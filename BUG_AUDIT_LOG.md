@@ -4079,8 +4079,82 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
 - **Verified בפרודקשן:** לא — תרחיש ה-claim-ownership token הספציפי
   (cold-cache re-hydration תוך כדי claim פעיל) לא נבדק ישירות בפרודקשן;
   הבדיקה שבוצעה (07/08 13:24) עברה במסלול BUG-158/EventBus-recovery
-- **סטטוס:** 🟡 מוזג ל-`main` (PR #555) + deployed (עקיף/ancestor) —
+- **סטטוס (עד 07/08/2026):** 🟡 מוזג ל-`main` (PR #555) + deployed (עקיף/ancestor) —
   **production verification ישיר לתרחיש ה-claim-ownership עדיין לא בוצע**
+
+### עדכון אימות Staging (13/08/2026, TRACK 3) — ✅ STAGING VERIFIED
+
+בדיקת race אמיתית בוצעה ב-`my-bot-approval-staging` (Render Shell, לא
+production) דרך `scripts/verify_bug157_160_163_staging.py
+--include-approval-race`, מול ה-`ActionGateway` הריאלי (לא mock), עם
+`FEATURE_ACTION_CONTRACT_PERSISTENCE=true` ו-`FEATURE_ATOMIC_CLAIMS=true`
+בפועל בסביבה. **לא בוצע race test ב-production** (אסור לפי כלל המשימה).
+
+**Run 1 — Deployed SHA `aa598e5dfe44eb3d0ad3aa8813615f7562bb009c`, 2026-08-12
+23:39:37 UTC, run_id=`tc10verify-20260812T233937Z-e0bb24c03c2442af996aac32e331ed00`**
+(invariants A/B — contract-creation race + duplicate-pending suppression):
+- 5 concurrent `propose_action()` callers, identical business fingerprint
+  (`table=משימות (Tasks)`, same title).
+- Winner: `contract_id=194d39ed-6807-429d-b627-d3f0a9f8634a` (1/5, `ok=True`).
+- Losers: 4/5, all `ok=False`, all dedup'd to the winner's `contract_id`.
+- Post-race duplicate proposal (6th call): `ok=False`, still resolves to
+  the same winner `contract_id`.
+- Cleanup: 1 ActionContract deleted.
+- **Result: PASS** (invariant A: at most one canonical ActionContract for
+  one fingerprint; invariant B: duplicate pending suppression).
+
+**Run 2 — Deployed SHA `6e2d0d0124e434034c4ae709cabd7544317e436d`,
+2026-08-12 23:56:35 UTC, run_id=`tc10verify-20260812T235635Z-3f56a7d81ba1406cb7647335c7d7f5b0`**
+(`6e2d0d0` changed only `scripts/verify_bug157_160_163_staging.py` on top
+of `aa598e5` — `core/action_gateway.py` itself is byte-identical to the
+Run 1 commit, so this is the same fix under test):
+- A/B repeated: winner `contract_id=5fd89373-b7d7-4937-af87-81c1c352e23f`,
+  5 callers, 4 losers dedup'd correctly, post-race suppression held. PASS.
+- **C/D/E — approval race / execution-claim race / replay:**
+  `contract_id=445aa9e3-151a-4bd3-a594-0a15fbcc8c5d`, 3 concurrent
+  `approve_with_lifecycle_result()` callers.
+  - `execution_id=18c22266-3d26-414b-ac7f-3672401db913` — **exactly one**
+    real execution attempt reached the tool dispatcher; the real
+    PostgreSQL atomic claim rejected the other 2 concurrent attempts with
+    `"Contract is already being executed by another approver"` (log-level
+    confirmation, not inferred).
+  - That one execution attempt failed — **not** a BUG-157 defect:
+    `EMERGENCY_STOP_ALL` was confirmed **active** on staging at the time
+    (`emergency_stop_active=True`, logged explicitly by the script;
+    root-caused to `tools/dispatcher.py:156`, which blocks every write
+    tool independently of any approval/concurrency logic — the resulting
+    `"expected structured result dict with ok=true; got plain string"` is
+    the pre-existing, already-documented `BUG-147/Patch A` symptom, not a
+    new finding). All 3 callers returned final (no hang).
+  - Final canonical contract state: `failed` (consistent — the single
+    permitted execution attempt was blocked by EmergencyStop, not by a
+    concurrency defect).
+  - Replay `approve_with_lifecycle_result()` after the race settled:
+    contract `.status` unchanged (`'failed'` → `'failed'`) — **no second
+    execution triggered**.
+  - Real business-table check: 0 Tasks records created (≤ 1 — the
+    invariant BUG-157 actually protects; 0 is legitimate here since the
+    sole permitted attempt failed for the unrelated EmergencyStop reason;
+    2+ would have been the real double-execution defect).
+  - Cleanup: 2 ActionContracts deleted (this run's A/B + C/D/E contracts).
+  - **Result: PASS** on all of C (single execution owner, no caller left
+    non-final), D (no double execution — at most one write), E (replay
+    stays idempotent).
+
+Note: an earlier same-day run against the same Run 2 scenario, before the
+script's D/E assertions were corrected (see `scripts/
+verify_bug157_160_163_staging.py` commit `6e2d0d0`, PR #617), reported 2
+false-negative FAILs — root-caused to the script comparing against an
+assumed-successful-execution record count and a non-terminal transient
+`canonical_state` snapshot, not to any defect in `core/action_gateway.py`.
+No product code was changed to reach this PASS; only the verification
+script's own assertions were corrected.
+
+- **סטטוס (13/08/2026):** ✅ **STAGING VERIFIED** — invariants A–E כולם
+  PASS מול ה-`ActionGateway` האמיתי ב-staging (SHA `6e2d0d0`), race אמיתי
+  (לא mock, לא unit test בלבד). **Production verification עדיין לא
+  בוצעה** (במכוון — אסור לפי היקף המשימה; race test ב-production דורש
+  החלטה נפרדת).
 
 ---
 
@@ -4309,9 +4383,32 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   reconfirmation_after_rejection.py` (16/16) + `test_bug159_create_
   task_noun_form_and_verbs.py` (52/52) + `test_hotfix_c_create_task_
   verb.py` (12/12) — כולם ללא regression, ו-`smoke_tests.py` (PASS).
-- **סטטוס:** ✅ CODE DONE, מאומת מקומית (טסט חדש + regression מלא על כל
+- **סטטוס (עד 07/08/2026):** ✅ CODE DONE, מאומת מקומית (טסט חדש + regression מלא על כל
   סוויטות ה-create_task). **לא** נדחף/נפרס עדיין — לא VERIFIED IN PROD
   עד push+deploy+אימות production בפועל, לפי כלל הברזל.
+
+### עדכון אימות Staging (13/08/2026, TRACK 3) — ✅ STAGING VERIFIED
+
+מוזג ואומת: `core/router/router.py`'s `_normalize_create_task_input()`
+(the single-char safe strip) קיים ופעיל ב-`origin/main` SHA
+`aa598e5dfe44eb3d0ad3aa8813615f7562bb009c` (ancestor: `f14190de8ee4311b0efc46a74be240c38169d173`,
+מוזג ל-`main` לפני 13/08/2026 — לא כחלק מ-track זה).
+
+**בדיקה:** `scripts/verify_bug157_160_163_staging.py`, הרצה ב-Render Shell
+על `my-bot-approval-staging`, 2026-08-12 23:39:37 UTC. קרא ל-`core.router.
+router.route_request()` **הריאלי, הפעיל, בתוך תהליך ה-staging המוצב**
+(in-process — **לא** דרך Telegram webhook/הודעה אמיתית).
+
+- קלט מדויק (מהדוח המקורי): `'"צור משימה בדיקת PR546 עד תאריך 12-08-26
+  בשעה 14:54` (מרכאה פותחת בלבד).
+  תוצאה: `intent=create_task handler=tool risk=needs_approval` — המסלול
+  הדטרמיניסטי, לא Agent. **PASS.**
+- Regression: `'"צור משימה בדיקה"'` (מרכאות מאוזנות) → `intent=create_task
+  handler=tool` — ללא שינוי התנהגות. **PASS.**
+
+- **סטטוס (13/08/2026):** ✅ **STAGING VERIFIED** (in-process, SHA
+  `aa598e5`) — **לא** אומת דרך Telegram webhook/הודעה אמיתית; אם נדרש
+  אימות מחמיר יותר (טרנספורט מלא), עדיין פתוח.
 
 ---
 
@@ -4811,10 +4908,36 @@ contract שנדחה, היה בעבר משחרר בטעות את ה-claim של A 
   DELETE_TASK, ובדיקת אי-התנגשות מפורשת עם `LIST_TASKS`) +
   `core/router/test_router.py` (44/44, ללא regression) + `smoke_tests.py`
   (PASS).
-- **סטטוס:** ✅ CODE DONE, מאומת מקומית (טסטים חדשים + regression מלא) —
+- **סטטוס (עד 07/08/2026):** ✅ CODE DONE, מאומת מקומית (טסטים חדשים + regression מלא) —
   **לא** נדחף/נפרס עדיין (ראה EVIDENCE בסוף הבלוק "אימות Turn Coordinator
   E2E" למעלה). לא VERIFIED IN PROD עד push+deploy+אימות production בפועל,
   לפי כלל הברזל.
+
+### עדכון אימות Staging (13/08/2026, TRACK 3) — ✅ STAGING VERIFIED
+
+מוזג ואומת: `core/router/intent_router.py`'s `COMPLETE_TASK`
+patterns (`השלם` + `(סמן|mark).{0,40}(משימ|טאסק|task).{0,20}(כבוצע|בוצעה|
+done|complete)`) קיימים ופעילים ב-`origin/main` SHA
+`aa598e5dfe44eb3d0ad3aa8813615f7562bb009c`.
+
+**בדיקה:** `scripts/verify_bug157_160_163_staging.py`, הרצה ב-Render Shell
+על `my-bot-approval-staging`, 2026-08-12 23:39:37 UTC. קרא ל-`core.router.
+router.route_request()` **הריאלי, הפעיל, בתוך תהליך ה-staging המוצב**
+(in-process — **לא** דרך Telegram webhook/הודעה אמיתית).
+
+- `'השלם את המשימה בדיקת Complete לא קיימת'` (הקלט המדויק מהדוח) →
+  `intent=complete_task` (היה `unknown`). **PASS.**
+- `'סמן משימת מעקב כבוצעה'` (הקלט המדויק מהדוח) → `intent=complete_task`
+  (היה `unknown`). **PASS.**
+- Precedence check (לא בדוח המקורי, נוסף לאימות): `'עדכן משימת מעקב
+  לסטטוס בוצע'` → `intent=update_task` — "עדכן" עדיין מנצח, לא נבלע
+  ע"י התבנית החדשה של COMPLETE_TASK. **PASS.**
+- אי-התנגשות עם LIST_TASKS: `'תראה לי אילו משימות כבר בוצעו'` →
+  `intent=list_tasks`. **PASS.**
+
+- **סטטוס (13/08/2026):** ✅ **STAGING VERIFIED** (in-process, SHA
+  `aa598e5`) — **לא** אומת דרך Telegram webhook/הודעה אמיתית; אם נדרש
+  אימות מחמיר יותר (טרנספורט מלא), עדיין פתוח.
 
 ### TC-12 (duplicate callback) — לא באג, פער testability
 
