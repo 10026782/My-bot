@@ -24,6 +24,7 @@ class ToolPlaybook:
     agent_assist_capabilities: tuple[str, ...] = ()
     capability_type: str = "GUIDED_EXTERNAL_TOOL"
     internalization: str = "KEEP EXTERNAL"
+    privacy_class: str = "OTHER_BOUNDED_WARNING"
 
 
 @dataclass(frozen=True)
@@ -224,8 +225,47 @@ _PLAYBOOKS: dict[str, ToolPlaybook] = {
 }
 
 
+_PRIVACY_CLASSES = {
+    "bentopdf": ("COPY_ONLY", "עבוד על עותק של הקובץ; שמור את המקור אצלך."),
+    "vert": ("NO_SENSITIVE_DATA", "אל תעלה לכלי חיצוני מידע רגיש או פרטי לקוחות."),
+    "squoosh": ("COPY_ONLY", "עבוד על עותק כדי לשמור את התמונה המקורית."),
+    "pairdrop": ("VERIFY_DESTINATION", "בדוק את שם המכשיר לפני השליחה."),
+    "rawgraphs": ("REDACT_FIRST", "השתמש בנתונים מצטברים או מושחרים, לא במידע אישי גולמי."),
+    "csv-repair": ("REDACT_FIRST", "השתמש בקובץ מושחר; אל תעלה ייצוא לקוחות גולמי."),
+    "sql-for-files": ("NO_SENSITIVE_DATA", "השתמש בעותקים מושחרים, לא במידע אישי או במסד נתונים פעיל."),
+    "cyberchef": ("NO_SENSITIVE_DATA", "אל תדביק סיסמאות, מפתחות או tokens."),
+    "svgomg": ("COPY_ONLY", "שמור את קובץ ה־SVG המקורי ובדוק את התוצאה."),
+    "mr-data-converter": ("REDACT_FIRST", "השתמש בדוגמה מושחרת, לא בייצוא עסקי גולמי."),
+    "json-crack": ("REDACT_FIRST", "השתמש ב־JSON מושחר; הסר tokens ופרטים אישיים."),
+    "metadata-remover": ("KEEP_ORIGINAL", "שמור את המקור; הסרת metadata אינה אנונימיזציה מלאה."),
+    "shareclean": ("REDACT_FIRST", "בדוק ידנית את הפלט; אל תדביק secrets חיים."),
+}
+_OPTIONAL_HELP = {
+    "rawgraphs": "אם תרצה, אני יכול לעזור לבחור סוג תרשים מתאים.",
+    "sql-for-files": "אם תרצה, אני יכול לעזור לנסח שאילתת קריאה.",
+    "json-crack": "אם תרצה, אני יכול להסביר את מבנה ה־JSON.",
+    "shareclean": "אם תרצה, אני יכול להציע מה לבדוק לפני השיתוף.",
+}
+
 def _attach_playbooks(tools: tuple[BusinessTool, ...]) -> tuple[BusinessTool, ...]:
-    return tuple(replace(tool, playbook=_PLAYBOOKS.get(tool.tool_id)) for tool in tools)
+    result = []
+    for tool in tools:
+        playbook = _PLAYBOOKS.get(tool.tool_id)
+        if playbook is not None:
+            privacy_class, privacy_guidance = _PRIVACY_CLASSES.get(
+                tool.tool_id, (playbook.privacy_class, playbook.privacy_guidance)
+            )
+            playbook = replace(
+                playbook,
+                privacy_class=privacy_class,
+                privacy_guidance=privacy_guidance,
+                agent_assist_capabilities=(
+                    (_OPTIONAL_HELP[tool.tool_id],)
+                    if tool.tool_id in _OPTIONAL_HELP else playbook.agent_assist_capabilities
+                ),
+            )
+        result.append(replace(tool, playbook=playbook))
+    return tuple(result)
 
 
 TOOL_REGISTRY = _attach_playbooks(TOOL_REGISTRY)
@@ -243,6 +283,7 @@ def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
         terms = tool.tasks + tool.capabilities + tool.categories + (tool.name.lower(), tool.tool_id)
         score = sum(3 if _normalize(term) in normalized else 0 for term in tool.tasks)
         score += sum(1 if _normalize(term) in normalized else 0 for term in tool.capabilities + tool.categories)
+        score += 3 if _normalize(tool.name) in normalized or _normalize(tool.tool_id) in normalized else 0
         if score:
             matches.append((-score, position, tool))
     matches.sort(key=lambda item: (item[0], item[1]))
@@ -257,6 +298,7 @@ def get_playbook(tool_ref: str) -> BusinessTool | None:
 
 
 def format_recommendation(task: str, tools: list[BusinessTool]) -> str | None:
+    """Render every business recommendation through one Telegram-safe contract."""
     if not tools:
         return None
     lines = ["יש לי כלי מתאים לזה:"]
@@ -264,13 +306,14 @@ def format_recommendation(task: str, tools: list[BusinessTool]) -> str | None:
         playbook = tool.playbook
         if not playbook:
             continue
-        optional = " אפשר לבקש ממני עזרה בהכנת הקלט." if playbook.agent_mode == "optional_agent" else ""
-        lines.extend((
-            f"\n[{tool.name}]({tool.url})",
-            f"מה זה עוזר: {playbook.purpose}.",
-            "איך להשתמש: " + " ".join(f"{i}. {step}" for i, step in enumerate(playbook.steps, 1)),
-            f"חשוב: {playbook.privacy_guidance}{optional}",
-        ))
+        lines.extend(("", f"[{tool.name}]({tool.url})", "",
+                      "מה הוא עושה", f"{playbook.purpose}.",
+                      "", "איך משתמשים"))
+        lines.extend(f"• {step}" for step in playbook.steps)
+        if playbook.privacy_guidance:
+            lines.extend(("", "חשוב", playbook.privacy_guidance))
+        if playbook.agent_mode == "optional_agent" and playbook.agent_assist_capabilities:
+            lines.extend(("", "עזרה נוספת", playbook.agent_assist_capabilities[0]))
     return "\n".join(lines)
 
 
@@ -278,7 +321,8 @@ def maybe_recommend(task: str) -> str | None:
     """Keep normal conversation untouched unless the message is a tool-seeking request."""
     normalized = _normalize(task)
     intent_markers = ("איזה כלי", "יש לי", "אני צריך", "אני רוצה", "איך ", "כלי ל")
-    matches = find_recommended_tools(task)
+    direct_tool = get_playbook(task) if ("איך" in normalized or "שימוש" in normalized) else None
+    matches = [direct_tool] if direct_tool else find_recommended_tools(task)
     if not any(marker in normalized for marker in intent_markers) and not matches:
         return None
     if "כלים עסקיים" in normalized and ("איזה" in normalized or "מה" in normalized):
