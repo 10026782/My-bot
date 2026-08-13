@@ -8,10 +8,14 @@ import hashlib
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 SCHEMA_VERSION = "1"
 DEFAULT_PATH = Path(__file__).resolve().parents[1] / "data/tool_registry/runtime_snapshot.json"
