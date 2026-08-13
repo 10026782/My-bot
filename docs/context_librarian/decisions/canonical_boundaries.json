@@ -410,6 +410,200 @@
         "Stage 3A (PR #506, merge 6201e86) implements this decision: core/message_contract.py is the canonical MessageContract (15 MessageState values, frozen V1/D-012 schema); D-013 ratifies evidence_status as optional non-authoritative metadata (never determines/upgrades MessageState, fails closed on unknown values); build_message_contract() and the formatter wrapper are pure with zero production imports/callers/wiring/output change. test_message_contract.py is the test authority (41/41 passing).",
         "PR B (#509, merge 1c51570) registers a pure, unwired ApprovalLifecycleResult adapter that delegates to the canonical builder; PR C (ActionFact/GatewayReply adapter) remains pending."
       ]
+    },
+    {
+      "id": "decision.business_domain_vocabulary",
+      "name": "domain_utils.py is supporting cross-layer vocabulary, not a new source of truth",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "canonicalization of free-text/legacy business-domain vocabulary into identity.Domain / core.router.route_decision.RouterDomain values",
+        "precedence": "identity.Domain and RouterDomain remain the canonical business-domain enums; domain_utils.py is a supporting alias/canonicalization layer over them, consumed by callers in more than one layer, and does not itself decide or own a domain value"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "domain_utils.py"
+      ],
+      "test_paths": [],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-13",
+      "last_verified_commit": "6ecdaa98d778858e32f87fc8f055d000aa06f771",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding: domain_utils.py is consumed by marketing_gateway.py (layer.marketing), core/lead_event_writer.py, and weekly_summary.py — no single existing catalog layer owns all three callers, so it does not belong exclusively in layer.marketing's code_paths.",
+        "This node registers the module as cross-layer supporting metadata, not as a new runtime authority: it must never be extended to originate a domain value that identity.Domain/RouterDomain do not already define (see UnknownBusinessDomain in domain_utils.py, which fails closed on an unapproved alias).",
+        "core/lead_event_writer.py and weekly_summary.py remain outside all 7 existing catalog layers as of this registration — that gap is unrelated to domain_utils.py itself and is not resolved by this decision."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "supporting_metadata",
+          "authority": false,
+          "purpose": "canonicalizes free-text/legacy business-domain vocabulary into identity.Domain/RouterDomain values for marketing, lead-event, and reporting call sites; not itself a runtime authority",
+          "runtime_consumed": true
+        }
+      }
+    },
+    {
+      "id": "decision.tma_shared_ui_primitives",
+      "name": "TMA presentational UI primitives are shared frontend infrastructure, not layer-owned",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "generic, stateless React presentational components under tma-frontend/src/components/ui/",
+        "precedence": "the feature screens that consume them (e.g. Ventures.tsx) own business behavior; these primitives own layout/markup only and decide nothing"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "tma-frontend/src/components/ui/PageHeader.tsx",
+        "tma-frontend/src/components/ui/ScreenState.tsx",
+        "tma-frontend/src/components/ui/StatusBadge.tsx",
+        "tma-frontend/src/components/ui/Surface.tsx"
+      ],
+      "test_paths": [],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-13",
+      "last_verified_commit": "6ecdaa98d778858e32f87fc8f055d000aa06f771",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding after PR #625 (VUX-0 Ventures foundations): these 4 files are pure, prop-driven React components (no fetch/API/state/side effects — verified by inspection) currently consumed only by Ventures.tsx.",
+        "None of the 7 existing catalog layers legitimately own generic TMA UI primitives — layer.marketing's MarketingStatus.tsx precedent is domain-specific (F23 Marketing Bridge status surface), not a generic-component precedent, so folding these in there would be a false assignment. layer.ux_f52's scope is backend user-message formatting/channel rendering, not TMA screen markup.",
+        "This node registers the files as non-authoritative shared frontend infrastructure only, mirroring decision.business_domain_vocabulary's pattern — it does not create a new runtime layer and does not claim ownership of Ventures.tsx or any other consumer screen. Ventures.tsx itself predates this catalog's anchor commits and remains unregistered in all 7 layers — a pre-existing gap, unrelated to and not resolved by this decision.",
+        "Scope is deliberately the 4 named files only, not a blanket exemption for tma-frontend/src/components/ui/ — future additions to that directory must be evaluated individually, not assumed to fall under this node."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "supporting_metadata",
+          "authority": false,
+          "purpose": "generic presentational UI primitives (layout/markup only, no business logic or I/O) shared across TMA screens; not itself a runtime authority for any business domain",
+          "runtime_consumed": true
+        }
+      }
+    },
+    {
+      "id": "decision.external_business_tool_recommendation_catalog",
+      "name": "business_tool_registry.py is a read-only external-tool recommendation catalog, not the internal execution Tool Registry",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "which external (third-party) business tools are approved/verified for recommendation to a user, and the deterministic metadata (categories, capabilities, when-to-use) used to select among them",
+        "precedence": "tool_registry.py remains the sole canonical authority for the internal execution Tool Registry (roles_allowed/tenant_scoped/requires_approval/dispatch eligibility); business_tool_registry.py has no precedence over it and cannot be extended to originate one"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "business_tool_registry.py"
+      ],
+      "test_paths": [
+        "test_business_tool_registry.py"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-13",
+      "last_verified_commit": "d8fa0ed17b6b08f95c9cd3a36b0717098f7d617a",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding: business_tool_registry.py is a static, hand-curated dataclass catalog of external SCOREBOS tools consumed by app.py's maybe_recommend() early in the inbound-message flow (before router/dispatcher), to suggest tools to the user in conversation.",
+        "Explicit boundary, matching the EXTERNAL_RECOMMENDATION_CATALOG policy: this module is NOT the internal execution Tool Registry, cannot dispatch or execute a business action, and cannot grant ActionGateway/tool execution authority. tool_registry.py remains the internal execution registry for every dispatcher-routed tool.",
+        "No existing catalog layer covers this scope (layer.tools' code_paths are the internal dispatcher-tool implementations under tools/) — this decision creates a narrow boundary for the external-recommendation concept rather than folding the file into layer.tools' internal-execution scope."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "external_recommendation_catalog",
+          "authority": true,
+          "purpose": "curated, read-only catalog of approved external tools and their recommendation metadata, consumed by app.py's maybe_recommend() to suggest (never execute) a tool to the user",
+          "runtime_consumed": true,
+          "policy_registry_id": "EXTERNAL_RECOMMENDATION_CATALOG"
+        }
+      }
+    },
+    {
+      "id": "decision.offline_research_support_tool",
+      "name": "scripts/research_crawler_poc/crawl.py is an offline POC research tool, not SCOREBOS runtime",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "bounded, manually-invoked Crawl4AI evidence-gathering harness used to research candidate external tools/UX references",
+        "precedence": "carries no authority over any catalog layer; it can discover a candidate for a human to consider, but cannot approve, publish, or otherwise change canonical registry/catalog state itself"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "scripts/research_crawler_poc/crawl.py"
+      ],
+      "test_paths": [],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-13",
+      "last_verified_commit": "c3fe74357caf41e71c7f55ea9da7a1a082e8240a",
+      "confidence": 0.8,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding: crawl.py's own module docstring self-declares \"intentionally outside SCOREBOS runtime\"; grepping for importers across the repo returns zero results.",
+        "Explicit boundary, matching the OFFLINE_RESEARCH_TOOL policy: not SCOREBOS runtime, cannot approve or publish registry state, and does not become canonical merely because it discovers a candidate (e.g. a business_tool_registry.py entry or a docs/ux reference asset) — a human still decides whether to act on anything it finds. No production/runtime status is claimed for it.",
+        "Establishes the reusable 'standalone offline research/support tool' bucket the catalog previously lacked (contact_merge.py and scripts/classify_contacts_for_airtable.py are pre-existing files of the same class, noted here for precedent only — they are not new sources and are out of scope for this registration)."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "offline_research_tool",
+          "authority": false,
+          "purpose": "bounded, manually-run research/evidence-gathering harness outside the live SCOREBOS runtime path",
+          "runtime_consumed": false,
+          "policy_registry_id": "OFFLINE_RESEARCH_TOOL"
+        }
+      }
+    },
+    {
+      "id": "decision.f15_staging_verification_artifact",
+      "name": "scripts/verify_f15_staging.py is a verification-only supporting artifact, not an F15/CRM runtime authority",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "verified_audit",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "bounded, manually-invoked staging-only F15 CRM create/update verification pass, gated by F15_STAGING_NON_PRODUCTION/F15_STAGING_ENVIRONMENT env vars",
+        "precedence": "crm.py and the live Airtable runtime remain the sole authority for CRM/lead state; this script only exercises and observes that runtime in a disposable staging pass and cannot originate business state"
+      },
+      "owner": "governance",
+      "code_paths": [],
+      "test_paths": [
+        "scripts/verify_f15_staging.py"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-13",
+      "last_verified_commit": "c3fe74357caf41e71c7f55ea9da7a1a082e8240a",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding: verify_f15_staging.py has zero importers/consumers anywhere in the repo (confirmed by grep) and requires F15_STAGING_NON_PRODUCTION=true plus a staging Airtable base to run at all — it is a manually-invoked CLI verifier, not a module the live pipeline imports.",
+        "Explicit boundary, matching the STAGING_VERIFICATION_ARTIFACT policy (same treatment already applied to scripts/verify_bug157_160_163_staging.py and scripts/verify_bug161_162_callback_staging.py under layer.approvals/layer.turn_coordinator test_paths): this does NOT create an F15 runtime layer, does NOT make the verifier a CRM authority, and does not change crm.py/Airtable runtime ownership. Staging verification code cannot originate business state — it deletes only the record IDs its own disposable creates returned, and never retries a write or guesses an ID after an uncertain provider result.",
+        "Registered under test_paths (verification/evidence artifact), mirroring the precedent set for the other verify_*_staging.py scripts, rather than code_paths — it is not itself part of any runtime code path."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "staging_verification_artifact",
+          "authority": false,
+          "purpose": "disposable, manually-invoked staging-only F15 CRM write verification pass; produces evidence, originates no business state",
+          "runtime_consumed": false,
+          "policy_registry_id": "STAGING_VERIFICATION_ARTIFACT"
+        }
+      }
     }
   ],
   "edges": [

@@ -49,7 +49,10 @@
         "scripts/run_isolated_regression.py",
         "scripts/staging_identity.py",
         "scripts/verify_tc8_staging.py",
-        "scripts/verify_tc9_staging.py"
+        "scripts/verify_tc9_staging.py",
+        "scripts/verify_bug157_160_163_staging.py",
+        "scripts/verify_bug161_162_callback_staging.py",
+        "tc8_test_repo_stub.py"
       ],
       "canonical_docs": [
         {
@@ -125,7 +128,7 @@
         }
       ],
       "valid_from": "2026-07-28",
-      "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
+      "last_verified_commit": "6ecdaa98d778858e32f87fc8f055d000aa06f771",
       "confidence": 0.85,
       "notes": [
         "CLARIFICATION — Two things named 'TurnCoordinator' must not be conflated: (1) **Formal Layer-2 TurnCoordinator component** — zero implementation, class TurnCoordinator does not exist (per CORE_COMPLETION_AUDIT_20260810.md §8, line 113; zero implementation is a non-blocking architectural gap). De-facto handled by router.py::route_request() + lead_candidate_handler.py. (2) **TC2-TC10 distributed functional machinery** — MERGED (PRs #562–#588, 08–10/08/2026), WIRED (4 unconditional callback sites in app.py for TC8 turn-state r/w), VERIFIED in staging (TC10_OPERATIONAL_VERIFICATION_HARNESS.md, verify_tc8/9_staging.py runs PASS, regression matrix 21/21 stable). This node's code_paths register the machinery; its status=\"shadow\" and precedence=\"frozen decision contract planning-only\" refer to formal Layer-2 authority (not yet approved), not machinery implementation status.",
@@ -136,7 +139,8 @@
         "PR #471 changed who legitimately owns a turn's final reply, not just how routing is observed: when FEATURE_SINGLE_SPEAKER_APPROVAL_UX is on and this turn queued an approval, run_agent() hands the reply to the Gateway (reply_owner=\"gateway\") and returns immediately without a further Agent turn (app.py:3802 as of ffa678a7; line drifts with unrelated wording-only edits elsewhere in the file, e.g. PR #479/#480 — re-verified this audit that the boundary logic itself is unchanged). This is a conditional, code-level ownership assignment for approval-queuing turns specifically — it does not create a general reply_owner claim mechanism and does not resolve the concurrency race (a callback and a concurrent text turn for the same identity) described in docs/architecture/turn-coordinator/REPLY_OWNERSHIP_AND_APPROVAL_AUTHORITY_RESEARCH.md §1.3c, which remains unmitigated and research-only.",
         "The same handoff path still invokes the RP5 shadow observer (observe_shadow_finalizer, app.py:3813 as of ffa678a7) on the Gateway-owned reply before returning — RP5's classification runs even though the Agent's own LLM text is never produced for that turn; see layer.rp5's notes.",
         "PR2 (merged 2026-07-29) added an early, anchored approval-lifecycle resolver ahead of lead capture, Session, Router, Business Memory, and Agent — a specialized deterministic bypass, not a replacement for formal TurnCoordinator. Unrecognized text falls through to the existing route; both paths remain live.",
-        "Registration-only pass (backend-ci Context Librarian catalog freshness fix, 2026-08-12, PR #611): TC2-TC10 code/test paths registered from docs/architecture/turn-coordinator-full/ canonical-builders/bounded-resolvers/ownership-contracts/durable-turn-state files plus TC10 staging/regression scripts. Paths only — this node's structured authority/contract narrative (status, source_of_truth, precedence) was not re-verified in this pass; produced documentation showing which claims predate the TC2-TC10 machinery. See ac03b08 for attempted narrative update (reverted — full re-verification deferred pending owner decision on formal Layer-2 TurnCoordinator status)."
+        "Registration-only pass (backend-ci Context Librarian catalog freshness fix, 2026-08-12, PR #611): TC2-TC10 code/test paths registered from docs/architecture/turn-coordinator-full/ canonical-builders/bounded-resolvers/ownership-contracts/durable-turn-state files plus TC10 staging/regression scripts. Paths only — this node's structured authority/contract narrative (status, source_of_truth, precedence) was not re-verified in this pass; produced documentation showing which claims predate the TC2-TC10 machinery. See ac03b08 for attempted narrative update (reverted — full re-verification deferred pending owner decision on formal Layer-2 TurnCoordinator status).",
+        "Registration-only pass (post-#611 catalog freshness correction): scripts/verify_bug157_160_163_staging.py and scripts/verify_bug161_162_callback_staging.py (BUG-157/160/163 and BUG-161/162 staging-only verification CLIs, same non-production genre as verify_tc8_staging.py/verify_tc9_staging.py above) and tc8_test_repo_stub.py (shared TurnStateRepository test double, deliberately unprefixed so CI's test_*.py glob loop skips it) were added to test_paths — verification/test-support artifacts only, not runtime authority. Dual-registered here and under layer.approvals for the same reason as the pre-existing TC10 scripts."
       ],
       "extensions": {
         "boss.layer_aliases": [

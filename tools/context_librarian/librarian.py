@@ -767,6 +767,13 @@ def classify_new_sources(
             classification, reason = "WARNING", "new documentation/audit/planning source"
         elif lower.endswith((".py", ".js", ".ts", ".tsx")):
             classification, reason = "REVIEW_REQUIRED", "new runtime source"
+        elif lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp")):
+            # Raster images are inert binary assets — they cannot carry
+            # dispatch/approval/authority logic, so a path-substring hit on
+            # an _AUTHORITY_TERMS word (e.g. a directory literally named
+            # "reference-evidence") is a naming coincidence, not a real
+            # authority signal. Treat like docs: non-blocking, never STOP.
+            classification, reason = "WARNING", "new image/asset source"
         else:
             classification, reason = "REVIEW_REQUIRED", "new source with unknown role"
         if classification != "WARNING" and any(term in name or term in lower for term in _AUTHORITY_TERMS):
