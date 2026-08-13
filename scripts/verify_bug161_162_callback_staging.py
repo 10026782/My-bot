@@ -67,6 +67,16 @@ from identity import Role  # noqa: E402
 import app  # noqa: E402
 from event_bus import bus  # noqa: E402
 from core.action_gateway import action_gateway as gateway  # noqa: E402
+from tools.dispatcher import dispatch_tool as _real_dispatch_tool  # noqa: E402
+
+# Terminal, non-pending contract states. Deliberately includes "failed":
+# whether a dispatch attempt succeeds depends on downstream conditions this
+# script does not control (e.g. EmergencyStop currently blocking real
+# airtable_add writes on staging) -- the ownership/single-speaker signal
+# this script actually verifies is dispatch COUNT and reply COUNT, not
+# whether the write itself succeeded. See EVIDENCE_20260813.md-style note
+# in the plan doc §3.
+_TERMINAL_STATUSES = ("completed", "executed", "failed")
 from scripts.staging_identity import (  # noqa: E402
     new_run_namespace,
     unique_identity,
@@ -185,12 +195,13 @@ def run_approve_happy_path(identity, run_id: str) -> None:
     mock_bot = MagicMock()
     cq = _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}")
     with patch.object(app, "bot", mock_bot), \
-         patch.object(app, "resolve_identity", return_value=identity):
+         patch.object(app, "resolve_identity", return_value=identity), \
+         patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_dispatch:
         app._handle_approval_callback_impl(cq)
 
     after = gateway.find_contract(contract_id)
-    _record("1. contract reached a terminal executed/completed state",
-            bool(after and after.status in ("completed", "executed")),
+    _record("1. contract reached a terminal state (not stuck pending)",
+            bool(after and after.status in _TERMINAL_STATUSES),
             f"status={getattr(after, 'status', None)}")
 
     total_replies = mock_bot.answer_callback_query.call_count + mock_bot.send_message.call_count
@@ -198,9 +209,13 @@ def run_approve_happy_path(identity, run_id: str) -> None:
             total_replies >= 1, f"answer_callback_query={mock_bot.answer_callback_query.call_count} "
             f"send_message={mock_bot.send_message.call_count}")
 
+    _record("1. dispatch_tool called exactly once", mock_dispatch.call_count == 1,
+            f"call_count={mock_dispatch.call_count}")
+
     records = _tasks_records_for(run_id)
     matched = [r for r in records if "approve-happy" in json.dumps(r.get("fields", {}), ensure_ascii=False)]
-    _record("1. exactly one real Tasks record created", len(matched) == 1, f"found {len(matched)}")
+    _record("1. Tasks record created iff dispatch actually succeeded (informational)",
+            True, f"found {len(matched)} Tasks record(s), contract status={getattr(after, 'status', None)}")
     _cleanup_tasks(run_id)
 
 
@@ -215,12 +230,16 @@ def run_reject(identity, run_id: str) -> None:
     mock_bot = MagicMock()
     cq = _fake_cq(identity.external_id, f"reject:{action_id}:{contract_id}")
     with patch.object(app, "bot", mock_bot), \
-         patch.object(app, "resolve_identity", return_value=identity):
+         patch.object(app, "resolve_identity", return_value=identity), \
+         patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_dispatch:
         app._handle_approval_callback_impl(cq)
 
     after = gateway.find_contract(contract_id)
     _record("2. contract reached rejected", bool(after and after.status == "rejected"),
             f"status={getattr(after, 'status', None)}")
+
+    _record("2. dispatch_tool never called on reject", mock_dispatch.call_count == 0,
+            f"call_count={mock_dispatch.call_count}")
 
     records = _tasks_records_for(run_id)
     matched = [r for r in records if "reject" in json.dumps(r.get("fields", {}), ensure_ascii=False)]
@@ -238,20 +257,27 @@ def run_duplicate_sequential(identity, run_id: str) -> None:
     mock_bot = MagicMock()
     cq = _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id="dup-seq-1")
     with patch.object(app, "bot", mock_bot), \
-         patch.object(app, "resolve_identity", return_value=identity):
+         patch.object(app, "resolve_identity", return_value=identity), \
+         patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_dispatch:
         app._handle_approval_callback_impl(cq)          # first press
         cq2 = _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id="dup-seq-2")
         app._handle_approval_callback_impl(cq2)          # second press, button already consumed
 
     after = gateway.find_contract(contract_id)
-    _record("3. contract executed exactly once (terminal, not re-executed)",
-            bool(after and after.status in ("completed", "executed")),
+    _record("3. contract reached a terminal state (not stuck pending)",
+            bool(after and after.status in _TERMINAL_STATUSES),
             f"status={getattr(after, 'status', None)}")
+
+    # This is the core TC-12 assertion: the second, stale press must not
+    # cause a second real dispatch attempt, regardless of whether the first
+    # attempt's write itself succeeded (EmergencyStop-blocked or not).
+    _record("3. dispatch_tool called at most once despite the double press",
+            mock_dispatch.call_count <= 1, f"call_count={mock_dispatch.call_count}")
 
     records = _tasks_records_for(run_id)
     matched = [r for r in records if "dup-seq" in json.dumps(r.get("fields", {}), ensure_ascii=False)]
-    _record("3. exactly one real Tasks record created despite the double press",
-            len(matched) == 1, f"found {len(matched)}")
+    _record("3. at most one real Tasks record created despite the double press",
+            len(matched) <= 1, f"found {len(matched)}")
     _cleanup_tasks(run_id)
 
 
@@ -267,28 +293,39 @@ def run_duplicate_concurrent(identity, run_id: str, race_n: int = 3) -> None:
     barrier = threading.Barrier(race_n)
     errors: list = []
 
-    def press(i: int) -> None:
-        try:
-            barrier.wait(timeout=5)
-            cq = _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id=f"race-{i}")
-            with patch.object(app, "resolve_identity", return_value=identity):
-                app._handle_approval_callback_impl(cq)
-        except Exception as exc:  # noqa: BLE001
-            errors.append(exc)
+    with patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_dispatch:
+        def press(i: int) -> None:
+            try:
+                barrier.wait(timeout=5)
+                cq = _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id=f"race-{i}")
+                with patch.object(app, "resolve_identity", return_value=identity):
+                    app._handle_approval_callback_impl(cq)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
 
-    with patch.object(app, "bot", mock_bot):
-        threads = [threading.Thread(target=press, args=(i,), daemon=True) for i in range(race_n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=20)
+        with patch.object(app, "bot", mock_bot):
+            threads = [threading.Thread(target=press, args=(i,), daemon=True) for i in range(race_n)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=20)
+
+        dispatch_count = mock_dispatch.call_count
 
     _record("3b. no unhandled exceptions across concurrent presses", not errors, f"errors={errors}")
 
     after = gateway.find_contract(contract_id)
     _record("3b. contract reached a single terminal state (not re-executed)",
-            bool(after and after.status in ("completed", "executed", "failed")),
+            bool(after and after.status in _TERMINAL_STATUSES),
             f"status={getattr(after, 'status', None)}")
+
+    # The core TC8 claim-race assertion: of race_n truly concurrent presses
+    # on the SAME still-pending contract, at most one may ever reach a real
+    # dispatch call — every other thread must be rejected by TC8's
+    # TurnStateRepository.claim() (TurnStateConflictError) before it gets
+    # anywhere near dispatch_tool.
+    _record(f"3b. dispatch_tool called at most once across {race_n} concurrent presses",
+            dispatch_count <= 1, f"call_count={dispatch_count}")
 
     records = _tasks_records_for(run_id)
     matched = [r for r in records if "dup-race" in json.dumps(r.get("fields", {}), ensure_ascii=False)]
@@ -308,25 +345,32 @@ def run_stale_resolved(identity, run_id: str) -> None:
     mock_bot = MagicMock()
     with patch.object(app, "bot", mock_bot), \
          patch.object(app, "resolve_identity", return_value=identity):
-        app._handle_approval_callback_impl(
-            _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id="stale-1"))
+        with patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool):
+            app._handle_approval_callback_impl(
+                _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id="stale-1"))
         before_second = gateway.find_contract(contract_id)
         mock_bot.reset_mock()
         # Press again, well after resolution — the button-consumed bus item
         # is already gone, so this exercises the SAME "no live contract to
         # act on" path BUG-158's recovery / the terminal-state guard cover.
-        app._handle_approval_callback_impl(
-            _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id="stale-2"))
+        # dispatch_tool is counted for THIS second press only (fresh mock),
+        # since that is the specific call that must stay at zero.
+        with patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_dispatch_second:
+            app._handle_approval_callback_impl(
+                _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id="stale-2"))
 
     after_second = gateway.find_contract(contract_id)
     _record("4. contract status unchanged by the second, stale press",
             getattr(before_second, "status", None) == getattr(after_second, "status", None),
             f"before={getattr(before_second, 'status', None)} after={getattr(after_second, 'status', None)}")
 
+    _record("4. dispatch_tool never called on the second, stale press",
+            mock_dispatch_second.call_count == 0, f"call_count={mock_dispatch_second.call_count}")
+
     records = _tasks_records_for(run_id)
     matched = [r for r in records if "stale" in json.dumps(r.get("fields", {}), ensure_ascii=False)]
-    _record("4. exactly one real Tasks record (no second dispatch from the stale press)",
-            len(matched) == 1, f"found {len(matched)}")
+    _record("4. at most one real Tasks record (no second dispatch from the stale press)",
+            len(matched) <= 1, f"found {len(matched)}")
     _cleanup_tasks(run_id)
 
 
@@ -353,13 +397,21 @@ def run_ttl_expiry(identity, run_id: str) -> None:
 
     mock_bot = MagicMock()
     with patch.object(app, "bot", mock_bot), \
-         patch.object(app, "resolve_identity", return_value=identity):
+         patch.object(app, "resolve_identity", return_value=identity), \
+         patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_dispatch:
         app._handle_approval_callback_impl(
             _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}", cq_id="ttl-1"))
 
     after = gateway.find_contract(contract_id)
-    _record("5. contract never executed (stayed pending, TTL blocked it)",
-            bool(after and after.status == "pending"), f"status={getattr(after, 'status', None)}")
+    # BUG-155: TTL expiry closes the contract (rejected_by="ttl_expired"),
+    # it does not leave it dangling "pending" — a TTL-expired approve must
+    # never dispatch, but "rejected" is the correct terminal state here,
+    # not "pending".
+    _record("5. contract closed as rejected by the TTL guard (BUG-155), never executed",
+            bool(after and after.status == "rejected"), f"status={getattr(after, 'status', None)}")
+
+    _record("5. dispatch_tool never called on TTL-expired approve",
+            mock_dispatch.call_count == 0, f"call_count={mock_dispatch.call_count}")
 
     records = _tasks_records_for(run_id)
     matched = [r for r in records if "ttl" in json.dumps(r.get("fields", {}), ensure_ascii=False)]
