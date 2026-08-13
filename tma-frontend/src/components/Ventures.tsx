@@ -20,8 +20,8 @@ type DetailState =
   | { status: "ok"; data: Venture }
   | { status: "error"; message: string };
 
-type Toast = { type: "ok" | "err"; text: string };
 type StatusTone = "neutral" | "info" | "warning" | "success" | "danger";
+type SaveResult = "saved" | "error" | null;
 
 const STAGES = [
   "Research", "Supplier/Source Contact", "Due Diligence", "Legal/Tax Review",
@@ -76,11 +76,18 @@ function LifecycleRail({
   includeAll?: boolean;
   counts?: Partial<Record<VentureStage, number>>;
 }) {
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [selectedStage]);
+
   return (
     <div className="ventures-lifecycle" aria-label="שלבי Venture">
       {includeAll && (
         <button
           type="button"
+          ref={selectedStage === "" ? selectedRef : undefined}
           onClick={(event) => {
             onSelect("");
             event.currentTarget.scrollIntoView({ block: "nearest", inline: "center" });
@@ -96,6 +103,7 @@ function LifecycleRail({
         <button
           type="button"
           key={stage}
+          ref={selectedStage === stage ? selectedRef : undefined}
           onClick={(event) => {
             onSelect(stage);
             event.currentTarget.scrollIntoView({ block: "nearest", inline: "center" });
@@ -142,16 +150,17 @@ function WorkspaceHeading({
 
 function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () => void }) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
+  const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<Toast | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveResult, setSaveResult] = useState<SaveResult>(null);
 
   const [editStage, setEditStage] = useState("");
   const [editConviction, setEditConviction] = useState("");
   const [editNextAction, setEditNextAction] = useState("");
   const [editNotes, setEditNotes] = useState("");
 
-  useEffect(() => {
+  function loadDetail() {
+    setState({ status: "loading" });
     fetchVenture(ventureId)
       .then((data) => {
         setState({ status: "ok", data });
@@ -161,12 +170,30 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
         setEditNotes(data.notes);
       })
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
+  }
+
+  useEffect(() => {
+    loadDetail();
   }, [ventureId]);
 
-  function showToast(type: "ok" | "err", text: string) {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setToast({ type, text });
-    timerRef.current = setTimeout(() => setToast(null), 2500);
+  function resetDraft(data: Venture) {
+    setEditStage(data.stage);
+    setEditConviction(data.conviction);
+    setEditNextAction(data.next_action);
+    setEditNotes(data.notes);
+  }
+
+  function openEditor() {
+    if (state.status !== "ok") return;
+    resetDraft(state.data);
+    setSaveResult(null);
+    setIsEditing(true);
+  }
+
+  function closeEditor() {
+    if (state.status === "ok") resetDraft(state.data);
+    setSaveResult(null);
+    setIsEditing(false);
   }
 
   async function handleSave() {
@@ -180,23 +207,30 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
       if (editNextAction !== d.next_action) fields.next_action = editNextAction;
       if (editNotes !== d.notes) fields.notes = editNotes;
 
-      if (Object.keys(fields).length === 0) { showToast("ok", "אין שינויים"); return; }
+      if (Object.keys(fields).length === 0) return;
       await updateVenture(ventureId, fields);
-      showToast("ok", "נשמר");
       const updated = await fetchVenture(ventureId);
       setState({ status: "ok", data: updated });
-      setEditStage(updated.stage);
-      setEditConviction(updated.conviction);
-      setEditNextAction(updated.next_action);
-      setEditNotes(updated.notes);
+      resetDraft(updated);
+      setSaveResult("saved");
     } catch {
-      showToast("err", "שמירה נכשלה");
+      setSaveResult("error");
     } finally {
       setSaving(false);
     }
   }
 
   const d = state.status === "ok" ? state.data : null;
+  const hasChanges = d
+    ? editStage !== d.stage
+      || editConviction !== d.conviction
+      || editNextAction !== d.next_action
+      || editNotes !== d.notes
+    : false;
+
+  function markDraftChanged() {
+    setSaveResult(null);
+  }
 
   return (
     <main className="ventures-screen">
@@ -208,127 +242,177 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
           title={d?.name || "Venture"}
           subtitle={d ? `${d.domain || "ללא תחום"} · מרחב החלטה` : "טוען מרחב החלטה"}
           badge={d?.stage ? <StatusBadge tone={stageTone(d.stage)}>{d.stage}</StatusBadge> : undefined}
+          action={d && !isEditing ? (
+            <button type="button" onClick={openEditor} className="boss-button boss-button--primary">
+              עריכת פרטים
+            </button>
+          ) : undefined}
         />
 
-        {toast && (
-          <div className={`ventures-toast ${toast.type === "err" ? "ventures-toast--error" : ""}`} role="status">
-            {toast.text}
-          </div>
+        {state.status === "loading" && <ScreenState state="loading" message="טוען את כרטיס ההזדמנות" />}
+        {state.status === "error" && (
+          <ScreenState
+            state="error"
+            message="לא הצלחנו לטעון את פרטי ההזדמנות. אפשר לנסות שוב."
+            action={(
+              <button type="button" onClick={loadDetail} className="boss-button boss-button--quiet">
+                ניסיון נוסף
+              </button>
+            )}
+          />
         )}
 
-        {state.status === "loading" && <ScreenState state="loading" message="טוען את כרטיס ההזדמנות" />}
-        {state.status === "error" && <ScreenState state="error" message={state.message} />}
-
         {d && (
-          <div className="ventures-detail-workspace">
+          <div className={`ventures-detail-workspace${isEditing ? " ventures-detail-workspace--editing" : ""}`}>
             <div className="ventures-detail-main">
-              <Surface>
+              <Surface className="ventures-decision-summary">
                 <WorkspaceHeading
-                  eyebrow="Context"
-                  title="תמונת מצב"
-                  context="הנתונים הקיימים של ההזדמנות"
+                  eyebrow="Decision summary"
+                  title="תמונת החלטה"
+                  context="העובדות המרכזיות הזמינות כרגע"
                 />
                 <div className="ventures-detail-grid">
+                  <div>
+                    <p className="ventures-detail-label">שלב נוכחי</p>
+                    <StatusBadge tone={stageTone(d.stage)}>{d.stage || "—"}</StatusBadge>
+                  </div>
+                  <div>
+                    <p className="ventures-detail-label">רמת ביטחון</p>
+                    <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{d.conviction || "—"}</StatusBadge>
+                  </div>
                   <div>
                     <p className="ventures-detail-label">פוטנציאל משוער</p>
                     <p className="ventures-detail-value ventures-detail-value--large">{fmt(d.estimated_potential)}</p>
                   </div>
                   <div>
-                    <p className="ventures-detail-label">ביטחון</p>
-                    <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{d.conviction || "—"}</StatusBadge>
-                  </div>
-                  <div>
                     <p className="ventures-detail-label">תאריך החלטה משוער</p>
                     <p className="ventures-detail-value">{d.target_decision_date || "—"}</p>
                   </div>
-                  <div>
-                    <p className="ventures-detail-label">תחום</p>
-                    <p className="ventures-detail-value">{d.domain || "—"}</p>
-                  </div>
                 </div>
               </Surface>
 
-              <Surface variant="subtle">
+              <Surface variant="subtle" className="ventures-next-action-detail">
                 <WorkspaceHeading
-                  eyebrow="Decision context"
-                  title="החלטה וצעד הבא"
+                  eyebrow="Next action"
+                  title="הצעד הבא"
                 />
-                <div className="ventures-decision-context">
+                <p className={`ventures-detail-copy ventures-next-action-detail__copy${d.next_action ? "" : " ventures-detail-copy--empty"}`}>
+                  {d.next_action || "לא הוגדר צעד הבא"}
+                </p>
+              </Surface>
+
+              <div className="ventures-detail-text-grid">
+                <Surface>
+                  <WorkspaceHeading eyebrow="Decision log" title="יומן החלטה" />
+                  <p className={`ventures-detail-copy${d.decision_log ? "" : " ventures-detail-copy--empty"}`}>
+                    {d.decision_log || "אין עדיין טקסט ביומן ההחלטה."}
+                  </p>
+                </Surface>
+
+                <Surface>
+                  <WorkspaceHeading eyebrow="Notes" title="הערות" />
+                  <p className={`ventures-detail-copy${d.notes ? "" : " ventures-detail-copy--empty"}`}>
+                    {d.notes || "אין הערות נוספות."}
+                  </p>
+                </Surface>
+              </div>
+
+              <Surface variant="subtle" className="ventures-context-facts">
+                <WorkspaceHeading eyebrow="Context" title="הקשר" />
+                <dl className="ventures-context-facts__list">
                   <div>
-                    <p className="ventures-detail-label">הצעד הבא</p>
-                    <p className="ventures-detail-copy">{d.next_action || "לא הוגדר צעד הבא"}</p>
+                    <dt>תחום</dt>
+                    <dd>{d.domain || "—"}</dd>
                   </div>
-                  {d.decision_log && (
-                    <div>
-                      <p className="ventures-detail-label">Decision Log</p>
-                      <p className="ventures-detail-copy">{d.decision_log}</p>
-                    </div>
-                  )}
-                  {d.notes && (
-                    <div>
-                      <p className="ventures-detail-label">הערות</p>
-                      <p className="ventures-detail-copy">{d.notes}</p>
-                    </div>
-                  )}
-                </div>
+                  <div>
+                    <dt>נוצר בתאריך</dt>
+                    <dd>{d.created_at || "—"}</dd>
+                  </div>
+                </dl>
               </Surface>
             </div>
 
-            <Surface variant="raised" className="ventures-editor">
-              <WorkspaceHeading
-                eyebrow="Current lifecycle"
-                title="עדכון Venture"
-                context="השינויים נשמרים יחד"
-              />
-
-              <div className="ventures-editor__section">
-                <p className="ventures-field-label">שלב</p>
-                <LifecycleRail selectedStage={editStage} onSelect={setEditStage} />
-              </div>
-
-              <div className="ventures-editor__section">
-                <p className="ventures-field-label">רמת ביטחון</p>
-                <div className="ventures-action-row ventures-action-row--equal" aria-label="רמת ביטחון">
-                  {CONVICTIONS.map((conviction) => (
-                    <button
-                      type="button"
-                      key={conviction}
-                      onClick={() => setEditConviction(conviction)}
-                      className="ventures-choice"
-                      aria-pressed={editConviction === conviction}
-                    >
-                      {conviction}
-                    </button>
-                  ))}
+            {isEditing && (
+              <Surface variant="raised" className="ventures-editor" aria-labelledby="venture-edit-title">
+                <div className="ventures-editor__header">
+                  <WorkspaceHeading
+                    eyebrow="Edit mode"
+                    title="עדכון Venture"
+                    context="רק השדות הנתמכים כיום"
+                    titleId="venture-edit-title"
+                  />
+                  <button type="button" onClick={closeEditor} disabled={saving} className="boss-button boss-button--quiet">
+                    ביטול
+                  </button>
                 </div>
-              </div>
 
-              <label className="ventures-field">
-                <span className="ventures-field-label">הצעד הבא</span>
-                <input
-                  type="text"
-                  value={editNextAction}
-                  onChange={(event) => setEditNextAction(event.target.value)}
-                  placeholder="הצעד הבא"
-                  className="boss-input"
-                />
-              </label>
+                <div className="ventures-editor__section">
+                  <p className="ventures-field-label">שלב</p>
+                  <LifecycleRail
+                    selectedStage={editStage}
+                    onSelect={(stage) => { setEditStage(stage); markDraftChanged(); }}
+                  />
+                </div>
 
-              <label className="ventures-field">
-                <span className="ventures-field-label">הערות</span>
-                <input
-                  type="text"
-                  value={editNotes}
-                  onChange={(event) => setEditNotes(event.target.value)}
-                  placeholder="הערות"
-                  className="boss-input"
-                />
-              </label>
+                <div className="ventures-editor__section">
+                  <p className="ventures-field-label">רמת ביטחון</p>
+                  <div className="ventures-action-row ventures-action-row--equal" aria-label="רמת ביטחון">
+                    {CONVICTIONS.map((conviction) => (
+                      <button
+                        type="button"
+                        key={conviction}
+                        onClick={() => { setEditConviction(conviction); markDraftChanged(); }}
+                        className="ventures-choice"
+                        aria-pressed={editConviction === conviction}
+                      >
+                        {conviction}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-              <button type="button" onClick={handleSave} disabled={saving} className="boss-button boss-button--primary ventures-editor__save">
-                {saving ? "שומר…" : "שמור שינויים"}
-              </button>
-            </Surface>
+                <label className="ventures-field">
+                  <span className="ventures-field-label">הצעד הבא</span>
+                  <textarea
+                    value={editNextAction}
+                    onChange={(event) => { setEditNextAction(event.target.value); markDraftChanged(); }}
+                    placeholder="הצעד הבא"
+                    className="boss-input ventures-textarea ventures-textarea--action"
+                  />
+                </label>
+
+                <label className="ventures-field">
+                  <span className="ventures-field-label">הערות</span>
+                  <textarea
+                    value={editNotes}
+                    onChange={(event) => { setEditNotes(event.target.value); markDraftChanged(); }}
+                    placeholder="הערות"
+                    className="boss-input ventures-textarea"
+                  />
+                </label>
+
+                <div
+                  className={`ventures-save-state${saveResult === "error" ? " ventures-save-state--error" : ""}`}
+                  role={saveResult === "error" ? "alert" : "status"}
+                  aria-live="polite"
+                >
+                  {saving && "שומר את השינויים…"}
+                  {!saving && saveResult === "saved" && "נשמר. פרטי ההזדמנות נטענו מחדש."}
+                  {!saving && saveResult === "error" && "השמירה נכשלה. השינויים נשארו בטופס ואפשר לנסות שוב."}
+                  {!saving && !saveResult && hasChanges && "יש שינויים שעדיין לא נשמרו."}
+                  {!saving && !saveResult && !hasChanges && "עדיין לא בוצעו שינויים."}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving || !hasChanges}
+                  className="boss-button boss-button--primary ventures-editor__save"
+                >
+                  {saving ? "שומר…" : "שמור שינויים"}
+                </button>
+              </Surface>
+            )}
           </div>
         )}
       </div>
