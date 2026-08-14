@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "generated_at": "2026-08-13T23:41:25Z",
-  "source_revision": "78848b580796cc1736e2251fc08e0202936060bd",
+  "source_revision": "fb58023515bce018458a8baa31a0d6883ce343aa",
   "tools": [
     {
       "tool_id": "bentopdf",
@@ -18,7 +18,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "COPY_ONLY",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -31,11 +31,28 @@
           "בחר Merge, סדר ובדוק את התוצאה.",
           "הורד את הקובץ החדש ושמור את המקור."
         ],
-        "privacy_guidance": "עבוד על עותקים בלבד; אל תעלה מסמכים רגישים ללא אישור.",
+        "privacy_guidance": "עבוד על עותק של הקובץ; שמור את המקור אצלך.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "merge pdf",
+        "unite pdf",
+        "compress pdf",
+        "split pdf",
+        "לאחד pdf",
+        "איחוד pdf",
+        "לדחוס pdf",
+        "לפצל pdf"
+      ],
+      "capability_ids": [
+        "file_convert",
+        "pdf_compress",
+        "pdf_merge",
+        "pdf_split",
+        "redact"
+      ]
     },
     {
       "tool_id": "checkly",
@@ -56,7 +73,15 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false
+      "runtime_visible": false,
+      "tasks": [
+        "test api",
+        "test browser flow"
+      ],
+      "capability_ids": [
+        "api_testing",
+        "browser_testing"
+      ]
     },
     {
       "tool_id": "csv-repair",
@@ -71,7 +96,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "REDACT_FIRST",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -84,11 +109,26 @@
           "בדוק את השגיאות והחל את התיקון.",
           "הורד ופתח מחדש בכלי היעד."
         ],
-        "privacy_guidance": "אין להעלות ייצוא לקוחות גולמי ללא אישור; העדף נתונים מושחרים.",
+        "privacy_guidance": "השתמש בקובץ מושחר; אל תעלה ייצוא לקוחות גולמי.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "broken csv",
+        "invalid csv",
+        "csv not opening",
+        "repair csv",
+        "csv לא תקין",
+        "csv לא נפתח",
+        "שלא נפתח",
+        "קובץ csv שבור",
+        "csv שבור"
+      ],
+      "capability_ids": [
+        "csv_repair",
+        "csv_validate"
+      ]
     },
     {
       "tool_id": "cyberchef",
@@ -104,7 +144,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "NO_SENSITIVE_DATA",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -117,11 +157,21 @@
           "הדבק ערך לא־רגיש ובדוק את הפלט.",
           "העתק רק את התוצאה המאושרת."
         ],
-        "privacy_guidance": "לעולם לא להדביק סיסמאות, מפתחות או tokens חיים.",
+        "privacy_guidance": "אל תדביק סיסמאות, מפתחות או tokens.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "decode text",
+        "transform data",
+        "inspect encoded value",
+        "לפענח טקסט",
+        "להמיר טקסט"
+      ],
+      "capability_ids": [
+        "text_transform"
+      ]
     },
     {
       "tool_id": "hoppscotch",
@@ -143,7 +193,15 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false
+      "runtime_visible": false,
+      "tasks": [
+        "inspect api",
+        "inspect webhook"
+      ],
+      "capability_ids": [
+        "api_inspection",
+        "webhook_inspection"
+      ]
     },
     {
       "tool_id": "json-crack",
@@ -158,9 +216,9 @@
       "agent_mode": "OPTIONAL_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "REDACT_FIRST",
       "enabled": true,
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": {
@@ -171,13 +229,24 @@
           "נווט בעץ ובדוק את הקשרים.",
           "הסר את התוכן מהכלי לאחר השימוש."
         ],
-        "privacy_guidance": "אין להדביק tokens, credentials או PII.",
+        "privacy_guidance": "השתמש ב־JSON מושחר; הסר tokens ופרטים אישיים.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
           "הסבר מבנה JSON"
         ]
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "understand json",
+        "visualize json",
+        "json structure",
+        "להבין json",
+        "json מסובך",
+        "להציג json"
+      ],
+      "capability_ids": [
+        "json_visualize"
+      ]
     },
     {
       "tool_id": "log-voyager",
@@ -199,7 +268,14 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false
+      "runtime_visible": false,
+      "tasks": [
+        "inspect error logs",
+        "search log export"
+      ],
+      "capability_ids": [
+        "log_inspection"
+      ]
     },
     {
       "tool_id": "metadata-remover",
@@ -215,9 +291,9 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "KEEP_ORIGINAL",
       "enabled": true,
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": {
@@ -228,11 +304,19 @@
           "הסר metadata ובדוק את התוצאה.",
           "שתף רק את העותק לאחר בדיקה."
         ],
-        "privacy_guidance": "לא לשמר את התוצאה כראיה מקורית; זו אינה הבטחת אנונימיזציה מלאה.",
+        "privacy_guidance": "שמור את המקור; הסרת metadata אינה אנונימיזציה מלאה.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "remove photo metadata",
+        "strip gps",
+        "clean image"
+      ],
+      "capability_ids": [
+        "metadata_remove"
+      ]
     },
     {
       "tool_id": "mr-data-converter",
@@ -247,7 +331,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "REDACT_FIRST",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -260,11 +344,20 @@
           "בחר פורמט יעד.",
           "בדוק את המבנה והעתק את התוצאה."
         ],
-        "privacy_guidance": "אין להשתמש בייצוא עסקי גולמי או במידע אישי.",
+        "privacy_guidance": "השתמש בדוגמה מושחרת, לא בייצוא עסקי גולמי.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "csv to json",
+        "spreadsheet to json",
+        "csv to xml",
+        "להמיר csv ל json"
+      ],
+      "capability_ids": [
+        "file_convert"
+      ]
     },
     {
       "tool_id": "pairdrop",
@@ -279,7 +372,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "VERIFY_DESTINATION",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -291,11 +384,21 @@
           "ודא את שם המכשיר השני.",
           "שלח את הקובץ ואשר את הקבלה."
         ],
-        "privacy_guidance": "בדוק את היעד לפני שליחה; לא להשתמש כאחסון או ארכיון.",
+        "privacy_guidance": "בדוק את שם המכשיר לפני השליחה.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "transfer file",
+        "move file",
+        "phone to computer",
+        "להעביר קובץ",
+        "להעביר מהמכשיר למחשב"
+      ],
+      "capability_ids": [
+        "file_transfer"
+      ]
     },
     {
       "tool_id": "rawgraphs",
@@ -312,7 +415,7 @@
       "agent_mode": "OPTIONAL_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "REDACT_FIRST",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -325,13 +428,25 @@
           "בחר תרשים ושייך עמודות.",
           "בדוק תוויות וייצא את התרשים."
         ],
-        "privacy_guidance": "השתמש בנתונים מצטברים או מושחרים; זה לא מקור האמת.",
+        "privacy_guidance": "השתמש בנתונים מצטברים או מושחרים, לא במידע אישי גולמי.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
           "הצעת סוג תרשים"
         ]
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "create graph",
+        "graph from csv",
+        "chart data",
+        "ליצור גרף",
+        "גרף מהנתונים",
+        "תרשים מהנתונים",
+        "איזה גרף"
+      ],
+      "capability_ids": [
+        "data_chart"
+      ]
     },
     {
       "tool_id": "sentry",
@@ -352,7 +467,14 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false
+      "runtime_visible": false,
+      "tasks": [
+        "track error",
+        "group exceptions"
+      ],
+      "capability_ids": [
+        "error_tracking"
+      ]
     },
     {
       "tool_id": "shareclean",
@@ -368,9 +490,9 @@
       "agent_mode": "OPTIONAL_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "REDACT_FIRST",
       "enabled": true,
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": {
@@ -381,13 +503,24 @@
           "הרץ ניקוי ובדוק ידנית את הפלט.",
           "שתף רק לאחר אישור אנושי."
         ],
-        "privacy_guidance": "הכלי אינו מבטיח זיהוי מלא; אין להדביק secrets חיים.",
+        "privacy_guidance": "בדוק ידנית את הפלט; אל תדביק secrets חיים.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
           "הצעת נקודות לבדיקה ידנית"
         ]
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "clean logs",
+        "redact config",
+        "sanitize text",
+        "לנקות לוג",
+        "לנקות לוג לפני שליחה"
+      ],
+      "capability_ids": [
+        "log_sanitize",
+        "text_redact"
+      ]
     },
     {
       "tool_id": "socket",
@@ -408,7 +541,14 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false
+      "runtime_visible": false,
+      "tasks": [
+        "scan dependencies",
+        "dependency security"
+      ],
+      "capability_ids": [
+        "dependency_scan"
+      ]
     },
     {
       "tool_id": "sql-for-files",
@@ -423,7 +563,7 @@
       "agent_mode": "OPTIONAL_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "NO_SENSITIVE_DATA",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -436,13 +576,27 @@
           "הרץ שאילתה לקריאה בלבד.",
           "ייצא תוצאה זמנית ובדוק אותה."
         ],
-        "privacy_guidance": "אין להשתמש במסד ייצור, סודות או רשומות קנוניות.",
+        "privacy_guidance": "השתמש בעותקים מושחרים, לא במידע אישי או במסד נתונים פעיל.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
           "עזרה בניסוח שאילתה"
         ]
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "query csv",
+        "join csv",
+        "analyze file",
+        "לנתח קובץ",
+        "לשאול על csv",
+        "לשאול שאלה על csv",
+        "לחבר csv"
+      ],
+      "capability_ids": [
+        "data_profile",
+        "file_join",
+        "file_query"
+      ]
     },
     {
       "tool_id": "squoosh",
@@ -458,7 +612,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "COPY_ONLY",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -471,11 +625,25 @@
           "בחר איכות וגודל, השווה תצוגה מקדימה.",
           "הורד את התוצאה ושמור את המקור."
         ],
-        "privacy_guidance": "עבוד על עותק; לא על ראיה מקורית או מסמך מזהה.",
+        "privacy_guidance": "עבוד על עותק כדי לשמור את התמונה המקורית.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "shrink image",
+        "compress photo",
+        "reduce image",
+        "להקטין תמונה",
+        "להקטין תמונות",
+        "לדחוס תמונה",
+        "תקטין לי תמונה",
+        "תמונה לוואטסאפ"
+      ],
+      "capability_ids": [
+        "image_compress",
+        "image_resize"
+      ]
     },
     {
       "tool_id": "svgomg",
@@ -491,7 +659,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "COPY_ONLY",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -504,11 +672,22 @@
           "בדוק אפשרויות אופטימיזציה ותצוגה.",
           "הורד ושמור לצד המקור."
         ],
-        "privacy_guidance": "השתמש בנכסי עיצוב מאושרים בלבד.",
+        "privacy_guidance": "שמור את קובץ ה־SVG המקורי ובדוק את התוצאה.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "clean svg",
+        "compress svg",
+        "optimize logo",
+        "לכווץ svg",
+        "לנקות svg",
+        "לכווץ לוגו svg"
+      ],
+      "capability_ids": [
+        "svg_optimize"
+      ]
     },
     {
       "tool_id": "uptimerobot",
@@ -528,7 +707,14 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false
+      "runtime_visible": false,
+      "tasks": [
+        "monitor endpoint",
+        "heartbeat"
+      ],
+      "capability_ids": [
+        "uptime_monitoring"
+      ]
     },
     {
       "tool_id": "vert",
@@ -544,7 +730,7 @@
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
       "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "privacy_class": "NO_SENSITIVE_DATA",
       "enabled": true,
       "verification_status": "VERIFIED",
       "last_verified_at": "2026-08-13",
@@ -556,11 +742,21 @@
           "בחר את פורמט המקור והיעד.",
           "העלה את הקובץ והורד את התוצאה."
         ],
-        "privacy_guidance": "השתמש בקובץ סינתטי או לא־רגיש עד שאופן הטיפול מאושר.",
+        "privacy_guidance": "אל תעלה לכלי חיצוני מידע רגיש או פרטי לקוחות.",
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true
+      "runtime_visible": true,
+      "tasks": [
+        "convert file",
+        "convert document",
+        "convert image",
+        "להמיר קובץ",
+        "המרת קובץ"
+      ],
+      "capability_ids": [
+        "file_convert"
+      ]
     }
   ],
   "capabilities": [
@@ -873,7 +1069,7 @@
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "OPTIONAL_AGENT",
       "lifecycle_status": "APPROVED",
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "enabled": true,
       "priority": 50
     },
@@ -895,7 +1091,7 @@
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "enabled": true,
       "priority": 50
     },
@@ -950,7 +1146,7 @@
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "OPTIONAL_AGENT",
       "lifecycle_status": "APPROVED",
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "enabled": true,
       "priority": 50
     },
@@ -961,7 +1157,7 @@
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "OPTIONAL_AGENT",
       "lifecycle_status": "APPROVED",
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "enabled": true,
       "priority": 50
     },
@@ -1065,5 +1261,5 @@
       "priority": 50
     }
   ],
-  "content_hash": "94f1bc704db99971749979a0d6d6d015bdd258a2a5a69258d3677338c4472b59"
+  "content_hash": "regenerated-from-fb58023515bce018458a8baa31a0d6883ce343aa"
 }
