@@ -21,6 +21,7 @@ type DetailState =
   | { status: "error"; message: string };
 
 type Toast = { type: "ok" | "err"; text: string };
+type SaveResult = "saved" | "error" | null;
 type StatusTone = "neutral" | "info" | "warning" | "success" | "danger";
 
 const STAGES = [
@@ -162,16 +163,17 @@ function WorkspaceHeading({
 
 function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () => void }) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
+  const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<Toast | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveResult, setSaveResult] = useState<SaveResult>(null);
 
   const [editStage, setEditStage] = useState("");
   const [editConviction, setEditConviction] = useState("");
   const [editNextAction, setEditNextAction] = useState("");
   const [editNotes, setEditNotes] = useState("");
 
-  useEffect(() => {
+  function loadDetail() {
+    setState({ status: "loading" });
     fetchVenture(ventureId)
       .then((data) => {
         setState({ status: "ok", data });
@@ -181,12 +183,30 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
         setEditNotes(data.notes);
       })
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
+  }
+
+  useEffect(() => {
+    loadDetail();
   }, [ventureId]);
 
-  function showToast(type: "ok" | "err", text: string) {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setToast({ type, text });
-    timerRef.current = setTimeout(() => setToast(null), 2500);
+  function resetDraft(data: Venture) {
+    setEditStage(data.stage);
+    setEditConviction(data.conviction);
+    setEditNextAction(data.next_action);
+    setEditNotes(data.notes);
+  }
+
+  function openEditor() {
+    if (state.status !== "ok") return;
+    resetDraft(state.data);
+    setSaveResult(null);
+    setIsEditing(true);
+  }
+
+  function closeEditor() {
+    if (state.status === "ok") resetDraft(state.data);
+    setSaveResult(null);
+    setIsEditing(false);
   }
 
   async function handleSave() {
@@ -200,23 +220,30 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
       if (editNextAction !== d.next_action) fields.next_action = editNextAction;
       if (editNotes !== d.notes) fields.notes = editNotes;
 
-      if (Object.keys(fields).length === 0) { showToast("ok", "אין שינויים"); return; }
+      if (Object.keys(fields).length === 0) return;
       await updateVenture(ventureId, fields);
-      showToast("ok", "נשמר");
       const updated = await fetchVenture(ventureId);
       setState({ status: "ok", data: updated });
-      setEditStage(updated.stage);
-      setEditConviction(updated.conviction);
-      setEditNextAction(updated.next_action);
-      setEditNotes(updated.notes);
+      resetDraft(updated);
+      setSaveResult("saved");
     } catch {
-      showToast("err", "שמירה נכשלה");
+      setSaveResult("error");
     } finally {
       setSaving(false);
     }
   }
 
   const d = state.status === "ok" ? state.data : null;
+  const hasChanges = d
+    ? editStage !== d.stage
+      || editConviction !== d.conviction
+      || editNextAction !== d.next_action
+      || editNotes !== d.notes
+    : false;
+
+  function markDraftChanged() {
+    setSaveResult(null);
+  }
 
   return (
     <main className="ventures-screen">
@@ -228,82 +255,99 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
           title={d?.name || "הזדמנות"}
           subtitle={d ? `${d.domain || "ללא תחום"} · מרחב החלטה` : "טוען מרחב החלטה"}
           badge={d?.stage ? <StatusBadge tone={stageTone(d.stage)}>{stageLabel(d.stage)}</StatusBadge> : undefined}
+          action={d && !isEditing ? (
+            <button type="button" onClick={openEditor} className="boss-button boss-button--primary boss-bubble--action">
+              עריכת פרטים
+            </button>
+          ) : undefined}
         />
 
-        {toast && (
-          <div className={`ventures-toast ${toast.type === "err" ? "ventures-toast--error" : ""}`} role="status">
-            {toast.text}
-          </div>
+        {state.status === "loading" && <ScreenState state="loading" message="טוען את כרטיס ההזדמנות" />}
+        {state.status === "error" && (
+          <ScreenState
+            state="error"
+            message="לא הצלחנו לטעון את פרטי ההזדמנות. אפשר לנסות שוב."
+            action={(
+              <button type="button" onClick={loadDetail} className="boss-button boss-button--quiet boss-bubble--action">
+                ניסיון נוסף
+              </button>
+            )}
+          />
         )}
 
-        {state.status === "loading" && <ScreenState state="loading" message="טוען את כרטיס ההזדמנות" />}
-        {state.status === "error" && <ScreenState state="error" message={state.message} />}
-
         {d && (
-          <div className="ventures-detail-workspace">
+          <div className={`ventures-detail-workspace${isEditing ? " ventures-detail-workspace--editing" : ""}`}>
             <div className="ventures-detail-main">
               <Surface className="boss-bubble--information">
                 <WorkspaceHeading
-                  eyebrow="הקשר"
+                  eyebrow="עובדות החלטה"
                   title="תמונת מצב"
                   context="הנתונים הקיימים של ההזדמנות"
                 />
                 <div className="ventures-detail-grid">
                   <div>
-                    <p className="ventures-detail-label">פוטנציאל משוער</p>
-                    <p className="ventures-detail-value ventures-detail-value--large">{fmt(d.estimated_potential)}</p>
+                    <p className="ventures-detail-label">שלב נוכחי</p>
+                    <StatusBadge tone={stageTone(d.stage)}>{stageLabel(d.stage) || "—"}</StatusBadge>
                   </div>
                   <div>
-                    <p className="ventures-detail-label">ביטחון</p>
+                    <p className="ventures-detail-label">רמת ביטחון</p>
                     <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{CONVICTION_LABEL[d.conviction] || d.conviction || "—"}</StatusBadge>
+                  </div>
+                  <div>
+                    <p className="ventures-detail-label">פוטנציאל משוער</p>
+                    <p className="ventures-detail-value ventures-detail-value--large">{fmt(d.estimated_potential)}</p>
                   </div>
                   <div>
                     <p className="ventures-detail-label">תאריך החלטה משוער</p>
                     <p className="ventures-detail-value">{d.target_decision_date || "—"}</p>
                   </div>
-                  <div>
-                    <p className="ventures-detail-label">תחום</p>
-                    <p className="ventures-detail-value">{d.domain || "—"}</p>
-                  </div>
                 </div>
               </Surface>
 
-              <Surface variant="subtle" className="boss-bubble--information">
+              <Surface variant="subtle" className="ventures-next-action-detail boss-bubble--information">
                 <WorkspaceHeading
-                  eyebrow="הקשר החלטה"
-                  title="החלטה וצעד הבא"
+                  eyebrow="מיקוד"
+                  title="הצעד הבא"
+                  context="הפעולה הבאה הזמינה מהנתונים הקיימים"
                 />
-                <div className="ventures-decision-context">
-                  <div>
-                    <p className="ventures-detail-label">הצעד הבא</p>
-                    <p className="ventures-detail-copy">{d.next_action || "לא הוגדר צעד הבא"}</p>
-                  </div>
-                  {d.decision_log && (
-                    <div>
-                      <p className="ventures-detail-label">יומן החלטות</p>
-                      <p className="ventures-detail-copy">{d.decision_log}</p>
-                    </div>
-                  )}
-                  {d.notes && (
-                    <div>
-                      <p className="ventures-detail-label">הערות</p>
-                      <p className="ventures-detail-copy">{d.notes}</p>
-                    </div>
-                  )}
-                </div>
+                <p className={`ventures-detail-copy${d.next_action ? "" : " ventures-detail-copy--empty"}`}>
+                  {d.next_action || "לא הוגדר צעד הבא"}
+                </p>
               </Surface>
+
+              <div className="ventures-detail-text-grid">
+                <Surface className="boss-bubble--information">
+                  <WorkspaceHeading eyebrow="רקע" title="יומן החלטות" />
+                  <p className={`ventures-detail-copy${d.decision_log ? "" : " ventures-detail-copy--empty"}`}>
+                    {d.decision_log || "אין עדיין טקסט ביומן ההחלטות."}
+                  </p>
+                </Surface>
+                <Surface className="boss-bubble--information">
+                  <WorkspaceHeading eyebrow="רקע" title="הערות" />
+                  <p className={`ventures-detail-copy${d.notes ? "" : " ventures-detail-copy--empty"}`}>
+                    {d.notes || "אין הערות נוספות."}
+                  </p>
+                </Surface>
+              </div>
             </div>
 
-            <Surface variant="raised" className="ventures-editor">
-              <WorkspaceHeading
-                eyebrow="מסלול התקדמות"
-                title="עדכון הזדמנות"
-                context="השינויים נשמרים יחד"
-              />
+            {isEditing && (
+              <Surface variant="raised" className="ventures-editor" aria-labelledby="venture-edit-title">
+                <div className="ventures-editor__header">
+                  <WorkspaceHeading
+                    eyebrow="פעולה"
+                    title="עריכת פרטים"
+                    context="רק השדות הנתמכים כיום"
+                    titleId="venture-edit-title"
+                  />
+                  <button type="button" onClick={closeEditor} disabled={saving} className="boss-button boss-button--quiet boss-bubble--action">
+                    ביטול
+                  </button>
+                </div>
 
               <div className="ventures-editor__section">
-                <p className="ventures-field-label">שלב</p>
-                <LifecycleRail selectedStage={editStage} onSelect={setEditStage} />
+                    <p className="ventures-field-label">שלב נוכחי</p>
+                <LifecycleRail selectedStage={editStage} onSelect={(stage) => { setEditStage(stage); markDraftChanged(); }} />
               </div>
 
               <div className="ventures-editor__section">
@@ -313,7 +357,7 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
                     <button
                       type="button"
                       key={conviction}
-                      onClick={() => setEditConviction(conviction)}
+                      onClick={() => { setEditConviction(conviction); markDraftChanged(); }}
                       className="ventures-choice boss-bubble--selectable"
                       aria-pressed={editConviction === conviction}
                     >
@@ -325,30 +369,39 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
 
               <label className="ventures-field">
                 <span className="ventures-field-label">הצעד הבא</span>
-                <input
-                  type="text"
+                <textarea
                   value={editNextAction}
-                  onChange={(event) => setEditNextAction(event.target.value)}
+                  onChange={(event) => { setEditNextAction(event.target.value); markDraftChanged(); }}
                   placeholder="הצעד הבא"
-                  className="boss-input"
+                  className="boss-input ventures-textarea ventures-textarea--action"
                 />
               </label>
 
               <label className="ventures-field">
                 <span className="ventures-field-label">הערות</span>
-                <input
-                  type="text"
+                <textarea
                   value={editNotes}
-                  onChange={(event) => setEditNotes(event.target.value)}
+                  onChange={(event) => { setEditNotes(event.target.value); markDraftChanged(); }}
                   placeholder="הערות"
-                  className="boss-input"
+                  className="boss-input ventures-textarea"
                 />
               </label>
 
-              <button type="button" onClick={handleSave} disabled={saving} className="boss-button boss-button--primary boss-bubble--action ventures-editor__save">
+                <div
+                  className={`ventures-save-state${saveResult === "error" ? " ventures-save-state--error" : ""}`}
+                  role={saveResult === "error" ? "alert" : "status"}
+                  aria-live="polite"
+                >
+                  {saving && "שומר את השינויים…"}
+                  {!saving && saveResult === "saved" && "נשמר. פרטי ההזדמנות נטענו מחדש."}
+                  {!saving && saveResult === "error" && "השמירה נכשלה. השינויים נשארו בטופס ואפשר לנסות שוב."}
+                  {!saving && !saveResult && hasChanges && "יש שינויים שעדיין לא נשמרו."}
+                </div>
+                <button type="button" onClick={handleSave} disabled={saving || !hasChanges} className="boss-button boss-button--primary boss-bubble--action ventures-editor__save">
                 {saving ? "שומר…" : "שמור שינויים"}
-              </button>
-            </Surface>
+                </button>
+              </Surface>
+            )}
           </div>
         )}
       </div>
