@@ -51,6 +51,7 @@ class BusinessTool:
     enabled: bool = True
     domain_tags: tuple[str, ...] = ()
     playbook: ToolPlaybook | None = None
+    execution_mode: str = "GUIDED_EXTERNAL"
 
 
 _SOURCE = "docs/tool-research/NOSIGNUPS_BUSINESS_TOOLBOX.md"
@@ -201,10 +202,67 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
 
 
+def _runtime_tool_from_snapshot(record: dict) -> BusinessTool:
+    playbook_data = record.get("playbook") or {}
+    playbook = ToolPlaybook(
+        purpose=playbook_data.get("purpose", ""),
+        supported_tasks=tuple(),
+        prerequisites=tuple(),
+        steps=tuple(playbook_data.get("steps", ())),
+        expected_output="",
+        privacy_guidance=playbook_data.get("privacy_guidance", ""),
+        common_mistakes=tuple(),
+        agent_mode="optional_agent" if record.get("agent_mode") == "OPTIONAL_AGENT" else "no_agent",
+        agent_assist_capabilities=tuple(playbook_data.get("agent_assist_capabilities", ())),
+        privacy_class=record.get("privacy_class", "OTHER_BOUNDED_WARNING"),
+    ) if playbook_data else None
+    verification = {
+        "VERIFIED": "verified",
+        "APPROVED_WITH_RESTRICTIONS": "approved_with_restrictions",
+    }.get(record.get("verification_status"), "unverified")
+    tags = tuple(record.get("tags", ()))
+    return BusinessTool(
+        tool_id=record["tool_id"],
+        name=record["name"],
+        url=record["canonical_url"],
+        tool_class=record["tool_class"],
+        categories=tags,
+        capabilities=tuple(record.get("capability_ids", ())),
+        tasks=tuple(record.get("tasks", ())),
+        short_description="",
+        when_to_use="",
+        when_not_to_use="",
+        privacy_level=record.get("privacy_class", ""),
+        allowed_data="",
+        forbidden_data="",
+        local_processing=None,
+        signup_required=False,
+        free_status="",
+        verification_status=verification,
+        last_verified_at=record.get("last_verified_at", ""),
+        source="runtime_snapshot",
+        enabled=bool(record.get("enabled")),
+        domain_tags=tags,
+        playbook=playbook,
+        execution_mode=record.get("execution_mode", "GUIDED_EXTERNAL"),
+    )
+
+
 def list_tools(*, tool_class: str = "business", include_disabled: bool = False) -> tuple[BusinessTool, ...]:
+    try:
+        from tools.tool_runtime_snapshot import load_tool_runtime_snapshot
+        records = load_tool_runtime_snapshot()["tools"]
+    except Exception:
+        return ()
     return tuple(
-        tool for tool in TOOL_REGISTRY
-        if tool.tool_class == tool_class and (include_disabled or tool.enabled)
+        _runtime_tool_from_snapshot(record)
+        for record in records
+        if record.get("tool_class") == tool_class
+        and (
+            record.get("runtime_visible")
+            if tool_class == "business"
+            else (include_disabled or record.get("enabled"))
+        )
     )
 
 
@@ -280,9 +338,8 @@ def find_recommended_tools(task: str, *, limit: int = 3) -> list[BusinessTool]:
     for position, tool in enumerate(list_tools(), start=1):
         if tool.verification_status not in {"verified", "approved_with_restrictions"}:
             continue
-        terms = tool.tasks + tool.capabilities + tool.categories + (tool.name.lower(), tool.tool_id)
         score = sum(3 if _normalize(term) in normalized else 0 for term in tool.tasks)
-        score += sum(1 if _normalize(term) in normalized else 0 for term in tool.capabilities + tool.categories)
+        score += sum(1 if _normalize(term.replace("_", " ")) in normalized else 0 for term in tool.capabilities + tool.categories)
         score += 3 if _normalize(tool.name) in normalized or _normalize(tool.tool_id) in normalized else 0
         if score:
             matches.append((-score, position, tool))
