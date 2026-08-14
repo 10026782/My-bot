@@ -51,6 +51,7 @@ class BusinessTool:
     enabled: bool = True
     domain_tags: tuple[str, ...] = ()
     playbook: ToolPlaybook | None = None
+    execution_mode: str = "GUIDED_EXTERNAL"
 
 
 _SOURCE = "docs/tool-research/NOSIGNUPS_BUSINESS_TOOLBOX.md"
@@ -243,6 +244,7 @@ def _runtime_tool_from_snapshot(record: dict) -> BusinessTool:
         enabled=bool(record.get("enabled")),
         domain_tags=tags,
         playbook=playbook,
+        execution_mode=record.get("execution_mode", "GUIDED_EXTERNAL"),
     )
 
 
@@ -256,7 +258,11 @@ def list_tools(*, tool_class: str = "business", include_disabled: bool = False) 
         _runtime_tool_from_snapshot(record)
         for record in records
         if record.get("tool_class") == tool_class
-        and (include_disabled or record.get("runtime_visible"))
+        and (
+            record.get("runtime_visible")
+            if tool_class == "business"
+            else (include_disabled or record.get("enabled"))
+        )
     )
 
 
