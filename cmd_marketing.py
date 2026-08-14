@@ -41,6 +41,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -512,9 +513,140 @@ def _get_next_action_card(demand_id: str, identity) -> dict:
     return {"ok": True, "text": text, "keyboard": keyboard}
 
 
-def _parse_three_ideas(raw: str) -> list[str]:
-    parts = re.split(r"רעיון\s*\d\s*:", raw)
-    return [p.strip() for p in parts if p.strip()][:3]
+# ── BUG-164 PR2: bounded creative authority for creative_ideas ─────
+#
+# The old free-text "רעיון 1:/2:/3:" instruction + regex parse let raw
+# AI-authored prose reach save_creative_ideas() unchecked (BUG-164: a
+# canonical Demand.Goal was silently rewritten into an unsupported claim).
+# This section replaces that path. It reuses BUG-164 PR1's authority modules
+# (marketing_fact_authority.py, marketing_creative_templates.py,
+# marketing_creative_renderer.py) EXACTLY AS MERGED — no PR1 file is
+# modified by this change.
+#
+# The AI is now asked to choose only from a closed menu (never free text):
+# an (angle_id, opening_style, cta_style) combination from
+# marketing_creative_templates.allowed_combinations(), and a fact_order
+# drawn only from ProtectedDemandFacts.renderable(). Its JSON response is
+# parsed with marketing_creative_renderer.parse_creative_proposal() and
+# rendered with authority_filter_and_render() -- the SAME functions PR1
+# shipped and tested, unmodified. The prompt below is advisory only; it is
+# NOT the authority boundary -- an AI response that ignores it entirely
+# still cannot produce persisted copy, because parse_creative_proposal()/
+# authority_filter_and_render() reject anything that doesn't pass. See
+# _parse_and_render_creative_proposals()'s fail-closed contract: on ANY
+# rejection this function returns ok=False and nothing is ever passed to
+# marketing_gateway.save_creative_ideas() -- there is no legacy raw-text
+# fallback path left in this file.
+
+def _build_creative_proposal_instruction(demand: dict, facts, domain_rules: str = "") -> str:
+    """
+    Pure. Builds the AI-facing prompt: persona/global-rules/domain-rules/
+    business-rules context (same content compose_brief() would include for
+    this Demand -- not reusing that function itself, to avoid touching
+    marketing_brief_composer.py for this PR2 cutover) + a closed menu
+    derived directly from marketing_creative_templates.allowed_combinations()
+    and facts.renderable() -- never a second, hand-maintained list that
+    could drift from what authority_filter_and_render() actually accepts.
+
+    Raises ValueError if this demand_type has no registered template
+    combinations -- fail closed, nothing valid to offer the AI.
+    """
+    from airtable_schema import MarketingDemandFields as MDF
+    from marketing_creative_templates import allowed_combinations
+    from marketing_domain_profiles import GLOBAL_RULES, get_profile
+
+    demand_type = demand.get(MDF.DEMAND_TYPE, "")
+    combos = allowed_combinations(demand_type)
+    if not combos:
+        raise ValueError(f"no template combinations registered for demand_type={demand_type!r}")
+
+    profile = get_profile(demand_type)
+    parts = [
+        f"[persona] {profile.persona}",
+        f"[חוקים כלליים] {GLOBAL_RULES}",
+    ]
+    if domain_rules:
+        parts.append(f"[חוקי תחום] {domain_rules}")
+    parts.append(f"[חוקי עסק] {profile.business_rules}")
+
+    parts.append(
+        "[משימה] בחר 3 הצעות קריאייטיב שונות באופן מהותי זו מזו (זווית/מסר "
+        "שונה בכל הצעה, לא 3 ניסוחים לאותו רעיון). אתה בוחר אך ורק מתוך "
+        "האפשרויות הסגורות למטה — אינך כותב טקסט חופשי, אינך מנסח בעצמך, "
+        "ואינך ממציא עובדות שאינן ברשימת [עובדות זמינות]. ניתן לבחור באותה "
+        "קומבינציה יותר מפעם אחת בין ההצעות, אך עדיף גיוון."
+    )
+
+    combo_lines = [
+        f"{i}. angle_id={angle.value}, opening_style={opening.value}, cta_style={cta.value}"
+        for i, (angle, opening, cta) in enumerate(combos, start=1)
+    ]
+    parts.append("[אפשרויות מותרות: angle_id / opening_style / cta_style]\n" + "\n".join(combo_lines))
+
+    renderable = facts.renderable()
+    fact_lines = [f'- "{key}": {fact.value!r}' for key, fact in sorted(renderable.items())]
+    parts.append("[עובדות זמינות (fact_order יכול להשתמש רק במפתחות אלו)]\n" + "\n".join(fact_lines))
+
+    parts.append(
+        "[פורמט תשובה מחייב]\n"
+        "החזר אך ורק JSON תקין: מערך של בדיוק 3 אובייקטים, ללא טקסט נוסף "
+        "לפני או אחרי ה-JSON, ללא markdown code fence.\n"
+        "כל אובייקט חייב להכיל בדיוק את 4 המפתחות הבאים, ושום מפתח נוסף:\n"
+        '  "angle_id": ערך יחיד מהעמודה הראשונה למעלה (למשל "benefit_first") — '
+        'לא מספר השורה.\n'
+        '  "opening_style": ערך יחיד מהעמודה השנייה.\n'
+        '  "cta_style": ערך יחיד מהעמודה השלישית.\n'
+        '  "fact_order": רשימת מפתחות מתוך [עובדות זמינות] בלבד, בסדר שבו '
+        'יופיעו בטקסט. "goal" חובה להיכלל בכל הצעה.'
+    )
+    return "\n\n".join(parts)
+
+
+def _parse_and_render_creative_proposals(raw: str, facts, expected_count: int = 3) -> tuple[bool, list[str], str]:
+    """
+    Fail-closed batch gate. Returns (ok, rendered_ideas, reason).
+
+    ok=False -> rendered_ideas is [] and reason explains why (invalid_json /
+    not_a_json_array / wrong_count:N / item_i:<parse_creative_proposal or
+    authority_filter_and_render rejection reason>). Caller MUST NOT persist
+    anything and MUST NOT fall back to the raw AI text on ok=False.
+
+    ok=True -> rendered_ideas contains exactly expected_count strings, each
+    produced ONLY by marketing_creative_renderer.authority_filter_and_render()
+    -- system-rendered output built from the fixed Hebrew template fragments
+    and whole ProtectedFact.value strings, never raw AI prose. A single
+    invalid proposal fails the entire batch (no partial save of 2 good +
+    1 rejected idea).
+    """
+    from marketing_creative_renderer import ProposalRejected, authority_filter_and_render, parse_creative_proposal
+
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```\s*$", "", text)
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        return False, [], f"invalid_json:{e}"
+
+    if not isinstance(parsed, list):
+        return False, [], "not_a_json_array"
+    if len(parsed) != expected_count:
+        return False, [], f"wrong_count:{len(parsed)}"
+
+    rendered: list[str] = []
+    for i, item in enumerate(parsed):
+        try:
+            proposal = parse_creative_proposal(item)
+        except ProposalRejected as e:
+            return False, [], f"item_{i}:{e}"
+        result = authority_filter_and_render(proposal, facts)
+        if result.status != "ok":
+            return False, [], f"item_{i}:{result.reason}"
+        rendered.append(result.rendered)
+
+    return True, rendered, ""
 
 
 def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown") -> dict:
@@ -523,11 +655,18 @@ def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown"
     {"ok": False, "error": str}. Creates the Demand record, then makes one
     AI call for all 3 ideas (not the Agent tool-use loop — see the M1 spec's
     point on minimizing LLM calls).
+
+    BUG-164 PR2: the persisted idea text is always system-rendered output
+    that passed authority_filter_and_render() -- see
+    _build_creative_proposal_instruction / _parse_and_render_creative_
+    proposals above. On any validation failure this returns {"ok": False,
+    ...} and marketing_gateway.save_creative_ideas() is never called with
+    anything -- no raw-AI-text fallback exists in this function.
     """
     import marketing_gateway
     from airtable_schema import MarketingDemandFields as MDF
     from llm_fallback import call_anthropic_text
-    from marketing_brief_composer import compose_brief
+    from marketing_fact_authority import extract_protected_facts
 
     fields = _materialize_demand_fields(state["demand_type"], state["answers"])
     demand_record = marketing_gateway.DemandRecord(
@@ -548,38 +687,43 @@ def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown"
         return {"ok": False, "error": f"הדרישה נוצרה (id={demand_id}) אך לא נמצאה בקריאה חוזרת"}
 
     domain_rules = marketing_gateway.get_marketing_rules(state["domain"])
+    facts = extract_protected_facts(demand_id, demand)
 
     try:
-        brief = compose_brief(demand=demand, task_type="creative_ideas", domain_rules=domain_rules)
-    except Exception as e:
-        return {"ok": False, "error": f"הרכבת ה-brief נכשלה: {e}"}
-
-    instruction = (
-        brief
-        + "\n\nהחזר בדיוק בפורמט הבא, ללא טקסט נוסף:\n"
-          "רעיון 1:\n<טקסט>\n\nרעיון 2:\n<טקסט>\n\nרעיון 3:\n<טקסט>"
-    )
+        instruction = _build_creative_proposal_instruction(demand, facts, domain_rules=domain_rules)
+    except ValueError as e:
+        return {"ok": False, "error": f"הרכבת הבקשה ל-AI נכשלה: {e}"}
 
     try:
         raw = call_anthropic_text(
             source="cmd_marketing.create_demand_and_generate_ideas",
             model="claude-haiku-4-5-20251001",
             max_tokens=800,
-            system="אתה עוזר קריאייטיב שיווקי. החזר תשובה בפורמט המדויק המבוקש בלבד.",
+            system=(
+                "אתה בוחר הצעות קריאייטיב מתוך אפשרויות סגורות בלבד. "
+                "החזר אך ורק JSON תקין בפורמט המבוקש, ללא טקסט נוסף."
+            ),
             messages=[{"role": "user", "content": instruction}],
         )
     except Exception as e:
         return {"ok": False, "error": f"קריאת ה-AI נכשלה: {e}"}
 
-    ideas = _parse_three_ideas(raw)
-    if len(ideas) != 3:
-        return {"ok": False, "error": f"לא הצלחתי לפרש 3 רעיונות מתשובת ה-AI (התקבלו {len(ideas)})"}
+    ok, ideas, reason = _parse_and_render_creative_proposals(raw, facts)
+    if not ok:
+        logger.warning(
+            "[F23][BUG-164] creative proposal batch rejected demand_id=%s reason=%s raw=%.500s",
+            demand_id, reason, raw,
+        )
+        return {
+            "ok": False,
+            "error": "ה-AI החזיר הצעה לא תקינה — לא נשמר תוכן לא-מאומת. נסה /marketing_new מחדש.",
+        }
 
     creative_id = marketing_gateway.save_creative_ideas(
         demand_id=demand_id,
         title=f"{demand.get(MDF.NAME, demand_id)} — creatives",
         idea1=ideas[0], idea2=ideas[1], idea3=ideas[2],
-        brief_used=brief,
+        brief_used=instruction,
     )
     if not creative_id:
         return {"ok": False, "error": "שמירת הרעיונות נכשלה"}
@@ -638,18 +782,56 @@ def _select_creative_and_generate_handoff(creative_id: str, idea_num: str) -> di
 
 
 if __name__ == "__main__":
-    sample = (
-        "רעיון 1:\nמודעה קצרה וישירה.\n\n"
-        "רעיון 2:\nמודעה עם דגש על תנאים.\n\n"
-        "רעיון 3:\nמודעה עם קריאה לפעולה דחופה."
-    )
-    ideas = _parse_three_ideas(sample)
-    assert len(ideas) == 3, f"expected 3 ideas, got {len(ideas)}"
-    assert ideas[0] == "מודעה קצרה וישירה."
-    assert ideas[2] == "מודעה עם קריאה לפעולה דחופה."
+    # BUG-164 PR2: no legacy raw-text parser exists in this module anymore —
+    # structural proof there is no dormant fallback path left to reach for.
+    assert "_parse_three_ideas" not in dir(), "legacy free-text idea parser must not exist"
 
-    malformed = _parse_three_ideas("אין כאן שום דבר בפורמט הנכון")
-    assert len(malformed) != 3
+    from airtable_schema import MarketingDemandFields as MDF
+    from marketing_fact_authority import extract_protected_facts
+
+    _demand = {
+        MDF.DOMAIN: "general", MDF.DEMAND_TYPE: "recruitment", MDF.NAME: "דרישה למתקינים",
+        MDF.TARGET_AUDIENCE: "ניסיון 3+ שנים", MDF.LOCATION: "בית שמש",
+        MDF.GOAL: "10 מועמדים תוך שבוע", MDF.CONSTRAINTS: "מיקום נגיש לנכים",
+    }
+    _facts = extract_protected_facts("recDemo1", _demand)
+
+    _instruction = _build_creative_proposal_instruction(_demand, _facts, domain_rules="תמיד לציין שכר.")
+    assert _instruction == _build_creative_proposal_instruction(_demand, _facts, domain_rules="תמיד לציין שכר."), \
+        "_build_creative_proposal_instruction must be deterministic"
+    assert "angle_id=benefit_first" in _instruction
+    assert '"goal"' in _instruction and "10 מועמדים תוך שבוע" in _instruction
+    assert '"constraints"' not in _instruction and '"domain"' not in _instruction and '"topic"' not in _instruction
+    assert "אינך כותב טקסט חופשי" in _instruction
+
+    _valid_json = json.dumps([
+        {"angle_id": "benefit_first", "opening_style": "statement", "cta_style": "apply_now",
+         "fact_order": ["goal", "location", "audience"]},
+        {"angle_id": "urgency", "opening_style": "statement", "cta_style": "apply_now",
+         "fact_order": ["goal"]},
+        {"angle_id": "benefit_first", "opening_style": "statement", "cta_style": "apply_now",
+         "fact_order": ["goal", "audience"]},
+    ])
+    ok, ideas, reason = _parse_and_render_creative_proposals(_valid_json, _facts)
+    assert ok and len(ideas) == 3 and reason == "", (ok, ideas, reason)
+    assert all("10 מועמדים תוך שבוע" in idea for idea in ideas)
+
+    # fenced code block wrapper (common LLM habit despite instructions) is
+    # stripped as transport framing, not treated as invalid
+    ok_fenced, ideas_fenced, _ = _parse_and_render_creative_proposals(f"```json\n{_valid_json}\n```", _facts)
+    assert ok_fenced and ideas_fenced == ideas
+
+    # malformed JSON -> fail closed, nothing rendered
+    ok_bad, ideas_bad, reason_bad = _parse_and_render_creative_proposals("not json at all", _facts)
+    assert not ok_bad and ideas_bad == [] and reason_bad.startswith("invalid_json")
+
+    # AI trying to smuggle free text via an extra field -> fail closed
+    smuggled = json.dumps([
+        {"angle_id": "benefit_first", "opening_style": "statement", "cta_style": "apply_now",
+         "fact_order": ["goal"], "framing_text": "10 משרות פתוחות"},
+    ] * 3)
+    ok_smuggled, ideas_smuggled, reason_smuggled = _parse_and_render_creative_proposals(smuggled, _facts)
+    assert not ok_smuggled and ideas_smuggled == [] and "unknown_fields" in reason_smuggled
 
     assert _label(DOMAINS, "recruitment") == "גיוס"
     assert _label(DEMAND_TYPES, "service") == "עסק שירותים"
