@@ -696,6 +696,43 @@ _LEAD_CLARIFY_NON_INTERRUPTING_INTENTS = frozenset({
     _Intent.CREATE_LEAD, _Intent.UPDATE_LEAD,
 })
 
+# BUG-051-FU (create_contact → Leads precedence gap, 14/08/2026 manual QA):
+# BUG-051/PR#205 deliberately decoupled LCH's Tier 1-3 auto-capture from
+# Router intent — LCH runs on identity.is_internal alone, so it will still
+# capture a Tier 1-3 candidate even when the Router has confidently
+# classified the SAME turn as a different, non-lead explicit mutation
+# (e.g. "צור איש קשר רמי לוי 0547653453" → Router intent=create_contact
+# conf=0.90, but LCH still proposed an airtable_add/Leads write). BUG-099c
+# already carved out a narrow Tier-5+CREATE_LEAD exception in the other
+# direction; this is the missing general-direction guard: when the Router
+# has confidently recognized an EXPLICIT, non-lead mutation target for this
+# turn, that intent owns the turn and LCH must not reinterpret it as a lead.
+#
+# Closed set, not a blanket "any non-CREATE_LEAD intent blocks capture" —
+# each pattern below requires an explicit target noun (contact/task/event/
+# email) with no textual overlap with genuine lead-dictation phrasing, so a
+# real lead message ("משה כהן 0501234567, מעוניין בדירה") can never match
+# one of these and lose its capture. Two intents reachable in
+# core/router/intent_router.py's rule table are deliberately EXCLUDED here
+# despite being "mutations":
+#   - STORE_MEMORY: its pattern includes bare "שמור" (save), which is one of
+#     LCH's own _SAVE_WORDS — including it would suppress ordinary
+#     "שמור את הליד" lead saves (violates the "don't change valid lead
+#     capture semantics" constraint).
+#   - ADMIN_ACTION: matched by the bare word "ניהול" (management) alone at
+#     0.85 — too generic (e.g. "מתעניין בניהול נכסים" is a real-estate
+#     lead, not an admin/settings request) to safely gate capture on.
+# Only intents whose Router pattern requires an unambiguous, lead-disjoint
+# target keyword are included.
+_NON_LEAD_MUTATION_INTENTS = frozenset({
+    _Intent.CREATE_CONTACT, _Intent.UPDATE_CONTACT,
+    _Intent.CREATE_TASK, _Intent.UPDATE_TASK,
+    _Intent.COMPLETE_TASK, _Intent.DELETE_TASK,
+    _Intent.CREATE_EVENT, _Intent.UPDATE_EVENT,
+    _Intent.CANCEL_EVENT, _Intent.SCHEDULE_MEETING,
+    _Intent.DRAFT_EMAIL, _Intent.SEND_EMAIL,
+})
+
 # BUG-111: display-only Hebrew label for a canonical Leads-Domain value (the
 # inverse of core.ingress_classifier._DOMAIN_HINT_CANONICAL) — used ONLY to
 # phrase the batch-clarification prompt ("...לדומיין גיוס..."); never used
@@ -1111,6 +1148,20 @@ def handle_lead_candidate(
             _start_reply = _maybe_start_lead_clarification(identity, text, chat_id, channel, domain)
             if _start_reply is not None:
                 return _start_reply
+        return None
+
+    # BUG-051-FU: Router-confirmed explicit non-lead mutation intent owns
+    # this turn — LCH must not reinterpret it as a lead capture even though
+    # ic.tier is 1-3 (see _NON_LEAD_MUTATION_INTENTS above for the closed
+    # set and exclusion rationale). `intent` is only ever a non-UNKNOWN
+    # value here when Router's own detect_intent() cleared
+    # INTENT_CONFIDENCE_THRESHOLD (core/router/router.py) — no separate
+    # confidence re-check needed.
+    if intent in _NON_LEAD_MUTATION_INTENTS:
+        logger.info(
+            "[LCH] Tier %d capture suppressed — explicit non-lead intent=%s owns turn",
+            ic.tier, intent,
+        )
         return None
 
     # ── Tier 1/2/3 routing ───────────────────────

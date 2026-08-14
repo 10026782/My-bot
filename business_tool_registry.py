@@ -104,7 +104,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "low/medium", "synthetic or approved non-sensitive files", "identity, contract, lead and confidential files", True,
           domains=("documents", "marketing")),
     _tool("squoosh", "Squoosh", "https://squoosh.app/", ("images",),
-          ("compress image", "resize image", "optimize image"), ("shrink image", "compress photo", "reduce image", "להקטין תמונה", "להקטין תמונות", "לדחוס תמונה", "תקטין לי תמונה", "תמונה לוואטסאפ"),
+          ("compress image", "resize image", "optimize image"), ("shrink image", "compress photo", "reduce image", "להקטין תמונה", "להקטין תמונות", "לדחוס תמונה", "לדחיסת תמונה", "לדחיסת תמונות", "תקטין לי תמונה", "תמונה לוואטסאפ"),
           "Compress and resize images before sharing or uploading.",
           "Photos and graphics that need a smaller file size.", "Never use as a substitute for preserving the original asset.",
           "low", "non-sensitive images and copies", "original evidence, private IDs, or files needing forensic integrity", True,
@@ -197,9 +197,27 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
 )
 
 
+# BUG-051-FU (business_tool_registry matching gap, 14/08/2026 manual QA):
+# a preposition letter (ו/ל/ב/כ/מ) immediately followed by the definite
+# article "ה" is a single, closed, deterministic Hebrew inflection class —
+# "מהנתונים" (from-THE-data) vs "מנתונים" (from data), "לתמונה"/"בתמונה"
+# and so on. Catalog phrases and user text spell these inconsistently for
+# the exact same meaning; collapsing the "ה" here (applied identically to
+# both sides of every match) recovers that whole class of near-misses with
+# one small, generic rule instead of hand-listing every prefix variant of
+# every catalog phrase. It intentionally does NOT touch other inflection
+# differences (verb vs. construct-noun forms, e.g. "לדחוס"/"לדחיסת") —
+# those are genuinely different word forms, not a definite-article artifact,
+# and are handled by adding the literal phrase to the relevant tool's
+# `tasks` tuple instead (the catalog's existing, closed-vocabulary
+# extension point — see squoosh below).
+_DEF_ARTICLE_PREFIX_RE = re.compile(r"([ולבכמ])ה(?=[א-ת]{2,})")
+
+
 def _normalize(text: str) -> str:
     text = unicodedata.normalize("NFKC", str(text or "")).lower()
-    return re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
+    text = re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
+    return _DEF_ARTICLE_PREFIX_RE.sub(r"\1", text)
 
 
 def _runtime_tool_from_snapshot(record: dict) -> BusinessTool:

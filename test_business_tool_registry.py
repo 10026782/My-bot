@@ -103,3 +103,55 @@ def test_every_approved_business_tool_renders_without_internal_wording():
         assert "מה זה עוזר" not in reply
         assert "מקור אמת" not in reply
         assert "ללא אישור" not in reply
+
+
+# ══════════════════════════════════════════════════
+# BUG-051-FU (14/08/2026 manual QA): deterministic matching gap.
+#
+#   "אני צריך לדחוס תמונה"        -> Squoosh (already worked)
+#   "יש כלי לדחיסת תמונה?"        -> Squoosh (FAILED before fix: construct-
+#                                     noun form "לדחיסת" vs the catalog's
+#                                     verb form "לדחוס" never matched)
+#   "אני צריך ליצור תרשים מנתונים" -> RAWGraphs (FAILED before fix:
+#                                     catalog phrase "תרשים מהנתונים" has
+#                                     the definite article "ה", user text
+#                                     doesn't)
+#
+# Fixed by (1) a generic, closed _DEF_ARTICLE_PREFIX_RE normalization that
+# collapses "מה/לה/בה/וה/כה" + word to the bare preposition form (applied
+# identically to catalog phrases and input), and (2) one added catalog
+# phrase variant on squoosh ("לדחיסת תמונה"/"לדחיסת תמונות") for the
+# genuinely different construct-noun inflection that (1) cannot bridge.
+# ══════════════════════════════════════════════════
+
+def test_bug051fu_squoosh_matches_construct_noun_phrasing():
+    assert find_recommended_tools("יש כלי לדחיסת תמונה?")[0].tool_id == "squoosh"
+    reply = maybe_recommend("יש כלי לדחיסת תמונה?")
+    assert reply and "Squoosh" in reply
+
+
+def test_bug051fu_squoosh_still_matches_verb_phrasing():
+    # Pre-existing case — must not regress.
+    assert find_recommended_tools("אני צריך לדחוס תמונה")[0].tool_id == "squoosh"
+
+
+def test_bug051fu_rawgraphs_matches_definite_article_variant():
+    assert find_recommended_tools("אני צריך ליצור תרשים מנתונים")[0].tool_id == "rawgraphs"
+    reply = maybe_recommend("אני צריך ליצור תרשים מנתונים")
+    assert reply and "RAWGraphs" in reply
+
+
+def test_bug051fu_rawgraphs_still_matches_definite_article_form():
+    # Pre-existing case ("גרף מהנתונים", WITH the definite article) — must
+    # not regress after adding the ה-collapsing normalizer.
+    assert find_recommended_tools("אני רוצה ליצור גרף מהנתונים")[0].tool_id == "rawgraphs"
+
+
+def test_bug051fu_definite_article_normalization_does_not_widen_false_positives():
+    # The ה-collapse must not turn unrelated sentences into matches, and
+    # must not make the tool-seeking gate (maybe_recommend's intent_markers)
+    # any broader than before.
+    assert maybe_recommend("יש לי כלי עבודה חדש בעבודה") is None
+    assert maybe_recommend("קניתי כלי נגינה") is None
+    assert maybe_recommend("תרשים ארגוני של החברה") is None
+    assert find_recommended_tools("מה שלומך היום") == []
