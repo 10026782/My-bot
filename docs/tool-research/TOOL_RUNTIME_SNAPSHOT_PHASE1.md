@@ -22,7 +22,7 @@ Runtime visibility requires an approved, verified, enabled Business Tool. Operat
 
 ## Runtime loader and resolution
 
-`load_tool_runtime_snapshot()` performs local read-only loading and strict validation. There is no network, database, mutation, or candidate fallback. `business_tool_registry.list_tools()`, direct lookup, and deterministic matching now require the validated snapshot. Matching resolves current wording to normalized capability IDs before selecting eligible ToolCapability relations; the existing formatter and direct-link UX remain unchanged.
+`load_tool_runtime_snapshot()` performs local read-only loading and strict validation. There is no network, database, mutation, or candidate fallback. `business_tool_registry.list_tools()`, direct lookup, and deterministic matching now construct runtime Tool records from the validated snapshot. The seed is not read for runtime name, URL, playbook, privacy guidance, agent mode, execution mode, aliases, or capability IDs. Matching resolves current wording to snapshot-published aliases and capability IDs; the existing formatter and direct-link UX remain unchanged.
 
 If the snapshot is missing or invalid, the recommendation path returns no recommendation and the existing normal SCOREBOS routing continues.
 
@@ -77,6 +77,8 @@ One bounded next step: define the canonical editorial storage contract and owner
 ### STATIC SEED STATUS
 
 `TRANSITION SEED`
+
+`TOOL_REGISTRY` is used by generation only; runtime reads the validated snapshot.
 
 ### DYNAMIC STORE
 
