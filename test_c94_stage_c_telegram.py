@@ -275,6 +275,76 @@ chk(
 
 
 # ══════════════════════════════════════════════════
+# 8. [C94] trace_marker — sanitized EvidenceTrace INFO marker (Agent 2
+#    observability). logger.debug() never emits at this app's default INFO
+#    level, so the pre-existing row-trace lines in capture_router.py were
+#    invisible in real runtime logs — this proves the new INFO counterpart
+#    is bounded/sanitized (envelope_id, status, tier, raw_ref_present bool
+#    only) and never leaks raw_ref or message text.
+# ══════════════════════════════════════════════════
+TRACE_MARKER_TEXT = "בדיקת מייל ליועץ 050-1234567"  # PII-shaped on purpose — must never leak
+
+logger_tm, handler_tm = _capture_logs("core.router.capture_router")
+ic_tm = capture_router.classify_capture_ic(TRACE_MARKER_TEXT, envelope_id="env-marker-1")
+logger_tm.removeHandler(handler_tm)
+
+marker_lines_tm = [m for m in handler_tm.records if m.startswith("[C94] trace_marker")]
+chk(
+    "classify_capture_ic() success path emits exactly one [C94] trace_marker INFO line",
+    len(marker_lines_tm) == 1, str(marker_lines_tm),
+)
+chk(
+    "trace_marker includes envelope_id=env-marker-1 and status=classified",
+    bool(marker_lines_tm)
+    and "envelope_id=env-marker-1" in marker_lines_tm[0]
+    and "status=classified" in marker_lines_tm[0],
+    str(marker_lines_tm),
+)
+chk(
+    "trace_marker includes tier=<int> and raw_ref_present=True",
+    bool(marker_lines_tm)
+    and f"tier={ic_tm.tier}" in marker_lines_tm[0]
+    and "raw_ref_present=True" in marker_lines_tm[0],
+    str(marker_lines_tm),
+)
+chk(
+    "trace_marker never contains the raw_ref value itself",
+    bool(marker_lines_tm) and ic_tm.raw_ref and ic_tm.raw_ref not in marker_lines_tm[0],
+    str(marker_lines_tm),
+)
+chk(
+    "trace_marker never contains the user's message text",
+    all(TRACE_MARKER_TEXT not in m for m in marker_lines_tm),
+    str(marker_lines_tm),
+)
+
+# Error path — same sanitization discipline as §2's PII/exception-type check.
+logger_tm2, handler_tm2 = _capture_logs("core.router.capture_router")
+with patch.object(capture_router, "classify_ingress", side_effect=_boom):
+    capture_router.classify_capture_ic(PII_TEXT, envelope_id="env-marker-err")
+logger_tm2.removeHandler(handler_tm2)
+
+marker_lines_tm2 = [m for m in handler_tm2.records if m.startswith("[C94] trace_marker")]
+chk(
+    "classify_capture_ic() error path emits exactly one [C94] trace_marker INFO line",
+    len(marker_lines_tm2) == 1, str(marker_lines_tm2),
+)
+chk(
+    "error-path trace_marker includes envelope_id=env-marker-err, status=classification_error, raw_ref_present=False",
+    bool(marker_lines_tm2)
+    and "envelope_id=env-marker-err" in marker_lines_tm2[0]
+    and "status=classification_error" in marker_lines_tm2[0]
+    and "raw_ref_present=False" in marker_lines_tm2[0],
+    str(marker_lines_tm2),
+)
+chk(
+    "error-path trace_marker never leaks PII text or the raw exception message",
+    all(PII_TEXT not in m and "boom" not in m for m in marker_lines_tm2),
+    str(marker_lines_tm2),
+)
+
+
+# ══════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════
 print(f"\n{passed} passed, {failed} failed")

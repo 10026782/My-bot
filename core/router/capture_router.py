@@ -72,6 +72,17 @@ def classify_capture_ic(text: str, chat_id: str = "", envelope_id: str = "") -> 
             trace = EvidenceTrace(envelope_id=envelope_id)
             trace.record_classification(classification_error=type(exc).__name__)
             logger.debug("[C94] row trace: envelope_id=%s status=%s", envelope_id, trace.status)
+            # Sanitized INFO counterpart to the debug line above — bounded
+            # metadata only (status is a fixed enum; raw_ref_present is a
+            # bool), never the raw_ref value itself, never exception text.
+            # Exists because logger.debug() never emits at this app's
+            # default INFO level (app.py's logging.basicConfig) — without
+            # this, an EvidenceTrace is recorded but produces zero visible
+            # runtime evidence.
+            logger.info(
+                "[C94] trace_marker envelope_id=%s status=%s raw_ref_present=%s",
+                envelope_id, trace.status, trace.raw_ref is not None,
+            )
         return None
 
     log_classification(ic, chat_id=chat_id)
@@ -82,6 +93,14 @@ def classify_capture_ic(text: str, chat_id: str = "", envelope_id: str = "") -> 
             raw_ref=ic.raw_ref,
         )
         logger.debug("[C94] row trace: envelope_id=%s tier=%s raw_ref=%s", envelope_id, ic.tier, trace.raw_ref)
+        # Sanitized INFO counterpart — see comment on the error-path marker
+        # above. tier is a bounded small int (1-5), safe to log; raw_ref
+        # itself (a Decision Inbox record id / local path, potentially
+        # identifying) is deliberately reduced to a presence bool.
+        logger.info(
+            "[C94] trace_marker envelope_id=%s status=%s tier=%s raw_ref_present=%s",
+            envelope_id, trace.status, ic.tier, trace.raw_ref is not None,
+        )
     return ic
 
 
