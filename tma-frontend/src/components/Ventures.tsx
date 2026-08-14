@@ -30,6 +30,17 @@ const STAGES = [
 
 type VentureStage = (typeof STAGES)[number];
 
+const STAGE_LABEL: Record<VentureStage, string> = {
+  Research: "מחקר",
+  "Supplier/Source Contact": "יצירת קשר עם ספק / מקור",
+  "Due Diligence": "בדיקת נאותות",
+  "Legal/Tax Review": "בדיקה משפטית ומיסויית",
+  "Smoke Test": "בדיקת היתכנות",
+  GO: "מאושר להתקדמות",
+  "NO-GO": "לא מתקדם",
+  Converted: "הועבר לביצוע",
+};
+
 const STAGE_TONE: Record<string, StatusTone> = {
   Research: "neutral",
   "Supplier/Source Contact": "info",
@@ -43,12 +54,17 @@ const STAGE_TONE: Record<string, StatusTone> = {
 
 const CONVICTION_TONE: Record<string, StatusTone> = {
   Low: "neutral",
-  Medium: "warning",
+  Medium: "neutral",
   High: "success",
 };
 
 const DOMAINS = ["Real Estate", "Import", "SaaS", "Recruitment", "General"];
 const CONVICTIONS = ["Low", "Medium", "High"];
+const CONVICTION_LABEL: Record<string, string> = {
+  Low: "נמוכה",
+  Medium: "בינונית",
+  High: "גבוהה",
+};
 
 function fmt(n: number): string {
   if (!n) return "—";
@@ -65,6 +81,10 @@ function isVentureStage(stage: string): stage is VentureStage {
   return STAGES.some((item) => item === stage);
 }
 
+function stageLabel(stage: string): string {
+  return isVentureStage(stage) ? STAGE_LABEL[stage] : stage;
+}
+
 function LifecycleRail({
   selectedStage,
   onSelect,
@@ -77,7 +97,7 @@ function LifecycleRail({
   counts?: Partial<Record<VentureStage, number>>;
 }) {
   return (
-    <div className="ventures-lifecycle" aria-label="שלבי Venture">
+    <div className="ventures-lifecycle" aria-label="שלבי הזדמנות">
       {includeAll && (
         <button
           type="button"
@@ -85,7 +105,7 @@ function LifecycleRail({
             onSelect("");
             event.currentTarget.scrollIntoView({ block: "nearest", inline: "center" });
           }}
-          className="ventures-lifecycle__stage ventures-lifecycle__stage--all"
+          className="ventures-lifecycle__stage ventures-lifecycle__stage--all boss-bubble--selectable"
           aria-pressed={selectedStage === ""}
         >
           <span className="ventures-lifecycle__index">כל</span>
@@ -100,11 +120,11 @@ function LifecycleRail({
             onSelect(stage);
             event.currentTarget.scrollIntoView({ block: "nearest", inline: "center" });
           }}
-          className="ventures-lifecycle__stage"
+          className="ventures-lifecycle__stage boss-bubble--selectable"
           aria-pressed={selectedStage === stage}
         >
           <span className="ventures-lifecycle__index">{index + 1}</span>
-          <span className="ventures-lifecycle__label">{stage}</span>
+          <span className="ventures-lifecycle__label">{STAGE_LABEL[stage]}</span>
           {counts?.[stage] !== undefined && (
             <span className="ventures-lifecycle__count" aria-label={`${counts[stage]} הזדמנויות`}>
               {counts[stage]}
@@ -203,11 +223,11 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
       <div className="ventures-shell ventures-shell--workspace">
         <PageHeader
           onBack={onBack}
-          backLabel="לכל ה־Ventures"
-          eyebrow="Venture workspace"
-          title={d?.name || "Venture"}
+          backLabel="לכל ההזדמנויות"
+          eyebrow="מרחב עבודה אסטרטגי"
+          title={d?.name || "הזדמנות"}
           subtitle={d ? `${d.domain || "ללא תחום"} · מרחב החלטה` : "טוען מרחב החלטה"}
-          badge={d?.stage ? <StatusBadge tone={stageTone(d.stage)}>{d.stage}</StatusBadge> : undefined}
+          badge={d?.stage ? <StatusBadge tone={stageTone(d.stage)}>{stageLabel(d.stage)}</StatusBadge> : undefined}
         />
 
         {toast && (
@@ -222,9 +242,9 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
         {d && (
           <div className="ventures-detail-workspace">
             <div className="ventures-detail-main">
-              <Surface>
+              <Surface className="boss-bubble--information">
                 <WorkspaceHeading
-                  eyebrow="Context"
+                  eyebrow="הקשר"
                   title="תמונת מצב"
                   context="הנתונים הקיימים של ההזדמנות"
                 />
@@ -235,7 +255,7 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
                   </div>
                   <div>
                     <p className="ventures-detail-label">ביטחון</p>
-                    <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{d.conviction || "—"}</StatusBadge>
+                    <StatusBadge tone={CONVICTION_TONE[d.conviction] ?? "neutral"}>{CONVICTION_LABEL[d.conviction] || d.conviction || "—"}</StatusBadge>
                   </div>
                   <div>
                     <p className="ventures-detail-label">תאריך החלטה משוער</p>
@@ -248,9 +268,9 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
                 </div>
               </Surface>
 
-              <Surface variant="subtle">
+              <Surface variant="subtle" className="boss-bubble--information">
                 <WorkspaceHeading
-                  eyebrow="Decision context"
+                  eyebrow="הקשר החלטה"
                   title="החלטה וצעד הבא"
                 />
                 <div className="ventures-decision-context">
@@ -260,7 +280,7 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
                   </div>
                   {d.decision_log && (
                     <div>
-                      <p className="ventures-detail-label">Decision Log</p>
+                      <p className="ventures-detail-label">יומן החלטות</p>
                       <p className="ventures-detail-copy">{d.decision_log}</p>
                     </div>
                   )}
@@ -276,8 +296,8 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
 
             <Surface variant="raised" className="ventures-editor">
               <WorkspaceHeading
-                eyebrow="Current lifecycle"
-                title="עדכון Venture"
+                eyebrow="מסלול התקדמות"
+                title="עדכון הזדמנות"
                 context="השינויים נשמרים יחד"
               />
 
@@ -294,10 +314,10 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
                       type="button"
                       key={conviction}
                       onClick={() => setEditConviction(conviction)}
-                      className="ventures-choice"
+                      className="ventures-choice boss-bubble--selectable"
                       aria-pressed={editConviction === conviction}
                     >
-                      {conviction}
+                      {CONVICTION_LABEL[conviction]}
                     </button>
                   ))}
                 </div>
@@ -325,7 +345,7 @@ function VentureDetail({ ventureId, onBack }: { ventureId: string; onBack: () =>
                 />
               </label>
 
-              <button type="button" onClick={handleSave} disabled={saving} className="boss-button boss-button--primary ventures-editor__save">
+              <button type="button" onClick={handleSave} disabled={saving} className="boss-button boss-button--primary boss-bubble--action ventures-editor__save">
                 {saving ? "שומר…" : "שמור שינויים"}
               </button>
             </Surface>
@@ -361,7 +381,7 @@ function NewVentureForm({ onCreated, onCancel }: { onCreated: (v: Venture) => vo
   return (
     <div className="ventures-modal" onClick={onCancel} role="presentation">
       <div className="ventures-modal__panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="new-venture-title">
-        <h2 id="new-venture-title" className="ventures-modal__title">Venture חדש</h2>
+        <h2 id="new-venture-title" className="ventures-modal__title">הזדמנות חדשה</h2>
         <div className="ventures-form-stack">
           <input
             type="text"
@@ -375,8 +395,8 @@ function NewVentureForm({ onCreated, onCancel }: { onCreated: (v: Venture) => vo
           </select>
           {error && <p className="ventures-form-error" role="alert">{error}</p>}
           <div className="ventures-form-actions">
-            <button type="button" onClick={onCancel} className="boss-button boss-button--quiet">ביטול</button>
-            <button type="button" onClick={handleCreate} disabled={saving || !name.trim()} className="boss-button boss-button--primary">
+            <button type="button" onClick={onCancel} className="boss-button boss-button--quiet boss-bubble--action">ביטול</button>
+            <button type="button" onClick={handleCreate} disabled={saving || !name.trim()} className="boss-button boss-button--primary boss-bubble--action">
               {saving ? "יוצר…" : "צור"}
             </button>
           </div>
@@ -415,7 +435,7 @@ export function Ventures({ onBack }: Props) {
   const d = state.status === "ok" ? state.data : null;
   const totalPotential = d?.ventures.reduce((sum, venture) => sum + (venture.estimated_potential || 0), 0) ?? 0;
   const venturesWithNextAction = d?.ventures.filter((venture) => Boolean(venture.next_action)).length ?? 0;
-  const currentViewLabel = stageFilter || "כל השלבים";
+  const currentViewLabel = stageFilter ? stageLabel(stageFilter) : "כל השלבים";
   const stageCounts = d && !stageFilter
     ? STAGES.reduce<Partial<Record<VentureStage, number>>>((counts, stage) => {
         counts[stage] = d.ventures.filter((venture) => venture.stage === stage).length;
@@ -444,28 +464,28 @@ export function Ventures({ onBack }: Props) {
       <div className="ventures-shell ventures-shell--workspace">
         <PageHeader
           onBack={onBack}
-          eyebrow="Strategic workspace"
-          title="Ventures"
+          eyebrow="מרחב עבודה אסטרטגי"
+          title="הזדמנויות עסקיות"
           subtitle="מרחב עבודה לבחינת הזדמנויות מהשערה להחלטה"
           badge={d ? <StatusBadge tone="info">{d.count} בתצוגה</StatusBadge> : undefined}
           action={(
-            <button type="button" onClick={() => setShowNew(true)} className="boss-button boss-button--primary">
-              Venture חדש
+            <button type="button" onClick={() => setShowNew(true)} className="boss-button boss-button--primary boss-bubble--action">
+              הזדמנות חדשה
             </button>
           )}
         />
 
         {d && (
           <section className="ventures-summary" aria-label="סיכום תצוגה">
-            <Surface variant="subtle" padding="compact" className="ventures-summary__item">
+            <Surface variant="subtle" padding="compact" className="ventures-summary__item boss-bubble--information">
               <p className="ventures-summary__label">הזדמנויות בתצוגה</p>
               <p className="ventures-summary__value">{d.count}</p>
             </Surface>
-            <Surface variant="subtle" padding="compact" className="ventures-summary__item">
+            <Surface variant="subtle" padding="compact" className="ventures-summary__item boss-bubble--information">
               <p className="ventures-summary__label">פוטנציאל בתצוגה</p>
               <p className="ventures-summary__value">{fmt(totalPotential)}</p>
             </Surface>
-            <Surface variant="subtle" padding="compact" className="ventures-summary__item">
+            <Surface variant="subtle" padding="compact" className="ventures-summary__item boss-bubble--information">
               <p className="ventures-summary__label">עם צעד הבא</p>
               <p className="ventures-summary__value">{venturesWithNextAction}</p>
             </Surface>
@@ -474,8 +494,8 @@ export function Ventures({ onBack }: Props) {
 
         <Surface variant="subtle" className="ventures-lifecycle-panel">
           <WorkspaceHeading
-            eyebrow="Lifecycle"
-            title="מסלול ההזדמנות"
+            eyebrow="מסלול התקדמות"
+            title="מסלול התקדמות"
             context={`תצוגה נוכחית: ${currentViewLabel}`}
           />
           <LifecycleRail
@@ -488,7 +508,7 @@ export function Ventures({ onBack }: Props) {
 
         <section className="ventures-work-area" aria-labelledby="ventures-collection-title">
           <WorkspaceHeading
-            eyebrow="Collection"
+            eyebrow="הזדמנויות"
             title="הזדמנויות"
             context={d ? `${d.count} פריטים · ${currentViewLabel}` : currentViewLabel}
             titleId="ventures-collection-title"
@@ -502,7 +522,7 @@ export function Ventures({ onBack }: Props) {
               </div>
               <button
                 type="button"
-                className="boss-button boss-button--quiet ventures-filter-context__reset"
+                className="boss-button boss-button--quiet boss-bubble--action ventures-filter-context__reset"
                 onClick={() => { setStageFilter(""); load(); }}
               >
                 הצגת כל השלבים
@@ -516,7 +536,7 @@ export function Ventures({ onBack }: Props) {
               state="error"
               message={state.message}
               action={(
-                <button type="button" onClick={() => load(stageFilter || undefined)} className="boss-button boss-button--quiet">
+                <button type="button" onClick={() => load(stageFilter || undefined)} className="boss-button boss-button--quiet boss-bubble--action">
                   ניסיון נוסף
                 </button>
               )}
@@ -527,9 +547,9 @@ export function Ventures({ onBack }: Props) {
             <ScreenState
               state="empty"
               title={stageFilter ? "אין הזדמנויות בשלב הזה" : "אין עדיין הזדמנויות"}
-              message={stageFilter ? "אפשר לאפס את המסנן ולחזור לכל השלבים." : "אפשר ליצור Venture ראשון כדי להתחיל לבחון הזדמנות."}
+              message={stageFilter ? "אפשר לאפס את המסנן ולחזור לכל השלבים." : "אפשר ליצור הזדמנות ראשונה כדי להתחיל לבחון אותה."}
               action={stageFilter ? (
-                <button type="button" onClick={() => { setStageFilter(""); load(); }} className="boss-button boss-button--quiet">
+                <button type="button" onClick={() => { setStageFilter(""); load(); }} className="boss-button boss-button--quiet boss-bubble--action">
                   הצגת כל השלבים
                 </button>
               ) : undefined}
@@ -544,9 +564,9 @@ export function Ventures({ onBack }: Props) {
                     <div className="ventures-stage-group__identity">
                       {group.index && <span className="ventures-stage-group__index" aria-hidden="true">{group.index}</span>}
                       <div>
-                        <p className="ventures-stage-group__eyebrow">{group.stage ? "Lifecycle stage" : "Data check"}</p>
+                        <p className="ventures-stage-group__eyebrow">{group.stage ? "שלב נוכחי" : "בדיקת נתונים"}</p>
                         <h3 id={`ventures-stage-${group.index ?? "uncategorized"}`} className="ventures-stage-group__title">
-                          {group.stage || "ללא שלב קנוני"}
+                          {group.stage ? stageLabel(group.stage) : "ללא שלב קנוני"}
                         </h3>
                       </div>
                     </div>
@@ -556,12 +576,12 @@ export function Ventures({ onBack }: Props) {
                   <Surface padding="none" className="ventures-collection">
                     <div className="ventures-list">
                       {group.ventures.map((venture) => (
-                        <button type="button" key={venture.id} className="ventures-card" onClick={() => setSelectedId(venture.id)}>
+                        <button type="button" key={venture.id} className="ventures-card boss-bubble--action" onClick={() => setSelectedId(venture.id)}>
                           <div className="ventures-card__body">
                             <div className="ventures-card__heading">
                               <p className="ventures-card__name">{venture.name || "—"}</p>
                               <StatusBadge tone={stageTone(venture.stage)}>
-                                {isVentureStage(venture.stage) ? venture.stage : "שלב לא מוכר"}
+                                {isVentureStage(venture.stage) ? stageLabel(venture.stage) : "שלב לא מוכר"}
                               </StatusBadge>
                             </div>
 
@@ -575,7 +595,7 @@ export function Ventures({ onBack }: Props) {
                             <div className="ventures-card__meta">
                               {venture.domain && <span className="ventures-meta">{venture.domain}</span>}
                               {venture.conviction && (
-                                <StatusBadge tone={CONVICTION_TONE[venture.conviction] ?? "neutral"}>{venture.conviction}</StatusBadge>
+                                <StatusBadge tone={CONVICTION_TONE[venture.conviction] ?? "neutral"}>{CONVICTION_LABEL[venture.conviction] || venture.conviction}</StatusBadge>
                               )}
                               {venture.estimated_potential > 0 && <span className="ventures-card__value">{fmt(venture.estimated_potential)}</span>}
                             </div>
@@ -583,7 +603,7 @@ export function Ventures({ onBack }: Props) {
                           <div className="ventures-card__aside">
                             <p className="ventures-card__aside-label">החלטה משוערת</p>
                             <p className="ventures-card__aside-value">{venture.target_decision_date || "—"}</p>
-                            <span className="ventures-card__open">פתיחת Venture</span>
+                            <span className="ventures-card__open">פתיחת הזדמנות</span>
                           </div>
                         </button>
                       ))}
