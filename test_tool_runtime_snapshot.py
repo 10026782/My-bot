@@ -1,9 +1,12 @@
 import copy
 import json
+from dataclasses import replace
 
 import pytest
 
+import business_tool_registry
 from business_tool_registry import find_recommended_tools, get_playbook, list_tools, maybe_recommend
+from tools import tool_runtime_snapshot
 from tools.tool_runtime_snapshot import (
     SnapshotLoadError,
     SnapshotValidationError,
@@ -17,6 +20,9 @@ def test_valid_snapshot_loads_and_has_stable_records():
     snapshot = load_tool_runtime_snapshot()
     assert snapshot["schema_version"] == "1"
     assert len(snapshot["tools"]) == 19
+    bentopdf = next(item for item in snapshot["tools"] if item["tool_id"] == "bentopdf")
+    assert bentopdf["playbook"]["privacy_guidance"] == "עבוד על עותק של הקובץ; שמור את המקור אצלך."
+    assert tool_runtime_snapshot.normalize_capability_id("merge") == "pdf_merge"
     assert len({item["tool_id"] for item in snapshot["tools"]}) == len(snapshot["tools"])
 
 
@@ -72,3 +78,49 @@ def test_missing_or_malformed_snapshot_fails_closed(tmp_path):
     path.write_text(json.dumps({"schema_version": "999"}), encoding="utf-8")
     with pytest.raises(SnapshotLoadError):
         load_tool_runtime_snapshot(path)
+
+
+def test_runtime_records_come_from_snapshot_not_seed():
+    seed = business_tool_registry.TOOL_REGISTRY
+    try:
+        bentopdf = next(tool for tool in seed if tool.tool_id == "bentopdf")
+        business_tool_registry.TOOL_REGISTRY = tuple(
+            replace(
+                tool,
+                name="Seed-only name",
+                url="https://seed-only.invalid/",
+                playbook=replace(tool.playbook, privacy_guidance="seed-only guidance"),
+            ) if tool.tool_id == "bentopdf" else tool
+            for tool in seed
+        )
+        reply = maybe_recommend("אני צריך לאחד PDF")
+        assert "[BentoPDF](https://bentopdf.com/)" in reply
+        assert "Seed-only" not in reply
+        assert "seed-only guidance" not in reply
+    finally:
+        business_tool_registry.TOOL_REGISTRY = seed
+
+
+def test_regenerating_snapshot_changes_runtime_output(tmp_path):
+    seed = business_tool_registry.TOOL_REGISTRY
+    original_path = tool_runtime_snapshot.DEFAULT_PATH
+    runtime_path = tmp_path / "runtime_snapshot.json"
+    try:
+        bentopdf = next(tool for tool in seed if tool.tool_id == "bentopdf")
+        business_tool_registry.TOOL_REGISTRY = tuple(
+            replace(
+                tool,
+                name="BentoPDF Regenerated",
+                url="https://bentopdf.example/",
+                playbook=replace(tool.playbook, privacy_guidance="regenerated guidance"),
+            ) if tool.tool_id == "bentopdf" else tool
+            for tool in seed
+        )
+        tool_runtime_snapshot.write_snapshot(runtime_path, source_revision="test-regeneration")
+        tool_runtime_snapshot.DEFAULT_PATH = runtime_path
+        reply = maybe_recommend("אני צריך לאחד PDF")
+        assert "[BentoPDF Regenerated](https://bentopdf.example/)" in reply
+        assert "regenerated guidance" in reply
+    finally:
+        business_tool_registry.TOOL_REGISTRY = seed
+        tool_runtime_snapshot.DEFAULT_PATH = original_path
