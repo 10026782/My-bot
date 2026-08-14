@@ -43,7 +43,9 @@ The generator:
 
 - reads only tools, capabilities, and tool_capabilities;
 - builds the same versioned snapshot contract as Phase 1;
-- calculates Tool eligibility and relation eligibility independently from lifecycle, verification, class, execution mode, and enabled gates;\n- exposes only eligible relation capability IDs; a business Tool with zero eligible relations is hidden;\n- preserves non-eligible relations in the canonical DB while disabling them in the runtime snapshot;
+- calculates Tool eligibility and relation eligibility independently from lifecycle, verification, class, execution mode, and enabled gates;
+- exposes only eligible relation capability IDs; a business Tool with zero eligible relations is hidden;
+- preserves non-eligible relations in the canonical DB while disabling them in the runtime snapshot;
 - validates all IDs, URLs, enums, references, and runtime eligibility before writing;
 - writes only after validation succeeds.
 
