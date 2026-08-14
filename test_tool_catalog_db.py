@@ -116,7 +116,8 @@ def test_only_verified_relation_is_runtime_visible():
     ])
     assert snapshot["tools"][0]["runtime_visible"] is True
     assert snapshot["tools"][0]["capability_ids"] == ["pdf_merge"]
-    assert snapshot["tool_capabilities"][1]["enabled"] is False
+    relation_states = {item["capability_id"]: item["enabled"] for item in snapshot["tool_capabilities"]}
+    assert relation_states["csv_repair"] is False
 
 
 def test_approved_tool_with_zero_eligible_relations_is_hidden():
