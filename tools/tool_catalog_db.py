@@ -108,7 +108,7 @@ def import_seed_to_db(conn=None, *, source_revision: str = "python-seed") -> dic
                      execution, playbook["agent_mode"] if playbook else "NO_AGENT", status, 50,
                      _decision(tool.tool_class), getattr(tool.playbook, "privacy_class", "OTHER_BOUNDED_WARNING"),
                      bool(tool.enabled), source_revision, verification, tool.last_verified_at,
-                     _SOURCE if False else tool.source, now),
+                     tool.source, now),
                 )
                 counts["tools"] += 1
 
