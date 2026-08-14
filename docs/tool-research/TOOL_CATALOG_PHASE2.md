@@ -30,10 +30,10 @@ The importer is intentionally one-way and bounded:
 
 1. read the current Python seed;
 2. normalize existing capability phrases to stable IDs;
-3. upsert the three catalog tables;
+3. insert only new rows into the three catalog tables by default;
 4. commit the catalog transaction.
 
-It does not publish a snapshot, enable candidates, delete records, or alter runtime state. Re-running it is safe and updates the canonical catalog from the transition seed while this migration is being established.
+It does not publish a snapshot, enable candidates, delete records, or alter runtime state. Re-running it cannot overwrite existing canonical rows. An explicit `--allow-existing-update` override exists only for a deliberate transition refresh.
 
 ## DB-backed snapshot generator
 
@@ -43,7 +43,7 @@ The generator:
 
 - reads only tools, capabilities, and tool_capabilities;
 - builds the same versioned snapshot contract as Phase 1;
-- calculates runtime visibility from DB lifecycle, verification, class, execution mode, and enabled gates;
+- calculates Tool eligibility and relation eligibility independently from lifecycle, verification, class, execution mode, and enabled gates;\n- exposes only eligible relation capability IDs; a business Tool with zero eligible relations is hidden;\n- preserves non-eligible relations in the canonical DB while disabling them in the runtime snapshot;
 - validates all IDs, URLs, enums, references, and runtime eligibility before writing;
 - writes only after validation succeeds.
 
@@ -96,7 +96,7 @@ tools, capabilities, tool_capabilities
 
 ### IMPORTER
 
-IMPLEMENTED — one-way, idempotent, transition-only
+IMPLEMENTED — one-way, insert-only by default; overwrite requires explicit override
 
 ### DB SNAPSHOT GENERATOR
 
