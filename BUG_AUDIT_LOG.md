@@ -5055,15 +5055,17 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 - **תיאור:** הרעיון שנוצר (רעיון 2, שנבחר בפועל) עיוות עובדה כמותית מה-Demand: `Goal="10 מועמדים תוך שבוע"` (יעד גיוס — כמה מועמדים צריך) הפך בטקסט הרעיון ל-**"10 משרות פתוחות"** (ניסוח שונה מהותית — "10 משרות" ≠ "10 מועמדים תוך שבוע"), בנוסף לניסוחים נוספים ("תנאים טובים", "התחלה מיידית") שלא הופיעו ב-`[פרטי הדרישה]`/`Constraints`. **בניגוד ל-Production Handoff** (דטרמיניסטי לחלוטין, `compose_production_handoff()` — ללא קריאת AI, שדות לא-ידועים מסומנים "לא סופק" במפורש, אין אפשרות מבנית להמצאה) — Prompt 1 הוא generative (קריאת Anthropic יחידה) וללא grounding/fact-check אחרי היצירה.
 - **Severity:** Medium — יש רשת ביטחון: ה-Production Handoff מתייג את הרעיון במפורש כ"כיוון קריאייטיבי בלבד, לא מקור אמת לעובדות עסקיות" ומחייב בדיקה אנושית לפני production. אבל תוכן הרעיון עצמו (שגם מוצג למשתמש כטקסט מוכן, כולל ב-`/marketing_status`) עלול להטעות אם לא נקרא בעיון לפני העברה להפקה.
 - **Root Cause:** `marketing_domain_profiles.py`'s `business_rules`/`GLOBAL_RULES` המוזרקים ל-brief אוסרים "המצאת" תנאים/הטבות, אבל אין הנחיה מפורשת נגד **שינוי/עיוות** של ערכים כמותיים שכן נמסרו ב-Demand (המספר "10" עצמו נשמר נכון — רק המשמעות שלו שונתה מ"יעד גיוס" ל"מספר משרות"), ואין שום שלב grounding/fact-check אחרי קבלת תשובת ה-AI ב-`_create_demand_and_generate_ideas()` (בניגוד ל-`compose_production_handoff()` שהוא דטרמיניסטי-לחלוטין ולכן חסין מבנית לתופעה הזו). לא אומת מול `_TASK_INSTRUCTIONS["creative_ideas"]` בפועל — טרם נבדק אם ניסוח ההוראה עצמו תורם לבעיה או שזו רק תוצאה סטטיסטית של מודל יחיד ללא בדיקה חוזרת.
-- **תוקן ב-commit:** —
-- **תוקן ב-branch:** —
-- **Merged:** לא
+- **תוקן ב-commit (היסטורי, 13/08/2026):** —
+- **תוקן ב-branch (היסטורי, 13/08/2026):** —
+- **Merged (היסטורי, 13/08/2026):** לא
 - **Deployed:** לא
 - **אומת כתצפית production (הבאג עצמו נצפה בפועל):** כן — 13/08/2026, תמלול live production מלא (הודעת הבעלים) מציג את הרעיון המעוות בפועל
-- **Verified בפרודקשן:** לא — אין תיקון (אין commit/branch, אין fix מוצע/מאושר עדיין) — שדה זה מתייחס לאימות **תיקון**, לא לאימות שהבאג קיים; קיום הבאג עצמו כבר מאומת (ראה השדה הקודם)
+- **Verified בפרודקשן:** לא — אין תיקון חי (ראה עדכון 14/08 למטה) — שדה זה מתייחס לאימות **תיקון**, לא לאימות שהבאג קיים; קיום הבאג עצמו כבר מאומת (ראה השדה הקודם)
 - **Verification ראיה:** תמלול live production מלא (הודעת הבעלים, 13/08/2026) — הרעיון שנבחר + ה-Production Handoff המלא שנוצר ממנו, מציג את שני הצדדים (הרעיון המעוות מול ה-Handoff הנכון) באותה אינטראקציה
-- **מפורש: לא חוסם/לא פותח מחדש את F23 M2** — M2 (orchestration/runtime, `/marketing_status`, `marketing_orchestrator.py`) עצמו נשאר ✅ CLOSED/VERIFIED; זהו ממצא נפרד ב-M1's Prompt 1 (creative-ideas generation) ש-M2 רק חשף מחדש דרך הצגה חוזרת של תוכן קיים, לא יצר. אין fix מוצע/מאושר עדיין.
-- **סטטוס:** Open
+- **מפורש: לא חוסם/לא פותח מחדש את F23 M2** — M2 (orchestration/runtime, `/marketing_status`, `marketing_orchestrator.py`) עצמו נשאר ✅ CLOSED/VERIFIED; זהו ממצא נפרד ב-M1's Prompt 1 (creative-ideas generation) ש-M2 רק חשף מחדש דרך הצגה חוזרת של תוכן קיים, לא יצר.
+- **עדכון (14/08/2026, תיעוד-דריפט) — PR1 (Authority/Foundation) מוזג, טרם מחווט:** PR #623 ("BUG-164 PR1: Authority/Foundation — ProtectedFact + closed template registry + bounded CreativeProposal renderer") מוזג ל-`main` (14/08/2026, שלושה commits: `f8c6332`, `4210acf`, `1066762`), מאושר כ-ancestor. מוסיף מודולים חדשים: `marketing_fact_authority.py` (`ProtectedFact`), `marketing_creative_templates.py` (registry סגור), `marketing_creative_renderer.py` (`CreativeProposal`). **נבדק ב-grep ישיר: אין קורא ל-`ProtectedFact`/`CreativeProposal` מחוץ לקבצי טסט, ו-`cmd_marketing.py::_create_demand_and_generate_ideas()` (המסלול שבו הבאג בפועל) אינו נוגע במודולים האלה.** משמעות: התשתית (authority/rendering) קיימת, אך **טרם חוברה** למסלול היצירה החי — קיום foundation ≠ תיקון חי. הבאג עצמו עדיין נשען.
+- **סטטוס (היסטורי, 13/08/2026):** Open
+- **סטטוס (14/08/2026):** Open — PR1 foundation מוזג, לא מחווט. אין live cutover.
 
 ---
 
@@ -5075,4 +5077,5 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 - **Commit קוד:** `8dbc73d` (על גבי F14-A, שכבר מוזג ב-PR #568).
 - **בדיקות:** F14-A — 8/8; F14-B1 — 4/4; BUG-105 — 10/10; `py_compile` ו-`git diff --check` עברו.
 - **מחוץ ל-scope:** dispatcher, approval_actions, ActionGateway, app.py, Turn Coordinator, F15 ו-schema/Airtable fields.
-- **סטטוס:** מומש מקומית, טרם אומת בפרודקשן, טרם מוזג.
+- **סטטוס (היסטורי, 09/08/2026):** מומש מקומית, טרם אומת בפרודקשן, טרם מוזג.
+- **עדכון (14/08/2026, תיעוד-דריפט):** **מוזג** — commit `8dbc73d` מאושר כ-ancestor של `origin/main` (דרך PR #568, ראה `CHANGE_CONTROL_LOG.md::C189`). **טרם אומת בפרודקשן** — אין שינוי בשדה הזה; אין ראיה חדשה לאימות production. השורה ההיסטורית למעלה נשמרת כפי שנכתבה במקור.
