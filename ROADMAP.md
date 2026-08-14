@@ -7,7 +7,12 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 13/08/2026 — **F23 M2 (Telegram slice) — ✅ VERIFIED IN PROD.** PR #613 מוזג,
+עודכן: 14/08/2026 — **תיעוד בלבד: `BOSS_MEDIA_MARKETING_AUDIT.md` מוזג ל-`main`.** קובץ
+ה-audit ההיסטורי של F23 (reuse מול Ventures/Decisions/Interaction Log/Sessions — כולם
+נפסלו) הועבר (cherry-pick, ללא שינוי תוכן) מהענף הבלתי-ממוזג `docs/media-marketing-
+enablement-audit` ל-`main`, וההפניה אליו בסעיף F23 למטה עודכנה בהתאם (הוסרה ההערה
+"קיים רק בברנץ'... לא מוזג"). אין שינוי קוד/schema/behavior — תיעוד בלבד.
+עודכן קודם: 13/08/2026 — **F23 M2 (Telegram slice) — ✅ VERIFIED IN PROD.** PR #613 מוזג,
 Render deploy `98f3626` מאשר את הקוד חי (ancestry מאומת), והבעלים הריץ live regression
 אמיתי ב-`/telegram` production מול Demand ייעודי לבדיקה: `/marketing_status` הציג רשימה
 נכונה, כרטיס Next Action לשלב `ideas_generated` תאם בדיוק ל-`compute_next_action()`, ובחירת
@@ -1588,9 +1593,9 @@ point: call append_reasoning_block() from ...`).
 Brief (דטרמיניסטי) → AI חיצוני (קריאה יחידה) → 3 רעיונות → בחירה אנושית (כפתור בטלגרם) →
 Production Handoff (דטרמיניסטי) → Asset (Media Files/Drive קיימים) → Publication ידנית →
 Attribution (Source Code). נבנה אחרי audit מקיף שבדק reuse מול Ventures/Decisions/
-Interaction Log/Sessions — כולם נפסלו מסיבה מבנית (ראה ה-audit בשיחה/
-`BOSS_MEDIA_MARKETING_AUDIT.md`, קיים רק בברנץ' `docs/media-marketing-enablement-audit`,
-לא מוזג); רק 3 טבלאות חדשות קטנות נוצרו בפועל.
+Interaction Log/Sessions — כולם נפסלו מסיבה מבנית (ראה `BOSS_MEDIA_MARKETING_AUDIT.md`,
+עודכן 14/08/2026: מוזג ל-main מענף `docs/media-marketing-enablement-audit`); רק 3 טבלאות
+חדשות קטנות נוצרו בפועל.
 
 **נקודת כניסה חיה:** `/marketing_new` בטלגרם (wizard, לא ID-argument commands — ראה למטה).
 
