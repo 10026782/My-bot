@@ -2069,3 +2069,45 @@ CORE v1 — COMPLETE; CORE v1 — READY TO FREEZE. Freeze remains an
 owner/governance decision. This entry supersedes earlier current-status
 snapshots where their deployment or PA-01/TC8/TC9/Track D wording predates the
 final audit; those entries remain historical evidence.
+
+### C191 — PR #598: D1 canonical `recruitment` domain across adapters, MERGED + WIRED (11/08/2026)
+Business Memory adapter now emits live lowercase `recruitment`; legacy
+`Recruitment` reads remain accepted for backward compatibility. Wired through
+routing, identity, weekly summary, and Lead Event writing (11 files,
++327/-14). Qualifies as consequential: changes a canonical value across
+multiple subsystems (routing/identity/memory/lead-event authority
+boundaries), not a routine UX/cosmetic change. **Merged:** ✅ yes, ancestor of
+`origin/main`. **Deployed/Runtime Verified:** not independently checked by
+this entry — PR body cites live read-only Airtable verification
+(`Marketing Demand.Domain`, `TRAFFIC_SOURCES.Suitable Domains`, `Business
+Memory.Domain` all show `recruitment`) plus 4 test suites (10/24/50/50 pass).
+
+### C192 — PR #623: BUG-164 PR1 Authority/Foundation, MERGED, NOT WIRED (14/08/2026)
+Adds `marketing_fact_authority.py` (`ProtectedFact`), `marketing_creative_templates.py`
+(closed template registry), `marketing_creative_renderer.py`
+(`CreativeProposal`) — new authority/rendering modules for the BUG-164 fix
+line. Qualifies as consequential: establishes a new canonical-contract
+pattern for marketing creative content. **Merged:** ✅ yes (3 commits:
+`f8c6332`, `4210acf`, `1066762`). **Wired:** ❌ no — verified by direct grep,
+zero callers outside test files; `cmd_marketing.py::_create_demand_and_generate_ideas()`
+(the actual BUG-164 code path) is untouched. Foundation existence ≠ live fix;
+see `BUG_AUDIT_LOG.md::BUG-164`.
+
+### C193 — PR #634/#638: Context Librarian Reconciliation engine + CI baseline unblock, MERGED + WIRED, CI CURRENTLY RED (14/08/2026)
+PR #634 (`feat/context-librarian-reconciliation`) adds a new, separate GitHub
+Actions workflow (`context-librarian-reconcile.yml`, distinct from the
+pre-existing in-`ci.yml` "Context Librarian authoritative post-merge
+reconciliation" step) plus crash-recovery idempotency for its maintenance-PR
+flow. PR #638 (`ci/baseline-unblock`) pins a freshness-state fixture.
+Qualifies as consequential: new governance/CI automation touching the
+Context Librarian catalog-freshness gate. **Merged:** ✅ yes, both ancestors
+of `origin/main`. **Wired:** ✅ yes, runs on every push to main. **Current
+state (verified against `origin/main` @ `904ce13b`):** both the "CI"
+workflow and the new "Context Librarian Reconciliation" workflow are
+**currently failing** at the exact integration-cut commit — **not caused by
+PR #634/#638 themselves**; root-caused to 5 sources unregistered in the
+catalog, all introduced by C192 (PR #623) and the tool-runtime-snapshot work
+(PR #640) — see `docs/audit/CORE_COMPLETION_AUDIT_20260810.md` addendum and
+`AI_CONTEXT.md` §1/§2/§4 for the exact list. Fix is catalog registration, an
+owner decision, not a code change — out of scope for this documentation-only
+documentation-only pass.

@@ -922,6 +922,14 @@ endpoints ב-tma_api.py + שורה ב-airtable_schema.py. לא יותר.
   `in_evaluation`/`pending_decision`) לפורמט `{stage_counts, total, active}` —
   count-by-stage אמיתי לפי 8 השלבים בטבלת Ventures, כפי שהמסמך דרש.
 
+**עדכון תיעוד (14/08/2026, תיעוד-דריפט — לא בדיקה מחודשת של N06 עצמו):**
+ההערות למעלה מתארות את המימוש המקורי (17/06/2026, commit `eebf73b`). מאז
+עבר `Ventures.tsx` שכתובים משמעותיים נוספים דרך PR #625 (`codex/vux-0-ventures-foundations`),
+#629 (`codex/vux-1-ventures-workspace-shell`), #632 (`codex/vux-2-ventures-collection-lifecycle`),
+#636 (`codex/vux-2-5-soft-3d-calibration`), #642 (`codex/vux-3-ventures-detail`) — מאות שורות
+שונו בכל אחד. **הסטטוס "✅ מיושם" נשאר נכון**, אבל הערות המימוש למעלה הן היסטוריות
+ולא תוארו-מחדש מול הקוד הנוכחי (מחוץ ל-scope של סבב תיעוד זה — לא נבדק תוכן ה-PRs האלה).
+
 ### N07 — Schema Governance script ✅ הושלם (PR #101, `e465eff`)
 **מה:** `tools/schema_governance.py` — סקריפט standalone שמשווה live Airtable
 schema (Metadata API, `GET /meta/bases/{baseId}/tables`) מול `airtable_schema.py`
@@ -1761,7 +1769,7 @@ Render deploy מאומת: commit חי `98f3626` (הודעת deploy אמיתית 
 בכוונה לא מעורבבים:**
 1. **F23 M2 orchestration/runtime — ✅ CLOSED.** `/marketing_status`/`marketing_orchestrator.py`/רשימה/authorization/callback lifecycle — מאומת חי, ללא regression (ראה אודיט למעלה). לא נפתח מחדש.
 2. **Production Handoff grounding — ✅ RUNTIME VERIFIED.** ה-wrapper הדטרמיניסטי (`compose_production_handoff()`) התנהג בדיוק כמתוכנן בלייב: תייג את הרעיון כ"כיוון קריאייטיבי בלבד, לא מקור אמת", סימן כל קלט הפקה לא-ידוע כ"לא סופק", ולא המציא דבר בעצמו.
-3. **Creative Ideas grounding (Prompt 1) — 🟡 באג נפרד, פתוח — `BUG-164`.** הרעיון שה-AI יצר (קריאה יחידה, `_create_demand_and_generate_ideas()`) עיוות עובדה כמותית מה-Demand ("10 מועמדים תוך שבוע" → "10 משרות פתוחות") + הוסיף ניסוחים לא-נתמכים. נצפה באותה בדיקה חיה, אך זהו gap ב-M1 (Prompt 1 אין לו grounding/fact-check אחרי היצירה, בניגוד ל-Handoff הדטרמיניסטי) — **לא regression מ-M2** (M2 לא קורא ל-AI כלל, רק חשף מחדש תוכן קיים). ראה `BUG_AUDIT_LOG.md::BUG-164` לפרטים מלאים ו-root cause. אין fix מוצע/מאושר עדיין — לא נפתח מחדש M2 בגללו.
+3. **Creative Ideas grounding (Prompt 1) — 🟡 באג נפרד, פתוח — `BUG-164`.** הרעיון שה-AI יצר (קריאה יחידה, `_create_demand_and_generate_ideas()`) עיוות עובדה כמותית מה-Demand ("10 מועמדים תוך שבוע" → "10 משרות פתוחות") + הוסיף ניסוחים לא-נתמכים. נצפה באותה בדיקה חיה, אך זהו gap ב-M1 (Prompt 1 אין לו grounding/fact-check אחרי היצירה, בניגוד ל-Handoff הדטרמיניסטי) — **לא regression מ-M2** (M2 לא קורא ל-AI כלל, רק חשף מחדש תוכן קיים). ראה `BUG_AUDIT_LOG.md::BUG-164` לפרטים מלאים ו-root cause. **עדכון (14/08/2026):** PR #623 ("PR1: Authority/Foundation") מוזג — מוסיף `ProtectedFact`/registry סגור/`CreativeProposal` renderer — אך מאומת ב-grep שאין קורא לו מחוץ לטסטים; `_create_demand_and_generate_ideas()` לא חובר. **foundation קיים, אין עדיין live cutover; הבאג עצמו עדיין פתוח.** לא נפתח מחדש M2 בגללו.
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
