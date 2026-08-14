@@ -57,8 +57,10 @@ def _decision(tool_class: str) -> str:
     return "KEEP_EXTERNAL" if tool_class in {"business", "operator", "research_crawler"} else "INTEGRATE_LATER"
 
 
-def import_seed_to_db(conn=None, *, source_revision: str = "python-seed") -> dict[str, int]:
-    """Idempotently copy the current seed into the canonical catalog tables."""
+def import_seed_to_db(
+    conn=None, *, source_revision: str = "python-seed", allow_existing_update: bool = False,
+) -> dict[str, int]:
+    """Insert the transition seed; existing canonical rows require explicit override."""
     owns_conn = conn is None
     if conn is None:
         conn = get_conn()
@@ -86,15 +88,8 @@ def import_seed_to_db(conn=None, *, source_revision: str = "python-seed") -> dic
                         "agent_assist_capabilities": list(tool.playbook.agent_assist_capabilities),
                     }
                 tags = sorted(set(tool.categories + tool.domain_tags))
-                cur.execute(
-                    """INSERT INTO tools
-                    (tool_id, name, canonical_url, tool_class, tags, tasks, playbook,
-                     execution_mode, agent_mode, lifecycle_status, priority, decision,
-                     privacy_class, enabled, source, verification_status, last_verified_at,
-                     next_verification_at, verification_source, updated_at)
-                    VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)
-                    ON CONFLICT (tool_id) DO UPDATE SET
+                tool_conflict = (
+                    """ON CONFLICT (tool_id) DO UPDATE SET
                       name=EXCLUDED.name, canonical_url=EXCLUDED.canonical_url,
                       tool_class=EXCLUDED.tool_class, tags=EXCLUDED.tags, tasks=EXCLUDED.tasks,
                       playbook=EXCLUDED.playbook, execution_mode=EXCLUDED.execution_mode,
@@ -102,7 +97,18 @@ def import_seed_to_db(conn=None, *, source_revision: str = "python-seed") -> dic
                       decision=EXCLUDED.decision, privacy_class=EXCLUDED.privacy_class,
                       enabled=EXCLUDED.enabled, source=EXCLUDED.source,
                       verification_status=EXCLUDED.verification_status,
-                      last_verified_at=EXCLUDED.last_verified_at, updated_at=EXCLUDED.updated_at""",
+                      last_verified_at=EXCLUDED.last_verified_at, updated_at=EXCLUDED.updated_at"""
+                    if allow_existing_update else "ON CONFLICT (tool_id) DO NOTHING"
+                )
+                cur.execute(
+                    f"""INSERT INTO tools
+                    (tool_id, name, canonical_url, tool_class, tags, tasks, playbook,
+                     execution_mode, agent_mode, lifecycle_status, priority, decision,
+                     privacy_class, enabled, source, verification_status, last_verified_at,
+                     next_verification_at, verification_source, updated_at)
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)
+                    {tool_conflict}""",
                     (tool.tool_id, tool.name, tool.url, tool.tool_class, json.dumps(tags, ensure_ascii=False),
                      json.dumps(list(tool.tasks), ensure_ascii=False), json.dumps(playbook, ensure_ascii=False),
                      execution, playbook["agent_mode"] if playbook else "NO_AGENT", status, 50,
@@ -114,30 +120,38 @@ def import_seed_to_db(conn=None, *, source_revision: str = "python-seed") -> dic
 
                 for raw_capability in tool.capabilities:
                     capability_id = normalize_capability_id(raw_capability)
-                    cur.execute(
-                        """INSERT INTO capabilities
-                        (capability_id, name, tags, lifecycle_status, source, updated_at)
-                        VALUES (%s, %s, %s::jsonb, %s, %s, %s)
-                        ON CONFLICT (capability_id) DO UPDATE SET
+                    capability_conflict = (
+                        """ON CONFLICT (capability_id) DO UPDATE SET
                           name=EXCLUDED.name, tags=EXCLUDED.tags,
                           lifecycle_status=EXCLUDED.lifecycle_status, source=EXCLUDED.source,
-                          updated_at=EXCLUDED.updated_at""",
+                          updated_at=EXCLUDED.updated_at"""
+                        if allow_existing_update else "ON CONFLICT (capability_id) DO NOTHING"
+                    )
+                    cur.execute(
+                        f"""INSERT INTO capabilities
+                        (capability_id, name, tags, lifecycle_status, source, updated_at)
+                        VALUES (%s, %s, %s::jsonb, %s, %s, %s)
+                        {capability_conflict}""",
                         (capability_id, raw_capability, json.dumps([], ensure_ascii=False), "VERIFIED",
                          source_revision, now),
                     )
                     counts["capabilities"] += 1
                     relation_id = f"{tool.tool_id}:{capability_id}"
-                    cur.execute(
-                        """INSERT INTO tool_capabilities
-                        (tool_capability_id, tool_id, capability_id, execution_mode, agent_mode,
-                         lifecycle_status, verification_status, enabled, priority, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (tool_capability_id) DO UPDATE SET
+                    relation_conflict = (
+                        """ON CONFLICT (tool_capability_id) DO UPDATE SET
                           execution_mode=EXCLUDED.execution_mode, agent_mode=EXCLUDED.agent_mode,
                           lifecycle_status=EXCLUDED.lifecycle_status,
                           verification_status=EXCLUDED.verification_status,
                           enabled=EXCLUDED.enabled, priority=EXCLUDED.priority,
-                          updated_at=EXCLUDED.updated_at""",
+                          updated_at=EXCLUDED.updated_at"""
+                        if allow_existing_update else "ON CONFLICT (tool_capability_id) DO NOTHING"
+                    )
+                    cur.execute(
+                        f"""INSERT INTO tool_capabilities
+                        (tool_capability_id, tool_id, capability_id, execution_mode, agent_mode,
+                         lifecycle_status, verification_status, enabled, priority, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        {relation_conflict}""",
                         (relation_id, tool.tool_id, capability_id, execution,
                          playbook["agent_mode"] if playbook else "NO_AGENT", status,
                          verification, bool(tool.enabled), 50, now),
@@ -179,39 +193,56 @@ def snapshot_from_catalog_rows(
     *, source_revision: str = "catalog-db", generated_at: str | None = None,
 ) -> dict:
     generated_at = generated_at or _now()
+    allowed_verification = {"VERIFIED", "APPROVED_WITH_RESTRICTIONS"}
+    allowed_execution = {"GUIDED_EXTERNAL", "NATIVE", "INTEGRATED"}
+
+    tool_basic = {
+        row["tool_id"]: (
+            row.get("tool_class") == "business"
+            and bool(row.get("enabled"))
+            and row.get("lifecycle_status") == "APPROVED"
+            and row.get("verification_status") in allowed_verification
+            and row.get("execution_mode") in allowed_execution
+        )
+        for row in tools
+    }
     relation_ids_by_tool: dict[str, list[str]] = {}
+    snapshot_relations = []
     for relation in relations:
-        relation_ids_by_tool.setdefault(relation["tool_id"], []).append(relation["capability_id"])
+        relation_eligible = (
+            bool(relation.get("enabled"))
+            and relation.get("lifecycle_status") == "APPROVED"
+            and relation.get("verification_status") in allowed_verification
+            and relation.get("execution_mode") in allowed_execution
+            and tool_basic.get(relation.get("tool_id"), False)
+        )
+        snapshot_relation = dict(relation)
+        snapshot_relation["enabled"] = relation_eligible
+        snapshot_relation["runtime_visible"] = relation_eligible
+        snapshot_relations.append(snapshot_relation)
+        if relation_eligible:
+            relation_ids_by_tool.setdefault(relation["tool_id"], []).append(relation["capability_id"])
 
     snapshot_tools = []
     for row in tools:
-        verification = row["verification_status"]
-        runtime_visible = (
-            row["tool_class"] == "business"
-            and row["enabled"]
-            and row["lifecycle_status"] == "APPROVED"
-            and verification in {"VERIFIED", "APPROVED_WITH_RESTRICTIONS"}
-            and row["execution_mode"] not in {"OPERATOR_ONLY", "POC_ONLY"}
-        )
+        capability_ids = sorted(relation_ids_by_tool.get(row["tool_id"], []))
         snapshot_tools.append({
             "tool_id": row["tool_id"], "name": row["name"], "canonical_url": row["canonical_url"],
             "tool_class": row["tool_class"], "tags": sorted(_json_value(row["tags"], [])),
-            "tasks": list(_json_value(row["tasks"], [])),
-            "capability_ids": sorted(relation_ids_by_tool.get(row["tool_id"], [])),
+            "tasks": list(_json_value(row["tasks"], [])), "capability_ids": capability_ids,
             "execution_mode": row["execution_mode"], "agent_mode": row["agent_mode"],
             "lifecycle_status": row["lifecycle_status"], "decision": row["decision"],
             "privacy_class": row["privacy_class"], "enabled": bool(row["enabled"]),
-            "verification_status": verification, "last_verified_at": row.get("last_verified_at"),
-            "next_verification_at": row.get("next_verification_at"),
+            "verification_status": row["verification_status"],
+            "last_verified_at": row.get("last_verified_at"), "next_verification_at": row.get("next_verification_at"),
             "playbook": _json_value(row["playbook"], None),
-            "runtime_visible": runtime_visible,
+            "runtime_visible": tool_basic[row["tool_id"]] and bool(capability_ids),
         })
     snapshot = {
-        "schema_version": SCHEMA_VERSION, "generated_at": generated_at,
-        "source_revision": source_revision,
+        "schema_version": SCHEMA_VERSION, "generated_at": generated_at, "source_revision": source_revision,
         "tools": sorted(snapshot_tools, key=lambda item: item["tool_id"]),
         "capabilities": sorted(capabilities, key=lambda item: item["capability_id"]),
-        "tool_capabilities": sorted(relations, key=lambda item: item["tool_capability_id"]),
+        "tool_capabilities": sorted(snapshot_relations, key=lambda item: item["tool_capability_id"]),
     }
     validate_snapshot(snapshot)
     payload = copy.deepcopy(snapshot)
@@ -220,7 +251,6 @@ def snapshot_from_catalog_rows(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     return snapshot
-
 
 def generate_snapshot_from_db(
     conn=None, *, source_revision: str = "catalog-db", generated_at: str | None = None,
