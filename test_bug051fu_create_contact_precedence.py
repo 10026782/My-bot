@@ -27,6 +27,7 @@ from unittest.mock import patch
 
 import core.lead_candidate_handler as lch
 from core.action_gateway import GatewayResult
+from core.ingress_classifier import classify_ingress
 from session_store import lead_sessions
 
 passed = failed = 0
@@ -70,6 +71,12 @@ def _send(chat_id: str, text: str, intent: str = "") -> "str | None":
 print("── create_contact owns the turn — no Leads ActionContract proposed ──")
 
 REPRO_TEXT = "צור איש קשר רמי לוי 0547653453"
+
+_repro_ic = classify_ingress(REPRO_TEXT)
+chk("T0: precondition — REPRO_TEXT actually classifies Tier 1-3 (the guard's "
+    "own reachability gate; if this drifts to Tier 4/5 the suppression checks "
+    "below would pass vacuously via the pre-existing Tier>=4 early-return)",
+    _repro_ic.tier in (1, 2, 3), f"got tier={_repro_ic.tier} reason={_repro_ic.reason}")
 
 with patch.object(lch, "_at_find_lead", return_value=None), \
      patch.object(lch, "_propose_lead_write", return_value=OK_RESULT) as propose_mock:
@@ -126,6 +133,9 @@ _OTHER_MUTATION_CASES = [
 ]
 
 for chat_id, text, intent in _OTHER_MUTATION_CASES:
+    _ic = classify_ingress(text)
+    chk(f"T7[{intent}] precondition: text classifies Tier 1-3",
+        _ic.tier in (1, 2, 3), f"got tier={_ic.tier} reason={_ic.reason}")
     with patch.object(lch, "_at_find_lead", return_value=None), \
          patch.object(lch, "_propose_lead_write", return_value=OK_RESULT) as propose_mock:
         reply = _send(chat_id, text, intent=intent)

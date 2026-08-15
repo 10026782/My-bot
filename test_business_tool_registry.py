@@ -117,11 +117,20 @@ def test_every_approved_business_tool_renders_without_internal_wording():
 #                                     the definite article "ה", user text
 #                                     doesn't)
 #
-# Fixed by (1) a generic, closed _DEF_ARTICLE_PREFIX_RE normalization that
-# collapses "מה/לה/בה/וה/כה" + word to the bare preposition form (applied
-# identically to catalog phrases and input), and (2) one added catalog
-# phrase variant on squoosh ("לדחיסת תמונה"/"לדחיסת תמונות") for the
-# genuinely different construct-noun inflection that (1) cannot bridge.
+# Fixed by (1) a closed _DEF_ARTICLE_EQUIVALENTS table that maps specific
+# verified "fused article" phrases (e.g. "מהנתונים") to their bare-
+# preposition equivalent (applied identically to catalog phrases and
+# input), and (2) one added catalog phrase variant on squoosh ("לדחיסת
+# תמונה"/"לדחיסת תמונות") for the genuinely different construct-noun
+# inflection that (1) doesn't cover.
+#
+# Note: an earlier version of (1) used a blanket regex stripping "ה" after
+# any of ו/ל/ב/כ/מ — code review caught that this also corrupts verb stems
+# that legitimately start with ה (Hif'il-pattern verbs, e.g. "להקטין" ->
+# "לקטין", "להמיר" -> "למיר"), since Hebrew has no orthographic marker
+# distinguishing a root-initial ה from a definite article after a
+# preposition. Replaced with the closed table above; see
+# test_bug051fu_verb_stems_starting_with_he_are_not_corrupted below.
 # ══════════════════════════════════════════════════
 
 def test_bug051fu_squoosh_matches_construct_noun_phrasing():
@@ -153,5 +162,19 @@ def test_bug051fu_definite_article_normalization_does_not_widen_false_positives(
     # any broader than before.
     assert maybe_recommend("יש לי כלי עבודה חדש בעבודה") is None
     assert maybe_recommend("קניתי כלי נגינה") is None
+
+
+def test_bug051fu_verb_stems_starting_with_he_are_not_corrupted():
+    # Regression guard for the code-review finding above: the closed
+    # _DEF_ARTICLE_EQUIVALENTS table must never touch Hif'il-pattern verbs
+    # whose root itself starts with ה — only the one verified fused phrase
+    # ("מהנתונים") is collapsed, nothing else.
+    from business_tool_registry import _normalize
+    assert _normalize("להקטין תמונה") == _normalize("להקטין תמונה")
+    assert "לקטין" not in _normalize("להקטין תמונה")
+    assert "למיר" not in _normalize("להמיר קובץ")
+    # Still resolves correctly to the intended tool, unaffected by the fix.
+    assert find_recommended_tools("אני צריך להקטין תמונה לפני שליחה")[0].tool_id == "squoosh"
+    assert find_recommended_tools("אני צריך להמיר קובץ")[0].tool_id == "vert"
     assert maybe_recommend("תרשים ארגוני של החברה") is None
     assert find_recommended_tools("מה שלומך היום") == []

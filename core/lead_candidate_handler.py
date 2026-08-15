@@ -696,34 +696,30 @@ _LEAD_CLARIFY_NON_INTERRUPTING_INTENTS = frozenset({
     _Intent.CREATE_LEAD, _Intent.UPDATE_LEAD,
 })
 
-# BUG-051-FU (create_contact → Leads precedence gap, 14/08/2026 manual QA):
-# BUG-051/PR#205 deliberately decoupled LCH's Tier 1-3 auto-capture from
-# Router intent — LCH runs on identity.is_internal alone, so it will still
-# capture a Tier 1-3 candidate even when the Router has confidently
-# classified the SAME turn as a different, non-lead explicit mutation
-# (e.g. "צור איש קשר רמי לוי 0547653453" → Router intent=create_contact
-# conf=0.90, but LCH still proposed an airtable_add/Leads write). BUG-099c
-# already carved out a narrow Tier-5+CREATE_LEAD exception in the other
-# direction; this is the missing general-direction guard: when the Router
-# has confidently recognized an EXPLICIT, non-lead mutation target for this
-# turn, that intent owns the turn and LCH must not reinterpret it as a lead.
+# BUG-051-FU (פער עדיפות create_contact מול Leads, QA ידני 14/08/2026):
+# BUG-051/PR#205 ניתק בכוונה את ה-auto-capture של LCH ב-Tier 1-3 מכוונת
+# ה-Router — LCH רץ לפי identity.is_internal בלבד, ולכן ימשיך לתפוס
+# מועמד Tier 1-3 גם כשה-Router סיווג את אותו turn בביטחון ככוונת mutation
+# מפורשת שאינה ליד (למשל "צור איש קשר רמי לוי 0547653453" → Router
+# intent=create_contact conf=0.90, אך LCH עדיין הציע כתיבת airtable_add/
+# Leads). BUG-099c כבר הוסיף חריג צר Tier-5+CREATE_LEAD בכיוון ההפוך; זהו
+# הגילדר הכללי החסר: כש-Router זיהה בביטחון יעד mutation מפורש שאינו ליד
+# עבור turn זה, אותה כוונה בעלת ה-turn ו-LCH אסור לו לפרש אותו מחדש כליד.
 #
-# Closed set, not a blanket "any non-CREATE_LEAD intent blocks capture" —
-# each pattern below requires an explicit target noun (contact/task/event/
-# email) with no textual overlap with genuine lead-dictation phrasing, so a
-# real lead message ("משה כהן 0501234567, מעוניין בדירה") can never match
-# one of these and lose its capture. Two intents reachable in
-# core/router/intent_router.py's rule table are deliberately EXCLUDED here
-# despite being "mutations":
-#   - STORE_MEMORY: its pattern includes bare "שמור" (save), which is one of
-#     LCH's own _SAVE_WORDS — including it would suppress ordinary
-#     "שמור את הליד" lead saves (violates the "don't change valid lead
-#     capture semantics" constraint).
-#   - ADMIN_ACTION: matched by the bare word "ניהול" (management) alone at
-#     0.85 — too generic (e.g. "מתעניין בניהול נכסים" is a real-estate
-#     lead, not an admin/settings request) to safely gate capture on.
-# Only intents whose Router pattern requires an unambiguous, lead-disjoint
-# target keyword are included.
+# קבוצה סגורה, לא כלל גורף "כל intent שאינו CREATE_LEAD חוסם capture" —
+# כל pattern למטה דורש שם-עצם יעד מפורש (איש קשר/משימה/אירוע/מייל) ללא
+# חפיפה טקסטואלית עם ניסוח דיקטציית ליד אמיתית, כך שהודעת ליד אמיתית
+# ("משה כהן 0501234567, מעוניין בדירה") לעולם לא תתאים לאחד מאלו ותאבד
+# את ה-capture שלה. שני intents שנגישים בטבלת הכללים של
+# core/router/intent_router.py הוצאו בכוונה למרות היותם "mutations":
+#   - STORE_MEMORY: ה-pattern שלו כולל "שמור" בלבד — אחת ממילות ה-
+#     _SAVE_WORDS של LCH עצמו; הכללתו הייתה מדכאת שמירות ליד רגילות
+#     ("שמור את הליד") — מפר את האילוץ "לא לשנות סמנטיקת lead capture".
+#   - ADMIN_ACTION: מתאים למילה "ניהול" בלבד ב-0.85 — כללי מדי (למשל
+#     "מתעניין בניהול נכסים" הוא ליד נדל"ן אמיתי, לא בקשת admin/settings)
+#     כדי לשער עליו capture בבטחה.
+# נכללים רק intents שה-pattern שלהם ב-Router דורש מילת-מפתח יעד חד-משמעית
+# שאין לה חפיפה עם ליד.
 _NON_LEAD_MUTATION_INTENTS = frozenset({
     _Intent.CREATE_CONTACT, _Intent.UPDATE_CONTACT,
     _Intent.CREATE_TASK, _Intent.UPDATE_TASK,
@@ -1150,13 +1146,12 @@ def handle_lead_candidate(
                 return _start_reply
         return None
 
-    # BUG-051-FU: Router-confirmed explicit non-lead mutation intent owns
-    # this turn — LCH must not reinterpret it as a lead capture even though
-    # ic.tier is 1-3 (see _NON_LEAD_MUTATION_INTENTS above for the closed
-    # set and exclusion rationale). `intent` is only ever a non-UNKNOWN
-    # value here when Router's own detect_intent() cleared
-    # INTENT_CONFIDENCE_THRESHOLD (core/router/router.py) — no separate
-    # confidence re-check needed.
+    # BUG-051-FU: כוונת mutation מפורשת שאינה ליד ואושרה ע"י Router בעלת
+    # ה-turn — LCH אסור לו לפרש אותו מחדש כ-lead capture גם כש-ic.tier הוא
+    # 1-3 (ראו _NON_LEAD_MUTATION_INTENTS למעלה לקבוצה הסגורה ולהנמקת
+    # ההוצאות). `intent` הוא ערך שאינו UNKNOWN כאן רק כש-detect_intent()
+    # של ה-Router עצמו עבר את INTENT_CONFIDENCE_THRESHOLD
+    # (core/router/router.py) — אין צורך בבדיקת confidence נפרדת.
     if intent in _NON_LEAD_MUTATION_INTENTS:
         logger.info(
             "[LCH] Tier %d capture suppressed — explicit non-lead intent=%s owns turn",

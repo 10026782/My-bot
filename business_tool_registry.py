@@ -197,27 +197,25 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
 )
 
 
-# BUG-051-FU (business_tool_registry matching gap, 14/08/2026 manual QA):
-# a preposition letter (ו/ל/ב/כ/מ) immediately followed by the definite
-# article "ה" is a single, closed, deterministic Hebrew inflection class —
-# "מהנתונים" (from-THE-data) vs "מנתונים" (from data), "לתמונה"/"בתמונה"
-# and so on. Catalog phrases and user text spell these inconsistently for
-# the exact same meaning; collapsing the "ה" here (applied identically to
-# both sides of every match) recovers that whole class of near-misses with
-# one small, generic rule instead of hand-listing every prefix variant of
-# every catalog phrase. It intentionally does NOT touch other inflection
-# differences (verb vs. construct-noun forms, e.g. "לדחוס"/"לדחיסת") —
-# those are genuinely different word forms, not a definite-article artifact,
-# and are handled by adding the literal phrase to the relevant tool's
-# `tasks` tuple instead (the catalog's existing, closed-vocabulary
-# extension point — see squoosh below).
-_DEF_ARTICLE_PREFIX_RE = re.compile(r"([ולבכמ])ה(?=[א-ת]{2,})")
+# BUG-051-FU (פער matching ב-business_tool_registry, QA ידני 14/08/2026):
+# "מהנתונים" (מן-ה-נתונים) מול "מנתונים" (מן נתונים) הוא זיווג מוכר בין
+# ניסוח קטלוג לניסוח משתמש עבור אותה משמעות בדיוק. תוקן במקור כ-regex
+# גורף שמסיר "ה" אחרי כל אות-יחס נפוצה בתחילת מילה — אבל code review חשף שה-
+# regex הזה לא מבחין בין ה"א-הידיעה לבין ה"א שהיא אות-שורש לגיטימית במילה
+# (בניין הפעיל), למשל "להקטין"/"להמיר" הפכו בטעות ל"לקטין"/"למיר". בעברית
+# אין סימן אורתוגרפי שמבדיל בין השניים בלי מילון אמיתי — לכן הוחלף בטבלה
+# סגורה ומפורשת של זיווגים מאומתים בלבד (להרחיב את הטבלה, לא את ה-regex).
+_DEF_ARTICLE_EQUIVALENTS: dict[str, str] = {
+    "מהנתונים": "מנתונים",
+}
 
 
 def _normalize(text: str) -> str:
     text = unicodedata.normalize("NFKC", str(text or "")).lower()
     text = re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
-    return _DEF_ARTICLE_PREFIX_RE.sub(r"\1", text)
+    for fused, split in _DEF_ARTICLE_EQUIVALENTS.items():
+        text = text.replace(fused, split)
+    return text
 
 
 def _runtime_tool_from_snapshot(record: dict) -> BusinessTool:
