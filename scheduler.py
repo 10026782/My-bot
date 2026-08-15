@@ -25,6 +25,15 @@ def _job_cleanup_pending():
         logger.error(f"cleanup_pending error: {e}")
 
 
+def _job_external_execution_poll():
+    """Bounded, lease-owned polling; provider adapters never own persistence."""
+    try:
+        from core.external_execution_boundary import get_default_boundary
+        get_default_boundary().poll_due()
+    except Exception as e:
+        logger.error(f"external_execution_poll error: {e}")
+
+
 def _job_daily_digest():
     logger.info("[Scheduler] job=daily_digest start")
     try:
@@ -811,6 +820,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every().day.at("03:30").do(_automation_guard(_job_schema_snapshot_archive, name="schema_snapshot_archive"))  # PR3A — flag: FEATURE_AIRTABLE_SCHEMA_SNAPSHOT
     schedule.every().day.at(collector_time).do(shabbat_safe(_automation_guard(_job_daily_collector, name="daily_collector")))
     schedule.every(cleanup_interval).minutes.do(_automation_guard(_job_cleanup_pending, name="cleanup_pending"))
+    schedule.every(2).minutes.do(_automation_guard(_job_external_execution_poll, name="external_execution_poll"))
     schedule.every().day.at("00:05").do(_automation_guard(_job_overdue_payments, name="overdue_payments"))
     schedule.every(10).minutes.do(_automation_guard(job_flush_lead_memory, name="flush_lead_memory"))                                          # N01
     schedule.every(followup_interval).minutes.do(shabbat_safe(_automation_guard(_job_followup_scan, name="followup_scan")))               # N02

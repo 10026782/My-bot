@@ -4206,6 +4206,7 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
                 "contract_id": contract_id,
                 "approved_by": getattr(contract, "approved_by", "") or "",
                 "claim_execution_id": claim_execution_id,
+                "idempotency_key": getattr(contract, "idempotency_key", "") or "",
             }
             if contract else None
         )

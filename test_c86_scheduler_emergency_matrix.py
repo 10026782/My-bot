@@ -15,6 +15,7 @@ SCHEDULER_JOB_NAMES = (
     "_job_schema_snapshot_archive",
     "_job_daily_collector",
     "_job_cleanup_pending",
+    "_job_external_execution_poll",
     "_job_overdue_payments",
     "_job_followup_scan",
     "_job_payment_reminders",
@@ -76,7 +77,7 @@ def test_emergency_stop_matrix_blocks_every_registered_scheduler_job(monkeypatch
         registered_jobs = tuple(scheduler.schedule.jobs)
         expected_names = (*SCHEDULER_JOB_NAMES, "job_flush_lead_memory")
 
-        assert len(registered_jobs) == len(expected_names) == 22
+        assert len(registered_jobs) == len(expected_names) == 23
 
         for job in registered_jobs:
             job.job_func()
