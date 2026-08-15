@@ -104,7 +104,7 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
           "low/medium", "synthetic or approved non-sensitive files", "identity, contract, lead and confidential files", True,
           domains=("documents", "marketing")),
     _tool("squoosh", "Squoosh", "https://squoosh.app/", ("images",),
-          ("compress image", "resize image", "optimize image"), ("shrink image", "compress photo", "reduce image", "להקטין תמונה", "להקטין תמונות", "לדחוס תמונה", "תקטין לי תמונה", "תמונה לוואטסאפ"),
+          ("compress image", "resize image", "optimize image"), ("shrink image", "compress photo", "reduce image", "להקטין תמונה", "להקטין תמונות", "לדחוס תמונה", "לדחיסת תמונה", "לדחיסת תמונות", "תקטין לי תמונה", "תמונה לוואטסאפ"),
           "Compress and resize images before sharing or uploading.",
           "Photos and graphics that need a smaller file size.", "Never use as a substitute for preserving the original asset.",
           "low", "non-sensitive images and copies", "original evidence, private IDs, or files needing forensic integrity", True,
@@ -197,9 +197,25 @@ TOOL_REGISTRY: tuple[BusinessTool, ...] = (
 )
 
 
+# BUG-051-FU (פער matching ב-business_tool_registry, QA ידני 14/08/2026):
+# "מהנתונים" (מן-ה-נתונים) מול "מנתונים" (מן נתונים) הוא זיווג מוכר בין
+# ניסוח קטלוג לניסוח משתמש עבור אותה משמעות בדיוק. תוקן במקור כ-regex
+# גורף שמסיר "ה" אחרי כל אות-יחס נפוצה בתחילת מילה — אבל code review חשף שה-
+# regex הזה לא מבחין בין ה"א-הידיעה לבין ה"א שהיא אות-שורש לגיטימית במילה
+# (בניין הפעיל), למשל "להקטין"/"להמיר" הפכו בטעות ל"לקטין"/"למיר". בעברית
+# אין סימן אורתוגרפי שמבדיל בין השניים בלי מילון אמיתי — לכן הוחלף בטבלה
+# סגורה ומפורשת של זיווגים מאומתים בלבד (להרחיב את הטבלה, לא את ה-regex).
+_DEF_ARTICLE_EQUIVALENTS: dict[str, str] = {
+    "מהנתונים": "מנתונים",
+}
+
+
 def _normalize(text: str) -> str:
     text = unicodedata.normalize("NFKC", str(text or "")).lower()
-    return re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
+    text = re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
+    for fused, split in _DEF_ARTICLE_EQUIVALENTS.items():
+        text = text.replace(fused, split)
+    return text
 
 
 def _runtime_tool_from_snapshot(record: dict) -> BusinessTool:

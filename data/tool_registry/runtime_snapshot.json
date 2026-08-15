@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-08-13T23:41:25Z",
-  "source_revision": "fb58023515bce018458a8baa31a0d6883ce343aa",
+  "generated_at": "2026-08-14T14:47:27Z",
+  "source_revision": "working-tree",
   "tools": [
     {
       "tool_id": "bentopdf",
@@ -13,6 +13,23 @@
         "operations",
         "pdf",
         "real_estate"
+      ],
+      "tasks": [
+        "merge pdf",
+        "unite pdf",
+        "compress pdf",
+        "split pdf",
+        "לאחד pdf",
+        "איחוד pdf",
+        "לדחוס pdf",
+        "לפצל pdf"
+      ],
+      "capability_ids": [
+        "file_convert",
+        "pdf_compress",
+        "pdf_merge",
+        "pdf_split",
+        "redact"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -35,24 +52,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "merge pdf",
-        "unite pdf",
-        "compress pdf",
-        "split pdf",
-        "לאחד pdf",
-        "איחוד pdf",
-        "לדחוס pdf",
-        "לפצל pdf"
-      ],
-      "capability_ids": [
-        "file_convert",
-        "pdf_compress",
-        "pdf_merge",
-        "pdf_split",
-        "redact"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "checkly",
@@ -62,6 +62,14 @@
       "tags": [
         "monitoring",
         "testing"
+      ],
+      "tasks": [
+        "test api",
+        "test browser flow"
+      ],
+      "capability_ids": [
+        "api_testing",
+        "browser_testing"
       ],
       "execution_mode": "POC_ONLY",
       "agent_mode": "NO_AGENT",
@@ -73,15 +81,7 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false,
-      "tasks": [
-        "test api",
-        "test browser flow"
-      ],
-      "capability_ids": [
-        "api_testing",
-        "browser_testing"
-      ]
+      "runtime_visible": false
     },
     {
       "tool_id": "csv-repair",
@@ -91,6 +91,21 @@
       "tags": [
         "data",
         "operations"
+      ],
+      "tasks": [
+        "broken csv",
+        "invalid csv",
+        "csv not opening",
+        "repair csv",
+        "csv לא תקין",
+        "csv לא נפתח",
+        "שלא נפתח",
+        "קובץ csv שבור",
+        "csv שבור"
+      ],
+      "capability_ids": [
+        "csv_repair",
+        "csv_validate"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -113,22 +128,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "broken csv",
-        "invalid csv",
-        "csv not opening",
-        "repair csv",
-        "csv לא תקין",
-        "csv לא נפתח",
-        "שלא נפתח",
-        "קובץ csv שבור",
-        "csv שבור"
-      ],
-      "capability_ids": [
-        "csv_repair",
-        "csv_validate"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "cyberchef",
@@ -139,6 +139,16 @@
         "data",
         "operations",
         "security"
+      ],
+      "tasks": [
+        "decode text",
+        "transform data",
+        "inspect encoded value",
+        "לפענח טקסט",
+        "להמיר טקסט"
+      ],
+      "capability_ids": [
+        "text_transform"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -161,17 +171,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "decode text",
-        "transform data",
-        "inspect encoded value",
-        "לפענח טקסט",
-        "להמיר טקסט"
-      ],
-      "capability_ids": [
-        "text_transform"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "hoppscotch",
@@ -183,17 +183,6 @@
         "http",
         "operator"
       ],
-      "execution_mode": "OPERATOR_ONLY",
-      "agent_mode": "NO_AGENT",
-      "lifecycle_status": "APPROVED",
-      "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
-      "enabled": true,
-      "verification_status": "VERIFIED",
-      "last_verified_at": "2026-08-13",
-      "next_verification_at": null,
-      "playbook": null,
-      "runtime_visible": false,
       "tasks": [
         "inspect api",
         "inspect webhook"
@@ -201,7 +190,18 @@
       "capability_ids": [
         "api_inspection",
         "webhook_inspection"
-      ]
+      ],
+      "execution_mode": "OPERATOR_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
     },
     {
       "tool_id": "json-crack",
@@ -211,6 +211,17 @@
       "tags": [
         "data",
         "operations"
+      ],
+      "tasks": [
+        "understand json",
+        "visualize json",
+        "json structure",
+        "להבין json",
+        "json מסובך",
+        "להציג json"
+      ],
+      "capability_ids": [
+        "json_visualize"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "OPTIONAL_AGENT",
@@ -232,21 +243,10 @@
         "privacy_guidance": "השתמש ב־JSON מושחר; הסר tokens ופרטים אישיים.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
-          "הסבר מבנה JSON"
+          "אם תרצה, אני יכול להסביר את מבנה ה־JSON."
         ]
       },
-      "runtime_visible": true,
-      "tasks": [
-        "understand json",
-        "visualize json",
-        "json structure",
-        "להבין json",
-        "json מסובך",
-        "להציג json"
-      ],
-      "capability_ids": [
-        "json_visualize"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "log-voyager",
@@ -258,24 +258,24 @@
         "logs",
         "operator"
       ],
-      "execution_mode": "OPERATOR_ONLY",
-      "agent_mode": "NO_AGENT",
-      "lifecycle_status": "APPROVED",
-      "decision": "KEEP_EXTERNAL",
-      "privacy_class": "OTHER_BOUNDED_WARNING",
-      "enabled": true,
-      "verification_status": "VERIFIED",
-      "last_verified_at": "2026-08-13",
-      "next_verification_at": null,
-      "playbook": null,
-      "runtime_visible": false,
       "tasks": [
         "inspect error logs",
         "search log export"
       ],
       "capability_ids": [
         "log_inspection"
-      ]
+      ],
+      "execution_mode": "OPERATOR_ONLY",
+      "agent_mode": "NO_AGENT",
+      "lifecycle_status": "APPROVED",
+      "decision": "KEEP_EXTERNAL",
+      "privacy_class": "OTHER_BOUNDED_WARNING",
+      "enabled": true,
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
+      "last_verified_at": "2026-08-13",
+      "next_verification_at": null,
+      "playbook": null,
+      "runtime_visible": false
     },
     {
       "tool_id": "metadata-remover",
@@ -286,6 +286,14 @@
         "images",
         "privacy",
         "security"
+      ],
+      "tasks": [
+        "remove photo metadata",
+        "strip gps",
+        "clean image"
+      ],
+      "capability_ids": [
+        "metadata_remove"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -308,15 +316,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "remove photo metadata",
-        "strip gps",
-        "clean image"
-      ],
-      "capability_ids": [
-        "metadata_remove"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "mr-data-converter",
@@ -326,6 +326,15 @@
       "tags": [
         "data",
         "operations"
+      ],
+      "tasks": [
+        "csv to json",
+        "spreadsheet to json",
+        "csv to xml",
+        "להמיר csv ל json"
+      ],
+      "capability_ids": [
+        "file_convert"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -348,16 +357,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "csv to json",
-        "spreadsheet to json",
-        "csv to xml",
-        "להמיר csv ל json"
-      ],
-      "capability_ids": [
-        "file_convert"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "pairdrop",
@@ -367,6 +367,16 @@
       "tags": [
         "operations",
         "transfer"
+      ],
+      "tasks": [
+        "transfer file",
+        "move file",
+        "phone to computer",
+        "להעביר קובץ",
+        "להעביר מהמכשיר למחשב"
+      ],
+      "capability_ids": [
+        "file_transfer"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -388,17 +398,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "transfer file",
-        "move file",
-        "phone to computer",
-        "להעביר קובץ",
-        "להעביר מהמכשיר למחשב"
-      ],
-      "capability_ids": [
-        "file_transfer"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "rawgraphs",
@@ -410,6 +410,18 @@
         "data",
         "marketing",
         "operations"
+      ],
+      "tasks": [
+        "create graph",
+        "graph from csv",
+        "chart data",
+        "ליצור גרף",
+        "גרף מהנתונים",
+        "תרשים מהנתונים",
+        "איזה גרף"
+      ],
+      "capability_ids": [
+        "data_chart"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "OPTIONAL_AGENT",
@@ -431,22 +443,10 @@
         "privacy_guidance": "השתמש בנתונים מצטברים או מושחרים, לא במידע אישי גולמי.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
-          "הצעת סוג תרשים"
+          "אם תרצה, אני יכול לעזור לבחור סוג תרשים מתאים."
         ]
       },
-      "runtime_visible": true,
-      "tasks": [
-        "create graph",
-        "graph from csv",
-        "chart data",
-        "ליצור גרף",
-        "גרף מהנתונים",
-        "תרשים מהנתונים",
-        "איזה גרף"
-      ],
-      "capability_ids": [
-        "data_chart"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "sentry",
@@ -456,6 +456,13 @@
       "tags": [
         "diagnostics",
         "monitoring"
+      ],
+      "tasks": [
+        "track error",
+        "group exceptions"
+      ],
+      "capability_ids": [
+        "error_tracking"
       ],
       "execution_mode": "POC_ONLY",
       "agent_mode": "NO_AGENT",
@@ -467,14 +474,7 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false,
-      "tasks": [
-        "track error",
-        "group exceptions"
-      ],
-      "capability_ids": [
-        "error_tracking"
-      ]
+      "runtime_visible": false
     },
     {
       "tool_id": "shareclean",
@@ -485,6 +485,17 @@
         "operations",
         "privacy",
         "security"
+      ],
+      "tasks": [
+        "clean logs",
+        "redact config",
+        "sanitize text",
+        "לנקות לוג",
+        "לנקות לוג לפני שליחה"
+      ],
+      "capability_ids": [
+        "log_sanitize",
+        "text_redact"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "OPTIONAL_AGENT",
@@ -506,21 +517,10 @@
         "privacy_guidance": "בדוק ידנית את הפלט; אל תדביק secrets חיים.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
-          "הצעת נקודות לבדיקה ידנית"
+          "אם תרצה, אני יכול להציע מה לבדוק לפני השיתוף."
         ]
       },
-      "runtime_visible": true,
-      "tasks": [
-        "clean logs",
-        "redact config",
-        "sanitize text",
-        "לנקות לוג",
-        "לנקות לוג לפני שליחה"
-      ],
-      "capability_ids": [
-        "log_sanitize",
-        "text_redact"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "socket",
@@ -530,6 +530,13 @@
       "tags": [
         "dependencies",
         "security"
+      ],
+      "tasks": [
+        "scan dependencies",
+        "dependency security"
+      ],
+      "capability_ids": [
+        "dependency_scan"
       ],
       "execution_mode": "POC_ONLY",
       "agent_mode": "NO_AGENT",
@@ -541,14 +548,7 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false,
-      "tasks": [
-        "scan dependencies",
-        "dependency security"
-      ],
-      "capability_ids": [
-        "dependency_scan"
-      ]
+      "runtime_visible": false
     },
     {
       "tool_id": "sql-for-files",
@@ -558,6 +558,20 @@
       "tags": [
         "data",
         "operations"
+      ],
+      "tasks": [
+        "query csv",
+        "join csv",
+        "analyze file",
+        "לנתח קובץ",
+        "לשאול על csv",
+        "לשאול שאלה על csv",
+        "לחבר csv"
+      ],
+      "capability_ids": [
+        "data_profile",
+        "file_join",
+        "file_query"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "OPTIONAL_AGENT",
@@ -579,24 +593,10 @@
         "privacy_guidance": "השתמש בעותקים מושחרים, לא במידע אישי או במסד נתונים פעיל.",
         "agent_mode": "OPTIONAL_AGENT",
         "agent_assist_capabilities": [
-          "עזרה בניסוח שאילתה"
+          "אם תרצה, אני יכול לעזור לנסח שאילתת קריאה."
         ]
       },
-      "runtime_visible": true,
-      "tasks": [
-        "query csv",
-        "join csv",
-        "analyze file",
-        "לנתח קובץ",
-        "לשאול על csv",
-        "לשאול שאלה על csv",
-        "לחבר csv"
-      ],
-      "capability_ids": [
-        "data_profile",
-        "file_join",
-        "file_query"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "squoosh",
@@ -607,6 +607,22 @@
         "images",
         "marketing",
         "real_estate"
+      ],
+      "tasks": [
+        "shrink image",
+        "compress photo",
+        "reduce image",
+        "להקטין תמונה",
+        "להקטין תמונות",
+        "לדחוס תמונה",
+        "לדחיסת תמונה",
+        "לדחיסת תמונות",
+        "תקטין לי תמונה",
+        "תמונה לוואטסאפ"
+      ],
+      "capability_ids": [
+        "image_compress",
+        "image_resize"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -629,21 +645,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "shrink image",
-        "compress photo",
-        "reduce image",
-        "להקטין תמונה",
-        "להקטין תמונות",
-        "לדחוס תמונה",
-        "תקטין לי תמונה",
-        "תמונה לוואטסאפ"
-      ],
-      "capability_ids": [
-        "image_compress",
-        "image_resize"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "svgomg",
@@ -654,6 +656,17 @@
         "design",
         "images",
         "marketing"
+      ],
+      "tasks": [
+        "clean svg",
+        "compress svg",
+        "optimize logo",
+        "לכווץ svg",
+        "לנקות svg",
+        "לכווץ לוגו svg"
+      ],
+      "capability_ids": [
+        "svg_optimize"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -676,18 +689,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "clean svg",
-        "compress svg",
-        "optimize logo",
-        "לכווץ svg",
-        "לנקות svg",
-        "לכווץ לוגו svg"
-      ],
-      "capability_ids": [
-        "svg_optimize"
-      ]
+      "runtime_visible": true
     },
     {
       "tool_id": "uptimerobot",
@@ -696,6 +698,13 @@
       "tool_class": "infrastructure_candidate",
       "tags": [
         "monitoring"
+      ],
+      "tasks": [
+        "monitor endpoint",
+        "heartbeat"
+      ],
+      "capability_ids": [
+        "uptime_monitoring"
       ],
       "execution_mode": "POC_ONLY",
       "agent_mode": "NO_AGENT",
@@ -707,14 +716,7 @@
       "last_verified_at": "2026-08-13",
       "next_verification_at": null,
       "playbook": null,
-      "runtime_visible": false,
-      "tasks": [
-        "monitor endpoint",
-        "heartbeat"
-      ],
-      "capability_ids": [
-        "uptime_monitoring"
-      ]
+      "runtime_visible": false
     },
     {
       "tool_id": "vert",
@@ -725,6 +727,16 @@
         "documents",
         "marketing",
         "media"
+      ],
+      "tasks": [
+        "convert file",
+        "convert document",
+        "convert image",
+        "להמיר קובץ",
+        "המרת קובץ"
+      ],
+      "capability_ids": [
+        "file_convert"
       ],
       "execution_mode": "GUIDED_EXTERNAL",
       "agent_mode": "NO_AGENT",
@@ -746,17 +758,7 @@
         "agent_mode": "NO_AGENT",
         "agent_assist_capabilities": []
       },
-      "runtime_visible": true,
-      "tasks": [
-        "convert file",
-        "convert document",
-        "convert image",
-        "להמיר קובץ",
-        "המרת קובץ"
-      ],
-      "capability_ids": [
-        "file_convert"
-      ]
+      "runtime_visible": true
     }
   ],
   "capabilities": [
@@ -1047,7 +1049,7 @@
       "execution_mode": "OPERATOR_ONLY",
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "enabled": false,
       "priority": 0
     },
@@ -1058,7 +1060,7 @@
       "execution_mode": "OPERATOR_ONLY",
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "enabled": false,
       "priority": 0
     },
@@ -1080,7 +1082,7 @@
       "execution_mode": "OPERATOR_ONLY",
       "agent_mode": "NO_AGENT",
       "lifecycle_status": "APPROVED",
-      "verification_status": "VERIFIED",
+      "verification_status": "APPROVED_WITH_RESTRICTIONS",
       "enabled": false,
       "priority": 0
     },
@@ -1261,5 +1263,5 @@
       "priority": 50
     }
   ],
-  "content_hash": "regenerated-from-fb58023515bce018458a8baa31a0d6883ce343aa"
+  "content_hash": "bee9f087e6db411c172c61c247067fb4a2fa52181512914e4d0d8be0466c919c"
 }
