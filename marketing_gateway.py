@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from dataclasses import dataclass, field
 
 from airtable_schema import (
@@ -176,6 +177,8 @@ def select_creative(creative_id: str, selected_idea: str, reviewer_notes: str = 
     fields = {
         MCF.SELECTED_IDEA: selected_idea,
         MCF.SELECTION_STATUS: "Rejected All" if selected_idea == "None" else "Selected",
+        MCF.APPROVED_SCRIPT: None,
+        MCF.SCRIPT_SHA256: None,
     }
     if reviewer_notes:
         fields[MCF.REVIEWER_NOTES] = reviewer_notes
@@ -183,9 +186,75 @@ def select_creative(creative_id: str, selected_idea: str, reviewer_notes: str = 
 
 
 def save_production_handoff(creative_id: str, handoff_text: str) -> bool:
+    creative = get_creative(creative_id)
+    if not creative or not is_production_ready(creative):
+        logger.warning(
+            "[marketing_gateway] refusing Production Handoff for creative_id=%s: "
+            "Approved Script is not production-ready", creative_id,
+        )
+        return False
     return airtable_patch(
         Tables.MARKETING_CREATIVES, creative_id,
         {MCF.PRODUCTION_HANDOFF: handoff_text}, source="marketing_gateway",
+    )
+
+
+def script_sha256(script: str) -> str:
+    """Hash the exact stored script bytes; no trimming or normalization."""
+    return hashlib.sha256(script.encode("utf-8")).hexdigest()
+
+
+def is_production_ready(creative: dict | None) -> bool:
+    """Only an exact, internally consistent approved snapshot is consumable."""
+    if not creative:
+        return False
+    draft = creative.get(MCF.SCRIPT_DRAFT)
+    approved = creative.get(MCF.APPROVED_SCRIPT)
+    stored_hash = creative.get(MCF.SCRIPT_SHA256)
+    return bool(
+        isinstance(draft, str)
+        and isinstance(approved, str)
+        and draft
+        and draft == approved
+        and stored_hash == script_sha256(approved)
+    )
+
+
+def save_script_draft(creative_id: str, draft: str) -> bool:
+    """Persist a draft and invalidate any prior approved snapshot."""
+    if not isinstance(draft, str) or not draft:
+        return False
+    creative = get_creative(creative_id)
+    if not creative or creative.get(MCF.SELECTION_STATUS) != "Selected":
+        return False
+    return airtable_patch(
+        Tables.MARKETING_CREATIVES,
+        creative_id,
+        {
+            MCF.SCRIPT_DRAFT: draft,
+            MCF.APPROVED_SCRIPT: None,
+            MCF.SCRIPT_SHA256: None,
+        },
+        source="marketing_gateway",
+    )
+
+
+def approve_script(creative_id: str) -> bool:
+    """Persist the exact draft snapshot after an external approval decision."""
+    creative = get_creative(creative_id)
+    if not creative or creative.get(MCF.SELECTION_STATUS) != "Selected":
+        return False
+    draft = creative.get(MCF.SCRIPT_DRAFT)
+    if not isinstance(draft, str) or not draft:
+        return False
+    return airtable_patch(
+        Tables.MARKETING_CREATIVES,
+        creative_id,
+        {
+            MCF.APPROVED_SCRIPT: draft,
+            MCF.SCRIPT_SHA256: script_sha256(draft),
+        },
+        source="marketing_gateway",
     )
 
 

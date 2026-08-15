@@ -670,6 +670,9 @@ class MarketingCreativesFields:
     SELECTION_STATUS  = "Selection Status" # singleSelect: Pending Review|Selected|Rejected All
     BRIEF_USED        = "Brief Used"
     PRODUCTION_HANDOFF = "Production Handoff"
+    SCRIPT_DRAFT      = "Script Draft"
+    APPROVED_SCRIPT    = "Approved Script"
+    SCRIPT_SHA256      = "Script SHA256"
     MEDIA_FILES       = "Media Files"      # שדה קישור הפוך שנוצר אוטומטית (Media Files.Linked Creative)
 
 
