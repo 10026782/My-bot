@@ -7,7 +7,19 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 14/08/2026 — **תיעוד בלבד: `BOSS_MEDIA_MARKETING_AUDIT.md` מוזג ל-`main`.** קובץ
+עודכן: 15/08/2026 — **`BUG-164` הגנת-עומק ל-`compose_brief()` + תיקון תיעוד-דריפט.**
+`creative_ideas` עצמו כבר **תוקן דטרמיניסטית וממוזג** (PR2, `e9d1ca8`, ראה
+`BUG_AUDIT_LOG.md::BUG-164`) — אינו עובר יותר דרך `compose_brief()` כלל, אלא דרך תפריט
+סגור + `authority_filter_and_render()`. השורות מ-13/08/2026 למטה תיארו זאת כ"טרם PR/merge"
+כי נכתבו לפני ש-PR2 קויים; התוכן שלהן תוקן בהתאם. מה שכן חדש כאן: `_DEMAND_FIDELITY_RULE`
+(commit `b375602`, ענף `claude/continue-f23-dmbgr7`) מוסיף הגנת-עומק ברמת prompt ל-3 סוגי
+המשימה הנותרים של `compose_brief()` — `creative_review`/`ad_package`/`publishing_plan` —
+שעדיין free-text וללא authority gate דטרמיניסטי. בדיקות מקומיות עברו (`test_marketing_brief_
+composer.py` חדש 5/5, `smoke_tests.py`, `test_marketing_orchestrator.py`,
+`test_cmd_marketing_status.py`, `compileall`, TC10 isolated regression `--repeat 2` STABLE
+32/33 — הכשל היחיד משוחזר זהה על `origin/main` נקי, pre-existing). **לא VERIFIED**: תיקון
+ברמת prompt-contract בלבד, לא הוכח מול קריאת AI חיה. פרטים מלאים ב-`BUG_AUDIT_LOG.md::BUG-164`.
+עודכן קודם: 14/08/2026 — **תיעוד בלבד: `BOSS_MEDIA_MARKETING_AUDIT.md` מוזג ל-`main`.** קובץ
 ה-audit ההיסטורי של F23 (reuse מול Ventures/Decisions/Interaction Log/Sessions — כולם
 נפסלו) הועבר (cherry-pick, ללא שינוי תוכן) מהענף הבלתי-ממוזג `docs/media-marketing-
 enablement-audit` ל-`main`, וההפניה אליו בסעיף F23 למטה עודכנה בהתאם (הוסרה ההערה
@@ -1769,7 +1781,7 @@ Render deploy מאומת: commit חי `98f3626` (הודעת deploy אמיתית 
 בכוונה לא מעורבבים:**
 1. **F23 M2 orchestration/runtime — ✅ CLOSED.** `/marketing_status`/`marketing_orchestrator.py`/רשימה/authorization/callback lifecycle — מאומת חי, ללא regression (ראה אודיט למעלה). לא נפתח מחדש.
 2. **Production Handoff grounding — ✅ RUNTIME VERIFIED.** ה-wrapper הדטרמיניסטי (`compose_production_handoff()`) התנהג בדיוק כמתוכנן בלייב: תייג את הרעיון כ"כיוון קריאייטיבי בלבד, לא מקור אמת", סימן כל קלט הפקה לא-ידוע כ"לא סופק", ולא המציא דבר בעצמו.
-3. **Creative Ideas grounding (Prompt 1) — 🟡 באג נפרד, פתוח — `BUG-164`.** הרעיון שה-AI יצר (קריאה יחידה, `_create_demand_and_generate_ideas()`) עיוות עובדה כמותית מה-Demand ("10 מועמדים תוך שבוע" → "10 משרות פתוחות") + הוסיף ניסוחים לא-נתמכים. נצפה באותה בדיקה חיה, אך זהו gap ב-M1 (Prompt 1 אין לו grounding/fact-check אחרי היצירה, בניגוד ל-Handoff הדטרמיניסטי) — **לא regression מ-M2** (M2 לא קורא ל-AI כלל, רק חשף מחדש תוכן קיים). ראה `BUG_AUDIT_LOG.md::BUG-164` לפרטים מלאים ו-root cause. **עדכון (14/08/2026):** PR #623 ("PR1: Authority/Foundation") מוזג — מוסיף `ProtectedFact`/registry סגור/`CreativeProposal` renderer — אך מאומת ב-grep שאין קורא לו מחוץ לטסטים; `_create_demand_and_generate_ideas()` לא חובר. **foundation קיים, אין עדיין live cutover; הבאג עצמו עדיין פתוח.** לא נפתח מחדש M2 בגללו.
+3. **Creative Ideas grounding (Prompt 1) — 🟢 `BUG-164` `creative_ideas` תוקן דטרמיניסטית (PR2, מוזג), + הגנת-עומק ל-3 סוגי המשימה הנותרים.** הרעיון שה-AI יצר (קריאה יחידה, `_create_demand_and_generate_ideas()`) עיוות עובדה כמותית מה-Demand ("10 מועמדים תוך שבוע" → "10 משרות פתוחות") + הוסיף ניסוחים לא-נתמכים. נצפה באותה בדיקה חיה, אך זהו gap ב-M1 (Prompt 1 אין לו grounding/fact-check אחרי היצירה, בניגוד ל-Handoff הדטרמיניסטי) — **לא regression מ-M2** (M2 לא קורא ל-AI כלל, רק חשף מחדש תוכן קיים). **עדכון (14/08/2026):** PR #623 ("PR1: Authority/Foundation") מוזג — מוסיף `ProtectedFact`/registry סגור/`CreativeProposal` renderer. **עדכון (14/08/2026, PR2):** PR #645 מחווט את ה-foundation בפועל ל-`_create_demand_and_generate_ideas()` — תפריט סגור + `authority_filter_and_render()` במקום free-text, ללא נתיב fallback לטקסט AI גולמי. **`creative_ideas` — הוקטור שבו נצפה הבאג — תוקן דטרמיניסטית וממוזג; טרם live-verified בפרודקשן.** **עדכון (15/08/2026):** `compose_brief()` קיבל `_DEMAND_FIDELITY_RULE` (commit `b375602`, ענף `claude/continue-f23-dmbgr7`) — הגנת-עומק ברמת prompt ל-3 סוגי המשימה שעדיין ללא authority gate דטרמיניסטי: `creative_review`/`ad_package`/`publishing_plan`. בדיקות מקומיות עברו; לא live-verified. ראה `BUG_AUDIT_LOG.md::BUG-164` לפרטים מלאים. לא נפתח מחדש M2 בגללו.
 
 **C60 — Tool Context Awareness (PR #152, מוזג ל-`main`, commit `2d85b84`/merge `3e0094b`):**
 לפי `SPEC_C59_Tool_Context_Awareness.md` (הועלה ע"י הבעלים בלי טקסט מלווה; אישור דרך
