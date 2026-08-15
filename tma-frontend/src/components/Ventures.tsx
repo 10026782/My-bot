@@ -530,7 +530,7 @@ export function Ventures({ onBack }: Props) {
 
         {d && (
           <section className="ventures-summary" aria-label="סיכום תצוגה">
-            <Surface variant="subtle" padding="compact" className="ventures-summary__item boss-bubble--information">
+            <Surface variant="subtle" padding="compact" className="ventures-summary__item ventures-summary__item--primary boss-bubble--information">
               <p className="ventures-summary__label">הזדמנויות בתצוגה</p>
               <p className="ventures-summary__value">{d.count}</p>
             </Surface>
