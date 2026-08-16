@@ -359,6 +359,132 @@ automatic third "delete/revoke" action — quarantine-and-report only; an
 owner decides whether to fix the source, re-scope the policy, or manually
 remove the registration.
 
+## F. Pre-merge (PR-time) owner decision gate
+
+Every section above describes reconciliation that runs **after** a merge
+lands on `main` (`ci.yml`'s `Context Librarian authoritative post-merge
+reconciliation` step, gated `if: github.event_name == 'push' &&
+github.ref == 'refs/heads/main'`). That step never runs during a PR's own
+CI, so a PR that introduces an unregistered runtime/authority source stayed
+fully green through review and only turned red on `main` after merging —
+the first real discovery point was post-merge, not pre-merge. This section
+closes that gap: `OWNER_DECISION_REQUIRED` is now detected at PR time too,
+so post-merge reconciliation becomes what it should always have been — a
+safety net that catches drift or bypasses that somehow escaped the PR gate,
+not the primary discovery mechanism.
+
+**Same engine, different diff base — not a second classifier.**
+`tools/context_librarian/reconcile.py`'s per-item routing logic (matching a
+new source against the policy registry, the STOP-never-auto-eligible rule,
+the missing-target/missing-predicate/ambiguous-policy checks) was extracted
+into `_route_new_sources()`. Both `reconcile()` (post-merge) and the new
+`reconcile_pr()` (pre-merge) call this exact same function with exactly the
+same inputs shape — the only thing that differs between the two callers is
+*which* `new_sources` list they hand it:
+
+- `reconcile()` anchors its scan on `last_source_scan_commit` (section A.1)
+  — "what did `main` itself pick up since the last recorded scan."
+- `reconcile_pr()` anchors its scan on an explicit `base_ref..head_ref` diff
+  (`_scan_pr_new_sources()`, default `origin/main..HEAD`) — "what does
+  *this PR's own diff* newly add." A PR's new files don't exist anywhere in
+  `main`'s history yet, so `reconcile()`'s post-merge anchors (which only
+  ever diff between two points *within* `main`'s own history) structurally
+  cannot see them before merge — this is exactly why a separate scan
+  function is needed, even though the classification engine underneath it
+  is identical. `test_reconcile_pr_and_reconcile_route_identical_new_sources_
+  identically` in `test_reconcile.py` is the literal proof: the same
+  `new_sources` list fed through both paths produces byte-identical
+  `decision_queue`/`auto_maintenance_sources`/`non_blocking_sources`.
+
+**Deliberately narrower than post-merge in one respect.** `reconcile_pr()`
+never computes `mechanical_updates` or `revalidation_flags`
+(`_mechanical_drift()` / `_scan_auto_registrations()`) — those measure
+drift or staleness on nodes/registrations already living on `main`, which
+is unrelated to what a given PR itself introduces. Pulling `main`'s own,
+potentially unrelated backlog into every PR's gate would block PRs on
+conditions they did not create; that stays the post-merge job.
+
+**Read-only.** `reconcile_pr()` never writes `last_source_scan_commit`,
+`last_observed_commit`, or any catalog file — there is no PR-time
+`--apply-auto` equivalent. The one write path this module has
+(`apply_auto_maintenance()`, invoked via `reconcile --apply-auto`) is
+unchanged and still only ever runs against `main` post-merge, via the
+existing `.github/workflows/context-librarian-reconcile.yml` maintenance-PR
+flow (untouched by this section) — an `AUTO_MAINTENANCE_REQUIRED` outcome
+at PR time is reported (which sources match an already-approved policy and
+what they'd register into) so a reviewer can *see* the exact bounded patch
+ahead of time, never applied or pushed by the PR-time step itself.
+
+**CLI:** `python -m tools.context_librarian reconcile-pr [--base-ref
+origin/main] [--head-ref HEAD] [--summary-output PATH]`. Prints the same
+`ReconcileResult` JSON shape `reconcile --check` prints (stdout, JSON-only,
+for tooling), and exits `1` only on `OWNER_DECISION_REQUIRED` — identical
+exit-code contract to `reconcile --check`. `--summary-output` additionally
+writes the human-readable Markdown report
+(`tools/context_librarian/owner_decision_report.py::format_pr_summary()`)
+to a file, used by CI to populate `$GITHUB_STEP_SUMMARY`.
+
+**CI wiring** (`.github/workflows/ci.yml`, `backend-ci` job, step "Context
+Librarian pre-merge owner decision gate", `if: github.event_name ==
+'pull_request'`): resolves `--head-ref` to the PR's actual head commit
+(`github.event.pull_request.head.sha`, not the ephemeral PR-merge-ref
+`actions/checkout@v4` checks out by default) so the diff is against the
+real PR content. Captures the exit code before appending the summary to
+`$GITHUB_STEP_SUMMARY` (GitHub Actions' `run:` blocks default to `bash -e`,
+so failing fast on a non-zero exit would otherwise skip publishing the very
+report a human needs to resolve the failure) and only then re-raises it —
+an `OWNER_DECISION_REQUIRED` PR shows both a failed required check *and* a
+readable report in the same place, never one without the other. No new
+GitHub permissions are requested: the step only writes to
+`$GITHUB_STEP_SUMMARY` (no `pull-requests: write` needed), deliberately not
+also posting a PR comment, per the "least-privilege" / "and/or" framing of
+this gate's own design brief.
+
+**Owner Decision Request format**
+(`owner_decision_report.py::format_owner_decision_request()`), one block
+per `decision_queue` item: `Source` / `Classification` / `Proposed target`
+/ `Evidence` (why runtime-schema-authority-relevant, mechanical
+grep-based caller/consumer scan via `find_consumers()`, a mechanical
+extension/classification-based affected-concerns heuristic, and the
+closest matching existing policy/node if any) / `Recommended decision` /
+`Alternative` / `Risk if classified incorrectly` / a bounded `Required
+owner answer` (exactly: `APPROVE EXISTING NODE: <id>` /
+`APPROVE EXISTING NODE: <different id>` / `CREATE NEW NODE: <name>` /
+`REJECT: <reason>`). `Recommended decision` is driven entirely by the
+`block_reason` code `_route_new_sources()` now attaches to every
+`decision_queue` item (`NO_POLICY_MATCH`, `AMBIGUOUS_POLICY_MATCH`,
+`STOP_NEVER_AUTO`, `TARGET_NODE_MISSING`, `POLICY_REQUIRES_HUMAN_
+CONFIRMATION`, `PREDICATE_FAILED`/`PREDICATE_UNPROVABLE`,
+`TARGET_FIELD_INVALID`) — a deterministic mapping, not a semantic read of
+the file's content. **A `STOP` item's recommendation is always `NEEDS
+OWNER REVIEW`, even when a policy happens to match it** — mirroring
+`_route_new_sources()`'s own structural guarantee (section C: "a `STOP`
+classification is never eligible for `AUTO_MAINTENANCE_REQUIRED`,
+regardless of whether some policy's glob happens to match it") one layer
+up, at the recommendation-text level. This module never resolves anything
+itself: `Recommended decision` is always a suggestion for the owner to
+accept, edit, or reject in their reply, exactly the boundary
+`OWNER_DECISION_REQUIRED` already enforces everywhere else in this engine.
+
+**Recording the decision.** An owner resolves a PR-time
+`OWNER_DECISION_REQUIRED` the same way any other `OWNER_DECISION_REQUIRED`
+is resolved (section E): edit the catalog node directly (or, if the
+decision generalizes to a reusable class, add/narrow a
+`policy_registry.json` entry in the same PR — never a broad catch-all glob,
+per section B) so the file is either registered (drops out of
+`classify_new_sources()`'s new-source scan entirely — see
+`_catalog_referenced_paths()`) or matches an approved, structurally-proven
+policy. Re-running `reconcile-pr` against the same diff then resolves to
+`CLEAN` (or `AUTO_MAINTENANCE_REQUIRED` if something else in the diff still
+matches an approved-but-unapplied policy) — proven end-to-end by
+`test_owner_approved_catalog_update_in_same_pr_makes_second_reconcile_clean`.
+
+**Authority-sensitive rule, unweakened.** Nothing above changes when a file
+is classified `STOP` in the first place (`librarian.py`'s
+`_AUTHORITY_TERMS` heuristic, section C) or when `STOP` is allowed to
+resolve automatically (never). The pre-merge gate makes the exact same
+fail-closed guarantee visible earlier, not a looser one.
+
 ## Worked example
 
 `reconcile --check` against `origin/main` today, on this branch (based on

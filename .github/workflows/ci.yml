@@ -101,6 +101,38 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: python -m tools.context_librarian reconcile --check
 
+      # Pre-merge owner-decision gate (RECONCILIATION.md section F): moves
+      # OWNER_DECISION_REQUIRED detection to PR time, so the post-merge job
+      # above becomes a safety net that catches drift/bypasses rather than
+      # the first place an unregistered runtime/authority source is ever
+      # discovered. Reuses the identical classification engine
+      # (reconcile.py's _route_new_sources()) the post-merge job uses --
+      # only the new-sources diff base differs (this PR's own diff against
+      # origin/main, not main's own scan-commit history). Read-only: never
+      # writes the catalog or reconciliation_state.json. Only
+      # OWNER_DECISION_REQUIRED fails this step, matching the post-merge
+      # step's own contract; AUTO_MAINTENANCE_REQUIRED/CLEAN never block.
+      - name: Context Librarian pre-merge owner decision gate
+        if: github.event_name == 'pull_request'
+        run: |
+          set +e
+          python -m tools.context_librarian reconcile-pr \
+            --base-ref origin/main \
+            --head-ref "${{ github.event.pull_request.head.sha }}" \
+            --summary-output /tmp/librarian_pr_summary.md
+          status=$?
+          set -e
+          # Publish the summary to the GitHub UI before deciding whether to
+          # fail the step -- an OWNER_DECISION_REQUIRED exit must never
+          # swallow the very report a human needs to resolve it. A missing
+          # summary file (e.g. the command crashed before writing one) means
+          # status is already non-zero for an unrelated reason -- the
+          # crash's own stderr output above is the real signal then.
+          if [ -f /tmp/librarian_pr_summary.md ]; then
+            cat /tmp/librarian_pr_summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
       - name: Run test_*.py scripts
         run: |
           set -e

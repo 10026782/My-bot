@@ -1052,3 +1052,312 @@ def test_H_broad_glob_cannot_override_failed_structural_predicate(catalog, polic
     assert result.decision_queue[0]["policy_id"] == "BROAD_GLOB_TEST_ONLY"
     assert "predicate failed" in result.decision_queue[0]["policy_note"]
     assert result.outcome == OWNER_DECISION_REQUIRED
+
+
+# =====================================================================
+# Pre-merge (PR-time) owner decision gate -- reconcile_pr()
+#
+# See docs/context_librarian/RECONCILIATION.md section F. reconcile_pr()
+# classifies only the sources a PR's own diff (base_ref..head_ref) adds,
+# using the exact same per-item routing engine (_route_new_sources())
+# reconcile() uses post-merge -- these tests exist specifically to prove
+# that sharing, not just that reconcile_pr() "also produces an outcome".
+# =====================================================================
+
+from tools.context_librarian.reconcile import ReconcileResult, reconcile_pr  # noqa: E402
+from tools.context_librarian.owner_decision_report import (  # noqa: E402
+    find_consumers,
+    format_owner_decision_request,
+    format_pr_summary,
+)
+
+
+def _reconcile_pr_with_fakes(
+    catalog,
+    policies,
+    *,
+    new_sources=(),
+    base_sha="0000000000000000000000000000000000000base",
+    head_sha="1111111111111111111111111111111111111head",
+):
+    """Drives reconcile_pr()'s routing/outcome logic without a real git
+    diff, mirroring _reconcile_with_fakes() above -- same fake-injection
+    seam style, applied to reconcile_pr()'s own (smaller) set of internal
+    calls (_resolve_main_sha, _scan_pr_new_sources)."""
+    mp = pytest.MonkeyPatch()
+    try:
+        def fake_resolve(_repo_root, ref):
+            return base_sha if ref == "origin/main" else head_sha
+        mp.setattr(reconcile_module, "_resolve_main_sha", fake_resolve)
+        mp.setattr(reconcile_module, "_scan_pr_new_sources", lambda *_a, **_k: list(new_sources))
+        return reconcile_pr(catalog, policies, base_ref="origin/main", head_ref="HEAD")
+    finally:
+        mp.undo()
+
+
+def test_pr_with_no_new_sources_is_clean(catalog, policies):
+    result = _reconcile_pr_with_fakes(catalog, policies, new_sources=[])
+    assert result.outcome == CLEAN
+    assert result.decision_queue == ()
+    assert result.auto_maintenance_sources == ()
+
+
+def test_pr_source_covered_by_approved_policy_needs_no_owner_decision(catalog, policies):
+    # Real, permanent, deliberately-unregistered fixture matching
+    # OFFLINE_RESEARCH_TOOL (same fixture test_policy_approved_new_source_
+    # registers_and_reconciles_clean() above uses for the post-merge path)
+    # -- reused here so both paths are proven against the identical real
+    # file, not two different examples that could quietly drift apart.
+    fixture_path = "scripts/research_crawler_poc/reconcile_test_fixture.py"
+    assert fixture_path not in catalog.nodes["decision.offline_research_support_tool"]["code_paths"]
+    new_sources = classify_new_sources(catalog, [fixture_path])
+
+    result = _reconcile_pr_with_fakes(catalog, policies, new_sources=new_sources)
+    assert result.outcome == AUTO_MAINTENANCE_REQUIRED
+    assert result.decision_queue == ()
+    assert len(result.auto_maintenance_sources) == 1
+    assert result.auto_maintenance_sources[0]["policy_id"] == "OFFLINE_RESEARCH_TOOL"
+
+
+def test_pr_unknown_runtime_source_requires_owner_decision(catalog, policies):
+    new_sources = _classify(catalog, ["totally_new_unclassified_pr_module.py"])
+    result = _reconcile_pr_with_fakes(catalog, policies, new_sources=new_sources)
+    assert result.outcome == OWNER_DECISION_REQUIRED
+    assert len(result.decision_queue) == 1
+    assert result.decision_queue[0]["path"] == "totally_new_unclassified_pr_module.py"
+    assert result.decision_queue[0]["block_reason"] == "NO_POLICY_MATCH"
+
+
+def test_pr_authority_sensitive_source_is_stop_and_requires_owner_decision(catalog, policies):
+    # "authority" in the filename trips librarian.py's _AUTHORITY_TERMS
+    # escalation -- STOP, never eligible for auto-maintenance regardless of
+    # any policy match (see test_H above for the post-merge equivalent, and
+    # the dedicated STOP-with-policy-match test right below).
+    new_sources = _classify(catalog, ["new_pr_authority_boundary.py"])
+    assert new_sources[0]["classification"] == "STOP"
+
+    result = _reconcile_pr_with_fakes(catalog, policies, new_sources=new_sources)
+    assert result.outcome == OWNER_DECISION_REQUIRED
+    assert result.decision_queue[0]["classification"] == "STOP"
+    # No policy in the real registry matches this arbitrary filename, so it
+    # fails closed one step earlier than the STOP-specific check -- still
+    # OWNER_DECISION_REQUIRED either way (see the dedicated
+    # STOP_NEVER_AUTO test below for the "STOP despite a policy match" case).
+    assert result.decision_queue[0]["block_reason"] == "NO_POLICY_MATCH"
+
+
+def test_pr_stop_classification_never_auto_eligible_even_with_a_matching_policy(catalog):
+    """A STOP-classified file that DOES match a policy (eligible_target
+    set, auto_registration_allowed=True) must still route to
+    OWNER_DECISION_REQUIRED with block_reason STOP_NEVER_AUTO -- mirrors
+    test_H_broad_glob_cannot_override_failed_structural_predicate's
+    guarantee, exercised through the PR-time path this time."""
+    broad = Policy(
+        id="BROAD_GLOB_PR_TEST_ONLY", policy_version=1, description="deliberately over-broad",
+        path_patterns=("*",), runtime_consumed=True, authority=False,
+        eligible_target="layer.marketing", target_field="code_paths",
+        auto_registration_allowed=True, classification_when_matched="AUTO_MAINTENANCE_ELIGIBLE",
+        notes=(),
+    )
+    new_sources = _classify(catalog, ["new_pr_authority_boundary_stop_policy.py"])
+    assert new_sources[0]["classification"] == "STOP"
+
+    result = _reconcile_pr_with_fakes(catalog, (broad,), new_sources=new_sources)
+    assert result.outcome == OWNER_DECISION_REQUIRED
+    assert result.decision_queue[0]["block_reason"] == "STOP_NEVER_AUTO"
+    assert result.decision_queue[0]["policy_id"] == "BROAD_GLOB_PR_TEST_ONLY"
+    assert result.auto_maintenance_sources == ()
+
+
+def test_pr_mechanical_drift_on_main_never_blocks_an_unrelated_pr(catalog, policies):
+    """reconcile_pr() must never surface main's own pre-existing,
+    PR-unrelated backlog (mechanical_updates / revalidation_flags) -- those
+    are the post-merge gate's job. A PR that adds nothing new must be CLEAN
+    even if _mechanical_drift()/_scan_auto_registrations() would (if they
+    were even called) find something stale on main."""
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(reconcile_module, "_mechanical_drift", lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("reconcile_pr() must never call _mechanical_drift")
+        ))
+        mp.setattr(reconcile_module, "_scan_auto_registrations", lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("reconcile_pr() must never call _scan_auto_registrations")
+        ))
+        result = _reconcile_pr_with_fakes(catalog, policies, new_sources=[])
+    assert result.outcome == CLEAN
+    assert result.mechanical_updates == ()
+    assert result.revalidation_flags == ()
+
+
+def test_owner_approved_catalog_update_in_same_pr_makes_second_reconcile_clean(policies):
+    """Simulates the full 'Recording the owner decision' flow (spec item 4):
+    a PR introduces a STOP-classified new file -> OWNER_DECISION_REQUIRED;
+    the PR is then amended to register that same file into an existing
+    node's code_paths (the owner's decision, encoded in the catalog) -> a
+    second reconcile of the SAME diff is CLEAN, because the file is no
+    longer unregistered and therefore never even reaches classification.
+
+    Uses a fresh (not the shared module-scoped `catalog` fixture)
+    load_catalog(REPO_ROOT) call and mutates its in-memory node dict
+    directly, restored in `finally` -- proves the classification-exclusion
+    contract (_catalog_referenced_paths/classify_new_sources) without
+    needing a real file write (apply_auto_maintenance()'s own tests already
+    cover the real-write path) and without the isolated-tmp-catalog path
+    mismatch _catalog_referenced_paths() has against a repo_root/catalog_root
+    split (see the comment on test_policy_approved_new_source_registers_
+    and_reconciles_clean above)."""
+    fresh = load_catalog(REPO_ROOT)
+    new_path = "new_pr_authority_boundary_2.py"
+    target_node_id = "layer.marketing"
+
+    first_sources = classify_new_sources(fresh, [new_path])
+    assert first_sources[0]["classification"] == "STOP"
+    first = _reconcile_pr_with_fakes(fresh, policies, new_sources=first_sources)
+    assert first.outcome == OWNER_DECISION_REQUIRED
+
+    # Owner decision: register under an existing node (mirrors PR #651's
+    # real "APPROVED under existing layer.marketing, do NOT create a new
+    # layer" resolution).
+    fresh.nodes[target_node_id]["code_paths"].append(new_path)
+    try:
+        second_sources = classify_new_sources(fresh, [new_path])
+        assert second_sources == [], "a registered path must never reach classify_new_sources() again"
+        second = _reconcile_pr_with_fakes(fresh, policies, new_sources=second_sources)
+        assert second.outcome == CLEAN
+    finally:
+        fresh.nodes[target_node_id]["code_paths"].remove(new_path)
+
+
+def test_reconcile_pr_and_reconcile_route_identical_new_sources_identically(catalog, policies):
+    """The actual 'same classifier, not a parallel one' proof: feed the
+    literal same new_sources list through both reconcile()'s and
+    reconcile_pr()'s internal routing and assert byte-identical
+    classification results (auto_maintenance/decision_queue/non_blocking),
+    field for field -- not just 'both return some outcome'."""
+    shared_new_sources = _classify(
+        catalog,
+        [
+            "totally_new_unclassified_shared_module.py",
+            "scripts/research_crawler_poc/reconcile_test_fixture.py",
+            "new_shared_authority_thing.py",
+        ],
+    )
+
+    post_merge_result = _reconcile_with_fakes(catalog, policies, new_sources=shared_new_sources)
+    pr_result = _reconcile_pr_with_fakes(catalog, policies, new_sources=shared_new_sources)
+
+    assert post_merge_result.decision_queue == pr_result.decision_queue
+    assert post_merge_result.auto_maintenance_sources == pr_result.auto_maintenance_sources
+    assert post_merge_result.non_blocking_sources == pr_result.non_blocking_sources
+    # Both must agree an owner decision is required, for the same reason.
+    assert post_merge_result.outcome == OWNER_DECISION_REQUIRED == pr_result.outcome
+
+
+def test_reconcile_pr_is_read_only_never_writes_reconciliation_state():
+    """reconcile_pr_repo() against the real repo with base==head (a no-op
+    diff, short-circuiting _scan_pr_new_sources()) must leave
+    reconciliation_state.json byte-identical -- there is no PR-time
+    apply-auto path; only the existing post-merge apply_auto_maintenance()
+    may ever write it."""
+    from tools.context_librarian.reconcile import reconcile_pr_repo
+
+    state_path = REPO_ROOT / "docs/context_librarian/reconciliation_state.json"
+    before = state_path.read_bytes()
+    result = reconcile_pr_repo(REPO_ROOT, base_ref="HEAD", head_ref="HEAD")
+    after = state_path.read_bytes()
+    assert before == after
+    assert result.outcome == CLEAN
+    assert result.mechanical_updates == ()
+    assert result.revalidation_flags == ()
+
+
+def test_post_merge_reconcile_workflow_remains_the_final_safety_net(catalog, policies):
+    """Post-merge reconcile() is unchanged by the pre-merge gate's addition
+    -- still computes mechanical_updates/revalidation_flags (which
+    reconcile_pr() deliberately never does), still the only path that feeds
+    apply_auto_maintenance()."""
+    result = _reconcile_with_fakes(
+        catalog, policies,
+        mechanical_updates=[{"node_id": "layer.marketing", "from": "a", "to": "b", "changed_paths": ["x.py"]}],
+    )
+    assert result.outcome == AUTO_MAINTENANCE_REQUIRED
+    assert result.mechanical_updates != ()
+
+
+# --- Owner Decision Request formatting (tools/context_librarian/owner_decision_report.py) ---
+
+
+def test_format_owner_decision_request_contains_every_required_section():
+    item = {
+        "path": "new_pr_authority_boundary_3.py",
+        "classification": "STOP",
+        "reason": "unregistered source may change authority",
+        "block_reason": "NO_POLICY_MATCH",
+    }
+    text = format_owner_decision_request(REPO_ROOT, item)
+    for heading in (
+        "OWNER DECISION REQUIRED", "Source:", "Classification:", "Proposed target:",
+        "Evidence:", "Recommended decision:", "Alternative:",
+        "Risk if classified incorrectly:", "Required owner answer",
+    ):
+        assert heading in text
+    assert "new_pr_authority_boundary_3.py" in text
+    assert "STOP" in text
+    # The agent proposes a recommendation; it must never claim to have
+    # resolved the decision itself.
+    assert "NEEDS OWNER REVIEW" in text
+    assert "APPROVE EXISTING NODE" in text  # offered as a bounded answer choice
+    assert "CREATE NEW NODE" in text
+    assert "REJECT" in text
+
+
+def test_format_owner_decision_request_never_auto_resolves_a_stop_even_with_policy_match():
+    """A STOP item that happens to also match a policy (eligible_target set)
+    must still recommend NEEDS OWNER REVIEW, never APPROVE EXISTING NODE
+    outright -- matching reconcile.py's own structural guarantee that STOP
+    is never auto-eligible regardless of policy match."""
+    item = {
+        "path": "some_authority_module.py",
+        "classification": "STOP",
+        "reason": "unregistered source may change authority",
+        "block_reason": "STOP_NEVER_AUTO",
+        "policy_id": "SOME_POLICY",
+        "eligible_target": "layer.marketing",
+        "target_field": "code_paths",
+    }
+    text = format_owner_decision_request(REPO_ROOT, item)
+    assert "Recommended decision:\nNEEDS OWNER REVIEW" in text
+
+
+def test_find_consumers_finds_real_callers_of_a_real_module():
+    hits = find_consumers(REPO_ROOT, "marketing_fact_authority.py")
+    assert "cmd_marketing.py" in hits
+
+
+def test_find_consumers_reports_no_matches_for_a_module_nothing_imports():
+    hits = find_consumers(REPO_ROOT, "totally_unreferenced_fixture_module_xyz.py")
+    assert hits == []
+
+
+def test_format_pr_summary_states_result_and_merge_block_status():
+    blocked_item = {
+        "path": "blocked_thing.py", "classification": "REVIEW_REQUIRED",
+        "reason": "new runtime source", "block_reason": "NO_POLICY_MATCH",
+    }
+    blocked = ReconcileResult(
+        outcome=OWNER_DECISION_REQUIRED, main_ref="origin/main", canonical_main_sha="a" * 40,
+        mechanical_updates=(), auto_maintenance_sources=(), decision_queue=(blocked_item,),
+        non_blocking_sources=(), revalidation_flags=(),
+    )
+    text = format_pr_summary(blocked, REPO_ROOT)
+    assert "OWNER_DECISION_REQUIRED" in text
+    assert "BLOCKED" in text
+    assert "blocked_thing.py" in text
+
+    clean = ReconcileResult(
+        outcome=CLEAN, main_ref="origin/main", canonical_main_sha="b" * 40,
+        mechanical_updates=(), auto_maintenance_sources=(), decision_queue=(),
+        non_blocking_sources=(), revalidation_flags=(),
+    )
+    clean_text = format_pr_summary(clean, REPO_ROOT)
+    assert "CLEAN" in clean_text
+    assert "not blocked" in clean_text
