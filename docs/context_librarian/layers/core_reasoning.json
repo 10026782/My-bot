@@ -1,63 +1,109 @@
 {
   "schema_version": "1.0",
   "layer_id": "core_reasoning",
-  "nodes": [{
-    "id": "layer.core_reasoning",
-    "name": "Core Reasoning / U1 / BUG-104",
-    "type": "layer",
-    "status": "shadow",
-    "authority_level": "runtime_main",
-    "source_of_truth": {
-      "is_authority": true,
-      "scope": "read-only lead reasoning projection and business-state interpretation",
-      "precedence": "current main code and executable tests override planning specifications"
-    },
-    "owner": "core_reasoning",
-    "code_paths": [
-      "core/leads_reasoning_projection.py",
-      "core/adapters/leads_adapter.py",
-      "core/adapters/decision_adapter.py",
-      "core/reasoning_engines.py",
-      "core/reasoning_entity.py",
-      "core/reasoning_ports.py",
-      "core/owner_attention.py",
-      "tma_api.py"
-    ],
-    "test_paths": [
-      "test_core_reasoning.py",
-      "test_bug104_leads_reasoning_projection.py",
-      "test_bug104_phase1_1_contract_hardening.py",
-      "test_bug104_phase2a1_current_state_policy.py",
-      "test_bug104_phase2a2_lead_wording.py",
-      "test_bug104_tma_lead_event_bridge.py",
-      "test_owner_attention.py"
-    ],
-    "canonical_docs": [
-      {"path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md", "role": "current closeout", "status": "active"},
-      {"path": "docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md", "role": "input canonicalization specification", "status": "planning_only"},
-      {"path": "docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md", "role": "state policy specification", "status": "planning_only"}
-    ],
-    "production_evidence": [
-      {"path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md", "observed_on": "2026-07-17", "scope": "operator-provided Render shadow excerpts; repository tests remain independently reproducible evidence", "status": "limited"}
-    ],
-    "feature_flags": [
-      {"name": "FEATURE_CORE_REASONING_LEADS_STATE", "default_state": "off", "documented_state": "off/shadow by environment; never infer on", "evidence_scope": "repository documentation, not a current environment read"}
-    ],
-    "valid_from": "2026-07-28",
-    "last_verified_commit": "2f5c577",
-    "confidence": 0.93,
-    "notes": [
-      "Read-only projection; must not own tool execution or writes.",
-      "Phase 2A.0 remains specification-only; Phase 2A.1/2A.2 code is merged but rollout is flag-gated.",
-      "Do not automatically load approval history for a Core Reasoning-only task.",
-      "tma_api.py is listed above as both the only live caller of this projection AND the write side (patch_lead(), _OUTCOME_STATUS_MAP) — this layer's own read-only scope does not make tma_api.py read-only; a 'wrong reasoning state' symptom can originate on either side and both must be opened, not just the read/normalization path.",
-      "core/adapters/decision_adapter.py is the current, live module for the Decision-domain reasoning entity; a module historically named decision_orchestrator.py no longer exists on main (its role was migrated here, see decision_adapter.py's own header comment) — do not search for that filename. This is also where the still-open SPEC ambiguity lives: PHASE_CLOSED (core/reasoning_entity.py) is reused for both Decision-cancellation and Lead administrative-closure (decision_adapter.py:148), which is a documented open question, not a coding error, per the 2026-07-28 N17 pilot Task 4 finding."
-    ],
-    "extensions": {"boss.layer_aliases": ["U1", "BUG-104", "layer-1"]}
-  }],
+  "nodes": [
+    {
+      "id": "layer.core_reasoning",
+      "name": "Core Reasoning / U1 / BUG-104",
+      "type": "layer",
+      "status": "shadow",
+      "authority_level": "runtime_main",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "read-only lead reasoning projection and business-state interpretation",
+        "precedence": "current main code and executable tests override planning specifications"
+      },
+      "owner": "core_reasoning",
+      "code_paths": [
+        "core/leads_reasoning_projection.py",
+        "core/adapters/leads_adapter.py",
+        "core/adapters/decision_adapter.py",
+        "core/reasoning_engines.py",
+        "core/reasoning_entity.py",
+        "core/reasoning_ports.py",
+        "core/owner_attention.py",
+        "tma_api.py"
+      ],
+      "test_paths": [
+        "test_core_reasoning.py",
+        "test_bug104_leads_reasoning_projection.py",
+        "test_bug104_phase1_1_contract_hardening.py",
+        "test_bug104_phase2a1_current_state_policy.py",
+        "test_bug104_phase2a2_lead_wording.py",
+        "test_bug104_tma_lead_event_bridge.py",
+        "test_owner_attention.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md",
+          "role": "current closeout",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md",
+          "role": "input canonicalization specification",
+          "status": "planning_only"
+        },
+        {
+          "path": "docs/architecture/bug-104/PHASE_2A1_CURRENT_STATE_POLICY_SPEC.md",
+          "role": "state policy specification",
+          "status": "planning_only"
+        }
+      ],
+      "production_evidence": [
+        {
+          "path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md",
+          "observed_on": "2026-07-17",
+          "scope": "operator-provided Render shadow excerpts; repository tests remain independently reproducible evidence",
+          "status": "limited"
+        }
+      ],
+      "feature_flags": [
+        {
+          "name": "FEATURE_CORE_REASONING_LEADS_STATE",
+          "default_state": "off",
+          "documented_state": "off/shadow by environment; never infer on",
+          "evidence_scope": "repository documentation, not a current environment read"
+        }
+      ],
+      "valid_from": "2026-07-28",
+      "last_verified_commit": "2f5c577",
+      "confidence": 0.93,
+      "notes": [
+        "Read-only projection; must not own tool execution or writes.",
+        "Phase 2A.0 remains specification-only; Phase 2A.1/2A.2 code is merged but rollout is flag-gated.",
+        "Do not automatically load approval history for a Core Reasoning-only task.",
+        "tma_api.py is listed above as both the only live caller of this projection AND the write side (patch_lead(), _OUTCOME_STATUS_MAP) — this layer's own read-only scope does not make tma_api.py read-only; a 'wrong reasoning state' symptom can originate on either side and both must be opened, not just the read/normalization path.",
+        "core/adapters/decision_adapter.py is the current, live module for the Decision-domain reasoning entity; a module historically named decision_orchestrator.py no longer exists on main (its role was migrated here, see decision_adapter.py's own header comment) — do not search for that filename. This is also where the still-open SPEC ambiguity lives: PHASE_CLOSED (core/reasoning_entity.py) is reused for both Decision-cancellation and Lead administrative-closure (decision_adapter.py:148), which is a documented open question, not a coding error, per the 2026-07-28 N17 pilot Task 4 finding."
+      ],
+      "extensions": {
+        "boss.layer_aliases": [
+          "U1",
+          "BUG-104",
+          "layer-1"
+        ]
+      },
+      "last_observed_commit": "84ab7bbd8284f595b453fb9c0e916235fb7e5e40"
+    }
+  ],
   "edges": [
-    {"from": "layer.core_reasoning", "to": "decision.cross_layer_authority", "type": "governed_by", "notes": "Cross-layer impact rules constrain authority changes."},
-    {"from": "layer.core_reasoning", "to": "layer.turn_coordinator", "type": "proposes_to", "notes": "Reasoning supplies business-state signals; it does not route or execute."},
-    {"from": "layer.core_reasoning", "to": "layer.tools", "type": "must_not_own", "notes": "Core Reasoning must never dispatch tools or writes."}
+    {
+      "from": "layer.core_reasoning",
+      "to": "decision.cross_layer_authority",
+      "type": "governed_by",
+      "notes": "Cross-layer impact rules constrain authority changes."
+    },
+    {
+      "from": "layer.core_reasoning",
+      "to": "layer.turn_coordinator",
+      "type": "proposes_to",
+      "notes": "Reasoning supplies business-state signals; it does not route or execute."
+    },
+    {
+      "from": "layer.core_reasoning",
+      "to": "layer.tools",
+      "type": "must_not_own",
+      "notes": "Core Reasoning must never dispatch tools or writes."
+    }
   ]
 }
