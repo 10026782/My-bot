@@ -330,7 +330,7 @@ def _approval_items(result: CollectorResult, checked_at: str) -> list[OwnerAtten
                 signal_key=f"approvals.pending.preview:{fragment}{suffix}",
                 domain="global",
                 category="approval",
-                severity="CRITICAL",
+                severity="WARNING",
                 title=action,
                 summary="החלטה actionable ממתינה לאישור או דחייה",
                 reason="הפריט סומן actionable על ידי נתיב האישורים הקנוני",

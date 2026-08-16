@@ -155,6 +155,7 @@ def test_approval_preview_is_bounded_actionable_and_has_no_record_id():
 
     previews = [item for item in result.pending_decisions if ".preview:" in item.signal_key]
     assert len(previews) == 2
+    assert all(item.severity == "WARNING" for item in previews)
     assert all("rec-secret" not in item.signal_key for item in previews)
     assert all(item.destination == "approvals" for item in previews)
 
