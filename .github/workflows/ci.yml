@@ -165,6 +165,9 @@ jobs:
       - name: Schema governance (warning only, never blocks)
         run: python tools/schema_governance.py || true
 
+      - name: Canonical Active Work Registry validation
+        run: python tools/dev_registry_validator.py
+
       - name: F52 gateway bypass audit (warning only, never blocks)
         run: python tools/audit_gateway_bypass.py || true
 
