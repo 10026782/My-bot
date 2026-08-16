@@ -120,12 +120,17 @@ def _overall_state(
     system: SystemStatus,
     recent_activity: UnsupportedSection,
 ) -> str:
+    attention_unavailable = attention.overall_state == "UNKNOWN"
+    development_unavailable = development.projection_state == "UNKNOWN"
+    if attention_unavailable and development_unavailable:
+        return "UNKNOWN"
     if any(item.owner_action_required and item.state == "ATTENTION" for item in attention.items):
         return "ATTENTION"
     if attention.overall_state == "ATTENTION":
         return "ATTENTION"
     if (
-        attention.overall_state in {"UNKNOWN", "STALE"}
+        attention_unavailable
+        or attention.overall_state == "STALE"
         or development.projection_state in {"PARTIAL", "UNKNOWN"}
         or business.state in {"STALE", "PARTIAL", "UNKNOWN"}
         or system.state in {"STALE", "PARTIAL", "UNKNOWN"}

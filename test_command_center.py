@@ -50,6 +50,10 @@ def _development(**overrides):
     return build_owner_development_status(text, checked_at=CHECKED_AT)
 
 
+def _unknown_development():
+    return build_owner_development_status("not a Registry", checked_at=CHECKED_AT)
+
+
 def test_valid_oc_b_and_dev_reg_compose_with_typed_boundaries():
     result = compose_command_center_status(_attention(), _development(), generated_at=CHECKED_AT)
 
@@ -59,6 +63,48 @@ def test_valid_oc_b_and_dev_reg_compose_with_typed_boundaries():
     assert result.business_status.state == "UNKNOWN"
     assert result.overall_state == "PARTIAL"
     assert result.as_dict()["development_status"]["current_focus"][0]["initiative_key"] == "EXAMPLE_INITIATIVE"
+
+
+def test_current_core_projections_plus_unsupported_sections_are_partial():
+    result = compose_command_center_status(_attention(), _development(), generated_at=CHECKED_AT)
+
+    assert result.overall_state == "PARTIAL"
+
+
+def test_unknown_attention_with_current_development_is_partial():
+    result = compose_command_center_status(
+        _attention(marketing=lambda: {"demands": [{}]}), _development(), generated_at=CHECKED_AT
+    )
+
+    assert result.attention.overall_state == "UNKNOWN"
+    assert result.development_status.projection_state == "CURRENT"
+    assert result.overall_state == "PARTIAL"
+
+
+def test_current_attention_with_unknown_development_is_partial():
+    result = compose_command_center_status(_attention(), _unknown_development(), generated_at=CHECKED_AT)
+
+    assert result.attention.overall_state == "OK"
+    assert result.development_status.projection_state == "UNKNOWN"
+    assert result.overall_state == "PARTIAL"
+
+
+def test_both_core_projections_unknown_make_unified_state_unknown():
+    result = compose_command_center_status(
+        _attention(marketing=lambda: {"demands": [{}]}), _unknown_development(), generated_at=CHECKED_AT
+    )
+
+    assert result.overall_state == "UNKNOWN"
+
+
+def test_attention_precedence_survives_unknown_development():
+    result = compose_command_center_status(
+        _attention(system_health=lambda: {"status": "emergency", "active_emergency": ["STOP_ALL"]}),
+        _unknown_development(),
+        generated_at=CHECKED_AT,
+    )
+
+    assert result.overall_state == "ATTENTION"
 
 
 def test_attention_requires_owner_action_and_emergency_is_critical():
