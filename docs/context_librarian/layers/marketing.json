@@ -10,19 +10,31 @@
       "authority_level": "runtime_main",
       "source_of_truth": {
         "is_authority": true,
-        "scope": "Marketing Demand intake, deterministic Creative Brief / Production Handoff composition, and the /marketing_new wizard",
-        "precedence": "cmd_marketing.py's wizard plus marketing_brief_composer.py's pure composition functions are current on main; CLAUDE.md and ROADMAP.md's F23 section are the narrative record"
+        "scope": "Marketing Demand intake, deterministic Creative Brief / Production Handoff composition, the /marketing_new wizard, and (BUG-164 PR1/PR2) the bounded creative-proposal authority boundary gating AI-generated creative-idea text before it is persisted to Marketing Creatives",
+        "precedence": "cmd_marketing.py's wizard plus marketing_brief_composer.py's pure composition functions are current on main; for creative_ideas specifically, marketing_fact_authority.py's ProtectedFact tiers + marketing_creative_templates.py's closed template registry + marketing_creative_renderer.py's authority_filter_and_render() are the sole authority boundary between AI output and save_creative_ideas() -- cmd_marketing.py's own prompt text is advisory only and is never itself the authority boundary; CLAUDE.md and ROADMAP.md's F23 section are the narrative record"
       },
       "owner": "marketing",
       "code_paths": [
         "cmd_marketing.py",
         "marketing_brief_composer.py",
+        "marketing_creative_renderer.py",
+        "marketing_creative_templates.py",
         "marketing_domain_profiles.py",
+        "marketing_fact_authority.py",
         "marketing_gateway.py",
         "marketing_orchestrator.py",
         "tma-frontend/src/components/MarketingStatus.tsx"
       ],
-      "test_paths": [],
+      "test_paths": [
+        "test_bug164_pr2_creative_cutover.py",
+        "test_cmd_marketing_status.py",
+        "test_marketing_brief_composer.py",
+        "test_marketing_creative_renderer.py",
+        "test_marketing_creative_templates.py",
+        "test_marketing_fact_authority.py",
+        "test_marketing_orchestrator.py",
+        "test_tma_marketing_status.py"
+      ],
       "canonical_docs": [
         {
           "path": "CLAUDE.md",
@@ -45,14 +57,15 @@
         }
       ],
       "valid_from": "2026-08-12",
-      "last_verified_commit": "6ecdaa98d778858e32f87fc8f055d000aa06f771",
+      "last_verified_commit": "e9d1ca82f5f0101ade3785216e8efc2df8fae3dc",
       "confidence": 0.7,
       "notes": [
         "New layer, registered as part of a Context Librarian catalog freshness fix (backend-ci was failing because these 4 files existed on main unregistered). Not yet exercised by a real consumption pilot the way cross_layer_architecture was — confidence is lower than the other 6 layers for that reason, not because the classification itself is in doubt.",
         "cmd_marketing.py is a direct command handler (cmd_update.py/cmd_decision.py style) — not a dispatcher tool and not routed through ActionGateway/ActionContract; it does not participate in the approvals layer's lifecycle.",
         "marketing_brief_composer.py's compose_brief()/compose_production_handoff() are pure, deterministic, no-I/O functions — no AI call and no Airtable access happen in that module; callers (cmd_marketing.py) fetch data and call the AI/Airtable layer themselves.",
         "Domain vocabulary drift is intentional: Marketing Demand's Demand Type field (recruitment/furniture_import/fiber_equipment/real_estate_listing/service) is a Marketing-owned enum selecting a DomainProfile, separate from identity.Domain's canonical business-domain values used by turn_coordinator/core_reasoning — see marketing_domain_profiles.py's own module docstring.",
-        "Registration-only pass (post-#611 catalog freshness correction): marketing_orchestrator.py (F23 M2 pull-only Marketing Demand status/next-step composition, mirrors decision_orchestrator.py's contract — no writes, no messaging, no new I/O) and tma-frontend/src/components/MarketingStatus.tsx (wired into App.tsx/api.ts/types.ts, the live TMA surface for the same M2 status data) were added to code_paths — both are real runtime sources for this layer that predated registration. domain_utils.py, also consumed by this layer via marketing_gateway.py, is intentionally NOT added here — it is cross-layer canonical vocabulary support, not owned by marketing; see decision.business_domain_vocabulary in canonical_boundaries.json."
+        "Registration-only pass (post-#611 catalog freshness correction): marketing_orchestrator.py (F23 M2 pull-only Marketing Demand status/next-step composition, mirrors decision_orchestrator.py's contract — no writes, no messaging, no new I/O) and tma-frontend/src/components/MarketingStatus.tsx (wired into App.tsx/api.ts/types.ts, the live TMA surface for the same M2 status data) were added to code_paths — both are real runtime sources for this layer that predated registration. domain_utils.py, also consumed by this layer via marketing_gateway.py, is intentionally NOT added here — it is cross-layer canonical vocabulary support, not owned by marketing; see decision.business_domain_vocabulary in canonical_boundaries.json.",
+        "OWNER DECISION (PR #651, BUG-164 owner-decision-queue resolution): marketing_fact_authority.py (STOP-classified by the Context Librarian -- 'unregistered source may change authority'), marketing_creative_templates.py, and marketing_creative_renderer.py registered under this existing layer -- owner explicitly confirmed no new layer is created. These three, added by PR #623 (BUG-164 PR1, merged) and wired live by PR #645 (BUG-164 PR2, merged, commit e9d1ca8), are a genuinely new authority boundary within this layer: marketing_fact_authority.py defines ProtectedFact/FactAuthority (CANONICAL/DETERMINISTIC/CANDIDATE) tiers over Marketing Demand fields; marketing_creative_templates.py is a closed template registry (allowed_combinations() per demand_type, Template Semantic Contract); marketing_creative_renderer.py's authority_filter_and_render() is the sole function that may turn an AI-proposed CreativeProposal into persisted Creative-idea text -- cmd_marketing.py's _create_demand_and_generate_ideas() calls all three but originates none of the authority logic itself, matching this layer's existing precedent (cmd_marketing.py as thin caller, not authority owner). This does not touch tool_registry.py or ActionGateway -- it governs marketing-copy text content only, never tool dispatch/execution eligibility. last_verified_commit set to e9d1ca8 (PR #645's merge commit, where this authority boundary went live)."
       ],
       "extensions": {
         "boss.layer_aliases": [
