@@ -17,7 +17,7 @@ import pytest
 
 from tools.context_librarian import policy_validators
 from tools.context_librarian import reconcile as reconcile_module
-from tools.context_librarian.librarian import ContextLibrarianError, classify_new_sources, load_catalog
+from tools.context_librarian.librarian import Catalog, ContextLibrarianError, classify_new_sources, load_catalog
 from tools.context_librarian.policy_registry import Policy, load_policy_registry, match_policy
 from tools.context_librarian.reconcile import (
     AUTO_MAINTENANCE_REQUIRED,
@@ -1252,6 +1252,71 @@ def test_reconcile_pr_and_reconcile_route_identical_new_sources_identically(cata
     assert post_merge_result.outcome == OWNER_DECISION_REQUIRED == pr_result.outcome
 
 
+def test_scan_pr_new_sources_uses_merge_base_not_mutable_base_tip(tmp_path):
+    """Real, non-monkeypatched proof of the two-dot -> three-dot fix: builds
+    an actual small git repo where a file present at the fork point is
+    independently deleted on the base branch *after* the PR branch forked.
+    A two-dot diff (base_sha..head_sha, comparing base's CURRENT tip against
+    head) would wrongly call that file "added" on the PR side (present on
+    head, absent from base's current tree) even though the PR branch never
+    touched it. The three-dot range (base_sha...head_sha,
+    merge-base(base,head)..head) must not."""
+    import subprocess as sp
+
+    def run(*args: str) -> None:
+        sp.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    def rev_parse(ref: str) -> str:
+        return sp.run(
+            ["git", "rev-parse", ref], cwd=tmp_path, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    run("init", "-q")
+    run("config", "user.email", "test@test.com")
+    run("config", "user.name", "test")
+    (tmp_path / "old_shared_file.py").write_text("x = 1\n")
+    run("add", ".")
+    run("commit", "-q", "-m", "fork point: old_shared_file.py exists")
+    fork_point = rev_parse("HEAD")
+    base_branch = sp.run(
+        ["git", "branch", "--show-current"], cwd=tmp_path, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    run("checkout", "-q", "-b", "pr-branch")
+    (tmp_path / "pr_new_file.py").write_text("y = 2\n")
+    run("add", ".")
+    run("commit", "-q", "-m", "PR adds pr_new_file.py")
+    head_sha = rev_parse("HEAD")
+
+    run("checkout", "-q", base_branch)
+    (tmp_path / "old_shared_file.py").unlink()
+    run("add", ".")
+    run("commit", "-q", "-m", "base independently deletes old_shared_file.py")
+    base_tip = rev_parse("HEAD")
+
+    assert base_tip != fork_point, "test setup sanity: base must have moved past the fork point"
+
+    catalog = Catalog(
+        repo_root=tmp_path, catalog_root=tmp_path, node_schema={}, edge_schema={},
+        nodes={}, edges=(), profiles={}, layer_nodes={},
+    )
+
+    # The bug this reproduces: a two-dot diff against base's CURRENT tip.
+    two_dot_added = reconcile_module._run_git(
+        tmp_path, ["diff", "--diff-filter=A", "--name-only", base_tip, head_sha]
+    )[1].splitlines()
+    assert "old_shared_file.py" in two_dot_added, (
+        "test setup sanity: two-dot diff must reproduce the false positive "
+        "this fix guards against"
+    )
+
+    # The fix: _scan_pr_new_sources() itself, using the three-dot range.
+    added_sources = reconcile_module._scan_pr_new_sources(catalog, base_tip, head_sha)
+    added_paths = {item["path"] for item in added_sources}
+    assert "pr_new_file.py" in added_paths
+    assert "old_shared_file.py" not in added_paths
+
+
 def test_reconcile_pr_is_read_only_never_writes_reconciliation_state():
     """reconcile_pr_repo() against the real repo with base==head (a no-op
     diff, short-circuiting _scan_pr_new_sources()) must leave
@@ -1334,8 +1399,13 @@ def test_find_consumers_finds_real_callers_of_a_real_module():
 
 
 def test_find_consumers_reports_no_matches_for_a_module_nothing_imports():
+    # find_consumers() searches every tracked file, not just *.py (fixed
+    # per CodeRabbit review on PR #653 -- a *.py-only search would miss a
+    # TS/JS/doc consumer). This test file's own literal string argument
+    # above is therefore an expected self-match; assert no *other* file
+    # references this nonexistent module.
     hits = find_consumers(REPO_ROOT, "totally_unreferenced_fixture_module_xyz.py")
-    assert hits == []
+    assert hits == ["test_reconcile.py"]
 
 
 def test_format_pr_summary_states_result_and_merge_block_status():
@@ -1361,3 +1431,30 @@ def test_format_pr_summary_states_result_and_merge_block_status():
     clean_text = format_pr_summary(clean, REPO_ROOT)
     assert "CLEAN" in clean_text
     assert "not blocked" in clean_text
+
+
+def test_format_pr_summary_renders_revalidation_flags_when_decision_queue_is_empty():
+    """reconcile() forces OWNER_DECISION_REQUIRED whenever revalidation_flags
+    is non-empty, even with an empty decision_queue (see _scan_auto_
+    registrations()'s STALE_REVALIDATION_REQUIRED path). format_pr_summary()
+    must never render 'BLOCKED' with nothing underneath explaining why --
+    fixed per CodeRabbit review on PR #653."""
+    flag = {
+        "path": "some/stale_registered_thing.py",
+        "status": "STALE_REVALIDATION_REQUIRED",
+        "previous_policy": "OFFLINE_RESEARCH_TOOL",
+        "failed_predicate": "structural/content predicate failed",
+        "changed_commit": "c" * 40,
+        "current_target": "decision.offline_research_support_tool",
+    }
+    result = ReconcileResult(
+        outcome=OWNER_DECISION_REQUIRED, main_ref="origin/main", canonical_main_sha="d" * 40,
+        mechanical_updates=(), auto_maintenance_sources=(), decision_queue=(),
+        non_blocking_sources=(), revalidation_flags=(flag,),
+    )
+    text = format_pr_summary(result, REPO_ROOT)
+    assert "BLOCKED" in text
+    assert "some/stale_registered_thing.py" in text
+    assert "OFFLINE_RESEARCH_TOOL" in text
+    assert "Required owner action" in text
+    assert "Nothing in this PR's own diff requires an owner decision." not in text

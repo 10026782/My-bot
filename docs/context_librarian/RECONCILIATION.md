@@ -391,8 +391,9 @@ same inputs shape — the only thing that differs between the two callers is
   ever diff between two points *within* `main`'s own history) structurally
   cannot see them before merge — this is exactly why a separate scan
   function is needed, even though the classification engine underneath it
-  is identical. `test_reconcile_pr_and_reconcile_route_identical_new_sources_
-  identically` in `test_reconcile.py` is the literal proof: the same
+  is identical.
+  `test_reconcile_pr_and_reconcile_route_identical_new_sources_identically`
+  in `test_reconcile.py` is the literal proof: the same
   `new_sources` list fed through both paths produces byte-identical
   `decision_queue`/`auto_maintenance_sources`/`non_blocking_sources`.
 
@@ -453,8 +454,8 @@ owner answer` (exactly: `APPROVE EXISTING NODE: <id>` /
 `REJECT: <reason>`). `Recommended decision` is driven entirely by the
 `block_reason` code `_route_new_sources()` now attaches to every
 `decision_queue` item (`NO_POLICY_MATCH`, `AMBIGUOUS_POLICY_MATCH`,
-`STOP_NEVER_AUTO`, `TARGET_NODE_MISSING`, `POLICY_REQUIRES_HUMAN_
-CONFIRMATION`, `PREDICATE_FAILED`/`PREDICATE_UNPROVABLE`,
+`STOP_NEVER_AUTO`, `TARGET_NODE_MISSING`,
+`POLICY_REQUIRES_HUMAN_CONFIRMATION`, `PREDICATE_FAILED`/`PREDICATE_UNPROVABLE`,
 `TARGET_FIELD_INVALID`) — a deterministic mapping, not a semantic read of
 the file's content. **A `STOP` item's recommendation is always `NEEDS
 OWNER REVIEW`, even when a policy happens to match it** — mirroring

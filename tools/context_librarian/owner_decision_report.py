@@ -17,6 +17,7 @@ evidence, but must never resolve OWNER_DECISION_REQUIRED itself.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -39,27 +40,36 @@ def _run_git(repo_root: Path, args: list[str]) -> tuple[int, str]:
 
 
 def find_consumers(repo_root: Path, path: str, *, limit: int = _MAX_CONSUMERS_SHOWN) -> list[str]:
-    """Best-effort, mechanical caller/consumer scan -- a plain `git grep` for
-    the module's importable name (for .py sources) or its basename
-    (everything else) across tracked files, excluding the source itself.
-    This is NOT proof of usage or non-usage (grep can both over- and
+    """Best-effort, mechanical caller/consumer scan -- a plain `git grep`
+    across every tracked file (never restricted to `*.py`, so a TypeScript/
+    JavaScript/doc consumer of a Python source, or any consumer of a
+    non-Python source, is still found), excluding the source itself. This
+    is NOT proof of usage or non-usage (grep can both over- and
     under-match); it is deterministic, reproducible evidence for a human to
     weigh, matching every other mechanical signal this module produces.
+
+    For a `.py` source, matches both its bare stem (`import stem`, `from
+    stem import ...`, `from .stem import ...`) and its full dotted package
+    path derived from the repo-relative path (`import a.b.stem`, `from
+    a.b.stem import ...`, and `a.b.stem.` attribute-access usage) -- a
+    bare-stem-only search misses every package-qualified import, which is
+    how most of this repo's own `tools/*` submodules are actually imported.
     """
     posix = PurePosixPath(path)
     if posix.suffix == ".py":
         stem = posix.stem
-        pattern = rf"(^|[^A-Za-z0-9_])(import {stem}|from {stem} import|from \.{stem} import)"
-        code, out = _run_git(
-            repo_root,
-            ["grep", "-l", "-E", "--", pattern, "*.py"],
+        dotted = posix.with_suffix("").as_posix().replace("/", ".")
+        names = sorted({re.escape(stem), re.escape(dotted)}, key=len, reverse=True)
+        alternatives = "|".join(names)
+        pattern = (
+            rf"(^|[^A-Za-z0-9_.])"
+            rf"(import ({alternatives})\b|from ({alternatives}) import|"
+            rf"from \.{re.escape(stem)} import|{re.escape(dotted)}\.)"
         )
+        code, out = _run_git(repo_root, ["grep", "-l", "-E", "--", pattern])
     else:
         needle = posix.name
-        code, out = _run_git(
-            repo_root,
-            ["grep", "-l", "-F", "--", needle, "*.py"],
-        )
+        code, out = _run_git(repo_root, ["grep", "-l", "-F", "--", needle])
     if code not in (0, 1):  # 1 == no matches, still a clean run
         return []
     hits = [line.strip() for line in out.splitlines() if line.strip() and line.strip() != path]
@@ -275,6 +285,25 @@ def format_pr_summary(result: ReconcileResult, repo_root: Path) -> str:
             lines.append(f"- `{item['path']}` -> policy `{item['policy_id']}`, target `{item['eligible_target']}`")
         lines.append("")
 
+    if result.revalidation_flags:
+        # reconcile() forces OWNER_DECISION_REQUIRED whenever revalidation_flags
+        # is non-empty, even with an empty decision_queue -- an already-
+        # registered path whose content/policy drifted and no longer proves
+        # its previously-approved contract. Rendered here so "BLOCKED" is
+        # never shown without a visible reason and required action.
+        lines.append(f"### {len(result.revalidation_flags)} previously-registered source(s) need revalidation")
+        lines.append("")
+        for flag in result.revalidation_flags:
+            lines.append(
+                f"- `{flag['path']}` ({flag.get('status', 'STALE_REVALIDATION_REQUIRED')}) -- "
+                f"previously approved under policy `{flag.get('previous_policy')}`, now: "
+                f"{flag.get('failed_predicate')}. Registered under `{flag.get('current_target')}`. "
+                "**Required owner action:** confirm the source still belongs to its previously-"
+                "approved class (fix it back into compliance, or bump/relax the policy in the "
+                "same change), or REJECT and manually remove its registration."
+            )
+        lines.append("")
+
     if result.non_blocking_sources:
         lines.append(
             f"<details><summary>{len(result.non_blocking_sources)} non-blocking new source(s) "
@@ -284,7 +313,7 @@ def format_pr_summary(result: ReconcileResult, repo_root: Path) -> str:
         )
         lines.append("")
 
-    if not blocked and not result.decision_queue:
+    if not blocked and not result.decision_queue and not result.revalidation_flags:
         lines.append("Nothing in this PR's own diff requires an owner decision.")
 
     lines.append("")

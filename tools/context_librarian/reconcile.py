@@ -449,11 +449,23 @@ def reconcile_repo(repo_root: Path, *, main_ref: str = "origin/main") -> Reconci
 
 
 def _scan_pr_new_sources(catalog: Catalog, base_sha: str, head_sha: str) -> list[dict[str, str]]:
-    """Files the PR's own diff (base_sha..head_sha) newly adds, classified via
-    the identical classify_new_sources() the post-merge path uses (see
+    """Files the PR's own diff newly adds, classified via the identical
+    classify_new_sources() the post-merge path uses (see
     reconcile()/_scan_new_sources() above -- same function, not a copy).
 
-    Deliberately anchored on an explicit base..head diff, never on
+    Uses git's three-dot range (base_sha...head_sha), i.e. a diff against
+    merge-base(base_sha, head_sha), never a plain two-dot content diff.
+    base_ref is typically the mutable "origin/main", which keeps moving
+    while a PR is open; a two-dot diff against its *current* tip can
+    misclassify a file the PR never touched as "added" (e.g. an old file
+    still present on the PR branch that main independently deleted after
+    the PR's fork point -- absent from current main's tree, present on the
+    PR branch, --diff-filter=A wrongly calls that "added"). The three-dot
+    range is immune to this: it always diffs from the actual fork point,
+    regardless of how far base_ref has since moved -- the same semantic
+    GitHub's own PR "Files changed" view and merge computation use.
+
+    Deliberately anchored on an explicit diff, never on
     last_source_scan_commit/last_verified_commit: a PR's own new files don't
     exist anywhere in main's history yet, so the post-merge anchors (which
     only ever diff between two points *within* main's own history) cannot
@@ -462,9 +474,11 @@ def _scan_pr_new_sources(catalog: Catalog, base_sha: str, head_sha: str) -> list
     """
     if base_sha == head_sha:
         return []
-    code, out = _run_git(catalog.repo_root, ["diff", "--diff-filter=A", "--name-only", base_sha, head_sha])
+    code, out = _run_git(
+        catalog.repo_root, ["diff", "--diff-filter=A", "--name-only", f"{base_sha}...{head_sha}"]
+    )
     if code != 0:
-        raise ContextLibrarianError(f"cannot scan PR-added sources between {base_sha}..{head_sha}")
+        raise ContextLibrarianError(f"cannot scan PR-added sources between {base_sha}...{head_sha}")
     added = [line.strip() for line in out.splitlines() if line.strip()]
     return classify_new_sources(catalog, added)
 
