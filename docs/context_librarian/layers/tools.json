@@ -46,7 +46,7 @@
         "catalog.reconciles_evidence": false,
         "catalog.business_write_ownership": false
       },
-      "last_observed_commit": "f3f3eb536653274eacb2a6c994ec4632cd87694c"
+      "last_observed_commit": "d2cd05f5f0f9aebb70b43b075476d885121ebf06"
     },
     {
       "id": "component.dev_registry_reconcile",
@@ -135,7 +135,7 @@
         "catalog.writes_registry": false,
         "catalog.reconciles_evidence": false
       },
-      "last_observed_commit": "b2125b9f917d71fb8f29252d794d717ec36b0c1b"
+      "last_observed_commit": "d2cd05f5f0f9aebb70b43b075476d885121ebf06"
     },
     {
       "id": "layer.tools",
