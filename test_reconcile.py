@@ -310,6 +310,95 @@ def test_policy_approved_new_source_registers_and_reconciles_clean(catalog, poli
     assert second.outcome == CLEAN
 
 
+def test_new_registration_node_gets_observed_commit_stamped_even_when_another_node_also_drifts(
+    catalog, policies, monkeypatch, tmp_path
+):
+    """Regression for the production incident where the post-merge
+    "Context Librarian Reconciliation" workflow stayed red on every single
+    push to main: apply_auto_maintenance() used to compute drifted_node_ids
+    (the set of nodes to stamp last_observed_commit for) from
+    result.mechanical_updates BEFORE performing new-source registration. A
+    node receiving its first-ever registration this run was therefore never
+    included in that stamp -- unless drifted_node_ids happened to be empty,
+    in which case the writer's None-means-"stamp every node" fallback
+    accidentally covered it too, masking the bug in
+    test_policy_approved_new_source_registers_and_reconciles_clean above
+    (whose _mechanical_drift() mock always returns []).
+
+    In production, OTHER real nodes genuinely had mechanical drift in the
+    same run, so drifted_node_ids was a concrete non-None list that did not
+    include the newly-registered node -- and the very next reconcile() (the
+    CLI's own in-process post-apply verification, and every subsequent CI
+    run thereafter, since last_source_scan_commit had already advanced past
+    the file) kept finding "drift" for it forever, because its
+    last_observed_commit baseline was never advanced. This test reproduces
+    that exact combination: a real drifted node AND a real new registration
+    in the same apply_auto_maintenance() call."""
+    fixture_path = "scripts/research_crawler_poc/reconcile_test_fixture.py"
+    assert fixture_path not in catalog.nodes["decision.offline_research_support_tool"]["code_paths"]
+    new_sources = classify_new_sources(catalog, [fixture_path])
+
+    isolated = _isolated_catalog(monkeypatch, tmp_path)
+    main_sha = "d4e5f6070800000000000000000000000000000"
+    other_node_id = next(
+        n["id"]
+        for n in isolated.nodes.values()
+        if n["id"] != "decision.offline_research_support_tool" and n["code_paths"]
+    )
+    other_node_changed_path = isolated.nodes[other_node_id]["code_paths"][0]
+
+    # Fake only the innermost git-shelling seam, not _mechanical_drift
+    # itself -- this keeps the REAL per-node baseline/tracked-paths loop
+    # running (for every node in the catalog, both reconcile() calls),
+    # exactly like the CLI's real in-process post-apply verification does,
+    # without ever needing a real git commit for the fake main_sha: any
+    # node already stamped at main_sha hits base==target and never reaches
+    # this fake at all.
+    def fake_changed_paths(_repo_root, base, target):
+        if base == target:
+            return set()
+        return {other_node_changed_path}
+
+    monkeypatch.setattr(reconcile_module, "_resolve_main_sha", lambda *_a, **_k: main_sha)
+    monkeypatch.setattr(reconcile_module, "_changed_paths_between", fake_changed_paths)
+    monkeypatch.setattr(reconcile_module, "_scan_new_sources", lambda *_a, **_k: new_sources)
+    monkeypatch.setattr(reconcile_module, "_current_branch_and_commit", lambda _root: ("main", main_sha))
+    monkeypatch.setattr(reconcile_module, "_working_tree_is_clean", lambda _root: True)
+
+    first = reconcile(isolated, policies, main_ref="origin/main")
+    assert first.outcome == AUTO_MAINTENANCE_REQUIRED
+    drifted_ids = [u["node_id"] for u in first.mechanical_updates]
+    # drifted_node_ids is a concrete, non-empty list that does NOT include
+    # the about-to-be-registered node -- the exact condition that used to
+    # defeat the writer's None-means-everyone fallback (some other node's
+    # tracked globs incidentally also matching the fake changed path is
+    # fine and realistic; what matters is the registration target is absent).
+    assert other_node_id in drifted_ids
+    assert "decision.offline_research_support_tool" not in drifted_ids
+    assert len(first.auto_maintenance_sources) == 1
+
+    applied = apply_auto_maintenance(isolated, policies, first)
+    assert other_node_id in applied["stamped_nodes"]
+    assert "decision.offline_research_support_tool" in applied["stamped_nodes"], (
+        "the newly-registered node's last_observed_commit must be stamped in "
+        "the same apply, or it re-enters mechanical_updates on the very next "
+        "reconcile() forever"
+    )
+
+    reloaded = load_catalog(REPO_ROOT)
+    assert reloaded.nodes["decision.offline_research_support_tool"]["last_observed_commit"] == main_sha
+    assert fixture_path in reloaded.nodes["decision.offline_research_support_tool"]["code_paths"]
+
+    # _mechanical_drift itself was never mocked -- only its git-shelling
+    # seam -- so this post-apply verification exercises the real per-node
+    # baseline loop for every node in the catalog, exactly like the CLI's
+    # in-process post-apply verification. Both stamped nodes now have
+    # last_observed_commit == main_sha, so this must come back CLEAN.
+    monkeypatch.setattr(reconcile_module, "_scan_new_sources", lambda *_a, **_k: [])
+    second = reconcile(reloaded, policies, main_ref="origin/main")
+    assert second.outcome == CLEAN
+
+
 # --- C: unknown runtime source -> OWNER_DECISION_REQUIRED; apply-auto refuses ---
 
 
