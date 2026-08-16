@@ -4,6 +4,32 @@ Status: **planning only**
 Audit baseline: local `origin/main` at `c97d675b87cde8f2745929ed35fb16be43b8aa3d`
 Scope: repository evidence only; no production UI, backend, API, schema, routing, navigation, Airtable, runtime, or business-logic changes.
 
+## Plan Status (ops/project-md-completion audit, 16/08/2026)
+
+This block was added by the recurring MD-completion routine (`ops/project-md-completion`), grounded in current `origin/main` evidence. It does not change this document's original content or scope.
+
+**Status:** COMPLETE, as a planning artifact. This document's own scope — a docs-only audit and implementation-sequence proposal — is finished and merged.
+
+**Completed:**
+- Repository evidence audit (§1–§10) and OC-1..OC-4 implementation sequence proposal (§11).
+- Merged to `main` via PR #652 (`codex/oc-0-command-center-audit`), merge commit `815a5cd`.
+
+**Verified:**
+- `git log origin/main` confirms `815a5cd` and `ff0427d` ("OC-0: document Command Center audit and implementation plan") are ancestors of the current `main` tip (`f8ab112`).
+- GitHub Actions on merge commit `815a5cd`: `completed` / `success`.
+- Not applicable: this document changes no runtime code, so there is no production/staging behavior to verify.
+
+**Next Action:** None against this document directly. The initiative continued past this document's own proposed OC-1 into a different next step — see `docs/ux/OC_CANONICAL_DATA_SOURCE_AND_ATTENTION_PLAN.md` (OC-A) for the current phase of the same initiative and its Plan Status block for the latest state.
+
+**Depends On:** Nothing outstanding.
+
+**Blocked By:** Nothing.
+
+**Owner Decision Required:** None outstanding for this document by itself. Note: this document's own stop condition ("Owner review is the stop condition. OC-1 must not begin until the owner accepts...") was not followed literally — the initiative's next step in practice was OC-A (a second audit/architecture document), not OC-1 implementation, and OC-B collector code was merged shortly after that. See the Owner Decision Required section of OC-A's Plan Status block for the evidence and the specific open question.
+
+**Evidence:**
+- PR #652 — `https://github.com/10026782/My-bot/pull/652` (GitHub PR API currently reports this PR as `state: closed`, `merged: false`, which conflicts with `815a5cd` being a `Merge pull request #652` commit present in `origin/main` ancestry; treated here as a GitHub tracking/API discrepancy, not as evidence the change is absent from `main` — see OC-A's Plan Status for the consolidated note covering PRs #652/#654/#657).
+
 > **Evidence labels**
 >
 > - **EXISTING** — observed in the checked-in implementation.

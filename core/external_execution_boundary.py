@@ -29,7 +29,7 @@ class SubmitResult:
 
 @dataclass(frozen=True)
 class PollResult:
-    status: str  # completed | failed | outcome_unknown
+    status: str  # submitted | completed | failed | outcome_unknown
     result_ref: str = ""
     evidence: dict | None = None
     failure_code: str = ""
@@ -171,11 +171,18 @@ class ExternalExecutionBoundary:
 def _bounded_evidence(evidence: dict | None) -> dict:
     if not isinstance(evidence, dict):
         return {}
-    allowed = {"provider_job_id", "provider_status", "submitted_at", "completed_at", "result_checksum", "result_ref", "adapter_name", "checked_at"}
+    allowed = {"provider_job_id", "provider_status", "submitted_at", "completed_at", "result_checksum", "result_ref", "adapter_name", "checked_at", "script_sha256", "mime_type", "size"}
     return {str(k): str(v)[:200] for k, v in evidence.items() if k in allowed}
 
 
-_DEFAULT_BOUNDARY = ExternalExecutionBoundary()
+def _default_adapter():
+    if os.environ.get("MPT_RUNTIME_ROOT"):
+        from core.moneyprinterturbo_adapter import MoneyPrinterTurboAdapter
+        return MoneyPrinterTurboAdapter()
+    return UnconfiguredExternalAdapter()
+
+
+_DEFAULT_BOUNDARY = ExternalExecutionBoundary(adapter=_default_adapter())
 
 
 def get_default_boundary() -> ExternalExecutionBoundary:

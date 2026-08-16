@@ -28,7 +28,7 @@
 - **Root Cause:** field names בקוד לא תאמו ל-live Airtable
 - **סטטוס:** Won't Fix — אומת שהקוד כבר נכון
 
-### BUG-002 — /api/game/today shared endpoint
+### BUG-002 — /api/game/today shared endpoint — ✅ CLOSED / RUNTIME VERIFIED (סטטוס עודכן 16/08/2026)
 - **דווח:** 17/06/2026
 - **Severity:** High — שינוי אחד שובר שני מסכים
 - **מסך / מודול:** `tma_api.py` — `GET /api/game/today`, נצרך גם ע"י `BossCheckin.tsx` וגם ע"י `GameScreen.tsx`
@@ -36,43 +36,47 @@
 - **תוקן ב-commit:** `d3243ef` ("fix(TMA): remove owner filter from game today") ואז `1876842` ("fix(TMA): repair game today task filtering") — תיקון בשני שלבים: הראשון הוציא שגיאה, השני תיקן את הסינון בפועל. בהמשך אוחד ל-helper משותף `_get_active_world_dict()` (commit `a462633`, ראו docstring: "Shared by game_status / game_today / game_checkin so World-lookup logic lives in exactly one place — BOSS_Refactor_Plan.md Stage 0 #2").
 - **תוקן ב-branch:** `claude/meta-whatsapp-phase-1-q6pp3e` (לפי תבנית branch naming של שאר commits מאותו טווח תאריכים — לא אומת ישירות מ-`git branch --contains`)
 - **Merged:** כן — שלושת ה-commits מופיעים ב-`origin/main`
-- **Deployed:** לא ידוע — דרוש בדיקה ידנית (Render)
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אין — לא בוצעה בדיקה ידנית מתועדת בשני המסכים בפרודקשן
-- **סטטוס:** Fixed — ממתין ל-Verify
+- **Deployed:** כן (ראו ראיית runtime למטה)
+- **עדכון (16/08/2026) — Owner Truth-Reset, אימות runtime בפועל:** ה-Daily check-in flow נבדק והשתמר אחרי reload; זרימת game/TMA הנוכחית דווחה כעובדת באותו סשן. הפרדת המסכים ההיסטורית (BossCheckin מול GameScreen) אינה עילה לפתוח מחדש את הבאג ההיסטורי הזה — היכולות הבסיסיות (Daily_Checkin persistence, task state/completion/XP/API contract) מאומתות. ראו גם BUG-004 למטה לראיית Airtable מפורשת מאותו סשן.
+- **Verified בפרודקשן:** כן — 16/08/2026 (owner verification session, לא reproduction אוטומטי)
+- **Verification ראיה:** בדיקה ידנית חיה של הבעלים ב-TMA (production) — persist אחרי close/reopen/refresh
+- **סטטוס:** ✅ CLOSED / RUNTIME VERIFIED
 
-### BUG-003 — Multiple Active Worlds no constraint
+### BUG-003 — Multiple Active Worlds no constraint — 🟡 PARTIAL / DEFERRED (לא סגור, אומת מחדש 16/08/2026)
 - **דווח:** 17/06/2026
 - **Severity:** Medium
 - **Root Cause:** אין hard constraint ב-Airtable שמבטיח רשומת World יחידה עם `Status=Active`; אם שתי רשומות מסומנות Active, `game_today()` (ב-`max_records=1` הישן) היה מחזיר תוצאה לא צפויה לפי סדר ה-API.
 - **תוקן ב-commit:** `a462633` ("feat(TMA): Daily_Checkin write-through for BossCheckin (Stage 0 #2-#4)") — הוסיף את `_get_active_world_dict()` עם הגנה לוגית: אם יותר מ-World אחד מסומן Active, נרשם לוג אזהרה והNumber הנמוך ביותר נבחר באופן דטרמיניסטי (`tma_api.py:2253-2272`, Stage 0 #3 בתיעוד הפנימי). אין constraint אמיתי ב-Airtable עצמו — ההגנה היא קוד בלבד.
 - **Merged:** כן
-- **Deployed:** לא ידוע — דרוש בדיקה ידנית
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אין
-- **סטטוס:** Fixed — ממתין ל-Verify (constraint עצמו ברמת Airtable עדיין לא קיים — ראו AI_CONTEXT.md §8 OPEN RISKS)
+- **Deployed:** כן (ה-guard פעיל)
+- **עדכון (16/08/2026) — Owner Truth-Reset, אימות שהאינווריאנט עדיין מופר בפועל:** בבסיס `app4bcgoX7t0HUVnm`, טבלת Worlds (`tblXa6Mbh0EPMBbZo`), נמצאו **שתי** רשומות `Active` בו-זמנית: `recLHbSMuRFJ7gKvA` ("World 2 — Followup Machine", Number `2`) ו-`receizYuUpFEFgIfw` ("F52 — Architecture 2.0", ללא Number מוצג). כלומר האינווריאנט "בדיוק World אחד Active" **עדיין מופר בפועל** ב-live data — ה-guard הדטרמיניסטי (`_get_active_world_dict()`) מטפל בכך ברמת ה-runtime, אבל אין constraint ב-Airtable עצמו. **החלטת בעלים מפורשת:** לא להשקיע בפנים המשחק (game internals) כרגע — לחזור לזה כשארכיטקטורת ה-game/screen תסוכם. **אין לסמן את הפריט הזה כ-Production Verified/Closed.**
+- **Verified בפרודקשן:** לא (הכוונה: ה-guard מאומת פעיל, אך האינווריאנט עצמו עדיין מופר)
+- **Verification ראיה:** בדיקת Airtable ישירה 16/08/2026 (owner verification session) — 2 רשומות Active בו-זמנית
+- **סטטוס:** 🟡 PARTIAL / DEFERRED — לא Closed, לא Production Verified. Constraint ברמת Airtable עדיין לא קיים — ראו AI_CONTEXT.md §8 OPEN RISKS
 
-### BUG-004 — BossCheckin silent no-op on text tasks
+### BUG-004 — BossCheckin silent no-op on text tasks — ✅ CLOSED / RUNTIME VERIFIED (סטטוס עודכן 16/08/2026)
 - **דווח:** 17/06/2026
 - **Severity:** High — UX שובר אמון
 - **Root Cause:** persisted flag לא נכתב ל-Airtable — ה"3 דברים" freeform ritual ב-BossCheckin היה no-op שקט לכל task שלא היה Roadmap task
 - **תיקון:** טבלת `Daily_Checkin` חדשה + write-through מיידי
 - **תוקן ב-commit:** `a462633` ("feat(TMA): Daily_Checkin write-through for BossCheckin (Stage 0 #2-#4)") — "BossCheckin's freeform 3-things ritual now writes immediately to a dedicated Daily_Checkin table instead of silently no-oping for non-Roadmap tasks (the old persisted-flag bug). One record per day, edited in place with Updated_At/Updated_By, never deleted/recreated." (מתוך commit message המלא)
 - **Merged:** כן
-- **Deployed:** לא ידוע — דרוש בדיקה ידנית
-- **Verified בפרודקשן:** לא
-- **Verification ראיה:** אין — לא נמצאה בדיקה ידנית מתועדת ב-TMA החי
-- **סטטוס:** Fixed — ממתין ל-Verify
+- **Deployed:** כן (ראו ראיית runtime למטה)
+- **עדכון (16/08/2026) — Owner Truth-Reset, אימות ישיר מול Airtable חי:** רכיב ה-TMA הנוכחי אומת בקוד/runtime: `tma-frontend/src/components/BossCheckin.tsx`, מרונדר מ-`tma-frontend/src/App.tsx`. הבעלים ערך את ה-check-in הנוכחי, סגר/פתח/רענן את ה-TMA, וה-state השתמר. ראיית Airtable: בסיס `app4bcgoX7t0HUVnm`, טבלת `Daily_Checkin` (`tblydLDwRzPM1JYuQ`), רשומה `reckhR4sb01wx5qnS`, Date `2026-08-15`, Owner/Updated_By `אליהו חזן`, Updated_At `2026-08-15T18:28:52.297Z`, Total_XP `100`, Tasks_JSON כולל task שהושלם ("בדיקת באגים") ו-task פתוח ("פרסום ביקוש חיפה והקריות"). אין לפרש את הפרדת מסך ה-Roadmap_Tasks כביטול של Daily_Checkin persistence — זו יכולת נפרדת.
+- **Verified בפרודקשן:** כן — 16/08/2026 (owner verification session, ראיית Airtable ישירה)
+- **Verification ראיה:** רשומת Airtable חיה `reckhR4sb01wx5qnS` בטבלת `Daily_Checkin` (base `app4bcgoX7t0HUVnm`) + בדיקה ידנית ב-TMA (close/reopen/refresh → persist)
+- **סטטוס:** ✅ CLOSED / RUNTIME VERIFIED
 
-### BUG-005 — /status Telegram handler missing decorator
+### BUG-005 — /status Telegram handler missing decorator — ✅ CLOSED / RUNTIME VERIFIED (סטטוס עודכן 16/08/2026)
 - **דווח:** 17/06/2026
 - **Severity:** Low
 - **Root Cause:** `cmd_status` איבד את ה-decorator `@bot.message_handler(commands=["status"])`
 - **תוקן ב-commit:** `628d2bb` ("fix: restore /status decorator, remove TEMP DEBUG block from Hub")
 - **Merged:** כן
-- **Deployed:** לא ידוע — דרוש בדיקה ידנית
-- **Verified בפרודקשן:** לא
-- **סטטוס:** Fixed ✅ (commit 628d2bb)
+- **Deployed:** כן (ראו ראיית runtime למטה)
+- **עדכון (16/08/2026) — Owner Truth-Reset, אימות runtime חי:** תגובת Telegram חיה שנצפתה ע"י הבעלים: "✅ BOSS Bot עלה בהצלחה!" / "🟢 18/18 env vars תקינים". בדיקת מקור ב-Render shell על ה-runtime החי: `app.py:516 @bot.message_handler(commands=["status"])`, `app.py:517 def cmd_status(msg):`. Runtime/deploy SHA שנצפה באותו סשן אימות: `e9d1ca821f10101ade3785216e8efc2df8fae3dc`. בדיקה מאוחרת יותר של `git merge-base --is-ancestor 628d2bb HEAD` נכשלה רק כי ה-checkout ב-Render היה shallow (`fatal: Not a valid object name 628d2bb`) — **אין לפרש זאת כראיה שהתיקון חסר**; ראיית ה-runtime החי גוברת.
+- **Verified בפרודקשן:** כן — 16/08/2026 (owner verification session + Render shell source check)
+- **סטטוס:** ✅ CLOSED / RUNTIME VERIFIED (commit `628d2bb`, SHA `e9d1ca82`)
 
 ### BUG-006 — Hub debug block in production
 - **דווח:** 17/06/2026  
@@ -91,10 +95,11 @@
 - **Root Cause:** לא CORS כפי שדווח — הפונקציות `_preflight_approval`/`_preflight_asset`/`_preflight_venture`/`_preflight_game_quest` קיבלו פרמטר עם `_` מוביל (למשל `_venture_id`) שלא תאם לשם המשתנה ב-URL rule (`venture_id`). Flask קורא ל-view עם `venture_id=...` כ-keyword arg, ולכן כל בקשת OPTIONS זרקה `TypeError: ... unexpected keyword argument 'venture_id'` — מטופל כ-Exception, מוחזר כ-500 שבדפדפן נראה כ-CORS preflight failure. אומת ע"י reproduction script עצמאי ב-Flask לפני ואחרי התיקון.
 - **תוקן ב-branch (היסטורי):** `claude/meta-whatsapp-phase-1-q6pp3e` (commit `7d5cb3a` — hash לא נגיש יותר מה-sandbox, ככל הנראה squash/rebase בדרך למיזוג).
 - **עדכון (20/07/2026) — אומת ישירות מול `origin/main`, לא רק נטען:** `tma_api.py`'s ארבע פונקציות ה-preflight (`_preflight_approval(approval_id=None)`, `_preflight_asset(asset_id=None)`, `_preflight_venture(venture_id=None)`, `_preflight_game_quest(quest_id=None)`) **כבר תואמות** לשמות ה-URL rule (`<approval_id>`/`<asset_id>`/`<venture_id>`/`<quest_id>`) — אין leading underscore mismatch. Reproduction אמיתי עם Flask test client (`app.test_client().options(...)`) על כל ארבעת הנתיבים החזיר **204** (לא 500) עבור כולם.
+- **עדכון (16/08/2026) — Owner Truth-Reset, ראיית runtime חיה מול Render staging (לא production ישירות):** בדיקה חיה מול שירות Render staging (אותו code SHA `e9d1ca821f10101ade3785216e8efc2df8fae3dc` שבו נעשה הבדיקה הדטרמיניסטית): `/api/ventures/test` → `204`, `/api/approvals/test` → `204`, `/api/assets/test` → `204`, `/api/game/quests/test` → `204`. זו ראיית **STAGING RUNTIME VERIFIED** על השרת עצמו (לא Flask test client מקומי כמו ב-20/07) — עדיין לא נצפתה בקשת OPTIONS אמיתית מדפדפן/production ישירות; אין להצהיר Production Verified על בסיס זה בלבד, כדי לשמר את הסולם MERGED → WIRED → DEPLOYED → RUNTIME/PRODUCTION VERIFIED.
 - **Merged:** ✅ כן — מאומת ישירות מול `origin/main`.
-- **Deployed:** לא ידוע ישירות מה-sandbox (אין גישת Render).
-- **Verified בפרודקשן:** לא עדיין — לא נצפתה בקשת OPTIONS אמיתית מוצלחת בפרודקשן.
-- **סטטוס:** ✅ תוקן ומוזג ל-main (reproduction אמיתי, 204 על כל 4 הנתיבים) — נותרה רק production verification.
+- **Deployed:** ✅ כן — Render staging (SHA `e9d1ca82`) מאומת חי, 16/08/2026.
+- **Verified בפרודקשן:** לא עדיין — נצפתה STAGING runtime verified (16/08/2026), אך לא production ישירות.
+- **סטטוס:** ✅ CLOSED / STAGING RUNTIME VERIFIED (16/08/2026) — reproduction מקומי (20/07) + 204 חי על Render staging בכל 4 הנתיבים (16/08); נותרה רק אימות production ישיר.
 
 ### BUG-008 — Lead Business Outcome 422 (trailing space in Airtable options) — ✅ VERIFIED / CLOSED 09/07/2026
 - **דווח:** 17/06/2026 — Airtable PATCH נכשל עם `422 INVALID_MULTIPLE_CHOICE_OPTIONS`, `keys=['Business Outcome', 'status']`; ב-UI רק "סמן כמתאים" עבד, שאר כפתורי הסטטוס הציגו "update failed"
