@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -20,6 +21,15 @@ UPSTREAM_REPOSITORY = "https://github.com/harry0703/MoneyPrinterTurbo"
 UPSTREAM_TAG = "v1.3.3"
 _MAX_MEDIA = 8
 _MAX_TIMEOUT = 3600
+_MIN_ARTIFACT_BYTES = 1024
+_VALIDATION_TIMEOUT_SECONDS = 15
+_RUNNER = (
+    "import os,pathlib,subprocess,sys;"
+    "status=pathlib.Path(sys.argv[1]);"
+    "rc=subprocess.run(sys.argv[2:]).returncode;"
+    "temp=status.with_suffix('.tmp');temp.write_text(str(rc));os.replace(temp,status);"
+    "raise SystemExit(rc)"
+)
 
 
 class MoneyPrinterTurboAdapter:
@@ -76,7 +86,8 @@ class MoneyPrinterTurboAdapter:
             ]
             env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
             process = subprocess.Popen(
-                argv, cwd=self.runtime_root, env=env,
+                [sys.executable, "-c", _RUNNER, str(job_dir / "exit_status"), *argv],
+                cwd=self.runtime_root, env=env,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             manifest.update({"status": "submitted", "pid": process.pid, "argv": argv})
@@ -95,7 +106,22 @@ class MoneyPrinterTurboAdapter:
             expected_root = self.runtime_root / "storage" / "tasks" / str(uuid.UUID(job.provider_job_id))
             if not _within(output.resolve(), expected_root.resolve()):
                 return PollResult("failed", failure_code="mpt_output_path")
-            if output.is_file() and output.stat().st_size > 0:
+            exit_code = _read_exit_status(job_dir / "exit_status")
+            if exit_code is None:
+                pid = manifest.get("pid")
+                if manifest.get("deadline", 0) < time.time() and _pid_alive(pid):
+                    os.kill(int(pid), 15)
+                    return PollResult("failed", failure_code="mpt_timeout")
+                if _pid_alive(pid):
+                    return PollResult("submitted")
+                return PollResult("outcome_unknown", failure_code="mpt_process_state_unknown")
+            if exit_code != 0:
+                return PollResult("failed", evidence={"validation_result": "process_exit_nonzero"}, failure_code="mpt_process_failed")
+
+            evidence = self._validate_artifact(output)
+            if evidence["validation_result"] != "valid":
+                return PollResult("failed", evidence=evidence, failure_code="mpt_artifact_invalid")
+            if output.is_file():
                 final = job_dir / "output" / "final-1.mp4"
                 if output != final:
                     shutil.copy2(output, final)
@@ -106,16 +132,55 @@ class MoneyPrinterTurboAdapter:
                     "script_sha256": manifest["script_sha256"],
                     "mime_type": "video/mp4",
                     "size": final.stat().st_size,
+                    **evidence,
                 })
-            pid = manifest.get("pid")
-            if manifest.get("deadline", 0) < time.time() and _pid_alive(pid):
-                os.kill(int(pid), 15)
-                return PollResult("failed", failure_code="mpt_timeout")
-            if _pid_alive(pid):
-                return PollResult("submitted")
-            return PollResult("failed", failure_code="mpt_process_failed")
         except Exception:
             return PollResult("outcome_unknown", failure_code="mpt_poll_unknown")
+
+    @staticmethod
+    def _validate_artifact(output: Path) -> dict:
+        if not output.is_file() or output.is_symlink():
+            return {"artifact_size": "0", "validation_result": "missing_or_not_regular"}
+        size = output.stat().st_size
+        evidence = {"artifact_size": str(size)}
+        if size < _MIN_ARTIFACT_BYTES:
+            return {**evidence, "validation_result": "too_small"}
+        ffprobe = shutil.which("ffprobe")
+        if ffprobe:
+            try:
+                result = subprocess.run(
+                    [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                     "stream=codec_type,width,height,duration", "-of", "json", str(output)],
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                    timeout=_VALIDATION_TIMEOUT_SECONDS,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return {**evidence, "validation_result": "ffprobe_error"}
+            evidence["ffprobe_exit_code"] = str(result.returncode)
+            if result.returncode or len(result.stdout) > 8192:
+                return {**evidence, "validation_result": "ffprobe_invalid"}
+            try:
+                stream = json.loads(result.stdout).get("streams", [])[0]
+                width, height = int(stream["width"]), int(stream["height"])
+            except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return {**evidence, "validation_result": "ffprobe_invalid"}
+            if stream.get("codec_type") != "video" or width <= 0 or height <= 0:
+                return {**evidence, "validation_result": "ffprobe_invalid"}
+            evidence.update({"video_width": str(width), "video_height": str(height)})
+            if stream.get("duration") not in (None, "N/A"):
+                evidence["video_duration"] = str(stream["duration"])[:32]
+            return {**evidence, "validation_result": "valid"}
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return {**evidence, "validation_result": "validator_unavailable"}
+        try:
+            result = subprocess.run(
+                [ffmpeg, "-v", "error", "-i", str(output), "-map", "0:v:0", "-frames:v", "1", "-f", "null", "-"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=_VALIDATION_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return {**evidence, "validation_result": "ffmpeg_error"}
+        return {**evidence, "validation_result": "valid" if result.returncode == 0 else "ffmpeg_invalid"}
 
     def _validate(self, payload):
         if not isinstance(payload, dict):
@@ -183,3 +248,11 @@ def _pid_alive(pid) -> bool:
         return True
     except (OSError, TypeError, ValueError):
         return False
+
+
+def _read_exit_status(path: Path) -> int | None:
+    try:
+        value = path.read_text(encoding="ascii").strip()
+        return int(value) if value and value.lstrip("-").isdigit() else None
+    except OSError:
+        return None
