@@ -7,6 +7,21 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
+עודכן: 16/08/2026 — **Owner Truth-Reset (docs only, ops/owner-handoff handoff)**:
+בעל הבית אימת ידנית 4 מתוך 5 באגים היסטוריים (BUG-002/004/005/007, ראו
+`BUG_AUDIT_LOG.md`) כ-RUNTIME/PRODUCTION VERIFIED; BUG-003 נשאר **PARTIAL /
+DEFERRED** במפורש (owner decision — לא להשקיע ב-game internals כרגע).
+בטבלת "C — הושלם" למטה: C13 (Shared Memory) סומן **SUPERSEDED** — הקובץ
+ההיסטורי `core/shared_memory.py` לא קיים, היכולת פוצלה ליכולות Business
+Memory קיימות; C18 (Store Protocol) סומן **PARTIAL/DEFERRED — לא סגור**
+ומוזג לתכנית storage-decoupling רחבה יותר (`core/stores/base.py` לא קיים,
+`AirtableStorageProvider` הצר יותר ב-`providers/airtable_shim.py` בלבד).
+**סתירה שנמצאה ולא יושמה:** ה-handoff הניח מיפוי C04="Context layer"
+ו-C10/C11/C15="Lead Qualifier"/"Lead Memory"/"Followup Engine" — מיפוי זה
+לא תואם את טבלת C-numbers האמיתית כאן (C04 בפועל = Feature Flags; C10/C11/C15
+לא קיימים כפריטי C בטבלה זו כלל — Lead Qualifier/Lead Memory/Followup Engine
+מתועדים כ-F09/F10/F11 בהמשך המסמך, לא כ-C). לא בוצע שינוי סטטוס תחת ID שגוי;
+ראו `CHANGELOG.md` לפירוט מלא.
 עודכן: 15/08/2026 — **`BUG-164` הגנת-עומק ל-`compose_brief()` + תיקון תיעוד-דריפט.**
 `creative_ideas` עצמו כבר **תוקן דטרמיניסטית וממוזג** (PR2, `e9d1ca8`, ראה
 `BUG_AUDIT_LOG.md::BUG-164`) — אינו עובר יותר דרך `compose_brief()` כלל, אלא דרך תפריט
@@ -593,15 +608,15 @@ F52, F14/Entity Resolution, Agent Cost). `ROADMAP.md` **אינו** מחזיק י
 | ID | שם | קבצים | הערה |
 |----|----|----|------|
 | C12 | Lead Events (audit log) | core/lead_events.py | |
-| C13 | Shared Memory (תובנות עסקיות לפי דומיין) | core/shared_memory.py | |
+| C13 | Shared Memory (תובנות עסקיות לפי דומיין) | core/shared_memory.py | **SUPERSEDED (עודכן 16/08/2026, Owner Truth-Reset) — הקובץ ההיסטורי `core/shared_memory.py` לא קיים יותר על `main` (מאומת: `ls` נכשל). היכולת לא נעלמה, פוצלה: Business Memory search/schema דרך dispatcher/schema/validator, ו-`core/lead_events.py` קורא אירועי business-memory לפי domain. תיעוד supersession — לא re-open.** |
 | ~~C14~~ | ~~Lead Scoring~~ | ~~lead_scoring.py~~ | **הוסר — zombie file; scoring consolidated ל-lead_capture.py (N02/N03)** |
 
 ### CRM + Storage
-| ID | שם | קבצים |
-|----|----|--------|
-| C16 | CRM Repository (get_lead / save_lead) | crm.py |
-| C17 | Airtable Search + Schema Self-Sync | airtable_tools.py |
-| C18 | Store Protocol (LeadStore / EventStore) | core/stores/base.py |
+| ID | שם | קבצים | הערה |
+|----|----|--------|------|
+| C16 | CRM Repository (get_lead / save_lead) | crm.py | |
+| C17 | Airtable Search + Schema Self-Sync | airtable_tools.py | |
+| C18 | Store Protocol (LeadStore / EventStore) | core/stores/base.py | **⚠️ PARTIAL / DEFERRED TO STORAGE DECOUPLING — לא לסגור (עודכן 16/08/2026, Owner Truth-Reset).** `core/stores/base.py` לא קיים על `main` (מאומת: `ls` נכשל) בצורה ההיסטורית המבוקשת. קיים `AirtableStorageProvider` צר יותר ב-`providers/airtable_shim.py`, אבל `crm.py`/`lead_capture.py`/`lead_memory.py`/`core/lead_events.py` עדיין מכילים ידע Airtable-ספציפי בלוגיקה עסקית. **החלטת ארכיטקטורה של הבעלים:** לא לבנות store ייעודי ל-Leads בלבד רק כדי לסגור את הסעיף — C18 מתמזג לתוך תכנית storage-decoupling רחבה יותר (Leads/Tasks/Contacts/Deals/Ventures/Marketing Demands וכו', repository/provider contracts). "הסרת Airtable מהקוד" = הסרת ידע Airtable מלוגיקה עסקית, לא בהכרח הסרת Airtable כ-provider. |
 
 ### App Layer
 | ID | שם | קבצים |
