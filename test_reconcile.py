@@ -79,13 +79,28 @@ def _isolated_catalog(monkeypatch, tmp_path):
     """Copies the real catalog into tmp_path and points librarian's
     CATALOG_RELATIVE_ROOT at the copy, so writes never touch the real repo
     -- the same isolation pattern test_context_librarian.py's own write
-    tests already use."""
+    tests already use.
+
+    The copied reconciliation_state.json's `auto_registrations` is reset to
+    empty: that section is a live, ever-growing record of whatever the real
+    repo has actually auto-registered by the time a given test happens to
+    run (see reconciliation_state.py's own docstring), so preserving it
+    verbatim would make every test built on this isolated copy silently
+    depend on production state at test time instead of the scenario it
+    declares. Callers that want a specific registration in place seed it
+    explicitly via _seed_registration()."""
     import shutil
 
     from tools.context_librarian import librarian
 
     target = tmp_path / "catalog"
     shutil.copytree(REPO_ROOT / "docs/context_librarian", target)
+    state_path = target / "reconciliation_state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["auto_registrations"] = {}
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     monkeypatch.setattr(librarian, "CATALOG_RELATIVE_ROOT", target)
     return load_catalog(REPO_ROOT)
 
@@ -610,6 +625,16 @@ def test_multiple_policy_matches_agreeing_on_identical_target_are_not_ambiguous(
     # fail-closed predicate gate (item 1/6) requires one for any policy with
     # auto_registration_allowed=True, same as the real registry loader does.
     monkeypatch.setitem(reconcile_module.policy_validators.VALIDATORS, "AGREE_A", lambda *_a: True)
+    # This test's policies tuple is a synthetic two-entry stand-in for the
+    # real registry, not the real registry itself -- passing it to the
+    # un-mocked _scan_auto_registrations() would look up every real
+    # already-registered path's policy_id in this incomplete map and
+    # misreport them as "policy no longer exists in the registry"
+    # (STALE_REVALIDATION_REQUIRED), forcing OWNER_DECISION_REQUIRED for a
+    # reason that has nothing to do with what this test is exercising.
+    # Revalidation of real auto-registrations is covered separately by the
+    # Message E (A-H) tests below, which always pass the real, full registry.
+    monkeypatch.setattr(reconcile_module, "_scan_auto_registrations", lambda *_a, **_k: ([], {}))
     new_sources = _classify(catalog, ["some/agree/newfile.py"])
     result = _reconcile_with_fakes(catalog, (agree_a, agree_b), new_sources=new_sources)
     assert len(result.auto_maintenance_sources) == 1
