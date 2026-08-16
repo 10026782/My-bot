@@ -134,6 +134,22 @@ def validate_registry_text(text: str) -> tuple[RegistryRow, ...]:
         for column in ("Needs Verification", "Blocked", "Owner Decision Required"):
             if values[column] not in {"true", "false"}:
                 raise RegistryValidationError(f"invalid boolean {column!r} at line {row.line_number}: {values[column]!r}")
+        if values["Work State"] == "BLOCKED" and values["Blocked"] != "true":
+            raise RegistryValidationError(f"BLOCKED Work State requires Blocked=true at line {row.line_number}")
+        if values["Work State"] == "OWNER_DECISION" and values["Owner Decision Required"] != "true":
+            raise RegistryValidationError(
+                f"OWNER_DECISION Work State requires Owner Decision Required=true at line {row.line_number}"
+            )
+        if values["Work State"] == "CLOSED" and values["Blocked"] == "true":
+            raise RegistryValidationError(f"CLOSED Work State cannot have Blocked=true at line {row.line_number}")
+        if values["Work State"] == "CLOSED" and values["Owner Decision Required"] == "true":
+            raise RegistryValidationError(
+                f"CLOSED Work State cannot have Owner Decision Required=true at line {row.line_number}"
+            )
+        if values["Evidence State"] == "RUNTIME_VERIFIED" and values["Needs Verification"] != "false":
+            raise RegistryValidationError(
+                f"RUNTIME_VERIFIED Evidence State requires Needs Verification=false at line {row.line_number}"
+            )
         if not _valid_timestamp(values["Last Reconciled"]):
             raise RegistryValidationError(f"invalid Last Reconciled at line {row.line_number}: {values['Last Reconciled']!r}")
         source = values["Evidence Source"]
