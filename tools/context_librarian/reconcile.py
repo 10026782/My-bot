@@ -754,11 +754,22 @@ def apply_auto_maintenance(
     if not _working_tree_is_clean(catalog.repo_root):
         raise ContextLibrarianError("apply_auto_maintenance requires a clean working tree")
 
-    drifted_node_ids = [u["node_id"] for u in result.mechanical_updates] or None
-    stamped = _write_observed_commit(catalog, result.canonical_main_sha, drifted_node_ids)
+    # A node that receives a brand-new path registration this run must have
+    # its last_observed_commit bumped too, in the same stamp -- otherwise
+    # the newly-tracked path (now part of that node's code_paths/test_paths)
+    # is "changed since baseline" on the very next _mechanical_drift() scan
+    # (including the in-process post-apply verification below), and this
+    # node re-enters mechanical_updates forever, since last_source_scan_commit
+    # never advances on main until a maintenance PR actually gets merged.
+    # So: compute the registration plan FIRST (read-only), union its target
+    # node ids into the observed-commit stamp, then apply the registration.
+    plan = _build_registration_plan(catalog, result.auto_maintenance_sources)
+    drifted_node_ids = {u["node_id"] for u in result.mechanical_updates}
+    registration_target_ids = {target for target, _field, _path in plan}
+    observe_ids = sorted(drifted_node_ids | registration_target_ids) or None
+    stamped = _write_observed_commit(catalog, result.canonical_main_sha, observe_ids)
 
     reloaded = load_catalog(catalog.repo_root)
-    plan = _build_registration_plan(reloaded, result.auto_maintenance_sources)
     registered = _apply_registration_plan(reloaded, plan)
     reloaded = load_catalog(catalog.repo_root) if registered else reloaded
 
