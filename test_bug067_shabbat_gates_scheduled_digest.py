@@ -33,6 +33,7 @@ SCHEDULER_JOB_NAMES = (
     "_job_schema_snapshot_archive",
     "_job_daily_collector",
     "_job_cleanup_pending",
+    "_job_external_execution_poll",
     "_job_overdue_payments",
     "_job_followup_scan",
     "_job_payment_reminders",
