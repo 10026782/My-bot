@@ -153,20 +153,40 @@ def build_owner_development_status(text: str, *, checked_at: str | datetime) -> 
         (f"H{i}", tuple(item.initiative_key for item in sorted(items, key=lambda x: (x.initiative_key)) if item.horizon == f"H{i}"))
         for i in range(8)
     )
-    return OwnerDevelopmentStatus(
-        current_focus=_bounded((item for item in items if item.work_state == "ACTIVE"), "current_focus"),
-        next_actions=_bounded(
-            (item for item in items if item.next_step.strip() and item.next_step.strip() != "—"),
-            "next_actions",
+    current_focus = _bounded((item for item in items if item.work_state == "ACTIVE"), "current_focus")
+    next_actions = _bounded(
+        (
+            item for item in items
+            if item.work_state != "CLOSED"
+            and item.next_step.strip()
+            and item.next_step.strip() != "—"
         ),
-        needs_verification=_bounded((item for item in items if item.needs_verification), "needs_verification"),
-        blocked=_bounded((item for item in items if item.blocked or item.work_state == "BLOCKED"), "blocked"),
-        owner_decisions=_bounded((item for item in items if item.owner_decision_required or item.work_state == "OWNER_DECISION"), "owner_decisions"),
-        recently_closed=_bounded((item for item in items if item.work_state == "CLOSED"), "recently_closed"),
+        "next_actions",
+    )
+    needs_verification = _bounded((item for item in items if item.needs_verification), "needs_verification")
+    blocked = _bounded((item for item in items if item.blocked or item.work_state == "BLOCKED"), "blocked")
+    owner_decisions = _bounded(
+        (item for item in items if item.owner_decision_required or item.work_state == "OWNER_DECISION"),
+        "owner_decisions",
+    )
+    recently_closed = _bounded((item for item in items if item.work_state == "CLOSED"), "recently_closed")
+    projected_items = {
+        item.initiative_key: item
+        for section in (current_focus, next_actions, needs_verification, blocked, owner_decisions, recently_closed)
+        for item in section
+    }
+    projection_state = "PARTIAL" if any(item.freshness == "STALE" for item in projected_items.values()) else "CURRENT"
+    return OwnerDevelopmentStatus(
+        current_focus=current_focus,
+        next_actions=next_actions,
+        needs_verification=needs_verification,
+        blocked=blocked,
+        owner_decisions=owner_decisions,
+        recently_closed=recently_closed,
         horizon_summary=horizon_summary,
         updated_at=checked.isoformat(),
         source_version="BOSS_UNIFIED_MASTER_PLAN.md:§3.5",
-        projection_state="CURRENT",
+        projection_state=projection_state,
     )
 
 

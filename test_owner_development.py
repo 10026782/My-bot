@@ -100,6 +100,22 @@ def test_freshness_current_and_stale_use_last_reconciled():
     assert by_key["STALE_ITEM"].freshness == "STALE"
 
 
+def test_all_current_projected_rows_make_projection_current():
+    result = build_owner_development_status(_registry([
+        {"Initiative Key": "CURRENT_ACTIVE", "Work State": "ACTIVE"},
+        {"Initiative Key": "CURRENT_NEXT", "Work State": "PLANNED"},
+    ]), checked_at="2026-08-16T12:00:00Z")
+    assert result.projection_state == "CURRENT"
+
+
+def test_stale_projected_row_makes_projection_partial():
+    result = build_owner_development_status(_registry([
+        {"Initiative Key": "STALE_ACTIVE", "Work State": "ACTIVE", "Last Reconciled": "2026-08-01T00:00:00Z"},
+        {"Initiative Key": "CURRENT_NEXT", "Work State": "PLANNED"},
+    ]), checked_at="2026-08-16T12:00:00Z")
+    assert result.projection_state == "PARTIAL"
+
+
 def test_invalid_registry_fails_closed_without_fallback():
     result = build_owner_development_status("ROADMAP says everything is complete", checked_at="2026-08-16T12:00:00Z")
     assert result.projection_state == "UNKNOWN"
@@ -121,3 +137,16 @@ def test_consumer_is_read_only(tmp_path):
     result = generate_owner_development_status(path, checked_at="2026-08-16T12:00:00Z")
     assert result.projection_state == "CURRENT"
     assert path.read_text(encoding="utf-8") == original
+
+
+def test_closed_next_step_is_not_an_active_next_action():
+    result = build_owner_development_status(_registry([
+        {"Initiative Key": "CLOSED_ITEM", "Work State": "CLOSED", "Next Decided Step": "archive"},
+        {"Initiative Key": "ACTIVE_ITEM", "Work State": "ACTIVE", "Next Decided Step": "continue"},
+        {"Initiative Key": "PLANNED_ITEM", "Work State": "PLANNED", "Next Decided Step": "start"},
+    ]), checked_at="2026-08-16T12:00:00Z")
+    next_keys = [item.initiative_key for item in result.next_actions]
+    assert "CLOSED_ITEM" not in next_keys
+    assert "ACTIVE_ITEM" in next_keys
+    assert "PLANNED_ITEM" in next_keys
+    assert result.recently_closed[0].initiative_key == "CLOSED_ITEM"
