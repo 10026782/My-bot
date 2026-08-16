@@ -31,6 +31,14 @@ Provenance model (Message D correction, see RECONCILIATION.md):
   never on the per-node `last_verified_commit` anchors librarian.py's own
   discover_new_sources() uses for its (still-supported, still-used-as-a-
   migration-fallback-only) anchor computation.
+
+Pre-merge (PR-time) gate: reconcile_pr() reuses the identical per-item
+classification/routing engine (_route_new_sources()) that reconcile() uses,
+but scans "what does the PR's own diff (origin/main..HEAD) newly add"
+instead of "what did main itself pick up since last_source_scan_commit" --
+see docs/context_librarian/RECONCILIATION.md section F. This is the same
+engine surfacing OWNER_DECISION_REQUIRED before merge instead of only
+after; post-merge reconcile() remains the final safety net, unchanged.
 """
 
 from __future__ import annotations
@@ -292,15 +300,26 @@ def _resolve_policy(path: str, policies: tuple[Policy, ...]) -> tuple[Policy | N
     return first, False
 
 
-def reconcile(
-    catalog: Catalog, policies: tuple[Policy, ...], *, main_ref: str = "origin/main"
-) -> ReconcileResult:
-    """Pure classification -- no disk writes, no git writes."""
-    main_sha = _resolve_main_sha(catalog.repo_root, main_ref)
-    mechanical_updates = _mechanical_drift(catalog, main_sha)
-    new_sources = _scan_new_sources(catalog, main_sha, main_ref)
-    stale_flags, refreshed_entries = _scan_auto_registrations(catalog, policies, main_sha)
+def _route_new_sources(
+    catalog: Catalog, policies: tuple[Policy, ...], new_sources: list[dict[str, str]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """The single per-item classification/routing engine, shared verbatim by
+    both reconcile() (post-merge, anchored on last_source_scan_commit..main)
+    and reconcile_pr() (pre-merge, anchored on origin/main..PR-head) -- see
+    docs/context_librarian/RECONCILIATION.md section F ("Pre-merge owner
+    decision gate"). The only thing that ever differs between the two
+    callers is *which* new_sources list they hand in; every routing rule
+    below (STOP-never-auto, ambiguous-policy, missing-target, failed
+    predicate, ...) runs identically for both, so there is exactly one
+    classification engine, never two.
 
+    Every decision_queue item this function emits also carries a stable
+    `block_reason` code (in addition to the existing free-text `policy_note`,
+    kept for backward compatibility with any caller already reading it) --
+    used by owner_decision_report.py to deterministically render a
+    Recommended decision without re-deriving the same logic by string-
+    matching policy_note.
+    """
     auto_maintenance: list[dict[str, Any]] = []
     decision_queue: list[dict[str, Any]] = []
     non_blocking: list[dict[str, Any]] = []
@@ -314,12 +333,13 @@ def reconcile(
         policy, ambiguous = _resolve_policy(item["path"], policies)
         if ambiguous:
             decision_queue.append(
-                {**item, "policy_note": "path matches multiple policies with different "
+                {**item, "block_reason": "AMBIGUOUS_POLICY_MATCH",
+                 "policy_note": "path matches multiple policies with different "
                  "targets -- ambiguous, requires owner decision"}
             )
             continue
         if policy is None:
-            decision_queue.append(item)
+            decision_queue.append({**item, "block_reason": "NO_POLICY_MATCH"})
             continue
 
         enriched = {
@@ -336,14 +356,16 @@ def reconcile(
         # guarantee, not a registry-authoring convention.
         if classification == "STOP":
             decision_queue.append(
-                {**enriched, "policy_note": "STOP classification is never eligible for "
+                {**enriched, "block_reason": "STOP_NEVER_AUTO",
+                 "policy_note": "STOP classification is never eligible for "
                  "auto-maintenance regardless of policy match"}
             )
             continue
 
         if not policy.auto_registration_allowed:
             decision_queue.append(
-                {**enriched, "policy_note": "matches a known policy class but that policy "
+                {**enriched, "block_reason": "POLICY_REQUIRES_HUMAN_CONFIRMATION",
+                 "policy_note": "matches a known policy class but that policy "
                  "requires human confirmation before registration "
                  "(auto_registration_allowed=false)"}
             )
@@ -351,7 +373,8 @@ def reconcile(
 
         if policy.eligible_target is not None and policy.eligible_target not in catalog.nodes:
             decision_queue.append(
-                {**enriched, "policy_note": f"policy eligible_target "
+                {**enriched, "block_reason": "TARGET_NODE_MISSING",
+                 "policy_note": f"policy eligible_target "
                  f"{policy.eligible_target!r} does not exist in the loaded catalog yet -- "
                  "cannot auto-register until it is created"}
             )
@@ -359,7 +382,8 @@ def reconcile(
 
         if policy.eligible_target is not None and policy.target_field not in _REGISTERABLE_FIELDS:
             decision_queue.append(
-                {**enriched, "policy_note": "policy has an eligible_target but no valid "
+                {**enriched, "block_reason": "TARGET_FIELD_INVALID",
+                 "policy_note": "policy has an eligible_target but no valid "
                  "target_field declared -- cannot auto-register"}
             )
             continue
@@ -374,7 +398,9 @@ def reconcile(
         )
         if predicate_result is not True:
             decision_queue.append(
-                {**enriched, "policy_note": (
+                {**enriched, "block_reason": (
+                    "PREDICATE_FAILED" if predicate_result is False else "PREDICATE_UNPROVABLE"
+                ), "policy_note": (
                     "policy structural/content predicate failed"
                     if predicate_result is False
                     else "policy structural/content predicate could not be proven"
@@ -383,6 +409,19 @@ def reconcile(
             continue
 
         auto_maintenance.append(enriched)
+
+    return auto_maintenance, decision_queue, non_blocking
+
+
+def reconcile(
+    catalog: Catalog, policies: tuple[Policy, ...], *, main_ref: str = "origin/main"
+) -> ReconcileResult:
+    """Pure classification -- no disk writes, no git writes."""
+    main_sha = _resolve_main_sha(catalog.repo_root, main_ref)
+    mechanical_updates = _mechanical_drift(catalog, main_sha)
+    new_sources = _scan_new_sources(catalog, main_sha, main_ref)
+    stale_flags, refreshed_entries = _scan_auto_registrations(catalog, policies, main_sha)
+    auto_maintenance, decision_queue, non_blocking = _route_new_sources(catalog, policies, new_sources)
 
     if decision_queue or stale_flags:
         outcome = OWNER_DECISION_REQUIRED
@@ -407,6 +446,98 @@ def reconcile_repo(repo_root: Path, *, main_ref: str = "origin/main") -> Reconci
     catalog = load_catalog(repo_root)
     policies = load_policy_registry(repo_root)
     return reconcile(catalog, policies, main_ref=main_ref)
+
+
+def _scan_pr_new_sources(catalog: Catalog, base_sha: str, head_sha: str) -> list[dict[str, str]]:
+    """Files the PR's own diff newly adds, classified via the identical
+    classify_new_sources() the post-merge path uses (see
+    reconcile()/_scan_new_sources() above -- same function, not a copy).
+
+    Uses git's three-dot range (base_sha...head_sha), i.e. a diff against
+    merge-base(base_sha, head_sha), never a plain two-dot content diff.
+    base_ref is typically the mutable "origin/main", which keeps moving
+    while a PR is open; a two-dot diff against its *current* tip can
+    misclassify a file the PR never touched as "added" (e.g. an old file
+    still present on the PR branch that main independently deleted after
+    the PR's fork point -- absent from current main's tree, present on the
+    PR branch, --diff-filter=A wrongly calls that "added"). The three-dot
+    range is immune to this: it always diffs from the actual fork point,
+    regardless of how far base_ref has since moved -- the same semantic
+    GitHub's own PR "Files changed" view and merge computation use.
+
+    Deliberately anchored on an explicit diff, never on
+    last_source_scan_commit/last_verified_commit: a PR's own new files don't
+    exist anywhere in main's history yet, so the post-merge anchors (which
+    only ever diff between two points *within* main's own history) cannot
+    see them until after merge -- which is exactly the "first discovery
+    point is post-merge" gap this pre-merge path closes.
+    """
+    if base_sha == head_sha:
+        return []
+    code, out = _run_git(
+        catalog.repo_root, ["diff", "--diff-filter=A", "--name-only", f"{base_sha}...{head_sha}"]
+    )
+    if code != 0:
+        raise ContextLibrarianError(f"cannot scan PR-added sources between {base_sha}...{head_sha}")
+    added = [line.strip() for line in out.splitlines() if line.strip()]
+    return classify_new_sources(catalog, added)
+
+
+def reconcile_pr(
+    catalog: Catalog,
+    policies: tuple[Policy, ...],
+    *,
+    base_ref: str = "origin/main",
+    head_ref: str = "HEAD",
+) -> ReconcileResult:
+    """Pre-merge, PR-time reconciliation. Classifies ONLY the sources the
+    PR's own diff (base_ref..head_ref) newly adds, using the exact same
+    per-item routing reconcile() uses (_route_new_sources) -- so a source
+    that would be OWNER_DECISION_REQUIRED post-merge is caught before merge
+    instead, per docs/context_librarian/RECONCILIATION.md section F.
+
+    Deliberately does NOT compute mechanical_updates or revalidation_flags
+    (_mechanical_drift / _scan_auto_registrations): those measure drift on
+    nodes/registrations already living on main, which is unrelated to what
+    THIS PR itself introduces and remains the post-merge gate's job (see
+    section F's pre-merge/post-merge split) -- pulling main's own,
+    potentially unrelated backlog into every PR's gate would block PRs on
+    conditions they did not create.
+
+    Read-only: never writes last_source_scan_commit, last_observed_commit,
+    or any catalog file. There is no PR-time apply_auto_maintenance() --
+    only the existing post-merge apply path may ever mutate main.
+    """
+    base_sha = _resolve_main_sha(catalog.repo_root, base_ref)
+    head_sha = _resolve_main_sha(catalog.repo_root, head_ref)
+    new_sources = _scan_pr_new_sources(catalog, base_sha, head_sha)
+    auto_maintenance, decision_queue, non_blocking = _route_new_sources(catalog, policies, new_sources)
+
+    if decision_queue:
+        outcome = OWNER_DECISION_REQUIRED
+    elif auto_maintenance:
+        outcome = AUTO_MAINTENANCE_REQUIRED
+    else:
+        outcome = CLEAN
+
+    return ReconcileResult(
+        outcome=outcome,
+        main_ref=base_ref,
+        canonical_main_sha=base_sha,
+        mechanical_updates=(),
+        auto_maintenance_sources=tuple(auto_maintenance),
+        decision_queue=tuple(decision_queue),
+        non_blocking_sources=tuple(non_blocking),
+        revalidation_flags=(),
+    )
+
+
+def reconcile_pr_repo(
+    repo_root: Path, *, base_ref: str = "origin/main", head_ref: str = "HEAD"
+) -> ReconcileResult:
+    catalog = load_catalog(repo_root)
+    policies = load_policy_registry(repo_root)
+    return reconcile_pr(catalog, policies, base_ref=base_ref, head_ref=head_ref)
 
 
 def _working_tree_is_clean(repo_root: Path) -> bool:

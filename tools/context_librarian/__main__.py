@@ -16,8 +16,17 @@ from .librarian import (
     suggest_profiles,
     verify_consumption,
 )
+from .owner_decision_report import format_pr_summary
 from .policy_registry import load_policy_registry
-from .reconcile import AUTO_MAINTENANCE_REQUIRED, CLEAN, OWNER_DECISION_REQUIRED, apply_auto_maintenance, reconcile, stamp_observed
+from .reconcile import (
+    AUTO_MAINTENANCE_REQUIRED,
+    CLEAN,
+    OWNER_DECISION_REQUIRED,
+    apply_auto_maintenance,
+    reconcile,
+    reconcile_pr,
+    stamp_observed,
+)
 
 
 def _repo_root() -> Path:
@@ -160,6 +169,23 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+    reconcile_pr_cmd = sub.add_parser(
+        "reconcile-pr",
+        help=(
+            "Pre-merge, PR-time reconciliation: classifies only the sources the "
+            "PR's own diff (base-ref..head-ref) newly adds, using the identical "
+            "engine 'reconcile' uses post-merge. Read-only -- never writes the "
+            "catalog or reconciliation_state.json. Exits 1 on OWNER_DECISION_REQUIRED."
+        ),
+    )
+    reconcile_pr_cmd.add_argument("--base-ref", default="origin/main")
+    reconcile_pr_cmd.add_argument("--head-ref", default="HEAD")
+    reconcile_pr_cmd.add_argument(
+        "--summary-output", type=Path,
+        help="Write the human-readable Markdown PR summary (Owner Decision Request "
+        "blocks included) to this path, e.g. for $GITHUB_STEP_SUMMARY or a PR comment body",
+    )
+
     verify = sub.add_parser(
         "verify-consumption",
         help=(
@@ -256,6 +282,26 @@ def main(argv: list[str] | None = None) -> int:
             # check job redirects this exact invocation to a file and parses
             # it with json.load() immediately after. Status goes to stderr.
             print(f"outcome: {result.outcome}", file=sys.stderr)
+            if result.outcome == OWNER_DECISION_REQUIRED:
+                return 1
+            return 0
+
+        if args.command == "reconcile-pr":
+            policies = load_policy_registry(_repo_root())
+            result = reconcile_pr(catalog, policies, base_ref=args.base_ref, head_ref=args.head_ref)
+            # Plain stdout output must be JSON only, mirroring "reconcile"'s own
+            # --check contract -- any tooling that redirects this into a file
+            # and json.load()s it must never see human-readable text mixed in.
+            print(json.dumps(result.to_json(), ensure_ascii=False, indent=2, sort_keys=True))
+            print(f"outcome: {result.outcome}", file=sys.stderr)
+            if args.summary_output:
+                summary_path = args.summary_output
+                if not summary_path.is_absolute():
+                    summary_path = _repo_root() / summary_path
+                summary_path.parent.mkdir(parents=True, exist_ok=True)
+                summary_path.write_text(
+                    format_pr_summary(result, _repo_root()) + "\n", encoding="utf-8", newline="\n"
+                )
             if result.outcome == OWNER_DECISION_REQUIRED:
                 return 1
             return 0
