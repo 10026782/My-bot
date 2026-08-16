@@ -28,6 +28,9 @@ def _job_cleanup_pending():
 def _job_external_execution_poll():
     """Bounded, lease-owned polling; provider adapters never own persistence."""
     try:
+        from feature_flags import is_enabled
+        if not is_enabled("EXTERNAL_EXECUTION_ENABLED"):
+            return
         from core.external_execution_boundary import get_default_boundary
         get_default_boundary().poll_due()
     except Exception as e:

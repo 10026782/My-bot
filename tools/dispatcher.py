@@ -510,6 +510,13 @@ def dispatch_tool(
             case "external_execution.submit":
                 if not execution_context or not execution_context.get("contract_id"):
                     return _tool_result(ok=False, tool=name, user_message="External execution requires an approved contract.")
+                if not _ff.is_enabled("EXTERNAL_EXECUTION_ENABLED"):
+                    from core.dispatcher_outcome import DispatcherOutcome
+                    return DispatcherOutcome(
+                        "failed",
+                        "External execution is disabled until its readiness gate is enabled.",
+                        error_code="external_execution_disabled",
+                    )
                 from core.external_execution_boundary import get_default_boundary
                 return get_default_boundary().submit(
                     contract_id=execution_context["contract_id"],

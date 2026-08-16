@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ class ExternalPollLeaseRepository:
         token = str(uuid.uuid4())
         conn = self._get_conn()
         if conn is None:
+            logger.warning("external poll lease unavailable; skipping job=%s", job_id)
             return None
         try:
             with conn.cursor() as cur:
@@ -51,8 +55,9 @@ class ExternalPollLeaseRepository:
                 acquired = cur.fetchone()
             conn.commit()
             return PollLease(job_id, token, poller_id) if acquired else None
-        except Exception:
+        except Exception as exc:
             conn.rollback()
+            logger.warning("external poll lease acquire failed; skipping job=%s error=%s", job_id, str(exc)[:160])
             return None
         finally:
             self._release_conn(conn)
@@ -60,6 +65,7 @@ class ExternalPollLeaseRepository:
     def release(self, lease: PollLease) -> bool:
         conn = self._get_conn()
         if conn is None:
+            logger.warning("external poll lease release unavailable; job=%s", lease.job_id)
             return False
         try:
             with conn.cursor() as cur:
@@ -70,8 +76,9 @@ class ExternalPollLeaseRepository:
                 released = cur.rowcount == 1
             conn.commit()
             return released
-        except Exception:
+        except Exception as exc:
             conn.rollback()
+            logger.warning("external poll lease release failed; job=%s error=%s", lease.job_id, str(exc)[:160])
             return False
         finally:
             self._release_conn(conn)

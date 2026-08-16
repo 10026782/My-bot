@@ -169,3 +169,14 @@ def test_provider_success_with_write_failure_does_not_resubmit():
     assert len(adapter.poll_calls) == 1
     assert len(adapter.submit_calls) == 1
     assert repo.jobs["c1"].status == "submitted"
+
+
+def test_restart_loads_submitted_job_without_ram_state():
+    repo = FakeRepo()
+    adapter = FakeAdapter(poll_result=PollResult("completed"))
+    first = make_boundary(adapter, repo)
+    first.submit(contract_id="c1", idempotency_key="k1", payload={})
+    restarted = make_boundary(adapter, repo, FakeLease())
+    assert restarted.completed_job("c1") is None
+    assert restarted.poll_due(poller_id="restart-B") == 1
+    assert restarted.completed_job("c1") is not None
