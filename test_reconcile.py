@@ -120,6 +120,53 @@ def _seed_registration(monkeypatch, tmp_path, *, entry, node_id=_SEED_NODE, fiel
     return load_catalog(REPO_ROOT)
 
 
+def _classify_as_if_unregistered(catalog, *, node_id, field, path):
+    """classify_new_sources(catalog, [path]) as if `path` were absent from
+    `node_id`'s `field` -- via an in-memory deep copy, not a tmp-rooted
+    isolated catalog: _catalog_referenced_paths() computes
+    `.relative_to(catalog.repo_root)` against catalog_root's own files,
+    which raises for a tmp catalog_root that isn't under the real
+    repo_root. A deep copy keeps repo_root/catalog_root pointing at the
+    real repo (so that resolution stays valid) while letting this one
+    node's tracked-paths list be mutated freely, since Catalog is a frozen
+    dataclass but its nested dicts are not."""
+    import copy
+
+    catalog_copy = copy.deepcopy(catalog)
+    node = catalog_copy.nodes[node_id]
+    if path in node[field]:
+        node[field].remove(path)
+    return classify_new_sources(catalog_copy, [path])
+
+
+def _isolated_catalog_without_registration(monkeypatch, tmp_path, *, node_id, field, path):
+    """Builds an isolated catalog (real repo_root, tmp catalog_root) with
+    `path` forced OUT of `node_id`'s `field` and out of auto_registrations,
+    regardless of whether the real repo has since registered it for real.
+
+    Tests that exercise "a real file that is not yet registered" used to
+    assert this directly against the real (module-scoped) `catalog` fixture
+    -- correct only as long as nothing on main ever actually registered the
+    file. Once the Context Librarian auto-maintenance loop is fixed and
+    actually runs to completion (see the incident this module's newest
+    regression test documents), a merged auto-maintenance PR permanently
+    registers such a file, and any test asserting "not registered" against
+    the real catalog breaks forever. Deregistering in an isolated copy
+    keeps the scenario real (real file, real classify_new_sources/policy
+    predicate) without depending on the real repo's registration state
+    staying frozen in time."""
+    isolated = _isolated_catalog(monkeypatch, tmp_path)
+    files = reconcile_module._catalog_node_files(isolated)
+    file_path = files[node_id]
+    data = json.loads(file_path.read_text(encoding="utf-8"))
+    for node in data["nodes"]:
+        if node["id"] == node_id and path in node.get(field, []):
+            node[field].remove(path)
+    file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    update_auto_registrations(isolated.catalog_root, {path: None})
+    return load_catalog(REPO_ROOT)
+
+
 def _real_content_hash(path=_SEED_PATH):
     return reconcile_module._content_hash(REPO_ROOT / path)
 
@@ -269,22 +316,29 @@ def test_policy_approved_new_source_registers_and_reconciles_clean(catalog, poli
     # example -- was registered for real by PR #628 (a prerequisite this
     # branch rebases onto, see docs/context_librarian/RECONCILIATION.md), so
     # it is no longer a real "new source". Use
-    # scripts/research_crawler_poc/reconcile_test_fixture.py instead: a real,
-    # permanent, deliberately-unregistered fixture file kept for exactly this
-    # test (same precedent as tc8_test_repo_stub.py), so this stays a genuine
-    # real-file, real-classification, real-predicate end-to-end proof instead
-    # of depending on which repository registration gaps happen to still be
-    # open.
+    # scripts/research_crawler_poc/reconcile_test_fixture.py instead: a
+    # real fixture file kept for exactly this test (same precedent as
+    # tc8_test_repo_stub.py) so this stays a genuine real-file, real-
+    # classification, real-predicate end-to-end proof.
     #
-    # Classification against the real (module-scoped) catalog fixture --
-    # _catalog_referenced_paths() resolves paths relative to catalog.repo_root,
-    # which only holds for the real repo layout, not an isolated tmp copy
-    # whose catalog_root lives outside repo_root.
+    # It is deliberately NOT assumed to stay unregistered on the real repo
+    # forever: once the Context Librarian auto-maintenance loop actually
+    # completes (which it now does), a merged maintenance PR registers it
+    # for real. Classify as-if-unregistered (real repo_root, in-memory
+    # deep copy) and separately build an isolated (tmp catalog_root) copy
+    # for the actual reconcile()/apply_auto_maintenance() write flow, so
+    # this test stays correct regardless of whether main has already
+    # registered it.
     fixture_path = "scripts/research_crawler_poc/reconcile_test_fixture.py"
-    assert fixture_path not in catalog.nodes["decision.offline_research_support_tool"]["code_paths"]
-    new_sources = classify_new_sources(catalog, [fixture_path])
+    new_sources = _classify_as_if_unregistered(
+        catalog, node_id="decision.offline_research_support_tool", field="code_paths", path=fixture_path,
+    )
+    isolated = _isolated_catalog_without_registration(
+        monkeypatch, tmp_path,
+        node_id="decision.offline_research_support_tool", field="code_paths", path=fixture_path,
+    )
+    assert fixture_path not in isolated.nodes["decision.offline_research_support_tool"]["code_paths"]
 
-    isolated = _isolated_catalog(monkeypatch, tmp_path)
     main_sha = "b2c3d4e5f6070000000000000000000000000000"
 
     monkeypatch.setattr(reconcile_module, "_resolve_main_sha", lambda *_a, **_k: main_sha)
@@ -334,11 +388,21 @@ def test_new_registration_node_gets_observed_commit_stamped_even_when_another_no
     last_observed_commit baseline was never advanced. This test reproduces
     that exact combination: a real drifted node AND a real new registration
     in the same apply_auto_maintenance() call."""
+    # See test_policy_approved_new_source_registers_and_reconciles_clean
+    # above for why this classifies/deregisters via copies rather than
+    # trusting the real repo to have never registered this fixture: once
+    # the bug this test guards against is fixed, a merged auto-maintenance
+    # PR registers it for real.
     fixture_path = "scripts/research_crawler_poc/reconcile_test_fixture.py"
-    assert fixture_path not in catalog.nodes["decision.offline_research_support_tool"]["code_paths"]
-    new_sources = classify_new_sources(catalog, [fixture_path])
+    new_sources = _classify_as_if_unregistered(
+        catalog, node_id="decision.offline_research_support_tool", field="code_paths", path=fixture_path,
+    )
+    isolated = _isolated_catalog_without_registration(
+        monkeypatch, tmp_path,
+        node_id="decision.offline_research_support_tool", field="code_paths", path=fixture_path,
+    )
+    assert fixture_path not in isolated.nodes["decision.offline_research_support_tool"]["code_paths"]
 
-    isolated = _isolated_catalog(monkeypatch, tmp_path)
     main_sha = "d4e5f6070800000000000000000000000000000"
     other_node_id = next(
         n["id"]
@@ -1194,14 +1258,18 @@ def test_pr_with_no_new_sources_is_clean(catalog, policies):
 
 
 def test_pr_source_covered_by_approved_policy_needs_no_owner_decision(catalog, policies):
-    # Real, permanent, deliberately-unregistered fixture matching
-    # OFFLINE_RESEARCH_TOOL (same fixture test_policy_approved_new_source_
-    # registers_and_reconciles_clean() above uses for the post-merge path)
-    # -- reused here so both paths are proven against the identical real
-    # file, not two different examples that could quietly drift apart.
+    # Real fixture matching OFFLINE_RESEARCH_TOOL (same fixture
+    # test_policy_approved_new_source_registers_and_reconciles_clean()
+    # above uses for the post-merge path) -- reused here so both paths are
+    # proven against the identical real file, not two different examples
+    # that could quietly drift apart. Classified as-if-unregistered (see
+    # _classify_as_if_unregistered) rather than assuming the real repo has
+    # never registered it: reconcile_pr() itself is read-only, so the real
+    # (possibly-already-registered) `catalog` is still fine to route with.
     fixture_path = "scripts/research_crawler_poc/reconcile_test_fixture.py"
-    assert fixture_path not in catalog.nodes["decision.offline_research_support_tool"]["code_paths"]
-    new_sources = classify_new_sources(catalog, [fixture_path])
+    new_sources = _classify_as_if_unregistered(
+        catalog, node_id="decision.offline_research_support_tool", field="code_paths", path=fixture_path,
+    )
 
     result = _reconcile_pr_with_fakes(catalog, policies, new_sources=new_sources)
     assert result.outcome == AUTO_MAINTENANCE_REQUIRED
