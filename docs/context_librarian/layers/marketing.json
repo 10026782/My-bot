@@ -72,7 +72,8 @@
           "F23",
           "marketing-bridge"
         ]
-      }
+      },
+      "last_observed_commit": "2548066d6514ab1d7df4fcee1b22d2b279fd6ec1"
     }
   ],
   "edges": []
