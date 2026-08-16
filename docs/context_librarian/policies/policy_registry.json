@@ -193,6 +193,7 @@
         "core/external_execution_boundary.py",
         "core/external_execution_repository.py",
         "core/external_poll_lease.py",
+        "core/moneyprinterturbo_adapter.py",
         "core/migrations/002_external_poll_leases.sql"
       ],
       "runtime_consumed": true,

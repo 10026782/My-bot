@@ -117,6 +117,15 @@ def test_poll_completes_job_and_terminal_outcome_unknown_is_not_resubmitted():
     assert len(adapter.submit_calls) == 1
 
 
+def test_poll_keeps_submitted_when_provider_is_still_running():
+    repo = FakeRepo()
+    adapter = FakeAdapter(poll_result=PollResult("submitted"))
+    boundary = make_boundary(adapter, repo)
+    boundary.submit(contract_id="c-running", idempotency_key="k1", payload={})
+    assert boundary.poll_due(poller_id="a") == 1
+    assert repo.jobs["c-running"].status == "submitted"
+
+
 def test_successful_poll_is_the_only_external_completion():
     repo = FakeRepo()
     adapter = FakeAdapter(poll_result=PollResult("completed", result_ref="sha256:abc"))
