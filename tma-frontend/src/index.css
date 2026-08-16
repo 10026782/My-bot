@@ -1363,12 +1363,57 @@
 
 .command-center-screen .boss-page-header__title-row {
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.command-center-screen .boss-page-header__body,
+.command-center-screen .boss-page-header__copy,
+.command-center-screen .boss-page-title,
+.command-center-screen .boss-page-subtitle {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  unicode-bidi: plaintext;
 }
 
 .command-center-screen .boss-page-header__title-row .boss-status-badge {
   max-width: min(100%, 260px);
   white-space: normal;
   text-align: center;
+}
+
+.command-center-screen,
+.command-center-screen .ventures-shell,
+.command-center-screen .boss-page-header,
+.command-center-screen .command-center-stack,
+.command-center-screen .command-center-hero,
+.command-center-screen .command-center-section,
+.command-center-screen .command-center-attention-card,
+.command-center-screen .command-center-development-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.command-center-screen {
+  overflow-x: hidden;
+}
+
+.command-center-screen .ventures-shell,
+.command-center-screen .command-center-stack,
+.command-center-screen .command-center-attention-list,
+.command-center-screen .command-center-decision-list,
+.command-center-screen .command-center-development-grid,
+.command-center-screen .command-center-development-group,
+.command-center-screen .command-center-attention-card,
+.command-center-screen .command-center-development-card,
+.command-center-screen .command-center-section__heading,
+.command-center-screen .command-center-card__topline,
+.command-center-screen .command-center-inline-status {
+  min-width: 0;
 }
 
 .command-center-stack {
@@ -1403,6 +1448,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--boss-space-3);
+  flex-wrap: wrap;
 }
 
 .command-center-section__heading h2,
@@ -1410,6 +1456,11 @@
 .command-center-attention-card h3,
 .command-center-development-card h3 {
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  unicode-bidi: plaintext;
 }
 
 .command-center-section__heading h2 {
@@ -1434,6 +1485,7 @@
   border-radius: var(--boss-radius-card);
   background: var(--boss-color-surface);
   box-shadow: var(--boss-shadow-section);
+  overflow: hidden;
 }
 
 .command-center-attention-card--warning {
@@ -1450,6 +1502,9 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--boss-space-2);
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .command-center-card__destination,
@@ -1457,6 +1512,11 @@
 .command-center-unavailable {
   color: var(--boss-color-text-muted);
   font-size: 13px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  unicode-bidi: plaintext;
 }
 
 .command-center-attention-card h3,
@@ -1471,11 +1531,19 @@
   color: var(--boss-color-text-secondary);
   font-size: 13px;
   line-height: 1.55;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  unicode-bidi: plaintext;
 }
 
 .command-center-card__action {
   justify-self: start;
   margin-top: var(--boss-space-1);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .command-center-more {
@@ -1519,6 +1587,7 @@
   border: 1px solid var(--boss-color-border);
   border-radius: var(--boss-radius-input);
   background: var(--boss-color-surface-subtle);
+  overflow: hidden;
 }
 
 .command-center-development-card__next {
@@ -1529,6 +1598,11 @@
   color: var(--boss-color-accent-readable);
   font-size: 12px;
   font-weight: 700;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  unicode-bidi: plaintext;
 }
 
 .command-center-skeleton {
@@ -1565,5 +1639,37 @@
 @media (prefers-reduced-motion: reduce) {
   .command-center-skeleton span {
     animation: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .command-center-hero,
+  .command-center-section {
+    padding: var(--boss-space-4);
+  }
+
+  .command-center-screen .boss-page-header__title-row {
+    align-items: flex-start;
+  }
+
+  .command-center-screen .boss-page-header__title-row .boss-status-badge {
+    max-width: 100%;
+  }
+
+  .command-center-section__heading,
+  .command-center-card__topline,
+  .command-center-inline-status {
+    align-items: flex-start;
+  }
+
+  .command-center-section__heading .boss-status-badge,
+  .command-center-card__topline .boss-status-badge {
+    white-space: normal;
+    text-align: start;
+  }
+
+  .command-center-inline-status .boss-button {
+    max-width: 100%;
+    white-space: normal;
   }
 }
