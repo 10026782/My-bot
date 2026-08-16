@@ -67,6 +67,7 @@ class FakeAdapter:
         self.poll_result = poll_result or PollResult("completed", result_ref="result-1")
         self.submit_calls = []
         self.poll_calls = []
+        self.cleanup_calls = []
 
     def submit(self, request):
         self.submit_calls.append(request)
@@ -75,6 +76,9 @@ class FakeAdapter:
     def poll(self, job):
         self.poll_calls.append(job.contract_id)
         return self.poll_result
+
+    def cleanup(self, job):
+        self.cleanup_calls.append(job.contract_id)
 
 
 def make_boundary(adapter=None, repo=None, lease=None):
@@ -136,6 +140,16 @@ def test_successful_poll_is_the_only_external_completion():
     assert repo.jobs["c1"].status == "completed"
     assert repo.jobs["c1"].result_ref == "sha256:abc"
     assert boundary.completed_job("c1").contract_id == "c1"
+
+
+def test_completed_poll_cleans_local_work_only_after_result_persistence():
+    repo = FakeRepo()
+    adapter = FakeAdapter(poll_result=PollResult("completed", result_ref="drive:file-1"))
+    boundary = make_boundary(adapter, repo)
+    boundary.submit(contract_id="c1", idempotency_key="k1", payload={})
+    assert boundary.poll_due(poller_id="p1") == 1
+    assert repo.jobs["c1"].result_ref == "drive:file-1"
+    assert adapter.cleanup_calls == ["c1"]
 
 
 def test_two_pollers_and_expired_token_release_guard():

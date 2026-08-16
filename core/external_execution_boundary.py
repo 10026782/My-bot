@@ -143,6 +143,11 @@ class ExternalExecutionBoundary:
                 try:
                     self.repository.update(job)
                     count += 1
+                    if result.status == "completed" and hasattr(self.adapter, "cleanup"):
+                        try:
+                            self.adapter.cleanup(job)
+                        except Exception:
+                            logger.warning("external artifact cleanup failed: %s", job.contract_id)
                 except Exception:
                     # Provider was already polled. Keep submitted state and never resubmit.
                     logger.warning("external poll result could not be persisted: %s", job.contract_id)
