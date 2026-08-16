@@ -19,6 +19,7 @@ INTERNAL_ONLY_TOOLS = frozenset({
     "send_followup",
     "send_recovery",
     "tma_write",
+    "external_execution.submit",
 })
 
 

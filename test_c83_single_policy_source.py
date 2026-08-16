@@ -26,6 +26,7 @@ EXPECTED_APPROVAL_TOOLS = frozenset({
     "send_recovery",
     # Phase 4B-2 wiring — TMA write-through-approval adapter
     "tma_write",
+    "external_execution.submit",
 })
 
 

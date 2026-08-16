@@ -98,6 +98,7 @@ class Tables:
     # of it, never an independent source of approval truth. Created in the live
     # base (app4bcgoX7t0HUVnm) via Airtable MCP, 12/07/2026. ראה ActionContractsFields.
     ACTION_CONTRACTS = "ActionContracts"
+    EXTERNAL_EXECUTION_JOBS = "External Execution Jobs"
     # PATCH 3B — durable Emergency Stop persistence (Option B: dedicated table,
     # not a reuse of Sessions). Must be created manually in Airtable before use;
     # pre-seed with one record per known EMERGENCY_STOP_* flag name (see
@@ -670,6 +671,9 @@ class MarketingCreativesFields:
     SELECTION_STATUS  = "Selection Status" # singleSelect: Pending Review|Selected|Rejected All
     BRIEF_USED        = "Brief Used"
     PRODUCTION_HANDOFF = "Production Handoff"
+    SCRIPT_DRAFT      = "Script Draft"
+    APPROVED_SCRIPT    = "Approved Script"
+    SCRIPT_SHA256      = "Script SHA256"
     MEDIA_FILES       = "Media Files"      # שדה קישור הפוך שנוצר אוטומטית (Media Files.Linked Creative)
 
 
@@ -686,6 +690,20 @@ class MarketingPublicationFields:
     PASSED_FORWARD       = "Passed Forward"
     SPEND                = "Spend"
     NOTES                = "Notes"
+
+
+class ExternalExecutionJobFields:
+    CONTRACT_ID       = "contract_id"
+    ADAPTER_NAME      = "adapter_name"
+    PROVIDER_JOB_ID   = "provider_job_id"
+    STATUS            = "status"
+    SUBMITTED_AT      = "submitted_at"
+    LAST_CHECKED_AT   = "last_checked_at"
+    COMPLETED_AT      = "completed_at"
+    ATTEMPT_COUNT     = "attempt_count"
+    RESULT_REF        = "result_ref"
+    EVIDENCE          = "evidence"
+    FAILURE_CODE      = "failure_code"
 
 
 class ApprovalsFields:

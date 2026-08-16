@@ -404,6 +404,14 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         model_exposed    = False,
         description_he   = "כתיבת Airtable שמקורה ב-TMA — לאחר אישור ActionGateway",
     ),
+    ToolMeta(
+        name             = "external_execution.submit",
+        roles_allowed    = _INTERNAL,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        model_exposed    = False,
+        description_he   = "שליחת עבודה ל-adapter חיצוני לאחר אישור ActionGateway",
+    ),
 )
 
 _REGISTRY: dict[str, ToolMeta] = _build_registry(_REGISTRY_ENTRIES)

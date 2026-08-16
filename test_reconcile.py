@@ -127,7 +127,7 @@ def _real_content_hash(path=_SEED_PATH):
 # --- Policy registry basics ---------------------------------------------
 
 
-def test_policy_registry_loads_all_ten_policies(policies):
+def test_policy_registry_loads_all_eleven_policies(policies):
     ids = {p.id for p in policies}
     assert ids == {
         "DOCUMENTATION_REFERENCE_ASSET",
@@ -140,6 +140,7 @@ def test_policy_registry_loads_all_ten_policies(policies):
         "OFFLINE_RESEARCH_TOOL",
         "EXTERNAL_RECOMMENDATION_CATALOG",
         "EXTERNAL_RECOMMENDATION_CATALOG_TEST",
+        "EXTERNAL_EXECUTION_RUNTIME",
     }
 
 
@@ -150,6 +151,7 @@ def test_policy_matching_is_glob_only_not_substring(policies):
     assert match_policy("core/authority_evidence_tracker.py", policies) is None
     # A real match: exact glob against the declared pattern.
     assert match_policy("scripts/verify_f15_staging.py", policies).id == "STAGING_VERIFICATION_F15"
+    assert match_policy("core/external_poll_lease.py", policies).id == "EXTERNAL_EXECUTION_RUNTIME"
 
 
 def test_target_field_never_inferred_all_policies_declare_it_explicitly(policies):

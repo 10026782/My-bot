@@ -733,10 +733,9 @@ def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown"
 
 
 def _select_creative_and_generate_handoff(creative_id: str, idea_num: str) -> dict:
-    """Returns {"ok": True, "handoff": str} or {"ok": False, "error": str}."""
+    """Select a Creative, then stop until an Approved Script exists."""
     import marketing_gateway
-    from airtable_schema import MarketingCreativesFields as MCF, MarketingDemandFields as MDF, MarketingDemandStage
-    from marketing_brief_composer import compose_production_handoff
+    from airtable_schema import MarketingCreativesFields as MCF, MarketingDemandStage
 
     selected_idea = f"Idea {idea_num}"
     if not marketing_gateway.select_creative(creative_id, selected_idea):
@@ -746,39 +745,21 @@ def _select_creative_and_generate_handoff(creative_id: str, idea_num: str) -> di
     if not creative:
         return {"ok": False, "error": "הרעיון לא נמצא לאחר הבחירה"}
 
-    idea_field = {"Idea 1": MCF.IDEA_1, "Idea 2": MCF.IDEA_2, "Idea 3": MCF.IDEA_3}[selected_idea]
-    selected_text = creative.get(idea_field, "")
-    if not selected_text:
-        return {"ok": False, "error": "טקסט הרעיון שנבחר ריק"}
-
     demand_ids = creative.get(MCF.LINKED_DEMAND) or []
     if not demand_ids:
         return {"ok": False, "error": "לרעיון אין דרישה מקושרת"}
 
-    demand = marketing_gateway.get_demand(demand_ids[0])
-    if not demand:
-        return {"ok": False, "error": "הדרישה המקושרת לא נמצאה"}
-
-    domain_rules = marketing_gateway.get_marketing_rules(demand.get(MDF.DOMAIN, "general"))
-
-    try:
-        handoff = compose_production_handoff(
-            demand=demand, selected_creative=selected_text, domain_rules=domain_rules,
-        )
-    except Exception as e:
-        return {"ok": False, "error": f"הרכבת ה-Production Handoff נכשלה: {e}"}
-
-    if not marketing_gateway.save_production_handoff(creative_id, handoff):
-        return {"ok": False, "error": "שמירת ה-Production Handoff נכשלה"}
-
-    if not marketing_gateway.update_demand_stage(demand_ids[0], MarketingDemandStage.HANDOFF_SENT):
+    if not marketing_gateway.update_demand_stage(demand_ids[0], MarketingDemandStage.SELECTED):
         logger.warning(
-            "[F23] handoff saved but demand_id=%s stage update to HANDOFF_SENT failed — "
+            "[F23] creative selected but demand_id=%s stage update to SELECTED failed — "
             "Current Stage is now stale, fix manually in Airtable", demand_ids[0],
         )
 
-    logger.info("[F23] handoff saved creative_id=%s demand_id=%s", creative_id, demand_ids[0])
-    return {"ok": True, "handoff": handoff}
+    logger.info(
+        "[F23] creative selected; script approval required creative_id=%s demand_id=%s",
+        creative_id, demand_ids[0],
+    )
+    return {"ok": False, "error": "נבחר Creative. נדרש Script Draft ואישור לפני Production Handoff."}
 
 
 if __name__ == "__main__":

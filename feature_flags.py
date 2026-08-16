@@ -89,6 +89,7 @@ APPROVAL POLICY:
                                  FEATURE_SINGLE_SPEAKER_APPROVAL_UX מופעל.
   FEATURE_ACTION_CONTRACT_PERSISTENCE - durable new proposals + proposal recovery lookups (Phase 4B-1A); default OFF
   FEATURE_ATOMIC_CLAIMS        - PostgreSQL atomic coordination for contract execution (Phase 4B0.1A); default OFF
+  EXTERNAL_EXECUTION_ENABLED   - generic external execution boundary; default OFF until schema/POC readiness
   FEATURE_PA01_ENFORCEMENT_STATE - שלוש מצבים (לא boolean רגיל): "off" (ברירת מחדל,
                                  התנהגות קיימת ללא שינוי) / "shadow" (מטריצת PA-01 מחושבת
                                  ומלוגגת per-row, לעולם לא נוגעת ב-final_reply) / "enforce"
@@ -221,6 +222,7 @@ _DEFAULTS: dict[str, str] = {
     "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS": os.environ.get(
         "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", "false",
     ),
+    "EXTERNAL_EXECUTION_ENABLED": os.environ.get("EXTERNAL_EXECUTION_ENABLED", "false"),
 }
 
 

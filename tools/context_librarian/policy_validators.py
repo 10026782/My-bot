@@ -107,6 +107,26 @@ def _validate_cross_layer_supporting_metadata(repo_root: Path, path: str) -> boo
     return _no_high_risk_content(text)
 
 
+def _validate_external_execution_runtime(repo_root: Path, path: str) -> bool | None:
+    """Prove the approved External Execution runtime source class by exact path."""
+    text = _read_text(repo_root, path)
+    if text is None:
+        return None
+    required = {
+        "core/external_execution_boundary.py": ("class ExternalExecutionBoundary",),
+        "core/external_execution_repository.py": ("class ExternalExecutionRepository",),
+        "core/external_poll_lease.py": ("class ExternalPollLeaseRepository",),
+        "core/migrations/002_external_poll_leases.sql": (
+            "CREATE TABLE IF NOT EXISTS external_poll_leases",
+            "job_id TEXT PRIMARY KEY",
+            "lease_token TEXT NOT NULL UNIQUE",
+            "idx_external_poll_leases_expiry",
+        ),
+    }
+    markers = required.get(path)
+    return bool(markers) and all(marker in text for marker in markers)
+
+
 VALIDATORS: dict[str, Callable[[Path, str], bool | None]] = {
     "STAGING_VERIFICATION_F15": _validate_staging_verification,
     "STAGING_VERIFICATION_APPROVALS_BUG_FAMILY": _validate_staging_verification,
@@ -115,6 +135,7 @@ VALIDATORS: dict[str, Callable[[Path, str], bool | None]] = {
     "EXTERNAL_RECOMMENDATION_CATALOG": _validate_external_recommendation_catalog,
     "EXTERNAL_RECOMMENDATION_CATALOG_TEST": _validate_external_recommendation_catalog,
     "CROSS_LAYER_SUPPORTING_METADATA": _validate_cross_layer_supporting_metadata,
+    "EXTERNAL_EXECUTION_RUNTIME": _validate_external_execution_runtime,
 }
 
 

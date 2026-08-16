@@ -184,6 +184,26 @@
       "notes": [
         "See EXTERNAL_RECOMMENDATION_CATALOG for why this is a separate policy rather than a second pattern on the same one."
       ]
+    },
+    {
+      "id": "EXTERNAL_EXECUTION_RUNTIME",
+      "policy_version": 1,
+      "description": "Approved External Execution runtime boundary, durable job repository, PostgreSQL poll lease repository, and its exact migration. Owned by the Approvals/execution layer; this registration does not change ActionContract lifecycle authority or enable external execution.",
+      "path_patterns": [
+        "core/external_execution_boundary.py",
+        "core/external_execution_repository.py",
+        "core/external_poll_lease.py",
+        "core/migrations/002_external_poll_leases.sql"
+      ],
+      "runtime_consumed": true,
+      "authority": true,
+      "eligible_target": "layer.approvals",
+      "target_field": "code_paths",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "Owner-approved exact-path registration under layer.approvals. The boundary owns External Execution submission/poll coordination; ActionContracts remain approval lifecycle authority, Airtable remains job-state authority, and PostgreSQL remains transient lease ownership only."
+      ]
     }
   ]
 }

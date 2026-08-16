@@ -243,9 +243,9 @@ def test_no_legacy_raw_text_fallback():
     print("test_no_legacy_raw_text_fallback OK")
 
 
-# ── 12. existing creative selection + handoff behavior remains unchanged ──
+# ── 12. selected Creative requires an Approved Script before handoff ──
 
-def test_creative_selection_and_handoff_unchanged():
+def test_creative_selection_requires_approved_script_before_handoff():
     from cmd_marketing import _select_creative_and_generate_handoff
     from airtable_schema import MarketingCreativesFields as MCF, MarketingDemandStage
 
@@ -261,11 +261,10 @@ def test_creative_selection_and_handoff_unchanged():
             patch("marketing_gateway.update_demand_stage", return_value=True):
         result = _select_creative_and_generate_handoff("recCreative1", "1")
 
-    assert result["ok"] is True, result
-    assert "handoff" in result and isinstance(result["handoff"], str) and result["handoff"]
-    save_handoff_mock.assert_called_once()
-    assert "רעיון קיים לבדיקה" in save_handoff_mock.call_args.args[1]
-    print("test_creative_selection_and_handoff_unchanged OK")
+    assert result["ok"] is False, result
+    assert "Script Draft" in result["error"]
+    save_handoff_mock.assert_not_called()
+    print("test_creative_selection_requires_approved_script_before_handoff OK")
 
 
 # ── prompt sanity: closed menu never offers a non-renderable key ────
@@ -290,6 +289,6 @@ if __name__ == "__main__":
     test_candidate_and_unconfirmed_fact_fails_closed()
     test_renderer_failure_never_calls_save_creative_ideas()
     test_no_legacy_raw_text_fallback()
-    test_creative_selection_and_handoff_unchanged()
+    test_creative_selection_requires_approved_script_before_handoff()
     test_prompt_never_offers_non_renderable_fact_keys()
     print("test_bug164_pr2_creative_cutover.py: ALL TESTS PASSED")

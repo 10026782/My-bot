@@ -25,7 +25,11 @@
         "app.py",
         "tma_api.py",
         "event_bus.py",
-        "core/lifecycle_projection.py"
+        "core/lifecycle_projection.py",
+        "core/external_execution_boundary.py",
+        "core/external_execution_repository.py",
+        "core/external_poll_lease.py",
+        "core/migrations/002_external_poll_leases.sql"
       ],
       "test_paths": [
         "test_action_gateway.py",
