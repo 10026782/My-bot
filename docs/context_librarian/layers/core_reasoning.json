@@ -20,6 +20,7 @@
       "core/reasoning_engines.py",
       "core/reasoning_entity.py",
       "core/reasoning_ports.py",
+      "core/owner_attention.py",
       "tma_api.py"
     ],
     "test_paths": [
@@ -28,7 +29,8 @@
       "test_bug104_phase1_1_contract_hardening.py",
       "test_bug104_phase2a1_current_state_policy.py",
       "test_bug104_phase2a2_lead_wording.py",
-      "test_bug104_tma_lead_event_bridge.py"
+      "test_bug104_tma_lead_event_bridge.py",
+      "test_owner_attention.py"
     ],
     "canonical_docs": [
       {"path": "docs/architecture/bug-104/PHASE_2A_CLOSEOUT.md", "role": "current closeout", "status": "active"},
