@@ -277,3 +277,11 @@ Must never be delegated to MoneyPrinterTurbo:
 
 This document records audit/design findings only. It does not implement the
 adapter, install MoneyPrinterTurbo, change schemas, or enable production use.
+
+## Verified POC runtime floor
+
+For the approved local-only 1080×1920 POC fixture, Render Standard (2 GiB)
+completed `final-1.mp4`; Render Starter (512 MiB) was terminated during
+combine. Treat Standard 2 GiB as the minimum proven MPT runtime for this
+fixture. This is staging POC evidence, not production enablement; keep
+`EXTERNAL_EXECUTION_ENABLED=false` until a separately approved rollout.
