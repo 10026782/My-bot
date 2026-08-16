@@ -3,6 +3,51 @@
   "layer_id": "tools",
   "nodes": [
     {
+      "id": "component.dev_registry_reconcile",
+      "name": "Canonical Active Work Registry Reconciler",
+      "type": "component",
+      "status": "active",
+      "authority_level": "verified_audit",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "deterministic development/governance maintenance for explicitly keyed evidence reconciliation into canonical §3.5",
+        "precedence": "explicit structured evidence only; the Registry remains the canonical summarized status and this routine does not infer identity or Work State"
+      },
+      "owner": "development_governance",
+      "code_paths": [
+        "tools/dev_registry_reconcile.py"
+      ],
+      "test_paths": [
+        "test_dev_registry_reconcile.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md",
+          "role": "canonical §3.5 Active Work Registry written by this bounded routine",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-16",
+      "last_verified_commit": "e14ebaeacc5038e153b5831ace00be15d90d2f30",
+      "confidence": 1.0,
+      "notes": [
+        "Development/governance maintenance only; deterministic and no LLM or network dependency.",
+        "Accepts exact Initiative Key mappings from structured evidence manifests; no title similarity or broad prose search.",
+        "May write only allowed machine-managed §3.5 fields and never changes Work State, identity, Scope, Horizon, Current Stage, or Next Decided Step.",
+        "Does not own runtime state, does not participate in application runtime, and does not prove deployment/runtime from commit subjects or CI success."
+      ],
+      "extensions": {
+        "catalog.role": "development_governance_maintenance_only",
+        "catalog.runtime_consumed": false,
+        "catalog.writes_registry": true,
+        "catalog.reconciles_evidence": true,
+        "catalog.no_network_dependency": true
+      },
+      "last_observed_commit": "e14ebaeacc5038e153b5831ace00be15d90d2f30"
+    },
+    {
       "id": "component.dev_registry_validator",
       "name": "Canonical Active Work Registry Validator",
       "type": "component",
