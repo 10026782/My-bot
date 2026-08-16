@@ -47,6 +47,7 @@ def test_supported_attention_items_have_stable_keys_and_deterministic_order():
     ))
 
     assert result.overall_state == "ATTENTION"
+    assert next(item for item in result.items if item.signal_key == "system.health.degraded").severity == "WARNING"
     assert [item.signal_key for item in result.items] == [
         "system.health.degraded",
         "approvals.pending",
