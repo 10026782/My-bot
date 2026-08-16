@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,27 @@ def _payload(script, media):
         "aspect_ratio": "9:16",
         "voice_profile": "no-voice",
     }
+
+
+def _poll_fixture(tmp_path, *, artifact=b"", exit_code="0"):
+    job_id = "00000000-0000-0000-0000-000000000001"
+    job = tmp_path / "jobs" / job_id
+    (job / "output").mkdir(parents=True)
+    runtime = tmp_path / "runtime"
+    output = runtime / "storage" / "tasks" / job_id / "final-1.mp4"
+    output.parent.mkdir(parents=True)
+    output.write_bytes(artifact)
+    script = "approved"
+    (job / "manifest.json").write_text(json.dumps({
+        "output_ref": str(output),
+        "approved_script": script,
+        "script_sha256": hashlib.sha256(script.encode()).hexdigest(),
+        "pid": 12345,
+        "deadline": time.time() + 60,
+    }))
+    if exit_code is not None:
+        (job / "exit_status").write_text(str(exit_code), encoding="ascii")
+    return MoneyPrinterTurboAdapter(runtime_root=runtime, jobs_root=tmp_path / "jobs", media_root=tmp_path), job_id, output
 
 
 def test_missing_or_wrong_script_hash_rejected(tmp_path):
@@ -39,27 +61,61 @@ def test_media_path_escape_rejected(tmp_path):
         adapter._validate(_payload("approved", outside))
 
 
-def test_poll_completed_is_restart_safe(tmp_path):
-    jobs = tmp_path / "jobs"
-    job = jobs / "00000000-0000-0000-0000-000000000001"
-    (job / "output").mkdir(parents=True)
-    output = job / "output" / "final-1.mp4"
-    output.write_bytes(b"mp4")
-    runtime = tmp_path / "runtime"
-    task_output = runtime / "storage" / "tasks" / job.name
-    task_output.mkdir(parents=True)
-    runtime_output = task_output / "final-1.mp4"
-    runtime_output.write_bytes(b"mp4")
-    script = "approved"
-    (job / "manifest.json").write_text(json.dumps({
-        "output_ref": str(runtime_output),
-        "approved_script": script,
-        "script_sha256": hashlib.sha256(script.encode()).hexdigest(),
-    }))
-    adapter = MoneyPrinterTurboAdapter(runtime_root=runtime, jobs_root=jobs, media_root=tmp_path)
-    result = adapter.poll(SimpleNamespace(provider_job_id=job.name))
+def test_poll_completed_is_restart_safe(tmp_path, monkeypatch):
+    adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 2048)
+    monkeypatch.setattr(adapter, "_validate_artifact", lambda _: {"artifact_size": "2048", "validation_result": "valid"})
+    result = adapter.poll(SimpleNamespace(provider_job_id=job_id))
     assert result.status == "completed"
-    assert result.result_ref == str(output)
+    assert result.result_ref.endswith("output/final-1.mp4")
+
+
+def test_missing_or_zero_artifact_never_completes(tmp_path):
+    adapter, job_id, output = _poll_fixture(tmp_path, artifact=b"")
+    output.unlink()
+    assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
+    adapter, job_id, _ = _poll_fixture(tmp_path / "zero", artifact=b"")
+    assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
+
+
+def test_fake_and_truncated_mp4_never_complete(tmp_path, monkeypatch):
+    adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 48)
+    result = adapter.poll(SimpleNamespace(provider_job_id=job_id))
+    assert result.status == "failed"
+    assert result.evidence["validation_result"] == "too_small"
+
+    adapter, job_id, _ = _poll_fixture(tmp_path / "truncated", artifact=b"x" * 2048)
+    monkeypatch.setattr("core.moneyprinterturbo_adapter.shutil.which", lambda name: "ffprobe" if name == "ffprobe" else None)
+    monkeypatch.setattr("core.moneyprinterturbo_adapter.subprocess.run", lambda *a, **k: SimpleNamespace(returncode=0, stdout='{"streams": []}'))
+    assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
+
+
+def test_valid_ffprobe_video_completes_with_bounded_evidence(tmp_path, monkeypatch):
+    adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 2048)
+    monkeypatch.setattr("core.moneyprinterturbo_adapter.shutil.which", lambda name: "ffprobe" if name == "ffprobe" else None)
+    monkeypatch.setattr("core.moneyprinterturbo_adapter.subprocess.run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout='{"streams": [{"codec_type": "video", "width": 1080, "height": 1920, "duration": "6.12"}]}'
+    ))
+    result = adapter.poll(SimpleNamespace(provider_job_id=job_id))
+    assert result.status == "completed"
+    assert result.evidence["artifact_size"] == "2048"
+    assert result.evidence["video_width"] == "1080"
+    assert result.evidence["video_duration"] == "6.12"
+
+
+def test_live_or_unknown_process_never_completes(tmp_path, monkeypatch):
+    adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 2048, exit_code=None)
+    monkeypatch.setattr("core.moneyprinterturbo_adapter._pid_alive", lambda _: True)
+    assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "submitted"
+    monkeypatch.setattr("core.moneyprinterturbo_adapter._pid_alive", lambda _: False)
+    assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "outcome_unknown"
+
+
+def test_validator_error_and_nonzero_exit_fail_closed(tmp_path, monkeypatch):
+    adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 2048)
+    monkeypatch.setattr(adapter, "_validate_artifact", lambda _: {"artifact_size": "2048", "validation_result": "ffprobe_error"})
+    assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
+    adapter, job_id, _ = _poll_fixture(tmp_path / "exit", artifact=b"x" * 2048, exit_code="2")
+    assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
 
 
 def test_submit_uses_local_script_and_materials_only(tmp_path, monkeypatch):
@@ -87,8 +143,9 @@ def test_submit_uses_local_script_and_materials_only(tmp_path, monkeypatch):
     )
     result = adapter.submit({"payload": _payload("exact approved script", media)})
     assert result.status == "accepted"
-    assert "--video-source" in seen["argv"]
-    assert seen["argv"][seen["argv"].index("--video-source") + 1] == "local"
-    assert "--video-subject" not in seen["argv"]
-    assert "--video-terms" not in seen["argv"]
+    child_argv = seen["argv"][4:]
+    assert "--video-source" in child_argv
+    assert child_argv[child_argv.index("--video-source") + 1] == "local"
+    assert "--video-subject" not in child_argv
+    assert "--video-terms" not in child_argv
     assert seen["kwargs"]["env"].keys() == {"PATH", "LANG", "LC_ALL"}
