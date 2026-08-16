@@ -15,8 +15,10 @@ GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=<secret JSON, injected by the platform>
 ```
 
 The service account must be shared only on the dedicated folder. The code uses
-the `drive.file` scope, does not create public permissions, and never accepts a
-user OAuth refresh token or a checked-in private key.
+the `drive` scope because the artifact folder is an existing Shared Drive
+folder; its Drive ACL remains restricted to that dedicated folder only. The
+code does not create public permissions and never accepts a user OAuth refresh
+token or a checked-in private key.
 
 `EXTERNAL_EXECUTION_ENABLED=false` remains the production default. Without
 `MPT_ARTIFACT_STORAGE=google_drive`, the existing local-only Phase 1 adapter

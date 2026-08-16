@@ -12,7 +12,7 @@ from pathlib import Path
 from core.artifact_store import ArtifactStoreError, StoredArtifact
 
 
-_SCOPES = ("https://www.googleapis.com/auth/drive.file",)
+_SCOPES = ("https://www.googleapis.com/auth/drive",)
 _MAX_RETRIES = 2
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
 

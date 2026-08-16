@@ -4,7 +4,7 @@ import json
 import pytest
 
 from core.artifact_store import ArtifactStoreError
-from core.google_drive_artifact_store import GoogleDriveArtifactStore
+from core.google_drive_artifact_store import GoogleDriveArtifactStore, _SCOPES
 
 
 class _Request:
@@ -79,6 +79,10 @@ def test_shared_drive_calls_enable_all_drives(tmp_path):
     _store(tmp_path, service).put(path=artifact, identity="contract:provider", metadata={})
     assert service.files_api.calls
     assert all(kwargs.get("supportsAllDrives") is True for _, kwargs in service.files_api.calls)
+
+
+def test_shared_drive_uses_drive_scope():
+    assert _SCOPES == ("https://www.googleapis.com/auth/drive",)
 
 
 def test_existing_identity_is_reused_without_duplicate(tmp_path):
