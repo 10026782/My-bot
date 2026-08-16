@@ -1,5 +1,16 @@
 {
-  "schema_version": "1.1",
-  "last_source_scan_commit": null,
-  "auto_registrations": {}
+  "auto_registrations": {
+    "scripts/research_crawler_poc/reconcile_test_fixture.py": {
+      "classification_mode": "AUTO",
+      "content_hash": "sha256:0185adc83c0d67db69a6c30e0f4c381b57934909d1447353893a143416b88525",
+      "policy_id": "OFFLINE_RESEARCH_TOOL",
+      "policy_version": 1,
+      "target_field": "code_paths",
+      "target_node": "decision.offline_research_support_tool",
+      "validated_at_commit": "48482c29a8c85ab206fa7cc9c1dc40c3fde05d98",
+      "validator_version": 1
+    }
+  },
+  "last_source_scan_commit": "48482c29a8c85ab206fa7cc9c1dc40c3fde05d98",
+  "schema_version": "1.1"
 }

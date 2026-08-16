@@ -87,7 +87,8 @@
           "EvidenceFinalizer",
           "RP4-RP5"
         ]
-      }
+      },
+      "last_observed_commit": "48482c29a8c85ab206fa7cc9c1dc40c3fde05d98"
     }
   ],
   "edges": [
