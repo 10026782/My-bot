@@ -84,9 +84,56 @@
         ]
       },
       "last_observed_commit": "84ab7bbd8284f595b453fb9c0e916235fb7e5e40"
+    },
+    {
+      "id": "component.command_center_read_model",
+      "name": "OC-D Unified Command Center Read Model",
+      "type": "component",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "owner-facing read-only composition of OC-B and DEV-REG-3 projections",
+        "precedence": "consumed projections remain authoritative; OC-D does not reconcile, infer, or mutate source state"
+      },
+      "owner": "command_center_read_model",
+      "code_paths": [
+        "core/command_center.py",
+        "tma_api.py"
+      ],
+      "test_paths": [
+        "test_command_center.py"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-16",
+      "last_verified_commit": "32cc280e621ff1a629448f55aac12514f75fadf5",
+      "confidence": 1.0,
+      "notes": [
+        "Read-only owner API composition; no writes, approvals, state transitions, persistence, cache, or LLM calls.",
+        "Consumes OC-B OwnerAttentionProjection and DEV-REG-3 OwnerDevelopmentStatus without duplicating collectors, Registry parsing, reconciliation, or source precedence.",
+        "Business status and recent activity are explicit UNKNOWN/unsupported until an existing canonical read model is available.",
+        "This component is registered under the existing API/read-model host layer for catalog coverage only; it does not own Core Reasoning, Approvals, System Health, Registry, or business-domain state."
+      ],
+      "extensions": {
+        "catalog.role": "owner_facing_read_model_api",
+        "catalog.read_only": true,
+        "catalog.source_of_truth": false,
+        "catalog.reconciles_evidence": false,
+        "catalog.writes_state": false,
+        "catalog.llm": false
+      },
+      "last_observed_commit": "32cc280e621ff1a629448f55aac12514f75fadf5"
     }
   ],
   "edges": [
+    {
+      "from": "component.command_center_read_model",
+      "to": "component.owner_development_registry_projection",
+      "type": "depends_on",
+      "notes": "OC-D consumes the validated DEV-REG-3 projection; it does not parse §3.5 or reconcile evidence."
+    },
     {
       "from": "layer.core_reasoning",
       "to": "decision.cross_layer_authority",
