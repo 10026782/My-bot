@@ -347,7 +347,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "0959cb3c3ec0b381c9f61591605ec6b6fd1c6014"
+      "last_observed_commit": "e14ebaeacc5038e153b5831ace00be15d90d2f30"
     },
     {
       "id": "decision.message_contract_envelope_authority",
