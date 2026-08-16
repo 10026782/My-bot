@@ -33,6 +33,9 @@ from airtable_schema import (
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
+from core.command_center import compose_command_center_status
+from core.owner_attention import build_owner_attention_projection
+from core.owner_development import generate_owner_development_status
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +143,7 @@ def _cors(response):
 @tma_api.route("/api/finance/pulse", methods=["OPTIONS"])
 @tma_api.route("/api/marketing/demands", methods=["OPTIONS"])
 @tma_api.route("/api/owner/control-center", methods=["OPTIONS"])
+@tma_api.route("/api/owner/command-center", methods=["OPTIONS"])
 @tma_api.route("/api/owner/health", methods=["OPTIONS"])
 @tma_api.route("/api/tma/upload", methods=["OPTIONS"])
 def _preflight():
@@ -2574,6 +2578,23 @@ def owner_control_center(identity):
         "next_actions": next_actions,
         "warnings": warnings,
     })
+
+
+@tma_api.route("/api/owner/command-center", methods=["GET"])
+@require_tma_auth
+def owner_command_center(identity):
+    """Compose owner read models; this endpoint performs no writes."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+    generated_at = datetime.now(timezone.utc).isoformat()
+    attention = build_owner_attention_projection(identity, checked_at=generated_at)
+    development = generate_owner_development_status(checked_at=generated_at)
+    status = compose_command_center_status(
+        attention,
+        development,
+        generated_at=generated_at,
+    )
+    return jsonify(status.as_dict()), 200
 
 
 @tma_api.route("/api/approvals", methods=["GET"])
