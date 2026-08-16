@@ -5072,6 +5072,33 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 
 ---
 
+### BUG-165 — ActionGateway shadow evidence misclassifies accepted external submission
+- **דווח:** 16/08/2026
+- **דווח על ידי:** owner, בעקבות MPT Phase 1 staging E2E
+- **מסך / מודול:** `core/action_gateway.py` evidence projection/shadow path;
+  `core/external_execution_boundary.py`
+- **תיאור:** לאחר approval של `external_execution.submit`, ה־ActionContract
+  הקנוני עבר ל־`executed` עבור accepted submission, אך shadow evidence רשם
+  `outcome_unknown`. באותו E2E ה־ExternalExecutionJob הדורבילי עבר
+  `created → submitted → completed`.
+- **Severity:** Low — observability/hardening בלבד; לא נצפתה הפרת lifecycle,
+  submission כפול או שינוי provider outcome.
+- **Root Cause:** לא הוכח. החשד הוא שה־shadow projection מפרש completion של
+  ActionContract כאילו הוא artifact/provider outcome, למרות שה־ExternalExecutionJob
+  הוא owner של התוצאה הסופית.
+- **תוקן ב-commit:** —
+- **Merged:** לא רלוונטי — אין תיקון
+- **Deployed:** staging evidence בלבד; אין שינוי deployment עבור הפריט
+- **Verified בפרודקשן:** לא — אין בדיקת production ואין שינוי production
+- **Verification ראיה:** MPT Phase 1 staging E2E, contract
+  `f5c73380-40b5-4fda-a626-6049d69bf0b6`, provider job
+  `e0a37806-000c-4ec5-a7c9-8783525d0423`; ActionContract `executed`,
+  ExternalExecutionJob `completed`, וה־shadow log סיווג `outcome_unknown`.
+- **סטטוס:** Open — non-blocking hardening investigation. אין לשנות execution
+  semantics אלא אם תוכח הפרת contract אמיתית.
+
+---
+
 ## F14-B1 — Legacy Caller Migration
 
 - **תאריך:** 09/08/2026
