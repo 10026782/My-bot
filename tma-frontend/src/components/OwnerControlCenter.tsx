@@ -74,6 +74,15 @@ function destinationAction(
   return undefined;
 }
 
+export function dedupeDevelopmentItems(items: CommandCenterDevelopmentItem[]): CommandCenterDevelopmentItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.initiative_key)) return false;
+    seen.add(item.initiative_key);
+    return true;
+  });
+}
+
 function SectionTitle({ title, status }: { title: string; status?: string }) {
   return (
     <div className="command-center-section__heading">
@@ -129,6 +138,7 @@ function Unavailable({ text }: { text: string }) {
 
 export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [attentionExpanded, setAttentionExpanded] = useState(false);
 
   function load() {
     setState({ status: "loading" });
@@ -167,12 +177,12 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
   }
 
   const data = state.data;
-  const attentionItems = data.attention.items.slice(0, 3);
+  const visibleAttentionItems = attentionExpanded ? data.attention.items : data.attention.items.slice(0, 3);
   const pendingUnknown = data.pending_decisions.length === 0 && data.freshness.attention !== "CURRENT";
   const systemState = data.system_status.state;
   const development = data.development_status;
   const handlers = { onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures };
-  const moreAttentionAction = data.attention.items.slice(3).map((item) => destinationAction(item.destination, handlers)).find(Boolean);
+  const blockedOrOwnerDecision = dedupeDevelopmentItems([...development.blocked, ...development.owner_decisions]);
 
   return (
     <main className="ventures-screen command-center-screen">
@@ -182,14 +192,14 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
         <div className="command-center-stack">
           <section className="command-center-hero" aria-labelledby="attention-heading">
             <SectionTitle title="דורש תשומת לב עכשיו" status={data.freshness.attention} />
-            {attentionItems.length ? <><div className="command-center-attention-list">{attentionItems.map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div>{moreAttentionAction && <button type="button" className="boss-button boss-button--quiet boss-bubble--action command-center-more" onClick={moreAttentionAction}>הצג עוד</button>}</> : data.freshness.attention === "CURRENT" ? <p id="attention-heading" className="command-center-positive">אין כרגע דברים דחופים שדורשים את תשומת לבך.</p> : <Unavailable text="לא ניתן לקבוע כרגע מה דורש תשומת לב." />}
+            {data.attention.items.length ? <><div className="command-center-attention-list">{visibleAttentionItems.map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div>{data.attention.items.length > 3 && <button type="button" className="boss-button boss-button--quiet boss-bubble--action command-center-more" aria-expanded={attentionExpanded} onClick={() => setAttentionExpanded((expanded) => !expanded)}>{attentionExpanded ? "הצג פחות" : "הצג עוד"}</button>}</> : data.freshness.attention === "CURRENT" ? <p id="attention-heading" className="command-center-positive">אין כרגע דברים דחופים שדורשים את תשומת לבך.</p> : <Unavailable text="לא ניתן לקבוע כרגע מה דורש תשומת לב." />}
           </section>
 
           <Surface className="command-center-section" aria-labelledby="pending-heading"><SectionTitle title="החלטות ממתינות" status={data.freshness.attention} />{pendingUnknown ? <Unavailable text="מצב ההחלטות אינו זמין כרגע." /> : data.pending_decisions.length ? <div className="command-center-decision-list">{data.pending_decisions.slice(0, 3).map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div> : <p id="pending-heading" className="command-center-positive">אין החלטות ממתינות כרגע.</p>}</Surface>
 
           <Surface className="command-center-section" aria-labelledby="business-heading"><SectionTitle title="מצב העסק" status={data.freshness.business_status} />{data.business_status.state === "CURRENT" ? <p id="business-heading" className="command-center-positive">מצב העסק זמין.</p> : <Unavailable text="מצב עסקי מאוחד עדיין אינו מחובר למקור קנוני." />}</Surface>
 
-          <Surface className="command-center-section" aria-labelledby="development-heading"><SectionTitle title="מצב הפיתוח" status={data.freshness.development} />{development.projection_state === "UNKNOWN" ? <Unavailable text="מצב הפיתוח אינו זמין כרגע." /> : <div className="command-center-development-grid" id="development-heading"><DevelopmentGroup title="עובדים עכשיו" items={development.current_focus} /><DevelopmentGroup title="הצעד הבא" items={development.next_actions} /><DevelopmentGroup title="דורש אימות" items={development.needs_verification} /><DevelopmentGroup title="חסום / דורש החלטה" items={[...development.blocked, ...development.owner_decisions]} /><DevelopmentGroup title="נסגר לאחרונה" items={development.recently_closed} /></div>}</Surface>
+          <Surface className="command-center-section" aria-labelledby="development-heading"><SectionTitle title="מצב הפיתוח" status={data.freshness.development} />{development.projection_state === "UNKNOWN" ? <Unavailable text="מצב הפיתוח אינו זמין כרגע." /> : <div className="command-center-development-grid" id="development-heading"><DevelopmentGroup title="עובדים עכשיו" items={development.current_focus} /><DevelopmentGroup title="הצעד הבא" items={development.next_actions} /><DevelopmentGroup title="דורש אימות" items={development.needs_verification} /><DevelopmentGroup title="חסום / דורש החלטה" items={blockedOrOwnerDecision} /><DevelopmentGroup title="נסגר לאחרונה" items={development.recently_closed} /></div>}</Surface>
 
           <Surface className="command-center-section command-center-section--compact" aria-labelledby="system-heading"><SectionTitle title="מצב המערכת" status={data.freshness.system_status} /><div className="command-center-inline-status"><StatusBadge tone={systemState === "CURRENT" ? "success" : systemState === "ATTENTION" ? "danger" : "neutral"}>{systemState === "CURRENT" ? "תקין" : systemState === "ATTENTION" ? "דורש תשומת לב" : "מידע לא זמין"}</StatusBadge>{onOpenHealth && <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onOpenHealth}>פתיחת בריאות המערכת</button>}</div></Surface>
 
