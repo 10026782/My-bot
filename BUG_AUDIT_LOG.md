@@ -5091,11 +5091,11 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 - **תיקון:** ה־raw payload כולל כעת אותו `external_id` מבני. זו ראיית
   submission-accepted בלבד, לא ראיית artifact/provider completion;
   `ExternalExecutionJob` נשאר owner יחיד של ה־provider outcome הסופי.
-- **תוקן ב-commit:** ראה commit של BUG-165 בענף הייעודי.
-- **Merged:** לא
-- **Deployed:** לא — implementation מקומי בלבד
+- **תוקן ב-commit:** `6835e0dc5ece1a853c43363d69d2dc626dd555f8`.
+- **Merged:** כן — PR #686, merge SHA `315fe8bfa94f83e11f3a27d3aa5715d3ae94c78d`.
+- **Deployed:** כן — staging deploy על אותו SHA.
 - **Verified בפרודקשן:** לא — אין בדיקת production ואין שינוי production
-- **Verification ראיה:** MPT Phase 1 staging E2E, contract
+- **Verification ראיה לפני התיקון:** MPT Phase 1 staging E2E, contract
   `f5c73380-40b5-4fda-a626-6049d69bf0b6`, provider job
   `e0a37806-000c-4ec5-a7c9-8783525d0423`; ActionContract `executed`,
   ExternalExecutionJob `completed`, וה־shadow log סיווג `outcome_unknown`.
@@ -5103,8 +5103,12 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
   submission דרך `ExternalExecutionBoundary._accepted()`: ActionContract
   נשאר `executed`/`completed`, shadow הוא `verified_write_success`, ואין claim
   על artifact readiness.
-- **סטטוס:** Implemented locally; ממתין לבדיקות, commit ו־PR. אין שינוי
-  execution semantics, lifecycle, approval או runtime behavior.
+- **Post-deploy verification:** staging startup/scheduler PASS; `EXTERNAL_EXECUTION_ENABLED=false`;
+  accepted submission shadow evidence מסווג `verified_write_success` בלבד עבור durable
+  submission acceptance. אין claim ל-provider/artifact completion; `ExternalExecutionJob`
+  נשאר owner יחיד של outcome סופי. לא נצפתה כפילות או regression.
+- **סטטוס:** CLOSED — BUG-165 אומת לאחר deploy. אין שינוי execution semantics,
+  lifecycle, approval או runtime behavior.
 
 ---
 

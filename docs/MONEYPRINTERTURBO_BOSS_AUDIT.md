@@ -313,3 +313,13 @@ or another terminal provider outcome; consumers must continue to use
 
 This verifies Phase 1 in staging only. Production was untouched; production
 rollout remains a separate explicit decision.
+
+### Phase 1 closure
+
+BUG-165 post-deploy verification עבר על staging deploy
+`315fe8bfa94f83e11f3a27d3aa5715d3ae94c78d`: startup/scheduler PASS,
+`EXTERNAL_EXECUTION_ENABLED=false`, וה־shadow evidence של submission accepted
+מסווג `verified_write_success` עבור durable acceptance בלבד. אין בכך claim על
+provider או artifact completion; `ExternalExecutionJob` נשאר owner של ה־outcome
+החיצוני הסופי. אין duplicate submission או lifecycle regression. MPT Phase 1
+fully closed; Phase 2 נשאר מסלול נפרד והפעלת production דורשת החלטה מפורשת.
