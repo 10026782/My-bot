@@ -1,281 +1,201 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
-import { fetchOwnerControlCenter } from "../api";
-import type { OwnerControlCenter as TOwnerControlCenter } from "../types";
+import { fetchCommandCenter } from "../api";
+import type {
+  CommandCenterAttentionItem,
+  CommandCenterDevelopmentItem,
+  CommandCenterResponse,
+} from "../types";
+import { PageHeader } from "./ui/PageHeader";
+import { ScreenState } from "./ui/ScreenState";
+import { StatusBadge } from "./ui/StatusBadge";
+import { Surface } from "./ui/Surface";
 
 interface Props {
   onBack: () => void;
+  onOpenApprovals?: () => void;
+  onOpenHealth?: () => void;
+  onOpenMarketing?: () => void;
   onOpenVentures?: () => void;
 }
 
+type DestinationHandlers = Pick<Props, "onOpenApprovals" | "onOpenHealth" | "onOpenMarketing" | "onOpenVentures">;
+
 type State =
   | { status: "loading" }
-  | { status: "ok"; data: TOwnerControlCenter }
-  | { status: "error"; message: string };
+  | { status: "ok"; data: CommandCenterResponse }
+  | { status: "error"; code?: number; message: string };
 
-const colorClass: Record<string, string> = {
-  green: "bg-green-500",
-  yellow: "bg-yellow-400",
-  red: "bg-red-500",
+const STATE_LABEL: Record<CommandCenterResponse["overall_state"], string> = {
+  OK: "הכול תקין לפי המקורות שנבדקו",
+  ATTENTION: "יש דברים שדורשים את תשומת הלב שלך",
+  PARTIAL: "חלק מהמידע אינו מלא או אינו עדכני",
+  UNKNOWN: "לא ניתן לקבוע כרגע את מצב מרכז השליטה",
 };
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+const STATE_TONE: Record<CommandCenterResponse["overall_state"], "neutral" | "success" | "warning" | "danger"> = {
+  OK: "success",
+  ATTENTION: "danger",
+  PARTIAL: "warning",
+  UNKNOWN: "neutral",
+};
+
+const FRESHNESS_LABEL: Record<string, string> = {
+  CURRENT: "עדכני",
+  STALE: "דורש רענון",
+  PARTIAL: "חלקי",
+  UNKNOWN: "לא זמין",
+};
+
+const SEVERITY_LABEL: Record<string, string> = {
+  INFO: "מידע",
+  WARNING: "אזהרה",
+  CRITICAL: "קריטי",
+};
+
+const DESTINATION_LABEL: Record<string, string> = {
+  approvals: "אישורים",
+  system_health: "בריאות המערכת",
+  marketing: "שיווק",
+  ventures: "מיזמים",
+};
+
+function freshnessLabel(value: string): string {
+  return FRESHNESS_LABEL[value] ?? "מצב לא זמין";
+}
+
+function destinationAction(
+  destination: string,
+  handlers: DestinationHandlers,
+): (() => void) | undefined {
+  if (destination === "approvals") return handlers.onOpenApprovals;
+  if (destination === "system_health") return handlers.onOpenHealth;
+  if (destination === "marketing") return handlers.onOpenMarketing;
+  if (destination === "ventures") return handlers.onOpenVentures;
+  return undefined;
+}
+
+function SectionTitle({ title, status }: { title: string; status?: string }) {
   return (
-    <section className="bg-white rounded-xl shadow-sm p-4">
-      <h2 className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wide">
-        {title}
-      </h2>
-      {children}
-    </section>
+    <div className="command-center-section__heading">
+      <h2>{title}</h2>
+      {status && <StatusBadge tone={status === "CURRENT" ? "success" : status === "STALE" ? "warning" : "neutral"}>{freshnessLabel(status)}</StatusBadge>}
+    </div>
   );
 }
 
-function EmptyLine({ text }: { text: string }) {
-  return <p className="text-xs text-gray-400">{text}</p>;
+function AttentionCard({ item, handlers }: { item: CommandCenterAttentionItem; handlers: DestinationHandlers }) {
+  const action = destinationAction(item.destination, handlers);
+  return (
+    <div className={`command-center-attention-card command-center-attention-card--${item.severity.toLowerCase()}`}>
+      <div className="command-center-card__topline">
+        <StatusBadge tone={item.severity === "CRITICAL" ? "danger" : item.severity === "WARNING" ? "warning" : "info"}>
+          {SEVERITY_LABEL[item.severity] ?? "מידע"}
+        </StatusBadge>
+        {DESTINATION_LABEL[item.destination] && <span className="command-center-card__destination">{DESTINATION_LABEL[item.destination]}</span>}
+      </div>
+      <h3>{item.title}</h3>
+      <p>{item.summary}</p>
+      {action && <button type="button" className="boss-button boss-button--quiet boss-bubble--action command-center-card__action" onClick={action}>פתיחה</button>}
+    </div>
+  );
 }
 
-export function OwnerControlCenter({ onBack, onOpenVentures }: Props) {
+function DevelopmentCard({ item }: { item: CommandCenterDevelopmentItem }) {
+  return (
+    <div className="command-center-development-card">
+      <div className="command-center-card__topline">
+        <span className="command-center-horizon">{item.horizon}</span>
+        <StatusBadge tone={item.freshness === "CURRENT" ? "success" : item.freshness === "STALE" ? "warning" : "neutral"}>{freshnessLabel(item.freshness)}</StatusBadge>
+      </div>
+      <h3>{item.title}</h3>
+      <p>{item.current_stage}</p>
+      {item.next_step && item.next_step !== "—" && <p className="command-center-development-card__next">הצעד הבא: {item.next_step}</p>}
+    </div>
+  );
+}
+
+function DevelopmentGroup({ title, items, empty }: { title: string; items: CommandCenterDevelopmentItem[]; empty?: string }) {
+  return (
+    <div className="command-center-development-group">
+      <h3>{title}</h3>
+      {items.length ? items.map((item) => <DevelopmentCard key={item.initiative_key} item={item} />) : <p className="command-center-muted">{empty ?? "אין פריטים להצגה"}</p>}
+    </div>
+  );
+}
+
+function Unavailable({ text }: { text: string }) {
+  return <p className="command-center-unavailable">{text}</p>;
+}
+
+export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
 
   function load() {
     setState({ status: "loading" });
-    fetchOwnerControlCenter()
+    fetchCommandCenter()
       .then((data) => setState({ status: "ok", data }))
-      .catch((e: unknown) => setState({ status: "error", message: String(e) }));
+      .catch((error: unknown) => {
+        const typed = error as Error & { status?: number };
+        setState({ status: "error", code: typed.status, message: typed.message });
+      });
   }
 
   useEffect(() => { load(); }, []);
 
+  if (state.status === "loading") {
+    return (
+      <main className="ventures-screen command-center-screen">
+        <div className="ventures-shell">
+          <PageHeader onBack={onBack} title="מרכז השליטה" eyebrow="BOSS" subtitle="תמונה תמציתית לקריאה, הבנה והחלטה" />
+          <ScreenState state="loading" title="טוען את מרכז השליטה" message="אוסף את התמונה הקנונית…" />
+          <div className="command-center-skeleton" aria-hidden="true"><span /><span /><span /></div>
+        </div>
+      </main>
+    );
+  }
+
+  if (state.status === "error") {
+    const forbidden = state.code === 401 || state.code === 403;
+    return (
+      <main className="ventures-screen command-center-screen">
+        <div className="ventures-shell">
+          <PageHeader onBack={onBack} title="מרכז השליטה" eyebrow="BOSS" />
+          <ScreenState state="error" title={forbidden ? "אין הרשאה לצפות במרכז השליטה" : "לא הצלחנו לטעון את מרכז השליטה"} message={forbidden ? "המסך זמין לבעלים בלבד." : "אפשר לנסות שוב בעוד רגע."} action={<button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={load}>נסו שוב</button>} />
+        </div>
+      </main>
+    );
+  }
+
+  const data = state.data;
+  const attentionItems = data.attention.items.slice(0, 3);
+  const pendingUnknown = data.pending_decisions.length === 0 && data.freshness.attention !== "CURRENT";
+  const systemState = data.system_status.state;
+  const development = data.development_status;
+  const handlers = { onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures };
+  const moreAttentionAction = data.attention.items.slice(3).map((item) => destinationAction(item.destination, handlers)).find(Boolean);
+
   return (
-    <div className="min-h-screen bg-gray-100 pb-8">
-      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center gap-3">
-        <button
-          onClick={onBack}
-          className="text-blue-500 text-xl font-medium leading-none"
-          aria-label="Back"
-        >
-          ←
-        </button>
-        <div>
-          <h1 className="text-lg font-black text-gray-900">Owner Control Center</h1>
-          <p className="text-xs text-gray-400">Governance cockpit</p>
+    <main className="ventures-screen command-center-screen">
+      <div className="ventures-shell">
+        <PageHeader onBack={onBack} title="מרכז השליטה" eyebrow="BOSS" subtitle="תמונה תמציתית לקריאה, הבנה והחלטה" action={<button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={load}>רענון</button>} badge={<StatusBadge tone={STATE_TONE[data.overall_state]}>{STATE_LABEL[data.overall_state]}</StatusBadge>} />
+
+        <div className="command-center-stack">
+          <section className="command-center-hero" aria-labelledby="attention-heading">
+            <SectionTitle title="דורש תשומת לב עכשיו" status={data.freshness.attention} />
+            {attentionItems.length ? <><div className="command-center-attention-list">{attentionItems.map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div>{moreAttentionAction && <button type="button" className="boss-button boss-button--quiet boss-bubble--action command-center-more" onClick={moreAttentionAction}>הצג עוד</button>}</> : data.freshness.attention === "CURRENT" ? <p id="attention-heading" className="command-center-positive">אין כרגע דברים דחופים שדורשים את תשומת לבך.</p> : <Unavailable text="לא ניתן לקבוע כרגע מה דורש תשומת לב." />}
+          </section>
+
+          <Surface className="command-center-section" aria-labelledby="pending-heading"><SectionTitle title="החלטות ממתינות" status={data.freshness.attention} />{pendingUnknown ? <Unavailable text="מצב ההחלטות אינו זמין כרגע." /> : data.pending_decisions.length ? <div className="command-center-decision-list">{data.pending_decisions.slice(0, 3).map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div> : <p id="pending-heading" className="command-center-positive">אין החלטות ממתינות כרגע.</p>}</Surface>
+
+          <Surface className="command-center-section" aria-labelledby="business-heading"><SectionTitle title="מצב העסק" status={data.freshness.business_status} />{data.business_status.state === "CURRENT" ? <p id="business-heading" className="command-center-positive">מצב העסק זמין.</p> : <Unavailable text="מצב עסקי מאוחד עדיין אינו מחובר למקור קנוני." />}</Surface>
+
+          <Surface className="command-center-section" aria-labelledby="development-heading"><SectionTitle title="מצב הפיתוח" status={data.freshness.development} />{development.projection_state === "UNKNOWN" ? <Unavailable text="מצב הפיתוח אינו זמין כרגע." /> : <div className="command-center-development-grid" id="development-heading"><DevelopmentGroup title="עובדים עכשיו" items={development.current_focus} /><DevelopmentGroup title="הצעד הבא" items={development.next_actions} /><DevelopmentGroup title="דורש אימות" items={development.needs_verification} /><DevelopmentGroup title="חסום / דורש החלטה" items={[...development.blocked, ...development.owner_decisions]} /><DevelopmentGroup title="נסגר לאחרונה" items={development.recently_closed} /></div>}</Surface>
+
+          <Surface className="command-center-section command-center-section--compact" aria-labelledby="system-heading"><SectionTitle title="מצב המערכת" status={data.freshness.system_status} /><div className="command-center-inline-status"><StatusBadge tone={systemState === "CURRENT" ? "success" : systemState === "ATTENTION" ? "danger" : "neutral"}>{systemState === "CURRENT" ? "תקין" : systemState === "ATTENTION" ? "דורש תשומת לב" : "מידע לא זמין"}</StatusBadge>{onOpenHealth && <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onOpenHealth}>פתיחת בריאות המערכת</button>}</div></Surface>
+
+          <Surface className="command-center-section command-center-section--compact" aria-labelledby="activity-heading"><SectionTitle title="פעילות אחרונה" status={data.freshness.recent_activity} /><Unavailable text="פעילות אחרונה עדיין אינה מחוברת למקור קנוני." /></Surface>
         </div>
-        <button onClick={load} className="mr-auto text-gray-400 text-sm active:text-gray-600">
-          Refresh
-        </button>
       </div>
-
-      {state.status === "loading" && (
-        <div className="flex justify-center pt-16">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-
-      {state.status === "error" && (
-        <div className="mx-4 mt-4 bg-red-50 border border-red-200 rounded-xl p-4">
-          <p className="text-sm font-semibold text-red-700">Could not load Control Center</p>
-          <p className="text-xs text-red-500 mt-1">{state.message}</p>
-        </div>
-      )}
-
-      {state.status === "ok" && (() => {
-        const data = state.data;
-        const health = data.system_health;
-        return (
-          <div className="flex flex-col gap-3 px-4">
-            <Section title="System Health">
-              <div className="grid grid-cols-4 gap-2">
-                <div className="col-span-1 rounded-lg bg-gray-900 p-3 text-white">
-                  <p className="text-[10px] text-gray-300">Health</p>
-                  <p className="text-2xl font-black">{health.health_percent}%</p>
-                </div>
-                <div className="rounded-lg bg-green-50 p-3">
-                  <p className="text-[10px] text-green-500">Working</p>
-                  <p className="text-xl font-black text-green-700">{health.working_count}</p>
-                </div>
-                <div className="rounded-lg bg-yellow-50 p-3">
-                  <p className="text-[10px] text-yellow-600">Partial</p>
-                  <p className="text-xl font-black text-yellow-700">{health.partial_count}</p>
-                </div>
-                <div className="rounded-lg bg-red-50 p-3">
-                  <p className="text-[10px] text-red-500">Broken</p>
-                  <p className="text-xl font-black text-red-700">{health.broken_count}</p>
-                </div>
-              </div>
-            </Section>
-
-            <Section title="Critical Systems">
-              <div className="flex flex-col divide-y divide-gray-50">
-                {data.critical_systems.map((system) => (
-                  <div key={system.name} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2.5 h-2.5 rounded-full ${colorClass[system.color] ?? "bg-gray-400"}`} />
-                      <span className="text-sm font-semibold text-gray-800">{system.name}</span>
-                    </div>
-                    <span className="text-xs text-gray-500">{system.status}</span>
-                  </div>
-                ))}
-              </div>
-            </Section>
-
-            {data.strategic_pipeline && (
-              <Section title="Strategic Pipeline">
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <div className="rounded-lg bg-blue-50 p-3">
-                    <p className="text-[10px] text-blue-500">Total Ventures</p>
-                    <p className="text-xl font-black text-blue-700">{data.strategic_pipeline.total}</p>
-                  </div>
-                  <div className="rounded-lg bg-green-50 p-3">
-                    <p className="text-[10px] text-green-600">Active</p>
-                    <p className="text-xl font-black text-green-700">{data.strategic_pipeline.active}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {Object.entries(data.strategic_pipeline.stage_counts)
-                    .filter(([, count]) => count > 0)
-                    .map(([stage, count]) => (
-                      <span key={stage} className="rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-700">
-                        {stage}: <span className="font-bold">{count}</span>
-                      </span>
-                    ))}
-                </div>
-                {onOpenVentures && (
-                  <button
-                    onClick={onOpenVentures}
-                    className="w-full rounded-lg bg-gray-900 text-white text-xs font-semibold py-2 active:bg-gray-700"
-                  >
-                    🔭 Open Ventures
-                  </button>
-                )}
-              </Section>
-            )}
-
-            <Section title="Approvals">
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <div className="rounded-lg bg-yellow-50 p-3">
-                  <p className="text-[10px] text-yellow-600">Pending</p>
-                  <p className="text-xl font-black text-yellow-700">{data.approvals.pending_count}</p>
-                </div>
-                <div className="rounded-lg bg-green-50 p-3">
-                  <p className="text-[10px] text-green-600">Executed</p>
-                  <p className="text-xl font-black text-green-700">{data.approvals.recent_executed.length}</p>
-                </div>
-                <div className="rounded-lg bg-blue-50 p-3">
-                  <p className="text-[10px] text-blue-600">Receipts</p>
-                  <p className="text-xl font-black text-blue-700">{data.approvals.recent_receipts.length}</p>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                {data.approvals.recent_executed.slice(0, 3).map((item) => (
-                  <div key={item.id} className="rounded-lg bg-gray-50 px-3 py-2">
-                    <p className="text-xs font-semibold text-gray-800">{item.action || item.id}</p>
-                    <p className="text-[11px] text-gray-400">{item.status} · {item.requested_at || "no date"}</p>
-                  </div>
-                ))}
-                {data.approvals.recent_receipts.slice(0, 3).map((item) => (
-                  <div key={item.id} className="rounded-lg bg-blue-50 px-3 py-2">
-                    <p className="text-xs font-semibold text-blue-900">
-                      {item.receipt.table || "Receipt"} / {item.receipt.record_id || item.id}
-                    </p>
-                    <p className="text-[11px] text-blue-500">{item.receipt.status || "executed"}</p>
-                  </div>
-                ))}
-                {data.approvals.recent_executed.length === 0 && data.approvals.recent_receipts.length === 0 && (
-                  <EmptyLine text="No recent approval activity." />
-                )}
-              </div>
-            </Section>
-
-            <Section title="Permissions">
-              <div className="overflow-hidden rounded-lg border border-gray-100">
-                <div className="grid grid-cols-4 bg-gray-50 text-[11px] font-semibold text-gray-500">
-                  <div className="p-2">Role</div>
-                  <div className="p-2">Read</div>
-                  <div className="p-2">Write</div>
-                  <div className="p-2">Approve</div>
-                </div>
-                {data.permissions.map((row) => (
-                  <div key={row.role} className="grid grid-cols-4 border-t border-gray-100 text-[11px] text-gray-700">
-                    <div className="p-2 font-semibold">{row.role}</div>
-                    <div className="p-2">{row.read}</div>
-                    <div className="p-2">{row.write}</div>
-                    <div className="p-2">{row.approve}</div>
-                  </div>
-                ))}
-              </div>
-            </Section>
-
-            <Section title="Business Language">
-              <div className="flex flex-col gap-3">
-                <LanguageBlock title="Lead Status" items={data.business_language.lead_status} />
-                <LanguageBlock title="Lead Outcome" items={data.business_language.lead_outcome} />
-                <LanguageBlock title="Lead Tier" items={data.business_language.lead_tier} />
-              </div>
-            </Section>
-
-            <Section title="Blockers">
-              {data.blockers.length > 0 ? (
-                <ol className="flex flex-col gap-2">
-                  {data.blockers.slice(0, 5).map((item, index) => (
-                    <li key={item} className="flex gap-2 text-sm text-gray-700">
-                      <span className="font-black text-red-500">{index + 1}.</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ol>
-              ) : <EmptyLine text="No blockers reported." />}
-            </Section>
-
-            <Section title="Next Actions">
-              <ol className="flex flex-col gap-2">
-                {data.next_actions.slice(0, 3).map((item, index) => (
-                  <li key={item} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-800">
-                    <span className="font-black text-gray-400 mr-1">{index + 1}.</span>
-                    {item}
-                  </li>
-                ))}
-              </ol>
-            </Section>
-
-            {data.warnings.length > 0 && (
-              <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3">
-                <p className="text-xs font-semibold text-yellow-700 mb-1">Warnings</p>
-                {data.warnings.map((warning) => (
-                  <p key={warning} className="text-[11px] text-yellow-700">{warning}</p>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
-
-function LanguageBlock({
-  title,
-  items,
-}: {
-  title: string;
-  items: { value: string; label: string }[];
-}) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-gray-600 mb-1">{title}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item) => (
-          <span key={item.value} className="rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-700">
-            {item.value}
-          </span>
-        ))}
-      </div>
-    </div>
+    </main>
   );
 }

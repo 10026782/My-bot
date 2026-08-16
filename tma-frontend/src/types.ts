@@ -282,6 +282,79 @@ export interface OwnerControlCenter {
   warnings: string[];
 }
 
+export interface CommandCenterAttentionItem {
+  signal_key: string;
+  category: string;
+  severity: "INFO" | "WARNING" | "CRITICAL";
+  state: "OK" | "ATTENTION" | "UNKNOWN" | "STALE";
+  title: string;
+  summary: string;
+  reason: string;
+  destination: string;
+  owner_action_required: boolean;
+  freshness: string;
+}
+
+export interface CommandCenterSourceStatus {
+  source: string;
+  state: "CURRENT" | "STALE" | "UNKNOWN" | "UNSUPPORTED";
+  freshness: string;
+  reason?: string | null;
+}
+
+export interface CommandCenterDevelopmentItem {
+  initiative_key: string;
+  title: string;
+  horizon: string;
+  work_state: string;
+  current_stage: string;
+  evidence_state: string;
+  next_step: string;
+  needs_verification: boolean;
+  blocked: boolean;
+  owner_decision_required: boolean;
+  freshness: "CURRENT" | "STALE" | "UNKNOWN";
+}
+
+export interface CommandCenterDevelopmentStatus {
+  current_focus: CommandCenterDevelopmentItem[];
+  next_actions: CommandCenterDevelopmentItem[];
+  needs_verification: CommandCenterDevelopmentItem[];
+  blocked: CommandCenterDevelopmentItem[];
+  owner_decisions: CommandCenterDevelopmentItem[];
+  recently_closed: CommandCenterDevelopmentItem[];
+  projection_state: "CURRENT" | "PARTIAL" | "UNKNOWN";
+}
+
+export interface CommandCenterSectionStatus {
+  state: "CURRENT" | "STALE" | "PARTIAL" | "UNKNOWN";
+  reason: string;
+  source_version: string;
+}
+
+export interface CommandCenterSystemStatus {
+  state: "CURRENT" | "ATTENTION" | "STALE" | "PARTIAL" | "UNKNOWN";
+  freshness: string;
+  reason?: string | null;
+}
+
+export interface CommandCenterResponse {
+  attention: {
+    items: CommandCenterAttentionItem[];
+    pending_decisions: CommandCenterAttentionItem[];
+    source_status: CommandCenterSourceStatus[];
+    overall_state: "OK" | "ATTENTION" | "UNKNOWN" | "STALE";
+  };
+  pending_decisions: CommandCenterAttentionItem[];
+  business_status: CommandCenterSectionStatus;
+  system_status: CommandCenterSystemStatus;
+  development_status: CommandCenterDevelopmentStatus;
+  recent_activity: CommandCenterSectionStatus;
+  freshness: Record<string, "CURRENT" | "STALE" | "PARTIAL" | "UNKNOWN">;
+  generated_at: string;
+  overall_state: "OK" | "ATTENTION" | "PARTIAL" | "UNKNOWN";
+}
+
 export type VentureStage =
   | "Research"
   | "Supplier/Source Contact"
