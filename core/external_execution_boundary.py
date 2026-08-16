@@ -164,7 +164,9 @@ class ExternalExecutionBoundary:
             "completed",
             "ההרצה החיצונית התקבלה לעיבוד.",
             external_id=job.contract_id,
-            raw_response={"ok": True, "external_job_status": job.status, "provider_job_id": job.provider_job_id},
+            # This proves durable submission acceptance only. The ExternalExecutionJob
+            # remains the sole authority for the later provider/artifact outcome.
+            raw_response={"ok": True, "external_id": job.contract_id, "external_job_status": job.status, "provider_job_id": job.provider_job_id},
         )
 
 

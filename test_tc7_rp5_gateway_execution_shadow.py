@@ -48,6 +48,8 @@ for _mod in ["telebot", "anthropic", "httpx"]:
 import core.action_gateway as ag_module
 from core.action_gateway import ActionContract, ActionGateway, ExecutionLedger
 from core.dispatcher_outcome import DispatcherOutcome
+from core.external_execution_boundary import ExternalExecutionBoundary
+from core.external_execution_repository import ExternalExecutionJob
 from core.router.ownership_contracts import EvidenceResult
 from core.turn_evidence import TurnEvidenceSummary, project_evidence_result
 
@@ -102,6 +104,15 @@ def _raising_executor(tool_name=None, tool_inputs=None, contract_id=None, identi
 
 def _outcome_unknown_executor(tool_name=None, tool_inputs=None, contract_id=None, identity=None):
     return DispatcherOutcome(result="outcome_unknown", user_message="", error="timeout")
+
+
+def _accepted_external_submission_executor(tool_name=None, tool_inputs=None, contract_id=None, identity=None):
+    return ExternalExecutionBoundary._accepted(ExternalExecutionJob(
+        contract_id=contract_id,
+        adapter_name="moneyprinterturbo",
+        provider_job_id="provider-job-1",
+        status="submitted",
+    ))
 
 
 @contextlib.contextmanager
@@ -216,6 +227,27 @@ with _rp5_state("shadow"):
 # ═════════════════════════════════════════════════════════════════
 # 2 & 3: both live entry paths reach the identical seam
 # ═════════════════════════════════════════════════════════════════
+
+# BUG-165: accepted external submission is verified ActionContract execution
+# evidence, not a provider/artifact completion claim. The durable job remains
+# submitted and owns its later terminal state.
+with _rp5_state("shadow"):
+    gw = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract(contract_id="external-submit-1", tool_name="external_execution.submit")
+    gw._ledger.save(contract)
+    gw._tool_executor = _accepted_external_submission_executor
+    calls, original = _spy_observe_shadow_finalizer()
+    try:
+        result = gw.approve_with_lifecycle_result(
+            "external-submit-1", approver="user-a", approver_role="owner",
+        )
+        check("(BUG-165) accepted submission persists ActionContract execution", gw._ledger.find_by_id("external-submit-1").status in ("completed", "executed"))
+        check("(BUG-165) accepted submission has exactly one shadow observation", len(calls) == 1)
+        if calls:
+            check("(BUG-165) accepted submission is verified write evidence, not outcome_unknown", calls[0]["comparison"].evidence_status == "verified_write_success")
+        check("(BUG-165) submission reply remains unchanged", bool(result.safe_user_message))
+    finally:
+        ag_module.observe_shadow_finalizer = original
 
 with _rp5_state("shadow"):
     # Scenario 3 — callback-button path: app.py's _handle_approval_callback_impl
