@@ -3,6 +3,52 @@
   "layer_id": "tools",
   "nodes": [
     {
+      "id": "component.owner_development_registry_projection",
+      "name": "Registry-only Owner Development Projection",
+      "type": "component",
+      "status": "active",
+      "authority_level": "verified_audit",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "read-only owner-facing projection from the validated canonical §3.5 Active Work Registry",
+        "precedence": "canonical §3.5 Registry only; DEV-REG-2 owns evidence reconciliation upstream"
+      },
+      "owner": "development_governance",
+      "code_paths": [
+        "core/owner_development.py",
+        "dev_registry_contract.py"
+      ],
+      "test_paths": [
+        "test_owner_development.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md",
+          "role": "canonical §3.5 Active Work Registry consumed after validation",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-16",
+      "last_verified_commit": "f3f3eb536653274eacb2a6c994ec4632cd87694c",
+      "confidence": 1.0,
+      "notes": [
+        "Read-only consumer; it does not write the Registry, runtime state, Airtable, caches, or persistence.",
+        "It does not own evidence authority or reconciliation authority and does not scan ROADMAP, BUG, CHANGE, AI_CONTEXT, git, PRs, or runtime evidence.",
+        "It preserves Work State and Evidence State as validated Registry fields; Current Stage and Next Decided Step are not parsed for status.",
+        "Supersedes the broader multi-source OC-C approach from PR #663 for this development-status projection."
+      ],
+      "extensions": {
+        "catalog.role": "read_only_canonical_registry_consumer",
+        "catalog.runtime_consumed": false,
+        "catalog.writes_registry": false,
+        "catalog.reconciles_evidence": false,
+        "catalog.business_write_ownership": false
+      },
+      "last_observed_commit": "f3f3eb536653274eacb2a6c994ec4632cd87694c"
+    },
+    {
       "id": "component.dev_registry_reconcile",
       "name": "Canonical Active Work Registry Reconciler",
       "type": "component",
@@ -60,7 +106,8 @@
       },
       "owner": "development_governance",
       "code_paths": [
-        "tools/dev_registry_validator.py"
+        "tools/dev_registry_validator.py",
+        "dev_registry_contract.py"
       ],
       "test_paths": [
         "test_dev_registry_validator.py"
