@@ -45,7 +45,7 @@
         "catalog.reconciles_evidence": true,
         "catalog.no_network_dependency": true
       },
-      "last_observed_commit": "e14ebaeacc5038e153b5831ace00be15d90d2f30"
+      "last_observed_commit": "f3f3eb536653274eacb2a6c994ec4632cd87694c"
     },
     {
       "id": "component.dev_registry_validator",
