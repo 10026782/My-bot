@@ -171,6 +171,7 @@ class _Evidence:
     evidence_state: str
     work_state: str | None = None
     scope_explicit: bool = False
+    ambiguous_link: bool = False
 
 
 @dataclass(frozen=True)
@@ -290,7 +291,8 @@ def _explicit_work_state(text: str) -> str | None:
 
 def _identity_tokens(entry: _RegistryEntry) -> tuple[str, ...]:
     """Return only explicit identity keys; prose similarity is never a link."""
-    tokens = {re.sub(r"\s+", " ", entry.title).strip().lower()}
+    title = re.sub(r"\s+", " ", entry.title).strip().lower()
+    tokens = set() if re.search(r"(?:\.md|/|\\)", title) else {title}
     tokens.update(value.lower() for value in re.findall(r"\b(?:bug[- ]?\d+[a-z0-9-]*|[cfnu]-\d+|[cfnu]\d+|f\d+|n\d+)\b", entry.title, re.IGNORECASE))
     return tuple(sorted(tokens, key=len, reverse=True))
 
@@ -305,23 +307,74 @@ def _explicitly_links(entry: _RegistryEntry, line: str) -> bool:
     return False
 
 
+def _ambiguous_link(entry: _RegistryEntry, line: str) -> bool:
+    normalized = re.sub(r"\s+", " ", line).strip().lower()
+    title = re.sub(r"\s+", " ", entry.title).strip().lower()
+    return bool(
+        title and title in normalized
+        and re.search(r"\s(?:and|או|/)\s", normalized, re.IGNORECASE)
+    )
+
+
+def _canonical_candidate_lines(entry: _RegistryEntry, text: str, source: str) -> tuple[tuple[int, str], ...]:
+    """Select canonical sections before applying identity matching.
+
+    CHANGE_CONTROL/BUG records link through their heading or Requirement field;
+    ROADMAP links through a matching section heading.  Short test fixtures may
+    omit section structure and are intentionally allowed to use their lines.
+    """
+    lines = text.splitlines()
+    headings = [index for index, line in enumerate(lines) if re.match(r"^#{2,4}\s", line)]
+    if not headings:
+        return tuple(enumerate(lines, 1))
+    selected: list[tuple[int, str]] = []
+    for position, start in enumerate(headings):
+        end = headings[position + 1] if position + 1 < len(headings) else len(lines)
+        block = lines[start:end]
+        header_link = _explicitly_links(entry, lines[start])
+        requirement_link = any(
+            line.lstrip().startswith("- **Requirement:**") and _explicitly_links(entry, line)
+            for line in block
+        )
+        if (source == "roadmap" and header_link) or (source in {"change", "bug"} and (header_link or requirement_link)):
+            selected.extend((index + 1, line) for index, line in enumerate(block, start))
+    if not selected and len(lines) < 80:
+        return tuple(enumerate(lines, 1))
+    return tuple(selected)
+
+
 def _source_evidence(entry: _RegistryEntry, text: str, source: str) -> tuple[_Evidence, ...]:
     evidence: list[_Evidence] = []
-    for line_number, line in enumerate(text.splitlines(), 1):
+    candidate_lines = (
+        tuple(enumerate(text.splitlines(), 1))
+        if source in {"main", "production"}
+        else _canonical_candidate_lines(entry, text, source)
+    )
+    for line_number, line in candidate_lines:
         if not _explicitly_links(entry, line):
             continue
-        state = _bounded_evidence_state(line)
+        state = _main_evidence_state(line) if source == "main" else _bounded_evidence_state(line)
         work_state = _explicit_work_state(line)
         if state == "UNKNOWN" and work_state is None:
             continue
-        scope = source in {"main", "production"} and bool(
+        scope = source == "production" and bool(
             re.search(r"\b(?:production|runtime|staging|deploy|main)\b|פרוד|סטייג'ינג|פריסה", line, re.IGNORECASE)
         )
+        ambiguous = _ambiguous_link(entry, line)
         evidence.append(_Evidence(
             source=source, source_ref=f"{source}:line-{line_number}",
             evidence_state=state, work_state=work_state, scope_explicit=scope,
+            ambiguous_link=ambiguous,
         ))
     return tuple(evidence)
+
+
+def _main_evidence_state(text: str) -> str:
+    """Main history proves code/merge only, never deployment or runtime."""
+    state = _bounded_evidence_state(text)
+    if state in {"RUNTIME_VERIFIED", "DEPLOYED", "WIRED"}:
+        return "MERGED" if re.search(r"\b(merged|מוזג|merge)\b", text, re.IGNORECASE) else "CODE_DONE"
+    return state
 
 
 def _reconcile(entry: _RegistryEntry, source_texts: Mapping[str, str], main_text: str) -> _Reconciled:
@@ -333,31 +386,38 @@ def _reconcile(entry: _RegistryEntry, source_texts: Mapping[str, str], main_text
         ("change", "CHANGE_CONTROL_LOG.md"),
         ("bug", "BUG_AUDIT_LOG.md"),
         ("main", "__main__"),
+        ("production", "__production__"),
     ):
         text = main_text if source == "main" else source_texts.get(path, "")
         matches = _source_evidence(entry, text, source)
         linked.extend(matches)
         refs.extend(match.source_ref for match in matches)
 
+    ambiguous = [item for item in linked if item.ambiguous_link]
+    if ambiguous:
+        return _Reconciled("UNKNOWN", None, tuple(refs), "UNRESOLVED")
+
     # The precedence is scoped and deterministic.  A linked production/runtime
     # record is strongest; main evidence follows; change/bug evidence follows;
     # current ROADMAP can set the work state; registry remains the fallback.
     roadmap_evidence = [item for item in linked if item.source == "roadmap"]
     roadmap_work = roadmap_evidence[-1].work_state if roadmap_evidence else None
-    production = [item for item in linked if item.source == "main" and item.scope_explicit and item.evidence_state == "RUNTIME_VERIFIED"]
+    production = [item for item in linked if item.source == "production" and item.scope_explicit and item.evidence_state == "RUNTIME_VERIFIED"]
     if production:
         return _Reconciled("RUNTIME_VERIFIED", roadmap_work or production[-1].work_state, tuple(refs), "RESOLVED")
     main_evidence = [item for item in linked if item.source == "main" and item.evidence_state != "UNKNOWN"]
     if main_evidence:
         return _Reconciled(main_evidence[-1].evidence_state, roadmap_work or main_evidence[-1].work_state, tuple(refs), "RESOLVED")
     change_evidence = [item for item in linked if item.source in {"change", "bug"} and item.evidence_state != "UNKNOWN"]
+    if len({item.evidence_state for item in change_evidence}) > 1:
+        return _Reconciled("UNKNOWN", roadmap_work, tuple(refs), "CONFLICT")
     if change_evidence:
         return _Reconciled(change_evidence[-1].evidence_state, roadmap_work or change_evidence[-1].work_state, tuple(refs), "RESOLVED")
     if roadmap_evidence:
         item = roadmap_evidence[-1]
         return _Reconciled(item.evidence_state if item.evidence_state != "UNKNOWN" else registry_state,
                            item.work_state, tuple(refs), "RESOLVED")
-    return _Reconciled(registry_state, _explicit_work_state(entry.stage), tuple(refs), "UNRESOLVED")
+    return _Reconciled(registry_state, _explicit_work_state(entry.stage), tuple(refs), "RESOLVED")
 
 
 def _item_state(stage: str, next_step: str | None, evidence: str, work_state: str | None) -> tuple[str, str | None, str | None]:

@@ -15,7 +15,7 @@ ROOT = Path(__file__).parent
 def test_projection_reads_registry_and_keeps_provenance():
     result = generate_owner_development_status(ROOT, checked_at="2026-08-16T00:00:00+00:00")
 
-    assert result.projection_state == "PARTIAL"
+    assert result.projection_state == "CURRENT"
     assert result.source_versions
     assert result.source_versions[-1].path == "main"
     assert result.horizon_summary
@@ -89,7 +89,8 @@ def test_scoped_main_production_evidence_can_upgrade_same_initiative():
         "BUG_AUDIT_LOG.md": "# bugs",
         "CHANGE_CONTROL_LOG.md": "# changes",
         "AI_CONTEXT.md": "# context",
-        "__main__": "Initiative C — production verified: yes; deploy=main",
+        "__main__": "Initiative C merged",
+        "__production__": "Initiative C — production verified: yes; deploy=main",
     }
     result = generate_owner_development_status(
         ROOT, source_texts=source, version_resolver=lambda *_: "fixture"
@@ -98,6 +99,55 @@ def test_scoped_main_production_evidence_can_upgrade_same_initiative():
     item = result.next_actions[0]
     assert item.evidence_state == "RUNTIME_VERIFIED"
     assert item.reconciliation_state == "RESOLVED"
+
+
+def test_main_runtime_wording_without_production_source_cannot_prove_runtime():
+    source = {
+        "ROADMAP.md": "# roadmap",
+        "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md": """\
+## 3.5 רישום עבודה חי
+| יוזמה / מסמך | היקף | Horizon מקביל | שלב נוכחי בפועל | הצעד הבא שהוחלט |
+|---|---|---|---|---|
+| BUG-123 | Core | H0 | PLANNED | review |
+
+### Horizon 0 — Truth Reset
+""",
+        "BUG_AUDIT_LOG.md": "# bugs",
+        "CHANGE_CONTROL_LOG.md": "# changes",
+        "AI_CONTEXT.md": "# context",
+        "__main__": "BUG-123 runtime verified in production",
+    }
+    result = generate_owner_development_status(
+        ROOT, source_texts=source, version_resolver=lambda *_: "fixture"
+    )
+
+    item = result.next_actions[0]
+    assert item.evidence_state in {"CODE_DONE", "MERGED"}
+    assert item.evidence_state != "RUNTIME_VERIFIED"
+
+
+def test_registry_only_item_is_resolved_and_projection_stays_current():
+    source = {
+        "ROADMAP.md": "# roadmap",
+        "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md": """\
+## 3.5 רישום עבודה חי
+| יוזמה / מסמך | היקף | Horizon מקביל | שלב נוכחי בפועל | הצעד הבא שהוחלט |
+|---|---|---|---|---|
+| Registry Only | Core | H0 | CODE DONE | review |
+
+### Horizon 0 — Truth Reset
+""",
+        "BUG_AUDIT_LOG.md": "# no linked evidence",
+        "CHANGE_CONTROL_LOG.md": "# no linked evidence",
+        "AI_CONTEXT.md": "# context",
+    }
+    result = generate_owner_development_status(
+        ROOT, source_texts=source, version_resolver=lambda *_: "fixture"
+    )
+
+    item = result.next_actions[0]
+    assert item.reconciliation_state == "RESOLVED"
+    assert result.projection_state == "CURRENT"
 
 
 def test_current_roadmap_verification_pending_beats_old_audit_completion():
@@ -135,7 +185,7 @@ def test_unlinked_evidence_is_not_merged_into_registry_item():
 
 ### Horizon 0 — Truth Reset
 """,
-        "BUG_AUDIT_LOG.md": "Other Initiative merged",
+        "BUG_AUDIT_LOG.md": "Initiative E and Other Initiative merged",
         "CHANGE_CONTROL_LOG.md": "Other Initiative deployed",
         "AI_CONTEXT.md": "# context",
     }
@@ -144,8 +194,33 @@ def test_unlinked_evidence_is_not_merged_into_registry_item():
     )
 
     item = result.next_actions[0]
-    assert item.evidence_state == "CODE_DONE"
+    assert item.evidence_state == "UNKNOWN"
     assert item.reconciliation_state == "UNRESOLVED"
+    assert result.projection_state == "PARTIAL"
+
+
+def test_explicitly_linked_incompatible_change_sources_fail_closed_as_conflict():
+    source = {
+        "ROADMAP.md": "# roadmap",
+        "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md": """\
+## 3.5 רישום עבודה חי
+| יוזמה / מסמך | היקף | Horizon מקביל | שלב נוכחי בפועל | הצעד הבא שהוחלט |
+|---|---|---|---|---|
+| Initiative G | Core | H0 | PLANNED | resolve |
+
+### Horizon 0 — Truth Reset
+""",
+        "BUG_AUDIT_LOG.md": "Initiative G CODE DONE",
+        "CHANGE_CONTROL_LOG.md": "Initiative G MERGED",
+        "AI_CONTEXT.md": "# context",
+    }
+    result = generate_owner_development_status(
+        ROOT, source_texts=source, version_resolver=lambda *_: "fixture"
+    )
+
+    item = result.next_actions[0]
+    assert item.reconciliation_state == "CONFLICT"
+    assert item.evidence_state == "UNKNOWN"
     assert result.projection_state == "PARTIAL"
 
 
