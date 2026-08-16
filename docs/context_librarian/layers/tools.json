@@ -3,6 +3,49 @@
   "layer_id": "tools",
   "nodes": [
     {
+      "id": "component.dev_registry_validator",
+      "name": "Canonical Active Work Registry Validator",
+      "type": "component",
+      "status": "active",
+      "authority_level": "verified_audit",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "development/governance validation of the canonical §3.5 Active Work Registry structure and semantic invariants",
+        "precedence": "canonical §3.5 Registry plus this read-only validator; validation output is not Registry state or runtime evidence"
+      },
+      "owner": "development_governance",
+      "code_paths": [
+        "tools/dev_registry_validator.py"
+      ],
+      "test_paths": [
+        "test_dev_registry_validator.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/governance/BOSS_UNIFIED_MASTER_PLAN.md",
+          "role": "canonical §3.5 Active Work Registry contract",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-16",
+      "last_verified_commit": "b2125b9f917d71fb8f29252d794d717ec36b0c1b",
+      "confidence": 1.0,
+      "notes": [
+        "Read-only development/governance validator; it does not own runtime state.",
+        "It does not reconcile evidence, write §3.5, or participate in runtime Core Reasoning.",
+        "It validates required columns, closed vocabularies, booleans, provenance, and cross-field invariants for the canonical Registry."
+      ],
+      "extensions": {
+        "catalog.role": "development_governance_validation_only",
+        "catalog.runtime_consumed": false,
+        "catalog.writes_registry": false,
+        "catalog.reconciles_evidence": false
+      },
+      "last_observed_commit": "b2125b9f917d71fb8f29252d794d717ec36b0c1b"
+    },
+    {
       "id": "layer.tools",
       "name": "Tools",
       "type": "layer",
