@@ -59,7 +59,8 @@ class GoogleDriveArtifactStore:
                 try:
                     response = self._service.files().create(
                         body=body, media_body=media,
-                        fields="id,name,mimeType,size,parents,appProperties,md5Checksum"
+                        fields="id,name,mimeType,size,parents,appProperties,md5Checksum",
+                        supportsAllDrives=True,
                     ).execute()
                     break
                 except Exception as exc:
@@ -69,6 +70,7 @@ class GoogleDriveArtifactStore:
             verified = self._service.files().get(
                 fileId=(response or {}).get("id", ""),
                 fields="id,name,mimeType,size,parents,appProperties,md5Checksum",
+                supportsAllDrives=True,
             ).execute()
             return self._verify(verified, name=name, size=size, sha256=sha256, identity=identity)
         except ArtifactStoreError:
@@ -84,7 +86,8 @@ class GoogleDriveArtifactStore:
         try:
             result = self._service.files().list(
                 q=query, spaces="drive", pageSize=10,
-                fields="files(id,name,mimeType,size,parents,appProperties,md5Checksum)"
+                fields="files(id,name,mimeType,size,parents,appProperties,md5Checksum)",
+                supportsAllDrives=True,
             ).execute()
             files = result.get("files", [])
             if len(files) > 1:

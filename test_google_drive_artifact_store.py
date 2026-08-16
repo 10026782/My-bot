@@ -22,11 +22,14 @@ class _Files:
         self.existing = existing or []
         self.create_errors = list(create_errors)
         self.create_calls = 0
+        self.calls = []
 
     def list(self, **kwargs):
+        self.calls.append(("list", kwargs))
         return _Request({"files": self.existing})
 
     def create(self, **kwargs):
+        self.calls.append(("create", kwargs))
         self.create_calls += 1
         error = self.create_errors.pop(0) if self.create_errors else None
         return _Request({
@@ -36,6 +39,7 @@ class _Files:
         }, error=error)
 
     def get(self, **kwargs):
+        self.calls.append(("get", kwargs))
         return _Request(self.create_result)
 
 
@@ -66,6 +70,15 @@ def test_upload_verify_and_result_ref(tmp_path):
     assert service.files_api.create_calls == 1
     assert json.loads(stored.result_ref)["drive_file_id"] == "drive-file-1"
     assert stored.sha256 == hashlib.sha256(b"test").hexdigest()
+
+
+def test_shared_drive_calls_enable_all_drives(tmp_path):
+    artifact = tmp_path / "final-1.mp4"
+    artifact.write_bytes(b"test")
+    service = _Service()
+    _store(tmp_path, service).put(path=artifact, identity="contract:provider", metadata={})
+    assert service.files_api.calls
+    assert all(kwargs.get("supportsAllDrives") is True for _, kwargs in service.files_api.calls)
 
 
 def test_existing_identity_is_reused_without_duplicate(tmp_path):
