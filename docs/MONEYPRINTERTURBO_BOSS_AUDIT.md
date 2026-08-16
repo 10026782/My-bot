@@ -285,3 +285,22 @@ completed `final-1.mp4`; Render Starter (512 MiB) was terminated during
 combine. Treat Standard 2 GiB as the minimum proven MPT runtime for this
 fixture. This is staging POC evidence, not production enablement; keep
 `EXTERNAL_EXECUTION_ENABLED=false` until a separately approved rollout.
+
+## Phase 1 — staging E2E verified (16/08/2026)
+
+The controlled staging-only External Execution path completed with one approved
+ActionContract: `f5c73380-40b5-4fda-a626-6049d69bf0b6`.
+
+- MoneyPrinterTurbo provider job: `e0a37806-000c-4ec5-a7c9-8783525d0423`.
+- Durable transition: `created → submitted → completed`; submit count: `1`.
+- PostgreSQL poll-lease contention: PASS.
+- Hardened artifact validation: `final-1.mp4`, 178,500 bytes, 1080×1920.
+- The exact approved-script SHA was preserved:
+  `d83fb7748851f41ef311ecf62d1e3730a8e0b616e44354ae991173238606a1f1`.
+- Staging restart PASS on deploy
+  `5c15eddcb17582a598dc35bb102950faf710a288`; the same completed job persisted
+  and post-restart resubmission count was `0`.
+- Final staging service setting: `EXTERNAL_EXECUTION_ENABLED=false`.
+
+This verifies Phase 1 in staging only. Production was untouched; production
+rollout remains a separate explicit decision.
