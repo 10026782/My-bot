@@ -302,5 +302,14 @@ ActionContract: `f5c73380-40b5-4fda-a626-6049d69bf0b6`.
   and post-restart resubmission count was `0`.
 - Final staging service setting: `EXTERNAL_EXECUTION_ENABLED=false`.
 
+### Submission-evidence semantics
+
+An accepted `external_execution.submit` is verified evidence only that the
+approved ActionContract was durably accepted for external processing. It is
+not evidence that a provider artifact is ready. The corresponding
+`ExternalExecutionJob` remains the sole authority for `submitted → completed`
+or another terminal provider outcome; consumers must continue to use
+`completed_job()` before consuming an artifact.
+
 This verifies Phase 1 in staging only. Production was untouched; production
 rollout remains a separate explicit decision.
