@@ -116,6 +116,7 @@ def _validate_external_execution_runtime(repo_root: Path, path: str) -> bool | N
         "core/external_execution_boundary.py": ("class ExternalExecutionBoundary",),
         "core/external_execution_repository.py": ("class ExternalExecutionRepository",),
         "core/external_poll_lease.py": ("class ExternalPollLeaseRepository",),
+        "core/moneyprinterturbo_adapter.py": ("class MoneyPrinterTurboAdapter",),
         "core/migrations/002_external_poll_leases.sql": (
             "CREATE TABLE IF NOT EXISTS external_poll_leases",
             "job_id TEXT PRIMARY KEY",
