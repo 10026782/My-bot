@@ -58,7 +58,8 @@ class _Service:
 
 def _store(tmp_path, service):
     return GoogleDriveArtifactStore(
-        folder_id="folder-1", service_account_json='{}', service=service
+        folder_id="folder-1", oauth_client_id="client", oauth_client_secret="secret",
+        oauth_refresh_token="refresh", service=service
     )
 
 
@@ -82,7 +83,7 @@ def test_shared_drive_calls_enable_all_drives(tmp_path):
 
 
 def test_shared_drive_uses_drive_scope():
-    assert _SCOPES == ("https://www.googleapis.com/auth/drive",)
+    assert _SCOPES == ("https://www.googleapis.com/auth/drive.file",)
 
 
 def test_existing_identity_is_reused_without_duplicate(tmp_path):
@@ -118,9 +119,11 @@ def test_uncertain_upload_is_fail_closed_after_retry_budget(tmp_path):
 
 
 def test_missing_credentials_fail_closed(tmp_path, monkeypatch):
-    monkeypatch.delenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN", raising=False)
     with pytest.raises(ArtifactStoreError, match="drive_configuration_missing"):
-        GoogleDriveArtifactStore(folder_id="folder-1", service_account_json=None, service=None)
+        GoogleDriveArtifactStore(folder_id="folder-1", service=None)
 
 
 def test_missing_or_wrong_folder_or_invalid_artifact_fails_closed(tmp_path):

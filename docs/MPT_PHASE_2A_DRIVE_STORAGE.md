@@ -11,14 +11,14 @@ Enable only in the target staging runtime with:
 ```text
 MPT_ARTIFACT_STORAGE=google_drive
 GOOGLE_DRIVE_ARTIFACT_FOLDER_ID=<dedicated-folder-id>
-GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=<secret JSON, injected by the platform>
+GOOGLE_DRIVE_OAUTH_CLIENT_ID=<secret/config>
+GOOGLE_DRIVE_OAUTH_CLIENT_SECRET=<secret>
+GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN=<secret>
 ```
 
-The service account must be shared only on the dedicated folder. The code uses
-the `drive` scope because the artifact folder is an existing Shared Drive
-folder; its Drive ACL remains restricted to that dedicated folder only. The
-code does not create public permissions and never accepts a user OAuth refresh
-token or a checked-in private key.
+The dedicated Google user owns the My Drive folder. The code refreshes a user
+OAuth token at startup using the narrow `drive.file` scope. It never logs or
+accepts a checked-in client secret or refresh token.
 
 `EXTERNAL_EXECUTION_ENABLED=false` remains the production default. Without
 `MPT_ARTIFACT_STORAGE=google_drive`, the existing local-only Phase 1 adapter

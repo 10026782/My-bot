@@ -1,4 +1,4 @@
-"""Least-privilege Google Drive artifact store for MPT outputs."""
+"""User-OAuth Google Drive artifact store for MPT outputs."""
 
 from __future__ import annotations
 
@@ -12,30 +12,46 @@ from pathlib import Path
 from core.artifact_store import ArtifactStoreError, StoredArtifact
 
 
-_SCOPES = ("https://www.googleapis.com/auth/drive",)
+_SCOPES = ("https://www.googleapis.com/auth/drive.file",)
 _MAX_RETRIES = 2
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class GoogleDriveArtifactStore:
-    def __init__(self, *, folder_id=None, service_account_json=None, service=None):
+    def __init__(
+        self, *, folder_id=None, oauth_client_id=None, oauth_client_secret=None,
+        oauth_refresh_token=None, service=None
+    ):
         self.folder_id = folder_id or os.environ.get("GOOGLE_DRIVE_ARTIFACT_FOLDER_ID")
-        raw_credentials = service_account_json or os.environ.get("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
-        if not self.folder_id or not raw_credentials:
+        client_id = oauth_client_id or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_ID")
+        client_secret = oauth_client_secret or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET")
+        refresh_token = oauth_refresh_token or os.environ.get("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN")
+        if not self.folder_id or not client_id or not client_secret or not refresh_token:
             raise ArtifactStoreError("drive_configuration_missing")
-        self._service = service or self._build_service(raw_credentials)
+        self._service = service or self._build_service(client_id, client_secret, refresh_token)
 
     @staticmethod
-    def _build_service(raw_credentials):
+    def _build_service(client_id, client_secret, refresh_token):
         try:
-            from google.oauth2 import service_account
+            from google.auth.transport.requests import Request
+            from google.auth.exceptions import RefreshError
+            from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
-            credentials = service_account.Credentials.from_service_account_info(
-                json.loads(raw_credentials), scopes=list(_SCOPES)
+            credentials = Credentials(
+                token=None, refresh_token=refresh_token, token_uri="https://oauth2.googleapis.com/token",
+                client_id=client_id, client_secret=client_secret, scopes=list(_SCOPES)
             )
+            try:
+                credentials.refresh(Request())
+            except RefreshError as exc:
+                reason = str(exc).lower()
+                code = "AUTH_REVOKED" if "invalid_grant" in reason or "revoked" in reason else "AUTH_REFRESH_FAILED"
+                raise ArtifactStoreError(code) from exc
             return build("drive", "v3", credentials=credentials, cache_discovery=False)
+        except ArtifactStoreError:
+            raise
         except Exception as exc:
-            raise ArtifactStoreError("drive_auth_failed") from exc
+            raise ArtifactStoreError("AUTH_REFRESH_FAILED") from exc
 
     def put(self, *, path, identity: str, metadata: dict) -> StoredArtifact:
         path = Path(path)
@@ -76,7 +92,7 @@ class GoogleDriveArtifactStore:
         except ArtifactStoreError:
             raise
         except Exception as exc:
-            raise ArtifactStoreError("drive_upload_failed") from exc
+            raise ArtifactStoreError(_drive_error_code(exc, "DRIVE_UPLOAD_FAILED"), uncertain=True) from exc
 
     def _find_existing(self, identity: str):
         query = (
@@ -96,7 +112,7 @@ class GoogleDriveArtifactStore:
         except ArtifactStoreError:
             raise
         except Exception as exc:
-            raise ArtifactStoreError("drive_lookup_failed", uncertain=True) from exc
+            raise ArtifactStoreError(_drive_error_code(exc, "DRIVE_PERMISSION_DENIED"), uncertain=True) from exc
 
     def _verify(self, file, *, name, size, sha256, identity):
         if (
@@ -126,3 +142,12 @@ def _quote(value: str) -> str:
 def _transient(exc: Exception) -> bool:
     status = getattr(getattr(exc, "resp", None), "status", None)
     return status in {408, 429, 500, 502, 503, 504} or isinstance(exc, (TimeoutError, OSError))
+
+
+def _drive_error_code(exc: Exception, default: str) -> str:
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    if status == 401:
+        return "AUTH_REVOKED"
+    if status == 403:
+        return "DRIVE_PERMISSION_DENIED"
+    return default
