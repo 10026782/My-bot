@@ -98,6 +98,39 @@ def _timestamp(value: str, field: str) -> str:
     return value
 
 
+def validate_evidence_record(record: EvidenceRecord) -> EvidenceRecord:
+    """Validate the evidence contract at every caller boundary.
+
+    JSON parsing and programmatic callers intentionally share this function;
+    constructing a dataclass directly does not confer authority.
+    """
+    if not isinstance(record, EvidenceRecord):
+        raise ReconciliationError(f"expected EvidenceRecord, got {type(record).__name__}")
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]+", record.initiative_key):
+        raise ReconciliationError(f"invalid initiative_key: {record.initiative_key!r}")
+    if record.evidence_type not in EVIDENCE_TYPES:
+        raise ReconciliationError(f"unsupported evidence_type: {record.evidence_type!r}")
+    if record.evidence_state not in EVIDENCE_STATES:
+        raise ReconciliationError(f"unsupported evidence_state: {record.evidence_state!r}")
+    if record.confidence != "explicit":
+        raise ReconciliationError("confidence must be explicit")
+    _timestamp(record.observed_at, "observed_at")
+    prefix = SOURCE_PREFIXES[record.evidence_type]
+    if not isinstance(record.source_ref, str) or not record.source_ref.startswith(prefix) or record.source_ref == prefix:
+        raise ReconciliationError(f"invalid source_ref for {record.evidence_type}: {record.source_ref!r}")
+    if record.evidence_state == "RUNTIME_VERIFIED" and record.evidence_type != "runtime":
+        raise ReconciliationError("RUNTIME_VERIFIED requires evidence_type=runtime")
+    if record.evidence_state == "DEPLOYED" and record.evidence_type not in {"deployment", "runtime"}:
+        raise ReconciliationError("DEPLOYED requires deployment/runtime evidence")
+    if record.evidence_type in {"deployment", "runtime"} and not isinstance(record.version_ref, str):
+        raise ReconciliationError(f"{record.evidence_type} evidence requires an explicit version_ref")
+    if record.evidence_type == "git_main" and record.evidence_state not in {"CODE_DONE", "MERGED"}:
+        raise ReconciliationError("git_main evidence may establish only CODE_DONE or MERGED")
+    if record.requires_runtime_verification is not None and not isinstance(record.requires_runtime_verification, bool):
+        raise ReconciliationError("malformed requires_runtime_verification")
+    return record
+
+
 def _record_from_mapping(raw: object, *, index: int) -> EvidenceRecord:
     if not isinstance(raw, dict):
         raise ReconciliationError(f"evidence record {index} must be an object")
@@ -105,41 +138,20 @@ def _record_from_mapping(raw: object, *, index: int) -> EvidenceRecord:
     missing = [field for field in required if not raw.get(field)]
     if missing:
         raise ReconciliationError(f"evidence record {index} missing {', '.join(missing)}")
-    key = raw["initiative_key"]
-    if not isinstance(key, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]+", key):
-        raise ReconciliationError(f"evidence record {index} has invalid initiative_key")
-    evidence_type = raw["evidence_type"]
-    if evidence_type not in EVIDENCE_TYPES:
-        raise ReconciliationError(f"evidence record {index} has unsupported evidence_type: {evidence_type!r}")
-    state = raw["evidence_state"]
-    if state not in EVIDENCE_STATES:
-        raise ReconciliationError(f"evidence record {index} has unsupported evidence_state: {state!r}")
-    if state == "RUNTIME_VERIFIED" and evidence_type != "runtime":
-        raise ReconciliationError("RUNTIME_VERIFIED requires evidence_type=runtime")
-    if state == "DEPLOYED" and evidence_type not in {"deployment", "runtime"}:
-        raise ReconciliationError("DEPLOYED requires deployment/runtime evidence")
-    if evidence_type in {"deployment", "runtime"} and not raw.get("version_ref"):
-        raise ReconciliationError(f"{evidence_type} evidence requires an explicit version_ref")
-    if evidence_type == "git_main" and state not in {"CODE_DONE", "MERGED"}:
-        raise ReconciliationError("git_main evidence may only establish CODE_DONE or MERGED")
-    source_ref = raw["source_ref"]
-    if not isinstance(source_ref, str) or not source_ref.startswith(SOURCE_PREFIXES[evidence_type]):
-        raise ReconciliationError(f"evidence record {index} has invalid source_ref for {evidence_type}")
-    if raw.get("confidence", "explicit") != "explicit":
-        raise ReconciliationError(f"evidence record {index} must have confidence=explicit")
-    requires = raw.get("requires_runtime_verification")
-    if requires is not None and not isinstance(requires, bool):
-        raise ReconciliationError(f"evidence record {index} has malformed requires_runtime_verification")
-    return EvidenceRecord(
-        initiative_key=key,
-        evidence_type=evidence_type,
-        evidence_state=state,
-        source_ref=source_ref,
-        observed_at=_timestamp(raw["observed_at"], "observed_at"),
+    record = EvidenceRecord(
+        initiative_key=raw["initiative_key"],
+        evidence_type=raw["evidence_type"],
+        evidence_state=raw["evidence_state"],
+        source_ref=raw["source_ref"],
+        observed_at=raw["observed_at"],
         version_ref=raw.get("version_ref"),
-        confidence="explicit",
-        requires_runtime_verification=requires,
+        confidence=raw.get("confidence", "explicit"),
+        requires_runtime_verification=raw.get("requires_runtime_verification"),
     )
+    try:
+        return validate_evidence_record(record)
+    except ReconciliationError as exc:
+        raise ReconciliationError(f"evidence record {index}: {exc}") from exc
 
 
 class JsonEvidenceAdapter:
@@ -178,6 +190,13 @@ def _same_evidence_type_conflict(records: list[EvidenceRecord]) -> str | None:
     return None
 
 
+def _policy_conflict(records: list[EvidenceRecord]) -> str | None:
+    values = {record.requires_runtime_verification for record in records if record.requires_runtime_verification is not None}
+    if len(values) > 1:
+        return "conflicting requires_runtime_verification policy values"
+    return None
+
+
 def reconcile_text(
     text: str,
     records: Iterable[EvidenceRecord],
@@ -191,6 +210,10 @@ def reconcile_text(
     unmapped: list[str] = []
     invalid: list[str] = []
     for record in records:
+        # This is deliberately before grouping, ranking, conflict detection,
+        # and any proposed Registry mutation.  Direct dataclass callers get
+        # exactly the same contract as JSON adapter callers.
+        validate_evidence_record(record)
         if record.initiative_key not in by_key:
             unmapped.append(f"{record.source_ref}:{record.initiative_key}")
         else:
@@ -210,6 +233,11 @@ def reconcile_text(
         conflict = _same_evidence_type_conflict(evidence)
         if conflict:
             conflicts.append(f"{key}: {conflict}")
+            unchanged.append(key)
+            continue
+        policy_conflict = _policy_conflict(evidence)
+        if policy_conflict:
+            conflicts.append(f"{key}: {policy_conflict}")
             unchanged.append(key)
             continue
         strongest = max(evidence, key=lambda item: EVIDENCE_ORDER.get(item.evidence_state, -1))

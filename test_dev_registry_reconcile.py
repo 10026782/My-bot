@@ -10,6 +10,7 @@ from tools.dev_registry_reconcile import (
     atomic_write,
     reconcile_file,
     reconcile_text,
+    validate_evidence_record,
 )
 from tools.dev_registry_validator import REQUIRED_COLUMNS, RegistryValidationError
 
@@ -183,3 +184,47 @@ def test_manifest_adapter_requires_explicit_keyed_records(tmp_path):
     path.write_text(json.dumps({"records": [{"evidence_state": "MERGED"}]}), encoding="utf-8")
     with pytest.raises(ReconciliationError, match="missing initiative_key"):
         JsonEvidenceAdapter().read(path)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        _record("RUNTIME_VERIFIED"),
+        _record("DEPLOYED"),
+        EvidenceRecord("EXAMPLE_INITIATIVE", "runtime", "RUNTIME_VERIFIED", "runtime-evidence:x", "2026-08-16T12:00:00Z"),
+        EvidenceRecord("EXAMPLE_INITIATIVE", "git_main", "MERGED", "wrong:x", "2026-08-16T12:00:00Z", version_ref="abc", confidence="reviewed"),
+    ],
+)
+def test_direct_evidence_records_cannot_bypass_validation(record):
+    with pytest.raises(ReconciliationError):
+        validate_evidence_record(record)
+
+
+def test_valid_direct_runtime_evidence_is_accepted():
+    record = EvidenceRecord(
+        "EXAMPLE_INITIATIVE", "runtime", "RUNTIME_VERIFIED", "runtime-evidence:release-1",
+        "2026-08-16T12:00:00Z", version_ref="release-1",
+    )
+    assert validate_evidence_record(record) == record
+
+
+def test_rejected_direct_record_does_not_write_or_update_provenance(tmp_path):
+    path = tmp_path / "BOSS.md"
+    original = _fixture()
+    path.write_text(original, encoding="utf-8")
+    rejected = EvidenceRecord("EXAMPLE_INITIATIVE", "git_main", "RUNTIME_VERIFIED", "git:main:abc", "2026-08-16T12:00:00Z")
+    with pytest.raises(ReconciliationError):
+        reconcile_file(path, records=[rejected], apply=True, reconciled_at="2026-08-16T13:00:00Z")
+    assert path.read_text(encoding="utf-8") == original
+    assert "2026-08-16T00:00:00Z" in original
+    assert "migration-explicit-status" in original
+
+
+def test_conflicting_runtime_policy_values_leave_row_unchanged():
+    records = [
+        _record("MERGED", requires_runtime_verification=True),
+        _record("MERGED", source_ref="git:main:def456", requires_runtime_verification=False),
+    ]
+    result, report = reconcile_text(_fixture(), records, reconciled_at="2026-08-16T13:00:00Z")
+    assert result == _fixture()
+    assert report.conflicts == ("EXAMPLE_INITIATIVE: conflicting requires_runtime_verification policy values",)
