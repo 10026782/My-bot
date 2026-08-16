@@ -53,6 +53,8 @@ _REQUIRED: dict[str, list[str]] = {
     # presence only; allowlist + op-specific shape (fields vs record_id) is
     # validated inside tools/approval_actions.py::tma_write() itself.
     "tma_write":                 ["op", "table"],
+    # Internal-only boundary payload; provider fields are not validator API.
+    "external_execution.submit": [],
 }
 
 _FIELD_QUESTIONS: dict[str, str] = {
