@@ -1,13 +1,18 @@
 """Deterministic, read-only development status projection.
 
 OC-C summarizes existing repository authorities; it is not a tracker and does
-not write status anywhere.  The precedence below is intentionally explicit:
+not write status anywhere.  The implemented reconciliation precedence is
+intentionally explicit:
 
-1. scoped production evidence (when a source contains it);
-2. current main implementation evidence;
-3. active planning documents (ROADMAP first, then the unified registry);
-4. defect/change ledgers and current briefing;
-5. dated snapshots and archived documents.
+1. Active Work Registry supplies identity, Horizon, and declared step.
+2. An explicitly linked current ROADMAP line may set the work state.
+3. Explicitly linked CHANGE_CONTROL/BUG evidence may set evidence state.
+4. Explicitly linked `main` commit subjects may set implementation/merge state.
+5. Explicitly scoped production/runtime evidence for that same initiative wins.
+
+AI_CONTEXT is consumed only for bounded current closure/owner-gate sections and
+provenance; it is not used to override registry or ROADMAP status. Archived or
+unlinked prose is never status evidence.
 
 In particular, MERGED is never upgraded to DEPLOYED or RUNTIME_VERIFIED by
 this module.  Only explicit source wording can provide those evidence states.
@@ -20,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import subprocess
-from typing import Callable, Iterable, Mapping
+from typing import Callable, Mapping
 
 
 WORK_STATES = frozenset({
@@ -32,7 +37,8 @@ EVIDENCE_STATES = frozenset({
     "RUNTIME_VERIFIED", "UNKNOWN",
 })
 FRESHNESS_STATES = frozenset({"current", "stale", "unknown"})
-PROJECTION_STATES = frozenset({"CURRENT", "UNKNOWN"})
+PROJECTION_STATES = frozenset({"CURRENT", "PARTIAL", "UNKNOWN"})
+RECONCILIATION_STATES = frozenset({"RESOLVED", "UNRESOLVED", "CONFLICT"})
 
 
 def _now_iso() -> str:
@@ -68,6 +74,7 @@ class DevelopmentItem:
     freshness: str
     source_refs: tuple[str, ...]
     source_versions: tuple[str, ...]
+    reconciliation_state: str = "RESOLVED"
 
     def __post_init__(self) -> None:
         if self.state not in WORK_STATES:
@@ -76,6 +83,8 @@ class DevelopmentItem:
             raise ValueError(f"unsupported evidence state: {self.evidence_state}")
         if self.freshness not in FRESHNESS_STATES:
             raise ValueError(f"unsupported freshness: {self.freshness}")
+        if self.reconciliation_state not in RECONCILIATION_STATES:
+            raise ValueError(f"unsupported reconciliation state: {self.reconciliation_state}")
 
 
 @dataclass(frozen=True)
@@ -121,6 +130,7 @@ class OwnerDevelopmentStatus:
                 "freshness": value.freshness,
                 "source_refs": list(value.source_refs),
                 "source_versions": list(value.source_versions),
+                "reconciliation_state": value.reconciliation_state,
             }
 
         return {
@@ -154,6 +164,23 @@ class _RegistryEntry:
     row_number: int
 
 
+@dataclass(frozen=True)
+class _Evidence:
+    source: str
+    source_ref: str
+    evidence_state: str
+    work_state: str | None = None
+    scope_explicit: bool = False
+
+
+@dataclass(frozen=True)
+class _Reconciled:
+    evidence_state: str
+    work_state: str | None
+    refs: tuple[str, ...]
+    reconciliation_state: str
+
+
 def _read_sources(repo_root: Path) -> dict[str, str]:
     paths = (
         "ROADMAP.md",
@@ -179,6 +206,14 @@ def _main_version(repo_root: Path, main_ref: str) -> str:
     )
     value = result.stdout.strip()
     return value if result.returncode == 0 and value else "unknown"
+
+
+def _main_commit_subjects(repo_root: Path, main_ref: str) -> str:
+    result = subprocess.run(
+        ["git", "log", "--format=%s", main_ref], cwd=repo_root,
+        text=True, capture_output=True, check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
 
 
 def _registry_rows(text: str) -> list[_RegistryEntry]:
@@ -222,30 +257,119 @@ def _has(text: str, *markers: str) -> bool:
     return any(marker.lower() in lowered for marker in markers)
 
 
-def _evidence_state(stage: str) -> str:
-    if _has(stage, "RUNTIME_VERIFIED", "VERIFIED IN PROD", "מאומת בפרוד", "production verified: כן"):
+def _bounded_evidence_state(text: str) -> str:
+    """Classify only exact high-confidence phrases from canonical source fields."""
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    if re.search(r"\b(runtime[_ -]verified|verified in prod|production verified\s*:\s*(yes|כן))\b", normalized):
         return "RUNTIME_VERIFIED"
-    if _has(stage, "DEPLOYED", "פרוס", "deployed"):
+    if re.search(r"\b(deployed|deploy(ed)?\s*:\s*(yes|כן)|פרוס|נפרס)\b", normalized):
         return "DEPLOYED"
-    if _has(stage, "WIRED", "מחובר"):
+    if re.search(r"\b(wired|מחובר)\b", normalized):
         return "WIRED"
-    if _has(stage, "MERGED", "ממוזג", "merged"):
+    if re.search(r"\b(merged|מוזג|merge\s*:\s*(yes|כן))\b", normalized):
         return "MERGED"
-    if _has(stage, "CODE DONE", "קוד הושלם", "מימוש", "implemented"):
+    if re.search(r"\b(code done|code complete|קוד הושלם)\b", normalized):
         return "CODE_DONE"
-    if _has(stage, "PLANNED", "טרם התחיל", "backlog", "parking lot"):
+    if re.search(r"\b(planned|טרם התחיל|backlog|parking lot)\b", normalized):
         return "PLANNED"
     return "UNKNOWN"
 
 
-def _item_state(stage: str, next_step: str | None, evidence: str) -> tuple[str, str | None, str | None]:
-    if _has(stage, "ממתין להחלטת owner", "ממתין להחלטת בעלים", "owner decision", "owner gate"):
+def _explicit_work_state(text: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    if re.search(r"ממתין להחלטת (owner|בעלים)|owner decision|owner gate", normalized):
+        return "OWNER_DECISION"
+    if re.search(r"\b(blocked|blocker)\b|חסום", normalized):
+        return "BLOCKED"
+    if re.search(r"\b(active|in progress)\b|בעבודה בפועל", normalized):
+        return "ACTIVE"
+    if re.search(r"verification (pending|open)|needs verification|לא אומת|טרם אומת|לא verified", normalized):
+        return "NEEDS_VERIFICATION"
+    return None
+
+
+def _identity_tokens(entry: _RegistryEntry) -> tuple[str, ...]:
+    """Return only explicit identity keys; prose similarity is never a link."""
+    tokens = {re.sub(r"\s+", " ", entry.title).strip().lower()}
+    tokens.update(value.lower() for value in re.findall(r"\b(?:bug[- ]?\d+[a-z0-9-]*|[cfnu]-\d+|[cfnu]\d+|f\d+|n\d+)\b", entry.title, re.IGNORECASE))
+    return tuple(sorted(tokens, key=len, reverse=True))
+
+
+def _explicitly_links(entry: _RegistryEntry, line: str) -> bool:
+    normalized = re.sub(r"\s+", " ", line).strip().lower()
+    for token in _identity_tokens(entry):
+        if len(token) >= 8 and token in normalized:
+            return True
+        if len(token) < 8 and re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", normalized):
+            return True
+    return False
+
+
+def _source_evidence(entry: _RegistryEntry, text: str, source: str) -> tuple[_Evidence, ...]:
+    evidence: list[_Evidence] = []
+    for line_number, line in enumerate(text.splitlines(), 1):
+        if not _explicitly_links(entry, line):
+            continue
+        state = _bounded_evidence_state(line)
+        work_state = _explicit_work_state(line)
+        if state == "UNKNOWN" and work_state is None:
+            continue
+        scope = source in {"main", "production"} and bool(
+            re.search(r"\b(?:production|runtime|staging|deploy|main)\b|פרוד|סטייג'ינג|פריסה", line, re.IGNORECASE)
+        )
+        evidence.append(_Evidence(
+            source=source, source_ref=f"{source}:line-{line_number}",
+            evidence_state=state, work_state=work_state, scope_explicit=scope,
+        ))
+    return tuple(evidence)
+
+
+def _reconcile(entry: _RegistryEntry, source_texts: Mapping[str, str], main_text: str) -> _Reconciled:
+    registry_state = _bounded_evidence_state(entry.stage)
+    refs = ["docs/governance/BOSS_UNIFIED_MASTER_PLAN.md:registry"]
+    linked: list[_Evidence] = []
+    for source, path in (
+        ("roadmap", "ROADMAP.md"),
+        ("change", "CHANGE_CONTROL_LOG.md"),
+        ("bug", "BUG_AUDIT_LOG.md"),
+        ("main", "__main__"),
+    ):
+        text = main_text if source == "main" else source_texts.get(path, "")
+        matches = _source_evidence(entry, text, source)
+        linked.extend(matches)
+        refs.extend(match.source_ref for match in matches)
+
+    # The precedence is scoped and deterministic.  A linked production/runtime
+    # record is strongest; main evidence follows; change/bug evidence follows;
+    # current ROADMAP can set the work state; registry remains the fallback.
+    roadmap_evidence = [item for item in linked if item.source == "roadmap"]
+    roadmap_work = roadmap_evidence[-1].work_state if roadmap_evidence else None
+    production = [item for item in linked if item.source == "main" and item.scope_explicit and item.evidence_state == "RUNTIME_VERIFIED"]
+    if production:
+        return _Reconciled("RUNTIME_VERIFIED", roadmap_work or production[-1].work_state, tuple(refs), "RESOLVED")
+    main_evidence = [item for item in linked if item.source == "main" and item.evidence_state != "UNKNOWN"]
+    if main_evidence:
+        return _Reconciled(main_evidence[-1].evidence_state, roadmap_work or main_evidence[-1].work_state, tuple(refs), "RESOLVED")
+    change_evidence = [item for item in linked if item.source in {"change", "bug"} and item.evidence_state != "UNKNOWN"]
+    if change_evidence:
+        return _Reconciled(change_evidence[-1].evidence_state, roadmap_work or change_evidence[-1].work_state, tuple(refs), "RESOLVED")
+    if roadmap_evidence:
+        item = roadmap_evidence[-1]
+        return _Reconciled(item.evidence_state if item.evidence_state != "UNKNOWN" else registry_state,
+                           item.work_state, tuple(refs), "RESOLVED")
+    return _Reconciled(registry_state, _explicit_work_state(entry.stage), tuple(refs), "UNRESOLVED")
+
+
+def _item_state(stage: str, next_step: str | None, evidence: str, work_state: str | None) -> tuple[str, str | None, str | None]:
+    if work_state == "OWNER_DECISION":
         return "OWNER_DECISION", None, next_step
-    if _has(stage, "חסום", "blocked", "blocker"):
+    if work_state == "BLOCKED":
         return "BLOCKED", stage, None
-    if _has(stage, "בעבודה בפועל", "active", "in progress"):
+    if work_state == "ACTIVE":
         return "ACTIVE", None, None
-    if evidence in {"MERGED", "WIRED", "DEPLOYED", "CODE_DONE"} and _has(
+    if work_state == "NEEDS_VERIFICATION":
+        return "NEEDS_VERIFICATION", None, None
+    if evidence in {"MERGED", "WIRED", "DEPLOYED", "RUNTIME_VERIFIED"} and _has(
         stage, "לא verified", "לא אומת", "טרם אומת", "not production", "לא עדיין"
     ):
         return "NEEDS_VERIFICATION", None, None
@@ -254,9 +378,9 @@ def _item_state(stage: str, next_step: str | None, evidence: str) -> tuple[str, 
     return "UNKNOWN", None, None
 
 
-def _registry_item(entry: _RegistryEntry, versions: tuple[str, ...]) -> DevelopmentItem:
-    evidence = _evidence_state(entry.stage)
-    state, blocker, decision_question = _item_state(entry.stage, entry.next_step, evidence)
+def _registry_item(entry: _RegistryEntry, reconciled: _Reconciled, versions: tuple[str, ...]) -> DevelopmentItem:
+    evidence = reconciled.evidence_state
+    state, blocker, decision_question = _item_state(entry.stage, entry.next_step, evidence, reconciled.work_state)
     return DevelopmentItem(
         initiative_key=_slug(entry.title), title=entry.title, horizon=entry.horizon,
         state=state, summary=_owner_text(entry.stage) or "Unknown current stage",
@@ -264,7 +388,8 @@ def _registry_item(entry: _RegistryEntry, versions: tuple[str, ...]) -> Developm
         decision_question=_owner_text(decision_question),
         evidence_state=evidence, freshness="current", source_refs=(
             f"docs/governance/BOSS_UNIFIED_MASTER_PLAN.md:registry-row-{entry.row_number}",
-        ), source_versions=versions,
+            *reconciled.refs,
+        ), source_versions=versions, reconciliation_state=reconciled.reconciliation_state,
     )
 
 
@@ -280,14 +405,15 @@ def _recently_closed(text: str, versions: tuple[str, ...]) -> tuple[DevelopmentI
         match = re.match(r"^- \*\*(.+?)\*\*", line)
         if not match:
             continue
-        if not _has(line, "מוזג", "merged", "implemented", "closed"):
+        evidence = _bounded_evidence_state(line)
+        if evidence == "UNKNOWN":
             continue
         title = re.sub(r"\s+\(.+?\)$", "", match.group(1)).strip()
         result.append(DevelopmentItem(
             initiative_key=_slug(title), title=title, horizon=None, state="CLOSED",
             summary=_owner_text(line[2:].strip()) or "Closed item",
             next_step=None, blocker=None,
-            decision_question=None, evidence_state="MERGED", freshness="current",
+            decision_question=None, evidence_state=evidence, freshness="current",
             source_refs=(f"AI_CONTEXT.md:completed-line-{line_number}",),
             source_versions=versions,
         ))
@@ -321,7 +447,7 @@ def _brief_items(text: str, versions: tuple[str, ...]) -> tuple[DevelopmentItem,
                 title = line[2:].split("—", 1)[0].strip(" `")
             else:
                 continue
-            evidence = _evidence_state(line)
+            evidence = _bounded_evidence_state(line)
             if section_kind == "blocked":
                 state = "OWNER_DECISION" if _has(line, "owner", "החלטת") else "BLOCKED"
                 blocker = line[2:].strip() if state == "BLOCKED" else None
@@ -360,17 +486,22 @@ def generate_owner_development_status(
         registry_text = texts["docs/governance/BOSS_UNIFIED_MASTER_PLAN.md"]
         entries = _registry_rows(registry_text)
         main_sha = _main_version(root, main_ref)
+        main_text = texts.get("__main__", _main_commit_subjects(root, main_ref))
         versions = tuple(
             SourceVersion(path, version_resolver(root, path, main_ref), authority, "current")
             for path, authority in (
-                ("ROADMAP.md", "planning"),
-                ("docs/governance/BOSS_UNIFIED_MASTER_PLAN.md", "registry"),
-                ("CHANGE_CONTROL_LOG.md", "change_evidence"),
-                ("AI_CONTEXT.md", "briefing"),
+            ("ROADMAP.md", "planning"),
+            ("docs/governance/BOSS_UNIFIED_MASTER_PLAN.md", "registry"),
+            ("CHANGE_CONTROL_LOG.md", "reconciliation only when explicitly linked"),
+            ("BUG_AUDIT_LOG.md", "reconciliation only when explicitly linked"),
+            ("AI_CONTEXT.md", "bounded closures/owner gates; not registry status"),
             )
         )
         version_text = tuple(value.as_text() for value in versions) + (f"main@{main_sha}",)
-        registry_items = tuple(_registry_item(entry, version_text) for entry in entries)
+        registry_items = tuple(
+            _registry_item(entry, _reconcile(entry, texts, main_text), version_text)
+            for entry in entries
+        )
         brief_items = _brief_items(texts.get("AI_CONTEXT.md", ""), version_text)
         items = registry_items + brief_items
         horizons = _horizons(registry_text)
@@ -382,6 +513,11 @@ def generate_owner_development_status(
             (f"Horizon {number} — {horizons.get(f'Horizon {number}', 'Unknown')}", tuple(grouped.get(f"H{number}", [])))
             for number in range(8) if grouped.get(f"H{number}")
         )
+        projection_state = (
+            "PARTIAL"
+            if any(item.reconciliation_state != "RESOLVED" for item in registry_items)
+            else "CURRENT"
+        )
         return OwnerDevelopmentStatus(
             current_focus=tuple(item for item in items if item.state == "ACTIVE"),
             next_actions=tuple(item for item in items if item.state == "NEXT"),
@@ -391,7 +527,7 @@ def generate_owner_development_status(
             recently_closed=_recently_closed(texts.get("AI_CONTEXT.md", ""), version_text),
             horizon_summary=horizon_summary, updated_at=checked_at,
             source_versions=versions + (SourceVersion("main", main_sha, "implementation", "current"),),
-            projection_state="CURRENT",
+            projection_state=projection_state,
         )
     except (OSError, UnicodeError, ValueError, KeyError):
         return OwnerDevelopmentStatus(
