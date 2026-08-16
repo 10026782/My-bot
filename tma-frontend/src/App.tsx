@@ -75,6 +75,9 @@ export default function App() {
     return (
       <OwnerControlCenter
         onBack={() => setOwnerControlOpen(false)}
+        onOpenApprovals={() => { setOwnerControlOpen(false); setApprovalsOpen(true); }}
+        onOpenHealth={() => { setOwnerControlOpen(false); setHealthOpen(true); }}
+        onOpenMarketing={() => { setOwnerControlOpen(false); setMarketingOpen(true); }}
         onOpenVentures={() => { setOwnerControlOpen(false); setVenturesOpen(true); }}
       />
     );
@@ -169,7 +172,7 @@ export default function App() {
           <button onClick={() => setCheckinOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="צ'ק-אין יומי">✅</button>
           <button onClick={() => setGameOpen(true)}      className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="גיים">🎮</button>
           {canShowOwnerControl && (
-            <button onClick={() => setOwnerControlOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-900 text-white active:bg-gray-700 text-xs font-black" aria-label="Owner Control Center">OC</button>
+            <button onClick={() => setOwnerControlOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-900 text-white active:bg-gray-700 text-[10px] font-black" aria-label="מרכז השליטה">מרכז</button>
           )}
           {canShowOwnerControl && (
             <button onClick={() => setVenturesOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="Ventures">🔭</button>

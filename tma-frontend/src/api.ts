@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -192,6 +192,16 @@ export async function fetchOwnerControlCenter(): Promise<OwnerControlCenter> {
   const r = await fetch(`${BASE}/api/owner/control-center`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<OwnerControlCenter>;
+}
+
+export async function fetchCommandCenter(): Promise<CommandCenterResponse> {
+  const r = await fetch(`${BASE}/api/owner/command-center`, { headers: authHeaders() });
+  if (!r.ok) {
+    const error = new Error(`API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
+  return r.json() as Promise<CommandCenterResponse>;
 }
 
 export async function emergencyStop(action: string): Promise<void> {
