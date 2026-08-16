@@ -8,7 +8,7 @@ the existing TMA helpers lazily to avoid creating a second source of truth.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import re
 from typing import Any, Callable, Mapping, Sequence
@@ -100,6 +100,11 @@ class OwnerAttentionProjection:
 
 
 SourceReader = Callable[[], Any]
+PayloadValidator = Callable[[Any], None]
+
+
+class PayloadValidationError(ValueError):
+    """The transport succeeded but the source contract was not proven."""
 
 
 @dataclass(frozen=True)
@@ -117,22 +122,112 @@ def _current_status(source: str, checked_at: str, item_count: int) -> SourceStat
 
 
 def _failed_status(source: str, checked_at: str, error: Exception) -> SourceStatus:
+    reason = (
+        f"invalid_payload:{error}"
+        if isinstance(error, PayloadValidationError)
+        else f"source_read_failed:{type(error).__name__}"
+    )
     return SourceStatus(
         source,
         "UNKNOWN",
         checked_at,
         "unknown",
-        reason=f"source_read_failed:{type(error).__name__}",
+        reason=reason,
     )
 
 
-def _run_reader(source: str, reader: SourceReader, checked_at: str) -> CollectorResult:
+def _run_reader(
+    source: str,
+    reader: SourceReader,
+    checked_at: str,
+    validator: PayloadValidator,
+) -> CollectorResult:
     try:
         payload = reader()
+        validator(payload)
         count = _payload_count(payload)
         return CollectorResult(source, payload, _current_status(source, checked_at, count))
     except Exception as error:  # source isolation is part of the contract
         return CollectorResult(source, None, _failed_status(source, checked_at, error))
+
+
+def _mapping(payload: Any, source: str) -> Mapping[str, Any]:
+    if not isinstance(payload, Mapping):
+        raise PayloadValidationError(f"{source}:payload_not_mapping")
+    return payload
+
+
+def _nonnegative_int(payload: Mapping[str, Any], key: str, source: str) -> int:
+    value = payload.get(key)
+    if type(value) is not int or value < 0:
+        raise PayloadValidationError(f"{source}:{key}_invalid")
+    return value
+
+
+def _validate_approvals(payload: Any) -> None:
+    data = _mapping(payload, "approvals")
+    _nonnegative_int(data, "pending_count", "approvals")
+    pending = data.get("pending")
+    if not isinstance(pending, list) or not all(isinstance(item, Mapping) for item in pending):
+        raise PayloadValidationError("approvals:pending_invalid")
+
+
+def _validate_tasks(payload: Any) -> None:
+    data = _mapping(payload, "tasks")
+    _nonnegative_int(data, "overdue_tasks", "tasks")
+
+
+def _validate_system_health(payload: Any) -> None:
+    data = _mapping(payload, "system_health")
+    status = data.get("status")
+    if not isinstance(status, str) or status.lower() not in {"ok", "degraded", "emergency"}:
+        raise PayloadValidationError("system_health:status_invalid")
+    active = data.get("active_emergency")
+    if not isinstance(active, list):
+        raise PayloadValidationError("system_health:active_emergency_invalid")
+
+
+def _validate_projects(payload: Any) -> None:
+    data = _mapping(payload, "projects")
+    _nonnegative_int(data, "hot_leads_count", "projects")
+    projects = data.get("projects")
+    if not isinstance(projects, list) or not all(isinstance(item, Mapping) for item in projects):
+        raise PayloadValidationError("projects:projects_invalid")
+
+
+def _validate_marketing(payload: Any) -> None:
+    data = _mapping(payload, "marketing")
+    demands = data.get("demands")
+    if not isinstance(demands, list):
+        raise PayloadValidationError("marketing:demands_invalid")
+    for demand in demands:
+        if not isinstance(demand, Mapping):
+            raise PayloadValidationError("marketing:demand_invalid")
+        _nonnegative_int(demand, "pending_creative_count", "marketing")
+
+
+def _validate_ventures(payload: Any) -> None:
+    data = _mapping(payload, "ventures")
+    active = _nonnegative_int(data, "active", "ventures")
+    total = _nonnegative_int(data, "total", "ventures")
+    if active > total:
+        raise PayloadValidationError("ventures:active_exceeds_total")
+    stage_counts = data.get("stage_counts")
+    if not isinstance(stage_counts, Mapping) or any(
+        not isinstance(stage, str) or type(count) is not int or count < 0
+        for stage, count in stage_counts.items()
+    ):
+        raise PayloadValidationError("ventures:stage_counts_invalid")
+
+
+SOURCE_VALIDATORS: Mapping[str, PayloadValidator] = {
+    "approvals": _validate_approvals,
+    "tasks": _validate_tasks,
+    "system_health": _validate_system_health,
+    "projects": _validate_projects,
+    "marketing": _validate_marketing,
+    "ventures": _validate_ventures,
+}
 
 
 def _payload_count(payload: Any) -> int:
@@ -471,7 +566,10 @@ def build_owner_attention_projection(
         ("marketing", source_set.marketing),
         ("ventures", source_set.ventures),
     )
-    results = [_run_reader(name, reader, timestamp) for name, reader in readers]
+    results = [
+        _run_reader(name, reader, timestamp, SOURCE_VALIDATORS[name])
+        for name, reader in readers
+    ]
     item_builders = {
         "approvals": _approval_items,
         "tasks": _task_items,

@@ -41,9 +41,9 @@ def test_supported_attention_items_have_stable_keys_and_deterministic_order():
         approvals=lambda: {"pending_count": 2, "pending": []},
         tasks=lambda: {"overdue_tasks": 3},
         system_health=lambda: {"status": "degraded", "active_emergency": []},
-        projects=lambda: {"hot_leads_count": 4},
+        projects=lambda: {"hot_leads_count": 4, "projects": []},
         marketing=lambda: {"demands": [{"pending_creative_count": 2}]},
-        ventures=lambda: {"active": 5},
+        ventures=lambda: {"active": 5, "total": 6, "stage_counts": {"Research": 5}},
     ))
 
     assert result.overall_state == "ATTENTION"
@@ -71,6 +71,66 @@ def test_failed_collector_isolated_and_projection_is_unknown_not_ok():
     assert marketing_status.freshness == "unknown"
     assert marketing_status.reason == "source_read_failed:RuntimeError"
     assert all(status.source != "marketing" or status.state == "UNKNOWN" for status in result.source_status)
+
+
+@pytest.mark.parametrize(
+    ("source_name", "payload"),
+    [
+        ("approvals", {"pending_count": 0}),
+        ("tasks", {"overdue_tasks": "0"}),
+        ("projects", {"hot_leads_count": 0}),
+        ("marketing", {"demands": [{"pending_creative_count": "0"}]}),
+        ("ventures", {"active": 0, "total": 0}),
+    ],
+)
+def test_malformed_payload_is_unknown_not_healthy_zero(source_name, payload):
+    result = project(sources(**{source_name: lambda: payload}))
+
+    status = next(item for item in result.source_status if item.source == source_name)
+    assert status.state == "UNKNOWN"
+    assert status.freshness == "unknown"
+    assert status.reason.startswith("invalid_payload:")
+    assert result.overall_state == "UNKNOWN"
+
+
+@pytest.mark.parametrize("payload", [{"status": "unknown"}, {}, {"status": "bogus", "active_emergency": []}, None])
+def test_system_health_unknown_or_invalid_status_is_unknown(payload):
+    result = project(sources(system_health=lambda: payload))
+
+    status = next(item for item in result.source_status if item.source == "system_health")
+    assert status.state == "UNKNOWN"
+    assert result.overall_state == "UNKNOWN"
+
+
+def test_system_health_valid_ok_is_current_without_attention():
+    result = project(sources(system_health=lambda: {"status": "ok", "active_emergency": []}))
+
+    status = next(item for item in result.source_status if item.source == "system_health")
+    assert status.state == "CURRENT"
+    assert not any(item.category == "system" for item in result.items)
+    assert result.overall_state == "OK"
+
+
+def test_system_health_emergency_flag_is_current_critical_attention():
+    result = project(sources(system_health=lambda: {"status": "ok", "active_emergency": ["STOP_ALL"]}))
+
+    status = next(item for item in result.source_status if item.source == "system_health")
+    item = next(item for item in result.items if item.signal_key == "system.emergency")
+    assert status.state == "CURRENT"
+    assert item.severity == "CRITICAL"
+    assert result.overall_state == "ATTENTION"
+
+
+def test_attention_dominates_unknown_but_unknown_source_is_preserved():
+    result = project(sources(
+        tasks=lambda: {"overdue_tasks": 1},
+        marketing=lambda: {"demands": [{"pending_creative_count": "invalid"}]},
+    ))
+
+    assert result.overall_state == "ATTENTION"
+    assert any(item.signal_key == "tasks.overdue.global" for item in result.items)
+    marketing_status = next(item for item in result.source_status if item.source == "marketing")
+    assert marketing_status.state == "UNKNOWN"
 
 
 def test_overdue_tasks_are_global_and_not_project_scoped():
