@@ -119,6 +119,9 @@ def test_uncertain_upload_is_fail_closed_after_retry_budget(tmp_path):
 
 
 def test_missing_credentials_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_REFRESH_TOKEN", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN", raising=False)

@@ -23,9 +23,9 @@ class GoogleDriveArtifactStore:
         oauth_refresh_token=None, service=None
     ):
         self.folder_id = folder_id or os.environ.get("GOOGLE_DRIVE_ARTIFACT_FOLDER_ID")
-        client_id = oauth_client_id or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_ID")
-        client_secret = oauth_client_secret or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET")
-        refresh_token = oauth_refresh_token or os.environ.get("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN")
+        client_id = oauth_client_id or os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_ID")
+        client_secret = oauth_client_secret or os.environ.get("GOOGLE_CLIENT_SECRET") or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET")
+        refresh_token = oauth_refresh_token or os.environ.get("GOOGLE_REFRESH_TOKEN") or os.environ.get("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN")
         if not self.folder_id or not client_id or not client_secret or not refresh_token:
             raise ArtifactStoreError("drive_configuration_missing")
         self._service = service or self._build_service(client_id, client_secret, refresh_token)

@@ -11,14 +11,15 @@ Enable only in the target staging runtime with:
 ```text
 MPT_ARTIFACT_STORAGE=google_drive
 GOOGLE_DRIVE_ARTIFACT_FOLDER_ID=<dedicated-folder-id>
-GOOGLE_DRIVE_OAUTH_CLIENT_ID=<secret/config>
-GOOGLE_DRIVE_OAUTH_CLIENT_SECRET=<secret>
-GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN=<secret>
+GOOGLE_CLIENT_ID=<secret/config>
+GOOGLE_CLIENT_SECRET=<secret>
+GOOGLE_REFRESH_TOKEN=<secret>
 ```
 
-The dedicated Google user owns the My Drive folder. The code refreshes a user
-OAuth token at startup using the narrow `drive.file` scope. It never logs or
-accepts a checked-in client secret or refresh token.
+The dedicated Google user owns the My Drive folder. The code reuses the
+existing BOSS Google OAuth variables and refreshes a user OAuth token at
+startup using the narrow `drive.file` scope. It never logs or accepts a
+checked-in client secret or refresh token.
 
 `EXTERNAL_EXECUTION_ENABLED=false` remains the production default. Without
 `MPT_ARTIFACT_STORAGE=google_drive`, the existing local-only Phase 1 adapter
