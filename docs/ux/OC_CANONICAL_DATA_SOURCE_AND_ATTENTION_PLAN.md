@@ -6,6 +6,41 @@ Audit branch base: `origin/main` at `1c3d7fd2d2f604a555a84102bb4b89fd7c0d3bd8`
 
 This document does not implement Command Center UI, an API, a projection file, a runtime store, a schema, a feature flag, or a new status system.
 
+## Plan Status (ops/project-md-completion audit, 16/08/2026)
+
+This block was added by the recurring MD-completion routine (`ops/project-md-completion`), grounded in current `origin/main` evidence. It tracks the whole OC-0 → OC-F Command Center / Owner Attention program defined in §15, since §15 is the only place in the repository that enumerates every phase together; it does not change this document's original content or scope.
+
+**Status:** IN PROGRESS. OC-0 and OC-A (planning/architecture) are complete and merged. OC-B (business signal collectors) is code-complete and merged but not wired into any runtime API or UI. OC-C, OC-D, OC-E, and OC-F have not started.
+
+**Completed:**
+- OC-0 (audit + sequence proposal) — merged, PR #652, commit `815a5cd`.
+- OC-A (this document: source audit, architecture, `OwnerAttentionItem` contract) — merged, PR #654, commit `344b6c2`.
+- OC-B scope (§15) — `core/owner_attention.py` (`build_owner_attention_projection`, 6 source collectors: approvals/tasks/system_health/projects/marketing/ventures, per-source `UNKNOWN`-on-failure isolation, deterministic ordering, no invented cross-domain priority score) and `test_owner_attention.py` — merged, PR #657, commits `eb53660`..`9e28be0`.
+
+**Verified:**
+- `git log origin/main` confirms all commits above are ancestors of the current `main` tip (`f8ab112`).
+- GitHub Actions on merge commits `815a5cd`, `344b6c2`, and `f8ab112` (the last includes the OC-B merge, PR #657): all `completed` / `success`.
+- `test_owner_attention.py`: 20/20 passed when run locally this session (`python3 -m pytest test_owner_attention.py -q`, 16/08/2026). This is local/session-level test evidence only — not a staging or production verification.
+- Confirmed by grep this session (`grep -rn "owner_attention" --include="*.py" .`): no file outside `core/owner_attention.py`/`test_owner_attention.py` imports this module, and no `command-center`/`command_center` route exists in `tma_api.py`. OC-B is genuinely unwired, consistent with its own scope boundary ("do not implement UI/API/projection storage").
+- **Not verified:** any staging or production behavior — there is no runtime wiring yet for this to apply to.
+
+**Next Action:** OC-C — development intelligence generator (§15: define the registered Active Work Registry/Horizon subset, reconcile main/roadmap/verification evidence/owner gates, generate a provenance-carrying development projection). No `reports/owner_development_status.json` or equivalent generator artifact exists yet (checked this session).
+
+**Depends On:** OC-B (satisfied — see Completed). OC-D (API evolution) additionally depends on both OC-B and OC-C per §15's sequence.
+
+**Blocked By:** No repository evidence of a current blocker to starting OC-C.
+
+**Owner Decision Required:**
+1. **Sequencing deviation from this document's own stop condition.** §17 states: "OC-A changes exactly one planning document... owner reviews this document before OC-B or any UI/API work begins." In practice, OC-B's first commit (`eb53660`, message: "OC-B: add owner attention projector (force override authorized)") landed roughly 14 minutes after the OC-A merge, authored directly by `eli chazan <elichazan24@gmail.com>` (this repository's owner account per the session configuration). The commit message's own "force override authorized" wording reads as owner-authorized fast-tracking rather than an unauthorized process breach, but that override is not reflected anywhere in OC-0's or this document's text, so both still describe a stop condition that was in fact bypassed. This routine cannot decide whether that reading is correct or amend the stop-condition text on the owner's behalf — flagging for owner confirmation and, if confirmed, a short owner-approved amendment.
+2. **PR metadata vs. actual merge state.** GitHub's PR API reports PR #652, #654, and #657 as `state: closed`, `merged: false`, while `git log origin/main` shows each PR's commits as direct ancestors of the current `main` tip via an explicit `Merge pull request #NNN` commit for each. Per `AGENTS.md`'s post-merge verification protocol, `main` ancestry is treated as authoritative here, not the PR API field — so this is not read as evidence the changes are absent from `main`. The discrepancy itself (e.g., consistent with merges pushed directly rather than via GitHub's "Merge pull request" button) is unexplained and worth an owner/maintainer look so PR tooling and dashboards reflect reality.
+
+**Evidence:**
+- PR #652 / commit `815a5cd` (OC-0), PR #654 / commit `344b6c2` (OC-A), PR #657 / commit `f8ab112` (OC-B) — `https://github.com/10026782/My-bot/pull/652`, `.../654`, `.../657`.
+- `core/owner_attention.py`, `test_owner_attention.py` (added in PR #657).
+- Local test run this session: `python3 -m pytest test_owner_attention.py -q` → `20 passed`.
+- `grep -rn "owner_attention" --include="*.py" .` this session → no callers outside the module/test.
+- GitHub Actions: workflow runs on `815a5cd`, `344b6c2`, `f8ab112` all `status=completed`, `conclusion=success`.
+
 ## Evidence labels
 
 - **EXISTING** — directly observed in current `main` code, tests, or a clearly identified current authority document.
