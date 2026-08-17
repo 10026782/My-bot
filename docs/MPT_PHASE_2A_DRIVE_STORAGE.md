@@ -17,9 +17,10 @@ GOOGLE_REFRESH_TOKEN=<secret>
 ```
 
 The dedicated Google user owns the My Drive folder. The code reuses the
-existing BOSS Google OAuth variables and refreshes a user OAuth token at
-startup using the narrow `drive.file` scope. It never logs or accepts a
-checked-in client secret or refresh token.
+existing BOSS Google OAuth helper and variables
+(`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`). The
+helper refreshes the token; this store does not duplicate token refresh logic
+or log credentials.
 
 `EXTERNAL_EXECUTION_ENABLED=false` remains the production default. Without
 `MPT_ARTIFACT_STORAGE=google_drive`, the existing local-only Phase 1 adapter

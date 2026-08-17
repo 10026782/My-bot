@@ -57,10 +57,7 @@ class _Service:
 
 
 def _store(tmp_path, service):
-    return GoogleDriveArtifactStore(
-        folder_id="folder-1", oauth_client_id="client", oauth_client_secret="secret",
-        oauth_refresh_token="refresh", service=service
-    )
+    return GoogleDriveArtifactStore(folder_id="folder-1", service=service)
 
 
 def test_upload_verify_and_result_ref(tmp_path):
@@ -125,7 +122,10 @@ def test_missing_credentials_fail_closed(tmp_path, monkeypatch):
     monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN", raising=False)
+    monkeypatch.setattr("tools.google_tools.get_google_token", lambda: None)
     with pytest.raises(ArtifactStoreError, match="drive_configuration_missing"):
+        GoogleDriveArtifactStore(folder_id=None, service=None)
+    with pytest.raises(ArtifactStoreError, match="AUTH_REFRESH_FAILED"):
         GoogleDriveArtifactStore(folder_id="folder-1", service=None)
 
 

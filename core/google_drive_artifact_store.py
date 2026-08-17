@@ -18,35 +18,22 @@ _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class GoogleDriveArtifactStore:
-    def __init__(
-        self, *, folder_id=None, oauth_client_id=None, oauth_client_secret=None,
-        oauth_refresh_token=None, service=None
-    ):
+    def __init__(self, *, folder_id=None, service=None):
         self.folder_id = folder_id or os.environ.get("GOOGLE_DRIVE_ARTIFACT_FOLDER_ID")
-        client_id = oauth_client_id or os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_ID")
-        client_secret = oauth_client_secret or os.environ.get("GOOGLE_CLIENT_SECRET") or os.environ.get("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET")
-        refresh_token = oauth_refresh_token or os.environ.get("GOOGLE_REFRESH_TOKEN") or os.environ.get("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN")
-        if not self.folder_id or not client_id or not client_secret or not refresh_token:
+        if not self.folder_id:
             raise ArtifactStoreError("drive_configuration_missing")
-        self._service = service or self._build_service(client_id, client_secret, refresh_token)
+        self._service = service or self._build_service()
 
     @staticmethod
-    def _build_service(client_id, client_secret, refresh_token):
+    def _build_service():
         try:
-            from google.auth.transport.requests import Request
-            from google.auth.exceptions import RefreshError
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
-            credentials = Credentials(
-                token=None, refresh_token=refresh_token, token_uri="https://oauth2.googleapis.com/token",
-                client_id=client_id, client_secret=client_secret, scopes=list(_SCOPES)
-            )
-            try:
-                credentials.refresh(Request())
-            except RefreshError as exc:
-                reason = str(exc).lower()
-                code = "AUTH_REVOKED" if "invalid_grant" in reason or "revoked" in reason else "AUTH_REFRESH_FAILED"
-                raise ArtifactStoreError(code) from exc
+            from tools.google_tools import get_google_token
+            token = get_google_token()
+            if not token:
+                raise ArtifactStoreError("AUTH_REFRESH_FAILED")
+            credentials = Credentials(token=token, scopes=list(_SCOPES))
             return build("drive", "v3", credentials=credentials, cache_discovery=False)
         except ArtifactStoreError:
             raise
