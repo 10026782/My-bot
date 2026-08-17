@@ -15,24 +15,25 @@
       },
       "owner": "action_contracts",
       "code_paths": [
-        "core/action_gateway.py",
+        "app.py",
         "core/action_contract_repository.py",
+        "core/action_gateway.py",
         "core/action_gateway_atomic_executor.py",
-        "core/approvals_projection.py",
         "core/action_resolution_projection.py",
         "core/approval_turn_metrics.py",
-        "feature_flags.py",
-        "app.py",
-        "tma_api.py",
-        "event_bus.py",
-        "core/lifecycle_projection.py",
+        "core/approvals_projection.py",
+        "core/artifact_store.py",
         "core/external_execution_boundary.py",
         "core/external_execution_repository.py",
         "core/external_poll_lease.py",
-        "core/moneyprinterturbo_adapter.py",
-        "core/artifact_store.py",
         "core/google_drive_artifact_store.py",
-        "core/migrations/002_external_poll_leases.sql"
+        "core/lifecycle_projection.py",
+        "core/migrations/002_external_poll_leases.sql",
+        "core/moneyprinterturbo_adapter.py",
+        "core/mpt_runtime_policy.py",
+        "event_bus.py",
+        "feature_flags.py",
+        "tma_api.py"
       ],
       "test_paths": [
         "test_action_gateway.py",
@@ -176,7 +177,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "6ad7fb21519a2a3c7d6b7bc092582b4a452fa88f"
+      "last_observed_commit": "84249b119c1901a44f1f96ad931fb2aaeeb506df"
     }
   ],
   "edges": [
