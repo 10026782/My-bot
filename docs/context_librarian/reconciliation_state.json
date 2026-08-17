@@ -1,5 +1,15 @@
 {
   "auto_registrations": {
+    "core/mpt_runtime_policy.py": {
+      "classification_mode": "AUTO",
+      "content_hash": "sha256:fc1353df996bdc3417e29692670af1b42f79b00e56bf4ec2af0bf6e87525e54f",
+      "policy_id": "EXTERNAL_EXECUTION_RUNTIME",
+      "policy_version": 1,
+      "target_field": "code_paths",
+      "target_node": "layer.approvals",
+      "validated_at_commit": "2369b4cee29db40dce00d03db9fb0e50cb2e4290",
+      "validator_version": 1
+    },
     "scripts/research_crawler_poc/reconcile_test_fixture.py": {
       "classification_mode": "AUTO",
       "content_hash": "sha256:0185adc83c0d67db69a6c30e0f4c381b57934909d1447353893a143416b88525",
@@ -11,6 +21,6 @@
       "validator_version": 1
     }
   },
-  "last_source_scan_commit": "6ad7fb21519a2a3c7d6b7bc092582b4a452fa88f",
+  "last_source_scan_commit": "2369b4cee29db40dce00d03db9fb0e50cb2e4290",
   "schema_version": "1.1"
 }
