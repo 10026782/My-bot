@@ -114,6 +114,23 @@ def test_validator_error_and_nonzero_exit_fail_closed(tmp_path, monkeypatch):
     adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 2048)
     monkeypatch.setattr(adapter, "_validate_artifact", lambda _: {"artifact_size": "2048", "validation_result": "ffprobe_error"})
     assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
+
+
+def test_exit_137_is_resource_limit_and_timeout_is_bounded(tmp_path, monkeypatch):
+    adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 2048, exit_code="137")
+    result = adapter.poll(SimpleNamespace(provider_job_id=job_id))
+    assert result.status == "failed"
+    assert result.evidence["failure_classification"] == "RESOURCE_LIMIT"
+
+    adapter, job_id, _ = _poll_fixture(tmp_path / "timeout", artifact=b"x" * 2048, exit_code=None)
+    manifest = json.loads((tmp_path / "timeout" / "jobs" / job_id / "manifest.json").read_text())
+    manifest["deadline"] = 0
+    (tmp_path / "timeout" / "jobs" / job_id / "manifest.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr("core.moneyprinterturbo_adapter._pid_alive", lambda _: True)
+    monkeypatch.setattr("core.moneyprinterturbo_adapter.os.kill", lambda *args: None)
+    result = adapter.poll(SimpleNamespace(provider_job_id=job_id))
+    assert result.status == "failed"
+    assert result.evidence["failure_classification"] == "TIMEOUT"
     adapter, job_id, _ = _poll_fixture(tmp_path / "exit", artifact=b"x" * 2048, exit_code="2")
     assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
 

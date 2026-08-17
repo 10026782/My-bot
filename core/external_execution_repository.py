@@ -105,6 +105,14 @@ class ExternalExecutionRepository:
         )
         return [_job(record) for record in records]
 
+    def list_for_adapter(self, adapter_name: str) -> list[ExternalExecutionJob]:
+        records = at_list_by_formula(
+            self.table,
+            "{" + ExternalExecutionJobFields.ADAPTER_NAME + "}='" + adapter_name + "'",
+            max_records=1000,
+        )
+        return [_job(record) for record in records]
+
     def due_submitted(self, now: float | None = None, interval_seconds: int = 300) -> list[ExternalExecutionJob]:
         now = time.time() if now is None else now
         return [

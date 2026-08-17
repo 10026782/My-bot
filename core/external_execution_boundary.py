@@ -15,6 +15,7 @@ from core.external_execution_repository import (
     TERMINAL_JOB_STATES,
 )
 from core.external_poll_lease import ExternalPollLeaseRepository
+from core.mpt_runtime_policy import MPTExecutionPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +54,12 @@ class UnconfiguredExternalAdapter:
 
 
 class ExternalExecutionBoundary:
-    def __init__(self, repository=None, lease_repository=None, adapter=None, *, poll_interval_seconds: int = 300):
+    def __init__(self, repository=None, lease_repository=None, adapter=None, *, poll_interval_seconds: int = 300, policy=None):
         self.repository = repository or ExternalExecutionRepository()
         self.leases = lease_repository or ExternalPollLeaseRepository()
         self.adapter = adapter or UnconfiguredExternalAdapter()
         self.poll_interval_seconds = poll_interval_seconds
+        self.policy = policy or MPTExecutionPolicy.from_env()
 
     def submit(self, *, contract_id: str, idempotency_key: str, payload: dict) -> DispatcherOutcome:
         try:
@@ -74,6 +76,26 @@ class ExternalExecutionBoundary:
                     external_id=existing.provider_job_id or None,
                     error_code=existing.failure_code or None,
                 )
+        if self.adapter.name == "moneyprinterturbo" and (existing is None or existing.status == "created"):
+            try:
+                jobs = self.repository.list_for_adapter("moneyprinterturbo")
+            except AttributeError:
+                jobs = []
+            except Exception as exc:
+                return DispatcherOutcome("outcome_unknown", "לא ניתן לאמת קיבולת MPT.", error=str(exc))
+            reason = self.policy.capacity_reason(jobs)
+            if reason:
+                job = existing or ExternalExecutionJob(
+                    contract_id=contract_id,
+                    adapter_name=self.adapter.name,
+                    evidence={"capacity": reason},
+                )
+                try:
+                    if existing is None:
+                        self.repository.create(job)
+                except Exception as exc:
+                    return DispatcherOutcome("outcome_unknown", "לא ניתן לשמור את ההרצה הממתינה.", error=str(exc))
+                return DispatcherOutcome("outcome_unknown", "ההרצה ממתינה לקיבולת פנויה; אין שליחה נוספת אוטומטית.", error_code=reason)
         job = existing or ExternalExecutionJob(contract_id=contract_id, adapter_name=self.adapter.name)
         if existing is None:
             try:
@@ -178,7 +200,7 @@ class ExternalExecutionBoundary:
 def _bounded_evidence(evidence: dict | None) -> dict:
     if not isinstance(evidence, dict):
         return {}
-    allowed = {"provider_job_id", "provider_status", "submitted_at", "completed_at", "result_checksum", "result_ref", "adapter_name", "checked_at", "script_sha256", "mime_type", "size"}
+    allowed = {"provider_job_id", "provider_status", "submitted_at", "completed_at", "result_checksum", "result_ref", "adapter_name", "checked_at", "script_sha256", "mime_type", "size", "artifact_size", "validation_result", "ffprobe_exit_code", "video_width", "video_height", "video_duration", "runtime_profile", "runtime_started_at", "runtime_finished_at", "elapsed_sec", "termination_reason", "failure_classification", "storage_result", "capacity"}
     return {str(k): str(v)[:200] for k, v in evidence.items() if k in allowed}
 
 
