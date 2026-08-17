@@ -1,0 +1,21 @@
+# External Capability Index — 2026-08
+
+> This is a research/procurement catalog, not a BOSS source of truth for implementation or runtime status.
+
+| Capability | Existing BOSS implementation/provider | Current gap | Build vs Buy vs Open Source | Candidate repositories/services | Governance requirements | Approval requirements | Data sensitivity | Priority | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| Browser/search | tool registry/dispatcher; no MCP slot proven | provider contract and evidence normalization | Buy/provider first | MCP catalog, public-apis | ActionGateway, identity, evidence | per mutation | high | Later | read-only discovery first |
+| CRM/business records | Airtable adapters | none for current scope | Keep | Airtable | domain ownership | existing tool policy | high | Now | human operational layer |
+| Messaging/email/calendar | existing provider/tool paths | provider-neutral error/evidence contract | Keep/adapt | MCP catalog | credentials server-side | existing approval policy | high | Later | no direct uncontrolled workflow |
+| Storage/files | Google Drive/Airtable paths | durable machine artifact model | Keep/adapt | Supabase Storage only if required | tenant scope, evidence | write approval | high | Later | no migration now |
+| Document conversion/OCR | document_converter and media paths | capability-specific conformance | Buy/adapt | public-apis | output validation | write if mutating | medium/high | Later | provider result is not proof |
+| Transcription | OpenAI STT path | provider-neutral media contract | Buy | Ollama/local later | privacy/retention | no mutation by default | high | Later | usage telemetry exists |
+| Vector search/embeddings | no canonical vector layer found | retrieval architecture | Build on current Postgres only after need | Supabase/pgvector, Ollama | tenant isolation, deletion, provenance | no authority from retrieval | high | Later | capability alone is not reason to migrate |
+| Local LLM | direct Anthropic/OpenAI calls; LLMProvider protocol | wiring, conformance, quality gates | Open source later | Ollama | no provider-specific business logic | governed tool calls | high | Later | classification/extraction first |
+| Workflow automation | scheduler/provider integrations | non-core utility boundary | Buy/reference | n8n | never core authority | all business mutations remain BOSS | high | No | notifications/ETL only if approved |
+| MCP | no generic client/adapter contract | transport/policy separation | Adapt later | awesome-mcp-servers | identity, credentials, injection, schema | ActionContract before mutation | high | Later | `ARCHITECTURE GAP FIRST` |
+| Analytics/observability | logs, usage_events shadow, cost monitor | durable operational dashboards | Build minimally | free-for-dev catalog | no sensitive leakage | none unless action | medium/high | Later | usage_events is shadow-only |
+| Auth/RLS | identity module and domain access checks | no proven need for Supabase Auth/RLS | Keep/build | Supabase | tenant authority must remain BOSS | existing approval | high | No | revisit at scale |
+| Database/queues | Render Postgres claims/turn state; in-memory queues remain | memory/event retrieval architecture | Extend current DB | Render Postgres, Supabase | ownership and migrations | none | high | Next | no new DB now |
+
+Security rule: candidates are discovery inputs only. License, maintainership, security, CVEs, secret handling, network access, execution privileges, tenant isolation, auth, retention, telemetry, outbound calls, and supply-chain risk must be checked before a spike.
