@@ -73,6 +73,23 @@ Current evidence: `app.py`, `core/action_gateway.py`, `core/action_contract_repo
 
 The important distinction is operational state versus business memory, episodic history, learning data, and prompt context. Main has pieces of all four, but not one coherent retrieval architecture for them.
 
+## Hermes Delta Re-evaluation
+
+The supplied `HERMES_AGENT_AUDIT.md` is treated as historical evidence, not current BOSS authority. Its Hermes-side findings are useful, but several cited BOSS paths are older than the current `origin/main`; current-main status below is based on direct code/tests.
+
+| Hermes recommendation | Current-main evidence | Status | What remains |
+|---|---|---|---|
+| Common channel adapter/event contract | `providers/interfaces.py` defines `ChannelAdapter`; current ingress remains in `app.py`; no broad adapter conformance suite found | PARTIALLY COVERED | Normalize event, identity input, delivery result, and capabilities without changing routing authority |
+| Tool availability/capability metadata | `tool_registry.py`, `context.py`, `tools/dispatcher.py`, `test_tool_registry_invariants.py` | PARTIALLY COVERED | A read-only availability/doctor projection; registry remains policy authority |
+| Diagnostic/doctor concept | `core/atomic_claims_health.py`, startup/predeploy checks, staging scripts | PARTIALLY COVERED | One read-only aggregator with evidence and remediation |
+| Provider abstraction | `providers/interfaces.py` and `providers/anthropic_shim.py` exist; active callers still use direct SDK paths in `app.py`/`llm_fallback.py` | STILL GAP | Provider-neutral request/result/error/tool/telemetry conformance tests |
+| Bounded preference/prompt memory | `memory_store.py` has bounded 12h process-local context; Sessions/Business Memory are separate | PARTIALLY COVERED | Durable bounded preference model and explicit prompt projection |
+| Persistent/searchable sessions | `session_store.py` restores Airtable Sessions; no general full-text session search contract was found | PARTIALLY COVERED | Search/retrieval semantics, tenant scoping, retention, and evidence |
+| Safe scheduler semantics | `scheduler.py` and automation guards exist; no Hermes-style provider snapshot contract was found | PARTIALLY COVERED | Fail-closed provider pinning, non-recursive scheduling, and delivery evidence |
+| Procedural skills | No canonical runtime skill registry/loader was found in current main | STILL GAP | Human-authored, read-only business playbooks only; no autonomous executable skills |
+
+Conclusion: **Learn from Hermes substrate patterns; preserve BOSS governance; do not integrate Hermes runtime.** The historical audit is now usable as the Hermes comparison baseline, but it does not upgrade any BOSS item to `DEPLOYED` or `RUNTIME VERIFIED`.
+
 ## E. Render Postgres Findings
 
 Render Postgres is already a suitable system-memory substrate for operational state: `core/database.py` provides the pool; migrations define atomic claims, durable turn state, external poll leases, and `usage_events`; repositories and tests consume them. It can also host future machine-oriented event/history tables without requiring a new database product.
@@ -163,7 +180,7 @@ The one justified next implementation task is: **write and test the provider-neu
 4. **Q4:** Reopen on measured Render limits, a required Supabase-only capability, or a complete lower-TCO comparison.
 5. **Q5:** Yes. Keep Airtable as human operational/business layer while Postgres serves machine/system state.
 6. **Q6:** Conversation history, action-resolution context, batch/pending approval fallbacks, and some projection/turn evidence are RAM-only or partial; see the table above.
-7. **Q7:** No current `HERMES_AGENT_AUDIT.md` exists on `origin/main`, so a literal delta cannot be proven. Current code partially covers channel/provider/tool/session patterns; bounded conversation memory, searchable episodic memory, procedural skills, and a generic doctor/discovery surface remain gaps or unverified.
+7. **Q7:** The supplied `HERMES_AGENT_AUDIT.md` provides the historical baseline. Against current `origin/main`: tool registry/capability metadata, diagnostics, sessions, and bounded prompt context are `PARTIALLY COVERED`; provider abstraction and procedural skills remain `STILL GAP`; persistent/searchable sessions are only `PARTIALLY COVERED`. No Hermes runtime integration is recommended.
 8. **Q8:** Yes architecturally, but not ready: only behind ActionGateway/provider adapter with identity, approval, timeout, retry, idempotency, revocation, and evidence contracts.
 9. **Q9:** No. The protocol exists, but active call paths and conformance tests are not provider-neutral.
 10. **Q10:** Check `OPEN_SOURCE_TOOL_INDEX.md`, `EXTERNAL_CAPABILITY_INDEX.md`, and `SAAS_REPLACEMENT_INDEX.md` before building or buying; catalogs remain non-authoritative.
