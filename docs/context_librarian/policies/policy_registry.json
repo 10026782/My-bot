@@ -194,6 +194,8 @@
         "core/external_execution_repository.py",
         "core/external_poll_lease.py",
         "core/moneyprinterturbo_adapter.py",
+        "core/artifact_store.py",
+        "core/google_drive_artifact_store.py",
         "core/migrations/002_external_poll_leases.sql"
       ],
       "runtime_consumed": true,

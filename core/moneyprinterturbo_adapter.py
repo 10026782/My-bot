@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 
 from core.external_execution_boundary import PollResult, SubmitResult
+from core.artifact_store import ArtifactStoreError
 
 UPSTREAM_REPOSITORY = "https://github.com/harry0703/MoneyPrinterTurbo"
 UPSTREAM_TAG = "v1.3.3"
@@ -36,7 +37,7 @@ class MoneyPrinterTurboAdapter:
     name = "moneyprinterturbo"
 
     def __init__(self, *, runtime_root=None, jobs_root=None, media_root=None,
-                 executable=None, timeout_seconds=None):
+                 executable=None, timeout_seconds=None, artifact_store=None):
         self.runtime_root = Path(runtime_root or os.environ.get("MPT_RUNTIME_ROOT", ".")).resolve()
         jobs_value = jobs_root or os.environ.get("MPT_JOBS_ROOT")
         media_value = media_root or os.environ.get("MPT_APPROVED_MEDIA_ROOT")
@@ -44,6 +45,7 @@ class MoneyPrinterTurboAdapter:
         self.media_root = Path(media_value).resolve() if media_value else None
         self.executable = executable or os.environ.get("MPT_EXECUTABLE", "uv")
         self.timeout_seconds = min(int(timeout_seconds or os.environ.get("MPT_TIMEOUT_SECONDS", "1800")), _MAX_TIMEOUT)
+        self.artifact_store = artifact_store or _configured_artifact_store()
 
     def submit(self, request: dict) -> SubmitResult:
         payload = request.get("payload") if isinstance(request, dict) else None
@@ -125,6 +127,24 @@ class MoneyPrinterTurboAdapter:
                 final = job_dir / "output" / "final-1.mp4"
                 if output != final:
                     shutil.copy2(output, final)
+                if self.artifact_store:
+                    identity = f"{job.contract_id}:{job.provider_job_id}" if getattr(job, "contract_id", "") else job.provider_job_id
+                    try:
+                        stored = self.artifact_store.put(
+                            path=final, identity=identity,
+                            metadata={"provider_job_id": job.provider_job_id, **evidence},
+                        )
+                    except ArtifactStoreError as exc:
+                        status = "outcome_unknown" if exc.uncertain else "failed"
+                        return PollResult(status, evidence={**evidence, "storage_result": exc.code}, failure_code=exc.code)
+                    return PollResult("completed", stored.result_ref, {
+                        "provider_job_id": job.provider_job_id,
+                        "result_ref": stored.result_ref,
+                        "result_checksum": stored.sha256,
+                        "script_sha256": manifest["script_sha256"],
+                        "mime_type": "video/mp4", "size": stored.size,
+                        "storage_provider": "google_drive", **evidence,
+                    })
                 return PollResult("completed", str(final), {
                     "provider_job_id": job.provider_job_id,
                     "result_ref": str(final),
@@ -136,6 +156,11 @@ class MoneyPrinterTurboAdapter:
                 })
         except Exception:
             return PollResult("outcome_unknown", failure_code="mpt_poll_unknown")
+
+    def cleanup(self, job) -> None:
+        if not self.artifact_store:
+            return
+        shutil.rmtree(self._job_dir(job.provider_job_id), ignore_errors=False)
 
     @staticmethod
     def _validate_artifact(output: Path) -> dict:
@@ -256,3 +281,10 @@ def _read_exit_status(path: Path) -> int | None:
         return int(value) if value and value.lstrip("-").isdigit() else None
     except OSError:
         return None
+
+
+def _configured_artifact_store():
+    if os.environ.get("MPT_ARTIFACT_STORAGE", "local").lower() != "google_drive":
+        return None
+    from core.google_drive_artifact_store import GoogleDriveArtifactStore
+    return GoogleDriveArtifactStore()

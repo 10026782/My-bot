@@ -118,6 +118,23 @@ def test_validator_error_and_nonzero_exit_fail_closed(tmp_path, monkeypatch):
     assert adapter.poll(SimpleNamespace(provider_job_id=job_id)).status == "failed"
 
 
+def test_poll_uploads_before_completed_when_drive_store_configured(tmp_path, monkeypatch):
+    adapter, job_id, _ = _poll_fixture(tmp_path, artifact=b"x" * 2048)
+    uploaded = {}
+
+    class Store:
+        def put(self, **kwargs):
+            uploaded.update(kwargs)
+            return SimpleNamespace(result_ref='{"provider":"google_drive","drive_file_id":"file-1"}', sha256="sha", size=2048)
+
+    adapter.artifact_store = Store()
+    monkeypatch.setattr(adapter, "_validate_artifact", lambda _: {"artifact_size": "2048", "validation_result": "valid"})
+    result = adapter.poll(SimpleNamespace(provider_job_id=job_id, contract_id="contract-1"))
+    assert result.status == "completed"
+    assert result.result_ref.startswith('{"provider":"google_drive"')
+    assert uploaded["identity"] == f"contract-1:{job_id}"
+
+
 def test_submit_uses_local_script_and_materials_only(tmp_path, monkeypatch):
     runtime = tmp_path / "mpt"
     runtime.mkdir()
