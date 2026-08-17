@@ -17,6 +17,7 @@ from pathlib import Path
 
 from core.external_execution_boundary import PollResult, SubmitResult
 from core.artifact_store import ArtifactStoreError
+from core.mpt_runtime_policy import MPTExecutionPolicy, classify_failure
 
 UPSTREAM_REPOSITORY = "https://github.com/harry0703/MoneyPrinterTurbo"
 UPSTREAM_TAG = "v1.3.3"
@@ -45,6 +46,9 @@ class MoneyPrinterTurboAdapter:
         self.media_root = Path(media_value).resolve() if media_value else None
         self.executable = executable or os.environ.get("MPT_EXECUTABLE", "uv")
         self.timeout_seconds = min(int(timeout_seconds or os.environ.get("MPT_TIMEOUT_SECONDS", "1800")), _MAX_TIMEOUT)
+        policy = MPTExecutionPolicy.from_env()
+        if policy.max_runtime_seconds is not None:
+            self.timeout_seconds = min(self.timeout_seconds, policy.max_runtime_seconds)
         self.artifact_store = artifact_store or _configured_artifact_store()
 
     def submit(self, request: dict) -> SubmitResult:
@@ -72,6 +76,8 @@ class MoneyPrinterTurboAdapter:
                 "media_refs": copied_media,
                 "output_ref": str(self.runtime_root / "storage" / "tasks" / provider_job_id / "final-1.mp4"),
                 "deadline": time.time() + self.timeout_seconds,
+                "runtime_started_at": time.time(),
+                "runtime_profile": MPTExecutionPolicy.from_env().runtime_profile or "unknown",
                 "status": "created",
                 "created_at": time.time(),
             }
@@ -113,16 +119,18 @@ class MoneyPrinterTurboAdapter:
                 pid = manifest.get("pid")
                 if manifest.get("deadline", 0) < time.time() and _pid_alive(pid):
                     os.kill(int(pid), 15)
-                    return PollResult("failed", failure_code="mpt_timeout")
+                    return PollResult("failed", evidence=self._runtime_evidence(manifest, "TIMEOUT", "SIGTERM"), failure_code="mpt_timeout")
                 if _pid_alive(pid):
                     return PollResult("submitted")
                 return PollResult("outcome_unknown", failure_code="mpt_process_state_unknown")
             if exit_code != 0:
-                return PollResult("failed", evidence={"validation_result": "process_exit_nonzero"}, failure_code="mpt_process_failed")
+                classification = classify_failure(exit_code=exit_code, failure_code="mpt_process_failed")
+                evidence = {"validation_result": "process_exit_nonzero", **self._runtime_evidence(manifest, classification, str(exit_code))}
+                return PollResult("failed", evidence=evidence, failure_code=f"mpt_{classification.lower()}")
 
             evidence = self._validate_artifact(output)
             if evidence["validation_result"] != "valid":
-                return PollResult("failed", evidence=evidence, failure_code="mpt_artifact_invalid")
+                return PollResult("failed", evidence={**evidence, **self._runtime_evidence(manifest, "ARTIFACT_VALIDATION_FAILED", "artifact_validation")}, failure_code="mpt_artifact_invalid")
             if output.is_file():
                 final = job_dir / "output" / "final-1.mp4"
                 if output != final:
@@ -143,7 +151,7 @@ class MoneyPrinterTurboAdapter:
                         "result_checksum": stored.sha256,
                         "script_sha256": manifest["script_sha256"],
                         "mime_type": "video/mp4", "size": stored.size,
-                        "storage_provider": "google_drive", **evidence,
+                        "storage_provider": "google_drive", **evidence, **self._runtime_evidence(manifest, "COMPLETED", "completed"),
                     })
                 return PollResult("completed", str(final), {
                     "provider_job_id": job.provider_job_id,
@@ -152,10 +160,23 @@ class MoneyPrinterTurboAdapter:
                     "script_sha256": manifest["script_sha256"],
                     "mime_type": "video/mp4",
                     "size": final.stat().st_size,
-                    **evidence,
+                    **evidence, **self._runtime_evidence(manifest, "COMPLETED", "completed"),
                 })
         except Exception:
             return PollResult("outcome_unknown", failure_code="mpt_poll_unknown")
+
+    @staticmethod
+    def _runtime_evidence(manifest, classification: str, termination_reason: str) -> dict:
+        started = float(manifest.get("runtime_started_at", manifest.get("created_at", time.time())))
+        finished = time.time()
+        return {
+            "runtime_profile": manifest.get("runtime_profile", "unknown"),
+            "runtime_started_at": str(started),
+            "runtime_finished_at": str(finished),
+            "elapsed_sec": f"{max(0.0, finished - started):.3f}",
+            "termination_reason": termination_reason,
+            "failure_classification": classification,
+        }
 
     def cleanup(self, job) -> None:
         if not self.artifact_store:
@@ -244,6 +265,9 @@ class MoneyPrinterTurboAdapter:
         text = config.read_text(encoding="utf-8")
         if "upload_post_enabled = false" not in text or "upload_post_auto_upload = false" not in text:
             raise ValueError("publishing_not_disabled")
+        policy = MPTExecutionPolicy.from_env()
+        if not policy.runtime_supported(render_plan_id=os.environ.get("RENDER_PLAN_ID", "")):
+            raise ValueError("unsupported_runtime_profile")
 
     def _job_dir(self, provider_job_id):
         job_id = uuid.UUID(str(provider_job_id))
