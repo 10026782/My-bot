@@ -53,7 +53,6 @@
         "test_bug056_legacy_cancel_replay_guard.py",
         "test_bug_canonical_tool_wiring.py",
         "test_hotfix_e_shared_replay_policy.py",
-        "test_google_drive_artifact_store.py",
         "scripts/regression_matrix.py",
         "scripts/run_isolated_regression.py",
         "scripts/staging_identity.py",
