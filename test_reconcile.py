@@ -214,6 +214,7 @@ def test_policy_matching_is_glob_only_not_substring(policies):
     # A real match: exact glob against the declared pattern.
     assert match_policy("scripts/verify_f15_staging.py", policies).id == "STAGING_VERIFICATION_F15"
     assert match_policy("core/external_poll_lease.py", policies).id == "EXTERNAL_EXECUTION_RUNTIME"
+    assert match_policy("core/mpt_runtime_policy.py", policies).id == "EXTERNAL_EXECUTION_RUNTIME"
 
 
 def test_target_field_never_inferred_all_policies_declare_it_explicitly(policies):
