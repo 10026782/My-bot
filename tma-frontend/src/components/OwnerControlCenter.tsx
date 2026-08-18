@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { fetchCommandCenter } from "../api";
-import type {
-  CommandCenterAttentionItem,
-  CommandCenterDevelopmentItem,
-  CommandCenterResponse,
-} from "../types";
+import {
+  actionableApprovalEntries,
+  buildDevelopmentList,
+  horizonBucketLabel,
+  shouldShowFreshness,
+  type CompactDevelopmentItem,
+} from "../lib/commandCenterPresentation";
+import type { CommandCenterAttentionItem, CommandCenterResponse } from "../types";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -74,20 +77,13 @@ function destinationAction(
   return undefined;
 }
 
-export function dedupeDevelopmentItems(items: CommandCenterDevelopmentItem[]): CommandCenterDevelopmentItem[] {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    if (seen.has(item.initiative_key)) return false;
-    seen.add(item.initiative_key);
-    return true;
-  });
-}
-
 function SectionTitle({ title, status }: { title: string; status?: string }) {
   return (
     <div className="command-center-section__heading">
       <h2>{title}</h2>
-      {status && <StatusBadge tone={status === "CURRENT" ? "success" : status === "STALE" ? "warning" : "neutral"}>{freshnessLabel(status)}</StatusBadge>}
+      {status && shouldShowFreshness(status) && (
+        <StatusBadge tone={status === "STALE" ? "warning" : "neutral"}>{freshnessLabel(status)}</StatusBadge>
+      )}
     </div>
   );
 }
@@ -109,25 +105,58 @@ function AttentionCard({ item, handlers }: { item: CommandCenterAttentionItem; h
   );
 }
 
-function DevelopmentCard({ item }: { item: CommandCenterDevelopmentItem }) {
+const DEVELOPMENT_BADGE_TONE: Record<string, "warning" | "danger" | "success" | "neutral"> = {
+  owner_decision: "warning",
+  blocked: "danger",
+  verification: "warning",
+  closed: "success",
+};
+
+function developmentBadges(item: CompactDevelopmentItem): { key: string; tone: "warning" | "danger" | "success" | "neutral"; label: string }[] {
+  const badges: { key: string; tone: "warning" | "danger" | "success" | "neutral"; label: string }[] = [];
+  if (item.owner_decision_required) badges.push({ key: "owner_decision", tone: DEVELOPMENT_BADGE_TONE.owner_decision, label: "דורש החלטה" });
+  if (item.blocked) badges.push({ key: "blocked", tone: DEVELOPMENT_BADGE_TONE.blocked, label: "חסום" });
+  if (item.needs_verification) badges.push({ key: "verification", tone: DEVELOPMENT_BADGE_TONE.verification, label: "דורש אימות" });
+  if (item.closed) badges.push({ key: "closed", tone: DEVELOPMENT_BADGE_TONE.closed, label: "נסגר" });
+  if (shouldShowFreshness(item.freshness)) {
+    badges.push({ key: "freshness", tone: item.freshness === "STALE" ? "warning" : "neutral", label: freshnessLabel(item.freshness) });
+  }
+  return badges;
+}
+
+function DevelopmentRow({ item, expanded, onToggle }: { item: CompactDevelopmentItem; expanded: boolean; onToggle: () => void }) {
+  const badges = developmentBadges(item);
+  const hasNextStep = item.next_step.trim() && item.next_step.trim() !== "—";
   return (
     <div className="command-center-development-card">
       <div className="command-center-card__topline">
-        <span className="command-center-horizon">{item.horizon}</span>
-        <StatusBadge tone={item.freshness === "CURRENT" ? "success" : item.freshness === "STALE" ? "warning" : "neutral"}>{freshnessLabel(item.freshness)}</StatusBadge>
+        <span className="command-center-horizon">{horizonBucketLabel(item.horizon)}</span>
+        {badges.length > 0 && (
+          <span className="command-center-development-badges">
+            {badges.map((badge) => <StatusBadge key={badge.key} tone={badge.tone}>{badge.label}</StatusBadge>)}
+          </span>
+        )}
       </div>
       <h3>{item.title}</h3>
-      <p>{item.current_stage}</p>
-      {item.next_step && item.next_step !== "—" && <p className="command-center-development-card__next">הצעד הבא: {item.next_step}</p>}
-    </div>
-  );
-}
-
-function DevelopmentGroup({ title, items, empty }: { title: string; items: CommandCenterDevelopmentItem[]; empty?: string }) {
-  return (
-    <div className="command-center-development-group">
-      <h3>{title}</h3>
-      {items.length ? items.map((item) => <DevelopmentCard key={item.initiative_key} item={item} />) : <p className="command-center-muted">{empty ?? "אין פריטים להצגה"}</p>}
+      <p className="command-center-development-card__clamp">{item.current_stage}</p>
+      {hasNextStep && <p className="command-center-development-card__next">הצעד הבא: {item.next_step}</p>}
+      <button
+        type="button"
+        className="boss-button boss-button--quiet boss-bubble--action command-center-development-toggle"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        {expanded ? "סגירת פרטים" : "פרטים"}
+      </button>
+      {expanded && (
+        <div className="command-center-development-details">
+          <p><strong>שלב נוכחי: </strong>{item.current_stage}</p>
+          <p><strong>הצעד הבא שהוחלט: </strong>{hasNextStep ? item.next_step : "אין צעד מוחלט כרגע"}</p>
+          <p><strong>מצב ראיות: </strong>{item.evidence_state}</p>
+          <p><strong>מצב עבודה: </strong>{item.work_state}</p>
+          <p><strong>עודכן לאחרונה: </strong>{item.last_reconciled}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -139,6 +168,7 @@ function Unavailable({ text }: { text: string }) {
 export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [attentionExpanded, setAttentionExpanded] = useState(false);
+  const [expandedDevelopment, setExpandedDevelopment] = useState<Set<string>>(new Set());
 
   function load() {
     setState({ status: "loading" });
@@ -178,11 +208,18 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
 
   const data = state.data;
   const visibleAttentionItems = attentionExpanded ? data.attention.items : data.attention.items.slice(0, 3);
-  const pendingUnknown = data.pending_decisions.length === 0 && data.freshness.attention !== "CURRENT";
   const systemState = data.system_status.state;
-  const development = data.development_status;
+  const pendingEntries = actionableApprovalEntries(data.pending_decisions);
+  const developmentItems = buildDevelopmentList(data.development_status);
   const handlers = { onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures };
-  const blockedOrOwnerDecision = dedupeDevelopmentItems([...development.blocked, ...development.owner_decisions]);
+
+  function toggleDevelopmentItem(key: string) {
+    setExpandedDevelopment((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <main className="ventures-screen command-center-screen">
@@ -195,15 +232,50 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
             {data.attention.items.length ? <><div className="command-center-attention-list">{visibleAttentionItems.map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div>{data.attention.items.length > 3 && <button type="button" className="boss-button boss-button--quiet boss-bubble--action command-center-more" aria-expanded={attentionExpanded} onClick={() => setAttentionExpanded((expanded) => !expanded)}>{attentionExpanded ? "הצג פחות" : "הצג עוד"}</button>}</> : data.freshness.attention === "CURRENT" ? <p id="attention-heading" className="command-center-positive">אין כרגע דברים דחופים שדורשים את תשומת לבך.</p> : <Unavailable text="לא ניתן לקבוע כרגע מה דורש תשומת לב." />}
           </section>
 
-          <Surface className="command-center-section" aria-labelledby="pending-heading"><SectionTitle title="החלטות ממתינות" status={data.freshness.attention} />{pendingUnknown ? <Unavailable text="מצב ההחלטות אינו זמין כרגע." /> : data.pending_decisions.length ? <div className="command-center-decision-list">{data.pending_decisions.slice(0, 3).map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div> : <p id="pending-heading" className="command-center-positive">אין החלטות ממתינות כרגע.</p>}</Surface>
+          {pendingEntries.length > 0 && (
+            <Surface className="command-center-section" aria-labelledby="pending-heading">
+              <SectionTitle title="החלטות ממתינות" status={data.freshness.attention} />
+              <div className="command-center-decision-list" id="pending-heading">{pendingEntries.map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div>
+            </Surface>
+          )}
 
-          <Surface className="command-center-section" aria-labelledby="business-heading"><SectionTitle title="מצב העסק" status={data.freshness.business_status} />{data.business_status.state === "CURRENT" ? <p id="business-heading" className="command-center-positive">מצב העסק זמין.</p> : <Unavailable text="מצב עסקי מאוחד עדיין אינו מחובר למקור קנוני." />}</Surface>
+          <Surface className="command-center-section" aria-labelledby="development-heading">
+            <div className="command-center-section__heading">
+              <SectionTitle title="מצב הפיתוח" status={data.freshness.development} />
+              {developmentItems.length > 0 && (
+                <div className="command-center-development-controls">
+                  <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={() => setExpandedDevelopment(new Set(developmentItems.map((item) => item.initiative_key)))}>פתח הכול</button>
+                  <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={() => setExpandedDevelopment(new Set())}>סגור הכול</button>
+                </div>
+              )}
+            </div>
+            {data.development_status.projection_state === "UNKNOWN" ? (
+              <div id="development-heading"><Unavailable text="מצב הפיתוח אינו זמין כרגע." /></div>
+            ) : developmentItems.length === 0 ? (
+              <p id="development-heading" className="command-center-positive">אין יוזמות פעילות להצגה כרגע.</p>
+            ) : (
+              <div className="command-center-development-list" id="development-heading">
+                {developmentItems.map((item) => (
+                  <DevelopmentRow
+                    key={item.initiative_key}
+                    item={item}
+                    expanded={expandedDevelopment.has(item.initiative_key)}
+                    onToggle={() => toggleDevelopmentItem(item.initiative_key)}
+                  />
+                ))}
+              </div>
+            )}
+          </Surface>
 
-          <Surface className="command-center-section" aria-labelledby="development-heading"><SectionTitle title="מצב הפיתוח" status={data.freshness.development} />{development.projection_state === "UNKNOWN" ? <Unavailable text="מצב הפיתוח אינו זמין כרגע." /> : <div className="command-center-development-grid" id="development-heading"><DevelopmentGroup title="עובדים עכשיו" items={development.current_focus} /><DevelopmentGroup title="הצעד הבא" items={development.next_actions} /><DevelopmentGroup title="דורש אימות" items={development.needs_verification} /><DevelopmentGroup title="חסום / דורש החלטה" items={blockedOrOwnerDecision} /><DevelopmentGroup title="נסגר לאחרונה" items={development.recently_closed} /></div>}</Surface>
-
-          <Surface className="command-center-section command-center-section--compact" aria-labelledby="system-heading"><SectionTitle title="מצב המערכת" status={data.freshness.system_status} /><div className="command-center-inline-status"><StatusBadge tone={systemState === "CURRENT" ? "success" : systemState === "ATTENTION" ? "danger" : "neutral"}>{systemState === "CURRENT" ? "תקין" : systemState === "ATTENTION" ? "דורש תשומת לב" : "מידע לא זמין"}</StatusBadge>{onOpenHealth && <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onOpenHealth}>פתיחת בריאות המערכת</button>}</div></Surface>
-
-          <Surface className="command-center-section command-center-section--compact" aria-labelledby="activity-heading"><SectionTitle title="פעילות אחרונה" status={data.freshness.recent_activity} /><Unavailable text="פעילות אחרונה עדיין אינה מחוברת למקור קנוני." /></Surface>
+          {systemState !== "UNKNOWN" && (
+            <Surface className="command-center-section command-center-section--compact" aria-labelledby="system-heading">
+              <SectionTitle title="מצב המערכת" status={data.freshness.system_status} />
+              <div className="command-center-inline-status">
+                <StatusBadge tone={systemState === "CURRENT" ? "success" : "danger"}>{systemState === "CURRENT" ? "תקין" : "דורש תשומת לב"}</StatusBadge>
+                {onOpenHealth && <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onOpenHealth}>פתיחת בריאות המערכת</button>}
+              </div>
+            </Surface>
+          )}
         </div>
       </div>
     </main>

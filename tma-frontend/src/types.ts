@@ -324,6 +324,7 @@ export interface CommandCenterDevelopmentItem {
   blocked: boolean;
   owner_decision_required: boolean;
   freshness: "CURRENT" | "STALE" | "UNKNOWN";
+  last_reconciled: string;
 }
 
 export interface CommandCenterDevelopmentStatus {
