@@ -126,6 +126,7 @@ High-risk/irreversible actions (`requires_approval=True` in the registry, e.g. `
 - `core/learning_engine.py`: read-only pattern extraction from `lead_events` (F02) — intentionally inert until ~2-3 months of lead-event data accumulates.
 - `core/output_gateway.py`: second-layer outbound guard distinguishing INTERNAL vs CUSTOMER-facing audiences before a message is sent.
 - `health_monitor.py`: checks Airtable connectivity, scheduler thread liveness, and emergency-flag state; backs the `/status` endpoint.
+- `boss_doctor.py`: Phase 1 read-only diagnostic aggregator ("boss doctor") — `run_doctor()` composes existing signals only (`tool_registry.get_availability()`, `feature_flags` accessors, `health_monitor.get_health_status()`, `core/atomic_claims_health.py`, `schedule.jobs`) into a `DoctorReport` of `DiagnosticCheck(name, status, code, detail, source)` rows with a fixed `OK`/`DEGRADED`/`UNAVAILABLE`/`UNKNOWN` status vocabulary; `format_report()` renders a short operator summary. Distinguishes `configured` (env presence) from `runtime-observed` (live probe, Airtable only) from `production-verified` (not attempted — always reported as "not checked"); never repairs, mutates, changes a flag, or calls the dispatcher/ActionGateway. No command is wired to it yet (no owner-only entrypoint) — see `test_boss_doctor.py` and `docs/research/HERMES_DEFERRED_PATTERNS_REVISIT_2026-08.md` ("boss doctor" pattern) for the design rationale.
 
 ### Schema validation & governance pipeline
 
