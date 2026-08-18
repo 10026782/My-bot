@@ -101,7 +101,8 @@
         "Business Memory (Airtable) carries no tenant_id field today — retrieval only attaches Business Memory content for the single known tenant ('boss_hq') and returns empty (not an error) for any other tenant_id, documented in core/memory_retrieval.py.",
         "Store unavailability (Episodic Postgres down, Business Memory Airtable call failing) is caught per-category and recorded in SnapshotMetadata; only a malformed request (missing tenant_id/canonical_user_id) raises.",
         "No writes anywhere in this surface, no calls to the LLM or the approval/tool-execution pipeline — verified by a dedicated test (test_memory_retrieval.py::test_no_llm_or_action_gateway_or_write_calls)."
-      ]
+      ],
+      "last_observed_commit": "a7641158646a4a4d415f0bef92c48b121957d46c"
     }
   ]
 }
