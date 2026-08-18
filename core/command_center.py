@@ -113,6 +113,18 @@ def _system_status(attention: OwnerAttentionProjection) -> SystemStatus:
     return SystemStatus("CURRENT", "CURRENT", "OC-B:system_health")
 
 
+def _is_unsupported_placeholder(section: UnsupportedSection) -> bool:
+    """True only for the by-design unsupported-capability marker.
+
+    A real (supported) business/recent-activity source would carry a
+    different `reason`; only the intentional placeholder is exempt from
+    degrading `overall_state` — a genuinely unknown/stale *real* source
+    must still degrade it (rule below).
+    """
+
+    return section.reason == "unsupported_canonical_source"
+
+
 def _overall_state(
     attention: OwnerAttentionProjection,
     development: OwnerDevelopmentStatus,
@@ -128,13 +140,20 @@ def _overall_state(
         return "ATTENTION"
     if attention.overall_state == "ATTENTION":
         return "ATTENTION"
+    business_degrades = (
+        not _is_unsupported_placeholder(business) and business.state in {"STALE", "PARTIAL", "UNKNOWN"}
+    )
+    recent_activity_degrades = (
+        not _is_unsupported_placeholder(recent_activity)
+        and recent_activity.state in {"STALE", "PARTIAL", "UNKNOWN"}
+    )
     if (
         attention_unavailable
         or attention.overall_state == "STALE"
         or development.projection_state in {"PARTIAL", "UNKNOWN"}
-        or business.state in {"STALE", "PARTIAL", "UNKNOWN"}
+        or business_degrades
         or system.state in {"STALE", "PARTIAL", "UNKNOWN"}
-        or recent_activity.state in {"STALE", "PARTIAL", "UNKNOWN"}
+        or recent_activity_degrades
     ):
         return "PARTIAL"
     return "OK"
