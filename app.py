@@ -563,6 +563,22 @@ def cmd_boss_doctor(msg):
         bot.send_message(msg.chat.id, "שגיאה בהרצת boss doctor.")
 
 
+@bot.message_handler(commands=["usage"])
+def cmd_usage(msg):
+    """Owner בלבד — read-only AI/STT usage & cost report for today (usage_events)."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role != "owner":
+        bot.send_message(msg.chat.id, "פקודה זו זמינה לבעלים בלבד.")
+        return
+    try:
+        from core.usage_telemetry import get_daily_usage, format_usage_window
+        text = format_usage_window(get_daily_usage())
+        bot.send_message(msg.chat.id, text)
+    except Exception as e:
+        logger.error(f"cmd_usage error: {e}")
+        bot.send_message(msg.chat.id, "שגיאה בהרצת usage.")
+
+
 @bot.message_handler(commands=["done"])
 def cmd_done(msg):
     """/done [n] — מסמן Quest מספר n כ-Done + כותב Coins_Log אוטומטית."""
