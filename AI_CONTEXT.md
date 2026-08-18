@@ -1,6 +1,6 @@
 # AI CONTEXT
 
-**עודכן:** 17/08/2026 · **origin/main:** `1c3d7fd` (no new PRs since 16/08/2026 — 6 PRs merged in previous 24h: #647–#651, #653)
+**עודכן:** 18/08/2026 · **origin/main:** `1c3d7fd` (6 PRs merged 17/08: #647–#651, #653 — all non-blocking changes, production verification pending)
 
 > קרא אותי לפני כל דבר אחר. תדרוך תמציתי לא מלא.
 > `ROADMAP.md` הוא מקור האמת הקנוני; `CHANGELOG.md`, `main` קודקוד קודמים.
@@ -41,11 +41,11 @@ Yesterday's PRs (#647–#651, #653) were all merged; no production canaries run 
 
 ## 4. Next Priorities (ordered by risk/verification debt)
 
-1. **Verify BUG-051-FU production:** Send test message triggering `create_contact` intent. Confirm it routes to Contact flow, not Lead capture. Currently MERGED, UNTESTED.
-2. **Verify BUG-164 demand-fidelity production:** Run `/marketing_new` Demand intake (deterministic path is known good; focus on free-text `creative_review` boundary). **Prompt guardrails are best-effort, not deterministic; no expected failure mode, only reduced risk.**
-3. **Verify Tool Catalog DB Phase 2 migration:** Confirm Phase 2 snapshot table was seeded in Airtable and `list_tools()` reads from it (not just dict fallback). Non-blocking if Phase 1 still works.
-4. **Update `ROADMAP.md`/`CHANGELOG.md`:** Both trail behind `1c3d7fd`. ROADMAP's `עודכן:` is 15/08/2026 (missing #647, #650, #651, #653); CHANGELOG's "Unreleased" section untouched since 12/08/2026.
-5. **Resolve BUG-161/BUG-162 (owner decision):** No new work, dependency on business/policy decision.
+1. **Enable & verify Lead Capture chain (N02–N04):** `LEAD_CAPTURE`, `LEAD_SCORING`, `LEAD_MEMORY` all default-off in production. Code complete; no production verification. Enable in Render and test: WhatsApp unknown contact → Airtable Leads create → scoring → memory. Decision needed: all-or-phased activation.
+2. **Verify BUG-051-FU production:** Router `create_contact` intent routing (not Lead capture). Merged PR #647; no production canary yet. Send test message, confirm Contact flow executed.
+3. **Verify BUG-164 demand-fidelity production:** `compose_brief()` free-text guards (`creative_review`, `ad_package`, `publishing_plan`). Merged PR #649; deterministic path (`creative_ideas`) already verified. Prompt-level guardrails are best-effort, not gates.
+4. **TMA Receipt Persistence (C40 gap):** Approval receipts returned but not displayed in Activity Feed. Blocks lead/deal/task completion workflows on Mini App.
+5. **Update `ROADMAP.md`/`CHANGELOG.md`:** Both trail behind `1c3d7fd` (15/08 vs 18/08). ROADMAP `עודכן:` missing #647–#653; CHANGELOG "Unreleased" stale since 12/08.
 
 ---
 
