@@ -44,7 +44,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "84ab7bbd8284f595b453fb9c0e916235fb7e5e40"
+      "last_observed_commit": "fee6632d63cc80c65c3546d453078c6e2e87b9a0"
     },
     {
       "id": "decision.actioncontracts_authority",
@@ -222,7 +222,7 @@
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
       ],
-      "last_observed_commit": "84ab7bbd8284f595b453fb9c0e916235fb7e5e40"
+      "last_observed_commit": "fee6632d63cc80c65c3546d453078c6e2e87b9a0"
     },
     {
       "id": "decision.ux_no_internal_ids",
@@ -663,7 +663,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "2642e3c30e1589c7024c7301153232366c997f46"
+      "last_observed_commit": "fee6632d63cc80c65c3546d453078c6e2e87b9a0"
     }
   ],
   "edges": [
