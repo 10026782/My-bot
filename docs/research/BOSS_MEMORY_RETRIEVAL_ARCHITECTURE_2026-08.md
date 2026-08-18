@@ -238,6 +238,8 @@ A single retrieval function that assembles the working-memory snapshot from Busi
 **Phase 3 — Provenance + conflict handling on Business Memory writes.**
 Add the missing provenance fields (writer type, confidence, superseded-by) to Business Memory writes (`cmd_update.py` and any future auto-write path), and enforce the correction-precedence rule from section F at retrieval time. Deferred to last because it requires the write policy in G to have real callers first — no point building conflict resolution for a memory class that has no volume yet.
 
+**Status (post-2026-08-18):** Phase 1 (`EpisodicEntry` contract + `EpisodicMemoryRepository`, PR #715) is merged to `main`. Phase 2's retrieval contract (`core/memory_retrieval_contract.py`, `core/memory_retrieval.py`, `core/memory_retrieval_shadow.py`) is implemented in shadow-only form — it queries Business Memory (Airtable) and Episodic Memory (Postgres) read-only, applies the hard filters and per-category budget from sections D/E, and is not called from `context.py`, `memory_store.py`, or any live turn path. No cutover has happened; both existing assembly paths (`memory_store.get_for_claude()`, `cmd_update.get_recent_business_context()`) are unmodified. Phase 3 (Business Memory provenance/conflict handling) has not started.
+
 ---
 
 ## Recommended Single Next Implementation Slice
