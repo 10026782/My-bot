@@ -192,3 +192,92 @@ def test_invalid_contract_values_fail_closed():
             source_ref="x", detected_at=CHECKED_AT, last_checked_at=CHECKED_AT,
             freshness="current", owner_action_required=False, destination="x", canonicality="canonical",
         )
+
+
+# ══════════════════════════════════════════════════════════════════
+# Regression: _default_sources().system_health() used to call the
+# @require_tma_auth-decorated tma_api.system_health(identity) route
+# function directly. The decorator's wrapper does
+# `f(*args, identity=identity, **kwargs)`, so a positional `identity`
+# already in args collided with the injected keyword and raised
+# `TypeError: system_health() got multiple values for argument 'identity'`
+# on every real Command Center read. The fix routes through the
+# undecorated tma_api._system_health_payload(identity) helper instead.
+# ══════════════════════════════════════════════════════════════════
+
+class _FakeIdentity:
+    is_owner = True
+
+
+def test_default_sources_system_health_calls_undecorated_helper_without_typeerror(monkeypatch):
+    import tma_api
+    from core.owner_attention import _default_sources
+
+    identity = _FakeIdentity()
+    seen_identity = []
+
+    def fake_payload(passed_identity):
+        seen_identity.append(passed_identity)
+        return {"status": "ok", "active_emergency": []}
+
+    monkeypatch.setattr(tma_api, "_system_health_payload", fake_payload)
+
+    result = _default_sources(identity).system_health()
+
+    assert result == {"status": "ok", "active_emergency": []}
+    assert seen_identity == [identity]
+
+
+def test_default_sources_system_health_maps_healthy_result_into_projection(monkeypatch):
+    import tma_api
+    from core.owner_attention import _default_sources
+
+    monkeypatch.setattr(
+        tma_api, "_system_health_payload",
+        lambda identity: {"status": "ok", "active_emergency": []},
+    )
+
+    real_source_set = _default_sources(_FakeIdentity())
+    result = project(sources(system_health=real_source_set.system_health))
+
+    status = next(item for item in result.source_status if item.source == "system_health")
+    assert status.state == "CURRENT"
+    assert not any(item.category == "system" for item in result.items)
+    assert result.overall_state == "OK"
+
+
+def test_default_sources_system_health_maps_emergency_result_into_projection(monkeypatch):
+    import tma_api
+    from core.owner_attention import _default_sources
+
+    monkeypatch.setattr(
+        tma_api, "_system_health_payload",
+        lambda identity: {"status": "emergency", "active_emergency": ["EMERGENCY_STOP_ALL"]},
+    )
+
+    real_source_set = _default_sources(_FakeIdentity())
+    result = project(sources(system_health=real_source_set.system_health))
+
+    status = next(item for item in result.source_status if item.source == "system_health")
+    item = next(item for item in result.items if item.signal_key == "system.emergency")
+    assert status.state == "CURRENT"
+    assert item.severity == "CRITICAL"
+    assert result.overall_state == "ATTENTION"
+
+
+def test_default_sources_system_health_fails_closed_to_unknown_when_helper_raises(monkeypatch):
+    import tma_api
+    from core.owner_attention import _default_sources
+
+    def broken(identity):
+        raise RuntimeError("airtable unavailable")
+
+    monkeypatch.setattr(tma_api, "_system_health_payload", broken)
+
+    real_source_set = _default_sources(_FakeIdentity())
+    result = project(sources(system_health=real_source_set.system_health))
+
+    status = next(item for item in result.source_status if item.source == "system_health")
+    assert status.state == "UNKNOWN"
+    assert status.reason == "source_read_failed:RuntimeError"
+    assert result.overall_state == "UNKNOWN"

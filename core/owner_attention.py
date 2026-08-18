@@ -514,10 +514,9 @@ def _default_sources(identity: Any) -> OwnerAttentionSources:
         return _get_global_kpis()
 
     def health() -> Mapping[str, Any]:
-        from tma_api import system_health
+        from tma_api import _system_health_payload
 
-        response = system_health(identity)
-        return response.get_json() if hasattr(response, "get_json") else response
+        return _system_health_payload(identity)
 
     def projects() -> Mapping[str, Any]:
         from tma_api import _get_project_cards
