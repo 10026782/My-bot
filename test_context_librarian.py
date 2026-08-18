@@ -179,7 +179,7 @@ def _fully_reviewed_ledger(
 
 
 def test_catalog_and_all_eight_profiles_validate(catalog):
-    assert len(catalog.layer_nodes) == 7
+    assert len(catalog.layer_nodes) == 8
     assert set(catalog.profiles) == {
         "approval_ux",
         "tool_execution",

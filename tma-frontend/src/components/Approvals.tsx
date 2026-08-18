@@ -48,6 +48,10 @@ function ApprovalCard({
 }) {
   const risk = riskInfo(approval.risk_level);
   const isBusy = busy === approval.id;
+  // Backend already refuses to execute on a non-actionable row regardless
+  // (tma_api._claim_and_execute_approval / _claim_and_reject_approval) — this
+  // only stops the UI from offering a button that can only fail.
+  const actionable = approval.actionable === true;
 
   return (
     <div className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3">
@@ -68,23 +72,31 @@ function ApprovalCard({
         {approval.context_type && <span>📎 {approval.context_type}</span>}
       </div>
 
-      {/* Action buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => onAction(approval.id, "approve")}
-          disabled={isBusy}
-          className="flex-1 py-2 bg-green-500 text-white rounded-xl text-sm font-medium active:opacity-70 disabled:opacity-40"
-        >
-          {isBusy ? "…" : "✅ אשר"}
-        </button>
-        <button
-          onClick={() => onAction(approval.id, "reject")}
-          disabled={isBusy}
-          className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium active:opacity-70 disabled:opacity-40"
-        >
-          {isBusy ? "…" : "❌ דחה"}
-        </button>
-      </div>
+      {/* Action buttons — read-only rows never render a live action */}
+      {actionable ? (
+        <div className="flex gap-2">
+          <button
+            onClick={() => onAction(approval.id, "approve")}
+            disabled={isBusy}
+            className="flex-1 py-2 bg-green-500 text-white rounded-xl text-sm font-medium active:opacity-70 disabled:opacity-40"
+          >
+            {isBusy ? "…" : "✅ אשר"}
+          </button>
+          <button
+            onClick={() => onAction(approval.id, "reject")}
+            disabled={isBusy}
+            className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium active:opacity-70 disabled:opacity-40"
+          >
+            {isBusy ? "…" : "❌ דחה"}
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2 text-center">
+          {approval.legacy_read_only
+            ? "רשומה ישנה — לקריאה בלבד, לא ניתנת לביצוע דרך המסך הזה"
+            : "לא ניתנת לביצוע כרגע (פג תוקף או שהמצב השתנה)"}
+        </p>
+      )}
     </div>
   );
 }
@@ -140,9 +152,13 @@ export function Approvals({ onBack }: Props) {
     }
   }
 
+  // Matches the backend's own bulk_approve() eligibility (tma_api.py): low
+  // risk AND actionable — a legacy/expired/non-canonical row is skipped
+  // there regardless, so the count shown here must not promise more than
+  // that.
   const lowRiskCount =
     state.status === "ok"
-      ? state.data.approvals.filter((a) => a.risk_level === "נמוך").length
+      ? state.data.approvals.filter((a) => a.risk_level === "נמוך" && a.actionable === true).length
       : 0;
 
   return (

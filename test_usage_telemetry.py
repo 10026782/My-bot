@@ -42,6 +42,7 @@ from unittest.mock import MagicMock, patch
 from core.usage_telemetry import (
     record_usage, record_llm_usage, record_stt_usage,
     get_usage_window, get_daily_usage, get_trailing_hour_usage,
+    format_usage_window, _empty_window_result,
 )
 
 passed = failed = 0
@@ -186,6 +187,45 @@ with patch("core.database.get_conn", return_value=fake_conn2), \
     chk("unit is 'seconds'", params_sent[5] == "seconds")
     chk("quantity_in is None for STT (no input side)", params_sent[6] is None)
     chk("quantity_out carries duration_seconds", params_sent[7] == 12.5)
+
+
+print("\n── format_usage_window() — ok, with data ────────────────")
+
+ok_window = {
+    "status": "ok", "error": "",
+    "by_model": {
+        ("anthropic", "text", "claude-sonnet-4-6"): {
+            "quantity_in": 100.0, "quantity_out": 50.0, "calls": 2,
+            "cost_usd": 0.01, "estimated_calls": 0,
+        },
+    },
+    "by_source": {"run_agent": {"calls": 2, "cost_usd": 0.01}},
+    "total_calls": 2, "total_cost_usd": 0.01,
+    "total_cost_usd_confirmed": 0.01, "total_cost_usd_estimated": 0.0,
+}
+text = format_usage_window(ok_window)
+chk("ok window renders total calls", "Total calls: 2" in text)
+chk("ok window renders model breakdown", "anthropic/text/claude-sonnet-4-6" in text)
+chk("ok window renders source breakdown", "run_agent" in text)
+
+
+print("\n── format_usage_window() — unavailable/error are not shown as zero usage ────────────────")
+
+text_unavail = format_usage_window(_empty_window_result("unavailable"))
+chk("unavailable does not render as ok/zero usage", "unavailable" in text_unavail.lower())
+chk("unavailable text does not claim total calls", "Total calls" not in text_unavail)
+
+text_err = format_usage_window(_empty_window_result("error", "boom"))
+chk("error does not render as ok/zero usage", "boom" in text_err)
+chk("error text does not claim total calls", "Total calls" not in text_err)
+
+
+print("\n── format_usage_window() — ok with empty by_model/by_source does not raise ────────────────")
+
+empty_ok = _empty_window_result("ok")
+text_empty = format_usage_window(empty_ok)
+chk("empty ok window renders without raising", "Total calls: 0" in text_empty)
+chk("empty ok window says no usage recorded", "No usage recorded" in text_empty)
 
 
 print(f"\n{'='*40}")
