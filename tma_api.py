@@ -3347,12 +3347,13 @@ _EMERGENCY_FLAG_SUFFIXES: dict[str, str] = {
 }
 
 
-@tma_api.route("/api/health", methods=["GET"])
-@require_tma_auth
-def system_health(identity):
-    if not identity.is_owner:
-        return jsonify({"error": "forbidden"}), 403
+def _system_health_payload(identity) -> dict:
+    """Pure System Health computation — no auth check, no Flask Response.
 
+    Undecorated on purpose so non-HTTP callers (e.g. the Command Center's
+    owner_attention reader) can call it directly instead of going through
+    the @require_tma_auth-wrapped route function.
+    """
     import httpx as _httpx
     import feature_flags as ff
 
@@ -3415,13 +3416,22 @@ def system_health(identity):
     if active_emergencies:
         status = "emergency"
 
-    return jsonify({
+    return {
         "status":           status,
         "services":         checks,
         "emergency_flags":  emergency_flags,
         "active_emergency": active_emergencies,
         "checked_at":       date.today().isoformat(),
-    })
+    }
+
+
+@tma_api.route("/api/health", methods=["GET"])
+@require_tma_auth
+def system_health(identity):
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    return jsonify(_system_health_payload(identity))
 
 
 @tma_api.route("/api/health/emergency", methods=["POST"])
