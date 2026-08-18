@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "layer_id": "memory",
+  "nodes": [
+    {
+      "id": "layer.memory",
+      "name": "Memory",
+      "type": "layer",
+      "status": "shadow",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "durable memory subsystems (currently: Episodic Memory Phase 1 only)",
+        "precedence": "docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md is the design authority for the full four-layer memory taxonomy this layer node will grow to cover; current code and executable tests are authoritative for what is actually implemented"
+      },
+      "owner": "memory",
+      "code_paths": [],
+      "test_paths": [],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-18",
+      "last_verified_commit": "37c502991276a089f7609065037b08ba90fce35f",
+      "confidence": 0.8,
+      "notes": [
+        "New layer, created to register Episodic Memory Phase 1 (component.episodic_memory) for the Context Librarian pre-merge gate; owner-approved as its own node rather than attached to an existing layer.",
+        "Design authority: docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md (merged to main after this branch was cut; not added to canonical_docs here to avoid depending on a path absent from this branch's own diff).",
+        "Only component.episodic_memory is implemented so far; Operational State, Business Memory, and Compact/Working Memory from the design doc's taxonomy have no code under this layer yet."
+      ]
+    },
+    {
+      "id": "component.episodic_memory",
+      "name": "Episodic Memory (Phase 1 — contract + repository)",
+      "type": "component",
+      "status": "shadow",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "Phase 1 durable episodic-event contract and append-only Postgres repository only",
+        "precedence": "not wired into the live turn loop, context builder, or retrieval; docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md is the design authority this implements"
+      },
+      "owner": "episodic_memory",
+      "code_paths": [
+        "core/episodic_entry.py",
+        "core/episodic_memory_repository.py",
+        "core/migrations/003_episodic_entries.sql"
+      ],
+      "test_paths": [
+        "test_episodic_memory_repository.py"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-18",
+      "last_verified_commit": "37c502991276a089f7609065037b08ba90fce35f",
+      "confidence": 1.0,
+      "notes": [
+        "Design authority: docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md (merged to main after this branch was cut; not added to canonical_docs here to avoid depending on a path absent from this branch's own diff).",
+        "Phase 1 scope only: EpisodicEntry contract + append-only PostgreSQL repository + migration + tests.",
+        "No live turn-loop wiring, no retrieval, no context.py changes, no ActionGateway coupling, no Money Printer logic, no Airtable changes.",
+        "insert() is the only write path; append-only by construction — corrections are new rows (event_type='correction'), never overwrites.",
+        "core/migrations/003_episodic_entries.sql had not been executed against production Postgres as of this node's valid_from date — verify current state before treating the table as live."
+      ]
+    }
+  ]
+}
