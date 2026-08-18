@@ -46,7 +46,7 @@
         "catalog.reconciles_evidence": false,
         "catalog.business_write_ownership": false
       },
-      "last_observed_commit": "ef76a97725a5278f3039e9180c82c3b0e4036615"
+      "last_observed_commit": "0ac6dda5d6c20748de1d04bf11431c47a2ddbf68"
     },
     {
       "id": "component.dev_registry_reconcile",
@@ -91,7 +91,7 @@
         "catalog.reconciles_evidence": true,
         "catalog.no_network_dependency": true
       },
-      "last_observed_commit": "ef76a97725a5278f3039e9180c82c3b0e4036615"
+      "last_observed_commit": "0ac6dda5d6c20748de1d04bf11431c47a2ddbf68"
     },
     {
       "id": "component.dev_registry_validator",
@@ -135,7 +135,7 @@
         "catalog.writes_registry": false,
         "catalog.reconciles_evidence": false
       },
-      "last_observed_commit": "ef76a97725a5278f3039e9180c82c3b0e4036615"
+      "last_observed_commit": "0ac6dda5d6c20748de1d04bf11431c47a2ddbf68"
     },
     {
       "id": "layer.tools",

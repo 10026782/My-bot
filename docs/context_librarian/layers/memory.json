@@ -60,7 +60,8 @@
         "No live turn-loop wiring, no retrieval, no context.py changes, no ActionGateway coupling, no Money Printer logic, no Airtable changes.",
         "insert() is the only write path; append-only by construction — corrections are new rows (event_type='correction'), never overwrites.",
         "core/migrations/003_episodic_entries.sql had not been executed against production Postgres as of this node's valid_from date — verify current state before treating the table as live."
-      ]
+      ],
+      "last_observed_commit": "0ac6dda5d6c20748de1d04bf11431c47a2ddbf68"
     }
   ]
 }
