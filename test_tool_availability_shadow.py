@@ -120,6 +120,160 @@ def test_role_denial_precedes_and_skips_availability_check(
     assert calls == 0
 
 
+# ── Tenant readiness (mirrors airtable_security.enforce_tenant_scope()'s own
+#    "missing/unknown tenant_id blocks external identities, internal roles
+#    bypass" gate — not a new tenant model) ──────────────────────────────
+
+def test_tenant_ready_available_for_tenant_scoped_tool_with_no_other_check(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_meta(
+        monkeypatch,
+        ToolMeta(name="tenant_tool_a", roles_allowed={Role.LEAD}, tenant_scoped=True),
+    )
+
+    result = get_availability("tenant_tool_a", role=Role.LEAD, tenant_id="boss_hq")
+
+    assert result.available is True
+    assert result.code == "available_by_default"
+
+
+def test_tenant_not_ready_blocks_before_provider_check_runs(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls = 0
+
+    def provider_check() -> ToolAvailability:
+        nonlocal calls
+        calls += 1
+        return ToolAvailability(True, "available", "ready")
+
+    _install_meta(
+        monkeypatch,
+        ToolMeta(
+            name="tenant_tool_b",
+            roles_allowed={Role.LEAD},
+            tenant_scoped=True,
+            availability_check=provider_check,
+        ),
+    )
+
+    result = get_availability("tenant_tool_b", role=Role.LEAD, tenant_id=None)
+
+    assert result == ToolAvailability(
+        available=False,
+        code="tenant_not_ready",
+        detail="Tenant context is missing or unresolved for this tenant-scoped tool.",
+    )
+    assert calls == 0
+
+
+@pytest.mark.parametrize("tenant_id", [None, "", "unknown"])
+def test_tenant_not_ready_code_stable_for_malformed_tenant_values(
+    monkeypatch: pytest.MonkeyPatch, tenant_id
+):
+    _install_meta(
+        monkeypatch,
+        ToolMeta(name="tenant_tool_c", roles_allowed={Role.LEAD}, tenant_scoped=True),
+    )
+
+    result = get_availability("tenant_tool_c", role=Role.LEAD, tenant_id=tenant_id)
+
+    assert result.available is False
+    assert result.code == "tenant_not_ready"
+
+
+def test_role_denial_precedes_and_skips_tenant_check(monkeypatch: pytest.MonkeyPatch):
+    _install_meta(
+        monkeypatch,
+        ToolMeta(name="tenant_tool_d", roles_allowed={Role.OWNER}, tenant_scoped=True),
+    )
+
+    result = get_availability("tenant_tool_d", role=Role.LEAD, tenant_id=None)
+
+    assert result.code == "role_denied"
+
+
+def test_internal_role_bypasses_tenant_check_like_enforce_tenant_scope(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_meta(
+        monkeypatch,
+        ToolMeta(name="tenant_tool_e", roles_allowed={Role.OWNER}, tenant_scoped=True),
+    )
+
+    result = get_availability("tenant_tool_e", role=Role.OWNER, tenant_id=None)
+
+    assert result.code == "available_by_default"
+
+
+def test_non_tenant_scoped_tool_unaffected_by_missing_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_meta(
+        monkeypatch,
+        ToolMeta(name="tenant_tool_f", roles_allowed={Role.LEAD}, tenant_scoped=False),
+    )
+
+    result = get_availability("tenant_tool_f", role=Role.LEAD, tenant_id=None)
+
+    assert result.code == "available_by_default"
+
+
+def test_tenant_check_exception_fails_closed_without_secret_leakage(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+):
+    class ExplodingTenant:
+        def __bool__(self) -> bool:
+            raise RuntimeError("tenant lookup exploded with secret=SECRET_MARKER_TENANT")
+
+    _install_meta(
+        monkeypatch,
+        ToolMeta(name="tenant_tool_g", roles_allowed={Role.LEAD}, tenant_scoped=True),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="tool_registry"):
+        result = get_availability("tenant_tool_g", role=Role.LEAD, tenant_id=ExplodingTenant())
+
+    assert result == ToolAvailability(
+        available=False,
+        code="tenant_check_error",
+        detail="Tenant readiness check raised an exception; details were redacted.",
+    )
+    assert "SECRET_MARKER_TENANT" not in caplog.text
+    assert "SECRET_MARKER_TENANT" not in result.detail
+
+
+def test_enforce_hides_tenant_not_ready_tool_regardless_of_provider_state(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "enforce")
+
+    names = _schema_names(Role.LEAD)
+
+    assert "airtable_get" not in names
+
+
+def test_shadow_mode_keeps_tenant_not_ready_tool_exposed(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "shadow")
+
+    names = _schema_names(Role.LEAD)
+
+    assert "airtable_get" in names
+
+
+def test_enforce_exposes_tenant_scoped_tool_when_tenant_and_provider_ready(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("AIRTABLE_API_KEY", "configured-test-key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "configured-test-base")
+    monkeypatch.setattr(context, "get_tool_availability_filter_state", lambda: "enforce")
+
+    names = [s["name"] for s in context._filter_tools(Role.LEAD, "boss_hq")]
+
+    assert "airtable_get" in names
+
+
 def test_context_availability_checks_never_call_network_or_providers(
     monkeypatch: pytest.MonkeyPatch,
 ):
