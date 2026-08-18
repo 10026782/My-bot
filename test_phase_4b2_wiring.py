@@ -1013,6 +1013,50 @@ chk("Test18: approve refused (409) purely from the load-projection precondition,
 
 
 # ══════════════════════════════════════════════════════════════════
+# 19. Command Center approvals read-model alignment (C84 follow-up): a
+#     pending contract whose canonical created_at is older than
+#     _TMA_APPROVAL_TTL_SECONDS must never be reported actionable=True by the
+#     read model, even though nothing proactively flips its `status` field
+#     off "pending" while it sits in the in-process cache (see
+#     ExecutionLedger.find_by_id()'s own documented RAM-staleness gap). This
+#     is a NEW, separate display-only check (_tma._is_display_stale) — it
+#     must never change the canonical execution path's own independent TTL
+#     enforcement, which still runs unmodified inside
+#     _claim_and_execute_approval() (still calls action_gateway.reject() with
+#     rejected_by="ttl_expired" and still returns HTTP 410, exactly as
+#     before this alignment change).
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 19: TTL-expired pending contract is never actionable ──")
+
+_stale_created_at = time.time() - _tma._TMA_APPROVAL_TTL_SECONDS - 3600  # 1h past the 24h window
+
+gw19 = _FakeGateway()
+gw19.contracts["c19"] = _FakeContract("c19", created_at=_stale_created_at)
+row19 = _projection_rec("rec19", "c19")
+
+with patch("core.action_gateway.action_gateway", gw19):
+    with patch("feature_flags.is_enabled", return_value=True):
+        fmt19 = _tma._fmt_approval(row19, _identity())
+chk("Test19: read model reports actionable=False for a TTL-expired contract",
+    fmt19["actionable"] is False)
+chk("Test19: the contract itself is untouched by the read-model check (still pending)",
+    gw19.contracts["c19"].status == "pending")
+
+# The canonical execution path's own TTL handling must remain byte-for-byte
+# unchanged: still refuses with 410, still rejects the contract itself.
+with _gateway_patches(gw19):
+    with patch("tma_api._at_get_record", return_value=row19):
+        with patch("tma_api._at_patch", return_value=True):
+            approve19 = _tma._claim_and_execute_approval("rec19", _identity())
+chk("Test19: canonical execution path still returns 410 (unchanged TTL check)",
+    approve19.get("status_code") == 410 and approve19.get("ok") is False)
+chk("Test19: canonical execution path still transitions the contract to rejected",
+    gw19.contracts["c19"].status == "rejected")
+chk("Test19: canonical execution path still records rejected_by=ttl_expired",
+    gw19.reject_calls and gw19.reject_calls[-1]["rejected_by"] == "ttl_expired")
+
+
+# ══════════════════════════════════════════════════════════════════
 print(f"\n{'='*50}")
 print(f"Phase 4B-2 wiring tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

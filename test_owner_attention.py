@@ -38,7 +38,14 @@ def test_all_successful_sources_without_attention_are_ok():
 
 def test_supported_attention_items_have_stable_keys_and_deterministic_order():
     result = project(sources(
-        approvals=lambda: {"pending_count": 2, "pending": []},
+        # pending_count is intentionally larger than the actionable list —
+        # the projection must count only actionable rows (Command Center
+        # approvals read-model alignment), so this exercises that the
+        # signal still surfaces when at least one row is genuinely actionable.
+        approvals=lambda: {
+            "pending_count": 2,
+            "pending": [{"action": "x", "context_type": "y", "actionable": True}],
+        },
         tasks=lambda: {"overdue_tasks": 3},
         system_health=lambda: {"status": "degraded", "active_emergency": []},
         projects=lambda: {"hot_leads_count": 4, "projects": []},
@@ -51,6 +58,7 @@ def test_supported_attention_items_have_stable_keys_and_deterministic_order():
     assert [item.signal_key for item in result.items] == [
         "system.health.degraded",
         "approvals.pending",
+        "approvals.pending.preview:x-y",
         "tasks.overdue.global",
         "leads.hot.visible_domains",
         "marketing.pending_review",
@@ -158,6 +166,41 @@ def test_approval_preview_is_bounded_actionable_and_has_no_record_id():
     assert all(item.severity == "WARNING" for item in previews)
     assert all("rec-secret" not in item.signal_key for item in previews)
     assert all(item.destination == "approvals" for item in previews)
+
+
+def test_approval_count_reflects_actionable_not_raw_pending_count():
+    """Command Center approvals read-model alignment: a raw Airtable
+    pending_count that outruns the actionable list (legacy rows, TTL-expired
+    contracts, non-canonical contracts) must never inflate the headline
+    'X ממתינים' number — the count is derived from the actionable rows only."""
+    result = project(sources(approvals=lambda: {
+        "pending_count": 5,
+        "pending": [
+            {"action": "a", "context_type": "t", "actionable": True},
+            {"action": "b", "context_type": "t", "actionable": False},
+            {"action": "c", "context_type": "t", "actionable": False},
+        ],
+    }))
+
+    item = next(item for item in result.items if item.signal_key == "approvals.pending")
+    assert "1 " in item.summary
+    assert "5 " not in item.summary
+
+
+def test_approval_all_non_actionable_yields_honest_absence_not_stale_banner():
+    """Every 'pending' row present but none of them actionable (all legacy/
+    expired/wrong-scope) — no approvals.pending signal at all, never a
+    misleading banner built from stale Airtable rows."""
+    result = project(sources(approvals=lambda: {
+        "pending_count": 3,
+        "pending": [
+            {"action": "a", "context_type": "t", "actionable": False},
+            {"action": "b", "context_type": "t", "actionable": False},
+        ],
+    }))
+
+    assert not any(item.signal_key == "approvals.pending" for item in result.items)
+    assert result.pending_decisions == ()
 
 
 def test_system_emergency_is_critical_and_routes_to_system_health():

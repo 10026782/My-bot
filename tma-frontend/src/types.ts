@@ -77,6 +77,16 @@ export interface Approval {
   context_type: string;
   context_id: string;
   status: string;
+  // Command Center approvals read-model alignment: derived server-side from
+  // the canonical ActionContract (core/action_gateway.py), never from this
+  // row's own status field. actionable=false must always disable/hide
+  // approve-reject actions in the UI — the backend already refuses to
+  // execute on these regardless, but the UI must not offer a button that
+  // can only fail.
+  action_contract_id: string;
+  legacy_read_only: boolean;
+  projected_lifecycle_status: string;
+  actionable: boolean;
 }
 
 export interface ApprovalsResponse {

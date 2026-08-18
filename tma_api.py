@@ -2257,19 +2257,38 @@ def _is_canonical_tma_contract(contract, identity) -> bool:
     )
 
 
+def _is_display_stale(contract) -> bool:
+    """Read-model-only staleness check (Command Center approvals read-model
+    alignment). Mirrors _claim_and_execute_approval()'s own inline TTL/
+    fail-closed logic (same _TMA_APPROVAL_TTL_SECONDS window, same "unreadable
+    created_at = treat as expired" rule) but is intentionally a SEPARATE
+    function, not a shared refactor — this one may only ever affect what the
+    read model reports as `actionable`, never the canonical approve/reject
+    execution path, which keeps its own independent check (and its own
+    _gw.reject(..., rejected_by="ttl_expired") side effect) untouched. A
+    contract cached in-process past its TTL never self-transitions its own
+    `status` field off "pending" (see ExecutionLedger.find_by_id()'s known RAM
+    staleness), so without this check an expired contract could still be
+    displayed as actionable even though acting on it would immediately 410."""
+    created_at = getattr(contract, "created_at", None)
+    if isinstance(created_at, (int, float)) and not isinstance(created_at, bool) and created_at > 0:
+        return (time.time() - created_at) > _TMA_APPROVAL_TTL_SECONDS
+    return True  # fail closed — an unreadable age is never "actionable"
+
+
 def _projection_actionable(contract_id: str, legacy_read_only: bool, identity) -> bool:
     """Whether this Approvals row is actionable, derived strictly from the
-    canonical ActionContract via _is_canonical_tma_contract() — never from
-    Approvals.STATUS. Legacy/no-contract rows are always False. Any lookup
-    failure also degrades to False (fail closed for a display flag: better
-    to under- than over-claim actionability) rather than raising out of a
-    list-rendering path."""
+    canonical ActionContract via _is_canonical_tma_contract() plus a display-
+    only staleness check — never from Approvals.STATUS. Legacy/no-contract
+    rows are always False. Any lookup failure also degrades to False (fail
+    closed for a display flag: better to under- than over-claim actionability)
+    rather than raising out of a list-rendering path."""
     if not contract_id or legacy_read_only:
         return False
     try:
         from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
         contract = _gw.find_contract(contract_id)
-        return _is_canonical_tma_contract(contract, identity)
+        return _is_canonical_tma_contract(contract, identity) and not _is_display_stale(contract)
     except Exception as exc:
         logger.warning("_projection_actionable: lookup failed for contract=%s: %s", contract_id, exc)
         return False
