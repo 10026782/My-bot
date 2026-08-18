@@ -341,6 +341,11 @@ def test_unavailable_episodic_store(monkeypatch):
     assert snap.episodic_entries == ()
     assert snap.metadata.episodic_memory_available is False
     assert snap.metadata.episodic_memory_error is not None
+    # The error field is durably persisted by the Phase 2B shadow-logging
+    # follow-up (core/memory_retrieval_shadow.py::record_shadow_comparison),
+    # so it must be a fixed exception class name, never raw exception text
+    # (which can embed connection details, SQL fragments, or field values).
+    assert snap.metadata.episodic_memory_error == "EpisodicMemoryStoreError"
 
 
 # ── 9. Business Memory only ──────────────────────────────────────

@@ -746,9 +746,11 @@ def _job_memory_shadow_scan():
     """Episodic Memory Phase 2B follow-up: low-frequency, owner-scoped
     comparison of the legacy memory-assembly paths vs. the new Phase 2
     retrieval contract, durably recorded as structured counts (never memory
-    content) so a later Phase 3/cutover decision has real observed data.
-    Flag-gated (FEATURE_MEMORY_SHADOW_LOGGING, default off); zero prompt or
-    context impact — see core/memory_retrieval_shadow.py."""
+    content) so a later Phase 3/cutover decision has owner-scoped scheduled
+    comparison evidence — one sample/day for the single owner identity, not
+    a broad or tenant-wide dataset; read that way before drawing conclusions
+    from it. Flag-gated (FEATURE_MEMORY_SHADOW_LOGGING, default off); zero
+    prompt or context impact — see core/memory_retrieval_shadow.py."""
     try:
         from feature_flags import is_enabled
         if not is_enabled("FEATURE_MEMORY_SHADOW_LOGGING"):
