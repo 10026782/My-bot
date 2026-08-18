@@ -664,6 +664,47 @@
         }
       },
       "last_observed_commit": "c79700515d71a460baec138c4524eea46ab65885"
+    },
+    {
+      "id": "decision.command_center_presentation_helper",
+      "name": "commandCenterPresentation.ts is a pure frontend presentation/read-model helper, not a runtime authority",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "deterministic, pure display-transformation helpers for the compact owner-first Command Center screen (dedupe/merge already-returned development items, horizon-to-bucket label mapping, freshness-noise suppression, approvals-headline filtering)",
+        "precedence": "carries no authority over any catalog layer, backend endpoint, or approval flow; consumes only Command Center data already returned by the backend and performs no fetch/API/state/writes of its own"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "tma-frontend/src/lib/commandCenterPresentation.ts"
+      ],
+      "test_paths": [
+        "tma-frontend/src/lib/commandCenterPresentation.test.ts"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-18",
+      "last_verified_commit": "3c7c71d7006212e8e8aa9fe631b5f7a9ee4757ba",
+      "confidence": 0.9,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #738 (Command Center Owner-First Compact View): both files are new runtime sources with no existing catalog node or policy_registry.json entry to match. Owner explicitly reviewed and approved this registration.",
+        "Nearest existing precedent considered was decision.tma_shared_ui_primitives (SHARED_UI_PRIMITIVE policy), but that node's scope is deliberately the 4 named tma-frontend/src/components/ui/*.tsx React components only ('future additions to that directory must be evaluated individually, not assumed to fall under this node') — commandCenterPresentation.ts is a plain TS module under tma-frontend/src/lib/, not a components/ui/ React component, so folding it into that node would widen its stated scope rather than reuse it. Followed the decision.boss_doctor_diagnostic_aggregator precedent instead: a new, narrowly-scoped, non-authority decision node for a single new source with its test file, no new policy_registry.json entry added.",
+        "Pure by construction: no React/JSX (module comment: 'testable with plain node + esbuild, no component-rendering test framework needed for logic-only rules'), no fetch/API/state/side effects — every exported function (dedupeDevelopmentItems, buildDevelopmentList, horizonBucketLabel, shouldShowFreshness, actionableApprovalEntries) is a synchronous transform over already-fetched CommandCenterAttentionItem/CommandCenterDevelopmentItem/CommandCenterDevelopmentStatus values passed in by its caller.",
+        "commandCenterPresentation.test.ts is unit test coverage for the above helper only; it carries no runtime authority of its own."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "frontend_presentation_helper",
+          "authority": false,
+          "purpose": "pure display-transformation helpers for the Command Center compact view; no writes, no business authority, no approval or DEV-REG authority",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "3c7c71d7006212e8e8aa9fe631b5f7a9ee4757ba"
     }
   ],
   "edges": [
