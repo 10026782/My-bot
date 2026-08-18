@@ -547,6 +547,22 @@ def cmd_schema(msg):
         logger.error(f"cmd_schema error: {e}")
         bot.send_message(msg.chat.id, f"שגיאה בטעינת סכמה: {e}")
 
+@bot.message_handler(commands=["boss_doctor"])
+def cmd_boss_doctor(msg):
+    """Owner בלבד — Phase 1 read-only diagnostic aggregator (boss doctor)."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role != "owner":
+        bot.send_message(msg.chat.id, "פקודה זו זמינה לבעלים בלבד.")
+        return
+    try:
+        from boss_doctor import run_doctor, format_report
+        text = format_report(run_doctor())
+        bot.send_message(msg.chat.id, text)
+    except Exception as e:
+        logger.error(f"cmd_boss_doctor error: {e}")
+        bot.send_message(msg.chat.id, "שגיאה בהרצת boss doctor.")
+
+
 @bot.message_handler(commands=["done"])
 def cmd_done(msg):
     """/done [n] — מסמן Quest מספר n כ-Done + כותב Coins_Log אוטומטית."""
