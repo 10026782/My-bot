@@ -623,6 +623,47 @@
           "policy_registry_id": "STAGING_VERIFICATION_ARTIFACT"
         }
       }
+    },
+    {
+      "id": "decision.boss_doctor_diagnostic_aggregator",
+      "name": "boss_doctor.py is a read-only diagnostic aggregator, not a runtime authority",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "read-only Phase 1 diagnostic aggregator; composes existing tool_registry/feature_flags/health_monitor/atomic_claims_health/scheduler signals into a redacted DiagnosticCheck/DoctorReport for operator consumption",
+        "precedence": "carries no authority over any catalog layer, flag, or execution path; never mutates state, never calls ActionGateway/dispatcher, and is consumed only by the owner-only /boss_doctor Telegram command in app.py"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "boss_doctor.py"
+      ],
+      "test_paths": [
+        "test_boss_doctor.py",
+        "test_cmd_boss_doctor.py"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-18",
+      "last_verified_commit": "2642e3c30e1589c7024c7301153232366c997f46",
+      "confidence": 0.9,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #707: boss_doctor.py is a new runtime source with no existing catalog node or policy_registry.json entry to match (health_monitor.py, its closest functional sibling, predates this governance system and was never registered either).",
+        "Read-only by construction and by test: every DiagnosticCheck wraps an already-existing signal (tool_registry.get_availability(), feature_flags accessors, health_monitor.get_health_status(), core/atomic_claims_health.check_health(), schedule.jobs) and reuses tool_registry._redact_operator_detail() for output safety. test_boss_doctor.py/test_cmd_boss_doctor.py assert no mutation path (feature_flags.set_flag/set_emergency_stop, ActionGateway.propose_action/ActionContract, dispatcher.dispatch_tool all poisoned to raise if called) and no secret leakage.",
+        "Consumed only by the new owner-only /boss_doctor command in app.py (mirrors the existing /schema owner-gate pattern); establishes the 'read-only diagnostic aggregator' bucket the catalog previously lacked, for potential reuse if a similar module is added later."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "diagnostic_aggregator",
+          "authority": false,
+          "purpose": "aggregates existing readiness/authorization signals into a redacted, read-only operator report; never mutates state",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "2642e3c30e1589c7024c7301153232366c997f46"
     }
   ],
   "edges": [
