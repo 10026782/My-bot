@@ -563,6 +563,32 @@ def cmd_boss_doctor(msg):
         bot.send_message(msg.chat.id, "שגיאה בהרצת boss doctor.")
 
 
+@bot.message_handler(commands=["memory_shadow"])
+def cmd_memory_shadow(msg):
+    """Owner בלבד — Phase 2B read-only shadow comparison: legacy memory
+    assembly paths vs. the new retrieval contract. No mutation, no prompt
+    impact — see core/memory_retrieval_shadow.py."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role != "owner":
+        bot.send_message(msg.chat.id, "פקודה זו זמינה לבעלים בלבד.")
+        return
+    try:
+        from core.memory_retrieval_shadow import (
+            build_shadow_request,
+            compare_with_live_paths,
+            format_shadow_comparison,
+        )
+        request = build_shadow_request(identity)
+        if request is None:
+            bot.send_message(msg.chat.id, "NOT_ENOUGH_CONTEXT — לא ניתן לבנות בקשת השוואה מזהות מוכחת.")
+            return
+        comparison = compare_with_live_paths(request, memory_key=identity.memory_key)
+        bot.send_message(msg.chat.id, format_shadow_comparison(comparison))
+    except Exception as e:
+        logger.error(f"cmd_memory_shadow error: {e}")
+        bot.send_message(msg.chat.id, "שגיאה בהרצת memory shadow.")
+
+
 @bot.message_handler(commands=["usage"])
 def cmd_usage(msg):
     """Owner בלבד — read-only AI/STT usage & cost report for today (usage_events)."""
