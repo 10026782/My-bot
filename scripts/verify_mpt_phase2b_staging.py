@@ -141,6 +141,22 @@ def main() -> int:
     print("MPT PHASE 2B — CANONICAL STAGING SUBMIT CANARY\n")
 
     try:
+        # A bare `import app` never bootstraps the Emergency Stop manager
+        # (app.py's own module docstring: that is deliberately NOT a side
+        # effect of importing the module — only app.run_startup_sequence(),
+        # invoked by gunicorn or `python3 app.py`'s __main__ block, does).
+        # Without it, feature_flags.is_enabled("EMERGENCY_STOP_ALL") fails
+        # closed to True (EmergencyStopNotConfigured -> blocked), so both
+        # the preflight print below and the dispatcher's later check would
+        # silently report/enforce a block regardless of the real durable
+        # flag. bootstrap_emergency_stop() alone (not the full
+        # run_startup_sequence()) only constructs the store/manager and
+        # does one hydration read — no scheduler thread, no webhook
+        # re-registration — safe for a one-off verification process.
+        from core.emergency_stop_bootstrap import bootstrap_emergency_stop
+        boot = bootstrap_emergency_stop()
+        print(f"{'EmergencyStop bootstrap':<40} configured={boot.configured} store_status={boot.store_status}")
+
         _preflight(evidence, args.expect_max_per_day)
 
         from scripts.staging_identity import cleanup_run_contracts, new_run_namespace, unique_identity
