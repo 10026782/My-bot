@@ -446,13 +446,49 @@ def check_allowed(tool_name: str, identity: "Identity") -> bool:
     return identity.role in meta.roles_allowed
 
 
-def get_availability(tool_name: str, *, role: str | None = None) -> ToolAvailability:
-    """Evaluate local diagnostic readiness without changing authorization or execution."""
+def get_availability(
+    tool_name: str,
+    *,
+    role: str | None = None,
+    tenant_id: str | None = None,
+) -> ToolAvailability:
+    """Evaluate local diagnostic readiness without changing authorization or execution.
+
+    Order: registered -> role authorized -> tenant readiness -> provider config.
+    tenant_id readiness mirrors airtable_security.enforce_tenant_scope()'s own
+    guard exactly (missing or "unknown" tenant_id blocks external identities;
+    internal roles bypass tenant scoping there too) - it is not a new tenant
+    model, only a read-only preview of that existing enforcement gate. It only
+    applies to tenant_scoped=True tools, and only when a role is known (no
+    role => internal/external cannot be determined, so the check is skipped,
+    same as the role check above it).
+    """
     meta = _REGISTRY.get(tool_name)
     if meta is None:
         return ToolAvailability(False, "unknown_tool", "Tool is not registered.")
     if role is not None and role not in meta.roles_allowed:
         return ToolAvailability(False, "role_denied", "Tool is not permitted for this role.")
+
+    if meta.tenant_scoped and role is not None and role not in _INTERNAL:
+        try:
+            tenant_ready = bool(tenant_id) and tenant_id != "unknown"
+        except Exception:
+            logger.warning(
+                "[ToolAvailability] tool=%s available=false code=tenant_check_error",
+                tool_name,
+            )
+            return ToolAvailability(
+                False,
+                "tenant_check_error",
+                "Tenant readiness check raised an exception; details were redacted.",
+            )
+        if not tenant_ready:
+            return ToolAvailability(
+                False,
+                "tenant_not_ready",
+                "Tenant context is missing or unresolved for this tenant-scoped tool.",
+            )
+
     if meta.availability_check is None:
         return ToolAvailability(
             True,

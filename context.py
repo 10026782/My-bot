@@ -76,7 +76,7 @@ _ROLE_TOOLS: dict[str, set[str]] = {
 }
 
 
-def _filter_tools(role: str) -> list:
+def _filter_tools(role: str, tenant_id: str | None = None) -> list:
     allowed = _ROLE_TOOLS.get(role, set())
     exposed = [t for t in TOOL_SCHEMAS if t["name"] in allowed]
     state = get_tool_availability_filter_state()
@@ -86,7 +86,7 @@ def _filter_tools(role: str) -> list:
     available_schemas = []
     for schema in exposed:
         tool_name = schema["name"]
-        availability = get_availability(tool_name, role=role)
+        availability = get_availability(tool_name, role=role, tenant_id=tenant_id)
         log = logger.info if availability.available else logger.warning
         log(
             "[ToolAvailability] state=%s role=%s tool=%s available=%s code=%s",
@@ -275,7 +275,7 @@ def build_context(
         except Exception:
             pass  # non-blocking
 
-    allowed_tools = _filter_tools(identity.role)
+    allowed_tools = _filter_tools(identity.role, identity.tenant_id)
 
     logger.info(
         f"[Context] tenant={identity.tenant_id} user={identity.user_id} "
