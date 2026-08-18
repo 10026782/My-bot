@@ -76,6 +76,9 @@ INTEGRATIONS:
   FEATURE_MEDIA_UPLOAD        - Telegram/TMA photo/document -> Drive + Media Files (F16); default OFF
   META_OUTBOUND_ENABLED       - Meta WhatsApp Cloud API (F05a): true מריץ run_agent על inbound; false (default) מדלג כל עוד outbound הוא stub
   FEATURE_MARKETING_BRIDGE    - F23: /marketing_new wizard + /marketing_status query (cmd_marketing.py, marketing_gateway.py, marketing_orchestrator.py); כבוי כברירת מחדל
+  FEATURE_MEMORY_SHADOW_LOGGING - Episodic Memory Phase 2B follow-up: daily scheduler job (scheduler.py::_job_memory_shadow_scan)
+                                 durably records structured shadow-comparison counts (core/memory_retrieval_shadow.py::record_shadow_comparison,
+                                 core/migrations/004_memory_shadow_comparisons.sql) — no memory content, no prompt/context impact; כבוי כברירת מחדל
 
 APPROVAL POLICY:
   EMERGENCY_WINDOW             - מאפשר הפעלת חריג זמני ל-High מהטלפון (core/emergency_window.py, כבוי כברירת מחדל)

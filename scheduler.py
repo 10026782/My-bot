@@ -742,6 +742,36 @@ def _job_cost_watchdog():
         logger.error(f"cost_watchdog error: {e}")
 
 
+def _job_memory_shadow_scan():
+    """Episodic Memory Phase 2B follow-up: low-frequency, owner-scoped
+    comparison of the legacy memory-assembly paths vs. the new Phase 2
+    retrieval contract, durably recorded as structured counts (never memory
+    content) so a later Phase 3/cutover decision has real observed data.
+    Flag-gated (FEATURE_MEMORY_SHADOW_LOGGING, default off); zero prompt or
+    context impact — see core/memory_retrieval_shadow.py."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("FEATURE_MEMORY_SHADOW_LOGGING"):
+            return
+        from identity import resolve_identity
+        from core.memory_retrieval_shadow import (
+            build_shadow_request, compare_with_live_paths, record_shadow_comparison,
+        )
+        owner_chat = os.environ.get("ELIYAHU_CHAT_ID", "").strip()
+        if not owner_chat:
+            logger.warning("[Scheduler] job=memory_shadow_scan skip — ELIYAHU_CHAT_ID not configured")
+            return
+        identity = resolve_identity("telegram", owner_chat)
+        request = build_shadow_request(identity)
+        if request is None:
+            logger.warning("[Scheduler] job=memory_shadow_scan skip — owner identity has no provable tenant/user id")
+            return
+        comparison = compare_with_live_paths(request, memory_key=identity.memory_key)
+        record_shadow_comparison(comparison)
+    except Exception as e:
+        logger.error(f"memory_shadow_scan error: {e}")
+
+
 def _job_daily_usage_report():
     """CORE_05 v2: כל יום 08:00 — מסכם usage.jsonl, בודק ספי Sonnet, כותב ל-AI_Usage_Daily."""
     try:
@@ -842,6 +872,7 @@ def start_scheduler() -> threading.Thread:
     getattr(schedule.every(), "friday").at("18:00").do(_automation_guard(_job_boss_battle_check, name="boss_battle_check"))             # Boss battle check
     schedule.every(60).minutes.do(_automation_guard(_job_cost_watchdog, name="cost_watchdog"))                                       # CORE_05 legacy: dollar-based emergency stop
     schedule.every().day.at("08:15").do(_automation_guard(_job_daily_usage_report, name="daily_usage_report"))                             # CORE_05 v2: count-based JSONL watchdog (08:15 — מניעת cluster עם D04+Game ב-Sunday 08:00)
+    schedule.every().day.at("04:00").do(_automation_guard(_job_memory_shadow_scan, name="memory_shadow_scan"))                              # Episodic Memory Phase 2B follow-up: flag FEATURE_MEMORY_SHADOW_LOGGING (default off)
 
     logger.info(
         f"📅 Scheduler | digest={digest_time} | collector={collector_time} | "

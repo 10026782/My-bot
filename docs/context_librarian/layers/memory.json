@@ -78,10 +78,14 @@
       "code_paths": [
         "core/memory_retrieval.py",
         "core/memory_retrieval_contract.py",
-        "core/memory_retrieval_shadow.py"
+        "core/memory_retrieval_shadow.py",
+        "core/migrations/004_memory_shadow_comparisons.sql",
+        "scheduler.py::_job_memory_shadow_scan"
       ],
       "test_paths": [
-        "test_memory_retrieval.py"
+        "test_memory_retrieval.py",
+        "test_memory_shadow_command.py",
+        "test_memory_shadow_logging.py"
       ],
       "canonical_docs": [
         {
@@ -91,7 +95,7 @@
         }
       ],
       "production_evidence": [],
-      "feature_flags": [],
+      "feature_flags": ["FEATURE_MEMORY_SHADOW_LOGGING"],
       "valid_from": "2026-08-18",
       "last_verified_commit": "db09fd73fc6f258153cf86fd2fff15992c5b7764",
       "confidence": 1.0,
@@ -100,7 +104,8 @@
         "Hard filters (tenant, then entity/session, then domain) applied before any ranking; ranking is deterministic recency only — no embeddings, no vector DB, no LLM-based ranking.",
         "Business Memory (Airtable) carries no tenant_id field today — retrieval only attaches Business Memory content for the single known tenant ('boss_hq') and returns empty (not an error) for any other tenant_id, documented in core/memory_retrieval.py.",
         "Store unavailability (Episodic Postgres down, Business Memory Airtable call failing) is caught per-category and recorded in SnapshotMetadata; only a malformed request (missing tenant_id/canonical_user_id) raises.",
-        "No writes anywhere in this surface, no calls to the LLM or the approval/tool-execution pipeline — verified by a dedicated test (test_memory_retrieval.py::test_no_llm_or_action_gateway_or_write_calls)."
+        "No writes to Business Memory/Episodic Memory/context/prompt anywhere in this surface, no calls to the LLM or the approval/tool-execution pipeline — verified by a dedicated test (test_memory_retrieval.py::test_no_llm_or_action_gateway_or_write_calls).",
+        "Phase 2B follow-up (2026-08-19): FEATURE_MEMORY_SHADOW_LOGGING (default off) adds a daily scheduler job that writes ONLY structured comparison counts (never memory item text) to a new memory_shadow_comparisons Postgres table, so a later Phase 3/cutover decision has real accumulated data — see record_shadow_comparison() in core/memory_retrieval_shadow.py and core/migrations/004_memory_shadow_comparisons.sql. This is the one intentional write path in the surface; it writes observability data about the comparison, not to Business Memory/Episodic Memory/context/prompt."
       ],
       "last_observed_commit": "a7641158646a4a4d415f0bef92c48b121957d46c"
     }
