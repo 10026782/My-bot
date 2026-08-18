@@ -60,15 +60,21 @@ def test_valid_oc_b_and_dev_reg_compose_with_typed_boundaries():
     assert result.attention.overall_state == "OK"
     assert result.development_status.projection_state == "CURRENT"
     assert result.pending_decisions == ()
+    # business_status/recent_activity stay the by-design unsupported placeholder
+    # (state UNKNOWN, reason unsupported_canonical_source) but must not, by
+    # themselves, degrade overall_state now that they're intentionally
+    # unsupported optional capabilities (Owner Decision 2).
     assert result.business_status.state == "UNKNOWN"
-    assert result.overall_state == "PARTIAL"
+    assert result.business_status.reason == "unsupported_canonical_source"
+    assert result.overall_state == "OK"
     assert result.as_dict()["development_status"]["current_focus"][0]["initiative_key"] == "EXAMPLE_INITIATIVE"
 
 
-def test_current_core_projections_plus_unsupported_sections_are_partial():
+def test_current_core_projections_plus_unsupported_sections_are_ok():
+    """Proof point: unsupported optional sections alone never cause PARTIAL."""
     result = compose_command_center_status(_attention(), _development(), generated_at=CHECKED_AT)
 
-    assert result.overall_state == "PARTIAL"
+    assert result.overall_state == "OK"
 
 
 def test_unknown_attention_with_current_development_is_partial():
@@ -127,6 +133,31 @@ def test_all_supported_current_sources_can_be_ok_without_inference():
 
     assert result.overall_state == "OK"
     assert all(value == "CURRENT" for value in result.freshness.values())
+
+
+def test_system_health_unknown_source_forces_partial_not_ok():
+    """System Health is a real supported source (PR #727) — its own UNKNOWN
+    state must still degrade overall_state, never be silently OK."""
+    attention = _attention(system_health=lambda: {"status": "bogus"})
+    result = compose_command_center_status(attention, _development(), generated_at=CHECKED_AT)
+
+    assert result.attention.overall_state == "UNKNOWN"
+    assert result.system_status.state == "UNKNOWN"
+    assert result.overall_state == "PARTIAL"
+
+
+def test_real_stale_business_source_still_causes_partial():
+    """A genuinely-supported (non-placeholder) business/recent_activity source
+    that is STALE must still degrade overall_state — only the by-design
+    unsupported_canonical_source placeholder is exempt."""
+    result = compose_command_center_status(
+        _attention(),
+        _development(),
+        generated_at=CHECKED_AT,
+        business_status=UnsupportedSection(state="STALE", reason="canonical_business_snapshot", source_version="business:v1"),
+    )
+
+    assert result.overall_state == "PARTIAL"
 
 
 def test_stale_or_partial_source_does_not_become_ok():
