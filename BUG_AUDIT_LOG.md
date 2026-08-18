@@ -121,6 +121,66 @@
 - **Verification ראיה:** `py_compile` עבר; `test_integration.py` 4/4 PASS; `smoke_tests.py` 5/6 PASS (כשל תלוי-סביבה, לא קשור); `npm run build` עבר. + audit-log למעלה, 09/07/2026.
 - **סטטוס:** ✅ VERIFIED / CLOSED.
 
+### BUG-127A — ExecutionLedger warm cache does not re-check contract expiry (TTL-blindness in projection) — 🔧 FIXED / PARTIAL-DEPLOY (PR #732)
+- **דווח:** 18/08/2026 (audit session)
+- **Severity:** Medium — presentation-only bug, execution path already fail-closed
+- **מסך / מודול:** `core/action_gateway.py::ExecutionLedger.find_by_id()` (L728-757), consumed by `tma_api.py::_projection_actionable()`
+- **תיאור:** `ExecutionLedger.find_by_id()` returns the warm in-memory cached copy of an `ActionContract` without re-checking whether it has expired (>24h old). A contract that expired >24h ago but is still process-cached reports `actionable: True` to the frontend, even though a real Approve/Reject click will immediately hit the correct 410 failure (TTL check happens in `_claim_and_execute_approval`). Presentation-only violation of "expired is not pending" requirement, not a security hole.
+- **Root Cause:** `ExecutionLedger` (L728-757) keeps an in-memory cache (`_contracts` dict) warm for the duration of a session. `_is_expired()` check (L731) is only applied on the cold repository path (`ActionContractRepository.get()`), not on cache hits from `find_by_id()`. TTL is `CONTRACT_PENDING_TTL_SECONDS = 24h`.
+- **תיקון:** (PR #732) new `_is_display_stale(contract)` helper in `tma_api.py` that checks expiry independently of the execution path; `_projection_actionable()` now requires `not _is_display_stale(contract)` in addition to other checks. Deliberately kept separate from `_claim_and_execute_approval()`'s own inline TTL block to guarantee zero behavioral change to canonical execution semantics.
+- **תוקן ב-commit:** PR #732 merged commit (55ac3db)
+- **תוקן ב-branch:** command-center/approvals-read-model-alignment
+- **Merged:** ✅ כן — PR #732 merged 2026-08-18T13:33:51Z
+- **Deployed:** ✅ כן — included in #744 context-librarian auto-maintenance merge into main
+- **Verified בפרודקשן:** 🟡 Deployment verified (code in main), execution path untouched by fix (still fail-closed), projection-only safety confirmed. **Not production-verified with live actions** — would require manual approve/reject test after 24h TTL on a real ActionContract, which was not done in this session.
+- **Verification ראיה:** `test_phase_4b2_wiring.py` 86/86 (all approval/atomic-claim suite unchanged), `test_owner_attention.py` (+2 new tests on projection staleness), CI green
+- **סטטוס:** 🔧 FIXED / PARTIAL-DEPLOY — code deployed to main, projection logic verified, execution path semantics unchanged, but live > 24h-old approval interaction not manually tested in production.
+
+### SYS-HEALTH-DECORATOR-TYPEERROR — Command Center System Health always returns UNKNOWN due to decorator collision — ✅ CLOSED / DEPLOYED (PR #727)
+- **דווח:** 18/08/2026 (audit session)
+- **Severity:** High — complete failure of System Health read in Command Center OC-B
+- **מסך / מודול:** `core/owner_attention.py::_default_sources().health()` (L519) calling `tma_api.system_health()` (L3350+, decorated `@require_tma_auth`)
+- **תיאור:** `core/owner_attention.py::_default_sources().health()` closure called the `@require_tma_auth`-decorated `tma_api.system_health(identity)` directly with `identity` as a positional argument. The decorator's `wrapper` re-injects `identity=` as a keyword argument, causing `TypeError: system_health() got multiple values for argument 'identity'`. `_run_reader()` catches all exceptions and permanently converts the source to `UNKNOWN`, which is why Command Center's System Health headline always showed unavailable even when the backend was healthy.
+- **Root Cause:** naive direct call to a decorated route function from backend code; the `@require_tma_auth` decorator is designed for Flask request context, not Python-to-Python import calls.
+- **תיקון:** (PR #727) extracted `_system_health_payload(identity) -> dict` — the full System Health computation undecorated, returning a plain dict (not a Flask Response). The HTTP route (`/api/health`) is thinned to `return jsonify(_system_health_payload(identity))` and keeps `@require_tma_auth` + its `is_owner` 403 check intact. `core/owner_attention.py::health()` now calls the undecorated helper directly. Matches the existing pattern used by `_marketing_status_payload`/`_get_project_cards` for other `_default_sources()` readers.
+- **תוקן ב-commit:** PR #727 merged commit (3e10dbc)
+- **תוקן ב-branch:** fix/command-center-system-health-typeerror
+- **Merged:** ✅ כן — PR #727 merged 2026-08-18T12:12:41Z (merged by owner directly, prior to this session's continued work)
+- **Deployed:** ✅ כן — included in main HEAD by time of this session
+- **Verified בפרודקשן:** ✅ כן — `test_command_center.py` 12/12, `test_owner_attention.py` (+4 new tests verifying no-TypeError wiring and healthy/degraded/failed mapping), backend CI green
+- **Verification ראיה:** `test_owner_attention.py::test_default_sources_system_health_calls_undecorated_helper_without_typeerror` + three more (healthy/emergency/fail-closed scenarios), all pass, no regression in Command Center output shape
+- **סטטוס:** ✅ CLOSED / DEPLOYED — merged, green CI, test coverage verified.
+
+### OC-APPROVALS-PROJECTION-STALE — Approvals projection shows stale/legacy rows as actionable, inflates "pending" count — 🔧 FIXED / PARTIAL-DEPLOY (PR #732, pre-existing code cleanup in PR #732)
+- **דווח:** 18/08/2026 (audit session, trace-back to earlier Phase 4B-2 work)
+- **Severity:** Medium — stale/expired/wrong-scope approvals shown as owner decisions when they shouldn't be
+- **מסך / מודול:** `tma_api.py` (approvals projection), `core/owner_attention.py::_approval_items()` (OC-B headline count)
+- **תיאור:** (1) `_projection_actionable()` didn't check if a contract was expired/stale before marking it `actionable: True`, causing 24h-old expired actions to appear actionable to the frontend (related to BUG-127A but at a different layer). (2) `_approval_items()` headline count ("X ממתינים") used raw Airtable `pending_count` (all rows `STATUS='ממתין'`) instead of the count of rows the backend itself proven actionable, allowing legacy/stale/wrong-scope rows to inflate the number owner sees.
+- **Root Cause:** (1) Phase 4B-2 work established that Airtable `Approvals` is a display projection only, not canonical. But the projection's own `actionable` field was inferred from presence in Airtable + basic scope checks, without checking if the underlying ActionContract had expired. (2) Headline count computed from raw Airtable data rather than the already-filtered `actionable` subset returned by `_owner_approvals_snapshot()`.
+- **תיקון:** (PR #732) (1) new `_is_display_stale(contract)` in `tma_api.py` (deliberately separate from execution-path TTL check to avoid side effects); `_projection_actionable()` requires `not _is_display_stale(contract)`. (2) `_approval_items()` computes `actionable` subset first, uses `len(actionable)` for the headline count, returns no signal when actionable count is zero (honest absence instead of stale banner).
+- **תוקן ב-commit:** PR #732 merged commit (55ac3db)
+- **תוקן ב-branch:** command-center/approvals-read-model-alignment
+- **Merged:** ✅ כן — PR #732 merged 2026-08-18T13:33:51Z
+- **Deployed:** ✅ כן — included in main
+- **Verified בפרודקשן:** 🟡 Deployment verified (code in main), full approval execution suite passing (test_action_gateway.py 43/43, test_pa01_phantom_approval_enforcement.py 108/108, etc.), projection logic verified. **Not production-verified with live >=24h-old approvals** — would require manual check of actual Airtable Approvals table with aged rows.
+- **Verification ראיה:** `test_phase_4b2_wiring.py` 86/86 (incl. new Test19), `test_owner_attention.py` (+2 new tests on actionable filtering, zero-count no-signal), CI green, `npm test` 13/13 on commandCenterPresentation.test.ts (dedupe/actionable scenarios)
+- **סטטוס:** 🔧 FIXED / PARTIAL-DEPLOY — projection logic deployed and verified, execution path untouched, projection-layer test coverage added, but live-data verification with 24h-old rows not performed.
+
+### OC-OVERALL-STATE-UNSUPPORTED-SECTIONS — Business Status / Recent Activity unsupported sections incorrectly trigger overall_state = PARTIAL — ✅ FIXED / DRAFT-AWAITING-REVIEW (PR #739)
+- **דווח:** 18/08/2026 (decision point from prior audit)
+- **Severity:** Medium — owner headline incorrectly shows "requires attention" when only optional unsupported capabilities are missing
+- **מסך / מודול:** `core/command_center.py::_overall_state()`, semantic interpretation of `UnsupportedSection` state
+- **תיאור:** `_overall_state()` treated `business_status`/`recent_activity` the same way as real degraded sources — if they were `UNKNOWN` state (which they always are, being the by-design `UnsupportedSection()` placeholders), the entire overall_state was marked `PARTIAL`. Intentionally-unsupported optional capabilities thus artificially degraded the headline to warn owner even when all real supported sources (Attention, Development, System Health) were healthy/current.
+- **Root Cause:** OR-chain in `_overall_state()` (core/command_center.py L116-140) checked `business.state in {"STALE", "PARTIAL", "UNKNOWN"}` and `recent_activity.state in {"STALE", "PARTIAL", "UNKNOWN"}` without distinguishing between a genuinely-unknown *required* source vs. the by-design `UNKNOWN` state of an unsupported placeholder.
+- **תיקון:** (PR #739) new `_is_unsupported_placeholder(section)` helper checks the specific `reason == "unsupported_canonical_source"` marker. Business/recent_activity now only degrade overall_state when they are *not* that placeholder. ATTENTION precedence, both-core-unavailable→UNKNOWN, and real required-source degradation all unchanged.
+- **תוקן ב-commit:** PR #739 HEAD commit (3c9cfc0 + main-sync → 535ac4d)
+- **תוקן ב-branch:** cc/overall-state-unsupported-optional
+- **Merged:** ❌ לא — Draft PR, awaiting owner review
+- **Deployed:** ❌ לא (Draft, unmerged)
+- **Verified בפרודקשן:** ✅ CI green (backend-ci passed after #741 budget fix), test coverage verified (test_command_center.py 14/14 with updated assertions, new tests proving unsupported-alone never causes PARTIAL, real UNKNOWN still degrades correctly)
+- **Verification ראיה:** `test_command_center.py::test_valid_oc_b_and_dev_reg_compose_with_typed_boundaries` now passes with unsupported Business Status present, overall_state = OK (was PARTIAL); new `test_real_stale_business_source_still_causes_partial` proves a real (non-placeholder) STALE status still degrades. CI green post-#741 sync.
+- **סטטוס:** ✅ FIXED / DRAFT-AWAITING-REVIEW — code verified and ready, CI green, awaiting owner sign-off for merge.
+
 ### FLAGGED (not fixed) — `Next Action` field schema drift
 - **דווח:** 17/06/2026, תוך כדי חקירת BUG-008
 - **מסך / מודול:** `airtable_schema.py` — `LeadFields.NEXT_STEP` ("Next Action")

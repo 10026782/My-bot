@@ -23,6 +23,33 @@
 
 > נבנה מ-`git log --since="30 days ago"` (~172 commits, `f935c53`→`eebf73b`) + טבלאות ROADMAP.md (Stabilization Sprint, World 2, Sprint 16/06). כל commit hash צוטט ישירות מ-git או מ-ROADMAP — שורות שלא נמצאה להן ראיה ישירה מסומנות "לא ידוע".
 
+### OC-HYGIENE-SESSION-18AUG — Command Center Data Hygiene Audit + Runtime Fixes + Compact UI (session 18-19/08/2026, 6 deliverables, 4 merged + 2 Draft)
+- **תאריך:** 18-19/08/2026
+- **סוג:** Feature (UI), Bug Fix (3x), Governance (Context Librarian registration), Infrastructure (CI budget)
+- **Requirement:** owner-initiated review of Command Center data accuracy + System Health fix + Approvals read-model + UI compaction
+- **Merged PRs:**
+  - #722 (Data Hygiene Audit, task A) — `76bfa54` — ביקורת מלאה של כל סעיפי Command Center, זיהוי TRUSTED/PARTIAL/STALE/UNSUPPORTED/MISLEADING
+  - #727 (System Health Runtime Fix, task B) — `3e10dbc` — תיקון TypeError: system_health() got multiple values for argument 'identity' (decorator collision)
+  - #732 (Approvals Read-Model Alignment, task C) — `55ac3db` — הוספת actionable/legacy_read_only fields, TTL-blindness fix ב-projection
+  - #741 (Context Librarian budget overflow fix) — `9745578` — הגדלת approval_ux task budget 9520→10200 tokens
+- **Draft PRs (green CI):**
+  - #738 (Command Center UI Cleanup, task D) — `610809e` (after main sync) — compact dedupe initiatives, expand-on-demand details, hidden unsupported sections (Business Status, Recent Activity)
+  - #739 (overall_state semantics, decision 2) — `535ac4d` (after main sync) — unsupported optional sections no longer trigger PARTIAL downgrade
+- **Review על ידי:** —
+- **Deploy תאריך:** merged PRs (722/727/732/741) deployed with PR #744 merge-into-main sync; draft PRs (738/739) awaiting owner review
+- **Verified בפרודקשן:** #722/#727/#732/#741 merged to main, CI green; #738/#739 Draft, CI green after sync with #741 budget fix
+- **Verification ראיה:** test_command_center.py 12/12 (all sessions), test_owner_attention.py 26/26 (all sessions), test_owner_development.py 12/12 (#739 session), smoke_tests.py all pass, Context Librarian validate/reconcile-pr CLEAN on all PRs
+- **Files שונו:** 
+  - PR #722: audit-only, no code changes
+  - PR #727: tma_api.py (new `_system_health_payload()` helper), core/owner_attention.py, test_owner_attention.py (+4 tests)
+  - PR #732: tma_api.py, core/owner_attention.py, tma-frontend/src/types.ts, tma-frontend/src/components/Approvals.tsx, test_phase_4b2_wiring.py (+1 test), test_owner_attention.py (+2 tests)
+  - PR #741: docs/context_librarian/task_profiles/profiles.json (1 line budget bump)
+  - PR #738: tma-frontend/src/lib/commandCenterPresentation.ts (new), test files, context_librarian catalog (+1 node)
+  - PR #739: core/command_center.py (`_is_unsupported_placeholder()`, `_overall_state()` logic update), test_command_center.py (2 tests updated, 1 new)
+- **Docs עודכנו:** BUG_AUDIT_LOG.md (new bugs/fixes), CHANGE_CONTROL_LOG.md (this entry)
+- **Feature Flag:** N/A (no new flags)
+- **Rollback plan:** each PR independent; revert by PR number if needed. Infrastructure fix (#741) is prerequisite for clean CI on #738/#739.
+
 ### BUG-071-LOCATION-MOVE — move WhatsApp media adapters from providers/ to root (structural fix for F12/F13 quarantine)
 - **תאריך:** 05/07/2026
 - **סוג:** Refactoring (structural only, zero behavior change)
