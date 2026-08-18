@@ -62,6 +62,46 @@
         "core/migrations/003_episodic_entries.sql had not been executed against production Postgres as of this node's valid_from date — verify current state before treating the table as live."
       ],
       "last_observed_commit": "ee0bc45b2326be22e3c697fdbb08583af917aad6"
+    },
+    {
+      "id": "component.memory_retrieval",
+      "name": "Episodic Memory Phase 2 — Retrieval Contract (shadow-only)",
+      "type": "component",
+      "status": "shadow",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "read-only, filtered/budgeted retrieval snapshot over Business Memory (Airtable) and Episodic Memory (Postgres, Phase 1); shadow-only, no cutover",
+        "precedence": "not wired into context.py, memory_store.py, or any live turn path; docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md sections D/E/K are the design authority this implements"
+      },
+      "owner": "memory_retrieval",
+      "code_paths": [
+        "core/memory_retrieval.py",
+        "core/memory_retrieval_contract.py",
+        "core/memory_retrieval_shadow.py"
+      ],
+      "test_paths": [
+        "test_memory_retrieval.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md",
+          "role": "memory taxonomy and retrieval design that this Phase 2 work implements",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-18",
+      "last_verified_commit": "db09fd73fc6f258153cf86fd2fff15992c5b7764",
+      "confidence": 1.0,
+      "notes": [
+        "Phase 2 scope only: MemoryRetrievalRequest/MemorySnapshot contract + build_memory_snapshot() + a debug-only shadow-comparison helper.",
+        "Hard filters (tenant, then entity/session, then domain) applied before any ranking; ranking is deterministic recency only — no embeddings, no vector DB, no LLM-based ranking.",
+        "Business Memory (Airtable) carries no tenant_id field today — retrieval only attaches Business Memory content for the single known tenant ('boss_hq') and returns empty (not an error) for any other tenant_id, documented in core/memory_retrieval.py.",
+        "Store unavailability (Episodic Postgres down, Business Memory Airtable call failing) is caught per-category and recorded in SnapshotMetadata; only a malformed request (missing tenant_id/canonical_user_id) raises.",
+        "No writes anywhere in this surface, no calls to the LLM or the approval/tool-execution pipeline — verified by a dedicated test (test_memory_retrieval.py::test_no_llm_or_action_gateway_or_write_calls)."
+      ]
     }
   ]
 }
