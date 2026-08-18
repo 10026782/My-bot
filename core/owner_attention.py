@@ -288,7 +288,18 @@ def _approval_items(result: CollectorResult, checked_at: str) -> list[OwnerAtten
         return []
     payload = result.payload or {}
     pending = payload.get("pending") or [] if isinstance(payload, Mapping) else []
-    count = payload.get("pending_count", len(pending)) if isinstance(payload, Mapping) else 0
+    # Command Center approvals read-model alignment: the headline count must
+    # reflect rows PROVEN actionable (per the canonical actionable flag —
+    # tma_api._fmt_approval, itself derived from the live ActionContract, not
+    # from Approvals.STATUS), never the raw Airtable pending_count. A stale/
+    # legacy/expired row inflating pending_count with nothing actionable
+    # behind it must never surface a misleading "N ממתינים" banner — honest
+    # absence (no item at all) beats partial fake completeness.
+    actionable = [
+        approval for approval in pending
+        if isinstance(approval, Mapping) and approval.get("actionable") is True
+    ]
+    count = len(actionable)
     if not count:
         return []
     items = [
@@ -299,7 +310,7 @@ def _approval_items(result: CollectorResult, checked_at: str) -> list[OwnerAtten
             severity="WARNING",
             title="החלטות ממתינות",
             summary=f"{count} אישורים ממתינים להחלטת בעלים",
-            reason="קיימות רשומות Approval במצב ממתין במקור הקנוני",
+            reason="קיימות רשומות Approval actionable במצב ממתין במקור הקנוני",
             source_name="Approvals",
             source_ref="tma_api.get_approvals",
             checked_at=checked_at,
@@ -307,10 +318,6 @@ def _approval_items(result: CollectorResult, checked_at: str) -> list[OwnerAtten
             destination="approvals",
             canonicality="canonical",
         )
-    ]
-    actionable = [
-        approval for approval in pending
-        if isinstance(approval, Mapping) and approval.get("actionable") is True
     ]
     actionable.sort(key=lambda approval: (
         str(approval.get("action", "")),
