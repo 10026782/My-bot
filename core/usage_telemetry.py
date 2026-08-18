@@ -311,3 +311,50 @@ def get_trailing_hour_usage(now: datetime | None = None) -> dict:
     if now is None:
         now = datetime.now(tz=timezone.utc)
     return get_usage_window(now - timedelta(hours=1), now)
+
+
+def format_usage_window(window: dict) -> str:
+    """
+    Pure text formatter for a get_usage_window()/get_daily_usage() result.
+    No DB access, no side effects. Must not raise on an empty by_model/
+    by_source, and must never render "unavailable"/"error" as if they were
+    zero usage — that distinction is the entire point of WindowStatus.
+    """
+    status = window["status"]
+
+    if status == "unavailable":
+        return "Usage telemetry: PostgreSQL unavailable — no data (not zero usage, unknown)."
+
+    if status == "error":
+        return f"Usage telemetry: query failed — {window['error']} (not zero usage, unknown)."
+
+    lines = [
+        "Usage telemetry",
+        "",
+        f"Total calls: {window['total_calls']}",
+        f"Total cost: ${window['total_cost_usd']:.4f}"
+        f" (confirmed ${window['total_cost_usd_confirmed']:.4f}"
+        f" / estimated ${window['total_cost_usd_estimated']:.4f})",
+    ]
+
+    if window["by_model"]:
+        lines.append("")
+        lines.append("By model:")
+        for (provider, service, model), m in sorted(window["by_model"].items()):
+            lines.append(
+                f"  {provider}/{service}/{model}: {m['calls']} calls, "
+                f"${m['cost_usd']:.4f}"
+                + (f" ({m['estimated_calls']} estimated)" if m["estimated_calls"] else "")
+            )
+
+    if window["by_source"]:
+        lines.append("")
+        lines.append("By source:")
+        for source, s in sorted(window["by_source"].items()):
+            lines.append(f"  {source}: {s['calls']} calls, ${s['cost_usd']:.4f}")
+
+    if not window["by_model"] and not window["by_source"]:
+        lines.append("")
+        lines.append("No usage recorded in this window.")
+
+    return "\n".join(lines)
