@@ -58,10 +58,11 @@ def prepare_task_gateway_call(
     title: str = "",
     fields: Mapping[str, object] | None = None,
     limit: int = 5,
+    identity=None,
 ) -> tuple[str, dict] | ResolverResult:
     result = prepare_task_proposal(
         intent, TASK_OWNERSHIP, scope=scope, lookup=lookup, query=query,
-        title=title, fields=fields, limit=limit,
+        title=title, fields=fields, limit=limit, identity=identity,
     )
     return gateway_call(result) if isinstance(result, CanonicalActionProposal) else result
 
@@ -84,12 +85,13 @@ def queue_task_request(
     query: str = "",
     fields: Mapping[str, object] | None = None,
     queue: Callable[[str, dict], dict],
+    identity=None,
 ) -> dict:
     """Prepare, fail closed on resolution, then use the existing queue."""
     try:
         result = prepare_task_gateway_call(
             intent, scope=scope, lookup=airtable_task_lookup,
-            query=query, title=title, fields=fields,
+            query=query, title=title, fields=fields, identity=identity,
         )
     except ValueError as exc:
         return {"message": str(exc), "created_this_turn": False}

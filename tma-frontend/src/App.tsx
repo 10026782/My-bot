@@ -14,6 +14,7 @@ import { BossDigest } from "./components/BossDigest";
 import { OwnerControlCenter } from "./components/OwnerControlCenter";
 import { Ventures } from "./components/Ventures";
 import { MarketingStatus } from "./components/MarketingStatus";
+import { MyWork } from "./components/MyWork";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -35,6 +36,7 @@ export default function App() {
   const [ownerControlOpen, setOwnerControlOpen] = useState(false);
   const [venturesOpen, setVenturesOpen] = useState(false);
   const [marketingOpen, setMarketingOpen] = useState(false);
+  const [myWorkOpen, setMyWorkOpen] = useState(false);
   const [authRole, setAuthRole] = useState<string | null>(null);
 
   function loadHub() {
@@ -55,6 +57,11 @@ export default function App() {
       })
       .catch(() => setAuthRole(null));
   }, []);
+
+  // ── My Work ──────────────────────────────────────────────────────
+  if (myWorkOpen) {
+    return <MyWork onBack={() => setMyWorkOpen(false)} />;
+  }
 
   // ── Boss Daily Check-in ─────────────────────────────────────────
   if (checkinOpen) {
@@ -176,6 +183,9 @@ export default function App() {
           )}
           {canShowOwnerControl && (
             <button onClick={() => setVenturesOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="Ventures">🔭</button>
+          )}
+          {canShowOwnerControl && (
+            <button onClick={() => setMyWorkOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="העבודה שלי">✓</button>
           )}
           <button onClick={() => setHealthOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="בריאות מערכת">⚙️</button>
           <button onClick={() => setMarketingOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="שיווק">📣</button>

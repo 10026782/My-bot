@@ -40,6 +40,7 @@ def prepare_task_proposal(
     title: str = "",
     fields: Mapping[str, object] | None = None,
     limit: int = 5,
+    identity=None,
 ) -> TaskIntegrationResult:
     """Select the registered owner, resolve when required, then build.
 
@@ -56,7 +57,7 @@ def prepare_task_proposal(
     if intent == Intent.CREATE_TASK:
         if decision.owner != _TASK_BUILDER_OWNER:
             raise ValueError(f"owner mismatch for intent: {intent}")
-        return build_create_task_proposal(title, **dict(fields or {}))
+        return build_create_task_proposal(title, identity=identity, **dict(fields or {}))
     if intent not in {Intent.UPDATE_TASK, Intent.COMPLETE_TASK}:
         raise ValueError(f"unsupported task integration intent: {intent}")
     if decision.owner != _TASK_RESOLVER_OWNER:

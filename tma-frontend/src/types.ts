@@ -366,6 +366,28 @@ export interface CommandCenterResponse {
   overall_state: "OK" | "ATTENTION" | "PARTIAL" | "UNKNOWN";
 }
 
+export interface TaskWorkItem {
+  stable_key: string;
+  title: string;
+  description: string;
+  status: string;
+  due_date: string | null;
+  owner: string;
+  domain: string;
+  source_type: string;
+  source_ref: string;
+  overdue: boolean;
+  destination: string;
+  actionable: boolean;
+}
+
+export interface MyWorkResponse {
+  ok: boolean;
+  immediate: TaskWorkItem[];
+  upcoming: TaskWorkItem[];
+  generated_at: string;
+}
+
 export type VentureStage =
   | "Research"
   | "Supplier/Source Contact"

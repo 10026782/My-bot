@@ -21,7 +21,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request
 from identity import resolve_identity, Role
 from airtable_schema import (
-    LeadFields, TaskFields, PaymentStatus, PaymentFields, ExpenseFields,
+    LeadFields, TaskFields, TaskStatus, PaymentStatus, PaymentFields, ExpenseFields,
     BusinessMemoryFields, InteractionLogFields, Tables,
     DealFields,
     QuestsFields, CoinsLogFields, WorldsFields, QuestStatus, WorldStatus,
@@ -145,6 +145,7 @@ def _cors(response):
 @tma_api.route("/api/owner/control-center", methods=["OPTIONS"])
 @tma_api.route("/api/owner/command-center", methods=["OPTIONS"])
 @tma_api.route("/api/owner/health", methods=["OPTIONS"])
+@tma_api.route("/api/owner/my-work", methods=["OPTIONS"])
 @tma_api.route("/api/tma/upload", methods=["OPTIONS"])
 def _preflight():
     return "", 204
@@ -2614,6 +2615,87 @@ def owner_command_center(identity):
         generated_at=generated_at,
     )
     return jsonify(status.as_dict()), 200
+
+
+@tma_api.route("/api/owner/my-work", methods=["GET"])
+@require_tma_auth
+def owner_my_work(identity):
+    """Personal executable task queue for owner; read-only."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    # Query tasks filtered to current owner only
+    owner_filter = f"{{{TaskFields.OWNER}}} = '{identity.user_id}'"
+    try:
+        records = _at_list(Tables.TASKS, owner_filter, max_records=100)
+    except Exception as e:
+        logger.error(f"Failed to query tasks: {e}")
+        return jsonify({"error": "failed to load tasks"}), 500
+
+    today = date_class.today().isoformat()
+    immediate = []
+    upcoming = []
+
+    for rec in records:
+        fields = rec.get("fields", {})
+
+        # Skip completed tasks
+        status = fields.get(TaskFields.STATUS, "")
+        if status == TaskStatus.DONE:
+            continue
+
+        # Skip if OWNER is empty or doesn't match (safety check)
+        owner = fields.get(TaskFields.OWNER, "").strip()
+        if not owner or owner != identity.user_id:
+            continue
+
+        task_item = {
+            "stable_key": rec.get("id", ""),
+            "title": fields.get(TaskFields.NAME, ""),
+            "description": fields.get(TaskFields.DESCRIPTION, ""),
+            "status": status,
+            "due_date": fields.get(TaskFields.DUE_DATE),
+            "owner": owner,
+            "domain": fields.get(TaskFields.DOMAIN, ""),
+            "source_type": "task",
+            "source_ref": rec.get("id", ""),
+            "overdue": False,
+            "destination": "task",
+            "actionable": True,
+        }
+
+        # Categorize by due date
+        due_date = fields.get(TaskFields.DUE_DATE)
+        if due_date and due_date < today:
+            task_item["overdue"] = True
+            immediate.append(task_item)
+        elif due_date and due_date == today:
+            immediate.append(task_item)
+        else:
+            # Future-dated or no due date → upcoming
+            upcoming.append(task_item)
+
+    # Sort: overdue first, then by due date ascending
+    def sort_key(t):
+        is_overdue = t["overdue"]
+        due_date = t["due_date"] or "9999-12-31"
+        return (not is_overdue, due_date)
+
+    immediate.sort(key=sort_key)
+
+    # Sort upcoming: due date ascending (None at end)
+    def upcoming_sort_key(t):
+        due_date = t["due_date"]
+        return (due_date is None, due_date or "9999-12-31")
+
+    upcoming.sort(key=upcoming_sort_key)
+
+    return jsonify({
+        "ok": True,
+        "immediate": immediate,
+        "upcoming": upcoming,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }), 200
 
 
 @tma_api.route("/api/approvals", methods=["GET"])
