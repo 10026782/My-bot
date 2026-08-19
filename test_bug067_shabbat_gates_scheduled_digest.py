@@ -51,6 +51,7 @@ SCHEDULER_JOB_NAMES = (
     "_job_boss_battle_check",
     "_job_cost_watchdog",
     "_job_daily_usage_report",
+    "_job_memory_shadow_scan",
 )
 
 

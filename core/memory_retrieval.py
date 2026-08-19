@@ -75,7 +75,13 @@ def _fetch_episodic_entries(
         return entries, True, None
     except EpisodicMemoryError as exc:
         logger.warning("[MemoryRetrieval] episodic memory unavailable: %s", exc)
-        return [], False, str(exc)[:200]
+        # SnapshotMetadata's error field flows to owner-facing output
+        # (format_shadow_comparison) and, since Phase 2B's shadow-logging
+        # follow-up, into a durable Postgres row — the exception class name
+        # is a fixed, content-free identifier; the raw message (which can
+        # embed connection details, SQL fragments, or field values) never
+        # leaves the server log line above.
+        return [], False, type(exc).__name__
 
 
 def _parse_event_date(raw: object) -> float | None:
@@ -134,7 +140,9 @@ def _fetch_business_memory(
         return items[: request.business_memory_budget], True, None
     except Exception as exc:
         logger.warning("[MemoryRetrieval] business memory unavailable: %s", exc)
-        return [], False, str(exc)[:200]
+        # See _fetch_episodic_entries' matching comment: class name only,
+        # never the raw message, since this field is now durably persisted.
+        return [], False, type(exc).__name__
 
 
 def build_memory_snapshot(request: MemoryRetrievalRequest) -> MemorySnapshot:

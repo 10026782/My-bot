@@ -1,17 +1,22 @@
-"""Debug/test-only shadow comparison: today's live assembly paths vs. the
-new Phase 2 retrieval contract.
+"""Debug/observation-only shadow comparison: today's live assembly paths vs.
+the new Phase 2 retrieval contract.
 
-Never called from app.py, context.py, or any live request path — see
+Never called from context.py or any live prompt-assembly path — see
 core/memory_retrieval.py's module docstring for why. This exists so a
-developer (Phase 2B: the owner, via /memory_shadow) can manually compare
-memory_store.get_for_claude() + cmd_update.get_recent_business_context()
-(today's live behavior, both completely untouched) against
-build_memory_snapshot() (new, side path) without either one influencing the
-other. No prompt, no model call, no mutation of either source's state.
+comparison (Phase 2B: on-demand via the owner's /memory_shadow command;
+this-follow-up: a low-frequency scheduler job, see scheduler.py's
+_job_memory_shadow_scan) can run memory_store.get_for_claude() +
+cmd_update.get_recent_business_context() (today's live behavior, both
+completely untouched) against build_memory_snapshot() (new, side path)
+without either one influencing the other. No prompt, no model call, no
+mutation of either source's state. record_shadow_comparison() below is the
+only thing that writes anywhere, and it writes structured counts only (see
+core/migrations/004_memory_shadow_comparisons.sql) — never memory content.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from core.memory_retrieval import build_memory_snapshot
@@ -20,6 +25,8 @@ from core.memory_retrieval_contract import (
     MemoryRetrievalValidationError,
     MemorySnapshot,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -101,3 +108,59 @@ def format_shadow_comparison(comparison: ShadowComparison) -> str:
         " defined ordering (raw Airtable API order).",
     ]
     return "\n".join(lines)
+
+
+def record_shadow_comparison(comparison: ShadowComparison) -> bool:
+    """Durably records one comparison's structured counts (never memory
+    content — mirrors core/usage_telemetry.py's record_usage() fail-soft
+    pattern). Returns True if the row was written, False if PostgreSQL is
+    unavailable or the write failed. Never raises."""
+    meta = comparison.new_snapshot.metadata
+    bm_count = len(comparison.new_snapshot.business_facts)
+    ep_count = len(comparison.new_snapshot.episodic_entries)
+
+    from core.database import get_conn, release_conn
+
+    conn = get_conn()
+    if conn is None:
+        logger.error(
+            "[MemoryShadow] PostgreSQL unavailable — comparison NOT durably "
+            "recorded (tenant=%s user=%s). Shadow-only observation; the gap "
+            "itself should still be investigated.",
+            meta.tenant_id, meta.canonical_user_id,
+        )
+        return False
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO memory_shadow_comparisons
+                    (ts, tenant_id, canonical_user_id, domain_id,
+                     legacy_message_count, legacy_business_char_count,
+                     new_business_count, new_business_available, new_business_error, new_business_budget,
+                     new_episodic_count, new_episodic_available, new_episodic_error, new_episodic_budget)
+                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """,
+                (
+                    meta.tenant_id, meta.canonical_user_id, meta.domain_id,
+                    comparison.live_conversation_message_count, comparison.live_business_memory_char_count,
+                    bm_count, meta.business_memory_available, meta.business_memory_error, meta.business_memory_budget,
+                    ep_count, meta.episodic_memory_available, meta.episodic_memory_error, meta.episodic_memory_budget,
+                ),
+            )
+            conn.commit()
+        logger.debug(
+            "[MemoryShadow] recorded comparison tenant=%s user=%s bm=%d ep=%d",
+            meta.tenant_id, meta.canonical_user_id, bm_count, ep_count,
+        )
+        return True
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("[MemoryShadow] record_shadow_comparison failed: %s", e, exc_info=True)
+        return False
+    finally:
+        release_conn(conn)
