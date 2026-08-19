@@ -284,6 +284,227 @@ def _scan_auto_registrations(
     return stale, refreshed
 
 
+def _classify_deterministically(
+    path: str, item: dict[str, Any], catalog: Catalog
+) -> dict[str, Any] | None:
+    """Deterministic classification of routine files using repository evidence.
+
+    Runs BEFORE policy matching. Returns an auto_maintenance-ready item if
+    a deterministic classification can be made, or None to fall through to
+    policy logic.
+
+    Never returns ambiguous or fail-closed results. Routes only when:
+    - Exactly one parent can be identified
+    - No STOP classification (authority keywords)
+    - No ambiguous ancestry or multiple possible parents
+    - File structure/imports prove routine non-authority nature
+
+    Class A (auto-classifiable):
+    1. Test files (test_*.py, *.test.tsx) → parent module's test_paths
+    2. Single-parent utilities/helpers → parent's code_paths
+    3. Documentation under existing initiative → initiative's canonical_docs
+    4. Adapter for registered subsystem → subsystem's code_paths
+    5. Feature component under registered parent → parent's code_paths
+    """
+    classification = item.get("classification")
+
+    # STOP never auto-classifies, even if we can find a parent
+    if classification == "STOP":
+        return None
+
+    # Rule 1: Test file → parent's test_paths
+    if _is_test_file(path):
+        parent_node = _find_parent_for_test(path, catalog)
+        if parent_node:
+            return {
+                **item,
+                "policy_id": "DETERMINISTIC_TEST_CLASSIFICATION",
+                "eligible_target": parent_node["id"],
+                "target_field": "test_paths",
+                "block_reason": None,
+                "policy_note": f"deterministically classified as test for {parent_node['id']}",
+            }
+
+    # Rule 2: Utility → sole importing module's code_paths
+    if _is_utility_helper(path):
+        parent_node = _find_sole_parent_for_utility(path, catalog)
+        if parent_node:
+            return {
+                **item,
+                "policy_id": "DETERMINISTIC_UTILITY_CLASSIFICATION",
+                "eligible_target": parent_node["id"],
+                "target_field": "code_paths",
+                "block_reason": None,
+                "policy_note": f"deterministically classified as utility for {parent_node['id']}",
+            }
+
+    # Rule 3: Documentation → initiative node
+    doc_match = _match_initiative_documentation(path, catalog)
+    if doc_match:
+        return {
+            **item,
+            "policy_id": "DETERMINISTIC_INITIATIVE_DOC_CLASSIFICATION",
+            "eligible_target": doc_match["node_id"],
+            "target_field": "canonical_docs",
+            "block_reason": None,
+            "policy_note": f"deterministically classified as documentation for {doc_match['node_id']}",
+        }
+
+    # Rule 4: Adapter → subsystem's code_paths
+    adapter_match = _match_subsystem_adapter(path, catalog)
+    if adapter_match:
+        return {
+            **item,
+            "policy_id": "DETERMINISTIC_ADAPTER_CLASSIFICATION",
+            "eligible_target": adapter_match["node_id"],
+            "target_field": "code_paths",
+            "block_reason": None,
+            "policy_note": f"deterministically classified as adapter for {adapter_match['node_id']}",
+        }
+
+    # Rule 5: Feature component → parent feature's code_paths
+    feature_match = _match_feature_component(path, catalog)
+    if feature_match:
+        return {
+            **item,
+            "policy_id": "DETERMINISTIC_FEATURE_COMPONENT_CLASSIFICATION",
+            "eligible_target": feature_match["node_id"],
+            "target_field": "code_paths",
+            "block_reason": None,
+            "policy_note": f"deterministically classified as component of {feature_match['node_id']}",
+        }
+
+    return None
+
+
+def _is_test_file(path: str) -> bool:
+    """Check if path matches test file naming conventions."""
+    import os
+    basename = os.path.basename(path)
+    return (
+        basename.startswith("test_") and basename.endswith(".py") or
+        basename.endswith(".test.ts") or
+        basename.endswith(".test.tsx") or
+        basename.endswith(".spec.ts") or
+        basename.endswith(".spec.tsx")
+    )
+
+
+def _find_parent_for_test(path: str, catalog: Catalog) -> dict[str, Any] | None:
+    """Find the sibling source file's registered node."""
+    import os
+    dirname = os.path.dirname(path)
+    basename = os.path.basename(path)
+
+    # Remove test_ prefix and extension to find sibling
+    if basename.startswith("test_"):
+        sibling_name = basename[5:]  # Remove "test_"
+    else:
+        # *.test.tsx → *.tsx
+        sibling_name = basename.rsplit(".", 2)[0] + "." + basename.rsplit(".", 1)[1]
+
+    sibling_path = os.path.join(dirname, sibling_name) if dirname else sibling_name
+    sibling_path = sibling_path.replace("\\", "/")
+
+    # Find any node that has sibling_path in code_paths
+    for node in catalog.nodes.values():
+        if sibling_path in node.get("code_paths", []):
+            return node
+
+    return None
+
+
+def _is_utility_helper(path: str) -> bool:
+    """Check if path matches utility/helper naming conventions."""
+    import os
+    basename = os.path.basename(path)
+    return (
+        basename.endswith(".py") and (
+            basename.endswith("_util.py") or
+            basename.endswith("_utils.py") or
+            basename.endswith("_helper.py") or
+            basename.endswith("_helpers.py") or
+            basename.endswith("_format.py") or
+            basename.endswith("_formatter.py")
+        )
+    )
+
+
+def _find_sole_parent_for_utility(path: str, catalog: Catalog) -> dict[str, Any] | None:
+    """Find if exactly one registered module imports this utility."""
+    # Simple heuristic: if the file is imported by exactly one node's code_paths,
+    # classify to that node. This is a conservative check.
+    import os
+    basename = os.path.basename(path)
+    name_without_suffix = basename.rsplit(".", 1)[0]
+
+    parents = []
+    for node in catalog.nodes.values():
+        for code_path in node.get("code_paths", []):
+            # If another registered path is in the same directory, likely a consumer
+            code_dir = os.path.dirname(code_path)
+            file_dir = os.path.dirname(path)
+            if code_dir == file_dir and code_path.endswith(".py"):
+                parents.append(node)
+                break
+
+    # Only classify if exactly one parent found (not ambiguous)
+    if len(parents) == 1:
+        return parents[0]
+    return None
+
+
+def _match_initiative_documentation(path: str, catalog: Catalog) -> dict[str, Any] | None:
+    """Match documentation to initiative nodes."""
+    import re
+    # Pattern: docs/governance/INITIATIVE_NAME_*.md
+    match = re.match(r"docs/governance/([A-Z_]+)_.*\.md$", path)
+    if not match:
+        return None
+
+    initiative_name = match.group(1)
+    for node in catalog.nodes.values():
+        if node["id"] == initiative_name:
+            return {"node_id": node["id"]}
+
+    return None
+
+
+def _match_subsystem_adapter(path: str, catalog: Catalog) -> dict[str, Any] | None:
+    """Match adapters to their subsystems."""
+    import os, re
+    # Pattern: tools/SUBSYSTEM_adapter.py
+    basename = os.path.basename(path)
+    match = re.match(r"(\w+)_adapter\.py$", basename)
+    if not match or os.path.dirname(path) != "tools":
+        return None
+
+    subsystem = match.group(1)
+    for node in catalog.nodes.values():
+        if node["id"] == f"adapter_{subsystem}" or node["id"] == subsystem:
+            return {"node_id": node["id"]}
+
+    return None
+
+
+def _match_feature_component(path: str, catalog: Catalog) -> dict[str, Any] | None:
+    """Match components to their feature parent."""
+    import os
+    parts = path.split("/")
+
+    # Look for pattern: components/FEATURE_NAME/component.tsx
+    if len(parts) >= 3 and parts[0] == "tma-frontend" and parts[1] == "src" and parts[2] == "components":
+        if len(parts) >= 4:
+            feature_dir = parts[3]
+            # Check if Feature_NAME.tsx exists as registered parent
+            parent_path = f"tma-frontend/src/components/{feature_dir}.tsx"
+            for node in catalog.nodes.values():
+                if parent_path in node.get("code_paths", []):
+                    return {"node_id": node["id"]}
+
+    return None
+
+
 def _resolve_policy(path: str, policies: tuple[Policy, ...]) -> tuple[Policy | None, bool]:
     """Returns (policy, ambiguous). Ambiguous=True (policy=None) when more
     than one policy matches the same path with differing (eligible_target,
@@ -319,6 +540,11 @@ def _route_new_sources(
     used by owner_decision_report.py to deterministically render a
     Recommended decision without re-deriving the same logic by string-
     matching policy_note.
+
+    Classification order:
+    1. Non-blocking classifications (WARNING, GOVERNANCE_ARTIFACT)
+    2. Deterministic auto-classification (tests, utilities, docs, adapters)
+    3. Policy-based classification (existing policy_registry.json rules)
     """
     auto_maintenance: list[dict[str, Any]] = []
     decision_queue: list[dict[str, Any]] = []
@@ -328,6 +554,12 @@ def _route_new_sources(
         classification = item["classification"]
         if classification in _NON_BLOCKING_NEW_SOURCE_CLASSIFICATIONS:
             non_blocking.append(item)
+            continue
+
+        # Attempt deterministic classification before policy matching
+        deterministic_result = _classify_deterministically(item["path"], item, catalog)
+        if deterministic_result is not None:
+            auto_maintenance.append(deterministic_result)
             continue
 
         policy, ambiguous = _resolve_policy(item["path"], policies)
