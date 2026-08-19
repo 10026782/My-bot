@@ -10,9 +10,13 @@ Tests verify:
 6. Fail-closed on non-owner access
 """
 
+import os
 from datetime import date, timedelta
+
+import identity as identity_module
+import tma_api
 from identity import Identity, Role, Domain
-from airtable_schema import TaskFields, TaskStatus
+from airtable_schema import TaskFields, TaskStatus, Tables
 
 
 def create_test_identity(user_id="eliyahu", role=Role.OWNER, external_id="123456"):
@@ -249,6 +253,153 @@ def test_my_work_empty_task_list():
 
     assert len(result["immediate"]) == 0
     assert len(result["upcoming"]) == 0
+
+
+# ══════════════════════════════════════════════════════════════════
+# MY-WORK-1C: real resolve_identity() proof (not a hand-built Identity)
+# ══════════════════════════════════════════════════════════════════
+
+def test_resolve_identity_real_owner_mapping():
+    """Prove the actual resolve_identity() maps a Telegram owner chat ID
+    to user_id='eliyahu'/role=OWNER via the real registry-loading path,
+    not a hand-constructed Identity object."""
+    orig_registry = identity_module._REGISTRY
+    orig_env = os.environ.get("ELIYAHU_CHAT_ID")
+    test_chat_id = "999999"
+    try:
+        os.environ["ELIYAHU_CHAT_ID"] = test_chat_id
+        identity_module._REGISTRY = identity_module._load_registry()
+
+        resolved = identity_module.resolve_identity("telegram", test_chat_id)
+
+        assert resolved.user_id == "eliyahu"
+        assert resolved.role == Role.OWNER
+        assert resolved.is_owner is True
+        assert resolved.tenant_id == "boss_hq"
+    finally:
+        if orig_env is None:
+            os.environ.pop("ELIYAHU_CHAT_ID", None)
+        else:
+            os.environ["ELIYAHU_CHAT_ID"] = orig_env
+        identity_module._REGISTRY = orig_registry
+
+
+def test_resolve_identity_unknown_telegram_id_is_not_owner():
+    """A Telegram ID absent from the registry must never resolve to owner."""
+    orig_registry = identity_module._REGISTRY
+    orig_env = os.environ.get("ELIYAHU_CHAT_ID")
+    try:
+        os.environ["ELIYAHU_CHAT_ID"] = "999999"
+        identity_module._REGISTRY = identity_module._load_registry()
+
+        resolved = identity_module.resolve_identity("telegram", "000000_unknown")
+
+        assert resolved.user_id != "eliyahu"
+        assert resolved.is_owner is False
+    finally:
+        if orig_env is None:
+            os.environ.pop("ELIYAHU_CHAT_ID", None)
+        else:
+            os.environ["ELIYAHU_CHAT_ID"] = orig_env
+        identity_module._REGISTRY = orig_registry
+
+
+# ══════════════════════════════════════════════════════════════════
+# MY-WORK-1C: real Flask route tests for GET /api/owner/my-work
+# (established pattern: see test_tma_projects_read_path_optimization.py)
+# ══════════════════════════════════════════════════════════════════
+
+def _make_client():
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(tma_api.tma_api)
+    return app.test_client()
+
+
+_HDR = {"X-Telegram-Init-Data": "x"}
+
+
+def test_route_get_my_work_returns_200_and_filters_by_owner():
+    """Full route: auth -> identity -> Airtable read -> owner-scoped response."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_at_list = tma_api._at_list
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu")
+
+    captured_calls = []
+
+    def fake_at_list(table, formula="", max_records=50, strict=False):
+        captured_calls.append((table, formula, max_records))
+        # Airtable would already filter server-side, but mixing owners here
+        # also proves the route's own safety-check excludes non-matching rows.
+        return [
+            create_test_task(record_id="rec_mine", owner="eliyahu", status=TaskStatus.PENDING),
+            create_test_task(record_id="rec_other", owner="other_owner", status=TaskStatus.PENDING),
+        ]
+
+    tma_api._at_list = fake_at_list
+
+    try:
+        r = client.get("/api/owner/my-work", headers=_HDR)
+        body = r.get_json()
+
+        assert r.status_code == 200
+        assert len(captured_calls) == 1
+        table, formula, max_records = captured_calls[0]
+        assert table == Tables.TASKS
+        assert "eliyahu" in formula
+
+        stable_keys = [t["stable_key"] for t in body["immediate"] + body["upcoming"]]
+        assert "rec_mine" in stable_keys
+        assert "rec_other" not in stable_keys
+        assert body["ok"] is True
+        assert "generated_at" in body
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_list = orig_at_list
+
+
+def test_route_get_my_work_non_owner_returns_403():
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "222222"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="partner", role=Role.PARTNER)
+
+    try:
+        r = client.get("/api/owner/my-work", headers=_HDR)
+        assert r.status_code == 403
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+
+
+def test_route_get_my_work_airtable_failure_returns_500():
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_at_list = tma_api._at_list
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu")
+
+    def failing_at_list(*a, **kw):
+        raise RuntimeError("Airtable timeout")
+
+    tma_api._at_list = failing_at_list
+
+    try:
+        r = client.get("/api/owner/my-work", headers=_HDR)
+        assert r.status_code == 500
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_list = orig_at_list
 
 
 if __name__ == "__main__":
