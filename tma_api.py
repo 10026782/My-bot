@@ -2617,22 +2617,21 @@ def owner_command_center(identity):
     return jsonify(status.as_dict()), 200
 
 
-@tma_api.route("/api/owner/my-work", methods=["GET"])
-@require_tma_auth
-def owner_my_work(identity):
-    """Personal executable task queue for owner; read-only."""
-    if not identity.is_owner:
-        return jsonify({"error": "forbidden"}), 403
+def _process_owner_tasks(records: list, user_id: str, today: str | None = None) -> dict:
+    """
+    Core task processing logic (testable, no Flask dependency).
 
-    # Query tasks filtered to current owner only
-    owner_filter = f"{{{TaskFields.OWNER}}} = '{identity.user_id}'"
-    try:
-        records = _at_list(Tables.TASKS, owner_filter, max_records=100)
-    except Exception as e:
-        logger.error(f"Failed to query tasks: {e}")
-        return jsonify({"error": "failed to load tasks"}), 500
+    Args:
+        records: Airtable task records
+        user_id: Owner's user_id to filter by
+        today: Today's ISO date (defaults to date.today())
 
-    today = date_class.today().isoformat()
+    Returns:
+        Dict with immediate/upcoming tasks and metadata
+    """
+    if today is None:
+        today = date.today().isoformat()
+
     immediate = []
     upcoming = []
 
@@ -2646,7 +2645,7 @@ def owner_my_work(identity):
 
         # Skip if OWNER is empty or doesn't match (safety check)
         owner = fields.get(TaskFields.OWNER, "").strip()
-        if not owner or owner != identity.user_id:
+        if not owner or owner != user_id:
             continue
 
         task_item = {
@@ -2690,10 +2689,33 @@ def owner_my_work(identity):
 
     upcoming.sort(key=upcoming_sort_key)
 
-    return jsonify({
-        "ok": True,
+    return {
         "immediate": immediate,
         "upcoming": upcoming,
+    }
+
+
+@tma_api.route("/api/owner/my-work", methods=["GET"])
+@require_tma_auth
+def owner_my_work(identity):
+    """Personal executable task queue for owner; read-only."""
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    # Query tasks filtered to current owner only
+    owner_filter = f"{{{TaskFields.OWNER}}} = '{identity.user_id}'"
+    try:
+        records = _at_list(Tables.TASKS, owner_filter, max_records=100)
+    except Exception as e:
+        logger.error(f"Failed to query tasks: {e}")
+        return jsonify({"error": "failed to load tasks"}), 500
+
+    result = _process_owner_tasks(records, identity.user_id)
+
+    return jsonify({
+        "ok": True,
+        "immediate": result["immediate"],
+        "upcoming": result["upcoming"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }), 200
 
