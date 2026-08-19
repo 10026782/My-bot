@@ -69,6 +69,8 @@ from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
 from core.claim_authorization_shadow import observe_claim_authorization_shadow
 from health_monitor import get_health_status
 from feature_flags import is_enabled as _flag_enabled, get_evidence_finalizer_state
+from core.episodic_entry import EpisodicEntry, EpisodicEntryValidationError
+from core.episodic_memory_repository import EpisodicMemoryError, EpisodicMemoryRepository
 import cost_monitor
 import llm_fallback
 try:
@@ -3704,6 +3706,41 @@ def _log_ingress_envelope_accepted(envelope) -> None:
     )
 
 
+def _capture_turn_outcome_episodic(identity, turn_evidence, tool_results_log: list) -> None:
+    """Episodic Memory Phase 1: append one 'outcome' EpisodicEntry for a
+    completed turn. Fail-soft/history only — never raises, never touches
+    final_reply. No session_id/entity_id: nothing in the live runtime
+    proves one yet (see core/memory_retrieval_shadow.py's own comment on
+    this same gap). Caller must check FEATURE_EPISODIC_CAPTURE first."""
+    try:
+        EpisodicMemoryRepository().insert(EpisodicEntry(
+            tenant_id=identity.tenant_id,
+            canonical_user_id=identity.user_id,
+            event_type="outcome",
+            source="run_agent",
+            occurred_at=time.time(),
+            domain_id=identity.domain_id,
+            payload={
+                "channel": identity.channel,
+                "classification": turn_evidence.classification(),
+                "tool_count": len(tool_results_log),
+            },
+        ))
+    except (EpisodicMemoryError, EpisodicEntryValidationError) as exc:
+        logger.warning(
+            "[EpisodicCapture] outcome capture failed error_type=%s",
+            type(exc).__name__,
+        )
+    except Exception as exc:
+        # Fail-soft boundary of last resort: this helper must never take
+        # run_agent() down with it. Class name only — never str(exc)/
+        # traceback, which could embed payload or runtime values.
+        logger.warning(
+            "[EpisodicCapture] skipped unexpected_error=%s",
+            type(exc).__name__,
+        )
+
+
 def run_agent(
     user_text:           str,
     chat_id:             str,
@@ -5401,6 +5438,10 @@ def run_agent(
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
         memory.add(ctx.memory_key, "assistant", final_reply)
+
+        # Episodic Memory Phase 1 — one "outcome" event per completed turn.
+        if _flag_enabled("FEATURE_EPISODIC_CAPTURE"):
+            _capture_turn_outcome_episodic(identity, turn_evidence, tool_results_log)
 
         # Buffer recovery + cleanup:
         # 1. recover_blocked_lead_payload — צורך buffer ומעדכן ליד
