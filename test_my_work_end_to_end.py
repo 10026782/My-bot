@@ -16,7 +16,7 @@ from datetime import date, timedelta
 import identity as identity_module
 import tma_api
 from identity import Identity, Role, Domain
-from airtable_schema import TaskFields, TaskStatus, Tables
+from airtable_schema import TaskFields, TaskStatus, Tables, ProfileFields, LeadFields
 
 
 def create_test_identity(user_id="eliyahu", role=Role.OWNER, external_id="123456"):
@@ -32,21 +32,26 @@ def create_test_identity(user_id="eliyahu", role=Role.OWNER, external_id="123456
     )
 
 
+OWNER_RECORD_ID = "recProfileEliyahu"
+OTHER_OWNER_RECORD_ID = "recProfileOther"
+
+
 def create_test_task(
     record_id="rec_001",
     title="Test Task",
-    owner="eliyahu",
+    owner_record_ids=(OWNER_RECORD_ID,),
     status=TaskStatus.PENDING,
     due_date=None,
     description="",
     domain="Real Estate",
 ):
-    """Create a test task record."""
+    """Create a test task record. Owner is a multipleRecordLinks field on
+    the real Airtable table -> a list of Profile record IDs, not a string."""
     return {
         "id": record_id,
         "fields": {
             TaskFields.NAME: title,
-            TaskFields.OWNER: owner,
+            TaskFields.OWNER: list(owner_record_ids) if owner_record_ids else [],
             TaskFields.STATUS: status,
             TaskFields.DUE_DATE: due_date,
             TaskFields.DESCRIPTION: description,
@@ -73,22 +78,37 @@ def test_my_work_endpoint_requires_owner_role():
 
 
 def test_my_work_filters_by_owner():
-    """Verify task processing filters tasks by owner."""
+    """Verify task processing filters tasks by owner (Profile linked-record ID)."""
     from tma_api import _process_owner_tasks
 
     # Mixed owners in the task list
     mock_tasks = [
-        create_test_task(record_id="rec_001", owner="eliyahu", status=TaskStatus.PENDING),
-        create_test_task(record_id="rec_002", owner="other_owner", status=TaskStatus.PENDING),
-        create_test_task(record_id="rec_003", owner="eliyahu", status=TaskStatus.PENDING),
-        create_test_task(record_id="rec_004", owner="", status=TaskStatus.PENDING),  # Empty owner
+        create_test_task(record_id="rec_001", owner_record_ids=(OWNER_RECORD_ID,), status=TaskStatus.PENDING),
+        create_test_task(record_id="rec_002", owner_record_ids=(OTHER_OWNER_RECORD_ID,), status=TaskStatus.PENDING),
+        create_test_task(record_id="rec_003", owner_record_ids=(OWNER_RECORD_ID,), status=TaskStatus.PENDING),
+        create_test_task(record_id="rec_004", owner_record_ids=(), status=TaskStatus.PENDING),  # Empty owner
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     # Should only have 2 tasks (rec_001 and rec_003)
     total = len(result["immediate"]) + len(result["upcoming"])
     assert total == 2, f"Expected 2 tasks for eliyahu, got {total}"
+
+
+def test_my_work_multi_owner_task_visible_to_each_linked_owner():
+    """A task linked to multiple Profile owners must appear for each of them."""
+    from tma_api import _process_owner_tasks
+
+    mock_tasks = [
+        create_test_task(record_id="rec_shared", owner_record_ids=(OWNER_RECORD_ID, OTHER_OWNER_RECORD_ID)),
+    ]
+
+    result_a = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
+    result_b = _process_owner_tasks(mock_tasks, OTHER_OWNER_RECORD_ID, "partner")
+
+    assert len(result_a["immediate"]) + len(result_a["upcoming"]) == 1
+    assert len(result_b["immediate"]) + len(result_b["upcoming"]) == 1
 
 
 def test_my_work_excludes_done_tasks():
@@ -101,7 +121,7 @@ def test_my_work_excludes_done_tasks():
         create_test_task(record_id="rec_003", status=TaskStatus.IN_PROGRESS),
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     total = len(result["immediate"]) + len(result["upcoming"])
     assert total == 2, "DONE task should be excluded"
@@ -116,7 +136,7 @@ def test_my_work_classifies_overdue_tasks():
         create_test_task(record_id="rec_001", due_date=yesterday, status=TaskStatus.PENDING),
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     assert len(result["immediate"]) == 1
     assert result["immediate"][0]["overdue"] is True
@@ -131,7 +151,7 @@ def test_my_work_classifies_today_tasks():
         create_test_task(record_id="rec_001", due_date=today, status=TaskStatus.PENDING),
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     assert len(result["immediate"]) == 1
     assert result["immediate"][0]["overdue"] is False  # Today is not overdue
@@ -146,7 +166,7 @@ def test_my_work_classifies_future_tasks():
         create_test_task(record_id="rec_001", due_date=tomorrow, status=TaskStatus.PENDING),
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     assert len(result["upcoming"]) == 1
 
@@ -159,7 +179,7 @@ def test_my_work_classifies_no_due_date_tasks():
         create_test_task(record_id="rec_001", due_date=None, status=TaskStatus.PENDING),
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     assert len(result["upcoming"]) == 1
 
@@ -179,7 +199,7 @@ def test_my_work_response_structure():
         ),
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     # Structure
     assert "immediate" in result
@@ -214,7 +234,7 @@ def test_my_work_counts_correct():
         create_test_task(record_id="rec_003", due_date=tomorrow),   # upcoming
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     assert len(result["immediate"]) == 1
     assert len(result["upcoming"]) == 2
@@ -235,7 +255,7 @@ def test_my_work_sorting_immediate():
         create_test_task(record_id="rec_003", title="Due today", due_date=today),
     ]
 
-    result = _process_owner_tasks(mock_tasks, user_id="eliyahu")
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
     immediate = result["immediate"]
 
@@ -249,10 +269,54 @@ def test_my_work_empty_task_list():
     """Verify processing handles zero tasks gracefully."""
     from tma_api import _process_owner_tasks
 
-    result = _process_owner_tasks([], user_id="eliyahu")
+    result = _process_owner_tasks([], OWNER_RECORD_ID, "eliyahu")
 
     assert len(result["immediate"]) == 0
     assert len(result["upcoming"]) == 0
+
+
+# ══════════════════════════════════════════════════════════════════
+# MY-WORK-1C: Owner is a multipleRecordLinks field -> Tables.PROFILE
+# (verified via Airtable MCP 2026-08-19; see _resolve_profile_record_id).
+# ══════════════════════════════════════════════════════════════════
+
+def test_resolve_profile_record_id_matches_case_insensitively():
+    """Live Profile.name is 'Eliyahu' (capitalized); identity.user_id is
+    lowercase 'eliyahu' -- resolution must not depend on exact case."""
+    from tma_api import _resolve_profile_record_id
+
+    orig_at_list = tma_api._at_list
+    captured = []
+
+    def fake_at_list(table, formula="", max_records=50, strict=False):
+        captured.append((table, formula, max_records))
+        return [{"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}]
+
+    tma_api._at_list = fake_at_list
+    try:
+        result = _resolve_profile_record_id("eliyahu")
+        assert result == OWNER_RECORD_ID
+        assert captured[0][0] == Tables.PROFILE
+        assert "LOWER" in captured[0][1]
+    finally:
+        tma_api._at_list = orig_at_list
+
+
+def test_resolve_profile_record_id_no_match_returns_none():
+    from tma_api import _resolve_profile_record_id
+
+    orig_at_list = tma_api._at_list
+    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
+    try:
+        assert _resolve_profile_record_id("nobody") is None
+    finally:
+        tma_api._at_list = orig_at_list
+
+
+def test_resolve_profile_record_id_empty_user_id_returns_none():
+    from tma_api import _resolve_profile_record_id
+
+    assert _resolve_profile_record_id("") is None
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -319,8 +383,22 @@ def _make_client():
 _HDR = {"X-Telegram-Init-Data": "x"}
 
 
+def _fake_at_list_for_route(profile_records, task_records, captured_calls):
+    """Owner is linked-record -> the route makes two _at_list calls: one
+    against Tables.PROFILE to resolve the owner, one against Tables.TASKS
+    to read all tasks (filtered by Owner in Python, not by formula)."""
+    def fake_at_list(table, formula="", max_records=50, strict=False):
+        captured_calls.append((table, formula, max_records))
+        if table == Tables.PROFILE:
+            return profile_records
+        if table == Tables.TASKS:
+            return task_records
+        return []
+    return fake_at_list
+
+
 def test_route_get_my_work_returns_200_and_filters_by_owner():
-    """Full route: auth -> identity -> Airtable read -> owner-scoped response."""
+    """Full route: auth -> identity -> Profile resolve -> Airtable read -> owner-scoped response."""
     orig_validate = tma_api._validate_initdata
     orig_resolve = tma_api.resolve_identity
     orig_at_list = tma_api._at_list
@@ -330,33 +408,50 @@ def test_route_get_my_work_returns_200_and_filters_by_owner():
     tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu")
 
     captured_calls = []
-
-    def fake_at_list(table, formula="", max_records=50, strict=False):
-        captured_calls.append((table, formula, max_records))
-        # Airtable would already filter server-side, but mixing owners here
-        # also proves the route's own safety-check excludes non-matching rows.
-        return [
-            create_test_task(record_id="rec_mine", owner="eliyahu", status=TaskStatus.PENDING),
-            create_test_task(record_id="rec_other", owner="other_owner", status=TaskStatus.PENDING),
-        ]
-
-    tma_api._at_list = fake_at_list
+    profile_records = [{"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}]
+    task_records = [
+        create_test_task(record_id="rec_mine", owner_record_ids=(OWNER_RECORD_ID,), status=TaskStatus.PENDING),
+        create_test_task(record_id="rec_other", owner_record_ids=(OTHER_OWNER_RECORD_ID,), status=TaskStatus.PENDING),
+    ]
+    tma_api._at_list = _fake_at_list_for_route(profile_records, task_records, captured_calls)
 
     try:
         r = client.get("/api/owner/my-work", headers=_HDR)
         body = r.get_json()
 
         assert r.status_code == 200
-        assert len(captured_calls) == 1
-        table, formula, max_records = captured_calls[0]
-        assert table == Tables.TASKS
-        assert "eliyahu" in formula
+        tables_queried = [c[0] for c in captured_calls]
+        assert tables_queried == [Tables.PROFILE, Tables.TASKS]
 
         stable_keys = [t["stable_key"] for t in body["immediate"] + body["upcoming"]]
         assert "rec_mine" in stable_keys
         assert "rec_other" not in stable_keys
         assert body["ok"] is True
         assert "generated_at" in body
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_list = orig_at_list
+
+
+def test_route_get_my_work_no_profile_record_returns_empty_not_500():
+    """Owner identity with no matching Profile row must fail closed to an
+    empty list, not crash or leak a mismatch as a 500."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_at_list = tma_api._at_list
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="ghost_user")
+    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
+
+    try:
+        r = client.get("/api/owner/my-work", headers=_HDR)
+        body = r.get_json()
+        assert r.status_code == 200
+        assert body["immediate"] == []
+        assert body["upcoming"] == []
     finally:
         tma_api._validate_initdata = orig_validate
         tma_api.resolve_identity = orig_resolve
@@ -388,7 +483,11 @@ def test_route_get_my_work_airtable_failure_returns_500():
     tma_api._validate_initdata = lambda s: {"id": "999999"}
     tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu")
 
-    def failing_at_list(*a, **kw):
+    profile_records = [{"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}]
+
+    def failing_at_list(table, formula="", max_records=50, strict=False):
+        if table == Tables.PROFILE:
+            return profile_records
         raise RuntimeError("Airtable timeout")
 
     tma_api._at_list = failing_at_list
@@ -399,6 +498,82 @@ def test_route_get_my_work_airtable_failure_returns_500():
     finally:
         tma_api._validate_initdata = orig_validate
         tma_api.resolve_identity = orig_resolve
+        tma_api._at_list = orig_at_list
+
+
+# ══════════════════════════════════════════════════════════════════
+# MY-WORK-1C: write-path fix -- POST /api/leads/<id>/task must give the
+# created task a real Owner. Leads.Owner is never written anywhere in this
+# codebase (grepped), so it's always empty; the task must default Owner to
+# the creator's own Profile record, or no task would ever get one.
+# ══════════════════════════════════════════════════════════════════
+
+def test_create_lead_task_defaults_owner_to_creator_when_lead_has_none():
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_post = tma_api._at_post
+    orig_at_list = tma_api._at_list
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_get_record = lambda table, rid: {"id": rid, "fields": {}}  # lead with no Owner
+    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: (
+        [{"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}] if table == Tables.PROFILE else []
+    )
+
+    posted = []
+
+    def fake_post(table, fields):
+        posted.append((table, fields))
+        return {"id": "recNewTask"}
+
+    tma_api._at_post = fake_post
+
+    try:
+        r = client.post("/api/leads/recLEAD001/task", json={"title": "call back"}, headers=_HDR)
+        assert r.status_code == 201
+        task_posts = [(t, f) for t, f in posted if t == Tables.TASKS]
+        assert len(task_posts) == 1
+        table, fields = task_posts[0]
+        assert fields[TaskFields.OWNER] == [OWNER_RECORD_ID]
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._at_post = orig_post
+        tma_api._at_list = orig_at_list
+
+
+def test_create_lead_task_preserves_lead_owner_when_present():
+    """Lead already has an Owner linked -> task copies it, does not override with creator."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_post = tma_api._at_post
+    orig_at_list = tma_api._at_list
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_get_record = lambda table, rid: {
+        "id": rid, "fields": {LeadFields.OWNER: [OTHER_OWNER_RECORD_ID]},
+    }
+    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
+
+    posted = []
+    tma_api._at_post = lambda table, fields: (posted.append((table, fields)), {"id": "recNewTask"})[1]
+
+    try:
+        r = client.post("/api/leads/recLEAD001/task", json={"title": "call back"}, headers=_HDR)
+        assert r.status_code == 201
+        assert posted[0][1][TaskFields.OWNER] == [OTHER_OWNER_RECORD_ID]
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._at_post = orig_post
         tma_api._at_list = orig_at_list
 
 

@@ -299,7 +299,7 @@ class TaskFields:
     CONTACTS_LINK   = "מקושר לאנשי קשר"
     DEALS_LINK      = "מקושר לעסקאות"
     DOMAIN          = "Domain"          # domain copied from lead on create-from-lead
-    OWNER           = "Owner"           # owner copied from lead on create-from-lead
+    OWNER           = "Owner"           # multipleRecordLinks -> Tables.PROFILE (NOT plain text; verified via Airtable MCP 2026-08-19). Read/write as a list of Profile record IDs -- see tma_api._resolve_profile_record_id.
     LEAD_LINK       = "Leads"           # linked record to Leads table (Airtable linked field name)
 
 
@@ -332,7 +332,7 @@ class LeadFields:
     CONVERTED_AT    = "converted_at"  # written by ad_attribution.mark_converted + lead_conversion
     OUTCOME         = "Business Outcome"  # singleSelect — see LeadOutcome below for exact option strings (some have a trailing space baked into the Airtable config)
     NEXT_FOLLOWUP   = "Next Followup" # ISO date of next scheduled followup
-    OWNER           = "Owner"         # assigned owner / responsible person
+    OWNER           = "Owner"         # multipleRecordLinks -> Tables.PROFILE (NOT plain text; verified via Airtable MCP 2026-08-19). Never written from the TMA today (see tma_api.create_lead_task).
     NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none — NOTE: live Airtable options are actually "Call Back/Send Details/Follow Up/Waiting Response/Create Deal/Convert Contact/Schedule Meeting /Closed Won/Closed Lost" (verified via Airtable MCP 2026-06-17) — this field is not currently written from the TMA, so the mismatch is latent, not active
     EXTERNAL_ID     = "external_id"   # gmail:<msg_id> — idempotency key מדויק (F06)
     SENDER_ID       = "sender_id"     # email address / phone — dedup by sender (F06)
@@ -416,15 +416,21 @@ class InteractionLogFields:
 
 
 class ProfileFields:
-    """Owner/business profile config — table: Tables.PROFILE.
-    Single-row table. profile.py talks to this table via raw httpx calls (does not
-    import this class) and is not wired into the live pipeline (see CLAUDE.md).
-    Verified via Airtable MCP 2026-06-24: live field is lowercase "name", and no
-    "ProfileData" field exists yet — both profile.py's docstring and this class
-    describe the intended/aspirational shape, not the current live table.
+    """Team/people roster — table: Tables.PROFILE ("Profile").
+    NOT a single-row config table (that was a stale assumption -- corrected
+    2026-08-19). Live table has one row per team member (owner/partner/
+    manager/marketing/...), linked from Tasks.Owner and Leads.Owner
+    (multipleRecordLinks) plus Contacts/Deals/Payments/etc. Each row's NAME
+    is a person's first name (e.g. "Eliyahu", capitalized), used to resolve
+    an identity.user_id to a Profile record ID -- see
+    tma_api._resolve_profile_record_id (case-insensitive match).
+    profile.py's separate "single-row business config" table concept
+    (ProfileData field, "always main" row) does not exist on the live base
+    at all -- that code remains unwired (see CLAUDE.md), do not confuse it
+    with this table.
     """
-    NAME            = "name"          # always "main" — single profile row. Live field is lowercase.
-    PROFILE_DATA    = "ProfileData"   # NOT YET CREATED LIVE — must be added to Airtable before profile.py can be wired in
+    NAME            = "name"          # person's display name, e.g. "Eliyahu". Live field is lowercase.
+    ROLE            = "Role"          # singleSelect: Owner|Manager|Sales|Marketing|Operations|Finance|Sistem|Partner
 
 
 class WorldsFields:

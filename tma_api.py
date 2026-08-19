@@ -30,6 +30,7 @@ from airtable_schema import (
     VentureFields, VentureStage,
     LeadStatus, LeadOutcome,
     LeadEventFields,
+    ProfileFields,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from health_monitor import get_health_status
@@ -1895,7 +1896,9 @@ def create_lead_task(lead_id, identity):
     lf = lead_rec.get("fields", {})
     lead_name   = lf.get(LeadFields.NAME, lead_id)
     lead_domain = _normalize_task_domain(lf.get(LeadFields.DOMAIN, ""))
-    lead_owner  = lf.get(LeadFields.OWNER, "")
+    # Owner is a multipleRecordLinks field -> list of Profile record IDs,
+    # not a plain string (see _resolve_profile_record_id).
+    lead_owner = _linked_record_ids(lf.get(LeadFields.OWNER, []))
 
     task_fields: dict = {
         TaskFields.NAME:     title,
@@ -1908,6 +1911,13 @@ def create_lead_task(lead_id, identity):
         task_fields[TaskFields.DOMAIN] = lead_domain
     if lead_owner:
         task_fields[TaskFields.OWNER] = lead_owner
+    else:
+        # Lead has no Owner assigned -- default to the person creating the
+        # task (nobody ever writes Leads.Owner today, so this is the only
+        # path that currently gives a task a real Owner).
+        creator_profile_id = _resolve_profile_record_id(identity.user_id)
+        if creator_profile_id:
+            task_fields[TaskFields.OWNER] = [creator_profile_id]
     # קישור ליד — linked record array
     task_fields[TaskFields.LEAD_LINK] = [lead_id]
 
@@ -2617,13 +2627,38 @@ def owner_command_center(identity):
     return jsonify(status.as_dict()), 200
 
 
-def _process_owner_tasks(records: list, user_id: str, today: str | None = None) -> dict:
+def _resolve_profile_record_id(user_id: str) -> str | None:
+    """
+    Resolve a canonical identity user_id (e.g. 'eliyahu') to its Profile
+    table record ID.
+
+    TaskFields.OWNER / LeadFields.OWNER are multipleRecordLinks fields
+    pointing at Tables.PROFILE (verified via Airtable MCP 2026-08-19) --
+    they are NOT plain text, so callers must resolve to a Profile record ID
+    before filtering or writing those fields. Matching is case-insensitive
+    because the live Profile.name value ("Eliyahu") and identity.user_id
+    ("eliyahu") differ in case.
+    """
+    if not user_id:
+        return None
+    safe_user_id = user_id.replace("'", "\\'")
+    formula = f"LOWER({{{ProfileFields.NAME}}}) = LOWER('{safe_user_id}')"
+    records = _at_list(Tables.PROFILE, formula, max_records=5)
+    return records[0].get("id") if records else None
+
+
+def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str, today: str | None = None) -> dict:
     """
     Core task processing logic (testable, no Flask dependency).
 
     Args:
         records: Airtable task records
-        user_id: Owner's user_id to filter by
+        owner_record_id: Owner's Profile table record ID (see
+            _resolve_profile_record_id) -- Tasks.Owner is a
+            multipleRecordLinks field, so filtering must compare against
+            this record ID, not a plain display name/user_id.
+        owner_display: identity.user_id, used only for the response's
+            "owner" display field.
         today: Today's ISO date (defaults to date.today())
 
     Returns:
@@ -2643,9 +2678,9 @@ def _process_owner_tasks(records: list, user_id: str, today: str | None = None) 
         if status == TaskStatus.DONE:
             continue
 
-        # Skip if OWNER is empty or doesn't match (safety check)
-        owner = fields.get(TaskFields.OWNER, "").strip()
-        if not owner or owner != user_id:
+        # Owner is a linked-record field -> list of Profile record IDs
+        owner_links = _linked_record_ids(fields.get(TaskFields.OWNER, []))
+        if owner_record_id not in owner_links:
             continue
 
         task_item = {
@@ -2654,7 +2689,7 @@ def _process_owner_tasks(records: list, user_id: str, today: str | None = None) 
             "description": fields.get(TaskFields.DESCRIPTION, ""),
             "status": status,
             "due_date": fields.get(TaskFields.DUE_DATE),
-            "owner": owner,
+            "owner": owner_display,
             "domain": fields.get(TaskFields.DOMAIN, ""),
             "source_type": "task",
             "source_ref": rec.get("id", ""),
@@ -2702,15 +2737,31 @@ def owner_my_work(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
 
-    # Query tasks filtered to current owner only
-    owner_filter = f"{{{TaskFields.OWNER}}} = '{identity.user_id}'"
     try:
-        records = _at_list(Tables.TASKS, owner_filter, max_records=100)
+        profile_record_id = _resolve_profile_record_id(identity.user_id)
+    except Exception as e:
+        logger.error(f"Failed to resolve Profile record for {identity.user_id}: {e}")
+        return jsonify({"error": "failed to load tasks"}), 500
+
+    if not profile_record_id:
+        logger.warning(f"[my-work] no Profile record found for user_id={identity.user_id}")
+        return jsonify({
+            "ok": True,
+            "immediate": [],
+            "upcoming": [],
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }), 200
+
+    # Owner is a linked-record field -- cannot be filtered by Airtable
+    # formula string-equality (see _resolve_profile_record_id), so pull all
+    # non-done tasks and match Owner in Python.
+    try:
+        records = _at_list(Tables.TASKS, max_records=100)
     except Exception as e:
         logger.error(f"Failed to query tasks: {e}")
         return jsonify({"error": "failed to load tasks"}), 500
 
-    result = _process_owner_tasks(records, identity.user_id)
+    result = _process_owner_tasks(records, profile_record_id, identity.user_id)
 
     return jsonify({
         "ok": True,
