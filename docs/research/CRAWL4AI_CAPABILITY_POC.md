@@ -73,11 +73,11 @@ Crawl4AI's SDK call is a single in-process request/response — the result is kn
 
 Reuses the existing `core/artifact_store.py` `ArtifactStore` protocol (`put()`/`cleanup()`, same shape `core/google_drive_artifact_store.py` already implements for MPT) via a new, generic `core/local_artifact_store.py` — filesystem-backed, no OAuth/Google Drive scope needed for this POC. Configured via `CRAWL4AI_ARTIFACT_ROOT`; if unset, `submit()` fails closed (`crawl4ai_storage_unconfigured`) before any crawl is attempted.
 
-- Path shape: `<CRAWL4AI_ARTIFACT_ROOT>/crawl4ai/<sanitized-contract-id>.md`.
-- The filename is derived solely from `contract_id` (sanitized to `[A-Za-z0-9._-]`, everything else collapsed to `-`) — never from a caller-supplied path/filename.
+- Path shape: `<CRAWL4AI_ARTIFACT_ROOT>/crawl4ai/<sanitized-contract-id>-<sha256(contract-id)><suffix>`.
+- The filename's human-readable prefix is derived from `contract_id` (sanitized to `[A-Za-z0-9._-]`, everything else collapsed to `-`); the actual uniqueness guarantee comes from a SHA-256 digest of the *original*, pre-sanitization `contract_id` — two different contract IDs that happen to sanitize to the same string (e.g. `job/1` and `job:1`) can never collide on disk. Never derived from a caller-supplied path/filename.
 - Write is atomic: content is written to a temp file, then `os.replace()`d into place.
 - A resolved-path containment check (`_within()`, same pattern as `moneyprinterturbo_adapter.py`) rejects any target that would resolve outside the configured root, as defense in depth beyond the filename sanitization.
-- The Markdown artifact carries a small YAML-ish header (`source_url`, `final_hostname`, `title`, `crawled_at`, `crawl4ai_version`) followed by the page's Markdown body, truncated to 500,000 bytes.
+- The Markdown artifact carries a small frontmatter-style header (`source_url`, `final_hostname`, `title`, `crawled_at`, `crawl4ai_version`) followed by the page's Markdown body, truncated to 500,000 bytes. Every header value — including the untrusted crawled page `title` — is `json.dumps()`-quoted: a deterministic, unambiguous encoding where embedded newlines/quotes/`---` sequences are escaped, so page content can never inject a fake header line or a fake closing delimiter. `source_url` itself is sanitized to `scheme://hostname[:port]/path` before being written — query strings and fragments (which may carry tokens or session data) are never persisted.
 
 ## Evidence (bounded)
 
@@ -101,6 +101,7 @@ Requires real network access and the isolated dependency — never run in CI.
 ```bash
 python3 -m venv /tmp/crawl4ai-poc-venv
 /tmp/crawl4ai-poc-venv/bin/pip install -r scripts/crawl4ai_capability_poc/requirements.txt
+/tmp/crawl4ai-poc-venv/bin/python3 -m playwright install --with-deps chromium
 
 CRAWL4AI_ALLOWED_HOSTS="example.com" \
 CRAWL4AI_ARTIFACT_ROOT=/tmp/crawl4ai-poc-artifacts \
@@ -109,12 +110,17 @@ CRAWL4AI_ARTIFACT_ROOT=/tmp/crawl4ai-poc-artifacts \
 
 This constructs its own `ExternalExecutionBoundary` with an in-memory repository and a real `Crawl4AIAdapter` — it does **not** touch `get_default_boundary()`, Airtable, or any live BOSS state. It prints the resulting `DispatcherOutcome` and the stored artifact path.
 
+**Environment note (found while verifying this POC):** `playwright install --with-deps` shells out to `sudo apt-get install` for Chromium's OS-level shared libraries (`libnspr4`, `libnss3`, `libatk*`, etc.) — in a non-interactive/no-sudo environment this fails. Workaround used to obtain the real-crawl smoke evidence below: `apt-get download <package>` (no root required) for each missing library named by `python3 -m playwright install-deps --dry-run chromium`, then `dpkg-deb -x` to extract the `.so` files into a local directory and point `LD_LIBRARY_PATH` at it — no system state modified, nothing installed outside a scratch directory. A normal dev machine or CI image with real sudo/root should just use `--with-deps` directly.
+
+**Real-crawl verification (2026-08-20):** ran against `example.com` (an explicitly allowlisted, benign, purpose-built test domain) with `crawl4ai==0.9.2`. Result: `status=completed`, non-empty Markdown artifact (166 markdown chars, 337-byte artifact file including header), `result_checksum` present, `result_ref` present and readable, job structurally never entered `poll_due()`. No production Airtable, no `get_default_boundary()`, no Telegram/WhatsApp, no Docker API, no MCP, no LLM extraction were touched.
+
 ## Known limitations
 
 - Redirect and DNS-level SSRF gaps described above.
 - Single fixed page-load timeout (30s in the contract; adjustable per-adapter-instance, not per-call).
 - No capacity/concurrency policy — unlike MPT, this adapter has no `.policy` attribute, so the generic boundary applies no gating.
 - The in-memory smoke harness's repository is not durable — a real integration would need a caller that goes through Airtable-backed `ExternalExecutionRepository`, which this POC does not add.
+- Chromium needs real OS-level shared libraries (`libnspr4`, `libnss3`, `libatk*`, ...); `playwright install --with-deps` assumes sudo/root is available. See the environment note under "Manual smoke procedure" for a no-root workaround.
 
 ## What is required before production
 

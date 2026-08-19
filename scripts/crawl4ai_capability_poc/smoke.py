@@ -21,7 +21,11 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Appended, never inserted at 0: the repo root has its own top-level
+# profile.py (an Airtable-backed module) that would otherwise shadow
+# Python's stdlib `profile` module -- crawl4ai's own `import cProfile`
+# transitively needs the real stdlib one.
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from core.external_capability_contract import resolve_adapter  # noqa: E402
 from core.external_execution_boundary import ExternalExecutionBoundary  # noqa: E402
