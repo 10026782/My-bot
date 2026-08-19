@@ -23,12 +23,14 @@
         "core/approval_turn_metrics.py",
         "core/approvals_projection.py",
         "core/artifact_store.py",
+        "core/crawl4ai_adapter.py",
         "core/external_capability_contract.py",
         "core/external_execution_boundary.py",
         "core/external_execution_repository.py",
         "core/external_poll_lease.py",
         "core/google_drive_artifact_store.py",
         "core/lifecycle_projection.py",
+        "core/local_artifact_store.py",
         "core/migrations/002_external_poll_leases.sql",
         "core/moneyprinterturbo_adapter.py",
         "core/mpt_runtime_policy.py",
@@ -64,12 +66,19 @@
         "scripts/verify_bug161_162_callback_staging.py",
         "tc8_test_repo_stub.py",
         "scripts/verify_mpt_phase2b_staging.py",
-        "test_external_capability_contract.py"
+        "test_external_capability_contract.py",
+        "test_crawl4ai_capability.py",
+        "scripts/crawl4ai_capability_poc/smoke.py"
       ],
       "canonical_docs": [
         {
           "path": "docs/architecture/EXTERNAL_CAPABILITY_CONTRACT_V1.md",
           "role": "capability metadata contract and adapter-resolution registry design for the generic ExternalExecutionBoundary",
+          "status": "active"
+        },
+        {
+          "path": "docs/research/CRAWL4AI_CAPABILITY_POC.md",
+          "role": "Crawl4AI capability POC scope, allowlist, and production blockers",
           "status": "active"
         },
         {

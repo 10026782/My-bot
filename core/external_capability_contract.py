@@ -57,6 +57,11 @@ def _moneyprinterturbo_adapter():
     return MoneyPrinterTurboAdapter()
 
 
+def _crawl4ai_adapter():
+    from core.crawl4ai_adapter import Crawl4AIAdapter
+    return Crawl4AIAdapter()
+
+
 def _build_registry(registrations: list[CapabilityRegistration]) -> dict[str, CapabilityRegistration]:
     registry: dict[str, CapabilityRegistration] = {}
     for registration in registrations:
@@ -86,6 +91,22 @@ _REGISTRY: dict[str, CapabilityRegistration] = _build_registry([
             healthcheck_capability=False,
         ),
         adapter_factory=_moneyprinterturbo_adapter,
+    ),
+    CapabilityRegistration(
+        contract=CapabilityContract(
+            capability_id="crawl4ai",
+            adapter_name="crawl4ai",
+            version="0.9.2",
+            execution_mode="sync",
+            risk_class="medium",
+            timeout_seconds=30,
+            retry_semantics="no automatic resubmit; failed/outcome_unknown are terminal for the caller",
+            idempotency_semantics="contract_id is the durable idempotency key; a submitted/completed job short-circuits resubmission",
+            evidence_schema_ref="core.crawl4ai_adapter",
+            cleanup_capability=False,
+            healthcheck_capability=False,
+        ),
+        adapter_factory=_crawl4ai_adapter,
     ),
 ])
 

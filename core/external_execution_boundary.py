@@ -33,10 +33,15 @@ _UNIVERSAL_EVIDENCE_KEYS = frozenset({
 
 @dataclass(frozen=True)
 class SubmitResult:
-    status: str  # accepted | failed | outcome_unknown
+    status: str  # accepted | completed | failed | outcome_unknown
     provider_job_id: str = ""
     evidence: dict | None = None
     failure_code: str = ""
+    # Only meaningful when status == "completed" — a sync capability (see
+    # CapabilityContract.execution_mode == "sync") returns its result inline
+    # from submit() instead of a later poll(); result_ref plays the same role
+    # PollResult.result_ref plays for the async path.
+    result_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -134,6 +139,23 @@ class ExternalExecutionBoundary:
                 self.repository.update(job)
             except Exception as exc:
                 return DispatcherOutcome("outcome_unknown", "השליחה התקבלה אך מצב העבודה לא נשמר.", error=str(exc))
+            return self._accepted(job)
+
+        if result.status == "completed":
+            # A sync capability's submit() already produced the terminal
+            # result — no polling is ever entered for this job (poll_due()
+            # only scans status == "submitted").
+            job.provider_job_id = result.provider_job_id
+            job.status = "completed"
+            job.submitted_at = time.time()
+            job.completed_at = time.time()
+            job.attempt_count += 1
+            job.result_ref = result.result_ref[:500]
+            job.evidence = self._bounded_evidence(result.evidence)
+            try:
+                self.repository.update(job)
+            except Exception as exc:
+                return DispatcherOutcome("outcome_unknown", "התוצאה התקבלה אך מצב העבודה לא נשמר.", error=str(exc))
             return self._accepted(job)
 
         job.status = "failed" if result.status == "failed" else "outcome_unknown"
