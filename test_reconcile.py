@@ -203,6 +203,7 @@ def test_policy_registry_loads_all_eleven_policies(policies):
         "EXTERNAL_RECOMMENDATION_CATALOG",
         "EXTERNAL_RECOMMENDATION_CATALOG_TEST",
         "EXTERNAL_EXECUTION_RUNTIME",
+        "TMA_FEATURE_SCREEN",
     }
 
 

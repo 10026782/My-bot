@@ -705,6 +705,44 @@
         }
       },
       "last_observed_commit": "3c7c71d7006212e8e8aa9fe631b5f7a9ee4757ba"
+    },
+    {
+      "id": "decision.tma_screens",
+      "name": "TMA feature screens (stateful, API-integrated components)",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "stateful TMA screen components with API integration, state management, and business logic — consumed by App.tsx navigation",
+        "precedence": "carries no authority over any catalog layer or backend endpoint; screens are presentation/UX containers only"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "tma-frontend/src/components/MyWork.tsx"
+      ],
+      "test_paths": [],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-19",
+      "last_verified_commit": "6baef325646fdd9dcc0a15f1c2b82cc4ebe589f5",
+      "confidence": 0.9,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #749 (MY-WORK-1): MyWork.tsx is a new TMA screen component matching the TMA_FEATURE_SCREEN policy. Owner explicitly reviewed and approved this registration.",
+        "MyWork.tsx is a read-only My Work personal task queue screen (Mobile-first, RTL Hebrew, no mutations in V1). Stateful (useState for loading/ok/error), fetches from GET /api/owner/my-work, displays immediate and upcoming task categories. Uses TMA patterns (PageHeader, ScreenState sub-components, Tailwind styling, RTL-safe layout).",
+        "Future TMA screens (e.g. new domain-specific or owner-facing screens) should be evaluated individually against this node's scope and either registered here (if narrow/similar scope) or placed in a different decision node (if sufficiently different concerns)."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "tma_screen_container",
+          "authority": false,
+          "purpose": "stateful TMA feature screens with API integration; no backend authority, read-only in V1",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "6baef325646fdd9dcc0a15f1c2b82cc4ebe589f5"
     }
   ],
   "edges": [

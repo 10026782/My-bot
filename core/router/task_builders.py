@@ -45,18 +45,32 @@ def _proposal(intent: str, tool: str, fields: Mapping[str, object]) -> Canonical
     )
 
 
-def build_create_task_proposal(title: str, **fields: object) -> CanonicalActionProposal:
-    """Build a complete named task-create proposal from deterministic input."""
+def build_create_task_proposal(
+    title: str, identity=None, **fields: object
+) -> CanonicalActionProposal:
+    """Build a complete named task-create proposal from deterministic input.
+
+    If identity is provided and OWNER is not already set, auto-populate from identity.user_id.
+    """
     normalized_title = _require_text(title, "title")
     if TaskFields.NAME in fields:
         raise ValueError("title must be supplied as the named title argument")
     unknown = set(fields) - _TASK_WRITE_FIELDS
     if unknown:
         raise ValueError(f"unsupported task fields: {sorted(unknown)}")
+
+    final_fields = {TaskFields.NAME: normalized_title, **fields}
+
+    # Auto-populate OWNER from identity if not already set
+    if identity is not None and TaskFields.OWNER not in final_fields:
+        user_id = getattr(identity, "user_id", None)
+        if user_id:
+            final_fields[TaskFields.OWNER] = user_id
+
     return _proposal(
         Intent.CREATE_TASK,
         "task_create",
-        {TaskFields.NAME: normalized_title, **fields},
+        final_fields,
     )
 
 

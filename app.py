@@ -1082,6 +1082,7 @@ def _queue_deterministic_create_task(
         intent="create_task", scope=getattr(identity, "memory_key", ""), title=title,
         fields=task_fields,
         queue=_queue_task,
+        identity=identity,
     )
     _contract_queued = bool(
         outcome.get("created_this_turn") and outcome.get("contract_id")
@@ -1139,6 +1140,7 @@ def _queue_deterministic_task_update(
         queue=lambda tool, payload: _queue_approval_detailed(
             tool, payload, chat_id, channel, user_text,
         ),
+        identity=identity,
     )
     if out_meta is not None and outcome.get("created_this_turn"):
         out_meta["source_module"] = outcome.get("source_module") or "action_gateway"

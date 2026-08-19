@@ -412,3 +412,47 @@ def test_bounded_reader_rejects_invalid_limits(monkeypatch):
         assert "negative" in str(exc)
     else:
         raise AssertionError("negative max_records must fail closed")
+
+
+def test_create_auto_populates_owner_from_identity():
+    """OWNER should be auto-populated from identity.user_id when creating tasks."""
+    identity = SimpleNamespace(user_id="eliyahu", role="owner")
+    queued = []
+    reply = queue_task_request(
+        intent=Intent.CREATE_TASK, scope="tenant:user", title="Call supplier",
+        queue=lambda tool, payload: queued.append((tool, payload)) or {"message": "pending"},
+        identity=identity,
+    )
+    assert reply["message"] == "pending"
+    assert queued == [
+        ("airtable_add", {
+            "table": Tables.TASKS,
+            "fields": {TaskFields.NAME: "Call supplier", TaskFields.OWNER: "eliyahu"},
+        })
+    ]
+
+
+def test_create_respects_explicit_owner():
+    """Explicit OWNER in fields should not be overridden by identity."""
+    identity = SimpleNamespace(user_id="eliyahu", role="owner")
+    queued = []
+    reply = queue_task_request(
+        intent=Intent.CREATE_TASK, scope="tenant:user", title="Call supplier",
+        fields={TaskFields.OWNER: "someone_else"},
+        queue=lambda tool, payload: queued.append((tool, payload)) or {"message": "pending"},
+        identity=identity,
+    )
+    assert reply["message"] == "pending"
+    assert queued[0][1]["fields"][TaskFields.OWNER] == "someone_else"
+
+
+def test_create_without_identity_has_no_owner():
+    """When identity is None, OWNER should not be auto-populated."""
+    queued = []
+    reply = queue_task_request(
+        intent=Intent.CREATE_TASK, scope="tenant:user", title="Call supplier",
+        queue=lambda tool, payload: queued.append((tool, payload)) or {"message": "pending"},
+        identity=None,
+    )
+    assert reply["message"] == "pending"
+    assert TaskFields.OWNER not in queued[0][1]["fields"]
