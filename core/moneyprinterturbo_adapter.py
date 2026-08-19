@@ -37,6 +37,16 @@ _RUNNER = (
 class MoneyPrinterTurboAdapter:
     name = "moneyprinterturbo"
 
+    # Capability-specific evidence fields this adapter is allowed to write
+    # through ExternalExecutionBoundary._bounded_evidence — kept adapter-owned
+    # so the generic boundary never needs to know MPT's evidence shape.
+    evidence_extra_keys = frozenset({
+        "script_sha256", "mime_type", "size", "artifact_size", "validation_result",
+        "ffprobe_exit_code", "video_width", "video_height", "video_duration",
+        "runtime_profile", "runtime_started_at", "runtime_finished_at",
+        "elapsed_sec", "termination_reason", "failure_classification",
+    })
+
     def __init__(self, *, runtime_root=None, jobs_root=None, media_root=None,
                  executable=None, timeout_seconds=None, artifact_store=None):
         self.runtime_root = Path(runtime_root or os.environ.get("MPT_RUNTIME_ROOT", ".")).resolve()
@@ -46,9 +56,12 @@ class MoneyPrinterTurboAdapter:
         self.media_root = Path(media_value).resolve() if media_value else None
         self.executable = executable or os.environ.get("MPT_EXECUTABLE", "uv")
         self.timeout_seconds = min(int(timeout_seconds or os.environ.get("MPT_TIMEOUT_SECONDS", "1800")), _MAX_TIMEOUT)
+        # Capacity/capability policy is owned here, not by the generic
+        # boundary — ExternalExecutionBoundary picks it up via getattr(adapter, "policy", None).
         policy = MPTExecutionPolicy.from_env()
         if policy.max_runtime_seconds is not None:
             self.timeout_seconds = min(self.timeout_seconds, policy.max_runtime_seconds)
+        self.policy = policy
         self.artifact_store = artifact_store or _configured_artifact_store()
 
     def submit(self, request: dict) -> SubmitResult:

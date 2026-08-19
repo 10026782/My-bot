@@ -23,6 +23,7 @@
         "core/approval_turn_metrics.py",
         "core/approvals_projection.py",
         "core/artifact_store.py",
+        "core/external_capability_contract.py",
         "core/external_execution_boundary.py",
         "core/external_execution_repository.py",
         "core/external_poll_lease.py",
@@ -62,9 +63,15 @@
         "scripts/verify_bug157_160_163_staging.py",
         "scripts/verify_bug161_162_callback_staging.py",
         "tc8_test_repo_stub.py",
-        "scripts/verify_mpt_phase2b_staging.py"
+        "scripts/verify_mpt_phase2b_staging.py",
+        "test_external_capability_contract.py"
       ],
       "canonical_docs": [
+        {
+          "path": "docs/architecture/EXTERNAL_CAPABILITY_CONTRACT_V1.md",
+          "role": "capability metadata contract and adapter-resolution registry design for the generic ExternalExecutionBoundary",
+          "status": "active"
+        },
         {
           "path": "docs/architecture/f52-unified-approval-runtime/audits/phase-4c/CURRENT_STATE_MAP.md",
           "role": "latest verified runtime audit",

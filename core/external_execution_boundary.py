@@ -9,15 +9,26 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from core.dispatcher_outcome import DispatcherOutcome
+from core.external_capability_contract import resolve_adapter
 from core.external_execution_repository import (
     ExternalExecutionJob,
     ExternalExecutionRepository,
     TERMINAL_JOB_STATES,
 )
 from core.external_poll_lease import ExternalPollLeaseRepository
-from core.mpt_runtime_policy import MPTExecutionPolicy
 
 logger = logging.getLogger(__name__)
+
+# Fields any adapter's evidence may carry. Capability-specific fields (e.g.
+# MoneyPrinterTurbo's video/script validation fields) are declared by the
+# adapter itself via an `evidence_extra_keys` attribute — see
+# core/moneyprinterturbo_adapter.py — so this boundary never needs to know
+# about a specific capability's evidence shape.
+_UNIVERSAL_EVIDENCE_KEYS = frozenset({
+    "provider_job_id", "provider_status", "submitted_at", "completed_at",
+    "result_checksum", "result_ref", "adapter_name", "checked_at",
+    "storage_result", "capacity",
+})
 
 
 @dataclass(frozen=True)
@@ -59,7 +70,11 @@ class ExternalExecutionBoundary:
         self.leases = lease_repository or ExternalPollLeaseRepository()
         self.adapter = adapter or UnconfiguredExternalAdapter()
         self.poll_interval_seconds = poll_interval_seconds
-        self.policy = policy or MPTExecutionPolicy.from_env()
+        # Capacity policy is capability-specific and adapter-owned (see
+        # core/external_capability_contract.py). The generic boundary never
+        # hardcodes a specific adapter/capability name; an adapter with no
+        # `.policy` attribute simply gets no capacity gating.
+        self.policy = policy if policy is not None else getattr(self.adapter, "policy", None)
 
     def submit(self, *, contract_id: str, idempotency_key: str, payload: dict) -> DispatcherOutcome:
         try:
@@ -76,13 +91,13 @@ class ExternalExecutionBoundary:
                     external_id=existing.provider_job_id or None,
                     error_code=existing.failure_code or None,
                 )
-        if self.adapter.name == "moneyprinterturbo" and (existing is None or existing.status == "created"):
+        if self.policy is not None and (existing is None or existing.status == "created"):
             try:
-                jobs = self.repository.list_for_adapter("moneyprinterturbo")
+                jobs = self.repository.list_for_adapter(self.adapter.name)
             except AttributeError:
                 jobs = []
             except Exception as exc:
-                return DispatcherOutcome("outcome_unknown", "לא ניתן לאמת קיבולת MPT.", error=str(exc))
+                return DispatcherOutcome("outcome_unknown", "לא ניתן לאמת קיבולת.", error=str(exc))
             reason = self.policy.capacity_reason(jobs)
             if reason:
                 job = existing or ExternalExecutionJob(
@@ -114,7 +129,7 @@ class ExternalExecutionBoundary:
             job.status = "submitted"
             job.submitted_at = time.time()
             job.attempt_count += 1
-            job.evidence = _bounded_evidence(result.evidence)
+            job.evidence = self._bounded_evidence(result.evidence)
             try:
                 self.repository.update(job)
             except Exception as exc:
@@ -123,7 +138,7 @@ class ExternalExecutionBoundary:
 
         job.status = "failed" if result.status == "failed" else "outcome_unknown"
         job.failure_code = result.failure_code[:120]
-        job.evidence = _bounded_evidence(result.evidence)
+        job.evidence = self._bounded_evidence(result.evidence)
         try:
             self.repository.update(job)
         except Exception:
@@ -159,7 +174,7 @@ class ExternalExecutionBoundary:
                     job.status = result.status
                     job.result_ref = result.result_ref[:500]
                     job.failure_code = result.failure_code[:120]
-                    job.evidence = _bounded_evidence(result.evidence)
+                    job.evidence = self._bounded_evidence(result.evidence)
                     if result.status in TERMINAL_JOB_STATES:
                         job.completed_at = time.time()
                 try:
@@ -196,18 +211,18 @@ class ExternalExecutionBoundary:
             raw_response={"ok": True, "external_id": job.contract_id, "external_job_status": job.status, "provider_job_id": job.provider_job_id},
         )
 
-
-def _bounded_evidence(evidence: dict | None) -> dict:
-    if not isinstance(evidence, dict):
-        return {}
-    allowed = {"provider_job_id", "provider_status", "submitted_at", "completed_at", "result_checksum", "result_ref", "adapter_name", "checked_at", "script_sha256", "mime_type", "size", "artifact_size", "validation_result", "ffprobe_exit_code", "video_width", "video_height", "video_duration", "runtime_profile", "runtime_started_at", "runtime_finished_at", "elapsed_sec", "termination_reason", "failure_classification", "storage_result", "capacity"}
-    return {str(k): str(v)[:200] for k, v in evidence.items() if k in allowed}
+    def _bounded_evidence(self, evidence: dict | None) -> dict:
+        if not isinstance(evidence, dict):
+            return {}
+        allowed = _UNIVERSAL_EVIDENCE_KEYS | getattr(self.adapter, "evidence_extra_keys", frozenset())
+        return {str(k): str(v)[:200] for k, v in evidence.items() if k in allowed}
 
 
 def _default_adapter():
     if os.environ.get("MPT_RUNTIME_ROOT"):
-        from core.moneyprinterturbo_adapter import MoneyPrinterTurboAdapter
-        return MoneyPrinterTurboAdapter()
+        adapter = resolve_adapter("moneyprinterturbo")
+        if adapter is not None:
+            return adapter
     return UnconfiguredExternalAdapter()
 
 
