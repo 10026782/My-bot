@@ -91,9 +91,24 @@ def test_my_work_filters_by_owner():
 
     result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
 
-    # Should only have 2 tasks (rec_001 and rec_003)
+    # rec_001, rec_003 (explicitly mine) + rec_004 (unowned, defaults to me).
+    # rec_002 (explicitly someone else's) stays excluded.
     total = len(result["immediate"]) + len(result["upcoming"])
-    assert total == 2, f"Expected 2 tasks for eliyahu, got {total}"
+    assert total == 3, f"Expected 3 tasks for eliyahu, got {total}"
+
+
+def test_my_work_unowned_task_defaults_to_requesting_owner():
+    """A task with no Owner link at all is shown to the (sole) owner, not hidden."""
+    from tma_api import _process_owner_tasks
+
+    mock_tasks = [
+        create_test_task(record_id="rec_unowned", owner_record_ids=(), status=TaskStatus.PENDING),
+    ]
+
+    result = _process_owner_tasks(mock_tasks, OWNER_RECORD_ID, "eliyahu")
+
+    total = len(result["immediate"]) + len(result["upcoming"])
+    assert total == 1, "Unowned task must default to the requesting owner"
 
 
 def test_my_work_multi_owner_task_visible_to_each_linked_owner():
