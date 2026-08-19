@@ -209,6 +209,24 @@
         "Owner-approved exact-path registration under layer.approvals. The boundary owns External Execution submission/poll coordination; ActionContracts remain approval lifecycle authority, Airtable remains job-state authority, and PostgreSQL remains transient lease ownership only.",
         "OWNER DECISION (MPT Phase 2B): core/mpt_runtime_policy.py is an approved bounded policy source for the existing MoneyPrinterTurbo adapter path. It centralizes concurrency, daily ceiling, timeout, proven Render Standard 2 GiB runtime profile, bounded evidence, and resource-limit classification; it is not a parallel runtime, source of truth, execution path, or architecture replacement."
       ]
+    },
+    {
+      "id": "TMA_FEATURE_SCREEN",
+      "policy_version": 1,
+      "description": "Stateful TMA feature screen components with API integration, state management, and side effects -- owned by the TMA layer.",
+      "path_patterns": [
+        "tma-frontend/src/components/*.tsx"
+      ],
+      "runtime_consumed": true,
+      "authority": false,
+      "eligible_target": "decision.tma_screens",
+      "target_field": "code_paths",
+      "auto_registration_allowed": false,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "auto_registration_allowed is false: a new TMA screen component still needs explicit review to confirm it follows TMA patterns (proper state management, error handling, accessibility, RTL support). This policy narrows where to look but does not prove structural conformance.",
+        "OWNER DECISION (MY-WORK-1): MyWork.tsx is an approved read-only TMA screen for the My Work personal task queue feature. Mobile-first, RTL Hebrew, no mutations in V1."
+      ]
     }
   ]
 }
