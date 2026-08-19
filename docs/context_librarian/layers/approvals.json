@@ -67,7 +67,8 @@
         "tc8_test_repo_stub.py",
         "scripts/verify_mpt_phase2b_staging.py",
         "test_external_capability_contract.py",
-        "test_crawl4ai_capability.py"
+        "test_crawl4ai_capability.py",
+        "scripts/crawl4ai_capability_poc/smoke.py"
       ],
       "canonical_docs": [
         {
