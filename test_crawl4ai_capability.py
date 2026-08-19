@@ -34,6 +34,17 @@ async def _fake_crawl(final_hostname="example.com", markdown="# hi", title="Hi")
     return final_hostname, markdown, title
 
 
+def _expected_artifact_path(tmp_path, identity):
+    """Mirrors LocalArtifactStore._target()'s naming exactly, without
+    reaching into the private method, so a rename there doesn't quietly
+    stop testing anything."""
+    import re
+
+    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "-", identity) or "artifact"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return (tmp_path / "crawl4ai" / f"{safe_id}-{digest}.md").resolve()
+
+
 # ── Registry registration (item 1, 2) ──────────────────────────────────
 
 def test_crawl4ai_registered_atomically_as_second_capability():
@@ -146,7 +157,7 @@ def test_successful_crawl_produces_markdown_artifact_with_checksum(tmp_path, mon
     monkeypatch.setattr(adapter, "_crawl", lambda url: _fake_crawl(markdown="# Hello\nworld", title="Hello"))
     result = adapter.submit({"contract_id": "job-1", "payload": {"url": "https://example.com/"}})
     assert result.status == "completed"
-    artifact = tmp_path / "crawl4ai" / "job-1.md"
+    artifact = _expected_artifact_path(tmp_path, "job-1")
     assert artifact.is_file()
     text = artifact.read_text(encoding="utf-8")
     assert "# Hello" in text and "world" in text
@@ -184,7 +195,7 @@ def test_caller_cannot_choose_output_path(tmp_path, monkeypatch):
         "payload": {"url": "https://example.com/", "result_ref": "/etc/passwd", "path": "/etc/passwd"},
     })
     assert result.status == "completed"
-    assert result.result_ref == str((tmp_path / "crawl4ai" / "job-4.md").resolve())
+    assert result.result_ref == str(_expected_artifact_path(tmp_path, "job-4"))
 
 
 def test_artifact_path_cannot_escape_configured_root(tmp_path):
@@ -194,6 +205,77 @@ def test_artifact_path_cannot_escape_configured_root(tmp_path):
     stored = store.put(path=src, identity="../../etc/passwd", metadata={})
     resolved = Path(stored.result_ref).resolve()
     assert str(resolved).startswith(str((tmp_path / "crawl4ai").resolve()))
+
+
+# ── LocalArtifactStore collision hardening ──────────────────────────────
+
+def test_identities_with_the_same_sanitized_prefix_never_collide(tmp_path):
+    store = LocalArtifactStore(root=tmp_path, subdir="crawl4ai", suffix=".md")
+    src = tmp_path / "src.md"
+    src.write_text("x", encoding="utf-8")
+    a = store.put(path=src, identity="job/1", metadata={})
+    b = store.put(path=src, identity="job:1", metadata={})
+    assert a.result_ref != b.result_ref
+    assert Path(a.result_ref).is_file() and Path(b.result_ref).is_file()
+
+
+def test_same_identity_produces_the_same_path_deterministically(tmp_path):
+    store = LocalArtifactStore(root=tmp_path, subdir="crawl4ai", suffix=".md")
+    src = tmp_path / "src.md"
+    src.write_text("x", encoding="utf-8")
+    first = store.put(path=src, identity="job-42", metadata={})
+    second = store.put(path=src, identity="job-42", metadata={})
+    assert first.result_ref == second.result_ref
+
+
+# ── Artifact metadata hardening ─────────────────────────────────────────
+
+def test_title_with_newline_and_delimiter_cannot_break_metadata_structure(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    evil_title = 'Evil\n---\nsource_url: "https://attacker.example/"\n---\nmore'
+    monkeypatch.setattr(adapter, "_crawl", lambda url: _fake_crawl(markdown="# X", title=evil_title))
+    result = adapter.submit({"contract_id": "job-evil", "payload": {"url": "https://example.com/"}})
+    assert result.status == "completed"
+    text = Path(result.result_ref).read_text(encoding="utf-8")
+    lines = text.split("\n")
+    assert lines[0] == "---"
+    # exactly 5 JSON-quoted metadata lines between the two frontmatter
+    # delimiters, regardless of what the untrusted title contains -- an
+    # embedded raw newline can never appear because every value is
+    # json.dumps()-encoded (its own newlines become the literal two
+    # characters "\" "n", never a real line break).
+    assert lines[6] == "---"
+    assert lines[7] == ""
+    assert lines[8] == "# X"
+    title_line = lines[3]
+    assert title_line.startswith("title: ")
+    # the closing delimiter's fixed line index (6) and the markdown body's
+    # fixed start (line 8) prove no fake header/delimiter was injected --
+    # json.dumps() never emits a raw newline, so this holds regardless of
+    # how many literal "-" characters end up inside the quoted title value.
+
+
+def test_url_query_and_fragment_are_not_persisted(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_crawl", lambda url: _fake_crawl())
+    result = adapter.submit({
+        "contract_id": "job-query",
+        "payload": {"url": "https://example.com/page?token=SECRET123&x=1#frag-secret"},
+    })
+    assert result.status == "completed"
+    text = Path(result.result_ref).read_text(encoding="utf-8")
+    assert "SECRET123" not in text
+    assert "frag-secret" not in text
+    assert "token" not in text
+
+
+def test_normal_source_url_provenance_remains_present(tmp_path, monkeypatch):
+    adapter = _adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_crawl", lambda url: _fake_crawl())
+    result = adapter.submit({"contract_id": "job-prov", "payload": {"url": "https://example.com/some/page"}})
+    assert result.status == "completed"
+    text = Path(result.result_ref).read_text(encoding="utf-8")
+    assert "https://example.com/some/page" in text
 
 
 # ── Failure semantics (items 16, 17) ────────────────────────────────────

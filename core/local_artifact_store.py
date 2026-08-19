@@ -5,6 +5,13 @@ aren't approved for) Google Drive/OAuth artifact custody.
 Fails closed if no root is configured; every write is atomic (temp file +
 os.replace) and confined under root/<subdir>/ by a resolved-path check —
 identity is sanitized into the filename, never used as a raw path segment.
+
+The filename is <sanitized-identity>-<sha256(identity)><suffix>: the
+sanitized identity stays as a human-readable prefix, but the actual
+uniqueness guarantee comes from the SHA-256 digest of the *original*
+(pre-sanitization) identity, so two different identities that happen to
+sanitize to the same string (e.g. "job/1" and "job:1", both "-" for the
+separator) can never collide on disk.
 """
 
 from __future__ import annotations
@@ -28,7 +35,8 @@ class LocalArtifactStore:
 
     def _target(self, identity: str) -> Path:
         safe_id = _SAFE_ID.sub("-", identity) or "artifact"
-        target = (self.root / f"{safe_id}{self.suffix}").resolve()
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        target = (self.root / f"{safe_id}-{digest}{self.suffix}").resolve()
         if not _within(target, self.root):
             raise ArtifactStoreError("artifact_path_escape")
         return target

@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from core.artifact_store import ArtifactStoreError
 from core.external_execution_boundary import PollResult, SubmitResult
@@ -62,17 +63,30 @@ def _configured_store():
     return LocalArtifactStore(root=root, subdir="crawl4ai", suffix=".md")
 
 
+def _sanitize_source_url(url: str) -> str:
+    """Scheme + hostname[:port] + path only — query/fragment (and any
+    credentials, already rejected upstream) are never persisted."""
+    parsed = urlparse(url)
+    netloc = parsed.hostname or ""
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+
+
 def _render_artifact(*, url: str, final_hostname: str, title: str, markdown: str) -> str:
-    header = (
-        "---\n"
-        f"source_url: {url}\n"
-        f"final_hostname: {final_hostname}\n"
-        f"title: {title}\n"
-        f"crawled_at: {datetime.now(timezone.utc).isoformat()}\n"
-        f"crawl4ai_version: {UPSTREAM_VERSION}\n"
-        "---\n\n"
-    )
-    return header + markdown
+    # Every header value is JSON-quoted -- a deterministic, unambiguous
+    # encoding that escapes embedded newlines/quotes, so untrusted page
+    # content (title) can never inject a new header line or a fake closing
+    # "---" delimiter, regardless of what the crawled page contains.
+    fields = {
+        "source_url": _sanitize_source_url(url),
+        "final_hostname": final_hostname,
+        "title": title,
+        "crawled_at": datetime.now(timezone.utc).isoformat(),
+        "crawl4ai_version": UPSTREAM_VERSION,
+    }
+    header_lines = "\n".join(f"{key}: {json.dumps(value)}" for key, value in fields.items())
+    return f"---\n{header_lines}\n---\n\n{markdown}"
 
 
 class Crawl4AIAdapter:
