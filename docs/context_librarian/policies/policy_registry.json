@@ -215,7 +215,7 @@
       "policy_version": 1,
       "description": "Stateful TMA feature screen components with API integration, state management, and side effects -- owned by the TMA layer.",
       "path_patterns": [
-        "tma-frontend/src/components/*.tsx"
+        "tma-frontend/src/components/[!u]*.tsx"
       ],
       "runtime_consumed": true,
       "authority": false,
