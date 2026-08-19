@@ -156,7 +156,7 @@
       "notes": [
         "A code default is not evidence of the current deployed environment."
       ],
-      "last_observed_commit": "84ab7bbd8284f595b453fb9c0e916235fb7e5e40"
+      "last_observed_commit": "d5e2d07fed05060bae4578c06f2875828c3e91ef"
     },
     {
       "id": "decision.production_verification",
@@ -347,7 +347,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "d60b37787d0889bde85cfd6a683f18689a5a1531"
+      "last_observed_commit": "d5e2d07fed05060bae4578c06f2875828c3e91ef"
     },
     {
       "id": "decision.message_contract_envelope_authority",
