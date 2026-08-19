@@ -5,7 +5,10 @@ database."""
 from dataclasses import replace
 
 from core.external_capability_contract import (
-    CAPABILITY_CONTRACTS,
+    CapabilityContract,
+    CapabilityRegistration,
+    CapabilityRegistrationError,
+    _build_registry,
     get_contract,
     resolve_adapter,
 )
@@ -35,9 +38,102 @@ def test_contract_metadata_matches_registered_capability():
     assert contract.capability_id == "moneyprinterturbo"
     assert contract.execution_mode == "async"
     assert get_contract("unregistered_id") is None
-    # every registered contract's capability_id is its own registry key
-    for key, contract in CAPABILITY_CONTRACTS.items():
-        assert contract.capability_id == key
+
+
+# ── Registration-atomicity invariants ───────────────────────────────────
+# CapabilityRegistration bundles a CapabilityContract with its adapter
+# factory as one object with no defaults on either field — there is no
+# constructor call that supplies one without the other, so these invariants
+# are largely enforced by the type itself; the tests below cover the parts
+# _build_registry()/resolve_adapter() still have to check at runtime.
+
+def _contract(capability_id: str, adapter_name: str) -> CapabilityContract:
+    return CapabilityContract(
+        capability_id=capability_id,
+        adapter_name=adapter_name,
+        version="0",
+        execution_mode="async",
+        risk_class="low",
+    )
+
+
+class _StubAdapter:
+    def __init__(self, name):
+        self.name = name
+
+    def submit(self, request):
+        raise NotImplementedError
+
+    def poll(self, job):
+        raise NotImplementedError
+
+
+def test_registration_requires_both_contract_and_factory():
+    import inspect
+    params = inspect.signature(CapabilityRegistration).parameters
+    assert set(params) == {"contract", "adapter_factory"}
+    assert all(p.default is inspect.Parameter.empty for p in params.values())
+
+
+def test_duplicate_capability_id_registration_is_rejected():
+    duplicate = [
+        CapabilityRegistration(contract=_contract("dup", "dup"), adapter_factory=lambda: _StubAdapter("dup")),
+        CapabilityRegistration(contract=_contract("dup", "dup"), adapter_factory=lambda: _StubAdapter("dup")),
+    ]
+    try:
+        _build_registry(duplicate)
+        assert False, "expected CapabilityRegistrationError"
+    except CapabilityRegistrationError as exc:
+        assert "dup" in str(exc)
+
+
+def test_registry_key_can_never_drift_from_contract_capability_id():
+    registry = _build_registry([
+        CapabilityRegistration(contract=_contract("x", "x"), adapter_factory=lambda: _StubAdapter("x")),
+    ])
+    assert set(registry) == {"x"}
+    assert registry["x"].contract.capability_id == "x"
+
+
+def test_factory_adapter_name_mismatch_fails_closed_deterministically():
+    registry = _build_registry([
+        CapabilityRegistration(
+            contract=_contract("mismatched", "expected_name"),
+            adapter_factory=lambda: _StubAdapter("wrong_name"),
+        ),
+    ])
+    from core import external_capability_contract as module
+    original = module._REGISTRY
+    module._REGISTRY = registry
+    try:
+        try:
+            module.resolve_adapter("mismatched")
+            assert False, "expected CapabilityRegistrationError"
+        except CapabilityRegistrationError as exc:
+            assert "wrong_name" in str(exc) and "expected_name" in str(exc)
+    finally:
+        module._REGISTRY = original
+
+
+def test_factory_returning_adapter_missing_submit_or_poll_fails_closed():
+    class Incomplete:
+        name = "incomplete"
+        # no submit()/poll()
+
+    registry = _build_registry([
+        CapabilityRegistration(contract=_contract("incomplete", "incomplete"), adapter_factory=Incomplete),
+    ])
+    from core import external_capability_contract as module
+    original = module._REGISTRY
+    module._REGISTRY = registry
+    try:
+        try:
+            module.resolve_adapter("incomplete")
+            assert False, "expected CapabilityRegistrationError"
+        except CapabilityRegistrationError:
+            pass
+    finally:
+        module._REGISTRY = original
 
 
 # ── Generic boundary: no hardcoded capability name ─────────────────────
