@@ -2638,6 +2638,11 @@ def _resolve_profile_record_id(user_id: str) -> str | None:
     before filtering or writing those fields. Matching is case-insensitive
     because the live Profile.name value ("Eliyahu") and identity.user_id
     ("eliyahu") differ in case.
+
+    Phase 1 (Lead System E2E Audit): core/lead_service.py's canonical
+    Owner contract (resolve_owner()) imports this SAME function directly
+    (`from tma_api import _resolve_profile_record_id`) rather than
+    reimplementing it, so Leads and Tasks resolve Owner identically.
     """
     if not user_id:
         return None

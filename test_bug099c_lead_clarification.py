@@ -107,7 +107,7 @@ with patch.object(lch, "_at_find_lead", return_value=None), \
     reply2 = _send(c, "יוסי כהן")
 
 chk("T3: second message returns the standard single-lead preview",
-    reply2 == "📋 זיהיתי ליד: *יוסי כהן* (0501234571)\nלשמור? ענה *כן* לאישור או *לא* לביטול.")
+    reply2 == "📋 זיהיתי ליד: יוסי כהן (0501234571)\nלשמור? ענה כן לאישור או לא לביטול.")
 chk("T4: the ORIGINAL first message (with phone+summary) is what gets proposed as the "
     "write payload's text, not the bare name reply — the interest/summary is not lost",
     propose_mock.call_args.args[0] is identity

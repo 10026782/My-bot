@@ -17,10 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-import urllib.parse
 from typing import Optional
-
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -338,56 +335,13 @@ def _extract_batch_candidates_from_block(
 # Airtable search
 # ══════════════════════════════════════════════════
 
-def _at_find_lead(name: str, phone: str) -> Optional[str]:
-    """מחפש ליד קיים לפי שם + טלפון. מחזיר record_id או None."""
-    import os
-    base = os.environ.get("AIRTABLE_BASE_ID", "")
-    key  = os.environ.get("AIRTABLE_API_KEY", "")
-    if not base or not key:
-        return None
-
-    url     = f"https://api.airtable.com/v0/{base}/{urllib.parse.quote('Leads', safe='')}"
-    headers = {"Authorization": f"Bearer {key}"}
-
-    for formula in _search_formulas(name, phone):
-        try:
-            r = httpx.get(url, headers=headers,
-                          params={"filterByFormula": formula, "maxRecords": 5},
-                          timeout=8)
-            if r.status_code == 200:
-                records = r.json().get("records", [])
-                if records:
-                    if phone:
-                        # BUG-094: כשיש phone, רק התאמת phone מדויקת נחשבת
-                        # "אותו ליד" — לא מספיק להסתמך על ה-formula האחרון
-                        # (SEARCH(name, {Name}) ללא phone בכלל) ולהחזיר
-                        # records[0] בלי אימות. שם דומה/משותף (נפוץ בעברית)
-                        # היה גורם ל-false match על ליד קיים לא-קשור וכתיבת
-                        # phone/summary שגויים על גביו — בדיוק המנגנון
-                        # שהפך "שני מועמדים עם אותו שם" ל"שתי כתיבות לאותה
-                        # רשומה" בפרודקשן. formula הבא (אם יש) ינוסה במקום.
-                        for rec in records:
-                            rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
-                            if rec_phone == phone:
-                                return rec["id"]
-                        continue
-                    return records[0]["id"]
-        except Exception as exc:
-            logger.warning("[LCH] Airtable search error: %s", exc)
-
-    return None
-
-
-def _search_formulas(name: str, phone: str) -> list[str]:
-    from tools.airtable_gateway import _safe_formula_param
-    safe_name = _safe_formula_param(name)
-    formulas  = []
-    if phone:
-        safe_phone = _safe_formula_param(phone)
-        formulas.append(f"AND(SEARCH('{safe_name}', {{Name}}), {{phone}}='{safe_phone}')")
-        formulas.append(f"{{phone}}='{safe_phone}'")
-    formulas.append(f"SEARCH('{safe_name}', {{Name}})")
-    return formulas
+# Phase 1 (Lead System E2E Audit): the dedup lookup is now a single
+# implementation shared by every Lead-creation caller — see
+# core/lead_service.py::find_existing_lead(). Re-exported here under the
+# original private name so this module's own call sites (and existing
+# regression tests, which patch `lch._at_find_lead` directly) are
+# unaffected.
+from core.lead_service import find_existing_lead as _at_find_lead
 
 
 # ══════════════════════════════════════════════════
@@ -403,177 +357,29 @@ def _write_one_lead(
     domain: str,
 ) -> tuple[bool, str, str]:
     """
-    מוצא (או יוצר/מעדכן) ליד אחד.
-    מחזיר (ok, record_id, action) — action = "create" | "update".
+    מוצא (או יוצר/מעדכן) ליד אחד — עטיפה דקה סביב core/lead_service.py::
+    create_lead(), השירות הקנוני היחיד לכתיבת Lead (Phase 1, Lead System
+    E2E Audit). כל ה-validation/dedup/Owner/EmergencyStop/ActionGateway-
+    lifecycle גרים כעת שם, לא כאן. חתימת ה-tuple המקורית (ok, record_id,
+    action) נשמרת כדי לא לשבור את _handle_single_candidate/
+    _handle_mixed_batch/_handle_batch.
     """
-    tenant_id = getattr(identity, "tenant_id", "default") or "default"
+    from core.lead_service import LeadPayload, create_lead
 
-    # memory_key — phone-based so future inbound from same phone matches
-    _phone_key = re.sub(r"[\s\-\+]", "", phone)
-    memory_key = (
-        f"{tenant_id}/{_phone_key}@lead"
-        if _phone_key
-        else f"{tenant_id}/dict_{re.sub(chr(32), '_', name.lower()[:20])}@lead"
+    domain_key  = _lead_domain_key(domain)
+    existing_id = _at_find_lead(name, phone)
+
+    payload = LeadPayload(
+        name=name, phone=phone, domain=domain_key,
+        source="owner_dictation", channel=channel, summary=text,
+        status="new", score=0,
+    )
+    result = create_lead(
+        identity, payload, source_module="lead_candidate_handler", existing_id=existing_id,
     )
 
-    existing_id = _at_find_lead(name, phone)
-    action      = "update" if existing_id else "create"
-
-    # Gateway dedup check
-    contract_id = None
-    contract_ledger = None
-    try:
-        from core.action_gateway import action_gateway as _gw
-        from airtable_schema import LeadFields
-        _tool = "airtable_update" if action == "update" else "airtable_add"
-        _domain_key = _lead_domain_key(domain)
-        # BUG-077: wrap under "fields" matching exactly what the Write step
-        # below actually writes — this is what lets classify_approval_policy()
-        # (core/action_gateway.py) correctly classify a brand-new safe lead
-        # as self_confirm (BUG-076 carve-out), instead of always falling
-        # through to the strict "approval" default and getting force-flagged
-        # pending by the requires_approval cross-check even though the write
-        # happens unconditionally right below regardless of contract status.
-        if existing_id:
-            _fields = {LeadFields.PHONE: phone, LeadFields.SUMMARY: text[:500]}
-            if _domain_key != "general":
-                _fields[LeadFields.DOMAIN] = _domain_key
-            _inputs = {"table": "Leads", "record_id": existing_id, "fields": _fields}
-        else:
-            _inputs = {
-                "table": "Leads",
-                "fields": {
-                    LeadFields.NAME:       name,
-                    LeadFields.PHONE:      phone,
-                    LeadFields.CHANNEL:    channel,
-                    LeadFields.MEMORY_KEY: memory_key,
-                    LeadFields.DOMAIN:     _domain_key,
-                    LeadFields.SOURCE:     "owner_dictation",
-                    LeadFields.STATUS:     "new",
-                    LeadFields.SUMMARY:    text[:500],
-                    LeadFields.SCORE:      0,
-                    LeadFields.SENDER_ID:  phone,
-                },
-            }
-        gw_result = _gw.propose_action(
-            tenant_id         = tenant_id,
-            canonical_user_id = identity.memory_key,
-            tool_name         = _tool,
-            tool_inputs       = _inputs,
-            origin_channel    = channel,
-            origin_chat_id    = identity.memory_key,
-            requires_approval = False,
-            identity          = identity,
-        )
-        if not gw_result.ok:
-            logger.info("[LCH] gateway blocked for %r: %s", name, gw_result.reason)
-            return False, "", "duplicate"
-        contract_id = gw_result.contract_id
-        contract_ledger = _gw._ledger
-    except Exception as exc:
-        logger.warning("[LCH] gateway propose failed: %s", exc)
-
-    # Write
-    record_id = ""
-    ok        = False
-    try:
-        from tools.airtable_gateway import airtable_create, airtable_patch
-        from airtable_schema import LeadFields
-        _domain_key = _lead_domain_key(domain)
-
-        if action == "update" and existing_id:
-            patch_fields = {
-                LeadFields.PHONE:   phone,
-                LeadFields.SUMMARY: text[:500],
-            }
-            if _domain_key != "general":
-                patch_fields[LeadFields.DOMAIN] = _domain_key
-            ok_patch = airtable_patch("Leads", existing_id, patch_fields,
-                                      source="lead_candidate_handler")
-            if ok_patch:
-                record_id = existing_id
-                ok = True
-        else:
-            _domain_key = _lead_domain_key(domain)
-            lead_fields = {
-                LeadFields.NAME:       name,
-                LeadFields.PHONE:      phone,
-                LeadFields.CHANNEL:    channel,
-                LeadFields.MEMORY_KEY: memory_key,
-                LeadFields.DOMAIN:     _domain_key,
-                LeadFields.SOURCE:     "owner_dictation",
-                LeadFields.STATUS:     "new",
-                LeadFields.SUMMARY:    text[:500],
-                LeadFields.SCORE:      0,
-                LeadFields.SENDER_ID:  phone,
-            }
-            rec = airtable_create("Leads", lead_fields,
-                                  source="lead_candidate_handler")
-            if rec:
-                record_id = rec.get("id", "")
-                ok = bool(record_id)
-    except Exception as exc:
-        logger.error("[LCH] write failed for %r: %s", name, exc)
-
-    # Update the durable lifecycle before reporting a normal success. The
-    # provider may already have written the lead, so a persistence failure is
-    # surfaced as an explicit unknown audit state and must not invite retry.
-    lifecycle_persistence_failed = False
-    if contract_id:
-        try:
-            success_status = "completed" if contract_ledger._repository else "executed"
-            if not contract_ledger.update_status(contract_id, success_status if ok else "failed"):
-                raise RuntimeError("contract missing during lifecycle update")
-            if ok and record_id:
-                c = contract_ledger.find_by_id(contract_id)
-                if c:
-                    import time as _t
-                    c.agent_observations.append({"kind": "execution_fact", "record_id": record_id, "created_at": _t.time()})
-        except Exception as exc:
-            lifecycle_persistence_failed = True
-            logger.critical(
-                "[LCH] provider result could not be persisted to ActionContracts: "
-                "contract=%s provider_ok=%s error=%s",
-                contract_id, ok, exc,
-            )
-
-    if lifecycle_persistence_failed:
-        return False, record_id, "lifecycle_persistence_failed"
-
-    # Post-write enrichment (non-blocking, flag-gated)
-    if ok and record_id:
-        _domain_key = _lead_domain_key(domain)
-        try:
-            from lead_capture import capture_lead_event
-            from feature_flags import is_enabled as _flag
-            if _flag("LEAD_CAPTURE"):
-                capture_lead_event(identity, text, record_id, domain=_domain_key)
-        except Exception as exc:
-            logger.warning("[LCH] lead_event failed: %s", exc)
-
-        try:
-            from feature_flags import is_enabled as _flagm
-            if _flagm("LEAD_MEMORY"):
-                from lead_memory import lead_memory
-                lead_memory.update(memory_key, domain=_domain_key, channel=channel,
-                                   contact_name=name, last_message=text, summary=text[:500])
-        except Exception as exc:
-            logger.warning("[LCH] lead_memory failed: %s", exc)
-
-        if action == "create":
-            try:
-                from feature_flags import is_enabled as _flags
-                if _flags("LEAD_SCORING"):
-                    from lead_capture import _score_inbound_message
-                    from tools.airtable_gateway import airtable_patch as _gw_patch
-                    from airtable_schema import LeadFields as _LF
-                    score, _, _ = _score_inbound_message(text, identity)
-                    _gw_patch("Leads", record_id, {_LF.SCORE: score},
-                              source="lead_candidate_handler_scoring")
-            except Exception as exc:
-                logger.warning("[LCH] scoring failed: %s", exc)
-
-    return ok, record_id, action
+    action = {"created": "create", "updated": "update"}.get(result.action, result.action)
+    return result.ok, result.record_id, action
 
 
 # ══════════════════════════════════════════════════
@@ -605,43 +411,44 @@ def _propose_lead_write(
     Returns the GatewayResult (ok / contract_id / user_message) from
     propose_action() — dedup (pending/already-executed) is handled entirely
     by the Gateway's business-fingerprint match, same as _write_one_lead().
+
+    Phase 1 (Lead System E2E Audit): field construction for the "new lead"
+    branch now goes through core/lead_service.py's build_lead_fields()/
+    resolve_owner() — the SAME canonical helpers _write_one_lead() (via
+    create_lead()) uses — so a lead proposed here for approval carries the
+    same Owner/tenant_id as one auto-written by Path A, instead of a
+    second, drifted field set. The actual WRITE on approval still goes
+    through app.py's confirm-word handling -> dispatch_tool() (unchanged;
+    out of Phase 1 scope — see the audit's remaining-work list).
     """
     from core.action_gateway import action_gateway as _gw
+    from core.lead_service import LeadPayload, build_lead_fields, build_memory_key, resolve_owner
     from airtable_schema import LeadFields
 
     tenant_id   = getattr(identity, "tenant_id", "default") or "default"
     existing_id = _at_find_lead(name, phone)
     _domain_key = _lead_domain_key(domain)
+    owner_record_id, _resolved_owner = resolve_owner(identity)
 
     if existing_id:
         tool_name = "airtable_update"
         fields: dict = {LeadFields.PHONE: phone, LeadFields.SUMMARY: text[:500]}
         if _domain_key != "general":
             fields[LeadFields.DOMAIN] = _domain_key
+        if owner_record_id:
+            fields[LeadFields.OWNER] = [owner_record_id]
         tool_inputs = {
             "table": "Leads", "record_id": existing_id,
             "fields": fields,
         }
     else:
-        _phone_key = re.sub(r"[\s\-\+]", "", phone)
-        memory_key = (
-            f"{tenant_id}/{_phone_key}@lead"
-            if _phone_key
-            else f"{tenant_id}/dict_{re.sub(chr(32), '_', name.lower()[:20])}@lead"
-        )
+        memory_key = build_memory_key(tenant_id, phone, name)
         tool_name = "airtable_add"
-        fields = {
-            LeadFields.NAME:       name,
-            LeadFields.PHONE:      phone,
-            LeadFields.CHANNEL:    channel,
-            LeadFields.MEMORY_KEY: memory_key,
-            LeadFields.DOMAIN:     _domain_key,
-            LeadFields.SOURCE:     "owner_dictation",
-            LeadFields.STATUS:     "new",
-            LeadFields.SUMMARY:    text[:500],
-            LeadFields.SCORE:      0,
-            LeadFields.SENDER_ID:  phone,
-        }
+        payload = LeadPayload(
+            name=name, phone=phone, domain=_domain_key, source="owner_dictation",
+            channel=channel, summary=text, status="new", score=0, tenant_id=tenant_id,
+        )
+        fields = build_lead_fields(payload, owner_record_id, memory_key)
         tool_inputs = {"table": "Leads", "fields": fields}
 
     return _gw.propose_action(
@@ -679,6 +486,12 @@ def _propose_lead_write(
 # this module, so importing back would be circular. Small and deliberate;
 # not a shared-constants refactor (out of scope for this fix).
 _LEAD_CLARIFY_CANCEL_WORDS = frozenset({"לא", "בטל", "ביטול", "עצור", "cancel", "no", "❌"})
+
+# Lead Draft Card (Phase 1 follow-up) — reuses _LEAD_CLARIFY_CANCEL_WORDS
+# for cancellation; confirm/edit are new, local (same "duplicate is
+# deliberate, importing back would be circular" reasoning as above).
+_LEAD_DRAFT_CONFIRM_WORDS = frozenset({"כן", "אשר", "מאשר", "מאשרת", "✅", "yes", "y", "ok", "אוקי", "שמור", "בצע"})
+_LEAD_DRAFT_EDIT_WORDS = frozenset({"ערוך", "עריכה", "לתקן", "תקן", "edit"})
 
 # Intents that unambiguously mean "this message is a different command
 # entirely," not a reply to "what's the lead's name?" — anything NOT in
@@ -876,7 +689,7 @@ def _maybe_start_lead_clarification(
     return (
         f"זיהיתי {len(phones)} מספרים{domain_suffix}, אבל חסרים שמות. איך לשמור אותם?\n"
         f"{phones_list}\n\n"
-        f"שלח שם אחד בכל שורה, לפי הסדר (בסה\"כ {len(phones)} שמות), או *בטל* לביטול."
+        f"שלח שם אחד בכל שורה, לפי הסדר (בסה\"כ {len(phones)} שמות), או בטל לביטול."
     )
 
 
@@ -1018,7 +831,7 @@ def _resolve_batch_name_clarification(
     if len(lines) != len(phones):
         return (
             f"צריך בדיוק {len(phones)} שמות — אחד לכל מספר, כל שם בשורה נפרדת "
-            f"ולפי הסדר שבו הופיעו המספרים. שלח שוב, או *בטל* לביטול."
+            f"ולפי הסדר שבו הופיעו המספרים. שלח שוב, או בטל לביטול."
         )
 
     names: list[str] = []
@@ -1045,6 +858,253 @@ def _resolve_batch_name_clarification(
         f"📋 זיהיתי {len(candidates)} לידים אפשריים בקבוצה:\n" +
         "\n".join(lines_preview) +
         "\n\nענה \"כן\" לשמירת כולם, או \"לא\" לביטול. (בתוקף ל-30 דקות)"
+    )
+
+
+# ══════════════════════════════════════════════════
+# Lead Draft Card (Phase 1 follow-up) — the primary creation UX
+# ══════════════════════════════════════════════════
+
+# "ליד חדש" followed by anything that ISN'T a pipe continuation — checked
+# only once core.lead_service.parse_structured_command() has already
+# returned None for the same text (which happens for exactly bare "ליד
+# חדש" -- caught separately as {"prompt": True} -- or "ליד חדש | ..." --
+# a full pipe command). By the time this regex is even consulted, the text
+# is guaranteed to carry free-text content after the trigger.
+_DRAFT_TRIGGER_RE = re.compile(r"^\s*ליד\s+חדש\b\s*(.*)$", re.DOTALL)
+
+
+def _start_lead_draft(identity, free_text: str, chat_id: str, channel: str, router_domain: str = "") -> str:
+    from core.lead_service import build_draft_from_text, new_empty_draft, render_lead_draft_card, DRAFT_FIELD_PROMPT_HE
+    from session_store import lead_sessions as _ls
+
+    draft = build_draft_from_text(free_text, channel, router_domain) if free_text else new_empty_draft(channel)
+    _ls.set_lead_draft(chat_id, draft)
+
+    if draft["mode"] == "review":
+        return render_lead_draft_card(draft)
+    return DRAFT_FIELD_PROMPT_HE[draft["awaiting_field"]]
+
+
+def _finalize_draft_cancel(chat_id: str) -> str:
+    from session_store import lead_sessions as _ls
+    _ls.clear_lead_draft(chat_id)
+    return "ביטלתי את יצירת הליד."
+
+
+def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> str:
+    """Shared by _resolve_lead_draft (normal in-flow confirm) and
+    resolve_lead_draft_confirmation (app.py's early confirm-word
+    dispatch) — a single implementation of "כן actually writes the lead,"
+    so the two entry points can never drift apart on what counts as a
+    complete draft or what create_lead() gets called with."""
+    from session_store import lead_sessions as _ls
+    from core.lead_service import first_missing_required_field, draft_to_payload, create_lead, DRAFT_FIELD_PROMPT_HE
+
+    missing = first_missing_required_field(draft)
+    if missing:
+        draft["mode"] = "filling"
+        draft["awaiting_field"] = missing
+        _ls.set_lead_draft(chat_id, draft)
+        return f"עדיין חסר. {DRAFT_FIELD_PROMPT_HE[missing]}"
+
+    payload = draft_to_payload(draft)
+    result = create_lead(identity, payload, source_module="lead_candidate_handler_draft")
+    if not result.ok:
+        return f"❌ לא הצלחתי לשמור את הליד: {result.reason}"
+    _ls.clear_lead_draft(chat_id)
+    verb = "עודכן" if result.action == "updated" else "נוצר"
+    owner_note = f", Owner: {result.owner_user_id}" if result.owner_user_id else ""
+    return (
+        f"✅ ליד {verb}: {draft.get('name')} ({draft.get('phone')}), "
+        f"domain: {result.domain}{owner_note} | {result.record_id}"
+    )
+
+
+def should_prefer_lead_draft(canonical_user_id: str, chat_id: str) -> bool:
+    """True if a review-mode Lead Draft Card was shown more recently than
+    either the ActionGateway Tier-1 bookmark (BUG-115) or the Tier-2 batch
+    preview (BUG-058/117) — same recency-comparison principle as
+    should_prefer_batch_preview(), extended to lead_draft. app.py's
+    confirm/cancel-word dispatch predates lead_draft and has no built-in
+    knowledge of it; this is what lets it check the right thing instead of
+    always falling through to "אין פעולה שממתינה לאישור" for a fully-formed,
+    on-screen draft card."""
+    try:
+        from session_store import lead_sessions as _ls
+    except Exception:
+        return False
+
+    draft = _ls.get_lead_draft(chat_id)
+    if draft is None or draft.get("mode") != "review":
+        return False  # only a fully-formed card (awaiting כן/ערוך/לא) counts
+
+    draft_at = draft.get("set_at", 0)
+
+    bookmark = _ls.get_last_prompted_contract(canonical_user_id)
+    if bookmark is not None and bookmark.get("set_at", 0) > draft_at:
+        return False
+
+    preview = _ls.get_pending_lead_preview(chat_id)
+    if preview is not None and preview.get("set_at", 0) > draft_at:
+        return False
+
+    return True
+
+
+def resolve_lead_draft_confirmation(
+    identity, chat_id: str, channel: str, is_confirm: bool, is_cancel: bool,
+) -> Optional[str]:
+    """Early-dispatch counterpart to _resolve_lead_draft(), for app.py's
+    confirm/cancel-word branch — which runs BEFORE handle_lead_candidate()
+    and has no session snapshot to pass in, same self-fetching style as
+    resolve_pending_lead_preview(). Only resolves a draft that's in review
+    mode; every other shape (nothing pending, or a draft still mid-fill/
+    edit) returns None so the caller falls through to its existing logic
+    unchanged — a mid-fill/edit reply isn't a bare confirm/cancel word in
+    the first place, so it always reaches handle_lead_candidate() normally
+    regardless of this function."""
+    if not (is_confirm or is_cancel):
+        return None
+    from session_store import lead_sessions as _ls
+    draft = _ls.get_lead_draft(chat_id)
+    if draft is None or draft.get("mode") != "review":
+        return None
+    if is_cancel:
+        return _finalize_draft_cancel(chat_id)
+    return _finalize_draft_confirm(identity, chat_id, draft)
+
+
+def _resolve_lead_draft(
+    identity, text: str, chat_id: str, channel: str, intent: str, session: Optional[dict],
+) -> Optional[str]:
+    """Resolves a reply against a pending Lead Draft Card. Checked FIRST in
+    handle_lead_candidate() — same LL-11 read-from-snapshot convention as
+    _resolve_lead_clarification (session is the caller's already-loaded
+    snapshot, never re-read here). NOTE: for review-mode כן/לא specifically,
+    app.py's own confirm/cancel-word dispatch resolves it earlier via
+    resolve_lead_draft_confirmation() before this function is ever reached
+    (see should_prefer_lead_draft()) — this function's own review-mode
+    branch below stays as the fallback for any caller that reaches
+    handle_lead_candidate() directly (tests, other entry points)."""
+    if not session:
+        return None
+    draft = session.get("lead_draft")
+    if not draft:
+        return None
+
+    import time as _time
+    from session_store import lead_sessions as _ls
+
+    if _time.time() - draft.get("set_at", 0) > 1800:
+        _ls.clear_lead_draft(chat_id)
+        return None
+
+    # An explicit, unambiguous different command owns this turn -> abandon
+    # the draft rather than force-feeding it an unrelated reply (same
+    # escape hatch as _resolve_lead_clarification).
+    if intent and intent in _NON_LEAD_MUTATION_INTENTS:
+        _ls.clear_lead_draft(chat_id)
+        return None
+
+    # A fresh "ליד חדש ..." trigger always wins over a stale/stuck draft —
+    # never force an unrelated new-lead attempt to be swallowed by this
+    # draft's own catch-all (the exact "stuck until pending is reset"
+    # complaint this guards against).
+    from core.lead_service import parse_structured_command as _psc
+    if _psc(text) is not None or _DRAFT_TRIGGER_RE.match(text.strip()):
+        _ls.clear_lead_draft(chat_id)
+        return None
+
+    from core.lead_service import (
+        render_lead_draft_card, set_draft_field, first_missing_required_field,
+        match_edit_field_label, DRAFT_FIELD_PROMPT_HE, DRAFT_FIELD_HE,
+    )
+
+    lower = text.strip().lower()
+    mode = draft.get("mode", "filling")
+
+    # ── Filling mode: this reply IS the value for awaiting_field ────────
+    if mode == "filling":
+        field_key = draft.get("awaiting_field")
+        if not field_key:
+            _ls.clear_lead_draft(chat_id)
+            return None
+        if lower in _LEAD_CLARIFY_CANCEL_WORDS:
+            return _finalize_draft_cancel(chat_id)
+        ok, err = set_draft_field(draft, field_key, text)
+        if not ok:
+            _ls.set_lead_draft(chat_id, draft)
+            return f"❌ {err}"
+        missing = first_missing_required_field(draft)
+        if missing:
+            draft["awaiting_field"] = missing
+            _ls.set_lead_draft(chat_id, draft)
+            return DRAFT_FIELD_PROMPT_HE[missing]
+        draft["mode"] = "review"
+        draft["awaiting_field"] = None
+        _ls.set_lead_draft(chat_id, draft)
+        return render_lead_draft_card(draft)
+
+    # ── Edit-choice mode: this reply picks WHICH field to change ────────
+    if mode == "edit_choice":
+        field_key = match_edit_field_label(text)
+        if not field_key:
+            return "לא זיהיתי שדה. אילו שדות: שם / טלפון / תחום / מקור / הערה."
+        draft["mode"] = "filling"
+        draft["awaiting_field"] = field_key
+        _ls.set_lead_draft(chat_id, draft)
+        current = draft.get(field_key) or "ריק"
+        prompt = DRAFT_FIELD_PROMPT_HE.get(field_key, f"מה הערך החדש עבור {DRAFT_FIELD_HE[field_key]}?")
+        return f"{prompt} (נוכחי: {current})"
+
+    # ── Review mode: waiting for כן / ערוך / לא ──────────────────────────
+    if lower in _LEAD_CLARIFY_CANCEL_WORDS:
+        return _finalize_draft_cancel(chat_id)
+
+    if lower in _LEAD_DRAFT_EDIT_WORDS:
+        draft["mode"] = "edit_choice"
+        _ls.set_lead_draft(chat_id, draft)
+        return "איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה."
+
+    if lower in _LEAD_DRAFT_CONFIRM_WORDS:
+        return _finalize_draft_confirm(identity, chat_id, draft)
+
+    return render_lead_draft_card(draft) + "\n\n(לא הבנתי — ענה/י כן / ערוך / לא)"
+
+
+# ══════════════════════════════════════════════════
+# Phase 1 (Lead System E2E Audit) — structured creation command
+# ══════════════════════════════════════════════════
+
+def _handle_structured_command(identity, parsed: dict, channel: str) -> str:
+    """Resolves a core.lead_service.parse_structured_command() result into
+    a user-facing reply. Called only for the two non-"prompt" shapes the
+    caller (handle_lead_candidate) doesn't handle itself: {"error": "..."}
+    (validation failure — never a silent invented default) or a fully
+    valid {"name","phone","domain","note"} (immediate write — the pipe
+    format is already fully unambiguous, no draft/confirm step needed).
+    The bare-trigger {"prompt": True} shape is handled by the caller via
+    _start_lead_draft(), never reaches this function."""
+    if "error" in parsed:
+        return f"❌ {parsed['error']}"
+
+    from core.lead_service import LeadPayload, create_lead
+
+    payload = LeadPayload(
+        name=parsed["name"], phone=parsed["phone"], domain=parsed["domain"],
+        domain_explicit=True, source="structured_command", channel=channel,
+        summary=parsed.get("note", ""),
+    )
+    result = create_lead(identity, payload, source_module="lead_candidate_handler_structured")
+    if not result.ok:
+        return f"❌ לא הצלחתי ליצור את הליד: {result.reason}"
+
+    verb = "עודכן" if result.action == "updated" else "נוצר"
+    owner_note = f", Owner: {result.owner_user_id}" if result.owner_user_id else ""
+    return (
+        f"✅ ליד {verb}: {parsed['name']} ({parsed['phone']}), "
+        f"domain: {result.domain}{owner_note} | {result.record_id}"
     )
 
 
@@ -1100,9 +1160,48 @@ def handle_lead_candidate(
     if not getattr(identity, "is_internal", False):
         return None
 
-    # ── domain: Router (route.domain) is the source of truth when passed in;
-    #    _detect_domain() stays as the fallback for any other caller ──────
-    domain = domain or _detect_domain(text, getattr(identity, "domain_id", "general"))
+    # ── Lead Draft Card (Phase 1 follow-up): a reply against an
+    #    already-pending draft is resolved FIRST — before any new-command
+    #    detection below — same priority position as _resolve_lead_clarification. ──
+    _draft_reply = _resolve_lead_draft(identity, text, chat_id, channel, intent, session)
+    if _draft_reply is not None:
+        return _draft_reply
+
+    # ── Phase 1 (Lead System E2E Audit) — structured, fully deterministic
+    #    creation command: "ליד חדש | שם | טלפון | domain | הערה" (immediate
+    #    write, already unambiguous) or bare "ליד חדש" (starts a Lead Draft
+    #    Card — the primary creation UX, see _start_lead_draft). Checked
+    #    before any natural-language parsing or tier classification. ─────
+    from core.lead_service import parse_structured_command
+    _structured = parse_structured_command(text)
+    if _structured is not None:
+        if _structured.get("prompt"):
+            return _start_lead_draft(identity, "", chat_id, channel)
+        return _handle_structured_command(identity, _structured, channel)
+
+    # ── "ליד חדש <free text>" (no pipe) -> a pre-filled Lead Draft Card,
+    #    shown for confirmation before anything is written. Only reached
+    #    once parse_structured_command() above has already ruled out both
+    #    the bare trigger and the pipe format for this exact text. ────────
+    _draft_trigger = _DRAFT_TRIGGER_RE.match(text.strip()) if text else None
+    if _draft_trigger is not None:
+        return _start_lead_draft(identity, _draft_trigger.group(1).strip(), chat_id, channel, router_domain=domain)
+
+    # ── domain: Phase 1's single domain-resolution authority
+    #    (core.lead_service.resolve_domain) — an explicit "domain X"/
+    #    "דומיין X" annotation in `text` ALWAYS wins here, even when the
+    #    Router already passed its own (possibly wrong) guess; only when no
+    #    such annotation exists does the Router's domain (or the legacy
+    #    local _detect_domain() guess, for callers that never pass one at
+    #    all) apply. This is the direct fix for the golden failure case
+    #    (recruitment -> finance): the Router's guess used to silently win
+    #    unconditionally, so an explicit annotation was structurally
+    #    unreachable in the live path. ──────────────────────────────────
+    from core.lead_service import resolve_domain as _resolve_lead_domain
+    if domain:
+        domain, _ = _resolve_lead_domain(text, domain)
+    else:
+        domain = _detect_domain(text, getattr(identity, "domain_id", "general"))
 
     # ── BUG-099c: resolve a PENDING lead-clarification first — before batch-
     #    followup and before classify_ingress() even runs on this message.
@@ -1268,12 +1367,12 @@ def _handle_single_candidate(
         ctx_str = f" [{', '.join(ctx)}]" if ctx else ""
         if existing_id:
             return (
-                f"📋 מצאתי ליד קיים: *{name}* ({phone}){ctx_str}\n"
-                f"לעדכן אותו? ענה *כן* לאישור או *לא* לביטול."
+                f"📋 מצאתי ליד קיים: {name} ({phone}){ctx_str}\n"
+                f"לעדכן אותו? ענה כן לאישור או לא לביטול."
             )
         return (
-            f"📋 זיהיתי ליד: *{name}* ({phone}){ctx_str}\n"
-            f"לשמור? ענה *כן* לאישור או *לא* לביטול."
+            f"📋 זיהיתי ליד: {name} ({phone}){ctx_str}\n"
+            f"לשמור? ענה כן לאישור או לא לביטול."
         )
 
     ok, record_id, action = _write_one_lead(identity, name, phone, text, channel, domain)
@@ -1394,7 +1493,7 @@ def _handle_mixed_batch(
             if gw_result.ok:
                 verb = "לעדכון" if existing_id else "לשמירה"
                 results.append(
-                    f"📋 {c['name']} ({c['phone']}){ctx_str} — ממתין לאישור ({verb}). ענה *כן* לאשר."
+                    f"📋 {c['name']} ({c['phone']}){ctx_str} — ממתין לאישור ({verb}). ענה כן לאשר."
                 )
                 pending += 1
             else:

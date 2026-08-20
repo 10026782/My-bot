@@ -90,6 +90,7 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "last_lead_candidate_batch": None,   # ← Section 4C: batch dictation state for follow-up routing
         "pending_lead_preview":     None,   # ← C89: preview candidates awaiting confirmation (FEATURE_AUTO_CAPTURE=OFF)
         "last_prompted_contract":   None,   # ← BUG-115: last ActionContract whose approval prompt was shown, TTL 600s
+        "lead_draft":               None,   # ← Phase 1 follow-up: Lead Draft Card in progress (fill/review/edit), TTL 1800s
     }
 
 
@@ -390,6 +391,44 @@ class PersistentSessionStore:
         if not session:
             return
         session["pending_lead_preview"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def set_lead_draft(self, sender: str, draft: dict) -> None:
+        """שומר Lead Draft Card (Phase 1 follow-up) — כרטיס ליד בתהליך מילוי/
+        עריכה שטרם נכתב ל-Airtable. TTL 1800 שניות, אותו דפוס בדיוק כמו
+        active_lead_candidate/pending_lead_preview. `draft` הוא dict מלא
+        (כולל set_at אם כבר קיים — נדרס כאן תמיד ל"עכשיו" כדי שכל עדכון
+        (מילוי שדה/עריכה) ירענן את ה-TTL, לא רק היצירה הראשונית)."""
+        import time as _time
+        session = self.get_or_create(sender)
+        draft = dict(draft)
+        draft["set_at"] = _time.time()
+        session["lead_draft"] = draft
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_lead_draft(self, sender: str) -> Optional[dict]:
+        """מחזיר lead_draft אם לא פג תוקפו (>1800 שניות), אחרת None ומנקה."""
+        import time as _time
+        session = self.get(sender)
+        if not session:
+            return None
+        draft = session.get("lead_draft")
+        if not draft:
+            return None
+        if _time.time() - draft.get("set_at", 0) > 1800:
+            session["lead_draft"] = None
+            self._sync_to_db(sender, session)
+            return None
+        return draft
+
+    def clear_lead_draft(self, sender: str) -> None:
+        """מנקה lead_draft אחרי שמירה/ביטול."""
+        session = self.get(sender)
+        if not session:
+            return
+        session["lead_draft"] = None
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
