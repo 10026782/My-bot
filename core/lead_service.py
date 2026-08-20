@@ -541,7 +541,12 @@ def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, a
 # invented default.
 # ══════════════════════════════════════════════════
 
-_STRUCTURED_TRIGGER_RE = re.compile(r"^\s*ליד\s+חדש\s*([|/].*)?$", re.DOTALL)
+from core.structured_command import build_structured_trigger_re, parse_positional_command
+
+# N18 Phase 2: trigger/delimiter mechanics live in core/structured_command.py
+# (shared across future entity writers) — only the trigger words and field
+# semantics below are Lead-specific.
+_STRUCTURED_TRIGGER_RE = build_structured_trigger_re(r"ליד\s+חדש")
 
 STRUCTURED_COMMAND_HELP = (
     "ליצירת ליד בפורמט מובנה:\n"
@@ -567,19 +572,11 @@ def parse_structured_command(text: str) -> Optional[dict]:
                                  missing/unrecognized.
       {"name","phone","domain","note"} — a fully valid, ready-to-use payload.
     """
-    if not text:
-        return None
-    m = _STRUCTURED_TRIGGER_RE.match(text.strip())
-    if not m:
-        return None
+    parsed = parse_positional_command(text, _STRUCTURED_TRIGGER_RE)
+    if parsed is None or parsed.get("prompt"):
+        return parsed
 
-    matched = m.group(1) or ""
-    delimiter = matched[0] if matched else "|"
-    rest = matched[1:].strip()
-    if not rest:
-        return {"prompt": True}
-
-    parts = [p.strip() for p in rest.split(delimiter)]
+    parts = parsed["parts"]
     if len(parts) < 3:
         return {"error": f"פורמט חסר.\n\n{STRUCTURED_COMMAND_HELP}"}
 
