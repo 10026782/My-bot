@@ -60,6 +60,9 @@ Phase 4C remains as a historical research identifier only.
 8. Decision history:
    `decisions/DECISION_LOG.md`
 
+8a. **Gateway runtime-path authority decision (2026-08-20):**
+   `decisions/D-020_GATEWAY_RUNTIME_PATH_AUTHORITY_20260820.md`
+
 ## Authority rules
 
 Historical audits are evidence, not implementation instructions.
@@ -83,6 +86,9 @@ configuration and can independently reach a real provider mutation.
 Use `rollout/GATEWAY_CUTOVER_READINESS_20260820.md` for the verified
 classification of Gateway, EventBus/PendingActionsStore, `_pending_approvals`,
 `pending_lead_preview`, TMA Approvals projection, persistence and atomic claims.
+
+The durable audit-interpretation decision is recorded in
+`decisions/D-020_GATEWAY_RUNTIME_PATH_AUTHORITY_20260820.md`.
 
 ## Current status
 
