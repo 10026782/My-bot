@@ -1,0 +1,59 @@
+# Stirling-PDF Capability POC — local/dev only. NOT production infrastructure.
+#
+# - Pinned exactly to 2.14.3 (never :latest).
+# - Loopback-only exposure (127.0.0.1), never 0.0.0.0 — no public ingress.
+# - SECURITY_ENABLELOGIN + SECURITY_CUSTOMGLOBALAPIKEY: BOSS is the sole caller,
+#   authenticated via a single X-API-KEY. See docs/research/STIRLING_PDF_CAPABILITY_POC.md
+#   ("Authentication licensing nuance") — this specific mechanism lives in
+#   Stirling-PDF's proprietary-licensed module, not its MIT core. Used here for
+#   local evaluation/POC only — no production or client deployment, and no
+#   production license clearance is claimed. Production use of this auth
+#   mechanism remains blocked pending an explicit license review/decision
+#   (paid Stirling PDF User License, or a non-Stirling auth layer).
+# - SYSTEM_MAXFILESIZE (MB) is set above the BOSS-side per-file cap
+#   (core/stirling_pdf_adapter.py's _MAX_FILE_BYTES = 20MB) so BOSS's own limit
+#   is always the tighter one.
+# - No volume is mounted over /tmp/stirling-pdf: the container's own default
+#   writable layer is already ephemeral (wiped on `docker compose down`/
+#   container removal, never a named/persistent volume), on top of
+#   Stirling's own upstream temp-file cleanup mechanism (see the Deep Gate
+#   doc). A `tmpfs:` mount was tried first for an extra in-memory-only
+#   guarantee, but real testing found it breaks this image: Stirling 2.14.3
+#   extracts a native library (jpdfium's libpdfium.so, used for the actual
+#   merge) into a subdirectory of this exact path and mmaps it with
+#   PROT_EXEC — this Docker daemon's tmpfs mounts don't grant exec
+#   permission, so the native library fails to load ("failed to map segment
+#   from shared object") and every merge call 500s. Documented here so this
+#   isn't silently reintroduced; see docs/research/STIRLING_PDF_CAPABILITY_POC.md
+#   ("Real smoke evidence" / bug found during verification).
+# - Memory limit here (2G/1G) is a POC-sized deviation from the upstream-
+#   recommended 4G/2G production sizing — deliberately smaller for local dev
+#   with tiny test PDFs; not a production sizing recommendation.
+
+services:
+  stirling-pdf-poc:
+    image: docker.stirlingpdf.com/stirlingtools/stirling-pdf:2.14.3
+    container_name: stirling-pdf-poc
+    restart: "no"
+    ports:
+      - "127.0.0.1:${STIRLING_PDF_POC_PORT:-8091}:8080"
+    environment:
+      SECURITY_ENABLELOGIN: "true"
+      SECURITY_CUSTOMGLOBALAPIKEY: "${STIRLING_PDF_POC_API_KEY:?set a POC-only API key before starting}"
+      SYSTEM_MAXFILESIZE: "25"
+      SYSTEM_DEFAULTLOCALE: en-US
+      METRICS_ENABLED: "false"
+      SHOW_SURVEY: "false"
+      SYSTEM_GOOGLEVISIBILITY: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/v1/info/status | grep -q UP || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G

@@ -62,6 +62,11 @@ def _crawl4ai_adapter():
     return Crawl4AIAdapter()
 
 
+def _stirling_pdf_adapter():
+    from core.stirling_pdf_adapter import StirlingPDFAdapter
+    return StirlingPDFAdapter()
+
+
 def _build_registry(registrations: list[CapabilityRegistration]) -> dict[str, CapabilityRegistration]:
     registry: dict[str, CapabilityRegistration] = {}
     for registration in registrations:
@@ -107,6 +112,22 @@ _REGISTRY: dict[str, CapabilityRegistration] = _build_registry([
             healthcheck_capability=False,
         ),
         adapter_factory=_crawl4ai_adapter,
+    ),
+    CapabilityRegistration(
+        contract=CapabilityContract(
+            capability_id="stirling_pdf",
+            adapter_name="stirling_pdf",
+            version="2.14.3",
+            execution_mode="sync",
+            risk_class="high",
+            timeout_seconds=60,
+            retry_semantics="no automatic resubmit; failed/outcome_unknown are terminal for the caller",
+            idempotency_semantics="contract_id is the durable idempotency key; a submitted/completed job short-circuits resubmission",
+            evidence_schema_ref="core.stirling_pdf_adapter",
+            cleanup_capability=False,
+            healthcheck_capability=True,
+        ),
+        adapter_factory=_stirling_pdf_adapter,
     ),
 ])
 
