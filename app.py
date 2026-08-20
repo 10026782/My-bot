@@ -4196,6 +4196,32 @@ def run_agent(
                         return _ledger_reply
             pass  # fall through — route to Agent as status query
         elif _lower in _CONFIRM_WORDS:
+            # Lead Draft Card (Phase 1 follow-up): checked before the
+            # BUG-117 Tier-2 recency check below, same recency-comparison
+            # principle (should_prefer_lead_draft mirrors
+            # should_prefer_batch_preview) — a review-mode draft card is a
+            # THIRD pending-Lead mechanism this early confirm/cancel-word
+            # dispatch predates and has no built-in knowledge of; without
+            # this check, "כן" against an on-screen draft card falls all
+            # the way through to "אין פעולה שממתינה לאישור" (observed in
+            # staging: the draft was built and shown correctly by
+            # handle_lead_candidate(), but this EARLIER branch always wins
+            # for confirm/cancel words specifically, since
+            # handle_lead_candidate() itself is only reached further below
+            # in this same request-handling function).
+            from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft
+            if _prefer_draft(identity.memory_key, chat_id):
+                from core.lead_candidate_handler import resolve_lead_draft_confirmation as _resolve_draft_early
+                _draft_reply_early = _resolve_draft_early(identity, chat_id, channel, is_confirm=True, is_cancel=False)
+                if _draft_reply_early is not None:
+                    logger.info(
+                        "[LCH] resolve_lead_draft_confirmation(confirm): user=%s reply=%.60s",
+                        identity.memory_key, _draft_reply_early,
+                    )
+                    if _out_meta is not None:
+                        _out_meta["source_module"] = "action_gateway"
+                    return _draft_reply_early
+
             # BUG-117: recency check BEFORE the unconditional Tier-1 gate
             # below. A fresh Tier-2 batch lead-preview ("📋 זיהיתי N לידים
             # אפשריים בקבוצה...", core/lead_candidate_handler.py's
@@ -4328,6 +4354,21 @@ def run_agent(
                         or _gw_cw.describe_no_pending_reason(identity.memory_key)
                     )
         elif _lower in _CANCEL_WORDS:
+            # Lead Draft Card (Phase 1 follow-up) — same recency-preferred
+            # check as the _CONFIRM_WORDS branch above, symmetric for "לא".
+            from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_c
+            if _prefer_draft_c(identity.memory_key, chat_id):
+                from core.lead_candidate_handler import resolve_lead_draft_confirmation as _resolve_draft_cancel
+                _draft_cancel_reply = _resolve_draft_cancel(identity, chat_id, channel, is_confirm=False, is_cancel=True)
+                if _draft_cancel_reply is not None:
+                    logger.info(
+                        "[LCH] resolve_lead_draft_confirmation(cancel): user=%s reply=%.60s",
+                        identity.memory_key, _draft_cancel_reply,
+                    )
+                    if _out_meta is not None:
+                        _out_meta["source_module"] = "action_gateway"
+                    return _draft_cancel_reply
+
             # BUG-056: same reasoning as _CONFIRM_WORDS above — LCH's Tier-1
             # preview may have a live ActionGateway contract regardless of
             # FEATURE_ACTION_GATEWAY. If none, fall through unchanged (existing
