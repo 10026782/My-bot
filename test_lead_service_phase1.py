@@ -540,6 +540,141 @@ chk("attribution: campaign/adset/ad are accepted in the payload but not written 
     and "adset1" not in str(fields_campaign))
 
 
+# ══════════════════════════════════════════════════
+# 9. Staging regression (2026-08-20): "כן" against a review-mode draft
+#    fell through to app.py's EARLIER ActionGateway confirm-word dispatch
+#    (core/action_gateway.py's "אין פעולה שממתינה לאישור") because that
+#    branch runs BEFORE handle_lead_candidate() and had no knowledge of
+#    lead_draft. Fixed via should_prefer_lead_draft() / resolve_lead_
+#    draft_confirmation() — this section tests app.py's actual call
+#    pattern (self-fetching, no session snapshot), not handle_lead_
+#    candidate()'s in-flow path (already covered by section 7).
+# ══════════════════════════════════════════════════
+print()
+print("── 9. Staging regression: early confirm/cancel-word dispatch for a review-mode draft ──")
+
+chat_early = "phase1_draft_early_dispatch"
+lch.handle_lead_candidate(
+    identity, "ליד חדש יונתן רפאל domain recruitment 0548155880 מחפש עבודה בחיפה",
+    chat_early, "telegram", session=lead_sessions.get_or_create(chat_early),
+)
+chk("regression: should_prefer_lead_draft is True for a fresh review-mode card with no competing bookmark",
+    lch.should_prefer_lead_draft(identity.memory_key, chat_early))
+
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch("tool_registry.TOOLS_BLOCKED_BY_EMERGENCY", frozenset({"airtable_add"})), \
+     patch("tma_api._resolve_profile_record_id", return_value="recOWNER123"), \
+     patch("core.lead_service.find_existing_lead", return_value=None), \
+     patch("core.action_gateway.action_gateway") as mock_gw6, \
+     patch("tools.airtable_gateway.airtable_create") as mock_create8:
+
+    mock_gw6.propose_action.return_value = _make_ok_gateway_result()
+    mock_gw6._ledger = _FakeLedger()
+    mock_create8.return_value = {"id": "recYONATAN001"}
+
+    # Exactly app.py's call signature/pattern: no session snapshot, self-fetching.
+    reply_early = lch.resolve_lead_draft_confirmation(identity, chat_early, "telegram",
+                                                        is_confirm=True, is_cancel=False)
+    chk("regression: the early-dispatch path (app.py's actual call shape) resolves 'כן', "
+        "not 'אין פעולה שממתינה לאישור'",
+        isinstance(reply_early, str) and reply_early.startswith("✅"))
+    chk("regression: the early-dispatch confirm wrote exactly once", mock_create8.call_count == 1)
+    chk("regression: draft cleared after the early-dispatch confirm",
+        lead_sessions.get_lead_draft(chat_early) is None)
+
+# A cancel word against a review-mode draft, same early-dispatch shape.
+chat_early_cancel = "phase1_draft_early_cancel"
+lch.handle_lead_candidate(
+    identity, "ליד חדש רונית ברק domain recruitment 0521234567",
+    chat_early_cancel, "telegram", session=lead_sessions.get_or_create(chat_early_cancel),
+)
+reply_early_cancel = lch.resolve_lead_draft_confirmation(identity, chat_early_cancel, "telegram",
+                                                          is_confirm=False, is_cancel=True)
+chk("regression: early-dispatch cancel resolves against the review-mode draft",
+    reply_early_cancel == "ביטלתי את יצירת הליד.")
+chk("regression: draft cleared after early-dispatch cancel",
+    lead_sessions.get_lead_draft(chat_early_cancel) is None)
+
+# No draft pending at all -> early-dispatch helper is a clean no-op (None),
+# letting app.py's existing ActionGateway/Tier-2 logic run unaffected.
+chk("regression: should_prefer_lead_draft is False with nothing pending",
+    not lch.should_prefer_lead_draft(identity.memory_key, "phase1_no_draft_at_all"))
+chk("regression: resolve_lead_draft_confirmation is a no-op (None) with nothing pending",
+    lch.resolve_lead_draft_confirmation(identity, "phase1_no_draft_at_all", "telegram",
+                                         is_confirm=True, is_cancel=False) is None)
+
+# 9b. "Stuck until pending is reset": a fresh 'ליד חדש ...' trigger must
+# abandon a stale/stuck draft instead of being swallowed by its catch-all.
+chat_stuck = "phase1_draft_stuck_then_fresh"
+lch.handle_lead_candidate(
+    identity, "ליד חדש יונתן רפאל domain recruitment 0548155880",
+    chat_stuck, "telegram", session=lead_sessions.get_or_create(chat_stuck),
+)
+# Simulate the observed stuck state: still in review mode (as if the
+# earlier 'כן' had been swallowed elsewhere), then a brand-new "ליד חדש"
+# for a DIFFERENT person arrives.
+reply_fresh_over_stuck = lch.handle_lead_candidate(
+    identity, "ליד חדש זיאד פחמאווי 0548878210",
+    chat_stuck, "telegram", session=lead_sessions.get_or_create(chat_stuck),
+)
+chk("regression: a fresh 'ליד חדש' trigger is never swallowed by a stuck review-mode draft "
+    "(no longer echoes the OLD card / '(לא הבנתי)')",
+    isinstance(reply_fresh_over_stuck, str) and "לא הבנתי" not in reply_fresh_over_stuck
+    and "יונתן רפאל" not in reply_fresh_over_stuck)
+new_draft_state = lead_sessions.get_lead_draft(chat_stuck)
+chk("regression: the session now holds a draft for the NEW person, not the stuck old one",
+    new_draft_state is not None and "0548878210" in str(new_draft_state))
+
+
+# ══════════════════════════════════════════════════
+# 10. Staging feedback (2026-08-20): numbered domain selection + no
+#     literal asterisks in user-facing UI text (Telegram sends these
+#     without parse_mode="Markdown" for action_gateway-sourced replies,
+#     so "*כן*" rendered as literal asterisks, not bold — fixed by
+#     removing the markdown syntax from fixed UI strings rather than
+#     enabling parse_mode globally, which would risk breaking message
+#     delivery whenever a lead's own name/note contains an unescaped
+#     markdown special character).
+# ══════════════════════════════════════════════════
+print()
+print("── 10. Numbered domain selection + asterisk cleanup ──")
+
+from core.lead_service import CANONICAL_LEAD_DOMAINS_ORDERED
+
+chk("domain-by-number: '1' resolves to the first entry in the ordered list",
+    resolve_domain_word("1") == CANONICAL_LEAD_DOMAINS_ORDERED[0])
+chk("domain-by-number: a valid index anywhere in range resolves correctly",
+    resolve_domain_word(str(len(CANONICAL_LEAD_DOMAINS_ORDERED))) == CANONICAL_LEAD_DOMAINS_ORDERED[-1])
+chk("domain-by-number: out-of-range number -> None, never guessed",
+    resolve_domain_word("99") is None)
+chk("domain-by-number: '0' (out of range, 1-based) -> None",
+    resolve_domain_word("0") is None)
+chk("domain-by-word: still works exactly as before (number is additive, not a replacement)",
+    resolve_domain_word("recruitment") == "recruitment")
+
+chat_numbered = "phase1_domain_by_number"
+lch.handle_lead_candidate(identity, "ליד חדש", chat_numbered, "telegram",
+                           session=lead_sessions.get_or_create(chat_numbered))
+lch.handle_lead_candidate(identity, "בדיקת מספר", chat_numbered, "telegram",
+                           session=lead_sessions.get_or_create(chat_numbered))
+r_numbered = lch.handle_lead_candidate(identity, "0501234567", chat_numbered, "telegram",
+                                        session=lead_sessions.get_or_create(chat_numbered))
+chk("draft: domain prompt shows a numbered list", "1." in r_numbered and "2." in r_numbered)
+recruitment_index = CANONICAL_LEAD_DOMAINS_ORDERED.index("recruitment") + 1
+r_pick = lch.handle_lead_candidate(identity, str(recruitment_index), chat_numbered, "telegram",
+                                    session=lead_sessions.get_or_create(chat_numbered))
+chk("draft: picking the domain by number lands on the review card with the right domain",
+    isinstance(r_pick, str) and "📇" in r_pick and "recruitment" in r_pick)
+
+no_asterisks_texts = [
+    r3,                      # section 7's full review card
+    reply_prefill,           # section 7's prefilled review card
+    r_edit1, r_edit2, r_edit3,
+]
+chk("UX: no literal '*' survives in any Lead Draft Card text shown to the user",
+    all("*" not in t for t in no_asterisks_texts if isinstance(t, str)))
+
+
 print(f"\n{'='*50}")
 print(f"Phase 1 (Canonical Lead Foundation) tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

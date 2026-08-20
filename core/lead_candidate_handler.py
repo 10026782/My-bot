@@ -689,7 +689,7 @@ def _maybe_start_lead_clarification(
     return (
         f"זיהיתי {len(phones)} מספרים{domain_suffix}, אבל חסרים שמות. איך לשמור אותם?\n"
         f"{phones_list}\n\n"
-        f"שלח שם אחד בכל שורה, לפי הסדר (בסה\"כ {len(phones)} שמות), או *בטל* לביטול."
+        f"שלח שם אחד בכל שורה, לפי הסדר (בסה\"כ {len(phones)} שמות), או בטל לביטול."
     )
 
 
@@ -831,7 +831,7 @@ def _resolve_batch_name_clarification(
     if len(lines) != len(phones):
         return (
             f"צריך בדיוק {len(phones)} שמות — אחד לכל מספר, כל שם בשורה נפרדת "
-            f"ולפי הסדר שבו הופיעו המספרים. שלח שוב, או *בטל* לביטול."
+            f"ולפי הסדר שבו הופיעו המספרים. שלח שוב, או בטל לביטול."
         )
 
     names: list[str] = []
@@ -886,13 +886,107 @@ def _start_lead_draft(identity, free_text: str, chat_id: str, channel: str, rout
     return DRAFT_FIELD_PROMPT_HE[draft["awaiting_field"]]
 
 
+def _finalize_draft_cancel(chat_id: str) -> str:
+    from session_store import lead_sessions as _ls
+    _ls.clear_lead_draft(chat_id)
+    return "ביטלתי את יצירת הליד."
+
+
+def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> str:
+    """Shared by _resolve_lead_draft (normal in-flow confirm) and
+    resolve_lead_draft_confirmation (app.py's early confirm-word
+    dispatch) — a single implementation of "כן actually writes the lead,"
+    so the two entry points can never drift apart on what counts as a
+    complete draft or what create_lead() gets called with."""
+    from session_store import lead_sessions as _ls
+    from core.lead_service import first_missing_required_field, draft_to_payload, create_lead, DRAFT_FIELD_PROMPT_HE
+
+    missing = first_missing_required_field(draft)
+    if missing:
+        draft["mode"] = "filling"
+        draft["awaiting_field"] = missing
+        _ls.set_lead_draft(chat_id, draft)
+        return f"עדיין חסר. {DRAFT_FIELD_PROMPT_HE[missing]}"
+
+    payload = draft_to_payload(draft)
+    result = create_lead(identity, payload, source_module="lead_candidate_handler_draft")
+    if not result.ok:
+        return f"❌ לא הצלחתי לשמור את הליד: {result.reason}"
+    _ls.clear_lead_draft(chat_id)
+    verb = "עודכן" if result.action == "updated" else "נוצר"
+    owner_note = f", Owner: {result.owner_user_id}" if result.owner_user_id else ""
+    return (
+        f"✅ ליד {verb}: {draft.get('name')} ({draft.get('phone')}), "
+        f"domain: {result.domain}{owner_note} | {result.record_id}"
+    )
+
+
+def should_prefer_lead_draft(canonical_user_id: str, chat_id: str) -> bool:
+    """True if a review-mode Lead Draft Card was shown more recently than
+    either the ActionGateway Tier-1 bookmark (BUG-115) or the Tier-2 batch
+    preview (BUG-058/117) — same recency-comparison principle as
+    should_prefer_batch_preview(), extended to lead_draft. app.py's
+    confirm/cancel-word dispatch predates lead_draft and has no built-in
+    knowledge of it; this is what lets it check the right thing instead of
+    always falling through to "אין פעולה שממתינה לאישור" for a fully-formed,
+    on-screen draft card."""
+    try:
+        from session_store import lead_sessions as _ls
+    except Exception:
+        return False
+
+    draft = _ls.get_lead_draft(chat_id)
+    if draft is None or draft.get("mode") != "review":
+        return False  # only a fully-formed card (awaiting כן/ערוך/לא) counts
+
+    draft_at = draft.get("set_at", 0)
+
+    bookmark = _ls.get_last_prompted_contract(canonical_user_id)
+    if bookmark is not None and bookmark.get("set_at", 0) > draft_at:
+        return False
+
+    preview = _ls.get_pending_lead_preview(chat_id)
+    if preview is not None and preview.get("set_at", 0) > draft_at:
+        return False
+
+    return True
+
+
+def resolve_lead_draft_confirmation(
+    identity, chat_id: str, channel: str, is_confirm: bool, is_cancel: bool,
+) -> Optional[str]:
+    """Early-dispatch counterpart to _resolve_lead_draft(), for app.py's
+    confirm/cancel-word branch — which runs BEFORE handle_lead_candidate()
+    and has no session snapshot to pass in, same self-fetching style as
+    resolve_pending_lead_preview(). Only resolves a draft that's in review
+    mode; every other shape (nothing pending, or a draft still mid-fill/
+    edit) returns None so the caller falls through to its existing logic
+    unchanged — a mid-fill/edit reply isn't a bare confirm/cancel word in
+    the first place, so it always reaches handle_lead_candidate() normally
+    regardless of this function."""
+    if not (is_confirm or is_cancel):
+        return None
+    from session_store import lead_sessions as _ls
+    draft = _ls.get_lead_draft(chat_id)
+    if draft is None or draft.get("mode") != "review":
+        return None
+    if is_cancel:
+        return _finalize_draft_cancel(chat_id)
+    return _finalize_draft_confirm(identity, chat_id, draft)
+
+
 def _resolve_lead_draft(
     identity, text: str, chat_id: str, channel: str, intent: str, session: Optional[dict],
 ) -> Optional[str]:
     """Resolves a reply against a pending Lead Draft Card. Checked FIRST in
     handle_lead_candidate() — same LL-11 read-from-snapshot convention as
     _resolve_lead_clarification (session is the caller's already-loaded
-    snapshot, never re-read here)."""
+    snapshot, never re-read here). NOTE: for review-mode כן/לא specifically,
+    app.py's own confirm/cancel-word dispatch resolves it earlier via
+    resolve_lead_draft_confirmation() before this function is ever reached
+    (see should_prefer_lead_draft()) — this function's own review-mode
+    branch below stays as the fallback for any caller that reaches
+    handle_lead_candidate() directly (tests, other entry points)."""
     if not session:
         return None
     draft = session.get("lead_draft")
@@ -913,10 +1007,18 @@ def _resolve_lead_draft(
         _ls.clear_lead_draft(chat_id)
         return None
 
+    # A fresh "ליד חדש ..." trigger always wins over a stale/stuck draft —
+    # never force an unrelated new-lead attempt to be swallowed by this
+    # draft's own catch-all (the exact "stuck until pending is reset"
+    # complaint this guards against).
+    from core.lead_service import parse_structured_command as _psc
+    if _psc(text) is not None or _DRAFT_TRIGGER_RE.match(text.strip()):
+        _ls.clear_lead_draft(chat_id)
+        return None
+
     from core.lead_service import (
         render_lead_draft_card, set_draft_field, first_missing_required_field,
-        match_edit_field_label, draft_to_payload, create_lead,
-        DRAFT_FIELD_PROMPT_HE, DRAFT_FIELD_HE,
+        match_edit_field_label, DRAFT_FIELD_PROMPT_HE, DRAFT_FIELD_HE,
     )
 
     lower = text.strip().lower()
@@ -929,8 +1031,7 @@ def _resolve_lead_draft(
             _ls.clear_lead_draft(chat_id)
             return None
         if lower in _LEAD_CLARIFY_CANCEL_WORDS:
-            _ls.clear_lead_draft(chat_id)
-            return "ביטלתי את יצירת הליד."
+            return _finalize_draft_cancel(chat_id)
         ok, err = set_draft_field(draft, field_key, text)
         if not ok:
             _ls.set_lead_draft(chat_id, draft)
@@ -959,8 +1060,7 @@ def _resolve_lead_draft(
 
     # ── Review mode: waiting for כן / ערוך / לא ──────────────────────────
     if lower in _LEAD_CLARIFY_CANCEL_WORDS:
-        _ls.clear_lead_draft(chat_id)
-        return "ביטלתי את יצירת הליד."
+        return _finalize_draft_cancel(chat_id)
 
     if lower in _LEAD_DRAFT_EDIT_WORDS:
         draft["mode"] = "edit_choice"
@@ -968,23 +1068,7 @@ def _resolve_lead_draft(
         return "איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה."
 
     if lower in _LEAD_DRAFT_CONFIRM_WORDS:
-        missing = first_missing_required_field(draft)
-        if missing:
-            draft["mode"] = "filling"
-            draft["awaiting_field"] = missing
-            _ls.set_lead_draft(chat_id, draft)
-            return f"עדיין חסר. {DRAFT_FIELD_PROMPT_HE[missing]}"
-        payload = draft_to_payload(draft)
-        result = create_lead(identity, payload, source_module="lead_candidate_handler_draft")
-        if not result.ok:
-            return f"❌ לא הצלחתי לשמור את הליד: {result.reason}"
-        _ls.clear_lead_draft(chat_id)
-        verb = "עודכן" if result.action == "updated" else "נוצר"
-        owner_note = f", Owner: {result.owner_user_id}" if result.owner_user_id else ""
-        return (
-            f"✅ ליד {verb}: {draft.get('name')} ({draft.get('phone')}), "
-            f"domain: {result.domain}{owner_note} | {result.record_id}"
-        )
+        return _finalize_draft_confirm(identity, chat_id, draft)
 
     return render_lead_draft_card(draft) + "\n\n(לא הבנתי — ענה/י כן / ערוך / לא)"
 
@@ -1283,12 +1367,12 @@ def _handle_single_candidate(
         ctx_str = f" [{', '.join(ctx)}]" if ctx else ""
         if existing_id:
             return (
-                f"📋 מצאתי ליד קיים: *{name}* ({phone}){ctx_str}\n"
-                f"לעדכן אותו? ענה *כן* לאישור או *לא* לביטול."
+                f"📋 מצאתי ליד קיים: {name} ({phone}){ctx_str}\n"
+                f"לעדכן אותו? ענה כן לאישור או לא לביטול."
             )
         return (
-            f"📋 זיהיתי ליד: *{name}* ({phone}){ctx_str}\n"
-            f"לשמור? ענה *כן* לאישור או *לא* לביטול."
+            f"📋 זיהיתי ליד: {name} ({phone}){ctx_str}\n"
+            f"לשמור? ענה כן לאישור או לא לביטול."
         )
 
     ok, record_id, action = _write_one_lead(identity, name, phone, text, channel, domain)
@@ -1409,7 +1493,7 @@ def _handle_mixed_batch(
             if gw_result.ok:
                 verb = "לעדכון" if existing_id else "לשמירה"
                 results.append(
-                    f"📋 {c['name']} ({c['phone']}){ctx_str} — ממתין לאישור ({verb}). ענה *כן* לאשר."
+                    f"📋 {c['name']} ({c['phone']}){ctx_str} — ממתין לאישור ({verb}). ענה כן לאשר."
                 )
                 pending += 1
             else:

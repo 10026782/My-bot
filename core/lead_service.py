@@ -40,6 +40,13 @@ CANONICAL_LEAD_DOMAINS = frozenset({
     "real_estate", "import", "media", "saas", "finance", "recruitment", "general",
 })
 
+# A stable, numbered ordering of the same set — lets a reply be a bare
+# digit ("3") instead of typing the exact canonical word, for the Lead
+# Draft Card's domain prompt (UX follow-up: choosing by number). Sorted
+# alphabetically so the displayed list is deterministic and matches what
+# error messages already show via sorted(CANONICAL_LEAD_DOMAINS).
+CANONICAL_LEAD_DOMAINS_ORDERED = tuple(sorted(CANONICAL_LEAD_DOMAINS))
+
 
 def resolve_domain(text: str, router_domain: str = "") -> tuple[str, bool]:
     """
@@ -67,16 +74,24 @@ def resolve_domain(text: str, router_domain: str = "") -> tuple[str, bool]:
 
 def resolve_domain_word(word: str) -> Optional[str]:
     """
-    Canonicalizes a BARE domain token (e.g. the `domain` column of the
-    structured `ליד חדש | ...` command below) — not a sentence to scan.
-    Reuses the SAME hint vocabulary core.ingress_classifier's
-    _DOMAIN_HINT_CANONICAL uses for free-text "דומיין X" annotations, one
-    shared mapping table, never a second guess table. Returns None (never
-    guesses/falls back) when the word has no known canonical mapping.
+    Canonicalizes a BARE domain token — e.g. the `domain` column of the
+    structured `ליד חדש | ...` command below, or a reply to the Lead Draft
+    Card's domain prompt (word OR a 1-based number into
+    CANONICAL_LEAD_DOMAINS_ORDERED, per render_lead_draft_card's numbered
+    list) — not a sentence to scan. Word-lookup reuses the SAME hint
+    vocabulary core.ingress_classifier's _DOMAIN_HINT_CANONICAL uses for
+    free-text "דומיין X" annotations, one shared mapping table, never a
+    second guess table. Returns None (never guesses/falls back) when the
+    word/number has no known canonical mapping.
     """
     if not word:
         return None
     key = word.strip().lower()
+    if key.isdigit():
+        idx = int(key)
+        if 1 <= idx <= len(CANONICAL_LEAD_DOMAINS_ORDERED):
+            return CANONICAL_LEAD_DOMAINS_ORDERED[idx - 1]
+        return None
     if key in CANONICAL_LEAD_DOMAINS:
         return key
     from core.ingress_classifier import _DOMAIN_HINT_CANONICAL
@@ -606,10 +621,15 @@ DRAFT_FIELD_HE = {
     "name": "שם", "phone": "טלפון", "domain": "תחום", "source": "מקור", "note": "הערה",
 }
 
+def _domain_prompt_text() -> str:
+    numbered = "\n".join(f"{i}. {d}" for i, d in enumerate(CANONICAL_LEAD_DOMAINS_ORDERED, 1))
+    return f"מה התחום? בחר/י מספר או הקלד/י שם:\n{numbered}"
+
+
 DRAFT_FIELD_PROMPT_HE = {
     "name": "מה שם הליד?",
     "phone": "מה מספר הטלפון?",
-    "domain": f"מה התחום? ({', '.join(sorted(CANONICAL_LEAD_DOMAINS))})",
+    "domain": _domain_prompt_text(),
 }
 
 # Free-text tokens that identify which field an "ערוך" reply means —
@@ -725,7 +745,7 @@ def render_lead_draft_card(draft: dict) -> str:
         value = draft.get(key) or "______"
         lines.append(f"{DRAFT_FIELD_HE[key]}: {value}")
     lines.append("")
-    lines.append('ענה/י *כן* לשמירה, *ערוך* לשינוי שדה, או *לא* לביטול.')
+    lines.append("ענה/י כן לשמירה, ערוך לשינוי שדה, או לא לביטול.")
     return "\n".join(lines)
 
 
