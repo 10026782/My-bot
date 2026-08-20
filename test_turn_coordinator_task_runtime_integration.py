@@ -31,6 +31,18 @@ def test_create_uses_one_gateway_queue_without_agent_or_write():
     assert queued == [("airtable_add", {"table": Tables.TASKS, "fields": {TaskFields.NAME: "Call supplier"}})]
 
 
+def test_create_does_not_copy_runtime_user_id_into_linked_owner_field():
+    queued = []
+    identity = SimpleNamespace(user_id="eliyahu")
+    reply = queue_task_request(
+        intent=Intent.CREATE_TASK, scope="tenant:user", title="Call supplier",
+        identity=identity,
+        queue=lambda tool, payload: queued.append((tool, payload)) or {"message": "pending"},
+    )
+    assert reply["message"] == "pending"
+    assert queued[0][1]["fields"] == {TaskFields.NAME: "Call supplier"}
+
+
 def test_update_and_complete_require_one_stable_match():
     update = prepare_task_gateway_call(
         Intent.UPDATE_TASK, scope="tenant:user", lookup=lookup,
@@ -346,7 +358,7 @@ def test_app_create_consumer_receives_gateway_mapping(monkeypatch):
     monkeypatch.setattr(app, "enforce", lambda *_: None)
     monkeypatch.setattr(
         app, "_queue_approval_detailed",
-        lambda *_: {
+        lambda *_, **__: {
             "message": "pending", "created_this_turn": True,
             "contract_id": "c1", "reply_owner": "gateway",
             "final_response_count": 1, "action_tool": "airtable_add",
@@ -414,8 +426,8 @@ def test_bounded_reader_rejects_invalid_limits(monkeypatch):
         raise AssertionError("negative max_records must fail closed")
 
 
-def test_create_auto_populates_owner_from_identity():
-    """OWNER should be auto-populated from identity.user_id when creating tasks."""
+def test_create_does_not_copy_runtime_identity_into_linked_owner():
+    """A runtime user_id is not an Airtable linked-record ID."""
     identity = SimpleNamespace(user_id="eliyahu", role="owner")
     queued = []
     reply = queue_task_request(
@@ -424,12 +436,10 @@ def test_create_auto_populates_owner_from_identity():
         identity=identity,
     )
     assert reply["message"] == "pending"
-    assert queued == [
-        ("airtable_add", {
-            "table": Tables.TASKS,
-            "fields": {TaskFields.NAME: "Call supplier", TaskFields.OWNER: "eliyahu"},
-        })
-    ]
+    assert queued == [("airtable_add", {
+        "table": Tables.TASKS,
+        "fields": {TaskFields.NAME: "Call supplier"},
+    })]
 
 
 def test_create_respects_explicit_owner():

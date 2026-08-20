@@ -50,7 +50,10 @@ def build_create_task_proposal(
 ) -> CanonicalActionProposal:
     """Build a complete named task-create proposal from deterministic input.
 
-    If identity is provided and OWNER is not already set, auto-populate from identity.user_id.
+    ``Owner`` is a linked Airtable field.  A runtime identity's ``user_id`` is
+    not an Airtable record ID, so it must never be copied into that field.
+    Owner assignment requires an explicit linked-record ID supplied by a
+    caller that resolved it against Airtable.
     """
     normalized_title = _require_text(title, "title")
     if TaskFields.NAME in fields:
@@ -59,18 +62,10 @@ def build_create_task_proposal(
     if unknown:
         raise ValueError(f"unsupported task fields: {sorted(unknown)}")
 
-    final_fields = {TaskFields.NAME: normalized_title, **fields}
-
-    # Auto-populate OWNER from identity if not already set
-    if identity is not None and TaskFields.OWNER not in final_fields:
-        user_id = getattr(identity, "user_id", None)
-        if user_id:
-            final_fields[TaskFields.OWNER] = user_id
-
     return _proposal(
         Intent.CREATE_TASK,
         "task_create",
-        final_fields,
+        {TaskFields.NAME: normalized_title, **fields},
     )
 
 
