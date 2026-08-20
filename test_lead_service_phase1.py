@@ -708,6 +708,29 @@ chk("UX: no literal '*' survives in any Lead Draft Card text shown to the user",
     all("*" not in t for t in no_asterisks_texts if isinstance(t, str)))
 
 
+# ══════════════════════════════════════════════════
+# 11. Staging QA report (2026-08-20): structured command with "/" delimiter
+#     dropped the note field. The documented format only recognized "|" —
+#     "/" fell through to the free-text NLP draft path instead, which has
+#     no concept of "5th token = note" and silently lost it. Fixed by
+#     accepting "/" as an equal alternate delimiter (detected from the
+#     matched trigger and used consistently), rather than teaching the NLP
+#     fallback to fake structured parsing.
+# ══════════════════════════════════════════════════
+print()
+print("── 11. Structured command: '/' delimiter (staging QA report) ──")
+
+r_slash = parse_structured_command("ליד חדש/משה בדיקה/0502222222/recruitment/בעל מספר צוותים")
+chk("structured '/' delimiter: name/phone/domain/note all parsed correctly",
+    r_slash == {"name": "משה בדיקה", "phone": "0502222222", "domain": "recruitment",
+                "note": "בעל מספר צוותים"})
+
+r_pipe_unchanged = parse_structured_command(
+    "ליד חדש | עידן מושקוביץ | 0506872216 | recruitment | תשתיות חיצוניות, בעל מספר צוותים")
+chk("structured '|' delimiter: unchanged, still works",
+    r_pipe_unchanged is not None and r_pipe_unchanged["note"] == "תשתיות חיצוניות, בעל מספר צוותים")
+
+
 print(f"\n{'='*50}")
 print(f"Phase 1 (Canonical Lead Foundation) tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

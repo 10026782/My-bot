@@ -541,13 +541,14 @@ def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, a
 # invented default.
 # ══════════════════════════════════════════════════
 
-_STRUCTURED_TRIGGER_RE = re.compile(r"^\s*ליד\s+חדש\s*(\|.*)?$", re.DOTALL)
+_STRUCTURED_TRIGGER_RE = re.compile(r"^\s*ליד\s+חדש\s*([|/].*)?$", re.DOTALL)
 
 STRUCTURED_COMMAND_HELP = (
     "ליצירת ליד בפורמט מובנה:\n"
     "ליד חדש | שם | טלפון | domain | הערה\n\n"
     "לדוגמה:\n"
     "ליד חדש | עידן מושקוביץ | 0506872216 | recruitment | תשתיות חיצוניות, בעל מספר צוותים\n\n"
+    "אפשר גם עם / במקום |.\n\n"
     f"ערכי domain אפשריים: {', '.join(sorted(CANONICAL_LEAD_DOMAINS))}"
 )
 
@@ -572,11 +573,13 @@ def parse_structured_command(text: str) -> Optional[dict]:
     if not m:
         return None
 
-    rest = (m.group(1) or "").lstrip("|").strip()
+    matched = m.group(1) or ""
+    delimiter = matched[0] if matched else "|"
+    rest = matched[1:].strip()
     if not rest:
         return {"prompt": True}
 
-    parts = [p.strip() for p in rest.split("|")]
+    parts = [p.strip() for p in rest.split(delimiter)]
     if len(parts) < 3:
         return {"error": f"פורמט חסר.\n\n{STRUCTURED_COMMAND_HELP}"}
 
