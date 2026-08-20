@@ -2138,3 +2138,43 @@ catalog, all introduced by C192 (PR #623) and the tool-runtime-snapshot work
 `AI_CONTEXT.md` §1/§2/§4 for the exact list. Fix is catalog registration, an
 owner decision, not a code change — out of scope for this documentation-only
 documentation-only pass.
+
+### C194 — MY-WORK-1: Owner linked-record root-cause fix (My Work + Lead Detail), PARTIALLY MERGED (20/08/2026)
+Root cause of the My Work screen always showing zero tasks: `Tasks.Owner` /
+`Leads.Owner` are `multipleRecordLinks` fields pointing at a `Profile`
+team-roster table (verified via Airtable MCP, 19/08/2026), not plain text as
+every prior read/write site assumed — compounded by a case mismatch
+(`Profile.name` = `"Eliyahu"` vs. `identity.user_id` = `"eliyahu"`) that
+would have broken even a naive string filter. Live Airtable check at
+discovery time: 0 of 121 Tasks and 0 Leads had `Owner` populated.
+
+**Merged:**
+- **PR #766** (branch `my-work-1d`, cherry-pick of `f6d0aff` after PR #760
+  was merged mid-session without this fix) — read-path fix
+  (`_resolve_profile_record_id()` + linked-record-aware
+  `_process_owner_tasks()`) and write-path fix (`create_lead_task()`
+  defaults a new task's Owner to the creator's resolved Profile record when
+  the source Lead has none). Merge commit `df107a4`.
+- **PR #770** (branch `my-work-1e`) — unowned-task fallback: a Task with no
+  Owner link at all now defaults to the requesting (sole) owner in the My
+  Work read path, instead of requiring a backfill of the 121 pre-existing
+  Owner-less Task records. Owner-approved policy (20/08/2026): unowned
+  records default to the sole owner unless/until an explicit other owner
+  exists. Merge commit `f647586`, mergedAt `2026-08-20T00:04:25Z`.
+  **Runtime verified:** production My Work screen went from 0 immediate/0
+  upcoming to 19 immediate + 77 upcoming real tasks after this deploy —
+  confirmed by the owner directly against the live TMA screen.
+
+**Open, not yet merged:**
+- **PR #788** (branch `my-work-1f`) — resolves `Leads.Owner` linked-record
+  IDs to a display name in `GET /api/leads/<id>` (previously returned raw
+  `recXXX` IDs; the frontend already defended against this with a generic
+  placeholder, so this was a display-quality bug, not a crash). Latent —
+  0 Leads currently have `Owner` set in production, so not yet visible to
+  any user. See `BUG_AUDIT_LOG.md::BUG-166`.
+
+**Consequential because:** corrects a canonical field-type/contract
+assumption (Owner treated as plain text) that silently broke a live
+production feature end-to-end, plus establishes an explicit, owner-approved
+default-ownership policy for unowned records — not a routine UX/cosmetic
+change.

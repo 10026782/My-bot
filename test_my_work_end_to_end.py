@@ -592,6 +592,81 @@ def test_create_lead_task_preserves_lead_owner_when_present():
         tma_api._at_list = orig_at_list
 
 
+def test_resolve_profile_display_names_resolves_ids_to_names():
+    from tma_api import _resolve_profile_display_names
+
+    orig_get_record = tma_api._at_get_record
+    profiles = {
+        OWNER_RECORD_ID: {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}},
+        OTHER_OWNER_RECORD_ID: {"id": OTHER_OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Partner"}},
+    }
+    tma_api._at_get_record = lambda table, rid: profiles.get(rid)
+
+    try:
+        names = _resolve_profile_display_names([OWNER_RECORD_ID, OTHER_OWNER_RECORD_ID])
+        assert names == ["Eliyahu", "Partner"]
+        assert _resolve_profile_display_names([]) == []
+        assert _resolve_profile_display_names(["recMissing"]) == []
+    finally:
+        tma_api._at_get_record = orig_get_record
+
+
+def test_route_get_lead_detail_resolves_owner_to_display_name():
+    """GET /api/leads/<id>: Owner is a linked-record field -> the response
+    must carry a resolved name, never a raw 'recXXX' id (see PR #766)."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_at_list = tma_api._at_list
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
+
+    records = {
+        "recLEAD001": {"id": "recLEAD001", "fields": {LeadFields.NAME: "Test Lead", LeadFields.OWNER: [OWNER_RECORD_ID]}},
+        OWNER_RECORD_ID: {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}},
+    }
+    tma_api._at_get_record = lambda table, rid: records.get(rid)
+
+    try:
+        r = client.get("/api/leads/recLEAD001", headers=_HDR)
+        body = r.get_json()
+        assert r.status_code == 200
+        assert body["owner"] == "Eliyahu", f"expected resolved name, got {body['owner']!r}"
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._at_list = orig_at_list
+
+
+def test_route_get_lead_detail_no_owner_returns_empty_string():
+    """A lead with no Owner link at all -> owner is "", not None/[]."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_at_list = tma_api._at_list
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
+    tma_api._at_get_record = lambda table, rid: {"id": "recLEAD002", "fields": {LeadFields.NAME: "Unowned Lead"}}
+
+    try:
+        r = client.get("/api/leads/recLEAD002", headers=_HDR)
+        body = r.get_json()
+        assert r.status_code == 200
+        assert body["owner"] == ""
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._at_list = orig_at_list
+
+
 if __name__ == "__main__":
     import subprocess
     subprocess.run(["python3", "-m", "pytest", __file__, "-v"], check=True)

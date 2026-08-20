@@ -1657,6 +1657,12 @@ def get_lead(lead_id, identity):
     score       = int(f.get(LeadFields.SCORE, 0) or 0)
     score_color = "red" if score >= 70 else ("yellow" if score >= 40 else "blue")
 
+    # Owner is a multipleRecordLinks field -> list of Profile record IDs,
+    # not a display string (see _resolve_profile_record_id). Resolve to
+    # name(s) so the frontend never has to render a raw "recXXX" id.
+    owner_links = _linked_record_ids(f.get(LeadFields.OWNER, []))
+    owner_display = ", ".join(_resolve_profile_display_names(owner_links)) if owner_links else ""
+
     payload = {
         "id":            rec["id"],
         "name":          f.get(LeadFields.NAME, ""),
@@ -1673,7 +1679,7 @@ def get_lead(lead_id, identity):
         "tier":          f.get(LeadFields.TIER, ""),
         "outcome":       f.get(LeadFields.OUTCOME, ""),
         "next_followup": f.get(LeadFields.NEXT_FOLLOWUP, ""),
-        "owner":         f.get(LeadFields.OWNER, ""),
+        "owner":         owner_display,
     }
 
     # BUG-104 — Core Reasoning Activation Program, Phase 1 (read-only).
@@ -2650,6 +2656,23 @@ def _resolve_profile_record_id(user_id: str) -> str | None:
     formula = f"LOWER({{{ProfileFields.NAME}}}) = LOWER('{safe_user_id}')"
     records = _at_list(Tables.PROFILE, formula, max_records=5)
     return records[0].get("id") if records else None
+
+
+def _resolve_profile_display_names(record_ids: list[str]) -> list[str]:
+    """
+    Reverse of _resolve_profile_record_id: Profile record IDs (e.g. from a
+    Leads/Tasks Owner linked-record field) -> display names, so callers
+    never surface a raw "recXXX" id to the frontend. A lead/task normally
+    has 0-1 owners, so a direct fetch per id (no bulk-listing/caching) is
+    the whole fix.
+    """
+    names = []
+    for rid in record_ids:
+        rec = _at_get_record(Tables.PROFILE, rid)
+        name = rec.get("fields", {}).get(ProfileFields.NAME, "") if rec else ""
+        if name:
+            names.append(name)
+    return names
 
 
 def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str, today: str | None = None) -> dict:
