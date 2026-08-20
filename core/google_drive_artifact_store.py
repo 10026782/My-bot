@@ -114,7 +114,7 @@ class GoogleDriveArtifactStore:
                 "folder_id": self.folder_id, "sha256": sha256,
                 "size": size, "mime_type": "video/mp4",
             }, separators=(",", ":")),
-            file_id=file["id"], size=size, sha256=sha256,
+            file_id=file["id"], size=size, sha256=sha256, mime_type="video/mp4",
         )
 
     def cleanup(self, *, identity: str) -> None:

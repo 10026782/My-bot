@@ -12,6 +12,7 @@ class StoredArtifact:
     file_id: str
     size: int
     sha256: str
+    mime_type: str | None = None
 
 
 class ArtifactStoreError(RuntimeError):
@@ -22,6 +23,6 @@ class ArtifactStoreError(RuntimeError):
 
 
 class ArtifactStore(Protocol):
-    def put(self, *, path, identity: str, metadata: dict) -> StoredArtifact: ...
+    def put(self, *, path, identity: str, metadata: dict, mime_type: str | None = None) -> StoredArtifact: ...
 
     def cleanup(self, *, identity: str) -> None: ...

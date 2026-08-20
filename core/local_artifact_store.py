@@ -41,7 +41,7 @@ class LocalArtifactStore:
             raise ArtifactStoreError("artifact_path_escape")
         return target
 
-    def put(self, *, path, identity: str, metadata: dict) -> StoredArtifact:
+    def put(self, *, path, identity: str, metadata: dict, mime_type: str | None = None) -> StoredArtifact:
         path = Path(path)
         if not path.is_file() or path.is_symlink():
             raise ArtifactStoreError("artifact_missing")
@@ -52,7 +52,7 @@ class LocalArtifactStore:
         temp = target.with_suffix(target.suffix + ".tmp")
         temp.write_bytes(data)
         os.replace(temp, target)
-        return StoredArtifact(result_ref=str(target), file_id=str(target), size=len(data), sha256=sha256)
+        return StoredArtifact(result_ref=str(target), file_id=str(target), size=len(data), sha256=sha256, mime_type=mime_type)
 
     def cleanup(self, *, identity: str) -> None:
         target = self._target(identity)
