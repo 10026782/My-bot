@@ -5172,6 +5172,52 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 
 ---
 
+### BUG-166 — Leads.Owner linked-record surfaced raw to frontend / PATCH allowlist reachability
+- **דווח:** 20/08/2026
+- **דווח על ידי:** owner, בעקבות MY-WORK-1E production verification
+- **מסך / מודול:** `tma_api.py::get_lead_detail` (`GET /api/leads/<id>`);
+  `tma_api.py::patch_lead` (`PATCH /api/leads/<id>`) —
+  `_LEAD_EDITABLE`/`_LEAD_FIELD_ALIASES`
+- **תיאור:** שני ממצאים קשורים מאותו root cause (`Leads.Owner`/`Tasks.Owner`
+  הם שדות `multipleRecordLinks`, לא טקסט — ראה `CHANGE_CONTROL_LOG.md::C194`,
+  PR #766):
+  1. `get_lead_detail()` החזיר את `Owner` הגולמי (רשימת Profile record IDs)
+     ללא resolve לשם תצוגה.
+  2. `_LEAD_EDITABLE`/`_LEAD_FIELD_ALIASES` מאפשרים PATCH ישיר על `owner`
+     בפורמט raw בלבד (רק `"recXXX"` בודד מתקבל).
+- **Severity:** Low.
+  1. לא היה crash — `LeadDetail.tsx::readableOwner()` כבר מחליף כל תבנית
+     `recXXX` ב-placeholder גנרי ("אחראי משויך"), כך שהמשתמש היה רואה
+     placeholder ולא שם אמיתי — לא שגיאה, אבל גם לא מידע נכון.
+  2. לא הייתה סכנת שחיתות נתונים — `tools/airtable_gateway.py::validate_airtable_fields()`
+     כבר עוטף `"recXXX"` בודד ל-`["recXXX"]` ומפיל (drop, fail-closed) כל
+     ערך אחר עבור `Leads.Owner` (רשום ב-`LINKED_RECORD_FIELDS`), לפני כל
+     כתיבה בפועל.
+- **Root Cause:** אותה הנחה שגויה כמו ב-PR #766 ("Owner הוא טקסט"), שלא
+  נסרקה בסבב הראשון כי הוא התמקד ב-Tasks/My Work בלבד.
+- **השפעה בפועל היום:** אפס — נבדק ישירות מול Airtable חי (MCP): 0 רשומות
+  Leads עם `Owner` מאוכלס נכון לתאריך הדיווח. הבאג הופך משמעותי ברגע שמשהו
+  יתחיל לכתוב בפועל ל-`Leads.Owner` (שום קוד מוזג לא עושה זאת כרגע).
+- **תיקון (#1 — GET):** `_resolve_profile_display_names()` נוסף (ההופכי
+  ל-`_resolve_profile_record_id()` הקיים), משמש ב-`get_lead_detail()` לפני
+  בניית ה-payload.
+- **החלטה (#2 — PATCH):** לא תוקן. מאומת כבטוח כפי שהוא (drop fail-closed
+  לערך לא-חוקי; אין UI חי ששולח `owner` ב-PATCH — `LeadDetail.tsx` קורא
+  ומציג בלבד, ללא edit control לשדה זה). בניית resolve-by-name לנתיב
+  כתיבה שאין לו caller כרגע היא YAGNI — תיבנה כשמשהו בפועל יזדקק לה.
+- **תוקן ב-commit:** `fefa8ee` (עבור #1 בלבד).
+- **Merged:** לא עדיין — PR #788, פתוח, טרם עבר review.
+- **בדיקות:** `test_my_work_end_to_end.py` — 2 טסטים חדשים ברמת route
+  (`test_route_get_lead_detail_resolves_owner_to_display_name`,
+  `test_route_get_lead_detail_no_owner_returns_empty_string`) + טסט יחידה
+  אחד ל-helper (`test_resolve_profile_display_names_resolves_ids_to_names`).
+  `test_bug104_leads_reasoning_projection.py` (102/102) מוודא שאין regression
+  לאותו route (BUG-104 reasoning projection חולק אותו endpoint).
+- **סטטוס:** #1 — 🟡 CODE DONE, NOT MERGED (PR #788). #2 — CLOSED, אין צורך
+  בתיקון (מאומת בטוח כפי שהוא).
+
+---
+
 ## F14-B1 — Legacy Caller Migration
 
 - **תאריך:** 09/08/2026
