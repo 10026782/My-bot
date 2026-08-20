@@ -163,7 +163,7 @@ class MoneyPrinterTurboAdapter:
                         "result_ref": stored.result_ref,
                         "result_checksum": stored.sha256,
                         "script_sha256": manifest["script_sha256"],
-                        "mime_type": "video/mp4", "size": stored.size,
+                        "mime_type": stored.mime_type, "size": stored.size,
                         "storage_provider": "google_drive", **evidence, **self._runtime_evidence(manifest, "COMPLETED", "completed"),
                     })
                 return PollResult("completed", str(final), {

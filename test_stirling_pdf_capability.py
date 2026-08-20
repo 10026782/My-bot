@@ -615,7 +615,7 @@ def test_transient_response_temp_file_cleaned_after_storage_failure(tmp_path, mo
     input_root.mkdir()
 
     class _FailingStore:
-        def put(self, *, path, identity, metadata):
+        def put(self, *, path, identity, metadata, mime_type=None):
             raise ArtifactStoreError("simulated_storage_failure")
 
     adapter = _adapter(input_root, tmp_path / "out", store=_FailingStore())

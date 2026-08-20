@@ -68,6 +68,7 @@ def test_upload_verify_and_result_ref(tmp_path):
     assert service.files_api.create_calls == 1
     assert json.loads(stored.result_ref)["drive_file_id"] == "drive-file-1"
     assert stored.sha256 == hashlib.sha256(b"test").hexdigest()
+    assert stored.mime_type == "video/mp4"
 
 
 def test_shared_drive_calls_enable_all_drives(tmp_path):

@@ -142,7 +142,10 @@ class Crawl4AIAdapter:
             with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tmp:
                 tmp.write(artifact_text)
                 tmp_path = Path(tmp.name)
-            stored = self.store.put(path=tmp_path, identity=contract_id, metadata={"final_hostname": final_hostname})
+            stored = self.store.put(
+                path=tmp_path, identity=contract_id,
+                metadata={"final_hostname": final_hostname}, mime_type="text/markdown",
+            )
         except ArtifactStoreError as exc:
             status = "outcome_unknown" if exc.uncertain else "failed"
             return SubmitResult(status, failure_code=exc.code[:120])

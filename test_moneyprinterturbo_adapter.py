@@ -142,7 +142,10 @@ def test_poll_uploads_before_completed_when_drive_store_configured(tmp_path, mon
     class Store:
         def put(self, **kwargs):
             uploaded.update(kwargs)
-            return SimpleNamespace(result_ref='{"provider":"google_drive","drive_file_id":"file-1"}', sha256="sha", size=2048)
+            return SimpleNamespace(
+                result_ref='{"provider":"google_drive","drive_file_id":"file-1"}',
+                sha256="sha", size=2048, mime_type="video/mp4",
+            )
 
     adapter.artifact_store = Store()
     monkeypatch.setattr(adapter, "_validate_artifact", lambda _: {"artifact_size": "2048", "validation_result": "valid"})
@@ -150,6 +153,7 @@ def test_poll_uploads_before_completed_when_drive_store_configured(tmp_path, mon
     assert result.status == "completed"
     assert result.result_ref.startswith('{"provider":"google_drive"')
     assert uploaded["identity"] == f"contract-1:{job_id}"
+    assert result.evidence["mime_type"] == "video/mp4"
 
 
 def test_submit_uses_local_script_and_materials_only(tmp_path, monkeypatch):

@@ -129,7 +129,7 @@ class StirlingPDFAdapter:
             with tempfile.NamedTemporaryFile("wb", suffix=".pdf", delete=False) as tmp:
                 tmp.write(output_bytes)
                 tmp_path = Path(tmp.name)
-            stored = self.store.put(path=tmp_path, identity=contract_id, metadata={})
+            stored = self.store.put(path=tmp_path, identity=contract_id, metadata={}, mime_type=_ALLOWED_MIME)
         except ArtifactStoreError as exc:
             status = "outcome_unknown" if exc.uncertain else "failed"
             return SubmitResult(status, failure_code=exc.code[:120])
