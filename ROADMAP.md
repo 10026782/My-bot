@@ -7,7 +7,23 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 16/08/2026 — **Owner Truth-Reset (docs only, ops/owner-handoff handoff)**:
+עודכן: 20/08/2026 — **N18 Phase 2 (בעבודה): שתי פרוסות ראשונות של Shared Write
+Primitives.** לפי הבהרת owner ("Phase 2 הוא תיקון ארכיטקטוני, לא רק הכנה לעתיד") — המכניקה
+הכלל-מערכתית שכבר נבנתה בתוך Lead מוצאת בהדרגה משם ל-primitives משותפים, ללא שינוי
+התנהגות (99/99 טסטי Lead נשארים ירוקים, לכל primitive טסטים ייעודיים משלו):
+`core/structured_command.py` (trigger/delimiter/split מכניקה, commit `45ef423`) ו-
+`core/draft_flow.py` (מכונת מצבים filling/edit_choice/review טהורה — ללא I/O, ללא כתיבה —
+`resolve_draft_reply(text, draft, DraftSpec)`). Lead נשאר consumer: כל שדות/prompts/
+validators שלו מרוכזים ב-`core.lead_service.LEAD_DRAFT_SPEC`. עדיין לא הועבר: terminal-
+turn-result contract (Phase 4) ו-Canonical Writers consolidation (Phase 3). ראו N18 למטה
+לפירוט מלא.
+עודכן קודם: 20/08/2026 — **N18 נפתח: Canonical Write Infrastructure.** Phase 1 (canonical Lead
+creation, PR #780) נסגר לפי קריטריון היציאה שלו (QA report מלא + תיקון structured note
+parsing, commit `4e44bca`). החלטת owner: לא בונים מערכת לידים נפרדת — התשתית שנבנתה
+(Draft→Validation→Edit→Preview→Approval→Canonical write→Evidence→UX) הופכת ל-shared write
+framework עבור BOSS כולו (Lead=consumer ראשון, לא יחיד). ראו N18 למטה לפירוט Phase 2-6
+המלא ולעקרון "Never solve the same write interaction twice".
+עודכן קודם: 16/08/2026 — **Owner Truth-Reset (docs only, ops/owner-handoff handoff)**:
 בעל הבית אימת ידנית 4 מתוך 5 באגים היסטוריים (BUG-002/004/005/007, ראו
 `BUG_AUDIT_LOG.md`) כ-RUNTIME/PRODUCTION VERIFIED; BUG-003 נשאר **PARTIAL /
 DEFERRED** במפורש (owner decision — לא להשקיע ב-game internals כרגע).
@@ -1450,6 +1466,69 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 `.github/workflows/ci.yml`, `docs/context_librarian/PHASE1_NON_INFERIORITY_PILOT.md`,
 `docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md` (סעיף 8, תכנון בלבד — item 10
 מיישם רק את מה שהתכנית הזו כבר אישרה).
+
+### N18 — Canonical Write Infrastructure (Lead System → Shared Write Framework) 🔲 בעבודה (נרשם 20/08/2026)
+
+**הקשר:** Phase 1 (canonical Lead creation service, `core/lead_service.py`, ענף
+`feat/canonical-lead-creation-phase1`, PR #780) נסגר — QA report מלא (15 תרחישים ממוספרים)
+אישר את כל המסלול; הפער היחיד שנמצא בבנייה עצמה (structured note parsing, `/` כ-delimiter
+חלופי ל-`|` שלא זוהה כלל ונפל בשקט למסלול ה-NLP) תוקן ואומת (commit `4e44bca`, 99/99 טסטים).
+Phase 1 מסומן **הושלם** לפי קריטריון היציאה שהוגדר לו במפורש (owner decision).
+
+**החלטה ארכיטקטונית (owner, 20/08/2026):** לא להמשיך לבנות מערכת לידים נפרדת. ה-Draft →
+Field collection → Validation → Edit → Preview → Approval → Canonical write → Evidence →
+Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתיבה כללית של BOSS — Lead הוא
+ה-consumer הראשון, לא היחיד. Entities עתידיים (Tasks/Payments/Deals/Contacts/Expenses)
+צריכים לצרוך את אותה תשתית ולא לבנות מחדש draft/confirm/edit flow משלהם. עקרון מנחה:
+**Parsing mechanics is shared. Field semantics belong to the entity schema.**
+כלל המשך: **Never solve the same write interaction twice** — מנגנון שימושי ליותר מ-entity
+אחד מקודם ל-shared infrastructure לפני שבונים entity נוסף עליו.
+
+**שלבים (F — ללא תאריך, ימוספרו בנפרד עם תחילת מימוש כל שלב):**
+- **Phase 2 — Shared Write Primitives:** להוציא מ-Lead את ה-Draft/filling/edit/validation
+  loop/confirm-cancel/structured parsing/terminal-turn-result לתשתית משותפת. Entity code
+  מגדיר רק schema/required/optional/validators/business rules/defaults/permissions — לא
+  בונה מחדש "איך שואלים שדה חסר"/"איך מאשרים"/"איך נשמר state".
+  **התקדמות (20/08/2026):** שתי פרוסות ראשונות מוצו ומאומתות (99/99 טסטי Lead + טסטים
+  ייעודיים לכל primitive, ללא שינוי התנהגות):
+  (1) `core/structured_command.py` — מכניקת trigger/delimiter-detection/split של פקודות
+  `<trigger> | field | field...`, מופרד מ-`parse_structured_command()` (commit `45ef423`).
+  (2) `core/draft_flow.py` — מכונת המצבים הגנרית filling/edit_choice/review (כולל אוצר
+  המילים כן/ערוך/לא, TTL, מעברי מצב) כ-`resolve_draft_reply(text, draft, DraftSpec)` טהור
+  (ללא I/O, ללא כתיבה) — מופרד מ-`_resolve_lead_draft()`; Lead מספק רק `DraftSpec`
+  (`core.lead_service.LEAD_DRAFT_SPEC`: שדות/prompts/validators/render). עדיין בליבת
+  `lead_candidate_handler.py`, לא הועברו עדיין: structured-command field mapping (Lead-
+  specific, נשאר ב-lead_service.py כמתוכנן), terminal-turn-result contract (Phase 4).
+- **Phase 3 — Canonical Writers:** איחוד כל Lead writers החיים (כולל אלה שעוקפים
+  dispatcher/governance checks, שנמצאו באודיט) למסלול `create_lead(payload, context)` יחיד;
+  כל מקור (Telegram/WhatsApp/UI/Campaign/API/Voice/Email) הופך ל-adapter שלא כותב בעצמו.
+  `lead_capture.py` לא נשאר writer עצמאי — רכיבי parsing/enrichment שימושיים בו נשמרים,
+  אך היצירה עצמה עוברת דרך ה-canonical service.
+- **Phase 4 — UX Contract:** ה-service מחזיר structured result
+  (`entity`/`operation`/`status`/`display_name`/`domain`/`owner`/`external_id`), לא
+  final user-facing string; שכבת UX נפרדת מחליטה מה מוצג. Internal IDs (Airtable record
+  IDs, contract/execution/field IDs) לא מוצגים כברירת מחדל — נשמרים ב-structured result
+  ל-logs/evidence/debugging/idempotency בלבד. סוגר גם double-response אחרי הצלחה (turn
+  ownership: `handled=true`/`terminal=true` חייב לעצור עיבוד נוסף של אותו turn ע"י general
+  agent/handler אחר — primitive משותף, לא Lead-specific patch).
+- **Phase 5 — Attribution + Lead Screen:** taxonomy קנונית ל-campaign attribution
+  (source/platform/campaign/ad set/ad/creative/tracking IDs — `ad_attribution.py` נמצא
+  כותב UTM fields שלא קיימים בסכימה החיה) ול-Score/Temperature/Status (נמצאו כמה
+  taxonomies + חישובים שונים ב-backend/frontend). Business state קנוני, צבע = presentation
+  בלבד.
+- **Phase 6 — Downstream + Learning:** Lead → Task/Contact/Deal שומר attribution/ownership
+  (כרגע חלקי/חסר); `lead_memory.py`/event writer/learning reader מתיישרים על אותו source —
+  **לא כחלק מה-Lead Creation build**, רק אחרי שה-canonical write יציב.
+
+**קבצים (Phase 1, סגור):** `core/lead_service.py`, `core/lead_candidate_handler.py`,
+`test_lead_service_phase1.py` (99 טסטים).
+**קבצים (Phase 2, בעבודה):** `core/structured_command.py` + `test_structured_command.py`
+(11 טסטים), `core/draft_flow.py` + `test_draft_flow.py` (16 טסטים) — שני primitives
+משותפים, ללא תלות ב-Lead; `core/lead_service.py`/`core/lead_candidate_handler.py` צורכים
+אותם כעת במקום מכניקה מקומית.
+**מקור מלא:** דוח QA מלא + מסמך ההחלטה הארכיטקטוני הועברו ע"י הבעלים בצ'אט ב-20/08/2026 —
+אין מסמך נפרד ב-`docs/` כרגע; אם/כשמתחיל מימוש Phase 2 בפועל, להעתיק את תוכן ההחלטה
+ל-`docs/architecture/` ייעודי במקום להסתמך על ROADMAP בלבד.
 
 ### F17 — Decision Hub Stage 2: Smart Trust Layer (PR #157, מוזג ל-`main`, commit `9252b1e`/merge `78f9bae`)
 **מה:** שכבת ביטחון על גבי Stage 1 — מסתכלת על ה-Decision כולו (לא Event בודד): האם

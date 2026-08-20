@@ -482,16 +482,12 @@ def _propose_lead_write(
 # BUG-106's Contract Chain). Every consumer below checks "state" explicitly
 # before touching the dict's other keys.
 
-# Local duplicate of app.py's _CANCEL_WORDS content — app.py imports FROM
-# this module, so importing back would be circular. Small and deliberate;
-# not a shared-constants refactor (out of scope for this fix).
-_LEAD_CLARIFY_CANCEL_WORDS = frozenset({"לא", "בטל", "ביטול", "עצור", "cancel", "no", "❌"})
-
-# Lead Draft Card (Phase 1 follow-up) — reuses _LEAD_CLARIFY_CANCEL_WORDS
-# for cancellation; confirm/edit are new, local (same "duplicate is
-# deliberate, importing back would be circular" reasoning as above).
-_LEAD_DRAFT_CONFIRM_WORDS = frozenset({"כן", "אשר", "מאשר", "מאשרת", "✅", "yes", "y", "ok", "אוקי", "שמור", "בצע"})
-_LEAD_DRAFT_EDIT_WORDS = frozenset({"ערוך", "עריכה", "לתקן", "תקן", "edit"})
+# N18 Phase 2: the confirm/cancel/edit Hebrew vocabulary is generic UI
+# chrome, not lead-specific — canonical copy now lives in core/draft_flow.py
+# (shared by any future Draft-Card entity). Re-exported under this module's
+# original private name — _resolve_lead_clarification (a separate flow,
+# below) also reuses it for cancellation.
+from core.draft_flow import CANCEL_WORDS as _LEAD_CLARIFY_CANCEL_WORDS  # noqa: E402
 
 # Intents that unambiguously mean "this message is a different command
 # entirely," not a reply to "what's the lead's name?" — anything NOT in
@@ -993,10 +989,10 @@ def _resolve_lead_draft(
     if not draft:
         return None
 
-    import time as _time
     from session_store import lead_sessions as _ls
+    from core.draft_flow import is_expired, resolve_draft_reply
 
-    if _time.time() - draft.get("set_at", 0) > 1800:
+    if is_expired(draft):
         _ls.clear_lead_draft(chat_id)
         return None
 
@@ -1016,61 +1012,26 @@ def _resolve_lead_draft(
         _ls.clear_lead_draft(chat_id)
         return None
 
-    from core.lead_service import (
-        render_lead_draft_card, set_draft_field, first_missing_required_field,
-        match_edit_field_label, DRAFT_FIELD_PROMPT_HE, DRAFT_FIELD_HE,
-    )
+    # N18 Phase 2: mode transitions (filling/edit_choice/review) are the
+    # generic Draft-Card state machine in core/draft_flow.py — this handler
+    # only owns session persistence and the actual write (via
+    # _finalize_draft_confirm/_finalize_draft_cancel), driven by
+    # core.lead_service.LEAD_DRAFT_SPEC's field semantics.
+    from core.lead_service import LEAD_DRAFT_SPEC
 
-    lower = text.strip().lower()
-    mode = draft.get("mode", "filling")
+    outcome = resolve_draft_reply(text, draft, LEAD_DRAFT_SPEC)
 
-    # ── Filling mode: this reply IS the value for awaiting_field ────────
-    if mode == "filling":
-        field_key = draft.get("awaiting_field")
-        if not field_key:
-            _ls.clear_lead_draft(chat_id)
-            return None
-        if lower in _LEAD_CLARIFY_CANCEL_WORDS:
-            return _finalize_draft_cancel(chat_id)
-        ok, err = set_draft_field(draft, field_key, text)
-        if not ok:
-            _ls.set_lead_draft(chat_id, draft)
-            return f"❌ {err}"
-        missing = first_missing_required_field(draft)
-        if missing:
-            draft["awaiting_field"] = missing
-            _ls.set_lead_draft(chat_id, draft)
-            return DRAFT_FIELD_PROMPT_HE[missing]
-        draft["mode"] = "review"
-        draft["awaiting_field"] = None
-        _ls.set_lead_draft(chat_id, draft)
-        return render_lead_draft_card(draft)
-
-    # ── Edit-choice mode: this reply picks WHICH field to change ────────
-    if mode == "edit_choice":
-        field_key = match_edit_field_label(text)
-        if not field_key:
-            return "לא זיהיתי שדה. אילו שדות: שם / טלפון / תחום / מקור / הערה."
-        draft["mode"] = "filling"
-        draft["awaiting_field"] = field_key
-        _ls.set_lead_draft(chat_id, draft)
-        current = draft.get(field_key) or "ריק"
-        prompt = DRAFT_FIELD_PROMPT_HE.get(field_key, f"מה הערך החדש עבור {DRAFT_FIELD_HE[field_key]}?")
-        return f"{prompt} (נוכחי: {current})"
-
-    # ── Review mode: waiting for כן / ערוך / לא ──────────────────────────
-    if lower in _LEAD_CLARIFY_CANCEL_WORDS:
+    if outcome.kind == "abandon":
+        _ls.clear_lead_draft(chat_id)
+        return None
+    if outcome.kind == "cancel":
         return _finalize_draft_cancel(chat_id)
-
-    if lower in _LEAD_DRAFT_EDIT_WORDS:
-        draft["mode"] = "edit_choice"
-        _ls.set_lead_draft(chat_id, draft)
-        return "איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה."
-
-    if lower in _LEAD_DRAFT_CONFIRM_WORDS:
+    if outcome.kind == "confirm":
         return _finalize_draft_confirm(identity, chat_id, draft)
 
-    return render_lead_draft_card(draft) + "\n\n(לא הבנתי — ענה/י כן / ערוך / לא)"
+    if outcome.draft is not None:
+        _ls.set_lead_draft(chat_id, outcome.draft)
+    return outcome.message
 
 
 # ══════════════════════════════════════════════════

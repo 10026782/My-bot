@@ -541,7 +541,12 @@ def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, a
 # invented default.
 # ══════════════════════════════════════════════════
 
-_STRUCTURED_TRIGGER_RE = re.compile(r"^\s*ליד\s+חדש\s*([|/].*)?$", re.DOTALL)
+from core.structured_command import build_structured_trigger_re, parse_positional_command
+
+# N18 Phase 2: trigger/delimiter mechanics live in core/structured_command.py
+# (shared across future entity writers) — only the trigger words and field
+# semantics below are Lead-specific.
+_STRUCTURED_TRIGGER_RE = build_structured_trigger_re(r"ליד\s+חדש")
 
 STRUCTURED_COMMAND_HELP = (
     "ליצירת ליד בפורמט מובנה:\n"
@@ -567,19 +572,11 @@ def parse_structured_command(text: str) -> Optional[dict]:
                                  missing/unrecognized.
       {"name","phone","domain","note"} — a fully valid, ready-to-use payload.
     """
-    if not text:
-        return None
-    m = _STRUCTURED_TRIGGER_RE.match(text.strip())
-    if not m:
-        return None
+    parsed = parse_positional_command(text, _STRUCTURED_TRIGGER_RE)
+    if parsed is None or parsed.get("prompt"):
+        return parsed
 
-    matched = m.group(1) or ""
-    delimiter = matched[0] if matched else "|"
-    rest = matched[1:].strip()
-    if not rest:
-        return {"prompt": True}
-
-    parts = [p.strip() for p in rest.split(delimiter)]
+    parts = parsed["parts"]
     if len(parts) < 3:
         return {"error": f"פורמט חסר.\n\n{STRUCTURED_COMMAND_HELP}"}
 
@@ -762,3 +759,29 @@ def draft_to_payload(draft: dict) -> LeadPayload:
         channel=draft.get("channel", "telegram"),
         summary=draft.get("note", ""),
     )
+
+
+# N18 Phase 2: the generic Draft/filling/edit-choice/review state machine
+# lives in core/draft_flow.py — this DraftSpec is Lead's own plug-in (field
+# semantics only), consumed by core/lead_candidate_handler.py's
+# _resolve_lead_draft(). field_prompts is fully populated (not just
+# DRAFT_FIELD_PROMPT_HE's 3 required-field entries) so the generic resolver
+# never needs entity-aware fallback logic — same fallback text
+# ("מה הערך החדש עבור <label>?") the old inline edit_choice branch used for
+# source/note, just precomputed once.
+_DRAFT_FIELD_PROMPT_FULL_HE = {
+    key: DRAFT_FIELD_PROMPT_HE.get(key, f"מה הערך החדש עבור {DRAFT_FIELD_HE[key]}?")
+    for key in DRAFT_FIELD_ORDER
+}
+
+from core.draft_flow import DraftSpec as _DraftSpec  # noqa: E402
+
+LEAD_DRAFT_SPEC = _DraftSpec(
+    required_fields=DRAFT_REQUIRED_FIELDS,
+    field_prompts=_DRAFT_FIELD_PROMPT_FULL_HE,
+    edit_labels=_DRAFT_EDIT_LABELS,
+    set_field=set_draft_field,
+    render=render_lead_draft_card,
+    unknown_field_message="לא זיהיתי שדה. אילו שדות: שם / טלפון / תחום / מקור / הערה.",
+    edit_choice_prompt="איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה.",
+)
