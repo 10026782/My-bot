@@ -487,6 +487,12 @@ def _propose_lead_write(
 # not a shared-constants refactor (out of scope for this fix).
 _LEAD_CLARIFY_CANCEL_WORDS = frozenset({"לא", "בטל", "ביטול", "עצור", "cancel", "no", "❌"})
 
+# Lead Draft Card (Phase 1 follow-up) — reuses _LEAD_CLARIFY_CANCEL_WORDS
+# for cancellation; confirm/edit are new, local (same "duplicate is
+# deliberate, importing back would be circular" reasoning as above).
+_LEAD_DRAFT_CONFIRM_WORDS = frozenset({"כן", "אשר", "מאשר", "מאשרת", "✅", "yes", "y", "ok", "אוקי", "שמור", "בצע"})
+_LEAD_DRAFT_EDIT_WORDS = frozenset({"ערוך", "עריכה", "לתקן", "תקן", "edit"})
+
 # Intents that unambiguously mean "this message is a different command
 # entirely," not a reply to "what's the lead's name?" — anything NOT in
 # this exclusion set (UNKNOWN/GREETING/SMALLTALK/CREATE_LEAD/UPDATE_LEAD)
@@ -856,18 +862,146 @@ def _resolve_batch_name_clarification(
 
 
 # ══════════════════════════════════════════════════
+# Lead Draft Card (Phase 1 follow-up) — the primary creation UX
+# ══════════════════════════════════════════════════
+
+# "ליד חדש" followed by anything that ISN'T a pipe continuation — checked
+# only once core.lead_service.parse_structured_command() has already
+# returned None for the same text (which happens for exactly bare "ליד
+# חדש" -- caught separately as {"prompt": True} -- or "ליד חדש | ..." --
+# a full pipe command). By the time this regex is even consulted, the text
+# is guaranteed to carry free-text content after the trigger.
+_DRAFT_TRIGGER_RE = re.compile(r"^\s*ליד\s+חדש\b\s*(.*)$", re.DOTALL)
+
+
+def _start_lead_draft(identity, free_text: str, chat_id: str, channel: str, router_domain: str = "") -> str:
+    from core.lead_service import build_draft_from_text, new_empty_draft, render_lead_draft_card, DRAFT_FIELD_PROMPT_HE
+    from session_store import lead_sessions as _ls
+
+    draft = build_draft_from_text(free_text, channel, router_domain) if free_text else new_empty_draft(channel)
+    _ls.set_lead_draft(chat_id, draft)
+
+    if draft["mode"] == "review":
+        return render_lead_draft_card(draft)
+    return DRAFT_FIELD_PROMPT_HE[draft["awaiting_field"]]
+
+
+def _resolve_lead_draft(
+    identity, text: str, chat_id: str, channel: str, intent: str, session: Optional[dict],
+) -> Optional[str]:
+    """Resolves a reply against a pending Lead Draft Card. Checked FIRST in
+    handle_lead_candidate() — same LL-11 read-from-snapshot convention as
+    _resolve_lead_clarification (session is the caller's already-loaded
+    snapshot, never re-read here)."""
+    if not session:
+        return None
+    draft = session.get("lead_draft")
+    if not draft:
+        return None
+
+    import time as _time
+    from session_store import lead_sessions as _ls
+
+    if _time.time() - draft.get("set_at", 0) > 1800:
+        _ls.clear_lead_draft(chat_id)
+        return None
+
+    # An explicit, unambiguous different command owns this turn -> abandon
+    # the draft rather than force-feeding it an unrelated reply (same
+    # escape hatch as _resolve_lead_clarification).
+    if intent and intent in _NON_LEAD_MUTATION_INTENTS:
+        _ls.clear_lead_draft(chat_id)
+        return None
+
+    from core.lead_service import (
+        render_lead_draft_card, set_draft_field, first_missing_required_field,
+        match_edit_field_label, draft_to_payload, create_lead,
+        DRAFT_FIELD_PROMPT_HE, DRAFT_FIELD_HE,
+    )
+
+    lower = text.strip().lower()
+    mode = draft.get("mode", "filling")
+
+    # ── Filling mode: this reply IS the value for awaiting_field ────────
+    if mode == "filling":
+        field_key = draft.get("awaiting_field")
+        if not field_key:
+            _ls.clear_lead_draft(chat_id)
+            return None
+        if lower in _LEAD_CLARIFY_CANCEL_WORDS:
+            _ls.clear_lead_draft(chat_id)
+            return "ביטלתי את יצירת הליד."
+        ok, err = set_draft_field(draft, field_key, text)
+        if not ok:
+            _ls.set_lead_draft(chat_id, draft)
+            return f"❌ {err}"
+        missing = first_missing_required_field(draft)
+        if missing:
+            draft["awaiting_field"] = missing
+            _ls.set_lead_draft(chat_id, draft)
+            return DRAFT_FIELD_PROMPT_HE[missing]
+        draft["mode"] = "review"
+        draft["awaiting_field"] = None
+        _ls.set_lead_draft(chat_id, draft)
+        return render_lead_draft_card(draft)
+
+    # ── Edit-choice mode: this reply picks WHICH field to change ────────
+    if mode == "edit_choice":
+        field_key = match_edit_field_label(text)
+        if not field_key:
+            return "לא זיהיתי שדה. אילו שדות: שם / טלפון / תחום / מקור / הערה."
+        draft["mode"] = "filling"
+        draft["awaiting_field"] = field_key
+        _ls.set_lead_draft(chat_id, draft)
+        current = draft.get(field_key) or "ריק"
+        prompt = DRAFT_FIELD_PROMPT_HE.get(field_key, f"מה הערך החדש עבור {DRAFT_FIELD_HE[field_key]}?")
+        return f"{prompt} (נוכחי: {current})"
+
+    # ── Review mode: waiting for כן / ערוך / לא ──────────────────────────
+    if lower in _LEAD_CLARIFY_CANCEL_WORDS:
+        _ls.clear_lead_draft(chat_id)
+        return "ביטלתי את יצירת הליד."
+
+    if lower in _LEAD_DRAFT_EDIT_WORDS:
+        draft["mode"] = "edit_choice"
+        _ls.set_lead_draft(chat_id, draft)
+        return "איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה."
+
+    if lower in _LEAD_DRAFT_CONFIRM_WORDS:
+        missing = first_missing_required_field(draft)
+        if missing:
+            draft["mode"] = "filling"
+            draft["awaiting_field"] = missing
+            _ls.set_lead_draft(chat_id, draft)
+            return f"עדיין חסר. {DRAFT_FIELD_PROMPT_HE[missing]}"
+        payload = draft_to_payload(draft)
+        result = create_lead(identity, payload, source_module="lead_candidate_handler_draft")
+        if not result.ok:
+            return f"❌ לא הצלחתי לשמור את הליד: {result.reason}"
+        _ls.clear_lead_draft(chat_id)
+        verb = "עודכן" if result.action == "updated" else "נוצר"
+        owner_note = f", Owner: {result.owner_user_id}" if result.owner_user_id else ""
+        return (
+            f"✅ ליד {verb}: {draft.get('name')} ({draft.get('phone')}), "
+            f"domain: {result.domain}{owner_note} | {result.record_id}"
+        )
+
+    return render_lead_draft_card(draft) + "\n\n(לא הבנתי — ענה/י כן / ערוך / לא)"
+
+
+# ══════════════════════════════════════════════════
 # Phase 1 (Lead System E2E Audit) — structured creation command
 # ══════════════════════════════════════════════════
 
 def _handle_structured_command(identity, parsed: dict, channel: str) -> str:
     """Resolves a core.lead_service.parse_structured_command() result into
-    a user-facing reply. `parsed` is always one of: {"prompt": True} (bare
-    trigger), {"error": "..."} (validation failure — never a silent
-    invented default), or a fully valid {"name","phone","domain","note"}."""
-    from core.lead_service import STRUCTURED_COMMAND_HELP
-
-    if parsed.get("prompt"):
-        return STRUCTURED_COMMAND_HELP
+    a user-facing reply. Called only for the two non-"prompt" shapes the
+    caller (handle_lead_candidate) doesn't handle itself: {"error": "..."}
+    (validation failure — never a silent invented default) or a fully
+    valid {"name","phone","domain","note"} (immediate write — the pipe
+    format is already fully unambiguous, no draft/confirm step needed).
+    The bare-trigger {"prompt": True} shape is handled by the caller via
+    _start_lead_draft(), never reaches this function."""
     if "error" in parsed:
         return f"❌ {parsed['error']}"
 
@@ -942,13 +1076,32 @@ def handle_lead_candidate(
     if not getattr(identity, "is_internal", False):
         return None
 
+    # ── Lead Draft Card (Phase 1 follow-up): a reply against an
+    #    already-pending draft is resolved FIRST — before any new-command
+    #    detection below — same priority position as _resolve_lead_clarification. ──
+    _draft_reply = _resolve_lead_draft(identity, text, chat_id, channel, intent, session)
+    if _draft_reply is not None:
+        return _draft_reply
+
     # ── Phase 1 (Lead System E2E Audit) — structured, fully deterministic
-    #    creation command, checked before any natural-language parsing or
-    #    tier classification: "ליד חדש | שם | טלפון | domain | הערה". ─────
+    #    creation command: "ליד חדש | שם | טלפון | domain | הערה" (immediate
+    #    write, already unambiguous) or bare "ליד חדש" (starts a Lead Draft
+    #    Card — the primary creation UX, see _start_lead_draft). Checked
+    #    before any natural-language parsing or tier classification. ─────
     from core.lead_service import parse_structured_command
     _structured = parse_structured_command(text)
     if _structured is not None:
+        if _structured.get("prompt"):
+            return _start_lead_draft(identity, "", chat_id, channel)
         return _handle_structured_command(identity, _structured, channel)
+
+    # ── "ליד חדש <free text>" (no pipe) -> a pre-filled Lead Draft Card,
+    #    shown for confirmation before anything is written. Only reached
+    #    once parse_structured_command() above has already ruled out both
+    #    the bare trigger and the pipe format for this exact text. ────────
+    _draft_trigger = _DRAFT_TRIGGER_RE.match(text.strip()) if text else None
+    if _draft_trigger is not None:
+        return _start_lead_draft(identity, _draft_trigger.group(1).strip(), chat_id, channel, router_domain=domain)
 
     # ── domain: Phase 1's single domain-resolution authority
     #    (core.lead_service.resolve_domain) — an explicit "domain X"/

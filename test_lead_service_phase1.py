@@ -378,10 +378,166 @@ with patch("feature_flags.is_enabled", return_value=False), \
         chk("integration: structured command's domain is exactly 'recruitment'",
             written2.get(LeadFields.DOMAIN) == "recruitment")
 
-# Bare "ליד חדש" trigger -> help prompt, no write, no guessing
-reply3 = lch.handle_lead_candidate(identity, "ליד חדש", "phase1_bare", "telegram")
-chk("integration: bare 'ליד חדש' trigger shows the format, writes nothing",
-    isinstance(reply3, str) and "|" in reply3)
+# ══════════════════════════════════════════════════
+# 7. Lead Draft Card — the primary creation UX
+# ══════════════════════════════════════════════════
+print()
+print("── 7. Lead Draft Card ──")
+
+# 7a. Bare "ליד חדש" -> starts filling mode, asks for name, writes nothing.
+chat_bare = "phase1_draft_bare"
+reply_bare = lch.handle_lead_candidate(identity, "ליד חדש", chat_bare, "telegram",
+                                        session=lead_sessions.get_or_create(chat_bare))
+chk("draft: bare trigger asks for the first missing field (name), no card yet",
+    reply_bare == "מה שם הליד?")
+draft_state = lead_sessions.get_lead_draft(chat_bare)
+chk("draft: session now holds a filling-mode draft awaiting 'name'",
+    draft_state is not None and draft_state["mode"] == "filling" and draft_state["awaiting_field"] == "name")
+
+# 7b. Sequential fill: name -> phone -> domain -> review card.
+r1 = lch.handle_lead_candidate(identity, "עידן מושקוביץ", chat_bare, "telegram",
+                                session=lead_sessions.get_or_create(chat_bare))
+chk("draft: after name, asks for phone next", r1 == "מה מספר הטלפון?")
+
+r2 = lch.handle_lead_candidate(identity, "0506872216", chat_bare, "telegram",
+                                session=lead_sessions.get_or_create(chat_bare))
+chk("draft: after phone, asks for domain next",
+    isinstance(r2, str) and r2.startswith("מה התחום?"))
+
+r3 = lch.handle_lead_candidate(identity, "recruitment", chat_bare, "telegram",
+                                session=lead_sessions.get_or_create(chat_bare))
+chk("draft: once all required fields are filled, shows the full review card",
+    isinstance(r3, str) and "📇" in r3 and "עידן מושקוביץ" in r3 and "0506872216" in r3 and "recruitment" in r3)
+draft_state2 = lead_sessions.get_lead_draft(chat_bare)
+chk("draft: state switched to review mode", draft_state2["mode"] == "review")
+
+# invalid phone during filling -> re-asks the SAME field, never silently accepted
+chat_badphone = "phase1_draft_badphone"
+lch.handle_lead_candidate(identity, "ליד חדש", chat_badphone, "telegram",
+                           session=lead_sessions.get_or_create(chat_badphone))
+lch.handle_lead_candidate(identity, "דנה כהן", chat_badphone, "telegram",
+                           session=lead_sessions.get_or_create(chat_badphone))
+r_badphone = lch.handle_lead_candidate(identity, "not-a-phone", chat_badphone, "telegram",
+                                        session=lead_sessions.get_or_create(chat_badphone))
+chk("draft: invalid phone during filling is rejected, not silently accepted",
+    isinstance(r_badphone, str) and r_badphone.startswith("❌"))
+chk("draft: still awaiting phone after a rejected value",
+    lead_sessions.get_lead_draft(chat_badphone)["awaiting_field"] == "phone")
+
+# 7c. Prefilled draft from free text after the trigger (explicit domain
+# annotation in the text -> domain counts as confidently filled).
+chat_prefill = "phase1_draft_prefill"
+reply_prefill = lch.handle_lead_candidate(
+    identity, "ליד חדש עידן מושקוביץ domain recruitment 0506872216 תשתיות חיצוניות",
+    chat_prefill, "telegram", session=lead_sessions.get_or_create(chat_prefill),
+)
+chk("draft: prefilled from free text goes straight to the review card (all required fields found)",
+    isinstance(reply_prefill, str) and "📇" in reply_prefill
+    and "עידן מושקוביץ" in reply_prefill and "0506872216" in reply_prefill and "recruitment" in reply_prefill)
+
+# 7d. Confirm ("כן") writes the lead through the SAME canonical create_lead().
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch("tool_registry.TOOLS_BLOCKED_BY_EMERGENCY", frozenset({"airtable_add"})), \
+     patch("tma_api._resolve_profile_record_id", return_value="recOWNER123"), \
+     patch("core.lead_service.find_existing_lead", return_value=None), \
+     patch("core.action_gateway.action_gateway") as mock_gw5, \
+     patch("tools.airtable_gateway.airtable_create") as mock_create5:
+
+    mock_gw5.propose_action.return_value = _make_ok_gateway_result()
+    mock_gw5._ledger = _FakeLedger()
+    mock_create5.return_value = {"id": "recDRAFT001"}
+
+    reply_confirm = lch.handle_lead_candidate(identity, "כן", chat_prefill, "telegram",
+                                               session=lead_sessions.get_or_create(chat_prefill))
+    chk("draft: confirming ('כן') writes the lead and reports success",
+        isinstance(reply_confirm, str) and reply_confirm.startswith("✅"))
+    chk("draft: confirming writes exactly once", mock_create5.call_count == 1)
+    chk("draft: session draft is cleared after a successful write",
+        lead_sessions.get_lead_draft(chat_prefill) is None)
+
+# 7e. Edit flow: pick a field, change it, land back on the review card.
+chat_edit = "phase1_draft_edit"
+lch.handle_lead_candidate(
+    identity, "ליד חדש עידן מושקוביץ domain recruitment 0506872216 תשתיות חיצוניות",
+    chat_edit, "telegram", session=lead_sessions.get_or_create(chat_edit),
+)
+r_edit1 = lch.handle_lead_candidate(identity, "ערוך", chat_edit, "telegram",
+                                     session=lead_sessions.get_or_create(chat_edit))
+chk("draft: 'ערוך' asks which field to change", "שדה" in r_edit1)
+
+r_edit2 = lch.handle_lead_candidate(identity, "טלפון", chat_edit, "telegram",
+                                     session=lead_sessions.get_or_create(chat_edit))
+chk("draft: picking 'טלפון' asks for the new phone, showing the current one",
+    isinstance(r_edit2, str) and "0506872216" in r_edit2)
+
+r_edit3 = lch.handle_lead_candidate(identity, "0501112222", chat_edit, "telegram",
+                                     session=lead_sessions.get_or_create(chat_edit))
+chk("draft: after supplying the new value, lands back on the full review card",
+    isinstance(r_edit3, str) and "📇" in r_edit3 and "0501112222" in r_edit3
+    and "0506872216" not in r_edit3)
+
+# 7f. Cancel at any stage clears the draft, no write.
+chat_cancel = "phase1_draft_cancel"
+lch.handle_lead_candidate(identity, "ליד חדש", chat_cancel, "telegram",
+                           session=lead_sessions.get_or_create(chat_cancel))
+r_cancel = lch.handle_lead_candidate(identity, "לא", chat_cancel, "telegram",
+                                      session=lead_sessions.get_or_create(chat_cancel))
+chk("draft: cancelling during filling mode clears the draft",
+    r_cancel == "ביטלתי את יצירת הליד." and lead_sessions.get_lead_draft(chat_cancel) is None)
+
+# 7g. Owner Contract hardened: unresolved Owner blocks creation outright —
+# no half-canonical Lead, no write attempted.
+with patch("feature_flags.is_enabled", return_value=False), \
+     patch("tool_registry.TOOLS_BLOCKED_BY_EMERGENCY", frozenset({"airtable_add"})), \
+     patch("tma_api._resolve_profile_record_id", return_value=None), \
+     patch("tools.airtable_gateway.airtable_create") as mock_create6:
+    payload = LeadPayload(name="X", phone="0501234567", domain="general")
+    result = create_lead(identity, payload, source_module="test")
+    chk("create_lead: unresolved Owner (creator not found in Profile) hard-blocks creation",
+        not result.ok and result.action == "invalid")
+    chk("create_lead: no write attempted when Owner cannot be resolved",
+        mock_create6.call_count == 0)
+
+
+# ══════════════════════════════════════════════════
+# 8. Attribution model — campaign/adset/ad + referral (separate concepts,
+#    never squashed into one text field)
+# ══════════════════════════════════════════════════
+print()
+print("── 8. Attribution model ──")
+
+result, mock_create7, *_ = _mocked_create_lead(
+    payload_overrides={"is_referral": True, "referrer_name": "משה", "referral_fee_type": "fixed", "referral_fee_value": 500},
+)
+chk("attribution: a well-formed referral payload creates successfully",
+    result.ok and result.action == "created")
+if mock_create7.call_count:
+    written_ref = mock_create7.call_args[0][1]
+    chk("attribution: referral fields are NOT squashed into the source/summary text",
+        "משה" not in str(written_ref.get(LeadFields.SOURCE, ""))
+        and "500" not in str(written_ref.get(LeadFields.SOURCE, "")))
+
+result, *_ = _mocked_create_lead(payload_overrides={"is_referral": True})
+chk("attribution: is_referral=True with no referrer_id/referrer_name -> invalid, never guessed",
+    not result.ok and result.action == "invalid")
+
+result, *_ = _mocked_create_lead(payload_overrides={"referral_fee_type": "fixed"})
+chk("attribution: a fee type set without is_referral=True -> invalid (inconsistent payload)",
+    not result.ok and result.action == "invalid")
+
+result, *_ = _mocked_create_lead(
+    payload_overrides={"is_referral": True, "referrer_name": "משה", "referral_fee_type": "bogus"},
+)
+chk("attribution: an unrecognized referral_fee_type -> invalid, not silently accepted",
+    not result.ok and result.action == "invalid")
+
+payload_campaign = LeadPayload(name="X", phone="0501234567", domain="general",
+                                campaign="קמפיין קיץ", adset="adset1", ad="ad1")
+fields_campaign = build_lead_fields(payload_campaign, "recOWNER123", "boss_hq/0501234567@lead")
+chk("attribution: campaign/adset/ad are accepted in the payload but not written (no live schema column)",
+    LeadFields.NAME in fields_campaign
+    and "קמפיין קיץ" not in str(fields_campaign)
+    and "adset1" not in str(fields_campaign))
 
 
 print(f"\n{'='*50}")
