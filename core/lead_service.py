@@ -121,6 +121,13 @@ class LeadValidationError(Exception):
         super().__init__(f"{field_name}: {reason}")
 
 
+# Referral fee taxonomy — kept as a fixed, small vocabulary (not free text)
+# so it stays reportable/joinable, per the audit's "no invented completion,
+# structured fields not squashed text" requirement.
+REFERRAL_FEE_TYPES = frozenset({"none", "fixed", "percent"})
+REFERRAL_FEE_STATUSES = frozenset({"not_relevant", "pending", "eligible", "paid"})
+
+
 @dataclass
 class LeadPayload:
     name: str
@@ -128,16 +135,34 @@ class LeadPayload:
     domain: str = "general"      # already-resolved canonical value — see resolve_domain()
     domain_explicit: bool = False
     owner_user_id: str = ""      # "" => default to creator, see resolve_owner()
-    source: str = "manual"
+    source: str = "manual"       # technical origin: Telegram/WhatsApp/Facebook/Website/Manual
     channel: str = "telegram"
-    campaign: str = ""           # accepted, not yet written — no live schema column (see build_lead_fields)
-    utm_source: str = ""
-    utm_medium: str = ""
-    utm_campaign: str = ""
     summary: str = ""
     status: str = "new"
     score: int = 0
     tenant_id: str = "boss_hq"
+
+    # ── Campaign attribution — distinct from `source` (technical origin) ──
+    # accepted, not yet written — no live Airtable column exists for any of
+    # these today (see build_lead_fields); defined now in the payload per
+    # the Phase 1 follow-up decision, so the model is locked in before the
+    # live schema is, rather than the other way around.
+    campaign: str = ""
+    adset: str = ""
+    ad: str = ""
+
+    # ── Referral — a SEPARATE concept from `source`/campaign attribution:
+    # "did a person introduce this lead, and what do they get for it."
+    # Deliberately five distinct fields, never squashed into one text blob
+    # (e.g. "facebook - משה - 500") — reports/learning/attribution need to
+    # join on these independently. ─────────────────────────────────────
+    is_referral: bool = False
+    referrer_id: str = ""        # preferred — an existing Contact's record id
+    referrer_name: str = ""      # fallback display when the referrer isn't a known contact
+    referral_fee_type: str = "none"       # none | fixed | percent
+    referral_fee_value: float = 0.0
+    referral_fee_trigger: str = ""        # e.g. "on_deal_close", or a business-defined rule
+    referral_fee_status: str = "not_relevant"  # not_relevant | pending | eligible | paid
 
 
 @dataclass
@@ -156,6 +181,23 @@ def _validate(payload: LeadPayload) -> None:
         raise LeadValidationError("name", "שם הליד הוא שדה חובה")
     if not payload.phone or not payload.phone.strip():
         raise LeadValidationError("phone", "מספר טלפון הוא שדה חובה")
+
+    if payload.referral_fee_type not in REFERRAL_FEE_TYPES:
+        raise LeadValidationError(
+            "referral_fee_type",
+            f"ערך לא קנוני {payload.referral_fee_type!r} — אפשרי: {', '.join(sorted(REFERRAL_FEE_TYPES))}",
+        )
+    if payload.referral_fee_status not in REFERRAL_FEE_STATUSES:
+        raise LeadValidationError(
+            "referral_fee_status",
+            f"ערך לא קנוני {payload.referral_fee_status!r} — אפשרי: {', '.join(sorted(REFERRAL_FEE_STATUSES))}",
+        )
+    if payload.is_referral and not (payload.referrer_id or payload.referrer_name):
+        # Rule 4 (no invented completion): "יש הפניה" without saying by whom
+        # is an incomplete answer, not a value to guess or leave blank.
+        raise LeadValidationError("referrer", "סומן 'הפניה: כן' אך לא צוין מי הפנה (referrer_id/referrer_name)")
+    if payload.referral_fee_type != "none" and not payload.is_referral:
+        raise LeadValidationError("referral_fee_type", "עמלת הפניה הוגדרה בלי שסומן 'הפניה: כן'")
 
 
 # ══════════════════════════════════════════════════
@@ -234,18 +276,27 @@ def build_memory_key(tenant_id: str, phone: str, name: str) -> str:
 
 
 def build_lead_fields(payload: LeadPayload, owner_record_id: Optional[str], memory_key: str) -> dict:
-    """Pure field-construction — no I/O, no invented fields. campaign/UTM
-    fields are deliberately NOT written: no column for them exists in the
-    live Airtable schema (or in airtable_schema.py) today — see the audit's
-    marketing-attribution findings. Writing them would silently fail the
-    same way ad_attribution.py's writes already do; accepting-but-dropping
-    with a clear log is the honest Phase 1 choice pending a real
-    attribution-schema decision (explicitly out of Phase 1 scope)."""
-    if payload.campaign or payload.utm_source or payload.utm_medium or payload.utm_campaign:
+    """Pure field-construction — no I/O, no invented fields. campaign/adset/
+    ad and the whole referral group are deliberately NOT written: no column
+    for any of them exists in the live Airtable schema (or in
+    airtable_schema.py) today — see the audit's marketing-attribution
+    findings. Writing them would silently fail the same way
+    ad_attribution.py's writes already do; accepting-but-dropping with a
+    clear log is the honest Phase 1 choice pending a real attribution-schema
+    decision (adding the columns is explicitly out of Phase 1 scope — the
+    payload model is locked in now, the live schema catches up later)."""
+    if payload.campaign or payload.adset or payload.ad:
         logger.info(
-            "[LeadService] campaign/UTM fields provided but not written — no live "
-            "schema column exists yet (campaign=%r utm_source=%r utm_medium=%r utm_campaign=%r)",
-            payload.campaign, payload.utm_source, payload.utm_medium, payload.utm_campaign,
+            "[LeadService] campaign attribution fields provided but not written — no live "
+            "schema column exists yet (campaign=%r adset=%r ad=%r)",
+            payload.campaign, payload.adset, payload.ad,
+        )
+    if payload.is_referral:
+        logger.info(
+            "[LeadService] referral fields provided but not written — no live schema column "
+            "exists yet (referrer_id=%r referrer_name=%r fee_type=%r fee_value=%r fee_trigger=%r fee_status=%r)",
+            payload.referrer_id, payload.referrer_name, payload.referral_fee_type,
+            payload.referral_fee_value, payload.referral_fee_trigger, payload.referral_fee_status,
         )
 
     fields: dict = {
@@ -305,16 +356,26 @@ def create_lead(
     tenant_id = getattr(identity, "tenant_id", "default") or "default"
     payload.tenant_id = tenant_id
 
+    # Owner Contract (hardened per Phase 1 follow-up decision): a Lead is
+    # NEVER saved "half-canonical." An unresolvable Owner — whether an
+    # explicit owner_user_id that doesn't exist in Profile, or the
+    # creator-fallback failing to resolve — blocks creation outright,
+    # exactly like a missing name/phone. This replaced an earlier
+    # warn-and-proceed fallback, which the audit's own author flagged as
+    # contradicting the Owner invariant before this went to main.
     owner_record_id, resolved_owner_user_id = resolve_owner(identity, payload.owner_user_id)
-    if payload.owner_user_id and not owner_record_id:
-        return LeadCreateResult(ok=False, action="invalid",
-                                 reason=f"owner_user_id: {payload.owner_user_id!r} לא נמצא בטבלת Profile")
     if not owner_record_id:
-        logger.warning(
-            "[LeadService] no Owner resolved for creator=%r (source=%s) — "
-            "lead will be created without an Owner",
+        logger.error(
+            "[LeadService] Owner could not be resolved for creator=%r (source=%s) — "
+            "lead NOT created (Owner invariant is hard-enforced)",
             resolved_owner_user_id, source_module,
         )
+        reason = (
+            f"owner_user_id: {payload.owner_user_id!r} לא נמצא בטבלת Profile"
+            if payload.owner_user_id else
+            f"owner: לא ניתן לשייך Owner ליוצר {resolved_owner_user_id!r} — ליד לא נשמר ללא Owner"
+        )
+        return LeadCreateResult(ok=False, action="invalid", reason=reason)
 
     memory_key = build_memory_key(tenant_id, payload.phone, payload.name)
 
@@ -523,3 +584,158 @@ def parse_structured_command(text: str) -> Optional[dict]:
         )}
 
     return {"name": name, "phone": phone, "domain": domain, "note": note}
+
+
+# ══════════════════════════════════════════════════
+# Lead Draft Card — the primary creation UX (Phase 1 follow-up)
+#
+# "ליד חדש" -> an empty card, filled in one field at a time.
+# "ליד חדש <free text>" -> a pre-filled card (reusing the SAME candidate
+# extraction natural-language capture already uses — never a second
+# parser), shown for confirmation before anything is written.
+# The pipe-delimited structured command above remains the deterministic
+# power-user/testing/integration fallback — unchanged, still an immediate
+# write with no draft/confirm step, since it's already fully unambiguous.
+# All three converge on create_lead().
+# ══════════════════════════════════════════════════
+
+DRAFT_FIELD_ORDER = ("name", "phone", "domain", "source", "note")
+DRAFT_REQUIRED_FIELDS = ("name", "phone", "domain")
+
+DRAFT_FIELD_HE = {
+    "name": "שם", "phone": "טלפון", "domain": "תחום", "source": "מקור", "note": "הערה",
+}
+
+DRAFT_FIELD_PROMPT_HE = {
+    "name": "מה שם הליד?",
+    "phone": "מה מספר הטלפון?",
+    "domain": f"מה התחום? ({', '.join(sorted(CANONICAL_LEAD_DOMAINS))})",
+}
+
+# Free-text tokens that identify which field an "ערוך" reply means —
+# matched loosely (token appears in the reply), never guessed beyond this
+# fixed table.
+_DRAFT_EDIT_LABELS: dict[str, str] = {
+    "שם": "name",
+    "טלפון": "phone", "פלאפון": "phone", "נייד": "phone",
+    "תחום": "domain", "domain": "domain",
+    "מקור": "source", "source": "source",
+    "הערה": "note", "הערות": "note", "note": "note",
+}
+
+_SOURCE_BY_CHANNEL = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
+
+
+def default_source_for_channel(channel: str) -> str:
+    return _SOURCE_BY_CHANNEL.get((channel or "").lower(), (channel or "Manual").capitalize())
+
+
+def new_empty_draft(channel: str) -> dict:
+    return {
+        "name": "", "phone": "", "domain": "",
+        "source": default_source_for_channel(channel), "note": "",
+        "channel": channel, "mode": "filling", "awaiting_field": "name",
+    }
+
+
+def build_draft_from_text(text: str, channel: str, router_domain: str = "") -> dict:
+    """Builds a pre-filled draft from free text typed right after the
+    'ליד חדש' trigger. Reuses core.ingress_classifier's own candidate
+    extraction (the SAME extractor natural-language capture uses) for
+    name/phone/context, and resolve_domain() for domain — never a second,
+    parallel guesser. Domain is only considered "filled" when there is real
+    signal (an explicit annotation, or a real non-general Router
+    classification) — the bare 'general' fallback is deliberately left
+    blank so the user confirms it explicitly, the same principle that
+    drove the golden-failure-case fix."""
+    name, phone, note = "", "", ""
+    try:
+        from core.ingress_classifier import classify_ingress
+        ic = classify_ingress(text, source_type="text") if text else None
+        if ic and ic.tier in (1, 2, 3) and ic.candidates:
+            c = ic.candidates[0]
+            name = c.get("name", "") or ""
+            phone = c.get("phone", "") or ""
+            ctx = c.get("context", [])
+            note = ", ".join(ctx) if ctx else ""
+    except Exception as exc:
+        logger.warning("[LeadService] draft prefill extraction failed: %s", exc)
+
+    domain, is_explicit = resolve_domain(text, router_domain)
+    domain_confident = is_explicit or (router_domain in CANONICAL_LEAD_DOMAINS and router_domain != "general")
+    domain = domain if domain_confident else ""
+
+    draft = new_empty_draft(channel)
+    draft.update({"name": name, "phone": phone, "domain": domain, "note": note})
+    missing = first_missing_required_field(draft)
+    draft["mode"] = "filling" if missing else "review"
+    draft["awaiting_field"] = missing
+    return draft
+
+
+def first_missing_required_field(draft: dict) -> Optional[str]:
+    for key in DRAFT_REQUIRED_FIELDS:
+        if not draft.get(key):
+            return key
+    return None
+
+
+def match_edit_field_label(text: str) -> Optional[str]:
+    stripped = (text or "").strip()
+    return _DRAFT_EDIT_LABELS.get(stripped)
+
+
+def set_draft_field(draft: dict, field_key: str, raw_value: str) -> tuple[bool, str]:
+    """Validates + normalizes a raw reply into draft[field_key]. Returns
+    (ok, error_message) — on failure the draft is left untouched and the
+    caller must re-ask, never silently accept an invalid value."""
+    raw_value = (raw_value or "").strip()
+
+    if field_key == "phone":
+        from core.ingress_classifier import _normalize_phone, _PHONE_RE
+        if not raw_value or not _PHONE_RE.fullmatch(raw_value.replace(" ", "")):
+            return False, f"מספר טלפון לא תקין: {raw_value!r}. נסה שוב."
+        draft["phone"] = _normalize_phone(raw_value)
+        return True, ""
+
+    if field_key == "domain":
+        canonical = resolve_domain_word(raw_value)
+        if not canonical:
+            return False, (
+                f"domain לא מוכר: {raw_value!r}. "
+                f"ערכים אפשריים: {', '.join(sorted(CANONICAL_LEAD_DOMAINS))}"
+            )
+        draft["domain"] = canonical
+        return True, ""
+
+    if field_key == "name":
+        if not raw_value:
+            return False, "שם ריק אינו תקין. מה שם הליד?"
+        draft["name"] = raw_value
+        return True, ""
+
+    # source / note — free text, no canonical vocabulary to enforce
+    draft[field_key] = raw_value
+    return True, ""
+
+
+def render_lead_draft_card(draft: dict) -> str:
+    lines = ["📇 ליד חדש", ""]
+    for key in DRAFT_FIELD_ORDER:
+        value = draft.get(key) or "______"
+        lines.append(f"{DRAFT_FIELD_HE[key]}: {value}")
+    lines.append("")
+    lines.append('ענה/י *כן* לשמירה, *ערוך* לשינוי שדה, או *לא* לביטול.')
+    return "\n".join(lines)
+
+
+def draft_to_payload(draft: dict) -> LeadPayload:
+    return LeadPayload(
+        name=draft.get("name", ""),
+        phone=draft.get("phone", ""),
+        domain=draft.get("domain") or "general",
+        domain_explicit=True,
+        source=draft.get("source") or default_source_for_channel(draft.get("channel", "")),
+        channel=draft.get("channel", "telegram"),
+        summary=draft.get("note", ""),
+    )
