@@ -3917,8 +3917,23 @@ def run_agent(
         # branch. Same should_prefer_lead_draft() guard, called one level
         # higher so a pending review-mode draft skips this fast path
         # entirely and falls through to its real handling further down.
-        from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_pr2
-        if not _prefer_draft_pr2(identity.memory_key, chat_id):
+        #
+        # LL-11 fix: should_prefer_lead_draft() self-fetches Sessions
+        # (get_lead_draft -> lead_sessions.get()), a SECOND read on top of
+        # run_agent's own canonical snapshot fetch above. Only call it when
+        # user_text is actually confirm/cancel-word shaped — the only shape
+        # _resolve_pr2_deterministic_approval() itself would otherwise
+        # "unconditionally answer" per the comment above; every other
+        # message (the overwhelming common case) must stay at exactly 1
+        # Sessions read, matching this function's own "falls through
+        # unchanged for unrecognized input" contract.
+        _pr2_confirm_probe = user_text.strip().lower()
+        if _pr2_confirm_probe in _CONFIRM_WORDS or _pr2_confirm_probe in _CANCEL_WORDS:
+            from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_pr2
+            _prefer_draft_now = _prefer_draft_pr2(identity.memory_key, chat_id)
+        else:
+            _prefer_draft_now = False
+        if not _prefer_draft_now:
             _pr2_reply = _resolve_pr2_deterministic_approval(
                 user_text=user_text,
                 identity=identity,

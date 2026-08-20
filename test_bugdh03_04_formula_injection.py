@@ -11,9 +11,12 @@
 # way to interpolate such text; three call sites are retrofitted to use it:
 #   - cmd_decision.py::_resolve_decision_ref            (ref)
 #   - decision_pipeline.py::maybe_supersede              (decision_id, Claim Topic)
-#   - core/lead_candidate_handler.py::_search_formulas   (name, phone — already
+#   - core/lead_service.py::_search_formulas             (name, phone — already
 #     escaped inline before this fix; switched to the shared helper so there
-#     is exactly one escaping implementation in the codebase, not two).
+#     is exactly one escaping implementation in the codebase, not two. Moved
+#     here from core/lead_candidate_handler.py by the Phase 1 canonical Lead
+#     creation service — core.lead_candidate_handler.find_existing_lead is
+#     now a thin re-export of core.lead_service.find_existing_lead.)
 
 import os, sys
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test")
@@ -28,7 +31,7 @@ from unittest.mock import patch
 from tools.airtable_gateway import _safe_formula_param
 import cmd_decision
 import decision_pipeline
-import core.lead_candidate_handler as lch
+import core.lead_service as lead_service
 
 passed = failed = 0
 
@@ -134,20 +137,20 @@ chk("Claim Topic: every quote in the raw payload was backslash-escaped",
 
 
 # ══════════════════════════════════════════════════
-# 4. core/lead_candidate_handler.py::_search_formulas — no regression
+# 4. core/lead_service.py::_search_formulas — no regression
 # ══════════════════════════════════════════════════
 print("\n── 4. _search_formulas() no regression ──")
 
-formulas_plain = lch._search_formulas("Dana Levi", "0501234567")
+formulas_plain = lead_service._search_formulas("Dana Levi", "0501234567")
 chk("still returns 3 formulas for name+phone (AND, phone-only, name-only)",
     len(formulas_plain) == 3)
 chk("phone-only formula present", any("{phone}='0501234567'" in f for f in formulas_plain))
 chk("name-search formula present", any("SEARCH('Dana Levi', {Name})" in f for f in formulas_plain))
 
-formulas_no_phone = lch._search_formulas("Dana Levi", "")
+formulas_no_phone = lead_service._search_formulas("Dana Levi", "")
 chk("no phone -> only the name-search formula", formulas_no_phone == ["SEARCH('Dana Levi', {Name})"])
 
-formulas_injection = lch._search_formulas("O'Brien' OR 1=1 --", "050")
+formulas_injection = lead_service._search_formulas("O'Brien' OR 1=1 --", "050")
 chk("name with quote is escaped, not left raw",
     all("O\\'Brien\\' OR 1=1 --" in f for f in formulas_injection if "SEARCH" in f))
 

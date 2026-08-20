@@ -115,9 +115,19 @@ def test_tier3_new_lead_auto_capture_on_writes_immediately():
     FEATURE_AUTO_CAPTURE=true — the fix must not regress the happy path."""
     identity = MockIdentity()
     gw = _new_gw(executor=_ok_executor)
+    # side_effect, not return_value=True: a blanket True also flips
+    # EMERGENCY_STOP_ALL on for core/lead_service.py::create_lead()'s own
+    # (correct, Phase 1-added) emergency-stop check, silently blocking the
+    # very write this test asserts happens.
+    # core/lead_service.py::create_lead() (Phase 1) hard-blocks on an
+    # unresolvable Owner — mock the same resolver test_lead_service_phase1.py
+    # uses so this synthetic identity resolves to a real-looking Profile
+    # record, same as the other tests below reach via the propose (not
+    # create_lead) path, which tolerates a missing Owner instead of blocking.
     with patch.object(lch, "_at_find_lead", return_value=None), \
          patch("core.action_gateway.action_gateway", gw), \
-         patch("feature_flags.is_enabled", return_value=True), \
+         patch("feature_flags.is_enabled", side_effect=lambda flag: flag == "FEATURE_AUTO_CAPTURE"), \
+         patch("tma_api._resolve_profile_record_id", return_value="recOWNER123"), \
          patch("tools.airtable_gateway.airtable_create", return_value={"id": "recNEWLEAD00000099"}) as mock_create:
         reply = lch.handle_lead_candidate(
             identity, TEXT, "chat_t3_2", "telegram", ic=_tier3_ic()
