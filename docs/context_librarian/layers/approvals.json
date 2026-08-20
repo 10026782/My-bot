@@ -34,6 +34,7 @@
         "core/migrations/002_external_poll_leases.sql",
         "core/moneyprinterturbo_adapter.py",
         "core/mpt_runtime_policy.py",
+        "core/stirling_pdf_adapter.py",
         "event_bus.py",
         "feature_flags.py",
         "tma_api.py"
@@ -68,7 +69,11 @@
         "scripts/verify_mpt_phase2b_staging.py",
         "test_external_capability_contract.py",
         "test_crawl4ai_capability.py",
-        "scripts/crawl4ai_capability_poc/smoke.py"
+        "scripts/crawl4ai_capability_poc/smoke.py",
+        "test_stirling_pdf_capability.py",
+        "scripts/stirling_pdf_capability_poc/smoke.py",
+        "scripts/stirling_pdf_capability_poc/fixtures.py",
+        "scripts/stirling_pdf_capability_poc/docker-compose.yml"
       ],
       "canonical_docs": [
         {
@@ -79,6 +84,11 @@
         {
           "path": "docs/research/CRAWL4AI_CAPABILITY_POC.md",
           "role": "Crawl4AI capability POC scope, allowlist, and production blockers",
+          "status": "active"
+        },
+        {
+          "path": "docs/research/STIRLING_PDF_CAPABILITY_POC.md",
+          "role": "Stirling-PDF merge_pdfs capability POC scope, artifact-first input contract, auth-licensing nuance, and production blockers",
           "status": "active"
         },
         {
