@@ -3908,12 +3908,23 @@ def run_agent(
             return _d018_reply
     _pr2_reply = None
     if not _snapshot_fetch_failed:
-        _pr2_reply = _resolve_pr2_deterministic_approval(
-            user_text=user_text,
-            identity=identity,
-            live_contracts=_live_contracts_snapshot,
-            out_meta=_out_meta,
-        )
+        # Lead Draft Card (2f76a50 follow-up): PR2's fast path is an EARLIER
+        # confirm/cancel interception than the one 2f76a50 fixed below — it
+        # has no knowledge of lead_draft either, and (when its own two flags
+        # are on) unconditionally answers a bare "כן"/"לא" with either a
+        # live-contract route or the canonical "no_contract" reply ("אין
+        # פעולה שממתינה לאישור"), never reaching the later, already-fixed
+        # branch. Same should_prefer_lead_draft() guard, called one level
+        # higher so a pending review-mode draft skips this fast path
+        # entirely and falls through to its real handling further down.
+        from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_pr2
+        if not _prefer_draft_pr2(identity.memory_key, chat_id):
+            _pr2_reply = _resolve_pr2_deterministic_approval(
+                user_text=user_text,
+                identity=identity,
+                live_contracts=_live_contracts_snapshot,
+                out_meta=_out_meta,
+            )
     if _pr2_reply is not None:
         return _gateway_reply_with_promotion(_pr2_reply, identity.memory_key)
 
