@@ -668,7 +668,16 @@ def _extract_context_kw(text: str, name: str, phone: str) -> list[str]:
 # single attached prefix on "דומיין" itself, mirroring the single-letter-
 # prefix convention _is_name_stop_token() already uses) so callers can strip
 # it out of a name-extraction window in one operation, not two.
-_DOMAIN_HINT_RE = re.compile(r"(?:ל)?דומיין\s+([א-ת]{2,})")
+# Phase 1 (Lead System E2E Audit, golden failure case): the golden failure
+# case itself was typed as "domain recruitment" — the ENGLISH word "domain",
+# not "דומיין" — which this regex never matched at all, so the explicit
+# annotation was silently invisible to _extract_domain_hint() even before
+# considering that its caller was unreachable (see core/lead_service.py's
+# resolve_domain(), now the actual live consumer). "domain" is added as an
+# alternative trigger, case-insensitive, alongside the original Hebrew form.
+_DOMAIN_HINT_RE = re.compile(
+    r"(?:(?:ל)?דומיין|domain)\s+([א-ת]{2,}|[A-Za-z]{2,})", re.IGNORECASE
+)
 
 # Best-effort canonical mapping to the live Leads/Lead Events Domain
 # singleSelect values (airtable_schema.py: "real_estate | import | recruitment
@@ -711,13 +720,15 @@ def _strip_domain_hint(text: str) -> str:
 
 def _extract_domain_hint(text: str) -> Optional[str]:
     """Returns the canonical Leads-Domain value for an explicit 'דומיין X' /
-    'לדומיין X' command annotation in text, or None if no such annotation is
-    present or its hint word has no known canonical mapping. Never guesses —
-    only the fixed _DOMAIN_HINT_CANONICAL table is consulted."""
+    'לדומיין X' / 'domain X' command annotation in text, or None if no such
+    annotation is present or its hint word has no known canonical mapping.
+    Never guesses — only the fixed _DOMAIN_HINT_CANONICAL table is
+    consulted. Lookup is case-insensitive (.lower() is a no-op on Hebrew,
+    so this only affects the English "domain X" form)."""
     m = _DOMAIN_HINT_RE.search(text)
     if not m:
         return None
-    return _DOMAIN_HINT_CANONICAL.get(m.group(1).strip())
+    return _DOMAIN_HINT_CANONICAL.get(m.group(1).strip().lower())
 
 
 # ══════════════════════════════════════════════════
