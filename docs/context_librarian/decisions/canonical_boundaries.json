@@ -156,7 +156,7 @@
       "notes": [
         "A code default is not evidence of the current deployed environment."
       ],
-      "last_observed_commit": "5e46c4307698f77f689095116bfc664e71143b88"
+      "last_observed_commit": "3c996adeec2e14bf586fbb3a2101e55bf3d7bfd5"
     },
     {
       "id": "decision.production_verification",
