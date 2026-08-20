@@ -2,6 +2,8 @@
 
 > This document is a design/audit reference. It is not a BOSS implementation or runtime source of truth.
 
+> **Historical audit snapshot (as of 2026-08-18).** For current adoption status of each pattern, see the `HERMES_INTERNAL_ARCHITECTURE_LEARNINGS` row in `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5.
+
 Audit base: `origin/main` at `84249b119c1901a44f1f96ad931fb2aaeeb506df`, fetched 2026-08-18.
 
 Scope is audit-only. Hermes remains a reference architecture. No Hermes runtime, MCP, Ollama, migration, schema, dependency, or production-behavior change is proposed here.
