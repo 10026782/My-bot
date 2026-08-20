@@ -743,6 +743,42 @@
         }
       },
       "last_observed_commit": "6baef325646fdd9dcc0a15f1c2b82cc4ebe589f5"
+    },
+    {
+      "id": "decision.canonical_lead_write_service",
+      "name": "core/lead_service.py is canonical for Lead creation/update",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "Lead creation/update — validation, dedup lookup, Owner/tenant resolution, Airtable field construction for table=Leads",
+        "precedence": "create_lead() is the sole writer for table=Leads across every entry point (chat capture, structured '/'|'|' command, Lead Draft Card); no other module may call tools.airtable_gateway.airtable_create/airtable_patch on table=Leads directly"
+      },
+      "owner": "lead_write",
+      "code_paths": [
+        "core/lead_service.py"
+      ],
+      "test_paths": [
+        "test_lead_service_phase1.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "ROADMAP.md",
+          "role": "N18 — Canonical Write Infrastructure (Lead System → Shared Write Framework)",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-20",
+      "last_verified_commit": "0c8a1b2d97388ab99f39f5ceff7056a06919134d",
+      "confidence": 1.0,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #785 (block_reason=NO_POLICY_MATCH): core/lead_service.py had no existing catalog owner across any of the 8 registered layers or 18 decision nodes as of this registration — owner decision was CREATE NEW NODE.",
+        "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope."
+      ],
+      "last_observed_commit": "0c8a1b2d97388ab99f39f5ceff7056a06919134d"
     }
   ],
   "edges": [
