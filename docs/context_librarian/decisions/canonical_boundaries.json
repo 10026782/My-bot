@@ -779,6 +779,54 @@
         "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope."
       ],
       "last_observed_commit": "0c8a1b2d97388ab99f39f5ceff7056a06919134d"
+    },
+    {
+      "id": "decision.n18_shared_write_primitives",
+      "name": "N18 shared write-interaction primitives (structured-command parsing, Draft-Card state machine)",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "generic, entity-agnostic parsing/state-machine mechanics for write-interaction UX — trigger/delimiter/positional-split command parsing and the filling/edit_choice/review Draft-Card state machine",
+        "precedence": "carries no business authority of its own — field semantics, validation, defaults, and write policy remain owned by each consuming entity's own service (e.g. decision.canonical_lead_write_service for Lead); these modules only ever read/mutate a plain dict handed to them by the caller, no I/O, no session storage, no entity writes"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "core/structured_command.py",
+        "core/draft_flow.py"
+      ],
+      "test_paths": [
+        "test_structured_command.py",
+        "test_draft_flow.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "ROADMAP.md",
+          "role": "N18 — Canonical Write Infrastructure, Phase 2 (Shared Write Primitives)",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-20",
+      "last_verified_commit": "39b02430db0d4f4c84bf51685ab496094b2fc1c8",
+      "confidence": 0.9,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that merges N18 Phase 2's first two slices — core/structured_command.py and core/draft_flow.py had no existing catalog owner. Explicitly anticipated by decision.canonical_lead_write_service's own registration notes: these primitives 'carry no Lead-specific authority themselves' — classified REGISTER_SUPPORTING, not a new authority node, matching the precedent set by decision.tma_screens for similar non-authority infrastructure.",
+        "Currently consumed only by core/lead_service.py (structured_command) and core/lead_candidate_handler.py (draft_flow, via core.lead_service.LEAD_DRAFT_SPEC), but designed for and expected to gain additional entity consumers as N18 Phase 2 continues (Tasks/Payments/Deals/Contacts/Expenses per ROADMAP.md) — confidence kept at 0.9 (not 1.0) pending a second real consumer proving the generalization holds.",
+        "0.9 confidence, not a lower number: both modules are pure functions (no I/O) with their own isolated test suites (11 + 16 tests) proving the contract in isolation via a synthetic non-Lead entity, not just 'it still works for Lead' — see test_structured_command.py and test_draft_flow.py."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "shared_write_interaction_primitive",
+          "authority": false,
+          "purpose": "generic parsing/state-machine mechanics reused across future entity write flows; no business authority, no I/O",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "39b02430db0d4f4c84bf51685ab496094b2fc1c8"
     }
   ],
   "edges": [
@@ -793,6 +841,12 @@
       "to": "decision.production_verification",
       "type": "governed_by",
       "notes": "Safe wording still requires live verification before completion claims."
+    },
+    {
+      "from": "decision.canonical_lead_write_service",
+      "to": "decision.n18_shared_write_primitives",
+      "type": "calls",
+      "notes": "core/lead_service.py's Draft Card and structured-command parsing are thin entity-specific wrappers around the generic primitives — the primitives module carries no Lead authority itself."
     }
   ]
 }
