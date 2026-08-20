@@ -2,6 +2,8 @@
 
 > This is a design/audit reference, not a runtime source of truth and not an implementation approval.
 
+> **For current execution status**, see the `BOSS_MEMORY_RETRIEVAL` row in `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §3.5. Design content below (sections A-K) is kept intact as historical/design evidence, not rewritten.
+
 Date: 2026-08-18
 Base commit audited: `d2f9481` (`origin/main`)
 Worktree: `/home/elichazan/My-bot-worktrees/memory-retrieval-design`, branch `audit/memory-retrieval-design`
