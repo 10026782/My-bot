@@ -1,90 +1,86 @@
 # Daily Repository Summary
-**Date:** 2026-08-19 (Updated 2026-08-19T00:30:00Z - automated daily briefing)
+**Date:** 2026-08-20 (Updated 2026-08-20T03:30:00Z - automated daily briefing)
 
-**Main SHA:** `58348c5f8681239253bb278239f1f5dfa3406c00`
-**Last Commit:** 2026-08-19 00:05:17Z — "Merge pull request #748 from 10026782/feat/memory-shadow-comparison-logging"
+**Main SHA:** `96e6e1f46ee5a62e9adf08d15972738a947ae9ff`
+**Last Commit:** 2026-08-20 01:05:54Z — "Merge pull request #775 from 10026782/docs/hermes-memory-canonicalization"
 
 ---
 
-## 1. Activity Summary (Today: 2026-08-19)
+## 1. Activity Summary (Today: 2026-08-20)
 
-### Merged PRs (2026-08-19)
+### Merged PRs (2026-08-20)
 | # | Title | Branch | Status | Merged At |
 |---|-------|--------|--------|-----------|
-| 748 | feat: scheduled shadow-comparison logging (Episodic Memory Phase 2B follow-up) | feat/memory-shadow-comparison-logging | ✅ MERGED | 2026-08-19 00:05:17Z |
+| 775 | docs: canonicalize Hermes learnings + Memory architecture into Active Work Registry | docs/hermes-memory-canonicalization | ✅ MERGED | 2026-08-20 01:05:54Z |
+| 774 | docs: Stirling-PDF Deep Gate — close file-retention and deployment-isolation questions | docs/stirling-pdf-deep-gate-2026-08-20 | ✅ MERGED | 2026-08-20 00:59:15Z |
 
-**Notable:** PR #748 adds the `_job_memory_shadow_scan` scheduled job with `FEATURE_MEMORY_SHADOW_LOGGING` flag (default OFF), structured logging only (no text leakage), new `memory_shadow_comparisons` Postgres table, fail-soft pattern matching `core/usage_telemetry.py`. Migration `004_memory_shadow_comparisons.sql` auto-runs on next Render deploy.
+**Notable:** Both PRs are documentation-focused (no code changes). PR #775 consolidates Hermes learning/memory architecture into the Active Work Registry. PR #774 closes open questions on Stirling-PDF integration (file retention, deployment isolation). Daily briefing (AI_CONTEXT.md) regenerated successfully (835a8ff, 2026-08-20).
 
-### Recent Merged (2026-08-18, continuing)
-| # | Title | Status | Merged At |
-|---|-------|--------|-----------|
-| 746 | docs: MPT Phase 2B staging verification session log (18-19/08/2026) | ✅ MERGED | 2026-08-18 22:36:00Z |
-| 745 | docs: command center session audit logs | ✅ MERGED | 2026-08-18 22:08:00Z |
+### Preceding Activity (2026-08-19, continuing)
+- PR #771: context-librarian auto-maintenance ✅ MERGED
+- PR #770: my-work feature fix ✅ MERGED (fixes owner field type handling)
 
 ---
 
-## 2. Open PRs (as of 2026-08-19 00:30Z)
+## 2. Open PRs (as of 2026-08-20 03:30Z)
 
 | # | Title | Branch | State | Created | Updated | Base SHA |
 |---|-------|--------|-------|---------|---------|----------|
-| 751 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-58348c5f8681 | 🟡 OPEN | 2026-08-19 00:06 | 2026-08-19 00:06 | 58348c5 (CURRENT) |
-| 750 | docs: full audit gate for 6 external tools (n8n/Flowise/Dify/Crawl4AI/browser-use/Stirling-PDF) | docs/external-tool-audit-gate-2026-08-19 | 🟡 OPEN | 2026-08-18 23:55 | 2026-08-18 23:55 | d4b3be4 (STALE) |
-| 749 | MY-WORK-1: Owner task read model + My Work screen | my-work-1 | 🟡 DRAFT | 2026-08-18 23:31 | 2026-08-18 23:32 | d4b3be4 (STALE) |
-| 747 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-d4b3be43051e | 🟡 OPEN | 2026-08-18 22:53 | 2026-08-18 22:53 | d4b3be4 (STALE) |
+| 777 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-96e6e1f46ee5 | 🟡 OPEN | 2026-08-20 01:07 | 2026-08-20 01:07 | 96e6e1f (CURRENT) |
+| 776 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-8c1bd47a9a89 | 🟡 OPEN | 2026-08-20 01:06 | 2026-08-20 01:06 | 8c1bd47 (CURRENT) |
+| 773 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-f31858a8e1c0 | 🟡 OPEN | 2026-08-20 00:17 | 2026-08-20 00:17 | f31858a (CURRENT) |
+| 772 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-f64758612fe3 | 🟡 OPEN | 2026-08-20 00:05 | 2026-08-20 00:05 | f64758 (CURRENT) |
+| 769 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-df107a4b0d6e | 🟡 OPEN | 2026-08-19 21:10 | 2026-08-19 21:10 | df107a (STALE) |
+| 768 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-e8a7dbf764dd | 🟡 OPEN | 2026-08-19 21:06 | 2026-08-19 21:06 | e8a7db (STALE) |
+| 764 | chore(context-librarian): bounded auto-maintenance | context-librarian/auto-maintenance-2811774cf477 | 🟡 OPEN | 2026-08-19 20:18 | 2026-08-19 20:18 | 281177 (STALE) |
 
 **Analysis:**
-- **PR #751:** Freshly auto-created by Context Librarian after PR #748 merged. Base is **CURRENT** (58348c5). Should merge automatically if CI green.
-- **PR #750, #749, #747:** All based on **STALE** commit (d4b3be4, ~2 commits behind current main). Requires rebase for CI.
-  - #750: External tool audit gate — substantive doc work, review pending
-  - #749: MY-WORK-1 feature (DRAFT) — owner task read model + TMA screen
-  - #747: Context Librarian auto-maintenance — routine maintenance
+- **PRs #777, #776, #773, #772:** Auto-created by Context Librarian after today's merges. All bases are **CURRENT** (96e6e1f, 8c1bd47, f31858a, f64758). These should merge automatically if CI green.
+- **PRs #769, #768, #764:** Based on **STALE** commits (df107a, e8a7db, 281177 — created 21:10, 21:06, 20:18 UTC on 2026-08-19). Require rebase for CI.
+- **Pattern:** Context Librarian creates bounded maintenance PRs after each merge (automatic), then these accumulate if not merged quickly. All 7 are awaiting merge/rebase.
 
 ---
 
-## 3. Unmerged Branches
+## 3. Unmerged Branches & Work In Progress
 
-| Branch | Status | Commits Ahead of Main | Last Commit | Purpose/Owner |
-|--------|--------|------------------------|-------------|---------------|
-| `claude/epic-volta-hxm0d7` | 🟡 UNMERGED | 1 | eeedd95 (2026-08-19 19:58Z) | Daily briefing regeneration (`AI_CONTEXT.md`) — auto-generated |
-| `context-librarian/auto-maintenance-58348c5f8681` | 🟡 IN PR #751 | 1 | 3acae28 | Auto-maintenance housekeeping (tracked by open PR #751) |
-| `context-librarian/auto-maintenance-d4b3be43051e` | 🟡 IN PR #747 | 1 | 4389b8b | Auto-maintenance housekeeping (tracked by open PR #747, STALE BASE) |
-| `docs/external-tool-audit-gate-2026-08-19` | 🟡 IN PR #750 | 1 | 111ae5b | External tool audit gate documentation (tracked by open PR #750, STALE BASE) |
-| `my-work-1` | 🟡 IN PR #749 (DRAFT) | 1 | e57a75e | MY-WORK-1 feature work (tracked by open PR #749 DRAFT, STALE BASE) |
-| `ops/owner-handoff` | 🟡 UNMERGED | 1 | cc5d422 (2026-08-18 03:14Z) | Owner truth-reset handoff documentation — manual/governance |
+| Branch | Status | Commits Ahead | Last Commit | Purpose/Notes |
+|--------|--------|-------------------|-------------|---------------|
+| `claude/wonderful-pasteur-4kgdpn` | 🟡 TRACKED | Same as main | N/A | Designated development branch from CLAUDE.md (empty/same as main) |
+| `claude/epic-volta-3gllbd` | 🟡 UNMERGED | +4 | 835a8ff (2026-08-20 03:01Z) | Daily briefing regeneration (AI_CONTEXT.md) — auto-generated, not merged to main |
+| `my-work-1b` | 🟡 UNMERGED | +1 | f6d0aff (2026-08-19 19:57Z) | My Work feature — created but PR merged separately as #770/etc, branch abandoned |
+| `ops/owner-handoff` | 🟡 UNMERGED | +1 | cc5d422 (2026-08-18 03:14Z) | Owner truth-reset handoff documentation — manual/governance, 1+ days old |
+| `context-librarian/auto-maintenance-*` (9 branches) | 🟡 IN OPEN PRs | +1 each | Various | Tracked by open PRs #764–#777; routine maintenance |
 
-**Merged Branches (0 commits ahead, in main):**
-- `claude/wonderful-pasteur-rjmjug` — Session work branch from CLAUDE.md (merged into main, tracking with ops/daily-repo-summary)
-- `feat/memory-shadow-comparison-logging` — PR #748 feature (merged today)
-- `hardening/tool-availability-tenant-readiness` — MPT Phase 2B staging harness (merged via #740)
-- `docs/command-center-session-audit-logs` — Session docs (merged via #745)
+**Key Observations:**
+- `claude/wonderful-pasteur-4kgdpn` exists but is at same commit as main (not actively developed)
+- `claude/epic-volta-3gllbd` has fresh daily briefing rebuild (835a8ff) but **NOT merged into main** — AI_CONTEXT.md on main is stale
+- `my-work-1b` and related work merged via separate PRs; branch itself is stale
+- `ops/owner-handoff` is 1+ days old, ownership/governance decision required
 
 ---
 
-## 4. Key Changes Since Last Update (17/08 → 19/08)
+## 4. Key Changes Since Last Update (19/08 → 20/08)
 
-### Feature Delivery
-**PR #748: Episodic Memory Phase 2B Follow-up (scheduled shadow logging)**
-- **Status:** ✅ MERGED (2026-08-19 00:05:17Z)
-- **Type:** Feature (scheduled diagnostic logging)
-- **Commits:** 4 commits (3f63db5 → 70ca4d8)
-- **Summary:**
-  - New `_job_memory_shadow_scan` daily scheduler job
-  - `FEATURE_MEMORY_SHADOW_LOGGING` flag (default OFF)
-  - Structured counts only to `memory_shadow_comparisons` Postgres table (never memory text)
-  - Fail-soft by design (never raises, matches `usage_telemetry.py` pattern)
-  - Zero prompt/context impact; no changes to `context.py` or `memory_store.py`
-  - New migration `004_memory_shadow_comparisons.sql` (auto-runs on next deploy)
-- **Tests:** 20 new tests in `test_memory_shadow_logging.py` (fail-soft on PG unavailable, rollback on write failure, no text leakage, flag-off no-op)
-- **Risk:** ✅ LOW — flag-gated OFF by default, shadow-only, no behavior change
+### Documentation & Architecture
+**PR #775: Hermes Memory Canonicalization**
+- **Status:** ✅ MERGED (2026-08-20 01:05:54Z)
+- **Type:** Documentation (architecture consolidation)
+- **Summary:** Canonicalize Hermes learning patterns + Memory architecture into Active Work Registry
+- **Impact:** High-level design clarity, no code behavior changes
+- **Risk:** ✅ LOW — documentation only
 
-### Documentation
-**PR #746: MPT Phase 2B Staging Verification Log**
-- **Status:** ✅ MERGED (2026-08-18 22:36:00Z)
-- **Summary:** Full 18-19/08 staging session log; documents harness bootstrap fix (PR #740), 5 cross-verified staging runs, 2 unresolved infrastructure gaps (Render plan mismatch, scheduler-vs-OneOff container issue). **No defect in core `propose → approve → dispatcher → ExternalExecutionBoundary → MoneyPrinterTurboAdapter` path.**
+**PR #774: Stirling-PDF Deep Gate**
+- **Status:** ✅ MERGED (2026-08-20 00:59:15Z)
+- **Type:** Documentation (architecture decision)
+- **Summary:** Close open questions on Stirling-PDF integration (file retention policy, deployment isolation guarantees)
+- **Impact:** Design clarity for external tool integration
+- **Risk:** ✅ LOW — documentation only
 
-**PR #745: Command Center Session Audit Logs**
-- **Status:** ✅ MERGED (2026-08-18 22:08:00Z)
-- **Summary:** Session documentation for OC-E/OC-D work
+### Automated Activity
+**Daily Briefing Rebuild (835a8ff)**
+- **Status:** 🟡 NOT MERGED (branch `claude/epic-volta-3gllbd`)
+- **Summary:** Regenerated AI_CONTEXT.md with 2026-08-20 state (reflects today's PR merges)
+- **Action:** Needs merge to main to update production briefing
 
 ---
 
@@ -92,127 +88,151 @@
 
 ### Production Deployment
 - **Current Deployed SHA:** **UNVERIFIED** — Render dashboard check required
-- **Candidate SHA:** `58348c5` (current main tip, 2026-08-19 00:05:17Z)
-- **Last Verified Deploy:** Unknown (DAILY_SUMMARY.md from 17/08 also marked UNVERIFIED)
+- **Candidate SHA:** `96e6e1f` (current main tip, 2026-08-20 01:05:54Z)
+- **Last Verified Deploy:** Unknown (same as 2026-08-19, no dashboard access)
 - **Action Required:** Check Render dashboard for deployed SHA confirmation
-
-### Staging Verification
-- **MPT Phase 2B (PR #746/740):** ✅ Staging verified (5 runs cross-checked against Airtable)
-- **Episodic Memory Phase 2B (PR #748):** 🟡 Code merged, flag OFF — deployment/runtime verification pending on enable
 
 ### Runtime Verification Status
 | Feature | Code | Wired | Deployed | Runtime Verified |
 |---------|------|-------|----------|------------------|
-| Memory Shadow Logging (Phase 2B) | ✅ MERGED | ✅ (job registered) | 🟡 PENDING | ❌ NOT VERIFIED (flag OFF) |
-| MPT Phase 2B (staging verified) | ✅ MERGED | ✅ | 🟡 PENDING | ✅ STAGING VERIFIED (live runs) |
-| OC-E/OC-D Command Center | ✅ MERGED | ✅ | 🟡 PENDING | ❌ NOT VERIFIED |
+| Hermes Memory Architecture | ✅ MERGED | N/A (docs) | 🟡 PENDING | N/A |
+| Stirling-PDF Integration Spec | ✅ MERGED | N/A (docs) | 🟡 PENDING | N/A |
+| My-Work Feature (PR #770) | ✅ MERGED | ✅ | 🟡 PENDING | ❌ NOT VERIFIED |
+| Context-Librarian Auto-Maintenance | 🟡 IN OPEN PRs | N/A | 🟡 PENDING | N/A |
 
 ---
 
 ## 6. Environment & Configuration
 
-### Known Status (as of 2026-08-19)
+### Known Status (as of 2026-08-20)
 - **Feature Flags:** 
-  - `FEATURE_MEMORY_SHADOW_LOGGING` — NEW (default OFF)
+  - `FEATURE_MEMORY_SHADOW_LOGGING` — active (default OFF, from PR #748)
   - `FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE` — active (PR3B)
   - `FEATURE_AIRTABLE_SCHEMA_SNAPSHOT` — active (PR3A)
   - Emergency stops managed by `EmergencyStopManager` via Airtable
-- **Database Schemas:** New migration `004_memory_shadow_comparisons.sql` added (Postgres table, auto-runs on next deploy)
-- **Scheduler Jobs:** New `_job_memory_shadow_scan` registered (24 jobs total, up from 23)
+- **Database Schemas:** Migration `004_memory_shadow_comparisons.sql` (Postgres, added 2026-08-19) — auto-runs on next deploy
+- **Scheduler Jobs:** `_job_memory_shadow_scan` registered (24 jobs total)
 
 ### Environment Verification Gaps
-- **Render deployment confirmation:** SHA `58348c5` NOT YET verified as deployed
-- **Memory Shadow Logging runtime:** Feature merged, flag OFF, no production behavior change yet
-- **OC-E/OC-D production verification:** Command Center features merged, deployment status unclear
+- **Render deployment confirmation:** SHA `96e6e1f` NOT YET verified as deployed
+- **AI_CONTEXT.md freshness:** Branch `claude/epic-volta-3gllbd` has 2026-08-20 rebuild but not merged; main AI_CONTEXT is stale
+- **My-Work feature (PR #770):** Code merged, deployment status unclear
 
 ---
 
 ## 7. Documentation Consistency Check
 
 ### ROADMAP.md vs. Current State
-- **ROADMAP Last Updated:** 16/08/2026 (`עודכן:` header) — **STALE by 3 days**
-- **Current Main Activity:** 3 merges on 18-19/08 (PR #748, #746, #745) — NOT recorded in ROADMAP
-- **AI_CONTEXT.md Last Updated:** 18/08/2026 (references `1c3d7fd`, older than current `58348c5`)
-- **AI_CONTEXT Regeneration:** Branch `claude/epic-volta-hxm0d7` has daily rebuild (eeedd95, 19/08) but not yet merged
+- **ROADMAP Last Updated:** 16/08/2026 (`עודכן:` header) — **STALE by 4 days**
+- **Current Main Activity:** 5+ merges on 19-20/08 (PRs #775, #774, #771, #770, etc.) — NOT recorded in ROADMAP
+- **AI_CONTEXT.md:** Last modified in main from PR #700 (18/08); fresh rebuild exists (835a8ff) but not merged
 
 **DISCREPANCIES FOUND:**
-1. **ROADMAP.md is 3 days stale:** Last update 16/08, but PRs #748/746/745 merged 18-19/08 — not recorded
-2. **AI_CONTEXT.md references stale SHA:** States `1c3d7fd` (16/08 state), current is `58348c5` (19/08)
-3. **Daily briefing not merged:** `claude/epic-volta-hxm0d7` has fresh AI_CONTEXT rebuild (eeedd95) but open branch, not in main
-4. **Context Librarian cycle continues:** PRs #751/747 are auto-maintenance, #750 is external tool audit
+1. **ROADMAP.md is 4 days stale:** Last update 16/08, but 5+ PRs merged 19-20/08 — not recorded
+2. **AI_CONTEXT.md not updated in main:** Fresh rebuild exists on `claude/epic-volta-3gllbd` but not merged; production briefing is stale
+3. **Daily briefing not merged:** Auto-generated but unmerged → users see stale AI_CONTEXT
+4. **Context Librarian cycle continues:** 7 auto-maintenance PRs open, consuming review attention
 
 ### CHANGELOG.md & BUG_AUDIT_LOG.md
-- No updates in transcript — assume not yet manually verified against 18-19/08 merges
+- Assume not yet manually verified against 19-20/08 merges (documentation PRs only)
 
 ---
 
-## 8. Owner Decisions & Blockers
+## 8. Repository Topology
+
+**Main:**
+```
+origin/main (96e6e1f, HEAD)
+  └─ Last commit: 2026-08-20 01:05:54Z — PR #775 merge
+```
+
+**Development/Work Branches:**
+```
+origin/claude/wonderful-pasteur-4kgdpn (same as main)  — designated branch, empty
+origin/claude/epic-volta-3gllbd (+1 on main)           — daily briefing rebuild (NOT merged)
+origin/my-work-1b (+1, stale)                         — abandoned, feature merged via PR #770
+origin/ops/owner-handoff (+1, 1+ days old)            — governance docs, ownership decision pending
+```
+
+**Auto-Maintenance PR Branches (9 total):**
+```
+origin/context-librarian/auto-maintenance-* (×9)
+  └─ All in open PRs #764–#777; 4 are stale, 4 are current
+```
+
+**Total Remote Branches:** 13
+
+---
+
+## 9. Owner Decisions & Blockers
 
 ### Pending Owner Decisions
-- **Render Deployment:** Check and verify SHA `58348c5` is deployed (or confirm known deployment)
-- **ROADMAP Update:** Should record PRs #748/746/745 + update `עודכן:` date
-- **Daily Briefing Merge:** Branch `claude/epic-volta-hxm0d7` (AI_CONTEXT rebuild) — should merge if CI passes
-- **Stale PRs Rebase:** PRs #750/749/747 all need rebase from d4b3be4 → 58348c5 if continuing work
+1. **Render Deployment Verification:** Check Render dashboard; confirm SHA `96e6e1f` deployed, or note actual deployed SHA
+2. **Daily Briefing Merge:** Should `claude/epic-volta-3gllbd` (AI_CONTEXT rebuild) be merged? If so, triggers ROADMAP update cascade
+3. **Stale Auto-Maintenance PRs:** Clean up PRs #769, #768, #764 (stale bases) — close or rebase?
+4. **ops/owner-handoff Branch:** Status and ownership — complete, defer, or close?
+5. **ROADMAP Update:** Record PRs #775, #774, #771, #770 and update `עודכן:` date to 20/08
 
 ### Active Blockers
-- **Render Deploy Status:** Unclear (no dashboard verification available this session)
-- **Stale PR Bases:** 3 open PRs (#750, #749, #747) based on commit from ~12 hours ago
+- **Render Deploy Status:** Unverified (no dashboard access)
+- **Stale PR Bases:** 3 auto-maintenance PRs based on commits from 2026-08-19 21:00–21:10
+- **AI_CONTEXT Stale:** Main still shows old briefing; fresh rebuild blocked pending owner decision to merge
 
 ### Dependencies
-- **Memory Shadow Logging (PR #748):** Depends on Render deploy to auto-run migration `004_memory_shadow_comparisons.sql`
-- **Stale branch rebasing:** Should happen before merge to avoid CI issues
-- **Daily Briefing (claude/epic-volta-hxm0d7):** Needs merge to reflect 19/08 state in AI_CONTEXT
+- **Daily Briefing Merge:** Unblocks ROADMAP update cascade
+- **Render Verification:** Needed to prove 2026-08-19 PRs (#748, #746, #745) are deployed
+- **Stale PR Rebasing:** Required before those can merge
 
 ---
 
-## 9. Notable Contradictions & Drift
+## 10. Notable Contradictions & Drift
 
 | Issue | Evidence | Impact | Resolution |
 |-------|----------|--------|-----------|
-| ROADMAP.md is 3 days stale | ROADMAP: 16/08; main: 18-19/08 merges (PRs #748/746/745) | Documentation lag | Update ROADMAP.md with current PRs + bump `עודכן:` to 19/08 |
-| AI_CONTEXT.md references old SHA | AI_CONTEXT: `1c3d7fd`; current main: `58348c5` (6+ commits difference) | Stale briefing | Merge `claude/epic-volta-hxm0d7` (eeedd95 rebuild) or re-run rebuild |
-| 3 open PRs based on stale commit (d4b3be4) | PR #750/749/747 all base on d4b3be4 (18:53 UTC 18/08); main at 58348c5 (00:05 UTC 19/08) | CI/merge complexity | Rebase to 58348c5 before merge if continuing |
-| Render deployment unverified | DAILY_SUMMARY from 17/08 also marked UNVERIFIED; no evidence of confirmed deploy | Risk: claiming merged = deployed | ACTION REQUIRED: Verify Render dashboard SHA |
-| Memory Shadow Logging flag OFF | PR #748 merged with flag default=OFF (intentional shadow-only) | No runtime change | Intended behavior; activation is separate owner decision |
+| ROADMAP.md is 4 days stale | ROADMAP: 16/08; main: 19-20/08 merges (PRs #775/774/771/770) | Documentation lag | Update ROADMAP.md with current PRs + bump `עודכן:` to 20/08 |
+| AI_CONTEXT.md not updated on main | Fresh rebuild (835a8ff) on `claude/epic-volta-3gllbd` not merged; main still shows old briefing | Users see stale context | Merge `claude/epic-volta-3gllbd` or confirm no-merge decision |
+| Designated branch `claude/wonderful-pasteur-4kgdpn` is empty | Branch exists but identical to main; per CLAUDE.md setup should be active development branch | No work in progress | Clarify: is this branch meant to be used, or was setup incomplete? |
+| 3 auto-maintenance PRs based on stale commits | PR #769/768/764 all base on commits from 2026-08-19 21:00–21:10; main is now 4+ commits ahead | CI/merge friction | Close stale PRs or rebase all to 96e6e1f before merge |
+| Render deployment unverified (2 days) | DAILY_SUMMARY from 2026-08-19 also marked UNVERIFIED; no evidence of confirmed deploy | Risk: claiming merged ≠ deployed | ACTION REQUIRED: Verify Render dashboard SHA |
 
 ---
 
-## 10. Next Actions
+## 11. Next Actions
 
-### Immediate (Today - 2026-08-19)
-- [ ] **Verify Render deployment:** Check Render dashboard; confirm SHA `58348c5` or later deployed, or note known deployment SHA
-- [ ] **Monitor PR #751:** Auto-maintenance PR created by Context Librarian — should merge automatically if CI passes
-- [ ] **Merge AI_CONTEXT briefing:** If `claude/epic-volta-hxm0d7` CI passes, merge to update AI_CONTEXT.md for 19/08 state
+### Immediate (Today - 2026-08-20)
+- [ ] **Verify Render deployment:** Check Render dashboard; confirm SHA `96e6e1f` deployed, or note known deployment SHA
+- [ ] **Daily Briefing decision:** Decide if `claude/epic-volta-3gllbd` should merge to main (updates AI_CONTEXT.md to 2026-08-20 state)
+- [ ] **Stale PR triage:** Close or rebase PRs #769, #768, #764 (all have stale bases from 2026-08-19 21:00–21:10)
 
 ### Short-term (This Week)
-- [ ] **Update ROADMAP.md:** Add PRs #748 (Memory Shadow Logging), #746 (MPT Phase 2B Staging Log), #745 (Command Center Audit Logs); bump `עודכן:` date to 19/08
-- [ ] **Rebase stale PRs:** #750 (external tool audit), #749 (MY-WORK-1), #747 (auto-maintenance) — all need rebase from d4b3be4 → 58348c5
-- [ ] **Verify PR #750 (external tool audit):** Substantive review for 6 external tools (n8n, Flowise, Dify, Crawl4AI, browser-use, Stirling-PDF)
-- [ ] **Check ops/owner-handoff branch:** cc5d422, "+1 commit ahead" — verify if owner handoff documentation is complete or stale
+- [ ] **Update ROADMAP.md:** Add PRs #775 (Hermes canonicalization), #774 (Stirling-PDF Deep Gate), #771 (auto-maintenance), #770 (my-work); bump `עודכן:` date to 20/08
+- [ ] **Verify my-work deployment (PR #770):** Owner task read model — confirm owner field type fix is deployed and working
+- [ ] **Check ops/owner-handoff (cc5d422):** Verify owner truth-reset documentation is complete or defer/close
+- [ ] **Investigate `claude/wonderful-pasteur-4kgdpn`:** Per CLAUDE.md, this is the designated development branch. Is it meant to track work, or should it be repointed?
 
 ### Documentation Sync
-- [ ] **Sync CHANGELOG.md "Unreleased" section:** Record PRs #748, #746, #745 if not auto-logged
-- [ ] **BUG_AUDIT_LOG.md:** Verify no open bugs touched by 18-19/08 merges; close any verified (none found in PR summaries)
+- [ ] **Sync CHANGELOG.md "Unreleased" section:** Record PRs #775, #774, #771, #770 if not auto-logged
+- [ ] **BUG_AUDIT_LOG.md:** Verify no open bugs touched by 19-20/08 merges (all were documentation PRs)
 
 ### Runtime Verification (Pending Deployment)
-- [ ] **Memory Shadow Logging:** Once flag enabled (owner decision), test that `_job_memory_shadow_scan` daily job executes and logs counts to `memory_shadow_comparisons` table
-- [ ] **OC-E/OC-D Command Center:** Once deployed, verify UI renders correctly in production + TMA frontend integration works
+- [ ] **My-Work feature (PR #770):** Once deployed, verify owner field linked-record handling works end-to-end
+- [ ] **Episodic Memory Shadow Logging (from 2026-08-19):** Monitor `_job_memory_shadow_scan` after next deploy (flag is OFF by default)
 
 ---
 
-## 11. Summary Checklist
+## 12. Summary Checklist
 
-- [x] Commits merged today: **1 PR** (#748, Episodic Memory Phase 2B)
-- [x] Commits merged yesterday: **2 PRs** (#746, #745)
-- [x] Open PRs: **4** (#751 auto-maintenance, #750 tool audit STALE BASE, #749 MY-WORK-1 DRAFT STALE BASE, #747 auto-maintenance STALE BASE)
-- [x] Unmerged branches: **6** (2 auto-maintenance in PRs, 1 external tool audit in PR, 1 MY-WORK feature DRAFT in PR, 1 daily briefing not merged, 1 ops handoff)
-- [x] Main SHA confirmed: `58348c5f8681239253bb278239f1f5dfa3406c00` (2026-08-19 00:05:17Z)
-- [x] Production SHA verified: **UNVERIFIED** (Render dashboard check required)
+- [x] Commits merged today: **2 PRs** (#775, #774 — documentation)
+- [x] Commits merged yesterday: **3 PRs** (#771, #770, context-librarian)
+- [x] Open PRs: **7 auto-maintenance** (4 current base, 3 stale base)
+- [x] Unmerged branches: **5** (1 designated/empty, 1 briefing rebuild, 1 abandoned, 1 governance, 9 auto-maintenance tracked in PRs)
+- [x] Main SHA confirmed: `96e6e1f46ee5a62e9adf08d15972738a947ae9ff` (2026-08-20 01:05:54Z)
+- [x] Production SHA verified: **UNVERIFIED** (Render dashboard check required, now 2 days stale)
 - [x] MERGED / WIRED / DEPLOYED / VERIFIED distinctions applied: ✅
-- [x] Environment changes documented: ✅ (new flag, new table, new job)
-- [x] Owner decisions outstanding: ✅ (Render verify, ROADMAP update, briefing merge, stale PR rebase)
-- [x] Blockers identified: ✅ (Render deploy status, stale PR bases)
-- [x] Drift/contradictions noted: ✅ (stale ROADMAP/AI_CONTEXT, unverified deployment)
+- [x] Environment changes documented: ✅ (flags, jobs, migrations unchanged from 2026-08-19)
+- [x] Owner decisions outstanding: ✅ (Render verify, ROADMAP update, briefing merge, stale PR triage, branch clarification)
+- [x] Blockers identified: ✅ (Render deploy status, stale PR bases, stale briefing)
+- [x] Drift/contradictions noted: ✅ (stale ROADMAP, unmerged briefing, empty designated branch, unverified deploy)
 - [x] Next actions listed: ✅
 
 ---
@@ -221,42 +241,40 @@
 
 ### Full Commit History (Last 20 on Main)
 ```
-58348c5 Merge pull request #748 from 10026782/feat/memory-shadow-comparison-logging
-70ca4d8 fix: register _job_memory_shadow_scan in the canonical scheduler job lists
-aadfc51 fix: Context Librarian catalog schema violations (CI backend-ci failure)
-9b44be9 fix: stop persisting raw exception text; correct overclaiming wording
-3f63db5 feat: scheduled shadow-comparison logging (Episodic Memory Phase 2B follow-up)
-d4b3be4 Merge pull request #745 from 10026782/docs/command-center-session-audit-logs
-c4d7afb Merge remote-tracking branch 'origin/main' into docs/command-center-session-audit-logs
-9577e2a Merge pull request #746 from 10026782/docs/mpt-phase2b-staging-verification-log
-23181e8 docs: add session summary for Episodic Memory Phase 2 & 2B
-b41ec8e docs: MPT Phase 2B staging verification session log (18-19/08/2026)
-e4e8d74 docs: audit logs for Command Center session (18-19/08/2026)
-6706fe0 Merge pull request #744 from 10026782/context-librarian/auto-maintenance-db8e27de2d2b
-840ea39 chore(context-librarian): bounded auto-maintenance (provenance + policy-pre-approved registrations)
-db8e27d Merge pull request #742 from 10026782/context-librarian/auto-maintenance-a91481774e90
-da2c0f3 Merge pull request #740 from 10026782/mpt/phase2b-harness-bootstrap-fix
-657d289 chore(context-librarian): bounded auto-maintenance (provenance + policy-pre-approved registrations)
-4c2c3e6 Merge origin/main into mpt/phase2b-harness-bootstrap-fix (pick up context-librarian budget fix #739)
-a914817 Merge pull request #739 from 10026782/cc/overall-state-unsupported-optional
-b6c5e7b Merge pull request #738 from 10026782/command-center/owner-first-compact-view
-535ac4d Merge remote-tracking branch 'origin/main' into HEAD
+96e6e1f Merge pull request #775 from 10026782/docs/hermes-memory-canonicalization
+8c1bd47 Merge pull request #774 from 10026782/docs/stirling-pdf-deep-gate-2026-08-20
+9da25a1 docs: canonicalize Hermes learnings + Memory architecture into Active Work Registry
+5e814fa docs: Stirling-PDF Deep Gate — close file-retention and deployment-isolation questions
+f31858a Merge pull request #771 from 10026782/context-librarian/auto-maintenance-3c996adeec2e
+f647586 Merge pull request #770 from 10026782/my-work-1e
+e68af8b fix(my-work): unowned tasks default to the sole owner instead of vanishing
+df107a4 Merge pull request #766 from 10026782/my-work-1d
+1af8dcd fix(my-work): Owner is a linked-record field, not text -- fix read+write
+f6d0aff fix(my-work): Owner is a linked-record field, not text -- fix read+write
+e88e077 Merge pull request #760 from 10026782/my-work-1b
+68d1340 test(my-work): add real Flask route tests + prove resolve_identity()
+48aeba3 feat(my-work): fix endpoint and add comprehensive test coverage for task reading
+a78e961 Merge pull request #759 from 10026782/claude/epic-volta-hxm0d7
+5e46c43 Merge pull request #757 from 10026782/claude/context-librarian-automation-hardening
+76d40c3 Merge pull request #749 from 10026782/my-work-1
+59f7fc7 Merge pull request #752 from 10026782/ops/daily-repo-summary
+db09fd7 Merge remote-tracking branch 'origin/main' into HEAD
 ```
 
-### Repository Topology (as of 2026-08-19 00:30Z)
+### Open PRs (Detailed)
 ```
-origin/main (58348c5, HEAD)
-  ├── claude/epic-volta-hxm0d7 (+1 commit: AI_CONTEXT rebuild eeedd95)
-  ├── context-librarian/auto-maintenance-58348c5f8681 (+1, in PR #751)
-  ├── context-librarian/auto-maintenance-d4b3be43051e (+1, in PR #747, base STALE)
-  ├── docs/external-tool-audit-gate-2026-08-19 (+1, in PR #750, base STALE)
-  ├── my-work-1 (+1, in PR #749 DRAFT, base STALE)
-  └── ops/owner-handoff (+1, cc5d422)
+#777: context-librarian/auto-maintenance-96e6e1f46ee5 (base: CURRENT 96e6e1f)
+#776: context-librarian/auto-maintenance-8c1bd47a9a89 (base: CURRENT 8c1bd47)
+#773: context-librarian/auto-maintenance-f31858a8e1c0 (base: CURRENT f31858a)
+#772: context-librarian/auto-maintenance-f64758612fe3 (base: CURRENT f64758)
+#769: context-librarian/auto-maintenance-df107a4b0d6e (base: STALE df107a4, 2026-08-19 21:10)
+#768: context-librarian/auto-maintenance-e8a7dbf764dd (base: STALE e8a7dbf, 2026-08-19 21:06)
+#764: context-librarian/auto-maintenance-2811774cf477 (base: STALE 281177, 2026-08-19 20:18)
 ```
 
 ---
 
 **Generated by:** Automated daily routine  
 **Session:** ops/daily-repo-summary  
-**Branch:** ops/daily-repo-summary (reset to origin/main at start)  
-**Next run:** 2026-08-20 00:00Z (scheduled daily)
+**Branch:** ops/daily-repo-summary (reset to origin/main at start of session)  
+**Next run:** 2026-08-21 00:00Z (scheduled daily)
