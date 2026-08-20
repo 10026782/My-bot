@@ -3907,6 +3907,27 @@ def run_agent(
                 _out_meta["status_route_owner"] = "approval_runtime"
             return _d018_reply
     _pr2_reply = None
+    # N18 Phase 2 (confirm/cancel dispatch unification): should_prefer_lead_
+    # draft() used to be called independently at this site AND again at each
+    # of the two ── 2.55 ── branches below (confirm, cancel) — up to 3 self-
+    # fetching Sessions reads for one turn. Computed exactly once here now;
+    # ── 2.55 ── reuses this same value instead of re-querying, so there is
+    # exactly one decision point for "does a review-mode draft own this
+    # confirm/cancel word," not three.
+    #
+    # Deliberately NOT gated on `_snapshot_fetch_failed`: that flag only
+    # means the ActionGateway live-contracts fetch itself failed, which
+    # should_prefer_lead_draft() never touches (it reads session-store
+    # bookmarks only) — §2.55's original per-branch calls ran regardless of
+    # that flag, so this single computation must too, or a review-mode
+    # draft would silently stop resolving during an unrelated ActionGateway
+    # outage.
+    _pr2_confirm_probe = user_text.strip().lower()
+    if _pr2_confirm_probe in _CONFIRM_WORDS or _pr2_confirm_probe in _CANCEL_WORDS:
+        from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_pr2
+        _prefer_draft_now = _prefer_draft_pr2(identity.memory_key, chat_id)
+    else:
+        _prefer_draft_now = False
     if not _snapshot_fetch_failed:
         # Lead Draft Card (2f76a50 follow-up): PR2's fast path is an EARLIER
         # confirm/cancel interception than the one 2f76a50 fixed below — it
@@ -3920,19 +3941,13 @@ def run_agent(
         #
         # LL-11 fix: should_prefer_lead_draft() self-fetches Sessions
         # (get_lead_draft -> lead_sessions.get()), a SECOND read on top of
-        # run_agent's own canonical snapshot fetch above. Only call it when
-        # user_text is actually confirm/cancel-word shaped — the only shape
-        # _resolve_pr2_deterministic_approval() itself would otherwise
-        # "unconditionally answer" per the comment above; every other
-        # message (the overwhelming common case) must stay at exactly 1
-        # Sessions read, matching this function's own "falls through
+        # run_agent's own canonical snapshot fetch above. Only computed
+        # above when user_text is actually confirm/cancel-word shaped — the
+        # only shape _resolve_pr2_deterministic_approval() itself would
+        # otherwise "unconditionally answer" per the comment above; every
+        # other message (the overwhelming common case) must stay at exactly
+        # 1 Sessions read, matching this function's own "falls through
         # unchanged for unrecognized input" contract.
-        _pr2_confirm_probe = user_text.strip().lower()
-        if _pr2_confirm_probe in _CONFIRM_WORDS or _pr2_confirm_probe in _CANCEL_WORDS:
-            from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_pr2
-            _prefer_draft_now = _prefer_draft_pr2(identity.memory_key, chat_id)
-        else:
-            _prefer_draft_now = False
         if not _prefer_draft_now:
             _pr2_reply = _resolve_pr2_deterministic_approval(
                 user_text=user_text,
@@ -4235,8 +4250,11 @@ def run_agent(
             # for confirm/cancel words specifically, since
             # handle_lead_candidate() itself is only reached further below
             # in this same request-handling function).
-            from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft
-            if _prefer_draft(identity.memory_key, chat_id):
+            #
+            # N18 Phase 2: reuses _prefer_draft_now, computed once above at
+            # the PR2 fast-path site — no second should_prefer_lead_draft()
+            # Sessions read here.
+            if _prefer_draft_now:
                 from core.lead_candidate_handler import resolve_lead_draft_confirmation as _resolve_draft_early
                 _draft_reply_early = _resolve_draft_early(identity, chat_id, channel, is_confirm=True, is_cancel=False)
                 if _draft_reply_early is not None:
@@ -4382,8 +4400,8 @@ def run_agent(
         elif _lower in _CANCEL_WORDS:
             # Lead Draft Card (Phase 1 follow-up) — same recency-preferred
             # check as the _CONFIRM_WORDS branch above, symmetric for "לא".
-            from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_c
-            if _prefer_draft_c(identity.memory_key, chat_id):
+            # N18 Phase 2: reuses _prefer_draft_now (see confirm branch above).
+            if _prefer_draft_now:
                 from core.lead_candidate_handler import resolve_lead_draft_confirmation as _resolve_draft_cancel
                 _draft_cancel_reply = _resolve_draft_cancel(identity, chat_id, channel, is_confirm=False, is_cancel=True)
                 if _draft_cancel_reply is not None:

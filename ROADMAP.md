@@ -7,7 +7,17 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 20/08/2026 — **N18 Phase 2 (בעבודה): שתי פרוסות ראשונות של Shared Write
+עודכן: 21/08/2026 — **N18 Phase 2, פרוסה שלישית: Confirm/Cancel Dispatch
+Unification.** `app.py`'s early כן/לא-word interception היה קורא ל-`should_prefer_lead_draft()`
+עד 3 פעמים באותו turn (PR2 fast-path + ── 2.55 ── confirm branch + ── 2.55 ── cancel branch),
+כל אחד עם קריאת Sessions עצמאית משלו. עכשיו מחושב פעם אחת בלבד ומשמש בשתי הענפים — נקודת
+החלטה יחידה, ללא שינוי התנהגות (`resolve_lead_draft_confirmation`/`_finalize_draft_confirm`/
+`_finalize_draft_cancel` לא זזו). לא תלוי ב-`_snapshot_fetch_failed` (זו הייתה תקלה נפרדת
+לגמרי ב-ActionGateway, לא ב-Sessions). טסט חדש `test_n18_draft_dispatch_unification.py` מוכיח
+זאת end-to-end דרך `app.run_agent()` (לא רק ברמת ה-unit של `core/lead_candidate_handler.py`
+כמו section 9 הקיים ב-`test_lead_service_phase1.py`). עדיין לא הועבר: clarification/
+validation-loop wiring (הפרוסה הבאה) ו-terminal-turn-result (אחרון, per owner sequencing).
+עודכן קודם: 20/08/2026 — **N18 Phase 2 (בעבודה): שתי פרוסות ראשונות של Shared Write
 Primitives.** לפי הבהרת owner ("Phase 2 הוא תיקון ארכיטקטוני, לא רק הכנה לעתיד") — המכניקה
 הכלל-מערכתית שכבר נבנתה בתוך Lead מוצאת בהדרגה משם ל-primitives משותפים, ללא שינוי
 התנהגות (99/99 טסטי Lead נשארים ירוקים, לכל primitive טסטים ייעודיים משלו):
@@ -1499,6 +1509,15 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   (`core.lead_service.LEAD_DRAFT_SPEC`: שדות/prompts/validators/render). עדיין בליבת
   `lead_candidate_handler.py`, לא הועברו עדיין: structured-command field mapping (Lead-
   specific, נשאר ב-lead_service.py כמתוכנן), terminal-turn-result contract (Phase 4).
+  (3) **Confirm/Cancel Dispatch Unification** (21/08/2026) — `app.py`'s early כן/לא-word
+  interception קרא ל-`should_prefer_lead_draft()` עד 3 פעמים באותו turn (PR2 fast-path +
+  ── 2.55 ── confirm + ── 2.55 ── cancel), כל אחד עם Sessions read עצמאי. מחושב עכשיו פעם
+  אחת (`_prefer_draft_now`) ומשמש בשני הענפים — נקודת החלטה יחידה, ללא שינוי בהתנהגות
+  (`resolve_lead_draft_confirmation`/`_finalize_draft_confirm`/`_finalize_draft_cancel` לא
+  זזו — עדיין השלב הבא). `test_n18_draft_dispatch_unification.py` (חדש) מוכיח זאת
+  end-to-end דרך `app.run_agent()`, לא רק ברמת ה-unit כמו section 9 הקיים ב-
+  `test_lead_service_phase1.py`. השלב הבא: clarification/validation-loop wiring;
+  terminal-turn-result נשאר אחרון (owner sequencing — כבר נוגע ב-single-speaker/UX).
 - **Phase 3 — Canonical Writers:** איחוד כל Lead writers החיים (כולל אלה שעוקפים
   dispatcher/governance checks, שנמצאו באודיט) למסלול `create_lead(payload, context)` יחיד;
   כל מקור (Telegram/WhatsApp/UI/Campaign/API/Voice/Email) הופך ל-adapter שלא כותב בעצמו.
@@ -1525,7 +1544,8 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
 **קבצים (Phase 2, בעבודה):** `core/structured_command.py` + `test_structured_command.py`
 (11 טסטים), `core/draft_flow.py` + `test_draft_flow.py` (16 טסטים) — שני primitives
 משותפים, ללא תלות ב-Lead; `core/lead_service.py`/`core/lead_candidate_handler.py` צורכים
-אותם כעת במקום מכניקה מקומית.
+אותם כעת במקום מכניקה מקומית. `app.py` (confirm/cancel dispatch unification) +
+`test_n18_draft_dispatch_unification.py` (8 טסטים, end-to-end דרך `app.run_agent()`).
 **מקור מלא:** דוח QA מלא + מסמך ההחלטה הארכיטקטוני הועברו ע"י הבעלים בצ'אט ב-20/08/2026 —
 אין מסמך נפרד ב-`docs/` כרגע; אם/כשמתחיל מימוש Phase 2 בפועל, להעתיק את תוכן ההחלטה
 ל-`docs/architecture/` ייעודי במקום להסתמך על ROADMAP בלבד.
