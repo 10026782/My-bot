@@ -21,6 +21,7 @@ os.environ.setdefault("AIRTABLE_API_KEY", "patTest")
 os.environ.setdefault("AIRTABLE_BASE_ID", "appTest")
 os.environ.setdefault("RENDER_APP_URL", "https://example.com")
 os.environ.setdefault("SETUP_WEBHOOK", "0")
+os.environ.setdefault("ELIYAHU_CHAT_ID", "123456")
 
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -624,6 +625,38 @@ chk("regression: a fresh 'ליד חדש' trigger is never swallowed by a stuck r
 new_draft_state = lead_sessions.get_lead_draft(chat_stuck)
 chk("regression: the session now holds a draft for the NEW person, not the stuck old one",
     new_draft_state is not None and "0548878210" in str(new_draft_state))
+
+# 9c. Second staging round (2026-08-20, same day, AFTER 2f76a50 was deployed):
+# "כן" against a review-mode draft STILL returned "אין פעולה שממתינה לאישור".
+# Root cause: app.py's PR2 fast path (_resolve_pr2_deterministic_approval,
+# called at the top of run_agent when FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS
+# + FEATURE_ACTION_GATEWAY are both on) intercepts bare "כן"/"לא" EARLIER than
+# the _CONFIRM_WORDS/_CANCEL_WORDS branch 2f76a50 fixed, and had no knowledge
+# of lead_draft either -- confirmed here that the trap function itself still
+# unconditionally answers "no_contract" on its own, and that
+# should_prefer_lead_draft() (the guard now added at its call site in
+# run_agent) correctly identifies this exact scenario so run_agent skips
+# calling it.
+import app as _app
+
+chat_pr2 = "phase1_draft_pr2_fastpath"
+lch.handle_lead_candidate(
+    identity, "ליד חדש דנה כהן domain recruitment 0501112222",
+    chat_pr2, "telegram", session=lead_sessions.get_or_create(chat_pr2),
+)
+_pr2_identity = SimpleNamespace(memory_key="phase1_draft_pr2_fastpath", role="owner")
+with patch("feature_flags.is_enabled", return_value=True):
+    _pr2_trap_reply = _app._resolve_pr2_deterministic_approval(
+        user_text="כן", identity=_pr2_identity, live_contracts=[], out_meta=None,
+    )
+chk("regression: _resolve_pr2_deterministic_approval alone (no lead_draft "
+    "awareness) still answers 'no_contract' for a bare 'כן' with no live "
+    "contracts -- proving why the run_agent-level guard is required",
+    _pr2_trap_reply == "אין פעולה שממתינה לאישור")
+chk("regression: should_prefer_lead_draft is True for this exact scenario, "
+    "so run_agent's guard (added after this incident) skips the PR2 fast "
+    "path entirely and lets the real draft-confirmation logic run instead",
+    lch.should_prefer_lead_draft("phase1_draft_pr2_fastpath", chat_pr2))
 
 
 # ══════════════════════════════════════════════════
