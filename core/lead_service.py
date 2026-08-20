@@ -759,3 +759,29 @@ def draft_to_payload(draft: dict) -> LeadPayload:
         channel=draft.get("channel", "telegram"),
         summary=draft.get("note", ""),
     )
+
+
+# N18 Phase 2: the generic Draft/filling/edit-choice/review state machine
+# lives in core/draft_flow.py — this DraftSpec is Lead's own plug-in (field
+# semantics only), consumed by core/lead_candidate_handler.py's
+# _resolve_lead_draft(). field_prompts is fully populated (not just
+# DRAFT_FIELD_PROMPT_HE's 3 required-field entries) so the generic resolver
+# never needs entity-aware fallback logic — same fallback text
+# ("מה הערך החדש עבור <label>?") the old inline edit_choice branch used for
+# source/note, just precomputed once.
+_DRAFT_FIELD_PROMPT_FULL_HE = {
+    key: DRAFT_FIELD_PROMPT_HE.get(key, f"מה הערך החדש עבור {DRAFT_FIELD_HE[key]}?")
+    for key in DRAFT_FIELD_ORDER
+}
+
+from core.draft_flow import DraftSpec as _DraftSpec  # noqa: E402
+
+LEAD_DRAFT_SPEC = _DraftSpec(
+    required_fields=DRAFT_REQUIRED_FIELDS,
+    field_prompts=_DRAFT_FIELD_PROMPT_FULL_HE,
+    edit_labels=_DRAFT_EDIT_LABELS,
+    set_field=set_draft_field,
+    render=render_lead_draft_card,
+    unknown_field_message="לא זיהיתי שדה. אילו שדות: שם / טלפון / תחום / מקור / הערה.",
+    edit_choice_prompt="איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה.",
+)
