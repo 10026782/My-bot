@@ -2656,7 +2656,9 @@ def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str
         owner_record_id: Owner's Profile table record ID (see
             _resolve_profile_record_id) -- Tasks.Owner is a
             multipleRecordLinks field, so filtering must compare against
-            this record ID, not a plain display name/user_id.
+            this record ID, not a plain display name/user_id. Tasks with
+            no Owner link at all default to this owner (see caller: this
+            is only reachable for identity.is_owner).
         owner_display: identity.user_id, used only for the response's
             "owner" display field.
         today: Today's ISO date (defaults to date.today())
@@ -2678,9 +2680,14 @@ def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str
         if status == TaskStatus.DONE:
             continue
 
-        # Owner is a linked-record field -> list of Profile record IDs
+        # Owner is a linked-record field -> list of Profile record IDs.
+        # A task with NO owner link at all defaults to the requesting owner
+        # (this route already requires identity.is_owner) -- with a single
+        # owner in the system there's no other rightful claimant for an
+        # unassigned task. A task with an explicit owner link to someone
+        # else is still excluded.
         owner_links = _linked_record_ids(fields.get(TaskFields.OWNER, []))
-        if owner_record_id not in owner_links:
+        if owner_links and owner_record_id not in owner_links:
             continue
 
         task_item = {
