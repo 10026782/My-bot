@@ -44,7 +44,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "e88e077d7a52bdb47cfbf5d4d77678812422e452"
+      "last_observed_commit": "0c02e84d93d42cfaec35cfe718118ea40c19b238"
     },
     {
       "id": "decision.actioncontracts_authority",
@@ -222,7 +222,7 @@
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
       ],
-      "last_observed_commit": "e88e077d7a52bdb47cfbf5d4d77678812422e452"
+      "last_observed_commit": "0c02e84d93d42cfaec35cfe718118ea40c19b238"
     },
     {
       "id": "decision.ux_no_internal_ids",
@@ -347,7 +347,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "5e46c4307698f77f689095116bfc664e71143b88"
+      "last_observed_commit": "0c02e84d93d42cfaec35cfe718118ea40c19b238"
     },
     {
       "id": "decision.message_contract_envelope_authority",
