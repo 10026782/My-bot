@@ -29,7 +29,16 @@ _DOMAIN_RULES: list[tuple[str, str, float]] = [
     (r"(import|supplier|china|shipping|container|cargo|procurement)", RouterDomain.IMPORT, 0.95),
 
     # ── Finance ──────────────────────────────────
-    (r"(כסף|תזרים|מזומן|הכנסה|הוצאה|רווח|הפסד|חשבון|תשלום|חשבונית|מע.מ|מס)", RouterDomain.FINANCE, 0.95),
+    # BUG-Phase1-Domain: "מס" (tax) MUST be word-bounded — unbounded, it
+    # matched as a substring inside "מספר" (number/phone), "מסמך" (document),
+    # "מסלול" (path/track), etc., causing "...בעל מספר צוותים..." to
+    # misroute to FINANCE before the RECRUITMENT rule below ever got a
+    # chance to match "recruitment"/"גיוס" in the same message (see the
+    # Lead System E2E Audit's golden failure case). \b is Unicode-aware in
+    # Python's re module (treats Hebrew letters as \w), so it correctly
+    # excludes "מס" as a substring of a longer word while still matching it
+    # standalone (e.g. "לשלם מס").
+    (r"(כסף|תזרים|מזומן|הכנסה|הוצאה|רווח|הפסד|חשבון|תשלום|חשבונית|מע.מ|\bמס\b)", RouterDomain.FINANCE, 0.95),
     (r"(finance|cash.flow|revenue|expense|profit|invoice|payment|tax|vat)", RouterDomain.FINANCE, 0.95),
 
     # ── Recruitment ────────────────────────────────────────────────────────
