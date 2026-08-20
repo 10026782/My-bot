@@ -67,18 +67,19 @@ organization may not use the Software in production, at scale, or for
 business-critical processes"* without a paid User License, but *"you may use
 the Software without a paid subscription for the sole purposes of internal
 trial, evaluation, or minimal use"* provided it's not used "in client-facing
-or commercial contexts." This POC — internal, non-production, non-customer-
-facing, explicitly scoped to prove architecture only — reads as falling
-squarely inside that Trial/Minimal-Use carve-out. **It is not a green light
-for production use of this same mechanism**: before any real dispatcher
-wiring, this needs an explicit decision — either a paid Stirling PDF User
-License, or a different auth approach that doesn't depend on
-`app/proprietary` at all (e.g. network-isolation-only with a reverse-proxy-
-injected header, since Stirling's own auth module is off the table without a
-license). This correction is scoped to this POC's own document; the
-already-merged `docs/research/STIRLING_PDF_DEEP_GATE_2026-08-20.md` was not
-edited as part of this PR (out of scope — flagged here and in the return
-report for a possible follow-up correction).
+or commercial contexts." This POC is used strictly for **local
+evaluation/POC purposes only** — no production deployment, no client-facing
+use. **No production license clearance is claimed here**: this document
+reports what the license text says, it does not make a legal determination
+beyond what the source itself proves. Production use of this same mechanism
+**remains blocked** pending an explicit license review/decision — either a
+paid Stirling PDF User License, or a different auth approach that doesn't
+depend on `app/proprietary` at all (e.g. network-isolation-only with a
+reverse-proxy-injected header, since Stirling's own auth module is off the
+table without a license). This correction is also now reflected in
+`docs/research/STIRLING_PDF_DEEP_GATE_2026-08-20.md` ("Authentication" —
+corrected as of this PR to remove its prior "MIT-licensed mechanism"
+characterization of `customGlobalAPIKey`).
 
 `SECURITY_ENABLELOGIN=true` is required for the API-key filter to activate
 at all (verified: `SecurityConfiguration`'s `loginEnabledValue` gates the

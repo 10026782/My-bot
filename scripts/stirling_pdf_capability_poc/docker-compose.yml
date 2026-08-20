@@ -5,9 +5,11 @@
 # - SECURITY_ENABLELOGIN + SECURITY_CUSTOMGLOBALAPIKEY: BOSS is the sole caller,
 #   authenticated via a single X-API-KEY. See docs/research/STIRLING_PDF_CAPABILITY_POC.md
 #   ("Authentication licensing nuance") — this specific mechanism lives in
-#   Stirling-PDF's proprietary-licensed module, not its MIT core; using it here
-#   is covered by that license's own Trial/Minimal-Use carve-out (internal,
-#   non-commercial, non-client-facing POC), not a general production green light.
+#   Stirling-PDF's proprietary-licensed module, not its MIT core. Used here for
+#   local evaluation/POC only — no production or client deployment, and no
+#   production license clearance is claimed. Production use of this auth
+#   mechanism remains blocked pending an explicit license review/decision
+#   (paid Stirling PDF User License, or a non-Stirling auth layer).
 # - SYSTEM_MAXFILESIZE (MB) is set above the BOSS-side per-file cap
 #   (core/stirling_pdf_adapter.py's _MAX_FILE_BYTES = 20MB) so BOSS's own limit
 #   is always the tighter one.
