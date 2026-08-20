@@ -1,5 +1,7 @@
 # F52 — Unified Approval Runtime Migration and Implementation
 
+**Last Updated:** 2026-08-20
+
 ## Purpose
 
 F52 is the formal program for migrating all approval-required execution to one
@@ -49,6 +51,9 @@ Phase 4C remains as a historical research identifier only.
 7. Rollout authority:
    `rollout/`
 
+7a. **Latest Gateway cutover/readiness authority (2026-08-20):**
+   `rollout/GATEWAY_CUTOVER_READINESS_20260820.md`
+
 7b. Incremental message-standard implementation plan:
    `rollout/UNIFIED_MESSAGE_IMPLEMENTATION_PLAN.md`
 
@@ -66,6 +71,26 @@ The SPEC defines what must be built only after planning-gate approval.
 Rollout documents define deployment, cutover and rollback only after they are
 reviewed and approved.
 
+### Runtime-path interpretation guard
+
+Do **not** report `MULTIPLE LIVE PATHS` merely because multiple approval stores,
+branches, projections or fallback implementations are present in source code.
+
+A duplicate live-execution finding requires proof that two execution-authority
+paths are both reachable for the same action in the same deployed flag/runtime
+configuration and can independently reach a real provider mutation.
+
+Use `rollout/GATEWAY_CUTOVER_READINESS_20260820.md` for the verified
+classification of Gateway, EventBus/PendingActionsStore, `_pending_approvals`,
+`pending_lead_preview`, TMA Approvals projection, persistence and atomic claims.
+
 ## Current status
 
-Planning Gate / Migration Readiness
+**Gateway Cutover Readiness:** `READY WITH DOCUMENTED NON-BLOCKING FOLLOW-UPS`
+(as verified on staging core path on 2026-08-20; Production was not changed).
+
+Important provenance boundary: the final staging canary ran on `4e44bca...`,
+while the production/main code examined was `09fc8a7e...`. The branches are
+diverged; the core Gateway/atomic modules were unchanged in the comparison,
+but production activation still requires the normal candidate-alignment/diff
+gate described in the readiness report.
