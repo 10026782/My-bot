@@ -7,7 +7,31 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 21/08/2026 — **N18 Phase 2, פרוסה שלישית: Confirm/Cancel Dispatch
+עודכן: 21/08/2026 — **N18 Phase 2, בירור פרוסה רביעית: clarification/validation-loop
+wiring כבר בוצע.** נבדק לעומק לפני תחילת עבודה חדשה (per owner's staged plan) — המכניקה
+המבוקשת (field ממתין → תשובת משתמש → validator → invalid נשאר על אותו שדה → valid מתקדם
+לשדה הבא → review כשהכל מלא) **כבר קיימת** ב-`core/draft_flow.py`'s `resolve_draft_reply(text,
+draft, DraftSpec)`, ו-Lead כבר צורך אותה כ-consumer דרך `core.lead_service.LEAD_DRAFT_SPEC`
+(`_resolve_lead_draft()`, ── 2.55 ── בליבת `lead_candidate_handler.py:974-1034`) — בוצע
+בפרוסה השנייה (20/08/2026, ראו למטה) לפני שהמשימה הזו התבקשה. אין duplicate Lead-specific
+state-machine לזרימה הזו. הפער היחיד שנמצא מול הדרישה המפורשת: לא היה טסט רגרסיה יחיד
+ורציף דרך ה-real orchestration path (`handle_lead_candidate()`) שעובר על **שני** שדות
+נדרשים ברצף אחד (invalid phone → נשאר על phone → valid phone → invalid domain → נשאר על
+domain → valid domain → review) — טסט תקין ל-phone וטסט נפרד ל-domain-by-number היו קיימים,
+אך לא שרשרת רציפה אחת. נוסף `test_lead_service_phase1.py` section 7h (5 assertions חדשות,
+107/107 ירוקים). Genericity (הוכחה שהמנגנון אינו Lead-specific) כבר מכוסה במלואה על ידי
+`test_draft_flow.py` הקיים (synthetic title/due spec, 16/16 ירוקים) — לא נוסף כפילות.
+**ממצא נפרד, לא טופל בסלייס הזה:** קיימת זרימה נוספת, נפרדת ומקבילה —
+`_resolve_lead_clarification()`/`_maybe_start_lead_clarification()` (`lead_candidate_handler.py:612-857`)
+— מטפלת ב-"טקסט חופשי חילץ טלפון אך לא שם" (Tier 5, capture אורגני, לא "ליד חדש" מפורש).
+זו state machine נפרדת עם session key שונה (`active_lead_candidate`/`needs_clarification`,
+לא `lead_draft`), שדה יחיד (name) או batch (names, per-phone), סדר עדיפויות משלה
+(TTL/cancel/interrupt/valid/unclear) — **אינה** משתמשת ב-`DraftSpec`/`resolve_draft_reply`.
+טכנית זו "duplicate Lead-specific validation-state machine" נוספת, אך הצורה שלה (שדה יחיד,
+לא multi-field walk עם phone/domain) לא תואמת את התיאור/התרחיש המפורש שהתבקש בסלייס הזה.
+איחוד שלה לתוך `draft_flow.py` הוא decision נפרד וגדול יותר (trigger שונה, batch mode,
+priority-ordering) — לא בוצע כאן, ממתין להחלטת owner אם ומתי.
+עודכן קודם: 21/08/2026 — **N18 Phase 2, פרוסה שלישית: Confirm/Cancel Dispatch
 Unification.** `app.py`'s early כן/לא-word interception היה קורא ל-`should_prefer_lead_draft()`
 עד 3 פעמים באותו turn (PR2 fast-path + ── 2.55 ── confirm branch + ── 2.55 ── cancel branch),
 כל אחד עם קריאת Sessions עצמאית משלו. עכשיו מחושב פעם אחת בלבד ומשמש בשתי הענפים — נקודת
@@ -1516,8 +1540,15 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   (`resolve_lead_draft_confirmation`/`_finalize_draft_confirm`/`_finalize_draft_cancel` לא
   זזו — עדיין השלב הבא). `test_n18_draft_dispatch_unification.py` (חדש) מוכיח זאת
   end-to-end דרך `app.run_agent()`, לא רק ברמת ה-unit כמו section 9 הקיים ב-
-  `test_lead_service_phase1.py`. השלב הבא: clarification/validation-loop wiring;
-  terminal-turn-result נשאר אחרון (owner sequencing — כבר נוגע ב-single-speaker/UX).
+  `test_lead_service_phase1.py`.
+  (4) **clarification/validation-loop wiring** (21/08/2026, בדיקה בלבד — ראו למעלה) —
+  התברר שכבר בוצע בפרוסה (2): `resolve_draft_reply()`+`LEAD_DRAFT_SPEC` הם המנגנון הגנרי
+  המבוקש, ללא duplicate. נוסף רק טסט רגרסיה רציף חסר (section 7h, 5 assertions) שמוכיח
+  שרשרת מלאה: invalid phone→נשאר→valid phone→invalid domain→נשאר→valid domain→review.
+  זוהה (לא טופל, decision נפרד) ממצא נוסף: `_resolve_lead_clarification()` היא state
+  machine נפרדת ומקבילה ל-organic Tier-5 capture (טלפון בלי שם) שאינה משתמשת ב-DraftSpec —
+  ראו פירוט למעלה. terminal-turn-result נשאר אחרון (owner sequencing — כבר נוגע ב-
+  single-speaker/UX).
 - **Phase 3 — Canonical Writers:** איחוד כל Lead writers החיים (כולל אלה שעוקפים
   dispatcher/governance checks, שנמצאו באודיט) למסלול `create_lead(payload, context)` יחיד;
   כל מקור (Telegram/WhatsApp/UI/Campaign/API/Voice/Email) הופך ל-adapter שלא כותב בעצמו.
@@ -1546,6 +1577,8 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
 משותפים, ללא תלות ב-Lead; `core/lead_service.py`/`core/lead_candidate_handler.py` צורכים
 אותם כעת במקום מכניקה מקומית. `app.py` (confirm/cancel dispatch unification) +
 `test_n18_draft_dispatch_unification.py` (8 טסטים, end-to-end דרך `app.run_agent()`).
+`test_lead_service_phase1.py` section 7h (5 טסטים חדשים — שרשרת רגרסיה רציפה דרך שני שדות,
+clarification/validation-loop wiring, ראה (4) למעלה).
 **מקור מלא:** דוח QA מלא + מסמך ההחלטה הארכיטקטוני הועברו ע"י הבעלים בצ'אט ב-20/08/2026 —
 אין מסמך נפרד ב-`docs/` כרגע; אם/כשמתחיל מימוש Phase 2 בפועל, להעתיק את תוכן ההחלטה
 ל-`docs/architecture/` ייעודי במקום להסתמך על ROADMAP בלבד.
