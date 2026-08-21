@@ -112,13 +112,16 @@ unmocked path exercised in CI, which has no ffprobe installed).
 
 ## Real ffprobe smoke
 
-`scripts/media_probe_poc/smoke.py` — deliberately not run in CI, same genre
-as `scripts/crawl4ai_capability_poc/smoke.py` — synthesizes a tiny local
-fixture with `ffmpeg` (no download, no customer data), then drives a real
-`ffprobe` invocation end to end through `ExternalExecutionBoundary`,
-independently re-verifying the stored result's checksum and MIME type,
-confirming the source file's SHA-256/size are unchanged afterward, and
-confirming a duplicate `contract_id` submit does not re-invoke ffprobe.
+Verified manually (not as a committed script — CI has no ffprobe, and this
+capability's own catalog registration is already at this node's context
+budget ceiling; see `docs/context_librarian/layers/approvals.json`'s
+`layer.approvals` notes): a tiny local fixture synthesized with `ffmpeg` (no
+download, no customer data) was probed end to end through
+`ExternalExecutionBoundary` with a real `ffprobe` binary, independently
+re-verifying the stored result's checksum and MIME type, confirming the
+source file's SHA-256/size were unchanged afterward, and confirming a
+duplicate `contract_id` submit does not re-invoke ffprobe. See the PR
+description for the recorded run output.
 
 ## Explicitly out of scope for this POC
 
