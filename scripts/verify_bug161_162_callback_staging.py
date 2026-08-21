@@ -69,14 +69,7 @@ from event_bus import bus  # noqa: E402
 from core.action_gateway import action_gateway as gateway  # noqa: E402
 from tools.dispatcher import dispatch_tool as _real_dispatch_tool  # noqa: E402
 
-# Terminal, non-pending contract states. Deliberately includes "failed":
-# whether a dispatch attempt succeeds depends on downstream conditions this
-# script does not control (e.g. EmergencyStop currently blocking real
-# airtable_add writes on staging) -- the ownership/single-speaker signal
-# this script actually verifies is dispatch COUNT and reply COUNT, not
-# whether the write itself succeeded. See EVIDENCE_20260813.md-style note
-# in the plan doc §3.
-_TERMINAL_STATUSES = ("completed", "executed", "failed")
+_TERMINAL_STATUSES = ("completed", "executed", "success")
 from scripts.staging_identity import (  # noqa: E402
     new_run_namespace,
     unique_identity,
@@ -85,6 +78,36 @@ from scripts.staging_identity import (  # noqa: E402
 
 EVIDENCE: dict = {}
 FAILED: list[str] = []
+
+
+def canary_invariant_failures(
+    *,
+    contract_count: int,
+    claim_count: int,
+    executor_count: int,
+    provider_write_count: int,
+    final_reply_count: int,
+    final_state: str | None,
+    legacy_callback_dispatch_count: int,
+) -> list[str]:
+    failures = []
+    if contract_count != 1:
+        failures.append(f"contract_count={contract_count}")
+    if claim_count != 1:
+        failures.append(f"claim_count={claim_count}")
+    if executor_count != 1:
+        failures.append(f"executor_count={executor_count}")
+    if provider_write_count != 1:
+        failures.append(f"provider_write_count={provider_write_count}")
+    if final_reply_count != 1:
+        failures.append(f"final_reply_count={final_reply_count}")
+    if final_state not in {"completed", "executed", "success"}:
+        failures.append(f"final_state={final_state}")
+    if legacy_callback_dispatch_count != 0:
+        failures.append(
+            f"legacy_callback_dispatch_count={legacy_callback_dispatch_count}"
+        )
+    return failures
 
 
 def _record(label: str, ok: bool, detail: str = "") -> None:
@@ -122,6 +145,45 @@ def _fake_cq(chat_id: str, data: str, cq_id: str | None = None):
     )
 
 
+def _emergency_stop_snapshot(label: str) -> dict:
+    import feature_flags
+    from core.emergency_stop_bootstrap import bootstrap_emergency_stop
+
+    bootstrap_emergency_stop()
+    status = feature_flags.get_emergency_stop_status()
+    manager_status = status.manager_status
+    evaluation = manager_status.flags["EMERGENCY_STOP_ALL"]
+    snapshot = {
+        "configured": status.configured,
+        "is_enabled": feature_flags.is_enabled("EMERGENCY_STOP_ALL"),
+        "blocked": evaluation.blocked,
+        "source": evaluation.source,
+        "store_status": manager_status.store_status,
+        "operation_id": evaluation.operation_id,
+        "cache_age_seconds": evaluation.cache_age_seconds,
+        "error": evaluation.error or manager_status.error,
+    }
+    EVIDENCE[f"emergency_stop_{label}"] = snapshot
+    print(f"EmergencyStop {label}: {json.dumps(snapshot, ensure_ascii=False)}")
+    return snapshot
+
+
+def _emergency_stop_preflight() -> bool:
+    snapshot = _emergency_stop_snapshot("preflight")
+    ok = (
+        snapshot["is_enabled"] is False
+        and snapshot["blocked"] is False
+        and snapshot["source"] == "durable"
+        and snapshot["store_status"] == "ok"
+    )
+    _record(
+        "EmergencyStop preflight clear",
+        ok,
+        json.dumps(snapshot, ensure_ascii=False),
+    )
+    return ok
+
+
 def _tasks_records_for(run_id: str) -> list[dict]:
     try:
         from tools.airtable_gateway import at_list_by_formula, _safe_formula_param
@@ -129,6 +191,16 @@ def _tasks_records_for(run_id: str) -> list[dict]:
         return at_list_by_formula("משימות (Tasks)", formula) or []
     except Exception as exc:
         print(f"    ⚠️  Tasks lookup failed (non-fatal, treated as 0 records found): {exc}")
+        return []
+
+
+def _contracts_for_run(run_id: str) -> list[dict]:
+    try:
+        from tools.airtable_gateway import at_list_by_formula, _safe_formula_param
+        formula = f"FIND('{_safe_formula_param(run_id)}', {{tenant_id}}) > 0"
+        return at_list_by_formula("ActionContracts", formula) or []
+    except Exception as exc:
+        print(f"    ⚠️  ActionContracts lookup failed: {exc}")
         return []
 
 
@@ -184,39 +256,68 @@ def _propose(identity, run_id: str, label: str) -> tuple:
     return action_id, contract_id
 
 
-def run_approve_happy_path(identity, run_id: str) -> None:
+def run_approve_happy_path(identity, run_id: str) -> bool:
     print("\n── Part 1: approve callback — happy path ──")
     action_id, contract_id = _propose(identity, run_id, "approve-happy")
     _record("1. setup: contract + bus item created", bool(action_id and contract_id),
             f"action_id={action_id} contract_id={contract_id}")
     if not action_id:
-        return
+        return False
 
     mock_bot = MagicMock()
     cq = _fake_cq(identity.external_id, f"approve:{action_id}:{contract_id}")
     with patch.object(app, "bot", mock_bot), \
          patch.object(app, "resolve_identity", return_value=identity), \
-         patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_dispatch:
+         patch("tools.dispatcher.dispatch_tool", wraps=_real_dispatch_tool) as mock_executor, \
+         patch.object(app, "dispatch_tool", wraps=app.dispatch_tool) as mock_legacy:
         app._handle_approval_callback_impl(cq)
 
     after = gateway.find_contract(contract_id)
-    _record("1. contract reached a terminal state (not stuck pending)",
-            bool(after and after.status in _TERMINAL_STATUSES),
-            f"status={getattr(after, 'status', None)}")
-
-    total_replies = mock_bot.answer_callback_query.call_count + mock_bot.send_message.call_count
-    _record("1. exactly one reply surface touched (single speaker)",
-            total_replies >= 1, f"answer_callback_query={mock_bot.answer_callback_query.call_count} "
-            f"send_message={mock_bot.send_message.call_count}")
-
-    _record("1. dispatch_tool called exactly once", mock_dispatch.call_count == 1,
-            f"call_count={mock_dispatch.call_count}")
-
+    from core.atomic_claim_repository import get_claim
+    claim = get_claim(contract_id)
     records = _tasks_records_for(run_id)
     matched = [r for r in records if "approve-happy" in json.dumps(r.get("fields", {}), ensure_ascii=False)]
-    _record("1. Tasks record created iff dispatch actually succeeded (informational)",
-            True, f"found {len(matched)} Tasks record(s), contract status={getattr(after, 'status', None)}")
+    contract_records = _contracts_for_run(run_id)
+    total_replies = mock_bot.answer_callback_query.call_count + mock_bot.send_message.call_count
+    failures = canary_invariant_failures(
+        contract_count=len(contract_records),
+        claim_count=1 if claim else 0,
+        executor_count=mock_executor.call_count,
+        provider_write_count=len(matched),
+        final_reply_count=total_replies,
+        final_state=getattr(after, "status", None),
+        legacy_callback_dispatch_count=mock_legacy.call_count,
+    )
+    _record(
+        "1. final canary invariants",
+        not failures,
+        json.dumps({
+            "contract_count": len(contract_records),
+            "claim_count": 1 if claim else 0,
+            "execution_id": getattr(claim, "execution_id", None),
+            "executor_count": mock_executor.call_count,
+            "provider_write_count": len(matched),
+            "final_reply_count": total_replies,
+            "final_state": getattr(after, "status", None),
+            "legacy_callback_dispatch_count": mock_legacy.call_count,
+            "failures": failures,
+        }, ensure_ascii=False),
+    )
+
+    _record("1. exactly one reply surface touched (single speaker)",
+            total_replies == 1, f"answer_callback_query={mock_bot.answer_callback_query.call_count} "
+            f"send_message={mock_bot.send_message.call_count}")
+
+    _record("1. canonical executor called exactly once", mock_executor.call_count == 1,
+            f"call_count={mock_executor.call_count}")
+    _record("1. direct legacy callback dispatch never called", mock_legacy.call_count == 0,
+            f"call_count={mock_legacy.call_count}")
+    _record("1. exactly one provider write", len(matched) == 1,
+            f"found {len(matched)} Tasks record(s)")
+    _record("1. contract completed successfully", bool(after and after.status in _TERMINAL_STATUSES),
+            f"status={getattr(after, 'status', None)}")
     _cleanup_tasks(run_id)
+    return not failures
 
 
 def run_reject(identity, run_id: str) -> None:
@@ -428,7 +529,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-concurrent", action="store_true",
                          help="skip Part 3b (concurrent-thread claim race) — keep only the "
-                              "sequential double-press check")
+                             "sequential double-press check")
+    parser.add_argument("--canary-only", action="store_true",
+                        help="run only the final approval canary with pre/post EmergencyStop snapshots")
     args = parser.parse_args()
 
     _commit_and_flags()
@@ -436,7 +539,33 @@ def main() -> int:
     identity = unique_identity(Role.OWNER, run_id=run_id, label="bug161_162verify")
     print(f"\nrun_id={run_id}")
 
-    run_approve_happy_path(identity, run_id)
+    if not _emergency_stop_preflight():
+        cleanup_run_contracts(run_id)
+        print("\n❌ STOP — EMERGENCY STOP PREFLIGHT NOT CLEAR")
+        return 1
+
+    canary_ok = run_approve_happy_path(identity, run_id)
+    post_snapshot = _emergency_stop_snapshot("postflight")
+    post_ok = (
+        post_snapshot["is_enabled"] is False
+        and post_snapshot["blocked"] is False
+        and post_snapshot["source"] == "durable"
+        and post_snapshot["store_status"] == "ok"
+    )
+    _record("EmergencyStop unchanged after canary", post_ok,
+            json.dumps(post_snapshot, ensure_ascii=False))
+    if args.canary_only:
+        deleted = cleanup_run_contracts(run_id)
+        print(f"\ncleanup_run_contracts: deleted={deleted} ActionContract record(s) for run_id={run_id}")
+        print("\n" + "=" * 60)
+        print(json.dumps(EVIDENCE, ensure_ascii=False, indent=2))
+        print("=" * 60)
+        if FAILED or not canary_ok or not post_ok:
+            print(f"\n❌ canary FAILED: {FAILED}")
+            return 1
+        print("\n✅ final canary PASSED")
+        return 0
+
     run_reject(identity, run_id)
     run_duplicate_sequential(identity, run_id)
     if not args.skip_concurrent:
