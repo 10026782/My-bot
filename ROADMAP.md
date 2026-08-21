@@ -7,6 +7,23 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
+עודכן: 21/08/2026 — **Governance/Horizon refresh מול `origin/main` `6a0ba6a`.**
+הבדיקה מול main המעודכן משנה את תמונת ההורייזונים: **H6 Command Center כבר אינו
+PLANNED** — unified owner API/UI, owner attention, owner development projection ו־registry
+projection קיימים על main, ולכן הסטטוס הוא `ACTIVE / MERGED / needs runtime verification`.
+**H1/N18 פעיל** — Lead הפך ל-consumer ראשון של תשתית כתיבה משותפת (`structured_command`,
+`draft_flow`, canonical Lead creation, Draft Card, confirm/cancel unification); עדיין חסרים
+terminal-turn-result contract ואימות חי לשרשרת Draft→Approval→Write→Evidence על ה־deployed
+SHA הנוכחי. **H4 התקדם אבל נשאר gated** — MoneyPrinterTurbo הוא staging-only, ו־Media Probe,
+Artifact Contract v1, StoredArtifact MIME, Gateway readiness ו־fail-closed canary harness
+מוזגו עד PR #804; אין להסיק production activation בלי gate evidence מפורש.
+
+**סדר עדיפות נוכחי לפי Horizon:** (1) H0 Production Truth — deployed SHA + canaries
+ל־BUG-164/BUG-051-FU/Tool Catalog/Command Center/N18; (2) H6 Command Center hygiene —
+לאמת route חי ולסגור/לרשום את מקור `system_health` שמידרדר ל־`UNKNOWN`; (3) H1/N18 —
+לסגור terminal-turn-result ולבחור consumer הבא רק אחרי gate; (4) H4 — להשאיר
+MPT/Media/Gateway מאחורי artifact/hash/path/publishing-off gates; (5) H3 — החלטת בעלים
+ל־Decision Hub/Layer 2 לפני activation; (6) H2/H5/H7 — רק אחרי שה־upstream יציב ומאומת.
 עודכן: 21/08/2026 — **N18 Phase 2, בירור פרוסה רביעית: clarification/validation-loop
 wiring כבר בוצע.** נבדק לעומק לפני תחילת עבודה חדשה (per owner's staged plan) — המכניקה
 המבוקשת (field ממתין → תשובת משתמש → validator → invalid נשאר על אותו שדה → valid מתקדם

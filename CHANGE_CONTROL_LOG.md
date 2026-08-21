@@ -2178,3 +2178,26 @@ assumption (Owner treated as plain text) that silently broke a live
 production feature end-to-end, plus establishes an explicit, owner-approved
 default-ownership policy for unowned records — not a routine UX/cosmetic
 change.
+
+### C195 — Governance/Horizon refresh against `origin/main` `6a0ba6a` (21/08/2026)
+
+Documentation-only governance reconciliation for the owner's requested Track D
+workstream. Updates `AI_CONTEXT.md`, `ROADMAP.md`, and
+`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` to reflect that main advanced
+materially beyond the older 16/08–20/08 planning snapshots.
+
+**Status changes recorded:**
+- H6 Command Center is no longer `PLANNED`: owner read API/UI, owner attention,
+  owner development projection, and registry projection are merged; the remaining
+  gate is deployed-SHA/runtime verification plus the known `system_health`
+  attention-source hygiene issue.
+- H1/N18 Canonical Write Infrastructure is active: Lead is now the first
+  consumer of shared write primitives, not a separate one-off Lead system.
+- H4 Media/Gateway progressed through staging-gated MPT, Media Probe POC,
+  Artifact Contract v1, StoredArtifact MIME, Gateway readiness, and fail-closed
+  gateway canary harness; still not production-activated.
+
+**Scope boundary:** Governance files only. No runtime, UI, media, API, schema,
+or test implementation files changed. This preserves the four-agent split where
+Track D owns status/decision documents and other tracks own verification,
+Command Center runtime/UI, and Media/Gateway implementation.
