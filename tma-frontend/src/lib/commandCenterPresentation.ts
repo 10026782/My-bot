@@ -59,6 +59,11 @@ export function shouldShowFreshness(freshness: string): boolean {
   return freshness !== "CURRENT";
 }
 
+/** A non-current projection must never be rendered as if it were live data. */
+export function isCurrentFreshness(freshness: string): boolean {
+  return freshness === "CURRENT";
+}
+
 const APPROVALS_HEADLINE_KEY = "approvals.pending";
 
 /** The projection's headline card is redundant once the section has its own title. */

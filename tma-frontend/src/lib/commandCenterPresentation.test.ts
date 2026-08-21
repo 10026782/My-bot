@@ -9,6 +9,7 @@ import {
   buildDevelopmentList,
   dedupeDevelopmentItems,
   horizonBucketLabel,
+  isCurrentFreshness,
   shouldShowFreshness,
 } from "./commandCenterPresentation";
 
@@ -110,6 +111,13 @@ test("STALE/PARTIAL/UNKNOWN freshness is shown", () => {
   assert.equal(shouldShowFreshness("STALE"), true);
   assert.equal(shouldShowFreshness("PARTIAL"), true);
   assert.equal(shouldShowFreshness("UNKNOWN"), true);
+});
+
+test("only CURRENT freshness is eligible for rendering", () => {
+  assert.equal(isCurrentFreshness("CURRENT"), true);
+  assert.equal(isCurrentFreshness("STALE"), false);
+  assert.equal(isCurrentFreshness("PARTIAL"), false);
+  assert.equal(isCurrentFreshness("UNKNOWN"), false);
 });
 
 // --- dedupe (requirement #2/#3) ---
