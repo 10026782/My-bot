@@ -112,7 +112,7 @@ Answers to §5's questions:
 
 | Duplication | Real consumers | Classification |
 |---|---|---|
-| `_within(path, root)` — commonpath containment check | Verbatim in `local_artifact_store.py`, `moneyprinterturbo_adapter.py`, `stirling_pdf_adapter.py`; re-implemented differently (but equivalently) in `media_probe_adapter.py` via `Path.relative_to()` + `try/except` | **A — genuinely generic now.** 4 independent copies/reimplementations of the same 5-line check. |
+| `_within(path, root)` — commonpath containment check | Verbatim in `local_artifact_store.py`, `moneyprinterturbo_adapter.py`, `stirling_pdf_adapter.py`; re-implemented differently (but equivalently) in `media_probe_adapter.py` via `Path.relative_to()` + `try/except` | **A — genuinely generic now**, evidenced by 4 independent copies/reimplementations of the same 5-line check. **But only 2 of the 4 (Stirling-PDF, Media Probe) are in scope for the first extraction** — see §9's DoD. `LocalArtifactStore` and `MoneyPrinterTurboAdapter` are corroborating evidence that the check is generic, not required migration targets. |
 | Governed-artifact-reference → verified local `Path` validation sequence (symlink-reject-before-resolve → resolve → containment → regular-file → non-empty → size-bound → size-match(supplied vs. actual) → checksum-match(supplied vs. actual) → MIME-allowlist) | `StirlingPDFAdapter._validate_inputs` (looped, N files) and `MediaProbeAdapter._validate_input` (single file) — same 4-field input contract (`result_ref`/`mime_type`/`size`/`sha256`), same check order, same fail-closed semantics | **A — genuinely generic now**, ≥2 real consumers, proven identical intent and near-identical implementation. This is the finding the gate exists to surface. |
 | Content-sniffing the resolved bytes (`%PDF-` magic bytes) | Stirling-PDF only | **B — similar but capability-specific.** Media Probe has no equivalent (ffprobe itself is the content check). Must NOT be pulled into a shared validator. |
 | `tempfile.NamedTemporaryFile` → write → `store.put()` → `unlink()` in `finally` | Crawl4AI, Stirling-PDF, Media Probe — 3 consumers, ~6 lines each, byte-identical shape | **C — not worth extracting yet.** Real duplication, but each site's `metadata=` dict and `mime_type=` differ enough, and the block is small/low-risk/rarely-touched enough, that a shared helper would trade "3 obvious inline blocks" for "1 indirection + 3 call sites," a wash at this size. Revisit if a 4th consumer appears. |
@@ -194,10 +194,22 @@ validation, no provider awareness.
 **Inputs.**
 - `result_ref: str`, `mime_type: str`, `size: int`, `sha256: str` (the
   existing 4-field contract both current consumers already use — no new
-  type).
+  type). `size` here is the **caller-claimed** size to verify against the
+  real file's actual size — not a limit.
 - `approved_root: Path` (adapter-configured, as today).
 - `allowed_mime_types: frozenset[str]` (adapter-owned allowlist — Stirling's
   and Media Probe's are different sets and stay different).
+- `max_bytes: int` — the **capability-owned maximum allowed size** for a
+  single file. The validator must not hardcode either capability's current
+  bound (Stirling's `_MAX_FILE_BYTES = 20 * 1024 * 1024`, Media Probe's
+  `_MAX_INPUT_BYTES = 500 * 1024 * 1024` stay different and adapter-supplied,
+  exactly as today). Do not confuse this with `size`: `size` is "what the
+  caller claims this one file is," `max_bytes` is "the ceiling this
+  capability enforces on any one file." Stirling's separate **aggregate**
+  cap across all files in one request (`_MAX_TOTAL_BYTES = 60 * 1024 * 1024`,
+  summed while looping over its input list) is not a per-file concern and
+  stays entirely Stirling-owned, computed by Stirling around its own calls
+  into the validator — it is explicitly outside this primitive.
 
 **Output.** A resolved, verified `Path` on success. On failure, one of a
 fixed small set of reason atoms (not adapter-prefixed strings) — e.g.
@@ -240,13 +252,45 @@ stays in Media Probe). Does not decide which MIME types are allowed
 call sites):** `StirlingPDFAdapter._validate_inputs` (called once per item in
 its input list) and `MediaProbeAdapter._validate_input` (called once).
 
-**Exact duplication this replaces.** The symlink/resolve/containment/
-regular-file/non-empty/size-bound/size-match/checksum-match sequence
-currently living independently in `core/stirling_pdf_adapter.py:173-227` and
-`core/media_probe_adapter.py:173-234`, plus the `_within()` copies in
-`core/local_artifact_store.py:63-67`, `core/moneyprinterturbo_adapter.py:300-304`,
-and `core/stirling_pdf_adapter.py:70-74` (all four collapse onto whatever
-single containment check the extracted validator uses internally).
+**Exact duplication this replaces (first-PR scope).** The symlink/resolve/
+containment/regular-file/non-empty/size-bound/size-match/checksum-match
+sequence currently living independently in
+`core/stirling_pdf_adapter.py:173-227` and
+`core/media_probe_adapter.py:173-234`, including each adapter's own copy of
+`_within()`-equivalent containment logic (`core/stirling_pdf_adapter.py:70-74`
+and Media Probe's `Path.relative_to()` + `try/except` form). **Only these
+two adapters are required migration targets for the first implementation
+PR.** `core/local_artifact_store.py:63-67`'s and
+`core/moneyprinterturbo_adapter.py:300-304`'s `_within()` copies are cited in
+§4/§6 purely as corroborating evidence that the containment check is
+generic — they are explicitly **not** part of the first extraction's scope
+and must not be touched unless a later implementation finds a trivial,
+behavior-preserving reuse with zero scope expansion (e.g. the extracted
+validator's internal containment helper happening to be importable as a
+drop-in replacement with no signature or behavior change). Absent that,
+leave both files exactly as they are.
+
+**First-PR Definition of Done.**
+1. `ArtifactInputValidator` introduced (new, small, no `StoredArtifact`/
+   `ArtifactStore`/`ExternalExecutionBoundary` contract changes).
+2. `StirlingPDFAdapter` migrated to call it (looped per input file; its own
+   `_MAX_FILE_BYTES` passed as `max_bytes`; its own `_MAX_TOTAL_BYTES`
+   aggregate check stays in Stirling, outside the validator).
+3. `MediaProbeAdapter` migrated to call it (`_MAX_INPUT_BYTES` passed as
+   `max_bytes`).
+4. Exact current failure semantics preserved for both — same conditions
+   fail, same `{adapter}_{reason}`-shaped failure codes surface to callers,
+   nothing reclassified from `failed` to `outcome_unknown` or vice versa.
+5. Stirling's `%PDF-` magic-byte sniff stays in `StirlingPDFAdapter`, not
+   pulled into the validator.
+6. Media Probe's ffprobe invocation and metadata normalization are
+   unchanged.
+7. `MoneyPrinterTurboAdapter` unchanged.
+8. `core/local_artifact_store.py` unchanged.
+
+Anything short of all eight is not this first PR's scope; anything beyond
+them (touching MPT or `LocalArtifactStore`, adding a materialization path,
+adding provider awareness) is scope creep per §10.
 
 ## 10. What this gate deliberately does not decide
 
