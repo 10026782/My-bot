@@ -69,15 +69,48 @@ class SubprocessHarnessAdapter:
             )
         except subprocess.TimeoutExpired:
             return WorkerResult.blocked(request, profile.worker_id, "timeout")
+        evidence = []
+        test_results = {}
+        commands_run = [self.executable]
+        if completed.returncode == 0:
+            for command in request.verification_commands:
+                commands_run.append(command)
+                try:
+                    verification = subprocess.run(
+                        command,
+                        cwd=request.repo_path,
+                        capture_output=True,
+                        text=True,
+                        timeout=profile.timeout,
+                        check=False,
+                        shell=True,
+                        env=safe_env,
+                    )
+                except subprocess.TimeoutExpired:
+                    return WorkerResult(
+                        request.request_id, profile.worker_id, WorkerStatus.TIMEOUT,
+                        summary="verification timed out", commands_run=commands_run,
+                    )
+                test_results[command] = verification.returncode
+                if verification.returncode != 0:
+                    return WorkerResult(
+                        request.request_id, profile.worker_id, WorkerStatus.FAILED,
+                        summary="verification failed", commands_run=commands_run,
+                        tests_run=list(request.verification_commands), test_results=test_results,
+                        exit_code=completed.returncode,
+                    )
+                evidence.append(f"verification-executed:{command}")
         status = WorkerStatus.SUCCESS if completed.returncode == 0 else WorkerStatus.FAILED
         return WorkerResult(
             request_id=request.request_id,
             worker_id=profile.worker_id,
             status=status,
             summary="harness execution finished",
-            commands_run=[self.executable],
+            commands_run=commands_run,
+            tests_run=list(request.verification_commands),
+            test_results=test_results,
             exit_code=completed.returncode,
             stdout_ref="captured://stdout",
             stderr_ref="captured://stderr",
-            evidence=list(request.verification_commands) if status is WorkerStatus.SUCCESS else [],
+            evidence=evidence,
         )

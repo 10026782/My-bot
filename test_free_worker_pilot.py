@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import patch
 
 from workers.adapters import SubprocessHarnessAdapter
@@ -47,6 +48,27 @@ def test_unsafe_permission_profile_is_blocked():
 def test_prose_only_success_is_invalid():
     result = WorkerResult("r1", "w", WorkerStatus.SUCCESS, summary="done", exit_code=0)
     assert result.status is WorkerStatus.INVALID_RESULT
+
+
+def test_unexecuted_verification_command_cannot_create_success():
+    profile = WorkerProfile(
+        "w", "builder", "qwen", enabled=True,
+        permission_profile="development_isolated_worktree",
+        qualification=Qualification.PILOT,
+    )
+    adapter = SubprocessHarnessAdapter("qwen", allow_execution=True)
+    with patch.object(adapter, "available", return_value=type("A", (), {"available": True})()), \
+         patch(
+             "workers.adapters.subprocess.run",
+             side_effect=[
+                 subprocess.CompletedProcess([], 0),
+                 subprocess.CompletedProcess([], 1),
+             ],
+         ) as run:
+        result = adapter.execute(request(verification_commands=("pytest test.py",)), profile)
+    assert run.call_count == 2
+    assert result.status is WorkerStatus.FAILED
+    assert not result.evidence
 
 
 def test_forbidden_paths_are_preserved():
