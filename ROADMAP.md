@@ -7,7 +7,34 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 21/08/2026 — **Governance/Horizon refresh מול `origin/main` `6a0ba6a`.**
+עודכן: 21/08/2026 — **N18 Phase 2, פרוסה חמישית (וסוגרת): terminal-turn-result
+primitive (scope מצומצם, לפי החלטת owner מפורשת).** ROADMAP's Phase 2 description רשם
+"terminal-turn-result" כאחד הדברים להוציא ל-shared infrastructure, אך אותו טקסט עצמו גם
+מציין שזה בפועל שייך ל-Phase 4 (Structured UX Contract: entity/operation/status/
+display_name/domain/owner/external_id, שכבת UX נפרדת, הסתרת internal IDs) — scope גדול
+ומצטלב עם single-speaker/UX, ולכן נדחה במפורש לאחרון. לפני תחילת עבודה נבדק בפועל (לא
+הונח): **אין כרגע double-response bug** — `app.py`'s early כן/לא-word dispatch (branches
+── 2.55 ── confirm/cancel) וה-handle_lead_candidate() call site כבר עוצרים עיבוד נוסף
+דרך `return` מיידי ברגע שמתקבלת תשובה לא-None; הסגירה קיימת כבר בזכות מבנה ה-control-flow
+עצמו, לא בזכות חוזה מפורש. הריח האמיתי היחיד שנמצא: `_process_structured_file_upload`
+(`app.py:5725-5732`) מסיק pending/written/failed ע"י התאמת prefix אימוג'י על המחרוזת
+המוצגת (`reply.startswith("✅")` וכו') במקום שדה מובנה.
+הוצג ל-owner בחירה בין (א) פורמליזציה מצומצמת של הקונבנציה הקיימת מול (ב) Phase 4 המלא —
+**owner בחר (א) במפורש.** מומש: `core/turn_result.py` (חדש) — `TurnResult(message, status)`
+dataclass קטן + 4 קבועי status (confirmed/cancelled/incomplete/failed), עם docstring
+שמבהיר מפורשות שזה **לא** ה-Phase 4 המלא. הוחל **רק** על נתיב ה-draft confirm/cancel
+הגנרי-אמיתי (זה שכבר הופרד ל-`core/draft_flow.py`): `_finalize_draft_cancel`/
+`_finalize_draft_confirm`/`resolve_lead_draft_confirmation`/`_resolve_lead_draft`
+(`lead_candidate_handler.py`) עכשיו מחזירים `TurnResult` במקום `Optional[str]` גולמי;
+`handle_lead_candidate()` עצמה ממשיכה להחזיר `Optional[str]` כלפי חוץ ללא שינוי (unwrap
+של `.message` בנקודת המעבר היחידה, `lead_candidate_handler.py:~1128`) — אין שינוי לחוזה
+החיצוני שלה. **במפורש לא טופל בסלייס הזה** (סקופ גדול/עסקי מדי ל"פורמליזציה מצומצמת"):
+ה-emoji string-sniffing ב-`_process_structured_file_upload` (עדיין קיים כפי שהוא —
+`handle_lead_candidate()`'s רוחב Tier 1-5 לא נגע), ו-Phase 4 המלא (UX formatter,
+internal-ID hiding, reply ownership) — עדיין ממתין, לא הפך פתאום ל-in-scope. 2 קריאות
+ב-`test_lead_service_phase1.py` (section 9, בדיקת `resolve_lead_draft_confirmation`
+ישירות) עודכנו להתאים לטיפוס ההחזרה החדש — אין שינוי התנהגות, 107/107 עדיין ירוקים.
+עודכן קודם: 21/08/2026 — **Governance/Horizon refresh מול `origin/main` `6a0ba6a`.**
 הבדיקה מול main המעודכן משנה את תמונת ההורייזונים: **H6 Command Center כבר אינו
 PLANNED** — unified owner API/UI, owner attention, owner development projection ו־registry
 projection קיימים על main, ולכן הסטטוס הוא `ACTIVE / MERGED / needs runtime verification`.
@@ -24,7 +51,7 @@ Artifact Contract v1, StoredArtifact MIME, Gateway readiness ו־fail-closed can
 לסגור terminal-turn-result ולבחור consumer הבא רק אחרי gate; (4) H4 — להשאיר
 MPT/Media/Gateway מאחורי artifact/hash/path/publishing-off gates; (5) H3 — החלטת בעלים
 ל־Decision Hub/Layer 2 לפני activation; (6) H2/H5/H7 — רק אחרי שה־upstream יציב ומאומת.
-עודכן: 21/08/2026 — **N18 Phase 2, בירור פרוסה רביעית: clarification/validation-loop
+עודכן קודם: 21/08/2026 — **N18 Phase 2, בירור פרוסה רביעית: clarification/validation-loop
 wiring כבר בוצע.** נבדק לעומק לפני תחילת עבודה חדשה (per owner's staged plan) — המכניקה
 המבוקשת (field ממתין → תשובת משתמש → validator → invalid נשאר על אותו שדה → valid מתקדם
 לשדה הבא → review כשהכל מלא) **כבר קיימת** ב-`core/draft_flow.py`'s `resolve_draft_reply(text,
@@ -1536,8 +1563,9 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
 אחד מקודם ל-shared infrastructure לפני שבונים entity נוסף עליו.
 
 **שלבים (F — ללא תאריך, ימוספרו בנפרד עם תחילת מימוש כל שלב):**
-- **Phase 2 — Shared Write Primitives:** להוציא מ-Lead את ה-Draft/filling/edit/validation
-  loop/confirm-cancel/structured parsing/terminal-turn-result לתשתית משותפת. Entity code
+- **Phase 2 — Shared Write Primitives ✅ סגור (21/08/2026, PR #807):** להוציא מ-Lead את
+  ה-Draft/filling/edit/validation loop/confirm-cancel/structured parsing/terminal-turn-result
+  לתשתית משותפת. Entity code
   מגדיר רק schema/required/optional/validators/business rules/defaults/permissions — לא
   בונה מחדש "איך שואלים שדה חסר"/"איך מאשרים"/"איך נשמר state".
   **התקדמות (20/08/2026):** שתי פרוסות ראשונות מוצו ומאומתות (99/99 טסטי Lead + טסטים
@@ -1566,6 +1594,13 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   machine נפרדת ומקבילה ל-organic Tier-5 capture (טלפון בלי שם) שאינה משתמשת ב-DraftSpec —
   ראו פירוט למעלה. terminal-turn-result נשאר אחרון (owner sequencing — כבר נוגע ב-
   single-speaker/UX).
+  (5) **terminal-turn-result primitive, scope מצומצם** (21/08/2026, סוגר Phase 2 — ראו
+  למעלה לפירוט מלא) — `core/turn_result.py` (חדש): `TurnResult(message, status)` דק,
+  הוחל רק על נתיב ה-draft confirm/cancel הגנרי (`_finalize_draft_cancel`/
+  `_finalize_draft_confirm`/`resolve_lead_draft_confirmation`/`_resolve_lead_draft`).
+  `handle_lead_candidate()`'s חוזה חיצוני (`Optional[str]`) לא השתנה. במפורש לא טופל:
+  ה-emoji string-sniffing ב-`_process_structured_file_upload` (`app.py:5725-5732`) ו-Phase 4
+  המלא (UX Contract) — owner בחר מפורשות בסקופ המצומצם מול Phase 4 המלא.
 - **Phase 3 — Canonical Writers:** איחוד כל Lead writers החיים (כולל אלה שעוקפים
   dispatcher/governance checks, שנמצאו באודיט) למסלול `create_lead(payload, context)` יחיד;
   כל מקור (Telegram/WhatsApp/UI/Campaign/API/Voice/Email) הופך ל-adapter שלא כותב בעצמו.
@@ -1589,13 +1624,14 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
 
 **קבצים (Phase 1, סגור):** `core/lead_service.py`, `core/lead_candidate_handler.py`,
 `test_lead_service_phase1.py` (99 טסטים).
-**קבצים (Phase 2, בעבודה):** `core/structured_command.py` + `test_structured_command.py`
+**קבצים (Phase 2, סגור):** `core/structured_command.py` + `test_structured_command.py`
 (11 טסטים), `core/draft_flow.py` + `test_draft_flow.py` (16 טסטים) — שני primitives
 משותפים, ללא תלות ב-Lead; `core/lead_service.py`/`core/lead_candidate_handler.py` צורכים
 אותם כעת במקום מכניקה מקומית. `app.py` (confirm/cancel dispatch unification) +
 `test_n18_draft_dispatch_unification.py` (8 טסטים, end-to-end דרך `app.run_agent()`).
 `test_lead_service_phase1.py` section 7h (5 טסטים חדשים — שרשרת רגרסיה רציפה דרך שני שדות,
-clarification/validation-loop wiring, ראה (4) למעלה).
+clarification/validation-loop wiring, ראה (4) למעלה). `core/turn_result.py` (חדש, ראה (5)
+למעלה) — אין טסט ייעודי (dataclass טריוויאלי, מכוסה דרך שימוש אמיתי ב-section 9 הקיים).
 **מקור מלא:** דוח QA מלא + מסמך ההחלטה הארכיטקטוני הועברו ע"י הבעלים בצ'אט ב-20/08/2026 —
 אין מסמך נפרד ב-`docs/` כרגע; אם/כשמתחיל מימוש Phase 2 בפועל, להעתיק את תוכן ההחלטה
 ל-`docs/architecture/` ייעודי במקום להסתמך על ROADMAP בלבד.

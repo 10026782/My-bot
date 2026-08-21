@@ -612,11 +612,13 @@ with patch("feature_flags.is_enabled", return_value=False), \
     mock_create8.return_value = {"id": "recYONATAN001"}
 
     # Exactly app.py's call signature/pattern: no session snapshot, self-fetching.
+    from core.turn_result import TurnResult as _TurnResult, STATUS_CONFIRMED as _STATUS_CONFIRMED
     reply_early = lch.resolve_lead_draft_confirmation(identity, chat_early, "telegram",
                                                         is_confirm=True, is_cancel=False)
     chk("regression: the early-dispatch path (app.py's actual call shape) resolves 'כן', "
         "not 'אין פעולה שממתינה לאישור'",
-        isinstance(reply_early, str) and reply_early.startswith("✅"))
+        isinstance(reply_early, _TurnResult) and reply_early.message.startswith("✅")
+        and reply_early.status == _STATUS_CONFIRMED)
     chk("regression: the early-dispatch confirm wrote exactly once", mock_create8.call_count == 1)
     chk("regression: draft cleared after the early-dispatch confirm",
         lead_sessions.get_lead_draft(chat_early) is None)
@@ -627,10 +629,12 @@ lch.handle_lead_candidate(
     identity, "ליד חדש רונית ברק domain recruitment 0521234567",
     chat_early_cancel, "telegram", session=lead_sessions.get_or_create(chat_early_cancel),
 )
+from core.turn_result import STATUS_CANCELLED as _STATUS_CANCELLED
 reply_early_cancel = lch.resolve_lead_draft_confirmation(identity, chat_early_cancel, "telegram",
                                                           is_confirm=False, is_cancel=True)
 chk("regression: early-dispatch cancel resolves against the review-mode draft",
-    reply_early_cancel == "ביטלתי את יצירת הליד.")
+    reply_early_cancel.message == "ביטלתי את יצירת הליד."
+    and reply_early_cancel.status == _STATUS_CANCELLED)
 chk("regression: draft cleared after early-dispatch cancel",
     lead_sessions.get_lead_draft(chat_early_cancel) is None)
 

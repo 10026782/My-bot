@@ -4259,12 +4259,12 @@ def run_agent(
                 _draft_reply_early = _resolve_draft_early(identity, chat_id, channel, is_confirm=True, is_cancel=False)
                 if _draft_reply_early is not None:
                     logger.info(
-                        "[LCH] resolve_lead_draft_confirmation(confirm): user=%s reply=%.60s",
-                        identity.memory_key, _draft_reply_early,
+                        "[LCH] resolve_lead_draft_confirmation(confirm): user=%s status=%s reply=%.60s",
+                        identity.memory_key, _draft_reply_early.status, _draft_reply_early.message,
                     )
                     if _out_meta is not None:
                         _out_meta["source_module"] = "action_gateway"
-                    return _draft_reply_early
+                    return _draft_reply_early.message
 
             # BUG-117: recency check BEFORE the unconditional Tier-1 gate
             # below. A fresh Tier-2 batch lead-preview ("📋 זיהיתי N לידים
@@ -4406,12 +4406,12 @@ def run_agent(
                 _draft_cancel_reply = _resolve_draft_cancel(identity, chat_id, channel, is_confirm=False, is_cancel=True)
                 if _draft_cancel_reply is not None:
                     logger.info(
-                        "[LCH] resolve_lead_draft_confirmation(cancel): user=%s reply=%.60s",
-                        identity.memory_key, _draft_cancel_reply,
+                        "[LCH] resolve_lead_draft_confirmation(cancel): user=%s status=%s reply=%.60s",
+                        identity.memory_key, _draft_cancel_reply.status, _draft_cancel_reply.message,
                     )
                     if _out_meta is not None:
                         _out_meta["source_module"] = "action_gateway"
-                    return _draft_cancel_reply
+                    return _draft_cancel_reply.message
 
             # BUG-056: same reasoning as _CONFIRM_WORDS above — LCH's Tier-1
             # preview may have a live ActionGateway contract regardless of

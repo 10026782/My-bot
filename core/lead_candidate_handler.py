@@ -882,13 +882,14 @@ def _start_lead_draft(identity, free_text: str, chat_id: str, channel: str, rout
     return DRAFT_FIELD_PROMPT_HE[draft["awaiting_field"]]
 
 
-def _finalize_draft_cancel(chat_id: str) -> str:
+def _finalize_draft_cancel(chat_id: str) -> "TurnResult":
     from session_store import lead_sessions as _ls
+    from core.turn_result import TurnResult, STATUS_CANCELLED
     _ls.clear_lead_draft(chat_id)
-    return "ביטלתי את יצירת הליד."
+    return TurnResult(message="ביטלתי את יצירת הליד.", status=STATUS_CANCELLED)
 
 
-def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> str:
+def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> "TurnResult":
     """Shared by _resolve_lead_draft (normal in-flow confirm) and
     resolve_lead_draft_confirmation (app.py's early confirm-word
     dispatch) — a single implementation of "כן actually writes the lead,"
@@ -896,24 +897,28 @@ def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> str:
     complete draft or what create_lead() gets called with."""
     from session_store import lead_sessions as _ls
     from core.lead_service import first_missing_required_field, draft_to_payload, create_lead, DRAFT_FIELD_PROMPT_HE
+    from core.turn_result import TurnResult, STATUS_INCOMPLETE, STATUS_FAILED, STATUS_CONFIRMED
 
     missing = first_missing_required_field(draft)
     if missing:
         draft["mode"] = "filling"
         draft["awaiting_field"] = missing
         _ls.set_lead_draft(chat_id, draft)
-        return f"עדיין חסר. {DRAFT_FIELD_PROMPT_HE[missing]}"
+        return TurnResult(message=f"עדיין חסר. {DRAFT_FIELD_PROMPT_HE[missing]}", status=STATUS_INCOMPLETE)
 
     payload = draft_to_payload(draft)
     result = create_lead(identity, payload, source_module="lead_candidate_handler_draft")
     if not result.ok:
-        return f"❌ לא הצלחתי לשמור את הליד: {result.reason}"
+        return TurnResult(message=f"❌ לא הצלחתי לשמור את הליד: {result.reason}", status=STATUS_FAILED)
     _ls.clear_lead_draft(chat_id)
     verb = "עודכן" if result.action == "updated" else "נוצר"
     owner_note = f", Owner: {result.owner_user_id}" if result.owner_user_id else ""
-    return (
-        f"✅ ליד {verb}: {draft.get('name')} ({draft.get('phone')}), "
-        f"domain: {result.domain}{owner_note} | {result.record_id}"
+    return TurnResult(
+        message=(
+            f"✅ ליד {verb}: {draft.get('name')} ({draft.get('phone')}), "
+            f"domain: {result.domain}{owner_note} | {result.record_id}"
+        ),
+        status=STATUS_CONFIRMED,
     )
 
 
@@ -950,7 +955,7 @@ def should_prefer_lead_draft(canonical_user_id: str, chat_id: str) -> bool:
 
 def resolve_lead_draft_confirmation(
     identity, chat_id: str, channel: str, is_confirm: bool, is_cancel: bool,
-) -> Optional[str]:
+) -> Optional["TurnResult"]:
     """Early-dispatch counterpart to _resolve_lead_draft(), for app.py's
     confirm/cancel-word branch — which runs BEFORE handle_lead_candidate()
     and has no session snapshot to pass in, same self-fetching style as
@@ -973,7 +978,7 @@ def resolve_lead_draft_confirmation(
 
 def _resolve_lead_draft(
     identity, text: str, chat_id: str, channel: str, intent: str, session: Optional[dict],
-) -> Optional[str]:
+) -> Optional["TurnResult"]:
     """Resolves a reply against a pending Lead Draft Card. Checked FIRST in
     handle_lead_candidate() — same LL-11 read-from-snapshot convention as
     _resolve_lead_clarification (session is the caller's already-loaded
@@ -1031,7 +1036,8 @@ def _resolve_lead_draft(
 
     if outcome.draft is not None:
         _ls.set_lead_draft(chat_id, outcome.draft)
-    return outcome.message
+    from core.turn_result import TurnResult
+    return TurnResult(message=outcome.message)
 
 
 # ══════════════════════════════════════════════════
@@ -1126,7 +1132,7 @@ def handle_lead_candidate(
     #    detection below — same priority position as _resolve_lead_clarification. ──
     _draft_reply = _resolve_lead_draft(identity, text, chat_id, channel, intent, session)
     if _draft_reply is not None:
-        return _draft_reply
+        return _draft_reply.message
 
     # ── Phase 1 (Lead System E2E Audit) — structured, fully deterministic
     #    creation command: "ליד חדש | שם | טלפון | domain | הערה" (immediate

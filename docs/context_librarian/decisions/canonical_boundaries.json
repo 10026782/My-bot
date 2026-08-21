@@ -827,6 +827,52 @@
         }
       },
       "last_observed_commit": "4330cce0dcd4bf99ba9118472bd557839fb55416"
+    },
+    {
+      "id": "decision.n18_terminal_turn_result",
+      "name": "N18 terminal-turn-result primitive (TurnResult)",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "a small named type (message + optional status) formalizing the 'did this call end the turn' signal already used ad hoc (bare Optional[str] + immediate return) by Lead's generic draft confirm/cancel path",
+        "precedence": "carries no business authority of its own — a plain frozen dataclass, no I/O, no session storage, no entity writes; field semantics/validation/write policy stay owned by the consuming entity's own service, same boundary as decision.n18_shared_write_primitives"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "core/turn_result.py"
+      ],
+      "test_paths": [
+        "test_lead_service_phase1.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "ROADMAP.md",
+          "role": "N18 — Canonical Write Infrastructure, Phase 2 (Shared Write Primitives), slice 5",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-21",
+      "last_verified_commit": "0b7fbad832f176b837cbf537ded5302a9bd3b307",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that merges N18 Phase 2's fifth (closing) slice — core/turn_result.py had no existing catalog owner. Classified REGISTER_SUPPORTING, not a new authority node, matching the identical precedent set by decision.n18_shared_write_primitives (same reasoning: pure data type, no I/O, no business semantics).",
+        "Scope was deliberately narrowed against the owner's own explicit choice before implementation: applied only to Lead's generic draft confirm/cancel path (core/lead_candidate_handler.py's _finalize_draft_cancel/_finalize_draft_confirm/resolve_lead_draft_confirmation/_resolve_lead_draft), not to handle_lead_candidate()'s broader Tier 1-5 Optional[str] contract (left unchanged) or the full Phase 4 UX Contract (structured entity/operation/status/domain/owner/external_id result — deliberately out of scope, sequenced last per ROADMAP.md).",
+        "Confidence kept at 0.85 (not 1.0): only one real consumer so far (Lead's draft path) and no I/O test suite of its own beyond exercising it through test_lead_service_phase1.py's real orchestration path — a smaller, more contained analogue of decision.n18_shared_write_primitives, whose 0.9 reflects two independently-tested primitives already in production use."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "shared_write_interaction_primitive",
+          "authority": false,
+          "purpose": "names the existing ad hoc terminal-turn-result convention as a small typed value instead of a bare Optional[str]; no business authority, no I/O",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "0b7fbad832f176b837cbf537ded5302a9bd3b307"
     }
   ],
   "edges": [
@@ -847,6 +893,12 @@
       "to": "decision.n18_shared_write_primitives",
       "type": "calls",
       "notes": "core/lead_service.py's Draft Card and structured-command parsing are thin entity-specific wrappers around the generic primitives — the primitives module carries no Lead authority itself."
+    },
+    {
+      "from": "decision.n18_shared_write_primitives",
+      "to": "decision.n18_terminal_turn_result",
+      "type": "calls",
+      "notes": "core/lead_candidate_handler.py's draft confirm/cancel resolvers (built on core/draft_flow.py's DraftOutcome) return TurnResult as their terminal signal; same non-authority boundary as the rest of the shared write-interaction primitives."
     }
   ]
 }
