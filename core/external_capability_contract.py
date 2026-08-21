@@ -67,6 +67,11 @@ def _stirling_pdf_adapter():
     return StirlingPDFAdapter()
 
 
+def _media_probe_adapter():
+    from core.media_probe_adapter import MediaProbeAdapter
+    return MediaProbeAdapter()
+
+
 def _build_registry(registrations: list[CapabilityRegistration]) -> dict[str, CapabilityRegistration]:
     registry: dict[str, CapabilityRegistration] = {}
     for registration in registrations:
@@ -128,6 +133,22 @@ _REGISTRY: dict[str, CapabilityRegistration] = _build_registry([
             healthcheck_capability=True,
         ),
         adapter_factory=_stirling_pdf_adapter,
+    ),
+    CapabilityRegistration(
+        contract=CapabilityContract(
+            capability_id="media_probe",
+            adapter_name="media_probe",
+            version="0.1.0",
+            execution_mode="sync",
+            risk_class="low",
+            timeout_seconds=15,
+            retry_semantics="no automatic resubmit; failed/outcome_unknown are terminal for the caller",
+            idempotency_semantics="contract_id is the durable idempotency key; a submitted/completed job short-circuits resubmission",
+            evidence_schema_ref="core.media_probe_adapter",
+            cleanup_capability=False,
+            healthcheck_capability=False,
+        ),
+        adapter_factory=_media_probe_adapter,
     ),
 ])
 

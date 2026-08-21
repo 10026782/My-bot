@@ -31,6 +31,7 @@
         "core/google_drive_artifact_store.py",
         "core/lifecycle_projection.py",
         "core/local_artifact_store.py",
+        "core/media_probe_adapter.py",
         "core/migrations/002_external_poll_leases.sql",
         "core/moneyprinterturbo_adapter.py",
         "core/mpt_runtime_policy.py",
@@ -205,7 +206,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "b6e455c67717a34223f79d5fc52250f762989ba8"
+      "last_observed_commit": "2376edb20fdd4f0623cabbb808cc74305fd71253"
     }
   ],
   "edges": [
