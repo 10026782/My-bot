@@ -198,6 +198,10 @@ def mark_converted(memory_key: str, deal_value: float = 0) -> bool:
                         LeadFields.CONVERTED_AT: datetime.now(tz=timezone.utc).isoformat()}
         if deal_value:
             fields["deal_value"] = deal_value
+        # airtable_update() routes through tools.airtable_gateway.airtable_patch
+        # internally and (as of Track B, Canonical Leads Schema v1) applies the
+        # same Business-Outcome option_fallback automatically for Leads writes
+        # — no separate wiring needed here, unlike what the 17/07 audit assumed.
         result = airtable_update("Leads", rec_m.group(0), fields)
         logger.info(f"[Attribution] converted: {memory_key} ₪{deal_value:,.0f}")
         return bool(result.get("ok"))

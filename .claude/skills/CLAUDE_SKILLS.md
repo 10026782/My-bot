@@ -213,7 +213,9 @@ fields = {
     LeadFields.OUTCOME: outcome,    # "Business Outcome" — select חוקי
     LeadFields.NEXT_STEP: action,   # "Next Action" — text
     LeadFields.OWNER: owner_name,   # "Owner" — text
-    # ❌ אסור: LeadFields.TIER — formula, read-only
+    # ❌ אסור: LeadFields.TIER — אמנם singleSelect כתיב (לא formula), אבל
+    # ריק ב-100% מהרשומות (0/39) וללא כותב מכוון — לא לכתוב אליו בכוונה
+    # תחילה; מועמד להסרה, ראה Canonical Leads Schema v1.
 }
 ```
 
