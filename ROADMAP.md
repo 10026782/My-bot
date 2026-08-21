@@ -34,6 +34,23 @@ dataclass קטן + 4 קבועי status (confirmed/cancelled/incomplete/failed), 
 internal-ID hiding, reply ownership) — עדיין ממתין, לא הפך פתאום ל-in-scope. 2 קריאות
 ב-`test_lead_service_phase1.py` (section 9, בדיקת `resolve_lead_draft_confirmation`
 ישירות) עודכנו להתאים לטיפוס ההחזרה החדש — אין שינוי התנהגות, 107/107 עדיין ירוקים.
+עודכן קודם: 21/08/2026 — **Governance/Horizon refresh מול `origin/main` `6a0ba6a`.**
+הבדיקה מול main המעודכן משנה את תמונת ההורייזונים: **H6 Command Center כבר אינו
+PLANNED** — unified owner API/UI, owner attention, owner development projection ו־registry
+projection קיימים על main, ולכן הסטטוס הוא `ACTIVE / MERGED / needs runtime verification`.
+**H1/N18 פעיל** — Lead הפך ל-consumer ראשון של תשתית כתיבה משותפת (`structured_command`,
+`draft_flow`, canonical Lead creation, Draft Card, confirm/cancel unification); עדיין חסרים
+terminal-turn-result contract ואימות חי לשרשרת Draft→Approval→Write→Evidence על ה־deployed
+SHA הנוכחי. **H4 התקדם אבל נשאר gated** — MoneyPrinterTurbo הוא staging-only, ו־Media Probe,
+Artifact Contract v1, StoredArtifact MIME, Gateway readiness ו־fail-closed canary harness
+מוזגו עד PR #804; אין להסיק production activation בלי gate evidence מפורש.
+
+**סדר עדיפות נוכחי לפי Horizon:** (1) H0 Production Truth — deployed SHA + canaries
+ל־BUG-164/BUG-051-FU/Tool Catalog/Command Center/N18; (2) H6 Command Center hygiene —
+לאמת route חי ולסגור/לרשום את מקור `system_health` שמידרדר ל־`UNKNOWN`; (3) H1/N18 —
+לסגור terminal-turn-result ולבחור consumer הבא רק אחרי gate; (4) H4 — להשאיר
+MPT/Media/Gateway מאחורי artifact/hash/path/publishing-off gates; (5) H3 — החלטת בעלים
+ל־Decision Hub/Layer 2 לפני activation; (6) H2/H5/H7 — רק אחרי שה־upstream יציב ומאומת.
 עודכן קודם: 21/08/2026 — **N18 Phase 2, בירור פרוסה רביעית: clarification/validation-loop
 wiring כבר בוצע.** נבדק לעומק לפני תחילת עבודה חדשה (per owner's staged plan) — המכניקה
 המבוקשת (field ממתין → תשובת משתמש → validator → invalid נשאר על אותו שדה → valid מתקדם
@@ -1546,8 +1563,9 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
 אחד מקודם ל-shared infrastructure לפני שבונים entity נוסף עליו.
 
 **שלבים (F — ללא תאריך, ימוספרו בנפרד עם תחילת מימוש כל שלב):**
-- **Phase 2 — Shared Write Primitives:** להוציא מ-Lead את ה-Draft/filling/edit/validation
-  loop/confirm-cancel/structured parsing/terminal-turn-result לתשתית משותפת. Entity code
+- **Phase 2 — Shared Write Primitives ✅ סגור (21/08/2026, PR #807):** להוציא מ-Lead את
+  ה-Draft/filling/edit/validation loop/confirm-cancel/structured parsing/terminal-turn-result
+  לתשתית משותפת. Entity code
   מגדיר רק schema/required/optional/validators/business rules/defaults/permissions — לא
   בונה מחדש "איך שואלים שדה חסר"/"איך מאשרים"/"איך נשמר state".
   **התקדמות (20/08/2026):** שתי פרוסות ראשונות מוצו ומאומתות (99/99 טסטי Lead + טסטים
@@ -1606,7 +1624,7 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
 
 **קבצים (Phase 1, סגור):** `core/lead_service.py`, `core/lead_candidate_handler.py`,
 `test_lead_service_phase1.py` (99 טסטים).
-**קבצים (Phase 2, בעבודה):** `core/structured_command.py` + `test_structured_command.py`
+**קבצים (Phase 2, סגור):** `core/structured_command.py` + `test_structured_command.py`
 (11 טסטים), `core/draft_flow.py` + `test_draft_flow.py` (16 טסטים) — שני primitives
 משותפים, ללא תלות ב-Lead; `core/lead_service.py`/`core/lead_candidate_handler.py` צורכים
 אותם כעת במקום מכניקה מקומית. `app.py` (confirm/cancel dispatch unification) +
