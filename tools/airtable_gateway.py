@@ -330,6 +330,36 @@ def _audit_log(
 # Public write API
 # ══════════════════════════════════════════════════════════════════
 
+def _is_invalid_option_error(response: "httpx.Response", field: str, attempted_value: str) -> bool:
+    """
+    Narrow match for Airtable's "value isn't a valid select option" 422 —
+    used only to gate the option_fallback retry below. Deliberately strict:
+    wrong error type, or the attempted value not named in the message, means
+    "no match" — a generic 422 (e.g. a real validation failure on some other
+    field) must never be treated as this specific, known, migration-shaped
+    failure. See Canonical Leads Schema v1 (Track B) for why this must not
+    become a blanket "retry on any 422".
+    """
+    if response.status_code != 422:
+        return False
+    try:
+        body = response.json()
+    except Exception:
+        return False
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return False
+    if error.get("type") != "INVALID_MULTIPLE_CHOICE_OPTIONS":
+        return False
+    # Airtable's message is prose (e.g. 'Insufficient permissions to create
+    # new select option "converted"') and doesn't structurally name the
+    # field, so the caller-supplied field name is trust-but-verify: we also
+    # require the exact attempted value to appear quoted in the message, so
+    # this can't match a different field's unrelated option error.
+    message = str(error.get("message", ""))
+    return f'"{attempted_value}"' in message
+
+
 def airtable_patch(
     table: str,
     record_id: str,
@@ -337,11 +367,25 @@ def airtable_patch(
     source: str = "unknown",
     *,
     timeout: float = 10,
+    option_fallback: dict[str, str] | None = None,
 ) -> bool:
     """
     PATCH an existing Airtable record.
     normalize → validate → audit → httpx PATCH
     Returns True on success.
+
+    option_fallback: optional {field_name: legacy_value} map for a narrow,
+    temporary singleSelect-option migration (e.g. trimming a trailing-space
+    option once the Airtable choice has been renamed but before a caller has
+    been updated, or vice versa). If the PATCH 422s and _is_invalid_option_error
+    confirms it's specifically Airtable rejecting the value we sent for one of
+    these fields (exact error type + exact value named in the message — never
+    a bare "any 422"), the request is retried ONCE with that field's value
+    swapped for the fallback, leaving every other field in the write
+    untouched. Any other failure shape (different field, different error
+    type, a real validation problem) is returned as-is, no retry — and if the
+    retry itself still fails (e.g. because the real problem was a different
+    field), that failure propagates normally, nothing is masked.
     """
     fields = normalize_airtable_fields(table, fields)
     clean, errors = validate_airtable_fields(table, fields)
@@ -385,6 +429,32 @@ def airtable_patch(
             timeout=timeout,
         )
         ok = r.status_code == 200
+
+        if not ok and option_fallback:
+            # Only consider the fallback field(s) actually present in THIS
+            # write; if that's not exactly one field, the failure isn't
+            # unambiguously attributable to a single migrating field, so no
+            # retry — narrow match only, never a blanket "any 422, retry".
+            candidates = [f for f in option_fallback if f in clean]
+            if len(candidates) == 1:
+                fb_field = candidates[0]
+                fb_value = option_fallback[fb_field]
+                if _is_invalid_option_error(r, fb_field, str(clean[fb_field])):
+                    logger.warning(
+                        "[gateway:%s] PATCH %s/%s — option_fallback: %r rejected as invalid "
+                        "choice for field %r, retrying once with legacy value %r",
+                        source, table, record_id, clean[fb_field], fb_field, fb_value,
+                    )
+                    retry_fields = {**clean, fb_field: fb_value}
+                    r = httpx.patch(
+                        f"{_at_url(table)}/{record_id}",
+                        headers=_at_headers(),
+                        json={"fields": retry_fields},
+                        timeout=timeout,
+                    )
+                    ok = r.status_code == 200
+                    clean = retry_fields
+
         _audit_log(source, table, "patch", record_id, list(clean.keys()), ok=ok)
         if not ok:
             body = r.text[:300]
