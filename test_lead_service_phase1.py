@@ -499,6 +499,44 @@ with patch("feature_flags.is_enabled", return_value=False), \
     chk("create_lead: no write attempted when Owner cannot be resolved",
         mock_create6.call_count == 0)
 
+# 7h. N18 Phase 2 (clarification/validation-loop wiring): a single
+# continuous chain through the real orchestration entry point
+# (handle_lead_candidate(), never resolve_draft_reply()/set_draft_field()
+# called directly) proving invalid replies for TWO DIFFERENT required
+# fields each re-ask the same field without advancing, and a valid reply
+# for each advances/completes — the exact scenario the shared draft_flow.py
+# state machine (not a Lead-specific duplicate) must preserve.
+chat_chain = "phase1_draft_chain"
+lch.handle_lead_candidate(identity, "ליד חדש", chat_chain, "telegram",
+                           session=lead_sessions.get_or_create(chat_chain))
+lch.handle_lead_candidate(identity, "אור לוי", chat_chain, "telegram",
+                           session=lead_sessions.get_or_create(chat_chain))
+chk("chain: after name, awaiting phone",
+    lead_sessions.get_lead_draft(chat_chain)["awaiting_field"] == "phone")
+
+r_chain_badphone = lch.handle_lead_candidate(identity, "abc", chat_chain, "telegram",
+                                              session=lead_sessions.get_or_create(chat_chain))
+chk("chain: invalid phone rejected", isinstance(r_chain_badphone, str) and r_chain_badphone.startswith("❌"))
+chk("chain: still awaiting phone after the rejected value",
+    lead_sessions.get_lead_draft(chat_chain)["awaiting_field"] == "phone")
+
+lch.handle_lead_candidate(identity, "0501112222", chat_chain, "telegram",
+                           session=lead_sessions.get_or_create(chat_chain))
+chk("chain: valid phone advances to domain",
+    lead_sessions.get_lead_draft(chat_chain)["awaiting_field"] == "domain")
+
+r_chain_baddomain = lch.handle_lead_candidate(identity, "בלה בלה לא קיים", chat_chain, "telegram",
+                                               session=lead_sessions.get_or_create(chat_chain))
+chk("chain: invalid domain rejected", isinstance(r_chain_baddomain, str) and r_chain_baddomain.startswith("❌"))
+chk("chain: still awaiting domain after the rejected value",
+    lead_sessions.get_lead_draft(chat_chain)["awaiting_field"] == "domain")
+
+r_chain_final = lch.handle_lead_candidate(identity, "recruitment", chat_chain, "telegram",
+                                           session=lead_sessions.get_or_create(chat_chain))
+chk("chain: valid domain completes required fields -> review card",
+    isinstance(r_chain_final, str) and "📇" in r_chain_final and "אור לוי" in r_chain_final)
+chk("chain: mode switched to review", lead_sessions.get_lead_draft(chat_chain)["mode"] == "review")
+
 
 # ══════════════════════════════════════════════════
 # 8. Attribution model — campaign/adset/ad + referral (separate concepts,
