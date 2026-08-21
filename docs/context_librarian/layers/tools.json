@@ -138,6 +138,52 @@
       "last_observed_commit": "b6e455c67717a34223f79d5fc52250f762989ba8"
     },
     {
+      "id": "component.free_worker_pilot",
+      "name": "Standalone Free Worker Pilot",
+      "type": "component",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "standalone development-worker contracts, harness detection, and dry-run routing",
+        "precedence": "BOSS Free Worker Pilot architecture document; never production execution or ActionGateway authority"
+      },
+      "owner": "development_infrastructure",
+      "code_paths": [
+        "workers/adapters.py",
+        "workers/cli.py",
+        "workers/contracts.py",
+        "workers/registry.py"
+      ],
+      "test_paths": [
+        "test_free_worker_pilot.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/FREE_WORKER_PILOT_V1.md",
+          "role": "standalone development-worker architecture and safety boundary",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-21",
+      "last_verified_commit": "7f58497af7a2cc5c83cbcff9fb336516e0705e36",
+      "confidence": 1.0,
+      "notes": [
+        "Development-only standalone package; not imported by app.py, tools/dispatcher.py, or core/action_gateway.py.",
+        "No production credentials, provider writes, approvals, merges, deployments, or autonomous promotion are owned here.",
+        "Registration prevents Context Librarian source discovery from treating this deliberately isolated pilot as an unreviewed production authority."
+      ],
+      "extensions": {
+        "catalog.role": "standalone_development_infrastructure",
+        "catalog.runtime_consumed": false,
+        "catalog.production_execution": false,
+        "catalog.action_gateway_wiring": false,
+        "catalog.autonomous_actions": false
+      }
+    },
+    {
       "id": "layer.tools",
       "name": "Tools",
       "type": "layer",
