@@ -44,7 +44,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "09fc8a7e1c2e85f349a3cade9272edc9c01f6487"
+      "last_observed_commit": "795451b46caa0022e558d9f307cc7a3c3742e9fe"
     },
     {
       "id": "decision.actioncontracts_authority",
@@ -222,7 +222,7 @@
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
       ],
-      "last_observed_commit": "09fc8a7e1c2e85f349a3cade9272edc9c01f6487"
+      "last_observed_commit": "795451b46caa0022e558d9f307cc7a3c3742e9fe"
     },
     {
       "id": "decision.ux_no_internal_ids",
@@ -347,7 +347,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "4330cce0dcd4bf99ba9118472bd557839fb55416"
+      "last_observed_commit": "795451b46caa0022e558d9f307cc7a3c3742e9fe"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -704,7 +704,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "3c7c71d7006212e8e8aa9fe631b5f7a9ee4757ba"
+      "last_observed_commit": "795451b46caa0022e558d9f307cc7a3c3742e9fe"
     },
     {
       "id": "decision.tma_screens",
@@ -778,7 +778,7 @@
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #785 (block_reason=NO_POLICY_MATCH): core/lead_service.py had no existing catalog owner across any of the 8 registered layers or 18 decision nodes as of this registration — owner decision was CREATE NEW NODE.",
         "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope."
       ],
-      "last_observed_commit": "4330cce0dcd4bf99ba9118472bd557839fb55416"
+      "last_observed_commit": "795451b46caa0022e558d9f307cc7a3c3742e9fe"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -826,7 +826,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "4330cce0dcd4bf99ba9118472bd557839fb55416"
+      "last_observed_commit": "795451b46caa0022e558d9f307cc7a3c3742e9fe"
     },
     {
       "id": "decision.n18_terminal_turn_result",
@@ -872,7 +872,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "0b7fbad832f176b837cbf537ded5302a9bd3b307"
+      "last_observed_commit": "795451b46caa0022e558d9f307cc7a3c3742e9fe"
     }
   ],
   "edges": [
