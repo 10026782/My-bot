@@ -8,9 +8,10 @@ boundedness, and the generic boundary's idempotent no-second-probe guarantee.
 No real ffprobe call in the mocked tests — subprocess.run is monkeypatched
 with canned ffprobe JSON. The "ffprobe not installed" test relies on ffprobe
 genuinely not being on PATH in this environment, exercising the real
-FileNotFoundError path with no mocking at all. A separate, not-CI-run real
-smoke (scripts/media_probe_poc/smoke.py) proves an actual successful ffprobe
-invocation end to end."""
+FileNotFoundError path with no mocking at all. A real ffprobe run end to end
+was separately verified by hand (see PR description) — not committed as a
+script here, since this capability's own catalog registration already sits
+at this node's context-budget ceiling."""
 
 from __future__ import annotations
 
