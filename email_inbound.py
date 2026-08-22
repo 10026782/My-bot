@@ -367,6 +367,7 @@ def run_email_poll(owner_chat_id: str = "") -> PollResult:
                 domain       = domain,
                 external_id  = external_id,
                 display_name = email.sender,
+                recipient    = email.to,
             )
             result.routed += 1
 

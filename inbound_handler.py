@@ -108,12 +108,19 @@ def _create_email_lead(
     domain: str,
     message: str,
     external_id: str,
+    recipient: str = "",
 ) -> None:
     """
     יוצר ליד חדש ממייל.
     WhatsApp ממשיך להשתמש ב-lead_capture.capture_inbound_lead() — לא נוגעים.
     """
     try:
+        if is_enabled("EMAIL_CANONICAL_LEAD_WRITE"):
+            from core.noninteractive_lead_cutovers import create_email_inbound_lead
+            result = create_email_inbound_lead(sender_id, recipient, display_name, message, domain, external_id)
+            if not result.ok:
+                logger.error("[InboundHandler] canonical email lead blocked: %s", result.reason)
+            return
         from tools.airtable_tools import airtable_add
         fields = {
             LeadFields.NAME:        display_name or sender_id,
@@ -147,6 +154,7 @@ def handle_inbound(
     external_id: str = "", # gmail:<msg_id>
     display_name: str = "",
     identity=None,         # קיים ב-WhatsApp, None ב-Email
+    recipient: str = "",
 ) -> None:
     """
     Gate אחיד לכל הודעה נכנסת.
@@ -162,6 +170,9 @@ def handle_inbound(
         return
 
     try:
+        if channel == "email" and is_enabled("EMAIL_CANONICAL_LEAD_WRITE"):
+            _create_email_lead(sender_id, display_name, domain, message, external_id, recipient)
+            return
         # 1. skip — כפילות מדויקת
         if external_id and _find_by_external_id(external_id):
             logger.debug("[InboundHandler] duplicate external_id skip: %s", external_id)
@@ -175,7 +186,7 @@ def handle_inbound(
 
         # 3. ליד חדש
         if channel == "email":
-            _create_email_lead(sender_id, display_name, domain, message, external_id)
+            _create_email_lead(sender_id, display_name, domain, message, external_id, recipient)
         else:
             # עתידי: WhatsApp + channels נוספים
             # identity קיים כאן → delegate ל-lead_capture הקיים
