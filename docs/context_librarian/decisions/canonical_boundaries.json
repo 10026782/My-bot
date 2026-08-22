@@ -757,10 +757,12 @@
       },
       "owner": "lead_write",
       "code_paths": [
-        "core/lead_service.py"
+        "core/lead_service.py",
+        "core/source_owner_mapping.py"
       ],
       "test_paths": [
-        "test_lead_service_phase1.py"
+        "test_lead_service_phase1.py",
+        "test_phase3_source_owner_mapping.py"
       ],
       "canonical_docs": [
         {
@@ -776,9 +778,10 @@
       "confidence": 1.0,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #785 (block_reason=NO_POLICY_MATCH): core/lead_service.py had no existing catalog owner across any of the 8 registered layers or 18 decision nodes as of this registration — owner decision was CREATE NEW NODE.",
-        "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope."
+        "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope.",
+        "Registered for PR #823: core/source_owner_mapping.py is supporting runtime infrastructure for explicit inbound source-account to canonical owner_user_id context. It does not resolve Airtable Profile IDs, write Leads, or create an Owner fallback; create_lead() remains the sole Owner/Profile authority."
       ],
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "f70c5d8bf831b1a88c0f91732ab97c03564c1002"
     },
     {
       "id": "decision.n18_shared_write_primitives",
