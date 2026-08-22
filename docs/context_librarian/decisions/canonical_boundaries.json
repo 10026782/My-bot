@@ -759,12 +759,14 @@
       "code_paths": [
         "core/lead_service.py",
         "core/source_owner_mapping.py",
-        "core/whatsapp_lead_cutover.py"
+        "core/whatsapp_lead_cutover.py",
+        "core/noninteractive_lead_cutovers.py"
       ],
       "test_paths": [
         "test_lead_service_phase1.py",
         "test_phase3_source_owner_mapping.py",
-        "test_whatsapp_lead_cutover.py"
+        "test_whatsapp_lead_cutover.py",
+        "test_noninteractive_lead_cutovers.py"
       ],
       "canonical_docs": [
         {
@@ -783,6 +785,7 @@
         "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope.",
         "Registered for PR #823: core/source_owner_mapping.py is supporting runtime infrastructure for explicit inbound source-account to canonical owner_user_id context. It does not resolve Airtable Profile IDs, write Leads, or create an Owner fallback; create_lead() remains the sole Owner/Profile authority.",
         "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification."
+        ,"Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
       "last_observed_commit": "f70c5d8bf831b1a88c0f91732ab97c03564c1002"
     },

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # routing-only meta-domains (crm/internal) that are meaningless as a lead's
 # business vertical and 422 against the live Airtable schema.
 CANONICAL_LEAD_DOMAINS = frozenset({
-    "real_estate", "import", "media", "saas", "finance", "recruitment", "general",
+    "real_estate", "import", "furniture_import", "media", "saas", "finance", "recruitment", "general",
 })
 
 # A stable, numbered ordering of the same set — lets a reply be a bare

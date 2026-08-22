@@ -35,7 +35,7 @@ _URGENT_TERMS = (
 )
 
 
-def handle_furniture_lead_message(sender: str, message: str, domain: str) -> str | None:
+def handle_furniture_lead_message(sender: str, message: str, domain: str, destination: str = "") -> str | None:
     """Return a fixed funnel reply for furniture leads, or None for agent fallback."""
     if domain != DOMAIN:
         return None
@@ -44,6 +44,8 @@ def handle_furniture_lead_message(sender: str, message: str, domain: str) -> str
         from session_store import lead_sessions
 
         session = lead_sessions.get_or_create(sender, domain=DOMAIN, channel="whatsapp")
+        if destination:
+            session["owner_destination"] = destination
         session.setdefault("conversation_step", "step_0_intro")
         session.setdefault("answers", {})
         step = int(session.get("step", 0) or 0)
@@ -148,6 +150,17 @@ def _asked_price_delivery_availability(answers: dict) -> bool:
 
 def _save_lead(sender: str, session: dict) -> None:
     try:
+        from feature_flags import is_enabled
+        if is_enabled("FURNITURE_CANONICAL_LEAD_WRITE"):
+            from core.noninteractive_lead_cutovers import create_furniture_inbound_lead
+            answers = session.get("answers", {})
+            result = create_furniture_inbound_lead(
+                sender, session.get("owner_destination", ""), (answers.get("name") or "").strip(),
+                "Furniture lead: triple solid oak bed", json.dumps(answers, ensure_ascii=False),
+            )
+            if not result.ok:
+                logger.error("[FurnitureFunnel] canonical lead blocked: %s", result.reason)
+            return
         from tools.airtable_gateway import airtable_create, airtable_patch
         from tools.airtable_tools import airtable_get
 

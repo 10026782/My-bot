@@ -6467,7 +6467,9 @@ def _webhook_whatsapp_impl():
     # if FURNITURE_TWILIO_WHATSAPP_NUMBER is unset, get_domain() returns "general" → skipped
     try:
         from furniture_lead_funnel import handle_furniture_lead_message
-        funnel_reply = handle_furniture_lead_message(sender, incoming, domain_from_channel)
+        funnel_reply = handle_furniture_lead_message(
+            sender, incoming, domain_from_channel, destination=to_number,
+        )
         if funnel_reply:
             gated_reply = _gateway_whatsapp_reply(sender, funnel_reply, domain_from_channel, msg_sid or sender)
             resp = MessagingResponse()
@@ -6703,7 +6705,8 @@ def voice_incoming():
         return Response(build_twiml(_say("השירות לא פעיל.") + _hangup()), mimetype="text/xml")
     call_sid = request.form.get("CallSid", "")
     from_num = request.form.get("From", "").replace("whatsapp:", "")
-    return Response(process_voice_step(call_sid, from_num), mimetype="text/xml")
+    to_num = request.form.get("To", "")
+    return Response(process_voice_step(call_sid, from_num, to_num=to_num), mimetype="text/xml")
 
 
 @app.route("/voice/step", methods=["POST"])
@@ -6716,7 +6719,8 @@ def voice_step():
     call_sid = request.form.get("CallSid", "")
     from_num = request.form.get("From", "").replace("whatsapp:", "")
     digits   = request.form.get("Digits", "")
-    return Response(process_voice_step(call_sid, from_num, digits), mimetype="text/xml")
+    to_num   = request.form.get("To", "")
+    return Response(process_voice_step(call_sid, from_num, digits, to_num), mimetype="text/xml")
 
 
 if __name__ == "__main__":
