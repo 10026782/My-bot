@@ -7,7 +7,22 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 21/08/2026 — **Canonical Leads Schema v1 (owner-approved) — Phase 3 prep, שלבים ראשונים.**
+עודכן: 22/08/2026 — **Canonical Leads Schema v1 — Track A/B הושלמו במלואם (ידני + קוד).**
+בוצע ידנית ב-Airtable UI (owner, 22/08): (1) הוסרה האופציה `"ליד חדש"` מרשימת ה-choices
+של `status` וגם של `Business Outcome`; (2) שינוי-שם ל-7 מתוך 8 האופציות של `Business
+Outcome` (הוסר ה-trailing space — `"open "`→`"open"` וכו', `"archived"` היה כבר נקי) —
+אומת ישירות דרך Airtable MCP `get_table_schema` על שני השדות, לא רק דווח. לוג ה-
+`option_fallback` ב-Render היה שקט לגמרי מאז ה-rename (יום תצפית מלא). בהתאם, בוצע Track
+B step 5: הוסרו `LeadOutcome.LEGACY_VALUE_FOR`, `airtable_schema.leads_outcome_option_fallback`,
+`tools/airtable_gateway.py`'s `_is_invalid_option_error` וה-`option_fallback` param/logic
+כולו מ-`airtable_patch`, וה-wiring משלושת ה-call sites (`tma_api.py::_at_patch`,
+`tools/approval_actions.py::tma_write`, `tools/airtable_tools.py::airtable_update`) — ה-
+`.strip()` בצד הקריאה (`core/adapters/leads_adapter.py`, `audience_intelligence.py`) נשאר
+לצמיתות לפי החלטת owner מפורשת (21/08/2026), לא כ-scaffolding זמני. `tier`-field ו-
+`Next Action`-field עדיין מכילים את האופציה `"ליד חדש"` — לא היו בסקופ הניקוי הזה, נותרו
+כמתוכנן לצעד עתידי נפרד. טסטים: 37/37 (`test_airtable_gateway.py`, לאחר הסרת 17 בדיקות
+T7 שבדקו את המנגנון שהוסר), smoke + כל רגרסיית BUG-104/105/A32/lead_service ללא שינוי.
+עודכן קודם: 21/08/2026 — **Canonical Leads Schema v1 (owner-approved) — Phase 3 prep, שלבים ראשונים.**
 תיקון תיעוד סותר על שדה `tier` (ראה Known Issues + N05 למעלה): אומת ישירות דרך Airtable
 MCP ש-`tier` הוא singleSelect אמיתי וכתיב (לא formula, לא read-only, לא "לא קיים בסכמה"
 כפי שנטען בעבר) — פשוט ריק ב-100% מהרשומות (0/39 נכון ל-21/08, 0/92 ב-17/07) וללא כותב

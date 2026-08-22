@@ -343,7 +343,7 @@ approval_actions._verify_active_execution_claim = lambda *a, **kw: True
 _patch_ok = {"value": True}
 
 
-def _fake_gw_patch(table, record_id, fields, source="unknown", *, timeout=10, option_fallback=None):
+def _fake_gw_patch(table, record_id, fields, source="unknown"):
     return _patch_ok["value"]
 
 

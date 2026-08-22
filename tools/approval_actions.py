@@ -399,11 +399,7 @@ def tma_write(
     elif op == "patch":
         result_record_id = record_id
         cleaned_fields = _clean_tma_write_fields(table, fields)
-        from airtable_schema import leads_outcome_option_fallback
-        ok = airtable_patch(
-            table, result_record_id, cleaned_fields, source="tma_write",
-            option_fallback=leads_outcome_option_fallback(table, cleaned_fields),
-        )
+        ok = airtable_patch(table, result_record_id, cleaned_fields, source="tma_write")
         if not ok:
             return _tool_result(
                 ok=False, tool="tma_write",

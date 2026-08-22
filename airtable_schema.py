@@ -362,32 +362,23 @@ class LeadOutcome:
     """Leads.'Business Outcome' singleSelect — canonical (clean) key -> exact live
     Airtable option string.
 
-    MIGRATION IN PROGRESS (Track B, Canonical Leads Schema v1, started
-    21/08/2026): the values below are the TARGET (trimmed) form. Airtable's
-    live choices still carry the legacy trailing-space form
-    (LEGACY_VALUE_FOR) until the field is renamed in the Airtable UI — until
-    then, every write of these trimmed values 422s on the first attempt and
-    is retried once by the gateway's narrow option_fallback mechanism (see
-    tools.airtable_gateway.airtable_patch's option_fallback param, and
-    airtable_schema.leads_outcome_option_fallback below). Read paths that
-    compare a raw fetched value against one of these constants must
-    .strip() first (core/adapters/leads_adapter.py's
-    _normalise_business_outcome already does; audience_intelligence.py's
-    comparison was fixed alongside this migration) — the live value is
-    still trailing-space-suffixed until the rename lands. Once the Airtable
-    rename has landed and the option_fallback log line has gone quiet for a
-    full day, delete LEGACY_VALUE_FOR and the option_fallback wiring (Track
-    B step 5) — but KEEP the .strip() on every read site indefinitely
-    (cheap, permanent hardening against future drift, not migration
-    scaffolding — owner decision, 21/08/2026).
+    Canonical Leads Schema v1 (Track B, 21/08/2026): the live Airtable
+    options were renamed to this trimmed form on 22/08/2026 (the field
+    originally carried a baked-in trailing space on 7 of its 8 choices).
+    Read paths that compare a raw fetched value against one of these
+    constants still .strip() first (core/adapters/leads_adapter.py's
+    _normalise_business_outcome, audience_intelligence.py) — kept
+    permanently as cheap, ongoing hardening against future drift, not as
+    migration scaffolding (owner decision, 21/08/2026). The temporary
+    write-side fallback (LEGACY_VALUE_FOR / option_fallback) that bridged
+    writes during the migration window was removed once the rename landed
+    and the fallback log went quiet (Track B step 5).
 
     Originally verified via Airtable MCP get_table_shape, 2026-06-17, field
     fldVa5wSmAqcKLi86. Airtable's typecast is OFF for this base, so a write
     that doesn't match an existing option byte-for-byte fails with 422
     INVALID_MULTIPLE_CHOICE_OPTIONS ("Insufficient permissions to create new
-    select option") instead of creating it — this is exactly the failure
-    mode option_fallback is scoped to handle, and ONLY that failure mode
-    (see _is_invalid_option_error's exact-match requirements).
+    select option") instead of creating it.
     """
     OPEN               = "open"
     NEEDS_FOLLOWUP     = "needs_followup"
@@ -409,40 +400,6 @@ class LeadOutcome:
         "duplicate": DUPLICATE,
         "archived": ARCHIVED,
     }
-
-    # TEMPORARY — Track B migration scaffold. trimmed value -> legacy live
-    # Airtable option string (with its baked-in trailing space). Delete
-    # alongside the option_fallback wiring once the Airtable rename has
-    # landed and stuck (see class docstring).
-    LEGACY_VALUE_FOR = {
-        OPEN: "open ",
-        NEEDS_FOLLOWUP: "needs_followup ",
-        MEETING_SCHEDULED: "meeting_scheduled ",
-        CONVERTED: "converted ",
-        NOT_RELEVANT: "not_relevant ",
-        LOST: "lost ",
-        DUPLICATE: "duplicate ",
-        ARCHIVED: "archived",  # unchanged — never had a trailing space
-    }
-
-
-def leads_outcome_option_fallback(table: str, fields: dict) -> "dict | None":
-    """TEMPORARY — Track B migration scaffold (Canonical Leads Schema v1).
-
-    Builds the tools.airtable_gateway.airtable_patch(option_fallback=...)
-    argument for a Leads write that includes Business Outcome, so the new
-    trimmed value's write can fall back once to the still-live legacy
-    trailing-space option until the Airtable rename lands. Returns None for
-    any other table/field combination (no fallback offered). Delete
-    alongside LeadOutcome.LEGACY_VALUE_FOR once the migration is complete.
-    """
-    if table != Tables.LEADS:
-        return None
-    value = fields.get(LeadFields.OUTCOME)
-    legacy = LeadOutcome.LEGACY_VALUE_FOR.get(value)
-    if legacy is None:
-        return None
-    return {LeadFields.OUTCOME: legacy}
 
 
 class BusinessMemoryFields:

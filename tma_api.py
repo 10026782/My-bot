@@ -281,11 +281,7 @@ def _shadow_record_tma(action: str) -> None:
 
 def _at_patch(table: str, record_id: str, fields: dict) -> bool:
     """PATCH single record via gateway (normalize → validate → audit → httpx)."""
-    from airtable_schema import leads_outcome_option_fallback
-    result = _gw_patch(
-        table, record_id, fields, source="tma",
-        option_fallback=leads_outcome_option_fallback(table, fields),
-    )
+    result = _gw_patch(table, record_id, fields, source="tma")
     _shadow_record_tma(f"patch:{table}")
     return result
 
