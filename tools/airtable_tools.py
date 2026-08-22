@@ -375,12 +375,7 @@ def airtable_get_schema() -> str:
 def airtable_update(table: str, record_id: str, fields: dict) -> dict:
     fields = _resolve_linked_fields(_resolve_table(table), fields)
     from tools.airtable_gateway import airtable_patch
-    from airtable_schema import leads_outcome_option_fallback
-    resolved_table = _resolve_table(table)
-    ok = airtable_patch(
-        resolved_table, record_id, fields, source="agent",
-        option_fallback=leads_outcome_option_fallback(resolved_table, fields),
-    )
+    ok = airtable_patch(_resolve_table(table), record_id, fields, source="agent")
     if ok:
         _audit("airtable_update", table, record_id=record_id, result="updated")
         return _tool_result(
