@@ -44,7 +44,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "ebd036fcc6aa574a72fce276bae1b1a0f90dc17e"
     },
     {
       "id": "decision.actioncontracts_authority",
@@ -222,7 +222,7 @@
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
       ],
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "ebd036fcc6aa574a72fce276bae1b1a0f90dc17e"
     },
     {
       "id": "decision.ux_no_internal_ids",
@@ -347,7 +347,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "ebd036fcc6aa574a72fce276bae1b1a0f90dc17e"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -781,7 +781,7 @@
         "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope.",
         "Registered for PR #823: core/source_owner_mapping.py is supporting runtime infrastructure for explicit inbound source-account to canonical owner_user_id context. It does not resolve Airtable Profile IDs, write Leads, or create an Owner fallback; create_lead() remains the sole Owner/Profile authority."
       ],
-      "last_observed_commit": "f70c5d8bf831b1a88c0f91732ab97c03564c1002"
+      "last_observed_commit": "ebd036fcc6aa574a72fce276bae1b1a0f90dc17e"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -829,7 +829,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "ebd036fcc6aa574a72fce276bae1b1a0f90dc17e"
     },
     {
       "id": "decision.n18_terminal_turn_result",
@@ -875,7 +875,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "ebd036fcc6aa574a72fce276bae1b1a0f90dc17e"
     }
   ],
   "edges": [
