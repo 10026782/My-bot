@@ -32,6 +32,7 @@ see is_enabled()/set_flag()'s own docstrings and the
 
 LEAD PIPELINE:
   LEAD_CAPTURE                - WhatsApp מספר לא מוכר → רשומת Leads
+  WHATSAPP_CANONICAL_LEAD_WRITE - WhatsApp LeadPayload → create_lead(); default OFF until E2E/runtime verification
   LEAD_SCORING                - score+tier נכתב בעת יצירת lead
   LEAD_MEMORY                 - lead_memory.update() מחובר ל-lead_capture
   FOLLOWUP_AUTOMATION         - scheduler סורק לידים HOT, מעלה לאישור
@@ -229,6 +230,9 @@ _DEFAULTS: dict[str, str] = {
         "FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS", "false",
     ),
     "EXTERNAL_EXECUTION_ENABLED": os.environ.get("EXTERNAL_EXECUTION_ENABLED", "false"),
+    "WHATSAPP_CANONICAL_LEAD_WRITE": os.environ.get(
+        "WHATSAPP_CANONICAL_LEAD_WRITE", "false",
+    ),
 }
 
 
