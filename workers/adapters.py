@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import os
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
 
@@ -50,24 +51,33 @@ def _paths_from_entry(entry: str) -> list[str]:
     return [_normalize(body)]
 
 
+def _content_signature(path: Path) -> str:
+    """SHA-256 over file content; mtime-independent change detection."""
+    digest = sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _snapshot_forbidden(
     repo_path: str,
     forbidden_paths: tuple[str, ...],
-) -> dict[str, tuple[int, int]] | None:
-    """Stat-signature map of every existing file under forbidden prefixes.
+) -> dict[str, str] | None:
+    """SHA-256 content-digest map of every existing file under forbidden prefixes.
 
-    Covers gitignored paths that `git status --porcelain` cannot see.
-    Returns None when a declared forbidden location exists but cannot be
-    inspected (fail closed).
+    Content digests detect same-size rewrites with restored mtimes that
+    stat-based signatures cannot. Covers gitignored paths that
+    `git status --porcelain` cannot see. Returns None when a declared
+    forbidden location exists but cannot be inspected or read (fail closed).
     """
-    snapshot: dict[str, tuple[int, int]] = {}
+    snapshot: dict[str, str] = {}
     try:
         base = Path(repo_path)
         for pattern in forbidden_paths:
             root = base / _normalize(pattern)
             if root.is_file():
-                st = root.stat()
-                snapshot[_normalize(pattern)] = (st.st_mtime_ns, st.st_size)
+                snapshot[_normalize(pattern)] = _content_signature(root)
             elif root.is_dir():
                 for current, dirs, files in os.walk(root):
                     dirs[:] = [
@@ -75,17 +85,16 @@ def _snapshot_forbidden(
                     ]
                     for name in files:
                         path = Path(current) / name
-                        st = path.stat()
                         key = str(path.relative_to(base)).replace("\\", "/")
-                        snapshot[key] = (st.st_mtime_ns, st.st_size)
+                        snapshot[key] = _content_signature(path)
     except OSError:
         return None
     return snapshot
 
 
 def _forbidden_changes(
-    before: dict[str, tuple[int, int]],
-    after: dict[str, tuple[int, int]],
+    before: dict[str, str],
+    after: dict[str, str],
 ) -> list[str]:
     created_or_modified = [p for p in after if before.get(p) != after[p]]
     deleted = [p for p in before if p not in after]
@@ -96,14 +105,15 @@ def _first_violation(
     repo_path: str,
     allowed_paths: tuple[str, ...],
     forbidden_paths: tuple[str, ...],
-    forbidden_before: dict[str, tuple[int, int]] | None = None,
+    forbidden_before: dict[str, str] | None = None,
 ) -> str | None:
     """Audit worktree changes; fail closed on audit failure.
 
-    Two layers: (1) a pre/post stat-signature diff over everything under
-    forbidden_paths, which detects changes to gitignored files that git
-    itself cannot report; (2) `git status --porcelain` coverage for tracked
-    and untracked changes against allowed_paths/forbidden_paths.
+    Two layers: (1) a pre/post SHA-256 content-digest diff over everything
+    under forbidden_paths, which detects changes to gitignored files that
+    git itself cannot report, independently of mtime; (2) `git status
+    --porcelain` coverage for tracked and untracked changes against
+    allowed_paths/forbidden_paths.
 
     Returns the first violation as a reportable string, or None when every
     changed path is inside bounds.

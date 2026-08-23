@@ -260,6 +260,38 @@ def test_untouched_gitignored_forbidden_path_does_not_fail():
     assert not [e for e in result.evidence if e.startswith("path-violation")]
 
 
+def test_same_size_same_mtime_forbidden_content_change_is_detected(tmp_path):
+    target = tmp_path / ".env"
+    target.write_bytes(b"SECRET=A\n")
+    original = target.stat()
+    ignored_request = request(
+        repo_path=str(tmp_path),
+        allowed_paths=("app.py",),
+        forbidden_paths=(".env",),
+        verification_commands=("pytest test.py",),
+    )
+
+    def harness_rewrites_same_size_and_restores_mtime(command, **kwargs):
+        if command[0] == "qwen":
+            target.write_bytes(b"SECRET=B\n")
+            os.utime(target, ns=(original.st_atime_ns, original.st_mtime_ns))
+            return subprocess.CompletedProcess([], 0)
+        return subprocess.CompletedProcess([], 0, stdout="")
+
+    availability_patch, adapter = pilot_adapter()
+    assert target.stat().st_mtime_ns == original.st_mtime_ns
+    assert target.stat().st_size == original.st_size
+    with availability_patch, \
+         patch(
+             "workers.adapters.subprocess.run",
+             side_effect=harness_rewrites_same_size_and_restores_mtime,
+         ):
+        result = adapter.execute(ignored_request, PILOT_PROFILE)
+    assert result.status is WorkerStatus.FAILED
+    assert result.summary == "path_boundary_violation"
+    assert result.evidence == ["path-violation:forbidden-ignored-change:.env"]
+
+
 def test_unauditable_worktree_fails_closed():
     availability_patch, adapter = pilot_adapter()
     with availability_patch, \
