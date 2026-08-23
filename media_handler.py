@@ -65,6 +65,41 @@ class MediaResult:
     error: MediaError | None = None
 
 
+@dataclass(frozen=True)
+class MediaProcessingStatus:
+    """Bounded, non-persistent distinction between provider ACK and processing."""
+    status: str  # COMPLETED | FAILED | NOT_COMPLETED
+    success_evidence: bool
+    error_code: str = ""
+    retryable: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "success_evidence": self.success_evidence,
+            "error_code": self.error_code,
+            "retryable": self.retryable,
+        }
+
+
+def media_processing_status(
+    result: MediaResult | None,
+    *,
+    failure_code: str = "MEDIA_NOT_COMPLETED",
+    retryable: bool = True,
+) -> MediaProcessingStatus:
+    """Convert a local media result into truthful bounded processing state."""
+    if result is not None and result.ok:
+        return MediaProcessingStatus("COMPLETED", success_evidence=True)
+    error = result.error if result is not None else None
+    return MediaProcessingStatus(
+        "FAILED" if error else "NOT_COMPLETED",
+        success_evidence=False,
+        error_code=error.error_code if error else failure_code,
+        retryable=error.retryable if error else retryable,
+    )
+
+
 def _classify_size(size_bytes: int) -> str:
     if size_bytes > TIER_LARGE:
         return "oversized"

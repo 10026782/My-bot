@@ -484,6 +484,7 @@ def _normalize_meta_payload(payload: dict) -> dict | None:
             "to":     entry.get("metadata", {}).get("display_phone_number", "unknown"),
             "msg_id": msg.get("id", ""),
             "media":  None,  # populated if media present
+            "media_error": None,
         }
 
         # Extract media metadata (type + media_id for URL fetch)
@@ -494,12 +495,35 @@ def _normalize_meta_payload(payload: dict) -> dict | None:
                 media = extract_meta_whatsapp_media(msg)
                 if media:
                     result["media"] = media
+                else:
+                    result["media_error"] = {
+                        "error_code": "MEDIA_METADATA_INVALID",
+                        "retryable": False,
+                    }
             except Exception as e:
-                logger.warning(f"[Meta WhatsApp] media extraction failed: {e}")
+                result["media_error"] = {
+                    "error_code": type(e).__name__,
+                    "retryable": True,
+                }
+                logger.warning("[Meta WhatsApp] media extraction failed error_type=%s", type(e).__name__)
 
         return result
     except (KeyError, IndexError, TypeError):
         return None
+
+
+def _log_whatsapp_media_status(provider: str, media_id: str, status) -> None:
+    """Log processing state without turning provider ACK into success evidence."""
+    logger.info(
+        "[%s WhatsApp] media processing status=%s success_evidence=%s "
+        "error_code=%s retryable=%s media_id_present=%s",
+        provider,
+        status.status,
+        status.success_evidence,
+        status.error_code or "none",
+        status.retryable,
+        bool(media_id),
+    )
 
 
 from tma_api import tma_api as _tma_blueprint
@@ -6377,11 +6401,16 @@ def _webhook_whatsapp_impl():
     # Extract and process media (voice/file) from Twilio webhook.
     # Per F13 architecture: metadata extraction + byte download from signed URL,
     # routed through unified media_handler pipeline (same as Telegram C90).
+    media_processing = None
+    media_meta = None
     try:
         from whatsapp_media_adapter import (
             extract_whatsapp_media, download_whatsapp_media, infer_file_type, infer_filename
         )
-        from media_handler import handle_voice_note, handle_file_upload
+        from media_handler import (
+            handle_voice_note, handle_file_upload, MediaError, MediaResult,
+            media_processing_status,
+        )
 
         media_meta = extract_whatsapp_media(request.values.to_dict())
         if media_meta:
@@ -6403,7 +6432,6 @@ def _webhook_whatsapp_impl():
                             file_bytes, mime_type, media_meta["file_id"],
                             sender, domain_from_channel, owner_chat_id, source="whatsapp"
                         )
-                        logger.info(f"[WhatsApp] voice note processed: ok={result.ok}, has_transcript={bool(result.normalized_transcript)}")
                     else:
                         # File/image/video → Drive upload + Media Files record
                         result = handle_file_upload(
@@ -6411,16 +6439,36 @@ def _webhook_whatsapp_impl():
                             media_meta["file_id"], sender, domain_from_channel,
                             source="whatsapp", linked_lead_id=""
                         )
-                        logger.info(f"[WhatsApp] file uploaded: ok={result.ok}, file_size_tier={result.file_size_tier}")
-
-                    if not result.ok and result.error and result.error.error_message:
-                        logger.warning(f"[WhatsApp] media processing failed: {result.error.error_message}")
+                    media_processing = media_processing_status(result)
+                else:
+                    media_processing = media_processing_status(
+                        MediaResult(
+                            ok=False,
+                            error=MediaError("MEDIA_DOWNLOAD_FAILED", "media download returned no bytes", True),
+                        )
+                    )
             except Exception as e:
-                logger.warning(f"[WhatsApp] media handler error: {e}", exc_info=True)
+                media_processing = media_processing_status(
+                    MediaResult(
+                        ok=False,
+                        error=MediaError(type(e).__name__, "media handler failed", True),
+                    )
+                )
+                logger.warning("[WhatsApp] media handler error error_type=%s", type(e).__name__)
+        elif request.values.get("NumMedia", "0") not in ("", "0"):
+            media_processing = media_processing_status(
+                MediaResult(
+                    ok=False,
+                    error=MediaError("MEDIA_METADATA_INVALID", "media metadata unavailable", False),
+                )
+            )
     except ImportError:
         logger.debug("[WhatsApp] media adapter not available, skipping media handling")
     except Exception as e:
-        logger.warning(f"[WhatsApp] media extraction error: {e}", exc_info=True)
+        logger.warning("[WhatsApp] media extraction error error_type=%s", type(e).__name__)
+
+    if media_processing is not None:
+        _log_whatsapp_media_status("Twilio", media_meta.get("file_id", "") if media_meta else "", media_processing)
 
     if _inject_utm and _flag_enabled("AD_ATTRIBUTION"):
         try:
@@ -6588,19 +6636,42 @@ def webhook_meta_whatsapp():
     # ── BUG-071 FIX: Meta WhatsApp Media Support ───────────────────────────
     # Extract media (image/video/audio/document), fetch download URL from Meta API,
     # and route through unified media_handler pipeline.
+    media_processing = None
     try:
         media_meta = normalized.get("media")
-        if media_meta:
+        media_error = normalized.get("media_error")
+        if media_error:
+            from media_handler import MediaError, MediaResult, media_processing_status
+            media_processing = media_processing_status(
+                MediaResult(
+                    ok=False,
+                    error=MediaError(
+                        media_error.get("error_code", "MEDIA_METADATA_INVALID"),
+                        "media metadata unavailable",
+                        bool(media_error.get("retryable", False)),
+                    ),
+                )
+            )
+        elif media_meta:
             try:
                 from meta_whatsapp_media_adapter import (
                     get_meta_media_download_url, infer_mime_type_from_meta_type
                 )
-                from media_handler import handle_voice_note, handle_file_upload
+                from media_handler import (
+                    handle_voice_note, handle_file_upload, MediaError, MediaResult,
+                    media_processing_status,
+                )
 
                 # Fetch download URL from Meta API
                 access_token = os.environ.get("META_BUSINESS_TOKEN", "")
                 if not access_token:
                     logger.warning("[Meta WhatsApp] no META_BUSINESS_TOKEN — skipping media download")
+                    media_processing = media_processing_status(
+                        MediaResult(
+                            ok=False,
+                            error=MediaError("META_BUSINESS_TOKEN_MISSING", "media download not attempted", True),
+                        )
+                    )
                 else:
                     media_url = get_meta_media_download_url(media_meta["media_id"], access_token)
                     if media_url:
@@ -6613,6 +6684,12 @@ def webhook_meta_whatsapp():
                             file_bytes = resp.content
                             if len(file_bytes) > 50 * 1024 * 1024:  # 50MB limit
                                 logger.warning("[Meta WhatsApp] media too large: %d bytes", len(file_bytes))
+                                media_processing = media_processing_status(
+                                    MediaResult(
+                                        ok=False,
+                                        error=MediaError("FILE_TOO_LARGE", "media exceeds size limit", False),
+                                    )
+                                )
                             else:
                                 _media_identity = resolve_identity("whatsapp", sender)
                                 owner_chat_id = os.environ.get("OWNER_TELEGRAM_ID", "") or \
@@ -6629,29 +6706,55 @@ def webhook_meta_whatsapp():
                                         file_bytes, mime_type, media_meta["message_id"],
                                         sender, domain_from_channel, owner_chat_id, source="whatsapp_meta"
                                     )
-                                    logger.info(f"[Meta WhatsApp] voice note processed: ok={result.ok}")
                                 else:
                                     result = handle_file_upload(
                                         file_bytes, filename, mime_type, media_meta["media_type"],
                                         media_meta["message_id"], sender, domain_from_channel,
                                         source="whatsapp_meta", linked_lead_id=""
                                     )
-                                    logger.info(f"[Meta WhatsApp] file uploaded: ok={result.ok}")
+                                media_processing = media_processing_status(result)
                         except Exception as e:
-                            logger.warning(f"[Meta WhatsApp] media download/process failed: {e}")
+                            media_processing = media_processing_status(
+                                MediaResult(
+                                    ok=False,
+                                    error=MediaError(type(e).__name__, "media download or processing failed", True),
+                                )
+                            )
+                            logger.warning("[Meta WhatsApp] media download/process failed error_type=%s", type(e).__name__)
+                    else:
+                        media_processing = media_processing_status(
+                            MediaResult(
+                                ok=False,
+                                error=MediaError("MEDIA_URL_UNAVAILABLE", "media URL unavailable", True),
+                            )
+                        )
             except ImportError:
                 logger.debug("[Meta WhatsApp] media adapter not available")
             except Exception as e:
-                logger.warning(f"[Meta WhatsApp] media handler error: {e}", exc_info=True)
+                logger.warning("[Meta WhatsApp] media handler error error_type=%s", type(e).__name__)
+                media_processing = media_processing_status(
+                    MediaResult(
+                        ok=False,
+                        error=MediaError(type(e).__name__, "media handler failed", True),
+                    )
+                )
     except Exception as e:
-        logger.warning(f"[Meta WhatsApp] media extraction error: {e}", exc_info=True)
+        logger.warning("[Meta WhatsApp] media extraction error error_type=%s", type(e).__name__)
+
+    if media_processing is not None:
+        _log_whatsapp_media_status(
+            "Meta", normalized.get("msg_id", ""), media_processing,
+        )
 
     if not _flag_enabled("META_OUTBOUND_ENABLED"):
         logger.info(
             "[Meta WhatsApp] inbound received — outbound stub, skipping run_agent. "
             "Set META_OUTBOUND_ENABLED=true to activate."
         )
-        return jsonify({"status": "received_no_outbound"}), 200
+        response = {"status": "received_no_outbound"}
+        if media_processing is not None:
+            response["media_processing"] = media_processing.as_dict()
+        return jsonify(response), 200
 
     reply = run_agent(
         incoming, sender,
@@ -6662,7 +6765,10 @@ def webhook_meta_whatsapp():
 
     # Outbound — stub כנה: מחשב תשובה, לא שולח (Phase 1)
     logger.info("[Meta WhatsApp] תשובה נוצרה (stub — לא נשלחה): %s", reply[:100])
-    return jsonify({"status": "received"}), 200
+    response = {"status": "received"}
+    if media_processing is not None:
+        response["media_processing"] = media_processing.as_dict()
+    return jsonify(response), 200
 
 
 WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
