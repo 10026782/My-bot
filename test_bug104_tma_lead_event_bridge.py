@@ -177,9 +177,26 @@ finally:
 
 
 # ═════════════════════════════════════════════════════════════════
-# 2. tma_api.py — owner-immediate path (patch_lead / set_lead_outcome)
+# 2. tma_api.py — Owner ActionGateway path (C05-C07 Finding #3 remediation)
+#
+# Owner used to call tma_api._at_patch/_at_post directly ("owner-immediate
+# path"), with write_tma_lead_event() called by hand right after. That
+# direct-write branch is exactly what Finding #3 flagged
+# (DUPLICATE_APPROVAL_PATH) and has been removed: Owner and Manager now both
+# enter _queue_or_owner_execute() -> _queue_tma_write_approval() (identical
+# for every role) and, for Owner only, _claim_and_execute_approval() — the
+# same claim -> approve -> execute helper the manual /api/approvals/<id>
+# click endpoint uses. The Lead Event bridge for a Leads patch is therefore
+# no longer tma_api.py's concern at all — it lives entirely inside
+# tools/approval_actions.py::tma_write(), exercised identically for both
+# roles in section [3] below (same audit_action="lead_patch"/"lead_outcome"
+# payload shape sent by section 2's endpoints). This section instead proves
+# the tma_api.py-level HTTP contract: Owner gets an immediate result with no
+# manual approval step, Manager still gets queued, an execution failure
+# never reports success, and — the regression this fix specifically
+# guards — Owner writes never reach tma_api._at_patch/_at_post directly.
 # ═════════════════════════════════════════════════════════════════
-print("\n[2] tma_api owner-immediate path")
+print("\n[2] tma_api Owner ActionGateway path (Finding #3)")
 
 from flask import Flask
 from identity import Role
@@ -209,125 +226,143 @@ _HDR = {"X-Telegram-Init-Data": "x"}
 _orig_validate = tma_api._validate_initdata
 _orig_resolve = tma_api.resolve_identity
 _orig_at_patch = tma_api._at_patch
+_orig_at_post = tma_api._at_post
 _orig_at_get_record = tma_api._at_get_record
-_orig_gw_create = tma_api._gw_create
+_orig_queue = tma_api._queue_tma_write_approval
+_orig_claim_execute = tma_api._claim_and_execute_approval
 _orig_at_list = tma_api._at_list
 
-_patch_should_fail = {"value": False}
-_events_created = []
-_interaction_log_writes = []
+_exec_should_fail = {"value": False}
+_queued_calls = []          # (action, payload) captured from every propose
+_direct_patch_tables = []   # any table tma_api._at_patch was called with
+_direct_post_tables = []    # any table tma_api._at_post was called with (Interaction Log audit excluded below)
 
 
-def _fake_at_patch(table, record_id, fields):
-    return not _patch_should_fail["value"]
+def _tracking_at_patch(table, record_id, fields):
+    _direct_patch_tables.append(table)
+    return True
 
 
-def _counting_create(table, fields, source="unknown"):
-    if table == Tables.LEAD_EVENTS:
-        _events_created.append({"fields": fields, "source": source})
-        return {"id": f"recEV{len(_events_created)}"}
-    if table == Tables.INTERACTION_LOG:
-        _interaction_log_writes.append({"fields": fields, "source": source})
-        return {"id": f"recIL{len(_interaction_log_writes)}"}
-    return {"id": "recOTHER", "fields": fields}
+def _tracking_at_post(table, fields):
+    _direct_post_tables.append(table)
+    return {"id": "recAudit"}
 
 
-def _domain_records(table, filter_formula=""):
-    if table == "Leads":
-        return [{"id": "recLEAD001", "fields": {LeadFields.DOMAIN: "general"}}]
-    return []
+def _fake_queue(action, payload, identity, label):
+    _queued_calls.append((action, dict(payload)))
+    return "fake_approval_1", {
+        "status": "pending_approval", "approval_id": "fake_approval_1", "contract_id": "fake_contract_1",
+    }, 202
+
+
+def _fake_claim_execute(approval_id, identity):
+    if _exec_should_fail["value"]:
+        return {"ok": False, "status_code": 500, "error": "execution failed", "action_label": "x", "ctx_id": ""}
+    return {
+        "ok": True, "status_code": 200, "new_status": "approved",
+        "action_label": "x", "ctx_id": "", "bus_synced": False,
+        "execution_result": {"message": "✅", "contract_status": "executed"},
+    }
 
 
 tma_api._validate_initdata = lambda s: {"id": "1"}
 tma_api.resolve_identity = lambda ch, tid: _FakeIdentity(Role.OWNER)
-tma_api._at_patch = _fake_at_patch
-# BUG-133: tma_api.py binds `_gw_create` to the real airtable_create at
-# import time (`from tools.airtable_gateway import airtable_create as
-# _gw_create`) — reassigning airtable_gateway.airtable_create (below) does
-# NOT affect that already-bound name, so tma_api._audit()'s Interaction Log
-# write (_at_post -> _gw_create) must be mocked here directly, same as
-# _at_patch above. Without this, every "success" case below made a REAL,
-# silent HTTP POST to production Airtable's Interaction Log table — see
-# BUG_AUDIT_LOG.md BUG-133 for the incident (310 real records over 6 days).
-tma_api._gw_create = _counting_create
-# GET /api/leads/<id> unconditionally builds an Interaction Log timeline via
-# tma_api._at_list() (a plain module-level function, no gateway indirection
-# to intercept) — same unmocked-real-call class as _gw_create above, but
-# read-only (returns [] on any error, see tma_api.py's own docstring), so it
-# never wrote data; still worth closing so the test makes zero real network
-# calls, matching BUG-128's precedent.
+tma_api._at_patch = _tracking_at_patch
+tma_api._at_post = _tracking_at_post
+tma_api._queue_tma_write_approval = _fake_queue
+tma_api._claim_and_execute_approval = _fake_claim_execute
 tma_api._at_list = lambda *a, **kw: []
-airtable_gateway.airtable_create = _counting_create
-airtable_tools.airtable_get_records = _domain_records
 
 try:
-    # -- owner patch success -> exactly one event --
-    _events_created.clear()
-    _interaction_log_writes.clear()
-    _patch_should_fail["value"] = False
+    # -- 1. Owner patch_lead: canonical ActionGateway path, no manual approval --
+    _queued_calls.clear()
+    _direct_patch_tables.clear()
+    _exec_should_fail["value"] = False
     r = _client.patch("/api/leads/recLEAD001", json={"status": "active"}, headers=_HDR)
-    check("owner patch success -> 200", r.status_code == 200)
-    check("owner patch success -> exactly one Lead Event created", len(_events_created) == 1)
-    # BUG-133 regression: _audit()'s Interaction Log write must go through
-    # the mock (tma_api._gw_create), never a real Airtable call.
-    check("owner patch success -> audit write captured by mock, not real Airtable",
-          len(_interaction_log_writes) == 1)
+    check("owner patch_lead -> 200, no manual approval step", r.status_code == 200)
+    check("owner patch_lead -> exactly one contract proposed through the gateway", len(_queued_calls) == 1)
+    check("owner patch_lead -> canonical tma_patch_lead action, Leads table, audit_action carried through",
+          _queued_calls[0][0] == "tma_patch_lead"
+          and _queued_calls[0][1]["table"] == "Leads"
+          and _queued_calls[0][1]["audit_action"] == "lead_patch")
+    check("owner patch_lead -> never reaches tma_api._at_patch directly (Leads)",
+          "Leads" not in _direct_patch_tables)
 
-    # -- owner patch failure -> zero events --
-    _events_created.clear()
-    _interaction_log_writes.clear()
-    _patch_should_fail["value"] = True
+    # -- 6. Failure inside execution must never produce a false success --
+    _queued_calls.clear()
+    _exec_should_fail["value"] = True
     r = _client.patch("/api/leads/recLEAD001", json={"status": "active"}, headers=_HDR)
-    check("owner patch failure -> 500", r.status_code == 500)
-    check("owner patch failure -> zero Lead Events created", len(_events_created) == 0)
-    check("owner patch failure -> zero audit writes (no PATCH -> no _audit call)",
-          len(_interaction_log_writes) == 0)
-    _patch_should_fail["value"] = False
+    check("owner patch_lead execution failure -> response never claims ok=True",
+          (r.get_json() or {}).get("ok") is not True)
+    check("owner patch_lead execution failure -> non-2xx status", r.status_code >= 400)
+    _exec_should_fail["value"] = False
 
-    # -- owner outcome success -> exactly one event --
-    _events_created.clear()
-    _interaction_log_writes.clear()
+    # -- 3. Owner set_lead_outcome: same canonical path, no direct Airtable bypass --
+    _queued_calls.clear()
+    _direct_patch_tables.clear()
     r = _client.post("/api/leads/recLEAD001/outcome", json={"outcome": "converted"}, headers=_HDR)
-    check("owner outcome success -> 200", r.status_code == 200)
-    check("owner outcome success -> exactly one Lead Event created", len(_events_created) == 1)
-    check("owner outcome success -> audit write captured by mock, not real Airtable",
-          len(_interaction_log_writes) == 1)
+    check("owner set_lead_outcome -> 200, no manual approval step", r.status_code == 200)
+    check("owner set_lead_outcome -> canonical tma_set_lead_outcome action, audit_action carried through",
+          _queued_calls[0][0] == "tma_set_lead_outcome"
+          and _queued_calls[0][1]["audit_action"] == "lead_outcome")
+    check("owner set_lead_outcome -> never reaches tma_api._at_patch directly (Leads)",
+          "Leads" not in _direct_patch_tables)
 
-    # -- owner outcome failure -> zero events --
-    _events_created.clear()
-    _interaction_log_writes.clear()
-    _patch_should_fail["value"] = True
+    _queued_calls.clear()
+    _exec_should_fail["value"] = True
     r = _client.post("/api/leads/recLEAD001/outcome", json={"outcome": "converted"}, headers=_HDR)
-    check("owner outcome failure -> 500", r.status_code == 500)
-    check("owner outcome failure -> zero Lead Events created", len(_events_created) == 0)
-    check("owner outcome failure -> zero audit writes (no PATCH -> no _audit call)",
-          len(_interaction_log_writes) == 0)
-    _patch_should_fail["value"] = False
+    check("owner set_lead_outcome execution failure -> response never claims ok=True",
+          (r.get_json() or {}).get("ok") is not True)
+    check("owner set_lead_outcome execution failure -> non-2xx status", r.status_code >= 400)
+    _exec_should_fail["value"] = False
 
-    # -- GET lead -> no event wiring on the read path --
+    # -- GET lead -> unaffected by this change (read path, no gateway involvement) --
     tma_api._at_get_record = lambda table, rid: {"id": rid, "fields": {"Name": "x"}}
-    _events_created.clear()
+    _queued_calls.clear()
     r = _client.get("/api/leads/recLEAD001", headers=_HDR)
-    check("GET lead -> zero Lead Events created", len(_events_created) == 0)
+    check("GET lead -> no contract proposed on the read path", len(_queued_calls) == 0)
 
-    # -- create_lead_task -> no event (doesn't PATCH the Lead) --
-    _events_created.clear()
+    # -- 4. Owner create_lead_task: same canonical path, no direct Airtable bypass --
+    tma_api._at_get_record = lambda table, rid: {"id": rid, "fields": {}}
+    _queued_calls.clear()
+    _direct_post_tables.clear()
     r = _client.post("/api/leads/recLEAD001/task", json={"title": "call back"}, headers=_HDR)
-    check("create_lead_task -> zero Lead Events created", len(_events_created) == 0)
+    check("owner create_lead_task -> 200, no manual approval step", r.status_code == 200)
+    check("owner create_lead_task -> canonical tma_create_lead_task action, Tasks table",
+          _queued_calls[0][0] == "tma_create_lead_task"
+          and _queued_calls[0][1]["table"] == Tables.TASKS)
+    check("owner create_lead_task -> never reaches tma_api._at_post directly (Tasks)",
+          Tables.TASKS not in _direct_post_tables)
 
-    # -- create_followup -> no event (doesn't PATCH the Lead) --
-    _events_created.clear()
+    # -- create_followup: unrelated endpoint, always queued (unchanged) --
+    _queued_calls.clear()
     r = _client.post("/api/followup", json={"lead_id": "recLEAD001", "note": "x"}, headers=_HDR)
-    check("create_followup -> zero Lead Events created", len(_events_created) == 0)
+    check("create_followup -> still queued for approval (out of Finding #3's scope)",
+          r.status_code == 202)
+
+    # -- 2. Manager patch_lead: still requires the existing approval flow --
+    tma_api.resolve_identity = lambda ch, tid: _FakeIdentity(Role.MANAGER)
+    _queued_calls.clear()
+    r = _client.patch("/api/leads/recLEAD001", json={"status": "active"}, headers=_HDR)
+    check("manager patch_lead -> still 202 pending_approval (unchanged)", r.status_code == 202)
+    check("manager patch_lead -> response is the pending_approval shape, not executed",
+          (r.get_json() or {}).get("status") == "pending_approval")
+
+    # -- 5. Insufficient role -> fail closed, gateway never reached --
+    tma_api.resolve_identity = lambda ch, tid: _FakeIdentity(Role.LEAD)
+    _queued_calls.clear()
+    r = _client.patch("/api/leads/recLEAD001", json={"status": "active"}, headers=_HDR)
+    check("insufficient role -> 403 forbidden", r.status_code == 403)
+    check("insufficient role -> gateway never reached", len(_queued_calls) == 0)
 finally:
     tma_api._validate_initdata = _orig_validate
     tma_api.resolve_identity = _orig_resolve
     tma_api._at_patch = _orig_at_patch
+    tma_api._at_post = _orig_at_post
     tma_api._at_get_record = _orig_at_get_record
-    tma_api._gw_create = _orig_gw_create
+    tma_api._queue_tma_write_approval = _orig_queue
+    tma_api._claim_and_execute_approval = _orig_claim_execute
     tma_api._at_list = _orig_at_list
-    airtable_gateway.airtable_create = _orig_create
-    airtable_tools.airtable_get_records = _orig_get_records
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -341,10 +376,24 @@ _orig_verify_claim = approval_actions._verify_active_execution_claim
 approval_actions._verify_active_execution_claim = lambda *a, **kw: True
 
 _patch_ok = {"value": True}
+_events_created = []
 
 
 def _fake_gw_patch(table, record_id, fields, source="unknown"):
     return _patch_ok["value"]
+
+
+def _counting_create(table, fields, source="unknown"):
+    if table == Tables.LEAD_EVENTS:
+        _events_created.append({"fields": fields, "source": source})
+        return {"id": f"recEV{len(_events_created)}"}
+    return {"id": "recOTHER", "fields": fields}
+
+
+def _domain_records(table, filter_formula=""):
+    if table == "Leads":
+        return [{"id": "recLEAD001", "fields": {LeadFields.DOMAIN: "general"}}]
+    return []
 
 
 airtable_gateway.airtable_patch = _fake_gw_patch
