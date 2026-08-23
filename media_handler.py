@@ -22,7 +22,13 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from guards import idempotency as _idem_store
-from media_gateway import AssetRecord, find_asset_by_logical_media_key, save_asset
+from airtable_schema import MediaPersistenceState
+from media_gateway import (
+    AssetRecord,
+    find_asset_by_logical_media_key,
+    save_asset,
+    update_asset_persistence,
+)
 import drive_adapter
 from voice_stt_adapter import transcribe
 
@@ -513,50 +519,152 @@ def handle_file_upload(
             ok=True, asset_id=media_lookup.record.get("id", ""),
             drive_url=fields.get("Drive URL", ""), file_size_tier=tier,
         )
+    media_record = media_lookup.record if media_lookup.status == "incomplete" else None
+    media_record_id = media_record.get("id", "") if media_record else ""
+
+    def mark_partial(record_id: str, drive_file_id: str, drive_url: str) -> None:
+        if record_id:
+            update_asset_persistence(
+                record_id,
+                state=MediaPersistenceState.PARTIAL,
+                drive_file_id=drive_file_id,
+                drive_url=drive_url,
+                last_error_code="MEDIA_FILES_PARTIAL",
+            )
 
     existing_drive = drive_adapter.find_existing_by_logical_media_key(media_key, parent_folder_id)
     if existing_drive.ok:
+        if media_record_id:
+            reconciled = update_asset_persistence(
+                media_record_id,
+                state=MediaPersistenceState.ASSET_PERSISTED,
+                drive_file_id=existing_drive.file_id,
+                drive_url=existing_drive.web_url,
+            )
+            if reconciled:
+                return MediaResult(
+                    ok=True, asset_id=media_record_id,
+                    drive_url=existing_drive.web_url, file_size_tier=tier,
+                )
+            mark_partial(media_record_id, existing_drive.file_id, existing_drive.web_url)
+            return MediaResult(
+                ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
+                error=MediaError("MEDIA_FILES_RECONCILIATION_FAILED", "Media Files reconciliation failed", True),
+            )
+        reconciled_id = save_asset(AssetRecord(
+            name=filename,
+            file_type=file_type,
+            mime_type=mime_type,
+            drive_url=existing_drive.web_url,
+            drive_file_id=existing_drive.file_id,
+            domain=domain,
+            source=source,
+            size_bytes=size_bytes,
+            created_by=user_id,
+            telegram_file_id=file_id,
+            linked_lead_id=linked_lead_id,
+            logical_media_key=media_key,
+            persistence_state=MediaPersistenceState.DRIVE_UPLOADED,
+        ))
+        if not reconciled_id:
+            return MediaResult(
+                ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
+                error=MediaError("MEDIA_FILES_RECONCILIATION_FAILED", "Media Files persistence failed", True),
+            )
+        if not update_asset_persistence(
+            reconciled_id,
+            state=MediaPersistenceState.ASSET_PERSISTED,
+            drive_file_id=existing_drive.file_id,
+            drive_url=existing_drive.web_url,
+        ):
+            mark_partial(reconciled_id, existing_drive.file_id, existing_drive.web_url)
+            return MediaResult(
+                ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
+                error=MediaError("MEDIA_FILES_RECONCILIATION_FAILED", "Media Files reconciliation failed", True),
+            )
         return MediaResult(
-            ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
-            error=MediaError(
-                "DRIVE_OBJECT_FOUND_NEEDS_PERSISTENCE",
-                "Drive object exists but Media Files metadata is not reusable yet.", True,
-            ),
+            ok=True, asset_id=reconciled_id, drive_url=existing_drive.web_url,
+            file_size_tier=tier,
         )
     if existing_drive.error and existing_drive.error.error_code not in {"DRIVE_NOT_FOUND"}:
         return MediaResult(ok=False, file_size_tier=tier, error=existing_drive.error)
+
+    if not media_record_id:
+        media_record_id = save_asset(AssetRecord(
+            name=filename,
+            file_type=file_type,
+            mime_type=mime_type,
+            drive_url="",
+            drive_file_id="",
+            domain=domain,
+            source=source,
+            size_bytes=size_bytes,
+            created_by=user_id,
+            telegram_file_id=file_id,
+            linked_lead_id=linked_lead_id,
+            logical_media_key=media_key,
+            persistence_state=MediaPersistenceState.PENDING,
+        )) or ""
 
     drive_result = drive_adapter.upload_file(
         file_bytes, filename, mime_type, parent_folder_id, logical_media_key=media_key,
     )
     if not drive_result.ok:
+        if media_record_id:
+            update_asset_persistence(
+                media_record_id,
+                state=MediaPersistenceState.FAILED,
+                last_error_code=drive_result.error.error_code,
+            )
         return MediaResult(
             ok=False,
             file_size_tier=tier,
             error=MediaError(drive_result.error.error_code, drive_result.error.error_message, drive_result.error.retryable),
         )
 
-    asset = AssetRecord(
-        name=drive_result.name,
-        file_type=file_type,
-        mime_type=mime_type,
-        drive_url=drive_result.web_url,
-        drive_file_id=drive_result.file_id,
-        domain=domain,
-        source=source,
-        size_bytes=size_bytes,
-        created_by=user_id,
-        telegram_file_id=file_id,
-        linked_lead_id=linked_lead_id,
-        logical_media_key=media_key,
-    )
-    asset_id = save_asset(asset)
-    if not asset_id:
+    if media_record_id:
+        state_saved = update_asset_persistence(
+            media_record_id,
+            state=MediaPersistenceState.DRIVE_UPLOADED,
+            drive_file_id=drive_result.file_id,
+            drive_url=drive_result.web_url,
+        )
+        asset_id = media_record_id
+    else:
+        asset_id = save_asset(AssetRecord(
+            name=drive_result.name,
+            file_type=file_type,
+            mime_type=mime_type,
+            drive_url=drive_result.web_url,
+            drive_file_id=drive_result.file_id,
+            domain=domain,
+            source=source,
+            size_bytes=size_bytes,
+            created_by=user_id,
+            telegram_file_id=file_id,
+            linked_lead_id=linked_lead_id,
+            logical_media_key=media_key,
+            persistence_state=MediaPersistenceState.DRIVE_UPLOADED,
+        ))
+        state_saved = bool(asset_id)
+    if not state_saved or not asset_id:
+        mark_partial(media_record_id, drive_result.file_id, drive_result.web_url)
         return MediaResult(
             ok=False,
             file_size_tier=tier,
             drive_url=drive_result.web_url,
-            error=MediaError("ASSET_SAVE_FAILED", "הקובץ הועלה ל-Drive אך לא נשמר ב-Airtable.", True),
+            error=MediaError("MEDIA_FILES_PARTIAL", "Drive object exists but Media Files state is partial.", True),
+        )
+    if not update_asset_persistence(
+        asset_id,
+        state=MediaPersistenceState.ASSET_PERSISTED,
+        drive_file_id=drive_result.file_id,
+        drive_url=drive_result.web_url,
+    ):
+        mark_partial(asset_id, drive_result.file_id, drive_result.web_url)
+        return MediaResult(
+            ok=False, file_size_tier=tier, drive_url=drive_result.web_url,
+            error=MediaError("MEDIA_FILES_PARTIAL", "Drive object exists but final persistence is incomplete.", True),
         )
 
     return MediaResult(

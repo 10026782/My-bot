@@ -9,12 +9,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from airtable_schema import MediaFileFields, Tables
+from airtable_schema import MediaFileFields, MediaPersistenceState, Tables
 from tools.airtable_gateway import (
     AirtableLookupError,
     _safe_formula_param,
     at_list_by_formula,
     airtable_create,
+    airtable_patch,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,11 +37,13 @@ class AssetRecord:
     raw_transcript: str = ""
     normalized_transcript: str = ""
     logical_media_key: str = ""
+    persistence_state: str = ""
+    last_error_code: str = ""
 
 
 @dataclass(frozen=True)
 class MediaLookupResult:
-    status: str  # not_found | reusable | duplicate | error
+    status: str  # not_found | incomplete | reusable | duplicate | error
     record: dict | None = None
     error: str = ""
 
@@ -67,6 +70,10 @@ def _asset_to_fields(asset: AssetRecord) -> dict:
         fields[MediaFileFields.NORMALIZED_TRANSCRIPT] = asset.normalized_transcript
     if asset.logical_media_key:
         fields[MediaFileFields.LOGICAL_MEDIA_KEY] = asset.logical_media_key
+    if asset.persistence_state:
+        fields[MediaFileFields.PERSISTENCE_STATE] = asset.persistence_state
+    if asset.last_error_code:
+        fields[MediaFileFields.LAST_ERROR_CODE] = asset.last_error_code
     return fields
 
 
@@ -88,7 +95,11 @@ def find_asset_by_logical_media_key(logical_media_key: str) -> MediaLookupResult
         return MediaLookupResult("not_found")
     fields = records[0].get("fields", {})
     if not fields.get(MediaFileFields.DRIVE_FILE_ID):
-        return MediaLookupResult("not_found")
+        return MediaLookupResult("incomplete", record=records[0])
+    if fields.get(MediaFileFields.PERSISTENCE_STATE) and fields.get(
+        MediaFileFields.PERSISTENCE_STATE
+    ) != MediaPersistenceState.ASSET_PERSISTED:
+        return MediaLookupResult("incomplete", record=records[0])
     return MediaLookupResult("reusable", record=records[0])
 
 
@@ -103,6 +114,26 @@ def save_asset(asset: AssetRecord) -> str | None:
         logger.warning("[media_gateway] save_asset failed for name=%s", asset.name)
         return None
     return record.get("id")
+
+
+def update_asset_persistence(
+    record_id: str,
+    *,
+    state: str,
+    drive_file_id: str = "",
+    drive_url: str = "",
+    last_error_code: str = "",
+) -> bool:
+    """Advance one Media Files record through the durable persistence lifecycle."""
+    fields = {
+        MediaFileFields.PERSISTENCE_STATE: state,
+        MediaFileFields.LAST_ERROR_CODE: last_error_code,
+    }
+    if drive_file_id:
+        fields[MediaFileFields.DRIVE_FILE_ID] = drive_file_id
+    if drive_url:
+        fields[MediaFileFields.DRIVE_URL] = drive_url
+    return airtable_patch(Tables.MEDIA_FILES, record_id, fields, source="media_gateway")
 
 
 if __name__ == "__main__":
