@@ -114,5 +114,23 @@ Legend: **implemented** = merged on main · **exercised** = actually run against
 - **Status:** DEFERRED (owner-blocked) / FINANCIAL_GATE NEEDS_RUNTIME_VERIFICATION.
 
 ### D13 — Architecture Drift Map piggyback queue
-- **Repo evidence:** `docs/governance/ARCHITECTURE_DRIFT_MAP.md` tracking table — 6×TODO (Emergency-Stop coverage P0, messaging facade P0, approvals canonicalization P0, task taxonomy P1, audit-event schema P1, Airtable read gateway P2), 1×DEFERRED (Google risk metadata, frozen), identity normalization smoke PASS 2026-06-14. Bodies intentionally not duplicated here (map is its own SSOT; do-not-autonomously-execute rule at map §"חשוב").
+- **Repo evidence:** `docs/governance/ARCHITECTURE_DRIFT_MAP.md` tracking table — 6×TODO (Emergency-Stop coverage P0, messaging facade P0, approvals canonicalization P0, task taxonomy P1, audit-event schema P1, Airtable read gateway P2), 1×DEFERRED (Google risk metadata, frozen), identity normalization smoke PASS 2026-06-14. Bodies intentionally not duplicated here (map is its own SSOT; do-not-autonomously-execute rule at map §"חשוב"). Note 23/08 file/drift pass: map row 1 (emergency /tmp persistence TODO) is now SUPERSEDED by the durable `evaluate_emergency_stop()` cutover (`feature_flags.py:260-281`) — status column in the map itself not yet updated.
 - **Status:** DEFERRED (piggyback triggers must arrive organically).
+
+---
+
+## Section E — FILE / DRIFT / ARTIFACT PASS (23/08/2026, baseline `0e356ad`)
+
+Full bodies live in **[MAINTENANCE_FILE_DRIFT_REGISTER.md](MAINTENANCE_FILE_DRIFT_REGISTER.md)**; summaries only here.
+
+| ID | Item | Status | Future audit |
+|---|---|---|---|
+| E-F | Legacy/unwired module cluster: worker.py, knowledge_engine.py (+root router.py dead-chain), lead_qualifier.py (separate dead chain — correction: knowledge_engine does NOT import it), memory.py, profile.py, creative_generator.py, tenant_provisioner.py (test-only/parked), benchmark_token_estimate.py | OPEN / NEEDS_PRODUCT_DECISION (retirement-vs-wiring per module) | #12/#21 |
+| E-A | Orphan-suspect tracked artifacts: `config.json`, `import_knowledge_base.json` (zero references repo-wide) | OPEN | #21 |
+| E-G | Doc drift: CLAUDE.md:116 + ROADMAP F13 still list deleted core/tenant_config.py; AI_CONTEXT.md:66 cites nonexistent `*_CUTOVER` flag names (real: `*_CANONICAL_LEAD_WRITE`); AGENTS.md self-stale lines; CONSUMPTION_ENFORCEMENT_PLAN header (=D4); AI_CONTEXT freshness lag | DOC_DRIFT (open docs pass) | #19 |
+| E-H | Code→docs gaps ×5: media result contract, WhatsApp ACK behavior, last_uploaded_file architecture (+dangling SPEC_File_Context_Reference.md citation at session_store.py:98), Media Files table responsibility, idempotency overview | OPEN (documentation work) | #20 |
+| E-I | Naming debt: owner-field semantic fragmentation (12 constants); provider IDs funneled into "Telegram File ID"; hand-copied alias duplicates dispatcher/tma_api; English-schema migration plan never executed | DEFERRED | #13 |
+| E-J | Compatibility debt: llm_fallback load-bearing (keep); approval legacy values EXECUTED/LEGACY aging candidates; duplicate Media Files transcript writer bypassing media_gateway; memory.ConversationMemory zero importers | DEFERRED | #14 |
+| E-K | Schema/data-contract follow-ups ×10 incl. FileUploadResult.file_id dual-table overloading; Media Files write-only identity columns; "Status" field hardcoded outside schema constants; State JSON unversioned blob | NEEDS_DEDICATED_AUDIT | #2/#3 |
+| E-L | Media/file-ingestion: four-clause verdict **STILL HOLDS** (no stable logical key / durable Drive mapping / cross-process retry safety / metadata reconciliation on ingestion path). NEW: PR #859 fixed WhatsApp false-success ACK + adapter failure reporting (MERGED) | DEFERRED until media architecture work package | #3/#15/#16 |
+| E-M | Missing historical artifacts ×6 re-checked: C00/C08 body, C02-C04 body (3 remediation docs exist; findings #2/#4/#5/#6/#9/#10 unevidenced), C04 idempotency inventory, LeadSessions audit, long-log audit, Approval_Policy_Spec.md (dangling refs ×3 docs) | UNKNOWN / MISSING ARTIFACT | — |

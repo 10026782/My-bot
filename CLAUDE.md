@@ -136,7 +136,7 @@ Airtable field/table drift is a recurring failure mode in this repo, so there's 
 
 ### Maintenance governance SSOT
 
-For maintenance-audit track status (A Env/Config, B Dead Code, C00–C08) and efficiency/operational debt: see `MAINTENANCE_STATUS_MATRIX.md` and `MAINTENANCE_DEFERRED_REGISTER.md` (consolidated 23/08/2026 against origin/main; includes the SINGLE BUSINESS WRITE PATH decision and worker.py legacy/unwired record). Note: these track IDs are unrelated to ROADMAP's CORE-component C-numbers.
+For maintenance-audit track status (A Env/Config, B Dead Code, C00–C08) and efficiency/operational debt: see `MAINTENANCE_STATUS_MATRIX.md` and `MAINTENANCE_DEFERRED_REGISTER.md` (consolidated 23/08/2026 against origin/main; includes the SINGLE BUSINESS WRITE PATH decision and worker.py legacy/unwired record). File/module ownership debt, docs↔code drift, naming/alias drift, deprecated-compatibility, orphan-artifact and media-ingestion findings: see `MAINTENANCE_FILE_DRIFT_REGISTER.md` (23/08/2026 file/drift pass). Note: these track IDs are unrelated to ROADMAP's CORE-component C-numbers.
 
 ### Lead lifecycle & growth features (mostly feature-flag gated)
 
