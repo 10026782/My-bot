@@ -91,3 +91,33 @@ def test_tool_logs_metadata_without_input_or_result(caplog):
     assert "input_key_count=2" in caplog.text
     assert "result_type=dict" in caplog.text
     assert "typing indicator failed error_type=RuntimeError" in caplog.text
+
+
+def test_meta_reply_log_contains_metadata_without_reply_content(caplog):
+    caplog.set_level(logging.INFO, logger="app")
+    sentinel = "SENSITIVE_REPLY_SENTINEL_9F31"
+    normalized = {
+        "text": "hello",
+        "from": "+972500000000",
+        "to": "+972511111111",
+        "msg_id": "wamid-log-test",
+        "media": None,
+    }
+    with patch.object(app, "_validate_meta_signature", return_value=True), \
+         patch.object(app, "_normalize_meta_payload", return_value=normalized), \
+         patch.object(app, "_apply_ingress_context_gate"), \
+         patch.object(app, "resolve_identity", return_value=SimpleNamespace(memory_key="boss_hq:log-test")), \
+         patch.object(app.idempotency, "is_duplicate", return_value=False), \
+         patch.object(app, "_channel_domain", return_value="general"), \
+         patch.object(app, "_flag_enabled", side_effect=lambda name: name == "META_OUTBOUND_ENABLED"), \
+         patch.object(app, "run_agent", return_value=sentinel) as run_agent:
+        response = app.app.test_client().post(
+            "/webhooks/meta/whatsapp", json={"ignored": "patched"},
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "received"}
+    run_agent.assert_called_once()
+    assert sentinel not in caplog.text
+    assert "result_type=str" in caplog.text
+    assert f"reply_length={len(sentinel)}" in caplog.text
