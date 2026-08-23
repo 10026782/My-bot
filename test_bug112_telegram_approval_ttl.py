@@ -38,9 +38,10 @@ exactly as that file's _classify() mirrors the classification branch).
 
 Explicitly NOT touched by this fix, verified not to regress: BUG-111 lead
 parsing, F52/agent_message_formatter, FEATURE_UNIFIED_STATUS_FORMATTER, RP5,
-and tool execution semantics for anything other than stale-approval
-blocking (a live, non-expired callback still executes exactly as before —
-see Section 1, Tests 1-2).
+and Gateway-ON tool execution semantics. With the approval-coverage fix,
+Gateway-OFF tool callbacks fail closed; a live, non-expired callback still
+executes through the canonical Gateway when it is enabled (see Section 1,
+Tests 1-2).
 
 ── BUG-112 production follow-up (Section 4, Tests 8b-8d, 4b/14-18) ──
 
@@ -201,11 +202,11 @@ def _run_callback(
 
 
 # ══════════════════════════════════════════════════════════════════
-# 1. Live callback (within TTL) — execution is UNCHANGED
+# 1. Live callback (within TTL) — Gateway-OFF is fail-closed; Gateway-ON is unchanged
 # ══════════════════════════════════════════════════════════════════
 print("── 1. callback approve WITHIN TTL still executes ──────────────")
 
-print("\n── Test 1: flag off, fresh callback — legacy dispatch still fires ──")
+print("\n── Test 1: flag off, fresh callback — legacy dispatch is blocked ──")
 requester1 = _identity("req_bug112_1", Role.OWNER)
 approver1 = _identity("appr_bug112_1", Role.OWNER)
 calls1, contract1, bot1 = _run_callback(
@@ -213,7 +214,7 @@ calls1, contract1, bot1 = _run_callback(
     seed_contract=False, feature_gw=False, tool_inputs={"chat_id": "req_bug112_1", "draft": "a"},
     age_seconds=60,  # 1 minute — well within the 10-minute window
 )
-chk("Test1: dispatch_tool called exactly once (fresh callback, unaffected)", calls1 == 1)
+chk("Test1: dispatch_tool is not called for Gateway-OFF callback", calls1 == 0)
 
 print("\n── Test 2: flag on + live contract, fresh callback — Gateway path fires ──")
 requester2 = _identity("req_bug112_2", Role.OWNER)
