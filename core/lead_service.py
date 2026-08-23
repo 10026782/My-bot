@@ -183,7 +183,7 @@ class LeadPayload:
 @dataclass
 class LeadCreateResult:
     ok: bool
-    action: str                  # "created" | "updated" | "duplicate" | "blocked" | "invalid" | "lifecycle_persistence_failed"
+    action: str                  # "created" | "updated" | "duplicate" | "blocked" | "invalid" | "gateway_failed" | "lifecycle_persistence_failed"
     record_id: str = ""
     domain: str = ""
     owner_user_id: str = ""
@@ -432,7 +432,19 @@ def create_lead(
         contract_id = gw_result.contract_id
         contract_ledger = _gw._ledger
     except Exception as exc:
-        logger.warning("[LeadService] gateway propose failed: %s", exc)
+        logger.error(
+            "[LeadService] gateway proposal failed; lead mutation NOT executed: %s",
+            exc,
+        )
+        return LeadCreateResult(
+            ok=False,
+            action="gateway_failed",
+            reason="gateway_proposal_failed",
+            evidence={
+                "gateway_proposal": "failed",
+                "mutation_executed": False,
+            },
+        )
 
     # Write
     record_id = ""
