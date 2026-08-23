@@ -114,8 +114,23 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse origin/main)" = "${{ steps.guard.outputs.sha }}"
+          set +e
           python -m tools.context_librarian reconcile --check --main-ref origin/main > reconcile.json
-          test "$(python -c "import json;print(json.load(open('reconcile.json'))['outcome'])")" = AUTO_MAINTENANCE_REQUIRED
+          reconcile_status=$?
+          set -e
+          test -s reconcile.json
+          outcome="$(python -c "import json;print(json.load(open('reconcile.json'))['outcome'])" 2>/dev/null)" || {
+            echo "::error::reconcile produced invalid JSON"
+            exit 1
+          }
+          test "$outcome" = AUTO_MAINTENANCE_REQUIRED || {
+            echo "::error::unexpected reconcile outcome: $outcome"
+            exit 1
+          }
+          if [ "$reconcile_status" -ne 0 ] && [ "$reconcile_status" -ne 2 ]; then
+            echo "::error::unexpected reconcile exit code: $reconcile_status"
+            exit 1
+          fi
       - name: Apply bounded maintenance on current main
         env:
           GH_TOKEN: ${{ github.token }}

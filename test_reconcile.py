@@ -824,6 +824,34 @@ def test_workflow_uses_latest_main_and_never_writes_on_push():
     assert "push origin HEAD:main" not in text
 
 
+def test_workflow_recheck_allows_expected_exit_code_2_for_auto_maintenance():
+    text = (REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml").read_text(
+        encoding="utf-8"
+    )
+    recheck = text.split("- name: Re-check current main before writing", 1)[1].split(
+        "- name: Apply bounded maintenance on current main", 1
+    )[0]
+    assert "set +e" in recheck
+    assert "reconcile_status=$?" in recheck
+    assert "set -e" in recheck
+    assert '[ "$reconcile_status" -ne 0 ]' in recheck
+    assert '[ "$reconcile_status" -ne 2 ]' in recheck
+    assert "AUTO_MAINTENANCE_REQUIRED" in recheck
+
+
+def test_workflow_recheck_rejects_invalid_output_and_unexpected_outcome():
+    text = (REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml").read_text(
+        encoding="utf-8"
+    )
+    recheck = text.split("- name: Re-check current main before writing", 1)[1].split(
+        "- name: Apply bounded maintenance on current main", 1
+    )[0]
+    assert "test -s reconcile.json" in recheck
+    assert "invalid JSON" in recheck
+    assert "unexpected reconcile outcome" in recheck
+    assert "exit 1" in recheck
+
+
 def test_ten_main_shas_share_one_rolling_branch_and_pr():
     text = (REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml").read_text(
         encoding="utf-8"
