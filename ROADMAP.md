@@ -2207,8 +2207,8 @@ Contact עברה דרך `crm_add_contact`/`find_or_create_contact` — מאשר
 ### F13 — TenantConfig + Provider Interfaces
 ⚠️ **STATUS: DEAD CODE — DO NOT WIRE** (ללא קשר להכרעת F12, ראה למטה)
 **חשוב:** כמו F12 — חוסם אך ורק F08 (SaaS Multi-Tenant) עתידי. אינו חוסם, ואינו קשור ל, שום עבודה שוטפת אחרת ברשימה הזו.
-- קיים: `core/tenant_config.py` + `providers/` (5 קבצים)
-- לא מחובר: אפס imports מקוד חי
+- היסטורי: `core/tenant_config.py` נוצר במסגרת F13 ולאחר מכן הוסר ב-PR #851; shims ה-provider תחת `providers/` עדיין קיימים, אך אינם מחוברים ל-pipeline.
+- מצב נוכחי: אפס imports מקוד חי אל ה-shims; אין להציג את `core/tenant_config.py` כרכיב קיים.
 - כפילות: `TenantConfig` קיים גם ב-`tenant_provisioner.py`
 - **F12 vs F13 overlap ב-`providers/` — הוכרע 07/07/2026: F13 סופגת את F12** (הכרעת בעלים מפורשת). עדיין **אין לחבר** — ה-DEAD CODE status למעלה נשאר בתוקף עד sprint multi-tenancy ייעודי; ההכרעה קובעת רק *איזה* תכנון ממשיך (F13), לא מתירה activation.
 - Piggyback Trigger: sprint multi-tenancy בלבד
@@ -2218,8 +2218,8 @@ scope: **infrastructure only — אפס שינוי runtime behavior** בשלב �
 תלוי ב: C01 (Identity), W2 (`airtable_gateway`), C52 (COG / `core/output_gateway.py`).
 חוסם: F08 (SaaS Multi-Tenant) — F08 לא יכול להיבנות בלי החוזה הזה קודם.
 ⚠️ **חפיפה עם F12** — שני הספקים מציעים `providers/` כתיקייה חדשה ל-LLM abstraction (F12: `LLMProvider.generate(prompt, context, model_tier)`; F13: `LLMProvider.generate(messages, system, model, max_tokens, tools)` + עוד שני providers ל-storage/channel). **לא להתחיל מימוש של אף אחד מהשניים לפני שמחליטים אם F13 סופג את F12 או שהם משלימים זה את זה** — אחרת ניצור שתי תיקיות `providers/` עם interfaces סותרים, כמו התנגשות ה-ID של C20/C21 שתועדה ב-`AI_CONTEXT.md`.
-מצב: **CODE COMPLETE, לא מחובר ל-pipeline** — כל 6 הקבצים קיימים (PR #87, מוזג ל-`main`). אפס import מקוד קיים אליהם — `app.py`/`tools/dispatcher.py` לא משתמשים בהם, `get_tenant_config()` תמיד מחזיר את `boss_hq` הקשיח. ⚠️ ה-spec המקורי הניח חתימות פונקציות שלא קיימות בקוד (`gateway_add`/`gateway_update`/`gateway_delete`, `send_via_cog`, `airtable_get(max_records=...)` כ-`list[dict]`, `_validate_twilio_signature(headers, body)`) — תוקן מול הקוד האמיתי, מתועד ב-`BUG_AUDIT_LOG.md` כ-SPEC-001. הכרעת F12-מול-F13 (השורה הקודמת) **עדיין לא בוצעה** — הקבצים קיימים אך לא נבחרו כפתרון הסופי.
-קבצים שנוצרו: `core/tenant_config.py`, `providers/__init__.py`, `providers/interfaces.py`, `providers/airtable_shim.py`, `providers/anthropic_shim.py`, `providers/twilio_shim.py`.
+מצב: **CODE COMPLETE היסטורי; לא מחובר ל-pipeline** — PR #87 מוזג ל-`main`, אך `core/tenant_config.py` הוסר ב-PR #851 ו-shims ה-provider שנותרו אינם מחוברים. אפס import מקוד קיים אליהם — `app.py`/`tools/dispatcher.py` לא משתמשים בהם. ה-spec המקורי הניח חתימות פונקציות שלא קיימות בקוד (`gateway_add`/`gateway_update`/`gateway_delete`, `send_via_cog`, `airtable_get(max_records=...)` כ-`list[dict]`, `_validate_twilio_signature(headers, body)`) — תוקן מול הקוד האמיתי, מתועד ב-`BUG_AUDIT_LOG.md` כ-SPEC-001. הכרעת F12-מול-F13 (השורה הקודמת) **עדיין לא בוצעה** — ה-shims הקיימים לא נבחרו כפתרון הסופי.
+הקבצים שנוצרו היסטורית: `core/tenant_config.py`, `providers/__init__.py`, `providers/interfaces.py`, `providers/airtable_shim.py`, `providers/anthropic_shim.py`, `providers/twilio_shim.py`.
 
 ### F16 — Media Layer (voice notes + file uploads → Drive + Airtable) — ✅ הושלם
 מה: שכבת מדיה מלאה — קליטת קובץ/הקלטה מ-Telegram או TMA, העלאה ל-Google Drive, תמלול (STT), ושמירת metadata בטבלת Airtable "Media Files". מחולק לשבעה batches (א-ז).
