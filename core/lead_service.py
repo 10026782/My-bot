@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from airtable_schema import LeadFields
+from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -234,35 +235,36 @@ def find_existing_lead(name: str, phone: str) -> Optional[str]:
     create_lead()'s `existing_id` instead of triggering a second lookup.
     """
     import os
-    import urllib.parse
-    import httpx
 
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     key = os.environ.get("AIRTABLE_API_KEY", "")
     if not base or not key:
         return None
 
-    url = f"https://api.airtable.com/v0/{base}/{urllib.parse.quote('Leads', safe='')}"
-    headers = {"Authorization": f"Bearer {key}"}
-
     for formula in _search_formulas(name, phone):
         try:
-            r = httpx.get(url, headers=headers,
-                          params={"filterByFormula": formula, "maxRecords": 5},
-                          timeout=8)
-            if r.status_code == 200:
-                records = r.json().get("records", [])
-                if records:
-                    if phone:
-                        # Only an exact phone match counts as "the same lead"
-                        # — a shared/similar name alone is not enough (see
-                        # BUG-094 in the original lead_candidate_handler.py).
-                        for rec in records:
-                            rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
-                            if rec_phone == phone:
-                                return rec["id"]
-                        continue
-                    return records[0]["id"]
+            records = list_records(
+                "Leads",
+                formula,
+                max_records=5,
+                paginate=False,
+                timeout=8,
+            )
+            if records:
+                if phone:
+                    # Only an exact phone match counts as "the same lead"
+                    # — a shared/similar name alone is not enough (see
+                    # BUG-094 in the original lead_candidate_handler.py).
+                    for rec in records:
+                        rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
+                        if rec_phone == phone:
+                            return rec["id"]
+                    continue
+                return records[0]["id"]
+        except AirtableReadError as exc:
+            if exc.status_code is None:
+                logger.warning("[LeadService] Airtable search error: %s", exc.cause or exc)
+            continue
         except Exception as exc:
             logger.warning("[LeadService] Airtable search error: %s", exc)
 
@@ -270,11 +272,10 @@ def find_existing_lead(name: str, phone: str) -> Optional[str]:
 
 
 def _search_formulas(name: str, phone: str) -> list[str]:
-    from tools.airtable_gateway import _safe_formula_param
-    safe_name = _safe_formula_param(name)
+    safe_name = escape_formula_value(name)
     formulas: list[str] = []
     if phone:
-        safe_phone = _safe_formula_param(phone)
+        safe_phone = escape_formula_value(phone)
         formulas.append(f"AND(SEARCH('{safe_name}', {{Name}}), {{phone}}='{safe_phone}')")
         formulas.append(f"{{phone}}='{safe_phone}'")
     formulas.append(f"SEARCH('{safe_name}', {{Name}})")

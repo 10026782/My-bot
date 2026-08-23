@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import httpx
 from unittest.mock import patch
 
 import daily_digest
 import weekly_summary
 import worker
+import crm
+from core import lead_service
 from airtable_schema import Tables
-from tools.airtable_read_adapter import AirtableReadError, list_records
+from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, list_records
 
 
 def test_daily_digest_query_and_pagination_are_preserved(monkeypatch):
@@ -78,6 +81,104 @@ def test_adapter_preserves_unbounded_pagination_and_fields():
         {"filterByFormula": "{Status}='Open'", "fields[]": ["Name"]},
         {"filterByFormula": "{Status}='Open'", "fields[]": ["Name"], "offset": "next"},
     ]
+
+
+def test_crm_get_preserves_tenant_formula_and_single_page_read():
+    class Identity:
+        is_internal = False
+        tenant_id = "tenant-a"
+
+    with patch.object(crm, "list_records", return_value=[]) as read:
+        assert crm._get("Contacts", "{Name}='Dana'", identity=Identity()) == []
+    read.assert_called_once_with(
+        "Contacts",
+        "AND({Name}='Dana', {tenant_id}='tenant-a')",
+        max_records=None,
+        fields=None,
+        paginate=False,
+        timeout=10,
+    )
+
+
+def test_lead_dedup_preserves_three_queries_and_read_options(monkeypatch):
+    monkeypatch.setenv("AIRTABLE_API_KEY", "key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
+    with patch.object(lead_service, "list_records", return_value=[]) as read:
+        assert lead_service.find_existing_lead("Dana", "0501234567") is None
+    assert [call.args[:2] for call in read.call_args_list] == [
+        ("Leads", "AND(SEARCH('Dana', {Name}), {phone}='0501234567')"),
+        ("Leads", "{phone}='0501234567'"),
+        ("Leads", "SEARCH('Dana', {Name})"),
+    ]
+    for call in read.call_args_list:
+        assert call.kwargs == {
+            "max_records": 5,
+            "paginate": False,
+            "timeout": 8,
+        }
+
+
+def test_lead_formula_escaping_stays_behind_public_read_adapter():
+    assert escape_formula_value("O'Brien") == "O\\'Brien"
+    assert "_safe_formula_param" not in lead_service._search_formulas.__code__.co_names
+
+
+def test_crm_preserves_legacy_http_status_error_for_other_statuses():
+    read_error = AirtableReadError(
+        "Contacts list: HTTP 422",
+        status_code=422,
+        response_text="invalid formula",
+        response_url="https://api.airtable.com/v0/base/Contacts",
+    )
+    with patch.object(crm, "list_records", side_effect=read_error):
+        try:
+            crm._get("Contacts")
+        except Exception as exc:
+            assert isinstance(exc, httpx.HTTPStatusError)
+            assert str(exc) == (
+                "Client error '422 Unprocessable Entity' for url "
+                "'https://api.airtable.com/v0/base/Contacts'\n"
+                "For more information check: "
+                "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422"
+            )
+            assert exc.response.status_code == 422
+            assert exc.response.text == "invalid formula"
+        else:
+            raise AssertionError("CRM did not preserve HTTPStatusError")
+
+
+def test_crm_preserves_legacy_auth_and_not_found_errors():
+    for status, expected in (
+        (401, "401 AIRTABLE_API_KEY לא תקין | body: bad"),
+        (403, "403 אין הרשאה לטבלה 'Contacts' | body: bad"),
+        (404, "404 טבלה 'Contacts' לא נמצאה | body: bad"),
+    ):
+        with patch.object(
+            crm,
+            "list_records",
+            side_effect=AirtableReadError("read failed", status_code=status, response_text="bad"),
+        ):
+            try:
+                crm._get("Contacts")
+            except RuntimeError as exc:
+                assert str(exc) == expected
+            else:
+                raise AssertionError(f"CRM did not preserve status {status}")
+
+
+def test_crm_reraises_legacy_transport_exception():
+    transport_error = TimeoutError("timed out")
+    with patch.object(
+        crm,
+        "list_records",
+        side_effect=AirtableReadError("Contacts list error", cause=transport_error),
+    ):
+        try:
+            crm._get("Contacts")
+        except TimeoutError as exc:
+            assert exc is transport_error
+        else:
+            raise AssertionError("CRM did not preserve transport exception")
 
 
 def test_daily_digest_preserves_legacy_read_errors(monkeypatch):
