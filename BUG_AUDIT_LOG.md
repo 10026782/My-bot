@@ -5228,3 +5228,17 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 - **מחוץ ל-scope:** dispatcher, approval_actions, ActionGateway, app.py, Turn Coordinator, F15 ו-schema/Airtable fields.
 - **סטטוס (היסטורי, 09/08/2026):** מומש מקומית, טרם אומת בפרודקשן, טרם מוזג.
 - **עדכון (14/08/2026, תיעוד-דריפט):** **מוזג** — commit `8dbc73d` מאושר כ-ancestor של `origin/main` (דרך PR #568, ראה `CHANGE_CONTROL_LOG.md::C189`). **טרם אומת בפרודקשן** — אין שינוי בשדה הזה; אין ראיה חדשה לאימות production. השורה ההיסטורית למעלה נשמרת כפי שנכתבה במקור.
+
+---
+
+## C00-F1 — worker.py Truth-Reset + Survey-Worker Finding Closure
+
+- **תאריך:** 23/08/2026
+- **מקור:** C00/C08 Route & Entry-Point Audit (read-only, אותו יום).
+- **סגירת ממצא (SUPERSEDED/CLOSED):** ממצא ה-C08 "ORPHAN_HANDLER — `workers/survey_worker.py::send_won_survey/send_lost_survey` ללא callers" נסגר כ-SUPERSEDED: המודול הוסר מ-`main` ב-commit `2540eb3` ("chore: remove unused survey worker"), שהוא ancestor של `origin/main` (`0646ae3`). לא נדרש פעולה נוספת.
+- **F1 truth-reset — root `worker.py`:** נבדק מול `origin/main`. לאף פונקציה (`run_proactive_check`, `_scan_airtable_deadlines`, `_build_urgency_message`, `_send_telegram`, `_nudge_loop`, `schedule_background_worker`) אין אף importer; `POST /worker/trigger` (app.py) מעביר `[system event]` ל-`run_agent()` בלבד ולא קורא ל-worker.py. כל ה-jobs הליליים/יומיים/שבועיים/בטיחותיים נרשמים ב-`start_scheduler()` (scheduler.py) — worker.py לא מעורב. ההתנהגות הייחודית שתישאר ללא entry point: push-nudge יזום על deadlines של `משימות (Tasks)` (חלקית מכוסה pull-based בלבד דרך `tma_api._get_global_kpis` → `core.owner_attention._task_items`).
+- **המלצה:** NEEDS_PRODUCT_DECISION — לא למחוק ולא לחבר בלי החלטת בעלים.
+- **תיקון דוק:** CLAUDE.md §Background workers — הסרת הטענה השגויה ש-worker.py הוא יעד ה-Cron של Render; הוחלפה בתיאור האמת (unwired legacy).
+- **ניקוי מת:** הסרת `FLASK_ROUTES_PATCH` (string לא-executable) מ-`voice_adapter.py` — ה-routes שהוא הציע כבר קיימים ב-app.py (`/voice/incoming`, `/voice/step`). worker.py עצמו לא נגעו.
+- **בדיקות:** `py_compile voice_adapter.py`; import app + URL map זהה (43 rules); רישום jobs של scheduler ללא שינוי; `git diff --check`.
+- **סטטוס:** 🟡 CODE DONE, LOCALLY VERIFIED, NOT PRODUCTION VERIFIED (שינויי docs/dead-string בלבד; אין השפעה runtime).

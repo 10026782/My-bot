@@ -152,8 +152,8 @@ Several modules are code-complete but disabled by default via `feature_flags.py`
 
 ### Background workers
 
-- `worker.py`: the proactive background worker hit by Render's Cron trigger (`POST /worker/trigger`, scheduled ~08:00/18:00) for routine async tasks.
-- This is distinct from `scheduler.py`'s in-process `schedule`-library jobs (digest, overdue payments, cleanup) started from `app.py`.
+- `worker.py`: **legacy, currently unwired** — defines a proactive Tasks-deadline Telegram nudge (`run_proactive_check`, `_nudge_loop`) but nothing imports it. `POST /worker/trigger` (app.py) does **not** call it: that route forwards a `[system event]` text to `run_agent()` instead. See BUG_AUDIT_LOG.md (C00-F1 truth-reset, 23/08/2026).
+- All recurring background work runs via `scheduler.py`'s in-process `schedule`-library jobs (digest, payments, followups, cleanup, reports), started from `run_startup_sequence()` by gunicorn's `post_worker_init` hook / `python3 app.py`.
 
 ## Frontend (`tma-frontend/`)
 

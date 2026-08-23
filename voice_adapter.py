@@ -390,43 +390,6 @@ def process_voice_step(
 
 
 # ══════════════════════════════════════════════════
-# Flask Routes (להוסיף ב-app.py)
-# ══════════════════════════════════════════════════
-
-FLASK_ROUTES_PATCH = '''
-# ── F07 Voice IVR — הוסף ב-app.py לפני if __name__ == "__main__" ──
-
-@app.route("/voice/incoming", methods=["POST"])
-def voice_incoming():
-    """Twilio webhook — שיחה נכנסת חדשה."""
-    from feature_flags import flags
-    if not flags.VOICE_IVR:
-        from flask import Response
-        from voice_adapter import build_twiml, _say, _hangup
-        return Response(build_twiml(_say("השירות לא פעיל.") + _hangup()),
-                        mimetype="text/xml")
-    from flask import request, Response
-    from voice_adapter import process_voice_step
-    call_sid = request.form.get("CallSid", "")
-    from_num = request.form.get("From", "").replace("whatsapp:", "")
-    twiml    = process_voice_step(call_sid, from_num)
-    return Response(twiml, mimetype="text/xml")
-
-
-@app.route("/voice/step", methods=["POST"])
-def voice_step():
-    """Twilio webhook — שלב בשיחה (Gather callback)."""
-    from flask import request, Response
-    from voice_adapter import process_voice_step
-    call_sid = request.form.get("CallSid", "")
-    from_num = request.form.get("From", "").replace("whatsapp:", "")
-    digits   = request.form.get("Digits", "")
-    twiml    = process_voice_step(call_sid, from_num, digits)
-    return Response(twiml, mimetype="text/xml")
-'''
-
-
-# ══════════════════════════════════════════════════
 # Self-tests
 # ══════════════════════════════════════════════════
 
