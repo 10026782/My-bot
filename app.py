@@ -5016,7 +5016,11 @@ def run_agent(
                     cached = _turn_read_cache[dedup_key]
                     raw, result, result_text = cached["raw"], cached["result"], cached["result_text"]
                 else:
-                    logger.info(f"[Tool] {tu.name} | {str(tu.input)[:80]}")
+                    logger.info(
+                        "[Tool] name=%s input_key_count=%d",
+                        tu.name,
+                        len(tu.input or {}),
+                    )
                     # BUG-091: raw Agent tool_use loop — always "agent",
                     # explicit for clarity/defense-in-depth even though
                     # airtable_add/update never reach this branch (both
@@ -5024,7 +5028,11 @@ def run_agent(
                     raw    = dispatch_tool(tu.name, tu.input, identity, trusted_source="agent")
                     result = validate_tool_output(tu.name, raw)
                     result_text = _tool_user_message(result)
-                    logger.info(f"[Tool] → {result_text[:80]}")
+                    logger.info(
+                        "[Tool] name=%s result_type=%s",
+                        tu.name,
+                        type(result).__name__,
+                    )
                     if meta.read_only:
                         _turn_read_cache[dedup_key] = {"raw": raw, "result": result, "result_text": result_text}
 
@@ -5243,8 +5251,11 @@ def run_agent(
             if channel == "telegram":
                 try:
                     bot.send_chat_action(chat_id, "typing")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(
+                        "[Tool] typing indicator failed error_type=%s",
+                        type(exc).__name__,
+                    )
 
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user",      "content": tool_results})

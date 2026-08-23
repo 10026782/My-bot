@@ -381,10 +381,18 @@ def handle_voice_note(
 
     normalized_for_prefix = _normalize_for_prefix(transcript)
     action_requested = _has_action(transcript)
-    logger.info(f"[voice] transcript repr: {repr(transcript[:50])}")
-    logger.info(f"[voice] normalized for prefix: {repr(normalized_for_prefix[:50])}")
-    logger.info(f"[voice] action_requested: {action_requested}")
-    logger.info(f"[voice] PREFIX_HARD matches: {[p for p in PREFIX_HARD if normalized_for_prefix.startswith(p)]}")
+    prefix_match_count = sum(
+        normalized_for_prefix.startswith(prefix) for prefix in PREFIX_HARD
+    )
+    logger.info(
+        "[voice] transcription analyzed source=%s chars=%d normalized_chars=%d "
+        "action_requested=%s prefix_match_count=%d",
+        source,
+        len(transcript or ""),
+        len(normalized_for_prefix or ""),
+        action_requested,
+        prefix_match_count,
+    )
 
     # אישור חובה תמיד עבור מילות סיכון, ללא קשר לאיתור action_requested או לאורך הטקסט.
     if _has_risk_words(transcript):
