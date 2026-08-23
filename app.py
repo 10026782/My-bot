@@ -6860,7 +6860,10 @@ def voice_step():
         from_num = request.form.get("From", "unknown")
         logger.warning("[Voice] invalid Twilio signature from %s — possible spoofing", from_num)
         return Response("Forbidden", status=403)
-    from voice_adapter import process_voice_step
+    from feature_flags import is_enabled
+    from voice_adapter import build_twiml, _say, _hangup, process_voice_step
+    if not is_enabled("VOICE_IVR"):
+        return Response(build_twiml(_say("השירות לא פעיל.") + _hangup()), mimetype="text/xml")
     call_sid = request.form.get("CallSid", "")
     from_num = request.form.get("From", "").replace("whatsapp:", "")
     digits   = request.form.get("Digits", "")
