@@ -129,7 +129,7 @@ Owner
   (verbatim)" → Top 3, item 3, and Full finding list, row 3).
 - **Architecture decision:** SINGLE BUSINESS WRITE PATH (this document,
   DECISION section above).
-- **Remediation:** implemented in PR #TBD
+- **Remediation:** implemented in PR #847
   (`claude/state-permission-approval-audit-836k3p`) — `tma_api.py`'s
   `patch_lead`, `set_lead_outcome`, and `create_lead_task` no longer branch
   on `identity.is_owner` to call `_at_patch()`/`_at_post()` directly. Both
