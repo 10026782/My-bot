@@ -1,6 +1,6 @@
 # core/learning_engine.py — F02 Learning Engine
 # תלוי ב: C12 Lead Events (core/lead_events.py) + כמה חודשי דאטה
-# flag: FEATURE_LEARNING_ENGINE (כבוי ברירת מחדל)
+# flag: LEARNING_ENGINE (כבוי ברירת מחדל)
 #
 # Phase 1 — סטטיסטיקה בלבד (ללא LLM, ללא ML):
 #   • conversion patterns: מה עבד (HOT→CLOSED)

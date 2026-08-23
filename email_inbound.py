@@ -1,6 +1,6 @@
 # email_inbound.py — F06 Email Channel (Inbound)
 # קובץ: email_inbound.py (flat, root)
-# flag: FEATURE_EMAIL_INBOUND (כבוי ברירת מחדל)
+# flag: EMAIL_INBOUND (כבוי ברירת מחדל)
 #
 # זרימה:
 #   poll_inbox() → parse_email() → route_email() → draft_reply() → request_approval()

@@ -1446,7 +1446,7 @@
   1. `app.py:1864`/`core/anti_hallucination.py:500`/`:1079` — הערות קוד שמתעדות את המחרוזות **הישנות** שכבר תוקנו (BUG-087) — לא מופע חדש.
   2. `core/adapters/leads_adapter.py:274` (`_phase_label`) — `PHASE_AWAITING: "ממתין לטיפול"` — **לגיטימי**: label שנגזר מ-`phase` field אמיתי בנתונים, לא הבטחה לתהליך שלא קיים.
   3. `core/anti_hallucination.py` (אזור `__approval_queued__` pattern) — זהו ה-detection pattern עצמו (מזהה טענות כוזבות), לא מופע של הבעיה.
-  4. `core/learning_engine.py:27` — `"בהמשך"` מופיע רק כמילת מפתח לסיווג טקסט היסטורי (keyword classification), לעולם לא כפלט למשתמש; `FEATURE_LEARNING_ENGINE` כבוי כברירת מחדל ממילא (ראה `core/learning_engine.py`'s תיאור ב-`CLAUDE.md`: אינרטי במכוון).
+  4. `core/learning_engine.py:27` — `"בהמשך"` מופיע רק כמילת מפתח לסיווג טקסט היסטורי (keyword classification), לעולם לא כפלט למשתמש; `LEARNING_ENGINE` כבוי כברירת מחדל ממילא (ראה `core/learning_engine.py`'s תיאור ב-`CLAUDE.md`: אינרטי במכוון).
 - **תוצאה:** אין מופע שלישי של המשפחה (מעבר ל-BUG-086/087). המשפחה נחשבת סגורה נכון ל-09/07/2026.
 - **Merged:** לא רלוונטי — audit בלבד, אין קוד מוצר מעורב.
 - **סטטוס:** ✅ הושלם — נבדק ותועד, אין ממצאים חדשים.
