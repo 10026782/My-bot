@@ -28,6 +28,12 @@ _ALLOWED_ROLES = ("owner", "manager", "partner")
 _pending: dict[str, dict] = {}
 
 
+def _decision_storage():
+    """Canonical Decision domain storage boundary for Telegram writes."""
+    from decision_ports import build_default_ports
+    return build_default_ports().storage
+
+
 # ── Registration ─────────────────────────────────────────────────
 
 def register_decision_command(bot, get_identity):
@@ -149,8 +155,7 @@ def register_decision_command(bot, get_identity):
     @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_inbox_ignore:"))
     def cb_inbox_ignore(call):
         inbox_id = call.data.split(":", 1)[1]
-        from tools.airtable_gateway import airtable_patch
-        airtable_patch(
+        _decision_storage().update(
             Tables.DECISION_INBOX, inbox_id,
             {DecisionInboxFields.STATUS: DecisionInboxStatus.REJECTED},
             source="cmd_decision:inbox_ignore",
@@ -237,8 +242,6 @@ def _handle_new_step(bot, msg, state):
 
 
 def _create_decision(identity, title: str, domain: str, exposure: float, stakeholder_names: list[str]) -> dict | None:
-    from tools.airtable_gateway import airtable_create
-
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
     fields = {
         DecisionFields.TITLE: title,
@@ -247,10 +250,11 @@ def _create_decision(identity, title: str, domain: str, exposure: float, stakeho
         DecisionFields.STATUS: DecisionStatus.OPEN,
         DecisionFields.TENANT_ID: identity.tenant_id,
     }
-    record = airtable_create(Tables.DECISIONS, fields, source=source_tag)
-    if not record:
+    record_id = _decision_storage().add(Tables.DECISIONS, fields, source=source_tag)
+    if not record_id:
         logger.warning(f"[DecisionHub] _create_decision failed source={source_tag}")
         return None
+    record = {"id": record_id, "fields": fields}
 
     for name in stakeholder_names:
         _create_stakeholder(identity, record["id"], name)
@@ -259,7 +263,6 @@ def _create_decision(identity, title: str, domain: str, exposure: float, stakeho
 
 
 def _create_stakeholder(identity, decision_id: str, name: str) -> None:
-    from tools.airtable_gateway import airtable_create
     from tools.contact_resolver import resolve, ResolveStatus
 
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
@@ -276,7 +279,7 @@ def _create_stakeholder(identity, decision_id: str, name: str) -> None:
     if contact_id:
         fields[DecisionStakeholderFields.CONTACT] = [contact_id]
 
-    airtable_create(Tables.DECISION_STAKEHOLDERS, fields, source=source_tag)
+    _decision_storage().add(Tables.DECISION_STAKEHOLDERS, fields, source=source_tag)
 
 
 # ── /decision update — Event + run_pipeline ─────────────────────
@@ -312,8 +315,6 @@ def _handle_update_step(bot, msg, state, get_identity):
 
 
 def _create_decision_event(identity, decision_id: str, event: dict) -> str | None:
-    from tools.airtable_gateway import airtable_create
-
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
     fields = {
         DecisionEventFields.DECISION: [decision_id],
@@ -325,8 +326,7 @@ def _create_decision_event(identity, decision_id: str, event: dict) -> str | Non
         DecisionEventFields.TENANT_ID: identity.tenant_id,
     }
     _add_trust_fields(fields, event)
-    record = airtable_create(Tables.DECISION_EVENTS, fields, source=source_tag)
-    return record.get("id") if record else None
+    return _decision_storage().add(Tables.DECISION_EVENTS, fields, source=source_tag)
 
 
 def _add_trust_fields(fields: dict, event: dict) -> None:
@@ -508,8 +508,6 @@ def _persist_confidence(decision_id: str, result, missing_evidence: list, eviden
     """כתיבה best-effort — לא חוסם את הצגת הכרטיס. עד שהשדות נוצרים ידנית
     ב-Airtable (Stage 2 SPEC §Schema), airtable_patch ישמיט אותם בשקט."""
     import json
-    from tools.airtable_gateway import airtable_patch
-
     fields = {
         DecisionFields.CONFIDENCE_SCORE: result.score,
         DecisionFields.EVIDENCE_SUMMARY: evidence_summary,
@@ -517,7 +515,7 @@ def _persist_confidence(decision_id: str, result, missing_evidence: list, eviden
         DecisionFields.MISSING_EVIDENCE: json.dumps(missing_evidence),
     }
     try:
-        airtable_patch(Tables.DECISIONS, decision_id, fields, source="decision_confidence:stage2")
+        _decision_storage().update(Tables.DECISIONS, decision_id, fields, source="decision_confidence:stage2")
     except Exception as e:
         logger.warning(f"[DecisionHub] _persist_confidence failed: {e}")
 
@@ -526,10 +524,8 @@ def _persist_readiness(decision_id: str, result) -> None:
     """כתיבה best-effort — לא חוסם את הצגת הכרטיס. כותב רק לשדה Readiness
     הקיים כבר ב-DecisionFields (Stage 3 SPEC: אין שינוי סכמה ל-MVP — Score/
     Message/Escalation מוצגים רק ב-Telegram, לא נשמרים, עד אישור נפרד)."""
-    from tools.airtable_gateway import airtable_patch
-
     try:
-        airtable_patch(
+        _decision_storage().update(
             Tables.DECISIONS, decision_id,
             {DecisionFields.READINESS: result.status},
             source="decision_readiness:stage3",
@@ -551,8 +547,6 @@ def _linked_label(value) -> str:
 # ── forward → Inbox ───────────────────────────────────────────
 
 def _handle_forward(bot, msg, identity) -> None:
-    from tools.airtable_gateway import airtable_create
-
     text = msg.text or getattr(msg, "caption", "") or ""
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
 
@@ -563,12 +557,11 @@ def _handle_forward(bot, msg, identity) -> None:
         DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
         DecisionInboxFields.TENANT_ID: identity.tenant_id,
     }
-    inbox_record = airtable_create(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
-    if not inbox_record:
+    inbox_id = _decision_storage().add(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
+    if not inbox_id:
         bot.send_message(msg.chat.id, "⚠️ ההודעה המועברת לא נשמרה. בדוק logs.")
         return
 
-    inbox_id = inbox_record["id"]
     _suggest_decision_link(bot, msg.chat.id, inbox_id, text)
 
 
@@ -592,7 +585,6 @@ def _suggest_decision_link(bot, chat_id, inbox_id: str, text: str) -> None:
 
 
 def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
-    from tools.airtable_gateway import airtable_patch, airtable_create
     from decision_pipeline import run_pipeline
 
     decision_record = _at_get_record(Tables.DECISIONS, decision_id)
@@ -620,8 +612,7 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
         DecisionEventFields.STATUS: event.get("Status", DecisionEventStatus.LOGGED),
     }
     _add_trust_fields(event_fields, event)
-    event_record = airtable_create(Tables.DECISION_EVENTS, event_fields, source="cmd_decision:inbox_link")
-    event_id = event_record.get("id") if event_record else None
+    event_id = _decision_storage().add(Tables.DECISION_EVENTS, event_fields, source="cmd_decision:inbox_link")
 
     patch_fields = {
         DecisionInboxFields.STATUS: DecisionInboxStatus.LINKED,
@@ -629,7 +620,7 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
     }
     if event_id:
         patch_fields[DecisionInboxFields.LINKED_EVENT] = [event_id]
-    airtable_patch(Tables.DECISION_INBOX, inbox_id, patch_fields, source="cmd_decision:inbox_link")
+    _decision_storage().update(Tables.DECISION_INBOX, inbox_id, patch_fields, source="cmd_decision:inbox_link")
 
     title = decision_record["fields"].get(DecisionFields.TITLE, "")
     text = _format_pipeline_outcome(title, outcome, event)
@@ -691,8 +682,6 @@ def route_file_to_decision_inbox(
     Raw-first: שומר מיד, מאשר, רק אז מציע שיוך (_suggest_decision_link).
     Drive משמש כאן רק כ-URL backend — לא נכתב Media Files/AssetRecord.
     """
-    from tools.airtable_gateway import airtable_create
-
     attachment = []
     if file_bytes:
         try:
@@ -715,12 +704,11 @@ def route_file_to_decision_inbox(
     if attachment:
         inbox_fields[DecisionInboxFields.ATTACHMENT] = attachment
 
-    inbox_record = airtable_create(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
-    if not inbox_record:
+    inbox_id = _decision_storage().add(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
+    if not inbox_id:
         bot.send_message(chat_id, "⚠️ הקובץ לא נשמר ב-Decision Inbox. בדוק logs.")
         return {"ok": False}
 
-    inbox_id = inbox_record["id"]
     bot.send_message(chat_id, "📥 נשמר ב-Decision Inbox.")
 
     if attachment:
@@ -782,8 +770,6 @@ def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
         _suggest_decision_link(bot, chat_id, last_file["file_id"], text)
         return True
 
-    from tools.airtable_gateway import airtable_create
-
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
     filename = last_file.get("original_filename", "")
     inbox_fields = {
@@ -796,12 +782,11 @@ def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
     if last_file.get("url"):
         inbox_fields[DecisionInboxFields.ATTACHMENT] = [{"url": last_file["url"], "filename": filename}]
 
-    inbox_record = airtable_create(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
-    if not inbox_record:
+    inbox_id = _decision_storage().add(Tables.DECISION_INBOX, inbox_fields, source=source_tag)
+    if not inbox_id:
         bot.send_message(chat_id, "⚠️ לא הצלחתי לשמור את הקובץ ל-Decision Inbox.")
         return True
 
-    inbox_id = inbox_record["id"]
     lead_sessions.set_last_file(
         identity.user_id,
         FileUploadResult(
