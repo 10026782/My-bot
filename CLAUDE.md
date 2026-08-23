@@ -153,7 +153,6 @@ Several modules are code-complete but disabled by default via `feature_flags.py`
 ### Background workers
 
 - `worker.py`: the proactive background worker hit by Render's Cron trigger (`POST /worker/trigger`, scheduled ~08:00/18:00) for routine async tasks.
-- `workers/survey_worker.py`: post-deal-close survey ("what won the deal?") sent via Telegram, feeding into the TMA quests/game system.
 - This is distinct from `scheduler.py`'s in-process `schedule`-library jobs (digest, overdue payments, cleanup) started from `app.py`.
 
 ## Frontend (`tma-frontend/`)
