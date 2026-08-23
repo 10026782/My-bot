@@ -516,6 +516,7 @@ class PersistentSessionStore:
                 "last_lead_candidate_batch": session.get("last_lead_candidate_batch"),
                 "pending_lead_preview":     session.get("pending_lead_preview"),
                 "last_prompted_contract":   session.get("last_prompted_contract"),
+                "lead_draft":               session.get("lead_draft"),
             }
             fields = {
                 SF.SENDER_ID:    sender,
@@ -689,6 +690,7 @@ class PersistentSessionStore:
                 ("last_lead_candidate_batch", None),
                 ("pending_lead_preview", None),
                 ("last_prompted_contract", None),
+                ("lead_draft", None),
             ):
                 session[key] = state.get(key, default)
             session["record_id"] = record_id
@@ -879,6 +881,52 @@ def _run_tests() -> bool:
     chk("restore: nested answers preserved",  restored.get("answers", {}).get("budget") == {"min": 1, "max": 2})
     chk("restore: score/tier preserved",      restored.get("score") == 55 and restored.get("tier") == "WARM")
     chk("restore: last_uploaded_file preserved", restored.get("last_uploaded_file", {}).get("file_id") == "recMEDIA9")
+    at.airtable_get = lambda t, formula: "אין רשומות"
+    at.airtable_get_records = lambda t, formula: []
+
+    # ── lead_draft: set → persist → reload → same value ──
+    saves.clear()
+    store.set_lead_draft("w:001", {"city": "תל אביב", "budget": 500000})
+    chk("lead_draft saved in RAM",
+        store.get("w:001").get("lead_draft", {}).get("city") == "תל אביב")
+    chk("sync includes lead_draft",
+        json.loads(saves[-1][SF.STATE_JSON]).get("lead_draft", {}).get("budget") == 500000)
+
+    draft_state = json.loads(saves[-1][SF.STATE_JSON])
+    at.airtable_get_records = lambda t, formula: [{
+        "id": "recDRAFT1",
+        "fields": {
+            SF.SENDER_ID: "w:draft-restore",
+            SF.CONTEXT_TYPE: "lead",
+            SF.CHANNEL: "whatsapp",
+            SF.STATE_JSON: json.dumps(draft_state, ensure_ascii=False),
+        },
+    }]
+    restored_draft = store.get("w:draft-restore")
+    chk("lead_draft: restored after reload",
+        restored_draft is not None
+        and restored_draft.get("lead_draft", {}).get("city") == "תל אביב"
+        and restored_draft.get("lead_draft", {}).get("budget") == 500000)
+
+    # ── lead_draft: legacy record with field absent stays safe (None, no KeyError) ──
+    at.airtable_get_records = lambda t, formula: [{
+        "id": "recLEGACY1",
+        "fields": {
+            SF.SENDER_ID: "w:legacy",
+            SF.CONTEXT_TYPE: "lead",
+            SF.CHANNEL: "whatsapp",
+            SF.STATE_JSON: json.dumps(
+                {"domain": "real_estate", "step": 1, "answers": {}, "done": False},
+                ensure_ascii=False,
+            ),
+        },
+    }]
+    restored_legacy = store.get("w:legacy")
+    chk("lead_draft: legacy record (field absent) restores as None",
+        restored_legacy is not None and restored_legacy.get("lead_draft") is None)
+    chk("get_lead_draft: legacy session with no draft → None, no crash",
+        store.get_lead_draft("w:legacy") is None)
+
     at.airtable_get = lambda t, formula: "אין רשומות"
     at.airtable_get_records = lambda t, formula: []
 
