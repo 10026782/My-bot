@@ -40,6 +40,15 @@ TABLE_CLASS_MAP = {
     schema.Tables.MARKETING_DEMAND: schema.MarketingDemandFields,
     schema.Tables.MARKETING_PUBLICATIONS: schema.MarketingPublicationFields,
     schema.Tables.SESSIONS:          schema.SessionsFields,
+    schema.Tables.BUSINESS_MEMORY:   schema.BusinessMemoryFields,
+    schema.Tables.DECISION_EVENTS:   schema.DecisionEventFields,
+    schema.Tables.DECISIONS:         schema.DecisionFields,
+    schema.Tables.DECISION_INBOX:    schema.DecisionInboxFields,
+    schema.Tables.DECISION_STAKEHOLDERS: schema.DecisionStakeholderFields,
+    schema.Tables.EXPENSES:          schema.ExpenseFields,
+    schema.Tables.PROFILE:           schema.ProfileFields,
+    schema.Tables.ROADMAP_TASKS:     schema.RoadmapTaskFields,
+    schema.Tables.VENTURES:          schema.VentureFields,
 }
 
 
