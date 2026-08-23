@@ -1,6 +1,6 @@
 # audience_intelligence.py — D04 Audience Intelligence
 # קובץ: audience_intelligence.py (flat, root)
-# flag: FEATURE_AUDIENCE_INTELLIGENCE (כבוי ברירת מחדל)
+# flag: AUDIENCE_INTELLIGENCE (כבוי ברירת מחדל)
 #
 # מה זה:
 #   1. Segmentation    — מי הלידים שלי? (7 פרופילים)

@@ -76,6 +76,10 @@ their own small PR.
 
 ## Feature rollout
 
+`FEATURE_UNIFIED_APPROVAL_MESSAGES` is planning-only. It has no runtime
+consumer and must not be treated as an active production feature flag until a
+separate implementation and wiring change is made.
+
 Initial flag:
 
 ```text
