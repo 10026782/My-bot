@@ -71,6 +71,9 @@ def _counter(calls, name):
 
 def _register_jobs(monkeypatch, calls):
     scheduler.schedule.clear()
+    # This matrix asserts the behavior of registered jobs; opt the feature in
+    # explicitly now that disabled features are not registered at all.
+    monkeypatch.setenv("FEATURE_WEEKLY_SUMMARY", "true")
     monkeypatch.setattr(scheduler.threading, "Thread", _NoopThread)
     for job_name in SCHEDULER_JOB_NAMES:
         monkeypatch.setattr(scheduler, job_name, _counter(calls, job_name))

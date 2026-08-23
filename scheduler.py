@@ -833,6 +833,7 @@ def start_scheduler() -> threading.Thread:
 
     from lead_memory import job_flush_lead_memory
     from shabbat_guard import shabbat_safe
+    from feature_flags import is_enabled
     digest_time           = os.environ.get("DIGEST_TIME",               "07:30")
     collector_time        = os.environ.get("COLLECTOR_TIME",            "23:00")
     cleanup_interval      = int(os.environ.get("CLEANUP_INTERVAL_MIN",  "360"))
@@ -869,7 +870,8 @@ def start_scheduler() -> threading.Thread:
     getattr(schedule.every(), "sunday").at("08:30").do(_automation_guard(_job_attribution_report, name="attribution_report"))                  # D05
     schedule.every(15).minutes.do(shabbat_safe(_automation_guard(_job_interaction_scan, name="interaction_scan")))                           # D06
     getattr(schedule.every(), security_day).at(security_time).do(_automation_guard(_job_security_reminder, name="security_reminder"))
-    getattr(schedule.every(), weekly_summary_day).at(weekly_summary_time).do(_automation_guard(_job_weekly_summary, name="weekly_summary"))  # C22
+    if is_enabled("FEATURE_WEEKLY_SUMMARY"):
+        getattr(schedule.every(), weekly_summary_day).at(weekly_summary_time).do(_automation_guard(_job_weekly_summary, name="weekly_summary"))  # C22
     schedule.every().day.at("07:00").do(_automation_guard(_job_daily_game_digest, name="daily_game_digest"))                            # Game digest (flag: GAME_SCHEDULER)
     getattr(schedule.every(), "sunday").at("08:00").do(_automation_guard(_job_weekly_quest_reset, name="weekly_quest_reset"))            # Game weekly reset
     getattr(schedule.every(), "friday").at("18:00").do(_automation_guard(_job_boss_battle_check, name="boss_battle_check"))             # Boss battle check
