@@ -44,7 +44,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     },
     {
       "id": "decision.actioncontracts_authority",
@@ -156,7 +156,7 @@
       "notes": [
         "A code default is not evidence of the current deployed environment."
       ],
-      "last_observed_commit": "3c996adeec2e14bf586fbb3a2101e55bf3d7bfd5"
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     },
     {
       "id": "decision.production_verification",
@@ -222,7 +222,7 @@
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
       ],
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     },
     {
       "id": "decision.ux_no_internal_ids",
@@ -347,7 +347,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -415,7 +415,8 @@
         "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
         "Stage 3A (PR #506, merge 6201e86) implements this decision: core/message_contract.py is the canonical MessageContract (15 MessageState values, frozen V1/D-012 schema); D-013 ratifies evidence_status as optional non-authoritative metadata (never determines/upgrades MessageState, fails closed on unknown values); build_message_contract() and the formatter wrapper are pure with zero production imports/callers/wiring/output change. test_message_contract.py is the test authority (41/41 passing).",
         "PR B (#509, merge 1c51570) registers a pure, unwired ApprovalLifecycleResult adapter that delegates to the canonical builder; PR C (ActionFact/GatewayReply adapter) remains pending."
-      ]
+      ],
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     },
     {
       "id": "decision.business_domain_vocabulary",
@@ -784,10 +785,10 @@
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #785 (block_reason=NO_POLICY_MATCH): core/lead_service.py had no existing catalog owner across any of the 8 registered layers or 18 decision nodes as of this registration — owner decision was CREATE NEW NODE.",
         "This node deliberately scopes to the Phase 1 Lead-write contract only (validation/dedup/Owner-tenant/field-construction). N18 Phase 2+ generalizes the Draft-Card/structured-command mechanics this service exposes into shared, entity-agnostic primitives (core/structured_command.py, core/draft_flow.py, tracked separately on feat/canonical-lead-creation-phase1) — those primitives carry no Lead-specific authority themselves and should get their own registration (or an explicit non-authority supporting-metadata node) when that work merges, rather than being folded into this node's scope.",
         "Registered for PR #823: core/source_owner_mapping.py is supporting runtime infrastructure for explicit inbound source-account to canonical owner_user_id context. It does not resolve Airtable Profile IDs, write Leads, or create an Owner fallback; create_lead() remains the sole Owner/Profile authority.",
-        "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification."
-        ,"Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
+        "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification.",
+        "Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
-      "last_observed_commit": "f70c5d8bf831b1a88c0f91732ab97c03564c1002"
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -835,7 +836,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     },
     {
       "id": "decision.n18_terminal_turn_result",
@@ -881,7 +882,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "0646ae36caad9c7905b155a9ac40c41c2efab958"
     }
   ],
   "edges": [
