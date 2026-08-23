@@ -182,6 +182,7 @@ def _lead_safe_fields() -> tuple[frozenset, frozenset]:
     })
     update_fields = frozenset({
         LeadFields.PHONE, LeadFields.SUMMARY, LeadFields.DOMAIN,
+        "utm_source", "utm_medium", "utm_campaign", "platform",
     })
     return create_fields, update_fields
 

@@ -520,6 +520,94 @@ def create_lead(
     )
 
 
+def update_lead_fields(
+    identity,
+    record_id: str,
+    fields: dict,
+    *,
+    source_module: str,
+) -> LeadCreateResult:
+    """Update an existing Lead through the canonical gateway boundary.
+
+    This is intentionally narrower than ``create_lead``: callers must supply
+    an already-resolved record id and an explicit field set. Gateway proposal
+    failure is terminal; there is no direct-writer fallback.
+    """
+    if not identity or not record_id or not isinstance(fields, dict) or not fields:
+        return LeadCreateResult(ok=False, action="invalid", reason="missing_update_context")
+
+    contract_id = ""
+    contract_ledger = None
+    try:
+        from core.action_gateway import action_gateway as _gw
+        result = _gw.propose_action(
+            tenant_id=getattr(identity, "tenant_id", "default") or "default",
+            canonical_user_id=identity.memory_key,
+            tool_name="airtable_update",
+            tool_inputs={"table": "Leads", "record_id": record_id, "fields": dict(fields)},
+            origin_channel=getattr(identity, "channel", "system") or "system",
+            origin_chat_id=identity.memory_key,
+            requires_approval=False,
+            identity=identity,
+            trusted_source=source_module,
+        )
+        if not result.ok:
+            return LeadCreateResult(
+                ok=False,
+                action="duplicate",
+                record_id=record_id,
+                reason=result.reason or "gateway_blocked",
+                evidence={"gateway_proposal": "blocked", "mutation_executed": False},
+            )
+        contract_id = result.contract_id or ""
+        contract_ledger = _gw._ledger
+    except Exception:
+        logger.exception("[LeadService] gateway proposal failed; lead mutation NOT executed")
+        return LeadCreateResult(
+            ok=False,
+            action="gateway_failed",
+            record_id=record_id,
+            reason="gateway_proposal_failed",
+            evidence={"gateway_proposal": "failed", "mutation_executed": False},
+        )
+
+    ok = False
+    try:
+        from tools.airtable_gateway import airtable_patch
+        ok = bool(airtable_patch("Leads", record_id, dict(fields), source=source_module))
+    except Exception:
+        logger.exception("[LeadService] canonical Lead update failed; record=%s", record_id)
+
+    lifecycle_persistence_failed = False
+    if contract_id and contract_ledger:
+        try:
+            success_status = "completed" if contract_ledger._repository else "executed"
+            if not contract_ledger.update_status(contract_id, success_status if ok else "failed"):
+                raise RuntimeError("contract missing during lifecycle update")
+        except Exception:
+            lifecycle_persistence_failed = True
+            logger.exception(
+                "[LeadService] provider result could not be persisted to ActionContracts: "
+                "contract=%s provider_ok=%s",
+                contract_id, ok,
+            )
+
+    if lifecycle_persistence_failed:
+        return LeadCreateResult(
+            ok=False,
+            action="lifecycle_persistence_failed",
+            record_id=record_id,
+            evidence={"contract_id": contract_id, "mutation_executed": ok},
+        )
+    return LeadCreateResult(
+        ok=ok,
+        action="updated" if ok else "write_failed",
+        record_id=record_id,
+        reason="" if ok else "write_failed",
+        evidence={"contract_id": contract_id, "mutation_executed": ok},
+    )
+
+
 def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, action: str, *, write_event: bool = True) -> None:
     """Non-blocking, flag-gated post-write hooks — unchanged behavior,
     relocated verbatim from the former _write_one_lead (Phase 1 explicitly

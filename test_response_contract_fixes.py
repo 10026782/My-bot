@@ -98,17 +98,25 @@ with patch("tools.airtable_tools.airtable_add", return_value=_fail_result()):
 print("\n── ad_attribution.py ─────────────────")
 
 from ad_attribution import record_lead_source, mark_converted, UTMParams
+from core.lead_service import LeadCreateResult
+from identity import Identity, Role
+
+_attribution_identity = Identity(
+    user_id="+972500000000", role=Role.LEAD, channel="whatsapp",
+)
 
 _utm = UTMParams(source="meta", medium="cpc", campaign="apt_tlv")
 
 with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD1] memory_key: x"), \
-     patch("tools.airtable_tools.airtable_update", return_value=_ok_result("recLEAD1")):
-    ok = record_lead_source("boss_hq:test", _utm)
+     patch("core.lead_service.update_lead_fields", return_value=LeadCreateResult(
+         ok=True, action="updated", record_id="recLEAD1")):
+    ok = record_lead_source("boss_hq:test", _utm, identity=_attribution_identity)
     chk("record_lead_source: ok=True → returns True", ok is True)
 
 with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD1] memory_key: x"), \
-     patch("tools.airtable_tools.airtable_update", return_value=_fail_result()):
-    ok = record_lead_source("boss_hq:test", _utm)
+     patch("core.lead_service.update_lead_fields", return_value=LeadCreateResult(
+         ok=False, action="write_failed", record_id="recLEAD1")):
+    ok = record_lead_source("boss_hq:test", _utm, identity=_attribution_identity)
     chk("record_lead_source: ok=False → returns False", ok is False)
 
 with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD2] memory_key: x"), \
@@ -241,10 +249,10 @@ if still_present:
 # the total finding count in these 5 files must not exceed what's
 # already accounted for by the known-legitimate airtable_get lines.
 _LEGITIMATE_AIRTABLE_GET_ENTRIES = {
-    ("ad_attribution.py", 172, "rec"),
-    ("ad_attribution.py", 193, "rec"),  # shifted +1 by BUG-105's added LeadStatus/LeadOutcome import
-    ("inbound_handler.py", 52, "rec"),
-    ("inbound_handler.py", 66, "rec"),
+    ("ad_attribution.py", 175, "rec"),
+    ("ad_attribution.py", 201, "rec"),
+    ("inbound_handler.py", 47, "rec"),
+    ("inbound_handler.py", 61, "rec"),
 }
 _target_files = {"interaction_engine.py", "ad_attribution.py", "voice_adapter.py",
                   "tenant_provisioner.py", "inbound_handler.py"}
