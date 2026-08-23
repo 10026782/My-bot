@@ -16,6 +16,11 @@ from .librarian import (
     suggest_profiles,
     verify_consumption,
 )
+from .budget_preflight import (
+    build_budget_preflight,
+    format_budget_preflight_json,
+    format_budget_preflight_table,
+)
 from .owner_decision_report import format_pr_summary
 from .policy_registry import load_policy_registry
 from .reconcile import (
@@ -108,6 +113,22 @@ def _parser() -> argparse.ArgumentParser:
     estimate.add_argument(
         "--verified-production-evidence",
         help="Explicitly attest a selected evidence path after direct review",
+    )
+
+    budget_preflight = sub.add_parser(
+        "budget-preflight",
+        help="Report deterministic current-state budget health for every profile",
+    )
+    budget_preflight_target = budget_preflight.add_mutually_exclusive_group(required=True)
+    budget_preflight_target.add_argument(
+        "--all-profiles",
+        action="store_true",
+        help="Measure every configured profile exactly once",
+    )
+    budget_preflight.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the machine-readable JSON report instead of the summary table",
     )
 
     suggest = sub.add_parser(
@@ -361,6 +382,14 @@ def main(argv: list[str] | None = None) -> int:
                     f"{result.actual_tokens}/{result.token_budget} tokens"
                 )
             return 0 if all_fit else 2
+
+        if args.command == "budget-preflight":
+            report = build_budget_preflight(_repo_root(), catalog)
+            if args.json:
+                print(format_budget_preflight_json(report), end="")
+            else:
+                print(format_budget_preflight_table(report))
+            return 0
 
         if args.command == "suggest-profile":
             ranked = suggest_profiles(catalog, args.query)

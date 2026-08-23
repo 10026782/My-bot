@@ -37,6 +37,9 @@ from tools.context_librarian.librarian import (  # noqa: E402
     build_bundle,
     load_catalog,
 )
+from tools.context_librarian.budget_preflight import (  # noqa: E402
+    CANONICAL_PROFILE_QUERY_ENTRIES,
+)
 
 DEFAULT_MODEL = "claude-sonnet-5"
 
@@ -44,13 +47,7 @@ DEFAULT_MODEL = "claude-sonnet-5"
 # notes, English prose, and cited code paths — the actual mixed content a
 # real bundle renders, not a synthetic corpus.
 _PROFILE_QUERIES: dict[str, str] = {
-    "approval_ux": "repeated approval returns the wrong message",
-    "tool_execution": "dispatcher reports success without execution evidence",
-    "turn_coordinator_routing": "an explicit request routes to the wrong handler",
-    "core_reasoning_change": "business outcome maps to the wrong reasoning state",
-    "rp5_evidence_mismatch": "a completion claim conflicts with available evidence",
-    "ux_f52_message": "change a Telegram approval button's wording",
-    "cross_layer_architecture": "a change spans reasoning, routing, and approvals",
+    profile: query for profile, _query_id, query in CANONICAL_PROFILE_QUERY_ENTRIES
 }
 
 

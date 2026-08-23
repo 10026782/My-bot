@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tools.context_librarian import librarian
+from tools.context_librarian import budget_preflight
 from tools.context_librarian.librarian import (
     BundleEstimate,
     ContextLibrarianError,
@@ -26,6 +27,13 @@ from tools.context_librarian.librarian import (
     refresh_proposal,
     suggest_profiles,
     verify_consumption,
+)
+from tools.context_librarian.budget_preflight import (
+    ESTIMATOR_ID,
+    build_budget_preflight,
+    canonical_profile_queries,
+    classify_health,
+    format_budget_preflight_json,
 )
 
 
@@ -385,6 +393,87 @@ def test_estimate_all_profiles_covers_every_profile_sorted(catalog):
     for r in results:
         assert isinstance(r, BundleEstimate)
         assert r.fits == (r.actual_tokens <= r.token_budget and r.selected_documents <= r.document_budget)
+
+
+def test_budget_preflight_measures_every_profile_and_includes_marketing(catalog):
+    report = build_budget_preflight(REPO_ROOT, catalog)
+    configured = set(catalog.profiles)
+    measured = {row["profile"] for row in report["profiles"]}
+    assert measured == configured
+    assert report["aggregate"]["total_profiles"] == len(configured)
+    assert "marketing_change" in measured
+    assert all(row["estimator"] == ESTIMATOR_ID for row in report["profiles"])
+
+
+def test_budget_preflight_usage_reuses_chars_div_4_estimator(catalog):
+    report = build_budget_preflight(REPO_ROOT, catalog)
+    queries = {entry.profile: entry.query for entry in canonical_profile_queries()}
+    for row in report["profiles"]:
+        bundle = build_bundle(catalog, task_type=row["profile"], query=queries[row["profile"]])
+        assert row["usage"] == math.ceil(len(bundle) / 4)
+        assert row["headroom_tokens"] == row["budget"] - row["usage"]
+        assert row["overflow_tokens"] == max(row["usage"] - row["budget"], 0)
+
+
+@pytest.mark.parametrize(
+    ("headroom_percent", "expected"),
+    [
+        (10.01, "PASS"),
+        (10.0, "WARN"),
+        (5.0, "WARN"),
+        (4.99, "CRITICAL"),
+        (0.0, "CRITICAL"),
+        (-0.01, "FAIL"),
+    ],
+)
+def test_budget_preflight_health_boundaries(headroom_percent, expected):
+    assert classify_health(headroom_percent) == expected
+
+
+def test_budget_preflight_report_json_schema_is_stable(catalog):
+    report = build_budget_preflight(REPO_ROOT, catalog)
+    encoded = format_budget_preflight_json(report)
+    decoded = json.loads(encoded)
+    assert decoded == report
+    assert set(decoded) == {"estimator", "profiles", "aggregate"}
+    assert set(decoded["aggregate"]) == {
+        "total_profiles", "pass_count", "warn_count", "critical_count",
+        "fail_count", "lowest_headroom_profile", "lowest_headroom_tokens",
+    }
+
+
+def test_budget_preflight_is_deterministic(catalog):
+    assert build_budget_preflight(REPO_ROOT, catalog) == build_budget_preflight(
+        REPO_ROOT, catalog
+    )
+
+
+def test_budget_preflight_fails_closed_on_invalid_profile_budget(catalog):
+    invalid_catalog = copy.deepcopy(catalog)
+    invalid_catalog.profiles["approval_ux"]["maximum_approximate_token_budget"] = 0
+    with pytest.raises(ContextLibrarianError, match="invalid token budget"):
+        build_budget_preflight(REPO_ROOT, invalid_catalog)
+
+
+def test_budget_preflight_fails_closed_when_query_mapping_is_incomplete(catalog, monkeypatch):
+    monkeypatch.setattr(
+        budget_preflight,
+        "CANONICAL_PROFILE_QUERY_ENTRIES",
+        budget_preflight.CANONICAL_PROFILE_QUERY_ENTRIES[:-1],
+    )
+    with pytest.raises(ContextLibrarianError, match="missing canonical"):
+        build_budget_preflight(REPO_ROOT, catalog)
+
+
+def test_budget_preflight_fails_closed_on_duplicate_query_mapping(catalog, monkeypatch):
+    entries = budget_preflight.CANONICAL_PROFILE_QUERY_ENTRIES
+    monkeypatch.setattr(
+        budget_preflight,
+        "CANONICAL_PROFILE_QUERY_ENTRIES",
+        entries + (entries[0],),
+    )
+    with pytest.raises(ContextLibrarianError, match="duplicate canonical"):
+        build_budget_preflight(REPO_ROOT, catalog)
 
 
 def test_document_budget_is_enforced(catalog):
@@ -1774,6 +1863,27 @@ def test_cli_estimate_requires_task_type_or_all_profiles():
 
     with pytest.raises(SystemExit):
         main(["estimate", "--query", "q"])
+
+
+def test_cli_budget_preflight_all_profiles_json(capsys):
+    from tools.context_librarian.__main__ import main
+
+    exit_code = main(["budget-preflight", "--all-profiles", "--json"])
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["aggregate"]["total_profiles"] == 8
+    assert len(report["profiles"]) == 8
+    assert report["estimator"] == ESTIMATOR_ID
+
+
+def test_cli_budget_preflight_summary_table(capsys):
+    from tools.context_librarian.__main__ import main
+
+    exit_code = main(["budget-preflight", "--all-profiles"])
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "profile\thealth\tusage/budget" in output
+    assert "aggregate\tprofiles=8" in output
 
 
 def test_cli_verify_consumption_subcommand_exists_and_is_wired(tmp_path, monkeypatch, capsys):
