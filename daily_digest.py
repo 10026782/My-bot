@@ -3,10 +3,10 @@
 
 import logging
 import os
-import urllib.parse
 from datetime import date, timedelta
 
 from airtable_schema import LeadFields, Tables, PaymentFields, PaymentStatus
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -16,34 +16,21 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════
 
 def _fetch(table_real: str, formula: str = "", max_rec: int = 20) -> list:
-    """HTTP call ישיר ל-Airtable. מחזיר list[record] או raise RuntimeError."""
-    import httpx
+    """Return Airtable records or raise RuntimeError, preserving the old contract."""
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     key  = os.environ.get("AIRTABLE_API_KEY", "")
     if not base or not key:
         raise RuntimeError("Airtable credentials missing (AIRTABLE_BASE_ID / AIRTABLE_API_KEY)")
-    params: dict = {}
-    if formula:
-        params["filterByFormula"] = formula
-    if max_rec:
-        params["maxRecords"] = max_rec
-    encoded = urllib.parse.quote(table_real, safe="")
-    records = []
-    while True:
-        r = httpx.get(
-            f"https://api.airtable.com/v0/{base}/{encoded}",
-            headers={"Authorization": f"Bearer {key}"},
-            params=params,
-            timeout=10,
-        )
-        if r.status_code != 200:
-            raise RuntimeError(f"Airtable {r.status_code}: {r.text[:120]}")
-        payload = r.json()
-        records.extend(payload.get("records", []))
-        offset = payload.get("offset")
-        if max_rec or not offset:
-            return records
-        params["offset"] = offset
+    try:
+        return list_records(table_real, formula, max_records=max_rec)
+    except AirtableReadError as exc:
+        if exc.cause is not None:
+            raise exc.cause
+        if exc.status_code is not None:
+            raise RuntimeError(
+                f"Airtable {exc.status_code}: {exc.response_text[:120]}"
+            ) from None
+        raise RuntimeError(str(exc)) from None
 
 
 def _fmt(iso: str) -> str:

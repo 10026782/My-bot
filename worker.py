@@ -11,11 +11,10 @@ from threading import Thread
 from time import sleep
 
 from airtable_schema import Tables, TaskFields, TaskStatus
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
-AIRTABLE_TOKEN = os.environ.get("AIRTABLE_API_KEY", "")
-AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")  # same var as app.py
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
@@ -55,10 +54,6 @@ def _scan_airtable_deadlines(days_ahead: int = 3) -> list:
     שולף משימות שהדד-ליין שלהן בטווח הקרוב ושסטטוסן אינו 'בוצע'.
     מחזיר רשימה רזה — שם, דד-ליין, מספר ימים שנותרו.
     """
-    headers = {
-        "Authorization": f"Bearer {AIRTABLE_TOKEN}",
-        "Content-Type": "application/json",
-    }
     today = datetime.now(tz=timezone.utc)
     cutoff = today + timedelta(days=days_ahead)
 
@@ -68,11 +63,25 @@ def _scan_airtable_deadlines(days_ahead: int = 3) -> list:
         "maxRecords": 20,  # הגבלה קשיחה — לא סורקים הכל
     }
 
-    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{TASKS_TABLE}"
-    r = requests.get(url, headers=headers, params=params, timeout=10)
-    r.raise_for_status()
-
-    records = r.json().get("records", [])
+    try:
+        records = list_records(
+            TASKS_TABLE,
+            params["filterByFormula"],
+            max_records=params["maxRecords"],
+            fields=params["fields[]"],
+        )
+    except AirtableReadError as exc:
+        if exc.cause is not None:
+            if isinstance(exc.cause, requests.RequestException):
+                raise exc.cause
+            raise requests.RequestException(str(exc.cause)) from exc.cause
+        if exc.status_code is not None:
+            response = requests.Response()
+            response.status_code = exc.status_code
+            response.url = exc.response_url
+            response.reason = exc.response_reason
+            response.raise_for_status()
+        raise
     urgent = []
     for rec in records:
         fields = rec.get("fields", {})

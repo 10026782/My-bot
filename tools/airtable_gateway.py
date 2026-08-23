@@ -497,6 +497,23 @@ class AirtableLookupError(Exception):
     ActionContractRepository) can fail closed on a store outage instead of
     silently treating "can't reach Airtable" the same as "genuinely not found"."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        cause: Exception | None = None,
+        status_code: int | None = None,
+        response_text: str = "",
+        response_url: str = "",
+        response_reason: str = "",
+    ):
+        super().__init__(message)
+        self.cause = cause
+        self.status_code = status_code
+        self.response_text = response_text
+        self.response_url = response_url
+        self.response_reason = response_reason
+
 
 def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) -> dict | None:
     """
@@ -526,7 +543,13 @@ def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) 
 
 
 def at_list_by_formula(
-    table: str, formula: str, max_records: int = 100, *, timeout: float = 10
+    table: str,
+    formula: str,
+    max_records: int | str | None = 100,
+    *,
+    fields: list[str] | None = None,
+    paginate: bool = False,
+    timeout: float = 10,
 ) -> list[dict]:
     """
     Lists records matching a caller-built filterByFormula string. The caller
@@ -537,20 +560,41 @@ def at_list_by_formula(
     AirtableLookupError on a network/HTTP failure — same fail-closed contract
     as at_get_by_field().
     """
-    try:
-        r = httpx.get(
-            _at_url(table),
-            headers=_at_headers(),
-            params={"filterByFormula": formula, "maxRecords": max_records},
-            timeout=timeout,
-        )
-    except Exception as e:
-        raise AirtableLookupError(f"{table} list error: {e}") from e
+    params: dict[str, object] = {}
+    if formula:
+        params["filterByFormula"] = formula
+    if max_records:
+        params["maxRecords"] = max_records
+    if fields:
+        params["fields[]"] = fields
 
-    if r.status_code != 200:
-        raise AirtableLookupError(f"{table} list: HTTP {r.status_code}")
+    records: list[dict] = []
+    while True:
+        try:
+            r = httpx.get(
+                _at_url(table),
+                headers=_at_headers(),
+                params=params,
+                timeout=timeout,
+            )
+        except Exception as e:
+            raise AirtableLookupError(f"{table} list error: {e}", cause=e) from e
 
-    return r.json().get("records", [])
+        if r.status_code != 200:
+            raise AirtableLookupError(
+                f"{table} list: HTTP {r.status_code}",
+                status_code=r.status_code,
+                response_text=r.text,
+                response_url=str(getattr(r, "url", "")),
+                response_reason=str(getattr(r, "reason_phrase", "")),
+            )
+
+        payload = r.json()
+        records.extend(payload.get("records", []))
+        offset = payload.get("offset")
+        if not paginate or not offset:
+            return records
+        params["offset"] = offset
 
 
 def at_upsert(
