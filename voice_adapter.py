@@ -46,6 +46,7 @@ class VoiceState(str, Enum):
 class VoiceSession:
     call_sid:  str
     from_num:  str           # מספר המתקשר
+    to_num:    str = ""      # Twilio destination number / service account
     state:     VoiceState = VoiceState.WELCOME
     domain:    str = ""
     answers:   dict = field(default_factory=dict)
@@ -61,11 +62,12 @@ class VoiceSession:
 _sessions: dict[str, VoiceSession] = {}
 
 
-def get_or_create_session(call_sid: str, from_num: str) -> VoiceSession:
+def get_or_create_session(call_sid: str, from_num: str, to_num: str = "") -> VoiceSession:
     if call_sid not in _sessions:
         _sessions[call_sid] = VoiceSession(
             call_sid = call_sid,
             from_num = from_num,
+            to_num = to_num,
         )
     return _sessions[call_sid]
 
@@ -230,6 +232,13 @@ def step_callback(session: VoiceSession, digits: str) -> str:
 def _save_voice_lead(session: VoiceSession) -> bool:
     """שומר ליד קולי לAirtable + מודיע לowner."""
     try:
+        from feature_flags import is_enabled
+        if is_enabled("VOICE_CANONICAL_LEAD_WRITE"):
+            from core.noninteractive_lead_cutovers import create_voice_inbound_lead
+            result = create_voice_inbound_lead(session, session.to_num)
+            if not result.ok:
+                logger.error("[Voice] canonical lead blocked: %s", result.reason)
+            return result.ok
         from tools.airtable_tools import airtable_add  # type: ignore
         from airtable_schema import Tables        # type: ignore
 
@@ -316,6 +325,7 @@ def process_voice_step(
     call_sid: str,
     from_num: str,
     digits:   str = "",
+    to_num:   str = "",
 ) -> str:
     """
     Entry point מה-Flask webhook.
@@ -343,7 +353,7 @@ def process_voice_step(
     except ImportError:
         pass
 
-    session = get_or_create_session(call_sid, from_num)
+    session = get_or_create_session(call_sid, from_num, to_num)
     session.digits = digits
 
     logger.info(f"[Voice] {call_sid} | state={session.state} | digits={digits!r}")

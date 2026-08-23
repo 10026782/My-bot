@@ -320,7 +320,8 @@ class LeadFields:
     PHONE           = "phone"
     STATUS          = "status"
     SCORE           = "Score"        # raw numeric — Airtable field "Score" (capital S); written by lead_memory/lead_capture
-    TIER            = "tier"         # singleSelect — writable. Values: קר/חם/לוהט/רותח (set by scoring logic)
+    TIER            = "tier"         # singleSelect — real, writable field (verified via Airtable MCP, not a formula/read-only). Values: קר/חם/לוהט/רותח/ליד חדש. Currently 0/39 live records populated and no code path writes it intentionally — treat as dead-in-practice, not canonical for reasoning, pending an owner decision to remove it (see docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md §7C and the Canonical Leads Schema v1 proposal).
+    NOTES           = "notes"        # multilineText — written only by voice_adapter.py (IVR), read by core/leads_reasoning_projection.py
     SUMMARY         = "summary"
     ANSWERS         = "answers"
     SOURCE          = "source"
@@ -359,24 +360,36 @@ class LeadStatus:
 
 class LeadOutcome:
     """Leads.'Business Outcome' singleSelect — canonical (clean) key -> exact live
-    Airtable option string. Verified via Airtable MCP get_table_schema, 2026-06-17,
-    field fldVa5wSmAqcKLi86. Airtable's typecast is OFF for this base, so a write
+    Airtable option string.
+
+    Canonical Leads Schema v1 (Track B, 21/08/2026): the live Airtable
+    options were renamed to this trimmed form on 22/08/2026 (the field
+    originally carried a baked-in trailing space on 7 of its 8 choices).
+    Read paths that compare a raw fetched value against one of these
+    constants still .strip() first (core/adapters/leads_adapter.py's
+    _normalise_business_outcome, audience_intelligence.py) — kept
+    permanently as cheap, ongoing hardening against future drift, not as
+    migration scaffolding (owner decision, 21/08/2026). The temporary
+    write-side fallback (LEGACY_VALUE_FOR / option_fallback) that bridged
+    writes during the migration window was removed once the rename landed
+    and the fallback log went quiet (Track B step 5).
+
+    Originally verified via Airtable MCP get_table_shape, 2026-06-17, field
+    fldVa5wSmAqcKLi86. Airtable's typecast is OFF for this base, so a write
     that doesn't match an existing option byte-for-byte fails with 422
     INVALID_MULTIPLE_CHOICE_OPTIONS ("Insufficient permissions to create new
-    select option") instead of creating it. Every option except ARCHIVED has a
-    trailing space baked into the Airtable field config itself — do not "fix" it
-    by stripping the space in code; that would just recreate this bug.
+    select option") instead of creating it.
     """
-    OPEN               = "open "
-    NEEDS_FOLLOWUP      = "needs_followup "
-    MEETING_SCHEDULED  = "meeting_scheduled "
-    CONVERTED          = "converted "
-    NOT_RELEVANT       = "not_relevant "
-    LOST               = "lost "
-    DUPLICATE          = "duplicate "
+    OPEN               = "open"
+    NEEDS_FOLLOWUP     = "needs_followup"
+    MEETING_SCHEDULED  = "meeting_scheduled"
+    CONVERTED          = "converted"
+    NOT_RELEVANT       = "not_relevant"
+    LOST               = "lost"
+    DUPLICATE          = "duplicate"
     ARCHIVED           = "archived"
 
-    # canonical (frontend/internal, no trailing space) key -> exact Airtable value
+    # canonical (frontend/internal) key -> exact Airtable value (target, trimmed form)
     BY_KEY = {
         "open": OPEN,
         "needs_followup": NEEDS_FOLLOWUP,

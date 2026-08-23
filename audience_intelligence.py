@@ -1,6 +1,6 @@
 # audience_intelligence.py — D04 Audience Intelligence
 # קובץ: audience_intelligence.py (flat, root)
-# flag: FEATURE_AUDIENCE_INTELLIGENCE (כבוי ברירת מחדל)
+# flag: AUDIENCE_INTELLIGENCE (כבוי ברירת מחדל)
 #
 # מה זה:
 #   1. Segmentation    — מי הלידים שלי? (7 פרופילים)
@@ -182,7 +182,10 @@ def _parse_records(records: list) -> list[LeadProfile]:
                 days_silent    = days_silent,
                 converted      = bool(
                     f.get("status") in ("closed", "won", "converted")  # BUG-110: legacy pre-fix marker, no backfill
-                    or (converted_outcome is not None and f.get(outcome_field) == converted_outcome)
+                    # .strip() — Track B (Canonical Leads Schema v1): Airtable's live Business
+                    # Outcome option still carries a trailing space until the field is renamed;
+                    # comparing stripped keeps this working before, during, and after that rename.
+                    or (converted_outcome is not None and str(f.get(outcome_field) or "").strip() == converted_outcome)
                 ),
                 followup_count = int(f.get("followup_count") or 0),
                 answers        = {},

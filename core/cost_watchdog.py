@@ -6,7 +6,8 @@
 # log_usage()     — append-only write to logs/usage.jsonl, never throws.
 # daily_watchdog() — reads last 24h, aggregates, checks thresholds, alerts + Airtable row.
 #
-# flag: COST_WATCHDOG_ENABLED (default on — "Pipes first").
+# flags: COST_WATCHDOG_ENABLED overrides COST_WATCHDOG_LIVE when set;
+#        otherwise COST_WATCHDOG_LIVE is used (default true — "Pipes first").
 #
 # Cost Telemetry Reliability, PR1 (write-truthfulness + upsert only — no
 # usage_events, no trigger changes, no new Airtable fields; those are

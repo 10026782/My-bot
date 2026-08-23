@@ -144,16 +144,15 @@ Several modules are code-complete but disabled by default via `feature_flags.py`
 - `followup_engine.py` (`FOLLOWUP_AUTOMATION`): identifies "ripe" leads, drafts follow-ups, and routes them through approval.
 - `furniture_lead_funnel.py`: a separate, deterministic WhatsApp funnel for a specific product line (not the general agent flow) — see `test_furniture_lead_funnel.py`.
 - `voice_adapter.py` (`FEATURE_VOICE_IVR`/F07): Twilio Voice IVR state machine for lead qualification.
-- `email_inbound.py` (`FEATURE_EMAIL_INBOUND`/F06): polls Gmail and routes inbound mail through identity → approval → reply.
-- `interaction_engine.py` (`FEATURE_INTERACTION_INTELLIGENCE`/D06.1): unified interaction log across calendar/email/WhatsApp.
-- `audience_intelligence.py` (`FEATURE_AUDIENCE_INTELLIGENCE`/D04): segmentation, high-value/churn detection, lookalike matching.
+- `email_inbound.py` (`EMAIL_INBOUND`/F06): polls Gmail and routes inbound mail through identity → approval → reply.
+- `interaction_engine.py` (`INTERACTION_INTELLIGENCE`/D06.1): unified interaction log across calendar/email/WhatsApp.
+- `audience_intelligence.py` (`AUDIENCE_INTELLIGENCE`/D04): segmentation, high-value/churn detection, lookalike matching.
 - `ad_attribution.py` (D05): UTM/campaign source tracking, consumed at lead-intake time via `app.py`'s `_inject_utm`.
 - `data_engines.py`: stubs for F02/F03/F04 (learning, attribution, KPI) intentionally blocked pending more historical data.
 
 ### Background workers
 
 - `worker.py`: the proactive background worker hit by Render's Cron trigger (`POST /worker/trigger`, scheduled ~08:00/18:00) for routine async tasks.
-- `workers/survey_worker.py`: post-deal-close survey ("what won the deal?") sent via Telegram, feeding into the TMA quests/game system.
 - This is distinct from `scheduler.py`'s in-process `schedule`-library jobs (digest, overdue payments, cleanup) started from `app.py`.
 
 ## Frontend (`tma-frontend/`)

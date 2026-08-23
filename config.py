@@ -19,6 +19,15 @@ CHANNEL_DOMAINS: dict[str, str] = {
     # "whatsapp:+972507654321": "import",
 }
 
+# ─── Inbound source → canonical Owner mapping ───────────────────────────────
+# Values are canonical identity user_ids, never Airtable Profile record IDs.
+# Missing entries are intentional: the resolver fails closed.
+OWNER_USER_ID_MAPPINGS: dict[str, dict[str, str]] = {
+    "whatsapp_destination": {},
+    "email_recipient": {},
+    "voice_destination": {},
+}
+
 # דומיין ברירת מחדל כשאין מיפוי מוגדר
 DEFAULT_DOMAIN = "general"
 

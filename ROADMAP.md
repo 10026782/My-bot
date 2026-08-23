@@ -7,7 +7,33 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 21/08/2026 — **N18 Phase 2, פרוסה חמישית (וסוגרת): terminal-turn-result
+עודכן: 22/08/2026 — **Canonical Leads Schema v1 — Track A/B הושלמו במלואם (ידני + קוד).**
+בוצע ידנית ב-Airtable UI (owner, 22/08): (1) הוסרה האופציה `"ליד חדש"` מרשימת ה-choices
+של `status` וגם של `Business Outcome`; (2) שינוי-שם ל-7 מתוך 8 האופציות של `Business
+Outcome` (הוסר ה-trailing space — `"open "`→`"open"` וכו', `"archived"` היה כבר נקי) —
+אומת ישירות דרך Airtable MCP `get_table_schema` על שני השדות, לא רק דווח. לוג ה-
+`option_fallback` ב-Render היה שקט לגמרי מאז ה-rename (יום תצפית מלא). בהתאם, בוצע Track
+B step 5: הוסרו `LeadOutcome.LEGACY_VALUE_FOR`, `airtable_schema.leads_outcome_option_fallback`,
+`tools/airtable_gateway.py`'s `_is_invalid_option_error` וה-`option_fallback` param/logic
+כולו מ-`airtable_patch`, וה-wiring משלושת ה-call sites (`tma_api.py::_at_patch`,
+`tools/approval_actions.py::tma_write`, `tools/airtable_tools.py::airtable_update`) — ה-
+`.strip()` בצד הקריאה (`core/adapters/leads_adapter.py`, `audience_intelligence.py`) נשאר
+לצמיתות לפי החלטת owner מפורשת (21/08/2026), לא כ-scaffolding זמני. `tier`-field ו-
+`Next Action`-field עדיין מכילים את האופציה `"ליד חדש"` — לא היו בסקופ הניקוי הזה, נותרו
+כמתוכנן לצעד עתידי נפרד. טסטים: 37/37 (`test_airtable_gateway.py`, לאחר הסרת 17 בדיקות
+T7 שבדקו את המנגנון שהוסר), smoke + כל רגרסיית BUG-104/105/A32/lead_service ללא שינוי.
+עודכן קודם: 21/08/2026 — **Canonical Leads Schema v1 (owner-approved) — Phase 3 prep, שלבים ראשונים.**
+תיקון תיעוד סותר על שדה `tier` (ראה Known Issues + N05 למעלה): אומת ישירות דרך Airtable
+MCP ש-`tier` הוא singleSelect אמיתי וכתיב (לא formula, לא read-only, לא "לא קיים בסכמה"
+כפי שנטען בעבר) — פשוט ריק ב-100% מהרשומות (0/39 נכון ל-21/08, 0/92 ב-17/07) וללא כותב
+מכוון בקוד. תוקן במקביל ב-`daily_digest.py`, `.claude/skills/CLAUDE_SKILLS.md`, וכאן.
+`status`-field data cleanup בוצע: רשומה יחידה עם `status="ליד חדש"` (ערך לא-קנוני, מחוץ
+ל-`LeadStatus.ALL`) עודכנה ל-`new` דרך Airtable MCP; אימות `isNotEmpty`/`=` מראה 0 רשומות
+נותרות על האופציה. הסרת האופציה עצמה מרשימת ה-choices דורשת עריכה ידנית ב-Airtable UI —
+כלי ה-MCP הזמין (`update_field`) לא תומך בעריכת choices של singleSelect. מסמך מלא:
+Canonical Leads Schema v1 (artifact, owner-approved 21/08/2026) — כולל targeted trace
+ל-6 שדות ה-linked-record ו-atomic migration plan ל-`status`/`Business Outcome`.
+עודכן קודם: 21/08/2026 — **N18 Phase 2, פרוסה חמישית (וסוגרת): terminal-turn-result
 primitive (scope מצומצם, לפי החלטת owner מפורשת).** ROADMAP's Phase 2 description רשם
 "terminal-turn-result" כאחד הדברים להוציא ל-shared infrastructure, אך אותו טקסט עצמו גם
 מציין שזה בפועל שייך ל-Phase 4 (Structured UX Contract: entity/operation/status/
@@ -967,8 +993,9 @@ Owner מאשר followup → טיוטה מגיעה ב-Telegram לשליחה יד�
 **מה:** חיבור score + tier לדוח הבוקר. `_hot_leads()` עבר מפילטר
 status='hot' מת (לא נכתב לעולם בקוד) לפילטר `Score>=50` עם fallback
 ל-status הישן. tier מחושב בזיכרון מ-Score (אותם ספים כמו
-`lead_capture._score_inbound_message`) — לא נקרא משדה Airtable, כי
-`LeadFields.TIER` לא קיים בסכמת הפרודקשן (ראה Known Issues).
+`lead_capture._score_inbound_message`) — לא נקרא משדה Airtable; השדה
+`tier` כן קיים בסכמה (singleSelect אמיתי, לא formula) אך ריק ב-100%
+מהרשומות (0/39, 21/08/2026) וללא כותב מכוון (ראה Known Issues, עודכן).
 **קבצים:** daily_digest.py בלבד.
 
 ### N06 — Ventures Screen (TMA) ✅ מיושם
@@ -2275,7 +2302,7 @@ UXMessage(
 | `lead_memory.py:155` — dead write | שדה `"updated_at"` נכתב ל-Leads אך אינו קיים בסכמת Airtable — הכתיבה נדחית בשקט ע"י gateway. | ניקוי בפגישת Tech Debt הבאה |
 | Worlds table — constraint חסר | `game_today()` מחפש `Status=Active` עם `max_records=1`. אם שני Worlds מסומנים Active, התוצאה לא צפויה. אין constraint ב-Airtable. | לפני F12 / aggregator |
 | `/api/game/today` — shared endpoint | גם `BossCheckin.tsx` (Screen #1) וגם `GameScreen.tsx` (Screen #2) משתמשים באותו endpoint. aggregator F12 חייב לשמור על filter הנוכחי (NOT Done + Due_Date≤today + Owner) כדי לא לשבור את Screen #2. | לפני פיתוח F12 |
-| `LeadFields.TIER = "tier"` — שדה לא קיים ב-Airtable | schema dump 2026-06-15 אימת: אין שדה `tier` / `Tier` בטבלת Leads ב-`app4bcgoX7t0HUVnm`. gateway חוסם כתיבה. **החלטה נדרשת:** (1) ליצור שדה `Tier` ב-Airtable (singleSelect), (2) להסיר `LeadFields.TIER` מהקוד, (3) להשאיר כ-no-op. | לפני פעילות scoring בפרודקשן |
+| `LeadFields.TIER = "tier"` — שדה קיים אך ריק וללא כותב | **מתוקן (21/08/2026, Canonical Leads Schema v1):** ההצהרה הקודמת בשורה זו הייתה שגויה — Airtable MCP `get_table_schema` מאמת ששדה `tier` **כן קיים** בטבלת Leads (`app4bcgoX7t0HUVnm`), הוא singleSelect אמיתי (לא formula, לא read-only-by-type), אך **ריק ב-100% מהרשומות** (0/92 ב-17/07, 0/39 ב-21/08 — נשאר ריק לאורך חודש) וללא כותב מכוון בקוד. `tools/airtable_gateway.py` לא חוסם כתיבה אליו (אינו ב-`READ_ONLY_FIELDS`) — פשוט אף קוד לא כותב אליו. **החלטה נדרשת:** להסיר את השדה מ-Airtable + את `LeadFields.TIER` מהקוד (ראה migration plan ב-Canonical Leads Schema v1). | לפני N18 Phase 3 |
 | Assets schema drift | שמות שדות ב-live שונים מ-MIGRATION doc: `"Mortgage Balance"` (לא `"Mortgage"`), אין `"Purchase Cost"`, אין `"Documents"`. `AssetFields` בקוד עשוי להשתמש בשמות לא נכונים. | לפני פיתוח Assets tools |
 | `Table 16` ב-Airtable | טבלת placeholder ריקה (`tblXeDnLTAvpej3cC`) — לא בשימוש. למחוק ידנית מ-Airtable UI. | Housekeeping הבא |
 | ~~`/status` Telegram handler חסר~~ | **✅ סגור (אומת 20/07/2026, BUG-005/BUG-120/BUG-121).** ה-decorator קיים ורשום בפועל (`app.py:401`); בזמן עבודה על BUG-120/121 גם תוקן באג נוסף ב-`/status` עצמו (קריסה על `ApiTelegramException` — ראו BUG_AUDIT_LOG). שורה זו הייתה stale. | — |

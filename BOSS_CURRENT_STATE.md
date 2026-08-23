@@ -305,7 +305,7 @@ See `docs/governance/ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred 
 | `app.py` run_agent | ✅ מחובר | log_usage אחרי כל client.messages.create |
 | `scheduler.py` | ✅ נוסף | `_job_daily_usage_report` כל יום 08:00 |
 | `AI_Usage_Daily` Airtable | ⏳ טבלה חדשה | יש ליצור ב-Airtable לפני שה-daily job כותב לה |
-| `COST_WATCHDOG_ENABLED` | default on | Pipes first |
+| `COST_WATCHDOG_ENABLED` | override when set; otherwise `COST_WATCHDOG_LIVE` | Pipes first |
 | `SONNET_DAILY_LIMIT` | default 50 | configurable via env |
 
 **החלטות ארכיטקטורה**:

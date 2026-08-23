@@ -523,11 +523,38 @@ def test_route_get_my_work_airtable_failure_returns_500():
 # the creator's own Profile record, or no task would ever get one.
 # ══════════════════════════════════════════════════════════════════
 
+def _fake_owner_autoapprove_gateway(posted):
+    """C05-C07 Finding #3 remediation: Owner writes now go through the same
+    ActionGateway pipeline as Manager (_queue_or_owner_execute ->
+    _queue_tma_write_approval -> propose_action, then, for Owner only,
+    _claim_and_execute_approval). Stubs both gateway seams so these tests
+    keep verifying only what they always cared about — the constructed
+    Airtable payload — without needing a real ActionGateway/PostgreSQL/
+    Airtable stack. Returns the (fake_queue, fake_claim_execute) pair to
+    assign onto tma_api._queue_tma_write_approval / tma_api._claim_and_execute_approval."""
+
+    def fake_queue(action, payload, identity, label):
+        posted.append((payload["table"], payload["fields"]))
+        return "fake_approval_1", {
+            "status": "pending_approval", "approval_id": "fake_approval_1", "contract_id": "fake_contract_1",
+        }, 202
+
+    def fake_claim_execute(approval_id, identity):
+        return {
+            "ok": True, "status_code": 200, "new_status": "approved",
+            "action_label": "test", "ctx_id": "", "bus_synced": False,
+            "execution_result": {"message": "✅", "contract_status": "executed"},
+        }
+
+    return fake_queue, fake_claim_execute
+
+
 def test_create_lead_task_defaults_owner_to_creator_when_lead_has_none():
     orig_validate = tma_api._validate_initdata
     orig_resolve = tma_api.resolve_identity
     orig_get_record = tma_api._at_get_record
-    orig_post = tma_api._at_post
+    orig_queue = tma_api._queue_tma_write_approval
+    orig_claim_execute = tma_api._claim_and_execute_approval
     orig_at_list = tma_api._at_list
 
     client = _make_client()
@@ -539,16 +566,11 @@ def test_create_lead_task_defaults_owner_to_creator_when_lead_has_none():
     )
 
     posted = []
-
-    def fake_post(table, fields):
-        posted.append((table, fields))
-        return {"id": "recNewTask"}
-
-    tma_api._at_post = fake_post
+    tma_api._queue_tma_write_approval, tma_api._claim_and_execute_approval = _fake_owner_autoapprove_gateway(posted)
 
     try:
         r = client.post("/api/leads/recLEAD001/task", json={"title": "call back"}, headers=_HDR)
-        assert r.status_code == 201
+        assert r.status_code == 200
         task_posts = [(t, f) for t, f in posted if t == Tables.TASKS]
         assert len(task_posts) == 1
         table, fields = task_posts[0]
@@ -557,7 +579,8 @@ def test_create_lead_task_defaults_owner_to_creator_when_lead_has_none():
         tma_api._validate_initdata = orig_validate
         tma_api.resolve_identity = orig_resolve
         tma_api._at_get_record = orig_get_record
-        tma_api._at_post = orig_post
+        tma_api._queue_tma_write_approval = orig_queue
+        tma_api._claim_and_execute_approval = orig_claim_execute
         tma_api._at_list = orig_at_list
 
 
@@ -566,7 +589,8 @@ def test_create_lead_task_preserves_lead_owner_when_present():
     orig_validate = tma_api._validate_initdata
     orig_resolve = tma_api.resolve_identity
     orig_get_record = tma_api._at_get_record
-    orig_post = tma_api._at_post
+    orig_queue = tma_api._queue_tma_write_approval
+    orig_claim_execute = tma_api._claim_and_execute_approval
     orig_at_list = tma_api._at_list
 
     client = _make_client()
@@ -578,17 +602,18 @@ def test_create_lead_task_preserves_lead_owner_when_present():
     tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
 
     posted = []
-    tma_api._at_post = lambda table, fields: (posted.append((table, fields)), {"id": "recNewTask"})[1]
+    tma_api._queue_tma_write_approval, tma_api._claim_and_execute_approval = _fake_owner_autoapprove_gateway(posted)
 
     try:
         r = client.post("/api/leads/recLEAD001/task", json={"title": "call back"}, headers=_HDR)
-        assert r.status_code == 201
+        assert r.status_code == 200
         assert posted[0][1][TaskFields.OWNER] == [OTHER_OWNER_RECORD_ID]
     finally:
         tma_api._validate_initdata = orig_validate
         tma_api.resolve_identity = orig_resolve
         tma_api._at_get_record = orig_get_record
-        tma_api._at_post = orig_post
+        tma_api._queue_tma_write_approval = orig_queue
+        tma_api._claim_and_execute_approval = orig_claim_execute
         tma_api._at_list = orig_at_list
 
 

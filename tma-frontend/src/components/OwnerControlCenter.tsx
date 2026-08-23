@@ -4,6 +4,7 @@ import {
   actionableApprovalEntries,
   buildDevelopmentList,
   horizonBucketLabel,
+  isCurrentFreshness,
   shouldShowFreshness,
   type CompactDevelopmentItem,
 } from "../lib/commandCenterPresentation";
@@ -207,10 +208,15 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
   }
 
   const data = state.data;
+  const attentionCurrent = isCurrentFreshness(data.freshness.attention);
+  const developmentCurrent = isCurrentFreshness(data.freshness.development)
+    && data.development_status.projection_state === "CURRENT";
+  const systemCurrent = isCurrentFreshness(data.freshness.system_status)
+    && data.system_status.state !== "UNKNOWN";
   const visibleAttentionItems = attentionExpanded ? data.attention.items : data.attention.items.slice(0, 3);
   const systemState = data.system_status.state;
-  const pendingEntries = actionableApprovalEntries(data.pending_decisions);
-  const developmentItems = buildDevelopmentList(data.development_status);
+  const pendingEntries = attentionCurrent ? actionableApprovalEntries(data.pending_decisions) : [];
+  const developmentItems = developmentCurrent ? buildDevelopmentList(data.development_status) : [];
   const handlers = { onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures };
 
   function toggleDevelopmentItem(key: string) {
@@ -229,7 +235,7 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
         <div className="command-center-stack">
           <section className="command-center-hero" aria-labelledby="attention-heading">
             <SectionTitle title="דורש תשומת לב עכשיו" status={data.freshness.attention} />
-            {data.attention.items.length ? <><div className="command-center-attention-list">{visibleAttentionItems.map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div>{data.attention.items.length > 3 && <button type="button" className="boss-button boss-button--quiet boss-bubble--action command-center-more" aria-expanded={attentionExpanded} onClick={() => setAttentionExpanded((expanded) => !expanded)}>{attentionExpanded ? "הצג פחות" : "הצג עוד"}</button>}</> : data.freshness.attention === "CURRENT" ? <p id="attention-heading" className="command-center-positive">אין כרגע דברים דחופים שדורשים את תשומת לבך.</p> : <Unavailable text="לא ניתן לקבוע כרגע מה דורש תשומת לב." />}
+            {!attentionCurrent ? <Unavailable text="לא ניתן לקבוע כרגע מה דורש תשומת לב — המקור אינו עדכני." /> : data.attention.items.length ? <><div className="command-center-attention-list">{visibleAttentionItems.map((item) => <AttentionCard key={item.signal_key} item={item} handlers={handlers} />)}</div>{data.attention.items.length > 3 && <button type="button" className="boss-button boss-button--quiet boss-bubble--action command-center-more" aria-expanded={attentionExpanded} onClick={() => setAttentionExpanded((expanded) => !expanded)}>{attentionExpanded ? "הצג פחות" : "הצג עוד"}</button>}</> : <p id="attention-heading" className="command-center-positive">אין כרגע דברים דחופים שדורשים את תשומת לבך.</p>}
           </section>
 
           {pendingEntries.length > 0 && (
@@ -249,8 +255,8 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
                 </div>
               )}
             </div>
-            {data.development_status.projection_state === "UNKNOWN" ? (
-              <div id="development-heading"><Unavailable text="מצב הפיתוח אינו זמין כרגע." /></div>
+            {!developmentCurrent ? (
+              <div id="development-heading"><Unavailable text="מצב הפיתוח אינו זמין כרגע — המקור אינו עדכני." /></div>
             ) : developmentItems.length === 0 ? (
               <p id="development-heading" className="command-center-positive">אין יוזמות פעילות להצגה כרגע.</p>
             ) : (
@@ -267,15 +273,17 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
             )}
           </Surface>
 
-          {systemState !== "UNKNOWN" && (
-            <Surface className="command-center-section command-center-section--compact" aria-labelledby="system-heading">
-              <SectionTitle title="מצב המערכת" status={data.freshness.system_status} />
+          <Surface className="command-center-section command-center-section--compact" aria-labelledby="system-heading">
+            <SectionTitle title="מצב המערכת" status={data.freshness.system_status} />
+            {!systemCurrent ? (
+              <Unavailable text="מצב המערכת אינו זמין כרגע — המקור אינו עדכני." />
+            ) : (
               <div className="command-center-inline-status">
                 <StatusBadge tone={systemState === "CURRENT" ? "success" : "danger"}>{systemState === "CURRENT" ? "תקין" : "דורש תשומת לב"}</StatusBadge>
                 {onOpenHealth && <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onOpenHealth}>פתיחת בריאות המערכת</button>}
               </div>
-            </Surface>
-          )}
+            )}
+          </Surface>
         </div>
       </div>
     </main>

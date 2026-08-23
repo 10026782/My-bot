@@ -640,6 +640,60 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
     }, 202
 
 
+# ══════════════════════════════════════════════════════════════════
+# C05-C07 audit Finding #3 (DUPLICATE_APPROVAL_PATH) remediation — DECISION:
+# SINGLE BUSINESS WRITE PATH (see docs/governance/ audit record). Owner and
+# Manager must enter the SAME ActionGateway pipeline for a given business
+# mutation; only the approval POLICY differs, never the write path.
+#
+# _queue_tma_write_approval() above already proposes a "tma_write" contract
+# identically for every role — this wrapper is the only thing that changes:
+# for Owner, it immediately drives the freshly-proposed pending contract
+# through the exact same claim -> load-contract -> approve -> re-read helper
+# (_claim_and_execute_approval, defined further down this file) that the
+# manual /api/approvals/<id> click endpoint uses — so Owner gets automatic
+# execution (no manual "approve your own action" step) while still getting
+# the full action contract, evidence/receipt, and audit trail that
+# tools/approval_actions.py::tma_write() produces for every execution,
+# something the old owner-direct `_at_patch()`/`_at_post()` branches never
+# produced. Manager is completely unaffected — falls straight through to the
+# unchanged "pending_approval" response for a human owner to act on later.
+# ══════════════════════════════════════════════════════════════════
+def _queue_or_owner_execute(action: str, payload: dict, identity, label: str) -> tuple[str, dict, int]:
+    """Canonical TMA business-write entry point. Same ActionGateway pipeline
+    for Owner and Manager; Owner is auto-approved and executed here, Manager
+    stays queued for manual approval (unchanged behavior)."""
+    approval_id, response, status = _queue_tma_write_approval(action, payload, identity, label)
+    if not identity.is_owner or status != 202 or not approval_id:
+        # Non-owner, or propose_action() itself didn't produce a fresh/
+        # recoverable pending approval (blocked, duplicate, OTP/confirmation
+        # required, projection write failed, etc.) — surface unchanged.
+        return approval_id, response, status
+
+    outcome = _claim_and_execute_approval(approval_id, identity)
+
+    if not outcome.get("ok"):
+        body = {"error": outcome.get("error", "execution failed"), "approval_id": approval_id}
+        if "detail" in outcome:
+            body["detail"] = outcome["detail"]
+        if outcome.get("projection_sync_pending"):
+            body["projection_sync_pending"] = True
+        return approval_id, body, outcome.get("status_code", 500)
+
+    _audit(f"{action}_owner_autoapprove", identity, details=label[:200])
+    result = {
+        "ok": True,
+        "status": "executed",
+        "approval_id": approval_id,
+        "contract_id": response.get("contract_id", ""),
+    }
+    if outcome.get("execution_result") is not None:
+        result.update(outcome["execution_result"])
+    if outcome.get("projection_sync_pending"):
+        result["projection_sync_pending"] = True
+    return approval_id, result, 200
+
+
 class _ProjectionLookupFailed(Exception):
     """Raised when the Approvals projection existence check itself could not
     be completed — distinct from "confirmed not found". Must never be
@@ -1782,7 +1836,8 @@ _OUTCOME_STATUS_MAP = {
 @tma_api.route("/api/leads/<lead_id>", methods=["PATCH"])
 @require_tma_auth
 def patch_lead(lead_id, identity):
-    """עדכון שדות ליד. Owner — מיידי; Manager — דרך approval."""
+    """עדכון שדות ליד. Owner ו-Manager עוברים באותו נתיב ActionGateway
+    (_queue_or_owner_execute) — Owner מאושר אוטומטית, Manager ממתין לאישור."""
     if identity.role not in {Role.OWNER, Role.MANAGER}:
         return jsonify({"error": "forbidden"}), 403
 
@@ -1807,16 +1862,7 @@ def patch_lead(lead_id, identity):
     if not fields or all(v == "" for v in fields.values()):
         return jsonify({"error": "no editable fields provided"}), 400
 
-    if identity.is_owner:
-        ok = _at_patch("Leads", lead_id, fields)
-        if not ok:
-            return jsonify({"error": "update failed"}), 500
-        _audit("lead_patch", identity, details=f"{lead_id}: {list(fields.keys())}")
-        from core.lead_event_writer import write_tma_lead_event
-        write_tma_lead_event(lead_id, "lead_patch", fields)
-        return jsonify({"ok": True, "lead_id": lead_id, "updated": list(fields.keys())})
-
-    _, response, status = _queue_tma_write_approval(
+    _, response, status = _queue_or_owner_execute(
         "tma_patch_lead",
         {
             "op": "patch",
@@ -1835,7 +1881,8 @@ def patch_lead(lead_id, identity):
 @tma_api.route("/api/leads/<lead_id>/outcome", methods=["POST"])
 @require_tma_auth
 def set_lead_outcome(lead_id, identity):
-    """קביעת תוצאה עסקית. Outcomes סופיים מעדכנים status=done. Owner — מיידי; Manager — approval."""
+    """קביעת תוצאה עסקית. Outcomes סופיים מעדכנים status=done. Owner ו-Manager
+    עוברים באותו נתיב ActionGateway (_queue_or_owner_execute)."""
     if identity.role not in {Role.OWNER, Role.MANAGER}:
         return jsonify({"error": "forbidden"}), 403
 
@@ -1855,16 +1902,7 @@ def set_lead_outcome(lead_id, identity):
     if outcome_key in _OUTCOME_STATUS_MAP:
         fields[LeadFields.STATUS] = _OUTCOME_STATUS_MAP[outcome_key]
 
-    if identity.is_owner:
-        ok = _at_patch("Leads", lead_id, fields)
-        if not ok:
-            return jsonify({"error": "update failed"}), 500
-        _audit("lead_outcome", identity, details=f"{lead_id}: {outcome_key}")
-        from core.lead_event_writer import write_tma_lead_event
-        write_tma_lead_event(lead_id, "lead_outcome", fields)
-        return jsonify({"ok": True, "lead_id": lead_id, "outcome": outcome_key})
-
-    _, response, status = _queue_tma_write_approval(
+    _, response, status = _queue_or_owner_execute(
         "tma_set_lead_outcome",
         {
             "op": "patch",
@@ -1883,7 +1921,8 @@ def set_lead_outcome(lead_id, identity):
 @tma_api.route("/api/leads/<lead_id>/task", methods=["POST"])
 @require_tma_auth
 def create_lead_task(lead_id, identity):
-    """יצירת משימה מליד — מעתיק אוטומטית domain, owner, lead link."""
+    """יצירת משימה מליד — מעתיק אוטומטית domain, owner, lead link. Owner
+    ו-Manager עוברים באותו נתיב ActionGateway (_queue_or_owner_execute)."""
     if identity.role not in {Role.OWNER, Role.MANAGER}:
         return jsonify({"error": "forbidden"}), 403
 
@@ -1927,15 +1966,7 @@ def create_lead_task(lead_id, identity):
     # קישור ליד — linked record array
     task_fields[TaskFields.LEAD_LINK] = [lead_id]
 
-    if identity.is_owner:
-        rec = _at_post(Tables.TASKS, task_fields)
-        if not rec:
-            return jsonify({"error": "task creation failed"}), 500
-        _audit("lead_task_created", identity, details=f"lead={lead_name} task={title}")
-        return jsonify({"ok": True, "id": rec.get("id", ""), "lead_id": lead_id}), 201
-
-    # Manager: queue for owner approval (consistent with patch_lead / set_lead_outcome)
-    _, response, status = _queue_tma_write_approval(
+    _, response, status = _queue_or_owner_execute(
         "tma_create_lead_task",
         {
             "op":            "post",

@@ -1,6 +1,6 @@
 # interaction_engine.py — D06.1 Interaction Intelligence & Business Memory
 # מחליף את meeting_intelligence.py
-# flag: FEATURE_INTERACTION_INTELLIGENCE
+# flag: INTERACTION_INTELLIGENCE (כבוי ברירת מחדל)
 #
 # ארכיטקטורה:
 #   [Calendar/WhatsApp/Email/Voice]

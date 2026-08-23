@@ -385,6 +385,7 @@ def airtable_patch(
             timeout=timeout,
         )
         ok = r.status_code == 200
+
         _audit_log(source, table, "patch", record_id, list(clean.keys()), ok=ok)
         if not ok:
             body = r.text[:300]

@@ -3751,6 +3751,7 @@ def run_agent(
     _out_meta:           dict | None = None,
     raw_event_id:        str = "",
     _live_contracts_snapshot: list | None = None,
+    _skip_legacy_lead_capture: bool = False,
 ) -> str:
     # _live_contracts_snapshot: Case C read-amplification fix (see
     # TURN_OWNERSHIP_EXTENSION.md) — an already-fetched find_live_contracts()
@@ -3961,7 +3962,7 @@ def run_agent(
     # ── 1.5. WhatsApp Lead Capture (W0) ───────────
     # W0/N02: capture inbound WhatsApp leads and optionally score them.
     lead_capture_result = None   # CXX/A32: נשמר לשילוב ב-tool_results_log
-    if identity.role == Role.LEAD:
+    if identity.role == Role.LEAD and not _skip_legacy_lead_capture:
         try:
             from lead_capture import capture_inbound_lead
             # BUG-NEW-13: domain תמיד "general" כאן — ה-Router עוד לא רץ
@@ -6345,6 +6346,7 @@ def _webhook_whatsapp_impl():
     # once, thread into both the ingress gate and run_agent() below — see
     # the Telegram handler's identical comment for the full rationale.
     _live_contracts_for_turn = None
+    _wa_identity_gate = None
     try:
         _wa_identity_gate = resolve_identity("whatsapp", sender)
         try:
@@ -6426,11 +6428,48 @@ def _webhook_whatsapp_impl():
             # נכנסת (utm_source/medium/campaign/platform לא קיימים ב-schema_cache.json)
             logger.warning(f"[UTM] whatsapp inject failed: {_utm_err}")
 
+    _skip_legacy_lead_capture = False
+    if (
+        _flag_enabled("WHATSAPP_CANONICAL_LEAD_WRITE")
+        and domain_from_channel != "furniture_import"
+    ):
+        _skip_legacy_lead_capture = True
+        try:
+            if _wa_identity_gate is None:
+                raise RuntimeError("whatsapp identity resolution unavailable")
+            from core.whatsapp_lead_cutover import create_whatsapp_inbound_lead
+            _canonical_result = create_whatsapp_inbound_lead(
+                _wa_identity_gate,
+                incoming,
+                to_number,
+                domain_from_channel,
+            )
+            if _canonical_result.ok:
+                logger.info(
+                    "[WhatsAppCanonicalLead] action=%s record_id=%s owner_user_id=%s",
+                    _canonical_result.action,
+                    _canonical_result.record_id,
+                    _canonical_result.owner_user_id,
+                )
+            else:
+                logger.error(
+                    "[WhatsAppCanonicalLead] blocked action=%s reason=%s",
+                    _canonical_result.action,
+                    _canonical_result.reason,
+                )
+        except Exception as _canonical_error:
+            logger.error(
+                "[WhatsAppCanonicalLead] failed error_type=%s",
+                type(_canonical_error).__name__,
+            )
+
     # furniture funnel pre-agent intercept — only when domain == "furniture_import"
     # if FURNITURE_TWILIO_WHATSAPP_NUMBER is unset, get_domain() returns "general" → skipped
     try:
         from furniture_lead_funnel import handle_furniture_lead_message
-        funnel_reply = handle_furniture_lead_message(sender, incoming, domain_from_channel)
+        funnel_reply = handle_furniture_lead_message(
+            sender, incoming, domain_from_channel, destination=to_number,
+        )
         if funnel_reply:
             gated_reply = _gateway_whatsapp_reply(sender, funnel_reply, domain_from_channel, msg_sid or sender)
             resp = MessagingResponse()
@@ -6450,6 +6489,7 @@ def _webhook_whatsapp_impl():
         _out_meta           = _run_meta,
         raw_event_id        = msg_sid,
         _live_contracts_snapshot = _live_contracts_for_turn,
+        _skip_legacy_lead_capture = _skip_legacy_lead_capture,
     )
     # תיקון: COG מקבל את הדומיין הסופי (אחרי Router), לא domain_from_channel
     # הישן שנקבע לפני שה-Router רץ — אחרת domain=general נרשם ב-COG גם
@@ -6665,7 +6705,8 @@ def voice_incoming():
         return Response(build_twiml(_say("השירות לא פעיל.") + _hangup()), mimetype="text/xml")
     call_sid = request.form.get("CallSid", "")
     from_num = request.form.get("From", "").replace("whatsapp:", "")
-    return Response(process_voice_step(call_sid, from_num), mimetype="text/xml")
+    to_num = request.form.get("To", "")
+    return Response(process_voice_step(call_sid, from_num, to_num=to_num), mimetype="text/xml")
 
 
 @app.route("/voice/step", methods=["POST"])
@@ -6678,7 +6719,8 @@ def voice_step():
     call_sid = request.form.get("CallSid", "")
     from_num = request.form.get("From", "").replace("whatsapp:", "")
     digits   = request.form.get("Digits", "")
-    return Response(process_voice_step(call_sid, from_num, digits), mimetype="text/xml")
+    to_num   = request.form.get("To", "")
+    return Response(process_voice_step(call_sid, from_num, digits, to_num), mimetype="text/xml")
 
 
 if __name__ == "__main__":
