@@ -503,11 +503,15 @@ class AirtableLookupError(Exception):
         cause: Exception | None = None,
         status_code: int | None = None,
         response_text: str = "",
+        response_url: str = "",
+        response_reason: str = "",
     ):
         super().__init__(message)
         self.cause = cause
         self.status_code = status_code
         self.response_text = response_text
+        self.response_url = response_url
+        self.response_reason = response_reason
 
 
 def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) -> dict | None:
@@ -580,6 +584,8 @@ def at_list_by_formula(
                 f"{table} list: HTTP {r.status_code}",
                 status_code=r.status_code,
                 response_text=r.text,
+                response_url=str(getattr(r, "url", "")),
+                response_reason=str(getattr(r, "reason_phrase", "")),
             )
 
         payload = r.json()

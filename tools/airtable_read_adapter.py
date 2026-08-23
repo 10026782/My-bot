@@ -16,11 +16,15 @@ class AirtableReadError(RuntimeError):
         cause: Exception | None = None,
         status_code: int | None = None,
         response_text: str = "",
+        response_url: str = "",
+        response_reason: str = "",
     ):
         super().__init__(message)
         self.cause = cause
         self.status_code = status_code
         self.response_text = response_text
+        self.response_url = response_url
+        self.response_reason = response_reason
 
 
 def list_records(
@@ -45,4 +49,6 @@ def list_records(
             cause=exc.cause,
             status_code=exc.status_code,
             response_text=exc.response_text,
+            response_url=exc.response_url,
+            response_reason=exc.response_reason,
         ) from exc

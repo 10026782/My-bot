@@ -144,13 +144,19 @@ def test_worker_preserves_requests_http_error_type():
         worker,
         "list_records",
         side_effect=AirtableReadError(
-            "Tasks list: HTTP 503", status_code=503, response_text="unavailable"
+            "Tasks list: HTTP 503",
+            status_code=503,
+            response_url="https://api.airtable.com/v0/base/Tasks",
+            response_reason="Service Unavailable",
         ),
     ):
         try:
             worker._scan_airtable_deadlines()
         except worker.requests.HTTPError as exc:
-            assert str(exc) == "Airtable 503: unavailable"
+            assert str(exc) == (
+                "503 Server Error: Service Unavailable for url: "
+                "https://api.airtable.com/v0/base/Tasks"
+            )
         else:
             raise AssertionError("worker did not preserve HTTPError")
 

@@ -76,9 +76,11 @@ def _scan_airtable_deadlines(days_ahead: int = 3) -> list:
                 raise exc.cause
             raise requests.RequestException(str(exc.cause)) from exc.cause
         if exc.status_code is not None:
-            raise requests.HTTPError(
-                f"Airtable {exc.status_code}: {exc.response_text[:120]}"
-            ) from exc
+            response = requests.Response()
+            response.status_code = exc.status_code
+            response.url = exc.response_url
+            response.reason = exc.response_reason
+            response.raise_for_status()
         raise
     urgent = []
     for rec in records:
