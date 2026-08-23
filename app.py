@@ -3256,22 +3256,28 @@ def _handle_approval_callback_impl(cq) -> None:
                 )
                 return
             else:
-                # Legacy path — FEATURE_ACTION_GATEWAY entirely off, no
-                # Gateway involvement in this mode at all; unchanged from
-                # pre-migration behavior. BUG-091: this replays the payload
-                # stored at _queue_approval() time (dict(tu.input) — Claude's
-                # own tool_use JSON, verbatim). _queue_approval() is only
-                # ever called from the raw Agent tool_use loop below —
-                # hardcode "agent", never trust a "_source" key that might be
-                # sitting inside tool_inputs.
-                raw    = dispatch_tool(tool_name, tool_inputs, identity, trusted_source="agent")
-                result = validate_tool_output(tool_name, raw)
-
-                exec_check = verify_execution(tool_name, result)
-                exec_failed = exec_check.status == "failed"
-                fail_text   = f"❌ הפעולה לא הושלמה: {exec_check.reason}"
-                if exec_check.status == "warn":
-                    logger.warning(f"[Approval:A32] Execution warn: {tool_name} -- {exec_check.reason}")
+                # A legacy approval callback must not become a second business
+                # write path when the canonical Gateway is disabled. Every
+                # tool that can reach this callback is side-effecting and is
+                # marked requires_approval in tool_registry; read-only tools
+                # never enter this approval queue.
+                logger.warning(
+                    "[ActionGateway] blocked legacy approval execution: "
+                    "gateway disabled action_id=%s tool=%s",
+                    action_id, tool_name,
+                )
+                result = {
+                    "ok": False,
+                    "tool": tool_name,
+                    "error_code": "LEGACY_GATEWAY_DISABLED",
+                    "user_message": (
+                        "❌ מסלול האישור הישן מושבת; "
+                        "נדרש ActionGateway קנוני לביצוע הפעולה."
+                    ),
+                    "evidence": {"mutation_executed": False},
+                }
+                exec_failed = True
+                fail_text = result["user_message"]
 
             if exec_failed:
                 logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {fail_text}")
