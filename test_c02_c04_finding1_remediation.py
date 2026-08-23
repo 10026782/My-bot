@@ -232,3 +232,36 @@ def test_twilio_media_adapter_unavailable_still_has_failed_processing_state(capl
     assert state.success_evidence is False
     assert state.error_code == "MEDIA_ADAPTER_UNAVAILABLE"
     assert state.retryable is True
+
+
+def test_meta_media_adapter_unavailable_returns_truthful_processing_state():
+    normalized = {
+        "text": "media received",
+        "from": "+972500000000",
+        "to": "+972511111111",
+        "msg_id": "wamid-adapter-unavailable",
+        "media": {
+            "media_type": "image",
+            "media_id": "media-unavailable",
+            "message_id": "wamid-adapter-unavailable",
+            "filename": "",
+        },
+    }
+    patches = _common_app_patches()
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
+            patch.object(app, "_validate_meta_signature", return_value=True), \
+            patch.object(app, "_normalize_meta_payload", return_value=normalized), \
+            patch.object(app, "_flag_enabled", return_value=False), \
+            patch.dict(sys.modules, {"meta_whatsapp_media_adapter": None}):
+        response = app.app.test_client().post(
+            "/webhooks/meta/whatsapp",
+            json={"ignored": "patched"},
+        )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["status"] == "received_no_outbound"
+    assert body["media_processing"]["status"] != "COMPLETED"
+    assert body["media_processing"]["success_evidence"] is False
+    assert body["media_processing"]["error_code"] == "MEDIA_ADAPTER_UNAVAILABLE"
+    assert body["media_processing"]["retryable"] is True

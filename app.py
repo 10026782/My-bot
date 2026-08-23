@@ -6745,6 +6745,14 @@ def webhook_meta_whatsapp():
                             )
                         )
             except ImportError:
+                if media_meta:
+                    from media_handler import MediaError, MediaResult, media_processing_status
+                    media_processing = media_processing_status(
+                        MediaResult(
+                            ok=False,
+                            error=MediaError("MEDIA_ADAPTER_UNAVAILABLE", "media adapter unavailable", True),
+                        )
+                    )
                 logger.debug("[Meta WhatsApp] media adapter not available")
             except Exception as e:
                 logger.warning("[Meta WhatsApp] media handler error error_type=%s", type(e).__name__)
