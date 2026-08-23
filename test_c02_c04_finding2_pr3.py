@@ -130,3 +130,44 @@ def test_multiple_drive_matches_fail_closed_without_upload():
     assert not result.ok
     assert result.error.error_code == "DRIVE_DUPLICATE_KEY"
     upload.assert_not_called()
+
+
+def test_pending_creation_failure_recovers_tagged_drive_on_retry():
+    drive = _drive()
+    with patch("media_handler._idem_store.is_duplicate", return_value=False), patch(
+        "media_handler._resolve_drive_folder", return_value=("folder", None)
+    ), patch(
+        "media_handler.find_asset_by_logical_media_key", return_value=MediaLookupResult("not_found")
+    ), patch(
+        "media_handler.drive_adapter.find_existing_by_logical_media_key", return_value=_missing_drive()
+    ), patch(
+        "media_handler.save_asset", side_effect=[None, None]
+    ) as first_save, patch(
+        "media_handler.drive_adapter.upload_file", return_value=drive
+    ) as first_upload:
+        first = media_handler.handle_file_upload(*_upload_kwargs())
+
+    assert not first.ok
+    assert first_save.call_count == 2
+    assert first_upload.call_args.kwargs["logical_media_key"] == "telegram:f1"
+
+    with patch("media_handler._idem_store.is_duplicate", return_value=False), patch(
+        "media_handler._resolve_drive_folder", return_value=("folder", None)
+    ), patch(
+        "media_handler.find_asset_by_logical_media_key", return_value=MediaLookupResult("not_found")
+    ), patch(
+        "media_handler.drive_adapter.find_existing_by_logical_media_key", return_value=drive
+    ), patch(
+        "media_handler.save_asset", return_value="rec1"
+    ) as retry_save, patch(
+        "media_handler.update_asset_persistence", return_value=True
+    ) as retry_update, patch(
+        "media_handler.drive_adapter.upload_file"
+    ) as retry_upload:
+        retry = media_handler.handle_file_upload(*_upload_kwargs())
+
+    assert retry.ok and retry.asset_id == "rec1"
+    retry_save.assert_called_once()
+    assert retry_save.call_args.args[0].persistence_state == MediaPersistenceState.DRIVE_UPLOADED
+    assert retry_update.call_args.kwargs["state"] == MediaPersistenceState.ASSET_PERSISTED
+    retry_upload.assert_not_called()
