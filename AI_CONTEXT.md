@@ -1,7 +1,7 @@
 # AI CONTEXT
 
-**Updated:** 23/08/2026  
-**Sources:** ROADMAP.md (last canonical update 21/08), CHANGELOG.md (through 20/08), git log through latest merge (29663ad, 03:49 UTC)  
+**Updated:** 24/08/2026
+**Sources:** ROADMAP.md (last canonical update 21/08), CHANGELOG.md (through 20/08), git/code truth verified through a02ee10ededa9d0ab9a1b3f5ca8aa56e0c3147a7
 **Read this before anything else.** Compressed briefing for all AI agents — not exhaustive documentation.  
 **"Merged" ≠ "deployed" ≠ "production-verified."** Owner holds field truth.
 
@@ -63,8 +63,8 @@
 
 ## 4. Next Priorities
 
-1. **N18 Phase 3 Activation Canary:** Owner decision on `FEATURE_WHATSAPP_CANONICAL_LEAD_CUTOVER`, `FEATURE_EMAIL_LEAD_CUTOVER`, `FEATURE_FURNITURE_LEAD_CUTOVER`, `FEATURE_VOICE_LEAD_CUTOVER`. Fresh inbound test against live Airtable.
-2. **H0 Production Truth:** Deploy current SHA (29663ad), run canaries for N18 Phase 3 activation, BUG-164 creative-grounding, Command Center route verification, lead product-flag readiness.
+1. **N18 Phase 3 Activation Canary:** Owner decision on `WHATSAPP_CANONICAL_LEAD_WRITE`, `EMAIL_CANONICAL_LEAD_WRITE`, `FURNITURE_CANONICAL_LEAD_WRITE`, `VOICE_CANONICAL_LEAD_WRITE`. Fresh inbound test against live Airtable.
+2. **H0 Production Truth:** Deploy the latest approved/current main SHA, record the actual deployed SHA, and run canaries for N18 Phase 3 activation, BUG-164 creative-grounding, Command Center route verification, lead product-flag readiness against that deployed SHA.
 3. **N18 Phase 4:** Terminal-turn-result formal contract implementation (broader scope, shared across all write flows).
 4. **H6 Command Center:** Verify `/api/owner/command-center` route on current SHA, resolve `system_health` `UNKNOWN` source, maintain read-only posture.
 5. **Lead Product Flags:** Owner decision on full `LEAD_CAPTURE`, `LEAD_SCORING`, `LEAD_MEMORY`, `FOLLOWUP_AUTOMATION` activation.
