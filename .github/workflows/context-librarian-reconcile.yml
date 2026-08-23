@@ -68,7 +68,8 @@ jobs:
     needs: check
     if: >-
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
-      needs.check.outputs.outcome == 'AUTO_MAINTENANCE_REQUIRED'
+      needs.check.result == 'success' &&
+      needs.check.outputs.outcome != 'OWNER_DECISION_REQUIRED'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -112,6 +113,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Re-check current main before writing
+        id: recheck
         run: |
           set -euo pipefail
           test "$(git rev-parse origin/main)" = "${{ steps.guard.outputs.sha }}"
@@ -124,15 +126,17 @@ jobs:
             echo "::error::reconcile produced invalid JSON"
             exit 1
           }
-          test "$outcome" = AUTO_MAINTENANCE_REQUIRED || {
+          if [ "$outcome" != AUTO_MAINTENANCE_REQUIRED ] && [ "$outcome" != CLEAN ]; then
             echo "::error::unexpected reconcile outcome: $outcome"
             exit 1
-          }
+          fi
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
           if [ "$reconcile_status" -ne 0 ] && [ "$reconcile_status" -ne 2 ]; then
             echo "::error::unexpected reconcile exit code: $reconcile_status"
             exit 1
           fi
       - name: Apply bounded maintenance on current main
+        if: steps.recheck.outputs.outcome == 'AUTO_MAINTENANCE_REQUIRED'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -140,17 +144,30 @@ jobs:
           test ! -e "$GITHUB_WORKSPACE/reconcile.json"
           test ! -e "$GITHUB_WORKSPACE/context-librarian-reconcile.json"
           python -m tools.context_librarian reconcile --apply-auto --main-ref origin/main
+      - name: Persist budget history and publish rolling branch
+        id: persist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
           git switch -C "$ROLLING_BRANCH"
+          python -m tools.context_librarian budget-preflight \
+            --all-profiles \
+            --record-history docs/context_librarian/budget_history.json \
+            --json > "$RUNNER_TEMP/context-librarian-budget-history.json"
           if git diff --quiet -- docs/context_librarian; then
-            echo "::error::AUTO_MAINTENANCE_REQUIRED produced no bounded catalog diff"
-            exit 1
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "No new Context Librarian budget snapshot or catalog maintenance is required."
+            exit 0
           fi
           git config user.name context-librarian-bot
           git config user.email "$BOT_EMAIL"
           git add docs/context_librarian
-          git commit -m "chore(context-librarian): bounded auto-maintenance"
+          git commit -m "chore(context-librarian): persist budget history"
           git push --force-with-lease origin "$ROLLING_BRANCH"
+          echo "published=true" >> "$GITHUB_OUTPUT"
       - name: Create or update the single rolling PR
+        if: steps.persist.outputs.published == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

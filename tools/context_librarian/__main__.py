@@ -21,6 +21,7 @@ from .budget_preflight import (
     format_budget_preflight_json,
     format_budget_preflight_table,
 )
+from .budget_history import record_budget_snapshot
 from .owner_decision_report import format_pr_summary
 from .policy_registry import load_policy_registry
 from .reconcile import (
@@ -129,6 +130,11 @@ def _parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit the machine-readable JSON report instead of the summary table",
+    )
+    budget_preflight.add_argument(
+        "--record-history",
+        type=Path,
+        help="Append this snapshot to a persistent budget history ledger",
     )
 
     suggest = sub.add_parser(
@@ -385,10 +391,25 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "budget-preflight":
             report = build_budget_preflight(_repo_root(), catalog)
+            history_result = None
+            if args.record_history:
+                history_result = record_budget_snapshot(
+                    _repo_root(), report, args.record_history
+                )
             if args.json:
+                if history_result is not None:
+                    report = dict(report)
+                    report["history"] = history_result
                 print(format_budget_preflight_json(report), end="")
             else:
                 print(format_budget_preflight_table(report))
+                if history_result is not None:
+                    print(
+                        "history\t"
+                        f"snapshot_added={history_result['snapshot_added']} "
+                        f"snapshot_count={history_result['snapshot_count']} "
+                        f"growth_breaks={','.join(history_result['growth_breaks']) or 'none'}"
+                    )
             return 0
 
         if args.command == "suggest-profile":
