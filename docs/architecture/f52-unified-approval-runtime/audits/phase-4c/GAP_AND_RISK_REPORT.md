@@ -51,6 +51,22 @@ Impact: the target invariant is configuration-dependent. Phase 4C cannot claim a
 6. **TMA has a second risk source.** `ACTION_RISK` controls low-risk bulk approval independently from Tool Registry/contract policy ([tma_api.py:392](../../../../../tma_api.py#L392)). Policy drift can make bulk behavior disagree with canonical authorization.
 7. **TMA owner branches write directly.** Owner lead patch/outcome/task paths bypass contracts while manager paths queue approval ([tma_api.py:1573](../../../../../tma_api.py#L1573), [tma_api.py:1619](../../../../../tma_api.py#L1619), [tma_api.py:1680](../../../../../tma_api.py#L1680)). Role alone is being treated as implicit self-authorization without an explicit policy record or claim.
 8. **File upload is a non-atomic two-provider mutation.** Drive upload precedes Airtable metadata; metadata failure returns an error while the file remains written ([media_handler.py:444](../../../../../media_handler.py#L444), [media_handler.py:465](../../../../../media_handler.py#L465)). Retry/idempotency and `outcome_unknown` semantics are not canonical.
+
+### C02–C04 Finding #2 — PR1 schema foundation note
+
+The Schema Design Gate approved **Media Files as the canonical SSOT** for
+durable media persistence. PR1 adds only the code-side foundation:
+
+- `Logical Media Key`
+- `Persistence State`
+- `Last Error Code`
+- existing `Drive File ID` remains the durable object reference
+- exact state values: `PENDING`, `DRIVE_UPLOADED`, `ASSET_PERSISTED`, `PARTIAL`, `FAILED`
+
+This PR does not mutate Airtable, change `media_handler`, alter Drive upload
+behavior, add lookup/reconciliation, backfill legacy rows, or introduce race
+handling. Durable deduplication and the cross-process race problem remain
+**not implemented**. No production verification claim is made.
 9. **Scheduler-created Tasks lack uniform identity, tenant and idempotency.** Abandoned and interaction jobs write Tasks directly ([abandoned_lead_worker.py:240](../../../../../abandoned_lead_worker.py#L240), [interaction_engine.py:358](../../../../../interaction_engine.py#L358)). Model-derived task payloads are business mutations, not audit logging.
 10. **No canonical scheduler/system principal.** Background jobs do not consistently freeze tenant/domain, system identity, delegation/policy or approver. This blocks safe generic pre-authorization.
 11. **Follow-up evidence conflates notification and state mutation.** `send_followup()` increments `followup_count` even without checking owner-delivery success ([tools/approval_actions.py:83](../../../../../tools/approval_actions.py#L83), [tools/approval_actions.py:112](../../../../../tools/approval_actions.py#L112)). Its returned evidence only carries the output audit ID.
