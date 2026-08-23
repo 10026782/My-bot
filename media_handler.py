@@ -425,6 +425,7 @@ def handle_voice_note(
 
     stt_result = transcribe(audio_bytes, mime_type)
     if not stt_result.ok:
+        _idem_store.release("media", idem_key, "")
         return MediaResult(
             ok=False,
             error=MediaError(stt_result.error.error_code, stt_result.error.error_message, stt_result.error.retryable),
