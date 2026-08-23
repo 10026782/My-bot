@@ -22,6 +22,10 @@
 | R-C07-6 | Three parallel approval-state representations reconciled by hand (EventBus / ActionContract / Airtable projection) | Requires architecture review; terminal-state protection currently solid (compare-and-set) | Hand-reconciled point-patches are drift-prone (BUG-SB-02/158/112 pattern) | Approval architecture review cycle | Potentially wide: event_bus, core/action_gateway.py, app.py patches |
 | R-C07-US | `update_lead_status` owner-wait inconsistency (found during #847 PART 4) | Out of declared remediation scope ("exactly these two findings"); folding in would widen PR beyond stated boundary | Policy inconsistency within Leads family; both roles still go through approval there (not a security hole) | Next writer-coverage pass over TMA Leads endpoints | Same pipeline as PR #847 |
 
+**24/08/2026 final C02–C04 recheck:** `R-C07-A2` remains the sole
+policy-dependent Approval Coverage queue item. No duplicate deferred-register
+entry was created; A1 remains a code item and is intentionally not listed here.
+
 ---
 
 ## Section D — EFFICIENCY & OPERATIONAL DEBT

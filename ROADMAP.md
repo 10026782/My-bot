@@ -10,11 +10,11 @@ snapshots below are historical evidence and do not override this audit.
 
 ## C02–C04 Approval Coverage — current sequence (24/08/2026)
 
-Current status: **POLICY ITEMS REMAIN**. Detailed status and evidence live in
+Current status: **CODE CLOSED / POLICY ITEMS REMAIN**. Detailed status and evidence live in
 [`MAINTENANCE_STATUS_MATRIX.md`](MAINTENANCE_STATUS_MATRIX.md).
 
-- Completed and statically verified: PR #881, #886, #889, and #891.
-- Next code item: **A1 Attribution canonicalization** (`ad_attribution.record_lead_source`).
+- Completed and statically verified: PR #881, #886, #889, #891, and #895.
+- Ordinary direct business bypasses remaining: **0**.
 - Policy queue: **A2 system-generated Tasks**; see `R-C07-A2` in the deferred register.
 - Runtime status: **NOT PRODUCTION VERIFIED**.
 
