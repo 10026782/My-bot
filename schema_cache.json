@@ -21,7 +21,7 @@
       "summary",
       "tenant_id",
       "tier",
-      "updated_at"
+      "notes"
     ],
     "משימות (Tasks)": [
       "Domain",
@@ -35,15 +35,44 @@
       "תיאור"
     ],
     "Assets": [
-      "הכנסה חודשית",
-      "הערות",
-      "מסמכים",
-      "משכנתא",
-      "סוג",
-      "סטטוס",
-      "עלות רכישה",
-      "שווי נוכחי",
-      "שם הנכס"
+      "Asset Type",
+      "Asset Potential",
+      "Asset Risks",
+      "Current Value",
+      "Domain",
+      "Equity",
+      "Monthly Income",
+      "Mortgage Balance",
+      "My Equity",
+      "Name",
+      "Next Step",
+      "Next Step Owner",
+      "Notes",
+      "Owner",
+      "Ownership %",
+      "Related Project",
+      "Status"
+    ],
+    "Media Files": [
+      "Approval Status",
+      "Created By",
+      "Domain",
+      "Drive File ID",
+      "Drive URL",
+      "File Type",
+      "Linked Creative",
+      "Linked Demand",
+      "Linked Lead",
+      "Last Error Code",
+      "Logical Media Key",
+      "Mime Type",
+      "Name",
+      "Persistence State",
+      "Raw Transcript",
+      "Size Bytes",
+      "Source",
+      "Telegram File ID",
+      "Transcript"
     ],
     "עסקאות (Deals)": [
       "Address",
@@ -189,4 +218,3 @@
   "fetched_at": "seed-from-schema-py",
   "note": "seed — run schema_audit.py to refresh from live Airtable"
 }
-

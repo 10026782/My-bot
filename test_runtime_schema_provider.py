@@ -18,14 +18,17 @@ integration in tools/airtable_gateway.py.
 from __future__ import annotations
 
 import logging
+import json
 import sys
 import threading
+from pathlib import Path
 from unittest.mock import patch
 
 logging.basicConfig(level=logging.WARNING)
 
 from core.runtime_schema_provider import RuntimeSchemaProvider
 from tools.airtable_gateway import validate_airtable_fields
+import airtable_schema as schema
 
 passed = failed = 0
 
@@ -38,6 +41,36 @@ def chk(desc: str, cond: bool) -> None:
     else:
         print(f"❌ {desc}")
         failed += 1
+
+
+def _string_constants(fields_class) -> set[str]:
+    return {
+        value
+        for name, value in vars(fields_class).items()
+        if not name.startswith("_") and isinstance(value, str)
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+# 0. Seed/cache contract alignment for the scoped Audit #2 finding
+# ══════════════════════════════════════════════════════════════════
+print("\n── seed/cache contract alignment ────")
+
+_CACHE_TABLES = json.loads(
+    Path(__file__).with_name("schema_cache.json").read_text(encoding="utf-8")
+)["tables"]
+_EXPECTED_CACHE_TABLES = {
+    "Leads": _string_constants(schema.LeadFields),
+    "Assets": _string_constants(schema.AssetsFields),
+    "Media Files": _string_constants(schema.MediaFileFields),
+}
+
+for _table, _expected in _EXPECTED_CACHE_TABLES.items():
+    _actual = set(_CACHE_TABLES.get(_table, []))
+    chk(f"{_table}: cache entry exists", _table in _CACHE_TABLES)
+    chk(f"{_table}: cache == current contract", _actual == _expected)
+    chk(f"{_table}: no stale extras", not (_actual - _expected))
+    chk(f"{_table}: no missing fields", not (_expected - _actual))
 
 
 _LIVE_ENTRY_LEADS = {
