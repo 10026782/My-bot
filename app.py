@@ -6725,7 +6725,7 @@ def webhook_meta_whatsapp():
                                 else:
                                     result = handle_file_upload(
                                         file_bytes, filename, mime_type, media_meta["media_type"],
-                                        media_meta["message_id"], sender, domain_from_channel,
+                                        media_meta["media_id"], sender, domain_from_channel,
                                         source="whatsapp_meta", linked_lead_id=""
                                     )
                                 media_processing = media_processing_status(result)

@@ -22,7 +22,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from guards import idempotency as _idem_store
-from media_gateway import AssetRecord, save_asset
+from media_gateway import AssetRecord, find_asset_by_logical_media_key, save_asset
 import drive_adapter
 from voice_stt_adapter import transcribe
 
@@ -139,6 +139,19 @@ def _has_risk_words(transcript: str) -> bool:
 
 def _idem_key(source: str, file_id: str, user_id: str) -> str:
     return hashlib.sha256(f"{source}:{file_id}:{user_id}".encode("utf-8")).hexdigest()[:16]
+
+
+def logical_media_key(source: str, file_id: str, file_bytes: bytes | None = None) -> str:
+    """Return the provider-scoped durable identity used by Media Files/Drive."""
+    source = (source or "").lower()
+    if source == "tma":
+        if file_bytes is None:
+            raise ValueError("TMA logical media key requires file bytes")
+        return f"tma:sha256:{hashlib.sha256(file_bytes).hexdigest()}"
+    namespace = {"telegram": "telegram", "whatsapp": "twilio", "whatsapp_meta": "meta"}.get(source)
+    if namespace:
+        return f"{namespace}:{file_id}"
+    raise ValueError(f"unsupported media source: {source}")
 
 
 def _resolve_drive_folder(domain: str) -> tuple[str | None, MediaError | None]:
@@ -484,7 +497,38 @@ def handle_file_upload(
     if folder_err:
         return MediaResult(ok=False, file_size_tier=tier, error=folder_err)
 
-    drive_result = drive_adapter.upload_file(file_bytes, filename, mime_type, parent_folder_id)
+    try:
+        media_key = logical_media_key(source, file_id, file_bytes)
+    except ValueError as exc:
+        return MediaResult(ok=False, file_size_tier=tier, error=MediaError("MEDIA_KEY_INVALID", str(exc), False))
+
+    media_lookup = find_asset_by_logical_media_key(media_key)
+    if media_lookup.status == "duplicate":
+        return MediaResult(ok=False, file_size_tier=tier, error=MediaError("MEDIA_DUPLICATE_KEY", media_lookup.error, False))
+    if media_lookup.status == "error":
+        return MediaResult(ok=False, file_size_tier=tier, error=MediaError("MEDIA_LOOKUP_FAILED", "Media Files lookup failed", True))
+    if media_lookup.status == "reusable":
+        fields = media_lookup.record.get("fields", {})
+        return MediaResult(
+            ok=True, asset_id=media_lookup.record.get("id", ""),
+            drive_url=fields.get("Drive URL", ""), file_size_tier=tier,
+        )
+
+    existing_drive = drive_adapter.find_existing_by_logical_media_key(media_key, parent_folder_id)
+    if existing_drive.ok:
+        return MediaResult(
+            ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
+            error=MediaError(
+                "DRIVE_OBJECT_FOUND_NEEDS_PERSISTENCE",
+                "Drive object exists but Media Files metadata is not reusable yet.", True,
+            ),
+        )
+    if existing_drive.error and existing_drive.error.error_code not in {"DRIVE_NOT_FOUND"}:
+        return MediaResult(ok=False, file_size_tier=tier, error=existing_drive.error)
+
+    drive_result = drive_adapter.upload_file(
+        file_bytes, filename, mime_type, parent_folder_id, logical_media_key=media_key,
+    )
     if not drive_result.ok:
         return MediaResult(
             ok=False,
@@ -504,6 +548,7 @@ def handle_file_upload(
         created_by=user_id,
         telegram_file_id=file_id,
         linked_lead_id=linked_lead_id,
+        logical_media_key=media_key,
     )
     asset_id = save_asset(asset)
     if not asset_id:
@@ -533,7 +578,7 @@ def handle_tma_upload(
 ) -> MediaResult:
     """TMA upload route entry point — treated as a generic document/image upload."""
     file_type = "image" if mime_type.startswith("image/") else "document"
-    file_id = hashlib.sha256(file_bytes[:1024]).hexdigest()[:16]
+    file_id = hashlib.sha256(file_bytes).hexdigest()
     return handle_file_upload(
         file_bytes=file_bytes,
         filename=filename,
