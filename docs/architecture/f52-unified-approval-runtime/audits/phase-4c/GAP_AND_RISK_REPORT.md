@@ -79,6 +79,18 @@ from filenames. This is duplicate-resistant only: Airtable has no verified
 unique constraint here, and two processes can still race without a shared lock.
 Persistence-state transitions, PARTIAL recovery, backfill, and reconciliation
 remain **not implemented**. No production verification claim is made.
+
+### C02–C04 Finding #2 — PR3 persistence/reconciliation note
+
+PR3 adds the bounded Media Files lifecycle for new/retried ingestion:
+`PENDING` → `DRIVE_UPLOADED` → `ASSET_PERSISTED`. A failed state write after
+Drive success is recorded as `PARTIAL` when the follow-up write succeeds;
+otherwise the Drive `logical_media_key` appProperty remains the recovery
+evidence. Retries reconcile incomplete Media Files rows or a tagged Drive
+object before considering a new upload. Stable error codes are stored in
+`Last Error Code`; no raw exception text, backfill, schema mutation, lock, or
+exactly-once claim is introduced. Concurrent processes can still race between
+lookup and upload. No production verification claim is made.
 9. **Scheduler-created Tasks lack uniform identity, tenant and idempotency.** Abandoned and interaction jobs write Tasks directly ([abandoned_lead_worker.py:240](../../../../../abandoned_lead_worker.py#L240), [interaction_engine.py:358](../../../../../interaction_engine.py#L358)). Model-derived task payloads are business mutations, not audit logging.
 10. **No canonical scheduler/system principal.** Background jobs do not consistently freeze tenant/domain, system identity, delegation/policy or approver. This blocks safe generic pre-authorization.
 11. **Follow-up evidence conflates notification and state mutation.** `send_followup()` increments `followup_count` even without checking owner-delivery success ([tools/approval_actions.py:83](../../../../../tools/approval_actions.py#L83), [tools/approval_actions.py:112](../../../../../tools/approval_actions.py#L112)). Its returned evidence only carries the output audit ID.

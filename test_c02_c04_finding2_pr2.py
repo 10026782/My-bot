@@ -64,6 +64,8 @@ def test_handler_miss_falls_through_to_new_upload():
         error=drive_adapter.MediaError("DRIVE_NOT_FOUND", "", False)
     )), patch("media_handler.drive_adapter.upload_file", return_value=drive) as upload, patch(
         "media_handler.save_asset", return_value="rec1"
+    ), patch(
+        "media_handler.update_asset_persistence", return_value=True
     ):
         result = media_handler.handle_file_upload(
             b"data", "x.pdf", "application/pdf", "document", "f1", "u1", "general"
