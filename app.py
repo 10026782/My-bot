@@ -6788,7 +6788,11 @@ def webhook_meta_whatsapp():
     )
 
     # Outbound — stub כנה: מחשב תשובה, לא שולח (Phase 1)
-    logger.info("[Meta WhatsApp] תשובה נוצרה (stub — לא נשלחה): %s", reply[:100])
+    logger.info(
+        "[Meta WhatsApp] תשובה נוצרה (stub — לא נשלחה): result_type=%s reply_length=%d",
+        type(reply).__name__,
+        len(reply or ""),
+    )
     response = {"status": "received"}
     if media_processing is not None:
         response["media_processing"] = media_processing.as_dict()
