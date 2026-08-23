@@ -6,8 +6,7 @@ through ActionGateway.approve() when a live contract exists, instead of
 re-implementing dispatch+verify by hand.
 
 Coverage:
-  1. FEATURE_ACTION_GATEWAY off (today's production default) -> legacy direct
-     dispatch_tool() path used, unchanged from pre-migration behavior.
+  1. FEATURE_ACTION_GATEWAY off -> legacy business dispatch is fail-closed.
   2. Flag on + a live pending contract exists -> ActionGateway.approve() is
      used; dispatch_tool called exactly once (via the Gateway's own executor);
      contract ends "executed".
@@ -90,13 +89,14 @@ def _fail_dispatch(*args, **kwargs):
 def _run_callback(
     *, requester: Identity, approver: Identity, dispatch_mock,
     seed_contract: bool, feature_gw: bool, tool_inputs: dict,
+    tool_name: str = "send_followup",
 ):
     """Queues a real event_bus item (+ optionally a real ActionGateway contract),
     then drives app._handle_approval_callback_impl() with everything else mocked."""
     action_id, _ = _real_bus.request_approval(
-        action="send_followup",
+        action=tool_name,
         payload={
-            "tool_name": "send_followup",
+            "tool_name": tool_name,
             "tool_inputs": tool_inputs,
             "origin_channel": "telegram",
             "origin_chat_id": requester.user_id,
@@ -112,7 +112,7 @@ def _run_callback(
     if seed_contract:
         propose = _real_gw.propose_action(
             tenant_id="boss_hq", canonical_user_id=requester.memory_key,
-            tool_name="send_followup", tool_inputs=tool_inputs,
+        tool_name=tool_name, tool_inputs=tool_inputs,
             origin_channel="telegram", origin_chat_id=requester.user_id,
             requires_approval=True, identity=requester, trusted_source="agent",
         )
@@ -125,7 +125,8 @@ def _run_callback(
 
     _flag_side_effect = lambda name: feature_gw if name == "FEATURE_ACTION_GATEWAY" else False
 
-    with patch.object(app, "bot", MagicMock()), \
+    bot_mock = MagicMock()
+    with patch.object(app, "bot", bot_mock), \
          patch.object(app, "resolve_identity", side_effect=_resolve_identity_side_effect), \
          patch("tools.dispatcher.dispatch_tool", side_effect=dispatch_mock) as _dt_gw, \
          patch.object(app, "dispatch_tool", side_effect=dispatch_mock) as _dt_legacy, \
@@ -135,21 +136,33 @@ def _run_callback(
 
     total_dispatch_calls = _dt_gw.call_count + _dt_legacy.call_count
     final_contract = _real_gw._ledger.find_by_id(contract_id) if contract_id else None
-    return total_dispatch_calls, final_contract
+    return total_dispatch_calls, final_contract, bot_mock
 
 
 # ══════════════════════════════════════════════════════════════════
-# 1. Flag OFF — legacy path, unchanged
+# 1. Flag OFF — legacy business execution fails closed
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 1: FEATURE_ACTION_GATEWAY off — legacy dispatch ──────")
+print("\n── Test 1: FEATURE_ACTION_GATEWAY off — fail closed ─────────")
 
 requester = _identity("req_1", Role.OWNER)
 approver = _identity("appr_1", Role.OWNER)
-calls, contract = _run_callback(
+calls, contract, bot = _run_callback(
     requester=requester, approver=approver, dispatch_mock=_ok_dispatch,
-    seed_contract=False, feature_gw=False, tool_inputs={"chat_id": "req_1", "draft": "x"},
+    seed_contract=False, feature_gw=False,
+    tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {"Task": "legacy blocked"}},
 )
-chk("Test1: dispatch_tool called exactly once (legacy path)", calls == 1)
+chk("Test1: business dispatch_tool is never called", calls == 0)
+chk(
+    "Test1: deterministic legacy-disabled failure is returned",
+    bot.answer_callback_query.call_args is not None
+    and "מסלול האישור הישן מושבת" in str(bot.mock_calls),
+)
+chk(
+    "Test1: no success evidence is emitted",
+    "בוצע" not in str(bot.mock_calls),
+)
+chk("Test1: no ActionContract is falsely completed", contract is None)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -159,7 +172,7 @@ print("\n── Test 2: flag on + live contract — Gateway path ─────
 
 requester = _identity("req_2", Role.OWNER)
 approver = _identity("appr_2", Role.OWNER)
-calls, contract = _run_callback(
+calls, contract, _bot = _run_callback(
     requester=requester, approver=approver, dispatch_mock=_ok_dispatch,
     seed_contract=True, feature_gw=True, tool_inputs={"chat_id": "req_2", "draft": "y"},
 )
@@ -174,7 +187,7 @@ print("\n── Test 3: BUG-074 — approver_role, not requester's role ──�
 
 requester_no_authority = _identity("req_3", Role.EMPLOYEE)  # in _INTERNAL, but no actions.approve
 approver_owner = _identity("appr_3", Role.OWNER)
-calls, contract = _run_callback(
+calls, contract, _bot = _run_callback(
     requester=requester_no_authority, approver=approver_owner, dispatch_mock=_ok_dispatch,
     seed_contract=True, feature_gw=True, tool_inputs={"chat_id": "req_3", "draft": "z"},
 )
@@ -193,7 +206,7 @@ print("\n── Test 4: flag on, no contract found — fail closed ────�
 
 requester = _identity("req_4", Role.OWNER)
 approver = _identity("appr_4", Role.OWNER)
-calls, contract = _run_callback(
+calls, contract, _bot = _run_callback(
     requester=requester, approver=approver, dispatch_mock=_ok_dispatch,
     seed_contract=False, feature_gw=True, tool_inputs={"chat_id": "req_4", "draft": "w"},
 )
@@ -208,7 +221,7 @@ print("\n── Test 5: flag on + live contract + execution fails ────�
 
 requester = _identity("req_5", Role.OWNER)
 approver = _identity("appr_5", Role.OWNER)
-calls, contract = _run_callback(
+calls, contract, _bot = _run_callback(
     requester=requester, approver=approver, dispatch_mock=_fail_dispatch,
     seed_contract=True, feature_gw=True, tool_inputs={"chat_id": "req_5", "draft": "v"},
 )
