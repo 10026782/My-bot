@@ -208,44 +208,43 @@ in `test_reconcile.py`).
 
 ## D. Post-merge automation
 
-`.github/workflows/context-librarian-reconcile.yml`, triggered on every
-push to `main`, is split into two jobs by privilege (Message D correction,
-item 6):
+`.github/workflows/context-librarian-reconcile.yml` runs a read-only check on
+every push to `main`, plus the same check on its hourly schedule and manual
+dispatch. Only the scheduled/manual path can write, and it is split into two
+jobs by privilege:
 
 - **`check`** — `permissions: contents: read`, checkout with
   `persist-credentials: false`. Runs `reconcile --check` and reports the
   outcome. Cannot push or open a PR under any circumstance, even if the
   classification path itself misbehaved.
-- **`prepare-maintenance-pr`** — only runs when `check`'s outcome is
+- **`maintain-rolling-pr`** — only runs for scheduled/manual events when `check`'s outcome is
   `AUTO_MAINTENANCE_REQUIRED`; only this job is granted
   `contents: write` / `pull-requests: write`.
 
 Outcome handling:
 
 - `CLEAN` → no-op (only `check` runs).
-- `AUTO_MAINTENANCE_REQUIRED` → an **idempotency guard** first checks
-  whether `context-librarian/auto-maintenance-<sha>` already exists on
-  `origin` (a prior run for this exact SHA); if so, it skips entirely. If
-  not, `reconcile --apply-auto` runs, a maintenance branch is created from
-  the now-mutated tree and pushed, and a PR is opened only if one for that
-  branch isn't already open (`gh pr list` check before `gh pr create`).
-  **Never pushes to `main` directly, never merges** — the PR needs the same
-  human review/merge as any other change. A workflow-level `concurrency`
-  group additionally prevents two runs from racing each other.
+- `AUTO_MAINTENANCE_REQUIRED` → the writer fetches current `origin/main`,
+  runs bounded `--apply-auto`, and updates the single canonical branch
+  `context-librarian/auto-maintenance`. Every commit reachable only from an
+  existing rolling branch must have both author and committer equal to
+  `context-librarian-bot`; otherwise the workflow fails closed. A proven bot
+  branch may be replaced with `--force-with-lease` from current `origin/main`.
+  The workflow edits the existing open PR or creates one when absent, and
+  refuses to proceed if more than one open rolling PR exists. Its body carries
+  the latest reconciled main SHA and a compact maintenance summary.
+  **Never pushes to `main`, human branches, or unknown branches; never merges.**
+  Push events therefore cannot create branch/PR noise, while scheduled/manual
+  runs batch updates into at most one rolling PR.
 - `OWNER_DECISION_REQUIRED` → opens no PR. Prints the compact decision
   queue to the job summary and fails the `check` job so it stays visible.
 
-**Workflow-order correction (item 5):** the first cut of this workflow ran
-`git checkout -b "$branch"` *before* `reconcile --apply-observed` — but
-that writer's safety check requires the checked-out branch to literally be
-named `main`, so it always failed once already on a feature branch. The new
-`--apply-auto` entry point uses a different, CI-appropriate invariant
-instead — **HEAD equals the canonical main SHA this result was computed
-against, plus a clean working tree** — and the workflow now applies it
-*before* creating the maintenance branch, matching that invariant exactly:
-`reconcile --apply-auto` runs first (HEAD is still the plain pushed `main`
-SHA at that point), *then* `git checkout -b "$branch"` picks up the
-already-mutated tree.
+The `--apply-auto` writer still requires **HEAD to equal the canonical main
+SHA and a clean working tree**. The rolling workflow satisfies that invariant
+while detached at current `origin/main`, applies first, then replaces only the
+proven bot-owned rolling branch. `--force-with-lease` protects against an
+unexpected update; the workflow-level concurrency group prevents normal
+self-races.
 
 `ci.yml`'s own gate (`Context Librarian authoritative post-merge
 reconciliation`) now runs the same `reconcile --check` and only fails on
@@ -253,13 +252,29 @@ reconciliation`) now runs the same `reconcile --check` and only fails on
 or a source matching an already-approved policy class no longer fails CI by
 themselves.
 
-**Standing-automation note:** `prepare-maintenance-pr` is granted
+**Standing-automation note:** `maintain-rolling-pr` is granted
 `contents: write` / `pull-requests: write`, but only conditionally (it
 never even runs on `CLEAN`/`OWNER_DECISION_REQUIRED`) and only after
 `check` has already run read-only in a separate job. That's a new,
 always-on capability once this file is merged to `main` — review the
 permission grant before merging, same as any other new CI automation with
 write access.
+
+### D.1 One-time cleanup of legacy SHA branches
+
+The migration cleanup is a separate, manually reviewed operation. First
+inventory open PRs and remote branches matching
+`context-librarian/auto-maintenance-*`; do not infer ownership from the name.
+For each candidate, prove that every commit unique from its merge base with
+`main` has both author and committer `context-librarian-bot`, and that its
+changes are superseded by current `main` or the canonical rolling branch.
+
+Only after those proofs succeed may an owner close the superseded PR and
+delete that exact bot-owned branch. Unknown, human-modified, or otherwise
+unprovable candidates remain untouched for manual investigation. The
+canonical `context-librarian/auto-maintenance` branch and its single open PR
+are never cleanup targets. The workflow intentionally contains no automatic
+legacy cleanup capability.
 
 ## E. Decision learning
 

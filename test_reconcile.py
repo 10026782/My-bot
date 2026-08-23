@@ -726,24 +726,26 @@ def test_reconcile_workflow_never_pushes_to_main():
     text = workflow.read_text(encoding="utf-8")
     assert "push origin main" not in text
     assert "push origin HEAD:main" not in text
-    assert "git push origin \"$branch\"" in text or "git push origin ${branch}" in text
+    assert "git push --force-with-lease origin \"$ROLLING_BRANCH\"" in text
     assert "gh pr create" in text
+    assert "gh pr edit" in text
     assert "--base main" in text
 
 
 def test_workflow_has_idempotency_guard_and_split_permissions():
     workflow = REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml"
     text = workflow.read_text(encoding="utf-8")
-    # G: second run for the same SHA must not create a duplicate branch/PR.
-    assert "ls-remote --exit-code --heads origin" in text
+    assert "ROLLING_BRANCH: context-librarian/auto-maintenance" in text
+    assert "auto-maintenance-${sha:0:12}" not in text
     assert "gh pr list --head" in text
     assert "concurrency:" in text
-    # item 6: workflow-level permissions default to read-only; only the
-    # conditional, need-gated prepare-maintenance-pr job escalates to write.
+    # Workflow-level permissions default to read-only; only the scheduled/
+    # manual, need-gated rolling job escalates to write.
     assert "permissions:\n  contents: read" in text
     assert "      contents: write" in text
     assert "persist-credentials: false" in text
-    assert "needs.check.outputs.outcome == 'AUTO_MAINTENANCE_REQUIRED'" in text
+    assert "github.event_name == 'schedule'" in text
+    assert "github.event_name == 'workflow_dispatch'" in text
 
 
 # --- Follow-up correction: crash-recovery idempotency (branch pushed but --
@@ -800,46 +802,38 @@ def test_workflow_run_blocks_have_consistent_indentation():
     assert checked_any, "expected at least one 'run: |' block in this workflow"
 
 
-def test_workflow_distinguishes_four_crash_recovery_cases():
-    """PR that failed before gh pr create is not the same as a fully
-    handled SHA -- 'branch exists' alone must not collapse into a single
-    skip=true, per the AGENT 1 'FINAL TWO FIXES' correction."""
+def test_workflow_rolling_update_is_fail_closed_and_idempotent():
     workflow = REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml"
     text = workflow.read_text(encoding="utf-8")
-    for case in ("absent", "complete", "missing_pr", "unprovable"):
-        assert f"case == '{case}'" in text
-
-    # case 3 (missing_pr): recovers by creating only the missing PR, must
-    # never re-create the branch or re-run apply-auto.
-    missing_pr_step = text.split("case == 'missing_pr'")[1].split("- name:")[0]
-    assert "gh pr create" in missing_pr_step
-    assert "checkout -b" not in missing_pr_step
-    assert "apply-auto" not in missing_pr_step
-    assert "git push" not in missing_pr_step
-
-    # case 4 (unprovable): fails closed, never mutates the branch.
-    unprovable_step = text.split("case == 'unprovable'")[1].split("- name:")[0]
-    assert "exit 1" in unprovable_step
-    assert "git push" not in unprovable_step
-    assert "checkout -b" not in unprovable_step
-    assert "git push --force" not in unprovable_step
-
-    # case 2 (complete): pure no-op, no mutating commands at all.
-    complete_step = text.split("case == 'complete'")[1].split("- name:")[0]
-    assert "gh pr create" not in complete_step
-    assert "git push" not in complete_step
+    assert "git ls-remote --exit-code --heads origin \"$ROLLING_BRANCH\"" in text
+    assert "git rev-list origin/main..\"$rolling_sha\"" in text
+    assert "format=%ae" in text and "format=%ce" in text
+    assert "provenance is not exclusively bot-owned" in text
+    assert "--force-with-lease" in text
+    assert "more than one open rolling maintenance PR exists" in text
 
 
-def test_workflow_branch_provenance_check_proves_single_bot_commit_on_canonical_sha():
-    """The 'unprovable' classification must be driven by an actual proof --
-    exactly one commit ahead of the canonical SHA, authored by the bot
-    identity used elsewhere in this same workflow -- not just branch-name
-    pattern matching, which an attacker or unrelated branch could satisfy."""
+def test_workflow_uses_latest_main_and_never_writes_on_push():
     workflow = REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml"
     text = workflow.read_text(encoding="utf-8")
-    assert 'rev-list --count "${sha}..${head_sha}"' in text
-    assert 'rev-parse "${head_sha}^"' in text
-    assert "context-librarian-bot@users.noreply.github.com" in text
+    assert "git fetch origin main" in text
+    assert "git checkout --detach origin/main" in text
+    assert "github.event_name == 'schedule'" in text
+    assert "github.event_name == 'workflow_dispatch'" in text
+    assert "push origin main" not in text
+    assert "push origin HEAD:main" not in text
+
+
+def test_ten_main_shas_share_one_rolling_branch_and_pr():
+    text = (REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml").read_text(
+        encoding="utf-8"
+    )
+    assert text.count("ROLLING_BRANCH: context-librarian/auto-maintenance") == 1
+    assert "auto-maintenance-${sha:0:12}" not in text
+    assert text.count("gh pr create") == 1
+    assert text.count("gh pr list --head \"$ROLLING_BRANCH\"") == 1
+    for sha in (f"sha-{i:02d}" for i in range(10)):
+        assert sha not in text  # no SHA-specific branch/PR literal is emitted
 
 
 # --- H / I: automation never writes semantic-review provenance ------------
