@@ -6503,6 +6503,7 @@ def _webhook_whatsapp_impl():
                 memory_key   = _early_identity.memory_key,
                 request_args = request.values.to_dict(),
                 channel      = "whatsapp",
+                identity     = _early_identity,
             )
         except Exception as _utm_err:
             # BUG-057 FIX: היה logger.debug — הסתיר כשל שקט בכל הודעה

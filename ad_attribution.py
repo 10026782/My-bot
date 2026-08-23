@@ -162,18 +162,26 @@ def parse_campaign_source(
 # Airtable Integration
 # ══════════════════════════════════════════════════
 
-def record_lead_source(memory_key: str, utm: UTMParams) -> bool:
-    """רושם 3 שדות UTM לAirtable Leads."""
+def record_lead_source(memory_key: str, utm: UTMParams, *, identity=None) -> bool:
+    """רושם 3 שדות UTM דרך ה־Lead service הקנוני."""
     try:
-        from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
+        from core.lead_service import update_lead_fields
+        from tools.airtable_tools import airtable_get  # type: ignore
+        if identity is None:
+            return False
         raw = airtable_get("Leads", f"{{memory_key}}='{memory_key}'")
         if "אין רשומות" in (raw or "") or not raw:
             return False
         rec_m = re.search(r'rec\w+', raw)
         if not rec_m:
             return False
-        result = airtable_update("Leads", rec_m.group(0), utm.to_airtable_fields())
-        return bool(result.get("ok"))
+        result = update_lead_fields(
+            identity,
+            rec_m.group(0),
+            utm.to_airtable_fields(),
+            source_module="ad_attribution",
+        )
+        return bool(result.ok)
     except ImportError:
         logger.debug(f"[Attribution] dry-run: {memory_key} → {utm.campaign_source}")
         return False
@@ -218,6 +226,7 @@ def inject_source_to_incoming_lead(
     memory_key:   str,
     request_args: dict,
     channel:      str = "whatsapp",
+    identity=None,
 ) -> UTMParams:
     """
     Entry point מapp.py.
@@ -235,7 +244,7 @@ def inject_source_to_incoming_lead(
             f"[Attribution] ⚠️ Missing UTM on paid referrer: {referer[:60]} | lead: {memory_key}"
         )
 
-    record_lead_source(memory_key, utm)
+    record_lead_source(memory_key, utm, identity=identity)
     return utm
 
 
