@@ -64,6 +64,8 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
             raise RuntimeError(f"404 טבלה '{table}' לא נמצאה | body: {exc.response_text[:200]}") from exc
         if exc.cause is not None:
             raise exc.cause
+        if exc.status_code is not None:
+            raise exc.as_http_status_error()
         raise
 
 def _post(table: str, fields: dict) -> dict:
