@@ -846,10 +846,24 @@ def test_workflow_recheck_rejects_invalid_output_and_unexpected_outcome():
     recheck = text.split("- name: Re-check current main before writing", 1)[1].split(
         "- name: Apply bounded maintenance on current main", 1
     )[0]
-    assert "test -s reconcile.json" in recheck
+    assert 'test -s "$RUNNER_TEMP/context-librarian-reconcile.json"' in recheck
+    assert "open('reconcile.json')" not in recheck
     assert "invalid JSON" in recheck
     assert "unexpected reconcile outcome" in recheck
     assert "exit 1" in recheck
+
+
+def test_workflow_keeps_reconcile_artifact_outside_checkout_before_apply():
+    text = (REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml").read_text(
+        encoding="utf-8"
+    )
+    apply = text.split("- name: Apply bounded maintenance on current main", 1)[1].split(
+        "- name: Create or update the single rolling PR", 1
+    )[0]
+    assert 'test ! -e "$GITHUB_WORKSPACE/reconcile.json"' in apply
+    assert 'test ! -e "$GITHUB_WORKSPACE/context-librarian-reconcile.json"' in apply
+    assert '"$RUNNER_TEMP/context-librarian-reconcile.json"' in text
+    assert "open(os.path.join(os.environ['RUNNER_TEMP'],'context-librarian-reconcile.json'))" in text
 
 
 def test_ten_main_shas_share_one_rolling_branch_and_pr():
