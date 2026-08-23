@@ -633,6 +633,9 @@ class MediaFileFields:
     MIME_TYPE             = "Mime Type"
     DRIVE_URL             = "Drive URL"
     DRIVE_FILE_ID         = "Drive File ID"
+    LOGICAL_MEDIA_KEY     = "Logical Media Key"  # provider-neutral durable identity
+    PERSISTENCE_STATE     = "Persistence State"  # see MediaPersistenceState
+    LAST_ERROR_CODE       = "Last Error Code"    # populated only after failed/uncertain persistence
     DOMAIN                = "Domain"
     SOURCE                = "Source"             # telegram/tma/whatsapp
     RAW_TRANSCRIPT        = "Raw Transcript"      # long text — גולמי, לא לשנות
@@ -644,6 +647,22 @@ class MediaFileFields:
     LINKED_DEMAND         = "Linked Demand"       # שדה חי קיים M1, multipleRecordLinks → Marketing Demand
     LINKED_CREATIVE       = "Linked Creative"     # שדה חי קיים M1, multipleRecordLinks → Marketing Creatives
     APPROVAL_STATUS       = "Approval Status"     # שדה חי קיים M1, singleSelect: Pending|Approved|Rejected
+
+
+class MediaPersistenceState:
+    """Exact lifecycle values for the additive Media Files persistence field.
+
+    These constants are foundation-only in PR1. No runtime media flow reads or
+    writes them until the durable lookup/reconciliation PRs land.
+    """
+
+    PENDING         = "PENDING"         # event accepted; upload not completed
+    DRIVE_UPLOADED  = "DRIVE_UPLOADED"  # Drive object confirmed; asset persistence incomplete
+    ASSET_PERSISTED = "ASSET_PERSISTED" # Media Files record + Drive ID durably confirmed
+    PARTIAL         = "PARTIAL"         # persistence failed or outcome uncertain after Drive success
+    FAILED          = "FAILED"          # terminal/non-completed state according to policy
+
+    ALL = (PENDING, DRIVE_UPLOADED, ASSET_PERSISTED, PARTIAL, FAILED)
 
 
 class MarketingDemandFields:
