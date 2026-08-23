@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 _DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 _DRIVE_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
+_LOGICAL_MEDIA_APP_PROPERTY = "logical_media_key"
 
 # Drive supports UTF-8 filenames natively (Hebrew included) — only strip
 # characters that are illegal in a Drive file name.
@@ -141,7 +142,10 @@ def _get_upload_folder(domain: str) -> str | None:
     return get_or_create_folder(month, domain_folder)
 
 
-def _upload_to_drive(tmp_path: str, filename: str, mime_type: str, parent_folder_id: str) -> DriveFile:
+def _upload_to_drive(
+    tmp_path: str, filename: str, mime_type: str, parent_folder_id: str,
+    logical_media_key: str = "",
+) -> DriveFile:
     token = get_google_token()
     if not token:
         return DriveFile(error=MediaError("GOOGLE_AUTH_MISSING", "Google OAuth env vars missing", True))
@@ -150,6 +154,8 @@ def _upload_to_drive(tmp_path: str, filename: str, mime_type: str, parent_folder
         file_bytes = f.read()
 
     metadata = {"name": filename, "parents": [parent_folder_id]}
+    if logical_media_key:
+        metadata["appProperties"] = {_LOGICAL_MEDIA_APP_PROPERTY: logical_media_key}
     boundary = "boss_drive_upload_boundary"
     body = (
         f"--{boundary}\r\n"
@@ -187,7 +193,55 @@ def _upload_to_drive(tmp_path: str, filename: str, mime_type: str, parent_folder
         return DriveFile(error=MediaError("UPLOAD_EXCEPTION", str(e), True))
 
 
-def upload_file(file_bytes: bytes, filename: str, mime_type: str, parent_folder_id: str) -> DriveFile:
+def find_existing_by_logical_media_key(logical_media_key: str, parent_folder_id: str) -> DriveFile:
+    """Find and verify one Drive object tagged with the canonical media key."""
+    token = get_google_token()
+    if not token:
+        return DriveFile(error=MediaError("GOOGLE_AUTH_MISSING", "Google OAuth env vars missing", True))
+    safe_key = logical_media_key.replace("\\", "\\\\").replace("'", "\\'")
+    try:
+        response = httpx.get(
+            _DRIVE_FILES_URL,
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "q": (
+                    f"'{parent_folder_id}' in parents and trashed = false and "
+                    f"appProperties has {{ key='{_LOGICAL_MEDIA_APP_PROPERTY}' "
+                    f"and value='{safe_key}' }}"
+                ),
+                "pageSize": 10,
+                "fields": "files(id,name,mimeType,size,parents,appProperties,webViewLink)",
+            },
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return DriveFile(error=MediaError("DRIVE_LOOKUP_FAILED", "Drive lookup failed", True))
+        files = response.json().get("files", [])
+        if len(files) > 1:
+            return DriveFile(error=MediaError("DRIVE_DUPLICATE_KEY", "duplicate Drive media key", False))
+        if not files:
+            return DriveFile(error=MediaError("DRIVE_NOT_FOUND", "no Drive object found", False))
+        file = files[0]
+        if (
+            not file.get("id")
+            or file.get("appProperties", {}).get(_LOGICAL_MEDIA_APP_PROPERTY) != logical_media_key
+            or parent_folder_id not in file.get("parents", [])
+        ):
+            return DriveFile(error=MediaError("DRIVE_VERIFICATION_FAILED", "Drive object verification failed", True))
+        return DriveFile(
+            file_id=file["id"], web_url=file.get("webViewLink", ""),
+            download_url=f"https://drive.google.com/uc?id={file['id']}",
+            name=file.get("name", ""), size_bytes=int(file.get("size") or 0),
+        )
+    except Exception as exc:
+        logger.warning("[drive_adapter] logical media lookup failed error_type=%s", type(exc).__name__)
+        return DriveFile(error=MediaError("DRIVE_LOOKUP_FAILED", "Drive lookup failed", True))
+
+
+def upload_file(
+    file_bytes: bytes, filename: str, mime_type: str, parent_folder_id: str,
+    logical_media_key: str = "",
+) -> DriveFile:
     """
     Uploads file_bytes to Drive under parent_folder_id (caller resolves the
     target folder, e.g. via _get_upload_folder/get_or_create_folder).
@@ -199,7 +253,7 @@ def upload_file(file_bytes: bytes, filename: str, mime_type: str, parent_folder_
     safe_name = _safe_filename(filename)
     tmp_path = _bytes_to_tempfile(file_bytes, suffix=_mime_to_ext(mime_type))
     try:
-        return _upload_to_drive(tmp_path, safe_name, mime_type, parent_folder_id)
+        return _upload_to_drive(tmp_path, safe_name, mime_type, parent_folder_id, logical_media_key)
     finally:
         os.remove(tmp_path)
 

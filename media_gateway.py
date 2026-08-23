@@ -10,7 +10,12 @@ import logging
 from dataclasses import dataclass
 
 from airtable_schema import MediaFileFields, Tables
-from tools.airtable_gateway import airtable_create
+from tools.airtable_gateway import (
+    AirtableLookupError,
+    _safe_formula_param,
+    at_list_by_formula,
+    airtable_create,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,14 @@ class AssetRecord:
     linked_lead_id: str = ""
     raw_transcript: str = ""
     normalized_transcript: str = ""
+    logical_media_key: str = ""
+
+
+@dataclass(frozen=True)
+class MediaLookupResult:
+    status: str  # not_found | reusable | duplicate | error
+    record: dict | None = None
+    error: str = ""
 
 
 def _asset_to_fields(asset: AssetRecord) -> dict:
@@ -52,7 +65,31 @@ def _asset_to_fields(asset: AssetRecord) -> dict:
         fields[MediaFileFields.RAW_TRANSCRIPT] = asset.raw_transcript
     if asset.normalized_transcript:
         fields[MediaFileFields.NORMALIZED_TRANSCRIPT] = asset.normalized_transcript
+    if asset.logical_media_key:
+        fields[MediaFileFields.LOGICAL_MEDIA_KEY] = asset.logical_media_key
     return fields
+
+
+def find_asset_by_logical_media_key(logical_media_key: str) -> MediaLookupResult:
+    """Read exact-key Media Files matches; never infer identity from names."""
+    if not logical_media_key:
+        return MediaLookupResult("not_found")
+    formula = (
+        f"{{{MediaFileFields.LOGICAL_MEDIA_KEY}}}="
+        f"'{_safe_formula_param(logical_media_key)}'"
+    )
+    try:
+        records = at_list_by_formula(Tables.MEDIA_FILES, formula, max_records=100)
+    except AirtableLookupError as exc:
+        return MediaLookupResult("error", error=str(exc))
+    if len(records) > 1:
+        return MediaLookupResult("duplicate", error="duplicate logical media key")
+    if not records:
+        return MediaLookupResult("not_found")
+    fields = records[0].get("fields", {})
+    if not fields.get(MediaFileFields.DRIVE_FILE_ID):
+        return MediaLookupResult("not_found")
+    return MediaLookupResult("reusable", record=records[0])
 
 
 def save_asset(asset: AssetRecord) -> str | None:
