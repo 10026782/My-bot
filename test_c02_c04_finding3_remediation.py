@@ -85,11 +85,17 @@ def test_gateway_failure_is_explicit_and_truthful(monkeypatch):
 
 
 def test_retry_after_gateway_failure_does_not_mutate_failed_attempt(monkeypatch):
-    result, gateway, writer = _run(monkeypatch, gateway_error=RuntimeError("gateway unavailable"))
-    assert result.ok is False
+    first, first_gateway, first_writer = _run(
+        monkeypatch, gateway_error=RuntimeError("gateway unavailable")
+    )
+    second, second_gateway, second_writer = _run(
+        monkeypatch, gateway_error=RuntimeError("gateway unavailable")
+    )
 
-    assert writer.call_count == 0
-    gateway.propose_action.assert_called_once()
+    assert first.ok is False and second.ok is False
+    assert first_writer.call_count == 0 and second_writer.call_count == 0
+    first_gateway.propose_action.assert_called_once()
+    second_gateway.propose_action.assert_called_once()
 
 
 def test_existing_success_behavior_remains_unchanged(monkeypatch):
