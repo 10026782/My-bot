@@ -158,6 +158,144 @@ running/production system). This remediation entry is STATIC/LIVE STRUCTURE
 evidence for the fix's presence in the diff — it is explicitly **not** a
 runtime-verified or production-verified claim.
 
+## RE-AUDIT — Finding #7 (Emergency Window concurrency)
+
+**Date:** 2026-08-23. **Scope:** focused re-verification of Finding #7 only,
+per explicit request — not a full re-audit.
+
+Both original claims were re-verified directly against the live file
+(`core/emergency_window.py`) and confirmed:
+1. `activate_window()`'s "no stacking" invariant was enforced via a bare
+   check-then-write — `is_active()` (a GET) followed by `airtable_create()`
+   (a POST), with no lock between them. Two concurrent callers could both
+   observe "no active window" and both create one.
+2. `_auto_expire()` called `airtable_patch(...)` and discarded its return
+   value entirely — the function unconditionally logged "auto-expired" and
+   returned `True` regardless of whether the status flip actually persisted.
+
+**New fact found during re-verification, not in the original finding:**
+`activate_window()` and `revoke_window()` currently have **zero live
+callers** anywhere in the repo (grep-confirmed: `core/emergency_window.py`
+is the only file containing either identifier besides this document). The
+race is real in the code, but not reachable in production today — nothing
+in the wired pipeline currently opens or closes an Emergency Window.
+
+**Fix (small, isolated, this file only):**
+- A module-level `threading.Lock()` now serializes the
+  check-then-create sequence in `activate_window()` — the same pattern
+  `event_bus.py` already uses for its analogous pop/confirm race. This
+  closes the race within one process; it is not a cross-process/multi-worker
+  guarantee (Airtable itself has no atomic compare-and-create), matching the
+  existing precedent's own limitation.
+- `_auto_expire()` now checks `airtable_patch()`'s return value. Behavior on
+  failure is unchanged (still fails closed — an expired window is treated as
+  inactive locally either way, so a persistence failure can't extend access
+  past expiry) but the failure is now surfaced as a distinct `ERROR` log
+  instead of being silently indistinguishable from a genuine success.
+
+**Test:** `test_emergency_window_concurrency.py` (new) — 12/12 passed.
+Covers: 8 threads calling `activate_window()` concurrently against a fake
+store with an artificial race window → exactly 1 activation, 7 correctly
+rejected as "already active"; `_auto_expire()` not called on an unexpired
+record; `_auto_expire()` on patch-success vs patch-failure, verifying the
+failure path is actually observed (distinct `ERROR` log) rather than
+swallowed, while still returning `True` (fail-closed preserved). Sanity
+check performed separately (not committed, ad hoc verification): with the
+new lock bypassed, the identical 8-thread test reproduces the original bug
+exactly — 8/8 stacked activations — confirming the test is not vacuously
+green and the lock is what closes the gap.
+
+**Severity/evidence revision:** Evidence upgraded from "STATIC FINDING (not
+independently re-verified)" to **LIVE STRUCTURE CONFIRMED + race reproduced
+in a runtime test harness**. Severity held at **MEDIUM** — the mechanism was
+real, but is currently dormant (no live caller), so today's exploitability
+is effectively none; it becomes real the moment something wires the feature
+up. Action: **NEEDS_CODE_CHANGE → DONE** (code-complete, locally verified;
+not production-verified — this feature is flag-gated off and has no active
+Owner-facing entrypoint).
+
+## REFRESH — Finding #1 (dispatcher/gateway bypass inventory)
+
+**Date:** 2026-08-23. Re-ran both of the repo's own inventory scripts
+against current `main` (previous baseline in both: 2026-07-03), per the
+original finding's own recommended action.
+
+**`tools/audit_dispatcher_bypass.py`** (direct imports of tool-impl modules
+/ `crm` outside dispatcher/digest/scheduler/collector): **51** call sites
+found, **23 new** (not in the 2026-07-03 baseline), **15 resolved** since
+baseline.
+
+**`tools/audit_gateway_bypass.py`** (direct `httpx.*` calls to Airtable
+outside `tools/airtable_gateway.py`): **25** call sites found, **14 new**,
+**13 resolved** since baseline. Notable positive signal: every one of the 25
+current entries is tagged `[read]` — the script found **zero** direct
+`post`/`patch`/`put`/`delete` Airtable calls outside the gateway right now
+(three previously-baselined write call sites in `crm.py` — a `post` and a
+`patch` — are in the "resolved, no longer present" list, meaning `crm.py`'s
+writes now route through the gateway). The write-side enforcement this
+finding was originally most concerned about (Leads/Tasks/Sessions/
+Business_Memory/Tenant *writes*) holds; what both scripts are actually
+inventorying right now on the gateway side is *read* bypasses, which
+`tools/airtable_gateway.py`'s own docstring already scopes out ("קריאה: GET
+ישיר ל-Airtable — אין gateway לקריאות בקודבייס הזה כיום") — i.e. reads have
+no sanctioned path to bypass in the first place. Worth a follow-up decision
+on whether `audit_gateway_bypass.py` should stop flagging reads at all, but
+that is a scoping question for whoever owns the script next, not something
+this refresh changes.
+
+**Baseline mechanism finding (new, found during this refresh — not in the
+original audit):** both scripts key their baseline on a literal
+`(file, line, method/module)` tuple, not on a symbol or function anchor.
+This makes the baseline fragile to any unrelated line-number shift in a
+file, independent of whether the bypass itself changed at all. This was
+directly demonstrated by this very refresh: the Finding #7 fix above added
+lines above `core/emergency_window.py`'s existing `httpx.get()` call inside
+`_fetch_active_record()`, shifting it from line 55 to line 66 with zero
+change to the call itself. `audit_gateway_bypass.py` reports this as one
+"resolved (line 55, fixed?)" entry and one "NEW (line 66)" entry — a false
+signal in both directions. This confirms and sharpens the original
+finding's own observation that "the tracking tool itself is stale": a
+meaningful fraction of the 23+14=37 "new" entries and 15+13=28 "resolved"
+entries across both scripts are plausibly line-shift noise rather than real
+scope drift, and cannot be told apart from real drift without re-verifying
+each one by hand against the 2026-07-03 baseline's actual diff. This refresh
+does **not** attempt that line-by-line reclassification (out of scope — the
+task was to re-run the inventories and build a canonical writer list, not to
+re-baseline or fix the scripts) and does **not** modify either script's
+`BASELINE` constant.
+
+**Canonical writer list** (files performing a business-data write outside
+`tools/dispatcher.py`, deduplicated from the dispatcher-bypass run above —
+this is the inventory Finding #1's writer-coverage summary referred to):
+
+- *Via `tools.airtable_tools` directly:* `abandoned_lead_worker.py`,
+  `ad_attribution.py`, `audience_intelligence.py`, `cmd_update.py`,
+  `core/lead_buffer.py`, `core/lead_event_writer.py`,
+  `core/memory_retrieval.py`, `core/runtime_schema_provider.py`,
+  `core/turn_coordinator_runtime.py`, `data_engines.py`,
+  `furniture_lead_funnel.py`, `inbound_handler.py`, `interaction_engine.py`,
+  `lead_capture.py`, `lead_memory.py`, `providers/airtable_shim.py`,
+  `session_store.py`, `tenant_provisioner.py`, `tools/schema_snapshot.py`,
+  `voice_adapter.py`.
+- *Via `crm` directly:* `core/lead_recovery.py`, `lead_conversion.py`,
+  `payment_reminder.py`, `scripts/verify_f15_staging.py`,
+  `tools/approval_actions.py`, `tools/contact_resolver.py`.
+- *Via `tools.google_tools`/`tools.calendar_tools` directly:*
+  `core/google_drive_artifact_store.py`, `drive_adapter.py`,
+  `email_inbound.py`, `interaction_engine.py`.
+- *Via `tools.contact_resolver` directly:* `cmd_decision.py`,
+  `decision_ports.py`.
+
+This list is the same category the original audit already named
+("Legacy/system writers... a large, largely-necessary category since these
+have no per-request `Identity` to check against `tool_registry`") — this
+refresh re-confirms its current membership against `main` rather than
+changing the finding's classification, severity, or recommended action.
+Classification/severity/action are **unchanged**: LEGACY_WRITER / HIGH /
+NEEDS_RUNTIME_VERIFICATION (now partially satisfied by this refresh; a full
+re-baseline of both scripts' `BASELINE` constants against today's `main` is
+still open and is deferred, not performed here).
+
 ## Related findings explicitly deferred (not touched by this remediation)
 
 - **Findings #1, #2, #4-#10** (see Full finding list above) — untouched by
