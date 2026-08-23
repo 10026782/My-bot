@@ -150,60 +150,21 @@ def _asked_price_delivery_availability(answers: dict) -> bool:
 
 def _save_lead(sender: str, session: dict) -> None:
     try:
-        from feature_flags import is_enabled
-        if is_enabled("FURNITURE_CANONICAL_LEAD_WRITE"):
-            from core.noninteractive_lead_cutovers import create_furniture_inbound_lead
-            answers = session.get("answers", {})
-            result = create_furniture_inbound_lead(
-                sender, session.get("owner_destination", ""), (answers.get("name") or "").strip(),
-                "Furniture lead: triple solid oak bed", json.dumps(answers, ensure_ascii=False),
-            )
-            if not result.ok:
-                logger.error("[FurnitureFunnel] canonical lead blocked: %s", result.reason)
-            return
-        from tools.airtable_gateway import airtable_create, airtable_patch
-        from tools.airtable_tools import airtable_get
-
+        from core.noninteractive_lead_cutovers import create_furniture_inbound_lead
         answers = session.get("answers", {})
-        score = _score_answers(answers)
-        name = (answers.get("name") or "").strip()
         beds = (answers.get("bed_count") or "").strip()
-        memory_key = f"boss_hq:{sender}"
-        status = "waiting_call" if name else "new"
         summary = f"Furniture lead: triple solid oak bed{f' | מיטות: {beds}' if beds else ''}"
-
-        fields = {
-            LeadFields.PHONE: sender,
-            LeadFields.STATUS: status,
-            LeadFields.SCORE: score,
-            LeadFields.SUMMARY: summary,
-            LeadFields.ANSWERS: json.dumps(answers, ensure_ascii=False),
-            LeadFields.SOURCE: "twilio_whatsapp_furniture_funnel",
-            LeadFields.CHANNEL: "whatsapp",
-            LeadFields.MEMORY_KEY: memory_key,
-            LeadFields.TENANT_ID: "boss_hq",
-            LeadFields.DOMAIN: DOMAIN,
-        }
-        if name:
-            fields[LeadFields.NAME] = name
-
-        record_id = session.get("lead_record_id", "")
-        if not record_id:
-            raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{_formula_escape(memory_key)}'")
-            match = re.search(r"rec\w+", raw or "")
-            record_id = match.group(0) if match else ""
-            if record_id:
-                session["lead_record_id"] = record_id
-
-        if record_id:
-            ok = airtable_patch(Tables.LEADS, record_id, fields, source="furniture_funnel")
-            if not ok:
-                logger.warning("[FurnitureFunnel] lead patch not ok for %s (record_id=%s)", sender, record_id)
-            return
-
-        rec = airtable_create(Tables.LEADS, fields, source="furniture_funnel")
-        if rec and rec.get("id"):
-            session["lead_record_id"] = rec["id"]
+        result = create_furniture_inbound_lead(
+            sender, session.get("owner_destination", ""), (answers.get("name") or "").strip(),
+            summary, json.dumps(answers, ensure_ascii=False),
+            status="waiting_call" if (answers.get("name") or "").strip() else "new",
+            score=_score_answers(answers), existing_id=session.get("lead_record_id", ""),
+        )
+        if not result.ok:
+            logger.error("[FurnitureFunnel] canonical lead blocked: %s", result.reason)
+        elif result.record_id:
+            session["lead_record_id"] = result.record_id
+        return
     except Exception as exc:
         logger.warning("[FurnitureFunnel] lead save failed for %s: %s", sender, exc)
 

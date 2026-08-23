@@ -9,6 +9,7 @@ import types
 from unittest.mock import patch
 
 import furniture_lead_funnel as funnel
+from core.lead_service import LeadCreateResult
 from session_store import PersistentSessionStore
 
 
@@ -43,11 +44,19 @@ def run() -> bool:
         True,
     )[1]
 
+    def fake_canonical(sender, destination, name, summary, answers, **kwargs):
+        payload = {
+            "status": kwargs["status"], "Score": kwargs["score"],
+            "summary": f"{summary}\n{answers}", "answers": answers,
+        }
+        saved.append(("canonical", "Leads", payload))
+        return LeadCreateResult(ok=True, action="created", record_id="recLead1")
+
     with patch.dict(sys.modules, {
         "session_store": session_mod,
         "tools.airtable_tools": at_tools,
         "tools.airtable_gateway": at_gateway,
-    }):
+    }), patch("core.noninteractive_lead_cutovers.create_furniture_inbound_lead", side_effect=fake_canonical):
         sender = "+972501111111"
         replies = [
             funnel.handle_furniture_lead_message(sender, "שלום", funnel.DOMAIN),

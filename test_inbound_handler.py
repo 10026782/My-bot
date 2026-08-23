@@ -8,6 +8,7 @@ import types
 from unittest.mock import patch
 
 import inbound_handler as handler
+from core.lead_service import LeadCreateResult
 
 
 def run() -> bool:
@@ -68,7 +69,9 @@ def run() -> bool:
     with patch.dict(sys.modules, {
         "tools.airtable_tools": at_tools,
         "tools.airtable_gateway": at_gateway,
-    }), patch.object(handler, "is_enabled", lambda name: name == "LEAD_CAPTURE"):
+    }), patch.object(handler, "is_enabled", lambda name: name == "LEAD_CAPTURE"), \
+         patch("core.noninteractive_lead_cutovers.create_email_inbound_lead", return_value=LeadCreateResult(ok=True, action="created", record_id="recNew123")) as email_canonical, \
+         patch("core.lead_service.create_lead", return_value=LeadCreateResult(ok=True, action="updated", record_id="recDani1")) as update_canonical:
 
         # A — duplicate external_id → skip, no create
         existing_external["gmail:msg123"] = "recDup1"
@@ -83,12 +86,8 @@ def run() -> bool:
             sender_id="new@test.com", message="רוצה מיטה", channel="email",
             domain="import", external_id="gmail:abc123",
         )
-        chk("C: new lead → create called once", len(leads()) == 1)
-        table, fields = next(a for a in adds if a[0] == "Leads")
-        chk("C: created in Leads table", table == "Leads")
-        chk("C: external_id stored", fields.get("external_id") == "gmail:abc123")
-        chk("C: sender_id stored", fields.get("sender_id") == "new@test.com")
-        chk("C: domain stored", fields.get("domain") == "import")
+        chk("C: canonical writer called once", email_canonical.call_count == 1)
+        chk("C: no direct Leads add", len(leads()) == 0)
 
         # B — known sender → update, not create
         existing_sender["dani@test.com"] = "recDani1"
@@ -96,8 +95,8 @@ def run() -> bool:
             sender_id="dani@test.com", message="שאלה חדשה", channel="email",
             domain="real_estate", external_id="gmail:new_msg",
         )
-        chk("B: known sender → update called", len(patches) == 1)
-        chk("B: known sender → no new lead create", len(leads()) == 1)
+        chk("B: known sender → canonical update called", update_canonical.call_count == 1)
+        chk("B: known sender → no direct Leads create", len(leads()) == 0)
 
         # E — flag OFF → zero Airtable calls
         adds.clear()

@@ -156,6 +156,9 @@ class LeadPayload:
     status: str = "new"
     score: int = 0
     tenant_id: str = "boss_hq"
+    memory_key: str = ""
+    external_id: str = ""
+    answers: str = ""
 
     # ── Campaign attribution — distinct from `source` (technical origin) ──
     # accepted, not yet written — no live Airtable column exists for any of
@@ -327,6 +330,10 @@ def build_lead_fields(payload: LeadPayload, owner_record_id: Optional[str], memo
         LeadFields.SENDER_ID:  payload.phone,
         LeadFields.TENANT_ID:  payload.tenant_id,
     }
+    if payload.external_id:
+        fields[LeadFields.EXTERNAL_ID] = payload.external_id
+    if payload.answers:
+        fields[LeadFields.ANSWERS] = payload.answers
     if owner_record_id:
         fields[LeadFields.OWNER] = [owner_record_id]
     return fields
@@ -342,6 +349,7 @@ def create_lead(
     *,
     source_module: str,
     existing_id: Optional[str] = None,
+    write_event: bool = True,
 ) -> LeadCreateResult:
     """
     The single canonical entry point for writing a Lead record.
@@ -392,7 +400,7 @@ def create_lead(
         )
         return LeadCreateResult(ok=False, action="invalid", reason=reason)
 
-    memory_key = build_memory_key(tenant_id, payload.phone, payload.name)
+    memory_key = payload.memory_key or build_memory_key(tenant_id, payload.phone, payload.name)
 
     if existing_id is None:
         existing_id = find_existing_lead(payload.name, payload.phone)
@@ -457,6 +465,10 @@ def create_lead(
                 LeadFields.SUMMARY: (payload.summary or "")[:500],
                 LeadFields.DOMAIN:  payload.domain,
             }
+            if payload.external_id:
+                patch_fields[LeadFields.EXTERNAL_ID] = payload.external_id
+            if payload.answers:
+                patch_fields[LeadFields.ANSWERS] = payload.answers
             if owner_record_id:
                 patch_fields[LeadFields.OWNER] = [owner_record_id]
             ok_patch = airtable_patch("Leads", existing_id, patch_fields, source=source_module)
@@ -494,7 +506,7 @@ def create_lead(
         return LeadCreateResult(ok=False, action="lifecycle_persistence_failed", record_id=record_id)
 
     if ok and record_id:
-        _run_post_write_enrichment(identity, payload, record_id, action)
+        _run_post_write_enrichment(identity, payload, record_id, action, write_event=write_event)
 
     return LeadCreateResult(
         ok=ok,
@@ -507,14 +519,14 @@ def create_lead(
     )
 
 
-def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, action: str) -> None:
+def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, action: str, *, write_event: bool = True) -> None:
     """Non-blocking, flag-gated post-write hooks — unchanged behavior,
     relocated verbatim from the former _write_one_lead (Phase 1 explicitly
     does not touch memory/learning, only preserves what already ran)."""
     try:
         from lead_capture import capture_lead_event
         from feature_flags import is_enabled as _flag
-        if _flag("LEAD_CAPTURE"):
+        if write_event and _flag("LEAD_CAPTURE"):
             capture_lead_event(identity, payload.summary or payload.name, record_id, domain=payload.domain)
     except Exception as exc:
         logger.warning("[LeadService] lead_event failed: %s", exc)

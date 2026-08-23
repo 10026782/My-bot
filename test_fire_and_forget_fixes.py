@@ -94,26 +94,27 @@ with patch("tools.airtable_tools.airtable_add", return_value=_fail_result()), \
     chk("create_human_pipeline_task: ok=False → owner NOT notified", not mock_notify.called)
 
 # ══════════════════════════════════════════════════════════════════
-# 3. furniture_lead_funnel._save_lead (patch path)
+# 3. furniture_lead_funnel._save_lead (canonical path)
 # ══════════════════════════════════════════════════════════════════
 print("\n── furniture_lead_funnel._save_lead (patch) ──")
 
 from furniture_lead_funnel import _save_lead
+from core.lead_service import LeadCreateResult
 
 _session_existing = {"answers": {"name": "Dani"}, "lead_record_id": "recFURN1"}
 
-with patch("tools.airtable_gateway.airtable_patch", return_value=True) as mock_patch:
+with patch("core.noninteractive_lead_cutovers.create_furniture_inbound_lead", return_value=LeadCreateResult(ok=True, action="created", record_id="recFURN1")) as mock_create:
     try:
         _save_lead("furn:1", dict(_session_existing))
-        chk("_save_lead: patch ok=True → no exception", True)
+        chk("_save_lead: canonical ok=True → no exception", True)
     except Exception:
-        chk("_save_lead: patch ok=True → no exception", False)
-    chk("_save_lead: patch called for existing record", mock_patch.called)
+        chk("_save_lead: canonical ok=True → no exception", False)
+    chk("_save_lead: canonical writer called", mock_create.called)
 
-with patch("tools.airtable_gateway.airtable_patch", return_value=False), \
+with patch("core.noninteractive_lead_cutovers.create_furniture_inbound_lead", return_value=LeadCreateResult(ok=False, action="blocked", reason="blocked")), \
      patch("furniture_lead_funnel.logger") as mock_logger:
     _save_lead("furn:1", dict(_session_existing))
-    chk("_save_lead: patch ok=False → warning logged (was silently discarded)", mock_logger.warning.called)
+    chk("_save_lead: canonical failure logged", mock_logger.error.called)
 
 # ══════════════════════════════════════════════════════════════════
 # 4. session_store.PersistentSessionStore._delete_from_db
