@@ -181,7 +181,8 @@
         "catalog.production_execution": false,
         "catalog.action_gateway_wiring": false,
         "catalog.autonomous_actions": false
-      }
+      },
+      "last_observed_commit": "fc90d1464bc7dfa6bea59265819b6b1dcadb681f"
     },
     {
       "id": "layer.tools",
@@ -273,7 +274,7 @@
           "dispatcher"
         ]
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "fc90d1464bc7dfa6bea59265819b6b1dcadb681f"
     }
   ],
   "edges": [
