@@ -41,4 +41,3 @@ def test_cmd_decision_has_no_direct_airtable_business_writer():
         and node.func.attr in {"airtable_create", "airtable_patch", "airtable_update"}
     }
     assert not direct_calls
-
