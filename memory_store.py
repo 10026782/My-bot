@@ -11,6 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Hardcoded, not env-configurable — MEMORY_MAX_MESSAGES/MEMORY_TTL_HOURS env
+# vars exist but only feed the unwired core/tenant_config.py, not this module.
 MAX_MESSAGES     = 50
 AVG_TOKENS       = 150
 TOKEN_LIMIT      = 80_000

@@ -7,6 +7,15 @@
 # כלל: לא לייבא מודולים של providers כאן — circular import.
 # כלל: get_tenant_config() חייב להיות synchronous.
 # כלל: אפס Airtable calls בשלב זה.
+#
+# NOT WIRED IN: this module has zero importers anywhere in the live
+# pipeline (verified by grep — see CLAUDE.md's F13 note). The env vars it
+# reads below (LLM_MODEL_OWNER, LLM_MODEL_DEFAULT, MEMORY_MAX_MESSAGES,
+# MEMORY_TTL_HOURS) are NOT live runtime configuration — setting them has
+# no effect on production. In particular, MEMORY_MAX_MESSAGES/
+# MEMORY_TTL_HOURS share a name with unrelated hardcoded constants in the
+# actually-live memory_store.py (MAX_MESSAGES, MEMORY_TTL_HOURS) that this
+# module does not feed — see memory_store.py's own note.
 
 from __future__ import annotations
 import os
