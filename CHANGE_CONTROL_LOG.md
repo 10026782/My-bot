@@ -2235,3 +2235,10 @@ backfill.
 - **Remediation:** Decision uses `decision_ports`; Marketing and Lead Conversion remain on their canonical paths; Business Memory is classified as technical persistence.
 - **PR / merge SHA:** #891 / `a02ee10ededa9d0ab9a1b3f5ca8aa56e0c3147a7`
 - **Verification:** STATIC VERIFIED + LIVE STRUCTURE VERIFIED; **production verification: NO**.
+
+#### PR #895 — Attribution Lead writer canonicalization
+- **Track/audit:** C02–C04 Approval Coverage, A1 Attribution
+- **Problem:** `ad_attribution.record_lead_source()` reachable from `app.py::_inject_utm` directly called the legacy `tools.airtable_tools.airtable_update` Lead writer.
+- **Remediation:** attribution now uses `core.lead_service.update_lead_fields()` and the canonical ActionGateway proposal/write boundary; proposal failure is fail-closed with no direct-write fallback.
+- **PR / merge SHA:** #895 / `f1aea5df2e88b766d0b60cd230934bfb0ea99df3`
+- **Verification:** STATIC VERIFIED + LIVE STRUCTURE VERIFIED; regression recheck passed; **production verification: NO**.

@@ -85,11 +85,33 @@ and no production verification is claimed.
 | TMA Assets/Ventures writers | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #886, merge `f7d7f657f22aaa0a27f48040763391bd1a43ba7e` |
 | Legacy inbound Lead writers | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #889, merge `326cbf2ed4c40c865bf5fa0cb8bb435a8f025fb6` |
 | Telegram business writers | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #891, merge `a02ee10ededa9d0ab9a1b3f5ca8aa56e0c3147a7` |
-| A1 `ad_attribution.record_lead_source` | **OPEN — CURRENT DIRECT-WRITE BYPASS / MEDIUM** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | Next: dedicated attribution canonicalization PR; not a deferred-policy item |
+| A1 `ad_attribution.record_lead_source` | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #895, merge `f1aea5df2e88b766d0b60cd230934bfb0ea99df3`; no direct-write fallback |
 | A2 interaction-generated Tasks | **POLICY DECISION REQUIRED / LOW** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | `MAINTENANCE_DEFERRED_REGISTER.md::R-C07-A2`; decide ActionGateway vs explicit service policy vs bounded exception |
 | A3 weekly quest reset | **DEFERRED** | STATIC VERIFIED | Existing `MAINTENANCE_DEFERRED_REGISTER.md::R-C06-10`; technical/gamification persistence |
 | A4 `ad_attribution.mark_converted` | **LEGACY BUT UNREACHABLE / NO CHANGE** | STATIC VERIFIED | No live callers found; do not remove without a separate decision |
 | A5 Business Memory persistence | **TECHNICAL PERSISTENCE / OUT OF SCOPE** | STATIC VERIFIED | No business-mutation remediation in this track |
+
+### C02–C04 Approval Coverage — post-A1 final recheck (24/08/2026)
+
+Final code verdict: **CODE CLOSED / POLICY ITEMS REMAIN**. The recheck was
+performed against `origin/main` at `f1aea5df2e88b766d0b60cd230934bfb0ea99df3`,
+including merged PR #895.
+
+- **A1 Attribution:** **CLOSED / REGRESSION**. `record_lead_source()` performs
+  a read-only Lead lookup, then calls `core.lead_service.update_lead_fields()`;
+  that helper proposes through ActionGateway and has no direct-write fallback.
+- **Ordinary direct business-write bypasses remaining:** **0**.
+- **A2:** policy-dependent system/service path remains. `scheduler.py` invokes
+  `interaction_engine.run_interaction_scan()`, which invokes
+  `create_tasks_from_analysis()`; that function directly calls
+  `tools.airtable_tools.airtable_add(Tables.TASKS, fields)` for analyzed tasks,
+  without requester or approval context. The policy question is whether
+  system-generated business Tasks must use ActionGateway, an explicit service
+  policy, or remain a bounded exception. This is recorded in `R-C07-A2` and was
+  not remediated here.
+- **Technical persistence exclusions unchanged:** A3 weekly quest reset, A4
+  unreachable `mark_converted`, and A5 Business Memory remain excluded/deferred.
+- **Production/runtime verification:** **NOT PRODUCTION VERIFIED**.
 
 ## Cross-track notes
 
