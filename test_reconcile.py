@@ -866,6 +866,23 @@ def test_workflow_keeps_reconcile_artifact_outside_checkout_before_apply():
     assert "open(os.path.join(os.environ['RUNNER_TEMP'],'context-librarian-reconcile.json'))" in text
 
 
+def test_workflow_records_budget_history_after_apply():
+    text = (REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml").read_text(
+        encoding="utf-8"
+    )
+    persist = text.split("- name: Persist budget history and publish rolling branch", 1)[1].split(
+        "- name: Create or update the single rolling PR", 1
+    )[0]
+    assert "budget-preflight" in persist
+    assert "--record-history docs/context_librarian/budget_history.json" in persist
+    assert '"$RUNNER_TEMP/context-librarian-budget-history.json"' in persist
+    assert "published=false" in persist
+    recheck = text.split("- name: Re-check current main before writing", 1)[1].split(
+        "- name: Apply bounded maintenance on current main", 1
+    )[0]
+    assert "!= CLEAN" in recheck
+
+
 def test_ten_main_shas_share_one_rolling_branch_and_pr():
     text = (REPO_ROOT / ".github/workflows/context-librarian-reconcile.yml").read_text(
         encoding="utf-8"

@@ -11,6 +11,7 @@ import pytest
 
 from tools.context_librarian import librarian
 from tools.context_librarian import budget_preflight
+from tools.context_librarian import budget_history
 from tools.context_librarian.librarian import (
     BundleEstimate,
     ContextLibrarianError,
@@ -35,6 +36,7 @@ from tools.context_librarian.budget_preflight import (
     classify_health,
     format_budget_preflight_json,
 )
+from tools.context_librarian.budget_history import record_budget_snapshot
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -474,6 +476,55 @@ def test_budget_preflight_fails_closed_on_duplicate_query_mapping(catalog, monke
     )
     with pytest.raises(ContextLibrarianError, match="duplicate canonical"):
         build_budget_preflight(REPO_ROOT, catalog)
+
+
+def test_budget_history_records_initial_snapshot_idempotently(catalog, tmp_path, monkeypatch):
+    report = build_budget_preflight(REPO_ROOT, catalog)
+    history_path = tmp_path / "budget_history.json"
+    first = record_budget_snapshot(REPO_ROOT, report, history_path)
+    second = record_budget_snapshot(REPO_ROOT, report, history_path)
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert first["snapshot_added"] is True
+    assert first["growth_breaks"] == []
+    assert first["growth_break_counts"]["cross_layer_architecture"] == 0
+    assert second["snapshot_added"] is False
+    assert len(history["snapshots"]) == 1
+    assert all(row["cause"] == "initial" for row in history["snapshots"][0]["profiles"])
+
+
+def test_budget_history_records_growth_break_and_changed_paths(catalog, tmp_path, monkeypatch):
+    first_report = build_budget_preflight(REPO_ROOT, catalog)
+    history_path = tmp_path / "budget_history.json"
+    record_budget_snapshot(REPO_ROOT, first_report, history_path)
+
+    second_report = copy.deepcopy(first_report)
+    for row in second_report["profiles"]:
+        row["commit"] = "second-commit"
+        if row["profile"] == "cross_layer_architecture":
+            row["usage"] = row["budget"] + 1
+            row["headroom_tokens"] = -1
+            row["headroom_percent"] = -0.01
+            row["overflow_tokens"] = 1
+            row["fits"] = False
+            row["health"] = "FAIL"
+    monkeypatch.setattr(budget_history, "_changed_paths", lambda *_args: ["docs/new.md"])
+    result = record_budget_snapshot(REPO_ROOT, second_report, history_path)
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    row = next(
+        row for row in history["snapshots"][-1]["profiles"]
+        if row["profile"] == "cross_layer_architecture"
+    )
+    assert result["growth_breaks"] == ["cross_layer_architecture"]
+    assert result["growth_break_counts"]["cross_layer_architecture"] == 1
+    assert row["cause"] == "growth"
+    assert row["growth_break"] is True
+    assert row["growth_break_count"] == 1
+    previous = next(
+        item for item in history["snapshots"][0]["profiles"]
+        if item["profile"] == "cross_layer_architecture"
+    )
+    assert row["usage_delta"] == row["usage"] - previous["usage"]
+    assert row["changed_paths"] == ["docs/new.md"]
 
 
 def test_document_budget_is_enforced(catalog):
