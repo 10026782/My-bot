@@ -2201,3 +2201,37 @@ materially beyond the older 16/08–20/08 planning snapshots.
 or test implementation files changed. This preserves the four-agent split where
 Track D owns status/decision documents and other tracks own verification,
 Command Center runtime/UI, and Media/Gateway implementation.
+
+### C02–C04 Approval Coverage — post-remediation backfill (24/08/2026)
+
+Append-only remediation evidence. The original audit findings remain
+unchanged; runtime/production behavior was not verified by this documentation
+backfill.
+
+#### PR #881 — Gateway-OFF legacy approval execution
+- **Track/audit:** C02–C04 Approval Coverage
+- **Problem:** approved legacy callbacks could previously reach direct business dispatch when `FEATURE_ACTION_GATEWAY` was off.
+- **Remediation:** fail closed for the gateway-off business-mutation path; no direct dispatch and no false success evidence.
+- **PR / merge SHA:** #881 / `8e67fd73890ade676787c0ed6f4f7f9f3e9f638c`
+- **Verification:** STATIC VERIFIED + LIVE STRUCTURE VERIFIED; **production verification: NO**.
+
+#### PR #886 — TMA Assets/Ventures writer coverage
+- **Track/audit:** C02–C04 Approval Coverage
+- **Problem:** TMA owner-only Assets/Ventures business writers were outside the canonical approval path.
+- **Remediation:** route the scoped TMA writers through the canonical ActionGateway/owner execution path.
+- **PR / merge SHA:** #886 / `f7d7f657f22aaa0a27f48040763391bd1a43ba7e`
+- **Verification:** STATIC VERIFIED + LIVE STRUCTURE VERIFIED; **production verification: NO**.
+
+#### PR #889 — Legacy inbound Lead writers
+- **Track/audit:** C02–C04 Approval Coverage
+- **Problem:** scoped legacy inbound Lead writers had parallel business-write concerns.
+- **Remediation:** route the scoped inbound Lead writers through `core.lead_service` and the canonical Lead write path.
+- **PR / merge SHA:** #889 / `326cbf2ed4c40c865bf5fa0cb8bb435a8f025fb6`
+- **Verification:** STATIC VERIFIED + LIVE STRUCTURE VERIFIED; **production verification: NO**.
+
+#### PR #891 — Telegram business writers
+- **Track/audit:** C02–C04 Approval Coverage
+- **Problem:** Telegram Decision/Marketing/Lead Conversion paths required current-main writer classification and canonical routing.
+- **Remediation:** Decision uses `decision_ports`; Marketing and Lead Conversion remain on their canonical paths; Business Memory is classified as technical persistence.
+- **PR / merge SHA:** #891 / `a02ee10ededa9d0ab9a1b3f5ca8aa56e0c3147a7`
+- **Verification:** STATIC VERIFIED + LIVE STRUCTURE VERIFIED; **production verification: NO**.

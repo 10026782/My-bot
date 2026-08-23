@@ -74,6 +74,23 @@ Status vocabulary: OPEN · CODE_DONE · MERGED · SUPERSEDED · DEFERRED · NEED
 | C07 | F6 three parallel approval-state representations | EventBus / ActionContract / Airtable Approvals projection reconciled by hand via point-patches | **DEFERRED** (architecture review) | STATIC FINDING | none | — | Approval-architecture review cycle |
 | C07 | update_lead_status inconsistency (new during #847 PART 4 check) | After #847, Owner gets immediate execution on three Leads endpoints but still waits for manual approval on the fourth Leads PATCH endpoint | **DEFERRED** to writer-coverage backlog (preserved verbatim in C05-C07 doc's deferral section) | LIVE STRUCTURE CONFIRMED (at remediation time) | none | — | Next writer-coverage pass |
 
+### C02–C04 Approval Coverage — post-remediation refresh (24/08/2026)
+
+Current verdict: **POLICY ITEMS REMAIN**. This track is not globally closed,
+and no production verification is claimed.
+
+| Cluster / item | Current status | Evidence | Reference / next action |
+|---|---|---|---|
+| Gateway-OFF approval callback | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #881, merge `8e67fd73890ade676787c0ed6f4f7f9f3e9f638c` |
+| TMA Assets/Ventures writers | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #886, merge `f7d7f657f22aaa0a27f48040763391bd1a43ba7e` |
+| Legacy inbound Lead writers | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #889, merge `326cbf2ed4c40c865bf5fa0cb8bb435a8f025fb6` |
+| Telegram business writers | **CLOSED / STATIC VERIFIED** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | PR #891, merge `a02ee10ededa9d0ab9a1b3f5ca8aa56e0c3147a7` |
+| A1 `ad_attribution.record_lead_source` | **OPEN — CURRENT DIRECT-WRITE BYPASS / MEDIUM** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | Next: dedicated attribution canonicalization PR; not a deferred-policy item |
+| A2 interaction-generated Tasks | **POLICY DECISION REQUIRED / LOW** | STATIC VERIFIED + LIVE STRUCTURE VERIFIED | `MAINTENANCE_DEFERRED_REGISTER.md::R-C07-A2`; decide ActionGateway vs explicit service policy vs bounded exception |
+| A3 weekly quest reset | **DEFERRED** | STATIC VERIFIED | Existing `MAINTENANCE_DEFERRED_REGISTER.md::R-C06-10`; technical/gamification persistence |
+| A4 `ad_attribution.mark_converted` | **LEGACY BUT UNREACHABLE / NO CHANGE** | STATIC VERIFIED | No live callers found; do not remove without a separate decision |
+| A5 Business Memory persistence | **TECHNICAL PERSISTENCE / OUT OF SCOPE** | STATIC VERIFIED | No business-mutation remediation in this track |
+
 ## Cross-track notes
 
 - **C08 — Import/Module Boundaries:** no dedicated preserved audit body on main (**UNKNOWN** beyond C00-F1). Directly verifiable current-main fact observed during this consolidation (STATIC FINDING, new observation, not retro-fitted into any old audit): `tma_api.py:563` imports `_build_and_log_turn_envelope` from `app` inside a function — a core→app back-edge present at START_SHA **and re-confirmed at re-baseline `0e356ad`**. Recorded here so it is not lost; not counted as an old finding. Broader file/module ownership inventory: see [MAINTENANCE_FILE_DRIFT_REGISTER.md](MAINTENANCE_FILE_DRIFT_REGISTER.md) §F.
