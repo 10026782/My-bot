@@ -14,6 +14,7 @@ import hmac
 import logging
 import os
 import secrets
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,10 @@ _CODE_DIGITS = 6
 
 # { request_id: {"code_hash", "purpose", "identity_ref", "expires", "attempts", "consumed"} }
 _store: dict[str, dict] = {}
+# LL-13-style lock (same pattern as event_bus.py's PendingActionsStore) — guards
+# check-then-increment-then-consume in verify_otp() against concurrent callers
+# racing the same request_id (e.g. double-submit / retry-storm on the OTP form).
+_lock = threading.Lock()
 
 
 def _hash_code(code: str) -> str:
@@ -61,14 +66,15 @@ def request_otp(purpose: str, identity_ref: str) -> str | None:
         return None
 
     request_id = str(uuid.uuid4())[:12]
-    _store[request_id] = {
-        "code_hash": _hash_code(code),
-        "purpose": purpose,
-        "identity_ref": identity_ref,
-        "expires": datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES),
-        "attempts": 0,
-        "consumed": False,
-    }
+    with _lock:
+        _store[request_id] = {
+            "code_hash": _hash_code(code),
+            "purpose": purpose,
+            "identity_ref": identity_ref,
+            "expires": datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES),
+            "attempts": 0,
+            "consumed": False,
+        }
     logger.warning(f"[otp] issued request_id={request_id} purpose={purpose!r} for={identity_ref}")
     return request_id
 
@@ -77,26 +83,31 @@ def verify_otp(request_id: str, code: str) -> bool:
     """
     מאמת קוד מול בקשה פתוחה. חד-פעמי: נצרך גם בהצלחה וגם כשנגמרים הניסיונות.
     True רק אם הקוד נכון, בתוקף, ולא כבר נוצל/נחסם.
+
+    כל הבדיקה-ואז-עדכון (check-then-increment-then-consume) רצה תחת _lock —
+    שתי קריאות מקבילות לאותו request_id (למשל retry כפול על אותה טופס) לא
+    יכולות יותר לעקוף יחד את MAX_ATTEMPTS או לצרוך את אותו קוד פעמיים.
     """
-    entry = _store.get(request_id)
-    if not entry or entry["consumed"]:
-        return False
-    if datetime.now(timezone.utc) > entry["expires"]:
-        _store.pop(request_id, None)
-        return False
+    with _lock:
+        entry = _store.get(request_id)
+        if not entry or entry["consumed"]:
+            return False
+        if datetime.now(timezone.utc) > entry["expires"]:
+            _store.pop(request_id, None)
+            return False
 
-    entry["attempts"] += 1
-    if entry["attempts"] > MAX_ATTEMPTS:
-        entry["consumed"] = True
-        logger.warning(f"[otp] request_id={request_id} blocked — too many attempts")
+        entry["attempts"] += 1
+        if entry["attempts"] > MAX_ATTEMPTS:
+            entry["consumed"] = True
+            logger.warning(f"[otp] request_id={request_id} blocked — too many attempts")
+            return False
+
+        if hmac.compare_digest(entry["code_hash"], _hash_code(code.strip())):
+            entry["consumed"] = True
+            logger.warning(f"[otp] request_id={request_id} verified OK purpose={entry['purpose']!r}")
+            return True
+
         return False
-
-    if hmac.compare_digest(entry["code_hash"], _hash_code(code.strip())):
-        entry["consumed"] = True
-        logger.warning(f"[otp] request_id={request_id} verified OK purpose={entry['purpose']!r}")
-        return True
-
-    return False
 
 
 def get_purpose(request_id: str) -> str | None:
@@ -108,7 +119,8 @@ def get_purpose(request_id: str) -> str | None:
 def cleanup_expired() -> int:
     """מנקה בקשות OTP שפגו — ניתן לקריאה מה-scheduler. מחזיר כמה נוקו."""
     now = datetime.now(timezone.utc)
-    expired = [rid for rid, e in _store.items() if now > e["expires"]]
-    for rid in expired:
-        _store.pop(rid, None)
+    with _lock:
+        expired = [rid for rid, e in _store.items() if now > e["expires"]]
+        for rid in expired:
+            _store.pop(rid, None)
     return len(expired)
