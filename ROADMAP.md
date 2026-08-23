@@ -7,7 +7,18 @@ Canonical current source:
 **PARTIAL / NON-BLOCKING**; formal Layer 2 TurnCoordinator implementation is
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
-עודכן: 22/08/2026 — **Canonical Leads Schema v1 — Track A/B הושלמו במלואם (ידני + קוד).**
+
+## C02–C04 Approval Coverage — current sequence (24/08/2026)
+
+Current status: **POLICY ITEMS REMAIN**. Detailed status and evidence live in
+[`MAINTENANCE_STATUS_MATRIX.md`](MAINTENANCE_STATUS_MATRIX.md).
+
+- Completed and statically verified: PR #881, #886, #889, and #891.
+- Next code item: **A1 Attribution canonicalization** (`ad_attribution.record_lead_source`).
+- Policy queue: **A2 system-generated Tasks**; see `R-C07-A2` in the deferred register.
+- Runtime status: **NOT PRODUCTION VERIFIED**.
+
+עודכן: 24/08/2026 — **Canonical Leads Schema v1 — Track A/B הושלמו במלואם (ידני + קוד).**
 בוצע ידנית ב-Airtable UI (owner, 22/08): (1) הוסרה האופציה `"ליד חדש"` מרשימת ה-choices
 של `status` וגם של `Business Outcome`; (2) שינוי-שם ל-7 מתוך 8 האופציות של `Business
 Outcome` (הוסר ה-trailing space — `"open "`→`"open"` וכו', `"archived"` היה כבר נקי) —
