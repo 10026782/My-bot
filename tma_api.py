@@ -400,6 +400,9 @@ def _identity_ref(identity) -> str:
 # (fail-closed) rather than "Low".
 ACTION_RISK = {
     "tma_create_project":     "Medium",
+    "tma_update_asset":       "Medium",
+    "tma_create_venture":     "Medium",
+    "tma_update_venture":     "Medium",
     "tma_update_lead_status": "Low",
     "tma_patch_lead":         "Low",
     "tma_set_lead_outcome":   "Medium",
@@ -3457,12 +3460,20 @@ def update_asset(asset_id, identity):
     if not fields:
         return jsonify({"error": "no editable fields provided"}), 400
 
-    ok = _at_patch("Assets", asset_id, fields)
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
-
-    _audit("asset_update", identity, details=f"{asset_id}: {list(fields.keys())}")
-    return jsonify({"ok": True, "asset_id": asset_id, "updated": list(fields.keys())})
+    _, response, status = _queue_or_owner_execute(
+        "tma_update_asset",
+        {
+            "op": "patch",
+            "table": "Assets",
+            "record_id": asset_id,
+            "fields": fields,
+            "audit_action": "asset_update",
+            "audit_details": f"{asset_id}: {list(fields.keys())}",
+        },
+        identity,
+        f"Update asset: {asset_id}",
+    )
+    return jsonify(response), status
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3543,12 +3554,19 @@ def create_venture(identity):
     fields = {_VENTURE_FIELD_MAP[k]: v for k, v in data.items() if k in _VENTURE_FIELD_MAP}
     fields.setdefault(VentureFields.STAGE, VentureStage.RESEARCH)
 
-    rec = _at_post(Tables.VENTURES, fields)
-    if not rec:
-        return jsonify({"error": "create failed"}), 500
-
-    _audit("venture_create", identity, details=name)
-    return jsonify(_fmt_venture(rec)), 201
+    _, response, status = _queue_or_owner_execute(
+        "tma_create_venture",
+        {
+            "op": "post",
+            "table": Tables.VENTURES,
+            "fields": fields,
+            "audit_action": "venture_create",
+            "audit_details": name,
+        },
+        identity,
+        f"Create venture: {name}",
+    )
+    return jsonify(response), status
 
 
 @tma_api.route("/api/ventures/<venture_id>", methods=["PATCH"])
@@ -3562,12 +3580,20 @@ def update_venture(venture_id, identity):
     if not fields:
         return jsonify({"error": "no editable fields provided"}), 400
 
-    ok = _at_patch(Tables.VENTURES, venture_id, fields)
-    if not ok:
-        return jsonify({"error": "update failed"}), 500
-
-    _audit("venture_update", identity, details=f"{venture_id}: {list(fields.keys())}")
-    return jsonify({"ok": True, "venture_id": venture_id, "updated": list(fields.keys())})
+    _, response, status = _queue_or_owner_execute(
+        "tma_update_venture",
+        {
+            "op": "patch",
+            "table": Tables.VENTURES,
+            "record_id": venture_id,
+            "fields": fields,
+            "audit_action": "venture_update",
+            "audit_details": f"{venture_id}: {list(fields.keys())}",
+        },
+        identity,
+        f"Update venture: {venture_id}",
+    )
+    return jsonify(response), status
 
 
 # ══════════════════════════════════════════════════════════════════
