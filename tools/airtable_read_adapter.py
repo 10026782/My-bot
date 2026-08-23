@@ -33,6 +33,8 @@ def list_records(
     *,
     max_records: int | str | None = 20,
     fields: list[str] | None = None,
+    paginate: bool | None = None,
+    timeout: float = 10,
 ) -> list[dict]:
     """Return raw Airtable records without exposing provider details."""
     try:
@@ -41,7 +43,8 @@ def list_records(
             formula,
             max_records,
             fields=fields,
-            paginate=not max_records,
+            paginate=not max_records if paginate is None else paginate,
+            timeout=timeout,
         )
     except AirtableLookupError as exc:
         raise AirtableReadError(

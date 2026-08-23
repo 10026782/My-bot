@@ -4,9 +4,7 @@
 
 import os
 import re
-import httpx
 import logging
-import urllib.parse
 import threading
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
@@ -19,6 +17,7 @@ from airtable_schema import (
     validate_funding_cost,
 )
 from tools.airtable_gateway import airtable_create, airtable_patch
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +29,6 @@ _CONTACT_DEDUP_LOCK = threading.Lock()
 # ══════════════════════════════════════════════════
 # Helpers — קוראים env בכל קריאה (לא module-level)
 # ══════════════════════════════════════════════════
-
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {os.environ.get('AIRTABLE_API_KEY', '')}",
-        "Content-Type":  "application/json",
-    }
-
-def _base_url(table: str) -> str:
-    base = os.environ.get("AIRTABLE_BASE_ID", "")
-    return f"https://api.airtable.com/v0/{base}/{urllib.parse.quote(table, safe='')}"
 
 def _creds_ok() -> bool:
     return bool(os.environ.get("AIRTABLE_API_KEY")) and bool(os.environ.get("AIRTABLE_BASE_ID"))
@@ -57,22 +46,25 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
         tenant_filter = f"{{tenant_id}}='{tenant_id}'"
         formula = f"AND({formula}, {tenant_filter})" if formula else tenant_filter
 
-    params = {}
-    if formula:
-        params["filterByFormula"] = formula
-    if fields:
-        for i, f in enumerate(fields):
-            params[f"fields[{i}]"] = f
-
-    r = httpx.get(_base_url(table), headers=_headers(), params=params, timeout=10)
-    if r.status_code == 401:
-        raise RuntimeError(f"401 AIRTABLE_API_KEY לא תקין | body: {r.text[:200]}")
-    if r.status_code == 403:
-        raise RuntimeError(f"403 אין הרשאה לטבלה '{table}' | body: {r.text[:200]}")
-    if r.status_code == 404:
-        raise RuntimeError(f"404 טבלה '{table}' לא נמצאה | body: {r.text[:200]}")
-    r.raise_for_status()
-    return r.json().get("records", [])
+    try:
+        return list_records(
+            table,
+            formula,
+            max_records=None,
+            fields=fields,
+            paginate=False,
+            timeout=10,
+        )
+    except AirtableReadError as exc:
+        if exc.status_code == 401:
+            raise RuntimeError(f"401 AIRTABLE_API_KEY לא תקין | body: {exc.response_text[:200]}") from exc
+        if exc.status_code == 403:
+            raise RuntimeError(f"403 אין הרשאה לטבלה '{table}' | body: {exc.response_text[:200]}") from exc
+        if exc.status_code == 404:
+            raise RuntimeError(f"404 טבלה '{table}' לא נמצאה | body: {exc.response_text[:200]}") from exc
+        if exc.cause is not None:
+            raise exc.cause
+        raise
 
 def _post(table: str, fields: dict) -> dict:
     record = airtable_create(table, fields, source="crm")

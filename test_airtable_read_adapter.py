@@ -5,6 +5,8 @@ from unittest.mock import patch
 import daily_digest
 import weekly_summary
 import worker
+import crm
+from core import lead_service
 from airtable_schema import Tables
 from tools.airtable_read_adapter import AirtableReadError, list_records
 
@@ -78,6 +80,41 @@ def test_adapter_preserves_unbounded_pagination_and_fields():
         {"filterByFormula": "{Status}='Open'", "fields[]": ["Name"]},
         {"filterByFormula": "{Status}='Open'", "fields[]": ["Name"], "offset": "next"},
     ]
+
+
+def test_crm_get_preserves_tenant_formula_and_single_page_read():
+    class Identity:
+        is_internal = False
+        tenant_id = "tenant-a"
+
+    with patch.object(crm, "list_records", return_value=[]) as read:
+        assert crm._get("Contacts", "{Name}='Dana'", identity=Identity()) == []
+    read.assert_called_once_with(
+        "Contacts",
+        "AND({Name}='Dana', {tenant_id}='tenant-a')",
+        max_records=None,
+        fields=None,
+        paginate=False,
+        timeout=10,
+    )
+
+
+def test_lead_dedup_preserves_three_queries_and_read_options(monkeypatch):
+    monkeypatch.setenv("AIRTABLE_API_KEY", "key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
+    with patch.object(lead_service, "list_records", return_value=[]) as read:
+        assert lead_service.find_existing_lead("Dana", "0501234567") is None
+    assert [call.args[:2] for call in read.call_args_list] == [
+        ("Leads", "AND(SEARCH('Dana', {Name}), {phone}='0501234567')"),
+        ("Leads", "{phone}='0501234567'"),
+        ("Leads", "SEARCH('Dana', {Name})"),
+    ]
+    for call in read.call_args_list:
+        assert call.kwargs == {
+            "max_records": 5,
+            "paginate": False,
+            "timeout": 8,
+        }
 
 
 def test_daily_digest_preserves_legacy_read_errors(monkeypatch):
