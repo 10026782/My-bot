@@ -1,10 +1,8 @@
 # schema_intelligence.py — A38 Schema Intelligence Layer
-# Source of Truth: airtable_schema.py
-# מטרה: לפני כל כתיבה לAirtable — אמת שדות, הצע תיקונים
+# READ-ONLY / NON-AUTHORITATIVE: presentation for /schema and /tables only.
+# It is not used to approve or validate Airtable writes.
 
 from __future__ import annotations
-import logging
-logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════
 # Schema Registry — טוען מ-airtable_schema.py
@@ -190,46 +188,7 @@ def resolve_table(name: str) -> str | None:
     return None
 
 
-def validate_fields(table: str, fields: dict) -> tuple[bool, str]:
-    """
-    מאמת שדות לפני כתיבה לAirtable.
-    מחזיר (ok, message).
-    אם שדה לא קיים — מציע תיקון.
-    """
-    full_table = resolve_table(table) or table
-    schema = SCHEMA.get(full_table)
-
-    if not schema:
-        logger.warning(f"[Schema] Unknown table: {table}")
-        return True, ""  # טבלה לא מוכרת — תן לעבור
-
-    errors = []
-    for field, value in fields.items():
-        if field not in schema:
-            suggestion = _find_similar(field, list(schema.keys()))
-            if suggestion:
-                errors.append(
-                    f"השדה \"{field}\" לא קיים ב-{full_table}.\n"
-                    f"האם התכוונת ל-\"{suggestion}\"?"
-                )
-            else:
-                errors.append(
-                    f"השדה \"{field}\" לא קיים ב-{full_table}.\n"
-                    f"השדות הזמינים: {', '.join(list(schema.keys())[:5])}"
-                )
-
-        # בדיקת ערכי select
-        elif schema[field].get("options") and value:
-            opts = schema[field]["options"]
-            if str(value) not in opts:
-                errors.append(
-                    f"הערך \"{value}\" לא חוקי לשדה \"{field}\".\n"
-                    f"ערכים מותרים: {', '.join(opts)}"
-                )
-
-    if errors:
-        return False, "\n".join(errors)
-    return True, ""
+READ_ONLY_NOTICE = "⚠️ READ-ONLY / NON-AUTHORITATIVE — presentation בלבד; אינו מאשר כתיבות."
 
 
 def format_table_schema(table: str) -> str:
@@ -239,9 +198,9 @@ def format_table_schema(table: str) -> str:
 
     if not schema:
         available = "\n".join(f"• {t}" for t in SCHEMA.keys())
-        return f"❌ טבלה \"{table}\" לא נמצאה.\n\nטבלאות זמינות:\n{available}"
+        return f"{READ_ONLY_NOTICE}\n❌ טבלה \"{table}\" לא נמצאה.\n\nטבלאות זמינות:\n{available}"
 
-    lines = [f"📋 *{full_table}*\n"]
+    lines = [f"{READ_ONLY_NOTICE}\n📋 *{full_table}*\n"]
     for field, meta in schema.items():
         type_str = meta.get("type", "")
         opts = meta.get("options", [])
@@ -255,38 +214,12 @@ def format_table_schema(table: str) -> str:
 
 def format_all_tables() -> str:
     """רשימת כל הטבלאות — לפקודת /tables."""
-    lines = [f"📊 *טבלאות Airtable — {len(SCHEMA)} טבלאות*\n"]
+    lines = [f"{READ_ONLY_NOTICE}\n📊 *טבלאות Airtable — {len(SCHEMA)} טבלאות*\n"]
     for table in SCHEMA:
         fields = list(SCHEMA[table].keys())
         lines.append(f"*{table}*")
         lines.append(f"  {', '.join(fields[:4])}{'...' if len(fields)>4 else ''}")
     return "\n".join(lines)
-
-
-# ── Utils ─────────────────────────────────────────
-
-def _find_similar(field: str, candidates: list[str]) -> str | None:
-    """מוצא שדה דומה — fuzzy match פשוט."""
-    field_l = field.lower()
-    for c in candidates:
-        if field_l in c.lower() or c.lower() in field_l:
-            return c
-    # common mistakes
-    TYPOS = {
-        "name": ["שם", "שם המשימה", "כותרת המשימה", "Name"],
-        "title": ["כותרת המשימה", "שם המשימה"],
-        "status": ["סטטוס", "Status", "שלב"],
-        "date": ["תאריך", "תאריך יעד", "תאריך דדליין"],
-        "priority": ["עדיפות"],
-        "notes": ["הערות", "תיאור", "Notes"],
-        "deadline": ["תאריך דדליין", "תאריך יעד"],
-    }
-    for typo, fixes in TYPOS.items():
-        if typo in field_l:
-            for fix in fixes:
-                if fix in candidates:
-                    return fix
-    return None
 
 
 # ══════════════════════════════════════════════════
@@ -302,23 +235,6 @@ def handle_schema_command(args: str) -> str:
     if not args.strip():
         return format_all_tables()
     return format_table_schema(args.strip())
-
-
-# ══════════════════════════════════════════════════
-# Integration — airtable_tools.py
-# ══════════════════════════════════════════════════
-
-def validate_before_write(table: str, fields: dict) -> tuple[bool, str]:
-    """
-    Entry point — קרא לפני כל airtable_add / airtable_update.
-    
-    שימוש ב-airtable_tools.py:
-        from schema_intelligence import validate_before_write
-        ok, err = validate_before_write(table, fields)
-        if not ok:
-            return f"❌ שגיאת סכמה: {err}"
-    """
-    return validate_fields(table, fields)
 
 
 # ══════════════════════════════════════════════════
@@ -340,31 +256,6 @@ def _run_tests() -> bool:
     chk("resolve leads",       resolve_table("לידים")   == "Leads")
     chk("resolve deadlines",   resolve_table("ודד")     == "משימות ודד ליינים")
     chk("unknown → None",      resolve_table("banana")  is None)
-
-    # validate_fields — valid
-    ok, err = validate_fields("משימות", {"כותרת המשימה": "בדיקה", "סטטוס": "ממתין"})
-    chk("valid fields → ok",   ok is True)
-    chk("valid fields → no err", err == "")
-
-    # validate_fields — wrong field name
-    ok, err = validate_fields("משימות", {"Name": "test"})
-    chk("wrong field → not ok",  ok is False)
-    chk("suggests כותרת המשימה", "כותרת המשימה" in err)
-
-    # validate_fields — wrong select value
-    ok, err = validate_fields("משימות", {"סטטוס": "Active"})
-    chk("wrong select → not ok", ok is False)
-    chk("shows valid options",    "ממתין" in err)
-
-    # validate_fields — unknown table → pass through
-    ok, err = validate_fields("UnknownTable", {"field": "val"})
-    chk("unknown table → ok",    ok is True)
-
-    # validate_fields — Deals
-    ok, err = validate_fields("עסקאות", {"שלב": "Active"})
-    chk("Deals wrong stage",      ok is False)
-    ok, err = validate_fields("עסקאות", {"שלב": "במשא ומתן"})
-    chk("Deals correct stage",    ok is True)
 
     # format_table_schema
     fmt = format_table_schema("משימות")
@@ -397,7 +288,4 @@ if __name__ == "__main__":
         print("SAMPLE /schema משימות:")
         print(format_table_schema("משימות"))
         print("\n" + "─"*40)
-        print("SAMPLE validate wrong field:")
-        _, err = validate_fields("משימות", {"Name": "test", "סטטוס": "Active"})
-        print(err)
     exit(0 if ok else 1)
