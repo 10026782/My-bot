@@ -42,6 +42,11 @@ records the truthful processing status. Meta retains HTTP 200 acknowledgement
 but includes the structured `media_processing` status in the JSON response.
 Successful processing is the only path that emits `success_evidence=True`.
 
+Final gap fix: when inbound Twilio media is present, adapter import failure and
+outer metadata/extraction failure now also create a non-success status with an
+explicit error code and retryability. Invalid metadata, empty download, and
+handler failures remain covered by the same invariant.
+
 No provider redelivery loop was introduced, no media/business write path was
 redesigned, and ordinary WhatsApp text handling is unchanged. There is still
 no durable processing-status record or reconciliation queue; retry/recovery

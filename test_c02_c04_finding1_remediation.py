@@ -5,6 +5,7 @@ Provider acknowledgement is intentionally tested separately from media state.
 
 import logging
 import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -194,3 +195,40 @@ def test_twilio_processing_failure_does_not_enter_other_success_path():
 
     assert response.status_code == 200
     file_handler.assert_not_called()
+
+
+def test_twilio_media_adapter_unavailable_still_has_failed_processing_state(caplog):
+    caplog.set_level(logging.INFO, logger="app")
+    request_values = {
+        "NumMedia": "1",
+        "MediaUrl0": "https://twilio.test/media",
+        "MediaContentType0": "image/jpeg",
+        "MessageSid": "SM-adapter-unavailable",
+        "From": "whatsapp:+972500000000",
+        "To": "whatsapp:+972511111111",
+        "Body": "media received",
+    }
+    patches = _common_app_patches()
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
+            patch.object(app, "_validate_twilio_signature", return_value=True), \
+            patch.dict(sys.modules, {"whatsapp_media_adapter": None}):
+        response = app.app.test_client().post("/whatsapp", data=request_values)
+
+    assert response.status_code == 200
+    assert b"<Response" in response.data
+    assert "status=FAILED" in caplog.text
+    assert "success_evidence=False" in caplog.text
+    assert "MEDIA_ADAPTER_UNAVAILABLE" in caplog.text
+    # The provider ACK remains unchanged; processing is independently truthful.
+    with patch.dict(sys.modules, {"whatsapp_media_adapter": None}):
+        from media_handler import media_processing_status, MediaError, MediaResult
+        state = media_processing_status(
+            MediaResult(
+                ok=False,
+                error=MediaError("MEDIA_ADAPTER_UNAVAILABLE", "unavailable", True),
+            )
+        )
+    assert state.status != "COMPLETED"
+    assert state.success_evidence is False
+    assert state.error_code == "MEDIA_ADAPTER_UNAVAILABLE"
+    assert state.retryable is True

@@ -6403,6 +6403,7 @@ def _webhook_whatsapp_impl():
     # routed through unified media_handler pipeline (same as Telegram C90).
     media_processing = None
     media_meta = None
+    media_present = request.values.get("NumMedia", "0") not in ("", "0")
     try:
         from whatsapp_media_adapter import (
             extract_whatsapp_media, download_whatsapp_media, infer_file_type, infer_filename
@@ -6463,8 +6464,23 @@ def _webhook_whatsapp_impl():
                 )
             )
     except ImportError:
+        if media_present:
+            from media_handler import MediaError, MediaResult, media_processing_status
+            media_processing = media_processing_status(
+                MediaResult(
+                    ok=False,
+                    error=MediaError("MEDIA_ADAPTER_UNAVAILABLE", "media adapter unavailable", True),
+                )
+            )
         logger.debug("[WhatsApp] media adapter not available, skipping media handling")
     except Exception as e:
+        if media_present:
+            media_processing = media_processing_status(
+                MediaResult(
+                    ok=False,
+                    error=MediaError(type(e).__name__, "media extraction failed", True),
+                )
+            )
         logger.warning("[WhatsApp] media extraction error error_type=%s", type(e).__name__)
 
     if media_processing is not None:
