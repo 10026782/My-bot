@@ -499,19 +499,26 @@ def handle_file_upload(
             error=MediaError("DUPLICATE", "הקובץ הזה כבר הועלה.", False),
         )
 
+    def release_reservation() -> None:
+        _idem_store.release("media", idem_key, "")
+
     parent_folder_id, folder_err = _resolve_drive_folder(domain)
     if folder_err:
+        release_reservation()
         return MediaResult(ok=False, file_size_tier=tier, error=folder_err)
 
     try:
         media_key = logical_media_key(source, file_id, file_bytes)
     except ValueError as exc:
+        release_reservation()
         return MediaResult(ok=False, file_size_tier=tier, error=MediaError("MEDIA_KEY_INVALID", str(exc), False))
 
     media_lookup = find_asset_by_logical_media_key(media_key)
     if media_lookup.status == "duplicate":
+        release_reservation()
         return MediaResult(ok=False, file_size_tier=tier, error=MediaError("MEDIA_DUPLICATE_KEY", media_lookup.error, False))
     if media_lookup.status == "error":
+        release_reservation()
         return MediaResult(ok=False, file_size_tier=tier, error=MediaError("MEDIA_LOOKUP_FAILED", "Media Files lookup failed", True))
     if media_lookup.status == "reusable":
         fields = media_lookup.record.get("fields", {})
@@ -547,6 +554,7 @@ def handle_file_upload(
                     drive_url=existing_drive.web_url, file_size_tier=tier,
                 )
             mark_partial(media_record_id, existing_drive.file_id, existing_drive.web_url)
+            release_reservation()
             return MediaResult(
                 ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
                 error=MediaError("MEDIA_FILES_RECONCILIATION_FAILED", "Media Files reconciliation failed", True),
@@ -567,6 +575,7 @@ def handle_file_upload(
             persistence_state=MediaPersistenceState.DRIVE_UPLOADED,
         ))
         if not reconciled_id:
+            release_reservation()
             return MediaResult(
                 ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
                 error=MediaError("MEDIA_FILES_RECONCILIATION_FAILED", "Media Files persistence failed", True),
@@ -578,6 +587,7 @@ def handle_file_upload(
             drive_url=existing_drive.web_url,
         ):
             mark_partial(reconciled_id, existing_drive.file_id, existing_drive.web_url)
+            release_reservation()
             return MediaResult(
                 ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
                 error=MediaError("MEDIA_FILES_RECONCILIATION_FAILED", "Media Files reconciliation failed", True),
@@ -587,6 +597,7 @@ def handle_file_upload(
             file_size_tier=tier,
         )
     if existing_drive.error and existing_drive.error.error_code not in {"DRIVE_NOT_FOUND"}:
+        release_reservation()
         return MediaResult(ok=False, file_size_tier=tier, error=existing_drive.error)
 
     if not media_record_id:
@@ -616,6 +627,7 @@ def handle_file_upload(
                 state=MediaPersistenceState.FAILED,
                 last_error_code=drive_result.error.error_code,
             )
+        release_reservation()
         return MediaResult(
             ok=False,
             file_size_tier=tier,
@@ -649,6 +661,7 @@ def handle_file_upload(
         state_saved = bool(asset_id)
     if not state_saved or not asset_id:
         mark_partial(media_record_id, drive_result.file_id, drive_result.web_url)
+        release_reservation()
         return MediaResult(
             ok=False,
             file_size_tier=tier,
@@ -662,6 +675,7 @@ def handle_file_upload(
         drive_url=drive_result.web_url,
     ):
         mark_partial(asset_id, drive_result.file_id, drive_result.web_url)
+        release_reservation()
         return MediaResult(
             ok=False, file_size_tier=tier, drive_url=drive_result.web_url,
             error=MediaError("MEDIA_FILES_PARTIAL", "Drive object exists but final persistence is incomplete.", True),

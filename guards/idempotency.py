@@ -26,6 +26,12 @@ class IdempotencyStore:
             self._seen[key] = time.time()
             return False
 
+    def release(self, channel: str, sender: str, content: str) -> None:
+        """Release a reservation after the protected operation fails."""
+        key = self._hash(channel, sender, content)
+        with self._lock:
+            self._seen.pop(key, None)
+
     def _hash(self, channel: str, sender: str, content: str) -> str:
         raw = f"{channel}:{sender}:{content}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
