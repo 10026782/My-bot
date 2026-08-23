@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from airtable_schema import LeadFields, LeadEventFields, LeadEventType, Tables
 from feature_flags import is_enabled
 from core.action_result import ActionResult, ClaimType
+from core.lead_service import LeadPayload, create_lead
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ def capture_inbound_lead(
         else f"{identity.memory_key}:{_domain_key}"
     )
     try:
-        from tools.airtable_tools import airtable_add, airtable_get
+        from tools.airtable_tools import airtable_get
 
         # airtable_get מחזיר str — re.search תקין כאן
         raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
@@ -244,87 +245,35 @@ def capture_inbound_lead(
                         logger.warning("[LeadCapture] lead event failed for %s: %s", existing_id, e)
                 return found_ar
 
-        # ALLOWLIST — רק שדות מוגדרים מפורשות.
-        # display_name="" (identity.py) → טלפון כ-Name (Primary Field), לא "ליד חדש"
         _lead_name = identity.display_name or identity.external_id or "unknown"
-        fields = {
-            LeadFields.NAME:       _lead_name,
-            LeadFields.PHONE:      identity.external_id,
-            LeadFields.CHANNEL:    identity.channel,
-            LeadFields.MEMORY_KEY: memory_key,
-            LeadFields.DOMAIN:     _domain_key,          # מטא-דאטה — לא חלק מהמפתח כש-general
-            LeadFields.SOURCE:     "whatsapp_inbound",
-            LeadFields.STATUS:     "new",
-            LeadFields.SUMMARY:    (message or "")[:500],
-            LeadFields.SCORE:      0,   # default 0 — נוסחאות Tier נשענות על מספר
-        }
-
-        # BUG FIX: airtable_add מחזיר dict (C53-A), לא string.
-        # ActionResult.from_airtable_add מטפל בחוזה נכון ולא יכול לקבל TypeError.
-        raw_result = airtable_add(Tables.LEADS, fields)
-        ar = ActionResult.from_airtable_add(raw_result, source="lead_capture")
-        ar.claim_type = ClaimType.CREATED
-        lead_id = ar.record_id
-
-        if ar.business_success:
-            logger.info("[LeadCapture] created new lead: %s rec=%s", memory_key, lead_id)
-            # N04-A — sync basic contact info to lead_memory regardless of scoring flag
-            if is_enabled("LEAD_MEMORY"):
-                try:
-                    from lead_memory import lead_memory
-                    lead_memory.update(
-                        memory_key,
-                        domain=getattr(identity, "domain_id", "") or "",
-                        channel=identity.channel,
-                        contact_name=identity.display_name or identity.external_id or "",
-                        last_message=message or "",
-                        summary=(message or "")[:500],
-                    )
-                except Exception as e:
-                    logger.warning("[LeadCapture] lead_memory.update failed for %s: %s", memory_key, e)
-            if is_enabled("LEAD_SCORING"):
-                try:
-                    if lead_id == "unknown":
-                        raise ValueError("missing Airtable record id after create")
-                    score, tier, why_score = _score_inbound_message(message, identity)
-                    from tools.airtable_gateway import airtable_patch as _gw_patch
-                    _gw_patch(Tables.LEADS, lead_id, {
-                        LeadFields.SCORE: score,  # tier הוא formula — מחושב אוטומטית
-                    }, source="lead_capture")
-                    logger.info(
-                        "lead_scored: score=%s tier=%s reasons=%s lead_id=%s",
-                        score, tier, why_score, lead_id,
-                    )
-                    # audit trail — data לדשבורד ROI עתידי
-                    try:
-                        from tools.airtable_security import audit_log_airtable
-                        audit_log_airtable(
-                            "lead_scoring",
-                            identity,
-                            {"table": "Leads", "lead_id": lead_id, "score": score, "tier": tier},
-                            f"score={score} tier={tier} signals={why_score}",
-                        )
-                    except Exception:
-                        pass  # אסור שה-audit ישבור את ה-flow
-                    # N04-B — sync tier/score/record_id to lead_memory after scoring
-                    if is_enabled("LEAD_MEMORY"):
-                        try:
-                            from lead_memory import lead_memory
-                            save_due = lead_memory.update(
-                                memory_key,
-                                score=score,
-                                tier=tier,
-                                record_id=lead_id,
-                            )
-                            if save_due:
-                                lead_memory.save(memory_key)
-                        except Exception as e:
-                            logger.warning("[LeadCapture] lead_memory sync failed for %s: %s", lead_id, e)
-                except Exception as e:
-                    logger.warning("[LeadCapture] scoring failed for %s: %s", lead_id, e)
-        else:
-            logger.warning("[LeadCapture] create failed for %s: %s", memory_key, raw_result)
-            return ar
+        result = create_lead(
+            identity,
+            LeadPayload(
+                name=_lead_name,
+                phone=identity.external_id,
+                domain=_domain_key,
+                source="whatsapp_inbound",
+                channel=identity.channel,
+                summary=(message or "")[:500],
+                score=0,
+                memory_key=memory_key,
+            ),
+            source_module="lead_capture",
+            write_event=write_event,
+        )
+        ar = ActionResult(
+            tool_called=bool(result.evidence.get("contract_id")),
+            tool_http_ok=result.ok,
+            business_success=result.ok,
+            record_id=result.record_id,
+            affected_records=1 if result.ok else 0,
+            claim_type=ClaimType.CREATED if result.action == "created" else None,
+            fatal_error=result.reason if not result.ok else "",
+            source="lead_capture",
+        )
+        if not ar.business_success:
+            logger.warning("[LeadCapture] canonical create failed for %s: %s", memory_key, result.reason)
+        return ar
 
     except Exception as e:
         logger.error("[LeadCapture] capture_inbound_lead error for %s: %s", memory_key, e)

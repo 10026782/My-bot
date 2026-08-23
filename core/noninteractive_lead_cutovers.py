@@ -19,11 +19,13 @@ def create_email_inbound_lead(sender: str, recipient: str, name: str, message: s
     return create_lead(identity, LeadPayload(
         name=name or sender, phone=sender, domain=domain, owner_user_id=owner_user_id,
         source="email_inbound", channel="email", summary=(message or "")[:500],
+        memory_key=f"email:{sender}", external_id=external_id,
         tenant_id=getattr(identity, "tenant_id", "boss_hq") or "boss_hq",
     ), source_module="email_inbound_canonical")
 
 
-def create_furniture_inbound_lead(sender: str, destination: str, name: str, summary: str, answers: str) -> LeadCreateResult:
+def create_furniture_inbound_lead(sender: str, destination: str, name: str, summary: str, answers: str, *,
+                                   status: str = "new", score: int = 0, existing_id: str = "") -> LeadCreateResult:
     owner_user_id = resolve_furniture_owner_user_id(destination)
     if not owner_user_id:
         return LeadCreateResult(ok=False, action="blocked", reason="furniture WhatsApp owner mapping missing")
@@ -32,8 +34,10 @@ def create_furniture_inbound_lead(sender: str, destination: str, name: str, summ
     return create_lead(identity, LeadPayload(
         name=name or sender, phone=sender, domain="furniture_import", owner_user_id=owner_user_id,
         source="twilio_whatsapp_furniture_funnel", channel="whatsapp",
-        summary=f"{summary}\n{answers}"[:500], tenant_id=getattr(identity, "tenant_id", "boss_hq") or "boss_hq",
-    ), source_module="furniture_funnel_canonical")
+        summary=f"{summary}\n{answers}"[:500], status=status, score=score,
+        memory_key=f"boss_hq:{sender}", answers=answers,
+        tenant_id=getattr(identity, "tenant_id", "boss_hq") or "boss_hq",
+    ), source_module="furniture_funnel_canonical", existing_id=existing_id or None)
 
 
 def create_voice_inbound_lead(session, destination: str) -> LeadCreateResult:

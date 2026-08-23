@@ -35,11 +35,6 @@ def _airtable_get():
     return airtable_get
 
 
-def _gw_patch(table, record_id, fields):
-    from tools.airtable_gateway import airtable_patch
-    airtable_patch(table, record_id, fields, source="inbound_handler")
-
-
 # ── Find helpers ──────────────────────────────────────────────────────────────
 
 def _find_by_external_id(external_id: str) -> str | None:
@@ -72,13 +67,29 @@ def _find_by_sender(sender_id: str) -> str | None:
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
-def _update_existing(record_id: str, message: str, external_id: str) -> None:
+def _update_existing(record_id: str, message: str, external_id: str, sender_id: str, channel: str, domain: str, identity=None) -> None:
     """שולח מוכר — עדכון summary + log interaction."""
     try:
-        _gw_patch(Tables.LEADS, record_id, {
-            LeadFields.SUMMARY:     (message or "")[:500],
-            LeadFields.EXTERNAL_ID: external_id,
-        })
+        from core.lead_service import LeadPayload, create_lead
+        from identity import resolve_identity
+        lead_identity = identity or resolve_identity(channel, sender_id)
+        result = create_lead(
+            lead_identity,
+            LeadPayload(
+                name=sender_id,
+                phone=sender_id,
+                domain=domain,
+                source=f"{channel}_inbound",
+                channel=channel,
+                summary=(message or "")[:500],
+                external_id=external_id,
+            ),
+            source_module="inbound_handler",
+            existing_id=record_id,
+        )
+        if not result.ok:
+            logger.error("[InboundHandler] canonical lead update blocked: %s", result.reason)
+            return
         _log_interaction(record_id, message)
         logger.info("[InboundHandler] updated existing lead %s", record_id)
     except Exception as e:
@@ -115,31 +126,11 @@ def _create_email_lead(
     WhatsApp ממשיך להשתמש ב-lead_capture.capture_inbound_lead() — לא נוגעים.
     """
     try:
-        if is_enabled("EMAIL_CANONICAL_LEAD_WRITE"):
-            from core.noninteractive_lead_cutovers import create_email_inbound_lead
-            result = create_email_inbound_lead(sender_id, recipient, display_name, message, domain, external_id)
-            if not result.ok:
-                logger.error("[InboundHandler] canonical email lead blocked: %s", result.reason)
-            return
-        from tools.airtable_tools import airtable_add
-        fields = {
-            LeadFields.NAME:        display_name or sender_id,
-            LeadFields.CHANNEL:     "email",
-            LeadFields.DOMAIN:      domain,
-            LeadFields.SOURCE:      "email_inbound",
-            LeadFields.STATUS:      "new",
-            LeadFields.SUMMARY:     (message or "")[:500],
-            LeadFields.CREATED_AT:  _now_iso(),
-            LeadFields.EXTERNAL_ID: external_id,
-            LeadFields.SENDER_ID:   sender_id,
-            LeadFields.MEMORY_KEY:  f"email:{sender_id}",
-        }
-        result = airtable_add(Tables.LEADS, fields)
-        if not result.get("ok"):
-            logger.warning("[InboundHandler] create_email_lead not ok: %s", result.get("user_message", result))
-            return
-        record_id = result.get("external_id") or "unknown"
-        logger.info("[InboundHandler] created email lead %s domain=%s", record_id, domain)
+        from core.noninteractive_lead_cutovers import create_email_inbound_lead
+        result = create_email_inbound_lead(sender_id, recipient, display_name, message, domain, external_id)
+        if not result.ok:
+            logger.error("[InboundHandler] canonical email lead blocked: %s", result.reason)
+        return
     except Exception as e:
         logger.error("[InboundHandler] create_email_lead error: %s", e)
 
@@ -170,9 +161,6 @@ def handle_inbound(
         return
 
     try:
-        if channel == "email" and is_enabled("EMAIL_CANONICAL_LEAD_WRITE"):
-            _create_email_lead(sender_id, display_name, domain, message, external_id, recipient)
-            return
         # 1. skip — כפילות מדויקת
         if external_id and _find_by_external_id(external_id):
             logger.debug("[InboundHandler] duplicate external_id skip: %s", external_id)
@@ -181,7 +169,7 @@ def handle_inbound(
         # 2. שולח מוכר → עדכן
         existing = _find_by_sender(sender_id)
         if existing:
-            _update_existing(existing, message, external_id)
+            _update_existing(existing, message, external_id, sender_id, channel, domain, identity)
             return
 
         # 3. ליד חדש
