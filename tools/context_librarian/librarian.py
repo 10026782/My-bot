@@ -726,6 +726,7 @@ def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
             "tools/context_librarian/__init__.py",
             "tools/context_librarian/__main__.py",
             "tools/context_librarian/benchmark_token_estimate.py",
+            "tools/context_librarian/budget_preflight.py",
             "tools/context_librarian/librarian.py",
             "tools/context_librarian/local_post_merge_check.sh",
             "tools/context_librarian/manage_hooks.py",
