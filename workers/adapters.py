@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from .contracts import WorkerProfile, WorkerRequest, WorkerResult, WorkerStatus
@@ -49,17 +50,71 @@ def _paths_from_entry(entry: str) -> list[str]:
     return [_normalize(body)]
 
 
+def _snapshot_forbidden(
+    repo_path: str,
+    forbidden_paths: tuple[str, ...],
+) -> dict[str, tuple[int, int]] | None:
+    """Stat-signature map of every existing file under forbidden prefixes.
+
+    Covers gitignored paths that `git status --porcelain` cannot see.
+    Returns None when a declared forbidden location exists but cannot be
+    inspected (fail closed).
+    """
+    snapshot: dict[str, tuple[int, int]] = {}
+    try:
+        base = Path(repo_path)
+        for pattern in forbidden_paths:
+            root = base / _normalize(pattern)
+            if root.is_file():
+                st = root.stat()
+                snapshot[_normalize(pattern)] = (st.st_mtime_ns, st.st_size)
+            elif root.is_dir():
+                for current, dirs, files in os.walk(root):
+                    dirs[:] = [
+                        d for d in dirs if not os.path.islink(os.path.join(current, d))
+                    ]
+                    for name in files:
+                        path = Path(current) / name
+                        st = path.stat()
+                        key = str(path.relative_to(base)).replace("\\", "/")
+                        snapshot[key] = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+    return snapshot
+
+
+def _forbidden_changes(
+    before: dict[str, tuple[int, int]],
+    after: dict[str, tuple[int, int]],
+) -> list[str]:
+    created_or_modified = [p for p in after if before.get(p) != after[p]]
+    deleted = [p for p in before if p not in after]
+    return sorted(set(created_or_modified + deleted))
+
+
 def _first_violation(
     repo_path: str,
     allowed_paths: tuple[str, ...],
     forbidden_paths: tuple[str, ...],
+    forbidden_before: dict[str, tuple[int, int]] | None = None,
 ) -> str | None:
-    """Audit worktree changes via `git status --porcelain`; fail closed on audit failure.
+    """Audit worktree changes; fail closed on audit failure.
 
-    Returns the first violation as a reportable string, or None when every changed
-    path is inside bounds. Untracked-but-gitignored files are not visible to this
-    audit and are out of scope for v1.1.
+    Two layers: (1) a pre/post stat-signature diff over everything under
+    forbidden_paths, which detects changes to gitignored files that git
+    itself cannot report; (2) `git status --porcelain` coverage for tracked
+    and untracked changes against allowed_paths/forbidden_paths.
+
+    Returns the first violation as a reportable string, or None when every
+    changed path is inside bounds.
     """
+    if forbidden_before is not None:
+        after = _snapshot_forbidden(repo_path, forbidden_paths)
+        if after is None:
+            return "path_audit_unavailable"
+        changes = _forbidden_changes(forbidden_before, after)
+        if changes:
+            return f"forbidden-ignored-change:{changes[0]}"
     try:
         completed = subprocess.run(
             ["git", "-C", repo_path, "status", "--porcelain"],
@@ -124,6 +179,9 @@ class SubprocessHarnessAdapter:
             return WorkerResult.blocked(request, profile.worker_id, "unsafe_permission_profile")
 
         child_env = _child_environment()
+        forbidden_before = _snapshot_forbidden(request.repo_path, request.forbidden_paths)
+        if forbidden_before is None:
+            return WorkerResult.blocked(request, profile.worker_id, "path_audit_unavailable")
         try:
             completed = subprocess.run(
                 [self.executable, request.task],
@@ -140,7 +198,8 @@ class SubprocessHarnessAdapter:
                 summary="harness timed out", commands_run=[self.executable],
             )
         violation = _first_violation(
-            request.repo_path, request.allowed_paths, request.forbidden_paths
+            request.repo_path, request.allowed_paths, request.forbidden_paths,
+            forbidden_before,
         )
         if violation:
             if violation == "path_audit_unavailable":
@@ -184,7 +243,8 @@ class SubprocessHarnessAdapter:
         status = WorkerStatus.SUCCESS if completed.returncode == 0 else WorkerStatus.FAILED
         if status is WorkerStatus.SUCCESS:
             violation = _first_violation(
-                request.repo_path, request.allowed_paths, request.forbidden_paths
+                request.repo_path, request.allowed_paths, request.forbidden_paths,
+                forbidden_before,
             )
             if violation == "path_audit_unavailable":
                 return WorkerResult.blocked(request, profile.worker_id, violation)

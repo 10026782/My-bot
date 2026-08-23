@@ -184,6 +184,82 @@ def test_in_bounds_success_keeps_evidence_and_reruns_audit_after_verification():
     assert result.evidence == ["verification-executed:pytest test.py"]
 
 
+def test_gitignored_forbidden_path_change_is_detected(tmp_path):
+    target = tmp_path / ".env"
+    target.write_text("A=1\n")
+    ignored_request = request(
+        repo_path=str(tmp_path),
+        allowed_paths=("app.py",),
+        forbidden_paths=(".env",),
+        verification_commands=("pytest test.py",),
+    )
+
+    def harness_mutates_ignored_file_then_audits(command, **kwargs):
+        if command[0] == "qwen":
+            target.write_text("A=2\n")
+            return subprocess.CompletedProcess([], 0)
+        return subprocess.CompletedProcess([], 0, stdout="")
+
+    availability_patch, adapter = pilot_adapter()
+    with availability_patch, \
+         patch(
+             "workers.adapters.subprocess.run",
+             side_effect=harness_mutates_ignored_file_then_audits,
+         ):
+        result = adapter.execute(ignored_request, PILOT_PROFILE)
+    assert result.status is WorkerStatus.FAILED
+    assert result.summary == "path_boundary_violation"
+    assert result.evidence == ["path-violation:forbidden-ignored-change:.env"]
+
+
+def test_unauditable_forbidden_area_fails_closed_before_execution(tmp_path):
+    forbidden_dir = tmp_path / "secrets"
+    forbidden_dir.mkdir()
+    unavailable_request = request(
+        repo_path=str(tmp_path),
+        allowed_paths=("app.py",),
+        forbidden_paths=("secrets/",),
+    )
+    availability_patch, adapter = pilot_adapter()
+    with availability_patch, \
+         patch("workers.adapters.os.walk", side_effect=OSError("denied")), \
+         patch(
+             "workers.adapters.subprocess.run",
+             side_effect=[
+                 subprocess.CompletedProcess([], 0),
+                 subprocess.CompletedProcess([], 0, stdout=""),
+             ],
+         ) as run:
+        result = adapter.execute(unavailable_request, PILOT_PROFILE)
+    assert result.status is WorkerStatus.BLOCKED
+    assert result.summary == "path_audit_unavailable"
+    assert run.call_count == 0
+
+
+def test_untouched_gitignored_forbidden_path_does_not_fail():
+    availability_patch, adapter = pilot_adapter()
+    ignored_request = request(
+        forbidden_paths=(".env",), verification_commands=("pytest test.py",)
+    )
+    with availability_patch, \
+         patch(
+             "workers.adapters.subprocess.run",
+             side_effect=[
+                 subprocess.CompletedProcess([], 0),
+                 subprocess.CompletedProcess([], 0, stdout=" M app.py\n"),
+                 subprocess.CompletedProcess([], 0),
+                 subprocess.CompletedProcess([], 0, stdout=" M app.py\n"),
+             ],
+         ) as run:
+        result = adapter.execute(ignored_request, PILOT_PROFILE)
+    assert run.call_count == 4
+    assert result.status is WorkerStatus.SUCCESS
+    assert result.evidence == ["verification-executed:pytest test.py"]
+    assert not [e for e in result.evidence if e.startswith("path-violation")]
+    assert result.status is WorkerStatus.SUCCESS
+    assert not [e for e in result.evidence if e.startswith("path-violation")]
+
+
 def test_unauditable_worktree_fails_closed():
     availability_patch, adapter = pilot_adapter()
     with availability_patch, \
