@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -30,6 +31,16 @@ logger = logging.getLogger(__name__)
 
 _SOURCE = "emergency_window"
 ALLOWED_DURATIONS_HOURS = (24, 48, 72)
+
+# C05-C07 audit Finding #7: activate_window()'s "no stacking" invariant was
+# enforced via a bare check-then-write (is_active() then airtable_create())
+# with no serialization — two concurrent callers could both observe "no
+# active window" and both create one. This lock closes that race the same
+# way event_bus.py's threading.Lock() closes its analogous pop/confirm race.
+# It only serializes calls within this one process — it is not a
+# cross-process/multi-worker guarantee (Airtable itself offers no atomic
+# compare-and-create), which matches this codebase's existing precedent.
+_activate_lock = threading.Lock()
 
 
 def _at_key() -> str:
@@ -85,13 +96,28 @@ def _auto_expire(record: dict) -> bool:
     if expires_at > _now():
         return False
 
-    airtable_patch(
+    # C05-C07 audit Finding #7: this write's success/failure used to be
+    # discarded outright. We still fail closed (an expired window is treated
+    # as inactive locally either way — never let a stale mobile exception
+    # keep granting High-risk access), but a failed patch now leaves a
+    # distinguishable Airtable record (Status=Active past Expires At) that
+    # this ERROR log surfaces instead of hiding behind the same message as
+    # a genuine success.
+    ok = airtable_patch(
         Tables.EMERGENCY_WINDOW,
         record["id"],
         {F.STATUS: Status.EXPIRED},
         source=_SOURCE,
     )
-    logger.warning(f"[emergency_window] window {record['id']} auto-expired")
+    if ok:
+        logger.warning(f"[emergency_window] window {record['id']} auto-expired")
+    else:
+        logger.error(
+            f"[emergency_window] window {record['id']} expiry PATCH FAILED — "
+            f"Airtable record still shows Status=Active past its Expires At; "
+            f"treating it as expired locally regardless, but the record is "
+            f"now inconsistent until a later write succeeds"
+        )
     return True
 
 
@@ -131,29 +157,31 @@ def activate_window(activated_by: str, reason: str, duration_hours: int) -> dict
         raise ValueError(f"duration_hours must be one of {ALLOWED_DURATIONS_HOURS}")
     if not reason or not reason.strip():
         raise ValueError("reason is required")
-    if is_active():
-        raise ValueError("an emergency window is already active")
 
-    now = _now()
-    window_id = f"EW-{now:%Y%m%d%H%M%S}"
-    rec = airtable_create(
-        Tables.EMERGENCY_WINDOW,
-        {
-            F.WINDOW_ID: window_id,
-            F.ACTIVATED_BY: activated_by,
-            F.ACTIVATED_AT: now.isoformat(),
-            F.EXPIRES_AT: (now + timedelta(hours=duration_hours)).isoformat(),
-            F.REASON: reason.strip(),
-            F.STATUS: Status.ACTIVE,
-            F.MAX_RISK_ALLOWED: EmergencyWindowMaxRisk.HIGH,
-            F.ACTIONS_APPROVED: "",
-        },
-        source=_SOURCE,
-    )
-    if not rec:
-        raise RuntimeError("emergency_window_create_failed")
-    logger.warning(f"[emergency_window] ACTIVATED by={activated_by} duration={duration_hours}h reason={reason!r}")
-    return rec
+    with _activate_lock:
+        if is_active():
+            raise ValueError("an emergency window is already active")
+
+        now = _now()
+        window_id = f"EW-{now:%Y%m%d%H%M%S}"
+        rec = airtable_create(
+            Tables.EMERGENCY_WINDOW,
+            {
+                F.WINDOW_ID: window_id,
+                F.ACTIVATED_BY: activated_by,
+                F.ACTIVATED_AT: now.isoformat(),
+                F.EXPIRES_AT: (now + timedelta(hours=duration_hours)).isoformat(),
+                F.REASON: reason.strip(),
+                F.STATUS: Status.ACTIVE,
+                F.MAX_RISK_ALLOWED: EmergencyWindowMaxRisk.HIGH,
+                F.ACTIONS_APPROVED: "",
+            },
+            source=_SOURCE,
+        )
+        if not rec:
+            raise RuntimeError("emergency_window_create_failed")
+        logger.warning(f"[emergency_window] ACTIVATED by={activated_by} duration={duration_hours}h reason={reason!r}")
+        return rec
 
 
 def revoke_window(revoked_by: str) -> bool:
