@@ -7,14 +7,11 @@
 
 import logging
 import os
-import re
-import urllib.parse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import httpx
-
 from domain_utils import normalize_business_domain
+from tools.airtable_read_adapter import list_records
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +97,7 @@ def _fetch_last_7_days() -> list[dict]:
 
 
 def _fetch_records_direct(formula: str) -> list[dict]:
-    """שליפת records גולמיים מ-Airtable — לסיכום בלבד."""
+    """שליפת records גולמיים דרך read adapter — לסיכום בלבד."""
     from airtable_schema import Tables
 
     api_key = os.environ.get("AIRTABLE_API_KEY", "")
@@ -108,18 +105,8 @@ def _fetch_records_direct(formula: str) -> list[dict]:
     if not api_key or not base_id:
         return []
 
-    encoded = urllib.parse.quote(Tables.BUSINESS_MEMORY, safe="")
-    r = httpx.get(
-        f"https://api.airtable.com/v0/{base_id}/{encoded}",
-        headers={"Authorization": f"Bearer {api_key}"},
-        params={"filterByFormula": formula, "maxRecords": "50"},
-        timeout=10,
-    )
-    if r.status_code != 200:
-        logger.warning(f"[C22] Airtable {r.status_code}: {r.text[:100]}")
-        return []
-
-    return [rec.get("fields", {}) for rec in r.json().get("records", [])]
+    records = list_records(Tables.BUSINESS_MEMORY, formula, max_records=50)
+    return [rec.get("fields", {}) for rec in records]
 
 
 # ── עיבוד ────────────────────────────────────────────────────────

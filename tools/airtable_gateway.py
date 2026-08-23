@@ -525,7 +525,13 @@ def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) 
 
 
 def at_list_by_formula(
-    table: str, formula: str, max_records: int = 100, *, timeout: float = 10
+    table: str,
+    formula: str,
+    max_records: int | None = 100,
+    *,
+    fields: list[str] | None = None,
+    paginate: bool = False,
+    timeout: float = 10,
 ) -> list[dict]:
     """
     Lists records matching a caller-built filterByFormula string. The caller
@@ -536,20 +542,35 @@ def at_list_by_formula(
     AirtableLookupError on a network/HTTP failure — same fail-closed contract
     as at_get_by_field().
     """
-    try:
-        r = httpx.get(
-            _at_url(table),
-            headers=_at_headers(),
-            params={"filterByFormula": formula, "maxRecords": max_records},
-            timeout=timeout,
-        )
-    except Exception as e:
-        raise AirtableLookupError(f"{table} list error: {e}") from e
+    params: dict[str, object] = {}
+    if formula:
+        params["filterByFormula"] = formula
+    if max_records:
+        params["maxRecords"] = max_records
+    if fields:
+        params["fields[]"] = fields
 
-    if r.status_code != 200:
-        raise AirtableLookupError(f"{table} list: HTTP {r.status_code}")
+    records: list[dict] = []
+    while True:
+        try:
+            r = httpx.get(
+                _at_url(table),
+                headers=_at_headers(),
+                params=params,
+                timeout=timeout,
+            )
+        except Exception as e:
+            raise AirtableLookupError(f"{table} list error: {e}") from e
 
-    return r.json().get("records", [])
+        if r.status_code != 200:
+            raise AirtableLookupError(f"{table} list: HTTP {r.status_code}")
+
+        payload = r.json()
+        records.extend(payload.get("records", []))
+        offset = payload.get("offset")
+        if not paginate or not offset:
+            return records
+        params["offset"] = offset
 
 
 def at_upsert(
