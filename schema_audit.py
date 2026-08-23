@@ -32,6 +32,14 @@ TABLE_CLASS_MAP = {
     schema.Tables.COINS_LOG:       schema.CoinsLogFields,
     schema.Tables.EMERGENCY_WINDOW: schema.EmergencyWindowFields,
     schema.Tables.MEDIA_FILES:     schema.MediaFileFields,
+    schema.Tables.ACTION_CONTRACTS: schema.ActionContractsFields,
+    schema.Tables.DAILY_CHECKIN:    schema.DailyCheckinFields,
+    schema.Tables.EMERGENCY_STOP_FLAGS: schema.EmergencyStopFlagFields,
+    schema.Tables.EXTERNAL_EXECUTION_JOBS: schema.ExternalExecutionJobFields,
+    schema.Tables.LEAD_EVENTS:      schema.LeadEventFields,
+    schema.Tables.MARKETING_DEMAND: schema.MarketingDemandFields,
+    schema.Tables.MARKETING_PUBLICATIONS: schema.MarketingPublicationFields,
+    schema.Tables.SESSIONS:          schema.SessionsFields,
 }
 
 
