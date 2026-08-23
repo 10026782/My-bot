@@ -37,10 +37,10 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          python -m tools.context_librarian reconcile --check --main-ref origin/main > reconcile.json
+          python -m tools.context_librarian reconcile --check --main-ref origin/main > "$RUNNER_TEMP/context-librarian-reconcile.json"
           set -e
-          outcome="$(python -c "import json;print(json.load(open('reconcile.json'))['outcome'])")"
-          sha="$(python -c "import json;print(json.load(open('reconcile.json'))['canonical_main_sha'])")"
+          outcome="$(python -c "import json,os;print(json.load(open(os.path.join(os.environ['RUNNER_TEMP'],'context-librarian-reconcile.json')))['outcome'])")"
+          sha="$(python -c "import json,os;print(json.load(open(os.path.join(os.environ['RUNNER_TEMP'],'context-librarian-reconcile.json')))['canonical_main_sha'])")"
           echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Report owner decisions needed
@@ -51,7 +51,8 @@ jobs:
             echo
             python - <<'PY'
           import json
-          data = json.load(open("reconcile.json"))
+          import os
+          data = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "context-librarian-reconcile.json")))
           for item in data["decision_queue"]:
               label = item.get("policy_id", "no matching policy")
               note = item.get("policy_note", "")
@@ -115,11 +116,11 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse origin/main)" = "${{ steps.guard.outputs.sha }}"
           set +e
-          python -m tools.context_librarian reconcile --check --main-ref origin/main > reconcile.json
+          python -m tools.context_librarian reconcile --check --main-ref origin/main > "$RUNNER_TEMP/context-librarian-reconcile.json"
           reconcile_status=$?
           set -e
-          test -s reconcile.json
-          outcome="$(python -c "import json;print(json.load(open('reconcile.json'))['outcome'])" 2>/dev/null)" || {
+          test -s "$RUNNER_TEMP/context-librarian-reconcile.json"
+          outcome="$(python -c "import json,os;print(json.load(open(os.path.join(os.environ['RUNNER_TEMP'],'context-librarian-reconcile.json')))['outcome'])" 2>/dev/null)" || {
             echo "::error::reconcile produced invalid JSON"
             exit 1
           }
@@ -136,6 +137,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          test ! -e "$GITHUB_WORKSPACE/reconcile.json"
+          test ! -e "$GITHUB_WORKSPACE/context-librarian-reconcile.json"
           python -m tools.context_librarian reconcile --apply-auto --main-ref origin/main
           git switch -C "$ROLLING_BRANCH"
           if git diff --quiet -- docs/context_librarian; then
@@ -153,7 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           sha="${{ steps.guard.outputs.sha }}"
-          summary="$(python -c "import json; d=json.load(open('reconcile.json')); print('mechanical_updates=' + str(len(d['mechanical_updates'])) + ', auto_maintenance_sources=' + str(len(d['auto_maintenance_sources'])))")"
+          summary="$(python -c "import json,os; d=json.load(open(os.path.join(os.environ['RUNNER_TEMP'],'context-librarian-reconcile.json'))); print('mechanical_updates=' + str(len(d['mechanical_updates'])) + ', auto_maintenance_sources=' + str(len(d['auto_maintenance_sources'])))")"
           body="Automated, policy-bounded catalog maintenance.\n\nLatest reconciled main SHA: $sha\nPrevious rolling baseline: managed by the canonical branch history\nMaintenance summary: $summary\n\nNever writes directly to main or merges automatically. Human review is required. See docs/context_librarian/RECONCILIATION.md."
           mapfile -t prs < <(gh pr list --head "$ROLLING_BRANCH" --base main --state open --json number --jq '.[].number')
           if [ "${#prs[@]}" -gt 1 ]; then
