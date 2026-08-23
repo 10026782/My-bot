@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from domain_utils import normalize_business_domain
-from tools.airtable_read_adapter import list_records
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,15 @@ def _fetch_records_direct(formula: str) -> list[dict]:
     if not api_key or not base_id:
         return []
 
-    records = list_records(Tables.BUSINESS_MEMORY, formula, max_records=50)
+    try:
+        records = list_records(Tables.BUSINESS_MEMORY, formula, max_records="50")
+    except AirtableReadError as exc:
+        if exc.status_code is not None:
+            logger.warning(f"[C22] Airtable {exc.status_code}: {exc.response_text[:100]}")
+            return []
+        if exc.cause is not None:
+            raise exc.cause
+        raise
     return [rec.get("fields", {}) for rec in records]
 
 

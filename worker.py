@@ -11,7 +11,7 @@ from threading import Thread
 from time import sleep
 
 from airtable_schema import Tables, TaskFields, TaskStatus
-from tools.airtable_read_adapter import list_records
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +63,23 @@ def _scan_airtable_deadlines(days_ahead: int = 3) -> list:
         "maxRecords": 20,  # הגבלה קשיחה — לא סורקים הכל
     }
 
-    records = list_records(
-        TASKS_TABLE,
-        params["filterByFormula"],
-        max_records=params["maxRecords"],
-        fields=params["fields[]"],
-    )
+    try:
+        records = list_records(
+            TASKS_TABLE,
+            params["filterByFormula"],
+            max_records=params["maxRecords"],
+            fields=params["fields[]"],
+        )
+    except AirtableReadError as exc:
+        if exc.cause is not None:
+            if isinstance(exc.cause, requests.RequestException):
+                raise exc.cause
+            raise requests.RequestException(str(exc.cause)) from exc.cause
+        if exc.status_code is not None:
+            raise requests.HTTPError(
+                f"Airtable {exc.status_code}: {exc.response_text[:120]}"
+            ) from exc
+        raise
     urgent = []
     for rec in records:
         fields = rec.get("fields", {})

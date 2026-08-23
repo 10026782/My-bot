@@ -6,7 +6,7 @@ import daily_digest
 import weekly_summary
 import worker
 from airtable_schema import Tables
-from tools.airtable_read_adapter import list_records
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 
 def test_daily_digest_query_and_pagination_are_preserved(monkeypatch):
@@ -31,7 +31,7 @@ def test_weekly_summary_query_and_return_shape_are_preserved(monkeypatch):
     read.assert_called_once_with(
         Tables.BUSINESS_MEMORY,
         "IS_AFTER({Date}, 'since')",
-        max_records=50,
+        max_records="50",
     )
 
 
@@ -78,3 +78,93 @@ def test_adapter_preserves_unbounded_pagination_and_fields():
         {"filterByFormula": "{Status}='Open'", "fields[]": ["Name"]},
         {"filterByFormula": "{Status}='Open'", "fields[]": ["Name"], "offset": "next"},
     ]
+
+
+def test_daily_digest_preserves_legacy_read_errors(monkeypatch):
+    monkeypatch.setenv("AIRTABLE_API_KEY", "key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
+    with patch.object(
+        daily_digest,
+        "list_records",
+        side_effect=AirtableReadError(
+            "Leads list: HTTP 422", status_code=422, response_text="bad payload"
+        ),
+    ):
+        try:
+            daily_digest._fetch("Leads")
+        except RuntimeError as exc:
+            assert str(exc) == "Airtable 422: bad payload"
+        else:
+            raise AssertionError("daily digest did not preserve RuntimeError")
+
+
+def test_daily_digest_re_raises_original_transport_error(monkeypatch):
+    monkeypatch.setenv("AIRTABLE_API_KEY", "key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
+    transport_error = TimeoutError("timed out")
+    with patch.object(
+        daily_digest,
+        "list_records",
+        side_effect=AirtableReadError("Leads list error", cause=transport_error),
+    ):
+        try:
+            daily_digest._fetch("Leads")
+        except TimeoutError as exc:
+            assert exc is transport_error
+        else:
+            raise AssertionError("daily digest did not re-raise transport error")
+
+
+def test_weekly_summary_preserves_http_error_logging_and_empty_fallback(caplog, monkeypatch):
+    monkeypatch.setenv("AIRTABLE_API_KEY", "key")
+    monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
+    with patch.object(
+        weekly_summary,
+        "list_records",
+        side_effect=AirtableReadError(
+            "Business Memory list: HTTP 500", status_code=500, response_text="server down"
+        ),
+    ):
+        assert weekly_summary._fetch_records_direct("FALSE()") == []
+    assert "[C22] Airtable 500: server down" in caplog.text
+
+
+def test_weekly_summary_preserves_transport_fallback_logging(caplog):
+    with patch.object(
+        weekly_summary,
+        "_fetch_records_direct",
+        side_effect=TimeoutError("timed out"),
+    ):
+        assert weekly_summary._fetch_last_7_days() == []
+    assert "[C22] _fetch_last_7_days failed: timed out" in caplog.text
+
+
+def test_worker_preserves_requests_http_error_type():
+    with patch.object(
+        worker,
+        "list_records",
+        side_effect=AirtableReadError(
+            "Tasks list: HTTP 503", status_code=503, response_text="unavailable"
+        ),
+    ):
+        try:
+            worker._scan_airtable_deadlines()
+        except worker.requests.HTTPError as exc:
+            assert str(exc) == "Airtable 503: unavailable"
+        else:
+            raise AssertionError("worker did not preserve HTTPError")
+
+
+def test_worker_maps_transport_error_to_requests_error():
+    transport_error = TimeoutError("timed out")
+    with patch.object(
+        worker,
+        "list_records",
+        side_effect=AirtableReadError("Tasks list error", cause=transport_error),
+    ):
+        try:
+            worker._scan_airtable_deadlines()
+        except worker.requests.RequestException as exc:
+            assert str(exc) == "timed out"
+        else:
+            raise AssertionError("worker did not preserve RequestException boundary")

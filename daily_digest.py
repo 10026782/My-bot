@@ -6,7 +6,7 @@ import os
 from datetime import date, timedelta
 
 from airtable_schema import LeadFields, Tables, PaymentFields, PaymentStatus
-from tools.airtable_read_adapter import list_records
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,14 @@ def _fetch(table_real: str, formula: str = "", max_rec: int = 20) -> list:
         raise RuntimeError("Airtable credentials missing (AIRTABLE_BASE_ID / AIRTABLE_API_KEY)")
     try:
         return list_records(table_real, formula, max_records=max_rec)
-    except Exception as exc:
-        raise RuntimeError(str(exc)) from exc
+    except AirtableReadError as exc:
+        if exc.cause is not None:
+            raise exc.cause
+        if exc.status_code is not None:
+            raise RuntimeError(
+                f"Airtable {exc.status_code}: {exc.response_text[:120]}"
+            ) from None
+        raise RuntimeError(str(exc)) from None
 
 
 def _fmt(iso: str) -> str:

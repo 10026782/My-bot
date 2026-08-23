@@ -496,6 +496,19 @@ class AirtableLookupError(Exception):
     ActionContractRepository) can fail closed on a store outage instead of
     silently treating "can't reach Airtable" the same as "genuinely not found"."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        cause: Exception | None = None,
+        status_code: int | None = None,
+        response_text: str = "",
+    ):
+        super().__init__(message)
+        self.cause = cause
+        self.status_code = status_code
+        self.response_text = response_text
+
 
 def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) -> dict | None:
     """
@@ -527,7 +540,7 @@ def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) 
 def at_list_by_formula(
     table: str,
     formula: str,
-    max_records: int | None = 100,
+    max_records: int | str | None = 100,
     *,
     fields: list[str] | None = None,
     paginate: bool = False,
@@ -560,10 +573,14 @@ def at_list_by_formula(
                 timeout=timeout,
             )
         except Exception as e:
-            raise AirtableLookupError(f"{table} list error: {e}") from e
+            raise AirtableLookupError(f"{table} list error: {e}", cause=e) from e
 
         if r.status_code != 200:
-            raise AirtableLookupError(f"{table} list: HTTP {r.status_code}")
+            raise AirtableLookupError(
+                f"{table} list: HTTP {r.status_code}",
+                status_code=r.status_code,
+                response_text=r.text,
+            )
 
         payload = r.json()
         records.extend(payload.get("records", []))
