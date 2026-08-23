@@ -12,6 +12,15 @@ VERIFIED_MAPPINGS = {
     schema.Tables.MARKETING_DEMAND: schema.MarketingDemandFields,
     schema.Tables.MARKETING_PUBLICATIONS: schema.MarketingPublicationFields,
     schema.Tables.SESSIONS: schema.SessionsFields,
+    schema.Tables.BUSINESS_MEMORY: schema.BusinessMemoryFields,
+    schema.Tables.DECISION_EVENTS: schema.DecisionEventFields,
+    schema.Tables.DECISIONS: schema.DecisionFields,
+    schema.Tables.DECISION_INBOX: schema.DecisionInboxFields,
+    schema.Tables.DECISION_STAKEHOLDERS: schema.DecisionStakeholderFields,
+    schema.Tables.EXPENSES: schema.ExpenseFields,
+    schema.Tables.PROFILE: schema.ProfileFields,
+    schema.Tables.ROADMAP_TASKS: schema.RoadmapTaskFields,
+    schema.Tables.VENTURES: schema.VentureFields,
 }
 
 
@@ -27,7 +36,13 @@ def test_verified_classes_are_not_unregistered():
     assert not unregistered.intersection(cls.__name__ for cls in VERIFIED_MAPPINGS.values())
 
 
+def test_unverified_classes_remain_unregistered():
+    assert schema.MarketingCreativesFields not in TABLE_CLASS_MAP.values()
+    assert schema.SchemaSnapshotFields not in TABLE_CLASS_MAP.values()
+
+
 if __name__ == "__main__":
     test_verified_classes_are_registered_without_collisions()
     test_verified_classes_are_not_unregistered()
+    test_unverified_classes_remain_unregistered()
     print("✅ schema governance tests passed")
