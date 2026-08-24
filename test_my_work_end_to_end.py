@@ -17,6 +17,7 @@ import identity as identity_module
 import tma_api
 from identity import Identity, Role, Domain
 from airtable_schema import TaskFields, TaskStatus, Tables, ProfileFields, LeadFields
+from tools.airtable_read_adapter import render_query
 
 
 def create_test_identity(user_id="eliyahu", role=Role.OWNER, external_id="123456"):
@@ -312,7 +313,7 @@ def test_resolve_profile_record_id_matches_case_insensitively():
         result = _resolve_profile_record_id("eliyahu")
         assert result == OWNER_RECORD_ID
         assert captured[0][0] == Tables.PROFILE
-        assert "LOWER" in captured[0][1]
+        assert "LOWER" in render_query(captured[0][1])
     finally:
         tma_api._at_list = orig_at_list
 
