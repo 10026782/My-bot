@@ -148,21 +148,23 @@ class RuntimeSchemaProvider:
             )
             return None
         try:
-            import httpx
+            from tools.airtable_gateway import get_base_metadata
 
-            r = httpx.get(
-                f"https://api.airtable.com/v0/meta/bases/{base}/tables",
-                headers={"Authorization": f"Bearer {key}"},
-                timeout=15,
-            )
-            r.raise_for_status()
+            metadata = get_base_metadata(timeout=15)
         except Exception as e:
             logger.warning(
                 "[RuntimeSchemaProvider] Meta API fetch failed for table=%s: %s", table, e
             )
             return None
 
-        for t in r.json().get("tables", []):
+        tables = metadata.get("tables", []) if isinstance(metadata, dict) else []
+        if not isinstance(tables, list):
+            logger.warning("[RuntimeSchemaProvider] invalid Meta API payload for table=%s", table)
+            return None
+
+        for t in tables:
+            if not isinstance(t, dict):
+                continue
             if t.get("name") == table:
                 return self._build_entry(t)
 
