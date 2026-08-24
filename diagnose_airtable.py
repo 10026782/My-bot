@@ -2,9 +2,12 @@
 # diagnose_airtable.py — בדיקת חיבור Airtable מלאה
 # הרץ: python diagnose_airtable.py
 
-import os, sys, urllib.parse, requests
+import os
+import sys
 from dotenv import load_dotenv
 from airtable_schema import Tables
+from tools.airtable_gateway import AirtableLookupError, get_base_metadata, get_whoami
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 
 def main() -> int:
@@ -25,37 +28,39 @@ def main() -> int:
         print("\n❌ חסרים env vars — עצור.")
         return 1
 
-    HEADERS = {"Authorization": f"Bearer {API_KEY}"}
-
     # ── 2. בדיקת תקינות המפתח ──────────────────────────────────
     print("\n[2] בדיקת תקינות API key...")
-    r = requests.get("https://api.airtable.com/v0/meta/whoami", headers=HEADERS, timeout=10)
-    if r.status_code == 200:
-        user = r.json().get("email", r.json().get("id", "?"))
-        print(f"  ✅ מפתח תקין — חשבון: {user}")
-    elif r.status_code == 401:
-        print(f"  ❌ 401 — המפתח לא תקין או פג תוקף")
-        return 1
+    try:
+        whoami = get_whoami(timeout=10)
+    except AirtableLookupError as exc:
+        if exc.status_code == 401:
+            print("  ❌ 401 — המפתח לא תקין או פג תוקף")
+            return 1
+        if exc.status_code is None and exc.cause is not None:
+            raise exc.cause from exc
+        print(f"  ⚠️ {exc.status_code}: {exc.response_text[:100]}")
     else:
-        print(f"  ⚠️ {r.status_code}: {r.text[:100]}")
+        user = whoami.get("email", whoami.get("id", "?"))
+        print(f"  ✅ מפתח תקין — חשבון: {user}")
 
     # ── 3. רשימת טבלאות בbase ──────────────────────────────────
     print(f"\n[3] טבלאות ב-Base {BASE_ID}:")
-    r = requests.get(
-        f"https://api.airtable.com/v0/meta/bases/{BASE_ID}/tables",
-        headers=HEADERS, timeout=10
-    )
-    if r.status_code == 200:
-        tables = r.json().get("tables", [])
+    try:
+        metadata = get_base_metadata(timeout=10)
+    except AirtableLookupError as exc:
+        if exc.status_code == 403:
+            print("  ⚠️ 403 — אין הרשאת metadata (זה בסדר, ממשיכים)")
+            tables = []
+        elif exc.status_code is None and exc.cause is not None:
+            raise exc.cause from exc
+        else:
+            print(f"  ⚠️ {exc.status_code}: {exc.response_text[:100]}")
+            tables = []
+    else:
+        tables = metadata.get("tables", [])
         print(f"  נמצאו {len(tables)} טבלאות:")
         for t in tables:
             print(f"  • '{t['name']}' (id: {t['id']})")
-    elif r.status_code == 403:
-        print(f"  ⚠️ 403 — אין הרשאת metadata (זה בסדר, ממשיכים)")
-        tables = []
-    else:
-        print(f"  ⚠️ {r.status_code}: {r.text[:100]}")
-        tables = []
 
     # ── 4. בדיקת כל טבלה ממפת השמות ─────────────────────────
     print("\n[4] בדיקת גישה לטבלאות CRM:")
@@ -67,18 +72,21 @@ def main() -> int:
     )
 
     for name in TABLE_NAMES:
-        encoded = urllib.parse.quote(name, safe="")
-        url = f"https://api.airtable.com/v0/{BASE_ID}/{encoded}"
-        r = requests.get(url, headers=HEADERS, params={"maxRecords": 1}, timeout=10)
-        if r.status_code == 200:
-            count = len(r.json().get("records", []))
-            print(f"  ✅ '{name}' — {count} רשומות")
-        elif r.status_code == 404:
-            print(f"  ❌ '{name}' — 404 לא נמצאה")
-        elif r.status_code == 403:
-            print(f"  ⚠️ '{name}' — 403 אין הרשאה לטבלה זו")
+        try:
+            records = list_records(name, max_records=1, paginate=False, timeout=10)
+        except AirtableReadError as exc:
+            if exc.status_code == 404:
+                print(f"  ❌ '{name}' — 404 לא נמצאה")
+            elif exc.status_code == 403:
+                print(f"  ⚠️ '{name}' — 403 אין הרשאה לטבלה זו")
+            elif exc.status_code is None and exc.cause is not None:
+                raise exc.cause from exc
+            else:
+                print(f"  ❌ '{name}' — {exc.status_code}: {exc.response_text[:80]}")
+            continue
         else:
-            print(f"  ❌ '{name}' — {r.status_code}: {r.text[:80]}")
+            count = len(records)
+            print(f"  ✅ '{name}' — {count} רשומות")
 
     print("\n" + "=" * 60)
     print("סיום בדיקה — אם יש ❌ שלח את הפלט הזה לאיתור הבעיה")
