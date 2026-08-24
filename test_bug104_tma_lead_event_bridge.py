@@ -46,13 +46,13 @@ from core.lead_event_writer import write_tma_lead_event
 from airtable_schema import LeadEventFields, LeadEventType, Tables, LeadFields
 
 _orig_create = airtable_gateway.airtable_create
-_orig_get_records = airtable_read_adapter.list_records
+_orig_get_record_fields = airtable_read_adapter.get_record_fields
 
 _created: list[dict] = []
 _create_should_fail = {"value": False}
 _create_should_raise = {"value": False}
 _domain_lookup_calls = {"n": 0}
-_domain_lookup_return = {"value": [{"id": "recLEAD001", "fields": {LeadFields.DOMAIN: "recruitment"}}]}
+_domain_lookup_return = {"value": {LeadFields.DOMAIN: "recruitment"}}
 
 
 def _fake_create(table, fields, source="unknown"):
@@ -66,15 +66,15 @@ def _fake_create(table, fields, source="unknown"):
     return {"id": f"recEV{len(_created)}", "fields": fields}
 
 
-def _fake_get_records(table, formula="", **kwargs):
+def _fake_get_record_fields(table, record_id, **kwargs):
     _domain_lookup_calls["n"] += 1
     if table == "Leads":
         return _domain_lookup_return["value"]
-    return []
+    return {}
 
 
 airtable_gateway.airtable_create = _fake_create
-airtable_read_adapter.list_records = _fake_get_records
+airtable_read_adapter.get_record_fields = _fake_get_record_fields
 
 try:
     # -- success path, domain read via one extra Airtable call --
@@ -91,31 +91,31 @@ try:
 
     # -- domain passthrough: real_estate --
     _created.clear()
-    _domain_lookup_return["value"] = [{"id": "recL2", "fields": {LeadFields.DOMAIN: "real_estate"}}]
+    _domain_lookup_return["value"] = {LeadFields.DOMAIN: "real_estate"}
     write_tma_lead_event("recL2", "lead_patch", {"status": "active"})
     check("domain 'real_estate' passes through unchanged", _created[0]["fields"][LeadEventFields.DOMAIN] == "real_estate")
 
     # -- domain passthrough: saas --
     _created.clear()
-    _domain_lookup_return["value"] = [{"id": "recL3", "fields": {LeadFields.DOMAIN: "saas"}}]
+    _domain_lookup_return["value"] = {LeadFields.DOMAIN: "saas"}
     write_tma_lead_event("recL3", "lead_patch", {"status": "active"})
     check("domain 'saas' passes through unchanged", _created[0]["fields"][LeadEventFields.DOMAIN] == "saas")
 
     # -- domain passthrough: import --
     _created.clear()
-    _domain_lookup_return["value"] = [{"id": "recL4", "fields": {LeadFields.DOMAIN: "import"}}]
+    _domain_lookup_return["value"] = {LeadFields.DOMAIN: "import"}
     write_tma_lead_event("recL4", "lead_patch", {"status": "active"})
     check("domain 'import' passes through unchanged", _created[0]["fields"][LeadEventFields.DOMAIN] == "import")
 
     # -- missing domain field entirely -> general --
     _created.clear()
-    _domain_lookup_return["value"] = [{"id": "recL5", "fields": {}}]
+    _domain_lookup_return["value"] = {}
     write_tma_lead_event("recL5", "lead_patch", {"status": "active"})
     check("missing domain -> general fallback", _created[0]["fields"][LeadEventFields.DOMAIN] == "general")
 
     # -- unrecognized raw domain (e.g. a project_slug value) -> general, no invented option --
     _created.clear()
-    _domain_lookup_return["value"] = [{"id": "recL6", "fields": {LeadFields.DOMAIN: "blueview"}}]
+    _domain_lookup_return["value"] = {LeadFields.DOMAIN: "blueview"}
     write_tma_lead_event("recL6", "lead_patch", {"status": "active"})
     check("unrecognized domain value ('blueview') -> general fallback, not invented",
           _created[0]["fields"][LeadEventFields.DOMAIN] == "general")
@@ -129,7 +129,7 @@ try:
 
     # -- deterministic applied_fields serialization (sorted keys) --
     _created.clear()
-    _domain_lookup_return["value"] = [{"id": "recL8", "fields": {LeadFields.DOMAIN: "general"}}]
+    _domain_lookup_return["value"] = {LeadFields.DOMAIN: "general"}
     write_tma_lead_event("recL8", "lead_patch", {"z_field": 1, "a_field": "x"})
     msg1 = _created[0]["fields"][LeadEventFields.MESSAGE]
     _created.clear()
@@ -162,7 +162,7 @@ try:
     import feature_flags
     os.environ["LEAD_CAPTURE"] = ""  # ensure disabled/unset
     _created.clear()
-    _domain_lookup_return["value"] = [{"id": "recL11", "fields": {LeadFields.DOMAIN: "general"}}]
+    _domain_lookup_return["value"] = {LeadFields.DOMAIN: "general"}
     ok_no_flag = write_tma_lead_event("recL11", "lead_patch", {"status": "active"})
     check("LEAD_CAPTURE disabled/unset -> writer still succeeds (no dependency)",
           ok_no_flag is True and len(_created) == 1)
@@ -173,7 +173,7 @@ try:
           'is_enabled("LEAD_CAPTURE")' not in _writer_src and "is_enabled('LEAD_CAPTURE')" not in _writer_src)
 finally:
     airtable_gateway.airtable_create = _orig_create
-    airtable_read_adapter.list_records = _orig_get_records
+    airtable_read_adapter.get_record_fields = _orig_get_record_fields
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -390,15 +390,15 @@ def _counting_create(table, fields, source="unknown"):
     return {"id": "recOTHER", "fields": fields}
 
 
-def _domain_records(table, formula="", **kwargs):
+def _domain_record_fields(table, record_id, **kwargs):
     if table == "Leads":
-        return [{"id": "recLEAD001", "fields": {LeadFields.DOMAIN: "general"}}]
-    return []
+        return {LeadFields.DOMAIN: "general"}
+    return {}
 
 
 airtable_gateway.airtable_patch = _fake_gw_patch
 airtable_gateway.airtable_create = _counting_create
-airtable_read_adapter.list_records = _domain_records
+airtable_read_adapter.get_record_fields = _domain_record_fields
 
 _EXEC_CTX = {"contract_id": "c1", "approved_by": "owner1", "claim_execution_id": "e1"}
 
@@ -460,7 +460,7 @@ try:
 finally:
     approval_actions._verify_active_execution_claim = _orig_verify_claim
     airtable_gateway.airtable_create = _orig_create
-    airtable_read_adapter.list_records = _orig_get_records
+    airtable_read_adapter.get_record_fields = _orig_get_record_fields
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -480,8 +480,8 @@ def _capturing_create(table, fields, source="unknown"):
 
 
 airtable_gateway.airtable_create = _capturing_create
-airtable_read_adapter.list_records = lambda table, formula="", **kwargs: (
-    [{"id": "recLEAD001", "fields": {LeadFields.DOMAIN: "general"}}] if table == "Leads" else []
+airtable_read_adapter.get_record_fields = lambda table, record_id, **kwargs: (
+    {LeadFields.DOMAIN: "general"} if table == "Leads" else {}
 )
 try:
     write_tma_lead_event("recLEAD001", "lead_patch", {"status": "active"})
@@ -494,7 +494,7 @@ try:
           tma_api._event_linked_to_lead(fake_event, "recOTHERLEAD") is False)
 finally:
     airtable_gateway.airtable_create = _orig_create
-    airtable_read_adapter.list_records = _orig_get_records
+    airtable_read_adapter.get_record_fields = _orig_get_record_fields
 
 
 # ═════════════════════════════════════════════════════════════════

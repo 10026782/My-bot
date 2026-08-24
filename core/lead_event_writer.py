@@ -36,15 +36,11 @@ def _resolve_domain(lead_id: str, lead_domain: str | None) -> str:
 
     try:
         from airtable_schema import LeadFields
-        from tools.airtable_read_adapter import list_records
+        from tools.airtable_read_adapter import get_record_fields
 
-        safe_id = lead_id.replace("'", "")
-        records = list_records(
-            "Leads", f"RECORD_ID()='{safe_id}'", max_records=1, paginate=False,
-        )
-        if records:
-            raw = records[0].get("fields", {}).get(LeadFields.DOMAIN)
-            return _normalize_domain(raw)
+        fields = get_record_fields("Leads", lead_id)
+        raw = fields.get(LeadFields.DOMAIN)
+        return _normalize_domain(raw)
     except Exception as e:
         logger.warning(
             "[LeadEventWriter] domain lookup failed for lead=%s: %s", lead_id, e,
