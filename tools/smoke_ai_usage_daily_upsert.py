@@ -59,8 +59,8 @@ logger = logging.getLogger(__name__)
 
 
 def _lookup(table: str, date_str: str) -> list[dict]:
-    from tools.airtable_gateway import at_list_by_formula, _safe_formula_param
-    formula = f"DATETIME_FORMAT({{Date}}, 'YYYY-MM-DD')='{_safe_formula_param(date_str)}'"
+    from tools.airtable_gateway import at_list_by_formula, escape_formula_value
+    formula = f"DATETIME_FORMAT({{Date}}, 'YYYY-MM-DD')='{escape_formula_value(date_str)}'"
     return at_list_by_formula(table, formula, max_records=10)
 
 

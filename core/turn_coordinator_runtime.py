@@ -69,10 +69,10 @@ def prepare_task_gateway_call(
 
 def airtable_task_lookup(query: str, scope: str, limit: int):
     """Return at most resolver-limit+1 matching task records."""
-    from tools.airtable_gateway import _safe_formula_param
+    from tools.airtable_gateway import escape_formula_value
     from tools.airtable_tools import airtable_get_records
 
-    escaped = _safe_formula_param(str(query).replace("\\", "\\\\"))
+    escaped = escape_formula_value(str(query).replace("\\", "\\\\"))
     formula = f"SEARCH('{escaped}', {{{TaskFields.NAME}}})"
     return airtable_get_records(Tables.TASKS, formula, max_records=limit + 1)
 

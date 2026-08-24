@@ -35,9 +35,9 @@ from tools.airtable_gateway import (
     at_upsert,
     airtable_patch,
 )
-# _safe_formula_param is airtable_gateway's own sanctioned formula-value
+# escape_formula_value is airtable_gateway's own sanctioned formula-value
 # escaping helper (see its docstring) — reused here rather than duplicated.
-from tools.airtable_gateway import _safe_formula_param
+from tools.airtable_gateway import escape_formula_value
 
 if TYPE_CHECKING:
     from core.action_gateway import ActionContract
@@ -329,7 +329,7 @@ class ActionContractRepository:
         from core.approval_turn_metrics import record_action_contract_read
         record_action_contract_read()
         formula = (
-            f"AND({{{ActionContractsFields.CANONICAL_USER_ID}}}='{_safe_formula_param(canonical_user_id)}', "
+            f"AND({{{ActionContractsFields.CANONICAL_USER_ID}}}='{escape_formula_value(canonical_user_id)}', "
             f"{{{ActionContractsFields.STATUS}}}='pending')"
         )
         try:

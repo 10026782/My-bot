@@ -234,11 +234,11 @@ def maybe_supersede(new_event: dict, decision: dict | None, ports: DecisionPorts
     if not decision or not decision_id or not new_event.get("Claim Topic"):
         return
 
-    from tools.airtable_gateway import _safe_formula_param
+    from tools.airtable_gateway import escape_formula_value
     prior_events = ports.storage.get(
         "Decision Events",
-        f"AND({{Decision}}='{_safe_formula_param(decision_id)}', "
-        f"{{Claim Topic}}='{_safe_formula_param(new_event['Claim Topic'])}', "
+        f"AND({{Decision}}='{escape_formula_value(decision_id)}', "
+        f"{{Claim Topic}}='{escape_formula_value(new_event['Claim Topic'])}', "
         f"{{Status}}='Active')",
     )
     for prior in prior_events:

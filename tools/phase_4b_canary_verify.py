@@ -87,9 +87,9 @@ def _find_projection_for_contract(contract_id: str) -> tuple[dict | None, str]:
     operator didn't supply --approval-record-id. Read-only formula search,
     same idempotent-lookup shape as tma_api._find_approval_projection_by_contract.
     Returns (row_or_None, detail_message)."""
-    from tools.airtable_gateway import _safe_formula_param, at_list_by_formula, AirtableLookupError
+    from tools.airtable_gateway import escape_formula_value, at_list_by_formula, AirtableLookupError
 
-    formula = f"{{{ApprovalsFields.ACTION_CONTRACT_ID}}}='{_safe_formula_param(contract_id)}'"
+    formula = f"{{{ApprovalsFields.ACTION_CONTRACT_ID}}}='{escape_formula_value(contract_id)}'"
     try:
         records = at_list_by_formula("Approvals", formula, max_records=2)
     except AirtableLookupError as exc:

@@ -247,10 +247,10 @@ def _write_airtable_row(date_str: str, counts: dict[str, int]) -> bool:
 
         from tools.airtable_gateway import (
             airtable_create, airtable_patch, at_list_by_formula,
-            _safe_formula_param, AirtableLookupError,
+            escape_formula_value, AirtableLookupError,
         )
 
-        formula = f"DATETIME_FORMAT({{Date}}, 'YYYY-MM-DD')='{_safe_formula_param(date_str)}'"
+        formula = f"DATETIME_FORMAT({{Date}}, 'YYYY-MM-DD')='{escape_formula_value(date_str)}'"
         try:
             matches = at_list_by_formula(table, formula, max_records=2)
         except AirtableLookupError as e:

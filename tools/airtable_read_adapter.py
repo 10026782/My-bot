@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import httpx
 
-from tools.airtable_gateway import at_get_record
-from tools.airtable_gateway import at_list_page
-from tools.airtable_gateway import at_list_by_formula
 from tools.airtable_gateway import AirtableLookupError
+from tools.airtable_gateway import at_get_record
+from tools.airtable_gateway import at_list_by_formula
+from tools.airtable_gateway import at_list_page
+from tools.airtable_gateway import escape_formula_value
 
 
 class AirtableReadError(RuntimeError):
@@ -34,7 +35,7 @@ class AirtableReadError(RuntimeError):
         """Recreate the legacy httpx error for callers that expose it."""
         if self.status_code is None:
             raise ValueError("AirtableReadError has no HTTP status")
-        request = httpx.Request("GET", self.response_url or "https://api.airtable.com")
+        request = httpx.Request("GET", self.response_url or "https://provider.invalid/records")
         response = httpx.Response(
             self.status_code,
             text=self.response_text,
@@ -45,13 +46,6 @@ class AirtableReadError(RuntimeError):
         except httpx.HTTPStatusError as exc:
             return exc
         raise ValueError(f"status {self.status_code} is not an HTTP error")
-
-
-def escape_formula_value(value: object) -> str:
-    """Escape one business value for a caller-built Airtable formula."""
-    from tools.airtable_gateway import _safe_formula_param
-
-    return _safe_formula_param(str(value))
 
 
 def list_records(
