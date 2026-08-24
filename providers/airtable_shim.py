@@ -1,21 +1,20 @@
 # providers/airtable_shim.py
 # F13 — AirtableStorageProvider shim
-# עוטף את tools/airtable_gateway.py + tools/airtable_tools.py ללא שינוין.
+# עוטף את tools/airtable_gateway.py + tools/airtable_read_adapter.py
+# + tools/airtable_tools.py ללא שינוי public API.
 #
 # הערה (SPEC-001): airtable_get() הקיים מחזיר string מפורמט, לא list[dict],
-# ואין לו max_records — לכן get() כאן עושה קריאת REST גולמית ישירות (כמו
-# airtable_get עושה internally), אבל דרך _resolve_table() כדי לשמר את
-# alias resolution הקיים. אין delete() אמיתי בגרסה הנוכחית של ה-gateway —
+# ואין לו max_records — לכן get() כאן משתמש ב-one-page primitive של read adapter
+# ושומר את alias resolution הקיים דרך _resolve_table(). אין delete() אמיתי
+# בגרסה הנוכחית של ה-gateway —
 # stub כן מצהיר NotImplementedError במקום להעמיד פנים שהוא עובד.
 
 from __future__ import annotations
 from typing import Any
-import urllib.parse
-
-import httpx
 
 from tools.airtable_gateway import airtable_create, airtable_patch
-from tools.airtable_tools import _resolve_table, _base, _headers
+from tools.airtable_read_adapter import AirtableReadError, list_records_page
+from tools.airtable_tools import _resolve_table
 from guards.circuit_breaker import with_airtable_breaker
 
 
@@ -24,17 +23,21 @@ class AirtableStorageProvider:
             fields: list[str] | None = None) -> list[dict[str, Any]]:
         real_table = _resolve_table(table)
         with with_airtable_breaker():
-            params: dict[str, Any] = {"pageSize": min(max_records, 100)}
-            if formula:
-                params["filterByFormula"] = formula
-            if fields:
-                params["fields[]"] = fields
-            encoded = urllib.parse.quote(real_table, safe="")
-            r = httpx.get(f"https://api.airtable.com/v0/{_base()}/{encoded}",
-                          headers=_headers(), params=params, timeout=10)
-            if r.status_code != 200:
-                return []
-            return r.json().get("records", [])[:max_records]
+            try:
+                records, _ = list_records_page(
+                    real_table,
+                    formula,
+                    page_size=min(max_records, 100),
+                    fields=fields,
+                    timeout=10,
+                )
+            except AirtableReadError as exc:
+                if exc.status_code is not None:
+                    return []
+                if exc.cause is not None:
+                    raise exc.cause from exc
+                raise
+            return records[:max_records]
 
     def add(self, table: str, fields: dict[str, Any]) -> dict[str, Any]:
         return airtable_create(_resolve_table(table), fields, source="provider:airtable_shim") or {}

@@ -633,6 +633,7 @@ def at_list_page(
     page_size: int | None = None,
     offset: str = "",
     max_records: int | str | None = None,
+    fields: list[str] | None = None,
     timeout: float = 10,
 ) -> tuple[list[dict], str | None]:
     """Fetch one Airtable records page and return its records and next offset."""
@@ -643,6 +644,8 @@ def at_list_page(
         params["pageSize"] = page_size
     if max_records:
         params["maxRecords"] = max_records
+    if fields:
+        params["fields[]"] = fields
     if offset:
         params["offset"] = offset
 
