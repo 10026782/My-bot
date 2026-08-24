@@ -11,6 +11,7 @@ from datetime import date, timedelta
 
 from tools.airtable_gateway import airtable_create
 from tools.airtable_read_adapter import AirtableReadError, list_records
+from tma_api import record_fields
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ def get_timeline_summary() -> dict:
         in_progress = []
 
         for r in records:
-            f    = r.get("fields", {})
+            f    = record_fields(r)
             due  = f.get("Due", "")
             entry = {
                 "task":     f.get("Task", "?"),
@@ -285,7 +286,7 @@ def _count_phases_done() -> list:
         )
         phases: dict = {}
         for r in records:
-            f = r.get("fields", {})
+            f = record_fields(r)
             p = f.get("Phase", "")
             s = f.get("Status", "")
             if p not in phases:

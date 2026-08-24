@@ -63,7 +63,7 @@ _FIELD_QUESTIONS: dict[str, str] = {
     "to": "למי לשלוח?", "subject": "מה נושא המייל?", "body": "מה תוכן המייל?",
     "draft_id": "מה מזהה הטיוטה?", "sheet_name": "מה שם הגיליון?",
     "row_data": "מה הנתונים?", "table": "לאיזו טבלה?", "fields": "מה השדות?",
-    "record_id": "מה מזהה הרשומה? (rec...)", "name": "מה השם?",
+    "record_id": "מה מזהה הרשומה?", "name": "מה השם?",
     "address": "מה הכתובת?", "price": "מה המחיר? (₪)",
     "funding_cost_pct": "מה עלות המימון? (%)", "status": "מה הסטטוס?",
     "amount": "מה הסכום? (₪)", "due_date": "מתי תאריך התשלום? (YYYY-MM-DD)",
@@ -79,8 +79,6 @@ _SENSITIVE_TOOLS = {
 _ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?$")
 _ISO_DATE_RE     = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EMAIL_RE        = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_RECORD_ID_RE    = re.compile(r"^rec[A-Za-z0-9]{14,}$")
-
 _TOOLS_WITH_RECORD_ID = {
     "airtable_update", "crm_update_last_contact",
     "crm_update_deal_status", "crm_mark_payment_paid",
@@ -119,8 +117,8 @@ def _check_structure(tool_name: str, inputs: dict) -> list[str]:
 
     if tool_name in _TOOLS_WITH_RECORD_ID:
         rid = inputs.get("record_id", "")
-        if rid and not _RECORD_ID_RE.match(str(rid)):
-            errors.append(f"record_id '{rid}' לא תקין — חייב להתחיל ב-rec")
+        if rid and (not isinstance(rid, str) or not rid.strip()):
+            errors.append(f"record_id '{rid}' לא תקין")
 
     if tool_name == "crm_add_payment":
         dd = inputs.get("due_date", "")
@@ -195,14 +193,14 @@ if __name__ == "__main__":
         ("airtable_get",            {"table":"CRM"},                                        "ALLOW", "airtable_get תקין"),
         ("airtable_get",            {},                                                      "BLOCK", "airtable_get ללא table"),
         ("airtable_update",         {"table":"CRM","record_id":"rec1234567890123456","fields":{"x":1}}, "ALLOW", "update record_id תקין"),
-        ("airtable_update",         {"table":"CRM","record_id":"WRONG","fields":{"x":1}},  "BLOCK", "update record_id לא תקין"),
+        ("airtable_update",         {"table":"CRM","record_id":"provider-42","fields":{"x":1}},  "ALLOW", "provider-neutral record_id תקין"),
         ("crm_add_contact",         {"name":"יוסי כהן"},                                   "ALLOW", "add_contact תקין"),
         ("crm_add_contact",         {},                                                      "BLOCK", "add_contact ללא name"),
         ("crm_find_contact",        {"query":"כהן"},                                        "ALLOW", "find_contact תקין"),
         ("crm_find_contact",        {},                                                      "BLOCK", "find_contact ללא query"),
         ("crm_list_contacts",       {},                                                      "ALLOW", "list_contacts ריק"),
         ("crm_update_last_contact", {"record_id":"rec1234567890123456"},                    "ALLOW", "update_last_contact תקין"),
-        ("crm_update_last_contact", {"record_id":"WRONG"},                                  "BLOCK", "update_last_contact record_id רע"),
+        ("crm_update_last_contact", {"record_id":"provider-42"},                           "ALLOW", "provider-neutral record_id תקין"),
         ("crm_add_deal",            {"name":"דירה","address":"רח א","price":1500000,"funding_cost_pct":7.5}, "ALLOW", "deal תקין"),
         ("crm_add_deal",            {"name":"דירה","address":"רח א","price":1000000,"funding_cost_pct":10.0},"BLOCK", "deal מימון > 9%"),
         ("crm_add_deal",            {"address":"רח א","price":1000000,"funding_cost_pct":7},"BLOCK", "deal ללא name"),

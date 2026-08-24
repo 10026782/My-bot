@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from domain_utils import normalize_business_domain
 from tools.airtable_read_adapter import AirtableReadError, list_records
+from tma_api import record_fields
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ def _fetch_records_direct(formula: str) -> list[dict]:
         if exc.cause is not None:
             raise exc.cause
         raise
-    return [rec.get("fields", {}) for rec in records]
+    return [record_fields(rec) for rec in records]
 
 
 # ── עיבוד ────────────────────────────────────────────────────────
