@@ -11,7 +11,7 @@ import core.lead_events as lead_events
 import tools.dispatcher as dispatcher
 import tools.airtable_gateway as gateway
 import tools.airtable_read_adapter as read_adapter
-from tools.airtable_read_adapter import AirtableReadError
+from tools.airtable_read_adapter import AirtableReadError, render_query
 
 
 def test_lead_event_store_preserves_formula_options_and_mapping():
@@ -22,13 +22,11 @@ def test_lead_event_store_preserves_formula_options_and_mapping():
         assert lead_events.LeadEventStore().get_all("real_estate") == [{
             "type": "note", "domain": "real_estate", "memory_key": "rec1", "content": "hello", "keywords": ["x"]
         }]
-    read.assert_called_once_with(
-        "Business Memory",
-        "FIND('real_estate', ARRAYJOIN({keywords}))",
-        max_records=500,
-        paginate=False,
-        timeout=10,
-    )
+    read.assert_called_once()
+    call = read.call_args
+    assert call.args[0] == "Business Memory"
+    assert render_query(call.args[1]) == "FIND('real_estate', ARRAYJOIN({keywords}))"
+    assert call.kwargs == {"max_records": 500, "paginate": False, "timeout": 10}
 
 
 def test_lead_event_store_preserves_empty_and_error_behavior():
