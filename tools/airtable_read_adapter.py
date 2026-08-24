@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 
 from tools.airtable_gateway import at_get_record
+from tools.airtable_gateway import at_list_page
 from tools.airtable_gateway import at_list_by_formula
 from tools.airtable_gateway import AirtableLookupError
 
@@ -72,6 +73,36 @@ def list_records(
             fields=fields,
             sort=sort,
             paginate=not max_records if paginate is None else paginate,
+            timeout=timeout,
+        )
+    except AirtableLookupError as exc:
+        raise AirtableReadError(
+            str(exc),
+            cause=exc.cause,
+            status_code=exc.status_code,
+            response_text=exc.response_text,
+            response_url=exc.response_url,
+            response_reason=exc.response_reason,
+        ) from exc
+
+
+def list_records_page(
+    table: str,
+    formula: str = "",
+    *,
+    page_size: int | None = None,
+    offset: str = "",
+    max_records: int | str | None = None,
+    timeout: float = 10,
+) -> tuple[list[dict], str | None]:
+    """Return one raw Airtable page and its next offset."""
+    try:
+        return at_list_page(
+            table,
+            formula,
+            page_size=page_size,
+            offset=offset,
+            max_records=max_records,
             timeout=timeout,
         )
     except AirtableLookupError as exc:

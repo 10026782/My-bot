@@ -1,6 +1,5 @@
 # tools/airtable_tools.py
 import os
-import urllib.parse
 import httpx
 import logging
 from typing import Any
@@ -161,23 +160,22 @@ def _lookup_record_id(linked_table: str, name: str) -> str | None:
     מחזיר record_id ("recXXX") אם נמצא, אחרת None.
     """
     try:
+        from tools.airtable_read_adapter import list_records_page
+
         safe = name.replace("'", "\\'")
-        encoded = urllib.parse.quote(linked_table, safe="")
-        r = httpx.get(
-            f"https://api.airtable.com/v0/{_base()}/{encoded}",
-            headers=_headers(),
-            params={"filterByFormula": f"{{Name}}='{safe}'", "maxRecords": 1},
+        records, _ = list_records_page(
+            linked_table,
+            f"{{Name}}='{safe}'",
+            max_records=1,
             timeout=10,
         )
-        if r.status_code != 200:
-            logger.warning(f"airtable: lookup failed [{linked_table}] {r.status_code}")
-            return None
-        records = r.json().get("records", [])
-        if records:
-            return records[0]["id"]
-        return None
+        return records[0]["id"] if records else None
     except Exception as e:
-        logger.warning(f"airtable: lookup exception [{linked_table}/{name}]: {e}")
+        status_code = getattr(e, "status_code", None)
+        if status_code is not None:
+            logger.warning(f"airtable: lookup failed [{linked_table}] {status_code}")
+        else:
+            logger.warning(f"airtable: lookup exception [{linked_table}/{name}]: {e}")
         return None
 
 
@@ -272,31 +270,36 @@ def airtable_get_records(
     with with_airtable_breaker():
         while True:
             remaining = None if max_records is None else max_records - len(records)
-            params: dict[str, object] = {"pageSize": min(100, remaining) if remaining is not None else 100}
-            if filter_formula:
-                params["filterByFormula"] = filter_formula
-            if offset:
-                params["offset"] = offset
-            encoded = urllib.parse.quote(real_table, safe="")
-            r = httpx.get(
-                f"https://api.airtable.com/v0/{_base()}/{encoded}",
-                headers=_headers(), params=params, timeout=10,
-            )
-            if r.status_code != 200:
-                raise RuntimeError(f"Airtable error {r.status_code}: {r.text[:150]}")
+            page_size = min(100, remaining) if remaining is not None else 100
+            try:
+                from tools.airtable_read_adapter import list_records_page
 
-            payload = r.json()
-            page = payload.get("records")
-            if not isinstance(page, list):
-                raise RuntimeError("Airtable records response is not a list")
+                page, next_offset = list_records_page(
+                    real_table,
+                    filter_formula,
+                    page_size=page_size,
+                    offset=offset,
+                    timeout=10,
+                )
+            except Exception as exc:
+                status_code = getattr(exc, "status_code", None)
+                if status_code is not None:
+                    response_text = getattr(exc, "response_text", "")
+                    raise RuntimeError(
+                        f"Airtable error {status_code}: {response_text[:150]}"
+                    ) from exc
+                cause = getattr(exc, "cause", None)
+                if cause is not None:
+                    raise cause from exc
+                raise RuntimeError(str(exc)) from exc
+
             records.extend(page if max_records is None else page[:remaining])
             if max_records is not None and len(records) >= max_records:
                 break
 
-            next_offset = payload.get("offset")
             if not next_offset:
                 break
-            if not isinstance(next_offset, str) or next_offset in seen_offsets:
+            if next_offset in seen_offsets:
                 raise RuntimeError("Airtable pagination returned an invalid offset")
             seen_offsets.add(next_offset)
             offset = next_offset
