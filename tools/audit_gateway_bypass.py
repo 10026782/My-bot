@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -86,9 +87,34 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
 })
 
 
+class ScanBoundaryError(RuntimeError):
+    """Raised when the tracked-file boundary can't be determined — fail closed
+    rather than falling back to an unsafe filesystem walk (see #7 gateway-bypass
+    scan-boundary remediation: rglob() previously picked up untracked sibling
+    worktrees under .worktrees/)."""
+
+
 def _iter_py_files():
-    for path in _REPO_ROOT.rglob("*.py"):
-        rel = path.relative_to(_REPO_ROOT)
+    """Enumerates *.py files tracked by this repository's git index. Untracked
+    files, nested/sibling checkouts (e.g. .worktrees/*), and generated scratch
+    files are never scanned, regardless of where they sit under _REPO_ROOT."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--", "*.py"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ScanBoundaryError(
+            f"audit_gateway_bypass: 'git ls-files' failed, refusing to scan "
+            f"the filesystem as a fallback: {exc}"
+        ) from exc
+
+    for rel_str in result.stdout.decode("utf-8").split("\0"):
+        if not rel_str:
+            continue
+        rel = Path(rel_str)
         if any(part in _EXCLUDE_DIRS for part in rel.parts):
             continue
         if rel.name.startswith(_EXCLUDE_FILE_PREFIXES):
@@ -162,7 +188,11 @@ def classify(method: str) -> str:
 
 
 def main() -> int:
-    found = scan()
+    try:
+        found = scan()
+    except ScanBoundaryError as exc:
+        print(f"❌ {exc}", file=sys.stderr)
+        return 2
     found_keys = {(f, l, m) for f, l, m in found}
 
     print("🔍 F52 Safe Refactor #6 — Airtable Gateway Bypass Audit")
