@@ -41,12 +41,12 @@ def check(label: str, cond: bool) -> None:
 print("\n[1] write_tma_lead_event — direct unit tests")
 
 import tools.airtable_gateway as airtable_gateway
-import tools.airtable_tools as airtable_tools
+import tools.airtable_read_adapter as airtable_read_adapter
 from core.lead_event_writer import write_tma_lead_event
 from airtable_schema import LeadEventFields, LeadEventType, Tables, LeadFields
 
 _orig_create = airtable_gateway.airtable_create
-_orig_get_records = airtable_tools.airtable_get_records
+_orig_get_records = airtable_read_adapter.list_records
 
 _created: list[dict] = []
 _create_should_fail = {"value": False}
@@ -66,7 +66,7 @@ def _fake_create(table, fields, source="unknown"):
     return {"id": f"recEV{len(_created)}", "fields": fields}
 
 
-def _fake_get_records(table, filter_formula=""):
+def _fake_get_records(table, formula="", **kwargs):
     _domain_lookup_calls["n"] += 1
     if table == "Leads":
         return _domain_lookup_return["value"]
@@ -74,7 +74,7 @@ def _fake_get_records(table, filter_formula=""):
 
 
 airtable_gateway.airtable_create = _fake_create
-airtable_tools.airtable_get_records = _fake_get_records
+airtable_read_adapter.list_records = _fake_get_records
 
 try:
     # -- success path, domain read via one extra Airtable call --
@@ -173,7 +173,7 @@ try:
           'is_enabled("LEAD_CAPTURE")' not in _writer_src and "is_enabled('LEAD_CAPTURE')" not in _writer_src)
 finally:
     airtable_gateway.airtable_create = _orig_create
-    airtable_tools.airtable_get_records = _orig_get_records
+    airtable_read_adapter.list_records = _orig_get_records
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -390,7 +390,7 @@ def _counting_create(table, fields, source="unknown"):
     return {"id": "recOTHER", "fields": fields}
 
 
-def _domain_records(table, filter_formula=""):
+def _domain_records(table, formula="", **kwargs):
     if table == "Leads":
         return [{"id": "recLEAD001", "fields": {LeadFields.DOMAIN: "general"}}]
     return []
@@ -398,7 +398,7 @@ def _domain_records(table, filter_formula=""):
 
 airtable_gateway.airtable_patch = _fake_gw_patch
 airtable_gateway.airtable_create = _counting_create
-airtable_tools.airtable_get_records = _domain_records
+airtable_read_adapter.list_records = _domain_records
 
 _EXEC_CTX = {"contract_id": "c1", "approved_by": "owner1", "claim_execution_id": "e1"}
 
@@ -460,7 +460,7 @@ try:
 finally:
     approval_actions._verify_active_execution_claim = _orig_verify_claim
     airtable_gateway.airtable_create = _orig_create
-    airtable_tools.airtable_get_records = _orig_get_records
+    airtable_read_adapter.list_records = _orig_get_records
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -480,7 +480,7 @@ def _capturing_create(table, fields, source="unknown"):
 
 
 airtable_gateway.airtable_create = _capturing_create
-airtable_tools.airtable_get_records = lambda table, filter_formula="": (
+airtable_read_adapter.list_records = lambda table, formula="", **kwargs: (
     [{"id": "recLEAD001", "fields": {LeadFields.DOMAIN: "general"}}] if table == "Leads" else []
 )
 try:
@@ -494,7 +494,7 @@ try:
           tma_api._event_linked_to_lead(fake_event, "recOTHERLEAD") is False)
 finally:
     airtable_gateway.airtable_create = _orig_create
-    airtable_tools.airtable_get_records = _orig_get_records
+    airtable_read_adapter.list_records = _orig_get_records
 
 
 # ═════════════════════════════════════════════════════════════════

@@ -36,10 +36,12 @@ def _resolve_domain(lead_id: str, lead_domain: str | None) -> str:
 
     try:
         from airtable_schema import LeadFields
-        from tools.airtable_tools import airtable_get_records
+        from tools.airtable_read_adapter import list_records
 
         safe_id = lead_id.replace("'", "")
-        records = airtable_get_records("Leads", f"RECORD_ID()='{safe_id}'")
+        records = list_records(
+            "Leads", f"RECORD_ID()='{safe_id}'", max_records=1, paginate=False,
+        )
         if records:
             raw = records[0].get("fields", {}).get(LeadFields.DOMAIN)
             return _normalize_domain(raw)
