@@ -22,13 +22,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
-
 from airtable_schema import SchemaSnapshotFields, SchemaSnapshotStatus, Tables
 
 logger = logging.getLogger(__name__)
-
-_META_URL_TMPL = "https://api.airtable.com/v0/meta/bases/{base_id}/tables"
 
 # Retention: keep the last N snapshot records (simplest to implement first —
 # see spec "10 snapshots OR 30 days, implementer's choice"). The latest
@@ -53,15 +49,11 @@ def fetch_live_schema() -> dict | None:
     env = _env_ready()
     if not env:
         return None
-    key, base = env
+    _key, _base = env
     try:
-        r = httpx.get(
-            _META_URL_TMPL.format(base_id=base),
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=20,
-        )
-        r.raise_for_status()
-        return r.json()
+        from tools.airtable_gateway import get_base_metadata
+
+        return get_base_metadata(timeout=20)
     except Exception as e:
         logger.error("[schema_snapshot] Meta API fetch failed: %s", e)
         return None
