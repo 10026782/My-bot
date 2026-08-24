@@ -33,6 +33,8 @@ from airtable_schema import (
     ProfileFields,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
+from tools.airtable_read_adapter import AirtableReadError, get_record as _read_get_record
+from tools.airtable_read_adapter import list_records as _read_list_records
 from health_monitor import get_health_status
 from core.command_center import compose_command_center_status
 from core.owner_attention import build_owner_attention_projection
@@ -206,14 +208,6 @@ def _preflight_game_task_done(task_id):
 # Raw Airtable JSON helpers — TMA only, do NOT touch airtable_tools.py
 # ══════════════════════════════════════════════════════════════════
 
-def _at_url(table: str) -> str:
-    return f"https://api.airtable.com/v0/{_AT_BASE}/{urllib.parse.quote(table, safe='')}"
-
-
-def _at_headers() -> dict:
-    return {"Authorization": f"Bearer {_AT_KEY}"}
-
-
 class AirtableError(Exception):
     """Raised by _at_list(strict=True) on non-200 Airtable responses."""
     def __init__(self, table: str, http_status: int, body: str = ""):
@@ -232,18 +226,23 @@ def _at_list(table: str, formula: str = "", max_records: int = 50,
                   a proper error response instead of silently showing zero.
     """
     try:
-        import httpx
-        params: dict = {}
-        if formula:
-            params["filterByFormula"] = formula
-        if max_records:
-            params["maxRecords"] = max_records
-        r = httpx.get(_at_url(table), headers=_at_headers(), params=params, timeout=10)
-        if r.status_code == 200:
-            return r.json().get("records", [])
-        logger.warning(f"_at_list({table}) → {r.status_code}: {r.text[:120]}")
-        if strict:
-            raise AirtableError(table, r.status_code, r.text)
+        return _read_list_records(
+            table,
+            formula,
+            max_records=max_records,
+            paginate=False,
+            timeout=10,
+        )
+    except AirtableReadError as e:
+        if e.status_code is not None:
+            logger.warning(f"_at_list({table}) → {e.status_code}: {e.response_text[:120]}")
+            if strict:
+                raise AirtableError(table, e.status_code, e.response_text)
+        else:
+            error = e.cause or e
+            logger.warning(f"_at_list({table}) error: {error}")
+            if strict:
+                raise AirtableError(table, 0, str(error))
     except AirtableError:
         raise
     except Exception as e:
@@ -256,11 +255,12 @@ def _at_list(table: str, formula: str = "", max_records: int = 50,
 def _at_get_record(table: str, record_id: str) -> dict | None:
     """Fetch single record → {id, fields} or None."""
     try:
-        import httpx
-        r = httpx.get(f"{_at_url(table)}/{record_id}", headers=_at_headers(), timeout=10)
-        if r.status_code == 200:
-            return r.json()
-        logger.warning(f"_at_get({table}/{record_id}) → {r.status_code}")
+        return _read_get_record(table, record_id, timeout=10)
+    except AirtableReadError as e:
+        if e.status_code is not None:
+            logger.warning(f"_at_get({table}/{record_id}) → {e.status_code}")
+        else:
+            logger.warning(f"_at_get error: {e.cause or e}")
     except Exception as e:
         logger.warning(f"_at_get error: {e}")
     return None
