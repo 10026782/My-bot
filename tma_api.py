@@ -3625,15 +3625,20 @@ def _system_health_payload(identity) -> dict:
 
     checks: dict[str, str] = {}
 
-    # ── Airtable — real list call ──────────────────────────────────
+    # ── Airtable — canonical read boundary ─────────────────────────
     try:
-        r = _httpx.get(
-            f"https://api.airtable.com/v0/{_AT_BASE}/Leads",
-            headers={"Authorization": f"Bearer {_AT_KEY}"},
-            params={"maxRecords": 1},
+        _read_list_records(
+            "Leads",
+            max_records=1,
+            paginate=False,
             timeout=5,
         )
-        checks["airtable"] = "ok" if r.status_code == 200 else f"error:{r.status_code}"
+        checks["airtable"] = "ok"
+    except AirtableReadError as e:
+        if e.status_code is not None:
+            checks["airtable"] = f"error:{e.status_code}"
+        else:
+            checks["airtable"] = f"error:{e.cause or e}"
     except Exception as e:
         checks["airtable"] = f"error:{e}"
 
