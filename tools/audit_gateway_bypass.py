@@ -56,35 +56,19 @@ _ASSIGNMENT_RE_TEMPLATE = r"^\s*{name}\s*="
 
 _WRITE_METHODS = {"post", "patch", "put", "delete"}
 
-# Known bypass sites as of 2026-07-03 (file relative to repo root, line, method).
+# Baseline re-verified on 2026-08-24 (Track D-Structure Audit #7): all 24
+# entries known as of 2026-07-03 were individually checked against current
+# origin/main. 23 were resolved by migrating to tools/airtable_gateway.py or
+# tools/airtable_read_adapter.py; the remaining one (the search logic
+# formerly in core/lead_candidate_handler.py) moved to
+# core/lead_service.py::find_existing_lead, which itself also routes through
+# tools/airtable_read_adapter.py. No baseline entry remained a live bypass,
+# so the baseline resets to empty — current truth is zero known bypasses.
+# Full history of the historical 2026-07-03 entries is preserved in git log,
+# not duplicated here as executable code.
 # New entries not in this set → WARNING (scope drift). Entries in this set
 # that disappear → reported as "no longer present" (likely fixed upstream).
-BASELINE: frozenset[tuple[str, int, str]] = frozenset({
-    ("crm.py", 59, "get"),
-    ("crm.py", 70, "post"),
-    ("crm.py", 80, "patch"),
-    ("tools/airtable_tools.py", 166, "get"),
-    ("tools/airtable_tools.py", 261, "get"),
-    ("tools/airtable_tools.py", 304, "get"),
-    ("tma_api.py", 199, "get"),
-    ("tma_api.py", 218, "get"),
-    ("tma_api.py", 2497, "get"),
-    ("decision_matching.py", 63, "get"),
-    ("schema_validator.py", 63, "get"),
-    ("system_registry_audit.py", 103, "get"),
-    ("daily_digest.py", 32, "get"),
-    ("weekly_summary.py", 108, "get"),
-    ("providers/airtable_shim.py", 33, "get"),
-    ("tools/dispatcher.py", 84, "get"),
-    ("tools/schema_governance.py", 52, "get"),
-    ("cmd_decision.py", 839, "get"),
-    ("cmd_decision.py", 853, "get"),
-    ("decision_ports.py", 71, "get"),
-    ("core/emergency_window.py", 55, "get"),
-    ("core/lead_candidate_handler.py", 287, "get"),
-    ("core/lead_events.py", 44, "get"),
-    ("health_monitor.py", 18, "get"),
-})
+BASELINE: frozenset[tuple[str, int, str]] = frozenset()
 
 
 class ScanBoundaryError(RuntimeError):
