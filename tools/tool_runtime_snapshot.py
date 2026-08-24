@@ -54,6 +54,15 @@ class SnapshotLoadError(RuntimeError):
     pass
 
 
+class LegacySnapshotWriteBlocked(RuntimeError):
+    """Raised when this module's write path targets the canonical runtime
+    snapshot. tools/generate_tool_runtime_snapshot_from_db.py (backed by
+    tools/tool_catalog_db.write_snapshot_from_db()) is the sole canonical
+    generator for DEFAULT_PATH -- see docs/tool-research/TOOL_CATALOG_PHASE2.md
+    ('Generator authority'). This module may still write elsewhere (tests,
+    ad-hoc comparisons via an explicit non-canonical --output/path)."""
+
+
 def _slug(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "_", str(value).lower()).strip("_")
     return value
@@ -172,8 +181,15 @@ def load_tool_runtime_snapshot(path: str | Path | None = None) -> dict:
 
 
 def write_snapshot(path: str | Path = DEFAULT_PATH, *, source_revision: str | None = None) -> None:
-    snapshot = generate_snapshot(source_revision=source_revision)
     target = Path(path)
+    if target.resolve() == DEFAULT_PATH.resolve():
+        raise LegacySnapshotWriteBlocked(
+            f"refusing to write the canonical runtime snapshot ({DEFAULT_PATH}) from the "
+            "legacy Python-seed generator. Use tools/generate_tool_runtime_snapshot_from_db.py "
+            "(tools.tool_catalog_db.write_snapshot_from_db) instead, or pass an explicit "
+            "non-canonical --output/path for a local/test snapshot."
+        )
+    snapshot = generate_snapshot(source_revision=source_revision)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

@@ -51,6 +51,10 @@ The generator:
 
 The generator is the only path from catalog DB to runtime snapshot. Runtime has no DB query and no seed fallback.
 
+## Generator authority
+
+tools/generate_tool_runtime_snapshot_from_db.py (tools/tool_catalog_db.py's write_snapshot_from_db()) is the sole canonical generator for data/tool_registry/runtime_snapshot.json. The Phase 1 legacy generator (tools/tool_runtime_snapshot.py's write_snapshot(), reading the Python TOOL_REGISTRY seed) remains available for local/test snapshots at a non-canonical path, but its write_snapshot() fails closed (raises LegacySnapshotWriteBlocked) rather than writing when its target resolves to the canonical path — it can no longer silently overwrite the canonical artifact with legacy-seed provenance. See test_tool_runtime_snapshot.py::test_legacy_generator_cannot_silently_overwrite_canonical_artifact.
+
 ## One-time transition
 
 The intended first rollout sequence is:
