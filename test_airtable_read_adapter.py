@@ -8,7 +8,7 @@ import weekly_summary
 import crm
 from core import lead_service
 from airtable_schema import Tables
-from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, list_records
+from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, list_records, render_query
 
 
 def test_daily_digest_query_and_pagination_are_preserved(monkeypatch):
@@ -76,14 +76,15 @@ def test_crm_get_preserves_tenant_formula_and_single_page_read():
 
     with patch.object(crm, "list_records", return_value=[]) as read:
         assert crm._get("Contacts", "{Name}='Dana'", identity=Identity()) == []
-    read.assert_called_once_with(
-        "Contacts",
-        "AND({Name}='Dana', {tenant_id}='tenant-a')",
-        max_records=None,
-        fields=None,
-        paginate=False,
-        timeout=10,
-    )
+    call = read.call_args
+    assert call.args[0] == "Contacts"
+    assert render_query(call.args[1]) == "AND({Name}='Dana', {tenant_id}='tenant-a')"
+    assert call.kwargs == {
+        "max_records": None,
+        "fields": None,
+        "paginate": False,
+        "timeout": 10,
+    }
 
 
 def test_lead_dedup_preserves_three_queries_and_read_options(monkeypatch):
@@ -91,7 +92,7 @@ def test_lead_dedup_preserves_three_queries_and_read_options(monkeypatch):
     monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
     with patch.object(lead_service, "list_records", return_value=[]) as read:
         assert lead_service.find_existing_lead("Dana", "0501234567") is None
-    assert [call.args[:2] for call in read.call_args_list] == [
+    assert [(call.args[0], render_query(call.args[1])) for call in read.call_args_list] == [
         ("Leads", "AND(SEARCH('Dana', {Name}), {phone}='0501234567')"),
         ("Leads", "{phone}='0501234567'"),
         ("Leads", "SEARCH('Dana', {Name})"),
@@ -106,7 +107,7 @@ def test_lead_dedup_preserves_three_queries_and_read_options(monkeypatch):
 
 def test_lead_formula_escaping_stays_behind_public_read_adapter():
     assert escape_formula_value("O'Brien") == "O\\'Brien"
-    assert "escape_formula_value" in lead_service._search_formulas.__code__.co_names
+    assert {"contains", "equals"}.issubset(lead_service._search_formulas.__code__.co_names)
 
 
 def test_crm_preserves_legacy_http_status_error_for_other_statuses():
