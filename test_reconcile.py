@@ -189,7 +189,7 @@ def _real_content_hash(path=_SEED_PATH):
 # --- Policy registry basics ---------------------------------------------
 
 
-def test_policy_registry_loads_all_eleven_policies(policies):
+def test_policy_registry_loads_all_thirteen_policies(policies):
     ids = {p.id for p in policies}
     assert ids == {
         "DOCUMENTATION_REFERENCE_ASSET",
@@ -203,6 +203,7 @@ def test_policy_registry_loads_all_eleven_policies(policies):
         "EXTERNAL_RECOMMENDATION_CATALOG",
         "EXTERNAL_RECOMMENDATION_CATALOG_TEST",
         "EXTERNAL_EXECUTION_RUNTIME",
+        "AIRTABLE_READ_INFRASTRUCTURE",
         "TMA_FEATURE_SCREEN",
     }
 
@@ -216,6 +217,15 @@ def test_policy_matching_is_glob_only_not_substring(policies):
     assert match_policy("scripts/verify_f15_staging.py", policies).id == "STAGING_VERIFICATION_F15"
     assert match_policy("core/external_poll_lease.py", policies).id == "EXTERNAL_EXECUTION_RUNTIME"
     assert match_policy("core/mpt_runtime_policy.py", policies).id == "EXTERNAL_EXECUTION_RUNTIME"
+
+
+def test_airtable_read_adapter_matches_existing_tools_node_policy(policies):
+    policy = match_policy("tools/airtable_read_adapter.py", policies)
+    assert policy is not None
+    assert policy.id == "AIRTABLE_READ_INFRASTRUCTURE"
+    assert policy.eligible_target == "layer.tools"
+    assert policy.target_field == "code_paths"
+    assert policy.auto_registration_allowed is True
 
 
 def test_target_field_never_inferred_all_policies_declare_it_explicitly(policies):
@@ -1356,6 +1366,22 @@ def test_pr_source_covered_by_approved_policy_needs_no_owner_decision(catalog, p
     assert result.decision_queue == ()
     assert len(result.auto_maintenance_sources) == 1
     assert result.auto_maintenance_sources[0]["policy_id"] == "OFFLINE_RESEARCH_TOOL"
+
+
+def test_airtable_read_adapter_policy_routes_without_owner_decision(catalog, policies):
+    path = "tools/airtable_read_adapter.py"
+    new_sources = _classify_as_if_unregistered(
+        catalog, node_id="layer.tools", field="code_paths", path=path
+    )
+    assert new_sources and new_sources[0]["path"] == path
+
+    result = _reconcile_pr_with_fakes(catalog, policies, new_sources=new_sources)
+
+    assert result.outcome == AUTO_MAINTENANCE_REQUIRED
+    assert result.decision_queue == ()
+    assert result.auto_maintenance_sources[0]["path"] == path
+    assert result.auto_maintenance_sources[0]["policy_id"] == "AIRTABLE_READ_INFRASTRUCTURE"
+    assert result.auto_maintenance_sources[0]["eligible_target"] == "layer.tools"
 
 
 def test_pr_unknown_runtime_source_requires_owner_decision(catalog, policies):
