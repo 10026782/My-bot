@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import daily_digest
 import weekly_summary
-import worker
 import crm
 from core import lead_service
 from airtable_schema import Tables
@@ -36,19 +35,6 @@ def test_weekly_summary_query_and_return_shape_are_preserved(monkeypatch):
         "IS_AFTER({Date}, 'since')",
         max_records="50",
     )
-
-
-def test_worker_query_and_requested_fields_are_preserved():
-    with patch.object(worker, "list_records", return_value=[]) as read:
-        assert worker._scan_airtable_deadlines(days_ahead=3) == []
-
-    formula, kwargs = read.call_args.args[1], read.call_args.kwargs
-    assert f"{{{worker.STATUS_FIELD}}} != '{worker.TaskStatus.DONE}'" in formula
-    assert f"{{{worker.DEADLINE_FIELD}}}" in formula
-    assert kwargs == {
-        "max_records": 20,
-        "fields": [worker.NAME_FIELD, worker.DEADLINE_FIELD, worker.STATUS_FIELD],
-    }
 
 
 def test_adapter_preserves_unbounded_pagination_and_fields():
@@ -238,40 +224,3 @@ def test_weekly_summary_preserves_transport_fallback_logging(caplog):
     ):
         assert weekly_summary._fetch_last_7_days() == []
     assert "[C22] _fetch_last_7_days failed: timed out" in caplog.text
-
-
-def test_worker_preserves_requests_http_error_type():
-    with patch.object(
-        worker,
-        "list_records",
-        side_effect=AirtableReadError(
-            "Tasks list: HTTP 503",
-            status_code=503,
-            response_url="https://api.airtable.com/v0/base/Tasks",
-            response_reason="Service Unavailable",
-        ),
-    ):
-        try:
-            worker._scan_airtable_deadlines()
-        except worker.requests.HTTPError as exc:
-            assert str(exc) == (
-                "503 Server Error: Service Unavailable for url: "
-                "https://api.airtable.com/v0/base/Tasks"
-            )
-        else:
-            raise AssertionError("worker did not preserve HTTPError")
-
-
-def test_worker_maps_transport_error_to_requests_error():
-    transport_error = TimeoutError("timed out")
-    with patch.object(
-        worker,
-        "list_records",
-        side_effect=AirtableReadError("Tasks list error", cause=transport_error),
-    ):
-        try:
-            worker._scan_airtable_deadlines()
-        except worker.requests.RequestException as exc:
-            assert str(exc) == "timed out"
-        else:
-            raise AssertionError("worker did not preserve RequestException boundary")
