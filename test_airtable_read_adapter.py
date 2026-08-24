@@ -106,7 +106,7 @@ def test_lead_dedup_preserves_three_queries_and_read_options(monkeypatch):
 
 def test_lead_formula_escaping_stays_behind_public_read_adapter():
     assert escape_formula_value("O'Brien") == "O\\'Brien"
-    assert "_safe_formula_param" not in lead_service._search_formulas.__code__.co_names
+    assert "escape_formula_value" in lead_service._search_formulas.__code__.co_names
 
 
 def test_crm_preserves_legacy_http_status_error_for_other_statuses():

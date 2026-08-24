@@ -314,8 +314,8 @@ def run_bug157_approval_race(identity, run_id: str) -> None:
     # concurrent callers both actually wrote, which is exactly the defect
     # BUG-157's atomic claim exists to prevent.
     try:
-        from tools.airtable_gateway import at_list_by_formula, airtable_delete, _safe_formula_param
-        formula = f"FIND('{_safe_formula_param(run_id)}', {{כותרת המשימה}}) > 0"
+        from tools.airtable_gateway import at_list_by_formula, airtable_delete, escape_formula_value
+        formula = f"FIND('{escape_formula_value(run_id)}', {{כותרת המשימה}}) > 0"
         records = at_list_by_formula("משימות (Tasks)", formula)
         matched = [rec for rec in records if rec.get("id")]
         _record("bug157", "D. at most one Tasks record created by the race (no double execution)",

@@ -310,6 +310,11 @@ def _safe_formula_param(value: str) -> str:
     return value.replace("'", "\\'")
 
 
+def escape_formula_value(value: object) -> str:
+    """Escape one value for safe interpolation into an Airtable formula."""
+    return _safe_formula_param(str(value))
+
+
 # ══════════════════════════════════════════════════════════════════
 # Audit
 # ══════════════════════════════════════════════════════════════════

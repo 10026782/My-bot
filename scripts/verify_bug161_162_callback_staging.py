@@ -186,8 +186,8 @@ def _emergency_stop_preflight() -> bool:
 
 def _tasks_records_for(run_id: str) -> list[dict]:
     try:
-        from tools.airtable_gateway import at_list_by_formula, _safe_formula_param
-        formula = f"FIND('{_safe_formula_param(run_id)}', {{כותרת המשימה}}) > 0"
+        from tools.airtable_gateway import at_list_by_formula, escape_formula_value
+        formula = f"FIND('{escape_formula_value(run_id)}', {{כותרת המשימה}}) > 0"
         return at_list_by_formula("משימות (Tasks)", formula) or []
     except Exception as exc:
         print(f"    ⚠️  Tasks lookup failed (non-fatal, treated as 0 records found): {exc}")
@@ -196,8 +196,8 @@ def _tasks_records_for(run_id: str) -> list[dict]:
 
 def _contracts_for_run(run_id: str) -> list[dict]:
     try:
-        from tools.airtable_gateway import at_list_by_formula, _safe_formula_param
-        formula = f"FIND('{_safe_formula_param(run_id)}', {{tenant_id}}) > 0"
+        from tools.airtable_gateway import at_list_by_formula, escape_formula_value
+        formula = f"FIND('{escape_formula_value(run_id)}', {{tenant_id}}) > 0"
         return at_list_by_formula("ActionContracts", formula) or []
     except Exception as exc:
         print(f"    ⚠️  ActionContracts lookup failed: {exc}")

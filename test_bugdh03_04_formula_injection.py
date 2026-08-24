@@ -7,7 +7,7 @@
 # arbitrary formula logic (e.g. ref="x' OR 1=1 --" widening a lookup to
 # match unrelated records, or blocking the AND(...) conditions entirely).
 #
-# tools/airtable_gateway._safe_formula_param() is now the single sanctioned
+# tools.airtable_gateway.escape_formula_value() is now the single sanctioned
 # way to interpolate such text; three call sites are retrofitted to use it:
 #   - cmd_decision.py::_resolve_decision_ref            (ref)
 #   - decision_pipeline.py::maybe_supersede              (decision_id, Claim Topic)
@@ -28,7 +28,7 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 
 from unittest.mock import patch
 
-from tools.airtable_gateway import _safe_formula_param
+from tools.airtable_gateway import escape_formula_value
 import cmd_decision
 import decision_pipeline
 import core.lead_service as lead_service
@@ -47,15 +47,15 @@ def chk(desc: str, cond: bool) -> None:
 
 
 # ══════════════════════════════════════════════════
-# 1. _safe_formula_param() — unit level
+# 1. escape_formula_value() — unit level
 # ══════════════════════════════════════════════════
-print("\n── 1. _safe_formula_param() unit tests ──")
+print("\n── 1. escape_formula_value() unit tests ──")
 
-chk("single quote escaped", _safe_formula_param("O'Brien") == "O\\'Brien")
-chk("no quotes -> unchanged", _safe_formula_param("Dana Levi") == "Dana Levi")
+chk("single quote escaped", escape_formula_value("O'Brien") == "O\\'Brien")
+chk("no quotes -> unchanged", escape_formula_value("Dana Levi") == "Dana Levi")
 chk("multiple quotes all escaped",
-    _safe_formula_param("a'b'c") == "a\\'b\\'c")
-chk("empty string -> empty string", _safe_formula_param("") == "")
+    escape_formula_value("a'b'c") == "a\\'b\\'c")
+chk("empty string -> empty string", escape_formula_value("") == "")
 
 
 # ══════════════════════════════════════════════════

@@ -21,7 +21,7 @@ from airtable_schema import (
     MarketingPublicationFields as MPF,
     Tables,
 )
-from tools.airtable_gateway import airtable_create, airtable_patch, at_list_by_formula, _safe_formula_param
+from tools.airtable_gateway import airtable_create, airtable_patch, at_list_by_formula, escape_formula_value
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def create_demand(demand: DemandRecord) -> str | None:
 def list_demands(status: str = "Active", limit: int = 15) -> list[dict]:
     """Read-only bounded list of Marketing Demand records."""
     try:
-        safe_status = _safe_formula_param(status)
+        safe_status = escape_formula_value(status)
         return at_list_by_formula(
             Tables.MARKETING_DEMAND,
             f"{{{MDF.STATUS}}}='{safe_status}'",
@@ -101,7 +101,7 @@ def _get_by_id(table: str, record_id: str) -> dict | None:
     """
     try:
         records = at_list_by_formula(
-            table, f"RECORD_ID()='{_safe_formula_param(record_id)}'", max_records=1,
+            table, f"RECORD_ID()='{escape_formula_value(record_id)}'", max_records=1,
         )
     except Exception as e:
         logger.warning("[marketing_gateway] _get_by_id(%s, %s) failed: %s", table, record_id, e)
@@ -121,7 +121,7 @@ def list_demands(status: str = "Active", limit: int = 15) -> list[dict]:
     filtered by Status (default "Active"; pass "" for no filter). Empty list
     on any failure — never raises, matches get_marketing_rules()'s contract.
     """
-    formula = f"{{{MDF.STATUS}}}='{_safe_formula_param(status)}'" if status else ""
+    formula = f"{{{MDF.STATUS}}}='{escape_formula_value(status)}'" if status else ""
     try:
         return at_list_by_formula(Tables.MARKETING_DEMAND, formula, max_records=limit)
     except Exception as e:
@@ -371,12 +371,12 @@ def get_marketing_rules(domain: str, limit: int = 20) -> str:
     domain_clause = ""
     try:
         airtable_domain = business_domain_to_airtable(domain, vocabulary="business_memory_legacy")
-        v = _safe_formula_param(airtable_domain)
+        v = escape_formula_value(airtable_domain)
         domain_clause = f"OR({{{BMF.DOMAIN}}}='{v}', {{{BMF.DOMAIN}}}='General'),"
     except UnknownBusinessDomain:
         pass
 
-    formula = f"AND({domain_clause}SEARCH('{_safe_formula_param(_MARKETING_RULE_PREFIX)}', {{{BMF.TITLE}}}))"
+    formula = f"AND({domain_clause}SEARCH('{escape_formula_value(_MARKETING_RULE_PREFIX)}', {{{BMF.TITLE}}}))"
 
     try:
         records = at_list_by_formula(Tables.BUSINESS_MEMORY, formula, max_records=limit)

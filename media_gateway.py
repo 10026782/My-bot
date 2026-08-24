@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from airtable_schema import MediaFileFields, MediaPersistenceState, Tables
 from tools.airtable_gateway import (
     AirtableLookupError,
-    _safe_formula_param,
+    escape_formula_value,
     at_list_by_formula,
     airtable_create,
     airtable_patch,
@@ -83,7 +83,7 @@ def find_asset_by_logical_media_key(logical_media_key: str) -> MediaLookupResult
         return MediaLookupResult("not_found")
     formula = (
         f"{{{MediaFileFields.LOGICAL_MEDIA_KEY}}}="
-        f"'{_safe_formula_param(logical_media_key)}'"
+        f"'{escape_formula_value(logical_media_key)}'"
     )
     try:
         records = at_list_by_formula(Tables.MEDIA_FILES, formula, max_records=100)

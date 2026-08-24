@@ -95,14 +95,14 @@ def cleanup_run_contracts(run_id: str) -> int:
         )
     try:
         from airtable_schema import ActionContractsFields, Tables
-        from tools.airtable_gateway import _safe_formula_param, airtable_delete, at_list_by_formula
+        from tools.airtable_gateway import escape_formula_value, airtable_delete, at_list_by_formula
     except Exception:
         logger.warning("[TC10] cleanup_run_contracts: Airtable gateway unavailable, skipping", exc_info=True)
         return 0
 
     formula = (
         f"{{{ActionContractsFields.TENANT_ID}}} = "
-        f"'{_safe_formula_param(run_id)}'"
+        f"'{escape_formula_value(run_id)}'"
     )
     try:
         records = at_list_by_formula(Tables.ACTION_CONTRACTS, formula)
