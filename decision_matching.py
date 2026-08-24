@@ -57,18 +57,19 @@ def list_open_decisions(limit: int = 5) -> list[dict]:
         f"{{{DecisionFields.STATUS}}}='{status}'" for status in OPEN_STATUSES
     ) + ")"
     try:
-        import httpx
-        from tools.airtable_gateway import _at_headers, _at_url
-
-        response = httpx.get(
-            _at_url(Tables.DECISIONS),
-            headers=_at_headers(),
-            params={"filterByFormula": formula},
+        from tools.airtable_read_adapter import AirtableReadError, list_records
+        return list_records(
+            Tables.DECISIONS,
+            formula,
+            max_records=None,
+            paginate=False,
             timeout=10,
-        )
-        if response.status_code == 200:
-            return response.json().get("records", [])[:limit]
-        logger.warning("[DecisionMatching] list_open_decisions -> %s", response.status_code)
+        )[:limit]
+    except AirtableReadError as exc:
+        if exc.status_code is not None:
+            logger.warning("[DecisionMatching] list_open_decisions -> %s", exc.status_code)
+        else:
+            logger.warning("[DecisionMatching] list_open_decisions error: %s", exc.cause or exc)
     except Exception as exc:
         logger.warning("[DecisionMatching] list_open_decisions error: %s", exc)
     return []

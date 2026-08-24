@@ -18,6 +18,7 @@ from airtable_schema import (
     DecisionInboxFields, DecisionInboxChannel, DecisionInboxStatus,
 )
 from decision_matching import find_matching_decision, list_open_decisions
+from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, get_record, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -815,16 +816,12 @@ def _find_matching_decision(text: str) -> tuple[dict | None, float]:
 
 def _at_list(table: str, formula: str = "") -> list:
     try:
-        import httpx
-        from tools.airtable_gateway import _at_url, _at_headers
-
-        params: dict = {}
-        if formula:
-            params["filterByFormula"] = formula
-        r = httpx.get(_at_url(table), headers=_at_headers(), params=params, timeout=10)
-        if r.status_code == 200:
-            return r.json().get("records", [])
-        logger.warning(f"[DecisionHub] _at_list({table}) -> {r.status_code}")
+        return list_records(table, formula, max_records=None, paginate=False, timeout=10)
+    except AirtableReadError as exc:
+        if exc.status_code is not None:
+            logger.warning(f"[DecisionHub] _at_list({table}) -> {exc.status_code}")
+        else:
+            logger.warning(f"[DecisionHub] _at_list({table}) error: {exc.cause or exc}")
     except Exception as e:
         logger.warning(f"[DecisionHub] _at_list({table}) error: {e}")
     return []
@@ -832,13 +829,12 @@ def _at_list(table: str, formula: str = "") -> list:
 
 def _at_get_record(table: str, record_id: str) -> dict | None:
     try:
-        import httpx
-        from tools.airtable_gateway import _at_url, _at_headers
-
-        r = httpx.get(f"{_at_url(table)}/{record_id}", headers=_at_headers(), timeout=10)
-        if r.status_code == 200:
-            return r.json()
-        logger.warning(f"[DecisionHub] _at_get_record({table}/{record_id}) -> {r.status_code}")
+        return get_record(table, record_id, timeout=10)
+    except AirtableReadError as exc:
+        if exc.status_code is not None:
+            logger.warning(f"[DecisionHub] _at_get_record({table}/{record_id}) -> {exc.status_code}")
+        else:
+            logger.warning(f"[DecisionHub] _at_get_record({table}/{record_id}) error: {exc.cause or exc}")
     except Exception as e:
         logger.warning(f"[DecisionHub] _at_get_record({table}/{record_id}) error: {e}")
     return None
@@ -851,8 +847,7 @@ def _resolve_decision_ref(ref: str) -> dict | None:
         if record:
             return record
 
-    from tools.airtable_gateway import _safe_formula_param
-    formula = f"FIND('{_safe_formula_param(ref)}', {{{DecisionFields.TITLE}}})"
+    formula = f"FIND('{escape_formula_value(ref)}', {{{DecisionFields.TITLE}}})"
     matches = _at_list(Tables.DECISIONS, formula)
     return matches[0] if matches else None
 

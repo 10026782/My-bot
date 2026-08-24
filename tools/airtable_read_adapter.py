@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 
+from tools.airtable_gateway import at_get_record
 from tools.airtable_gateway import at_list_by_formula
 from tools.airtable_gateway import AirtableLookupError
 
@@ -71,6 +72,21 @@ def list_records(
             paginate=not max_records if paginate is None else paginate,
             timeout=timeout,
         )
+    except AirtableLookupError as exc:
+        raise AirtableReadError(
+            str(exc),
+            cause=exc.cause,
+            status_code=exc.status_code,
+            response_text=exc.response_text,
+            response_url=exc.response_url,
+            response_reason=exc.response_reason,
+        ) from exc
+
+
+def get_record(table: str, record_id: str, *, timeout: float = 10) -> dict:
+    """Return one raw Airtable record without exposing provider details."""
+    try:
+        return at_get_record(table, record_id, timeout=timeout)
     except AirtableLookupError as exc:
         raise AirtableReadError(
             str(exc),

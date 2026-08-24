@@ -542,6 +542,28 @@ def at_get_by_field(table: str, field: str, value: str, *, timeout: float = 10) 
     return records[0] if records else None
 
 
+def at_get_record(table: str, record_id: str, *, timeout: float = 10) -> dict:
+    """Fetch one raw Airtable record by record ID."""
+    try:
+        r = httpx.get(
+            f"{_at_url(table)}/{record_id}",
+            headers=_at_headers(),
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise AirtableLookupError(f"{table}/{record_id} get error: {e}", cause=e) from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(
+            f"{table}/{record_id} get: HTTP {r.status_code}",
+            status_code=r.status_code,
+            response_text=r.text,
+            response_url=str(getattr(r, "url", "")),
+            response_reason=str(getattr(r, "reason_phrase", "")),
+        )
+    return r.json()
+
+
 def at_list_by_formula(
     table: str,
     formula: str,

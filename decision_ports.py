@@ -62,16 +62,19 @@ class _AirtableStorageAdapter:
 
     def get(self, table: str, filter_formula: str = "") -> list:
         try:
-            import httpx
-            from tools.airtable_gateway import _at_url, _at_headers
-
-            params: dict = {}
-            if filter_formula:
-                params["filterByFormula"] = filter_formula
-            r = httpx.get(_at_url(table), headers=_at_headers(), params=params, timeout=10)
-            if r.status_code == 200:
-                return r.json().get("records", [])
-            logger.warning(f"[DecisionPorts] storage.get({table}) -> {r.status_code}")
+            from tools.airtable_read_adapter import AirtableReadError, list_records
+            return list_records(
+                table,
+                filter_formula,
+                max_records=None,
+                paginate=False,
+                timeout=10,
+            )
+        except AirtableReadError as exc:
+            if exc.status_code is not None:
+                logger.warning(f"[DecisionPorts] storage.get({table}) -> {exc.status_code}")
+            else:
+                logger.warning(f"[DecisionPorts] storage.get({table}) error: {exc.cause or exc}")
         except Exception as e:
             logger.warning(f"[DecisionPorts] storage.get({table}) error: {e}")
         return []
