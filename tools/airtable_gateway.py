@@ -844,6 +844,28 @@ def get_base_metadata(*, timeout: float = 10) -> dict:
     return r.json()
 
 
+def get_whoami(*, timeout: float = 10) -> dict:
+    """Fetch the Airtable identity payload through the metadata boundary."""
+    try:
+        r = httpx.get(
+            "https://api.airtable.com/v0/meta/whoami",
+            headers={"Authorization": f"Bearer {_at_key()}"},
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise AirtableLookupError("meta whoami fetch failed", cause=e) from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(
+            f"meta whoami fetch: HTTP {r.status_code}",
+            status_code=r.status_code,
+            response_text=r.text,
+            response_url=str(getattr(r, "url", "")),
+            response_reason=str(getattr(r, "reason_phrase", "")),
+        )
+    return r.json()
+
+
 def get_attachment_json(url: str, *, timeout: float = 15) -> object:
     """Download one already-selected Airtable attachment payload, read-only."""
     try:
