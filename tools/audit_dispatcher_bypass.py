@@ -13,9 +13,9 @@
 # here as a warning-only CI inventory alongside audit_gateway_bypass.py /
 # audit_result_parsing.py (F52 Safe Refactor #6/#7).
 #
-# This does NOT move any import and does NOT fail CI — it is a warning-only
-# inventory. It compares live results against a known BASELINE; anything new
-# is flagged so scope drift gets noticed instead of silently growing.
+# This does NOT move any import. It compares live results against explicit
+# classifications; only genuinely NEW findings fail CI. Legacy debt remains
+# visible, while cross-track and accepted findings are kept out of BASELINE.
 #
 # NOTE ON BASELINE PROVENANCE: this baseline was derived by actually running
 # this scan against the repo on 2026-07-03.
@@ -27,6 +27,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -115,6 +116,28 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("tools/contact_resolver.py", 133, "crm"),
 })
 
+# A line-number rebase correction: the lead_capture import is the same
+# historical call site as BASELINE's line 211, now at line 212 after unrelated
+# edits. Stable identity prevents this shift from becoming false NEW debt.
+_LEGACY_STABLE_IDENTITIES: frozenset[tuple[str, str, str]] = frozenset({
+    ("lead_capture.py", "tools.airtable_tools", "airtable_get"),
+})
+
+# These are intentionally not merged into BASELINE. They are active
+# cross-track handoffs and must remain visible as their own class.
+CROSS_TRACK: frozenset[tuple[str, int, str]] = frozenset({
+    ("core/google_drive_artifact_store.py", 32, "tools.google_tools"),
+    ("core/memory_retrieval.py", 107, "tools.airtable_tools"),
+    ("core/runtime_schema_provider.py", 204, "tools.airtable_tools"),
+    ("core/turn_coordinator_runtime.py", 73, "tools.airtable_tools"),
+})
+
+# Verification-only staging utility; it is legitimate but not a runtime
+# dispatcher exception and must remain separately visible.
+ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
+    ("scripts/verify_f15_staging.py", 143, "crm"),
+})
+
 # Exact call sites verified sanctioned despite failing _is_allowed()'s
 # filename-substring heuristic -- each is imported and invoked by a module
 # that IS on the allowlist, just not itself named dispatcher*/scheduler*/etc.
@@ -201,37 +224,82 @@ def scan() -> list[tuple[str, int, str]]:
     return [f for f in findings if f not in _SANCTIONED_CALL_SITES]
 
 
+def _stable_identity(finding: tuple[str, int, str]) -> tuple[str, str, str]:
+    """Return path/module/imported-symbol identity, independent of line number."""
+    rel_str, line, module = finding
+    try:
+        source_line = (_REPO_ROOT / rel_str).read_text(encoding="utf-8").splitlines()[line - 1]
+    except (IndexError, OSError, UnicodeDecodeError):
+        return (rel_str, module, "*")
+    match = re.match(r"^\s*from\s+\S+\s+import\s+(.+?)(?:\s+#.*)?$", source_line)
+    symbol = match.group(1).strip().split(",", 1)[0].strip() if match else "*"
+    return (rel_str, module, symbol)
+
+
+def _classify_finding(finding: tuple[str, int, str]) -> str:
+    if finding in _SANCTIONED_CALL_SITES:
+        return "sanctioned"
+    if finding in CROSS_TRACK:
+        return "cross_track"
+    if finding in ACCEPTED:
+        return "accepted"
+    if finding in BASELINE or _stable_identity(finding) in _LEGACY_STABLE_IDENTITIES:
+        return "legacy"
+    return "new"
+
+
+def classify(findings: list[tuple[str, int, str]]) -> dict[str, list[tuple[str, int, str]]]:
+    groups = {key: [] for key in ("legacy", "sanctioned", "cross_track", "accepted", "new")}
+    for finding in sorted(set(findings)):
+        groups[_classify_finding(finding)].append(finding)
+    return groups
+
+
 def main() -> int:
     try:
         found = scan()
     except ScanBoundaryError as exc:
         print(f"❌ {exc}", file=sys.stderr)
         return 2
-    found_keys = {(f, l, m) for f, l, m in found}
+    groups = classify(found)
 
     print("GOV — Dispatcher Bypass Audit (direct tool-implementation imports)")
     print("-" * 60)
 
-    for file, line, module in sorted(found):
-        is_new = (file, line, module) not in BASELINE
-        marker = "WARN_NEW" if is_new else "known   "
-        print(f"{marker}  {file}:{line}  import {module}")
+    labels = {
+        "legacy": "LEGACY",
+        "sanctioned": "SANCTIONED",
+        "cross_track": "CROSS_TRACK",
+        "accepted": "ACCEPTED",
+        "new": "NEW_VIOLATION",
+    }
+    for key in ("legacy", "sanctioned", "cross_track", "accepted", "new"):
+        for file, line, module in groups[key]:
+            print(f"{labels[key]:13} {file}:{line}  import {module}")
 
-    missing = sorted(BASELINE - found_keys)
+    found_keys = {(f, l, m) for f, l, m in found}
+    stable_legacy_paths = {
+        (file, module)
+        for file, line, module in found
+        if _stable_identity((file, line, module)) in _LEGACY_STABLE_IDENTITIES
+    }
+    missing = sorted(
+        baseline for baseline in BASELINE - found_keys
+        if (baseline[0], baseline[2]) not in stable_legacy_paths
+    )
     for file, line, module in missing:
         print(f"RESOLVED  no longer present (fixed?)  {file}:{line}  import {module}")
 
-    new_count = len(found_keys - BASELINE)
     print("-" * 60)
-    print(f"Summary: {len(found)} direct import(s) found outside dispatcher/digest/scheduler/collector, "
-          f"{new_count} new (not in baseline), {len(missing)} resolved since baseline.")
-
-    if new_count:
-        print("Warning-only: new import bypass site(s) found outside the baseline. "
-              "Not blocking CI, but verify whether this is expected scope growth "
-              "(see CLAUDE.md 'Tool execution' section / docs/governance/SECURITY_CHECKLIST.md).")
-
-    return 0  # warning-only — never blocks CI
+    sanctioned_count = len(_SANCTIONED_CALL_SITES)
+    print(f"SANCTIONED      {sanctioned_count} exact call-site exception(s)")
+    print(f"Summary: legacy={len(groups['legacy'])} sanctioned={sanctioned_count} "
+          f"cross_track={len(groups['cross_track'])} accepted={len(groups['accepted'])} "
+          f"new={len(groups['new'])} resolved={len(missing)}")
+    if groups["new"]:
+        print("FAIL: new dispatcher/tool bypass findings require remediation or explicit authority review.", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _self_test() -> None:
