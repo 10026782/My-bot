@@ -47,15 +47,18 @@ _SELECT_TYPES = {"singleSelect", "multipleSelects"}
 
 def fetch_live_schema(base_id: str, api_key: str) -> dict:
     """שולף schema חי מ-Airtable Metadata API. קריאה בלבד, אין כתיבה."""
-    import httpx
+    from tools.airtable_gateway import AirtableLookupError, get_base_metadata
 
-    r = httpx.get(
-        f"https://api.airtable.com/v0/meta/bases/{base_id}/tables",
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=20,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        return get_base_metadata(timeout=20)
+    except AirtableLookupError as exc:
+        if exc.status_code is not None:
+            import httpx
+
+            raise httpx.HTTPStatusError(str(exc), request=None, response=None) from exc
+        if exc.cause is not None:
+            raise exc.cause from exc
+        raise
 
 
 def _load_previous_report() -> dict | None:
