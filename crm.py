@@ -17,7 +17,17 @@ from airtable_schema import (
     validate_funding_cost,
 )
 from tools.airtable_gateway import airtable_create, airtable_patch
-from tools.airtable_read_adapter import AirtableReadError, list_records
+from tools.airtable_read_adapter import (
+    AirtableReadError,
+    after,
+    all_of,
+    before,
+    contains,
+    equals,
+    list_records,
+    negate,
+    any_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +53,8 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
     is_external = identity is not None and not getattr(identity, "is_internal", True)
 
     if is_external and tenant_id and tenant_id != "unknown":
-        tenant_filter = f"{{tenant_id}}='{tenant_id}'"
-        formula = f"AND({formula}, {tenant_filter})" if formula else tenant_filter
+        tenant_filter = equals("tenant_id", tenant_id)
+        formula = all_of(formula, tenant_filter)
 
     try:
         return list_records(
@@ -147,7 +157,7 @@ def _find_or_create_contact_unlocked(phone, name, *, email="", company="",
     records_by_id = {}
     lookup_error = ""
     for equivalent in _contact_phone_equivalents(normalized):
-        formula = f"{{{ContactFields.PHONE}}} = '{equivalent}'"
+        formula = equals(ContactFields.PHONE, equivalent)
         try:
             records = _get(Tables.CONTACTS, formula, identity=identity)
         except Exception as exc:
@@ -251,10 +261,9 @@ def crm_find_contact(query: str, identity=None) -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        safe = str(query).replace("'", "\\'")
-        formula = (
-            f"OR(FIND(LOWER('{safe}'), LOWER({{{ContactFields.NAME}}})), "
-            f"FIND(LOWER('{safe}'), LOWER({{{ContactFields.COMPANY}}})))"
+        formula = any_of(
+            contains(ContactFields.NAME, query, case_insensitive=True),
+            contains(ContactFields.COMPANY, query, case_insensitive=True),
         )
         records = _get(Tables.CONTACTS, formula, identity=identity)
         if not records:
@@ -291,9 +300,9 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        formula = f"{{סטטוס}} = '{ContactStatus.ACTIVE}'"
+        formula = equals("סטטוס", ContactStatus.ACTIVE)
         if contact_type:
-            formula = f"AND({formula}, {{{ContactFields.ROLE_CATEGORY}}} = '{contact_type}')"
+            formula = all_of(formula, equals(ContactFields.ROLE_CATEGORY, contact_type))
         records = _get(Tables.CONTACTS, formula, identity=identity)
         if not records:
             return "📭 אין אנשי קשר פעילים"
@@ -379,9 +388,12 @@ def crm_list_deals(status: str = "", identity=None) -> str:
         return "❌ חסרים מפתחות Airtable"
     try:
         if status == "Active":
-            formula = f"NOT(OR({{{DealFields.STAGE}}}='{DealStage.CLOSED_WIN}', {{{DealFields.STAGE}}}='{DealStage.CLOSED_LOSS}'))"
+            formula = negate(any_of(
+                equals(DealFields.STAGE, DealStage.CLOSED_WIN),
+                equals(DealFields.STAGE, DealStage.CLOSED_LOSS),
+            ))
         elif status:
-            formula = f"{{שלב}} = '{status}'"
+            formula = equals("שלב", status)
         else:
             formula = ""
         records = _get(Tables.DEALS, formula, identity=identity)
@@ -443,12 +455,10 @@ def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
     try:
         today    = date.today()
         deadline = today + timedelta(days=days_ahead)
-        formula  = (
-            f"AND("
-            f"{{{PaymentFields.STATUS}}} = '{PaymentStatus.IN_PROGRESS}', "
-            f"IS_BEFORE({{{PaymentFields.DUE_DATE}}}, '{deadline.isoformat()}'), "
-            f"IS_AFTER({{{PaymentFields.DUE_DATE}}}, '{today.isoformat()}')"
-            f")"
+        formula = all_of(
+            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS),
+            before(PaymentFields.DUE_DATE, deadline.isoformat()),
+            after(PaymentFields.DUE_DATE, today.isoformat()),
         )
         records = _get(Tables.PAYMENTS, formula, identity=identity)
         if not records:
@@ -486,11 +496,9 @@ def crm_overdue_payments(identity=None) -> str:
         return "❌ חסרים מפתחות Airtable"
     try:
         today   = date.today().isoformat()
-        formula = (
-            f"AND("
-            f"{{{PaymentFields.STATUS}}} = '{PaymentStatus.IN_PROGRESS}', "
-            f"IS_BEFORE({{{PaymentFields.DUE_DATE}}}, '{today}')"
-            f")"
+        formula = all_of(
+            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS),
+            before(PaymentFields.DUE_DATE, today),
         )
         records = _get(Tables.PAYMENTS, formula, identity=identity)
         if not records:

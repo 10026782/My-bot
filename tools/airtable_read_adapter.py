@@ -11,6 +11,77 @@ from tools.airtable_gateway import at_list_page
 from tools.airtable_gateway import escape_formula_value
 
 
+def _field_ref(field: str) -> str:
+    return "{" + str(field) + "}"
+
+
+def equals(field: str, value: object) -> str:
+    """Express an exact field match without exposing provider formula syntax."""
+    return f"{_field_ref(field)}='{escape_formula_value(value)}'"
+
+
+def equals_ci(field: str, value: object) -> str:
+    return f"LOWER({_field_ref(field)})=LOWER('{escape_formula_value(value)}')"
+
+
+def not_equals(field: str, value: object) -> str:
+    return f"{_field_ref(field)}!='{escape_formula_value(value)}'"
+
+
+def contains(
+    field: str,
+    value: object,
+    *,
+    case_sensitive: bool = False,
+    case_insensitive: bool = False,
+) -> str:
+    """Express a substring match; case sensitivity is a business intent."""
+    escaped = escape_formula_value(value)
+    if case_insensitive:
+        return f"FIND(LOWER('{escaped}'), LOWER({_field_ref(field)}))"
+    if case_sensitive:
+        return f"FIND('{escaped}', {_field_ref(field)})"
+    return f"SEARCH('{escaped}', {_field_ref(field)})"
+
+
+def array_contains(field: str, value: object) -> str:
+    return f"FIND('{escape_formula_value(value)}', ARRAYJOIN({_field_ref(field)}))"
+
+
+def record_id_equals(value: object) -> str:
+    return f"RECORD_ID()='{escape_formula_value(value)}'"
+
+
+def before(field: str, value: object) -> str:
+    return f"IS_BEFORE({_field_ref(field)}, '{escape_formula_value(value)}')"
+
+
+def after(field: str, value: object) -> str:
+    return f"IS_AFTER({_field_ref(field)}, '{escape_formula_value(value)}')"
+
+
+def greater_or_equal(field: str, value: object) -> str:
+    return f"{_field_ref(field)}>={escape_formula_value(value)}"
+
+
+def all_of(*clauses: str) -> str:
+    parts = [clause for clause in clauses if clause]
+    if not parts:
+        return ""
+    return parts[0] if len(parts) == 1 else "AND(" + ", ".join(parts) + ")"
+
+
+def any_of(*clauses: str) -> str:
+    parts = [clause for clause in clauses if clause]
+    if not parts:
+        return ""
+    return parts[0] if len(parts) == 1 else "OR(" + ", ".join(parts) + ")"
+
+
+def negate(clause: str) -> str:
+    return f"NOT({clause})" if clause else ""
+
+
 class AirtableReadError(RuntimeError):
     """Read failure with provider details retained for legacy callers."""
 

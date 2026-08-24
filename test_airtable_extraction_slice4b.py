@@ -39,7 +39,7 @@ def test_timeline_reads_preserve_queries_and_shapes():
     assert summary["in_progress"] == [{"task": "T", "phase": "A", "due": "2999-01-01", "priority": "high"}]
     assert summary["done_today"] == 0
     assert calls[0] == (
-        ("ProjectTimeline", "OR(Status='open', Status='in_progress')"),
+            ("ProjectTimeline", "OR({Status}='open', {Status}='in_progress')"),
         {"max_records": None, "sort": [{"field": "Due", "direction": "asc"}], "paginate": False, "timeout": 10},
     )
     assert calls[1][0][0] == "ProjectTimeline"

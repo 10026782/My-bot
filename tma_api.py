@@ -33,8 +33,21 @@ from airtable_schema import (
     ProfileFields,
 )
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
-from tools.airtable_read_adapter import AirtableReadError, get_record as _read_get_record
-from tools.airtable_read_adapter import list_records as _read_list_records
+from tools.airtable_read_adapter import (
+    AirtableReadError,
+    all_of as _query_all_of,
+    any_of as _query_any_of,
+    before as _query_before,
+    contains as _query_contains,
+    equals as _query_equals,
+    equals_ci as _query_equals_ci,
+    get_record as _read_get_record,
+    greater_or_equal as _query_gte,
+    negate as _query_negate,
+    not_equals as _query_not_equals,
+    record_id_equals as _query_record_id_equals,
+    list_records as _read_list_records,
+)
 from health_monitor import get_health_status
 from core.command_center import compose_command_center_status
 from core.owner_attention import build_owner_attention_projection
@@ -756,7 +769,7 @@ def _find_approval_projection_by_contract(contract_id: str) -> dict | None:
     try:
         recs = _at_list(
             "Approvals",
-            f"{{{ApprovalsFields.ACTION_CONTRACT_ID}}}='{contract_id}'",
+            _query_equals(ApprovalsFields.ACTION_CONTRACT_ID, contract_id),
             max_records=2,
             strict=True,
         )
@@ -941,7 +954,7 @@ def _get_global_kpis() -> dict:
     # Overdue tasks (same filter as _urgent_tasks)
     overdue = _at_list(
         "משימות (Tasks)",
-        f"AND(IS_BEFORE({{תאריך יעד}}, '{tomorrow}'), {{סטטוס}}!='בוצע')",
+        _query_all_of(_query_before("תאריך יעד", tomorrow), _query_not_equals("סטטוס", "בוצע")),
         max_records=50,
     )
 
@@ -1025,11 +1038,10 @@ def _get_project_cards(identity) -> tuple[list, int]:
 
     leads_by_domain: dict[str, list] = {d: [] for d in domains}
     if domains:
-        domain_conds = ", ".join(f"{{domain}}='{d}'" for d in domains)
-        or_domains = f"OR({domain_conds})" if len(domains) > 1 else domain_conds
+        or_domains = _query_any_of(*(_query_equals("domain", d) for d in domains))
         if exclude_statuses:
-            status_conds = ", ".join(f"{{status}}='{s}'" for s in exclude_statuses)
-            bulk_formula = f"AND({or_domains}, NOT(OR({status_conds})))"
+            status_conds = _query_any_of(*(_query_equals("status", s) for s in exclude_statuses))
+            bulk_formula = _query_all_of(or_domains, _query_negate(status_conds))
         else:
             bulk_formula = or_domains
         bulk_leads = _at_list("Leads", bulk_formula,
@@ -1237,7 +1249,7 @@ def get_project_dashboard(project_slug, identity):
         return err
     hub_records = _at_list(
         "ProjectsHub",
-        f"{{slug}}='{project_slug}'",
+        _query_equals("slug", project_slug),
         max_records=1,
     )
     if not hub_records:
@@ -1271,7 +1283,13 @@ def get_project_dashboard(project_slug, identity):
         leads = _at_list("Leads", _hub_formula, max_records=50, strict=True)
         deals = _at_list(
             "עסקאות (Deals)",
-            f"AND({{domain}}='{safe_domain}', NOT(OR({{{DealFields.STAGE}}}='סגור-ניצחון', {{{DealFields.STAGE}}}='סגור-הפסד')))",
+            _query_all_of(
+                _query_equals("domain", safe_domain),
+                _query_negate(_query_any_of(
+                    _query_equals(DealFields.STAGE, "סגור-ניצחון"),
+                    _query_equals(DealFields.STAGE, "סגור-הפסד"),
+                )),
+            ),
             max_records=20,
             strict=True,
         )
@@ -1429,41 +1447,39 @@ def _build_formula(
     # 0. raw_formula — escape hatch מלא
     if raw_formula:
         if domain:
-            return f"AND({{domain}}='{domain}', {raw_formula})"
+            return _query_all_of(_query_equals("domain", domain), raw_formula)
         return raw_formula
 
     parts: list[str] = []
 
     # 1. domain מפורש
     if domain:
-        parts.append(f"{{domain}}='{domain}'")
+        parts.append(_query_equals("domain", domain))
 
     # 2. Partner: domain restriction מ-identity (אוטומטי)
     if identity is not None and getattr(identity, "role", None) == Role.PARTNER:
         allowed = getattr(identity, "allowed_domains", None) or []
         if allowed:
-            d_conds = ", ".join(f"{{domain}}='{d}'" for d in allowed)
-            parts.append(f"OR({d_conds})")
+            parts.append(_query_any_of(*(_query_equals("domain", d) for d in allowed)))
 
     # 3. include_statuses — OR של סטטוסים מותרים
     if include_statuses:
-        s_conds = ", ".join(f"{{{status_field}}}='{s}'" for s in include_statuses)
-        parts.append(f"OR({s_conds})" if len(include_statuses) > 1 else s_conds)
+        parts.append(_query_any_of(*(_query_equals(status_field, s) for s in include_statuses)))
 
     # 4. exclude_statuses — AND של שלילות
     elif exclude_statuses:
         for s in exclude_statuses:
-            parts.append(f"{{{status_field}}}!='{s}'")
+            parts.append(_query_not_equals(status_field, s))
 
     # 5. score_min (עתידי — Hot leads KPI)
     if score_min > 0:
-        parts.append(f"{{{LeadFields.SCORE}}}>={score_min}")
+        parts.append(_query_gte(LeadFields.SCORE, score_min))
 
     if not parts:
         return ""
     if len(parts) == 1:
         return parts[0]
-    return f"AND({', '.join(parts)})"
+    return _query_all_of(*parts)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1525,7 +1541,7 @@ def get_leads(identity):
     if err:
         return err
     if slug_q and not domain_q:
-        hub = _at_list("ProjectsHub", f"{{slug}}='{slug_q}'", max_records=1)
+        hub = _at_list("ProjectsHub", _query_equals("slug", slug_q), max_records=1)
         if hub:
             domain_q = record_fields(hub[0]).get("domain", "")
 
@@ -1592,7 +1608,7 @@ def _read_lead_events(rec: dict):
                            (_event_linked_to_lead) — exactly ONE Airtable call.
       - None (UNAVAILABLE) only on a real read failure.
 
-    The formula matches the Lead-Event records by their own RECORD_ID() — the
+    The query matches the Lead-Event records by their provider record IDs — the
     IDs come from the Lead snapshot's reverse link, never from the lead ID, and
     the whole table is never scanned/filtered locally. Deterministic cap: the
     first _MAX linked IDs (snapshot order) are used when a lead has more than the
@@ -1607,8 +1623,7 @@ def _read_lead_events(rec: dict):
         return []   # available, empty — no Airtable read
 
     capped  = event_ids[:MAX_LEAD_EVENT_IDS]        # deterministic cap
-    clause  = ",".join(f"RECORD_ID()='{eid}'" for eid in capped)
-    formula = f"OR({clause})"
+    formula = _query_any_of(*(_query_record_id_equals(eid) for eid in capped))
     try:
         fetched = _at_list(Tables.LEAD_EVENTS, formula, max_records=MAX_LEAD_EVENT_IDS, strict=True)
     except AirtableError as e:
@@ -1723,7 +1738,7 @@ def get_lead(lead_id, identity):
     # Timeline from Interaction Log — automated interactions related to this lead
     timeline_recs = _at_list(
         Tables.INTERACTION_LOG,
-        f"SEARCH('{lead_id}',{{{InteractionLogFields.SUMMARY}}})",
+        _query_contains(InteractionLogFields.SUMMARY, lead_id),
         max_records=20,
     )
     def _readable_timeline_value(value: str) -> str:
@@ -2168,9 +2183,9 @@ def finance_pulse(identity):
     # status="overdue" (שדה שדורש עדכון ידני ולא אמין).
     raw_formula = view_cfg.get("raw_formula", "")
     if view_q == "overdue":
-        raw_formula = (
-            f"AND(NOT({{{PaymentFields.STATUS}}}='{PaymentStatus.RECEIVED}'), "
-            f"IS_BEFORE({{{PaymentFields.DATE}}}, '{today_str}'))"
+        raw_formula = _query_all_of(
+            _query_negate(_query_equals(PaymentFields.STATUS, PaymentStatus.RECEIVED)),
+            _query_before(PaymentFields.DATE, today_str),
         )
 
     formula = _build_formula(
@@ -2559,7 +2574,7 @@ def _owner_approvals_snapshot(identity) -> tuple[dict, list[str]]:
     executed: list[dict] = []
 
     try:
-        pending_formula = f"{{{ApprovalsFields.STATUS}}}='\u05de\u05de\u05ea\u05d9\u05df'"
+        pending_formula = _query_equals(ApprovalsFields.STATUS, "ממתין")
         pending = [_fmt_approval(r, identity) for r in _at_list(
             "Approvals",
             pending_formula,
@@ -2597,7 +2612,7 @@ def _owner_recent_receipts() -> tuple[list[dict], list[str]]:
     warnings: list[str] = []
     receipts: list[dict] = []
     try:
-        formula = f"SEARCH('[TMA receipt]', {{{InteractionLogFields.TITLE}}})"
+        formula = _query_contains(InteractionLogFields.TITLE, "[TMA receipt]")
         recs = _at_list(Tables.INTERACTION_LOG, formula, max_records=10)
         for rec in recs:
             f = record_fields(rec)
@@ -2734,8 +2749,7 @@ def _resolve_profile_record_id(user_id: str) -> str | None:
     """
     if not user_id:
         return None
-    safe_user_id = user_id.replace("'", "\\'")
-    formula = f"LOWER({{{ProfileFields.NAME}}}) = LOWER('{safe_user_id}')"
+    formula = _query_equals_ci(ProfileFields.NAME, user_id)
     records = _at_list(Tables.PROFILE, formula, max_records=5)
     return record_id(records[0]) if records else None
 
@@ -3410,7 +3424,7 @@ def activity_feed(identity):
             "sentiment": f.get(BusinessMemoryFields.IMPACT, "")[:120] if f.get(BusinessMemoryFields.IMPACT) else "",
         })
 
-    receipt_formula = f"SEARCH('[TMA receipt]', {{{InteractionLogFields.TITLE}}})"
+    receipt_formula = _query_contains(InteractionLogFields.TITLE, "[TMA receipt]")
     receipt_recs = _at_list(Tables.INTERACTION_LOG, receipt_formula, max_records=limit)
     for rec in receipt_recs:
         f = record_fields(rec)
@@ -3570,7 +3584,7 @@ def get_ventures(identity):
         return jsonify({"error": "forbidden"}), 403
 
     stage = (request.args.get("stage", "") or "").strip()
-    formula = f"{{{VentureFields.STAGE}}}='{stage}'" if stage else ""
+    formula = _query_equals(VentureFields.STAGE, stage) if stage else ""
     recs = _at_list(Tables.VENTURES, formula, max_records=100)
     ventures = [_fmt_venture(r) for r in recs]
     return jsonify({"count": len(ventures), "ventures": ventures})
@@ -3935,7 +3949,11 @@ def _get_active_world_dict() -> dict | None:
     Worlds.Coins_Earned field — Coins_Log is the single source of truth,
     so there's no write-through counter that can drift out of sync.
     """
-    worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=5)
+    worlds = _at_list(
+        Tables.WORLDS,
+        _query_equals(WorldsFields.STATUS, WorldStatus.ACTIVE),
+        max_records=5,
+    )
     if not worlds:
         return None
     if len(worlds) > 1:
@@ -4240,7 +4258,11 @@ def update_checkin_task_status(task_id, identity):
 
 def _get_checkin_record(date_str: str) -> dict | None:
     """One Daily_Checkin record per calendar day — find today's, or None."""
-    recs = _at_list(Tables.DAILY_CHECKIN, f"{{{DailyCheckinFields.DATE}}}='{date_str}'", max_records=1)
+    recs = _at_list(
+        Tables.DAILY_CHECKIN,
+        _query_equals(DailyCheckinFields.DATE, date_str),
+        max_records=1,
+    )
     return recs[0] if recs else None
 
 

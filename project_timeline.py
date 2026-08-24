@@ -10,7 +10,7 @@ import logging
 from datetime import date, timedelta
 
 from tools.airtable_gateway import airtable_create
-from tools.airtable_read_adapter import AirtableReadError, list_records
+from tools.airtable_read_adapter import AirtableReadError, all_of, any_of, equals, list_records
 from tma_api import record_fields
 
 logger = logging.getLogger(__name__)
@@ -207,7 +207,7 @@ def get_timeline_summary() -> dict:
 
     today_str = date.today().isoformat()
     try:
-        formula = "OR(Status='open', Status='in_progress')"
+        formula = any_of(equals("Status", "open"), equals("Status", "in_progress"))
         records = list_records(
             TIMELINE_TABLE,
             formula,
@@ -245,7 +245,7 @@ def get_timeline_summary() -> dict:
         try:
             done_records = list_records(
                 TIMELINE_TABLE,
-                f"AND(Status='done', Due='{today_str}')",
+                all_of(equals("Status", "done"), equals("Due", today_str)),
                 max_records=None,
                 paginate=False,
                 timeout=10,

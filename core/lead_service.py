@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from airtable_schema import LeadFields
-from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, list_records
+from tools.airtable_read_adapter import AirtableReadError, all_of, contains, equals, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -272,13 +272,11 @@ def find_existing_lead(name: str, phone: str) -> Optional[str]:
 
 
 def _search_formulas(name: str, phone: str) -> list[str]:
-    safe_name = escape_formula_value(name)
     formulas: list[str] = []
     if phone:
-        safe_phone = escape_formula_value(phone)
-        formulas.append(f"AND(SEARCH('{safe_name}', {{Name}}), {{phone}}='{safe_phone}')")
-        formulas.append(f"{{phone}}='{safe_phone}'")
-    formulas.append(f"SEARCH('{safe_name}', {{Name}})")
+        formulas.append(all_of(contains("Name", name), equals("phone", phone)))
+        formulas.append(equals("phone", phone))
+    formulas.append(contains("Name", name))
     return formulas
 
 

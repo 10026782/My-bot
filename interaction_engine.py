@@ -340,9 +340,9 @@ def is_duplicate(raw_id: str) -> bool:
     from airtable_schema import Tables, InteractionLogFields
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
-        safe = raw_id.replace("'", "\\'")
+        from tools.airtable_read_adapter import contains
         raw = airtable_get(Tables.INTERACTION_LOG,
-                           f"SEARCH('{safe}',{{{InteractionLogFields.PARTICIPANTS}}})")
+                           contains(InteractionLogFields.PARTICIPANTS, raw_id))
         return raw and "אין רשומות" not in raw and "❌" not in raw
     except Exception:
         return False
@@ -355,9 +355,13 @@ def search_business_memory(query: str, domain: str = "") -> str:
     from airtable_schema import Tables, InteractionLogFields
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
-        formula = f"SEARCH('{query}',{{{InteractionLogFields.SUMMARY}}})"
+        from tools.airtable_read_adapter import all_of, contains
+        formula = contains(InteractionLogFields.SUMMARY, query)
         if domain:
-            formula = f"AND(SEARCH('{query}',{{{InteractionLogFields.SUMMARY}}}),SEARCH('{domain}',{{{InteractionLogFields.PARTICIPANTS}}}))"
+            formula = all_of(
+                formula,
+                contains(InteractionLogFields.PARTICIPANTS, domain),
+            )
         raw = airtable_get(Tables.INTERACTION_LOG, formula)
         if not raw or "אין רשומות" in raw:
             return f"לא נמצאו רשומות עבור: {query}"
