@@ -5,10 +5,10 @@ ARCHITECTURE SPEC — APPROVED FOR IMPLEMENTATION PLANNING
 NOT IMPLEMENTED
 NOT RUNTIME VERIFIED
 
-Created: 2026-08-25  
-Last Updated: 2026-08-25  
-Planning baseline SHA: `7e3dcf94e76a33e9e1bb5b0ad3570fb1c7919703`  
-Track: D-STRUCTURE  
+Created: 2026-08-25
+Last Updated: 2026-08-25
+Planning baseline SHA: `7e3dcf94e76a33e9e1bb5b0ad3570fb1c7919703`
+Track: D-STRUCTURE
 Audit: #23 Cost Audit
 
 This document is a target architecture and implementation-planning boundary. It does not claim that the target architecture exists in runtime.
@@ -196,6 +196,8 @@ One logical operation may have zero, one, multiple Agent, retry, or fallback cal
 
 Telemetry producer failure is fail-soft for ordinary business execution but must mark an observability gap. Telemetry incompleteness blocks promotion to enforcement.
 
+Historical `usage_events` remain queryable after additive attribution changes. New attribution dimensions must not make old rows unreadable; rows without those dimensions are represented explicitly as legacy/unknown, never guessed.
+
 ## 16. Pricing Authority
 
 `core/model_pricing.py` is the canonical target pricing authority. Legacy private pricing tables are transitional only. Provider/model pricing changes do not change capability identity.
@@ -229,7 +231,16 @@ One canonical policy controls mode. Legacy flags are migration adapters only.
 
 ## 20. Emergency Stop Contract
 
-Automatic cost stop and manual operator stop are distinct authorities. Only the unified cost-policy authority may trigger an automatic cost stop; manual owner/admin control remains separately authorized.
+Automatic cost stop and manual operator stop/clear are distinct authorities. The unified watchdog alone owns the automatic cost-based stop. Manual stop and clear are owned by the existing authorized owner/admin control boundary through the durable `EmergencyStopManager`; TMA/admin interfaces are control surfaces, not the authority.
+
+The durable manual boundary is:
+
+```text
+authorized owner/admin operation → EmergencyStopManager
+→ durable verified emergency-stop state
+```
+
+Manual and automatic sources remain distinguishable. Automatic policy cannot silently clear a manual stop. Manual clear requires authorization and durable verification. Reason, source, and operation evidence remain auditable. The watchdog does not own manual owner control.
 
 The automatic sequence is:
 
@@ -247,6 +258,8 @@ Without a verified write, the system must not claim enforcement succeeded.
 - Unknown pricing: explicit unknown/conservative estimate; never silent zero.
 - Hard-stop write/readback failure: never report enforcement success.
 - Executor failure: never silently escalate `ExecutionClass`.
+- Capability-resolution failure: an unresolved bounded business action fails closed; ambiguous input may return `CLARIFY`; another ExecutionClass requires a new explicit routing decision; no executor may silently rediscover capability ownership.
+- Watchdog, aggregation, or policy execution failure: never interpret failure as within-threshold usage, never report successful enforcement, and never clear durable stop state. The failure remains visible/auditable. Ordinary deterministic business execution is not globally blocked solely by a failed reporting/watchdog cycle unless a separate explicit safety policy requires it.
 
 ## 22. Promotion Gates
 
@@ -272,9 +285,12 @@ IMPLEMENT → SHADOW → RECONCILE → POST-TC MEASURE → CALIBRATE
 
 - `cost_monitor.py`: migration adapter, then retire private counters and private pricing authority.
 - `core/cost_watchdog.py`: reporting/migration adapter, then retire JSONL/count authority.
-- `AI_Usage_Daily` and similar stores: reporting projections only; never cost truth, threshold authority, or enforcement authority.
+- `AI_Usage_Daily` and similar stores: rebuildable reporting projections only; never raw usage truth, pricing authority, threshold authority, or enforcement authority.
 - Legacy raw-text approval: retire after canonical captured-contract coverage exists.
 - Legacy `Handler` values: remain compatibility metadata during additive migration.
+- Pre-existing ActionContracts without `capability_id`, capability version/reference, `ExecutionClass`, or capability-level attribution are explicitly identifiable as legacy. Their historical records remain readable for audit/lifecycle purposes.
+- Missing capability metadata is never reconstructed by rerouting original natural-language text. A legacy pending contract may execute only under an explicit compatibility rule that proves its existing tool and normalized-payload semantics safely; otherwise it fails closed or requires a new proposal and approval. No legacy contract resolves silently against the latest capability.
+- Historical usage rows missing new business-attribution dimensions remain queryable and are represented as legacy/unknown. Reporting projections can be rebuilt from canonical ledger/aggregation data.
 
 ## 24. Migration Order
 
@@ -379,20 +395,20 @@ Every result is labeled `STATIC VERIFIED`, `RUNTIME VERIFIED`, or `PRODUCTION VE
 
 Each implementation slice must state purpose, owned contract, verified likely files/areas, cross-track dependency, required tests/evidence, and rollback/compatibility constraint. The following phases are dependency-ordered planning slices, not implementation:
 
-| Phase | Scope | Likely verified areas | Ownership note |
-|---|---|---|---|
-| A | Capability semantics and compatibility | `core/router`, capability/tool contracts | #23 boundary |
-| B | Capability-resolution handoff | router and Turn Coordinator boundaries | #24 dependency-only where TC-owned |
-| C | Captured-operation capability freeze | `core/action_gateway.py`, ActionContract repository | #23 boundary; approval dependency |
-| D | Approval-continuation migration | approval handlers and continuation stores | Approval-owning track dependency |
-| E | Canonical cost attribution | `core/usage_telemetry.py`, paid-call producers | #23 boundary |
-| F | Canonical paid-path coverage | Agent and paid provider call sites | #23 boundary |
-| G | Pricing consolidation and aggregation | `core/model_pricing.py`, usage query boundary | #23 boundary |
-| H | Unified watchdog `SHADOW` | `cost_monitor.py`, `core/cost_watchdog.py` adapters | #23 boundary |
-| I | Measurement and reconciliation | runtime telemetry and provider billing evidence | #23 boundary |
-| J | `ALERT` and canary | watchdog policy and stop boundary | #23 boundary |
-| K | `ENFORCE` | paid-path gates and `core/emergency_stop.py` | #23 boundary, gated by all evidence |
-| L | Legacy authority retirement | legacy watchdog/counter/reporting reachability | #23 boundary after reachability proof |
+| Phase | Scope / verified areas | Ownership / required evidence | Compatibility constraint | Rollback constraint |
+|---|---|---|---|---|
+| A | Capability semantics; `core/router`, capability/tool contracts | #23; static contract and resolution tests | Preserve `Handler` and existing route behavior | Remove additive metadata without Agent fallback |
+| B | Capability-resolution handoff; router/Turn Coordinator boundaries | #24 dependency-only where TC-owned; route-decision evidence | Existing router remains temporary authority | Revert handoff to the existing router; preserve evidence |
+| C | Captured-operation freeze; `core/action_gateway.py`, ActionContract repository | #23; lifecycle and freeze evidence | Read and safely classify legacy contracts | Revert additive fields without raw-text rerouting |
+| D | Approval continuation; approval handlers and stores | Approval-owning track; continuation and approval evidence | Preserve legacy approval behavior until coverage exists | Restore prior continuation path without duplicate execution |
+| E | Cost attribution; `core/usage_telemetry.py`, paid-call producers | #23; telemetry rows and correlation evidence | Historical rows remain queryable | Disable additive attribution while retaining raw events |
+| F | Paid-path coverage; Agent and provider call sites | #23; coverage and zero-call evidence | Existing provider calls remain operational | Remove coverage changes without bypassing existing safety boundaries |
+| G | Pricing/aggregation; `core/model_pricing.py`, usage query boundary | #23; aggregation comparison and pricing reconciliation | Preserve legacy pricing/reporting reads during migration | Fall back to prior reporting adapter, never a second authority |
+| H | Watchdog `SHADOW`; watchdog adapters | #23; SHADOW decision evidence | No policy action or enforcement activation | Disable SHADOW and retain ledger/audit evidence |
+| I | Measurement/reconciliation; telemetry and billing evidence | #23; billing reconciliation and post-TC measurement | No threshold calibration from incomplete data | Discard incomplete measurement, preserve source events |
+| J | `ALERT`/canary; watchdog policy and stop boundary | #23; alert and canary/rollback proof | Existing manual control remains independent | Return to SHADOW; preserve stop evidence |
+| K | `ENFORCE`; paid-path gates and `core/emergency_stop.py` | #23; stop write/readback and coverage evidence | Activate only after every promotion gate | Revert to ALERT/SHADOW; never clear manual stop silently |
+| L | Legacy retirement; watchdog/counter/reporting reachability | #23; retirement reachability audit | Retire only after canonical coverage and queryability proof | Restore adapters without duplicate authority or lost evidence |
 
 No phase authorizes bundling all work into one PR.
 
