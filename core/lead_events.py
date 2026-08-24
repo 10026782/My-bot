@@ -9,7 +9,7 @@ import json
 import logging
 import os
 
-import httpx
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -36,23 +36,20 @@ class LeadEventStore:
             return []
 
         try:
-            url    = f"https://api.airtable.com/v0/{_AT_BASE}/{_TABLE}"
-            params: dict = {"maxRecords": 500}
+            formula = ""
             if domain:
-                params["filterByFormula"] = f"FIND('{domain}', ARRAYJOIN({{keywords}}))"
+                formula = f"FIND('{domain}', ARRAYJOIN({{keywords}}))"
 
-            r = httpx.get(
-                url,
-                headers={"Authorization": f"Bearer {_AT_KEY}"},
-                params=params,
+            records = list_records(
+                _TABLE,
+                formula,
+                max_records=500,
+                paginate=False,
                 timeout=10,
             )
-            if r.status_code != 200:
-                logger.warning(f"[LeadEventStore] Airtable {r.status_code}: {r.text[:120]}")
-                return []
 
             events = []
-            for rec in r.json().get("records", []):
+            for rec in records:
                 f = rec.get("fields", {})
                 # נסה לחלץ keywords מ-JSON
                 try:
@@ -72,6 +69,14 @@ class LeadEventStore:
             logger.info(f"[LeadEventStore] loaded {len(events)} events (domain={domain or 'all'})")
             return events
 
+        except AirtableReadError as e:
+            if e.status_code is not None:
+                logger.warning(
+                    f"[LeadEventStore] Airtable {e.status_code}: {e.response_text[:120]}"
+                )
+            else:
+                logger.error(f"[LeadEventStore] get_all error: {e.cause or e}")
+            return []
         except Exception as e:
             logger.error(f"[LeadEventStore] get_all error: {e}")
             return []

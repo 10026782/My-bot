@@ -570,6 +570,7 @@ def at_list_by_formula(
     max_records: int | str | None = 100,
     *,
     fields: list[str] | None = None,
+    sort: list[dict[str, str]] | None = None,
     paginate: bool = False,
     timeout: float = 10,
 ) -> list[dict]:
@@ -589,6 +590,12 @@ def at_list_by_formula(
         params["maxRecords"] = max_records
     if fields:
         params["fields[]"] = fields
+    if sort:
+        for index, item in enumerate(sort):
+            if "field" in item:
+                params[f"sort[{index}][field]"] = item["field"]
+            if "direction" in item:
+                params[f"sort[{index}][direction]"] = item["direction"]
 
     records: list[dict] = []
     while True:
