@@ -91,6 +91,54 @@ def _fresh_entry():
 
 
 # ══════════════════════════════════════════════════════════════════
+# 0b. Live Meta API transport boundary and contract preservation
+# ══════════════════════════════════════════════════════════════════
+print("\n── live metadata fetch via gateway ─────")
+
+_LIVE_METADATA = {
+    "tables": [{
+        "id": "tblLIVE",
+        "name": "Leads",
+        "fields": [{
+            "id": "fldSTATUS",
+            "name": "Status",
+            "type": "singleSelect",
+            "options": {"choices": [{"name": "New"}, {"name": "Won"}]},
+        }],
+    }],
+}
+
+with patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "base"}), \
+     patch("tools.airtable_gateway.get_base_metadata", return_value=_LIVE_METADATA) as mock_metadata:
+    live = RuntimeSchemaProvider()._fetch_live("Leads")
+    chk("live fetch: uses gateway metadata primitive", mock_metadata.call_args.kwargs == {"timeout": 15})
+    chk("live fetch: table id preserved", live["table_id"] == "tblLIVE")
+    chk("live fetch: field type preserved", live["fields"]["Status"]["type"] == "singleSelect")
+    chk("live fetch: select choices preserved", live["fields"]["Status"]["choices"] == ["New", "Won"])
+
+with patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "base"}), \
+     patch("tools.airtable_gateway.get_base_metadata", return_value={"tables": []}):
+    chk("live fetch: missing requested table returns None", RuntimeSchemaProvider()._fetch_live("Leads") is None)
+
+with patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "base"}), \
+     patch("tools.airtable_gateway.get_base_metadata", return_value=None):
+    chk("live fetch: malformed payload returns None", RuntimeSchemaProvider()._fetch_live("Leads") is None)
+
+for _live_failure in (RuntimeError("HTTP 500"), OSError("network down"), ValueError("bad payload")):
+    with patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "base"}), \
+         patch("tools.airtable_gateway.get_base_metadata", side_effect=_live_failure):
+        chk(
+            f"live fetch: {_live_failure.__class__.__name__} is fail-soft",
+            RuntimeSchemaProvider()._fetch_live("Leads") is None,
+        )
+
+with patch.dict("os.environ", {}, clear=True), \
+     patch("tools.airtable_gateway.get_base_metadata") as mock_missing_credentials:
+    chk("live fetch: missing credentials returns None", RuntimeSchemaProvider()._fetch_live("Leads") is None)
+    chk("live fetch: missing credentials skips gateway", not mock_missing_credentials.called)
+
+
+# ══════════════════════════════════════════════════════════════════
 # 1. TTL valid → no Meta API call at all
 # ══════════════════════════════════════════════════════════════════
 print("\n── TTL valid — no Meta API call ──────")
