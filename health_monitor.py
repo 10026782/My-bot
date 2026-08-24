@@ -10,19 +10,19 @@ _AIRTABLE_TIMEOUT = 3  # seconds per real check
 def _check_airtable() -> tuple[bool, str]:
     """Attempt a real Airtable read. Returns (ok, detail)."""
     try:
-        import httpx
         base = os.environ.get("AIRTABLE_BASE_ID", "")
         key  = os.environ.get("AIRTABLE_API_KEY", "")
         if not base or not key:
             return False, "missing credentials"
-        r = httpx.get(
-            f"https://api.airtable.com/v0/meta/bases/{base}/tables",
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=_AIRTABLE_TIMEOUT,
-        )
-        if r.status_code == 200:
-            return True, "ok"
-        return False, f"HTTP {r.status_code}"
+        from tools.airtable_gateway import AirtableLookupError, get_base_metadata
+
+        get_base_metadata(timeout=_AIRTABLE_TIMEOUT)
+        return True, "ok"
+    except AirtableLookupError as e:
+        if e.status_code is not None:
+            return False, f"HTTP {e.status_code}"
+        cause = e.cause
+        return False, f"error: {type(cause or e).__name__}"
     except Exception as e:
         return False, f"error: {type(e).__name__}"
 
