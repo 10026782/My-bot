@@ -59,48 +59,57 @@ _TOOLS_IMPORT_RE = re.compile(
 )
 _CRM_IMPORT_RE = re.compile(r"^\s*(?:from\s+crm\s+import\b|import\s+crm\b)")
 
-# Known offenders as of 2026-07-03 (file relative to repo root, line, module).
+# Baseline rebased on 2026-08-24 (Track D-Structure Audit #7): all 43 entries
+# known as of 2026-07-03 were individually re-verified against current
+# origin/main. 41 were still-live direct-import bypass sites (20 unchanged,
+# 21 at shifted line numbers from unrelated code growth elsewhere in their
+# files); 2 were genuinely resolved (furniture_lead_funnel.py:152 — import
+# removed entirely; inbound_handler.py:91 — consolidated into the existing
+# shared _airtable_get() helper, already covered by inbound_handler.py:34)
+# and are dropped here. 8 additional direct-import sites found during this
+# re-verification are NOT in this baseline — they are genuinely new since
+# 2026-07-03 and are left to surface as WARN_NEW for separate triage, not
+# silently accepted. Full history of the 2026-07-03 entries and this
+# re-verification is preserved in git log, not duplicated here as comments.
 BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("abandoned_lead_worker.py", 101, "tools.airtable_tools"),
     ("abandoned_lead_worker.py", 246, "tools.airtable_tools"),
-    ("ad_attribution.py", 168, "tools.airtable_tools"),
-    ("ad_attribution.py", 188, "tools.airtable_tools"),
-    ("ad_attribution.py", 355, "tools.airtable_tools"),
+    ("ad_attribution.py", 169, "tools.airtable_tools"),
+    ("ad_attribution.py", 196, "tools.airtable_tools"),
+    ("ad_attribution.py", 378, "tools.airtable_tools"),
     ("audience_intelligence.py", 136, "tools.airtable_tools"),
-    ("cmd_decision.py", 263, "tools.contact_resolver"),
-    ("cmd_update.py", 251, "tools.airtable_tools"),
+    ("cmd_decision.py", 267, "tools.contact_resolver"),
+    ("cmd_update.py", 548, "tools.airtable_tools"),
     ("core/lead_buffer.py", 132, "tools.airtable_tools"),
     ("data_engines.py", 82, "tools.airtable_tools"),
     ("data_engines.py", 144, "tools.airtable_tools"),
     ("data_engines.py", 203, "tools.airtable_tools"),
-    ("decision_ports.py", 88, "tools.contact_resolver"),
+    ("decision_ports.py", 91, "tools.contact_resolver"),
     ("drive_adapter.py", 19, "tools.google_tools"),
     ("email_inbound.py", 82, "tools.google_tools"),
-    ("furniture_lead_funnel.py", 152, "tools.airtable_tools"),
     ("inbound_handler.py", 34, "tools.airtable_tools"),
-    ("inbound_handler.py", 91, "tools.airtable_tools"),
-    ("inbound_handler.py", 115, "tools.airtable_tools"),
+    ("inbound_handler.py", 102, "tools.airtable_tools"),
     ("interaction_engine.py", 102, "tools.calendar_tools"),
-    ("interaction_engine.py", 287, "tools.airtable_tools"),
-    ("interaction_engine.py", 327, "tools.airtable_tools"),
+    ("interaction_engine.py", 304, "tools.airtable_tools"),
     ("interaction_engine.py", 342, "tools.airtable_tools"),
-    ("interaction_engine.py", 370, "tools.airtable_tools"),
-    ("interaction_engine.py", 550, "tools.calendar_tools"),
-    ("lead_capture.py", 130, "tools.airtable_tools"),
-    ("lead_capture.py", 210, "tools.airtable_tools"),
+    ("interaction_engine.py", 357, "tools.airtable_tools"),
+    ("interaction_engine.py", 385, "tools.airtable_tools"),
+    ("interaction_engine.py", 565, "tools.calendar_tools"),
+    ("lead_capture.py", 131, "tools.airtable_tools"),
+    ("lead_capture.py", 211, "tools.airtable_tools"),
     ("lead_memory.py", 167, "tools.airtable_tools"),
-    ("providers/airtable_shim.py", 18, "tools.airtable_tools"),
-    ("session_store.py", 308, "tools.airtable_tools"),
-    ("session_store.py", 396, "tools.airtable_tools"),
-    ("session_store.py", 442, "tools.airtable_tools"),
-    ("session_store.py", 494, "tools.airtable_tools"),
+    ("providers/airtable_shim.py", 17, "tools.airtable_tools"),
+    ("session_store.py", 502, "tools.airtable_tools"),
+    ("session_store.py", 614, "tools.airtable_tools"),
+    ("session_store.py", 645, "tools.airtable_tools"),
+    ("session_store.py", 705, "tools.airtable_tools"),
     ("tenant_provisioner.py", 160, "tools.airtable_tools"),
     ("tenant_provisioner.py", 225, "tools.airtable_tools"),
     ("tenant_provisioner.py", 252, "tools.airtable_tools"),
-    ("tenant_provisioner.py", 280, "tools.airtable_tools"),
-    ("voice_adapter.py", 233, "tools.airtable_tools"),
+    ("tenant_provisioner.py", 283, "tools.airtable_tools"),
+    ("voice_adapter.py", 242, "tools.airtable_tools"),
     ("core/lead_recovery.py", 76, "crm"),
-    ("lead_conversion.py", 21, "crm"),
+    ("lead_conversion.py", 20, "crm"),
     ("payment_reminder.py", 98, "crm"),
     ("payment_reminder.py", 167, "crm"),
     ("tools/contact_resolver.py", 133, "crm"),
