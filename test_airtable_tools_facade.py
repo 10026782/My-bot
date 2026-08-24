@@ -189,7 +189,7 @@ def test_record_level_http_is_absent_from_legacy_module():
             body = ast.get_source_segment(source, node) or ""
             if "httpx.get(" in body:
                 direct_get_functions.append(node.name)
-    assert direct_get_functions == ["airtable_get_schema"]
+    assert direct_get_functions == []
     assert "list_records_page" in source
 
 
