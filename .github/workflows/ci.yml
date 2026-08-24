@@ -183,6 +183,9 @@ jobs:
       - name: Dispatcher bypass audit (blocking)
         run: python tools/audit_dispatcher_bypass.py
 
+      - name: Writer / authority registration guard (blocking)
+        run: python tools/audit_writer_authority_registration.py
+
       - name: pytest collect
         run: |
           python -m pytest --collect-only -q \
