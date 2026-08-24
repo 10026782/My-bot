@@ -211,6 +211,24 @@
       ]
     },
     {
+      "id": "AIRTABLE_READ_INFRASTRUCTURE",
+      "policy_version": 1,
+      "description": "The public, read-only Airtable infrastructure boundary used by business modules; provider reads and error normalization remain owned by the existing Tools layer.",
+      "path_patterns": [
+        "tools/airtable_read_adapter.py"
+      ],
+      "runtime_consumed": true,
+      "authority": false,
+      "eligible_target": "layer.tools",
+      "target_field": "code_paths",
+      "auto_registration_allowed": true,
+      "classification_when_matched": "AUTO_MAINTENANCE_ELIGIBLE",
+      "notes": [
+        "Exact-file policy: the read adapter is registered under the existing layer.tools node because it exposes Airtable provider reads and normalizes provider errors without owning tool identity, approval, or write authority.",
+        "The exact path is deliberate; a different Airtable module requires its own ownership review rather than inheriting this decision by directory or naming convention."
+      ]
+    },
+    {
       "id": "TMA_FEATURE_SCREEN",
       "policy_version": 1,
       "description": "Stateful TMA feature screen components with API integration, state management, and side effects -- owned by the TMA layer.",

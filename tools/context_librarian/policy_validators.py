@@ -129,6 +129,25 @@ def _validate_external_execution_runtime(repo_root: Path, path: str) -> bool | N
     return bool(markers) and all(marker in text for marker in markers)
 
 
+def _validate_airtable_read_infrastructure(repo_root: Path, path: str) -> bool | None:
+    """Prove the exact read-only Airtable infrastructure boundary."""
+    text = _read_text(repo_root, path)
+    if text is None:
+        return None
+    required = (
+        "from tools.airtable_gateway import at_list_by_formula",
+        "from tools.airtable_gateway import AirtableLookupError",
+        "def list_records(",
+        "class AirtableReadError(",
+    )
+    forbidden = (
+        "dispatch_tool(",
+        "ActionGateway(",
+        "airtable_gateway.write",
+    )
+    return all(marker in text for marker in required) and not any(marker in text for marker in forbidden)
+
+
 VALIDATORS: dict[str, Callable[[Path, str], bool | None]] = {
     "STAGING_VERIFICATION_F15": _validate_staging_verification,
     "STAGING_VERIFICATION_APPROVALS_BUG_FAMILY": _validate_staging_verification,
@@ -138,6 +157,7 @@ VALIDATORS: dict[str, Callable[[Path, str], bool | None]] = {
     "EXTERNAL_RECOMMENDATION_CATALOG_TEST": _validate_external_recommendation_catalog,
     "CROSS_LAYER_SUPPORTING_METADATA": _validate_cross_layer_supporting_metadata,
     "EXTERNAL_EXECUTION_RUNTIME": _validate_external_execution_runtime,
+    "AIRTABLE_READ_INFRASTRUCTURE": _validate_airtable_read_infrastructure,
 }
 
 
