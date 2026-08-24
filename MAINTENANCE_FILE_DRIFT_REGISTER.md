@@ -37,6 +37,8 @@ Status vocabulary: OPEN · DEFERRED · UNKNOWN · DOC_DRIFT · SUPERSEDED · NEE
 
 ### F3 — Live tooling ownership snapshot (for future audits #7 CLI/Admin Tools and #12 File/Folder Ownership)
 
+**#7 CLOSED 25/08/2026** — see `docs/governance/HORIZON.md` §CLOSED and `CHANGE_CONTROL_LOG.md`. `diagnose_airtable.py`'s no-`__main__`-guard note below is **SUPERSEDED** (fixed by PR #930, `949e66b`, merged before this cluster's baseline SHA — original text preserved per this register's own rule).
+
 - **Manual ops/governance CLIs (LIVE):** `audit_truth_gate.py`, `daily_git_audit.py` (+ library `branch_cemetery_cleanup.py`), `system_registry_audit.py` (generates tracked `reports/system_registry_report.{json,md}`), `scan_ghost_buttons.py`, `diagnose_airtable.py` (no `__main__` guard — top-level side effects on execution), `contact_merge.py`, `project_timeline.py`, `scripts/classify_contacts_for_airtable.py`, `scripts/render_log_export.py`, `tools/check_airtable_schema_runtime.py`, `tools/dev_registry_reconcile.py`, `tools/smoke_ai_usage_daily_upsert.py` (deliberately CI-excluded manual prod smoke).
 - **CI-invoked (LIVE):** `smoke_tests.py` (blocking), `tools/schema_governance.py` (warning), `tools/audit_dispatcher_bypass.py` + `tools/audit_gateway_bypass.py` + `tools/audit_result_parsing.py` (warning-only), `scripts/run_isolated_regression.py` (+ `regression_matrix.py`, `staging_identity.py` chain), `tools/dev_registry_validator.py` (blocking), context-librarian subcommands + `refresh_after_merge.py`.
 - **Runtime-wired:** scheduler lazy-imports 14 workers (`scheduler.py:22-834`); app.py wires startup/memory/cost/adapters/schema/boss_doctor/cmd_* modules; `cost_monitor.py` imported top-level (`app.py:74`) + watchdog job (`scheduler.py:739`); `gunicorn.conf.py` pins workers=1.
@@ -189,7 +191,7 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #4 Exception Taxonomy follow-up | (none consolidated this pass) |
 | #5 Async/Concurrency follow-up | guards/idempotency lock-before-I/O behavior noted in L(e) |
 | #6 Scheduler follow-up | R-C06-10 (existing), scheduler lazy-import inventory F3 |
-| #7 CLI/Admin Tools | F3 manual CLI list; diagnose_airtable.py no-main-guard note; benchmark_token_estimate.py |
+| #7 CLI/Admin Tools | F3 manual CLI list; diagnose_airtable.py no-main-guard note (**SUPERSEDED**, PR #930); benchmark_token_estimate.py — **#7 CLOSED 25/08/2026, see `docs/governance/HORIZON.md`; `benchmark_token_estimate.py`'s own orphan-suspect status remains routed to #21, unaffected by #7's closure** |
 | #8 Test Gap | tc8_test_repo_stub/emergency_stop_test_support root placement; test-only-import modules F1 |
 | #9 Mock Fidelity | (none consolidated this pass) |
 | #10 Dependency Risk | (none consolidated this pass) |

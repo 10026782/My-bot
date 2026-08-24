@@ -1,0 +1,94 @@
+# HORIZON — Program Management Map
+
+**Role:** management-level status map across the D-Structure numbered audit
+track program (#1–#24) referenced by `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
+"Future-audit cross-reference" table. Not an audit report — full bodies and
+evidence live in each track's own audit/remediation documents; this file
+records only CLOSED / ACTIVE / DEFERRED / handoff status at a glance.
+Reconcile this file rather than duplicating audit content into it.
+
+**Distinct from** `docs/governance/HORIZON_STATUS_AND_NEXT_STEPS_AUDIT_20260821.md`
+— a one-off dated Truth-Reset audit for an unrelated H0–H9 finding series
+(deployed-SHA evidence, Command Center, N18 terminal-result chain, H4 media
+gates). That document is historical and is not the D-Structure track map.
+This file (`HORIZON.md`, no date suffix) is the persistent, update-in-place
+management map; no canonical version of it existed before this entry — see
+the closure PR that created it for the search that established this.
+
+**Last updated:** 25/08/2026
+**Truth Reset SHA at last update:** `b5eb29f37acd3fa8445738bde35f2ad73bfd6483`
+
+---
+
+## CLOSED
+
+- **#7 CLI / Admin Tools** — CLOSED (25/08/2026). Seven PRs (#936, #939, #940,
+  #943, #944, #945, #946); no real CURRENT GAP remains under #7 ownership.
+  Full record: `CHANGE_CONTROL_LOG.md` ("Track D-Structure Audit #7 — CLI /
+  Admin Tools closure"). `diagnose_airtable.py` import safety is also CLOSED
+  / VERIFIED (its `__main__` guard exists on current main — PR #930, merged
+  before this track's work started).
+
+- **#21 Orphan Artifact** — CLOSED for the identified orphan candidates.
+  Evidence: `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`.
+
+- **#12 File / Folder Ownership** — CLOSED. Evidence gathered and verified
+  during this reconciliation pass (not previously written up anywhere): 7 of
+  the 8 modules in `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s F1 cluster —
+  `worker.py`, `knowledge_engine.py`, root `router.py`, `lead_qualifier.py`,
+  `memory.py`, `profile.py`, `creative_generator.py` — have been removed from
+  `origin/main` (PRs #909, #911, #915, #919, #922, #931, plus an earlier
+  worker-module removal). The 8th, `tenant_provisioner.py`, remains by
+  deliberate, already-documented owner-parked decision (test-only import,
+  "needs to stay parked — business/model decision") — not a live gap.
+  **Flag, not fixed here:** `MAINTENANCE_DEFERRED_REGISTER.md`'s §E-F row and
+  §"Track F follow-up closure", and `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
+  §F1 table and §F3, still read `OPEN` / `NEEDS_PRODUCT_DECISION` for this
+  cluster as of their last edit — stale relative to the removals above.
+  Reconciling those two documents' full row content is its own dedicated
+  docs pass, out of Track #7's scope; recorded here so it isn't lost.
+
+## ACTIVE
+
+None currently active in the Track-A sequence.
+
+**Program structure:** `#7 → #13`, `#22 → #23`. D-CORE is a separate,
+independently verified track (see `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`
+— `COMPLETE / READY TO FREEZE`, formal freeze an owner decision).
+
+**Next Track-A item: #13 Naming Consistency.** Not started, not active — do
+not mark it complete or in-progress beyond this. Known routed input for #13
+(from `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s cross-reference table): I1–I3,
+I5, I7–I10, K10.
+
+## CROSS-TRACK / HANDOFFS
+
+From #7's triage of `audit_dispatcher_bypass.py`'s `WARN_NEW` findings —
+routed to their owning tracks, not remediated by #7, not counted as #7 debt:
+
+| Finding | Routed to |
+|---|---|
+| `core/google_drive_artifact_store.py:32` | Money Printer external-tools audit |
+| `core/memory_retrieval.py:107` | Memory Retrieval / Episodic Memory (also relevant to Provider Portability / architecture conformance) |
+| `core/runtime_schema_provider.py:204` | Airtable Schema Governance pipeline |
+| `core/turn_coordinator_runtime.py:73` | Turn Coordinator architecture (also relevant to Provider Portability / architecture conformance) |
+
+**Accepted / legitimate, no remediation required:** `scripts/verify_f15_staging.py:143`
+— staging-only gated CLI (`F15_STAGING_NON_PRODUCTION`/`F15_STAGING_ENVIRONMENT`).
+Continued visibility as `WARN_NEW` is intentional unless a later scanner-policy
+decision changes that.
+
+**Global hygiene, not track debt:** `origin/claude/epic-volta-wv446g` remains
+unmerged and blocks `pre_session_gate.sh` for any new branch. Unrelated to
+#7; recorded here only so it isn't mistaken for #7 follow-up.
+
+## ARCHITECTURE GOVERNANCE
+
+- **Legacy may remain temporarily. New code must converge.**
+- **Approved future architecture creates a no-new-debt rule for new code,
+  even before legacy migration is complete.**
+- **Planning documents ≠ active execution/work documents.**
+
+(Full Architecture Intent & Conformance Audit and the future
+No-New-Architectural-Debt enforcement program are separate work — not
+duplicated here. This is a management-level reference only.)
