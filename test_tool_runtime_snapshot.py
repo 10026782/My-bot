@@ -8,11 +8,13 @@ import business_tool_registry
 from business_tool_registry import find_recommended_tools, get_playbook, list_tools, maybe_recommend
 from tools import tool_runtime_snapshot
 from tools.tool_runtime_snapshot import (
+    LegacySnapshotWriteBlocked,
     SnapshotLoadError,
     SnapshotValidationError,
     generate_snapshot,
     load_tool_runtime_snapshot,
     validate_snapshot,
+    write_snapshot,
 )
 
 
@@ -124,3 +126,24 @@ def test_regenerating_snapshot_changes_runtime_output(tmp_path):
     finally:
         business_tool_registry.TOOL_REGISTRY = seed
         tool_runtime_snapshot.DEFAULT_PATH = original_path
+
+
+def test_legacy_generator_cannot_silently_overwrite_canonical_artifact():
+    """tools/generate_tool_runtime_snapshot_from_db.py is the sole canonical
+    generator for DEFAULT_PATH (Track #7 generator-authority remediation).
+    This module's write_snapshot() must fail closed, not silently write,
+    when its target resolves to the canonical artifact -- whether reached
+    via the default argument or an explicit equal path."""
+    canonical = tool_runtime_snapshot.DEFAULT_PATH
+    before = canonical.read_bytes()
+    with pytest.raises(LegacySnapshotWriteBlocked):
+        write_snapshot(source_revision="working-tree")
+    with pytest.raises(LegacySnapshotWriteBlocked):
+        write_snapshot(canonical, source_revision="working-tree")
+    assert canonical.read_bytes() == before
+
+
+def test_legacy_generator_still_writes_non_canonical_paths(tmp_path):
+    target = tmp_path / "runtime_snapshot.json"
+    write_snapshot(target, source_revision="test-legacy-non-canonical")
+    assert target.exists()
