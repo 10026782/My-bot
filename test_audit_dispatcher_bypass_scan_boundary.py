@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""tools/audit_dispatcher_bypass.py must scan tracked *.py files only
-(Track D-Structure #7 — dispatcher-bypass scan-boundary remediation).
+"""tools/audit_dispatcher_bypass.py must scan tracked *.py files only, and
+must exclude only exact verified-sanctioned call sites, never a whole file
+(Track D-Structure #7 — dispatcher-bypass scan-boundary and scanner
+false-positive remediation).
 
 Builds a scratch git repo per test so untracked files, non-dot-prefixed
 nested checkouts, and dot-prefixed leftover worktrees can never leak into
@@ -105,6 +107,52 @@ def test_nested_checkout_is_not_discovered(scratch_repo: Path) -> None:
 def test_tracked_bypass_is_still_detected(scratch_repo: Path) -> None:
     findings = adb.scan()
     assert ("bypass_fixture.py", 1, "tools.airtable_tools") in findings
+
+
+def test_sanctioned_call_site_filters_only_the_exact_tuple(
+    scratch_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The filter must be exact-tuple, not whole-file: a second, unrelated
+    bypass-shaped import in the same sanctioned file must still surface."""
+    tools_dir = scratch_repo / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "approval_actions.py").write_text(
+        "def a():\n"
+        "    import crm\n"          # line 2 — will be marked sanctioned
+        "def b():\n"
+        "    import crm\n"          # line 4 — must still be reported
+    )
+    _git(scratch_repo, "add", "tools/approval_actions.py")
+    _git(scratch_repo, "commit", "-q", "-m", "approval_actions fixture")
+
+    monkeypatch.setattr(
+        adb, "_SANCTIONED_CALL_SITES",
+        frozenset({("tools/approval_actions.py", 2, "crm")}),
+    )
+    findings = adb.scan()
+    assert ("tools/approval_actions.py", 2, "crm") not in findings
+    assert ("tools/approval_actions.py", 4, "crm") in findings
+
+
+def test_real_sanctioned_call_sites_are_never_reported(scratch_repo: Path) -> None:
+    """The two real sites this constant currently covers must never appear
+    as findings, even though _is_allowed()'s filename-substring heuristic
+    alone would not have excluded them (see the constant's own provenance
+    comment for the verified caller-graph evidence)."""
+    tools_dir = scratch_repo / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "approval_actions.py").write_text(
+        "\n" * 364 + "            import crm\n"
+    )
+    (tools_dir / "schema_snapshot.py").write_text(
+        "\n" * 285 + "    from tools.airtable_tools import airtable_get_records\n"
+    )
+    _git(scratch_repo, "add", "tools/approval_actions.py", "tools/schema_snapshot.py")
+    _git(scratch_repo, "commit", "-q", "-m", "real sanctioned call site fixtures")
+
+    findings = adb.scan()
+    assert ("tools/approval_actions.py", 365, "crm") not in findings
+    assert ("tools/schema_snapshot.py", 286, "tools.airtable_tools") not in findings
 
 
 def test_scan_boundary_fails_closed_on_git_error(

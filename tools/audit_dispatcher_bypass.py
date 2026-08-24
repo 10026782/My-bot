@@ -115,6 +115,27 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("tools/contact_resolver.py", 133, "crm"),
 })
 
+# Exact call sites verified sanctioned despite failing _is_allowed()'s
+# filename-substring heuristic -- each is imported and invoked by a module
+# that IS on the allowlist, just not itself named dispatcher*/scheduler*/etc.
+# Verified by direct caller-graph read (Track D-Structure Audit #7), not a
+# guess:
+#   - tools/approval_actions.py:365 -- tools/dispatcher.py:26 does
+#     `from . import approval_actions`; its dispatch switch at
+#     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
+#     "post" branch contains this `import crm`.
+#   - tools/schema_snapshot.py:286 -- scheduler.py:66 imports and calls
+#     run_snapshot_archive() (scheduled at scheduler.py:857), which calls
+#     apply_retention_policy() at tools/schema_snapshot.py:265, containing
+#     this `import tools.airtable_tools`.
+# Unlike BASELINE (known offenders not yet fixed), these are not bypass
+# debt -- they are permanently excluded from findings, never surfaced as
+# WARN_NEW, and never need baselining.
+_SANCTIONED_CALL_SITES: frozenset[tuple[str, int, str]] = frozenset({
+    ("tools/approval_actions.py", 365, "crm"),
+    ("tools/schema_snapshot.py", 286, "tools.airtable_tools"),
+})
+
 
 class ScanBoundaryError(RuntimeError):
     """Raised when the tracked-file boundary can't be determined — fail closed
@@ -177,7 +198,7 @@ def scan() -> list[tuple[str, int, str]]:
                 continue
             if _CRM_IMPORT_RE.match(line):
                 findings.append((rel_str, idx + 1, "crm"))
-    return findings
+    return [f for f in findings if f not in _SANCTIONED_CALL_SITES]
 
 
 def main() -> int:
