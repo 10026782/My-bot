@@ -13,19 +13,13 @@ profile.py — User Profile Layer (Airtable Backend)
 import json
 import os
 import time
-import requests
 from threading import Lock
 from datetime import datetime
 
+from tools.airtable_gateway import airtable_create, airtable_patch
+from tools.airtable_read_adapter import list_records
+
 _lock = Lock()
-
-def _at_headers() -> dict:
-    return {"Authorization": f"Bearer {os.environ.get('AIRTABLE_API_KEY', '')}", "Content-Type": "application/json"}
-
-def _at_url() -> str:
-    base  = os.environ.get("AIRTABLE_BASE_ID", "")
-    table = os.environ.get("AIRTABLE_PROFILE_TABLE", "Profile")
-    return f"https://api.airtable.com/v0/{base}/{table}"
 
 # ─── Cache קצר (60 שניות) — לא קוראים Airtable בכל הודעה ─────────────────────
 _cache: dict = {"profile": None, "record_id": None, "ts": 0}
@@ -58,14 +52,14 @@ def load_profile() -> dict:
             return dict(_cache["profile"])
 
         try:
-            r = requests.get(
-                _at_url(),
-                headers=_at_headers(),
-                params={"filterByFormula": "{Name}='main'", "maxRecords": 1},
+            table = os.environ.get("AIRTABLE_PROFILE_TABLE", "Profile")
+            records = list_records(
+                table,
+                "{Name}='main'",
+                max_records=1,
+                paginate=False,
                 timeout=10,
             )
-            r.raise_for_status()
-            records = r.json().get("records", [])
 
             if records:
                 rec = records[0]
@@ -93,24 +87,28 @@ def save_profile(profile: dict):
 
         try:
             record_id = _cache.get("record_id")
+            table = os.environ.get("AIRTABLE_PROFILE_TABLE", "Profile")
 
             if record_id:
-                r = requests.patch(
-                    f"{_at_url()}/{record_id}",
-                    headers=_at_headers(),
-                    json={"fields": {"ProfileData": payload}},
+                if not airtable_patch(
+                    table,
+                    record_id,
+                    {"ProfileData": payload},
+                    source="profile",
                     timeout=10,
-                )
+                ):
+                    raise RuntimeError("Airtable profile PATCH failed")
             else:
-                r = requests.post(
-                    _at_url(),
-                    headers=_at_headers(),
-                    json={"fields": {"Name": "main", "ProfileData": payload}},
+                record = airtable_create(
+                    table,
+                    {"Name": "main", "ProfileData": payload},
+                    source="profile",
                     timeout=10,
                 )
-                _cache["record_id"] = r.json().get("id")
+                if not record:
+                    raise RuntimeError("Airtable profile POST failed")
+                _cache["record_id"] = record.get("id")
 
-            r.raise_for_status()
             _cache["profile"] = profile
             _cache["ts"] = time.time()
 
@@ -121,14 +119,16 @@ def save_profile(profile: dict):
 def _create_profile_record():
     try:
         payload = json.dumps(DEFAULT_PROFILE, ensure_ascii=False)
-        r = requests.post(
-            _at_url(),
-            headers=_at_headers(),
-            json={"fields": {"Name": "main", "ProfileData": payload}},
+        table = os.environ.get("AIRTABLE_PROFILE_TABLE", "Profile")
+        record = airtable_create(
+            table,
+            {"Name": "main", "ProfileData": payload},
+            source="profile",
             timeout=10,
         )
-        r.raise_for_status()
-        _cache["record_id"] = r.json().get("id")
+        if not record:
+            raise RuntimeError("Airtable profile POST failed")
+        _cache["record_id"] = record.get("id")
         _cache["profile"] = dict(DEFAULT_PROFILE)
     except Exception as e:
         print(f"[profile] create error: {e}", flush=True)

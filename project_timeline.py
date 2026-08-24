@@ -7,8 +7,10 @@
 
 import os
 import logging
-import requests
 from datetime import date, timedelta
+
+from tools.airtable_gateway import airtable_create
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +22,6 @@ TODAY = date.today()
 def _d(offset: int) -> str:
     """תאריך יחסי מהיום"""
     return (TODAY + timedelta(days=offset)).isoformat()
-
-
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {os.environ.get('AIRTABLE_API_KEY', '')}",
-        "Content-Type":  "application/json",
-    }
-
-
-def _base_url() -> str:
-    base = os.environ.get("AIRTABLE_BASE_ID", "")
-    return f"https://api.airtable.com/v0/{base}/{TIMELINE_TABLE}"
 
 
 TIMELINE_TASKS = [
@@ -184,15 +174,20 @@ TIMELINE_TASKS = [
 def create_timeline_records() -> dict:
     """מוסיף את כל המשימות לטבלת ProjectTimeline"""
     results = {"created": 0, "errors": 0}
-    url = _base_url()
 
     for task in TIMELINE_TASKS:
         fields = {k: task[k] for k in
                   ("Phase", "Task", "Description", "Owner",
                    "Status", "Priority", "Start", "Due", "Phase_Order")}
         try:
-            resp = requests.post(url, headers=_headers(), json={"fields": fields}, timeout=10)
-            resp.raise_for_status()
+            record = airtable_create(
+                TIMELINE_TABLE,
+                fields,
+                source="project_timeline",
+                timeout=10,
+            )
+            if not record:
+                raise RuntimeError("Airtable timeline POST failed")
             results["created"] += 1
             print(f"✅ נוצר: {task['Task']}")
         except Exception as e:
@@ -210,19 +205,16 @@ def get_timeline_summary() -> dict:
         return {}
 
     today_str = date.today().isoformat()
-    url = _base_url()
-
     try:
         formula = "OR(Status='open', Status='in_progress')"
-        resp = requests.get(
-            url, headers=_headers(),
-            params={"filterByFormula": formula,
-                    "sort[0][field]": "Due",
-                    "sort[0][direction]": "asc"},
+        records = list_records(
+            TIMELINE_TABLE,
+            formula,
+            max_records=None,
+            sort=[{"field": "Due", "direction": "asc"}],
+            paginate=False,
             timeout=10,
         )
-        resp.raise_for_status()
-        records = resp.json().get("records", [])
 
         overdue = []
         due_today = []
@@ -249,12 +241,19 @@ def get_timeline_summary() -> dict:
                 upcoming.append(entry)
 
         # הושלמו היום
-        done_resp = requests.get(
-            url, headers=_headers(),
-            params={"filterByFormula": f"AND(Status='done', Due='{today_str}')"},
-            timeout=10,
-        )
-        done_today = len(done_resp.json().get("records", [])) if done_resp.ok else 0
+        try:
+            done_records = list_records(
+                TIMELINE_TABLE,
+                f"AND(Status='done', Due='{today_str}')",
+                max_records=None,
+                paginate=False,
+                timeout=10,
+            )
+            done_today = len(done_records)
+        except AirtableReadError as e:
+            if e.status_code is None:
+                raise
+            done_today = 0
 
         return {
             "overdue":     overdue,
@@ -266,6 +265,9 @@ def get_timeline_summary() -> dict:
             "phases_done": _count_phases_done(),
         }
 
+    except AirtableReadError as e:
+        logger.error(f"get_timeline_summary error: {e.cause or e}")
+        return {}
     except Exception as e:
         logger.error(f"get_timeline_summary error: {e}")
         return {}
@@ -274,12 +276,13 @@ def get_timeline_summary() -> dict:
 def _count_phases_done() -> list:
     """בודק אילו שלבים הושלמו לגמרי"""
     try:
-        resp = requests.get(
-            _base_url(), headers=_headers(),
-            params={"fields[]": ["Phase", "Status"]},
+        records = list_records(
+            TIMELINE_TABLE,
+            max_records=None,
+            fields=["Phase", "Status"],
+            paginate=False,
             timeout=10,
         )
-        records = resp.json().get("records", [])
         phases: dict = {}
         for r in records:
             f = r.get("fields", {})
