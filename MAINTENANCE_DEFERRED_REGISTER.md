@@ -132,10 +132,24 @@ Full bodies live in **[MAINTENANCE_FILE_DRIFT_REGISTER.md](MAINTENANCE_FILE_DRIF
 |---|---|---|---|
 | E-F | Legacy/unwired module cluster: worker.py, knowledge_engine.py (+root router.py dead-chain), lead_qualifier.py (separate dead chain — correction: knowledge_engine does NOT import it), memory.py, profile.py, creative_generator.py, tenant_provisioner.py (test-only/parked), benchmark_token_estimate.py | OPEN / NEEDS_PRODUCT_DECISION (retirement-vs-wiring per module) | #12/#21 |
 | E-A | Orphan-suspect tracked artifacts: `config.json`, `import_knowledge_base.json` (zero references repo-wide) | OPEN | #21 |
-| E-G | Doc drift: CLAUDE.md:116 + ROADMAP F13 still list deleted core/tenant_config.py; AI_CONTEXT.md:66 cites nonexistent `*_CUTOVER` flag names (real: `*_CANONICAL_LEAD_WRITE`); AGENTS.md self-stale lines; CONSUMPTION_ENFORCEMENT_PLAN header (=D4); AI_CONTEXT freshness lag | DOC_DRIFT (open docs pass) | #19 |
+| E-G | Doc drift: CLAUDE.md:116 + ROADMAP F13 listed deleted core/tenant_config.py; AI_CONTEXT.md:66 cited nonexistent `*_CUTOVER` flag names; AGENTS.md self-stale lines; CONSUMPTION_ENFORCEMENT_PLAN header (=D4); AI_CONTEXT freshness lag | **RESOLVED / DOC DRIFT REMEDIATED** via #882, #893, #896, and this closure PR; historical records preserved | #19 |
 | E-H | Code→docs gaps ×5: media result contract, WhatsApp ACK behavior, last_uploaded_file architecture (+dangling SPEC_File_Context_Reference.md citation at session_store.py:98), Media Files table responsibility, idempotency overview | OPEN (documentation work) | #20 |
 | E-I | Naming debt: owner-field semantic fragmentation (12 constants); provider IDs funneled into "Telegram File ID"; hand-copied alias duplicates dispatcher/tma_api; English-schema migration plan never executed | DEFERRED | #13 |
 | E-J | Compatibility debt: llm_fallback load-bearing (keep); approval legacy values EXECUTED/LEGACY aging candidates; duplicate Media Files transcript writer bypassing media_gateway; memory.ConversationMemory zero importers | DEFERRED | #14 |
 | E-K | Schema/data-contract follow-ups ×10 incl. FileUploadResult.file_id dual-table overloading; Media Files write-only identity columns; "Status" field hardcoded outside schema constants; State JSON unversioned blob | NEEDS_DEDICATED_AUDIT | #2/#3 |
 | E-L | Media/file-ingestion: four-clause verdict **STILL HOLDS** (no stable logical key / durable Drive mapping / cross-process retry safety / metadata reconciliation on ingestion path). NEW: PR #859 fixed WhatsApp false-success ACK + adapter failure reporting (MERGED) | DEFERRED until media architecture work package | #3/#15/#16 |
 | E-M | Missing historical artifacts ×6 re-checked: C00/C08 body, C02-C04 body (3 remediation docs exist; findings #2/#4/#5/#6/#9/#10 unevidenced), C04 idempotency inventory, LeadSessions audit, long-log audit, Approval_Policy_Spec.md (dangling refs ×3 docs) | UNKNOWN / MISSING ARTIFACT | — |
+
+### Track F follow-up closure — 24/08/2026
+
+Current statuses were re-verified against `origin/main` at
+`7e38c8e4274285bb548e02830d8ef959148fb31a`:
+
+- #4 Exception Taxonomy — **ALREADY CLOSED**.
+- #15 Recovery / Fallback — bounded retry/idempotency finding **CLOSED / MERGED via #871**; broader recovery/reconciliation remains **DEFERRED ARCHITECTURE**.
+- #16 Tool Contract — **ALREADY CLOSED**; known contract/data items remain cross-track.
+- #5 Async / Concurrency — bounded voice STT retry finding **CLOSED / MERGED via #878**; process-local/shared-lock limitation remains **DEFERRED ARCHITECTURE**.
+- #6 Scheduler — **DEFERRED ARCHITECTURE**; R-C06-10 retained with no demonstrated functional defect.
+- #8 Test Gap — **ALREADY CLOSED**; placement concern is #12 only.
+- #14 Deprecated Compatibility — **DEFERRED ARCHITECTURE**; active compatibility remains load-bearing.
+- #19 Docs-to-Code — **CLOSED / DOC DRIFT REMEDIATED** after #882, #893, #896, and this G7 correction.

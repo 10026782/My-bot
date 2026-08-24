@@ -6,20 +6,26 @@ claims and the Durable Atomic Approval layer's own gate, so it is a Planning
 Gate document under that contract's §0. See "Cross-Layer Impact Matrix"
 below for the required 4-layer analysis.
 
-**STATUS: PLANNING APPROVED BY OWNER — implementation still blocked until
-this corrected PR is reviewed and merged.** The Cross-Layer Impact Matrix
-found no unresolved cross-layer risk — all four layers are either untouched
-or touched only by reference/illustrative catalog metadata, with explicit
-proof below. Section 9's owner-decisions are now resolved (see below for
-each); the parallel, independent Codex audit has been received, reviewed,
-and merged as PR #489. The remaining gate is procedural, not substantive:
-per explicit instruction for this planning cycle, no implementation PR may
-open until this corrected planning PR itself has been reviewed and merged.
+**STATUS: PLANNING APPROVED BY OWNER — Phase 1 implementation is merged and
+available, while later enforcement phases remain planned.** The Cross-Layer
+Impact Matrix found no unresolved cross-layer risk — all four layers are
+either untouched or touched only by reference/illustrative catalog metadata,
+with explicit proof below. Section 9's owner-decisions are now resolved (see
+below for each); the parallel, independent Codex audit has been received,
+reviewed, and merged as PR #489.
 
-**Nothing in this document is implemented.** No code changed, no CLI command
-added, no catalog node or schema field added, no runtime change. Written
-against `origin/main` at `a205dea` (post PR #485 — pilot-findings
-remediation — and PR #487 — targeted rerun verification).
+**Implemented and wired:** Consumption Enforcement Phase 1 (PR #490) added
+the mandatory checklist/ledger validation, `verify_consumption()`, and the
+`verify-consumption` CLI subcommand. The validator is fail-closed when it is
+invoked and returns `CONSUMPTION: COMPLETE` or `CONCLUSION_BLOCKED` with the
+corresponding exit code. This is static/code evidence, not production
+verification.
+
+**Still planned:** the Phase 3 CI step that invokes `verify-consumption` on a
+ledger artifact and blocks the job on `CONCLUSION_BLOCKED`; the plan's
+broader rollout and operational enforcement remain unimplemented. Written
+against the current implementation on `origin/main` at the final Track F
+truth-reset SHA `7e38c8e4274285bb548e02830d8ef959148fb31a` (24/08/2026).
 
 ## 1. The problem
 

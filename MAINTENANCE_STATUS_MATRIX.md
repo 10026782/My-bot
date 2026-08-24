@@ -8,6 +8,22 @@
 
 Deferred items live separately in **[MAINTENANCE_DEFERRED_REGISTER.md](MAINTENANCE_DEFERRED_REGISTER.md)** (including section **D — EFFICIENCY & OPERATIONAL DEBT**).
 
+## Track F follow-up closure — 24/08/2026
+
+Re-verified against current `origin/main` at `7e38c8e4274285bb548e02830d8ef959148fb31a`.
+This closure records documentation truth only; production verification is not claimed.
+
+| Track F item | Final current status | Evidence / boundary |
+|---|---|---|
+| #4 Exception Taxonomy | **ALREADY CLOSED** | No current #4-specific follow-up finding or regression. |
+| #15 Recovery / Fallback | **BOUNDED FINDING CLOSED / MERGED**; broader recovery/reconciliation **DEFERRED ARCHITECTURE** | Retry/idempotency reservation release via PR #871; orphaned Drive/persistence reconciliation remains deferred. |
+| #16 Tool Contract | **ALREADY CLOSED** | No independent current #16 gap; recorded contract/data items remain cross-track. |
+| #5 Async / Concurrency | **BOUNDED FINDING CLOSED / MERGED**; process-local/shared-lock limitation **DEFERRED ARCHITECTURE** | Voice STT retry release via PR #878. |
+| #6 Scheduler | **DEFERRED ARCHITECTURE** | R-C06-10 retained; no demonstrated functional defect. |
+| #8 Test Gap | **ALREADY CLOSED** | Placement concern remains owned by #12 only. |
+| #14 Deprecated Compatibility | **DEFERRED ARCHITECTURE** | Active compatibility remains load-bearing. |
+| #19 Docs-to-Code | **CLOSED / DOC DRIFT REMEDIATED** | G1/G2 #882, G5/G6 #893, G3/G4/G15 #896, G7 closed by the accompanying documentation correction. |
+
 ---
 
 ## Track ID warning (read first)
