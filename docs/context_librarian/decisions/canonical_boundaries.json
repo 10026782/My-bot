@@ -885,6 +885,46 @@
         }
       },
       "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
+    },
+    {
+      "id": "decision.provider_neutral_query_contract",
+      "name": "core/query_contract.py is the provider-neutral query intent contract",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "provider-neutral query intent construction used by business modules before provider-specific translation",
+        "precedence": "business modules depend on query intent only; provider adapters own serialization and provider-specific filtering syntax"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "core/query_contract.py"
+      ],
+      "test_paths": [
+        "test_provider_portability_cluster3.py"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-25",
+      "last_verified_commit": "11c707ecaf9f8e83947b1f04df162a5702a5fadf",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve the Context Librarian OWNER_DECISION_REQUIRED finding on Provider Portability Cluster #3: core/query_contract.py is a new runtime source without an existing catalog owner.",
+        "This is a supporting contract, not a provider or business authority: it contains query intent only, has no I/O, and must not contain Airtable formula tokens or provider-specific transport knowledge.",
+        "Airtable serialization remains owned by tools/airtable_read_adapter.py; replacing the provider must not require business-module import changes."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "provider_neutral_query_contract",
+          "authority": false,
+          "purpose": "expresses provider-neutral query intent while adapters translate it to provider syntax",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "11c707ecaf9f8e83947b1f04df162a5702a5fadf"
     }
   ],
   "edges": [
