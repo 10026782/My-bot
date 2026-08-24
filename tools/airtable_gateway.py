@@ -626,6 +626,55 @@ def at_list_by_formula(
         params["offset"] = offset
 
 
+def at_list_page(
+    table: str,
+    formula: str = "",
+    *,
+    page_size: int | None = None,
+    offset: str = "",
+    max_records: int | str | None = None,
+    timeout: float = 10,
+) -> tuple[list[dict], str | None]:
+    """Fetch one Airtable records page and return its records and next offset."""
+    params: dict[str, object] = {}
+    if formula:
+        params["filterByFormula"] = formula
+    if page_size is not None:
+        params["pageSize"] = page_size
+    if max_records:
+        params["maxRecords"] = max_records
+    if offset:
+        params["offset"] = offset
+
+    try:
+        r = httpx.get(
+            _at_url(table),
+            headers=_at_headers(),
+            params=params,
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise AirtableLookupError(f"{table} page error: {e}", cause=e) from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(
+            f"{table} page: HTTP {r.status_code}",
+            status_code=r.status_code,
+            response_text=r.text,
+            response_url=str(getattr(r, "url", "")),
+            response_reason=str(getattr(r, "reason_phrase", "")),
+        )
+
+    payload = r.json()
+    records = payload.get("records")
+    if not isinstance(records, list):
+        raise AirtableLookupError(f"{table} records response is not a list")
+    next_offset = payload.get("offset")
+    if next_offset is not None and not isinstance(next_offset, str):
+        raise AirtableLookupError(f"{table} pagination returned an invalid offset")
+    return records, next_offset
+
+
 def at_upsert(
     table: str,
     fields: dict,
