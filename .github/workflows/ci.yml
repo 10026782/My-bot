@@ -174,6 +174,9 @@ jobs:
       - name: Core provider boundary guard (blocking)
         run: python tools/audit_provider_boundary.py
 
+      - name: Direct model / agent call boundary guard (blocking)
+        run: python tools/audit_model_call_boundary.py
+
       - name: F52 result-parsing audit (warning only, never blocks)
         run: python tools/audit_result_parsing.py || true
 
