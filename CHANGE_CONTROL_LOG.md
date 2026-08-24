@@ -2242,3 +2242,46 @@ backfill.
 - **Remediation:** attribution now uses `core.lead_service.update_lead_fields()` and the canonical ActionGateway proposal/write boundary; proposal failure is fail-closed with no direct-write fallback.
 - **PR / merge SHA:** #895 / `f1aea5df2e88b766d0b60cd230934bfb0ea99df3`
 - **Verification:** STATIC VERIFIED + LIVE STRUCTURE VERIFIED; regression recheck passed; **production verification: NO**.
+
+### Track D-Structure Audit #7 — CLI / Admin Tools closure (25/08/2026)
+
+Seven merged PRs, each independently truth-reset/verified before merge. Final
+verdict: no real CURRENT GAP remains under #7 ownership. See
+`docs/governance/HORIZON.md` for the management-level closure record and
+cross-track handoffs.
+
+#### PR #936 — `audit_gateway_bypass.py` scan-boundary fix
+- **Problem:** scanned the filesystem (`Path.rglob`) instead of git-tracked files — picked up untracked/leftover-worktree files as false positives.
+- **Remediation:** switched to `git ls-files`; added fail-closed `ScanBoundaryError`.
+- **PR / merge SHA:** #936 / `9c72a28387645ebcf0675218a0d9df8cb0ff3b9f`
+
+#### PR #939 — `audit_gateway_bypass.py` baseline rebase
+- **Remediation:** rebased the `BASELINE` frozenset to current line numbers after the scan-boundary fix; no findings silently accepted.
+- **PR / merge SHA:** #939 / `519d8a0d5095bcf85d179e3e624359c6dcd26c99`
+
+#### PR #940 — `audit_dispatcher_bypass.py` scan-boundary fix
+- **Problem:** same filesystem-walk defect as #936, in the companion dispatcher-bypass audit.
+- **Remediation:** same `git ls-files` + `ScanBoundaryError` fix; 8-case regression test added.
+- **PR / merge SHA:** #940 / `3d9b9462bae06b87cf4def342b189c5b43efcbd1`
+
+#### PR #943 — `audit_dispatcher_bypass.py` baseline rebase
+- **Remediation:** rebased `BASELINE` from 43→41 entries (21 line-shifted, 2 genuinely resolved); 8 genuinely-new findings deliberately left un-baselined and visible as `WARN_NEW` for separate triage.
+- **PR / merge SHA:** #943 / `d6702c2f7d71dd60a0a251cdc0e18a219335fc4b`
+
+#### PR #944 — `core/lead_event_writer.py` dispatcher-bypass remediation
+- **Problem:** direct `tools.airtable_tools.airtable_get_records` import — the one real (non-cross-track, non-false-positive) bypass among the 8 new findings.
+- **Remediation:** migrated to `tools.airtable_read_adapter.get_record_fields()` (added as part of this fix); no formula string built, no raw record envelope unwrapped in business code; fallback/read-only/domain-routing behavior preserved exactly.
+- **PR / merge SHA:** #944 / `3ca2259b0277d16505e5b6794ecb537aaf2fc10d`
+
+#### PR #945 — Business Tool Registry `runtime_snapshot` generator authority
+- **Problem:** two independent, unconditional generators (`tools/tool_runtime_snapshot.py` legacy Python-seed path, `tools/tool_catalog_db.py`'s DB-backed path) both wrote `data/tool_registry/runtime_snapshot.json` with no lock/reconciliation; the committed artifact still carried legacy provenance despite the DB-backed path being merged as its intended successor.
+- **Remediation:** `tools/generate_tool_runtime_snapshot_from_db.py` / `write_snapshot_from_db()` declared sole canonical generator; legacy `write_snapshot()` now fails closed (`LegacySnapshotWriteBlocked`) against the canonical path instead of silently overwriting it. No reader-contract or schema change.
+- **PR / merge SHA:** #945 / `5e6e2e34136cc85575fd3bd949aad935d44242ba`
+
+#### PR #946 — `audit_dispatcher_bypass.py` scanner false positives
+- **Problem:** `tools/approval_actions.py` and `tools/schema_snapshot.py` are genuinely dispatcher/scheduler-invoked but not *named* `dispatcher*`/`scheduler*`, so the allowlist's filename-substring heuristic missed them.
+- **Remediation:** new exact-tuple `_SANCTIONED_CALL_SITES` filter (distinct from `BASELINE`); detection semantics otherwise unchanged. 46 findings/5 new/0 resolved after (was 48/7/0).
+- **PR / merge SHA:** #946 / `49d0885cb84af67278dd9600278cb161d0848ec0`
+
+- **Verification (all seven):** STATIC + LIVE STRUCTURE VERIFIED, each re-confirmed by commit-ancestry check against `origin/main` post-merge (not PR status alone); focused regression suites green; **production verification: NO** (these are dev-tooling/governance-script and one read-path fix, no production-behavior claim made beyond the merged code itself).
+- **Remaining, explicitly not #7 debt:** 4 cross-track `WARN_NEW` findings (routed onward — see HORIZON.md), 1 accepted/legitimate staging-CLI exception, global branch-hygiene gate blocked by an unrelated fresh branch.
