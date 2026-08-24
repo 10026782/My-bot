@@ -8,9 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
-
-
 ROOT = Path(__file__).resolve().parent
 REGISTRY_PATH = ROOT / "system_registry.yaml"
 REPORTS_DIR = ROOT / "reports"
@@ -99,19 +96,19 @@ def _fetch_airtable_schema() -> tuple[str, dict[str, set[str]], str]:
     if not key or not base:
         return "MISSING", {}, "AIRTABLE_API_KEY or AIRTABLE_BASE_ID missing"
 
+    from tools.airtable_gateway import AirtableLookupError, get_base_metadata
+
     try:
-        response = httpx.get(
-            f"https://api.airtable.com/v0/meta/bases/{base}/tables",
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=10,
-        )
+        payload = get_base_metadata(timeout=10)
+    except AirtableLookupError as exc:
+        if exc.status_code is not None:
+            return "BROKEN", {}, f"Airtable metadata returned HTTP {exc.status_code}"
+        cause = exc.cause or exc
+        return "BROKEN", {}, f"Airtable metadata request failed: {type(cause).__name__}"
     except Exception as exc:
         return "BROKEN", {}, f"Airtable metadata request failed: {type(exc).__name__}"
 
-    if response.status_code != 200:
-        return "BROKEN", {}, f"Airtable metadata returned HTTP {response.status_code}"
-
-    tables = response.json().get("tables", [])
+    tables = payload.get("tables", [])
     if not tables:
         return "EMPTY", {}, "Airtable metadata returned zero tables"
 
