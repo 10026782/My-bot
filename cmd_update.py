@@ -340,8 +340,7 @@ def _extract_document_text(bot, message) -> str | None:
 
 
 # ── נרמול שדות לפני כתיבה ל-Business Memory ──────────────────────
-# Airtable מחזיר 422 על ערך שאינו option קיים בשדה singleSelect/
-# multipleSelects (אין typecast=true בשכבת ה-gateway). BusinessMemoryFields
+# שכבת persistence דוחה ערך שאינו option קיים בשדה בחירה. BusinessMemoryFields
 # עד כה לא היה לה שדה Domain ייעודי — ה-domain key הגולמי (למשל "media")
 # נכתב ישירות לתוך Tags הכללי, שם אין לו שום ערבות שהוא option קיים.
 # Root cause (מאושר מול production logs): domain לעולם לא אמור להיכתב

@@ -48,10 +48,7 @@ def _fmt(iso: str) -> str:
 def _tier_label(score: int) -> str:
     """
     Score → tier label, באותם ספים כמו lead_capture._score_inbound_message.
-    שדה tier כן קיים ב-Airtable (singleSelect אמיתי, לא formula — verified via
-    Airtable MCP, ראה Canonical Leads Schema v1) אך ריק ב-100% מהרשומות
-    (0/39, 21/08/2026) וללא כותב מכוון בקוד — ה-tier מחושב כאן בזיכרון מתוך
-    Score בלבד, לא נקרא מהשדה, בכוונה תחילה (השדה מועמד להסרה, ממתין להחלטת owner).
+    ה-tier מחושב כאן בזיכרון מתוך Score בלבד, לא נקרא ממקור הנתונים.
     """
     if score >= 70:
         return "🔥 רותח"
