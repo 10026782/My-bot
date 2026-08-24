@@ -400,7 +400,7 @@ Each implementation slice must state purpose, owned contract, verified likely fi
 | A | Capability semantics; `core/router`, capability/tool contracts | #23; static contract and resolution tests | Preserve `Handler` and existing route behavior | Remove additive metadata without Agent fallback |
 | B | Capability-resolution handoff; router/Turn Coordinator boundaries | #24 dependency-only where TC-owned; route-decision evidence | Existing router remains temporary authority | Revert handoff to the existing router; preserve evidence |
 | C | Captured-operation freeze; `core/action_gateway.py`, ActionContract repository | #23; lifecycle and freeze evidence | Read and safely classify legacy contracts | Revert additive fields without raw-text rerouting |
-| D | Approval continuation; approval handlers and stores | Approval-owning track; continuation and approval evidence | Preserve legacy approval behavior until coverage exists | Restore prior continuation path without duplicate execution |
+| D | Approval continuation; approval handlers and stores | Approval-owning track; continuation and approval evidence | Preserve legacy approval behavior until coverage exists | Disable the new continuation path; keep proven-safe captured contracts executable, fail closed or use an explicitly safe compatibility boundary for unresolved continuations, and never restore raw-text → `run_agent()` reinterpretation or duplicate execution |
 | E | Cost attribution; `core/usage_telemetry.py`, paid-call producers | #23; telemetry rows and correlation evidence | Historical rows remain queryable | Disable additive attribution while retaining raw events |
 | F | Paid-path coverage; Agent and provider call sites | #23; coverage and zero-call evidence | Existing provider calls remain operational | Remove coverage changes without bypassing existing safety boundaries |
 | G | Pricing/aggregation; `core/model_pricing.py`, usage query boundary | #23; aggregation comparison and pricing reconciliation | Preserve legacy pricing/reporting reads during migration | Fall back to prior reporting adapter, never a second authority |
@@ -426,7 +426,7 @@ No phase authorizes bundling all work into one PR.
 
 | Area | Current State | Target State | Implementation Owner | Verification Gate |
 |---|---|---|---|---|
-| Routing/capability | Partial router decision; multiple authorities | Canonical capability-resolution API | #23 with #24 dependency | Capability resolution |
+| Routing/capability | Partial router decision; multiple authorities | Canonical capability-resolution API | #24 Architecture Drift; #23 owns Agent-last/cost requirements and the dependency contract only | Capability resolution |
 | ExecutionClass | Not yet a unified runtime contract | Exactly one class per executable route | #23 | Static + route tests |
 | Approval continuation | Legacy and canonical paths coexist | Captured operation only | Approval-owning track | Freeze/continuation |
 | ActionContract freeze | Covered lifecycle exists; target fields remain additive | Capability/class frozen or referenced | #23 / ActionGateway owner | Contract tests |
