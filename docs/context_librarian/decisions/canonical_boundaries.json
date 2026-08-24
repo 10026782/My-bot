@@ -86,7 +86,7 @@
       "notes": [
         "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
       ],
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
     },
     {
       "id": "decision.no_new_source_of_truth",
@@ -348,7 +348,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -547,7 +547,7 @@
           "policy_registry_id": "EXTERNAL_RECOMMENDATION_CATALOG"
         }
       },
-      "last_observed_commit": "84ab7bbd8284f595b453fb9c0e916235fb7e5e40"
+      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
     },
     {
       "id": "decision.offline_research_support_tool",
@@ -790,7 +790,7 @@
         "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification.",
         "Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -838,7 +838,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
     },
     {
       "id": "decision.n18_terminal_turn_result",
@@ -884,7 +884,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
     }
   ],
   "edges": [
