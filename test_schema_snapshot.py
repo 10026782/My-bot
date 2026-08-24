@@ -185,6 +185,23 @@ print("\n── missing env vars ───────────────�
 with patch.dict("os.environ", {"AIRTABLE_API_KEY": "", "AIRTABLE_BASE_ID": ""}, clear=False):
     chk("fetch_live_schema returns None when env vars missing", fetch_live_schema() is None)
 
+print("\n── live metadata via gateway ─────────")
+
+with patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "appFAKE"}, clear=False), \
+     patch("tools.airtable_gateway.get_base_metadata", return_value=_RAW_META) as mock_metadata:
+    live = fetch_live_schema()
+    chk("fetch_live_schema returns the full gateway payload", live == _RAW_META)
+    chk("fetch_live_schema uses the gateway timeout 20", mock_metadata.call_args.kwargs == {"timeout": 20})
+
+for error in (RuntimeError("HTTP 500"), OSError("network down"), ValueError("malformed JSON")):
+    with patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "appFAKE"}, clear=False), \
+         patch("tools.airtable_gateway.get_base_metadata", side_effect=error):
+        chk(f"fetch_live_schema maps {type(error).__name__} to None", fetch_live_schema() is None)
+
+with patch.dict("os.environ", {"AIRTABLE_API_KEY": "key", "AIRTABLE_BASE_ID": "appFAKE"}, clear=False), \
+     patch("tools.airtable_gateway.get_base_metadata", return_value={}):
+    chk("fetch_live_schema preserves an empty metadata payload", fetch_live_schema() == {})
+
 # ══════════════════════════════════════════════════════════════════
 # 6. Missing snapshot table fails closed
 # ══════════════════════════════════════════════════════════════════
