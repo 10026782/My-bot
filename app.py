@@ -638,7 +638,7 @@ def cmd_done(msg):
     if not identity or identity.role not in ("owner", "admin"):
         return
     try:
-        from tma_api import _at_list, _at_patch, _at_post, record_fields, record_id
+        from tma_api import _at_list, _at_patch, _at_post, record_fields, record_id, relation_payload
         from datetime import date, timedelta
         from airtable_schema import Tables, QuestsFields, CoinsLogFields, QuestStatus
 
@@ -684,7 +684,7 @@ def cmd_done(msg):
                 CoinsLogFields.ACTION:        name,
                 CoinsLogFields.COINS:         coins,
                 CoinsLogFields.DATE:          today.isoformat(),
-                CoinsLogFields.QUEST:         [record_id(quest, required=True)],
+                CoinsLogFields.QUEST:         relation_payload(record_id(quest, required=True)),
                 CoinsLogFields.NOTE:          "Quest completed via /done",
             })
 
