@@ -125,3 +125,8 @@ def get_record(table: str, record_id: str, *, timeout: float = 10) -> dict:
             response_url=exc.response_url,
             response_reason=exc.response_reason,
         ) from exc
+
+
+def get_record_fields(table: str, record_id: str, *, timeout: float = 10) -> dict:
+    """Return one record's business fields, without exposing the raw envelope."""
+    return get_record(table, record_id, timeout=timeout).get("fields", {})
