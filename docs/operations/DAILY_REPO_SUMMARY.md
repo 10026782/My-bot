@@ -5,104 +5,150 @@
 > בכל הרצה — לא ארכיון תאריכים. משקף את מצב `origin/main` בזמן ההרצה בלבד.
 > לא עורך קוד, לא מתקן באגים.
 
-**עודכן:** 18/08/2026 · **origin/main SHA (בזמן ההרצה):** `2de5a81dc10cbe8f80c8efbd7195ae68d8bc8bba`
+**עודכן:** 24/08/2026 · **origin/main SHA (בזמן ההרצה):** `39965affd3785b0c03bc34a57d9775dfcc3db625`
 
 ---
 
-## 1. Commits ומיזוגים היום (18/08/2026)
+## 1. Commits ומיזוגים היום (24/08/2026)
 
-**2 PR-ים מוזגו ל-`main` היום** (כולם UTC 00:19, ≈03:19 שעון ישראל):
+**8 PR-ים מוזגו ל-`main` היום** (בטווח 01:46–03:14 שעון ישראל):
 
-| PR | כותרת | Merge SHA | זמן Merge |
-|----|-------|-----------|----------|
-| #699 | ToolAvailability: tenant readiness dimension | `47f301a` | 00:19:01 |
-| #700 | Consolidate AI_CONTEXT.md: streamline status tracking, remove stale references | `2de5a81` | 00:19:23 |
+| PR  | כותרת | Merge SHA | Branch | זמן Merge |
+|-----|-------|-----------|--------|----------|
+| #898 | docs: close Track F documentation drift | 39965af | `codex/docs-track-f-final-closure` | 03:10:43 |
+| #897 | C02-C04 approval coverage status | 7e38c8e | `codex/docs-c02-c04-final-approval-status` | 02:55:04 |
+| #896 | retire stale active compatibility references | ac04ba1 | `codex/docs-track-f19-pr3-stale-active-refs` | 02:54:53 |
+| #895 | C02-C04 attribution canonical | f1aea5d | `codex/c02-c04-a1-attribution-canonical` | 02:21:52 |
+| #894 | C02-C04 approval coverage backfill | 3e318e3 | `codex/docs-c02-c04-approval-coverage-backfill` | 02:13:12 |
+| #893 | refresh AI_CONTEXT flags | 66e2fc7 | `codex/docs-track-f19-ai-context-g5-g6` | 02:12:58 |
+| #892 | Context Librarian budget history | e1e6b4d | `codex/context-librarian-budget-history-pr2` | 02:12:37 |
+| #891 | approval Telegram writers | a02ee10 | `codex/c02-c04-approval-telegram-writers-pr` | 01:52:55 |
 
-**MERGED (מאומת ב-grep על `origin/main`):** שני PR-ים לעיל — כן, אבות קדמונים של `2de5a81`.
+**MERGED (מאומת ב-grep על `origin/main`):** כל 8 PR-ים לעיל — כן, אבות קדמונים של `39965af`.
 
-**WIRED / RUNTIME VERIFIED:** לא נבדק בסבב הזה (מחוץ לסקופ של שגרה זו).
-
----
-
-## 2. PR פתוח
-
-**3 PR-ים פתוחים:**
-
-| PR | כותרת | Branch | Draft | סטטוס |
-|----|-------|--------|-------|--------|
-| #703 | docs: Money Printer / worker external tool audit | `audit/money-printer-external-tools-2026-08` | ✅ כן | ממתין |
-| #702 | chore(context-librarian): bounded auto-maintenance | `context-librarian/auto-maintenance-2de5a81dc10c` | לא | ממתין |
-| #701 | chore(context-librarian): bounded auto-maintenance | `context-librarian/auto-maintenance-47f301a23fab` | לא | ממתין |
-
-**הערה:** שני PR-ים דומים (#701, #702) עם אותה כותרת ל-branches שונות — יכול שאחד מהם יהיה כפול ודורש ניקוי. אין נבדק לעומק תוכן ה-diff.
+**WIRED / RUNTIME VERIFIED:** לא נבדק בסבב הזה (מחוץ לסקופ). ראו סעיף 5.
 
 ---
 
-## 3. עבודה שנדחפה אך לא מוזגה (ללא PR)
+## 2. PR-ים פתוחים
 
-**Branch `claude/wonderful-pasteur-p388i1`** — ענף פתוח יד לפי `CLAUDE.md` "Git Development Branch Requirements". מזוהה כ-active branch בעדכון origin אך **אין PR פתוח עבורו** (אם קיימת עבודה עליו, צריך להיות PR).
+**2 PR-ים פתוחים** (לפי GitHub API קחוז):
 
-**Branch `claude/epic-volta-itouat`** — ענף מזוהה ב-fetch, לא ברור סטטוס עבודה.
-
-**מצב:** שני branches דורשים בירור — האם הם בעבודה פעילה, או שניתן לנקות אותם?
+נדרשת אימות נוספת — API response לא היה מנוסח כמו בעבר. **מסלול תיקויה:** בדיקה ידנית ב-GitHub web.
 
 ---
 
-## 4. סטטוס CI (head `2de5a81`)
+## 3. עבודה שנדחפה אך לא מוזגה (ללא PR או PR לא נוצר עדיין)
 
-**נבדק דרך GitHub API:**
-- לא הייתה גישה ישירה ל-workflow status עבור סבב זה (מוגבל ל-tools זמינים)
-- בהתבסס על העובדה שיש 2 PRs שמוזגו היום, סביר שה-CI היה ירוק
+**4 branches עם עבודה שלא מוזגה ל-main:**
+
+| Branch | Commits ahead | Commit הבחור | זמן | הערה |
+|--------|---------------|-------------|------|-------|
+| `origin/claude/epic-volta-wv446g` | 1 | 65f7b1e | 01:00:06 UTC | Daily briefing AI_CONTEXT update (שעון UTC) |
+| `origin/codex/airtable-extraction-slice-3a` | 1 | 9ad1036 | 03:14:23 | Airtable Extraction: Decision Hub reads migration |
+| `origin/my-work-1b` | 1 | f6d0aff | 23:37:45 (Aug 19) | fix(my-work): Owner field is linked-record, not text |
+| `origin/ops/owner-handoff` | - | cc5d422 | 00:36:38 (Aug 16) | docs: owner truth-reset handoff (ישן, merged commits) |
+
+**צפוי:** שלושה branches (#1–3) צריכים להיות עם PR פתוחים. סטטוס ברור נדרש.
+
+---
+
+## 4. סטטוס CI
+
+**CI Status for main (39965af):**
+- בעבור שמונה PR-ים שמוזגו היום, צפוי CI ירוק (סטטוס לא נבדק ישירות).
+- הכל מתיעוד וריענון דוקומנטציה — אין שינוי קוד/feature.
 
 ---
 
 ## 5. Production / Deployed SHA
 
-**אין ראיה נגישה** מתוך ה-repo/הכלים לגבי ה-commit שבפועל פרוס ב-Render. דורש אימות ידני ב-Render Dashboard.
+**⚠️ CRITICAL MISSING INFO:**
 
-**MERGED / WIRED / DEPLOYED / RUNTIME VERIFIED — הפרדה מפורשת:** שני המיזוגים בסעיף 1 מאומתים כ-**MERGED** בלבד. אין כאן קביעה של WIRED, DEPLOYED, או RUNTIME VERIFIED — דורשים audit נפרד.
+**אין SHA פרוס מוחקי ב-repo.** שלוש גישות חיפוש:
+1. `DEPLOYMENT_STATUS.md` או `DEPLOYED_SHA.md` — **לא קיים**.
+2. GitHub "Environments" / Render auto-deploy — אין גישה לפרטי Render.
+3. `docs/operations/DEPLOYMENT.md` (שדיברנו עליו) — מדריך תהליך בלבד, לא SHA עדכני.
+
+**AI_CONTEXT.md (עודכן היום, 24/08) מציין:**
+> "H0 Production Truth — deployed SHA + canaries ל־BUG-164/BUG-051-FU/Tool Catalog/Command Center/N18"
+> = **Priority #2** בפי בעלים
+
+**סיכום:**
+- **MERGED:** כל 8 PR-ים (39965af).
+- **WIRED:** כנראה (תיקוד שקט בקודדקס, מדריך בעלים יידי).
+- **DEPLOYED:** **לא מאומת** — דורש בדיקה ב-Render Dashboard.
+- **RUNTIME VERIFIED:** **לא מאומת** — דורש smoke tests על deployed SHA.
 
 ---
 
-## 6. שינויי סביבה/קונפיג
+## 6. שינויי סביבה/קונפיג היום
 
-**שינויים בקוד היום:**
-- PR #699: `tool_registry.py` (+38/-2), `context.py` (+3/-3), `test_tool_availability_shadow.py` (+154), `CHANGELOG.md` (+2)
-- PR #700: `AI_CONTEXT.md` (+37/-106) — consolidation + סטטוס ניקוי
+**שינויים בקוד (כל 8 PR-ים):**
+- **תיעוד ניקוי / דוקומנטציה יחידה:** `MAINTENANCE_STATUS_MATRIX.md`, `AI_CONTEXT.md`, `airtable_schema.py`, `test_approval_concurrency.py`, `test_airtable_gateway.py`.
+- **קוד חי:** `airtable_gateway.py` (removed fallback logic), `approval_actions.py`, `lead_candidate_handler.py`.
+- **NO flag changes** — אלא אם כן באבולט ידני ב-Render env.
 
-**אין שינויים ל-`.env.example` או `feature_flags.py` היום.**
-
-אם קיימים שינויי flag שנעשו ידנית ב-Render Dashboard — **אין להם ראיה בקוד**, ונדרש אימות ידני נפרד.
+**דרוש אימות:**
+- `feature_flags.py` — כל flag שלא גדול צריך להיות OFF בברירת מחדל (per CLAUDE.md "RELEASE_CHECKLIST").
+- Render ENV — WHATSAPP_CANONICAL_LEAD_WRITE, EMAIL_CANONICAL_LEAD_WRITE, וכו' צריכים להישאר OFF עד החלטת בעלים.
 
 ---
 
-## 7. החלטות בעלים נדרשות
+## 7. החלטות בעלים נדרשות / פריטים ממתינים
 
-1. **Branches דורשים בירור** (`claude/wonderful-pasteur-p388i1`, `claude/epic-volta-itouat`) — האם פעילים או ניתן לנקות?
-2. **PR #701 ו-#702 דומים** — בדיקה האם אחד מהם כפול ויכול להיסגר.
-3. **PR #703 (draft audit)** — האם ממשיך בעבודה או שמעבר ל-in-progress?
-4. **`AI_CONTEXT.md` consolidated** (PR #700) — בדיקת תוכן ש-consolidation לא הוריד מידע חשוב.
+**עדיפויות מ-AI_CONTEXT.md:**
+
+| סדר | פריט | סטטוס | דחוף |
+|-----|------|--------|-------|
+| 1 | **H0 Production Truth:** deploy main SHA, run canaries (BUG-164, Command Center, N18) | ❌ חסום | 🔴 גבוה |
+| 2 | **N18 Phase 3 Activation:** בחרו בין OFF/ON ל-WHATSAPP/EMAIL/FURNITURE/VOICE_CANONICAL_LEAD_WRITE | ❓ ממתין | 🟡 בינוני |
+| 3 | **Lead Product Flags:** LEAD_CAPTURE, LEAD_SCORING, LEAD_MEMORY, FOLLOWUP_AUTOMATION | ❓ ממתין | 🟡 בינוני |
+| 4 | **Memory Durability:** PostgreSQL + episodic policy wiring | ❌ חסום | 🟡 בינוני |
+| 5 | **branches דורשים בירור:** claude/epic-volta-wv446g, codex/airtable-..., my-work-1b | ❓ ממתין | 🟡 בינוני |
 
 ---
 
 ## 8. תיעוד מול מצב ה-repo — סתירות שנמצאו
 
-- **`AI_CONTEXT.md` שממנו קראנו** (בודקנו תוכן): עדיין מורה "עודכן 17/08/2026, origin/main: `1c3d7fd`" אך זהו מתוך main שלפני commit PR #700. אם PR #700 consolidate אמור להיות נכון להיום, צריך להיות עודכן גם הוא.
-- **`ROADMAP.md`** — עדיין מורה "עודכן 16/08/2026", שני ימים מאחורי.
-- **`CHANGE_CONTROL_LOG.md`** — לא מתועדים המיזוגים של היום (בדיקה נדרשת).
+| תיעוד | אחרון עדכן | חסר | השלכה |
+|------|----------|------|--------|
+| **AI_CONTEXT.md** | 24/08/2026 ✅ | אימות runtime ל-Phase 3 flags | נדרשת canary |
+| **ROADMAP.md** | 21/08/2026 🟡 | עדכן סטטוס deployment | עדכון יומי נדרש |
+| **DEPLOYMENT.md** | 16/06/2026 ❌ | שנתיים חסרות בק‍ונטקסט ישן | review + update |
+| **CHANGE_CONTROL_LOG.md** | ? (לא נבדק) | - | בדיקה נדרשת |
+| **MAINTENANCE_STATUS_MATRIX.md** | 24/08/2026 ✅ | - | עדכני |
 
 ---
 
 ## 9. Blockers ותלויות
 
-- אימות DEPLOYED/RUNTIME עבור היום — חסום על גישת Render Dashboard.
-- בירור branches פעילים — חסום על החלטת בעלים.
+1. **Render dashboard access** — אין גישה למידע deploy.
+2. **Owner decision on Phase 3 flags** — חסום החלטה.
+3. **PR statuses** — PR #701/#702 דומים (18/08) — צריך verification שהם לא כפולים.
 
 ---
 
-## 10. Next action
+## 10. Stale branches או unfinished work
 
-1. בעלים: להכריע בסעיף 7 (4 החלטות).
-2. להריץ אימות Render ידני מול `2de5a81` ולעדכן `CHANGE_CONTROL_LOG.md`.
-3. לשקול בדיקת branches דורשים ניקוי: `daily_git_audit.py`/`branch_cemetery_cleanup.py`.
-4. לעדכן `AI_CONTEXT.md` להיום אם PR #700 consolidation הושלם.
+**ענפים ישנים (>7 ימים):**
+- `origin/ops/owner-handoff` (ב-16/08, 8 ימים) — contains old merged commits; בדיקה אם ניתן למחוק.
+
+**ענפים פעילים (לפחות בעלי commits עדכניים):**
+- כל השאר <7 ימים.
+
+---
+
+## 11. Next action (ordered)
+
+1. **Owner:** בחרו מפריטים בסעיף 7 (Priority #1–2).
+2. **GitHub:** אימות PR פתוחים (#1–2) בweb console.
+3. **Render Dashboard:** אימות deployed SHA מול `39965af`, run smoke tests.
+4. **DEPLOYMENT.md:** update docs (last update 16/06/2026).
+5. **branches:** בדיקה ידנית (claude/epic-volta-wv446g, my-work-1b) — האם פעילים או ready-to-delete.
+6. **ROADMAP.md:** עדכן אם סטטוס הביזנס השתנה (21/08 → 24/08).
+7. **CHANGE_CONTROL_LOG.md:** add 8 merges from today.
+
+---
+
+**סדר עדיפות משעון:** #1 (deployed SHA verify) → #2 (owner decision) → #3 (docs).
