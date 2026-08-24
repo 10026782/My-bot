@@ -638,7 +638,7 @@ def cmd_done(msg):
     if not identity or identity.role not in ("owner", "admin"):
         return
     try:
-        from tma_api import _at_list, _at_patch, _at_post
+        from tma_api import _at_list, _at_patch, _at_post, record_fields, record_id
         from datetime import date, timedelta
         from airtable_schema import Tables, QuestsFields, CoinsLogFields, QuestStatus
 
@@ -654,10 +654,10 @@ def cmd_done(msg):
         all_quests  = _at_list(Tables.QUESTS, "", max_records=200)
         week_quests = [
             r for r in all_quests
-            if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
+            if (record_fields(r).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
         ] or [
             r for r in all_quests
-            if r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
+            if record_fields(r).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
         ]
 
         if quest_num < 1 or quest_num > len(week_quests):
@@ -665,7 +665,7 @@ def cmd_done(msg):
             return
 
         quest      = week_quests[quest_num - 1]
-        qf         = quest.get("fields", {})
+        qf         = record_fields(quest)
         old_status = qf.get(QuestsFields.STATUS, "")
         name       = qf.get(QuestsFields.NAME, "?")
 
@@ -673,7 +673,7 @@ def cmd_done(msg):
             bot.send_message(msg.chat.id, f"✅ {name} כבר מסומן כהושלם.")
             return
 
-        _at_patch(Tables.QUESTS, quest["id"], {
+        _at_patch(Tables.QUESTS, record_id(quest, required=True), {
             QuestsFields.STATUS:  QuestStatus.DONE,
             QuestsFields.DONE_BY: identity.display_name or identity.user_id,
         })
@@ -684,7 +684,7 @@ def cmd_done(msg):
                 CoinsLogFields.ACTION:        name,
                 CoinsLogFields.COINS:         coins,
                 CoinsLogFields.DATE:          today.isoformat(),
-                CoinsLogFields.QUEST:         [quest["id"]],
+                CoinsLogFields.QUEST:         [record_id(quest, required=True)],
                 CoinsLogFields.NOTE:          "Quest completed via /done",
             })
 
@@ -727,7 +727,7 @@ def cmd_quest(msg):
     if not identity or identity.role not in ("owner", "admin"):
         return
     try:
-        from tma_api import _at_list
+        from tma_api import _at_list, record_fields
         from datetime import date, timedelta
         from airtable_schema import Tables, QuestsFields, QuestStatus
         today  = date.today()
@@ -735,9 +735,9 @@ def cmd_quest(msg):
         week_str = monday.isoformat()
 
         all_q = _at_list(Tables.QUESTS, "", max_records=200)
-        quests = [r for r in all_q if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str]
+        quests = [r for r in all_q if (record_fields(r).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str]
         if not quests:
-            quests = [r for r in all_q if r.get("fields", {}).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}]
+            quests = [r for r in all_q if record_fields(r).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}]
         if not quests:
             bot.send_message(msg.chat.id, "🎮 אין Quests השבוע.")
             return
@@ -747,7 +747,7 @@ def cmd_quest(msg):
         total_possible = 0
         total_earned   = 0
         for r in quests:
-            f       = r.get("fields", {})
+            f       = record_fields(r)
             status  = f.get(QuestsFields.STATUS, "")
             coins   = int(f.get(QuestsFields.COINS, 0) or 0)
             impact  = " ⚡" if f.get(QuestsFields.IMPACT) else ""
@@ -770,16 +770,16 @@ def cmd_coins(msg):
     if not identity or identity.role not in ("owner", "admin"):
         return
     try:
-        from tma_api import _at_list
+        from tma_api import _at_list, record_fields
         from airtable_schema import Tables, CoinsLogFields, WorldsFields, WorldStatus
 
         log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
-        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+        total_coins = sum(int(record_fields(r).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
 
         worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
         world_section = ""
         if worlds:
-            wf     = worlds[0].get("fields", {})
+            wf     = record_fields(worlds[0])
             target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
             earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
             pct    = round(100 * earned / target, 1) if target > 0 else 0.0

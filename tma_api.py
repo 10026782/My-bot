@@ -217,6 +217,18 @@ class AirtableError(Exception):
         super().__init__(f"Airtable {table} → HTTP {http_status}")
 
 
+def record_fields(record: dict) -> dict:
+    """Provider-neutral view of a fetched record's business fields."""
+    return record.get("fields", {})
+
+
+def record_id(record: dict, *, required: bool = False):
+    """Provider-neutral record identifier; preserve missing-id semantics."""
+    if required:
+        return record["id"]
+    return record.get("id")
+
+
 def _at_list(table: str, formula: str = "", max_records: int = 50,
              strict: bool = False, measurement_label: str | None = None) -> list:
     """
@@ -619,9 +631,9 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
             # in case an earlier attempt's projection write failed.
             rec = _ensure_approval_projection(contract_id, action, label, risk, identity)
             if rec:
-                return rec["id"], {
+                return record_id(rec, required=True), {
                     "status": "pending_approval",
-                    "approval_id": rec["id"],
+                    "approval_id": record_id(rec, required=True),
                     "contract_id": contract_id,
                     "message": result.user_message or result.reason,
                 }, 202
@@ -656,7 +668,7 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
             ),
         }, 202
 
-    approval_id = rec["id"]
+    approval_id = record_id(rec, required=True)
     return approval_id, {
         "status": "pending_approval",
         "approval_id": approval_id,
@@ -766,11 +778,11 @@ def _repair_approval_projection(existing: dict, contract_id: str) -> dict | None
         ApprovalsFields.PROJECTED_LIFECYCLE_STATUS: project_lifecycle_status("pending"),
         ApprovalsFields.CONTEXT_DATA: "",
     }
-    ok = _at_patch("Approvals", existing["id"], patch_fields)
+    ok = _at_patch("Approvals", record_id(existing, required=True), patch_fields)
     if not ok:
         return None
     merged = dict(existing)
-    merged["fields"] = {**existing.get("fields", {}), **patch_fields}
+    merged["fields"] = {**record_fields(existing), **patch_fields}
     return merged
 
 
@@ -975,7 +987,7 @@ def _get_project_cards(identity) -> tuple[list, int]:
     # OR-of-domains only ever reflects domains that will actually be shown.
     visible_records = []
     for r in records:
-        f      = r.get("fields", {})
+        f      = record_fields(r)
         domain = f.get("domain", "")
 
         # Temporarily hidden from Projects Hub display — record, slug, and
@@ -1001,7 +1013,7 @@ def _get_project_cards(identity) -> tuple[list, int]:
 
     domains: list[str] = []
     for r in visible_records:
-        d = r.get("fields", {}).get("domain", "")
+        d = record_fields(r).get("domain", "")
         safe_d, _ = _safe_formula_param(d, "domain")
         if safe_d and safe_d not in domains:
             domains.append(safe_d)
@@ -1024,26 +1036,26 @@ def _get_project_cards(identity) -> tuple[list, int]:
                 _PROJECT_CARDS_BULK_LEADS_MAX_RECORDS, domains,
             )
         for lead in bulk_leads:
-            d = lead.get("fields", {}).get("domain", "")
+            d = record_fields(lead).get("domain", "")
             if d in leads_by_domain:
                 leads_by_domain[d].append(lead)
 
     cards = []
     total_hot = 0
     for r in visible_records:
-        f      = r.get("fields", {})
+        f      = record_fields(r)
         slug   = f.get("slug", "")
         domain = f.get("domain", "")
 
         leads = leads_by_domain.get(domain, [])
         hot = [
             l for l in leads
-            if (l.get("fields", {}).get(LeadFields.SCORE) or 0) >= 70
+            if (record_fields(l).get(LeadFields.SCORE) or 0) >= 70
         ]
         total_hot += len(hot)
 
         cards.append({
-            "id":           r["id"],           # Airtable record_id — internal key
+            "id":           record_id(r, required=True),
             "slug":         slug,              # URL-safe identifier for dashboard routes
             "name":         f.get("Name", ""),
             "emoji":        f.get("emoji", "📁"),
@@ -1103,10 +1115,10 @@ def _marketing_status_payload(identity) -> dict:
 
     demands = []
     for record in marketing_gateway.list_demands(limit=10):
-        fields = record.get("fields", {})
+        fields = record_fields(record)
         if not identity.can_access_domain(fields.get(MDF.DOMAIN, "")):
             continue
-        demand_id = record.get("id", "")
+        demand_id = record_id(record) or ""
         creative_ids = fields.get(MDF.CREATIVES) or []
         creatives = {
             creative_id: creative_fields
@@ -1226,7 +1238,7 @@ def get_project_dashboard(project_slug, identity):
     if not hub_records:
         return jsonify({"error": f"project '{project_slug}' not found in ProjectsHub"}), 404
 
-    hub_fields = hub_records[0].get("fields", {})
+    hub_fields = record_fields(hub_records[0])
     domain = hub_fields.get("domain", "")
     if not domain:
         return jsonify({
@@ -1454,10 +1466,10 @@ def _build_formula(
 # ══════════════════════════════════════════════════════════════════
 
 def _fmt_lead_summary(rec: dict) -> dict:
-    f     = rec.get("fields", {})
+    f     = record_fields(rec)
     score = int(f.get(LeadFields.SCORE, 0) or 0)
     return {
-        "id":     rec["id"],
+        "id":     record_id(rec, required=True),
         "name":   f.get("Name", ""),
         "phone":  f.get("phone", ""),
         "status": f.get("status", ""),
@@ -1510,7 +1522,7 @@ def get_leads(identity):
     if slug_q and not domain_q:
         hub = _at_list("ProjectsHub", f"{{slug}}='{slug_q}'", max_records=1)
         if hub:
-            domain_q = hub[0].get("fields", {}).get("domain", "")
+            domain_q = record_fields(hub[0]).get("domain", "")
 
     # Screen config — lead_pipeline
     screen = SCREEN_CONFIGS["lead_pipeline"]
@@ -1562,7 +1574,7 @@ def _event_linked_to_lead(event: dict, lead_id: str) -> bool:
     its OWN LeadEventFields.LEAD_LINK field is a list that explicitly contains
     the current lead_id. Operates on the already-fetched record — no read.
     """
-    own_link = event.get("fields", {}).get(LeadEventFields.LEAD_LINK)
+    own_link = record_fields(event).get(LeadEventFields.LEAD_LINK)
     if not isinstance(own_link, list):
         return False   # malformed/missing own link field — excluded, fail closed
     return lead_id in own_link
@@ -1588,8 +1600,8 @@ def _read_lead_events(rec: dict):
     """
     from core.leads_reasoning_projection import MAX_LEAD_EVENT_IDS
 
-    lead_id = rec.get("id", "")
-    raw_ids = rec.get("fields", {}).get(_LEAD_EVENTS_LINK_FIELD, []) or []
+    lead_id = record_id(rec) or ""
+    raw_ids = record_fields(rec).get(_LEAD_EVENTS_LINK_FIELD, []) or []
     event_ids = [e for e in raw_ids if isinstance(e, str) and _REC_ID_RE.match(e)]
     if not event_ids:
         return []   # available, empty — no Airtable read
@@ -1665,8 +1677,8 @@ def _apply_leads_reasoning_projection(payload: dict, rec: dict) -> None:
     )
 
     as_of  = datetime.now(timezone.utc)   # single request-scoped reference time
-    lead_id = rec.get("id", "")
-    fields  = rec.get("fields", {})
+    lead_id = record_id(rec) or ""
+    fields  = record_fields(rec)
     try:
         events = _read_lead_events(rec)   # ≤1 Lead Events read, keyed by linked IDs
         projection = build_reasoning_projection(rec, events, as_of)
@@ -1703,7 +1715,7 @@ def get_lead(lead_id, identity):
     if not rec:
         return jsonify({"error": "lead not found"}), 404
 
-    f = rec.get("fields", {})
+    f = record_fields(rec)
 
     if identity.role == Role.PARTNER and not identity.can_access_domain(f.get("domain", "")):
         return jsonify({"error": "forbidden"}), 403
@@ -1720,7 +1732,7 @@ def get_lead(lead_id, identity):
 
     timeline = []
     for t in timeline_recs:
-        tf = t.get("fields", {})
+        tf = record_fields(t)
         title = _readable_timeline_value(tf.get(InteractionLogFields.TITLE, ""))
         summary = _readable_timeline_value(tf.get(InteractionLogFields.SUMMARY, ""))
         timestamp = tf.get(InteractionLogFields.TIMESTAMP, "")
@@ -1743,7 +1755,7 @@ def get_lead(lead_id, identity):
     owner_display = ", ".join(_resolve_profile_display_names(owner_links)) if owner_links else ""
 
     payload = {
-        "id":            rec["id"],
+        "id":            record_id(rec, required=True),
         "name":          f.get(LeadFields.NAME, ""),
         "phone":         f.get(LeadFields.PHONE, ""),
         "domain":        f.get(LeadFields.DOMAIN, ""),
@@ -1963,7 +1975,7 @@ def create_lead_task(lead_id, identity):
     lead_rec = _at_get_record("Leads", lead_id)
     if not lead_rec:
         return jsonify({"error": "lead not found"}), 404
-    lf = lead_rec.get("fields", {})
+    lf = record_fields(lead_rec)
     lead_name   = lf.get(LeadFields.NAME, lead_id)
     lead_domain = _normalize_task_domain(lf.get(LeadFields.DOMAIN, ""))
     # Owner is a multipleRecordLinks field -> list of Profile record IDs,
@@ -2025,7 +2037,7 @@ def create_followup(identity):
     if lead_id:
         rec = _at_get_record("Leads", lead_id)
         if rec:
-            lead_name = rec.get("fields", {}).get("Name", lead_id)
+            lead_name = record_fields(rec).get("Name", lead_id)
 
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
@@ -2076,7 +2088,7 @@ def ask_ai(identity):
     if context_type == "lead_card" and context_id:
         rec = _at_get_record("Leads", context_id)
         if rec:
-            f = rec.get("fields", {})
+            f = record_fields(rec)
             ctx_data = (
                 f"ליד: {f.get('Name', '')} | "
                 f"טלפון: {f.get('phone', '')} | "
@@ -2196,7 +2208,7 @@ def finance_pulse(identity):
     recent: list   = []
 
     for rec in all_payments:
-        f      = rec.get("fields", {})
+        f      = record_fields(rec)
         amount = float(f.get(PaymentFields.AMOUNT, 0) or 0)
         status = (f.get(PaymentFields.STATUS, "") or "").strip()
         d_str  = (f.get(PaymentFields.DATE, "") or "")[:10]
@@ -2239,7 +2251,7 @@ def finance_pulse(identity):
     )
     all_expenses = _at_list(Tables.EXPENSES, exp_formula, max_records=200)
     for rec in all_expenses:
-        f     = rec.get("fields", {})
+        f     = record_fields(rec)
         amt   = float(f.get(ExpenseFields.AMOUNT, 0) or 0)
         d_str = (f.get(ExpenseFields.DATE, "") or "")[:10]
         if d_str >= month_start:
@@ -2368,11 +2380,11 @@ def _projection_actionable(contract_id: str, legacy_read_only: bool, identity) -
 
 
 def _fmt_approval(rec: dict, identity) -> dict:
-    f = rec.get("fields", {})
+    f = record_fields(rec)
     contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
     legacy_read_only = _derive_legacy_read_only(f)
     return {
-        "id":           rec["id"],
+        "id":           record_id(rec, required=True),
         "action":       f.get(ApprovalsFields.ACTION, ""),
         "requested_by": f.get(ApprovalsFields.REQUESTED_BY, ""),
         "requested_at": f.get(ApprovalsFields.REQUESTED_AT, ""),
@@ -2588,14 +2600,14 @@ def _owner_recent_receipts() -> tuple[list[dict], list[str]]:
         formula = f"SEARCH('[TMA receipt]', {{{InteractionLogFields.TITLE}}})"
         recs = _at_list(Tables.INTERACTION_LOG, formula, max_records=10)
         for rec in recs:
-            f = rec.get("fields", {})
+            f = record_fields(rec)
             summary = f.get(InteractionLogFields.SUMMARY, "")
             try:
                 receipt_data = json.loads(summary) if summary else {}
             except (TypeError, ValueError):
                 receipt_data = {}
             receipts.append({
-                "id": rec.get("id", ""),
+                "id": record_id(rec) or "",
                 "title": f.get(InteractionLogFields.TITLE, ""),
                 "timestamp": f.get(InteractionLogFields.TIMESTAMP, receipt_data.get("timestamp", "")),
                 "receipt": receipt_data,
@@ -2620,7 +2632,7 @@ def _owner_strategic_pipeline() -> dict:
         records = _at_list(Tables.VENTURES, "", max_records=200)
         counts = {stage: 0 for stage in _VENTURE_STAGES}
         for r in records:
-            stage = r.get("fields", {}).get(VentureFields.STAGE, "")
+            stage = record_fields(r).get(VentureFields.STAGE, "")
             if stage in counts:
                 counts[stage] += 1
         active = sum(
@@ -2725,7 +2737,7 @@ def _resolve_profile_record_id(user_id: str) -> str | None:
     safe_user_id = user_id.replace("'", "\\'")
     formula = f"LOWER({{{ProfileFields.NAME}}}) = LOWER('{safe_user_id}')"
     records = _at_list(Tables.PROFILE, formula, max_records=5)
-    return records[0].get("id") if records else None
+    return record_id(records[0]) if records else None
 
 
 def _resolve_profile_display_names(record_ids: list[str]) -> list[str]:
@@ -2739,7 +2751,7 @@ def _resolve_profile_display_names(record_ids: list[str]) -> list[str]:
     names = []
     for rid in record_ids:
         rec = _at_get_record(Tables.PROFILE, rid)
-        name = rec.get("fields", {}).get(ProfileFields.NAME, "") if rec else ""
+        name = record_fields(rec).get(ProfileFields.NAME, "") if rec else ""
         if name:
             names.append(name)
     return names
@@ -2771,7 +2783,7 @@ def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str
     upcoming = []
 
     for rec in records:
-        fields = rec.get("fields", {})
+        fields = record_fields(rec)
 
         # Skip completed tasks
         status = fields.get(TaskFields.STATUS, "")
@@ -2789,7 +2801,7 @@ def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str
             continue
 
         task_item = {
-            "stable_key": rec.get("id", ""),
+            "stable_key": record_id(rec) or "",
             "title": fields.get(TaskFields.NAME, ""),
             "description": fields.get(TaskFields.DESCRIPTION, ""),
             "status": status,
@@ -2797,7 +2809,7 @@ def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str
             "owner": owner_display,
             "domain": fields.get(TaskFields.DOMAIN, ""),
             "source_type": "task",
-            "source_ref": rec.get("id", ""),
+            "source_ref": record_id(rec) or "",
             "overdue": False,
             "destination": "task",
             "actionable": True,
@@ -2911,14 +2923,14 @@ def bulk_approve(identity):
     from core.action_gateway import action_gateway as _gw  # noqa: PLC0415
 
     for rec in recs:
-        f = rec.get("fields", {})
+        f = record_fields(rec)
         risk = (f.get(ApprovalsFields.RISK_LEVEL, "") or "").strip()
         contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
         legacy_read_only = _derive_legacy_read_only(f)
         # Hard rules: NEVER bulk-approve high risk, NEVER bulk-approve a
         # legacy/no-contract row (not actionable — Phase 4B-2 audit §8).
         if risk.lower() not in _RISK_LOW or not contract_id or legacy_read_only:
-            skipped.append(rec["id"])
+            skipped.append(record_id(rec, required=True))
             continue
         # Phase 4B-2 follow-up: same shared scope check used by the
         # single-item approve/reject helpers and the read model — a row
@@ -2926,16 +2938,16 @@ def bulk_approve(identity):
         # canonical TMA write-through-approval contract for this identity's
         # own tenant is skipped, never bulk-actioned.
         if not _is_canonical_tma_contract(_gw.find_contract(contract_id), identity):
-            skipped.append(rec["id"])
+            skipped.append(record_id(rec, required=True))
             continue
-        outcome = _claim_and_execute_approval(rec["id"], identity)
+        outcome = _claim_and_execute_approval(record_id(rec, required=True), identity)
         if outcome.get("projection_sync_pending"):
-            projection_sync_pending_ids.append(rec["id"])
+            projection_sync_pending_ids.append(record_id(rec, required=True))
         if outcome.get("ok"):
-            approved.append(rec["id"])
+            approved.append(record_id(rec, required=True))
         else:
-            logger.warning("[bulk_approve] record %s failed: %s", rec["id"], outcome)
-            failed.append(rec["id"])
+            logger.warning("[bulk_approve] record %s failed: %s", record_id(rec, required=True), outcome)
+            failed.append(record_id(rec, required=True))
 
     if approved or failed:
         _audit("bulk_approve", identity, details=f"{len(approved)} approved, {len(failed)} failed")
@@ -3028,7 +3040,7 @@ def _load_actionable_projection(approval_id: str) -> tuple[dict | None, dict]:
     fresh = _at_get_record("Approvals", approval_id)
     if not fresh:
         return None, {"ok": False, "status_code": 404, "error": "approval not found"}
-    f = fresh.get("fields", {})
+    f = record_fields(fresh)
     action_label = f.get(ApprovalsFields.ACTION, approval_id)
     ctx_id = f.get(ApprovalsFields.CONTEXT_ID, "")
     contract_id = f.get(ApprovalsFields.ACTION_CONTRACT_ID, "")
@@ -3385,10 +3397,10 @@ def activity_feed(identity):
     # ?domain= param reserved for future Interaction Log endpoint.
     business_recs = _at_list(Tables.BUSINESS_MEMORY, "", max_records=limit)
     for rec in business_recs:
-        f    = rec.get("fields", {})
+        f    = record_fields(rec)
         tags = f.get(BusinessMemoryFields.TAGS) or []
         entries.append({
-            "id":        rec["id"],
+            "id":        record_id(rec, required=True),
             "source":    "business_memory",
             "title":     f.get(BusinessMemoryFields.TITLE, ""),
             "summary":   f.get(BusinessMemoryFields.DESCRIPTION, ""),
@@ -3401,14 +3413,14 @@ def activity_feed(identity):
     receipt_formula = f"SEARCH('[TMA receipt]', {{{InteractionLogFields.TITLE}}})"
     receipt_recs = _at_list(Tables.INTERACTION_LOG, receipt_formula, max_records=limit)
     for rec in receipt_recs:
-        f = rec.get("fields", {})
+        f = record_fields(rec)
         summary = f.get(InteractionLogFields.SUMMARY, "")
         try:
             receipt_data = json.loads(summary) if summary else {}
         except (TypeError, ValueError):
             receipt_data = {}
         entries.append({
-            "id":        rec["id"],
+            "id":        record_id(rec, required=True),
             "source":    "receipt",
             "title":     f.get(InteractionLogFields.TITLE, ""),
             "summary":   summary,
@@ -3430,9 +3442,9 @@ def _can_assets(identity) -> bool:
 
 
 def _fmt_asset(rec: dict) -> dict:
-    f = rec.get("fields", {})
+    f = record_fields(rec)
     return {
-        "id":               rec["id"],
+        "id":               record_id(rec, required=True),
         "name":             f.get("Name", ""),
         "type":             f.get("Asset Type", ""),
         "current_value":    float(f.get("Current Value", 0) or 0),
@@ -3517,9 +3529,9 @@ def update_asset(asset_id, identity):
 # ══════════════════════════════════════════════════════════════════
 
 def _fmt_venture(r: dict) -> dict:
-    f = r.get("fields", {})
+    f = record_fields(r)
     return {
-        "id":                    r.get("id", ""),
+        "id":                    record_id(r) or "",
         "name":                  f.get(VentureFields.NAME, ""),
         "stage":                 f.get(VentureFields.STAGE, ""),
         "domain":                f.get(VentureFields.DOMAIN, ""),
@@ -3927,12 +3939,12 @@ def _get_active_world_dict() -> dict | None:
     if not worlds:
         return None
     if len(worlds) > 1:
-        names = [w.get("fields", {}).get(WorldsFields.NAME, w["id"]) for w in worlds]
+        names = [record_fields(w).get(WorldsFields.NAME, record_id(w, required=True)) for w in worlds]
         logger.error(f"[Worlds] {len(worlds)} worlds are Status=Active simultaneously: {names} — using lowest Number")
-        worlds.sort(key=lambda w: int(w.get("fields", {}).get(WorldsFields.NUMBER, 0) or 0))
+        worlds.sort(key=lambda w: int(record_fields(w).get(WorldsFields.NUMBER, 0) or 0))
 
     w  = worlds[0]
-    wf = w.get("fields", {})
+    wf = record_fields(w)
     coins_target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
 
     quest_ids = set(_linked_record_ids(wf.get(WorldsFields.QUESTS, []) or []))
@@ -3940,13 +3952,13 @@ def _get_active_world_dict() -> dict | None:
     if quest_ids:
         log_recs = _at_list(Tables.COINS_LOG, "", max_records=500)
         for log in log_recs:
-            log_quest_ids = _linked_record_ids(log.get("fields", {}).get(CoinsLogFields.QUEST, []) or [])
+            log_quest_ids = _linked_record_ids(record_fields(log).get(CoinsLogFields.QUEST, []) or [])
             if quest_ids.intersection(log_quest_ids):
-                coins_earned += int(log.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0)
+                coins_earned += int(record_fields(log).get(CoinsLogFields.COINS, 0) or 0)
 
     pct = round(100 * coins_earned / coins_target, 1) if coins_target > 0 else 0.0
     return {
-        "id":           w["id"],
+        "id":           record_id(w, required=True),
         "name":         wf.get(WorldsFields.NAME, ""),
         "number":       int(wf.get(WorldsFields.NUMBER, 0) or 0),
         "boss":         wf.get(WorldsFields.BOSS, ""),
@@ -3975,19 +3987,19 @@ def game_status(identity):
     all_quests = _at_list(Tables.QUESTS, "", max_records=200)
     quests_this_week = [
         r for r in all_quests
-        if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_start_str
+        if (record_fields(r).get(QuestsFields.WEEK_START, "") or "")[:10] == week_start_str
     ]
     if not quests_this_week:
         quests_this_week = [
             r for r in all_quests
-            if r.get("fields", {}).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}
+            if record_fields(r).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}
         ]
 
     quest_list = []
     for r in quests_this_week:
-        qf = r.get("fields", {})
+        qf = record_fields(r)
         quest_list.append({
-            "id":     r["id"],
+            "id":     record_id(r, required=True),
             "name":   qf.get(QuestsFields.NAME, ""),
             "status": qf.get(QuestsFields.STATUS, ""),
             "coins":  int(qf.get(QuestsFields.COINS, 0) or 0),
@@ -3996,7 +4008,7 @@ def game_status(identity):
 
     # ── Total coins from Coins_Log ─────────────────────────────────
     log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
-    total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+    total_coins = sum(int(record_fields(r).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
 
     return jsonify({
         "active_world":     active_world,
@@ -4025,7 +4037,7 @@ def update_quest(quest_id, identity):
     if not rec:
         return jsonify({"error": "quest not found"}), 404
 
-    qf         = rec.get("fields", {})
+    qf         = record_fields(rec)
     old_status = qf.get(QuestsFields.STATUS, "")
     quest_name = qf.get(QuestsFields.NAME, quest_id)
 
@@ -4098,19 +4110,19 @@ def game_today(identity):
     all_rt = _at_list(Tables.ROADMAP_TASKS, "", max_records=200)
 
     def _due_today_or_earlier(r: dict) -> bool:
-        f   = r.get("fields", {})
+        f   = record_fields(r)
         due = (f.get(RoadmapTaskFields.DUE_DATE, "") or "")[:10]
         return not due or due <= today_str
 
     def _owner_matches(r: dict) -> bool:
         if not owner_name:
             return True
-        owner = (r.get("fields", {}).get(RoadmapTaskFields.OWNER, "") or "").lower()
+        owner = (record_fields(r).get(RoadmapTaskFields.OWNER, "") or "").lower()
         return owner_name in owner or owner in owner_name
 
     tasks = []
     for r in all_rt:
-        f = r.get("fields", {})
+        f = record_fields(r)
         status = f.get(RoadmapTaskFields.STATUS, RoadmapTaskStatus.TODO)
         if _is_roadmap_complete(status):
             continue  # בוצע — לא מציג בכרטיסיה היומית
@@ -4122,7 +4134,7 @@ def game_today(identity):
         if not _due_today_or_earlier(r):
             continue
         tasks.append({
-            "id":     r["id"],
+        "id":     record_id(r, required=True),
             "task":   task_name,
             "coins":  int(f.get(RoadmapTaskFields.COINS, 0) or 0),
             "status": _map_rt_status(status),
@@ -4134,7 +4146,7 @@ def game_today(identity):
 
     # ── Total Coins ───────────────────────────────────────────────
     log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
-    total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+    total_coins = sum(int(record_fields(r).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
 
     return jsonify({
         "today":       today_str,
@@ -4155,7 +4167,7 @@ def complete_daily_task(task_id, identity):
     if not rec:
         return jsonify({"error": "task not found"}), 404
 
-    f          = rec.get("fields", {})
+    f          = record_fields(rec)
     old_status = _clean_select_value(f.get(RoadmapTaskFields.STATUS, ""))
     task_name  = f.get(RoadmapTaskFields.TASK, task_id)
 
@@ -4241,7 +4253,7 @@ def game_checkin_get(identity):
 
     today_str = date.today().isoformat()
     rec = _get_checkin_record(today_str)
-    cf  = rec.get("fields", {}) if rec else {}
+    cf  = record_fields(rec) if rec else {}
 
     try:
         tasks = json.loads(cf.get(DailyCheckinFields.TASKS_JSON, "") or "[]")
@@ -4289,10 +4301,10 @@ def game_checkin_put(identity):
 
     existing = _get_checkin_record(today_str)
     if existing:
-        ok = _at_patch(Tables.DAILY_CHECKIN, existing["id"], fields)
+        ok = _at_patch(Tables.DAILY_CHECKIN, record_id(existing, required=True), fields)
         if not ok:
             return jsonify({"error": "update failed"}), 500
-        record_id = existing["id"]
+        resolved_record_id = record_id(existing, required=True)
     else:
         rec = _at_post(Tables.DAILY_CHECKIN, {
             DailyCheckinFields.DATE:  today_str,
@@ -4301,12 +4313,12 @@ def game_checkin_put(identity):
         })
         if not rec:
             return jsonify({"error": "create failed"}), 500
-        record_id = rec["id"]
+        resolved_record_id = record_id(rec, required=True)
 
     _audit("daily_checkin_save", identity, details=f"{today_str} total_xp={total_xp}")
     return jsonify({
         "ok":          True,
-        "record_id":   record_id,
+        "record_id":   resolved_record_id,
         "date":        today_str,
         "total_xp":    total_xp,
         "updated_at":  now_iso,

@@ -34,6 +34,7 @@ from airtable_schema import (
     DecisionEventStatus as ES,
     DecisionDomain as DOMAIN,
 )
+from tma_api import record_fields, record_id
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +81,11 @@ class ConfidenceResult:
 
 
 def _active_events(events: list[dict]) -> list[dict]:
-    return [e for e in events if e.get("fields", {}).get(EF.STATUS, ES.ACTIVE) != ES.SUPERSEDED]
+    return [e for e in events if record_fields(e).get(EF.STATUS, ES.ACTIVE) != ES.SUPERSEDED]
 
 
 def _event_pair_hash(event_a: dict, event_b: dict) -> str:
-    ids = sorted([event_a.get("id", ""), event_b.get("id", "")])
+    ids = sorted([record_id(event_a) or "", record_id(event_b) or ""])
     return hashlib.sha256("|".join(ids).encode()).hexdigest()
 
 
@@ -93,8 +94,8 @@ def detect_conflict_ai(event_a: dict, event_b: dict) -> ConflictResult:
     לא נקראת ישירות בזרימה — ראו detect_conflicts_ai_lazy() למגבלות."""
     from llm_fallback import call_anthropic_text
 
-    fa = event_a.get("fields", {})
-    fb = event_b.get("fields", {})
+    fa = record_fields(event_a)
+    fb = record_fields(event_b)
     text_a = fa.get(EF.AI_SUMMARY) or fa.get(EF.RAW_CONTENT, "")
     text_b = fb.get(EF.AI_SUMMARY) or fb.get(EF.RAW_CONTENT, "")
 
@@ -118,11 +119,11 @@ def detect_conflict_ai(event_a: dict, event_b: dict) -> ConflictResult:
             is_conflict=bool(data.get("is_conflict")),
             aspect=data.get("aspect"),
             severity=data.get("severity"),
-            event_ids=(event_a.get("id", ""), event_b.get("id", "")),
+            event_ids=(record_id(event_a) or "", record_id(event_b) or ""),
         )
     except Exception as e:
         logger.warning(f"[decision_confidence] detect_conflict_ai failed: {e}")
-        return ConflictResult(is_conflict=False, event_ids=(event_a.get("id", ""), event_b.get("id", "")))
+        return ConflictResult(is_conflict=False, event_ids=(record_id(event_a) or "", record_id(event_b) or ""))
 
 
 def detect_conflicts_ai_lazy(events: list[dict]) -> list[ConflictResult]:
@@ -137,13 +138,13 @@ def detect_conflicts_ai_lazy(events: list[dict]) -> list[ConflictResult]:
     """
     eligible = [
         e for e in _active_events(events)
-        if _trust_rank(e.get("fields", {}).get(EF.TRUST_LEVEL, "")) >= _trust_rank(_MIN_TRUST_FOR_AI_CONFLICT)
-        and e.get("fields", {}).get(EF.CLAIM_TOPIC)
+        if _trust_rank(record_fields(e).get(EF.TRUST_LEVEL, "")) >= _trust_rank(_MIN_TRUST_FOR_AI_CONFLICT)
+        and record_fields(e).get(EF.CLAIM_TOPIC)
     ]
 
     by_topic: dict[str, list[dict]] = {}
     for e in eligible:
-        by_topic.setdefault(e["fields"][EF.CLAIM_TOPIC], []).append(e)
+        by_topic.setdefault(record_fields(e)[EF.CLAIM_TOPIC], []).append(e)
 
     results: list[ConflictResult] = []
     comparisons = 0
@@ -183,7 +184,7 @@ def calc_confidence(
     if not active:
         return ConfidenceResult(score=0.0, missing=["אין אירועים מקושרים"])
 
-    trust_scores = [_TRUST_SCORE.get(e["fields"].get(EF.TRUST_LEVEL, ""), 0.3) for e in active]
+    trust_scores = [_TRUST_SCORE.get(record_fields(e).get(EF.TRUST_LEVEL, ""), 0.3) for e in active]
     base_score = sum(trust_scores) / len(trust_scores)
 
     if conflicts is None:
@@ -196,7 +197,7 @@ def calc_confidence(
     score = max(0.0, min(1.0, base_score - conflict_penalty - missing_penalty))
 
     conflicting_ids = {eid for c in conflicts for eid in c.event_ids if eid}
-    supporting = [e["id"] for e in active if e.get("id") not in conflicting_ids]
+    supporting = [record_id(e, required=True) for e in active if record_id(e) not in conflicting_ids]
 
     return ConfidenceResult(
         score=round(score, 2),
@@ -226,6 +227,6 @@ def build_evidence_summary(events: list[dict]) -> str:
         return "(אין ראיות מקושרות)"
     counts: dict[str, int] = {}
     for e in active:
-        et = e.get("fields", {}).get(EF.EVENT_TYPE) or "אחר"
+        et = record_fields(e).get(EF.EVENT_TYPE) or "אחר"
         counts[et] = counts.get(et, 0) + 1
     return ", ".join(f"{count} {etype}" for etype, count in counts.items())
