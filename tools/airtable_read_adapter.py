@@ -34,7 +34,7 @@ class AirtableReadError(RuntimeError):
         """Recreate the legacy httpx error for callers that expose it."""
         if self.status_code is None:
             raise ValueError("AirtableReadError has no HTTP status")
-        request = httpx.Request("GET", self.response_url or "https://api.airtable.com")
+        request = httpx.Request("GET", self.response_url or "https://provider.invalid/records")
         response = httpx.Response(
             self.status_code,
             text=self.response_text,

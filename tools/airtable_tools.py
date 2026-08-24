@@ -235,12 +235,6 @@ def _sanitize_fields(table: str, fields: dict) -> dict:
     return cleaned
 
 
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {os.environ.get('AIRTABLE_API_KEY', '')}",
-        "Content-Type":  "application/json"
-    }
-
 def _base() -> str:
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     if not base:

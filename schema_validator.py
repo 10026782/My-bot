@@ -66,9 +66,7 @@ def refresh_cache() -> dict[str, list[str]]:
         metadata = get_base_metadata(timeout=20)
     except AirtableLookupError as exc:
         if exc.status_code is not None:
-            request = httpx.Request(
-                "GET", exc.response_url or "https://api.airtable.com"
-            )
+            request = httpx.Request("GET", exc.response_url or "https://provider.invalid/metadata")
             response = httpx.Response(
                 exc.status_code,
                 text=exc.response_text,
