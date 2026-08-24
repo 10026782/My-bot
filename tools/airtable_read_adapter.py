@@ -93,6 +93,7 @@ def list_records_page(
     page_size: int | None = None,
     offset: str = "",
     max_records: int | str | None = None,
+    fields: list[str] | None = None,
     timeout: float = 10,
 ) -> tuple[list[dict], str | None]:
     """Return one raw Airtable page and its next offset."""
@@ -103,6 +104,7 @@ def list_records_page(
             page_size=page_size,
             offset=offset,
             max_records=max_records,
+            fields=fields,
             timeout=timeout,
         )
     except AirtableLookupError as exc:
