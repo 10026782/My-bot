@@ -171,6 +171,9 @@ jobs:
       - name: Airtable boundary guard (blocking)
         run: python tools/audit_gateway_bypass.py --boundary
 
+      - name: Core provider boundary guard (blocking)
+        run: python tools/audit_provider_boundary.py
+
       - name: F52 result-parsing audit (warning only, never blocks)
         run: python tools/audit_result_parsing.py || true
 
