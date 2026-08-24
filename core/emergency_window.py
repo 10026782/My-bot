@@ -16,8 +16,6 @@ import os
 import threading
 from datetime import datetime, timedelta, timezone
 
-import httpx
-
 import feature_flags
 from airtable_schema import (
     Tables,
@@ -26,6 +24,7 @@ from airtable_schema import (
     EmergencyWindowMaxRisk,
 )
 from tools.airtable_gateway import airtable_create, airtable_patch
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -63,22 +62,23 @@ def _fetch_active_record() -> dict | None:
         return None
 
     try:
-        r = httpx.get(
-            f"https://api.airtable.com/v0/{base}/{Tables.EMERGENCY_WINDOW}",
-            headers={"Authorization": f"Bearer {key}"},
-            params={
-                "filterByFormula": f"{{{F.STATUS}}}='{Status.ACTIVE}'",
-                "sort[0][field]": F.ACTIVATED_AT,
-                "sort[0][direction]": "desc",
-                "maxRecords": 1,
-            },
+        records = list_records(
+            Tables.EMERGENCY_WINDOW,
+            f"{{{F.STATUS}}}='{Status.ACTIVE}'",
+            max_records=1,
+            sort=[{"field": F.ACTIVATED_AT, "direction": "desc"}],
+            paginate=False,
             timeout=10,
         )
-        if r.status_code != 200:
-            logger.warning(f"[emergency_window] fetch failed {r.status_code}: {r.text[:200]}")
-            return None
-        records = r.json().get("records", [])
         return records[0] if records else None
+    except AirtableReadError as e:
+        if e.status_code is not None:
+            logger.warning(
+                f"[emergency_window] fetch failed {e.status_code}: {e.response_text[:200]}"
+            )
+        else:
+            logger.error(f"[emergency_window] fetch error: {e.cause or e}")
+        return None
     except Exception as e:
         logger.error(f"[emergency_window] fetch error: {e}")
         return None

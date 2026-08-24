@@ -7,10 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-import urllib.parse
 from typing import TYPE_CHECKING
-
-import httpx
 
 from action_validator import ActionBlocked, validate_action
 
@@ -19,6 +16,7 @@ from .calendar_tools import calendar_get_events, calendar_create_event
 from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
 from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead, _tool_result
+from .airtable_read_adapter import AirtableReadError, list_records
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
 try:
     from core.lead_buffer import save_blocked_payload as _save_lead_buffer
@@ -85,15 +83,18 @@ def _check_duplicate(real_table: str, field: str, value: str) -> dict | None:
         return None
     safe = _sanitize_formula_value(value)
     try:
-        r = httpx.get(
-            f"https://api.airtable.com/v0/{base}/{urllib.parse.quote(real_table, safe='')}",
-            headers={"Authorization": f"Bearer {key}"},
-            params={"filterByFormula": f"{{{field}}}='{safe}'", "maxRecords": 1},
+        records = list_records(
+            real_table,
+            f"{{{field}}}='{safe}'",
+            max_records=1,
+            paginate=False,
             timeout=5,
         )
-        if r.status_code == 200:
-            recs = r.json().get("records", [])
-            return recs[0] if recs else None
+        return records[0] if records else None
+    except AirtableReadError as e:
+        if e.cause is not None:
+            logger.warning(f"[Dedup] {real_table}/{field}: {e.cause}")
+        return None
     except Exception as e:
         logger.warning(f"[Dedup] {real_table}/{field}: {e}")
     return None
