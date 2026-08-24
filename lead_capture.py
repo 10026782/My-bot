@@ -129,6 +129,7 @@ def capture_lead_event(
 
     try:
         from tools.airtable_tools import airtable_add
+        from tma_api import relation_payload as _relation_payload
 
         # זיהוי event_type לפי תוכן
         msg_lower = (message or "").lower()
@@ -144,7 +145,7 @@ def capture_lead_event(
 
         fields = {
             LeadEventFields.NAME:       title,
-            LeadEventFields.LEAD_LINK:  [lead_record_id],  # Linked record — חייב להיות list
+            LeadEventFields.LEAD_LINK:  _relation_payload(lead_record_id),
             LeadEventFields.EVENT_TYPE: event_type,
             LeadEventFields.DOMAIN:     domain,
             LeadEventFields.MESSAGE:    (message or "")[:5000],
@@ -213,7 +214,7 @@ def capture_inbound_lead(
         # airtable_get מחזיר str — re.search תקין כאן
         raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
         if isinstance(raw, str):
-            existing_m = re.search(r"rec\w+", raw)
+            existing_m = re.search(r"\[([^\]]+)\]", raw)
             if existing_m:
                 logger.debug("[LeadCapture] lead already exists, skipping: %s", memory_key)
                 # תיקון: claim_type=FOUND, לא CREATED — שום דבר לא נוצר כאן, רק

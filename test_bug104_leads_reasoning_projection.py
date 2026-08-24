@@ -253,10 +253,11 @@ try:
     check("no linked events → zero Lead-Events reads", len(_calls) == 0)
     check("no linked events → [] (available, empty)", r0 == [])
 
-    # malformed IDs are rejected before the formula (defense in depth)
+    # Opaque relation references are accepted; malformed value types remain
+    # the invalid-input case covered by the relation abstraction.
     _calls.clear()
     rj = tma_api._read_lead_events({"id": "recX", "fields": {"Lead Events": ["not-a-rec", 123]}})
-    check("malformed linked IDs → zero reads, []", len(_calls) == 0 and rj == [])
+    check("opaque linked reference is preserved in the formula", len(_calls) == 1 and rj == [])
 finally:
     tma_api._at_list = _orig_at_list
 

@@ -328,15 +328,20 @@ def _at_post(table: str, fields: dict) -> dict | None:
 
 
 
-def _linked_record_ids(value) -> list[str]:
-    """Return only Airtable linked-record ids, never display text."""
-    if isinstance(value, list):
+def relation_refs(value) -> tuple[str, ...]:
+    """Return opaque related-entity references without provider validation."""
+    if isinstance(value, str):
+        candidates = (value,)
+    elif isinstance(value, (list, tuple)):
         candidates = value
-    elif isinstance(value, str):
-        candidates = [value]
     else:
-        return []
-    return [v for v in candidates if isinstance(v, str) and re.match(r"^rec\w+$", v)]
+        return ()
+    return tuple(v for v in candidates if isinstance(v, str) and v)
+
+
+def relation_payload(value) -> list[str]:
+    """Return the legacy ordered relation payload for the persistence boundary."""
+    return list(relation_refs(value))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1560,24 +1565,19 @@ def get_leads(identity):
 
 # Reverse-link field on a Leads record → list of Lead-Event record IDs.
 _LEAD_EVENTS_LINK_FIELD = "Lead Events"
-# Airtable record-ID shape — used to reject anything that is not a clean rec ID
-# before it is embedded in a RECORD_ID() formula (defense in depth).
-_REC_ID_RE = re.compile(r"^rec[A-Za-z0-9]+$")
-
-
 def _event_linked_to_lead(event: dict, lead_id: str) -> bool:
     """
     BUG-104 Phase 1.1 — second, independent linkage proof. The reverse-link
     membership on the Lead snapshot only LOCATES candidate record IDs; it is
     not itself proof that the fetched event actually links back to this lead
     (e.g. a stale/misconfigured reverse link). An event is only admitted when
-    its OWN LeadEventFields.LEAD_LINK field is a list that explicitly contains
+    its OWN LeadEventFields.LEAD_LINK relation explicitly contains
     the current lead_id. Operates on the already-fetched record — no read.
     """
     own_link = record_fields(event).get(LeadEventFields.LEAD_LINK)
     if not isinstance(own_link, list):
         return False   # malformed/missing own link field — excluded, fail closed
-    return lead_id in own_link
+    return lead_id in relation_refs(own_link)
 
 
 def _read_lead_events(rec: dict):
@@ -1602,7 +1602,7 @@ def _read_lead_events(rec: dict):
 
     lead_id = record_id(rec) or ""
     raw_ids = record_fields(rec).get(_LEAD_EVENTS_LINK_FIELD, []) or []
-    event_ids = [e for e in raw_ids if isinstance(e, str) and _REC_ID_RE.match(e)]
+    event_ids = list(relation_refs(raw_ids))
     if not event_ids:
         return []   # available, empty — no Airtable read
 
@@ -1751,7 +1751,7 @@ def get_lead(lead_id, identity):
     # Owner is a multipleRecordLinks field -> list of Profile record IDs,
     # not a display string (see _resolve_profile_record_id). Resolve to
     # name(s) so the frontend never has to render a raw "recXXX" id.
-    owner_links = _linked_record_ids(f.get(LeadFields.OWNER, []))
+    owner_links = relation_refs(f.get(LeadFields.OWNER, []))
     owner_display = ", ".join(_resolve_profile_display_names(owner_links)) if owner_links else ""
 
     payload = {
@@ -1980,7 +1980,7 @@ def create_lead_task(lead_id, identity):
     lead_domain = _normalize_task_domain(lf.get(LeadFields.DOMAIN, ""))
     # Owner is a multipleRecordLinks field -> list of Profile record IDs,
     # not a plain string (see _resolve_profile_record_id).
-    lead_owner = _linked_record_ids(lf.get(LeadFields.OWNER, []))
+    lead_owner = relation_refs(lf.get(LeadFields.OWNER, []))
 
     task_fields: dict = {
         TaskFields.NAME:     title,
@@ -1992,16 +1992,16 @@ def create_lead_task(lead_id, identity):
     if lead_domain:
         task_fields[TaskFields.DOMAIN] = lead_domain
     if lead_owner:
-        task_fields[TaskFields.OWNER] = lead_owner
+        task_fields[TaskFields.OWNER] = relation_payload(lead_owner)
     else:
         # Lead has no Owner assigned -- default to the person creating the
         # task (nobody ever writes Leads.Owner today, so this is the only
         # path that currently gives a task a real Owner).
         creator_profile_id = _resolve_profile_record_id(identity.user_id)
         if creator_profile_id:
-            task_fields[TaskFields.OWNER] = [creator_profile_id]
+            task_fields[TaskFields.OWNER] = relation_payload(creator_profile_id)
     # קישור ליד — linked record array
-    task_fields[TaskFields.LEAD_LINK] = [lead_id]
+    task_fields[TaskFields.LEAD_LINK] = relation_payload(lead_id)
 
     _, response, status = _queue_or_owner_execute(
         "tma_create_lead_task",
@@ -2796,7 +2796,7 @@ def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str
         # owner in the system there's no other rightful claimant for an
         # unassigned task. A task with an explicit owner link to someone
         # else is still excluded.
-        owner_links = _linked_record_ids(fields.get(TaskFields.OWNER, []))
+        owner_links = relation_refs(fields.get(TaskFields.OWNER, []))
         if owner_links and owner_record_id not in owner_links:
             continue
 
@@ -3947,12 +3947,12 @@ def _get_active_world_dict() -> dict | None:
     wf = record_fields(w)
     coins_target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
 
-    quest_ids = set(_linked_record_ids(wf.get(WorldsFields.QUESTS, []) or []))
+    quest_ids = set(relation_refs(wf.get(WorldsFields.QUESTS, []) or []))
     coins_earned = 0
     if quest_ids:
         log_recs = _at_list(Tables.COINS_LOG, "", max_records=500)
         for log in log_recs:
-            log_quest_ids = _linked_record_ids(record_fields(log).get(CoinsLogFields.QUEST, []) or [])
+            log_quest_ids = relation_refs(record_fields(log).get(CoinsLogFields.QUEST, []) or [])
             if quest_ids.intersection(log_quest_ids):
                 coins_earned += int(record_fields(log).get(CoinsLogFields.COINS, 0) or 0)
 
@@ -4055,7 +4055,7 @@ def update_quest(quest_id, identity):
                 CoinsLogFields.ACTION:        "Quest Completed",
                 CoinsLogFields.COINS:         coins,
                 CoinsLogFields.DATE:          date.today().isoformat(),
-                CoinsLogFields.QUEST:         [quest_id],
+                CoinsLogFields.QUEST:         relation_payload(quest_id),
                 CoinsLogFields.NOTE:          f"Quest completed via TMA: {quest_name}",
             })
             if not log_ok:
@@ -4177,7 +4177,7 @@ def complete_daily_task(task_id, identity):
     coins = int(f.get(RoadmapTaskFields.COINS, 0) or 0)
     coins_awarded = 0
     if coins > 0:
-        quest_ids = _linked_record_ids(f.get(RoadmapTaskFields.QUEST, []) or [])
+        quest_ids = relation_refs(f.get(RoadmapTaskFields.QUEST, []) or [])
         log_fields: dict = {
             CoinsLogFields.ACTION:        "Task Completed",
             CoinsLogFields.COINS:         coins,
@@ -4185,7 +4185,7 @@ def complete_daily_task(task_id, identity):
             CoinsLogFields.NOTE:          f"Roadmap task completed via TMA: {task_name}",
         }
         if quest_ids:
-            log_fields[CoinsLogFields.QUEST] = quest_ids
+            log_fields[CoinsLogFields.QUEST] = relation_payload(quest_ids)
         log_ok = _at_post(Tables.COINS_LOG, log_fields)
         if not log_ok:
             return jsonify({"error": "coins log failed — task not marked done"}), 500
