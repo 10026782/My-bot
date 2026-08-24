@@ -816,6 +816,31 @@ def get_table_schema(table_name: str, *, timeout: float = 15) -> dict | None:
     return None
 
 
+def get_base_metadata(*, timeout: float = 10) -> dict:
+    """Fetch the full Airtable Meta API payload for the current base."""
+    base = os.environ.get("AIRTABLE_BASE_ID", "")
+    if not base:
+        raise RuntimeError("AIRTABLE_BASE_ID לא מוגדר")
+    try:
+        r = httpx.get(
+            f"https://api.airtable.com/v0/meta/bases/{base}/tables",
+            headers={"Authorization": f"Bearer {_at_key()}"},
+            timeout=timeout,
+        )
+    except Exception as e:
+        raise AirtableLookupError("meta base metadata fetch failed", cause=e) from e
+
+    if r.status_code != 200:
+        raise AirtableLookupError(
+            f"meta base metadata fetch: HTTP {r.status_code}",
+            status_code=r.status_code,
+            response_text=r.text,
+            response_url=str(getattr(r, "url", "")),
+            response_reason=str(getattr(r, "reason_phrase", "")),
+        )
+    return r.json()
+
+
 def airtable_upload_attachment(
     record_id: str,
     field_id: str,

@@ -1,6 +1,5 @@
 # tools/airtable_tools.py
 import os
-import httpx
 import logging
 from typing import Any
 from airtable_schema import Tables
@@ -354,16 +353,18 @@ def airtable_add(table: str, fields: dict) -> dict:
 def airtable_get_schema() -> str:
     """קורא את כל הטבלאות והשדות מ-Airtable Meta API בזמן אמת."""
     with with_airtable_breaker():
-        base = _base()
-        r = httpx.get(
-            f"https://api.airtable.com/v0/meta/bases/{base}/tables",
-            headers=_headers(),
-            timeout=10
-        )
-        if r.status_code != 200:
-            _audit("airtable_get_schema", "meta", result=f"error {r.status_code}")
-            return f"❌ Meta API error {r.status_code}: {r.text[:150]}"
-        tables = r.json().get("tables", [])
+        from tools.airtable_gateway import AirtableLookupError, get_base_metadata
+
+        try:
+            payload = get_base_metadata(timeout=10)
+        except AirtableLookupError as exc:
+            if exc.status_code is None and exc.cause is not None:
+                raise exc.cause from exc
+            if exc.status_code is None:
+                raise
+            _audit("airtable_get_schema", "meta", result=f"error {exc.status_code}")
+            return f"❌ Meta API error {exc.status_code}: {exc.response_text[:150]}"
+        tables = payload.get("tables", [])
         if not tables:
             return "📭 לא נמצאו טבלאות בבסיס הנתונים."
         result = f"📊 נמצאו {len(tables)} טבלאות:\n\n"
