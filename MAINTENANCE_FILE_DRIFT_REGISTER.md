@@ -53,13 +53,13 @@ Classification: DOC DRIFT = contradicts current code · SUPERSEDED = later merge
 
 | # | Document:line | Claim | Current-code evidence | Class | Owner |
 |---|---|---|---|---|---|
-| G1 | `AGENTS.md:154` | "single-file Python/Flask application" | Multi-module tree (~400 test files, core/, tools/, workers/); self-labeled stale at CLAUDE.md:184 | DOC_DRIFT (declared-stale briefing) | #19 |
-| G2 | `AGENTS.md:169` | "The repository has no automated tests" | ~400 `test_*.py` executed by CI backend job | DOC_DRIFT (declared-stale) | #19 |
-| G3 | `CLAUDE.md:116` | Lists `core/tenant_config.py` as existing unwired module | Deleted by PR #851 (`0646ae3`); no doc update followed | DOC_DRIFT | #19 |
-| G4 | `ROADMAP.md:2199,2206,2210-2211` | F13: "קיים: core/tenant_config.py + providers/" | Same deletion; F13 section untouched by #851 | DOC_DRIFT | #19 |
-| G5 | `AI_CONTEXT.md:66` | N18 canary flags named `FEATURE_WHATSAPP_CANONICAL_LEAD_CUTOVER` (+EMAIL/FURNITURE/VOICE) | No such flags exist; real flags `WHATSAPP_CANONICAL_LEAD_WRITE` etc. (`feature_flags.py:35-38,236-240`) | DOC_DRIFT (owner-decision item cites wrong names) | #19 |
-| G6 | `AI_CONTEXT.md:4` | Briefing current through merge `29663ad` | HEAD `0e356ad` adds merges #853/#854/#857/#859/#860 absent from briefing | DOC_DRIFT (snapshot freshness; daily-refresh mechanism owns this) | #19 |
-| G7 | `docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md:9-19` | "implementation still blocked… nothing implemented" | `verify_consumption()` live (`librarian.py:1358`, wired `__main__.py:190,316`); Phase 1 = PR #490 | DOC_DRIFT (already tracked as D4) | #19 |
+| G1 | `AGENTS.md:154` | "single-file Python/Flask application" | Multi-module tree (~400 test files, core/, tools/, workers/); corrected by PR #882 | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
+| G2 | `AGENTS.md:169` | "The repository has no automated tests" | ~400 `test_*.py` executed by CI backend job; corrected by PR #882 | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
+| G3 | `CLAUDE.md:116` | Listed `core/tenant_config.py` as existing unwired module | Deleted by PR #851; corrected by PR #896 | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
+| G4 | `ROADMAP.md:2199,2206,2210-2211` | F13 presented deleted `core/tenant_config.py` as current | Corrected by PR #896 after PR #894 recheck | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
+| G5 | `AI_CONTEXT.md:66` | N18 canary flags named obsolete `*_CUTOVER` identifiers | Corrected to canonical `*_CANONICAL_LEAD_WRITE` identifiers by PR #893 | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
+| G6 | `AI_CONTEXT.md:4` | Briefing freshness/SHA stale | Refreshed through current snapshot by PR #893 | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
+| G7 | `docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md:9-19` | "implementation still blocked… nothing implemented" | `verify_consumption()` live at `librarian.py:1361`, wired by `__main__.py:217,343`; Phase 1 = PR #490; Phase 3 CI gate remains planned | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
 | G8 | `docs/governance/HORIZON_STATUS_AND_NEXT_STEPS_AUDIT_20260821.md:70-73` | "terminal-turn-result contract remains next" | Assertion holds today (`core/turn_result.py` exists but ROADMAP:69 older entry superseded in-file) | CURRENT | #19 |
 | G9 | `ROADMAP.md:69` | Pre-PR-807 "terminal result contract missing" | Superseded by newer entry in same file (:36-62) | SUPERSEDED | #19 |
 | G10 | `docs/governance/ARCHITECTURE_DRIFT_MAP.md:14` (row 1, TODO) | Emergency-flag /tmp persistence fix pending | Landed: durable Airtable-backed `evaluate_emergency_stop()` (`feature_flags.py:260-281`); CLAUDE.md:98 "/tmp mechanism no longer exists"; map status column never updated | SUPERSEDED (map row stale) | #19/#24 |
@@ -67,7 +67,7 @@ Classification: DOC DRIFT = contradicts current code · SUPERSEDED = later merge
 | G12 | `C02_C04_REMEDIATION_2_FINDINGS_7_8.md:20` | "implemented locally… no merge" | Merged PR #857 (`2b0c08e`) | SUPERSEDED | #19 |
 | G13 | `C02_C04_REMEDIATION_3_FINDING_1.md:56` | "no production writes, merge…" | Merged PR #859 (`d70a59f`,`9561ed6`, merge `5f0763f`) — post-dates prior matrix baseline | SUPERSEDED | #19 |
 | G14 | `CLAUDE.md:159` worker.py truth-reset claim | "legacy, currently unwired" | Verified: 0 imports; route forwards to run_agent() | CURRENT | — |
-| G15 | `CLAUDE.md:125` Approval_Policy_Spec.md absent | "doesn't currently exist in the repo" | Still absent (find empty). Note: AI_CONTEXT today contains NO reference to it — that part of CLAUDE's sentence is now slightly stale; dangling refs remain at `RELEASE_CHECKLIST.md:100`, `CHANGE_CONTROL_LOG.md:957`, `BUG_AUDIT_LOG.md:466` | CURRENT (with noted nuance) | #19 |
+| G15 | `CLAUDE.md:125` Approval_Policy_Spec.md absent | "doesn't currently exist in the repo" | Still absent; CLAUDE now states it is absent and not current activation guidance. Historical/dangling refs remain preserved elsewhere | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
 | G16 | `BOSS_CURRENT_STATE.md:3` | Self-banner "⚠️ STALE (09/08/2026)" | Intentional declared-stale archive marker | CURRENT (by design) | — |
 | G17 | `docs/audit/C95A_ARCHIVE_CARRY_FORWARD_GAP_REPORT.md:60+` | Cites "ROADMAP.md:241" supersession record | ROADMAP.md:241 content no longer matches citation (now TC10 text) | DOC_DRIFT (stale line-cite inside historical audit — do NOT rewrite body; record only) | #19 |
 
@@ -134,7 +134,7 @@ Counts: GAP 5 (H1,H2,H3,H5,H9) · PARTIAL 2 (H4,H6) · EXISTS 3.
 | K2 | `resolve_identity()` None-assumption mismatch (never returns None vs documented hard-fail) | C05-C07 F8, deferred (= R-C06-8) | NEEDS_DATA_CONTRACT_AUDIT | #3/#15 |
 | K3 | Select-option whitespace baked into live schema | LeadOutcome trailing spaces on 7/8 options; renamed trimmed 22/08; read paths keep permanent `.strip().lower()` hardening (`airtable_schema.py:361-380`, `core/adapters/leads_adapter.py:260-262`) | NEEDS_DEDICATED_SCHEMA_AUDIT (verify other tables' option strings) | #2 |
 | K4 | Checkbox-absent-means-False contract | EmergencyStopStore `Enabled` checkbox omitted by Airtable when unchecked; readers must default missing→False; duplicate Flag Names undetectable by type system (`airtable_schema.py:1495-1508`) | NEEDS_DATA_CONTRACT_AUDIT | #3 |
-| K5 | PR #851 tenant_config deletion residue in docs/comments | Zero code imports remain; stale references survive: `memory_store.py:15` comment (claims env vars feed the now-deleted module — vars simply dead), CLAUDE.md:116, ROADMAP F13 rows, dead link `f52.../phase-4c/CURRENT_STATE_MAP.md:197`. Historical-only refs acceptable (CHANGELOG, BUG_AUDIT_LOG, master plan, POST_N15 survey) | DOC_DRIFT (docs fix allowed; historical preserved) | #19 |
+| K5 | PR #851 tenant_config deletion residue in docs/comments | Active doc references in CLAUDE/ROADMAP corrected by PR #896; `CURRENT_STATE_MAP.md:197`, CHANGELOG, BUG_AUDIT_LOG, master plan, POST_N15 survey, and `memory_store.py:15` comment remain historical/source-comment evidence outside this scope | **RESOLVED ACTIVE DOC SUBSET; HISTORICAL/CROSS-TRACK RESIDUE PRESERVED** | #19/#20 |
 | K6 | Media Files identity columns write-only | `DRIVE_FILE_ID` (:635) and `TELEGRAM_FILE_ID` (:642): sole writers `media_gateway.py:41,48` (+ transcript writer :214 status); ZERO lookup-by-ID readers anywhere; no Drive-file-id retrieval either | NEEDS_DEDICATED_SCHEMA_AUDIT | #2 |
 | K7 | LeadSessions persistence | Original F4 gap (lead_draft in-memory only) FIXED (PR #845 `f2030b0`; persist+restore+round-trip self-test `session_store.py:519,693,887-890`). Residual: entire session state is one schema-less `State JSON` blob; keys evolve without versioning | Fixed; residual NEEDS_DATA_CONTRACT_AUDIT | #3 |
 | K8 | Structured-result contract complete; FileUploadResult.file_id dual-table overloading | Media pipeline fully structured today (`MediaError/MediaResult` dataclasses; all 3 entry points return MediaResult; rendering centralized :156-160). Overloading CONFIRMED: file_id = Media Files rec ID when type="drive_file" vs Decision Inbox rec ID when "inbox_file" (`session_store.py:102-115`); `_sync_to_db` writes LINKED_MEDIA_FILE only for drive_file to dodge cross-table INVALID_RECORD_ID (:536-540) | Overloading NEEDS_DATA_CONTRACT_AUDIT | #3 |
@@ -200,7 +200,7 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #15 Recovery/Fallback follow-up | L(f) orphaned-Drive-file on ASSET_SAVE_FAILED; burned-idempotency-key retry block L(e) |
 | #16 Tool Contract | I5 duplicate maps; K8 result-contract overloading |
 | #18 SSOT | G3-G7, G17 doc-authority conflicts; matrix/register are SSOT pointers |
-| #19 Docs-to-Code | G1-G13, G15, G17, K5, I8 |
+| #19 Docs-to-Code | G1-G7, G15, K5 active subset **resolved**; G17 historical audit drift preserved; I8 cross-routed to #23 |
 | #20 Code-to-Docs | H1-H6, H9 (H8 optional expansion) |
 | #21 Orphan Artifact | config.json, import_knowledge_base.json, review_diffs.txt review, memory.py, benchmark_token_estimate.py, reports/ provenance gaps |
 | #22 Performance Smell | (none consolidated this pass) |
