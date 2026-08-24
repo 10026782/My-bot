@@ -1639,6 +1639,15 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   `handle_lead_candidate()`'s חוזה חיצוני (`Optional[str]`) לא השתנה. במפורש לא טופל:
   ה-emoji string-sniffing ב-`_process_structured_file_upload` (`app.py:5725-5732`) ו-Phase 4
   המלא (UX Contract) — owner בחר מפורשות בסקופ המצומצם מול Phase 4 המלא.
+  (6) **ממצא נוסף, זוהה 24/08/2026 (לא טופל, Phase 4 territory):** כרטיס ה-Draft של ליד
+  (`render_lead_draft_card`) הוא **טקסט בלבד** — נבדק בקוד: אין `InlineKeyboardMarkup`/
+  `reply_markup` בשום מקום ב-`core/lead_candidate_handler.py`/`core/lead_service.py`. אישור/
+  ביטול (review mode) נעשים אך ורק ע"י הקלדת "כן"/"לא" חופשית, לא לחיצה על כפתור. לעומת זאת
+  יש כפתורי Telegram אמיתיים (✅/❌ לחיצים, `InlineKeyboardMarkup`/`reply_markup`) במקום אחר
+  ב-`app.py` (סביב שורה 1964, זרימת ה-pending-approvals הכללית) — אך הם אינם מחוברים לכרטיס
+  הליד. אף אחת מ-5 הפרוסות של Phase 2 לא נגעה בזה — כולן היו backend/state-machine, לא שכבת
+  שליחה/UI. זה שייך מבחינה מהותית ל-Phase 4 (UX Contract, ראו למטה) — לא "finished" כחלק
+  מ-Phase 2, ולא בוצעה בו עבודה חדשה בממצא הזה עצמו (תיעוד בלבד).
 - **Phase 3 — Canonical Writers:** איחוד כל Lead writers החיים (כולל אלה שעוקפים
   dispatcher/governance checks, שנמצאו באודיט) למסלול `create_lead(payload, context)` יחיד;
   כל מקור (Telegram/WhatsApp/UI/Campaign/API/Voice/Email) הופך ל-adapter שלא כותב בעצמו.
@@ -1650,7 +1659,10 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   IDs, contract/execution/field IDs) לא מוצגים כברירת מחדל — נשמרים ב-structured result
   ל-logs/evidence/debugging/idempotency בלבד. סוגר גם double-response אחרי הצלחה (turn
   ownership: `handled=true`/`terminal=true` חייב לעצור עיבוד נוסף של אותו turn ע"י general
-  agent/handler אחר — primitive משותף, לא Lead-specific patch).
+  agent/handler אחר — primitive משותף, לא Lead-specific patch). **כולל גם** (ממצא 24/08/2026,
+  ראו Phase 2 (6) למעלה): חיבור כרטיס ה-Draft של ליד לכפתורי Telegram אמיתיים
+  (`InlineKeyboardMarkup`) במקום אישור/ביטול בטקסט חופשי בלבד — התשתית לכפתורים כבר קיימת
+  ב-`app.py` (סביב שורה 1964) לזרימות אישור אחרות, פשוט לא מחוברת לכרטיס הליד.
 - **Phase 5 — Attribution + Lead Screen:** taxonomy קנונית ל-campaign attribution
   (source/platform/campaign/ad set/ad/creative/tracking IDs — `ad_attribution.py` נמצא
   כותב UTM fields שלא קיימים בסכימה החיה) ול-Score/Temperature/Status (נמצאו כמה
