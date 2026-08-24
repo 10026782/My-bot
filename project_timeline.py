@@ -10,7 +10,8 @@ import logging
 from datetime import date, timedelta
 
 from tools.airtable_gateway import airtable_create
-from tools.airtable_read_adapter import AirtableReadError, all_of, any_of, equals, list_records
+from core.query_contract import all_of, any_of, equals
+from tools.airtable_read_adapter import AirtableReadError, list_records
 from tma_api import record_fields
 
 logger = logging.getLogger(__name__)

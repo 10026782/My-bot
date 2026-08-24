@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from airtable_schema import LeadFields
-from tools.airtable_read_adapter import AirtableReadError, all_of, contains, equals, list_records
+from core.query_contract import all_of, contains, equals
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 

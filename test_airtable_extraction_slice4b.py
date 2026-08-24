@@ -7,6 +7,7 @@ import os
 from unittest.mock import patch
 
 import project_timeline
+from tools.airtable_read_adapter import render_query
 
 
 def test_timeline_creation_preserves_payload_and_write_contract():
@@ -27,7 +28,7 @@ def test_timeline_reads_preserve_queries_and_shapes():
 
     def fake_list(*args, **kwargs):
         calls.append((args, kwargs))
-        if args[1].startswith("OR("):
+        if render_query(args[1]).startswith("OR("):
             return records
         return []
 
@@ -38,10 +39,15 @@ def test_timeline_reads_preserve_queries_and_shapes():
 
     assert summary["in_progress"] == [{"task": "T", "phase": "A", "due": "2999-01-01", "priority": "high"}]
     assert summary["done_today"] == 0
-    assert calls[0] == (
-            ("ProjectTimeline", "OR({Status}='open', {Status}='in_progress')"),
-        {"max_records": None, "sort": [{"field": "Due", "direction": "asc"}], "paginate": False, "timeout": 10},
+    assert (calls[0][0][0], render_query(calls[0][0][1])) == (
+        "ProjectTimeline", "OR({Status}='open', {Status}='in_progress')"
     )
+    assert calls[0][1] == {
+        "max_records": None,
+        "sort": [{"field": "Due", "direction": "asc"}],
+        "paginate": False,
+        "timeout": 10,
+    }
     assert calls[1][0][0] == "ProjectTimeline"
     assert calls[1][1] == {"max_records": None, "paginate": False, "timeout": 10}
 

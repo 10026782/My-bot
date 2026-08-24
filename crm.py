@@ -16,17 +16,11 @@ from airtable_schema import (
     PaymentFields, PaymentStatus,
     validate_funding_cost,
 )
+from core.query_contract import after, all_of, any_of, before, contains, equals, negate
 from tools.airtable_gateway import airtable_create, airtable_patch
 from tools.airtable_read_adapter import (
     AirtableReadError,
-    after,
-    all_of,
-    before,
-    contains,
-    equals,
     list_records,
-    negate,
-    any_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,7 +151,7 @@ def _find_or_create_contact_unlocked(phone, name, *, email="", company="",
     records_by_id = {}
     lookup_error = ""
     for equivalent in _contact_phone_equivalents(normalized):
-        formula = equals(ContactFields.PHONE, equivalent)
+        formula = equals(ContactFields.PHONE, equivalent, spaced=True)
         try:
             records = _get(Tables.CONTACTS, formula, identity=identity)
         except Exception as exc:
@@ -300,9 +294,9 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        formula = equals("סטטוס", ContactStatus.ACTIVE)
+        formula = equals("סטטוס", ContactStatus.ACTIVE, spaced=True)
         if contact_type:
-            formula = all_of(formula, equals(ContactFields.ROLE_CATEGORY, contact_type))
+            formula = all_of(formula, equals(ContactFields.ROLE_CATEGORY, contact_type, spaced=True))
         records = _get(Tables.CONTACTS, formula, identity=identity)
         if not records:
             return "📭 אין אנשי קשר פעילים"
@@ -389,11 +383,11 @@ def crm_list_deals(status: str = "", identity=None) -> str:
     try:
         if status == "Active":
             formula = negate(any_of(
-                equals(DealFields.STAGE, DealStage.CLOSED_WIN),
-                equals(DealFields.STAGE, DealStage.CLOSED_LOSS),
+                equals(DealFields.STAGE, DealStage.CLOSED_WIN, spaced=True),
+                equals(DealFields.STAGE, DealStage.CLOSED_LOSS, spaced=True),
             ))
         elif status:
-            formula = equals("שלב", status)
+            formula = equals("שלב", status, spaced=True)
         else:
             formula = ""
         records = _get(Tables.DEALS, formula, identity=identity)
@@ -456,7 +450,7 @@ def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
         today    = date.today()
         deadline = today + timedelta(days=days_ahead)
         formula = all_of(
-            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS),
+            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS, spaced=True),
             before(PaymentFields.DUE_DATE, deadline.isoformat()),
             after(PaymentFields.DUE_DATE, today.isoformat()),
         )
@@ -497,7 +491,7 @@ def crm_overdue_payments(identity=None) -> str:
     try:
         today   = date.today().isoformat()
         formula = all_of(
-            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS),
+            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS, spaced=True),
             before(PaymentFields.DUE_DATE, today),
         )
         records = _get(Tables.PAYMENTS, formula, identity=identity)

@@ -41,6 +41,7 @@ def check(label: str, cond: bool) -> None:
 
 import tma_api
 from airtable_schema import LeadFields
+from tools.airtable_read_adapter import render_query
 
 
 class _FakeIdentity:
@@ -74,7 +75,7 @@ _EXCLUDED_STATUSES = {"archived", "duplicate", "not_relevant", "lost"}
 def _formula_domains(formula: str) -> set[str]:
     """Extract the set of domain values a bulk formula's OR(...) targets."""
     import re
-    return set(re.findall(r"\{domain\}='([^']+)'", formula))
+    return set(re.findall(r"\{domain\}='([^']+)'", render_query(formula)))
 
 
 class _CountingAirtable:
@@ -133,7 +134,7 @@ try:
     check("import/recruitment/real_estate all present",
           domains_shown == {"import", "recruitment", "real_estate"})
 
-    leads_formula = next(f for t, f, _ in fake.calls if t == "Leads")
+    leads_formula = render_query(next(f for t, f, _ in fake.calls if t == "Leads"))
     check("bulk Leads formula never references domain='saas'", "domain}='saas'" not in leads_formula)
 
     import_card = next(c for c in cards if c["domain"] == "import")

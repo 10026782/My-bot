@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 import crm
+from tools.airtable_read_adapter import render_query
 
 
 class ContactGateTests(unittest.TestCase):
@@ -57,7 +58,7 @@ class ContactGateTests(unittest.TestCase):
         self.assertEqual(result.normalized_phone, "+972548212778")
         self.assertEqual(get.call_count, 4)
         self.assertEqual(
-            [call.args[1] for call in get.call_args_list],
+            [render_query(call.args[1]) for call in get.call_args_list],
             [
                 "{טלפון} = '+972548212778'",
                 "{טלפון} = '972548212778'",

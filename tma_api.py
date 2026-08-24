@@ -35,18 +35,19 @@ from airtable_schema import (
 from tools.airtable_gateway import airtable_patch as _gw_patch, airtable_create as _gw_create
 from tools.airtable_read_adapter import (
     AirtableReadError,
+    get_record as _read_get_record,
+    list_records as _read_list_records,
+)
+from core.query_contract import (
     all_of as _query_all_of,
     any_of as _query_any_of,
     before as _query_before,
     contains as _query_contains,
     equals as _query_equals,
-    equals_ci as _query_equals_ci,
-    get_record as _read_get_record,
     greater_or_equal as _query_gte,
     negate as _query_negate,
     not_equals as _query_not_equals,
     record_id_equals as _query_record_id_equals,
-    list_records as _read_list_records,
 )
 from health_monitor import get_health_status
 from core.command_center import compose_command_center_status
@@ -2749,7 +2750,7 @@ def _resolve_profile_record_id(user_id: str) -> str | None:
     """
     if not user_id:
         return None
-    formula = _query_equals_ci(ProfileFields.NAME, user_id)
+    formula = _query_equals(ProfileFields.NAME, user_id, case_insensitive=True)
     records = _at_list(Tables.PROFILE, formula, max_records=5)
     return record_id(records[0]) if records else None
 

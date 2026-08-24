@@ -9,7 +9,8 @@ import json
 import logging
 import os
 
-from tools.airtable_read_adapter import AirtableReadError, array_contains, list_records
+from core.query_contract import array_contains
+from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
 

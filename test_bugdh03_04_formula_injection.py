@@ -19,6 +19,7 @@
 #     now a thin re-export of core.lead_service.find_existing_lead.)
 
 import os, sys
+from tools.airtable_read_adapter import render_query
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-test")
 os.environ.setdefault("TELEGRAM_TOKEN", "123456789:TEST")
 os.environ.setdefault("AIRTABLE_API_KEY", "patTest")
@@ -142,17 +143,20 @@ chk("Claim Topic: every quote in the raw payload was backslash-escaped",
 print("\n── 4. _search_formulas() no regression ──")
 
 formulas_plain = lead_service._search_formulas("Dana Levi", "0501234567")
+rendered_plain = [render_query(formula) for formula in formulas_plain]
 chk("still returns 3 formulas for name+phone (AND, phone-only, name-only)",
     len(formulas_plain) == 3)
-chk("phone-only formula present", any("{phone}='0501234567'" in f for f in formulas_plain))
-chk("name-search formula present", any("SEARCH('Dana Levi', {Name})" in f for f in formulas_plain))
+chk("phone-only formula present", any("{phone}='0501234567'" in f for f in rendered_plain))
+chk("name-search formula present", any("SEARCH('Dana Levi', {Name})" in f for f in rendered_plain))
 
 formulas_no_phone = lead_service._search_formulas("Dana Levi", "")
-chk("no phone -> only the name-search formula", formulas_no_phone == ["SEARCH('Dana Levi', {Name})"])
+chk("no phone -> only the name-search formula",
+    [render_query(formula) for formula in formulas_no_phone] == ["SEARCH('Dana Levi', {Name})"])
 
 formulas_injection = lead_service._search_formulas("O'Brien' OR 1=1 --", "050")
 chk("name with quote is escaped, not left raw",
-    all("O\\'Brien\\' OR 1=1 --" in f for f in formulas_injection if "SEARCH" in f))
+    all("O\\'Brien\\' OR 1=1 --" in render_query(f) for f in formulas_injection
+        if "SEARCH" in render_query(f)))
 
 
 print("\n" + "=" * 50)

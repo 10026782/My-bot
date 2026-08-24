@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 
+from core.query_contract import Query
 from tools.airtable_gateway import AirtableLookupError
 from tools.airtable_gateway import at_get_record
 from tools.airtable_gateway import at_list_by_formula
@@ -15,71 +16,56 @@ def _field_ref(field: str) -> str:
     return "{" + str(field) + "}"
 
 
-def equals(field: str, value: object) -> str:
-    """Express an exact field match without exposing provider formula syntax."""
-    return f"{_field_ref(field)}='{escape_formula_value(value)}'"
+def render_query(query: Query | str) -> str:
+    """Translate provider-neutral intent at the Airtable boundary only."""
+    if isinstance(query, str):
+        return query
+    if not isinstance(query, Query):
+        raise TypeError(f"unsupported query type: {type(query).__name__}")
 
-
-def equals_ci(field: str, value: object) -> str:
-    return f"LOWER({_field_ref(field)})=LOWER('{escape_formula_value(value)}')"
-
-
-def not_equals(field: str, value: object) -> str:
-    return f"{_field_ref(field)}!='{escape_formula_value(value)}'"
-
-
-def contains(
-    field: str,
-    value: object,
-    *,
-    case_sensitive: bool = False,
-    case_insensitive: bool = False,
-) -> str:
-    """Express a substring match; case sensitivity is a business intent."""
-    escaped = escape_formula_value(value)
-    if case_insensitive:
-        return f"FIND(LOWER('{escaped}'), LOWER({_field_ref(field)}))"
-    if case_sensitive:
-        return f"FIND('{escaped}', {_field_ref(field)})"
-    return f"SEARCH('{escaped}', {_field_ref(field)})"
-
-
-def array_contains(field: str, value: object) -> str:
-    return f"FIND('{escape_formula_value(value)}', ARRAYJOIN({_field_ref(field)}))"
-
-
-def record_id_equals(value: object) -> str:
-    return f"RECORD_ID()='{escape_formula_value(value)}'"
-
-
-def before(field: str, value: object) -> str:
-    return f"IS_BEFORE({_field_ref(field)}, '{escape_formula_value(value)}')"
-
-
-def after(field: str, value: object) -> str:
-    return f"IS_AFTER({_field_ref(field)}, '{escape_formula_value(value)}')"
-
-
-def greater_or_equal(field: str, value: object) -> str:
-    return f"{_field_ref(field)}>={escape_formula_value(value)}"
-
-
-def all_of(*clauses: str) -> str:
-    parts = [clause for clause in clauses if clause]
-    if not parts:
+    op, args = query.operation, query.arguments
+    if op == "empty":
         return ""
-    return parts[0] if len(parts) == 1 else "AND(" + ", ".join(parts) + ")"
-
-
-def any_of(*clauses: str) -> str:
-    parts = [clause for clause in clauses if clause]
-    if not parts:
-        return ""
-    return parts[0] if len(parts) == 1 else "OR(" + ", ".join(parts) + ")"
-
-
-def negate(clause: str) -> str:
-    return f"NOT({clause})" if clause else ""
+    if op == "equals":
+        field, value, spaced, case_insensitive = args
+        if case_insensitive:
+            return f"LOWER({_field_ref(field)})=LOWER('{escape_formula_value(value)}')"
+        separator = " = " if spaced else "="
+        return f"{_field_ref(field)}{separator}'{escape_formula_value(value)}'"
+    if op == "not_equals":
+        field, value, spaced = args
+        separator = " != " if spaced else "!="
+        return f"{_field_ref(field)}{separator}'{escape_formula_value(value)}'"
+    if op == "contains":
+        field, value, case_sensitive, case_insensitive = args
+        escaped = escape_formula_value(value)
+        if case_insensitive:
+            return f"FIND(LOWER('{escaped}'), LOWER({_field_ref(field)}))"
+        function = "FIND" if case_sensitive else "SEARCH"
+        return f"{function}('{escaped}', {_field_ref(field)})"
+    if op == "array_contains":
+        field, value = args
+        return f"FIND('{escape_formula_value(value)}', ARRAYJOIN({_field_ref(field)}))"
+    if op == "record_id_equals":
+        return f"RECORD_ID()='{escape_formula_value(args[0])}'"
+    if op in {"before", "after"}:
+        field, value = args
+        return f"IS_{op.upper()}({_field_ref(field)}, '{escape_formula_value(value)}')"
+    if op == "greater_or_equal":
+        field, value = args
+        return f"{_field_ref(field)}>={escape_formula_value(value)}"
+    if op in {"all_of", "any_of"}:
+        parts = [render_query(part) for part in args if part]
+        if not parts:
+            return ""
+        if len(parts) == 1:
+            return parts[0]
+        function = "AND" if op == "all_of" else "OR"
+        return f"{function}({', '.join(parts)})"
+    if op == "negate":
+        rendered = render_query(args[0])
+        return f"NOT({rendered})" if rendered else ""
+    raise ValueError(f"unsupported query operation: {op}")
 
 
 class AirtableReadError(RuntimeError):
@@ -121,7 +107,7 @@ class AirtableReadError(RuntimeError):
 
 def list_records(
     table: str,
-    formula: str = "",
+    formula: Query | str = "",
     *,
     max_records: int | str | None = 20,
     fields: list[str] | None = None,
@@ -131,6 +117,7 @@ def list_records(
 ) -> list[dict]:
     """Return raw Airtable records without exposing provider details."""
     try:
+        formula = render_query(formula)
         return at_list_by_formula(
             table,
             formula,
@@ -153,7 +140,7 @@ def list_records(
 
 def list_records_page(
     table: str,
-    formula: str = "",
+    formula: Query | str = "",
     *,
     page_size: int | None = None,
     offset: str = "",
@@ -163,6 +150,7 @@ def list_records_page(
 ) -> tuple[list[dict], str | None]:
     """Return one raw Airtable page and its next offset."""
     try:
+        formula = render_query(formula)
         return at_list_page(
             table,
             formula,

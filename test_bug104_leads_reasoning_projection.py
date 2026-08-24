@@ -223,6 +223,7 @@ check("degraded never claims verified", d["verifier"]["status"] != VERIFIER_VERI
 # ═════════════════════════════════════════════════════════════════
 print("\n[5] P1-A — Lead-Events lookup + read budget")
 import tma_api
+from tools.airtable_read_adapter import render_query
 
 _calls = []
 _orig_at_list = tma_api._at_list
@@ -242,9 +243,9 @@ try:
     r = tma_api._read_lead_events(LEAD)
     check("linked events → exactly one Lead-Events read", len(_calls) == 1)
     check("formula uses event RECORD_IDs, not the lead ID",
-          "recEV1" in _calls[0] and "recEV2" in _calls[0] and LEAD["id"] not in _calls[0])
+          "recEV1" in render_query(_calls[0]) and "recEV2" in render_query(_calls[0]) and LEAD["id"] not in render_query(_calls[0]))
     check("formula uses RECORD_ID() (events table), not linked display",
-          "RECORD_ID()" in _calls[0] and "ARRAYJOIN" not in _calls[0])
+          "RECORD_ID()" in render_query(_calls[0]) and "ARRAYJOIN" not in render_query(_calls[0]))
     check("linked events → returns event list", r == EVENTS)
 
     # lead WITHOUT linked events → zero reads, available empty
@@ -421,7 +422,7 @@ tma_api._at_get_record     = lambda table, rid: _state["lead"]
 def _client_at_list(table, formula="", max_records=50, strict=False):
     if table == tma_api.Tables.LEAD_EVENTS:
         _state["events_reads"] += 1
-        _state["last_formula"] = formula
+        _state["last_formula"] = render_query(formula)
         return EVENTS
     return []   # interaction log timeline etc.
 

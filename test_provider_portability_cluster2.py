@@ -3,6 +3,7 @@
 import inspect
 
 import tma_api
+from tools.airtable_read_adapter import render_query
 
 
 def test_relation_refs_preserve_empty_single_multiple_and_opaque_values():
@@ -45,8 +46,8 @@ def test_read_lead_events_uses_opaque_relation_refs_without_rec_validation(monke
         "fields": {"Lead Events": ["event-1"]},
     }
     assert tma_api._read_lead_events(lead)
-    assert "event-1" in calls[0]
-    assert "RECORD_ID()" in calls[0]
+    assert "event-1" in render_query(calls[0])
+    assert "RECORD_ID()" in render_query(calls[0])
 
 
 def test_linked_relation_validation_is_not_reintroduced():
