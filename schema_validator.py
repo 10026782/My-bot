@@ -9,6 +9,8 @@ import logging
 import os
 from pathlib import Path
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 _CACHE_PATH = Path(__file__).parent / "schema_cache.json"
@@ -52,23 +54,36 @@ def refresh_cache() -> dict[str, list[str]]:
     שולף schema חי מ-Airtable Metadata API ושומר ב-schema_cache.json.
     מחזיר dict של table -> [field_names].
     """
-    import httpx
-
     key  = os.environ.get("AIRTABLE_API_KEY", "")
     base = os.environ.get("AIRTABLE_BASE_ID", "")
 
     if not key or not base:
         raise EnvironmentError("AIRTABLE_API_KEY / AIRTABLE_BASE_ID חסרים")
 
-    r = httpx.get(
-        f"https://api.airtable.com/v0/meta/bases/{base}/tables",
-        headers={"Authorization": f"Bearer {key}"},
-        timeout=20,
-    )
-    r.raise_for_status()
+    from tools.airtable_gateway import AirtableLookupError, get_base_metadata
+
+    try:
+        metadata = get_base_metadata(timeout=20)
+    except AirtableLookupError as exc:
+        if exc.status_code is not None:
+            request = httpx.Request(
+                "GET", exc.response_url or f"https://api.airtable.com/v0/meta/bases/{base}/tables"
+            )
+            response = httpx.Response(
+                exc.status_code,
+                text=exc.response_text,
+                request=request,
+            )
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as status_error:
+                raise status_error from exc
+        if exc.cause is not None:
+            raise exc.cause from exc
+        raise
 
     tables: dict[str, list[str]] = {}
-    for tbl in r.json().get("tables", []):
+    for tbl in metadata.get("tables", []):
         tables[tbl["name"]] = [f["name"] for f in tbl.get("fields", [])]
 
     payload = {
