@@ -13,31 +13,33 @@ Status vocabulary: OPEN · DEFERRED · UNKNOWN · DOC_DRIFT · SUPERSEDED · NEE
 
 ### F1 — Legacy / unwired module cluster (all STATIC FINDING unless noted; zero runtime importers verified by bare+relative import grep)
 
-| Module | Importer/caller evidence | Classification | Status | Future audit |
-|---|---|---|---|---|
-| `worker.py` (root) | 0 imports; `/worker/trigger` (`app.py:6800`) forwards `[system event]` to `run_agent()` and never calls it; `schedule_background_worker` defined `worker.py:153`, zero call sites | LEGACY UNWIRED (documented `CLAUDE.md:159`; BUG_AUDIT_LOG C00-F1) | NEEDS_PRODUCT_DECISION (= R-C00-1) | #12 |
-| `knowledge_engine.py` (root) | 0 importers repo-wide (only a comment at `tools/audit_result_parsing.py:15`); imports root `router.py`; `KNOWLEDGE_ENGINE` flag default-off | LEGACY UNWIRED / ORPHAN SUSPECT; C95A recommends formal retirement ("C98"), superseded functionally by `core_knowledge.py` + `cmd_update.get_recent_business_context()` | OPEN (retirement decision) | #12 |
-| `router.py` (root, 342B) | Exactly 1 importer: `knowledge_engine.py:4` — itself dead. NOT the same file as `core/router/router.py` (package) | DEAD-CHAIN MEMBER (drags root router down with it) | OPEN (decide together with knowledge_engine) | #12 |
-| `lead_qualifier.py` (root) | 0 real importers (24 grep hits are comments/string literals/enums). **Correction to earlier belief:** knowledge_engine does NOT import it — these are TWO separate dead chains, not one chain | LEGACY UNWIRED (F09 built-not-wired; `ROADMAP.md:2134-2137,2316` states "לא מחובר לפרודקשן") | OPEN (wiring or retirement = product call) | #12 |
-| `memory.py` (root, 992B) | 0 importers; referenced only from `archive/boss_bot_summary.md` | ORPHAN SUSPECT (superseded by session_store/memory_store) | OPEN | #21 |
-| `profile.py` (root) | 0 importers | LEGACY UNWIRED (documented parked, `CLAUDE.md:116`) | DEFERRED (parked) | #12 |
-| `creative_generator.py` | 0 importers (it consumes llm_fallback, not vice versa) | LEGACY UNWIRED (flag-gated) | DEFERRED (parked) | #12 |
-| `data_engines.py` | 0 importers; self-referential importlib demo `:302-304` | INTENTIONALLY PARKED STUB (F02/F03/F04 blocked pending data) | CLOSED (by design) | — |
-| `tenant_provisioner.py` | Only importer is `test_response_contract_fixes.py` | TEST-ONLY + DOCUMENTED PARKED ("needs to stay parked — business/model decision", POST_N15 survey :129) | DEFERRED (owner-blocked) | #12 |
-| `tools/context_librarian/benchmark_token_estimate.py` | 0 importers, no non-test references | ORPHAN SUSPECT (one-off benchmark; ad-hoc agent use possible) — see also D1 measurement debt | OPEN | #21 |
+| Module | Importer/caller evidence | Classification | Status | Future audit | Current disposition (25/08/2026) |
+|---|---|---|---|---|---|
+| `worker.py` (root) | 0 imports; `/worker/trigger` (`app.py:6800`) forwards `[system event]` to `run_agent()` and never calls it; `schedule_background_worker` defined `worker.py:153`, zero call sites | LEGACY UNWIRED (documented `CLAUDE.md:159`; BUG_AUDIT_LOG C00-F1) | NEEDS_PRODUCT_DECISION (= R-C00-1) | #12 | REMOVED (deletion commit `6b8573b`) — **#12 CLOSED**; per-file product decision moot (module no longer exists). See `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md`. |
+| `knowledge_engine.py` (root) | 0 importers repo-wide (only a comment at `tools/audit_result_parsing.py:15`); imports root `router.py`; `KNOWLEDGE_ENGINE` flag default-off | LEGACY UNWIRED / ORPHAN SUSPECT; C95A recommends formal retirement ("C98"), superseded functionally by `core_knowledge.py` + `cmd_update.get_recent_business_context()` | OPEN (retirement decision) | #12 | REMOVED (deletion commit `b393313`) — **#12 CLOSED**. |
+| `router.py` (root, 342B) | Exactly 1 importer: `knowledge_engine.py:4` — itself dead. NOT the same file as `core/router/router.py` (package) | DEAD-CHAIN MEMBER (drags root router down with it) | OPEN (decide together with knowledge_engine) | #12 | REMOVED (deletion commit `48efa3f`) — **#12 CLOSED**. |
+| `lead_qualifier.py` (root) | 0 real importers (24 grep hits are comments/string literals/enums). **Correction to earlier belief:** knowledge_engine does NOT import it — these are TWO separate dead chains, not one chain | LEGACY UNWIRED (F09 built-not-wired; `ROADMAP.md:2134-2137,2316` states "לא מחובר לפרודקשן") | OPEN (wiring or retirement = product call) | #12 | REMOVED (deletion commit `8b4a89d`) — **#12 CLOSED**. |
+| `memory.py` (root, 992B) | 0 importers; referenced only from `archive/boss_bot_summary.md` | ORPHAN SUSPECT (superseded by session_store/memory_store) | OPEN | #21 | REMOVED (deletion commit `4ff9604`) — **#21 CLOSED**. |
+| `profile.py` (root) | 0 importers | LEGACY UNWIRED (documented parked, `CLAUDE.md:116`) | DEFERRED (parked) | #12 | REMOVED (deletion commit `cb0e0ff`) — **#12 CLOSED**. |
+| `creative_generator.py` | 0 importers (it consumes llm_fallback, not vice versa) | LEGACY UNWIRED (flag-gated) | DEFERRED (parked) | #12 | REMOVED (deletion commit `72b91dc`) — **#12 CLOSED**. |
+| `data_engines.py` | 0 importers; self-referential importlib demo `:302-304` | INTENTIONALLY PARKED STUB (F02/F03/F04 blocked pending data) | CLOSED (by design) | — | OUT-OF-SCOPE for this pass (not routed to #12/#21; already CLOSED by design at original baseline, unchanged). |
+| `tenant_provisioner.py` | Only importer is `test_response_contract_fixes.py` | TEST-ONLY + DOCUMENTED PARKED ("needs to stay parked — business/model decision", POST_N15 survey :129) | DEFERRED (owner-blocked) | #12 | PARKED BY OWNER DECISION (re-verified 25/08/2026: still test-only import) — **no live #12 gap**. |
+| `tools/context_librarian/benchmark_token_estimate.py` | 0 importers, no non-test references | ORPHAN SUSPECT (one-off benchmark; ad-hoc agent use possible) — see also D1 measurement debt | OPEN | #21 | PARKED — intentional manual verification tool (re-verified 25/08/2026: only a file-path string in `tools/context_librarian/librarian.py`'s allowlist, not a functional import) — **not a live #21 gap**. |
 
 ### F2 — Orphan-suspect tracked artifacts
 
-| Artifact | Evidence | Classification | Status |
-|---|---|---|---|
-| `config.json` (root, 1.5K) | ZERO references repo-wide (keys `bot_settings`/`free_commands` appear nowhere else; unrelated to `config.py`) | POSSIBLE ORPHAN (intent UNKNOWN — planned loader never built?) | OPEN |
-| `import_knowledge_base.json` (root, 4.6K) | ZERO references repo-wide (incl. docs/, archive/) | POSSIBLE ORPHAN | OPEN |
-| `review_diffs.txt` (root, 29K) | Dated 2026-05-28 diff dump; sole live ref `docs/governance/ARCHITECTURE_DRIFT_MAP.md:3` | HISTORICAL EVIDENCE | KEEP (evidence) |
-| `ledger-premerge-approval-ux.json` (79K) | PR #534 pre-merge receipt; governance tooling itself classifies `"GOVERNANCE_ARTIFACT"` | GOVERNANCE ARTIFACT | KEEP |
+| Artifact | Evidence | Classification | Status | Current disposition (25/08/2026) |
+|---|---|---|---|---|
+| `config.json` (root, 1.5K) | ZERO references repo-wide (keys `bot_settings`/`free_commands` appear nowhere else; unrelated to `config.py`) | POSSIBLE ORPHAN (intent UNKNOWN — planned loader never built?) | OPEN | REMOVED (deletion commit `7a76754`) — **#21 CLOSED**. |
+| `import_knowledge_base.json` (root, 4.6K) | ZERO references repo-wide (incl. docs/, archive/) | POSSIBLE ORPHAN | OPEN | REMOVED (deletion commit `97c256d`) — **#21 CLOSED**. |
+| `review_diffs.txt` (root, 29K) | Dated 2026-05-28 diff dump; sole live ref `docs/governance/ARCHITECTURE_DRIFT_MAP.md:3` | HISTORICAL EVIDENCE | KEEP (evidence) | HISTORICAL EVIDENCE, retained by design — **not an #21 gap** (never OPEN; unchanged). |
+| `ledger-premerge-approval-ux.json` (79K) | PR #534 pre-merge receipt; governance tooling itself classifies `"GOVERNANCE_ARTIFACT"` | GOVERNANCE ARTIFACT | KEEP | GOVERNANCE ARTIFACT, retained by design — **not an #21 gap** (never OPEN; unchanged). |
 
 ### F3 — Live tooling ownership snapshot (for future audits #7 CLI/Admin Tools and #12 File/Folder Ownership)
 
 **#7 CLOSED 25/08/2026** — see `docs/governance/HORIZON.md` §CLOSED and `CHANGE_CONTROL_LOG.md`. `diagnose_airtable.py`'s no-`__main__`-guard note below is **SUPERSEDED** (fixed by PR #930, `949e66b`, merged before this cluster's baseline SHA — original text preserved per this register's own rule).
+
+**#12 CLOSED 25/08/2026** — see §F1's "Current disposition" column and `docs/governance/HORIZON.md` §CLOSED. Does not affect this section's own live-tooling inventory, which remains current.
 
 - **Manual ops/governance CLIs (LIVE):** `audit_truth_gate.py`, `daily_git_audit.py` (+ library `branch_cemetery_cleanup.py`), `system_registry_audit.py` (generates tracked `reports/system_registry_report.{json,md}`), `scan_ghost_buttons.py`, `diagnose_airtable.py` (no `__main__` guard — top-level side effects on execution), `contact_merge.py`, `project_timeline.py`, `scripts/classify_contacts_for_airtable.py`, `scripts/render_log_export.py`, `tools/check_airtable_schema_runtime.py`, `tools/dev_registry_reconcile.py`, `tools/smoke_ai_usage_daily_upsert.py` (deliberately CI-excluded manual prod smoke).
 - **CI-invoked (LIVE):** `smoke_tests.py` (blocking), `tools/schema_governance.py` (warning), `tools/audit_dispatcher_bypass.py` + `tools/audit_gateway_bypass.py` + `tools/audit_result_parsing.py` (warning-only), `scripts/run_isolated_regression.py` (+ `regression_matrix.py`, `staging_identity.py` chain), `tools/dev_registry_validator.py` (blocking), context-librarian subcommands + `refresh_after_merge.py`.
@@ -196,7 +198,7 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #9 Mock Fidelity | (none consolidated this pass) |
 | #10 Dependency Risk | (none consolidated this pass) |
 | #11 Security Surface | J2 fail-open context (owner R-C06-8) |
-| #12 File/Folder Ownership | F1 cluster (worker/knowledge_engine/router/lead_qualifier/profile/creative_generator/tenant_provisioner/memory.py) |
+| #12 File/Folder Ownership | F1 cluster (worker/knowledge_engine/router/lead_qualifier/profile/creative_generator/tenant_provisioner/memory.py) — **#12 CLOSED 25/08/2026**: 7 of 8 modules removed (see F1 table's "Current disposition" column for per-file commit citations); `tenant_provisioner.py` remains parked by owner decision, not a gap. See `docs/governance/HORIZON.md` §CLOSED and `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md`. |
 | #13 Naming Consistency | I1-I3, I5, I7-I10, K10 |
 | #14 Deprecated Compatibility | I4, I6, I10, J1-J7 |
 | #15 Recovery/Fallback follow-up | L(f) orphaned-Drive-file on ASSET_SAVE_FAILED; burned-idempotency-key retry block L(e) |
@@ -204,7 +206,7 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #18 SSOT | G3-G7, G17 doc-authority conflicts; matrix/register are SSOT pointers |
 | #19 Docs-to-Code | G1-G7, G15, K5 active subset **resolved**; G17 historical audit drift preserved; I8 cross-routed to #23 |
 | #20 Code-to-Docs | H1-H6, H9 (H8 optional expansion) |
-| #21 Orphan Artifact | config.json, import_knowledge_base.json, review_diffs.txt review, memory.py, benchmark_token_estimate.py, reports/ provenance gaps |
+| #21 Orphan Artifact | config.json, import_knowledge_base.json, review_diffs.txt review, memory.py, benchmark_token_estimate.py, reports/ provenance gaps — **#21 CLOSED for the identified orphan candidates** (`docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`); see F1/F2 tables' "Current disposition" columns for per-item evidence. `reports/` provenance is explicitly **OUT-OF-SCOPE for this reconciliation pass** — the evidence doc hands its ownership to #12 without a closure statement of its own; not re-opened, not resolved here. |
 | #22 Performance Smell | (none consolidated this pass) |
 | #23 Cost | D8/I8 cost-flag precedence (cross-ref) |
 | #24 Architecture Drift | G10 drift-map stale row; drift-map rows 3/4/5/8 UNKNOWN verification |

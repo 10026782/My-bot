@@ -130,8 +130,8 @@ Full bodies live in **[MAINTENANCE_FILE_DRIFT_REGISTER.md](MAINTENANCE_FILE_DRIF
 
 | ID | Item | Status | Future audit |
 |---|---|---|---|
-| E-F | Legacy/unwired module cluster: worker.py, knowledge_engine.py (+root router.py dead-chain), lead_qualifier.py (separate dead chain — correction: knowledge_engine does NOT import it), memory.py, profile.py, creative_generator.py, tenant_provisioner.py (test-only/parked), benchmark_token_estimate.py | OPEN / NEEDS_PRODUCT_DECISION (retirement-vs-wiring per module) | #12/#21 |
-| E-A | Orphan-suspect tracked artifacts: `config.json`, `import_knowledge_base.json` (zero references repo-wide) | OPEN | #21 |
+| E-F | Legacy/unwired module cluster: worker.py, knowledge_engine.py (+root router.py dead-chain), lead_qualifier.py (separate dead chain — correction: knowledge_engine does NOT import it), memory.py, profile.py, creative_generator.py, tenant_provisioner.py (test-only/parked), benchmark_token_estimate.py | OPEN / NEEDS_PRODUCT_DECISION (retirement-vs-wiring per module) — **RESOLVED / #12 CLOSED 25/08/2026**: 7 of 8 modules removed from main via PRs #909/#911/#915/#919/#922/#931 (+ an earlier worker-module removal); `tenant_provisioner.py` remains parked by owner decision, not a gap; `benchmark_token_estimate.py` remains parked (routed to #21, see next row). Historical per-module classification preserved above; per-file evidence in `MAINTENANCE_FILE_DRIFT_REGISTER.md` §F1 "Current disposition" column and `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md`. | #12/#21 |
+| E-A | Orphan-suspect tracked artifacts: `config.json`, `import_knowledge_base.json` (zero references repo-wide) | OPEN — **RESOLVED / #21 CLOSED 25/08/2026**: both removed (deletion commits `7a76754`, `97c256d`). Historical classification preserved above; see `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md`. | #21 |
 | E-G | Doc drift: CLAUDE.md:116 + ROADMAP F13 listed deleted core/tenant_config.py; AI_CONTEXT.md:66 cited nonexistent `*_CUTOVER` flag names; AGENTS.md self-stale lines; CONSUMPTION_ENFORCEMENT_PLAN header (=D4); AI_CONTEXT freshness lag | **RESOLVED / DOC DRIFT REMEDIATED** via #882, #893, #896, and this closure PR; historical records preserved | #19 |
 | E-H | Code→docs gaps ×5: media result contract, WhatsApp ACK behavior, last_uploaded_file architecture (+dangling SPEC_File_Context_Reference.md citation at session_store.py:98), Media Files table responsibility, idempotency overview | OPEN (documentation work) | #20 |
 | E-I | Naming debt: owner-field semantic fragmentation (12 constants); provider IDs funneled into "Telegram File ID"; hand-copied alias duplicates dispatcher/tma_api; English-schema migration plan never executed | DEFERRED | #13 |
@@ -153,3 +153,23 @@ Current statuses were re-verified against `origin/main` at
 - #8 Test Gap — **ALREADY CLOSED**; placement concern is #12 only.
 - #14 Deprecated Compatibility — **DEFERRED ARCHITECTURE**; active compatibility remains load-bearing.
 - #19 Docs-to-Code — **CLOSED / DOC DRIFT REMEDIATED** after #882, #893, #896, and this G7 correction.
+
+### #12 / #21 closure reconciliation — 25/08/2026
+
+Docs-only pass reconciling this register's E-F/E-A rows (and
+`MAINTENANCE_FILE_DRIFT_REGISTER.md`'s §F1/§F2/cross-reference table) against
+current `origin/main`. Not a new audit — no new orphan candidates inspected,
+no code changed.
+
+- **#12 File / Folder Ownership** — **CLOSED**. 7 of 8 E-F cluster modules
+  removed (see E-F row above for commits); `tenant_provisioner.py` remains
+  parked by owner decision — not a live gap.
+- **#21 Orphan Artifact** — **CLOSED for the identified orphan candidates**
+  (unchanged verdict; `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`).
+  `config.json`/`import_knowledge_base.json` removed (E-A row above);
+  `review_diffs.txt`/`ledger-premerge-approval-ux.json` retained by design
+  (never OPEN); `benchmark_token_estimate.py` remains parked, not a gap.
+- **Out-of-scope, not resolved by this pass:** the `reports/` provenance
+  question `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s #21 cross-reference row
+  mentions (hands ownership to #12 without its own closure statement) —
+  recorded here only, not investigated.
