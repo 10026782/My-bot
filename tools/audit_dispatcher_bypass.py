@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -106,9 +107,34 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
 })
 
 
+class ScanBoundaryError(RuntimeError):
+    """Raised when the tracked-file boundary can't be determined — fail closed
+    rather than falling back to an unsafe filesystem walk (see #7 dispatcher-bypass
+    scan-boundary remediation: rglob() previously picked up untracked files and
+    non-dot-prefixed nested checkouts)."""
+
+
 def _iter_py_files():
-    for path in _REPO_ROOT.rglob("*.py"):
-        rel = path.relative_to(_REPO_ROOT)
+    """Enumerates *.py files tracked by this repository's git index. Untracked
+    files and nested/sibling checkouts are never scanned, regardless of where
+    they sit under _REPO_ROOT."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--", "*.py"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ScanBoundaryError(
+            f"audit_dispatcher_bypass: 'git ls-files' failed, refusing to scan "
+            f"the filesystem as a fallback: {exc}"
+        ) from exc
+
+    for rel_str in result.stdout.decode("utf-8").split("\0"):
+        if not rel_str:
+            continue
+        rel = Path(rel_str)
         if any(part in _EXCLUDE_DIRS for part in rel.parts):
             continue
         if any(part.startswith(_EXCLUDE_DIR_PREFIXES) for part in rel.parts[:-1]):
@@ -146,7 +172,11 @@ def scan() -> list[tuple[str, int, str]]:
 
 
 def main() -> int:
-    found = scan()
+    try:
+        found = scan()
+    except ScanBoundaryError as exc:
+        print(f"❌ {exc}", file=sys.stderr)
+        return 2
     found_keys = {(f, l, m) for f, l, m in found}
 
     print("GOV — Dispatcher Bypass Audit (direct tool-implementation imports)")
