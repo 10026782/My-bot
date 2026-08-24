@@ -16,10 +16,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
-
 from airtable_schema import ActionContractsFields, ActionContractStatus, ApprovalsFields, Tables
-from tools.airtable_gateway import _at_headers, _at_url, AirtableLookupError
+from tools.airtable_read_adapter import AirtableReadError, get_record, list_records_page
 
 logger = logging.getLogger(__name__)
 
@@ -102,15 +100,21 @@ def fetch_all_records(table: str, formula: str = "TRUE()", page_size: int = 100)
     offset: str | None = None
     try:
         while True:
-            params = {"filterByFormula": formula, "pageSize": min(page_size, 100)}
-            if offset:
-                params["offset"] = offset
-            r = httpx.get(_at_url(table), headers=_at_headers(), params=params, timeout=15)
-            if r.status_code != 200:
-                raise AirtableLookupError(f"{table} list: HTTP {r.status_code}")
-            data = r.json()
-            records.extend(data.get("records", []))
-            offset = data.get("offset")
+            try:
+                page, offset = list_records_page(
+                    table,
+                    formula,
+                    page_size=min(page_size, 100),
+                    offset=offset or "",
+                    timeout=15,
+                )
+            except AirtableReadError as exc:
+                if exc.status_code is not None:
+                    raise RuntimeError(f"{table} list: HTTP {exc.status_code}") from exc
+                if exc.cause is not None:
+                    raise exc.cause from exc
+                raise
+            records.extend(page)
             if not offset:
                 break
         return records
@@ -145,10 +149,16 @@ def fetch_record_by_id(table: str, record_id: str) -> dict | None:
     "not found" from "unreachable"; callers that need that distinction
     should use fetch_all_records() + an id match instead."""
     try:
-        r = httpx.get(f"{_at_url(table)}/{record_id}", headers=_at_headers(), timeout=15)
-        if r.status_code != 200:
+        return get_record(table, record_id, timeout=15)
+    except AirtableReadError as exc:
+        if exc.status_code is not None:
             return None
-        return r.json()
+        original = exc.cause or exc
+        logger.error(
+            "[phase_4b_rollout_common] fetch_record_by_id(%s, %s) failed: %s",
+            table, record_id, original,
+        )
+        return None
     except Exception as exc:
         logger.error(
             "[phase_4b_rollout_common] fetch_record_by_id(%s, %s) failed: %s",

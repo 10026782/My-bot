@@ -743,6 +743,52 @@ def test_fetch_all_claims_returns_complete_dataset_when_count_matches():
     assert {r["contract_id"] for r in result} == {"c1", "c2"}
 
 
+def test_fetch_all_records_preserves_pagination_query_and_timeout():
+    pages = [
+        ([{"id": "rec1"}], "next-page"),
+        ([{"id": "rec2"}], None),
+    ]
+    with patch("tools.phase_4b_rollout_common.list_records_page", side_effect=pages) as read:
+        result = common_mod.fetch_all_records("ActionContracts", "{Status}='pending'", 150)
+
+    assert result == [{"id": "rec1"}, {"id": "rec2"}]
+    assert read.call_args_list[0].kwargs == {
+        "page_size": 100, "offset": "", "timeout": 15,
+    }
+    assert read.call_args_list[1].kwargs == {
+        "page_size": 100, "offset": "next-page", "timeout": 15,
+    }
+
+
+def test_fetch_all_records_returns_none_and_logs_on_read_error():
+    from tools.airtable_read_adapter import AirtableReadError
+
+    with patch(
+        "tools.phase_4b_rollout_common.list_records_page",
+        side_effect=AirtableReadError("failed", status_code=503),
+    ), patch.object(common_mod.logger, "error") as log_error:
+        result = common_mod.fetch_all_records("ActionContracts")
+
+    assert result is None
+    assert log_error.called
+    assert "fetch_all_records(%s) failed: %s" in log_error.call_args.args[0]
+    assert log_error.call_args.args[1] == "ActionContracts"
+
+
+def test_fetch_record_by_id_preserves_record_and_missing_behavior():
+    record = {"id": "rec1", "fields": {"Status": "pending"}}
+    with patch("tools.phase_4b_rollout_common.get_record", return_value=record) as read:
+        assert common_mod.fetch_record_by_id("ActionContracts", "rec1") == record
+    read.assert_called_once_with("ActionContracts", "rec1", timeout=15)
+
+    from tools.airtable_read_adapter import AirtableReadError
+    with patch(
+        "tools.phase_4b_rollout_common.get_record",
+        side_effect=AirtableReadError("missing", status_code=404),
+    ):
+        assert common_mod.fetch_record_by_id("ActionContracts", "missing") is None
+
+
 def test_reconciliation_never_reports_target_met_on_truncated_claims():
     """A truncated claims fetch must surface as a fetch_errors entry, never
     silently as rollout_target_met=true."""
