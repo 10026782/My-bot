@@ -67,7 +67,7 @@ def refresh_cache() -> dict[str, list[str]]:
     except AirtableLookupError as exc:
         if exc.status_code is not None:
             request = httpx.Request(
-                "GET", exc.response_url or f"https://api.airtable.com/v0/meta/bases/{base}/tables"
+                "GET", exc.response_url or "https://api.airtable.com"
             )
             response = httpx.Response(
                 exc.status_code,

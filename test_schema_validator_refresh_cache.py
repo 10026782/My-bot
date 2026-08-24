@@ -67,3 +67,11 @@ def test_refresh_cache_keeps_load_cache_fail_open(tmp_path: Path):
     with patch.object(schema_validator, "_CACHE_PATH", missing):
         schema_validator._cache = None
         assert schema_validator.get_known_fields("Leads") == set()
+
+
+def test_schema_validator_contains_no_airtable_transport_knowledge():
+    source = Path("schema_validator.py").read_text(encoding="utf-8")
+    assert "api.airtable.com/v0/meta" not in source
+    assert "_at_url" not in source
+    assert "_at_headers" not in source
+    assert "httpx.get(" not in source
