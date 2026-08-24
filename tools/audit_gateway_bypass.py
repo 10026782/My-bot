@@ -6,7 +6,8 @@
 # single sanctioned write path per that file's own docstring: "אין לקרוא
 # ל-httpx.patch/post על Airtable מחוץ לקובץ זה").
 #
-# This does NOT move any call site and does NOT fail CI — it is a
+# The legacy inventory mode does NOT move any call site and does NOT fail CI.
+# The --boundary mode below is the blocking gateway-boundary guard.
 # warning-only inventory. It compares live grep results against a known
 # BASELINE (verified by hand against the current repo state); anything new
 # is flagged as a WARNING so scope drift gets noticed instead of silently
@@ -24,6 +25,7 @@
 from __future__ import annotations
 
 import re
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -37,7 +39,7 @@ _EXCLUDE_FILE_PREFIXES = ("test_",)
 # own self-tests/docstrings — exclude them from being scanned as targets.
 _EXCLUDE_FILES = {"tools/audit_gateway_bypass.py", "tools/audit_result_parsing.py"}
 
-_CALL_RE = re.compile(r"\b_?httpx\.(get|post|patch|put|delete)\s*\(")
+_CALL_RE = re.compile(r"\b(?:_?httpx|requests)\.(get|post|patch|put|delete)\s*\(")
 
 # Substrings that, if present within a small window around the call, mark
 # it as targeting the Airtable API (as opposed to Google/Telegram/Supabase
@@ -122,6 +124,74 @@ def _iter_py_files():
         yield rel
 
 
+def _gateway_private_imports(tree: ast.AST) -> list[str]:
+    aliases: set[str] = set()
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "tools.airtable_gateway":
+            for alias in node.names:
+                if alias.name.startswith("_"):
+                    violations.append(f"line {node.lineno}: private gateway import {alias.name}")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "tools.airtable_gateway":
+                    aliases.add(alias.asname or "tools.airtable_gateway")
+
+    def attribute_path(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            parent = attribute_path(node.value)
+            return f"{parent}.{node.attr}" if parent else None
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            parent = attribute_path(node.value)
+            if parent in aliases:
+                violations.append(f"line {node.lineno}: private gateway usage {parent}.{node.attr}")
+    return violations
+
+
+def _source_boundary_violations(rel_str: str, text: str) -> list[str]:
+    """Find transport/provider knowledge outside the canonical gateway."""
+    violations: list[str] = []
+    forbidden = ("api.airtable.com", "content.airtable.com", "/v0/", "/v0/meta/")
+    for token in forbidden:
+        if token in text:
+            violations.append(f"{rel_str}: forbidden Airtable endpoint token {token}")
+    try:
+        tree = ast.parse(text.lstrip("\ufeff"), filename=rel_str)
+    except SyntaxError as exc:
+        return [f"{rel_str}: syntax error: {exc}"]
+    violations.extend(f"{rel_str}: {item}" for item in _gateway_private_imports(tree))
+    # Authorization construction is only forbidden here when the file also
+    # carries Airtable transport markers; unrelated provider auth is allowed.
+    if re.search(r"[\"']Authorization[\"']\s*:", text) and re.search(
+        r"api\.airtable\.com|content\.airtable\.com|/v0/|_at_(?:url|headers|base|key)",
+        text,
+        re.IGNORECASE,
+    ):
+        violations.append(f"{rel_str}: Airtable Authorization/header construction")
+    return violations
+
+
+def boundary_scan() -> list[str]:
+    violations: list[str] = []
+    for rel in _iter_py_files():
+        rel_str = rel.as_posix()
+        if rel_str in {_GATEWAY_FILE, *_EXCLUDE_FILES}:
+            continue
+        try:
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        violations.extend(_source_boundary_violations(rel_str, text))
+    for file, line, method in scan():
+        violations.append(f"{file}:{line}: direct Airtable HTTP httpx.{method}()")
+    return sorted(set(violations))
+
+
 def _is_airtable_target(lines: list[str], idx: int) -> bool:
     """Decides whether the httpx call at lines[idx] targets the Airtable API.
 
@@ -188,6 +258,15 @@ def classify(method: str) -> str:
 
 
 def main() -> int:
+    if "--boundary" in sys.argv:
+        violations = boundary_scan()
+        if violations:
+            print("❌ Airtable boundary violations:")
+            for violation in violations:
+                print(f"- {violation}")
+            return 1
+        print("✅ Airtable boundary guard: PASS")
+        return 0
     try:
         found = scan()
     except ScanBoundaryError as exc:
@@ -269,7 +348,29 @@ def _self_test() -> None:
     assert classify("post") == "WRITE"
     assert classify("get") == "read"
 
-    print("✅ audit_gateway_bypass self-test: 5/5 assertions passed")
+    assert _source_boundary_violations(
+        "bad.py", 'import httpx\nhttpx.get("https://api.airtable.com/v0/Leads")'
+    )
+    assert _source_boundary_violations(
+        "bad.py", "from tools.airtable_gateway import _safe_formula_param"
+    )
+    assert _source_boundary_violations(
+        "bad.py", "import tools.airtable_gateway as gateway\ngateway._safe_formula_param('x')"
+    )
+    assert _source_boundary_violations(
+        "bad.py", 'import requests\nrequests.post("https://api.airtable.com/v0/Leads")'
+    )
+    assert _source_boundary_violations(
+        "bad.py", 'def _at_headers(): return {"Authorization": "Bearer x"}'
+    )
+    assert not _source_boundary_violations(
+        "good.py", "def _safe_formula_param(value): return value"
+    )
+    assert not _source_boundary_violations(
+        "good.py", "from tools.airtable_gateway import escape_formula_value"
+    )
+
+    print("✅ audit_gateway_bypass self-test: 12/12 assertions passed")
 
 
 if __name__ == "__main__":

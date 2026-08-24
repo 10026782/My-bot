@@ -168,8 +168,8 @@ jobs:
       - name: Canonical Active Work Registry validation
         run: python tools/dev_registry_validator.py
 
-      - name: F52 gateway bypass audit (warning only, never blocks)
-        run: python tools/audit_gateway_bypass.py || true
+      - name: Airtable boundary guard (blocking)
+        run: python tools/audit_gateway_bypass.py --boundary
 
       - name: F52 result-parsing audit (warning only, never blocks)
         run: python tools/audit_result_parsing.py || true
@@ -222,10 +222,8 @@ jobs:
       # any file this PR touched is registered somewhere in the Context
       # Librarian catalog but wasn't re-verified (or is a new file the
       # catalog already claims the directory of, or a broken edge/stale
-      # reference at load time). Warning-only on first rollout, matching
-      # every other new governance check introduced in this job
-      # (schema_governance.py, audit_gateway_bypass.py, etc.) — flip to
-      # blocking once it's proven out across a few real PRs.
+      # reference at load time). This check remains warning-only; the
+      # Airtable boundary guard above is intentionally blocking.
       - name: Context Librarian freshness check (verification only, warning-only rollout)
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
