@@ -28,8 +28,7 @@ logger = logging.getLogger(__name__)
 _PHONE_RE = re.compile(r"(?:0\d{1,2}[-\s]?\d{7,8}|[\+]?972[-\s]?\d{8,9})")
 
 # BUG-094-C: RouterDomain values that are routing/meta concepts, not business
-# verticals — never valid values for Airtable's Leads/Lead Events "Domain"
-# singleSelect field (live schema: real_estate/import/recruiting/general).
+# verticals — never valid values for the Leads/Lead Events "Domain" field.
 # core/router/domain_router.py classifies any message containing "ליד"/"lead"/
 # "crm" as RouterDomain.CRM (0.85 confidence) — which a batch lead-dictation
 # message like "ליד חדש: ..." naturally contains, so resolved_route_domain
