@@ -51,3 +51,13 @@ def test_stable_identity_handles_shifted_legacy_import():
     groups = audit.classify([finding])
     assert groups["legacy"] == [finding]
     assert groups["new"] == []
+
+
+def test_stable_identity_handles_shifted_interaction_imports():
+    findings = [
+        ("interaction_engine.py", 389, "tools.airtable_tools"),
+        ("interaction_engine.py", 569, "tools.calendar_tools"),
+    ]
+    groups = audit.classify(findings)
+    assert groups["legacy"] == findings
+    assert groups["new"] == []

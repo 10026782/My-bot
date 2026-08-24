@@ -48,3 +48,21 @@ def test_synthetic_new_surface_is_blocking(tmp_path, monkeypatch):
     new, registered, _ = audit.audit()
     assert not registered
     assert [(item.kind, item.symbol) for item in new] == [("public_renderer", "render_feature")]
+
+
+def test_guard_does_not_scan_its_own_source(tmp_path, monkeypatch):
+    source = tmp_path / "tools"
+    source.mkdir()
+    self_file = source / "audit_public_renderer_contract.py"
+    self_file.write_text(
+        "# MessageContract and format_agent_message appear in guard implementation\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    monkeypatch.setattr(audit, "REGISTRY", tmp_path / "empty.md")
+    monkeypatch.setattr(
+        audit, "_added_lines", lambda: {"tools/audit_public_renderer_contract.py": {1}}
+    )
+    new, registered, _ = audit.audit()
+    assert not new
+    assert not registered

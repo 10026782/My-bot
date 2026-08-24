@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "docs/governance/PUBLIC_RENDERER_CONTRACT_REGISTRY.md"
+_SELF_PATH = "tools/audit_public_renderer_contract.py"
 _EXCLUDED = {".git", "__pycache__", ".venv", "venv", "node_modules"}
 _TEST_PREFIXES = ("test_",)
 _RENDERER_NAME = re.compile(r"^(?:render|format|compose_.*reply|build_.*message)(?:_|$)", re.I)
@@ -113,7 +114,7 @@ def audit() -> tuple[list[Finding], list[Finding], dict[tuple[str, str, str], tu
     registrations = load_registrations()
     candidates: list[Finding] = []
     for path, added in _added_lines().items():
-        if path.startswith(_TEST_PREFIXES) or any(part in _EXCLUDED for part in Path(path).parts):
+        if path == _SELF_PATH or path.startswith(_TEST_PREFIXES) or any(part in _EXCLUDED for part in Path(path).parts):
             continue
         source_path = ROOT / path
         if not source_path.exists():

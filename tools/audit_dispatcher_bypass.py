@@ -121,6 +121,10 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
 # edits. Stable identity prevents this shift from becoming false NEW debt.
 _LEGACY_STABLE_IDENTITIES: frozenset[tuple[str, str, str]] = frozenset({
     ("lead_capture.py", "tools.airtable_tools", "airtable_get"),
+    # Long-lived interaction paths may move as unrelated code is inserted;
+    # the imported symbol is the stable identity, while line is report context.
+    ("interaction_engine.py", "tools.airtable_tools", "airtable_add"),
+    ("interaction_engine.py", "tools.calendar_tools", "calendar_get_events"),
 })
 
 # These are intentionally not merged into BASELINE. They are active
@@ -236,6 +240,24 @@ def _stable_identity(finding: tuple[str, int, str]) -> tuple[str, str, str]:
     return (rel_str, module, symbol)
 
 
+def _matches_stable_legacy_identity(finding: tuple[str, int, str]) -> bool:
+    """Match a legacy import by path/module/symbol, independent of line drift."""
+    if _stable_identity(finding) in _LEGACY_STABLE_IDENTITIES:
+        return True
+    rel_str, _line, module = finding
+    source_path = _REPO_ROOT / rel_str
+    try:
+        source_lines = source_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return False
+    for path, expected_module, symbol in _LEGACY_STABLE_IDENTITIES:
+        if path != rel_str or expected_module != module:
+            continue
+        if any(re.search(rf"^\s*from\s+\S+\s+import\s+{re.escape(symbol)}(?:\s|,|$)", line) for line in source_lines):
+            return True
+    return False
+
+
 def _classify_finding(finding: tuple[str, int, str]) -> str:
     if finding in _SANCTIONED_CALL_SITES:
         return "sanctioned"
@@ -243,7 +265,7 @@ def _classify_finding(finding: tuple[str, int, str]) -> str:
         return "cross_track"
     if finding in ACCEPTED:
         return "accepted"
-    if finding in BASELINE or _stable_identity(finding) in _LEGACY_STABLE_IDENTITIES:
+    if finding in BASELINE or _matches_stable_legacy_identity(finding):
         return "legacy"
     return "new"
 
@@ -281,7 +303,7 @@ def main() -> int:
     stable_legacy_paths = {
         (file, module)
         for file, line, module in found
-        if _stable_identity((file, line, module)) in _LEGACY_STABLE_IDENTITIES
+        if _matches_stable_legacy_identity((file, line, module))
     }
     missing = sorted(
         baseline for baseline in BASELINE - found_keys
