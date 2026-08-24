@@ -17,6 +17,22 @@ def test_at_list_preserves_query_and_one_page_contract():
     )
 
 
+def test_at_list_measurement_is_bounded_and_does_not_log_record_payload():
+    with patch.object(tma_api, "_read_list_records", return_value=[{"id": "rec1"}]), \
+         patch.object(tma_api.logger, "info") as info:
+        assert tma_api._at_list(
+            "Approvals",
+            "{סטטוס}='ממתין'",
+            max_records=50,
+            measurement_label="owner_approvals_snapshot.pending",
+        ) == [{"id": "rec1"}]
+
+    message, *fields = info.call_args.args
+    assert message.startswith("[P22Measurement]")
+    assert "rec1" not in " ".join(map(str, fields))
+    assert fields[0:4] == ["owner_approvals_snapshot.pending", "Approvals", True, 50]
+
+
 def test_at_list_non_strict_error_returns_empty_and_strict_error_maps_to_airtable_error():
     error = AirtableReadError("Leads list: HTTP 500", status_code=500, response_text="bad")
     with patch.object(tma_api, "_read_list_records", side_effect=error):

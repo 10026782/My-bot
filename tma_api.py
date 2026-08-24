@@ -218,22 +218,42 @@ class AirtableError(Exception):
 
 
 def _at_list(table: str, formula: str = "", max_records: int = 50,
-             strict: bool = False) -> list:
+             strict: bool = False, measurement_label: str | None = None) -> list:
     """
     Direct Airtable REST call → list[{id, fields}].
     strict=False (default): returns [] on any error (legacy behavior).
     strict=True:  raises AirtableError on non-200 so callers can return
                   a proper error response instead of silently showing zero.
     """
+    started = time.monotonic() if measurement_label else None
+
+    def emit_measurement(returned_count: int, success: bool) -> None:
+        if measurement_label is not None and started is not None:
+            logger.info(
+                "[P22Measurement] event=airtable_read caller=%s table=%s "
+                "formula_present=%s max_records=%s returned_count=%s "
+                "elapsed_ms=%s success=%s",
+                measurement_label,
+                table,
+                bool(formula),
+                max_records,
+                returned_count,
+                int((time.monotonic() - started) * 1000),
+                success,
+            )
+
     try:
-        return _read_list_records(
+        records = _read_list_records(
             table,
             formula,
             max_records=max_records,
             paginate=False,
             timeout=10,
         )
+        emit_measurement(len(records), True)
+        return records
     except AirtableReadError as e:
+        emit_measurement(0, False)
         if e.status_code is not None:
             logger.warning(f"_at_list({table}) → {e.status_code}: {e.response_text[:120]}")
             if strict:
@@ -244,8 +264,10 @@ def _at_list(table: str, formula: str = "", max_records: int = 50,
             if strict:
                 raise AirtableError(table, 0, str(error))
     except AirtableError:
+        emit_measurement(0, False)
         raise
     except Exception as e:
+        emit_measurement(0, False)
         logger.warning(f"_at_list({table}) error: {e}")
         if strict:
             raise AirtableError(table, 0, str(e))
@@ -2526,13 +2548,23 @@ def _owner_approvals_snapshot(identity) -> tuple[dict, list[str]]:
 
     try:
         pending_formula = f"{{{ApprovalsFields.STATUS}}}='\u05de\u05de\u05ea\u05d9\u05df'"
-        pending = [_fmt_approval(r, identity) for r in _at_list("Approvals", pending_formula, max_records=50)]
+        pending = [_fmt_approval(r, identity) for r in _at_list(
+            "Approvals",
+            pending_formula,
+            max_records=50,
+            measurement_label="owner_approvals_snapshot.pending",
+        )]
     except Exception as e:
         logger.warning(f"[OwnerControlCenter] pending approvals read failed: {e}")
         warnings.append(f"pending approvals read failed: {type(e).__name__}")
 
     try:
-        recs = _at_list("Approvals", "", max_records=25)
+        recs = _at_list(
+            "Approvals",
+            "",
+            max_records=25,
+            measurement_label="owner_approvals_snapshot.executed",
+        )
         for rec in recs:
             item = _fmt_approval(rec, identity)
             if item.get("status") != "\u05de\u05de\u05ea\u05d9\u05df":
@@ -2620,6 +2652,10 @@ def owner_health(identity):
 def owner_control_center(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden"}), 403
+
+    logger.info(
+        "[P22Measurement] event=owner_control_center_request caller=owner_control_center"
+    )
 
     warnings: list[str] = []
     capability_map, map_warnings = _load_capability_map()
