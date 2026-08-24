@@ -844,6 +844,25 @@ def get_base_metadata(*, timeout: float = 10) -> dict:
     return r.json()
 
 
+def get_attachment_json(url: str, *, timeout: float = 15) -> object:
+    """Download one already-selected Airtable attachment payload, read-only."""
+    try:
+        r = httpx.get(url, timeout=timeout)
+    except Exception as e:
+        raise AirtableLookupError("attachment download failed", cause=e) from e
+    try:
+        r.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise AirtableLookupError(
+            f"attachment download: HTTP {r.status_code}",
+            status_code=r.status_code,
+            response_text=r.text,
+            response_url=str(getattr(r, "url", url)),
+            response_reason=str(getattr(r, "reason_phrase", "")),
+        ) from e
+    return r.json()
+
+
 def airtable_upload_attachment(
     record_id: str,
     field_id: str,

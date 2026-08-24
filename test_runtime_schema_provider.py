@@ -27,7 +27,7 @@ from unittest.mock import patch
 logging.basicConfig(level=logging.WARNING)
 
 from core.runtime_schema_provider import RuntimeSchemaProvider
-from tools.airtable_gateway import validate_airtable_fields
+from tools.airtable_gateway import AirtableLookupError, validate_airtable_fields
 import airtable_schema as schema
 
 passed = failed = 0
@@ -270,21 +270,10 @@ _SNAPSHOT_JSON_BODY = {
 }
 
 
-class _FakeHttpResponse:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def raise_for_status(self):
-        pass
-
-    def json(self):
-        return self._payload
-
-
 p4b = RuntimeSchemaProvider(ttl_seconds=300)
 with patch.object(p4b, "_fetch_live", return_value=None), \
      patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
-     patch("httpx.get", return_value=_FakeHttpResponse(_SNAPSHOT_JSON_BODY)), \
+     patch("tools.airtable_gateway.get_attachment_json", return_value=_SNAPSHOT_JSON_BODY), \
      patch("core.runtime_schema_provider.logger") as mock_logger:
     contract = p4b.get_table_contract("Leads")
     chk("PR3B.1 DoD: source=snapshot when live fails + no last_good", contract["source"] == "snapshot")
@@ -304,13 +293,49 @@ with patch.object(p4b, "_fetch_live", return_value=None), \
 # picks the LATEST OK record (by Snapshot Date), not just any OK record
 with patch.object(p4b, "_fetch_live", return_value=None), \
      patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
-     patch("httpx.get", return_value=_FakeHttpResponse(_SNAPSHOT_JSON_BODY)) as mock_httpx_get:
+     patch("tools.airtable_gateway.get_attachment_json", return_value=_SNAPSHOT_JSON_BODY) as mock_attachment:
     p_latest = RuntimeSchemaProvider(ttl_seconds=300)
     p_latest.get_table_contract("Leads")
     chk(
         "PR3B.1: downloads the LATEST OK snapshot's attachment, not an older one",
-        mock_httpx_get.call_args.args[0] == "https://example.com/snap.json",
+        mock_attachment.call_args.args[0] == "https://example.com/snap.json",
     )
+    chk(
+        "PR3B.1: attachment download uses timeout=15",
+        mock_attachment.call_args.kwargs == {"timeout": 15},
+    )
+
+# attachment failures remain fail-soft, regardless of gateway exception type
+for _attachment_failure in (
+    AirtableLookupError("attachment download: HTTP 500", status_code=500),
+    OSError("network down"),
+    ValueError("malformed JSON"),
+):
+    p_failure = RuntimeSchemaProvider(ttl_seconds=300)
+    with patch.object(p_failure, "_fetch_live", return_value=None), \
+         patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
+         patch("tools.airtable_gateway.get_attachment_json", side_effect=_attachment_failure), \
+         patch("schema_validator.get_known_fields", return_value={"Name"}):
+        contract = p_failure.get_table_contract("Leads")
+        chk(
+            f"PR3B.1: attachment {_attachment_failure.__class__.__name__} → seed fallback",
+            contract["source"] == "seed",
+        )
+
+# no JSON attachment remains a clean snapshot miss and does not call the downloader
+_SNAPSHOT_RECORDS_NO_JSON = [{"id": "recNOJSON", "fields": {
+    "Status": "OK",
+    "Snapshot Date": "2026-07-08T00:00:00+00:00",
+    "Snapshot File": [{"filename": "report.xlsx", "url": "https://example.com/report.xlsx"}],
+}}]
+p_no_attachment = RuntimeSchemaProvider(ttl_seconds=300)
+with patch.object(p_no_attachment, "_fetch_live", return_value=None), \
+     patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_NO_JSON), \
+     patch("tools.airtable_gateway.get_attachment_json") as mock_no_attachment, \
+     patch("schema_validator.get_known_fields", return_value={"Name"}):
+    contract = p_no_attachment.get_table_contract("Leads")
+    chk("PR3B.1: missing JSON attachment → seed fallback", contract["source"] == "seed")
+    chk("PR3B.1: missing JSON attachment skips download", not mock_no_attachment.called)
 
 # no OK record at all → falls through to seed
 p4c = RuntimeSchemaProvider(ttl_seconds=300)
@@ -326,7 +351,7 @@ with patch.object(p4c, "_fetch_live", return_value=None), \
 p4d = RuntimeSchemaProvider(ttl_seconds=300)
 with patch.object(p4d, "_fetch_live", return_value=None), \
      patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
-     patch("httpx.get", side_effect=Exception("network down")), \
+     patch("tools.airtable_gateway.get_attachment_json", side_effect=Exception("network down")), \
      patch("schema_validator.get_known_fields", return_value={"Name"}):
     contract = p4d.get_table_contract("Leads")
     chk("PR3B.1: snapshot download failure → falls through to seed", contract["source"] == "seed")
@@ -335,7 +360,7 @@ with patch.object(p4d, "_fetch_live", return_value=None), \
 p4e = RuntimeSchemaProvider(ttl_seconds=300)
 with patch.object(p4e, "_fetch_live", return_value=None), \
      patch("tools.airtable_tools.airtable_get_records", return_value=_SNAPSHOT_RECORDS_OK), \
-     patch("httpx.get", return_value=_FakeHttpResponse(_SNAPSHOT_JSON_BODY)), \
+     patch("tools.airtable_gateway.get_attachment_json", return_value=_SNAPSHOT_JSON_BODY), \
      patch("schema_validator.get_known_fields", return_value={"Name"}):
     contract = p4e.get_table_contract("SomeOtherTable")
     chk("PR3B.1: table absent from snapshot content → falls through to seed", contract["source"] == "seed")

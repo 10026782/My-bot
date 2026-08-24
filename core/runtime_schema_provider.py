@@ -202,8 +202,8 @@ class RuntimeSchemaProvider:
         """
         try:
             from tools.airtable_tools import airtable_get_records
+            from tools.airtable_gateway import get_attachment_json
             from airtable_schema import SchemaSnapshotFields, SchemaSnapshotStatus, Tables
-            import httpx
         except Exception as e:
             logger.warning("[RuntimeSchemaProvider] snapshot tier import failure: %s", e)
             return None
@@ -235,9 +235,7 @@ class RuntimeSchemaProvider:
             return None
 
         try:
-            r = httpx.get(json_attachment["url"], timeout=15)
-            r.raise_for_status()
-            snapshot = r.json()
+            snapshot = get_attachment_json(json_attachment["url"], timeout=15)
         except Exception as e:
             logger.warning("[RuntimeSchemaProvider] snapshot tier: failed to download/parse JSON: %s", e)
             return None
