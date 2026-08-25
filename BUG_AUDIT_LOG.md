@@ -5663,3 +5663,35 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 8. `git diff --check` — PASS.
 
 - **סטטוס:** 🔴 **OPEN — CURRENT TEST GAPS**. לא בוצע remediation בסבב זה — תיעוד/reconciliation בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
+
+---
+
+## Audit #10 — Dependency Risk (25–26/08/2026) — **ENGINEERING CLOSED**
+
+- **Original scope:** reproducible dependency resolution; dead/unused/duplicate dependency cleanup; lifecycle/EOL verification; runtime/dev-test separation.
+- **Findings:** DG-1 through DG-8, plus lifecycle/EOL external verification.
+
+**DG-1 through DG-6 — CLOSED:**
+- **DG-1:** Unpinned dependencies → all 19 runtime + 2 dev/test pinned to exact compatible versions. PR #1004 (runtime pins) + PR #1006 (dev/test pins).
+- **DG-2:** `python-telegram-bot` dead dependency removed. PR #1003.
+- **DG-3:** `openai` duplicate (in both `requirements.txt` and `requirements-dev.txt`) deduplicated. PR #1003.
+- **DG-4:** `groq` unused dependency removed. PR #1003.
+- **DG-5:** `pytest` moved from runtime to dev/test. PR #1003.
+- **DG-6:** `python-dotenv` moved from runtime to dev/test. PR #1003.
+
+**DG-7 — DEFERRED LOW (intentional):**
+- `google-auth-httplib2` and `google-auth-oauthlib` have no direct imports in application code, but are transitive dependencies of `google-api-python-client`. Removing them risks breaking `discovery.build()`. Intentionally kept.
+
+**DG-8 — DEFERRED LOW (intentional):**
+- `psycopg2-binary` is conditionally activated via `FEATURE_POSTGRES_ENABLED` flag. Intentional architectural choice per `BOSS_UNIFIED_MASTER_PLAN`; feature-flag gated; documented.
+
+**Lifecycle/EOL verification — EXTERNAL VERIFICATION REQUIRED:**
+- No in-repo evidence found for any package's lifecycle or EOL status. Requires PyPI/release-check audit outside repo scope.
+
+**Evidence:**
+- PR #1003 (merged `5fbcd55`, 25/08/2026): runtime dedup/cleanup (DG-2–DG-6).
+- PR #1004 (merged `9a37b13`, 25/08/2026): exact runtime pins (DG-1).
+- PR #1006 (merged, 25/08/2026): exact dev/test pins (DG-1 continued).
+- 164 tests pass with pinned versions. CI installs both files; Render installs runtime file only. Parity confirmed.
+
+- **סטטוס:** ✅ **ENGINEERING CLOSED** — all HIGH/MEDIUM gaps resolved. 0 unpinned dependencies. DG-7/DG-8 intentionally deferred LOW. Lifecycle/EOL external verification only.

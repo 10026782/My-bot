@@ -2,7 +2,7 @@
 
 **Created:** 23/08/2026 (docs-only consolidation; no runtime code touched)
 **START_SHA:** `2b0c08ed8782d6cafb02a1541036c9b74841ed34` (origin/main, fetched at session start)
-**END_SHA:** `2b0c08ed8782d6cafb02a1541036c9b74841ed34` — closing fetch returned identical SHA; all status claims re-checked and valid against END_SHA.
+**END_SHA:** `b9dabee1a3492ba92a2c17ff3775eec82b8cc1bd` — Audit #10 closure reconciliation (26/08/2026); #10 row added to master table, DG-7/DG-8 added to deferred register.
 **Re-baselined 23/08/2026 (file/drift pass):** main advanced to `0e356ad5a1f2abf9a05ac572c4fdfc249fa9a382` (merges #859 media-failure reporting + #860 this SSOT). Rows affected were re-verified against `0e356ad` and updated in place; original 23/08 morning text otherwise unchanged. File/module ownership, docs-drift, naming, orphan-artifact and schema follow-up findings: see [MAINTENANCE_FILE_DRIFT_REGISTER.md](MAINTENANCE_FILE_DRIFT_REGISTER.md).
 **Method:** mandatory audit Truth-Reset — every status below was extracted from documents and merged history physically present on current `origin/main`; no chat-history or memory authority. All referenced PR/commit IDs were verified with `git merge-base --is-ancestor <sha> origin/main` on END_SHA day.
 
@@ -107,6 +107,7 @@ Status vocabulary: OPEN · CODE_DONE · MERGED · SUPERSEDED · DEFERRED · NEED
 | C07 | F3 DUPLICATE_APPROVAL_PATH | TMA owner-direct-write vs manager-full-approval split for identical actions (`patch_lead`, `set_lead_outcome`, `create_lead_task`) | **MERGED** (+ architecture decision) | LIVE STRUCTURE CONFIRMED | PR #847 (`ab49cc4`,`fc90d14`): shared `_queue_or_owner_execute()`; Owner auto-executes via `_claim_and_execute_approval()`, Manager unchanged | No — doc itself states "Runtime verification: NOT YET VERIFIED" | Current-deployment canary of the unified path |
 | C07 | F6 three parallel approval-state representations | EventBus / ActionContract / Airtable Approvals projection reconciled by hand via point-patches | **DEFERRED** (architecture review) | STATIC FINDING | none | — | Approval-architecture review cycle |
 | C07 | update_lead_status inconsistency (new during #847 PART 4 check) | After #847, Owner gets immediate execution on three Leads endpoints but still waits for manual approval on the fourth Leads PATCH endpoint | **DEFERRED** to writer-coverage backlog (preserved verbatim in C05-C07 doc's deferral section) | LIVE STRUCTURE CONFIRMED (at remediation time) | none | — | Next writer-coverage pass |
+| #10 | Dependency Risk | Reproducible dependency resolution; dead/unused/duplicate deps; runtime/dev-test separation | **ENGINEERING CLOSED** — all HIGH/MEDIUM gaps resolved; DG-1–DG-6 closed; DG-7/DG-8 deferred LOW; lifecycle/EOL external verification only | STATIC FINDING + 164 tests verified | PR #1003 (`5fbcd55`), #1004 (`9a37b13`), #1006 (merged) | No (CI parity confirmed; Render parity confirmed) | See deferred register R-C10-DG7, R-C10-DG8 for explicitly retained items |
 
 ### C02–C04 Approval Coverage — post-remediation refresh (24/08/2026)
 
