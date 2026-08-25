@@ -34,6 +34,43 @@
 
 ---
 
+## Audit #3 — Data Contract — STILL OPEN — CURRENT DATA CONTRACT GAP
+
+- **Truth-reset:** `origin/main` `00853b09f1c65a53535240545ba410da012c14f3` (26/08/2026).
+- **Original findings:** **5 CLOSED** — #1, #3, #4, #5, #6. **1 DEFERRED** — #2, `DEFERRED — LIVE/SCHEMA CONTRACT DECISION`.
+- **Finding #1:** **CLOSED** — LeadMemory is update/enrichment-only; canonical `create_lead()` remains the sole Lead writer. Remediation commit `bad0c04`, merged through PR #1000.
+- **Finding #2:** **DEFERRED — LIVE/SCHEMA CONTRACT DECISION** — UTM/schema contract remains deferred; no production/schema remediation is implied by this status.
+- **Finding #3:** **CLOSED** — Deal status/stage normalization is canonicalized at the CRM boundary. Remediation commit `2791195`, merged through PR #1002.
+- **Finding #4:** **CLOSED** — unsupported Contact notes are explicit rather than silently dropped. Remediation commit `2791195`, merged through PR #1002.
+- **Finding #5:** **CLOSED** — Payment `contact_id` persists through the canonical relation field. Remediation commit `2791195`, merged through PR #1002.
+- **Finding #6:** **CLOSED** — typed Payment results reach reminders without reparsing presentation text. Remediation commit `2791195`, merged through PR #1002.
+- **Additional routed finding — I3:** **HIGH CURRENT GAP**, owned by **#3 Data Contract**. Provider-specific IDs are still written through the field `"Telegram File ID"` for non-Telegram providers.
+- **I3 evidence:** `airtable_schema.py:636` defines `Logical Media Key`; `media_gateway.py:64` still writes `TELEGRAM_FILE_ID` and `media_gateway.py:72` additionally writes `LOGICAL_MEDIA_KEY`; `media_handler.py:574,616,658`; `app.py:6459-6463`; `app.py:6748-6752`.
+- **I3 interpretation:** `Logical Media Key` partially remediates identity/idempotency, but does not close I3 because provider-specific IDs continue to use a Telegram-named generic storage column. I3 is **not deferred**; no reopen trigger exists because it is currently active.
+- **Classification:** **#3 STILL OPEN — CURRENT DATA CONTRACT GAP**; 5 original findings closed, 1 original finding deferred, and 1 HIGH residual current gap (I3).
+
+### Audit #3 I3 remediation — CLOSED / STATIC VERIFIED
+
+- **Truth-reset:** `origin/main` `a52977278c1db0be41eeec026ce72e22fd0308a` (26/08/2026).
+- **Remediation:** `AssetRecord.provider_media_id` is provider-neutral. The
+  legacy `Telegram File ID` field is now populated only when
+  `AssetRecord.source == "telegram"`; all providers continue to persist
+  `Logical Media Key`. No Airtable field was renamed or added, and no live
+  schema migration was performed.
+- **Compatibility:** existing non-Telegram values in `Telegram File ID` remain
+  historical data. Current lookup/idempotency uses `Logical Media Key`; no
+  legacy read fallback was retained because the active lookup path already
+  ignores legacy-only rows and no current behavior requires that fallback.
+- **Verification:** focused Telegram/WhatsApp/Meta/TMA contract tests passed;
+  media gateway, logical-key, idempotency, WhatsApp media, TMA media, and
+  media probe tests passed. The unrelated pre-existing `test_c94_stage_d_whatsapp.py`
+  has 3 failing ingress-marker assertions and was not changed by this fix.
+- **Final classification:** **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
+  FINDING #2 EXPLICITLY DEFERRED**. This is not `CLEAN` because Finding #2
+  remains deferred.
+
+---
+
 ## לוג באגים
 
 ### BUG-001 — PersonalMode field names mismatch
@@ -5648,17 +5685,17 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 
 ### FINDING #8-2 — CLOSED / CI ENFORCED
 - **תיקון:** נוסף dedicated blocking `pytest` step ל-`.github/workflows/ci.yml` עבור `test_phase_4b_1b_durable_lifecycle.py`, באותו pattern בדיוק כמו `test_context_librarian.py`/`test_refresh_after_merge.py`/`test_reconcile.py` (`ci.yml:232-239`) — `python -m pytest test_phase_4b_1b_durable_lifecycle.py -x --tb=short -q`, ללא `continue-on-error`, ללא `|| true`. ה-loop הגנרי (`ci.yml:141-155`) לא שונה — עדיין מריץ 0 בדיקות בשקט על הקובץ הזה, בדיוק כמו שקורה כבר ל-3 הקבצים האחרים; ה-step הייעודי החדש הוא זה שבאמת מפעיל את הבדיקות.
-- **גילוי אגבי במהלך ההפעלה (לא production defect — לא #8 finding נפרד, מתועד לשקיפות בלבד):** הפעלת `pytest` בפועל חשפה שהטסט `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` נכשל — **קיים-מראש**, נבדק שוב מול `origin/main` נקי (`git stash`) ומשוחזר זהה. שורש הבעיה **אינו production bug**: `ExecutionLedger.update_status()`'s BUG-127A stale-cache refresh (`core/action_gateway.py:940`, `_refresh_stale_contract_cache()`) מרענן את ה-RAM cache מ-durable truth **לפני** ה-retry, בכוונה מתועדת (comment ב-`core/action_gateway.py:889-919`) — כך שה-RAM store **כן** מתעדכן גם כשה-conflict בסופו של דבר עדיין מועלה. הטסט קדם להתנהגות הזו וכעת בודק invariant שכבר לא תקף במכוון. **לא תוקן כאן** — מחוץ ל-scope של #8-2 (חיווט הרצה ב-CI בלבד, לא remediation של הטסט עצמו) — סומן `@pytest.mark.xfail(strict=False, reason=...)` עם תיעוד מלא inline, בלי לגעת ב-assertion/בלוגיקה עצמה. מומלץ מעקב נפרד (לא תחת #8) אם רוצים לעדכן את ה-assertion כך שתשקף את BUG-127A.
+- **גילוי אגבי במהלך ההפעלה, ותוקן (לא production defect — לא #8 finding נפרד):** הפעלת `pytest` בפועל בפעם הראשונה חשפה שהטסט `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` נכשל — **קיים-מראש**, נבדק שוב מול `origin/main` נקי (`git stash`) ומשוחזר זהה. שורש הבעיה **אינו production bug**: `ExecutionLedger.update_status()`'s BUG-127A stale-cache refresh (`core/action_gateway.py:940`, `_refresh_stale_contract_cache()`) מרענן את ה-RAM cache מ-durable truth **לפני** ה-retry, בכוונה מתועדת (comment ב-`core/action_gateway.py:889-919`) — כך שה-RAM store **כן** מתעדכן גם כשה-conflict בסופו של דבר עדיין מועלה. הטסט קדם להתנהגות הזו ובדק invariant שכבר לא תקף במכוון. **תוקן (commit תיקוני, לא xfail):** הטסט הוסב לשם `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth` ולאסרציות שמשקפות את החוזה הנוכחי: (1) ה-conflict עדיין מועלה, (2) המעבר האסור ("approved") לעולם לא persisted — לא ב-cache ולא ב-durable store, (3) durable truth נשאר authoritative (`"rejected"`, ללא שינוי), (4) RAM cache **רשאי** להתרענן מ-durable truth — נבדק אמפירית (`ledger._store[contract_id].status == "rejected"`) לפני הכתיבה. שינויי production code: **0** — רק הטסט תוקן.
 - **וידוא Required Proof (26/08/2026):**
   1. **pytest discovers the expected tests** — `python -m pytest test_phase_4b_1b_durable_lifecycle.py --collect-only -q` → 18 tests collected (כולל `test_fake_lifecycle_repository_rejects_illegal_transition`).
-  2. **all intended tests actually execute** — 17 passed + 1 xfailed = 18/18 רצו בפועל (0 skipped-without-running).
-  3. **an intentional failing assertion would fail CI** — נבדק ידנית: assertion סובוטז' זמנית ב-`test_fake_lifecycle_repository_rejects_illegal_transition` → `pytest -x` עצר עם `1 failed, 13 passed, 1 xfailed`, "stopping after 1 failures"; שוחזר מיד לאחר מכן (`diff` מול גיבוי אישר reversion מלא, 0 שינוי שיורי).
+  2. **all intended tests actually execute** — 18 passed = 18/18 רצו בפועל, **0 xfail, 0 skip**.
+  3. **an intentional failing assertion would fail CI** — נבדק ידנית פעמיים (לפני ואחרי תיקון הטסט): assertion סובוטז' זמנית ב-`test_fake_lifecycle_repository_rejects_illegal_transition` → `pytest -x` עצר עם `1 failed`, "stopping after 1 failures"; שוחזר מיד לאחר מכן (`diff` מול גיבוי אישר reversion מלא, 0 שינוי שיורי).
   4. **ALLOWED_CONTRACT_TRANSITIONS legality regression is included** — `test_fake_lifecycle_repository_rejects_illegal_transition` (נוסף ב-PR #1017, Audit #9-3) נכלל ורץ.
   5. **CI step is blocking** — אין `continue-on-error`, אין `|| true`; `-x` עוצר על כשלון ראשון.
 - **YAML validation:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"` — PASS.
 
 ### Regression run (מעבר על התיקון כולו)
-1. `test_phase_4b_1b_durable_lifecycle.py` via `pytest` — 17 passed, 1 xfailed (18/18 executed).
+1. `test_phase_4b_1b_durable_lifecycle.py` via `pytest` — **18 passed, 0 xfail, 0 skip** (18/18 executed).
 2. Tenant-isolation/approval suite: `test_approval_concurrency.py` (22/22), `test_pr0c0_tma_approval_truthfulness.py` (22/22), `test_phase_4b2_wiring.py` (86/86).
 3. #9 fidelity regressions (unchanged files, unaffected by #8's changes): 5 `is_internal` files (72/72), `test_tc8_repo_stub_fidelity.py` (6/6) + 4 consumer files (91/91).
 4. ActionContract repository suite: `test_pr0c_action_contract_repository.py` (14/14), `test_phase_4b_1a_durable_proposals.py` (11/11), `test_phase_4b_1a_lookup_correctness.py`, `test_bug127a_stale_lifecycle_version_retry.py` (10/10), `test_pa01_phantom_approval_enforcement.py` (108/108), `test_tc7_b2_claim_authorization_shadow.py` (78/78), `test_phase_4b_rollout_tooling.py` (75/75), `test_bug114_context_interrupt_amplification.py` (12/12), `test_bug155_ttl_expiry_contract_id_lookup.py` (5/5), `test_first_pending_notification_failure_suppression.py` (14/14), `test_bug156_due_time_note_and_fingerprint_exclusion.py` (11/11) — כולם PASS.
@@ -5674,6 +5711,6 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 - **Audit #8 final:** ✅ **CLOSED / STATIC VERIFIED + CI ENFORCED**.
 - ה-24/08/2026 "ALREADY CLOSED" ההיסטורי, וה-26/08/2026 "OPEN — CURRENT TEST GAPS" reconciliation (PR #1020) — **שניהם נשארים ברשומה כלשונם**, לא נמחקים/נכתבים-מחדש; רשומה זו מוסיפה closure חדש ואחרון בשרשרת הכרונולוגית.
 - **#9 נשאר CLOSED, ללא שינוי** — לא נגעו בסעיפי #9 הקיימים בקובץ זה.
-- **פריט אגבי, לא תחת #8:** `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` הוא test-staleness (לא production defect) שנחשף תוך כדי #8-2 — מתועד למעלה לשקיפות, לא נסגר/לא נפתח כ-track נפרד כאן.
+- **פריט אגבי, לא תחת #8, ותוקן:** `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` (עכשיו `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth`) היה test-staleness (לא production defect) שנחשף תוך כדי #8-2 — תוקן ישירות (ר' #8-2 למעלה) כדי שה-CI step יספק כיסוי אמיתי (18/18 PASS, 0 xfail), לא לעקוף אותו.
 
 - **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED + CI ENFORCED** — 2/2 findings מתוקנים ומאומתים סטטית על branch זה. אימות production (post-merge, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.

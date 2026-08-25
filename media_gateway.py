@@ -32,7 +32,9 @@ class AssetRecord:
     source: str              # telegram / tma / whatsapp
     size_bytes: int
     created_by: str
-    telegram_file_id: str = ""
+    # Provider-neutral external media identifier. It is persisted to the
+    # Telegram-named compatibility field only for Telegram-originated assets.
+    provider_media_id: str = ""
     linked_lead_id: str = ""
     raw_transcript: str = ""
     normalized_transcript: str = ""
@@ -60,8 +62,8 @@ def _asset_to_fields(asset: AssetRecord) -> dict:
         MediaFileFields.SIZE_BYTES: asset.size_bytes,
         MediaFileFields.CREATED_BY: asset.created_by,
     }
-    if asset.telegram_file_id:
-        fields[MediaFileFields.TELEGRAM_FILE_ID] = asset.telegram_file_id
+    if asset.provider_media_id and asset.source == "telegram":
+        fields[MediaFileFields.TELEGRAM_FILE_ID] = asset.provider_media_id
     if asset.linked_lead_id:
         fields[MediaFileFields.LINKED_LEAD] = [asset.linked_lead_id]
     if asset.raw_transcript:

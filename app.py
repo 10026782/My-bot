@@ -5932,7 +5932,7 @@ def _handle_telegram_media(message) -> None:
             result = handle_voice_note(
                 audio_bytes=audio_bytes,
                 mime_type=message.voice.mime_type or "audio/ogg",
-                telegram_file_id=message.voice.file_id,
+                provider_media_id=message.voice.file_id,
                 user_id=user_id,
                 domain=domain,
                 owner_chat_id=owner_chat_id,

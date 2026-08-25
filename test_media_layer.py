@@ -157,7 +157,7 @@ chk("idempotency key is 16 chars", len(k1) == 16)
 oversized_voice = mh.handle_voice_note(
     audio_bytes=b"x" * (mh.TIER_LARGE + 1),
     mime_type="audio/ogg",
-    telegram_file_id="f1",
+    provider_media_id="f1",
     user_id="u1",
     domain="general",
     owner_chat_id="123",
@@ -180,7 +180,7 @@ chk(
 with patch("media_handler._idem_store") as mock_idem:
     mock_idem.is_duplicate.return_value = True
     dup = mh.handle_voice_note(
-        audio_bytes=b"small", mime_type="audio/ogg", telegram_file_id="f3",
+        audio_bytes=b"small", mime_type="audio/ogg", provider_media_id="f3",
         user_id="u1", domain="general", owner_chat_id="123",
     )
     chk("duplicate file blocked by idempotency", not dup.ok and dup.error.error_code == "DUPLICATE")

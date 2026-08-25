@@ -16,7 +16,7 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `00853b09f1c65a53535240545ba410da012c14f3`
+**Truth Reset SHA at last update:** `b9dabee1a3492ba92a2c17ff3775eec82b8cc1bd`
 
 ---
 
@@ -42,17 +42,28 @@ the closure PR that created it for the search that established this.
     `.github/workflows/ci.yml` for `test_phase_4b_1b_durable_lifecycle.py`,
     matching the existing `test_context_librarian.py`/
     `test_refresh_after_merge.py`/`test_reconcile.py` pattern. Verified: 18
-    tests collected, 17 pass + 1 `xfail` (all execute), an intentionally
+    tests collected, 18 executed, 18 PASS (0 xfail/skip), an intentionally
     sabotaged assertion correctly failed `pytest -x` (then fully reverted),
     the `ALLOWED_CONTRACT_TRANSITIONS` legality regression (#9-3) is
-    included, no `continue-on-error`/`|| true`. **Incidental, out-of-scope
-    discovery (not a production defect, not a new #8 item):**
-    `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` was
-    found pre-existing-broken — its assertion predates
-    `ExecutionLedger.update_status()`'s intentional BUG-127A stale-cache
-    refresh (`core/action_gateway.py:940`) and is now stale, not a runtime
-    bug. Marked `@pytest.mark.xfail(strict=False, ...)` with full inline
-    justification, logic untouched.
+    included, no `continue-on-error`/`|| true`. **Incidental discovery
+    during first-ever CI execution (not a production defect, not a new #8
+    item):** `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`'s
+    assertion predated `ExecutionLedger.update_status()`'s intentional
+    BUG-127A stale-cache refresh (`core/action_gateway.py:940`) — corrected
+    to assert the current intentional contract (conflict still raised,
+    forbidden transition never persisted, durable truth stays authoritative,
+    RAM cache may legitimately refresh from durable truth) rather than
+    marked `xfail`; production code untouched.
+
+- **#3 Data Contract** — **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
+  FINDING #2 EXPLICITLY DEFERRED** (remediation 26/08/2026, Truth-reset SHA
+  `a52977278c1db0be41eeec026ce72e22fd0308a9`). Original findings #1, #3, #4,
+  #5, and #6 are CLOSED; Finding #2 remains **DEFERRED — LIVE/SCHEMA CONTRACT
+  DECISION**. Routed I3 is **CLOSED / STATIC VERIFIED**: `Logical Media Key`
+  is provider-neutral, while `"Telegram File ID"` is now compatibility storage
+  only for Telegram-originated assets. No Airtable field rename or live schema
+  migration was performed. Full record: `BUG_AUDIT_LOG.md` and
+  `MAINTENANCE_FILE_DRIFT_REGISTER.md`.
 
 - **#9 Mock Fidelity** — **CLOSED / STATIC VERIFIED**
   (remediation 25/08/2026, Truth-Reset SHA

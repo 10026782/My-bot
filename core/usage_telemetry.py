@@ -61,6 +61,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone, date as _date
+from numbers import Real
 from typing import Literal
 
 from core.model_pricing import compute_cost
@@ -95,7 +96,7 @@ def record_usage(
     model: str,
     source: str,
     unit: str,
-    quantity_out: float,
+    quantity_out: float | None,
     quantity_in: float | None = None,
     caller: str = "",
     request_id: str | None = None,
@@ -104,6 +105,7 @@ def record_usage(
     execution_class: str = UNKNOWN_EXECUTION_CLASS,
     operation_id: str | None = None,
     workflow_id: str | None = None,
+    measurement_status: Literal["measured", "unknown"] = "measured",
 ) -> bool:
     """
     Durably records one real provider API call and its cost. Returns True
@@ -111,16 +113,29 @@ def record_usage(
     that's still success, just deduplicated), False if PostgreSQL is
     unavailable or the write failed. Never raises.
     """
-    cost_usd, exact = compute_cost(provider, service, model, quantity_in, quantity_out)
+    if measurement_status not in ("measured", "unknown"):
+        logger.error("[UsageTelemetry] unsupported measurement_status=%r", measurement_status)
+        return False
+    if measurement_status == "measured":
+        if quantity_out is None or isinstance(quantity_out, bool) or not isinstance(quantity_out, Real):
+            logger.error("[UsageTelemetry] measured usage requires numeric quantity_out")
+            return False
+        cost_usd, exact = compute_cost(provider, service, model, quantity_in, quantity_out)
+    else:
+        if quantity_out is not None:
+            logger.error("[UsageTelemetry] unknown usage requires quantity_out=None")
+            return False
+        cost_usd, exact = None, False
+    cost_is_estimate = not exact if measurement_status == "measured" else False
 
     from core.database import get_conn, release_conn
 
     conn = get_conn()
     if conn is None:
         logger.error(
-            "[UsageTelemetry] PostgreSQL unavailable — usage NOT durably recorded "
+            "[UsageTelemetry] PostgreSQL unavailable — usage not durably recorded "
             "(provider=%s service=%s model=%s source=%s quantity_in=%s quantity_out=%s "
-            "cost=$%.4f). This is shadow-only telemetry (no trigger depends on it yet), "
+            "cost=$%s). This is shadow-only telemetry (no trigger depends on it yet), "
             "but the gap itself should be investigated.",
             provider, service, model, source, quantity_in, quantity_out, cost_usd,
         )
@@ -134,24 +149,25 @@ def record_usage(
                     (ts, provider, service, model, source, caller, unit,
                      quantity_in, quantity_out, cost_usd, cost_is_estimate,
                      request_id, meta, capability_id, execution_class, operation_id,
-                     workflow_id)
-                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     workflow_id, measurement_status)
+                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (provider, request_id) DO NOTHING;
                 """,
                 (
                     provider, service, model, source, caller or None, unit,
-                    quantity_in, quantity_out, cost_usd, not exact,
+                    quantity_in, quantity_out, cost_usd, cost_is_estimate,
                     request_id, json.dumps(meta) if meta else None,
                     capability_id, execution_class,
                     operation_id,
                     workflow_id,
+                    measurement_status,
                 ),
             )
             conn.commit()
         logger.debug(
             "[UsageTelemetry] recorded provider=%s service=%s model=%s source=%s "
-            "quantity_out=%s cost=$%.4f estimate=%s",
-            provider, service, model, source, quantity_out, cost_usd, not exact,
+            "quantity_out=%s cost=$%s estimate=%s measurement_status=%s",
+            provider, service, model, source, quantity_out, cost_usd, cost_is_estimate, measurement_status,
         )
         return True
     except Exception as e:
@@ -179,6 +195,7 @@ def record_llm_usage(
     execution_class: str = UNKNOWN_EXECUTION_CLASS,
     operation_id: str | None = None,
     workflow_id: str | None = None,
+    measurement_status: Literal["measured", "unknown"] = "measured",
 ) -> bool:
     """Convenience wrapper for the common case: a text LLM call."""
     return record_usage(
@@ -196,6 +213,7 @@ def record_llm_usage(
         execution_class=execution_class,
         operation_id=operation_id,
         workflow_id=workflow_id,
+        measurement_status=measurement_status,
     )
 
 
@@ -203,7 +221,7 @@ def record_stt_usage(
     *,
     source: str,
     model: str,
-    duration_seconds: float,
+    duration_seconds: float | None,
     provider: str = "openai",
     caller: str = "",
     request_id: str | None = None,
@@ -212,6 +230,7 @@ def record_stt_usage(
     execution_class: str = UNKNOWN_EXECUTION_CLASS,
     operation_id: str | None = None,
     workflow_id: str | None = None,
+    measurement_status: Literal["measured", "unknown"] = "measured",
 ) -> bool:
     """Convenience wrapper for the STT case: quantity_out = duration_seconds, no input side."""
     return record_usage(
@@ -229,6 +248,7 @@ def record_stt_usage(
         execution_class=execution_class,
         operation_id=operation_id,
         workflow_id=workflow_id,
+        measurement_status=measurement_status,
     )
 
 

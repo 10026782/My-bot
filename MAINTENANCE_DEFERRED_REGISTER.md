@@ -228,12 +228,16 @@ historical record; this is the next closure in the chronology. Full record:
   test added. All 4 required proof criteria satisfied.
 - **#8-2 CLOSED / CI ENFORCED** — dedicated blocking `pytest` CI step added
   for `test_phase_4b_1b_durable_lifecycle.py`, matching the existing
-  Context Librarian pattern. 18 tests collected, all 18 execute (17 pass +
-  1 `xfail`), a sabotaged assertion correctly failed `pytest -x` (then
-  reverted), the `ALLOWED_CONTRACT_TRANSITIONS` legality regression is
-  included, no `continue-on-error`/`|| true`. Incidental discovery (not a
-  production defect, not a new #8 item): one pre-existing test
-  (`test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`)
-  predates `core/action_gateway.py`'s intentional BUG-127A stale-cache
-  refresh and is now a stale assertion — marked `xfail(strict=False)`,
-  logic untouched, tracked separately from #8.
+  Context Librarian pattern. 18 tests collected, all 18 execute, **18 pass,
+  0 xfail, 0 skip**, a sabotaged assertion correctly failed `pytest -x`
+  (then reverted), the `ALLOWED_CONTRACT_TRANSITIONS` legality regression is
+  included, no `continue-on-error`/`|| true`. Incidental discovery during
+  first-ever CI execution (not a production defect, not a new #8 item) —
+  fixed directly, not xfailed: one pre-existing test's assertion
+  (`test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`,
+  now renamed `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth`)
+  predated `core/action_gateway.py`'s intentional BUG-127A stale-cache
+  refresh; corrected to assert the current intentional contract (conflict
+  still raised, forbidden transition never persisted, durable truth
+  authoritative, RAM cache may refresh from durable truth). 0 production
+  code changes.
