@@ -113,6 +113,13 @@ Counts: GAP 5 (H1,H2,H3,H5,H9) · PARTIAL 2 (H4,H6) · EXISTS 3.
 | I9 | Unregistered flag read path | `ERROR_REPORTING` direct env, absent from registry (`feature_flags.py:661`, `core/error_reporter.py:21,55`) | Registry canonical for flags | LOW | #13 |
 | I10 | DEAD_FLAG | `FEATURE_UNIFIED_APPROVAL_MESSAGES` registered, zero runtime consumers (planning-only) | n/a | LOW | #14 |
 
+### Track #13 closure disposition
+
+Track #13 is **CLOSED / CLEAN IN OWNED SCOPE**. The provider-identity naming
+issue remains cross-track #3, owner-field overlap remains #2, and
+`FEATURE_*` documentation drift remains #20. No #13 rename or migration is
+authorized by this closure.
+
 ---
 
 ## Section J — DEPRECATED COMPATIBILITY retained after migrations

@@ -24,6 +24,13 @@ This closure records documentation truth only; production verification is not cl
 | #14 Deprecated Compatibility | **DEFERRED ARCHITECTURE** | Active compatibility remains load-bearing. |
 | #19 Docs-to-Code | **CLOSED / DOC DRIFT REMEDIATED** | G1/G2 #882, G5/G6 #893, G3/G4/G15 #896, G7 closed by the accompanying documentation correction. |
 
+## Track #13 closure — Naming Consistency
+
+**CLOSED / CLEAN IN OWNED SCOPE.** No runtime rename, compatibility-alias change,
+schema/data migration, or file/module rename is owned by #13. Cross-track items
+remain recorded under #3 (provider identity naming), #2 (owner-field semantics),
+and #20 (feature-flag documentation drift).
+
 ---
 
 ## Track ID warning (read first)
