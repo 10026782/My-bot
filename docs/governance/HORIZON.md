@@ -16,9 +16,41 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 25/08/2026
-**Truth Reset SHA at last update:** `8c847ec24772850fba8a04031317295337a9ffeb`
+**Truth Reset SHA at last update:** `9399979cd6decc5d8418ed607c9abb364364bb88`
 
 ---
+
+## OPEN
+
+- **#9 Mock Fidelity** — 🔴 **OPEN — CURRENT MOCK FIDELITY GAPS**
+  (Phase 1 read-only audit, documentation capture 25/08/2026, Truth-Reset SHA
+  `9399979cd6decc5d8418ed607c9abb364364bb88`). Full record: `BUG_AUDIT_LOG.md`
+  ("Audit #9 — Mock Fidelity (Phase 1, Read-Only)"). No remediation performed
+  in this pass — documentation only.
+  - **#9-1 HIGH** — TMA approval tenant-isolation check
+    (`tma_api.py:2344` `_is_canonical_tma_contract`) is exercised only on its
+    all-conditions-pass branch across every test that touches it
+    (`test_approval_concurrency.py:90-140`, `test_phase_4b2_wiring.py:106-149`,
+    `test_pr0c0_tma_approval_truthfulness.py`) — no test asserts a tenant
+    mismatch is rejected. A regression weakening the tenant guard would pass
+    the suite undetected. CROSS-TRACK → #8 for the broader negative-path
+    Test Gap.
+  - **#9-2 MEDIUM (latent)** — 5 test files hardcode
+    `MockIdentity.is_internal = True` unconditionally instead of deriving it
+    from `role` like `identity.py:151` and 3 other correct test copies do.
+    Not currently exploited (all 5 use `role="owner"` today) — dormant risk
+    if a future test in those files uses a non-internal role.
+  - **#9-3 LOW** — `LifecycleRepository` test fake
+    (`test_phase_4b_1b_durable_lifecycle.py:56-74`) omits the transition-legality
+    check that `core/action_contract_repository.py:241-245` enforces in
+    production. Not currently reachable via user input.
+  - **#9-4 LOW** — `tc8_test_repo_stub.py:52-67`'s `finalize`/`release` drop the
+    CAS/ownership check `core/turn_state_repository.py:272-329` enforces in
+    production. Mitigated — the consuming path is non-fatal cleanup, and TC8's
+    real CAS semantics are separately covered with high fidelity elsewhere.
+  - CROSS-TRACK → #2/#3 (`providers/airtable_shim.py` stale docstring) and
+    → #11 (`test_bugdh03_04_formula_injection.py`, already-closed territory,
+    no new gap) also recorded — not pursued under #9.
 
 ## CLOSED
 
