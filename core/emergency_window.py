@@ -86,7 +86,9 @@ def _fetch_active_record() -> dict | None:
 
 def _auto_expire(record: dict) -> bool:
     """If a record's Expires At has passed, flip it to Expired. Returns True if expired."""
-    expires_raw = record.get("fields", {}).get(F.EXPIRES_AT)
+    from tma_api import record_fields, record_id
+
+    expires_raw = record_fields(record).get(F.EXPIRES_AT)
     if not expires_raw:
         return False
     try:
@@ -105,15 +107,15 @@ def _auto_expire(record: dict) -> bool:
     # a genuine success.
     ok = airtable_patch(
         Tables.EMERGENCY_WINDOW,
-        record["id"],
+        record_id(record, required=True),
         {F.STATUS: Status.EXPIRED},
         source=_SOURCE,
     )
     if ok:
-        logger.warning(f"[emergency_window] window {record['id']} auto-expired")
+        logger.warning(f"[emergency_window] window {record_id(record, required=True)} auto-expired")
     else:
         logger.error(
-            f"[emergency_window] window {record['id']} expiry PATCH FAILED — "
+            f"[emergency_window] window {record_id(record, required=True)} expiry PATCH FAILED — "
             f"Airtable record still shows Status=Active past its Expires At; "
             f"treating it as expired locally regardless, but the record is "
             f"now inconsistent until a later write succeeds"
@@ -190,14 +192,16 @@ def revoke_window(revoked_by: str) -> bool:
     if not record:
         return False
 
+    from tma_api import record_id
+
     ok = airtable_patch(
         Tables.EMERGENCY_WINDOW,
-        record["id"],
+        record_id(record, required=True),
         {F.STATUS: Status.REVOKED, F.REVOKED_AT: _now().isoformat()},
         source=_SOURCE,
     )
     if ok:
-        logger.warning(f"[emergency_window] REVOKED window={record['id']} by={revoked_by}")
+        logger.warning(f"[emergency_window] REVOKED window={record_id(record, required=True)} by={revoked_by}")
     return ok
 
 
@@ -208,15 +212,17 @@ def record_action(description: str) -> None:
         logger.warning(f"[emergency_window] record_action with no active window: {description!r}")
         return
 
-    existing = record.get("fields", {}).get(F.ACTIONS_APPROVED, "") or ""
+    from tma_api import record_fields, record_id
+
+    existing = record_fields(record).get(F.ACTIONS_APPROVED, "") or ""
     line = f"[{_now().isoformat()}] {description}"
     updated = f"{existing}\n{line}".strip()
 
     ok = airtable_patch(
         Tables.EMERGENCY_WINDOW,
-        record["id"],
+        record_id(record, required=True),
         {F.ACTIONS_APPROVED: updated},
         source=_SOURCE,
     )
     if not ok:
-        logger.warning(f"[emergency_window] failed to log action on window={record['id']}: {description!r}")
+        logger.warning(f"[emergency_window] failed to log action on window={record_id(record, required=True)}: {description!r}")

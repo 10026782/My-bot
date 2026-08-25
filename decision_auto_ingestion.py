@@ -192,7 +192,9 @@ def create_decision_inbox_item(
 
     source_tag = _source_tag(source, metadata, idempotency_key)
     record = _create_inbox_record(inbox_fields, source_tag)
-    if not record or not record.get("id"):
+    from tma_api import record_id
+
+    if not record or not record_id(record):
         return IngestionResult(
             ok=False,
             status="error:inbox_create_failed",
@@ -205,7 +207,7 @@ def create_decision_inbox_item(
         ok=True,
         status="created:decision_inbox",
         channel=channel,
-        inbox_id=record["id"],
+        inbox_id=record_id(record, required=True),
         suggested_decision_id=suggested_decision_id if match_confidence > STRONG_MATCH_THRESHOLD else "",
         match_confidence=match_confidence if match_confidence > STRONG_MATCH_THRESHOLD else 0.0,
         idempotency_key=idempotency_key,
