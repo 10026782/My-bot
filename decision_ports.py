@@ -15,6 +15,8 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+from core.query_contract import Query
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +48,14 @@ class DecisionPorts:
     contacts: ContactPort
     verifier: VerifierPort
     approver: ApprovalPort
+
+
+def storage_get(storage: StoragePort, table: str, query: Query | str = "") -> list:
+    """Compatibility bridge for legacy string-based storage consumers."""
+    if isinstance(query, Query):
+        from tools.airtable_read_adapter import render_query
+        query = render_query(query)
+    return storage.get(table, query)
 
 
 # ══════════════════════════════════════════════════

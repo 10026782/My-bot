@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable
 
-from decision_ports import DecisionPorts, build_default_ports
+from decision_ports import DecisionPorts, build_default_ports, storage_get
 from core.query_contract import all_of, equals
 from tma_api import record_fields, record_id
 from airtable_schema import (
@@ -236,7 +236,8 @@ def maybe_supersede(new_event: dict, decision: dict | None, ports: DecisionPorts
     if not decision or not decision_id or not new_event.get("Claim Topic"):
         return
 
-    prior_events = ports.storage.get(
+    prior_events = storage_get(
+        ports.storage,
         "Decision Events",
         all_of(
             equals("Decision", decision_id),
