@@ -1,10 +1,13 @@
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from feature_flags import is_enabled
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from core.operation_identity import ExecutionContext
 
 
 def _fallback_enabled() -> bool:
@@ -58,6 +61,7 @@ def call_openai_text(
     system: str | None = None,
     temperature: float | None = None,
     fallback_from: str | None = None,
+    execution_context: "ExecutionContext | None" = None,
 ) -> str:
     """
     fallback_from: set by call_anthropic_text() when this is an
@@ -126,6 +130,7 @@ def call_anthropic_text(
     system: str | None = None,
     temperature: float = 0.2,
     timeout: int | None = None,
+    execution_context: "ExecutionContext | None" = None,
 ) -> str:
     import anthropic
 
@@ -185,5 +190,6 @@ def call_anthropic_text(
                 system=system,
                 temperature=temperature,
                 fallback_from="anthropic",
+                execution_context=execution_context,
             )
         raise

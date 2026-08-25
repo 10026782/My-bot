@@ -61,6 +61,8 @@ from core.router     import (
     parse_deterministic_create_task,
 )
 from core.router.deterministic_denial import check_deterministic_denial
+from core import create_execution_context, create_operation
+from core.turn_coordinator_runtime import resolve_agent_capability
 from core.anti_hallucination import (
     verify_execution, sanitize_agent_response,
     _SINGLE_SPEAKER_FALLBACK, _has_write_tool_evidence,
@@ -4682,6 +4684,13 @@ def run_agent(
             return denial.message
 
     try:
+        # R24-04A: RouteDecision is the temporary runtime authority. Create
+        # exactly one reasoning identity before the first paid attempt.
+        resolved_capability = resolve_agent_capability(route)
+        reasoning_operation = create_operation(resolved_capability)
+        execution_context = create_execution_context(
+            resolved_capability, reasoning_operation, turn_id=None,
+        )
         research_mode = user_text.startswith("#") and identity.is_owner
         clean_msg     = user_text[1:].strip() if research_mode else user_text
 
@@ -5610,6 +5619,7 @@ def run_agent(
                     messages=[{"role": "user", "content": clean_msg}],
                     system=ctx.system_prompt,
                     max_tokens=ctx.max_tokens,
+                    execution_context=execution_context,
                 )
                 return sanitize_agent_response(fallback, [])
             except Exception as fe:
@@ -5626,6 +5636,7 @@ def run_agent(
                     messages=[{"role": "user", "content": clean_msg}],
                     system=ctx.system_prompt,
                     max_tokens=ctx.max_tokens,
+                    execution_context=execution_context,
                 )
                 return sanitize_agent_response(fallback, [])
             except Exception as fe:
