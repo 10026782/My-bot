@@ -130,6 +130,7 @@ def recover_blocked_lead_payload(identity, domain: str = "general") -> bool:
     try:
         from airtable_schema import LeadFields, Tables
         from tools.airtable_tools import airtable_get
+        from tools.airtable_gateway import escape_formula_value
         from core.action_result import ActionResult
 
         # תיקון תאימות: זהה ל-lead_capture.capture_inbound_lead — domain="general"
@@ -141,7 +142,8 @@ def recover_blocked_lead_payload(identity, domain: str = "general") -> bool:
         )
 
         # מצא את הליד שנוצר באותו request
-        raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
+        safe_memory_key = escape_formula_value(memory_key)
+        raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'")
 
         import re
         existing_m = re.search(r"rec\w+", raw or "")

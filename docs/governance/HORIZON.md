@@ -16,39 +16,51 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 25/08/2026
-**Truth Reset SHA at last update:** `442eb15fd85175b6016fd490f34455169784a559`
+**Truth Reset SHA at last update:** `8c847ec24772850fba8a04031317295337a9ffeb`
 
 ---
 
-## OPEN
-
-- **#11 Security Surface** — 🔴 **OPEN — CURRENT SECURITY GAPS** (Phase 1,
-  Read-Only, 25/08/2026, Truth-Reset SHA `442eb15fd85175b6016fd490f34455169784a559`).
-  Full record: `BUG_AUDIT_LOG.md` ("Audit #11 — Security Surface (Phase 1,
-  Read-Only)"). Finding counts: CRITICAL 0 · HIGH 1 · MEDIUM 2 · LOW 0.
-  No remediation performed — documentation capture only.
-  - **#11-1 HIGH** — Airtable formula injection through unescaped identifier
-    interpolation, entry point `email_inbound.py:296-299` → ~10 affected
-    call sites (`inbound_handler.py`, `core/noninteractive_lead_cutovers.py`,
-    `lead_capture.py`, `lead_memory.py`, `core/lead_buffer.py`,
-    `ad_attribution.py`, `session_store.py`). Gated behind `EMAIL_INBOUND`;
-    **production reachability UNVERIFIED from a read-only repo audit** — do
-    not promote to CRITICAL without runtime evidence the flag is enabled.
-  - **#11-2 MEDIUM** — `tma_api.py:94-98`'s blueprint-wide `RuntimeError`
-    handler returns raw `str(e)` detail to any authenticated TMA client.
-  - **#11-3 MEDIUM (coverage)** — the sanctioned `escape_formula_value()`
-    interpolation policy (`tools/airtable_gateway.py`) has no blocking
-    CI/AST guard, unlike its sibling boundary guards
-    (`tools/audit_gateway_bypass.py`, `audit_dispatcher_bypass.py`,
-    `audit_provider_boundary.py`).
-  - **Routed input consumed:** `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
-    "Future-audit cross-reference" §#11 row (J2 fail-open context, owner
-    R-C06-8) — evaluated as ALREADY VERIFIED (deny-by-default `READONLY`/
-    `LEAD` fallback, not a fail-open security gap); the underlying
-    docs-or-code naming decision itself stays open under R-C06-8, not
-    closed by this track.
-
 ## CLOSED
+
+- **#11 Security Surface** — **CLOSED / STATIC VERIFIED + CI ENFORCED**
+  (remediation 25/08/2026, Truth-Reset SHA `8c847ec24772850fba8a04031317295337a9ffeb`).
+  All 3 findings from the Phase-1 read-only audit remediated; full record:
+  `BUG_AUDIT_LOG.md` ("Audit #11 — Security Surface (Phase 1, Read-Only)" and
+  its closure entry).
+  - **#11-1 HIGH** — CLOSED / STATIC VERIFIED. All 9 unescaped interpolation
+    sites (`inbound_handler.py`, `lead_capture.py`, `lead_memory.py`,
+    `core/lead_buffer.py`, `ad_attribution.py`, `session_store.py`) now route
+    the interpolated value through `escape_formula_value()`
+    (`tools/airtable_gateway.py`) before it reaches the `filterByFormula`
+    string. `core/noninteractive_lead_cutovers.py:22,38` reviewed and
+    deliberately left unchanged — those lines build the `memory_key` field
+    value itself (not a formula), and escaping there would corrupt the
+    stored field content and break exact-match lookups elsewhere. **Production
+    reachability of `EMAIL_INBOUND` remains UNVERIFIED from a read-only repo
+    audit** — not a reason to keep the static finding open now the code gap
+    is removed; only blocks a production-verified claim.
+  - **#11-2 MEDIUM** — CLOSED / STATIC VERIFIED. `tma_api.py:95-100`'s
+    `RuntimeError` handler now returns `{"error": "internal_error"}` only —
+    no `str(e)` reaches the client; server-side `logger.error(...)` still
+    retains full detail. Proven by
+    `test_bug11_2_tma_runtime_error_no_detail_leak.py` (6/6 checks).
+  - **#11-3 MEDIUM (coverage)** — CLOSED / CI ENFORCED. New blocking guard
+    `tools/audit_formula_escaping_boundary.py` (AST-based, same pattern as
+    `tools/audit_gateway_bypass.py`/`audit_dispatcher_bypass.py`/
+    `audit_provider_boundary.py`) wired into `.github/workflows/ci.yml` as a
+    blocking step — no `continue-on-error`/`|| true`. Repo-wide scan:
+    `NEW (0)`, 5 pre-existing legacy-baseline sites carried forward
+    unchanged (all previously documented as NOT COUNTED / out-of-scope).
+    Proven by `test_audit_formula_escaping_boundary.py` (6/6 checks: unsafe
+    interpolation rejected, both sanctioned escape patterns accepted,
+    canonical query-renderer output accepted, static/constant formulas and
+    log messages resembling the shape not incorrectly rejected).
+  - **Routed input consumed (Phase 1, unaffected by this closure):**
+    `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s "Future-audit cross-reference"
+    §#11 row (J2 fail-open context, owner R-C06-8) — evaluated as ALREADY
+    VERIFIED (deny-by-default `READONLY`/`LEAD` fallback, not a fail-open
+    security gap); the underlying docs-or-code naming decision itself stays
+    open under R-C06-8, not closed by this track.
 
 - **#7 CLI / Admin Tools** — CLOSED (25/08/2026). Seven PRs (#936, #939, #940,
   #943, #944, #945, #946); no real CURRENT GAP remains under #7 ownership.

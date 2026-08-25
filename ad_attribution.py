@@ -170,9 +170,11 @@ def record_lead_source(memory_key: str, utm: UTMParams, *, identity=None) -> boo
     try:
         from core.lead_service import update_lead_fields
         from tools.airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_gateway import escape_formula_value  # type: ignore
         if identity is None:
             return False
-        raw = airtable_get("Leads", f"{{memory_key}}='{memory_key}'")
+        safe_memory_key = escape_formula_value(memory_key)
+        raw = airtable_get("Leads", f"{{memory_key}}='{safe_memory_key}'")
         if "אין רשומות" in (raw or "") or not raw:
             return False
         rec_m = re.search(r'rec\w+', raw)
@@ -198,7 +200,9 @@ def mark_converted(memory_key: str, deal_value: float = 0) -> bool:
     try:
         from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
         from airtable_schema import LeadFields, LeadStatus, LeadOutcome  # type: ignore
-        raw = airtable_get("Leads", f"{{memory_key}}='{memory_key}'")
+        from tools.airtable_gateway import escape_formula_value  # type: ignore
+        safe_memory_key = escape_formula_value(memory_key)
+        raw = airtable_get("Leads", f"{{memory_key}}='{safe_memory_key}'")
         if "אין רשומות" in (raw or ""):
             return False
         rec_m = re.search(r'rec\w+', raw)

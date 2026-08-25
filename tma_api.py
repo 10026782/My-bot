@@ -94,8 +94,11 @@ def _normalize_task_domain(value: str) -> str:
 
 @tma_api.errorhandler(RuntimeError)
 def _handle_runtime_error(e):
+    # Audit #11 (#11-2): exception text stays server-side only — a client-
+    # facing "detail": str(e) here leaked internal implementation detail
+    # (field/table names, internal state) to any authenticated TMA caller.
     logger.error(f"[tma_api] unhandled RuntimeError: {e}")
-    return jsonify({"error": "internal_error", "detail": str(e)}), 500
+    return jsonify({"error": "internal_error"}), 500
 
 
 # ── env ────────────────────────────────────────────────────────────

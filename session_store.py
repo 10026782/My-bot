@@ -29,6 +29,7 @@ from typing import Optional
 
 from airtable_schema import SessionsFields as SF, Tables
 from tma_api import record_fields, record_id as provider_record_id, relation_payload
+from tools.airtable_gateway import escape_formula_value
 
 logger = logging.getLogger(__name__)
 
@@ -612,8 +613,9 @@ class PersistentSessionStore:
         try:
             from tools.airtable_tools import airtable_get_records  # type: ignore
 
+            safe_sender = escape_formula_value(sender)
             raw_records = airtable_get_records(
-                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'"
+                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{safe_sender}'"
             )
             records = self._validated_records(sender, raw_records)
             if records is None:
@@ -643,8 +645,9 @@ class PersistentSessionStore:
         try:
             from tools.airtable_tools import airtable_get_records  # type: ignore
 
+            safe_sender = escape_formula_value(sender)
             raw_records = airtable_get_records(
-                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{sender}'"
+                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{safe_sender}'"
             )
             records = self._validated_records(sender, raw_records)
             if records is None or not records:

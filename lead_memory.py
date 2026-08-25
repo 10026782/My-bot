@@ -155,6 +155,7 @@ class LeadMemory:
         try:
             from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
             from airtable_schema import Tables, LeadFields               # type: ignore
+            from tools.airtable_gateway import escape_formula_value      # type: ignore
 
             fields = {
                 "memory_key": state.memory_key,
@@ -168,7 +169,8 @@ class LeadMemory:
                 fields[LeadFields.SUMMARY] = state.summary
 
             if not state.record_id:
-                raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{state.memory_key}'")
+                safe_memory_key = escape_formula_value(state.memory_key)
+                raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'")
                 m   = re.search(r'rec\w+', raw or "")
                 if m:
                     state.record_id = m.group(0)
