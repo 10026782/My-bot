@@ -40,6 +40,30 @@ TASK_OWNERSHIP = IntentOwnershipRegistry({
 })
 
 
+def resolve_voice_transcription_capability() -> ResolvedCapability:
+    """Resolve the bounded paid voice-transcription contract."""
+    ownership = IntentOwnershipDecision(
+        intent=Intent.TRANSCRIBE_VOICE_NOTE,
+        owner="voice_stt_adapter.transcription",
+        reason="eligible bounded voice transcription contract",
+        confidence=1.0,
+    )
+    return resolve_capability(
+        ownership,
+        {
+            Intent.TRANSCRIBE_VOICE_NOTE: (
+                ResolvedCapability(
+                    capability_id="media.voice_transcription",
+                    execution_class=ExecutionClass.NARROW_MODEL,
+                    executor_ref="voice_stt_adapter._transcribe_openai",
+                    validator_ref="voice_stt_adapter.transcription_eligibility.v1",
+                    verification_ref="voice_stt_adapter.transcript_structure.v1",
+                ),
+            ),
+        },
+    )
+
+
 def resolve_tma_contextual_answer_capability() -> ResolvedCapability:
     """Resolve the fixed authenticated TMA contextual-answer contract."""
     ownership = IntentOwnershipDecision(
