@@ -42,9 +42,10 @@ CREATE TABLE IF NOT EXISTS usage_events (
     caller TEXT,                         -- free-form context (e.g. ctx.memory_key)
     unit TEXT NOT NULL,                  -- "tokens" | "seconds" — what quantity_in/quantity_out mean
     quantity_in NUMERIC,                 -- e.g. input tokens; NULL when not applicable (STT has no "in" side)
-    quantity_out NUMERIC NOT NULL,       -- e.g. output tokens, or STT duration_seconds — always the primary billed quantity
-    cost_usd NUMERIC NOT NULL,           -- computed via core.model_pricing at write time
+    quantity_out NUMERIC,                -- primary billed quantity; NULL when measurement is unknown
+    cost_usd NUMERIC,                    -- computed via core.model_pricing; NULL when measurement is unknown
     cost_is_estimate BOOLEAN NOT NULL DEFAULT FALSE,  -- true when pricing hit the documented fail-safe (unrecognized model)
+    measurement_status TEXT NOT NULL DEFAULT 'measured', -- measured or unknown; never encode unknown as zero
     request_id TEXT,
     meta JSONB,                          -- e.g. {"fallback_from": "anthropic", "fallback_reason": "timeout"}
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -52,6 +53,14 @@ CREATE TABLE IF NOT EXISTS usage_events (
     execution_class TEXT NOT NULL DEFAULT 'UNKNOWN',
     operation_id TEXT,
     workflow_id TEXT,
+    CONSTRAINT usage_events_measurement_status_check
+        CHECK (measurement_status IN ('measured', 'unknown')),
+    CONSTRAINT usage_events_measurement_values_check
+        CHECK (
+            (measurement_status = 'measured' AND quantity_out IS NOT NULL AND cost_usd IS NOT NULL)
+            OR
+            (measurement_status = 'unknown' AND quantity_out IS NULL AND cost_usd IS NULL)
+        ),
     UNIQUE(provider, request_id)
 );
 
