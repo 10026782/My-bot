@@ -5453,3 +5453,77 @@ CRITICAL: 0 · HIGH: 1 · MEDIUM: 2 · LOW: 0 · ALREADY VERIFIED: 9 (כולל J
 `EMAIL_INBOUND` flag state בפרודקשן: **PRODUCTION REACHABILITY UNVERIFIED** — לא אומת runtime evidence שה-flag פעיל. לפי הנחיית המשימה, זה אינו סיבה להשאיר את ה-audit הסטטי OPEN לאחר שה-code gap הוסר; רק חוסם claim מפורש של production-verification (ר' `CLAUDE.md`'s STATUS template — `🟡 CODE DONE, NOT VERIFIED` עד שיתבצע post-merge+deploy verification בפועל).
 
 - **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED + CI ENFORCED** — #11-1: CLOSED / STATIC VERIFIED · #11-2: CLOSED / STATIC VERIFIED · #11-3: CLOSED / CI ENFORCED. 3/3 findings תוקנו ומאומתים סטטית על branch זה. אימות production (post-merge+deploy, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.
+
+---
+
+## Audit #9 — Mock Fidelity (Phase 1, Read-Only)
+
+- **תאריך:** 25/08/2026
+- **Truth-Reset SHA:** `9399979cd6decc5d8418ed607c9abb364364bb88` (origin/main)
+- **Scope:** track program #9 בלבד — fidelity of existing mocks/fakes/stubs/monkeypatches against the production contracts they replace (external provider mocks, repository/gateway mocks, contract fidelity, security/auth mocks, schema/data mocks, failure behavior, test-only helper drift, patch-target fidelity). לא נבדקו/לא נפתחו מחדש #2–#8, #10–#16, #18–#24 בסבב זה; #9 אינו general Test Gap audit (#8) — findings שהם "חסר טסט" בלבד נותבו ל-CROSS-TRACK → #8, לא דווחו כאן.
+- **Mode:** read-only static inspection (Phase 1). אין שינוי production code/tests/mocks/fakes בשלב האיתור עצמו. **הרשומה הזו היא documentation-capture בלבד — לא בוצע remediation.**
+- **Reviewed:** ~200+ mock/patch/fake sites נבדקו מקרוב על פני ~65 קבצי test; census רוחב-ריפו של 392 אתרי `mock.patch`/`monkeypatch.setattr`/`@patch` (grep count).
+- **Final status:** 🔴 **OPEN — CURRENT MOCK FIDELITY GAPS**. HIGH: 1 · MEDIUM: 1 (latent) · LOW: 2.
+
+### FINDING #9-1 — HIGH CURRENT MOCK FIDELITY GAP — TMA approval tenant-isolation check exercised only on the pass branch
+- **קונספט:** test doubles ל-TMA-approval gate משתמשים בצורת tenant לא-ריאליסטית שגורמת ל-tenant guard לעבור באופן טריוויאלי, בלי כיסוי negative-path.
+- **Production target:** `tma_api.py:2344` — `_is_canonical_tma_contract(contract, identity)`, שער בן 6 תנאים; התנאי האחרון `contract.tenant_id == getattr(identity, "tenant_id", None)` הוא ה-guard המפורש נגד cross-tenant action, נבדק בכל בקשת approve/reject/bulk-approve תחת TMA (`tma_api.py:2973, 3150`).
+- **Relevant test doubles:**
+  - `test_approval_concurrency.py:90-140` — `_owner()` הוא `SimpleNamespace` בלי `tenant_id` בכלל (`getattr(..., None)` ⇒ `None`), מול `_FakeContract.tenant_id = None` — ה-guard עובר דרך `None == None`.
+  - `test_phase_4b2_wiring.py:106-149` ו-`test_pr0c0_tma_approval_truthfulness.py` — identity/contract שניהם מברירת-מחדל ל-`tenant_id="boss_hq"` זהה, כולל בבדיקת bulk_approve pre-filter (שורה ~566).
+- **Exact fidelity mismatch:** בכל קובץ test שנוגע ב-`_is_canonical_tma_contract` (מאושש ב-grep — רק שלושת הקבצים הנ"ל), התנאי נבדק אך ורק בענף "כל התנאים עוברים". `None == None` ב-`test_approval_concurrency.py` הוא בנוסף data-shape שלא דומה ל-`Identity.tenant_id` האמיתי (תמיד string מאוכלס, ברירת מחדל `"boss_hq"`).
+- **False confidence:** רגרסיה שמחלישה/מסירה את ה-tenant check (למשל `==` ⇄ `is`, תנאי שנשמט, bug בברירת-מחדל בצד identity) הייתה עוברת את כל ה-suite בלי להתגלות — אין אף test שמאשש `_is_canonical_tma_contract` מחזיר `False` על tenant mismatch.
+- **Reachability:** live path — כל בקשת TMA approve/reject/bulk-approve עוברת דרך השער הזה.
+- **Classification:** HIGH CURRENT MOCK FIDELITY GAP. Criteria: D (עוקף כיסוי negative-path של ה-canonical tenant-scope check), E (צורת `tenant_id=None` של ה-mock לא ריאליסטית).
+- **Recommended remediation (לא בוצע כאן):** identities/contracts ב-approval tests יקבלו tenant IDs ריאליסטיים ושונים-בכוונה, ותתווסף אסרציה מפורשת לענף ה-mismatch של אותו gate.
+- **CROSS-TRACK → #8 Test Gap:** ההיעדר הרחב יותר של negative-path tenant-mismatch assertion הוא גם Test Gap concern נפרד מה-fidelity issue עצמו. לא נבדק/לא נסגר כאן.
+
+### FINDING #9-2 — MEDIUM CURRENT GAP (LATENT) — Divergent `MockIdentity.is_internal` semantics across test-helper copies
+- **קונספט:** helper class בשם זהה (`MockIdentity`) עם התנהגות שונה מהותית בין עותקים בקבצי test שונים.
+- **Test copies שמקבעים `is_internal=True` ללא תנאי:** `test_bug077_tier3_auto_capture_gate.py:54`, `test_bug096_ingress_classifier_batch_bleed.py:192`, `test_bug098_followup_word_boundary.py:49`, `test_c89_preview_confirmation.py:46`, `test_tier2_silent_preview.py:51`.
+- **Production target:** `identity.py:151` — `Identity.is_internal` נגזר מ-`role` (`role in (OWNER, PARTNER, MANAGER, EMPLOYEE)`), לא ערך קבוע.
+- **עותקים תקינים שכבר גוזרים מ-`role` נכון:** `test_c94_stage_c_telegram.py:61`, `test_capture_router_wiring.py:43`, `test_integration.py:33`.
+- **Reachability כיום:** לא מנוצל בפועל — כל 5 המופעים ב-copies הקשיחים משתמשים כרגע ב-`role="owner"` ברירת מחדל, כך שהתוצאה נכונה במקרה. **Latent** — הבדיקה הראשונה שתיווסף לאחד מ-5 הקבצים האלה עם role לא-פנימי (`lead`/`guest`) תקבל בשקט `is_internal=True` כש-production היה אומר `False`.
+- **Classification:** MEDIUM CURRENT GAP — LATENT. Criteria: A (contract שונה — קבוע מול נגזר-מ-role), latent E.
+- **Recommended remediation (לא בוצע כאן):** להחליף את הערך הקבוע בלוגיקה שנגזרת מ-`role`, תואמת ל-`Identity.is_internal`.
+
+### FINDING #9-3 — LOW CURRENT GAP — `LifecycleRepository` test fake omits transition-legality validation
+- **Test:** `test_phase_4b_1b_durable_lifecycle.py:56-74` — `LifecycleRepository.transition()`, fake duck-typed שמועבר ל-`ExecutionLedger(repository=repository)`.
+- **Production target:** `core/action_contract_repository.py:241-245` — `ActionContractRepository.transition()` דוחה כל `new_status` שלא ב-`ALLOWED_CONTRACT_TRANSITIONS[current.status]` (`ActionContractTransitionConflictError`).
+- **Mismatch:** ה-fake בודק רק stale `expected_status`/`expected_version` (CAS/TOCTOU), ומקבל בשקט כל `new_status`, בלי להתייעץ עם טבלת המעברים המותרים.
+- **False confidence:** tests שמשתמשים ב-fake (restart recovery, persistence-failure, stale-cache) לא היו תופסים bug ב-`ExecutionLedger`/`ActionGateway` שמנפיק מעבר סטטוס לא-חוקי.
+- **Reachability:** נמוכה כיום — `ExecutionLedger.update_status()` נקרא רק פנימית עם literals קבועים וחוקיים; לא exploitable דרך user input.
+- **Classification:** LOW CURRENT GAP. Criteria: A, B.
+- **Recommended remediation (לא בוצע כאן):** לגרום ל-fake לאכוף את אותה טבלת מעברים, או להשתמש בהלפר משותף עם ה-production repository.
+
+### FINDING #9-4 — LOW CURRENT GAP — TC8 turn-state repository stub silently drops CAS/ownership checks
+- **Test double:** `tc8_test_repo_stub.py:52-67` (`InMemoryTurnStateRepository.finalize`/`.release`), בשימוש ב-`test_bug112_telegram_approval_ttl.py`, `test_bug158_approval_callback_eventbus_ttl_recovery.py`, `test_bug_approval_callback_hardening.py`, `test_pr0c_telegram_callback_gateway.py`.
+- **Production target:** `core/turn_state_repository.py:272-329` — `finalize`/`release` דורשים match על `expected_version` וגם `operation_id`/`state='claimed'`, אחרת `TurnStateConflictError`.
+- **Mismatch:** ה-stub מיישם את המוטציה ללא תנאי, מתעלם משני הפרמטרים.
+- **Mitigating context:** הנתיב שמפעיל את זה הוא non-fatal cleanup (`app.py:2924-2934` לוכד ורק רושם לוג); ה"double-approve blocked" behavior שה-4 tests הנ"ל בפועל בודקים מגיע מ-`ActionGateway.lifecycle_result`, לא מ-TC8 CAS. סמנטיקת ה-CAS האמיתית של TC8 מכוסה בנפרד ובאמינות גבוהה ב-`test_turn_state_repository.py`'s `_SharedDb` fake.
+- **Classification:** LOW CURRENT GAP. Criteria: A, D. אין claim חי (test/runtime) שתלוי בפער הזה כרגע.
+- **Recommended remediation (לא בוצע כאן):** לקרב את סמנטיקת המוטציה של ה-TC8 stub ל-production בלי לשנות את מה שהטסטים הצורכים אמורים לאשש.
+
+### INFORMATIONAL — NOT SCORED (Category 8 sample, not reachable)
+- `interaction_engine.py`'s `if __name__ == "__main__":` self-test block: `sys.modules["airtable_tools"] = at` (חסר prefix `tools.` — patch target שגוי מול ה-import האמיתי `tools.airtable_tools`) וקורא ל-`save_to_business_memory` שלא קיימת יותר במודול (0 matches ב-grep). לא חלק מ-`test_*.py`/`smoke_tests.py` — אין נתיב false-confidence חי. נרשם כדוגמת Category 8 בלבד, **לא נספר** כ-#9 current gap.
+
+### ALREADY VERIFIED (נבדק, ללא gap חי)
+1. Airtable/action-contract boundary: `test_airtable_gateway.py`, `test_pr0c_action_contract_repository.py`, `test_airtable_extraction_slice4a/4b.py`, `test_airtable_shim.py`, `test_airtable_tools_facade.py` — mock ב-`httpx` boundary עם אסרציות request-shape אמיתיות, וגם AST-based static guards שמוכיחים שמודולים מהוגרים חסרי קריאות HTTP ישירות.
+2. `test_airtable_emergency_stop_store.py` — מדמה נכון quirk אמיתי של Airtable (מפתח checkbox לא-מסומן נעדר, לא `false`).
+3. `test_pa01_phantom_approval_enforcement.py` D1-D5 — משתמש ב-`ActionContractRepository`/`_contract_to_fields` האמיתיים, לא reimplementation.
+4. `dispatch_tool` mocking ב-`test_bug112_*`, `test_pr0c_telegram_callback_gateway.py` וכו' משמש נכון (call-count/no-double-dispatch), ו-`test_pr0c_action_gateway_adapters.py` Test 6 מריץ את `dispatch_tool`/`tool_registry.enforce()` האמיתיים end-to-end.
+5. `test_stirling_pdf_capability.py`, `test_crawl4ai_capability.py` — מבחינים נכון בין כשל HTTP דטרמיניסטי לחוסר-ודאות רשת, עם exception classes אמיתיות של `httpx`.
+6. `test_p23_m1_usage_attribution.py`/`test_p23_m7_voice_attribution.py` — צורת response של OpenAI SDK משוקפת שדה-לשדה דרך `monkeypatch.setitem(sys.modules, "openai", ...)`.
+7. `test_google_drive_artifact_store.py`, `test_c81_recovery_truth.py`, `test_google_tools.py` — צורות אמיתיות של googleapiclient/`httpx.Response`/python-docx.
+8. `test_otp_concurrency.py` — `request_otp()`/`verify_otp()`/lock אמיתיים מונעים ע"י threads אמיתיים, רק גבול משלוח ה-Telegram מזויף.
+9. `test_a32_enforcement.py`, `test_deterministic_denial.py`, `test_external_execution_validator.py`, `test_bug075_tma_upload_role_gate.py`, `test_cxx_action_integrity.py`, `test_bugdh03_04_formula_injection.py` — patch-target fidelity מאושש מול אתרי ה-import/call האמיתיים בפועל.
+
+### Finding counts
+CRITICAL: 0 · HIGH: 1 · MEDIUM: 1 (latent) · LOW: 2 · INFORMATIONAL (not scored): 1 · ALREADY VERIFIED: 9 · CROSS-TRACK: 3.
+
+### CROSS-TRACK
+- **→ #8 Test Gap:** היעדר negative-path assertion מפורש ל-tenant-mismatch (קשור ל-#9-1, ר' למעלה). לא נבדק/לא נסגר כאן.
+- **→ #2/#3:** `providers/airtable_shim.py`'s docstring טוען ש-"`tools/airtable_gateway.py` has no delete function", אבל `airtable_gateway.py:736` מגדיר `airtable_delete()`. Stale doc comment בקוד מת/לא-מחובר (F13, אפס imports חיים לפי `CLAUDE.md`) — doc-drift, לא mock-fidelity defect. לא נבדק/לא נסגר כאן.
+- **→ #11 (already closed, no new gap):** `test_bugdh03_04_formula_injection.py` (BUG-DH-03/04, `cmd_decision.py::_resolve_decision_ref`, `decision_pipeline.py::maybe_supersede`, `core/lead_service.py::_search_formulas`) — טריטוריית תיקון אבטחת production (Airtable formula injection), כבר נושא Audit #11 שנסגר. הטסט עצמו high-fidelity, בודק את `escape_formula_value()` האמיתי — אין כאן #9 gap חדש.
+
+- **סטטוס:** 🔴 **OPEN — CURRENT MOCK FIDELITY GAPS**. לא בוצע remediation בסבב זה — תיעוד בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
