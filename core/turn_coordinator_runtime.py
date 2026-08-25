@@ -65,6 +65,31 @@ def resolve_tma_contextual_answer_capability() -> ResolvedCapability:
     )
 
 
+def resolve_marketing_creative_drafting_capability() -> ResolvedCapability:
+    """Resolve the validated /marketing_new creative-drafting contract."""
+    ownership = IntentOwnershipDecision(
+        intent=Intent.DRAFT_MARKETING_CREATIVES,
+        owner="marketing.creative_drafting",
+        reason="validated /marketing_new creative drafting contract",
+        confidence=1.0,
+    )
+    return resolve_capability(
+        ownership,
+        {
+            Intent.DRAFT_MARKETING_CREATIVES: (
+                ResolvedCapability(
+                    capability_id="marketing.creative_idea_drafting",
+                    execution_class=ExecutionClass.NARROW_MODEL,
+                    executor_ref="cmd_marketing._create_demand_and_generate_ideas",
+                    validator_ref="cmd_marketing.capture_text.constraints",
+                    verification_ref="cmd_marketing._parse_and_render_creative_proposals",
+                    fallback_ref="llm_fallback",
+                ),
+            ),
+        },
+    )
+
+
 def resolve_agent_capability(route: RouteDecision) -> ResolvedCapability:
     """Adapt an authoritative Agent route to the canonical reasoning capability."""
     if not isinstance(route, RouteDecision):
