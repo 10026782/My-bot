@@ -16,43 +16,49 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 25/08/2026
-**Truth Reset SHA at last update:** `9399979cd6decc5d8418ed607c9abb364364bb88`
+**Truth Reset SHA at last update:** `74808625cd59a26a06d666dfa266540e7f0d1c89`
 
 ---
 
-## OPEN
-
-- **#9 Mock Fidelity** — 🔴 **OPEN — CURRENT MOCK FIDELITY GAPS**
-  (Phase 1 read-only audit, documentation capture 25/08/2026, Truth-Reset SHA
-  `9399979cd6decc5d8418ed607c9abb364364bb88`). Full record: `BUG_AUDIT_LOG.md`
-  ("Audit #9 — Mock Fidelity (Phase 1, Read-Only)"). No remediation performed
-  in this pass — documentation only.
-  - **#9-1 HIGH** — TMA approval tenant-isolation check
-    (`tma_api.py:2344` `_is_canonical_tma_contract`) is exercised only on its
-    all-conditions-pass branch across every test that touches it
-    (`test_approval_concurrency.py:90-140`, `test_phase_4b2_wiring.py:106-149`,
-    `test_pr0c0_tma_approval_truthfulness.py`) — no test asserts a tenant
-    mismatch is rejected. A regression weakening the tenant guard would pass
-    the suite undetected. CROSS-TRACK → #8 for the broader negative-path
-    Test Gap.
-  - **#9-2 MEDIUM (latent)** — 5 test files hardcode
-    `MockIdentity.is_internal = True` unconditionally instead of deriving it
-    from `role` like `identity.py:151` and 3 other correct test copies do.
-    Not currently exploited (all 5 use `role="owner"` today) — dormant risk
-    if a future test in those files uses a non-internal role.
-  - **#9-3 LOW** — `LifecycleRepository` test fake
-    (`test_phase_4b_1b_durable_lifecycle.py:56-74`) omits the transition-legality
-    check that `core/action_contract_repository.py:241-245` enforces in
-    production. Not currently reachable via user input.
-  - **#9-4 LOW** — `tc8_test_repo_stub.py:52-67`'s `finalize`/`release` drop the
-    CAS/ownership check `core/turn_state_repository.py:272-329` enforces in
-    production. Mitigated — the consuming path is non-fatal cleanup, and TC8's
-    real CAS semantics are separately covered with high fidelity elsewhere.
-  - CROSS-TRACK → #2/#3 (`providers/airtable_shim.py` stale docstring) and
-    → #11 (`test_bugdh03_04_formula_injection.py`, already-closed territory,
-    no new gap) also recorded — not pursued under #9.
-
 ## CLOSED
+
+- **#9 Mock Fidelity** — **CLOSED / STATIC VERIFIED**
+  (remediation 25/08/2026, Truth-Reset SHA
+  `74808625cd59a26a06d666dfa266540e7f0d1c89`). All 4 findings from the
+  Phase-1 read-only audit remediated (test/test-double changes only —
+  0 production code changes); full record: `BUG_AUDIT_LOG.md` ("Audit #9 —
+  Mock Fidelity (Phase 1, Read-Only)" and its closure entry).
+  - **#9-1 HIGH** — CLOSED / VERIFIED. `test_approval_concurrency.py` and
+    `test_pr0c0_tma_approval_truthfulness.py`'s identity/contract test
+    doubles now carry a real, matching `tenant_id="boss_hq"` (was two
+    vacuously-equal `None`s) — `test_phase_4b2_wiring.py` already did.
+    A new negative-path regression (`test_approval_concurrency.py` Test 6)
+    proves a cross-tenant contract is refused (HTTP 409, gateway never
+    called) through the real `_is_canonical_tma_contract` end-to-end path.
+    **CROSS-TRACK → #8 stays open** — the broader Test Gap this remediation
+    routed to #8 is not closed by this fidelity fix.
+  - **#9-2 MEDIUM (latent)** — CLOSED / VERIFIED. All 5 affected
+    `MockIdentity.is_internal` copies now derive from `role`
+    (`role in ("owner", "partner", "manager", "employee")`), matching
+    `identity.py:151`, with a focused assertion per file proving both
+    branches.
+  - **#9-3 LOW** — CLOSED / VERIFIED. `LifecycleRepository.transition()`'s
+    test fake now enforces `ALLOWED_CONTRACT_TRANSITIONS` (imported from
+    `core.action_contract_repository`, not duplicated), proven by a new
+    illegal-transition regression test.
+  - **#9-4 LOW** — CLOSED / VERIFIED. `tc8_test_repo_stub.py`'s
+    `finalize`/`release` now enforce the same claimed-state/version/
+    operation-id CAS as `core/turn_state_repository.py`'s `_owner_mutate()`,
+    proven by a new standalone `test_tc8_repo_stub_fidelity.py` (6/6) without
+    touching the 4 existing approval-callback consumer test files.
+  - **Incidental, out-of-scope findings surfaced during regression** (not
+    touched, not part of #9): `test_phase_4b_1b_durable_lifecycle.py` is
+    written in `pytest` style but CI's "Run test_*.py scripts" step runs it
+    as plain `python3 file.py`, which executes 0 tests silently (#8-adjacent
+    CI-wiring concern); `test_bug153_create_task_reconfirmation_after_rejection.py`
+    has 3 pre-existing failures, reproduced identically on a clean
+    `origin/main` with none of this remediation's changes applied — unrelated
+    to any of the 4 findings.
 
 - **#11 Security Surface** — **CLOSED / STATIC VERIFIED + CI ENFORCED**
   (remediation 25/08/2026, Truth-Reset SHA `8c847ec24772850fba8a04031317295337a9ffeb`).

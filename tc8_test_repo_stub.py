@@ -30,6 +30,7 @@ from unittest.mock import patch
 class _Row:
     version: int
     state: str = "active"
+    operation_id: str = ""
 
 
 class InMemoryTurnStateRepository:
@@ -53,18 +54,26 @@ class InMemoryTurnStateRepository:
             from core.turn_state_repository import TurnStateConflictError
             raise TurnStateConflictError("stub: claim lost race")
         row.state = "claimed"
+        row.operation_id = operation_id
         row.version += 1
         return type("Result", (), {"state": row})()
 
-    def finalize(self, tenant_id, canonical_user_id, *, expected_version, operation_id, terminal_reason=None):
+    def _owner_mutate(self, tenant_id, canonical_user_id, expected_version, operation_id, state):
+        # Audit #9-4 fidelity: mirrors TurnStateRepository._owner_mutate()'s
+        # CAS — WHERE state = 'claimed' AND operation_id = %s AND version = %s
+        # — instead of mutating unconditionally.
         row = self._rows[(tenant_id, canonical_user_id)]
-        row.state = "terminal"
+        if row.state != "claimed" or row.version != expected_version or row.operation_id != operation_id:
+            from core.turn_state_repository import TurnStateConflictError
+            raise TurnStateConflictError("stub: stale, terminal, or non-owner operation")
+        row.state = state
         row.version += 1
 
+    def finalize(self, tenant_id, canonical_user_id, *, expected_version, operation_id, terminal_reason=None):
+        self._owner_mutate(tenant_id, canonical_user_id, expected_version, operation_id, "terminal")
+
     def release(self, tenant_id, canonical_user_id, *, expected_version, operation_id, terminal_reason=None):
-        row = self._rows[(tenant_id, canonical_user_id)]
-        row.state = "released"
-        row.version += 1
+        self._owner_mutate(tenant_id, canonical_user_id, expected_version, operation_id, "released")
 
 
 def patch_turn_state_repository() -> None:

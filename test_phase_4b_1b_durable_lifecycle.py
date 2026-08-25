@@ -10,6 +10,7 @@ import pytest
 
 from airtable_schema import ActionContractsFields
 from core.action_contract_repository import (
+    ALLOWED_CONTRACT_TRANSITIONS,
     ActionContractRepository,
     ActionContractTransitionConflictError,
     ActionContractTransitionPersistenceError,
@@ -63,6 +64,14 @@ class LifecycleRepository:
             raise ActionContractTransitionConflictError("missing")
         if contract.status != expected_status or contract.version != expected_version:
             raise ActionContractTransitionConflictError("stale")
+        # Audit #9-3 fidelity: enforce the same transition-legality table as
+        # the real repository, reused rather than duplicated, so an illegal
+        # transition the real repository would reject is rejected here too.
+        if (new_status != contract.status
+                and new_status not in ALLOWED_CONTRACT_TRANSITIONS.get(contract.status, frozenset())):
+            raise ActionContractTransitionConflictError(
+                f"invalid lifecycle transition: {contract.status} -> {new_status}"
+            )
         contract.status = new_status
         contract.version += 1
         for key, value in (updates or {}).items():
@@ -263,6 +272,28 @@ def test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache():
 
     assert ledger._store[contract_id].status == "pending"
     assert repository.get(contract_id).status == "rejected"
+
+
+def test_fake_lifecycle_repository_rejects_illegal_transition():
+    """Audit #9-3 fidelity: LifecycleRepository (the in-memory test double)
+    must reject a transition the real ActionContractRepository's
+    ALLOWED_CONTRACT_TRANSITIONS table would also reject, not just a stale
+    expected_status/version — proven directly against ALLOWED_CONTRACT_TRANSITIONS
+    itself so this stays correct if the table's shape ever changes."""
+    memory = LifecycleRepository()
+    ledger = ExecutionLedger(repository=memory)
+    contract_id = _propose(ActionGateway(ledger=ledger))
+    assert "executing" not in ALLOWED_CONTRACT_TRANSITIONS["pending"]
+
+    with pytest.raises(ActionContractTransitionConflictError):
+        memory.transition(
+            contract_id,
+            expected_status="pending",
+            expected_version=1,
+            new_status="executing",
+        )
+
+    assert memory.get(contract_id).status == "pending"
 
 
 def test_repository_transition_uses_partial_patch_and_verifies_version():

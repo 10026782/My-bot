@@ -191,11 +191,18 @@ class MockIdentity:
 
     @property
     def is_internal(self) -> bool:
-        return True
+        # Mirrors identity.Identity.is_internal (role-derived), not a
+        # hardcoded True — Audit #9-2 fidelity fix.
+        return self.role in ("owner", "partner", "manager", "employee")
 
     @property
     def memory_key(self) -> str:
         return f"{self.tenant_id}:{self.user_id}"
+
+
+# Audit #9-2 fidelity: is_internal must be role-derived, not a fixed True.
+chk("MockIdentity.is_internal True for internal role (owner)", MockIdentity(role="owner").is_internal is True)
+chk("MockIdentity.is_internal False for external role (lead)", MockIdentity(role="lead").is_internal is False)
 
 
 captured = []

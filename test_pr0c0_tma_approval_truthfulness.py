@@ -80,7 +80,8 @@ def chk(desc: str, cond: bool) -> None:
 
 
 def _owner() -> SimpleNamespace:
-    return SimpleNamespace(is_owner=True, user_id="owner_1", display_name="Owner", role="owner")
+    return SimpleNamespace(is_owner=True, user_id="owner_1", display_name="Owner", role="owner",
+                            tenant_id="boss_hq")
 
 
 def _bulk(identity) -> dict:
@@ -98,14 +99,14 @@ class _FakeContract:
         self.status = status
         # Phase 4B-2 follow-up: _is_canonical_tma_contract() reads these
         # directly — defaults match this file's tma_write happy path and
-        # _owner()'s identity, which has no tenant_id attribute at all
-        # (getattr(..., "tenant_id", None) is None), so tenant_id here is
-        # None too rather than a real tenant string.
+        # _owner()'s identity, both in tenant "boss_hq" (Audit #9-1 fidelity
+        # fix: a real matching tenant_id, not two Nones that vacuously equal
+        # each other and never actually exercise the tenant-scoping check).
         self.approval_policy = "approval"
         self.tool_name = "tma_write"
         self.trusted_source = "tma_api"
         self.origin_channel = "tma"
-        self.tenant_id = None
+        self.tenant_id = "boss_hq"
         # C84: real ActionContract.created_at is a required field (no
         # default) — always fresh ("now") unless a test explicitly wants an
         # aged contract, so every pre-existing test here keeps passing
