@@ -16,9 +16,37 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 25/08/2026
-**Truth Reset SHA at last update:** `ef8363f830253c324b8da8f1b7026f29ff6faf0f`
+**Truth Reset SHA at last update:** `442eb15fd85175b6016fd490f34455169784a559`
 
 ---
+
+## OPEN
+
+- **#11 Security Surface** — 🔴 **OPEN — CURRENT SECURITY GAPS** (Phase 1,
+  Read-Only, 25/08/2026, Truth-Reset SHA `442eb15fd85175b6016fd490f34455169784a559`).
+  Full record: `BUG_AUDIT_LOG.md` ("Audit #11 — Security Surface (Phase 1,
+  Read-Only)"). Finding counts: CRITICAL 0 · HIGH 1 · MEDIUM 2 · LOW 0.
+  No remediation performed — documentation capture only.
+  - **#11-1 HIGH** — Airtable formula injection through unescaped identifier
+    interpolation, entry point `email_inbound.py:296-299` → ~10 affected
+    call sites (`inbound_handler.py`, `core/noninteractive_lead_cutovers.py`,
+    `lead_capture.py`, `lead_memory.py`, `core/lead_buffer.py`,
+    `ad_attribution.py`, `session_store.py`). Gated behind `EMAIL_INBOUND`;
+    **production reachability UNVERIFIED from a read-only repo audit** — do
+    not promote to CRITICAL without runtime evidence the flag is enabled.
+  - **#11-2 MEDIUM** — `tma_api.py:94-98`'s blueprint-wide `RuntimeError`
+    handler returns raw `str(e)` detail to any authenticated TMA client.
+  - **#11-3 MEDIUM (coverage)** — the sanctioned `escape_formula_value()`
+    interpolation policy (`tools/airtable_gateway.py`) has no blocking
+    CI/AST guard, unlike its sibling boundary guards
+    (`tools/audit_gateway_bypass.py`, `audit_dispatcher_bypass.py`,
+    `audit_provider_boundary.py`).
+  - **Routed input consumed:** `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
+    "Future-audit cross-reference" §#11 row (J2 fail-open context, owner
+    R-C06-8) — evaluated as ALREADY VERIFIED (deny-by-default `READONLY`/
+    `LEAD` fallback, not a fail-open security gap); the underlying
+    docs-or-code naming decision itself stays open under R-C06-8, not
+    closed by this track.
 
 ## CLOSED
 
