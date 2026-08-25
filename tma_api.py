@@ -2080,6 +2080,12 @@ def create_followup(identity):
 # WEEK 1 — Ask AI (routes through existing BOSS context layer)
 # ══════════════════════════════════════════════════════════════════
 
+def verify_tma_contextual_answer(answer: str) -> str:
+    """Accept only a structurally non-empty contextual-answer response."""
+    if not isinstance(answer, str) or not answer.strip():
+        raise ValueError("TMA contextual answer must be a non-empty string")
+    return answer
+
 @tma_api.route("/api/ai/ask", methods=["POST"])
 @require_tma_auth
 def ask_ai(identity):
@@ -2129,10 +2135,17 @@ def ask_ai(identity):
     try:
         # Route through existing BOSS context layer — build_context applies
         # role-based system prompt, model selection, and memory from memory_store.
+        from core import create_execution_context, create_operation
+        from core.turn_coordinator_runtime import resolve_tma_contextual_answer_capability
         from context import build_context
         from llm_fallback import call_anthropic_text
         from memory_store import memory
 
+        resolved_capability = resolve_tma_contextual_answer_capability()
+        operation = create_operation(resolved_capability)
+        execution_context = create_execution_context(
+            resolved_capability, operation, turn_id=None, contract_id=None,
+        )
         ctx      = build_context(identity, full_question)
         history  = memory.get_for_claude(ctx.memory_key)
         messages = history + [{"role": "user", "content": full_question}]
@@ -2144,9 +2157,11 @@ def ask_ai(identity):
             temperature=0.2,
             system=ctx.system_prompt,
             messages=messages,
+            execution_context=execution_context,
         )
         if not answer:
             answer = "AI service returned no text."
+        answer = verify_tma_contextual_answer(answer)
         return jsonify({"answer": answer, "context": context_type})
 
 
