@@ -230,6 +230,7 @@ with patch("core.database.get_conn", return_value=fake_conn2), \
     chk("legacy execution class is explicit", params_sent[13] == "UNKNOWN")
     chk("legacy operation correlation remains absent", params_sent[14] is None)
     chk("legacy workflow correlation remains absent", params_sent[15] is None)
+    chk("measured is the default measurement status", params_sent[16] == "measured")
 
     fake_cursor2.reset_mock()
     ok = record_llm_usage(
@@ -261,6 +262,37 @@ with patch("core.database.get_conn", return_value=fake_conn2), \
     chk("unit is 'seconds'", params_sent[5] == "seconds")
     chk("quantity_in is None for STT (no input side)", params_sent[6] is None)
     chk("quantity_out carries duration_seconds", params_sent[7] == 12.5)
+    chk("measured STT persists measurement_status", params_sent[16] == "measured")
+
+print("\n── unknown measurement writer contract ────────────────")
+
+fake_cursor2.reset_mock()
+with patch("core.database.get_conn", return_value=fake_conn2), \
+     patch("core.database.release_conn"), \
+     patch("core.usage_telemetry.compute_cost") as mock_compute:
+    ok = record_stt_usage(
+        source="voice_stt_adapter", model="whisper-1", duration_seconds=None,
+        caller="test", request_id="req-stt-unknown", measurement_status="unknown",
+    )
+    params_sent = fake_cursor2.execute.call_args[0][1]
+    chk("unknown STT write succeeds", ok is True)
+    chk("unknown STT does not call compute_cost", mock_compute.call_count == 0)
+    chk("unknown STT writes quantity_out=None", params_sent[7] is None)
+    chk("unknown STT writes cost_usd=None", params_sent[8] is None)
+    chk("unknown STT writes cost_is_estimate=False", params_sent[9] is False)
+    chk("unknown STT persists measurement_status", params_sent[16] == "unknown")
+
+for description, kwargs in (
+    ("unsupported status returns False", {"measurement_status": "bogus", "quantity_out": 1}),
+    ("measured None returns False", {"measurement_status": "measured", "quantity_out": None}),
+    ("unknown numeric quantity returns False", {"measurement_status": "unknown", "quantity_out": 1}),
+):
+    with patch("core.database.get_conn") as mock_get_conn:
+        ok = record_usage(
+            provider="openai", service="stt", model="whisper-1", source="test",
+            unit="seconds", **kwargs,
+        )
+    chk(description, ok is False and mock_get_conn.call_count == 0)
 
 
 print("\n── format_usage_window() — ok, with data ────────────────")
