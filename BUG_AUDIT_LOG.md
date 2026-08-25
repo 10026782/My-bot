@@ -5265,7 +5265,7 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 - **Truth-Reset SHA:** `d22aa24fa320d6797ee3a36e9bda04d62c162e15` (origin/main)
 - **Scope:** track program #18 only — האם לכל truth חשוב יש מקור סמכות אחד וברור, והאם code/docs/runtime registries מסכימים מי authority. לא נבדקו/לא נפתחו מחדש #2–#16, #19–#24.
 - **Mode:** read-only static inspection. אין שינוי קוד/branch/PR/flag בשלב האיתור עצמו.
-- **Final status:** **OPEN — CURRENT SSOT GAPS** (3 REAL CURRENT GAPS).
+- **Final status:** **OPEN — CURRENT SSOT GAPS** (3 REAL CURRENT GAPS) → **RESOLVED 25/08/2026: CLOSED / STATIC VERIFIED** — see closure section at the end of this entry.
 
 ### FINDING #18-1 — HIGH CURRENT GAP — Voice-IVR feature-flag naming authority
 - **קונספט:** שם ה-flag הקנוני של Voice IVR.
@@ -5304,4 +5304,36 @@ CRITICAL: 0 · HIGH: 1 · MEDIUM: 1 · LOW: 1 · ALREADY VERIFIED: 5 clusters ·
 ### Competing authorities
 YES — (א) `CLAUDE.md`/`voice_adapter.py` header מול `feature_flags.py` על שם ה-flag; (ב) `HORIZON.md` מול ה-registries הנלווים שלו על ניסוח סגירת #12.
 
-- **סטטוס:** 🔴 **OPEN — CURRENT SSOT GAPS** (3 REAL CURRENT GAPS). לא בוצע remediation בסבב זה — תיעוד בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
+- **סטטוס (מקורי, 25/08/2026):** 🔴 **OPEN — CURRENT SSOT GAPS** (3 REAL CURRENT GAPS). לא בוצע remediation בסבב זה — תיעוד בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
+
+---
+
+## Audit #18 — SSOT — CLOSURE (Static Remediation)
+
+- **תאריך:** 25/08/2026
+- **Truth-Reset SHA (base):** `ef8363f830253c324b8da8f1b7026f29ff6faf0f` (origin/main, לאחר merge של ה-documentation-capture PR #1008)
+- **Scope:** תיקון סטטי בלבד לשלושת ה-findings שתועדו למעלה. לא בוצע audit חדש, לא הורחב scope, לא נפתחו מחדש #12/#21/כל מסלול אחר.
+- **Mode:** documentation + comment-only fix (voice_adapter.py header comment בלבד; אין שינוי ל-runtime code/registry/call-sites/feature-flag behavior).
+
+### FINDING #18-1 — CLOSED / VERIFIED
+- **תיקון:** `CLAUDE.md:150` ו-`voice_adapter.py:3` שונו מ-`FEATURE_VOICE_IVR` ל-`VOICE_IVR`.
+- **וידוא:** `grep -rn "FEATURE_VOICE_IVR"` ברחבי הריפו — הישרדו רק ציטוטי-ראיה היסטוריים (evidence, לא authority נוכחי): `docs/audit/M01_FEATURE_FLAG_CONSISTENCY_AUDIT.md:63` (מתעד את ה-drift ההיסטורי עצמו), ורשומות ה-audit המקוריות למעלה באותו קובץ זה ו-`docs/governance/HORIZON.md` (מצטטות את הטקסט השגוי כראיה). 0 הפניות current-authority נותרו.
+- **אימות runtime:** `feature_flags.py:71` ו-`is_enabled("VOICE_IVR")` ב-`app.py:6871`, `app.py:6887`, `voice_adapter.py:336` — ללא שינוי.
+
+### FINDING #18-2 — CLOSED / VERIFIED
+- **תיקון:** `MAINTENANCE_FILE_DRIFT_REGISTER.md` §F1 — עמודת "Status" בשורות ה-#12-cluster שהוסרו בפועל (`worker.py`, `knowledge_engine.py`, `router.py`, `lead_qualifier.py`, `profile.py`, `creative_generator.py`) קיבלה resolution מוטבע (`→ RESOLVED / #12 CLOSED`), עקבי עם עמודת "Current disposition" הקיימת. `docs/governance/HORIZON.md`'s §CLOSED #12 entry — הפסקה שטענה שהרג'יסטרים "עדיין קוראים OPEN" צומצמה לפסקת "Reconciled" עדכנית.
+- **ללא שינוי (נכון מלכתחילה):** `MAINTENANCE_DEFERRED_REGISTER.md:133` (§E-F) — כבר הכיל `RESOLVED / #12 CLOSED 25/08/2026`; לא נגעו בו.
+- **מחוץ ל-scope (לא #12):** שורת `memory.py` ב-§F1 (מנותבת ל-#21, לא #12) — לא נגעו בה.
+
+### FINDING #18-3 — CLOSED / VERIFIED
+- **תיקון:** `CLAUDE.md:159` שונה מתיאור בזמן הווה לניסוח היסטורי מפורש: `worker.py: **REMOVED** (commit \`6b8573b\`) — formerly a legacy, unwired proactive Tasks-deadline Telegram nudge...; no current runtime role.`
+
+### Verification run
+1. `grep -rn "FEATURE_VOICE_IVR"` — 0 current-authority references נותרו; כל ההפניות שנותרו הן ראיה היסטורית מסומנת ככזו (audit findings + M01 audit doc).
+2. `VOICE_IVR` נשאר ה-flag הקנוני ב-runtime — ללא שינוי ל-`feature_flags.py`/call-sites.
+3. #12 status עקבי כעת בין `HORIZON.md`, `MAINTENANCE_DEFERRED_REGISTER.md`, `MAINTENANCE_FILE_DRIFT_REGISTER.md` (כל השלושה קוראים RESOLVED/CLOSED לשורות שהוסרו בפועל).
+4. אין מסמך נוכחי (לא historical-marked) שמתאר `worker.py` כקיים ב-runtime.
+5. שינויי production/runtime code: 0. שינוי יחיד שאינו-קוד-הרצה: header comment ב-`voice_adapter.py:3` (comment בלבד, לא נבדק/נקרא ע"י שום קוד).
+6. `py_compile voice_adapter.py` — PASS. `git diff --check` — PASS (ריק).
+
+- **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED** — 3/3 findings מתוקנים ומאומתים סטטית על branch זה. אימות production (post-merge, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.
