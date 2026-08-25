@@ -16,7 +16,7 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `00853b09f1c65a53535240545ba410da012c14f3`
+**Truth Reset SHA at last update:** `a52977278c1db0be41eeec026ce72e22fd0308a9`
 
 ---
 
@@ -53,6 +53,16 @@ the closure PR that created it for the search that established this.
     via dedicated `pytest` steps — the same treatment was not applied here.
 
 ## CLOSED
+
+- **#3 Data Contract** — **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
+  FINDING #2 EXPLICITLY DEFERRED** (remediation 26/08/2026, Truth-reset SHA
+  `a52977278c1db0be41eeec026ce72e22fd0308a9`). Original findings #1, #3, #4,
+  #5, and #6 are CLOSED; Finding #2 remains **DEFERRED — LIVE/SCHEMA CONTRACT
+  DECISION**. Routed I3 is **CLOSED / STATIC VERIFIED**: `Logical Media Key`
+  is provider-neutral, while `"Telegram File ID"` is now compatibility storage
+  only for Telegram-originated assets. No Airtable field rename or live schema
+  migration was performed. Full record: `BUG_AUDIT_LOG.md` and
+  `MAINTENANCE_FILE_DRIFT_REGISTER.md`.
 
 - **#9 Mock Fidelity** — **CLOSED / STATIC VERIFIED**
   (remediation 25/08/2026, Truth-Reset SHA
@@ -180,17 +190,6 @@ the closure PR that created it for the search that established this.
   matching inline `RESOLVED / #12 CLOSED` resolution — see #18 below.
 
 ## ACTIVE
-
-- **#3 Data Contract** — **OPEN — CURRENT DATA CONTRACT GAP** (Truth-reset
-  26/08/2026, SHA `00853b09f1c65a53535240545ba410da012c14f3`). Five original
-  findings are CLOSED (#1, #3, #4, #5, #6); original #2 is
-  **DEFERRED — LIVE/SCHEMA CONTRACT DECISION**. One additional routed residual
-  remains: **I3 — HIGH CURRENT GAP**, owned by #3. `Logical Media Key` now
-  exists and partially covers provider-neutral identity/idempotency, but
-  provider-specific IDs are still written through the generic
-  `"Telegram File ID"` field on non-Telegram paths. I3 is active, not
-  deferred; no reopen trigger exists. Evidence and exact paths are recorded
-  in `BUG_AUDIT_LOG.md` and `MAINTENANCE_FILE_DRIFT_REGISTER.md`.
 
 - **No New Architectural Debt enforcement** — **ESTABLISHED (25/08/2026)**.
   PR #972 completed final noise verification and promoted A1–A5 to blocking.
