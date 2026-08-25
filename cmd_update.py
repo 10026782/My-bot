@@ -546,18 +546,15 @@ def get_recent_business_context(domain: str = "general", limit: int = 5) -> str:
     try:
         from tools.airtable_tools import airtable_get
         from airtable_schema import Tables, BusinessMemoryFields as BMF
+        from core.query_contract import any_of, array_contains, equals
 
         if domain and domain != "general":
             resolved = resolve_business_memory_domain(domain)
             airtable_domain = resolved["value"] if resolved["ok"] else "General"
-            formula = (
-                f"OR("
-                f"{{{BMF.DOMAIN}}}='{airtable_domain}',"
-                f"{{{BMF.DOMAIN}}}='General',"
-                # legacy fallback: records written before BUG-081 (Domain field
-                # didn't exist yet) have the raw domain key baked into Tags instead
-                f"FIND('{domain}',ARRAYJOIN({{{BMF.TAGS}}}))"
-                f")"
+            formula = any_of(
+                equals(BMF.DOMAIN, airtable_domain),
+                equals(BMF.DOMAIN, "General"),
+                array_contains(BMF.TAGS, domain),
             )
         else:
             formula = ""

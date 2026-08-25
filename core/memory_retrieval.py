@@ -104,18 +104,17 @@ def _fetch_business_memory(
         from airtable_schema import BusinessMemoryFields as BMF
         from airtable_schema import Tables
         from cmd_update import resolve_business_memory_domain
+        from core.query_contract import any_of, array_contains, equals
         from tools.airtable_tools import airtable_get_records
 
         domain = request.domain_id or ""
         if domain and domain != "general":
             resolved = resolve_business_memory_domain(domain)
             airtable_domain = resolved["value"] if resolved["ok"] else "General"
-            formula = (
-                f"OR("
-                f"{{{BMF.DOMAIN}}}='{airtable_domain}',"
-                f"{{{BMF.DOMAIN}}}='General',"
-                f"FIND('{domain}',ARRAYJOIN({{{BMF.TAGS}}}))"
-                f")"
+            formula = any_of(
+                equals(BMF.DOMAIN, airtable_domain),
+                equals(BMF.DOMAIN, "General"),
+                array_contains(BMF.TAGS, domain),
             )
         else:
             formula = ""

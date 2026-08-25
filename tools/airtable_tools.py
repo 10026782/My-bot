@@ -297,9 +297,10 @@ def airtable_get_records(
             seen_offsets.add(next_offset)
             offset = next_offset
 
+    from tools.airtable_read_adapter import render_query
     _audit(
         "airtable_get_records", table,
-        result=f"{len(records)} records | filter={filter_formula[:40]}",
+        result=f"{len(records)} records | filter={render_query(filter_formula)[:40]}",
     )
     return records
 
@@ -311,13 +312,15 @@ def airtable_get(table: str, filter_formula: str = "") -> str:
     except Exception as exc:
         return f"❌ {exc}"
     if not records:
-        _audit("airtable_get", table, result=f"0 records | filter={filter_formula[:40]}")
+        from tools.airtable_read_adapter import render_query
+        _audit("airtable_get", table, result=f"0 records | filter={render_query(filter_formula)[:40]}")
         return f"📭 אין רשומות בטבלה '{table}'."
     result = f"📊 {table} — {len(records)} רשומות:\n"
     for rec in records[:15]:
         fields = " | ".join(f"{k}: {v}" for k, v in rec.get("fields", {}).items())
         result += f"• [{rec['id']}] {fields}\n"
-    _audit("airtable_get", table, result=f"{len(records)} records | filter={filter_formula[:40]}")
+    from tools.airtable_read_adapter import render_query
+    _audit("airtable_get", table, result=f"{len(records)} records | filter={render_query(filter_formula)[:40]}")
     return result
 
 

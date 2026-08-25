@@ -77,7 +77,7 @@ with patch.object(cmd_decision, "_at_get_record", return_value=None), \
     injected_ref = "test' OR 1=1 --"
     cmd_decision._resolve_decision_ref(injected_ref)
 
-built = captured_formula.get("formula", "")
+built = render_query(captured_formula.get("formula", ""))
 chk("the injected quote was backslash-escaped in the built formula",
     "\\'" in built)
 chk("no unescaped quote remains from the raw injected ref (every ' in the "
