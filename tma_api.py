@@ -3692,7 +3692,7 @@ def _system_health_payload(identity) -> dict:
     try:
         _read_list_records(
             "Leads",
-            max_records=1,
+            limit=1,
             paginate=False,
             timeout=5,
         )

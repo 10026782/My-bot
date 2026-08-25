@@ -119,12 +119,15 @@ class AirtableReadError(RuntimeError):
         raise ValueError(f"status {self.status_code} is not an HTTP error")
 
 
+_UNSET = object()
+
+
 def list_records(
     table: str,
     formula: Query | str = "",
     *,
     max_records: int | str | None = 20,
-    limit: int | str | None = None,
+    limit: int | str | None | object = _UNSET,
     fields: list[str] | None = None,
     sort: list[dict[str, str]] | None = None,
     paginate: bool | None = None,
@@ -133,7 +136,7 @@ def list_records(
     """Return raw records; ``limit`` is the provider-neutral result cap."""
     try:
         formula = render_query(formula)
-        if limit is not None:
+        if limit is not _UNSET:
             max_records = limit
         return at_list_by_formula(
             table,
