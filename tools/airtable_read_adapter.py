@@ -110,14 +110,17 @@ def list_records(
     formula: Query | str = "",
     *,
     max_records: int | str | None = 20,
+    limit: int | str | None = None,
     fields: list[str] | None = None,
     sort: list[dict[str, str]] | None = None,
     paginate: bool | None = None,
     timeout: float = 10,
 ) -> list[dict]:
-    """Return raw Airtable records without exposing provider details."""
+    """Return raw records; ``limit`` is the provider-neutral result cap."""
     try:
         formula = render_query(formula)
+        if limit is not None:
+            max_records = limit
         return at_list_by_formula(
             table,
             formula,

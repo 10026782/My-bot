@@ -26,7 +26,7 @@ def test_lead_event_store_preserves_formula_options_and_mapping():
     call = read.call_args
     assert call.args[0] == "Business Memory"
     assert render_query(call.args[1]) == "FIND('real_estate', ARRAYJOIN({keywords}))"
-    assert call.kwargs == {"max_records": 500, "paginate": False, "timeout": 10}
+    assert call.kwargs == {"limit": 500, "paginate": False, "timeout": 10}
 
 
 def test_lead_event_store_preserves_empty_and_error_behavior():

@@ -107,7 +107,7 @@ def _fetch_records_direct(formula: str) -> list[dict]:
         return []
 
     try:
-        records = list_records(Tables.BUSINESS_MEMORY, formula, max_records="50")
+        records = list_records(Tables.BUSINESS_MEMORY, formula, limit="50")
     except AirtableReadError as exc:
         if exc.status_code is not None:
             logger.warning(f"[C22] Airtable {exc.status_code}: {exc.response_text[:100]}")

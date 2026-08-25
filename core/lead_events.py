@@ -44,7 +44,7 @@ class LeadEventStore:
             records = list_records(
                 _TABLE,
                 formula,
-                max_records=500,
+                limit=500,
                 paginate=False,
                 timeout=10,
             )
