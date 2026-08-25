@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from numbers import Real
 
 from core import create_execution_context, create_operation
+from core.usage_telemetry import usage_attribution_from_context
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ def _transcribe_openai(
                 model            = stt_model,
                 duration_seconds = float(duration),
                 caller           = "voice_stt_adapter._transcribe_openai",
+                **usage_attribution_from_context(execution_context),
             )
         else:
             logger.error(
