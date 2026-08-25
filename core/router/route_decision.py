@@ -89,6 +89,8 @@ class Intent:
     # Marketing bridge — fixed, validated /marketing_new action
     DRAFT_MARKETING_CREATIVES = "draft_marketing_creatives"
 
+    DETECT_DAILY_PERSISTENCE_GAPS = "detect_daily_persistence_gaps"
+
     ALL = {
         GREETING, SMALLTALK, BOT_STATUS_CHECK,
         ASK_QUESTION, REQUEST_INFO, SUMMARIZE, TRANSLATE, EXPLAIN,
@@ -102,6 +104,7 @@ class Intent:
         RESEARCH_TOPIC, RESEARCH_COMPANY,
         SYSTEM_STATUS, ADMIN_ACTION,
         UNKNOWN, ENGINEERING_NOTE, DRAFT_MARKETING_CREATIVES,
+        DETECT_DAILY_PERSISTENCE_GAPS,
     }
 
 
