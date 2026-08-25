@@ -169,7 +169,14 @@ no code changed.
   `config.json`/`import_knowledge_base.json` removed (E-A row above);
   `review_diffs.txt`/`ledger-premerge-approval-ux.json` retained by design
   (never OPEN); `benchmark_token_estimate.py` remains parked, not a gap.
-- **Out-of-scope, not resolved by this pass:** the `reports/` provenance
-  question `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s #21 cross-reference row
-  mentions (hands ownership to #12 without its own closure statement) —
-  recorded here only, not investigated.
+- **#21 → #12 `reports/` provenance — DEFERRED — OWNER: #12 File / Folder Ownership.**
+  `reports/` contains mixed live/generated/test/historical families and was not
+  suitable for destructive or broad ownership remediation inside #21. #21 does
+  not own further work on `reports/`; #12 owns any future ownership/provenance
+  decision. This is not an active runtime gap and requires no remediation now.
+  Reopen only when: (1) `reports/` is proposed for deletion, move, or
+  restructure; (2) a `reports/` artifact becomes part of active
+  runtime/deployment behavior; (3) an ownership migration explicitly includes
+  `reports/`; or (4) provenance is required for a retention, compliance, build,
+  or deployment decision. **HANDOFF: CLOSED / ACKNOWLEDGED.** #12 remains
+  CLOSED WITH EXPLICIT DEFERRED ITEM; #21 remains CLOSED.
