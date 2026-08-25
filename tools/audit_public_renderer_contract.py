@@ -22,8 +22,14 @@ _SELF_PATH = "tools/audit_public_renderer_contract.py"
 _EXCLUDED = {".git", "__pycache__", ".venv", "venv", "node_modules"}
 _TEST_PREFIXES = ("test_",)
 _RENDERER_NAME = re.compile(r"^(?:render|format|compose_.*reply|build_.*message)(?:_|$)", re.I)
-_CONTRACT_IMPORT = re.compile(r"\b(?:from\s+core\.(?:message_contract|agent_message_formatter)|import\s+core\.(?:message_contract|agent_message_formatter))\b")
-_CONTRACT_SYMBOL = re.compile(r"\b(?:MessageContract|build_message_contract|format_message_contract|format_agent_message(?:_with_meta)?)\b")
+_CONTRACT_MODULES = {"core.message_contract", "core.agent_message_formatter"}
+_CONTRACT_SYMBOLS = {
+    "MessageContract",
+    "build_message_contract",
+    "format_message_contract",
+    "format_agent_message",
+    "format_agent_message_with_meta",
+}
 
 # These are the frozen canonical implementation paths. They may evolve their
 # internal wiring without registering themselves as a new public surface.
@@ -87,15 +93,35 @@ def _renderer_definitions(path: str, source: str, added: set[int]) -> list[Findi
 def _contract_entries(path: str, source: str, added: set[int]) -> list[Finding]:
     if path in _CANONICAL_PATHS:
         return []
-    findings = []
-    for lineno, raw in enumerate(source.splitlines(), 1):
+    try:
+        tree = ast.parse(source, filename=path)
+    except SyntaxError:
+        return []
+
+    findings: set[Finding] = set()
+    imported_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module in _CONTRACT_MODULES:
+            imported_names.update(alias.asname or alias.name for alias in node.names)
+            if node.lineno in added:
+                findings.add(Finding(path, "contract_import", "message_contract", node.lineno))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in _CONTRACT_MODULES:
+                    imported_names.add(alias.asname or alias.name.split(".")[-1])
+                    if node.lineno in added:
+                        findings.add(Finding(path, "contract_import", "message_contract", node.lineno))
+
+    allowed_names = _CONTRACT_SYMBOLS | imported_names
+    for node in ast.walk(tree):
+        lineno = getattr(node, "lineno", None)
         if lineno not in added:
             continue
-        if _CONTRACT_IMPORT.search(raw):
-            findings.append(Finding(path, "contract_import", "message_contract", lineno))
-        elif _CONTRACT_SYMBOL.search(raw):
-            findings.append(Finding(path, "contract_entry", "message_contract", lineno))
-    return findings
+        if isinstance(node, ast.Name) and node.id in allowed_names:
+            findings.add(Finding(path, "contract_entry", "message_contract", lineno))
+        elif isinstance(node, ast.Attribute) and node.attr in _CONTRACT_SYMBOLS:
+            findings.add(Finding(path, "contract_entry", "message_contract", lineno))
+    return sorted(findings, key=lambda item: (item.line, item.kind, item.symbol))
 
 
 def load_registrations() -> dict[tuple[str, str, str], tuple[str, str]]:
