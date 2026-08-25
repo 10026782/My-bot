@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from airtable_schema import SessionsFields as SF, Tables
+from tma_api import record_fields, record_id as provider_record_id, relation_payload
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def _select_canonical_session_record(records: list[dict]) -> dict:
     """
     return sorted(
         records,
-        key=lambda r: r.get("fields", {}).get(SF.UPDATED_AT, "") or "",
+        key=lambda r: record_fields(r).get(SF.UPDATED_AT, "") or "",
         reverse=True,
     )[0]
 
@@ -264,9 +265,8 @@ class PersistentSessionStore:
         return session.get("last_tool_result")
 
     def set_current_lead_record_id(self, sender: str, record_id: str) -> None:
-        """שומר את ה-record_id האמיתי של הליד (Tables.LEADS) על ה-Session (BUG-NEW-09).
-        חובה record_id אמיתי שמתחיל ב-'rec' — אסור לשמור id מפוברק."""
-        if not record_id or not str(record_id).startswith("rec"):
+        """שומר מזהה opaque של הליד על ה-Session (BUG-NEW-09)."""
+        if not isinstance(record_id, str) or not record_id:
             return
         session = self.get_or_create(sender)
         session["current_lead_record_id"] = record_id
@@ -530,14 +530,14 @@ class PersistentSessionStore:
             # קישורים אופציונליים — רק אם קיימים ב-session:
             _linked_lead = session.get("lead_record_id") or session.get("current_lead_record_id")
             if _linked_lead:
-                fields[SF.LINKED_LEAD] = [_linked_lead]
+                fields[SF.LINKED_LEAD] = relation_payload(_linked_lead)
             if session.get("decision_record_id"):
-                fields[SF.LINKED_DECISION] = [session["decision_record_id"]]
+                fields[SF.LINKED_DECISION] = relation_payload(session["decision_record_id"])
             last_file = session.get("last_uploaded_file") or {}
             # רק drive_file → Media Files record; inbox_file → Decision Inbox record
             # (טבלה אחרת — קישור דרך LINKED_MEDIA_FILE היה גורם ל-INVALID_RECORD_ID).
             if last_file.get("type") == "drive_file" and last_file.get("file_id"):
-                fields[SF.LINKED_MEDIA_FILE] = [last_file["file_id"]]
+                fields[SF.LINKED_MEDIA_FILE] = relation_payload(last_file["file_id"])
 
             if session.get("record_id"):
                 result = airtable_update(Tables.SESSIONS, session["record_id"], fields)
@@ -593,9 +593,8 @@ class PersistentSessionStore:
         parsed = [
             record for record in raw_records
             if isinstance(record, dict)
-            and isinstance(record.get("id"), str)
-            and record["id"].startswith("rec")
-            and isinstance(record.get("fields", {}), dict)
+            and isinstance(provider_record_id(record), str)
+            and isinstance(record_fields(record), dict)
         ]
         if len(parsed) != len(raw_records):
             logger.error(
@@ -627,7 +626,7 @@ class PersistentSessionStore:
                 )
                 return None, 0, "no_records"
 
-            selected = _select_canonical_session_record(records)["id"]
+            selected = provider_record_id(_select_canonical_session_record(records), required=True)
             return selected, len(records), "patch_existing"
         except Exception as exc:
             logger.warning("[SessionStore] live dedup check failed for %s: %s", sender, exc)
@@ -652,14 +651,14 @@ class PersistentSessionStore:
                 return None
 
             record = _select_canonical_session_record(records)
-            record_id = record["id"]
+            record_id = provider_record_id(record, required=True)
             if len(records) > 1:
                 logger.warning(
                     "[SessionStore] load sender=%s found_count=%d -- using canonical (most recently updated): %s",
                     sender, len(records), record_id,
                 )
 
-            fields = record.get("fields", {})
+            fields = record_fields(record)
             state_raw = fields.get(SF.STATE_JSON, {})
             if isinstance(state_raw, str):
                 try:
@@ -957,9 +956,9 @@ def _run_tests() -> bool:
         store.get_current_lead_record_id("w:001") == "recLEAD123")
     chk("sync includes current_lead_record_id",
         json.loads(saves[-1][SF.STATE_JSON]).get("current_lead_record_id") == "recLEAD123")
-    store.set_current_lead_record_id("w:001", "NOT_A_REAL_ID")
-    chk("non-rec id ignored — previous value kept",
-        store.get_current_lead_record_id("w:001") == "recLEAD123")
+    store.set_current_lead_record_id("w:001", "provider-lead-opaque")
+    chk("opaque provider id accepted",
+        store.get_current_lead_record_id("w:001") == "provider-lead-opaque")
 
     # ── BUG-NEW-12: N existing Sessions rows for same sender → exactly one PATCH, zero POST ──
     store3 = PersistentSessionStore(maxsize=5)
