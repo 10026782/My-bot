@@ -7,11 +7,16 @@ from collections.abc import Callable, Mapping
 from airtable_schema import Tables, TaskFields
 from core.router import (
     CanonicalActionProposal,
+    ExecutionClass,
+    Handler,
     Intent,
     IntentOwnershipDecision,
     IntentOwnershipRegistry,
+    ResolvedCapability,
     ResolverResult,
     prepare_task_proposal,
+    resolve_capability,
+    RouteDecision,
 )
 from core.router.task_resolvers import TaskLookup
 from core.query_contract import contains
@@ -33,6 +38,37 @@ TASK_OWNERSHIP = IntentOwnershipRegistry({
         evidence_policy_ref="task_write", reply_policy_ref="gateway",
     ),
 })
+
+
+def resolve_agent_capability(route: RouteDecision) -> ResolvedCapability:
+    """Adapt an authoritative Agent route to the canonical reasoning capability."""
+    if not isinstance(route, RouteDecision):
+        raise TypeError("route must be a RouteDecision")
+    if (
+        route.handler != Handler.AGENT
+        or route.intent in {Intent.UNKNOWN, Intent.ENGINEERING_NOTE}
+        or route.response_override
+    ):
+        raise ValueError("route is not an executable Agent decision")
+
+    ownership = IntentOwnershipDecision(
+        intent=route.intent,
+        owner="agent.loop",
+        reason="RouteDecision selected the Agent executor",
+        confidence=route.confidence,
+    )
+    return resolve_capability(
+        ownership,
+        {
+            route.intent: (
+                ResolvedCapability(
+                    capability_id="general.reasoning",
+                    execution_class=ExecutionClass.FULL_AGENT,
+                    executor_ref="agent.loop",
+                ),
+            ),
+        },
+    )
 
 
 def gateway_call(proposal: CanonicalActionProposal) -> tuple[str, dict]:
