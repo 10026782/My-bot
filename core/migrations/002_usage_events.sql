@@ -48,8 +48,17 @@ CREATE TABLE IF NOT EXISTS usage_events (
     request_id TEXT,
     meta JSONB,                          -- e.g. {"fallback_from": "anthropic", "fallback_reason": "timeout"}
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    capability_id TEXT NOT NULL DEFAULT 'legacy.unknown',
+    execution_class TEXT NOT NULL DEFAULT 'UNKNOWN',
     UNIQUE(provider, request_id)
 );
+
+-- Keep existing installations readable while adding the first semantic
+-- attribution dimensions. Legacy rows are explicit unknowns, never inferred.
+ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS capability_id TEXT NOT NULL DEFAULT 'legacy.unknown';
+ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS execution_class TEXT NOT NULL DEFAULT 'UNKNOWN';
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts
     ON usage_events(ts DESC);

@@ -68,6 +68,8 @@ from core.model_pricing import compute_cost
 logger = logging.getLogger(__name__)
 
 WindowStatus = Literal["ok", "unavailable", "error"]
+LEGACY_CAPABILITY_ID = "legacy.unknown"
+UNKNOWN_EXECUTION_CLASS = "UNKNOWN"
 
 
 def record_usage(
@@ -82,6 +84,8 @@ def record_usage(
     caller: str = "",
     request_id: str | None = None,
     meta: dict | None = None,
+    capability_id: str = LEGACY_CAPABILITY_ID,
+    execution_class: str = UNKNOWN_EXECUTION_CLASS,
 ) -> bool:
     """
     Durably records one real provider API call and its cost. Returns True
@@ -111,14 +115,15 @@ def record_usage(
                 INSERT INTO usage_events
                     (ts, provider, service, model, source, caller, unit,
                      quantity_in, quantity_out, cost_usd, cost_is_estimate,
-                     request_id, meta)
-                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     request_id, meta, capability_id, execution_class)
+                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (provider, request_id) DO NOTHING;
                 """,
                 (
                     provider, service, model, source, caller or None, unit,
                     quantity_in, quantity_out, cost_usd, not exact,
                     request_id, json.dumps(meta) if meta else None,
+                    capability_id, execution_class,
                 ),
             )
             conn.commit()
@@ -149,6 +154,8 @@ def record_llm_usage(
     caller: str = "",
     request_id: str | None = None,
     meta: dict | None = None,
+    capability_id: str = LEGACY_CAPABILITY_ID,
+    execution_class: str = UNKNOWN_EXECUTION_CLASS,
 ) -> bool:
     """Convenience wrapper for the common case: a text LLM call."""
     return record_usage(
@@ -162,6 +169,8 @@ def record_llm_usage(
         caller=caller,
         request_id=request_id,
         meta=meta,
+        capability_id=capability_id,
+        execution_class=execution_class,
     )
 
 
@@ -174,6 +183,8 @@ def record_stt_usage(
     caller: str = "",
     request_id: str | None = None,
     meta: dict | None = None,
+    capability_id: str = LEGACY_CAPABILITY_ID,
+    execution_class: str = UNKNOWN_EXECUTION_CLASS,
 ) -> bool:
     """Convenience wrapper for the STT case: quantity_out = duration_seconds, no input side."""
     return record_usage(
@@ -187,6 +198,8 @@ def record_stt_usage(
         caller=caller,
         request_id=request_id,
         meta=meta,
+        capability_id=capability_id,
+        execution_class=execution_class,
     )
 
 
