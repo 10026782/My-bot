@@ -4776,6 +4776,8 @@ def run_agent(
                     tokens_out = getattr(response.usage, "output_tokens", 0),
                     caller     = ctx.memory_key,
                     request_id = getattr(response, "id", None),
+                    capability_id  = "general.reasoning",
+                    execution_class = "FULL_AGENT",
                 )
             except Exception as e:
                 logger.error(f"[UsageTelemetry] run_agent recording failed (non-fatal): {e}", exc_info=True)
