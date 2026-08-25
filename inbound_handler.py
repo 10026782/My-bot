@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from airtable_schema import LeadFields, Tables, InteractionLogFields
 from feature_flags import is_enabled
+from tools.airtable_gateway import escape_formula_value
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,8 @@ def _find_by_external_id(external_id: str) -> str | None:
         return None
     try:
         get = _airtable_get()
-        raw = get(Tables.LEADS, f"{{{LeadFields.EXTERNAL_ID}}}='{external_id}'")
+        safe_external_id = escape_formula_value(external_id)
+        raw = get(Tables.LEADS, f"{{{LeadFields.EXTERNAL_ID}}}='{safe_external_id}'")
         m = re.search(r"rec\w+", raw or "")
         return m.group(0) if m else None
     except Exception as e:
@@ -57,7 +59,8 @@ def _find_by_sender(sender_id: str) -> str | None:
         return None
     try:
         get = _airtable_get()
-        raw = get(Tables.LEADS, f"{{{LeadFields.SENDER_ID}}}='{sender_id}'")
+        safe_sender_id = escape_formula_value(sender_id)
+        raw = get(Tables.LEADS, f"{{{LeadFields.SENDER_ID}}}='{safe_sender_id}'")
         m = re.search(r"rec\w+", raw or "")
         return m.group(0) if m else None
     except Exception as e:

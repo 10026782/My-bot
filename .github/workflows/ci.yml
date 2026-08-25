@@ -194,6 +194,9 @@ jobs:
       - name: Public renderer / MessageContract freeze (blocking — AST-only detection)
         run: python tools/audit_public_renderer_contract.py
 
+      - name: Airtable formula escaping boundary (blocking — AST-only detection, Audit #11 #11-3)
+        run: python tools/audit_formula_escaping_boundary.py
+
       - name: pytest collect
         run: |
           python -m pytest --collect-only -q \

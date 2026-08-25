@@ -5403,3 +5403,53 @@ CRITICAL: 0 · HIGH: 1 · MEDIUM: 2 · LOW: 0 · ALREADY VERIFIED: 9 (כולל J
 לא זוהו ממצאים ששייכים באופן ברור למסלול ממוספר אחר בסבב זה.
 
 - **סטטוס:** 🔴 **OPEN — CURRENT SECURITY GAPS**. לא בוצע remediation בסבב זה — תיעוד בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
+
+---
+
+## Audit #11 — Security Surface — CLOSURE (Combined Fix)
+
+- **תאריך:** 25/08/2026
+- **Truth-Reset SHA (base):** `8c847ec24772850fba8a04031317295337a9ffeb` (origin/main, לאחר merge של PR #1012 — ה-documentation-capture)
+- **Scope:** תיקון קוד בלבד לשלושת ה-findings שתועדו למעלה (#11-1/#11-2/#11-3). לא בוצע audit חדש, לא הורחב scope, לא נפתחו מחדש #2–#10/#12–#16/#18–#24, לא נגעו ב-provider-portability cleanup או ב-Context Librarian.
+- **Mode:** תיקון קוד + blocking CI guard + focused regression tests. `tools/airtable_security.py`'s `tenant_filter` ו-`tenant_provisioner.py` נשארו ללא שינוי במפורש — NOT CURRENTLY EXPLOITABLE / NOT CURRENTLY REACHABLE, כפי שתועד ב-audit המקורי.
+
+### FINDING #11-1 — CLOSED / STATIC VERIFIED
+- **תיקון:** כל אחד מ-9 אתרי האינטרפולציה שתועדו קיבל `escape_formula_value()` (מ-`tools/airtable_gateway.py`) על הערך המוזרם, לפני בנייתה של ה-`filterByFormula`, בתבנית שתי-השלבים שהוגדרה (`safe_x = escape_formula_value(x)` ואז `f"...{safe_x}..."`) — סמנטיקת ה-formula (exact-match, לא fuzzy) ולוגיקת ה-routing/lifecycle לא שונו:
+  - `inbound_handler.py:46,60` (`_find_by_external_id`/`_find_by_sender`) — `escape_formula_value(external_id)` / `escape_formula_value(sender_id)`, import חדש `from tools.airtable_gateway import escape_formula_value`.
+  - `lead_capture.py:215` — `escape_formula_value(memory_key)`.
+  - `lead_memory.py:171` — `escape_formula_value(state.memory_key)` (import מקומי בתוך הפונקציה, תואם לקונבנציה הקיימת של הקובץ).
+  - `core/lead_buffer.py:144` — `escape_formula_value(memory_key)`.
+  - `ad_attribution.py:175,201` (`record_lead_source`/`mark_converted`) — `escape_formula_value(memory_key)` בכל אחת משתי הפונקציות (import מקומי, זהה ל-pattern הקיים בקובץ).
+  - `session_store.py:616,647` (`_find_best_session_in_db`/`_load_from_db`) — `escape_formula_value(sender)`.
+- **`core/noninteractive_lead_cutovers.py:22,38` — נבדק, ללא שינוי, בכוונה:** שתי השורות האלה (`memory_key=f"email:{sender}"`, `memory_key=f"boss_hq:{sender}"`) **אינן** בונות `filterByFormula` — הן בונות את ערך ה-`memory_key` עצמו שנכתב כ-field data ל-Airtable (`core/lead_service.py:325`, `LeadFields.MEMORY_KEY: memory_key`) ונקרא חזרה ע"י `identity.memory_key`/צרכנים אחרים. Escaping כאן היה כותב `\'` לתוך תוכן ה-field בפועל ומפר את ה-exact-match מול ה-`memory_key` הלא-escaped שנבנה במקומות אחרים (למשל `identity.py:129`'s `f"{tenant_id}:{user_id}"`) — בדיוק סוג ה"weakened matching"/"changed lifecycle behavior" שהמשימה אסרה. התיקון האמיתי הוא בנקודות ה-**קריאה** (`lead_capture.py`/`lead_memory.py`/`core/lead_buffer.py` למעלה), לא בנקודת הבנייה.
+- **וידוא (repo-wide):** `tools/audit_formula_escaping_boundary.py` (הכלי שנוסף ב-#11-3) נסרק על כל הריפו — `NEW (0)`; 5 אתרים legacy-baseline בלבד נותרו (ראו #11-3), כולם מתועדים כ-NOT COUNTED/out-of-scope באודיט המקורי. אין אתר reachable נוסף שנשאר לא-escaped.
+- **Reachability של `EMAIL_INBOUND`:** נשאר **PRODUCTION REACHABILITY UNVERIFIED** — לא ניתן לאמת flag state בפרודקשן מ-audit ריפו read-only. בהתאם להנחיה — זה **לא** מונע סגירה סטטית של #11-1 כעת שה-code gap הוסר; רק חוסם claim של "production-verified" (ר' STATUS למטה).
+- **Runtime/business behavior:** ללא שינוי — כל 9 האתרים ממשיכים להחזיר בדיוק אותה תוצאה (exact-match record lookup) עבור כל קלט legit (ללא `'`); רק קלט עם `'`/formula-metacharacters משתנה מ"שובר את ה-string literal" ל"מטופל כערך literal תקין".
+
+### FINDING #11-2 — CLOSED / STATIC VERIFIED
+- **תיקון:** `tma_api.py:95-100` — `@tma_api.errorhandler(RuntimeError)` מחזיר כעת `{"error": "internal_error"}` בלבד (ללא `"detail"`), HTTP 500 ללא שינוי. `logger.error(...)` (השורה מעל) ממשיך לרשום את הפרטים המלאים בצד השרת ללא שינוי.
+- **וידוא:** `test_bug11_2_tma_runtime_error_no_detail_leak.py` (חדש) — Flask test-client מול route שזורק `RuntimeError` עם מחרוזת-סוד; מוודא: HTTP 500 נשמר, ה-JSON response חסר מפתח `"detail"`, טקסט ה-exception לא מופיע בשום מקום בגוף התשובה, `logger.error` עדיין נקרא ומכיל את הפרטים המלאים. 6/6 checks PASS.
+- **חיפוש callers/tests תלויים:** `grep -rn "\"detail\"\|'detail'"` ברחבי הריפו — אין test/caller שתלוי ב-`"detail"` הספציפי שהוחזר מ-`_handle_runtime_error`; שאר ה-`"detail"` matches בקוד שייכים ל-response shapes נפרדים ולא-קשורים (Airtable HTTP error details, `next_step.detail` וכו') שלא שונו.
+
+### FINDING #11-3 — CLOSED / CI ENFORCED
+- **תיקון:** `tools/audit_formula_escaping_boundary.py` (חדש) — AST-based blocking guard, תבנית זהה ל-`tools/audit_provider_boundary.py`/`audit_dispatcher_bypass.py`: מזהה `f"..."` שפותח formula-comparison (`}='`/`)='`/`}!='`, כלומר close של `{Field}`-reference או `RECORD_ID()` ואז operator ואז quote) עם ערך שלא הוכח כ-escaped (לא `Constant`, לא קריאה סנקציונית ל-`escape_formula_value`/`_safe_formula_param`/`_sanitize_formula_value` — ישירות או דרך `safe_x = escape_formula_value(x)` באותו scope, לא Attribute PascalCase-constant כמו `WorldStatus.ACTIVE`). `LEGACY_BASELINE` מכיל בדיוק את 5 האתרים המתועדים כ-NOT COUNTED/out-of-scope (`tools/airtable_security.py`, `tenant_provisioner.py`×2, `tools/dispatcher.py:240`, `tools/airtable_tools.py:167`) — כל אתר חדש (מחוץ ל-baseline) נכשל את ה-guard. קריאות logging (`logger.debug/info/warning/error/...`) מוחרגות במפורש כדי לא להתבלבל עם מחרוזות log שנראות דומות (`"resolved {field}='{val}'"`).
+- **CI wiring:** `.github/workflows/ci.yml` — צעד חדש "Airtable formula escaping boundary (blocking — AST-only detection, Audit #11 #11-3)" מיד אחרי "Public renderer / MessageContract freeze", `run: python tools/audit_formula_escaping_boundary.py` — **בלי** `continue-on-error`/`|| true`/warning-downgrade, זהה בסגנון לחמשת ה-guards האחיות שכבר blocking שם.
+- **Regression tests:** `test_audit_formula_escaping_boundary.py` (חדש) — 6/6 checks: unsafe direct interpolation נדחה, `escape_formula_value()` two-step מתקבל, `escape_formula_value()` inline-call מתקבל, canonical query-renderer output מתקבל, static/constant enum-attribute formula לא נדחה, log message שדומה ל-formula shape לא נדחה.
+
+### Verification run
+1. `python3 tools/audit_formula_escaping_boundary.py` (סריקת ריפו מלאה) — `NEW (0)`, `LEGACY (5)`, exit 0.
+2. `python3 test_audit_formula_escaping_boundary.py` — 6/6 PASS.
+3. `python3 test_bug11_2_tma_runtime_error_no_detail_leak.py` — 6/6 PASS.
+4. Existing blocking guards — `audit_gateway_bypass.py --boundary`, `audit_provider_boundary.py`, `audit_model_call_boundary.py`, `audit_dispatcher_bypass.py`, `audit_writer_authority_registration.py`, `audit_public_renderer_contract.py` — כולם exit 0, ללא רגרסיה.
+5. Focused/regression suites לכל execution path ששונה — `test_inbound_handler.py`, `test_lead_service_phase1.py`, `test_noninteractive_lead_cutovers.py`, `test_ad_attribution_gate.py`, `test_c02_c04_a1_attribution_canonical.py`, `test_session_store_contract.py`, `test_session_snapshot.py`, `test_bug106_session_determinism.py`, `test_airtable_gateway.py` — כולם exit 0.
+6. TMA suites — `test_tma_read_helpers.py`, `test_tma_system_health.py`, `test_c02_c04_approval_tma_assets_ventures.py`, `test_bug075_tma_upload_role_gate.py`, `test_pr0c0_tma_approval_truthfulness.py`, `test_r24_04b_tma_contextual_answer.py`, `test_tma_marketing_status.py`, `test_tma_projects_read_path_optimization.py`, `test_tma_task_domain_options.py`, `test_bug104_tma_lead_event_bridge.py` — כולם exit 0.
+7. `smoke_tests.py` — PASS (8/8 checks).
+8. מלוא ה-`test_*.py` suite (329 קבצים, לולאה זהה לצעד ה-CI) — 328/329 PASS; הכשל היחיד (`test_bug153_create_task_reconfirmation_after_rejection.py`, 3 תת-בדיקות `TurnStateStoreError: turn-state store unavailable`) אושש כ-pre-existing/environmental — נכשל זהה על `origin/main` נקי (ללא השינויים) בבדיקה נפרדת ב-worktree זמני; לא קשור לתיקון זה (תלוי Postgres service container שקיים ב-CI המלא אך לא בסביבת האימות המקומית כאן).
+9. `python3 -m compileall -q .` — PASS (אזהרת syntax קיימת-מראש ב-`test_bug159_create_task_noun_form_and_verbs.py`, לא קשורה).
+10. `git diff --check` — PASS (ריק).
+11. שינויי runtime/business behavior: 0 מעבר לתיקוני האבטחה המכוונים (ראו per-finding למעלה).
+
+### Production reachability
+`EMAIL_INBOUND` flag state בפרודקשן: **PRODUCTION REACHABILITY UNVERIFIED** — לא אומת runtime evidence שה-flag פעיל. לפי הנחיית המשימה, זה אינו סיבה להשאיר את ה-audit הסטטי OPEN לאחר שה-code gap הוסר; רק חוסם claim מפורש של production-verification (ר' `CLAUDE.md`'s STATUS template — `🟡 CODE DONE, NOT VERIFIED` עד שיתבצע post-merge+deploy verification בפועל).
+
+- **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED + CI ENFORCED** — #11-1: CLOSED / STATIC VERIFIED · #11-2: CLOSED / STATIC VERIFIED · #11-3: CLOSED / CI ENFORCED. 3/3 findings תוקנו ומאומתים סטטית על branch זה. אימות production (post-merge+deploy, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.

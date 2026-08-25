@@ -12,6 +12,7 @@ from airtable_schema import LeadFields, LeadEventFields, LeadEventType, Tables
 from feature_flags import is_enabled
 from core.action_result import ActionResult, ClaimType
 from core.lead_service import LeadPayload, create_lead
+from tools.airtable_gateway import escape_formula_value
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,8 @@ def capture_inbound_lead(
         from tools.airtable_tools import airtable_get
 
         # airtable_get מחזיר str — re.search תקין כאן
-        raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{memory_key}'")
+        safe_memory_key = escape_formula_value(memory_key)
+        raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'")
         if isinstance(raw, str):
             existing_m = re.search(r"\[([^\]]+)\]", raw)
             if existing_m:
