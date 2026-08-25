@@ -21,7 +21,9 @@ dict) — result הוא dict, ולעולם לא היה מכיל "✅" כמפתח
 from __future__ import annotations
 
 import logging
+import ast
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 logging.basicConfig(level=logging.WARNING)
@@ -243,20 +245,42 @@ if still_present:
 
 # Regression guard: if any of these 5 files' airtable_add/update call
 # sites reintroduce the pattern at a NEW line, that would show up as a
-# "new" (non-baseline) finding in the same file. We can't tell purely
-# from (file, line) whether a fresh finding is airtable_get or
-# airtable_add/update-related, so this is a narrower, deliberate check:
-# the total finding count in these 5 files must not exceed what's
-# already accounted for by the known-legitimate airtable_get lines.
-_LEGITIMATE_AIRTABLE_GET_ENTRIES = {
-    ("ad_attribution.py", 177, "rec"),
-    ("ad_attribution.py", 203, "rec"),
-    ("inbound_handler.py", 47, "rec"),
-    ("inbound_handler.py", 61, "rec"),
-}
+# "new" (non-baseline) finding in the same file.  Legitimate rec parsing is
+# identified by the enclosing function's semantic call to airtable_get,
+# rather than a brittle line-number allowlist.
+def _airtable_get_function_ranges(path: str) -> list[tuple[int, int]]:
+    source = Path(path).read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=path)
+    ranges = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        has_airtable_get = any(
+            isinstance(child, ast.Call)
+            and (
+                (isinstance(child.func, ast.Name) and child.func.id in {"airtable_get", "_airtable_get"})
+                or (isinstance(child.func, ast.Attribute) and child.func.attr == "airtable_get")
+            )
+            for child in ast.walk(node)
+        )
+        if has_airtable_get and node.end_lineno is not None:
+            ranges.append((node.lineno, node.end_lineno))
+    return ranges
+
+
+def _is_legitimate_airtable_get_finding(finding: tuple[str, int, str]) -> bool:
+    path, line, kind = finding
+    return kind == "rec" and any(
+        start <= line <= end for start, end in _airtable_get_function_ranges(path)
+    )
+
+
 _target_files = {"interaction_engine.py", "ad_attribution.py", "voice_adapter.py",
                   "tenant_provisioner.py", "inbound_handler.py"}
-unexpected = {f for f in current if f[0] in _target_files} - _LEGITIMATE_AIRTABLE_GET_ENTRIES
+unexpected = {
+    finding for finding in current
+    if finding[0] in _target_files and not _is_legitimate_airtable_get_finding(finding)
+}
 chk(
     "no unexpected new false-success finding in these 5 files beyond the known airtable_get lines",
     not unexpected,
