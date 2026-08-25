@@ -229,7 +229,7 @@ def analyze_interaction(interaction: InteractionSchema) -> InteractionAnalysis:
         # provider/service/model-generic recording — additive, doesn't
         # feed AI_Usage_Daily or EMERGENCY_STOP_AI yet.
         try:
-            from core.usage_telemetry import record_llm_usage
+            from core.usage_telemetry import record_llm_usage, usage_attribution_from_context
             usage = getattr(resp, "usage", None)
             record_llm_usage(
                 provider   = "anthropic",
@@ -239,6 +239,7 @@ def analyze_interaction(interaction: InteractionSchema) -> InteractionAnalysis:
                 tokens_out = getattr(usage, "output_tokens", 0) if usage else 0,
                 caller     = "interaction_engine.analyze_interaction",
                 request_id = getattr(resp, "id", None),
+                **usage_attribution_from_context(execution_context),
             )
         except Exception as _e:
             logger.error(f"[Interaction] usage recording failed (non-fatal): {_e}")
