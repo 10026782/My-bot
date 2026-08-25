@@ -249,8 +249,8 @@ if still_present:
 # the total finding count in these 5 files must not exceed what's
 # already accounted for by the known-legitimate airtable_get lines.
 _LEGITIMATE_AIRTABLE_GET_ENTRIES = {
-    ("ad_attribution.py", 175, "rec"),
-    ("ad_attribution.py", 201, "rec"),
+    ("ad_attribution.py", 177, "rec"),
+    ("ad_attribution.py", 203, "rec"),
     ("inbound_handler.py", 47, "rec"),
     ("inbound_handler.py", 61, "rec"),
 }

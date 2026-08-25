@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from core.query_contract import after
+
 logger = logging.getLogger(__name__)
 
 _KNOWN_PLATFORMS = {
@@ -379,8 +381,7 @@ def _load_leads_with_timeframe(days_back: int) -> list[dict]:
         from airtable_schema import Tables, LeadFields  # type: ignore
 
         cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
-        formula = f"IS_AFTER({{created_at}},'{cutoff}')"
-        raw = airtable_get(Tables.LEADS, formula)
+        raw = airtable_get(Tables.LEADS, after("created_at", cutoff))
 
         if not raw or "אין רשומות" in str(raw) or not isinstance(raw, list):
             logger.warning("[Attribution] airtable returned no leads — returning empty")
