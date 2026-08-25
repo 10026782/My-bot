@@ -5663,3 +5663,54 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 8. `git diff --check` — PASS.
 
 - **סטטוס:** 🔴 **OPEN — CURRENT TEST GAPS**. לא בוצע remediation בסבב זה — תיעוד/reconciliation בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
+
+---
+
+## Audit #8 — Test Gap — CLOSURE (Combined Fix)
+
+- **תאריך:** 26/08/2026
+- **Truth-Reset SHA (base):** `00853b09f1c65a53535240545ba410da012c14f3` (origin/main, לאחר merge של PR #1020 — Audit #8 documentation capture)
+- **Scope:** תיקון סטטי בלבד לשני ה-findings שתועדו למעלה (#8-1, #8-2). לא בוצע audit חדש, לא הורחב scope, לא נפתחו/נגעו #2/#3/#9/#10/#11/#12/#13/#16/#20/#21/#23/#24.
+- **Mode:** test + CI-wiring fix. שינויי production business-logic: **0**.
+
+### FINDING #8-1 — CLOSED / VERIFIED (evidence adopted, no new test added)
+- **הערכה:** נבדק מול 4 קריטריוני ה-proof הנדרשים, כנגד ה-regression הקיים שנוסף כבר ב-PR #1017 (`test_approval_concurrency.py`):
+  1. **matching tenant identity/contract succeeds** — Test 1 (`_owner()`/`_FakeContract("c1")`, שניהם ברירת מחדל `tenant_id="boss_hq"` תואם, מאז תיקון #9-1) → HTTP 200, `action_gateway.approve()` נקרא.
+  2. **mismatched tenant identity/contract is rejected** — Test 6 (`_FakeContract("c6", tenant_id="other_tenant")` מול `_owner(tenant_id="boss_hq")`) → HTTP 409.
+  3. **canonical approval/action path is not executed on mismatch** — Test 6: `gw6.approve_calls == []`.
+  4. **test exercises the real production guard/path, not only a local fake** — `_act()` קורא ל-`tma_api.act_on_approval.__wrapped__` האמיתי (unwrap רק כדי לעקוף Flask/auth decorators), שמפעיל את `_claim_and_execute_approval()` → `_is_canonical_tma_contract()` האמיתיים (`tma_api.py:2344`) ללא mock. רק ה-gateway (`core.action_gateway.action_gateway`) ו-Airtable I/O מזויפים — ה-guard עצמו production code אמיתי.
+- **מסקנה:** ה-regression הקיים מספק כיסוי מלא לפי כל 4 הקריטריונים. **לא נוסף קוד כפול** — Test 1 ו-Test 6 (יחד) מאומצים רשמית כראיית #8-1.
+- **וידוא (26/08/2026, Truth-Reset SHA `00853b09f1c65a53535240545ba410da012c14f3`):** `python3 test_approval_concurrency.py` — 22/22 passed (כולל Test 1, Test 6).
+- **CROSS-TRACK → #8-1 נסגר; #9-1 נשאר CLOSED ללא שינוי** (ר' Audit #9 closure למעלה — לא נגעו בה).
+
+### FINDING #8-2 — CLOSED / CI ENFORCED
+- **תיקון:** נוסף dedicated blocking `pytest` step ל-`.github/workflows/ci.yml` עבור `test_phase_4b_1b_durable_lifecycle.py`, באותו pattern בדיוק כמו `test_context_librarian.py`/`test_refresh_after_merge.py`/`test_reconcile.py` (`ci.yml:232-239`) — `python -m pytest test_phase_4b_1b_durable_lifecycle.py -x --tb=short -q`, ללא `continue-on-error`, ללא `|| true`. ה-loop הגנרי (`ci.yml:141-155`) לא שונה — עדיין מריץ 0 בדיקות בשקט על הקובץ הזה, בדיוק כמו שקורה כבר ל-3 הקבצים האחרים; ה-step הייעודי החדש הוא זה שבאמת מפעיל את הבדיקות.
+- **גילוי אגבי במהלך ההפעלה, ותוקן (לא production defect — לא #8 finding נפרד):** הפעלת `pytest` בפועל בפעם הראשונה חשפה שהטסט `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` נכשל — **קיים-מראש**, נבדק שוב מול `origin/main` נקי (`git stash`) ומשוחזר זהה. שורש הבעיה **אינו production bug**: `ExecutionLedger.update_status()`'s BUG-127A stale-cache refresh (`core/action_gateway.py:940`, `_refresh_stale_contract_cache()`) מרענן את ה-RAM cache מ-durable truth **לפני** ה-retry, בכוונה מתועדת (comment ב-`core/action_gateway.py:889-919`) — כך שה-RAM store **כן** מתעדכן גם כשה-conflict בסופו של דבר עדיין מועלה. הטסט קדם להתנהגות הזו ובדק invariant שכבר לא תקף במכוון. **תוקן (commit תיקוני, לא xfail):** הטסט הוסב לשם `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth` ולאסרציות שמשקפות את החוזה הנוכחי: (1) ה-conflict עדיין מועלה, (2) המעבר האסור ("approved") לעולם לא persisted — לא ב-cache ולא ב-durable store, (3) durable truth נשאר authoritative (`"rejected"`, ללא שינוי), (4) RAM cache **רשאי** להתרענן מ-durable truth — נבדק אמפירית (`ledger._store[contract_id].status == "rejected"`) לפני הכתיבה. שינויי production code: **0** — רק הטסט תוקן.
+- **וידוא Required Proof (26/08/2026):**
+  1. **pytest discovers the expected tests** — `python -m pytest test_phase_4b_1b_durable_lifecycle.py --collect-only -q` → 18 tests collected (כולל `test_fake_lifecycle_repository_rejects_illegal_transition`).
+  2. **all intended tests actually execute** — 18 passed = 18/18 רצו בפועל, **0 xfail, 0 skip**.
+  3. **an intentional failing assertion would fail CI** — נבדק ידנית פעמיים (לפני ואחרי תיקון הטסט): assertion סובוטז' זמנית ב-`test_fake_lifecycle_repository_rejects_illegal_transition` → `pytest -x` עצר עם `1 failed`, "stopping after 1 failures"; שוחזר מיד לאחר מכן (`diff` מול גיבוי אישר reversion מלא, 0 שינוי שיורי).
+  4. **ALLOWED_CONTRACT_TRANSITIONS legality regression is included** — `test_fake_lifecycle_repository_rejects_illegal_transition` (נוסף ב-PR #1017, Audit #9-3) נכלל ורץ.
+  5. **CI step is blocking** — אין `continue-on-error`, אין `|| true`; `-x` עוצר על כשלון ראשון.
+- **YAML validation:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"` — PASS.
+
+### Regression run (מעבר על התיקון כולו)
+1. `test_phase_4b_1b_durable_lifecycle.py` via `pytest` — **18 passed, 0 xfail, 0 skip** (18/18 executed).
+2. Tenant-isolation/approval suite: `test_approval_concurrency.py` (22/22), `test_pr0c0_tma_approval_truthfulness.py` (22/22), `test_phase_4b2_wiring.py` (86/86).
+3. #9 fidelity regressions (unchanged files, unaffected by #8's changes): 5 `is_internal` files (72/72), `test_tc8_repo_stub_fidelity.py` (6/6) + 4 consumer files (91/91).
+4. ActionContract repository suite: `test_pr0c_action_contract_repository.py` (14/14), `test_phase_4b_1a_durable_proposals.py` (11/11), `test_phase_4b_1a_lookup_correctness.py`, `test_bug127a_stale_lifecycle_version_retry.py` (10/10), `test_pa01_phantom_approval_enforcement.py` (108/108), `test_tc7_b2_claim_authorization_shadow.py` (78/78), `test_phase_4b_rollout_tooling.py` (75/75), `test_bug114_context_interrupt_amplification.py` (12/12), `test_bug155_ttl_expiry_contract_id_lookup.py` (5/5), `test_first_pending_notification_failure_suppression.py` (14/14), `test_bug156_due_time_note_and_fingerprint_exclusion.py` (11/11) — כולם PASS.
+5. Identity/Router: `test_identity_smoke.py` (4/4), `core/router/test_router.py` (50/50), `test_integration.py` (4/4) — PASS.
+6. Full `test_*.py` loop (331 קבצים, אותו pattern כמו CI's "Run test_*.py scripts" step) — 330/331 files exit 0. היוצא היחיד: `test_bug153_create_task_reconfirmation_after_rejection.py` — **קיים-מראש, לא קשור**: 3 כשלים reproduced זהים על `origin/main` נקי (`git stash`), אינו נוגע בשום קובץ שתוקן כאן; לא נבדק לעומק/לא נגע בו — מחוץ ל-scope לחלוטין (כבר תועד בסבב הקודם).
+7. `smoke_tests.py` — PASS (8/8 checks).
+8. `python3 -m py_compile test_phase_4b_1b_durable_lifecycle.py` — PASS.
+9. `git diff --check` — PASS (ריק).
+
+### AUTHORITATIVE STATUS
+- **#8-1** — ✅ **CLOSED / VERIFIED**.
+- **#8-2** — ✅ **CLOSED / CI ENFORCED**.
+- **Audit #8 final:** ✅ **CLOSED / STATIC VERIFIED + CI ENFORCED**.
+- ה-24/08/2026 "ALREADY CLOSED" ההיסטורי, וה-26/08/2026 "OPEN — CURRENT TEST GAPS" reconciliation (PR #1020) — **שניהם נשארים ברשומה כלשונם**, לא נמחקים/נכתבים-מחדש; רשומה זו מוסיפה closure חדש ואחרון בשרשרת הכרונולוגית.
+- **#9 נשאר CLOSED, ללא שינוי** — לא נגעו בסעיפי #9 הקיימים בקובץ זה.
+- **פריט אגבי, לא תחת #8, ותוקן:** `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` (עכשיו `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth`) היה test-staleness (לא production defect) שנחשף תוך כדי #8-2 — תוקן ישירות (ר' #8-2 למעלה) כדי שה-CI step יספק כיסוי אמיתי (18/18 PASS, 0 xfail), לא לעקוף אותו.
+
+- **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED + CI ENFORCED** — 2/2 findings מתוקנים ומאומתים סטטית על branch זה. אימות production (post-merge, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.

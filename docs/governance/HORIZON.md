@@ -16,43 +16,44 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `a52977278c1db0be41eeec026ce72e22fd0308a9`
+**Truth Reset SHA at last update:** `b9dabee1a3492ba92a2c17ff3775eec82b8cc1bd`
 
 ---
 
-## OPEN
-
-- **#8 Test Gap** — 🔴 **OPEN — CURRENT TEST GAPS**
-  (status reconciliation 26/08/2026, Truth-Reset SHA
-  `28dbc7ab075653440d378c3a60100f11b9c8b411`; documentation-capture only, no
-  remediation performed in this pass). Full record: `BUG_AUDIT_LOG.md`
-  ("Audit #8 — Test Gap — STATUS RECONCILIATION (Documentation Capture
-  Only)"). Supersedes the "ALREADY CLOSED" status recorded in
-  `MAINTENANCE_STATUS_MATRIX.md`/`MAINTENANCE_DEFERRED_REGISTER.md`'s
-  "Track F follow-up closure — 24/08/2026" — that closure predates Audit #9
-  (25-26/08/2026), which routed both items below to #8 afterward; neither
-  historical entry is rewritten, both are marked bounded/historical instead.
-  - **#8-1 OPEN (no official severity yet)** — tenant-isolation negative-path
-    coverage gap, CROSS-TRACK from Audit #9 Finding #9-1. PR #1017 fixed the
-    #9-1 mock-fidelity issue and added one regression proving the corrected
-    mock — but #9's own documentation states twice, explicitly, that this
-    does **not** close the broader #8 gap. Do not conflate #9's closure with
-    #8 closure.
-  - **#8-2 HIGH (explicit justification)** — `test_phase_4b_1b_durable_lifecycle.py`
-    is written in `pytest` style (`pytest.raises`, no `if __name__` runner);
-    CI's generic "Run test_*.py scripts" step (`.github/workflows/ci.yml:141-155`)
-    invokes it via plain `python3 file.py`, which executes 0 tests silently
-    (verified: exit 0, no output). Confirmed unique, non-redundant blind
-    spot: repo-wide grep for the production rejection message ("invalid
-    lifecycle transition") returns only its definition
-    (`core/action_contract_repository.py:244`) and the one test asserting it
-    (`test_phase_4b_1b_durable_lifecycle.py:73`) — no other CI-executed test
-    file proves this legality-enforcement path. `ci.yml:227-233` already
-    documents and fixes the identical failure mode for
-    `test_context_librarian.py`/`test_refresh_after_merge.py`/`test_reconcile.py`
-    via dedicated `pytest` steps — the same treatment was not applied here.
-
 ## CLOSED
+
+- **#8 Test Gap** — **CLOSED / STATIC VERIFIED + CI ENFORCED**
+  (remediation 26/08/2026, Truth-Reset SHA
+  `00853b09f1c65a53535240545ba410da012c14f3`). Both findings from the
+  status-reconciliation pass remediated; full record: `BUG_AUDIT_LOG.md`
+  ("Audit #8 — Test Gap — CLOSURE (Combined Fix)"). The 24/08/2026
+  "ALREADY CLOSED" line and the 26/08/2026 "OPEN — CURRENT TEST GAPS"
+  reconciliation are both preserved as-written in `MAINTENANCE_STATUS_MATRIX.md`/
+  `MAINTENANCE_DEFERRED_REGISTER.md` — not rewritten; this is the next
+  closure in the chronology.
+  - **#8-1** — CLOSED / VERIFIED, evidence adopted from PR #1017's existing
+    regression (`test_approval_concurrency.py` Test 1 + Test 6) — no
+    duplicate test added. Satisfies all 4 required proof criteria: matching
+    tenant succeeds, mismatched tenant is rejected (HTTP 409), the canonical
+    `action_gateway.approve()` path is never called on mismatch, and the
+    real production `_is_canonical_tma_contract()` guard (`tma_api.py:2344`)
+    is exercised end-to-end, not just a local fake.
+  - **#8-2** — CLOSED / CI ENFORCED. New dedicated blocking `pytest` step in
+    `.github/workflows/ci.yml` for `test_phase_4b_1b_durable_lifecycle.py`,
+    matching the existing `test_context_librarian.py`/
+    `test_refresh_after_merge.py`/`test_reconcile.py` pattern. Verified: 18
+    tests collected, 18 executed, 18 PASS (0 xfail/skip), an intentionally
+    sabotaged assertion correctly failed `pytest -x` (then fully reverted),
+    the `ALLOWED_CONTRACT_TRANSITIONS` legality regression (#9-3) is
+    included, no `continue-on-error`/`|| true`. **Incidental discovery
+    during first-ever CI execution (not a production defect, not a new #8
+    item):** `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`'s
+    assertion predated `ExecutionLedger.update_status()`'s intentional
+    BUG-127A stale-cache refresh (`core/action_gateway.py:940`) — corrected
+    to assert the current intentional contract (conflict still raised,
+    forbidden transition never persisted, durable truth stays authoritative,
+    RAM cache may legitimately refresh from durable truth) rather than
+    marked `xfail`; production code untouched.
 
 - **#3 Data Contract** — **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
   FINDING #2 EXPLICITLY DEFERRED** (remediation 26/08/2026, Truth-reset SHA

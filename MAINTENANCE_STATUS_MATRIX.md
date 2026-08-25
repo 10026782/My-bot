@@ -20,7 +20,7 @@ This closure records documentation truth only; production verification is not cl
 | #16 Tool Contract | **ALREADY CLOSED** | No independent current #16 gap; recorded contract/data items remain cross-track. |
 | #5 Async / Concurrency | **BOUNDED FINDING CLOSED / MERGED**; process-local/shared-lock limitation **DEFERRED ARCHITECTURE** | Voice STT retry release via PR #878. |
 | #6 Scheduler | **DEFERRED ARCHITECTURE** | R-C06-10 retained; no demonstrated functional defect. |
-| #8 Test Gap | **ALREADY CLOSED**¹ | Placement concern remains owned by #12 only. |
+| #8 Test Gap | **ALREADY CLOSED**¹ ² | Placement concern remains owned by #12 only. |
 | #14 Deprecated Compatibility | **DEFERRED ARCHITECTURE** | Active compatibility remains load-bearing. |
 | #19 Docs-to-Code | **CLOSED / DOC DRIFT REMEDIATED** | G1/G2 #882, G5/G6 #893, G3/G4/G15 #896, G7 closed by the accompanying documentation correction. |
 
@@ -34,6 +34,17 @@ Truth-Reset SHA `28dbc7ab075653440d378c3a60100f11b9c8b411` (origin/main, after P
 
 - **#8-1 OPEN (no official severity yet)** — tenant-isolation negative-path coverage gap, CROSS-TRACK from Audit #9 Finding #9-1. PR #1017 fixed the #9-1 mock-fidelity issue itself and added one regression proving the corrected mock, but #9's own documentation states explicitly, twice, that the broader #8 gap is **not** closed by that fix.
 - **#8-2 HIGH (explicit justification)** — `test_phase_4b_1b_durable_lifecycle.py` is pytest-style with no `__main__` runner; CI's generic `python "$f"` loop (`.github/workflows/ci.yml:141-155`) runs 0 of its tests silently. Confirmed a unique, non-redundant blind spot on the production `ALLOWED_CONTRACT_TRANSITIONS` legality-enforcement path (`core/action_contract_repository.py:241-245`) — no other CI-executed test proves it. `ci.yml:227-233` already documents and fixes this identical failure mode for 3 other files via dedicated `pytest` steps; not yet applied here.
+
+² **Closed 26/08/2026 — see "#8 Test Gap closure" section below.** This "OPEN" text is preserved verbatim as the same-day status-reconciliation finding; #8 was remediated later the same day.
+
+## #8 Test Gap closure — 26/08/2026
+
+Truth-Reset SHA `00853b09f1c65a53535240545ba410da012c14f3` (origin/main, after PR #1020 — Audit #8 documentation capture). Test + CI-wiring fix; 0 production business-logic changes.
+
+**Current status: #8 Test Gap — ✅ CLOSED / STATIC VERIFIED + CI ENFORCED.** Both #8-1 and #8-2 above remediated. Neither the 24/08/2026 "ALREADY CLOSED" row nor the 26/08/2026 "OPEN — CURRENT TEST GAPS" section is rewritten — both stay as historical record; this section is the next entry in the chronology. Full record: `BUG_AUDIT_LOG.md` ("Audit #8 — Test Gap — CLOSURE (Combined Fix)"), `docs/governance/HORIZON.md` ("## CLOSED").
+
+- **#8-1 CLOSED / VERIFIED** — evidence adopted from PR #1017's existing `test_approval_concurrency.py` regression (Test 1 + Test 6); no duplicate test added. Satisfies all 4 required proof criteria (matching-tenant success, mismatched-tenant HTTP 409 rejection, canonical `action_gateway.approve()` never called on mismatch, real production `_is_canonical_tma_contract()` guard exercised end-to-end).
+- **#8-2 CLOSED / CI ENFORCED** — dedicated blocking `pytest` CI step added for `test_phase_4b_1b_durable_lifecycle.py`, same pattern as the 3 existing Context Librarian steps. Verified: 18 tests collected, all 18 execute, **18 pass, 0 xfail, 0 skip**, a sabotaged assertion correctly failed `pytest -x` (then reverted), the `ALLOWED_CONTRACT_TRANSITIONS` legality regression is included, no `continue-on-error`/`|| true`. Incidental discovery during first-ever CI execution (not a production defect, not a new #8 item) — fixed directly, not xfailed: `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`'s assertion predated `core/action_gateway.py`'s intentional BUG-127A stale-cache refresh; corrected (renamed to `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth`) to assert the current intentional contract — conflict still raised, forbidden transition never persisted, durable truth authoritative, RAM cache may refresh from durable truth. 0 production code changes.
 
 ## Track #13 closure — Naming Consistency
 
