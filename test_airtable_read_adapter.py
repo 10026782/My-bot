@@ -16,7 +16,7 @@ def test_daily_digest_query_and_pagination_are_preserved(monkeypatch):
     monkeypatch.setenv("AIRTABLE_BASE_ID", "base")
     with patch.object(daily_digest, "list_records", return_value=[{"id": "1"}]) as read:
         assert daily_digest._fetch("Leads", "{Status}='Open'", max_rec=0) == [{"id": "1"}]
-    read.assert_called_once_with("Leads", "{Status}='Open'", max_records=0)
+        read.assert_called_once_with("Leads", "{Status}='Open'", limit=0)
 
 
 def test_weekly_summary_query_and_return_shape_are_preserved(monkeypatch):
@@ -99,7 +99,7 @@ def test_lead_dedup_preserves_three_queries_and_read_options(monkeypatch):
     ]
     for call in read.call_args_list:
         assert call.kwargs == {
-            "max_records": 5,
+                "limit": 5,
             "paginate": False,
             "timeout": 8,
         }
