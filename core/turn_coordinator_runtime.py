@@ -140,6 +140,31 @@ def resolve_business_interaction_analysis_capability() -> ResolvedCapability:
     )
 
 
+def resolve_decision_conflict_detection_capability() -> ResolvedCapability:
+    """Resolve one eligible uncached Decision Event pair comparison."""
+    ownership = IntentOwnershipDecision(
+        intent=Intent.DETECT_DECISION_CONFLICT,
+        owner="decision_confidence.conflict_detection",
+        reason="eligible uncached Decision Event pair comparison contract",
+        confidence=1.0,
+    )
+    return resolve_capability(
+        ownership,
+        {
+            Intent.DETECT_DECISION_CONFLICT: (
+                ResolvedCapability(
+                    capability_id="business.decision_conflict_detection",
+                    execution_class=ExecutionClass.NARROW_MODEL,
+                    executor_ref="decision_confidence.detect_conflict_ai",
+                    validator_ref="decision_confidence.pair_eligibility.v1",
+                    verification_ref="decision_confidence.conflict_result_schema.v1",
+                    fallback_ref="llm_fallback",
+                ),
+            ),
+        },
+    )
+
+
 def resolve_agent_capability(route: RouteDecision) -> ResolvedCapability:
     """Adapt an authoritative Agent route to the canonical reasoning capability."""
     if not isinstance(route, RouteDecision):
