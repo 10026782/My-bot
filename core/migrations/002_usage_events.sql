@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     capability_id TEXT NOT NULL DEFAULT 'legacy.unknown',
     execution_class TEXT NOT NULL DEFAULT 'UNKNOWN',
     operation_id TEXT,
+    workflow_id TEXT,
     UNIQUE(provider, request_id)
 );
 
@@ -62,6 +63,8 @@ ALTER TABLE usage_events
     ADD COLUMN IF NOT EXISTS execution_class TEXT NOT NULL DEFAULT 'UNKNOWN';
 ALTER TABLE usage_events
     ADD COLUMN IF NOT EXISTS operation_id TEXT;
+ALTER TABLE usage_events
+    ADD COLUMN IF NOT EXISTS workflow_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts
     ON usage_events(ts DESC);
