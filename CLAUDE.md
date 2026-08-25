@@ -147,7 +147,7 @@ Several modules are code-complete but disabled by default via `feature_flags.py`
 - `abandoned_lead_worker.py` (`ABANDONED_LEADS`): detects leads stuck mid-qualification and auto-bounces or escalates them.
 - `followup_engine.py` (`FOLLOWUP_AUTOMATION`): identifies "ripe" leads, drafts follow-ups, and routes them through approval.
 - `furniture_lead_funnel.py`: a separate, deterministic WhatsApp funnel for a specific product line (not the general agent flow) — see `test_furniture_lead_funnel.py`.
-- `voice_adapter.py` (`FEATURE_VOICE_IVR`/F07): Twilio Voice IVR state machine for lead qualification.
+- `voice_adapter.py` (`VOICE_IVR`/F07): Twilio Voice IVR state machine for lead qualification.
 - `email_inbound.py` (`EMAIL_INBOUND`/F06): polls Gmail and routes inbound mail through identity → approval → reply.
 - `interaction_engine.py` (`INTERACTION_INTELLIGENCE`/D06.1): unified interaction log across calendar/email/WhatsApp.
 - `audience_intelligence.py` (`AUDIENCE_INTELLIGENCE`/D04): segmentation, high-value/churn detection, lookalike matching.
@@ -156,7 +156,7 @@ Several modules are code-complete but disabled by default via `feature_flags.py`
 
 ### Background workers
 
-- `worker.py`: **legacy, currently unwired** — defines a proactive Tasks-deadline Telegram nudge (`run_proactive_check`, `_nudge_loop`) but nothing imports it. `POST /worker/trigger` (app.py) does **not** call it: that route forwards a `[system event]` text to `run_agent()` instead. See BUG_AUDIT_LOG.md (C00-F1 truth-reset, 23/08/2026).
+- `worker.py`: **REMOVED** (commit `6b8573b`) — formerly a legacy, unwired proactive Tasks-deadline Telegram nudge (`run_proactive_check`, `_nudge_loop`); no current runtime role. `POST /worker/trigger` (app.py) never called it: that route forwards a `[system event]` text to `run_agent()` instead. History: BUG_AUDIT_LOG.md (C00-F1 truth-reset, 23/08/2026; Audit #18 SSOT closure, 25/08/2026).
 - All recurring background work runs via `scheduler.py`'s in-process `schedule`-library jobs (digest, payments, followups, cleanup, reports), started from `run_startup_sequence()` by gunicorn's `post_worker_init` hook / `python3 app.py`.
 
 ## Frontend (`tma-frontend/`)

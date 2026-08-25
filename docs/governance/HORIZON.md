@@ -16,40 +16,9 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 25/08/2026
-**Truth Reset SHA at last update:** `d22aa24fa320d6797ee3a36e9bda04d62c162e15`
+**Truth Reset SHA at last update:** `ef8363f830253c324b8da8f1b7026f29ff6faf0f`
 
 ---
-
-## OPEN
-
-- **#18 SSOT** — **OPEN — CURRENT SSOT GAPS** (Phase 1, read-only audit,
-  25/08/2026, Truth-Reset SHA `d22aa24fa320d6797ee3a36e9bda04d62c162e15`).
-  3 REAL CURRENT GAPS found; full evidence: `BUG_AUDIT_LOG.md` ("Audit #18 —
-  SSOT (Phase 1, Read-Only)"). Not marked CLOSED. No remediation applied by
-  the audit or by this entry — status recording only.
-  - **#18-1 HIGH** — Voice-IVR flag naming: `CLAUDE.md:150` and
-    `voice_adapter.py:3` say `FEATURE_VOICE_IVR`; the actual registry
-    (`feature_flags.py:71`) and every live call site
-    (`app.py:6871`, `app.py:6887`, `voice_adapter.py:336`) use `VOICE_IVR`.
-    Independently pre-flagged in
-    `docs/audit/M01_FEATURE_FLAG_CONSISTENCY_AUDIT.md:63` as
-    `REGISTRATION_DRIFT / HIGH`, never remediated.
-  - **#18-2 MEDIUM** — this file's own §CLOSED #12 entry below says
-    `MAINTENANCE_DEFERRED_REGISTER.md`'s §E-F row "still reads
-    `OPEN`/`NEEDS_PRODUCT_DECISION`", but that row (line 133) already carries
-    an inline `"RESOLVED / #12 CLOSED 25/08/2026"` — the two documents
-    disagree on whether that specific row has been reconciled.
-    `MAINTENANCE_FILE_DRIFT_REGISTER.md:18`'s §F1 "Status" column is
-    confirmed still unedited (`NEEDS_PRODUCT_DECISION`) against its own
-    "Current disposition" column (`REMOVED... #12 CLOSED`) on the same row.
-    Scope: documentation-consistency only — #12's underlying closure is not
-    reopened.
-  - **#18-3 LOW / DOC DRIFT** — `CLAUDE.md:159` still describes `worker.py`
-    in present tense ("defines a proactive Tasks-deadline Telegram nudge")
-    after the file was fully deleted from `origin/main` (commit `6b8573b`,
-    confirmed ancestor).
-  - Competing-authorities verdict: **YES** (flag-naming: docs/comments vs.
-    registry; closure-narrative: this file vs. its own companion registers).
 
 ## CLOSED
 
@@ -63,6 +32,29 @@ the closure PR that created it for the search that established this.
 - **#21 Orphan Artifact** — CLOSED for the identified orphan candidates.
   Evidence: `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`.
 
+- **#18 SSOT** — **CLOSED / STATIC VERIFIED** (remediation 25/08/2026,
+  Truth-Reset SHA `ef8363f830253c324b8da8f1b7026f29ff6faf0f`). All 3 findings
+  from the Phase-1 read-only audit remediated; full record:
+  `BUG_AUDIT_LOG.md` ("Audit #18 — SSOT (Phase 1, Read-Only)" and its
+  closure entry).
+  - **#18-1 HIGH** — CLOSED / VERIFIED. `CLAUDE.md:150` and
+    `voice_adapter.py:3` now say `VOICE_IVR`, matching the registry
+    (`feature_flags.py:71`) and every live call site (`app.py:6871`,
+    `app.py:6887`, `voice_adapter.py:336`). Historical evidence
+    (`docs/audit/M01_FEATURE_FLAG_CONSISTENCY_AUDIT.md:63`) left unchanged.
+  - **#18-2 MEDIUM** — CLOSED / VERIFIED. `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
+    §F1 "Status" column for the #12 cluster rows (`worker.py`,
+    `knowledge_engine.py`, `router.py`, `lead_qualifier.py`, `profile.py`,
+    `creative_generator.py`) now carries an inline `RESOLVED / #12 CLOSED`
+    resolution consistent with its own "Current disposition" column.
+    `MAINTENANCE_DEFERRED_REGISTER.md`'s §E-F row already correctly read
+    `RESOLVED / #12 CLOSED 25/08/2026` and was left unchanged. This file's
+    own #12 entry below has been narrowed to remove the now-stale claim.
+  - **#18-3 LOW / DOC DRIFT** — CLOSED / VERIFIED. `CLAUDE.md:159` now reads
+    `worker.py: **REMOVED** (commit \`6b8573b\`)...` in place of the prior
+    present-tense description.
+  - Competing-authorities verdict: resolved on this branch for all 3 findings.
+
 - **#12 File / Folder Ownership** — CLOSED. Evidence gathered and verified
   during this reconciliation pass (not previously written up anywhere): 7 of
   the 8 modules in `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s F1 cluster —
@@ -72,12 +64,10 @@ the closure PR that created it for the search that established this.
   worker-module removal). The 8th, `tenant_provisioner.py`, remains by
   deliberate, already-documented owner-parked decision (test-only import,
   "needs to stay parked — business/model decision") — not a live gap.
-  **Flag, not fixed here:** `MAINTENANCE_DEFERRED_REGISTER.md`'s §E-F row and
-  §"Track F follow-up closure", and `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
-  §F1 table and §F3, still read `OPEN` / `NEEDS_PRODUCT_DECISION` for this
-  cluster as of their last edit — stale relative to the removals above.
-  Reconciling those two documents' full row content is its own dedicated
-  docs pass, out of Track #7's scope; recorded here so it isn't lost.
+  **Reconciled (Audit #18, 25/08/2026):** `MAINTENANCE_DEFERRED_REGISTER.md`'s
+  §E-F row already read `RESOLVED / #12 CLOSED`; `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
+  §F1 table "Status" column for this cluster's removed rows now carries a
+  matching inline `RESOLVED / #12 CLOSED` resolution — see #18 below.
 
 ## ACTIVE
 

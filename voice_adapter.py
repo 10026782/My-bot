@@ -1,6 +1,6 @@
 # voice_adapter.py — F07 Voice / IVR
 # קו מוצר נפרד — שוק חרדי (אוקיינוס כחול)
-# flag: FEATURE_VOICE_IVR (כבוי ברירת מחדל)
+# flag: VOICE_IVR (כבוי ברירת מחדל)
 #
 # פלטפורמות:
 #   Phase 1: Twilio Voice (webhook → TwiML)
