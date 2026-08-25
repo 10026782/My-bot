@@ -87,6 +87,7 @@ def record_usage(
     capability_id: str = LEGACY_CAPABILITY_ID,
     execution_class: str = UNKNOWN_EXECUTION_CLASS,
     operation_id: str | None = None,
+    workflow_id: str | None = None,
 ) -> bool:
     """
     Durably records one real provider API call and its cost. Returns True
@@ -116,8 +117,9 @@ def record_usage(
                 INSERT INTO usage_events
                     (ts, provider, service, model, source, caller, unit,
                      quantity_in, quantity_out, cost_usd, cost_is_estimate,
-                     request_id, meta, capability_id, execution_class, operation_id)
-                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     request_id, meta, capability_id, execution_class, operation_id,
+                     workflow_id)
+                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (provider, request_id) DO NOTHING;
                 """,
                 (
@@ -126,6 +128,7 @@ def record_usage(
                     request_id, json.dumps(meta) if meta else None,
                     capability_id, execution_class,
                     operation_id,
+                    workflow_id,
                 ),
             )
             conn.commit()
@@ -159,6 +162,7 @@ def record_llm_usage(
     capability_id: str = LEGACY_CAPABILITY_ID,
     execution_class: str = UNKNOWN_EXECUTION_CLASS,
     operation_id: str | None = None,
+    workflow_id: str | None = None,
 ) -> bool:
     """Convenience wrapper for the common case: a text LLM call."""
     return record_usage(
@@ -175,6 +179,7 @@ def record_llm_usage(
         capability_id=capability_id,
         execution_class=execution_class,
         operation_id=operation_id,
+        workflow_id=workflow_id,
     )
 
 
@@ -190,6 +195,7 @@ def record_stt_usage(
     capability_id: str = LEGACY_CAPABILITY_ID,
     execution_class: str = UNKNOWN_EXECUTION_CLASS,
     operation_id: str | None = None,
+    workflow_id: str | None = None,
 ) -> bool:
     """Convenience wrapper for the STT case: quantity_out = duration_seconds, no input side."""
     return record_usage(
@@ -206,6 +212,7 @@ def record_stt_usage(
         capability_id=capability_id,
         execution_class=execution_class,
         operation_id=operation_id,
+        workflow_id=workflow_id,
     )
 
 
