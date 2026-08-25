@@ -150,7 +150,7 @@ Current statuses were re-verified against `origin/main` at
 - #16 Tool Contract — **ALREADY CLOSED**; known contract/data items remain cross-track.
 - #5 Async / Concurrency — bounded voice STT retry finding **CLOSED / MERGED via #878**; process-local/shared-lock limitation remains **DEFERRED ARCHITECTURE**.
 - #6 Scheduler — **DEFERRED ARCHITECTURE**; R-C06-10 retained with no demonstrated functional defect.
-- #8 Test Gap — **ALREADY CLOSED**; placement concern is #12 only.
+- #8 Test Gap — **ALREADY CLOSED**; placement concern is #12 only. **Superseded 26/08/2026 — see "#8 Test Gap status update" section below.** Preserved verbatim as the historical 24/08/2026 finding; not the current status.
 - #14 Deprecated Compatibility — **DEFERRED ARCHITECTURE**; active compatibility remains load-bearing.
 - #19 Docs-to-Code — **CLOSED / DOC DRIFT REMEDIATED** after #882, #893, #896, and this G7 correction.
 
@@ -180,3 +180,29 @@ no code changed.
   `reports/`; or (4) provenance is required for a retention, compliance, build,
   or deployment decision. **HANDOFF: CLOSED / ACKNOWLEDGED.** #12 remains
   CLOSED WITH EXPLICIT DEFERRED ITEM; #21 remains CLOSED.
+
+### #8 Test Gap status update — 26/08/2026
+
+Docs-only reconciliation. Truth-Reset SHA `28dbc7ab075653440d378c3a60100f11b9c8b411`
+(origin/main, after PR #1017 — Audit #9 remediation). Not a new audit — no
+new files inspected beyond the two items Audit #9 already routed here; no
+code/test/CI changed.
+
+**Current status: #8 Test Gap — OPEN — CURRENT TEST GAPS.** The 24/08/2026
+"ALREADY CLOSED" line above is bounded/historical, not current — it predates
+Audit #9 (25-26/08/2026), which routed both items below to #8 afterward.
+Full record: `BUG_AUDIT_LOG.md` ("Audit #8 — Test Gap — STATUS
+RECONCILIATION (Documentation Capture Only)"), `docs/governance/HORIZON.md`
+("## OPEN").
+
+- **#8-1 OPEN (no official severity yet)** — tenant-isolation negative-path
+  coverage gap, CROSS-TRACK from Audit #9 Finding #9-1. PR #1017's added
+  regression proves the corrected mock (#9-1 itself) but explicitly does not
+  close this broader #8 item, per #9's own closure documentation.
+- **#8-2 HIGH (explicit justification)** — `test_phase_4b_1b_durable_lifecycle.py`
+  is pytest-style with no `__main__` runner; CI's generic `python "$f"` loop
+  runs 0 of its tests silently. Confirmed the only test in the repo proving
+  the production `ALLOWED_CONTRACT_TRANSITIONS` legality-enforcement path
+  (`core/action_contract_repository.py:241-245`) — not redundant with any
+  CI-executed test. The repo already fixes this identical failure mode for
+  3 other files via dedicated `pytest` CI steps; not yet applied here.
