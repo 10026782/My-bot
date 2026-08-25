@@ -12,6 +12,7 @@ import tools.dispatcher as dispatcher
 import tools.airtable_gateway as gateway
 import tools.airtable_read_adapter as read_adapter
 from tools.airtable_read_adapter import AirtableReadError, render_query
+from core.query_contract import equals
 
 
 def test_lead_event_store_preserves_formula_options_and_mapping():
@@ -50,8 +51,8 @@ def test_emergency_lookup_preserves_formula_sort_limit_and_timeout():
         assert emergency_window._fetch_active_record() == record
     read.assert_called_once_with(
         emergency_window.Tables.EMERGENCY_WINDOW,
-        "{Status}='Active'",
-        max_records=1,
+        equals(emergency_window.F.STATUS, emergency_window.Status.ACTIVE),
+        limit=1,
         sort=[{"field": emergency_window.F.ACTIVATED_AT, "direction": "desc"}],
         paginate=False,
         timeout=10,
@@ -112,8 +113,8 @@ def test_read_adapter_forwards_sort_without_changing_defaults():
     with patch.object(read_adapter, "at_list_by_formula", return_value=[]) as list_by_formula:
         assert read_adapter.list_records(
             "Emergency Window",
-            "{Status}='Active'",
-            max_records=1,
+            equals(emergency_window.F.STATUS, emergency_window.Status.ACTIVE),
+            limit=1,
             sort=[{"field": "Activated At", "direction": "desc"}],
             paginate=False,
             timeout=10,
