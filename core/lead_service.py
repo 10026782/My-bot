@@ -25,6 +25,7 @@ from typing import Optional
 
 from airtable_schema import LeadFields
 from core.query_contract import all_of, contains, equals
+from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
@@ -257,11 +258,11 @@ def find_existing_lead(name: str, phone: str) -> Optional[str]:
                     # — a shared/similar name alone is not enough (see
                     # BUG-094 in the original lead_candidate_handler.py).
                     for rec in records:
-                        rec_phone = re.sub(r"[\s\-]", "", str(rec.get("fields", {}).get("phone", "")))
+                        rec_phone = re.sub(r"[\s\-]", "", str(_record_fields(rec).get("phone", "")))
                         if rec_phone == phone:
-                            return rec["id"]
+                            return _record_id(rec, required=True)
                     continue
-                return records[0]["id"]
+                return _record_id(records[0], required=True)
         except AirtableReadError as exc:
             if exc.status_code is None:
                 logger.warning("[LeadService] Airtable search error: %s", exc.cause or exc)
@@ -478,7 +479,7 @@ def create_lead(
         else:
             rec = airtable_create("Leads", fields, source=source_module)
             if rec:
-                record_id = rec.get("id", "")
+                record_id = _record_id(rec) or ""
                 ok = bool(record_id)
     except Exception as exc:
         logger.error("[LeadService] write failed for %r: %s", payload.name, exc)

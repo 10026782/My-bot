@@ -17,6 +17,7 @@ from airtable_schema import (
     validate_funding_cost,
 )
 from core.query_contract import after, all_of, any_of, before, contains, equals, negate
+from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_gateway import airtable_create, airtable_patch
 from tools.airtable_read_adapter import (
     AirtableReadError,
@@ -158,19 +159,19 @@ def _find_or_create_contact_unlocked(phone, name, *, email="", company="",
             lookup_error = str(exc)
             continue
         for record in records:
-            record_id = record.get("id")
-            if record_id:
-                records_by_id[record_id] = record
+            current_id = _record_id(record)
+            if current_id:
+                records_by_id[current_id] = record
     if lookup_error:
         return ContactResult("lookup_error", normalized_phone=normalized,
                              error=lookup_error)
     records = tuple(records_by_id.values())
 
     if len(records) > 1:
-        matches = tuple({"record_id": record.get("id", "")} for record in records)
+        matches = tuple({"record_id": _record_id(record) or ""} for record in records)
         return ContactResult("ambiguous", normalized_phone=normalized, matches=matches)
     if records:
-        return ContactResult("existing", record_id=records[0].get("id", ""),
+        return ContactResult("existing", record_id=_record_id(records[0]) or "",
                              normalized_phone=normalized)
 
     fields = {
@@ -209,7 +210,7 @@ def _find_or_create_contact_unlocked(phone, name, *, email="", company="",
                 return ContactResult("create_error", normalized_phone=normalized,
                                      error=f"unexpected provider outcome: {outcome}")
             record = getattr(provider_result, "record", provider_result)
-        record_id = (record or {}).get("id", "")
+        record_id = _record_id(record) if record else ""
     except Exception as exc:
         if create_writer is not None:
             return ContactResult("outcome_unknown", normalized_phone=normalized,
@@ -265,13 +266,13 @@ def crm_find_contact(query: str, identity=None) -> str:
 
         lines = [f"🔍 *נמצאו {len(records)} תוצאות:*\n"]
         for r in records:
-            f = r.get("fields", {})
+            f = _record_fields(r)
             lines.append(
                 f"• *{f.get(ContactFields.NAME, '?')}*"
                 f" | {f.get(ContactFields.STATUS, '?')}"
                 f" | 📞 {f.get(ContactFields.PHONE, '—')}"
                 f" | 🏢 {f.get(ContactFields.COMPANY, '—')}"
-                f"\n  ID: `{r['id']}`"
+                f"\n  ID: `{_record_id(r, required=True)}`"
             )
         return "\n".join(lines)
     except Exception as e:
@@ -303,7 +304,7 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
 
         lines = [f"👥 *אנשי קשר פעילים ({len(records)}):*\n"]
         for r in records:
-            f = r.get("fields", {})
+            f = _record_fields(r)
             followup = _fmt_date(f.get(ContactFields.FOLLOWUP_DATE, ""))
             lines.append(
                 f"• *{f.get(ContactFields.NAME, '?')}*"
@@ -349,7 +350,7 @@ def crm_add_deal(name: str, address: str, price: float,
             f"🏠 *עסקה נוספה:* {name}\n"
             f"📍 {address}\n"
             f"💰 ₪{price:,.0f} | מימון: {funding_cost_pct}%\n"
-            f"ID: `{rec['id']}`"
+            f"ID: `{_record_id(rec, required=True)}`"
         )
     except Exception as e:
         logger.error(f"crm_add_deal: {e}")
@@ -396,7 +397,7 @@ def crm_list_deals(status: str = "", identity=None) -> str:
 
         lines = [f"🏠 *עסקאות ({len(records)}):*\n"]
         for r in records:
-            f = r.get("fields", {})
+            f = _record_fields(r)
             funding = f.get(DealFields.FUNDING_COST, 0)
             flag    = " ⚠️" if funding > 9 else ""
             lines.append(
@@ -436,7 +437,7 @@ def crm_add_payment(name: str, amount: float, due_date: str,
             f"✅ *תשלום נרשם:* {name}\n"
             f"💰 ₪{amount:,.0f} | לתשלום: {_fmt_date(due_date)}\n"
             f"🔔 תזכורת תישלח: {remind_str} (חוק #8)\n"
-            f"ID: `{rec['id']}`"
+            f"ID: `{_record_id(rec, required=True)}`"
         )
     except Exception as e:
         logger.error(f"crm_add_payment: {e}")
@@ -461,7 +462,7 @@ def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
         lines = [f"💳 *תשלומים קרובים ({len(records)}):*\n"]
         total = 0
         for r in records:
-            f      = r.get("fields", {})
+            f      = _record_fields(r)
             amount = f.get(PaymentFields.AMOUNT, 0)
             total += amount
             due    = _fmt_date(f.get(PaymentFields.DUE_DATE, ""))
@@ -501,12 +502,12 @@ def crm_overdue_payments(identity=None) -> str:
         updated = 0
         lines   = [f"🚨 *{len(records)} תשלומים באיחור:*\n"]
         for r in records:
-            f      = r.get("fields", {})
+            f      = _record_fields(r)
             amount = f.get(PaymentFields.AMOUNT, 0)
             due    = _fmt_date(f.get(PaymentFields.DUE_DATE, ""))
             lines.append(f"• *{f.get(PaymentFields.NAME, '?')}* | ₪{amount:,.0f} | היה: {due}")
             try:
-                _patch(Tables.PAYMENTS, r["id"], {PaymentFields.STATUS: PaymentStatus.OVERDUE})
+                _patch(Tables.PAYMENTS, _record_id(r, required=True), {PaymentFields.STATUS: PaymentStatus.OVERDUE})
                 updated += 1
             except Exception:
                 pass

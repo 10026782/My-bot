@@ -18,6 +18,7 @@ from airtable_schema import (
     DecisionInboxFields, DecisionInboxChannel, DecisionInboxStatus,
 )
 from decision_matching import find_matching_decision, list_open_decisions
+from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, get_record, list_records
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ def register_decision_command(bot, get_identity):
                 "command": "update", "step": "text",
                 "decision": decision, "identity": identity, "created_at": _now_ts(),
             }
-            title = decision["fields"].get(DecisionFields.TITLE, "")
+            title = _record_fields(decision).get(DecisionFields.TITLE, "")
             bot.send_message(msg.chat.id, f"📋 *{title}*\n\n✍️ מה קרה?", parse_mode="Markdown")
 
         elif sub == "status":
@@ -234,7 +235,7 @@ def _handle_new_step(bot, msg, state):
         if record:
             bot.send_message(
                 msg.chat.id,
-                f"✅ *{state['title']}* נוצרה.\n🆔 `{record['id']}`",
+                f"✅ *{state['title']}* נוצרה.\n🆔 `{_record_id(record, required=True)}`",
                 parse_mode="Markdown",
             )
         else:
@@ -258,7 +259,7 @@ def _create_decision(identity, title: str, domain: str, exposure: float, stakeho
     record = {"id": record_id, "fields": fields}
 
     for name in stakeholder_names:
-        _create_stakeholder(identity, record["id"], name)
+        _create_stakeholder(identity, _record_id(record, required=True), name)
 
     return record
 
@@ -302,14 +303,14 @@ def _handle_update_step(bot, msg, state, get_identity):
         "raw_content": msg.text or "",
         "attachment": has_attachment,
         "Channel": DecisionEventChannel.TELEGRAM,
-        "_decision_id": decision["id"],
+        "_decision_id": _record_id(decision, required=True),
     }
 
     from decision_pipeline import run_pipeline
-    outcome = run_pipeline(event, decision["fields"])
+    outcome = run_pipeline(event, _record_fields(decision))
 
-    event_id = _create_decision_event(identity, decision["id"], event)
-    text = _format_pipeline_outcome(decision["fields"].get(DecisionFields.TITLE, ""), outcome, event)
+    event_id = _create_decision_event(identity, _record_id(decision, required=True), event)
+    text = _format_pipeline_outcome(_record_fields(decision).get(DecisionFields.TITLE, ""), outcome, event)
     bot.send_message(msg.chat.id, text, parse_mode="Markdown")
     if event_id:
         logger.info(f"[DecisionHub] event created id={event_id} halted_at={outcome['halted_at']}")
@@ -372,7 +373,7 @@ def _format_pipeline_outcome(title: str, outcome: dict, event: dict) -> str:
 # ── /decision status — כרטיס מלא ────────────────────────────────
 
 def _format_decision_card(decision: dict) -> str:
-    f = decision["fields"]
+    f = _record_fields(decision)
     title = f.get(DecisionFields.TITLE, "")
     draft = f.get(DecisionFields.CURRENT_DRAFT, "")
     exposure = f.get(DecisionFields.ESTIMATED_EXPOSURE, "")
@@ -381,17 +382,17 @@ def _format_decision_card(decision: dict) -> str:
     risk_no = f.get(DecisionFields.RISK_IF_NO, "")
     missing = f.get(DecisionFields.MISSING_INFO, "")
 
-    stakeholders = _list_stakeholders(decision["id"])
+    stakeholders = _list_stakeholders(_record_id(decision, required=True))
     stakeholder_lines = "\n".join(
-        f"  {_position_emoji(s['fields'].get(DecisionStakeholderFields.POSITION))} "
-        f"{_linked_label(s['fields'].get(DecisionStakeholderFields.CONTACT))} — "
-        f"{s['fields'].get(DecisionStakeholderFields.POSITION, '')}"
+        f"  {_position_emoji(_record_fields(s).get(DecisionStakeholderFields.POSITION))} "
+        f"{_linked_label(_record_fields(s).get(DecisionStakeholderFields.CONTACT))} — "
+        f"{_record_fields(s).get(DecisionStakeholderFields.POSITION, '')}"
         for s in stakeholders
     ) or "  (אין)"
 
-    events = _list_decision_events(decision["id"])
-    latest = _latest_event(decision["id"], events)
-    latest_summary = latest["fields"].get(DecisionEventFields.AI_SUMMARY, "") if latest else "(אין)"
+    events = _list_decision_events(_record_id(decision, required=True))
+    latest = _latest_event(_record_id(decision, required=True), events)
+    latest_summary = _record_fields(latest).get(DecisionEventFields.AI_SUMMARY, "") if latest else "(אין)"
     attention_summary = ""
     try:
         from decision_attention import build_attention_summary, calc_priority
@@ -416,7 +417,7 @@ def _format_decision_card(decision: dict) -> str:
     orchestrator_decision = {
         **decision,
         "fields": {
-            **decision["fields"],
+            **_record_fields(decision),
             DecisionFields.READINESS: readiness_result.status,
         },
     }
@@ -479,12 +480,12 @@ def _format_confidence_block(decision: dict, events: list) -> tuple:
     (decision_readiness.py) כדי שלא יחושב פעמיים (כולל AI Conflict Detection)."""
     from decision_confidence import calc_confidence, build_evidence_summary
 
-    domain = decision["fields"].get(DecisionFields.DOMAIN, "")
+    domain = _record_fields(decision).get(DecisionFields.DOMAIN, "")
     result = calc_confidence(events, domain=domain)
     missing_evidence = result.missing
     evidence_summary = build_evidence_summary(events)
 
-    _persist_confidence(decision["id"], result, missing_evidence, evidence_summary)
+    _persist_confidence(_record_id(decision, required=True), result, missing_evidence, evidence_summary)
 
     pct = int(result.score * 100)
     lines = [f"📊 ביטחון בהחלטה: {pct}%", f"📎 ראיות: {evidence_summary}"]
@@ -501,7 +502,7 @@ def _format_readiness_block(decision: dict, events: list, confidence_result) -> 
     from decision_readiness import calc_readiness, build_readiness_message
 
     result = calc_readiness(decision, events, confidence_result)
-    _persist_readiness(decision["id"], result)
+    _persist_readiness(_record_id(decision, required=True), result)
     return build_readiness_message(result), result
 
 
@@ -571,8 +572,8 @@ def _suggest_decision_link(bot, chat_id, inbox_id: str, text: str) -> None:
     match, score = _find_matching_decision(text)
 
     if match and score > 60:
-        title = match["fields"].get(DecisionFields.TITLE, "")
-        markup = _inbox_suggestion_keyboard(inbox_id, match["id"])
+        title = _record_fields(match).get(DecisionFields.TITLE, "")
+        markup = _inbox_suggestion_keyboard(inbox_id, _record_id(match, required=True))
         bot.send_message(chat_id, f"נראה כמו «{title}» — לשייך?", reply_markup=markup)
         return
 
@@ -594,7 +595,7 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
         return
 
     inbox_record = _at_get_record(Tables.DECISION_INBOX, inbox_id)
-    raw_text = inbox_record["fields"].get(DecisionInboxFields.RAW_INPUT, "") if inbox_record else ""
+    raw_text = _record_fields(inbox_record).get(DecisionInboxFields.RAW_INPUT, "") if inbox_record else ""
 
     event = {
         "raw_content": raw_text,
@@ -602,7 +603,7 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
         "Channel": DecisionEventChannel.TELEGRAM,
         "_decision_id": decision_id,
     }
-    outcome = run_pipeline(event, decision_record["fields"])
+    outcome = run_pipeline(event, _record_fields(decision_record))
 
     event_fields = {
         DecisionEventFields.DECISION: [decision_id],
@@ -623,7 +624,7 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
         patch_fields[DecisionInboxFields.LINKED_EVENT] = [event_id]
     _decision_storage().update(Tables.DECISION_INBOX, inbox_id, patch_fields, source="cmd_decision:inbox_link")
 
-    title = decision_record["fields"].get(DecisionFields.TITLE, "")
+    title = _record_fields(decision_record).get(DecisionFields.TITLE, "")
     text = _format_pipeline_outcome(title, outcome, event)
     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
     bot.answer_callback_query(call.id)
@@ -866,7 +867,7 @@ def _latest_event(decision_id: str, events: list | None = None) -> dict | None:
     events = events if events is not None else _list_decision_events(decision_id)
     if not events:
         return None
-    events.sort(key=lambda e: e["fields"].get(DecisionEventFields.EVENT_DATE, ""), reverse=True)
+    events.sort(key=lambda e: _record_fields(e).get(DecisionEventFields.EVENT_DATE, ""), reverse=True)
     return events[0]
 
 
@@ -932,7 +933,7 @@ def _decision_pick_keyboard(inbox_id: str, decisions: list):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     markup = InlineKeyboardMarkup(row_width=1)
     for d in decisions:
-        title = d["fields"].get(DecisionFields.TITLE, "?")
-        markup.add(InlineKeyboardButton(title, callback_data=f"dec_inbox_pick_choice:{inbox_id}:{d['id']}"))
+        title = _record_fields(d).get(DecisionFields.TITLE, "?")
+        markup.add(InlineKeyboardButton(title, callback_data=f"dec_inbox_pick_choice:{inbox_id}:{_record_id(d, required=True)}"))
     markup.add(InlineKeyboardButton("התעלם", callback_data=f"dec_inbox_ignore:{inbox_id}"))
     return markup
