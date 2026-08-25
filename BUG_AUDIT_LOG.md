@@ -5527,3 +5527,46 @@ CRITICAL: 0 · HIGH: 1 · MEDIUM: 1 (latent) · LOW: 2 · INFORMATIONAL (not sco
 - **→ #11 (already closed, no new gap):** `test_bugdh03_04_formula_injection.py` (BUG-DH-03/04, `cmd_decision.py::_resolve_decision_ref`, `decision_pipeline.py::maybe_supersede`, `core/lead_service.py::_search_formulas`) — טריטוריית תיקון אבטחת production (Airtable formula injection), כבר נושא Audit #11 שנסגר. הטסט עצמו high-fidelity, בודק את `escape_formula_value()` האמיתי — אין כאן #9 gap חדש.
 
 - **סטטוס:** 🔴 **OPEN — CURRENT MOCK FIDELITY GAPS**. לא בוצע remediation בסבב זה — תיעוד בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
+
+---
+
+## Audit #9 — Mock Fidelity — CLOSURE (Static Remediation)
+
+- **תאריך:** 25/08/2026
+- **Truth-Reset SHA (base):** `74808625cd59a26a06d666dfa266540e7f0d1c89` (origin/main, לאחר merge של ה-documentation-capture PR #1015)
+- **Scope:** תיקון סטטי בלבד לארבעת ה-findings שתועדו למעלה. לא בוצע audit חדש, לא הורחב scope, לא נפתחו מחדש #2/#3/#8/#10/#11/#18/#23/#24/כל מסלול אחר.
+- **Mode:** test/test-double-only fix. שינויי production code: 0.
+
+### FINDING #9-1 — CLOSED / VERIFIED
+- **תיקון:** `test_approval_concurrency.py` — `_owner()` מקבל `tenant_id="boss_hq"` מפורש; `_FakeContract` ברירת המחדל שונתה מ-`tenant_id=None` ל-`tenant_id="boss_hq"` (פרמטר, לא עוד hardcoded). אותו תיקון ב-`test_pr0c0_tma_approval_truthfulness.py`. `test_phase_4b2_wiring.py` כבר השתמש ב-tenant IDs ריאליסטיים תואמים — ללא צורך בתיקון.
+- **Negative-path assertion חדשה:** `test_approval_concurrency.py`'s Test 6 — contract עם `tenant_id="other_tenant"` מול identity עם `tenant_id="boss_hq"`, דרך אותו נתיב end-to-end (`_act`/`_claim_and_execute_approval`) כמו Test 5 (legacy row): HTTP 409, `action_gateway.approve()` אף פעם לא נקרא.
+- **וידוא:** `test_approval_concurrency.py` — 22/22 passed (כולל Test 6 החדש). `test_pr0c0_tma_approval_truthfulness.py` — 22/22 passed. `test_phase_4b2_wiring.py` (רגרסיה, לא נגעו בו) — 86/86 passed.
+- **CROSS-TRACK → #8 נשאר פתוח:** ה-negative-path assertion החדשה כאן מוכיחה שה-mock המתוקן משקף נכון את ה-production contract (חלק מ-#9-1 fidelity remediation בלבד) — היא **אינה** סוגרת/מחליפה את ה-#8 Test Gap הרחב יותר שנותב בסבב הקודם. #8 לא נבדק/לא נסגר כאן.
+
+### FINDING #9-2 — CLOSED / VERIFIED
+- **תיקון:** בכל 5 הקבצים (`test_bug077_tier3_auto_capture_gate.py`, `test_bug096_ingress_classifier_batch_bleed.py`, `test_bug098_followup_word_boundary.py`, `test_c89_preview_confirmation.py`, `test_tier2_silent_preview.py`) — `MockIdentity.is_internal` שונה מ-`return True` קבוע ל-`return self.role in ("owner", "partner", "manager", "employee")`, תואם בדיוק ל-`identity.py:151`. לא נמצא helper משותף קיים לשימוש חוזר (כל קובץ מגדיר `MockIdentity` בנפרד) — תוקן inline בכל אחד, בלי מסגרת mock חדשה.
+- **וידוא:** כל 5 קריאות ה-`MockIdentity(...)` הקיימות בכל קובץ משתמשות ב-role ברירת המחדל `"owner"` — התיקון לא שינה שום תוצאת בדיקה קיימת. נוספה אסרציה ממוקדת אחת בכל קובץ: `is_internal is True` ל-`role="owner"`, `is_internal is False` ל-`role="lead"`.
+- **תוצאות:** 5/5, 31/31, 18/18, 9/9, 9/9 passed (72/72 סה"כ, כולל 10 האסרציות החדשות).
+
+### FINDING #9-3 — CLOSED / VERIFIED
+- **תיקון:** `test_phase_4b_1b_durable_lifecycle.py`'s `LifecycleRepository.transition()` — נוסף בדיקת חוקיות מעבר לפני המוטציה, תוך שימוש חוזר ב-`ALLOWED_CONTRACT_TRANSITIONS` שיובא ישירות מ-`core.action_contract_repository` (לא הוכפלה טבלה עצמאית שנייה). ה-CAS הקיים (`expected_status`/`expected_version`) נשמר ללא שינוי.
+- **Negative-path test חדש:** `test_fake_lifecycle_repository_rejects_illegal_transition` — מעבר `pending -> executing` (לא ב-`ALLOWED_CONTRACT_TRANSITIONS["pending"]`) מעלה `ActionContractTransitionConflictError`; ה-contract נשאר `pending`.
+- **וידוא:** 17/18 passed תחת `pytest` (הכשל היחיד, `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`, **קיים מראש** על `origin/main` נקי — reproduced ב-`git stash`, ללא קשר לתיקון זה; לא נגעו בו, מחוץ ל-scope של #9-3). **הערה נלווית (לא #9, לא נסגר כאן):** קובץ זה מוגדר בסגנון `pytest` (`pytest.raises`, ללא `if __name__`), אבל CI's "Run test_*.py scripts" step מריץ אותו כ-`python3 file.py` פשוט — 0 בדיקות בפועל רצות באותו נתיב (exit 0 שקט). זהו ניתוב-CI concern (#8-adjacent), לא #9 mock-fidelity — לא נבדק/לא נסגר/לא תוקן כאן.
+
+### FINDING #9-4 — CLOSED / VERIFIED
+- **תיקון:** `tc8_test_repo_stub.py`'s `InMemoryTurnStateRepository.finalize`/`.release` — הוצא helper משותף `_owner_mutate()` שאוכף `state == "claimed"` וגם `operation_id` תואם וגם `expected_version` תואם (משקף את `core/turn_state_repository.py`'s `_owner_mutate()` WHERE clause), במקום מוטציה ללא-תנאי. `_Row` קיבל שדה `operation_id`, נשמר ב-`claim()`.
+- **Focused test חדש:** `test_tc8_repo_stub_fidelity.py` (קובץ standalone חדש, לא נגע בארבעת קבצי ה-approval-callback הצורכים) — מוכיח: (1) claimed/version/operation תקינים → success, (2) stale version → `TurnStateConflictError`, ללא מוטציה, (3) operation_id שגוי → `TurnStateConflictError`, ללא מוטציה, (4) `release()` על row שמעולם לא נתפס → `TurnStateConflictError`.
+- **וידוא:** `test_tc8_repo_stub_fidelity.py` — 6/6 passed. ארבעת קבצי ה-consumer (`test_bug112_telegram_approval_ttl.py`, `test_bug158_approval_callback_eventbus_ttl_recovery.py`, `test_bug_approval_callback_hardening.py`, `test_pr0c_telegram_callback_gateway.py`) — 30/30, 11/11, 39/39, 11/11 passed, ללא שינוי בהתנהגות (production flow תמיד מעביר `expected_version`/`operation_id` תואמים אמיתיים — ראה `app.py:2889-2934`).
+
+### Regression run (מעבר על התיקון כולו)
+1. Focused #9 tests (4 findings): כל ה-assertions החדשות/המתוקנות למעלה — PASS.
+2. Approval/TMA suite: `test_approval_concurrency.py`, `test_pr0c0_tma_approval_truthfulness.py`, `test_phase_4b2_wiring.py` — PASS (130/130).
+3. Identity/Router: `test_identity_smoke.py` (4/4), `core/router/test_router.py` (50/50 + Tier-4 gate), `test_integration.py` (4/4) — PASS.
+4. Lifecycle/action-contract: `test_phase_4b_1b_durable_lifecycle.py` — 17/18 (הכשל היחיד קיים-מראש, לא קשור, ר' #9-3 למעלה).
+5. Turn-state/approval-callback: `test_tc8_repo_stub_fidelity.py` (6/6) + 4 consumer files (91/91) — PASS.
+6. Full `test_*.py` loop (330 קבצים, אותו pattern כמו CI's "Run test_*.py scripts" step) — 328/330 files exit 0. שני ה-exceptions: (א) `test_phase_4b_1b_durable_lifecycle.py` — ר' #9-3 (לא בעיה בנתיב ה-CI בפועל, כי 0 בדיקות רצות שם ממילא). (ב) `test_bug153_create_task_reconfirmation_after_rejection.py` — **קיים-מראש, לא קשור**: 3 כשלים reproduced זהים על `origin/main` נקי (`git stash`), אינו נוגע בשום קובץ שתוקן כאן. לא נבדק/לא נחקר לעומק/לא נגע בו — מחוץ ל-scope לחלוטין.
+7. `smoke_tests.py` — PASS (8/8 checks).
+8. `python3 -m py_compile` על כל הקבצים ששונו — PASS.
+9. `git diff --check` — PASS (ריק).
+
+- **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED** — 4/4 findings מתוקנים ומאומתים סטטית על branch זה. #9-1's CROSS-TRACK → #8 (negative-path Test Gap) **נשאר פתוח, לא נסגר על ידי remediation זה**. אימות production (post-merge, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.

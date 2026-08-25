@@ -88,12 +88,13 @@ def chk(desc: str, cond: bool) -> None:
         failed += 1
 
 
-def _owner() -> SimpleNamespace:
+def _owner(tenant_id: str = "boss_hq") -> SimpleNamespace:
     return SimpleNamespace(
         is_owner=True,
         user_id="owner_1",
         display_name="Owner",
         role="owner",
+        tenant_id=tenant_id,
     )
 
 
@@ -114,19 +115,20 @@ def _approval_rec(contract_id: str = "c1", legacy: bool = False) -> dict:
 # ── Fake ActionGateway: full control over contract lifecycle, no Airtable ──
 
 class _FakeContract:
-    def __init__(self, contract_id: str, status: str = "pending", created_at: float | None = None):
+    def __init__(self, contract_id: str, status: str = "pending", created_at: float | None = None,
+                 tenant_id: str = "boss_hq"):
         self.contract_id = contract_id
         self.status = status
         # Phase 4B-2 follow-up: _is_canonical_tma_contract() reads these
         # directly — defaults match this file's tma_write happy path and
-        # _owner()'s identity, which has no tenant_id attribute at all
-        # (getattr(..., "tenant_id", None) is None), so tenant_id here is
-        # None too rather than a real tenant string.
+        # _owner()'s identity, both in tenant "boss_hq" (Audit #9-1 fidelity
+        # fix: a real matching tenant_id, not two Nones that vacuously equal
+        # each other and never actually exercise the tenant-scoping check).
         self.approval_policy = "approval"
         self.tool_name = "tma_write"
         self.trusted_source = "tma_api"
         self.origin_channel = "tma"
-        self.tenant_id = None
+        self.tenant_id = tenant_id
         # C84: real ActionContract.created_at is a required field (no
         # default) — always fresh ("now") unless a test explicitly wants an
         # aged contract, so every pre-existing test here keeps passing
@@ -341,6 +343,26 @@ with _app.test_request_context(
 
 chk("Test5: HTTP 409 for legacy row", code == 409)
 chk("Test5: action_gateway.approve() never called for a legacy row", gw5.approve_calls == [])
+
+
+# ══════════════════════════════════════════════════════════════════
+# 6. Audit #9-1 fidelity: contract tenant != identity tenant — refused,
+#    never touches the gateway (_is_canonical_tma_contract's tenant-scope
+#    clause, exercised end-to-end through the same claim path as Test 5).
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 6: Cross-tenant contract is refused, not executed ───")
+
+gw6 = _FakeGateway()
+gw6.contracts["c6"] = _FakeContract("c6", tenant_id="other_tenant")
+
+with _app.test_request_context(
+    "/api/approvals/recTEST123", method="POST", json={"action": "approve"},
+):
+    with _patched(gw6, lambda t, rid: _approval_rec(contract_id="c6"), _record_patch):
+        resp, code = _act("recTEST123", identity=_owner(tenant_id="boss_hq"))
+
+chk("Test6: HTTP 409 for cross-tenant contract", code == 409)
+chk("Test6: action_gateway.approve() never called for a cross-tenant contract", gw6.approve_calls == [])
 
 
 # ══════════════════════════════════════════════════════════════════
