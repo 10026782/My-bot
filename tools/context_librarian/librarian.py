@@ -724,11 +724,14 @@ def _catalog_referenced_paths(catalog: Catalog) -> set[str]:
             "docs/context_librarian/policies/policy_registry.json",
             "docs/context_librarian/reconciliation_state.json",
             "docs/context_librarian/budget_history.json",
+            "docs/context_librarian/token_budget_policy.json",
+            "docs/context_librarian/token_calibration.json",
             "tools/context_librarian/__init__.py",
             "tools/context_librarian/__main__.py",
             "tools/context_librarian/benchmark_token_estimate.py",
             "tools/context_librarian/budget_history.py",
             "tools/context_librarian/budget_preflight.py",
+            "tools/context_librarian/token_budget_policy.py",
             "tools/context_librarian/librarian.py",
             "tools/context_librarian/local_post_merge_check.sh",
             "tools/context_librarian/manage_hooks.py",
@@ -2067,7 +2070,16 @@ def build_bundle(
                 breakdown=breakdown,
             )
         )
+    from .token_budget_policy import enforcement_for_overflow
+
     if actual_tokens > token_budget:
+        enforcement, _, _ = enforcement_for_overflow(
+            catalog.repo_root,
+            actual_tokens - token_budget,
+            explicit_budget=max_tokens is not None,
+        )
+        if enforcement != "BLOCK":
+            return bundle
         raise ContextLibrarianError(
             _format_budget_overflow(
                 estimated_tokens=actual_tokens,
@@ -2098,6 +2110,12 @@ class BundleEstimate:
     selected_documents: int = 0
     document_budget: int = 0
     document_fits: bool = True
+    overflow_tokens: int = 0
+    enforcement: str = "PASS"
+    hard_safety_ceiling: int = 0
+    growth_signal: str = "INFO"
+    calibrated_tokens: int | None = None
+    calibration_ratio: float | None = None
 
 
 def estimate_bundle(
@@ -2148,6 +2166,20 @@ def estimate_bundle(
         verification_ledger=verification_ledger,
     )
     del bundle  # dry run: טקסט ה-bundle המרונדר עצמו לא מעניין את הקורא
+    from .token_budget_policy import (
+        calibrated_estimate,
+        enforcement_for_overflow,
+    )
+
+    overflow_tokens = max(actual_tokens - token_budget, 0)
+    enforcement, hard_overflow, growth_signal = enforcement_for_overflow(
+        catalog.repo_root,
+        overflow_tokens,
+        explicit_budget=max_tokens is not None,
+    )
+    calibrated_tokens, calibration_ratio = calibrated_estimate(
+        catalog.repo_root, task_type, actual_tokens
+    )
     return BundleEstimate(
         task_type=task_type,
         query=query,
@@ -2157,6 +2189,12 @@ def estimate_bundle(
         selected_documents=selected_documents,
         document_budget=document_budget,
         document_fits=selected_documents <= document_budget,
+        overflow_tokens=overflow_tokens,
+        enforcement=enforcement,
+        hard_safety_ceiling=token_budget + hard_overflow,
+        growth_signal=growth_signal,
+        calibrated_tokens=calibrated_tokens,
+        calibration_ratio=calibration_ratio,
     )
 
 

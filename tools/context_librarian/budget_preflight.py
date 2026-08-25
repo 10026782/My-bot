@@ -12,6 +12,7 @@ from .librarian import (
     ContextLibrarianError,
     estimate_bundle,
 )
+from .token_budget_policy import calibration_summary
 
 
 ESTIMATOR_ID = "chars_div_4"
@@ -147,6 +148,7 @@ def build_budget_preflight(repo_root: Path, catalog) -> dict[str, Any]:
         )
 
     commit = _current_commit(repo_root)
+    calibration = calibration_summary(repo_root)
     rows: list[dict[str, Any]] = []
     for entry in sorted(mappings, key=lambda item: item.profile):
         profile = catalog.profiles[entry.profile]
@@ -182,10 +184,20 @@ def build_budget_preflight(repo_root: Path, catalog) -> dict[str, Any]:
             "headroom_percent": round(headroom_percent, 2),
             "overflow_tokens": overflow_tokens,
             "fits": usage <= budget,
-            "health": classify_health(headroom_percent),
+            "health": (
+                "FAIL" if estimate.enforcement == "BLOCK"
+                else "WARN" if estimate.enforcement == "WARN"
+                else classify_health(headroom_percent)
+            ),
             "estimator": ESTIMATOR_ID,
             "query_id": entry.query_id,
             "commit": commit,
+            "overflow_tokens": estimate.overflow_tokens,
+            "enforcement": estimate.enforcement,
+            "hard_safety_ceiling": estimate.hard_safety_ceiling,
+            "growth_signal": estimate.growth_signal,
+            "calibrated_tokens": estimate.calibrated_tokens,
+            "calibration_ratio": estimate.calibration_ratio,
         }
         _validate_row(row)
         rows.append(row)
@@ -205,6 +217,7 @@ def build_budget_preflight(repo_root: Path, catalog) -> dict[str, Any]:
             "fail_count": health_counts["FAIL"],
             "lowest_headroom_profile": lowest["profile"],
             "lowest_headroom_tokens": lowest["headroom_tokens"],
+            "calibration": calibration,
         },
     }
     _validate_report(report, len(configured))
@@ -215,6 +228,8 @@ def _validate_row(row: dict[str, Any]) -> None:
     required = {
         "profile", "budget", "usage", "headroom_tokens", "headroom_percent",
         "overflow_tokens", "fits", "health", "estimator", "query_id", "commit",
+        "enforcement", "hard_safety_ceiling", "growth_signal",
+        "calibrated_tokens", "calibration_ratio",
     }
     if set(row) != required:
         raise ContextLibrarianError("budget preflight result schema is malformed")
@@ -224,6 +239,12 @@ def _validate_row(row: dict[str, Any]) -> None:
         raise ContextLibrarianError("budget preflight fits value is malformed")
     if row["overflow_tokens"] != max(row["usage"] - row["budget"], 0):
         raise ContextLibrarianError("budget preflight overflow value is malformed")
+    if row["enforcement"] not in {"PASS", "WARN", "BLOCK"}:
+        raise ContextLibrarianError("budget preflight enforcement is malformed")
+    if row["hard_safety_ceiling"] < row["budget"]:
+        raise ContextLibrarianError("budget preflight hard safety ceiling is malformed")
+    if row["enforcement"] == "BLOCK" and row["usage"] <= row["hard_safety_ceiling"]:
+        raise ContextLibrarianError("budget preflight block status is malformed")
 
 
 def _validate_report(report: dict[str, Any], configured_count: int) -> None:
@@ -239,12 +260,15 @@ def _validate_report(report: dict[str, Any], configured_count: int) -> None:
     aggregate = report["aggregate"]
     expected = {
         "total_profiles", "pass_count", "warn_count", "critical_count", "fail_count",
-        "lowest_headroom_profile", "lowest_headroom_tokens",
+        "lowest_headroom_profile", "lowest_headroom_tokens", "calibration",
     }
     if not isinstance(aggregate, dict) or set(aggregate) != expected:
         raise ContextLibrarianError("budget preflight aggregate schema is malformed")
     if aggregate["total_profiles"] != configured_count:
         raise ContextLibrarianError("budget preflight aggregate count is malformed")
+    calibration = aggregate["calibration"]
+    if not isinstance(calibration, dict) or calibration.get("status") not in {"CURRENT", "STALE"}:
+        raise ContextLibrarianError("budget preflight calibration status is malformed")
 
 
 def format_budget_preflight_table(report: dict[str, Any]) -> str:
@@ -256,7 +280,8 @@ def format_budget_preflight_table(report: dict[str, Any]) -> str:
         lines.append(
             f"{row['profile']}\t{row['health']}\t"
             f"{row['usage']}/{row['budget']}\t{row['headroom_tokens']}\t"
-            f"{row['headroom_percent']:.2f}%\t{row['overflow_tokens']}"
+            f"{row['headroom_percent']:.2f}%\t{row['overflow_tokens']}\t"
+            f"{row['enforcement']}\t{row['growth_signal']}"
         )
     aggregate = report["aggregate"]
     lines.append(
@@ -268,6 +293,10 @@ def format_budget_preflight_table(report: dict[str, Any]) -> str:
         f"fail={aggregate['fail_count']}\t"
         f"lowest={aggregate['lowest_headroom_profile']} "
         f"({aggregate['lowest_headroom_tokens']} tokens)"
+    )
+    lines.append(
+        f"calibration\t{aggregate['calibration']['status']}\t"
+        f"profiles={aggregate['calibration']['profiles']}"
     )
     return "\n".join(lines)
 

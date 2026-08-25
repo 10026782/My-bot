@@ -86,13 +86,14 @@ dependencies, then optional evidence; ties are resolved by status, verification
 date/commit, and node ID. Historical and superseded nodes are excluded by
 default. Planning-only material must be explicitly allowed by the profile.
 
-The token budget is enforced with `ceil(characters / 4)` — a character-count
-proxy, not a real Anthropic tokenizer count. This heuristic has not yet been
-benchmarked against real token counts, so it must not be treated as a
-conservative (i.e. never-understating) ceiling; see
-`TOKEN_ESTIMATION_BENCHMARK.md` for the pending measurement before relying on
-it for anything beyond a rough estimate. Safety text and mandatory decisions
-reserve budget first. If they cannot fit, the command fails closed.
+The token budget uses `ceil(characters / 4)` as a deterministic growth signal,
+not as a real Anthropic tokenizer count. Small proxy overflows are reported as
+warnings; the separate hard safety ceiling remains blocking. Periodic real
+token calibration is stored in `token_calibration.json` and stale or missing
+calibration reports `CALIBRATION_STALE` without failing per-PR CI. See
+`TOKEN_ESTIMATION_BENCHMARK.md` for the manual calibration workflow. Safety
+text and mandatory decisions reserve budget first; structural and hard-safety
+violations still fail closed.
 
 ## Freshness and evidence
 

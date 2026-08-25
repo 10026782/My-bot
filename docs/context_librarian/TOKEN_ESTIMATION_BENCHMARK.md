@@ -10,7 +10,7 @@ Hebrew text, and code do not all average 4 characters per token, and no
 comparison against a real tokenizer had been run.
 
 `tools/context_librarian/benchmark_token_estimate.py` builds a real bundle
-for each of the 7 task profiles (using representative queries that pull in
+for each of the 8 task profiles (using representative queries that pull in
 the same Hebrew/English/code mix real bundles contain) and compares the
 `chars / 4` estimate against a real token count from Anthropic's
 `messages.count_tokens` API (already available via the `anthropic` package in
@@ -29,7 +29,8 @@ output.
 ANTHROPIC_API_KEY=<key> python3 tools/context_librarian/benchmark_token_estimate.py
 ```
 
-Paste the full output below, under a dated heading, before changing
+Paste the full output below, under a dated heading, and store normalized rows
+in `docs/context_librarian/token_calibration.json` before changing
 `_CHARS_PER_APPROXIMATE_TOKEN` in `librarian.py`. The script itself prints a
 "conservative divisor" recommendation (the largest divisor that would not
 have understated real token usage for any sampled bundle) — do not lower the
@@ -47,3 +48,10 @@ the most "accurate" one on average.
 ## Results
 
 _(none yet — see Status above)_
+
+## Enforcement split
+
+The `chars / 4` value is a deterministic growth signal. Small overflow is a
+warning, not a hard failure. A separate hard safety ceiling remains blocking.
+Real token calibration is periodic and is never called by per-PR CI. Missing
+or stale calibration is reported as `CALIBRATION_STALE`, not as a CI failure.

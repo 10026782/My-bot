@@ -91,6 +91,9 @@ jobs:
       - name: Context Librarian catalog validation (N17 item 4 — CI drift detection)
         run: python -m tools.context_librarian validate
 
+      - name: Context Librarian budget growth signal (warning band; hard ceiling blocks)
+        run: python -m tools.context_librarian budget-preflight --all-profiles
+
       # Three-outcome reconciliation (CLEAN / AUTO_MAINTENANCE_REQUIRED /
       # OWNER_DECISION_REQUIRED) replaces the old binary CHANGES_REQUIRED
       # gate here — see docs/context_librarian/RECONCILIATION.md. Only

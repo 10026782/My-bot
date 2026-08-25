@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "growth_signal_estimator": "chars_div_4",
+  "small_overflow_warning_tokens": 64,
+  "hard_safety_overflow_tokens": 256,
+  "calibration_stale_after_days": 90
+}
