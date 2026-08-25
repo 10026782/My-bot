@@ -86,6 +86,9 @@ class Intent:
     # Tier 11 — Engineering / meta (SPEC-ROUTER-06)
     ENGINEERING_NOTE  = "engineering_note"
 
+    # Marketing bridge — fixed, validated /marketing_new action
+    DRAFT_MARKETING_CREATIVES = "draft_marketing_creatives"
+
     ALL = {
         GREETING, SMALLTALK, BOT_STATUS_CHECK,
         ASK_QUESTION, REQUEST_INFO, SUMMARIZE, TRANSLATE, EXPLAIN,
@@ -98,7 +101,7 @@ class Intent:
         GENERATE_REPORT, FINANCIAL_REPORT, SALES_REPORT,
         RESEARCH_TOPIC, RESEARCH_COMPANY,
         SYSTEM_STATUS, ADMIN_ACTION,
-        UNKNOWN, ENGINEERING_NOTE,
+        UNKNOWN, ENGINEERING_NOTE, DRAFT_MARKETING_CREATIVES,
     }
 
 

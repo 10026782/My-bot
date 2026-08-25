@@ -166,6 +166,13 @@ def _materialize_demand_fields(demand_type: str, answers: dict) -> dict:
 
 # ── Registration ─────────────────────────────────────────────────
 
+def _create_marketing_execution_context():
+    from core import create_execution_context, create_operation
+    from core.turn_coordinator_runtime import resolve_marketing_creative_drafting_capability
+
+    capability = resolve_marketing_creative_drafting_capability()
+    return create_execution_context(capability, create_operation(capability))
+
 def register_marketing_command(bot, get_identity):
     """נקרא מ-app.py פעם אחת ב-startup."""
     try:
@@ -331,7 +338,12 @@ def register_marketing_command(bot, get_identity):
         _pending.pop(uid, None)
         bot.send_message(msg.chat.id, "⏳ יוצר דרישה ומרכיב 3 רעיונות...")
 
-        result = _create_demand_and_generate_ideas(state, triggered_by=f"telegram:{identity.user_id}")
+        execution_context = _create_marketing_execution_context()
+        result = _create_demand_and_generate_ideas(
+            state,
+            triggered_by=f"telegram:{identity.user_id}",
+            execution_context=execution_context,
+        )
         if not result["ok"]:
             bot.send_message(msg.chat.id, f"❌ {result['error']}")
             return
@@ -651,7 +663,12 @@ def _parse_and_render_creative_proposals(raw: str, facts, expected_count: int = 
     return True, rendered, ""
 
 
-def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown") -> dict:
+def _create_demand_and_generate_ideas(
+    state: dict,
+    triggered_by: str = "unknown",
+    *,
+    execution_context=None,
+) -> dict:
     """
     Returns {"ok": True, "creative_id": ..., "ideas": [str, str, str]} or
     {"ok": False, "error": str}. Creates the Demand record, then makes one
@@ -706,6 +723,7 @@ def _create_demand_and_generate_ideas(state: dict, triggered_by: str = "unknown"
                 "החזר אך ורק JSON תקין בפורמט המבוקש, ללא טקסט נוסף."
             ),
             messages=[{"role": "user", "content": instruction}],
+            execution_context=execution_context,
         )
     except Exception as e:
         return {"ok": False, "error": f"קריאת ה-AI נכשלה: {e}"}
