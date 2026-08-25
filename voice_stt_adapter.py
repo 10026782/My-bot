@@ -76,9 +76,9 @@ def _transcribe_openai(
     """Returns (raw_transcript, language, duration_seconds). Raises on failure.
 
     duration_seconds comes from OpenAI's own verbose_json response (real
-    provider-reported audio length) — never estimated from file size, so
-    STT cost (priced per minute, see core/model_pricing.py) is billed
-    against a real quantity or not recorded at all, never a guess.
+    provider-reported audio length), or remains None when both provider
+    duration fields are absent. Unknown duration is recorded as unknown,
+    never estimated from file size.
     """
     from openai import OpenAI
 
@@ -97,26 +97,22 @@ def _transcribe_openai(
         usage = getattr(resp, "usage", None)
         duration = getattr(usage, "seconds", None) if usage is not None else None
     request_id = getattr(resp, "_request_id", None)
+    measurement_status = "measured" if duration is not None else "unknown"
 
     # Cost Telemetry Reliability PR2 (shadow only): durable
     # provider/service/model-generic recording — additive, doesn't feed
     # AI_Usage_Daily or EMERGENCY_STOP_AI yet.
     try:
         from core.usage_telemetry import record_stt_usage
-        if duration is not None:
-            record_stt_usage(
-                source           = "voice_stt_adapter",
-                model            = stt_model,
-                duration_seconds = float(duration),
-                caller           = "voice_stt_adapter._transcribe_openai",
-                request_id       = request_id,
-                **usage_attribution_from_context(execution_context),
-            )
-        else:
-            logger.error(
-                "[voice_stt] OpenAI response had no duration (verbose_json expected) — "
-                "STT usage NOT recorded for this call rather than guessing a duration."
-            )
+        record_stt_usage(
+            source           = "voice_stt_adapter",
+            model            = stt_model,
+            duration_seconds = float(duration) if duration is not None else None,
+            measurement_status = measurement_status,
+            caller           = "voice_stt_adapter._transcribe_openai",
+            request_id       = request_id,
+            **usage_attribution_from_context(execution_context),
+        )
     except Exception as e:
         logger.error(f"[voice_stt] usage recording failed (non-fatal): {e}")
 

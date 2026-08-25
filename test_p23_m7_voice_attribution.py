@@ -108,8 +108,14 @@ def test_missing_duration_and_telemetry_failure_remain_non_fatal(monkeypatch, tm
     path = tmp_path / "voice.ogg"
     path.write_bytes(b"audio")
 
-    assert voice_stt_adapter._transcribe_openai(str(path), execution_context=_context())[2] is None
-    assert events == []
+    context = _context()
+    assert voice_stt_adapter._transcribe_openai(str(path), execution_context=context)[2] is None
+    assert len(events) == 1
+    assert events[0]["duration_seconds"] is None
+    assert events[0]["measurement_status"] == "unknown"
+    assert events[0]["capability_id"] == "media.voice_transcription"
+    assert events[0]["execution_class"] == "NARROW_MODEL"
+    assert events[0]["operation_id"] == context.operation.operation_id
 
     provider.duration = 1.25
     monkeypatch.setattr(
@@ -153,6 +159,28 @@ def test_provider_usage_duration_fallback_reaches_event_and_transcript(monkeypat
     assert len(events) == 1
     assert events[0]["duration_seconds"] == 3.75
     assert events[0]["request_id"] == "req-provider-2"
+
+
+def test_missing_both_duration_sources_records_one_unknown_event_with_request_id(monkeypatch, tmp_path):
+    provider = FakeTranscriptions(duration=None, usage_seconds=None, request_id="req-provider-unknown")
+    FakeOpenAI.transcriptions = provider
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    events = []
+    monkeypatch.setattr("core.usage_telemetry.record_stt_usage", lambda **kwargs: events.append(kwargs))
+    path = tmp_path / "voice.ogg"
+    path.write_bytes(b"audio")
+    context = _context()
+
+    raw, language, duration = voice_stt_adapter._transcribe_openai(
+        str(path), execution_context=context,
+    )
+
+    assert (raw, language, duration) == ("שלום", "he", None)
+    assert len(events) == 1
+    assert events[0]["measurement_status"] == "unknown"
+    assert events[0]["duration_seconds"] is None
+    assert events[0]["request_id"] == "req-provider-unknown"
+    assert events[0]["operation_id"] == context.operation.operation_id
 
 
 def test_missing_provider_request_id_remains_none(monkeypatch, tmp_path):
