@@ -925,6 +925,56 @@
         }
       },
       "last_observed_commit": "11c707ecaf9f8e83947b1f04df162a5702a5fadf"
+    },
+    {
+      "id": "decision.operation_identity_authority",
+      "name": "core/operation_identity.py is canonical for operation identity",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "immutable operation identity creation after capability/action selection and before approval or direct execution",
+        "precedence": "OperationIdentity is the sole authority for operation identity; ActionGateway, providers, telemetry, workflow, and idempotency layers may reference it but must not recreate it"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "core/operation_identity.py"
+      ],
+      "test_paths": [
+        "core/test_operation_identity.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/CROSS_LAYER_AUTHORITY_CONTRACT_V1.md",
+          "role": "cross-layer ownership boundary",
+          "status": "active"
+        },
+        {
+          "path": "GOVERNANCE_RULES.md",
+          "role": "single-source-of-truth governance rules",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-25",
+      "last_verified_commit": "74c56b607721ce0afe10c0e96adc34dcb19cee4b",
+      "confidence": 0.9,
+      "notes": [
+        "Owner decision for PR #978: CREATE NEW NODE after the pre-merge gate reported NO_POLICY_MATCH for core/operation_identity.py.",
+        "Scope is deliberately limited to the immutable OperationIdentity contract and pure ResolvedCapability-backed factory. Workflow identity, ActionContract persistence, telemetry, producers, and runtime propagation remain owned by their separate tracks."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_RUNTIME_AUTHORITY",
+          "role": "operation_identity_authority",
+          "authority": true,
+          "purpose": "establishes the sole operation identity creation boundary without performing routing, approval, execution, workflow creation, or telemetry",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "74c56b607721ce0afe10c0e96adc34dcb19cee4b"
     }
   ],
   "edges": [
