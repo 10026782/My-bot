@@ -10,6 +10,7 @@ from core.router.ownership_contracts import (
     IntentOwnershipRegistry,
     ResolvedCapability,
     ResolverResult,
+    lookup_resolved_capability,
     resolve_capability,
 )
 from core.router.route_decision import Handler
@@ -94,22 +95,46 @@ def test_execution_class_is_closed_and_resolved_capability_is_immutable():
         approval_risk_ref="route.policy",
         fallback_ref="none",
     )
-    assert resolve_capability(capability.capability_id, {capability.capability_id: capability}) is capability
+    assert lookup_resolved_capability(
+        capability.capability_id, {capability.capability_id: capability}
+    ) is capability
     with pytest.raises((AttributeError, TypeError)):
         capability.capability_id = "task.create"
     with pytest.raises(TypeError):
         ResolvedCapability("bad", "FULL_AGENT")
 
 
-def test_resolution_is_fail_closed_and_does_not_infer_full_agent():
-    calls = []
-    capability = ResolvedCapability("task.create", ExecutionClass.DETERMINISTIC)
-    capabilities = {capability.capability_id: capability}
+def test_resolution_uses_existing_ownership_and_fails_closed():
+    ownership = IntentOwnershipDecision("create_task", "task_builder", "task intent", 1.0)
+    capability = ResolvedCapability(
+        "task.create", ExecutionClass.DETERMINISTIC, executor_ref="task_gateway"
+    )
+    candidates = {ownership.intent: (capability,)}
 
-    assert resolve_capability("task.create", capabilities).execution_class is ExecutionClass.DETERMINISTIC
-    assert calls == []
+    assert resolve_capability(ownership, candidates) is capability
     with pytest.raises(CapabilityResolutionError):
-        resolve_capability("missing.bounded_capability", capabilities)
+        resolve_capability(
+            IntentOwnershipDecision("missing", "task_builder", "task intent", 1.0),
+            candidates,
+        )
+
+
+def test_resolution_rejects_ambiguous_candidates_without_fallback():
+    ownership = IntentOwnershipDecision("create_task", "task_builder", "task intent", 1.0)
+    candidates = {
+        ownership.intent: (
+            ResolvedCapability("task.create", ExecutionClass.DETERMINISTIC, executor_ref="task_gateway"),
+            ResolvedCapability("general.reasoning", ExecutionClass.FULL_AGENT, executor_ref="agent.loop"),
+        ),
+    }
+
+    with pytest.raises(CapabilityResolutionError):
+        resolve_capability(ownership, candidates)
+
+
+def test_resolved_capability_requires_executor_identity():
+    with pytest.raises(ValueError):
+        ResolvedCapability("task.create", ExecutionClass.DETERMINISTIC)
 
 
 def test_capability_identity_is_independent_from_tool_identity():

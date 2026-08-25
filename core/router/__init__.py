@@ -15,6 +15,7 @@ from .ownership_contracts import (
     IntentOwnershipRegistry,
     ResolvedCapability,
     ResolverResult,
+    lookup_resolved_capability,
     resolve_capability,
 )
 from .task_builders import (
@@ -53,6 +54,7 @@ __all__ = [
     "IntentOwnershipDecision", "CanonicalActionProposal", "ResolverResult",
     "IntentOwnershipRegistry",
     "CapabilityResolutionError", "ExecutionClass", "ResolvedCapability",
+    "lookup_resolved_capability",
     "resolve_capability",
     "build_create_task_proposal", "build_update_task_proposal",
     "build_complete_task_proposal",

@@ -52,13 +52,15 @@ class ResolvedCapability:
         ):
             if not isinstance(getattr(self, name), str):
                 raise TypeError(f"{name} must be a string")
+        if not self.executor_ref.strip():
+            raise ValueError("executor_ref is required")
 
 
-def resolve_capability(
+def lookup_resolved_capability(
     capability_id: str,
     capabilities: Mapping[str, ResolvedCapability],
 ) -> ResolvedCapability:
-    """Resolve a caller-composed capability map without I/O or fallback."""
+    """Look up a known capability by id; this is not authority resolution."""
     if not isinstance(capability_id, str) or not capability_id.strip():
         raise CapabilityResolutionError("capability_id is required")
     resolved = capabilities.get(capability_id)
@@ -69,6 +71,25 @@ def resolve_capability(
     if resolved.capability_id != capability_id:
         raise CapabilityResolutionError("capability map key does not match capability_id")
     return resolved
+
+
+def resolve_capability(
+    ownership: "IntentOwnershipDecision",
+    candidates_by_intent: Mapping[str, tuple[ResolvedCapability, ...]],
+) -> ResolvedCapability:
+    """Resolve exactly one capability from an existing ownership decision."""
+    if not isinstance(ownership, IntentOwnershipDecision):
+        raise TypeError("ownership must be an IntentOwnershipDecision")
+    candidates = candidates_by_intent.get(ownership.intent, ())
+    if not isinstance(candidates, tuple) or not all(
+        isinstance(candidate, ResolvedCapability) for candidate in candidates
+    ):
+        raise TypeError("capability candidates must be a tuple of ResolvedCapability")
+    if len(candidates) != 1:
+        raise CapabilityResolutionError(
+            f"capability resolution requires exactly one match for intent: {ownership.intent}"
+        )
+    return candidates[0]
 
 
 @dataclass(frozen=True)
