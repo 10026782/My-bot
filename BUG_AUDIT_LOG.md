@@ -34,6 +34,23 @@
 
 ---
 
+## Audit #3 — Data Contract — STILL OPEN — CURRENT DATA CONTRACT GAP
+
+- **Truth-reset:** `origin/main` `00853b09f1c65a53535240545ba410da012c14f3` (26/08/2026).
+- **Original findings:** **5 CLOSED** — #1, #3, #4, #5, #6. **1 DEFERRED** — #2, `DEFERRED — LIVE/SCHEMA CONTRACT DECISION`.
+- **Finding #1:** **CLOSED** — LeadMemory is update/enrichment-only; canonical `create_lead()` remains the sole Lead writer. Remediation commit `bad0c04`, merged through PR #1000.
+- **Finding #2:** **DEFERRED — LIVE/SCHEMA CONTRACT DECISION** — UTM/schema contract remains deferred; no production/schema remediation is implied by this status.
+- **Finding #3:** **CLOSED** — Deal status/stage normalization is canonicalized at the CRM boundary. Remediation commit `2791195`, merged through PR #1002.
+- **Finding #4:** **CLOSED** — unsupported Contact notes are explicit rather than silently dropped. Remediation commit `2791195`, merged through PR #1002.
+- **Finding #5:** **CLOSED** — Payment `contact_id` persists through the canonical relation field. Remediation commit `2791195`, merged through PR #1002.
+- **Finding #6:** **CLOSED** — typed Payment results reach reminders without reparsing presentation text. Remediation commit `2791195`, merged through PR #1002.
+- **Additional routed finding — I3:** **HIGH CURRENT GAP**, owned by **#3 Data Contract**. Provider-specific IDs are still written through the field `"Telegram File ID"` for non-Telegram providers.
+- **I3 evidence:** `airtable_schema.py:636` defines `Logical Media Key`; `media_gateway.py:64` still writes `TELEGRAM_FILE_ID` and `media_gateway.py:72` additionally writes `LOGICAL_MEDIA_KEY`; `media_handler.py:574,616,658`; `app.py:6459-6463`; `app.py:6748-6752`.
+- **I3 interpretation:** `Logical Media Key` partially remediates identity/idempotency, but does not close I3 because provider-specific IDs continue to use a Telegram-named generic storage column. I3 is **not deferred**; no reopen trigger exists because it is currently active.
+- **Classification:** **#3 STILL OPEN — CURRENT DATA CONTRACT GAP**; 5 original findings closed, 1 original finding deferred, and 1 HIGH residual current gap (I3).
+
+---
+
 ## לוג באגים
 
 ### BUG-001 — PersonalMode field names mismatch
