@@ -109,6 +109,28 @@ def _added_line_ranges() -> dict[str, set[int]]:
     return ranges
 
 
+def _baseline_findings(path: str) -> set[tuple[str, str]]:
+    """Return implementation identities already present on origin/main.
+
+    Added line ranges are only a delta locator.  A harmless move or unrelated
+    insertion can put an existing writer/store definition on an added line, so
+    compare its stable path/symbol identity with the canonical main snapshot
+    before treating it as a new authority surface.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "show", f"origin/main:{path}"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    return {finding.key for finding in scan_source(path, result.stdout)}
+
+
 def load_registrations() -> dict[tuple[str, str], tuple[str, str]]:
     registrations: dict[tuple[str, str], tuple[str, str]] = {}
     if not REGISTRY.exists():
@@ -134,8 +156,11 @@ def audit() -> tuple[list[Finding], list[Finding], dict[tuple[str, str], tuple[s
         source_path = ROOT / path
         if not source_path.exists():
             continue
+        baseline_keys = _baseline_findings(path)
         for finding in scan_source(path, source_path.read_text(encoding="utf-8")):
             if finding.line in lines or (finding.kind == "module" and 1 in lines):
+                if finding.key in baseline_keys:
+                    continue
                 candidates.append(finding)
     registered = [finding for finding in candidates if finding.key in registrations]
     new = [finding for finding in candidates if finding.key not in registrations]
