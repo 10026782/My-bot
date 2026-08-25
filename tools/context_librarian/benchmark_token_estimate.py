@@ -19,14 +19,19 @@ one rather than silently skipping the comparison):
     ANTHROPIC_API_KEY=<key> python3 tools/context_librarian/benchmark_token_estimate.py
 
 Optional: `--model <model-id>` to benchmark against a different model's
-tokenizer (Anthropic's `count_tokens` endpoint is model-specific).
+tokenizer (Anthropic's `count_tokens` endpoint is model-specific). Use
+`--output docs/context_librarian/token_calibration.json` to persist the
+versioned calibration rows without running this script in per-PR CI.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -66,7 +71,11 @@ def _real_token_count(client, model: str, text: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--safety-margin", type=float, default=0.10)
     args = parser.parse_args(argv)
+    if args.safety_margin < 0:
+        parser.error("--safety-margin must be non-negative")
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print(
@@ -89,6 +98,13 @@ def main(argv: list[str] | None = None) -> int:
 
     client = anthropic.Anthropic()
     catalog: Catalog = load_catalog(_repo_root())
+    commit_sha = subprocess.run(
+        ["git", "-C", str(_repo_root()), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     rows: list[tuple[str, int, int, int]] = []
     for profile_id, query in _PROFILE_QUERIES.items():
@@ -134,6 +150,31 @@ def main(argv: list[str] | None = None) -> int:
         "docs/context_librarian/TOKEN_ESTIMATION_BENCHMARK.md before making "
         "any divisor change."
     )
+    if args.output:
+        payload = {
+            "schema_version": "1.0",
+            "estimator": "anthropic_count_tokens",
+            "freshness_days": 90,
+            "results": [
+                {
+                    "model": args.model,
+                    "commit_sha": commit_sha,
+                    "timestamp": timestamp,
+                    "profile": profile_id,
+                    "character_count": char_count,
+                    "estimated_tokens": estimate,
+                    "real_counted_tokens": real_tokens,
+                    "observed_ratio": real_tokens / estimate if estimate else 0,
+                    "safety_margin": args.safety_margin,
+                }
+                for profile_id, char_count, estimate, real_tokens in rows
+            ],
+        }
+        args.output.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"calibration written: {args.output}")
     return 0
 
 

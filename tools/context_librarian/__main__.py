@@ -410,7 +410,9 @@ def main(argv: list[str] | None = None) -> int:
                         f"snapshot_count={history_result['snapshot_count']} "
                         f"growth_breaks={','.join(history_result['growth_breaks']) or 'none'}"
                     )
-            return 0
+            if report["aggregate"]["calibration"]["status"] == "STALE":
+                print("WARNING: CALIBRATION_STALE", file=sys.stderr)
+            return 2 if any(row["enforcement"] == "BLOCK" for row in report["profiles"]) else 0
 
         if args.command == "suggest-profile":
             ranked = suggest_profiles(catalog, args.query)

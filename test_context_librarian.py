@@ -37,6 +37,7 @@ from tools.context_librarian.budget_preflight import (
     format_budget_preflight_json,
 )
 from tools.context_librarian.budget_history import record_budget_snapshot
+from tools.context_librarian.token_budget_policy import calibration_summary
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -441,6 +442,7 @@ def test_budget_preflight_report_json_schema_is_stable(catalog):
     assert set(decoded["aggregate"]) == {
         "total_profiles", "pass_count", "warn_count", "critical_count",
         "fail_count", "lowest_headroom_profile", "lowest_headroom_tokens",
+        "calibration",
     }
 
 
@@ -448,6 +450,45 @@ def test_budget_preflight_is_deterministic(catalog):
     assert build_budget_preflight(REPO_ROOT, catalog) == build_budget_preflight(
         REPO_ROOT, catalog
     )
+
+
+def test_small_chars_proxy_overflow_is_warning_not_blocking(catalog):
+    profile = "cross_layer_architecture"
+    query = "a change spans reasoning, routing, and approvals"
+    baseline = estimate_bundle(catalog, task_type=profile, query=query)
+    noisy_catalog = copy.deepcopy(catalog)
+    noisy_catalog.profiles[profile]["maximum_approximate_token_budget"] = baseline.actual_tokens - 1
+
+    bundle = build_bundle(noisy_catalog, task_type=profile, query=query)
+    result = estimate_bundle(noisy_catalog, task_type=profile, query=query)
+    assert bundle
+    assert result.enforcement == "WARN"
+    assert result.growth_signal == "WARN"
+    assert result.overflow_tokens > 0
+
+
+def test_hard_safety_ceiling_still_blocks_large_default_overflow(catalog):
+    profile = "cross_layer_architecture"
+    query = "a change spans reasoning, routing, and approvals"
+    baseline = estimate_bundle(catalog, task_type=profile, query=query)
+    unsafe_catalog = copy.deepcopy(catalog)
+    unsafe_catalog.profiles[profile]["maximum_approximate_token_budget"] = baseline.actual_tokens - 300
+    with pytest.raises(ContextLibrarianError, match="context budget overflow"):
+        build_bundle(unsafe_catalog, task_type=profile, query=query)
+
+
+def test_calibration_without_results_is_explicitly_stale():
+    assert calibration_summary(REPO_ROOT) == {
+        "status": "STALE",
+        "latest_timestamp": None,
+        "profiles": 0,
+    }
+
+
+def test_calibration_inventory_covers_every_profile(catalog):
+    from tools.context_librarian.benchmark_token_estimate import _PROFILE_QUERIES
+
+    assert set(_PROFILE_QUERIES) == set(catalog.profiles)
 
 
 def test_budget_preflight_fails_closed_on_invalid_profile_budget(catalog):

@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "estimator": "anthropic_count_tokens",
+  "freshness_days": 90,
+  "results": []
+}
