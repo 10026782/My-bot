@@ -99,6 +99,9 @@ with patch("core.database.get_conn", return_value=fake_conn) as mock_get_conn, \
     chk("get_usage_window() calls release_conn() exactly once", mock_release_conn.call_count == 1)
     chk("a successful empty query reports status='ok' (this IS a real zero)", window["status"] == "ok")
     chk("status='ok' with 0 rows means total_calls=0 genuinely", window["total_calls"] == 0)
+    chk("the single query reads measurement_status",
+        "measurement_status" in fake_cursor.execute.call_args[0][0])
+    chk("the read uses exactly one query", fake_cursor.execute.call_count == 1)
 
 
 print("\n── get_usage_window() query failure => status='error', rollback before release ────────────────")
@@ -122,6 +125,60 @@ with patch("core.database.get_conn", return_value=fake_conn_fail), \
         fake_conn_fail.rollback.called)
     chk("release_conn() was still called after the failure (connection returned to pool)",
         mock_release_conn.called)
+
+
+def read_rows(rows):
+    cursor = MagicMock()
+    cursor.__enter__ = MagicMock(return_value=cursor)
+    cursor.__exit__ = MagicMock(return_value=False)
+    cursor.fetchall.return_value = rows
+    conn = MagicMock()
+    conn.cursor.return_value = cursor
+    with patch("core.database.get_conn", return_value=conn), \
+         patch("core.database.release_conn"):
+        return get_usage_window(
+            __import__("datetime").datetime(2026, 1, 1),
+            __import__("datetime").datetime(2026, 1, 2),
+        )
+
+
+print("\n── measurement_status preserves unknown measurement truth ────────────────")
+
+measured = ("anthropic", "text", "claude-sonnet-4-6", "run_agent", 100, 50, 0.01, False, "measured")
+measured_zero = ("anthropic", "text", "claude-sonnet-4-6", "run_agent", 0, 0, 0, False, "measured")
+unknown = ("openai", "stt", "whisper-1", "voice_stt_adapter", None, None, None, False, "unknown")
+
+window = read_rows([measured])
+chk("measured-only window is complete", window["measurement_complete"] is True)
+chk("measured-only window has no unknown calls", window["unknown_measurement_calls"] == 0)
+chk("measured-only totals remain correct", window["total_cost_usd"] == 0.01)
+
+window = read_rows([measured_zero])
+chk("measured zero remains a measured call", window["measurement_complete"] is True)
+chk("measured zero remains numeric zero", window["total_cost_usd"] == 0)
+
+window = read_rows([unknown])
+model = window["by_model"][("openai", "stt", "whisper-1")]
+source = window["by_source"]["voice_stt_adapter"]
+chk("unknown row still counts as a paid call", window["total_calls"] == 1)
+chk("unknown row count is exact", window["unknown_measurement_calls"] == 1)
+chk("unknown row makes measurement incomplete", window["measurement_complete"] is False)
+chk("unknown quantity is not fabricated as measured zero", model["quantity_out"] == 0)
+chk("unknown cost is not fabricated as measured zero cost", model["cost_usd"] == 0)
+chk("unknown row is visible in model breakdown", model["unknown_measurement_calls"] == 1)
+chk("unknown row is visible in source breakdown", source["unknown_measurement_calls"] == 1)
+chk("unknown row is excluded from confirmed and estimated costs",
+    window["total_cost_usd_confirmed"] == 0 and window["total_cost_usd_estimated"] == 0)
+
+window = read_rows([measured, unknown])
+chk("mixed rows preserve measured cost subtotal", window["total_cost_usd"] == 0.01)
+chk("mixed rows preserve exact unknown count", window["unknown_measurement_calls"] == 1)
+chk("mixed rows are incomplete", window["measurement_complete"] is False)
+
+invalid_status = read_rows([(*measured[:-1], "unsupported")])
+chk("unsupported measurement status returns telemetry error", invalid_status["status"] == "error")
+invalid_measured = read_rows([(*measured[:6], None, measured[7], "measured")])
+chk("invalid measured row returns telemetry error", invalid_measured["status"] == "error")
 
 
 print("\n── record_usage() rolls back before releasing on write failure ────────────────")
@@ -214,16 +271,26 @@ ok_window = {
         ("anthropic", "text", "claude-sonnet-4-6"): {
             "quantity_in": 100.0, "quantity_out": 50.0, "calls": 2,
             "cost_usd": 0.01, "estimated_calls": 0,
+            "unknown_measurement_calls": 0,
         },
     },
-    "by_source": {"run_agent": {"calls": 2, "cost_usd": 0.01}},
+    "by_source": {"run_agent": {"calls": 2, "cost_usd": 0.01, "unknown_measurement_calls": 0}},
     "total_calls": 2, "total_cost_usd": 0.01,
     "total_cost_usd_confirmed": 0.01, "total_cost_usd_estimated": 0.0,
+    "measurement_complete": True, "unknown_measurement_calls": 0,
 }
 text = format_usage_window(ok_window)
 chk("ok window renders total calls", "Total calls: 2" in text)
 chk("ok window renders model breakdown", "anthropic/text/claude-sonnet-4-6" in text)
 chk("ok window renders source breakdown", "run_agent" in text)
+
+incomplete_window = read_rows([measured, unknown])
+incomplete_text = format_usage_window(incomplete_window)
+chk("incomplete report states measurement is incomplete", "Measurement incomplete: 1" in incomplete_text)
+chk("incomplete report labels known cost as subtotal", "Measured cost subtotal: $0.0100" in incomplete_text)
+chk("incomplete report does not label subtotal as complete total", "Total cost:" not in incomplete_text)
+chk("incomplete model breakdown exposes unknown measurement",
+    "unknown measurement" in incomplete_text)
 
 
 print("\n── format_usage_window() — unavailable/error are not shown as zero usage ────────────────")

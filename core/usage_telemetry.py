@@ -236,6 +236,8 @@ def _empty_window_result(status: WindowStatus, error: str = "") -> dict:
     return {
         "status": status,
         "error": error,
+        "measurement_complete": status == "ok",
+        "unknown_measurement_calls": 0,
         "by_model": {},
         "by_source": {},
         "total_calls": 0,
@@ -254,12 +256,16 @@ def get_usage_window(start: datetime, end: datetime) -> dict:
         "error": str,  # only set for "error"
         "by_model": {(provider, service, model): {"quantity_in": float, "quantity_out": float,
                                                     "calls": int, "cost_usd": float,
-                                                    "estimated_calls": int}},
-        "by_source": {source: {"calls": int, "cost_usd": float}},
+                                                    "estimated_calls": int,
+                                                    "unknown_measurement_calls": int}},
+        "by_source": {source: {"calls": int, "cost_usd": float,
+                                "unknown_measurement_calls": int}},
         "total_calls": int,
         "total_cost_usd": float,
         "total_cost_usd_confirmed": float,   # sum over exact-priced rows only
         "total_cost_usd_estimated": float,   # sum over fail-safe-priced rows only
+        "measurement_complete": bool,
+        "unknown_measurement_calls": int,
       }
 
     status="unavailable" means PostgreSQL itself couldn't be reached — no
@@ -281,7 +287,7 @@ def get_usage_window(start: datetime, end: datetime) -> dict:
             cur.execute(
                 """
                 SELECT provider, service, model, source, quantity_in, quantity_out,
-                       cost_usd, cost_is_estimate
+                       cost_usd, cost_is_estimate, measurement_status
                 FROM usage_events
                 WHERE ts >= %s AND ts < %s;
                 """,
@@ -298,38 +304,64 @@ def get_usage_window(start: datetime, end: datetime) -> dict:
     finally:
         release_conn(conn)
 
-    by_model: dict[tuple[str, str, str], dict] = {}
-    by_source: dict[str, dict] = {}
-    total_cost = 0.0
-    total_cost_confirmed = 0.0
-    total_cost_estimated = 0.0
+    try:
+        by_model: dict[tuple[str, str, str], dict] = {}
+        by_source: dict[str, dict] = {}
+        total_cost = 0.0
+        total_cost_confirmed = 0.0
+        total_cost_estimated = 0.0
+        unknown_measurement_calls = 0
 
-    for provider, service, model, source, qin, qout, cost_usd, is_estimate in rows:
-        key = (provider, service, model)
-        m = by_model.setdefault(key, {
-            "quantity_in": 0.0, "quantity_out": 0.0, "calls": 0,
-            "cost_usd": 0.0, "estimated_calls": 0,
-        })
-        m["quantity_in"]  += float(qin or 0)
-        m["quantity_out"] += float(qout or 0)
-        m["calls"]        += 1
-        m["cost_usd"]     += float(cost_usd or 0)
-        if is_estimate:
-            m["estimated_calls"] += 1
+        for provider, service, model, source, qin, qout, cost_usd, is_estimate, measurement_status in rows:
+            if measurement_status == "measured":
+                if qout is None or cost_usd is None:
+                    raise ValueError("measured usage row has NULL quantity_out or cost_usd")
+            elif measurement_status == "unknown":
+                if qout is not None or cost_usd is not None:
+                    raise ValueError("unknown usage row has measured quantity_out or cost_usd")
+            else:
+                raise ValueError(f"unsupported measurement_status: {measurement_status!r}")
 
-        s = by_source.setdefault(source, {"calls": 0, "cost_usd": 0.0})
-        s["calls"]    += 1
-        s["cost_usd"] += float(cost_usd or 0)
+            key = (provider, service, model)
+            m = by_model.setdefault(key, {
+                "quantity_in": 0.0, "quantity_out": 0.0, "calls": 0,
+                "cost_usd": 0.0, "estimated_calls": 0,
+                "unknown_measurement_calls": 0,
+            })
+            m["quantity_in"] += float(qin or 0)
+            m["calls"] += 1
 
-        total_cost += float(cost_usd or 0)
-        if is_estimate:
-            total_cost_estimated += float(cost_usd or 0)
-        else:
-            total_cost_confirmed += float(cost_usd or 0)
+            s = by_source.setdefault(source, {
+                "calls": 0, "cost_usd": 0.0, "unknown_measurement_calls": 0,
+            })
+            s["calls"] += 1
+
+            if measurement_status == "unknown":
+                unknown_measurement_calls += 1
+                m["unknown_measurement_calls"] += 1
+                s["unknown_measurement_calls"] += 1
+                continue
+
+            measured_qout = float(qout)
+            measured_cost = float(cost_usd)
+            m["quantity_out"] += measured_qout
+            m["cost_usd"] += measured_cost
+            s["cost_usd"] += measured_cost
+            total_cost += measured_cost
+            if is_estimate:
+                m["estimated_calls"] += 1
+                total_cost_estimated += measured_cost
+            else:
+                total_cost_confirmed += measured_cost
+    except Exception as e:
+        logger.error("[UsageTelemetry] usage window contract failure: %s", e, exc_info=True)
+        return _empty_window_result("error", str(e))
 
     return {
         "status": "ok",
         "error": "",
+        "measurement_complete": unknown_measurement_calls == 0,
+        "unknown_measurement_calls": unknown_measurement_calls,
         "by_model": by_model,
         "by_source": by_source,
         "total_calls": len(rows),
@@ -370,14 +402,23 @@ def format_usage_window(window: dict) -> str:
     if status == "error":
         return f"Usage telemetry: query failed — {window['error']} (not zero usage, unknown)."
 
+    incomplete = not window.get("measurement_complete", True)
     lines = [
         "Usage telemetry",
         "",
         f"Total calls: {window['total_calls']}",
-        f"Total cost: ${window['total_cost_usd']:.4f}"
-        f" (confirmed ${window['total_cost_usd_confirmed']:.4f}"
-        f" / estimated ${window['total_cost_usd_estimated']:.4f})",
     ]
+    cost_label = "Measured cost subtotal" if incomplete else "Total cost"
+    lines.append(
+        f"{cost_label}: ${window['total_cost_usd']:.4f}"
+        f" (confirmed ${window['total_cost_usd_confirmed']:.4f}"
+        f" / estimated ${window['total_cost_usd_estimated']:.4f})"
+    )
+    if incomplete:
+        count = window.get("unknown_measurement_calls", 0)
+        lines.append(
+            f"Measurement incomplete: {count} paid call(s) have unknown usage quantity/cost."
+        )
 
     if window["by_model"]:
         lines.append("")
@@ -385,15 +426,21 @@ def format_usage_window(window: dict) -> str:
         for (provider, service, model), m in sorted(window["by_model"].items()):
             lines.append(
                 f"  {provider}/{service}/{model}: {m['calls']} calls, "
+                f"{'measured subtotal' if m.get('unknown_measurement_calls', 0) else 'cost'} "
                 f"${m['cost_usd']:.4f}"
                 + (f" ({m['estimated_calls']} estimated)" if m["estimated_calls"] else "")
+                + (f" ({m.get('unknown_measurement_calls', 0)} unknown measurement)"
+                   if m.get("unknown_measurement_calls", 0) else "")
             )
 
     if window["by_source"]:
         lines.append("")
         lines.append("By source:")
         for source, s in sorted(window["by_source"].items()):
-            lines.append(f"  {source}: {s['calls']} calls, ${s['cost_usd']:.4f}")
+            unknown_count = s.get("unknown_measurement_calls", 0)
+            label = "measured subtotal" if unknown_count else "cost"
+            suffix = (f" ({unknown_count} unknown measurement)" if unknown_count else "")
+            lines.append(f"  {source}: {s['calls']} calls, {label} ${s['cost_usd']:.4f}{suffix}")
 
     if not window["by_model"] and not window["by_source"]:
         lines.append("")
