@@ -29,6 +29,26 @@ def test_synthetic_unregistered_delta_is_blocking(tmp_path, monkeypatch):
     ]
 
 
+def test_harmless_refactor_of_existing_writer_is_not_a_new_delta(tmp_path, monkeypatch):
+    source = tmp_path / "legacy_store.py"
+    source.write_text(
+        '"""Existing implementation after harmless line movement."""\n\n'
+        "class LegacyStore:\n    pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    monkeypatch.setattr(audit, "REGISTRY", tmp_path / "empty_registry.md")
+    monkeypatch.setattr(audit, "_added_line_ranges", lambda: {"legacy_store.py": {1, 2, 3, 4}})
+    monkeypatch.setattr(
+        audit,
+        "_baseline_findings",
+        lambda path: {("legacy_store.py", "<module>"), ("legacy_store.py", "LegacyStore")},
+    )
+    new, registered, _ = audit.audit()
+    assert not new
+    assert not registered
+
+
 def test_exact_registration_requires_owner_and_decision(tmp_path, monkeypatch):
     registry = tmp_path / "registry.md"
     registry.write_text(

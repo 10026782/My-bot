@@ -183,15 +183,13 @@ jobs:
       - name: F52 result-parsing audit (warning only, never blocks)
         run: python tools/audit_result_parsing.py || true
 
-      - name: Dispatcher bypass audit (WARN_ONLY — pending stable-identity hardening)
-        continue-on-error: true
+      - name: Dispatcher bypass audit (blocking — stable identity hardened)
         run: python tools/audit_dispatcher_bypass.py
 
       - name: Writer / authority registration guard (blocking)
         run: python tools/audit_writer_authority_registration.py
 
-      - name: Public renderer / MessageContract freeze (WARN_ONLY — pending AST-only hardening)
-        continue-on-error: true
+      - name: Public renderer / MessageContract freeze (blocking — AST-only detection)
         run: python tools/audit_public_renderer_contract.py
 
       - name: pytest collect
