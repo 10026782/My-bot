@@ -103,7 +103,10 @@ def call_openai_text(
     # provider/service/model-generic recording — additive, doesn't feed
     # AI_Usage_Daily or EMERGENCY_STOP_AI yet. See core/usage_telemetry.py.
     try:
-        from core.usage_telemetry import record_llm_usage
+        from core.usage_telemetry import (
+            record_llm_usage,
+            usage_attribution_from_context,
+        )
         usage = getattr(response, "usage", None)
         record_llm_usage(
             provider   = "openai",
@@ -114,6 +117,7 @@ def call_openai_text(
             caller     = source,
             request_id = getattr(response, "id", None),
             meta       = {"fallback_from": fallback_from} if fallback_from else None,
+            **usage_attribution_from_context(execution_context),
         )
     except Exception as e:
         logger.error("[LLM] usage recording failed (non-fatal): %s", e)
@@ -161,7 +165,10 @@ def call_anthropic_text(
         # provider/service/model-generic recording — additive, doesn't
         # feed AI_Usage_Daily or EMERGENCY_STOP_AI yet.
         try:
-            from core.usage_telemetry import record_llm_usage
+            from core.usage_telemetry import (
+                record_llm_usage,
+                usage_attribution_from_context,
+            )
             usage = getattr(response, "usage", None)
             record_llm_usage(
                 provider   = "anthropic",
@@ -171,6 +178,7 @@ def call_anthropic_text(
                 tokens_out = getattr(usage, "output_tokens", 0) if usage else 0,
                 caller     = source,
                 request_id = getattr(response, "id", None),
+                **usage_attribution_from_context(execution_context),
             )
         except Exception as e:
             logger.error("[LLM] usage recording failed (non-fatal): %s", e)

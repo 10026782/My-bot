@@ -72,6 +72,17 @@ LEGACY_CAPABILITY_ID = "legacy.unknown"
 UNKNOWN_EXECUTION_CLASS = "UNKNOWN"
 
 
+def usage_attribution_from_context(execution_context) -> dict:
+    """Translate existing execution authority into telemetry fields."""
+    if execution_context is None:
+        return {}
+    return {
+        "capability_id": execution_context.resolved_capability.capability_id,
+        "execution_class": execution_context.resolved_capability.execution_class.value,
+        "operation_id": execution_context.operation.operation_id,
+    }
+
+
 def record_usage(
     *,
     provider: str,
