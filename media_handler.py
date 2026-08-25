@@ -401,7 +401,7 @@ def _log_unhandled_voice_note(transcript: str, user_id: str, source: str) -> Non
 def handle_voice_note(
     audio_bytes: bytes,
     mime_type: str,
-    telegram_file_id: str,
+    provider_media_id: str,
     user_id: str,
     domain: str,
     owner_chat_id: str,
@@ -417,7 +417,7 @@ def handle_voice_note(
             error=MediaError("FILE_TOO_LARGE", "הקובץ גדול מ-50MB. הגודל המרבי הוא 50MB.", False),
         )
 
-    idem_key = _idem_key(source, telegram_file_id, user_id)
+    idem_key = _idem_key(source, provider_media_id, user_id)
     if _idem_store.is_duplicate("media", idem_key, ""):
         return MediaResult(
             ok=False,
@@ -571,7 +571,7 @@ def handle_file_upload(
             source=source,
             size_bytes=size_bytes,
             created_by=user_id,
-            telegram_file_id=file_id,
+            provider_media_id=file_id,
             linked_lead_id=linked_lead_id,
             logical_media_key=media_key,
             persistence_state=MediaPersistenceState.DRIVE_UPLOADED,
@@ -613,7 +613,7 @@ def handle_file_upload(
             source=source,
             size_bytes=size_bytes,
             created_by=user_id,
-            telegram_file_id=file_id,
+            provider_media_id=file_id,
             linked_lead_id=linked_lead_id,
             logical_media_key=media_key,
             persistence_state=MediaPersistenceState.PENDING,
@@ -655,7 +655,7 @@ def handle_file_upload(
             source=source,
             size_bytes=size_bytes,
             created_by=user_id,
-            telegram_file_id=file_id,
+            provider_media_id=file_id,
             linked_lead_id=linked_lead_id,
             logical_media_key=media_key,
             persistence_state=MediaPersistenceState.DRIVE_UPLOADED,
@@ -790,7 +790,7 @@ if __name__ == "__main__":
     oversized = handle_voice_note(
         audio_bytes=b"x" * (TIER_LARGE + 1),
         mime_type="audio/ogg",
-        telegram_file_id="f1",
+        provider_media_id="f1",
         user_id="u1",
         domain="general",
         owner_chat_id="123",
@@ -828,7 +828,7 @@ if __name__ == "__main__":
     with patch.object(_this, "transcribe", return_value=_stt("שיחה רגילה בלי שום הוראה")), \
          patch.object(_this, "_log_unhandled_voice_note") as mock_log:
         no_action = handle_voice_note(
-            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v1",
+        audio_bytes=b"audio-bytes", mime_type="audio/ogg", provider_media_id="v1",
             user_id="u1", domain="general", owner_chat_id="123",
         )
         assert no_action.ok and no_action.message == "📝 תומלל:\nשיחה רגילה בלי שום הוראה\n\nלא בוצעה פעולה."
@@ -838,7 +838,7 @@ if __name__ == "__main__":
     with patch.object(_this, "transcribe", return_value=_stt("משימה: להתקשר ללקוח מחר")), \
          patch.object(_this, "_save_transcript_to_media_files", return_value=True) as mock_save:
         short_action = handle_voice_note(
-            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v2",
+        audio_bytes=b"audio-bytes", mime_type="audio/ogg", provider_media_id="v2",
             user_id="u1", domain="general", owner_chat_id="123",
         )
         assert short_action.ok and short_action.saved_to_memory
@@ -850,7 +850,7 @@ if __name__ == "__main__":
          patch.object(_this, "_send_voice_approval_request", return_value="📨 ack") as mock_approve, \
          patch.object(_this, "_save_transcript_to_media_files") as mock_save:
         risky = handle_voice_note(
-            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v3",
+        audio_bytes=b"audio-bytes", mime_type="audio/ogg", provider_media_id="v3",
             user_id="u1", domain="general", owner_chat_id="123",
         )
         assert risky.ok and risky.message == "📨 ack"
@@ -863,7 +863,7 @@ if __name__ == "__main__":
          patch.object(_this, "_send_voice_approval_request") as mock_approve, \
          patch.object(_this, "_save_transcript_to_media_files", return_value=True) as mock_save:
         long_action = handle_voice_note(
-            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v4",
+        audio_bytes=b"audio-bytes", mime_type="audio/ogg", provider_media_id="v4",
             user_id="u1", domain="general", owner_chat_id="123",
         )
         assert long_action.ok and "נשמר ל-Voice Inbox" in long_action.message
@@ -878,7 +878,7 @@ if __name__ == "__main__":
          patch.object(_this, "_save_transcript_to_memory") as mock_save, \
          patch.object(_this, "_send_voice_approval_request") as mock_approve:
         soft_verb_only = handle_voice_note(
-            audio_bytes=b"audio-bytes", mime_type="audio/ogg", telegram_file_id="v5",
+        audio_bytes=b"audio-bytes", mime_type="audio/ogg", provider_media_id="v5",
             user_id="u1", domain="general", owner_chat_id="123",
         )
         assert soft_verb_only.ok and soft_verb_only.message == "📝 תומלל:\nתזכיר לי לקבוע פגישה מחר\n\nלא בוצעה פעולה."

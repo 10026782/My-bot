@@ -49,6 +49,26 @@
 - **I3 interpretation:** `Logical Media Key` partially remediates identity/idempotency, but does not close I3 because provider-specific IDs continue to use a Telegram-named generic storage column. I3 is **not deferred**; no reopen trigger exists because it is currently active.
 - **Classification:** **#3 STILL OPEN — CURRENT DATA CONTRACT GAP**; 5 original findings closed, 1 original finding deferred, and 1 HIGH residual current gap (I3).
 
+### Audit #3 I3 remediation — CLOSED / STATIC VERIFIED
+
+- **Truth-reset:** `origin/main` `a52977278c1db0be41eeec026ce72e22fd0308a` (26/08/2026).
+- **Remediation:** `AssetRecord.provider_media_id` is provider-neutral. The
+  legacy `Telegram File ID` field is now populated only when
+  `AssetRecord.source == "telegram"`; all providers continue to persist
+  `Logical Media Key`. No Airtable field was renamed or added, and no live
+  schema migration was performed.
+- **Compatibility:** existing non-Telegram values in `Telegram File ID` remain
+  historical data. Current lookup/idempotency uses `Logical Media Key`; no
+  legacy read fallback was retained because the active lookup path already
+  ignores legacy-only rows and no current behavior requires that fallback.
+- **Verification:** focused Telegram/WhatsApp/Meta/TMA contract tests passed;
+  media gateway, logical-key, idempotency, WhatsApp media, TMA media, and
+  media probe tests passed. The unrelated pre-existing `test_c94_stage_d_whatsapp.py`
+  has 3 failing ingress-marker assertions and was not changed by this fix.
+- **Final classification:** **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
+  FINDING #2 EXPLICITLY DEFERRED**. This is not `CLEAN` because Finding #2
+  remains deferred.
+
 ---
 
 ## לוג באגים
