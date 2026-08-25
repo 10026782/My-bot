@@ -50,7 +50,19 @@ the closure PR that created it for the search that established this.
 
 ## ACTIVE
 
-None currently active in the Track-A sequence.
+- **No New Architectural Debt enforcement** — **ESTABLISHED (25/08/2026)**.
+  PR #972 completed final noise verification and promoted A1–A5 to blocking.
+  The merged verification recorded 49 focused guard tests passing, harmless
+  changes passing, synthetic real violations failing, and no runtime or
+  business-logic change. Canonical posture: `ESTABLISHED`; detail:
+  `docs/governance/NO_NEW_ARCHITECTURAL_DEBT_POSTURE.md`.
+
+- **Context Librarian provenance drift** — **FOLLOW-UP / NOT A #972
+  REGRESSION (25/08/2026)**. `refresh-after-merge --check` reports broad stale
+  or unregistered catalog provenance with `authority_review_required=false`.
+  This is a separate catalog-maintenance/governance follow-up; it does not
+  invalidate the #972 guard verification or the established enforcement
+  posture.
 
 **Program structure:** `#7 → #13`, `#22 → #23`. D-CORE is a separate,
 independently verified track (see `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`
