@@ -2,12 +2,18 @@ import pytest
 
 from core.router.ownership_contracts import (
     ActionLifecycleResult,
+    CapabilityResolutionError,
     CanonicalActionProposal,
+    ExecutionClass,
     EvidenceResult,
     IntentOwnershipDecision,
     IntentOwnershipRegistry,
+    ResolvedCapability,
     ResolverResult,
+    resolve_capability,
 )
+from core.router.route_decision import Handler
+from core.turn_envelope import ExecutionKind
 
 
 def test_contracts_are_frozen_and_registry_is_immutable():
@@ -72,3 +78,53 @@ def test_ws2_lifecycle_and_evidence_contracts_are_frozen_and_validated():
 
     with pytest.raises(ValueError):
         EvidenceResult("", "", "", False)
+
+
+def test_execution_class_is_closed_and_resolved_capability_is_immutable():
+    assert {item.value for item in ExecutionClass} == {
+        "DETERMINISTIC", "NARROW_MODEL", "FULL_AGENT",
+    }
+    capability = ResolvedCapability(
+        capability_id="general.reasoning",
+        capability_version="v1",
+        execution_class=ExecutionClass.FULL_AGENT,
+        executor_ref="agent.loop",
+        validator_ref="agent.output",
+        verification_ref="turn.evidence",
+        approval_risk_ref="route.policy",
+        fallback_ref="none",
+    )
+    assert resolve_capability(capability.capability_id, {capability.capability_id: capability}) is capability
+    with pytest.raises((AttributeError, TypeError)):
+        capability.capability_id = "task.create"
+    with pytest.raises(TypeError):
+        ResolvedCapability("bad", "FULL_AGENT")
+
+
+def test_resolution_is_fail_closed_and_does_not_infer_full_agent():
+    calls = []
+    capability = ResolvedCapability("task.create", ExecutionClass.DETERMINISTIC)
+    capabilities = {capability.capability_id: capability}
+
+    assert resolve_capability("task.create", capabilities).execution_class is ExecutionClass.DETERMINISTIC
+    assert calls == []
+    with pytest.raises(CapabilityResolutionError):
+        resolve_capability("missing.bounded_capability", capabilities)
+
+
+def test_capability_identity_is_independent_from_tool_identity():
+    capability = ResolvedCapability(
+        "lead.create", ExecutionClass.NARROW_MODEL, executor_ref="airtable_add"
+    )
+    replacement = ResolvedCapability(
+        "lead.create", ExecutionClass.NARROW_MODEL, executor_ref="lead_gateway_v2"
+    )
+    assert capability.capability_id == replacement.capability_id
+    assert capability.executor_ref != replacement.executor_ref
+
+
+def test_legacy_handler_and_execution_kind_values_remain_unchanged():
+    assert Handler.AGENT == "agent"
+    assert Handler.TOOL == "tool"
+    assert ExecutionKind.DETERMINISTIC.value == "deterministic"
+    assert ExecutionKind.AGENT_INTERPRETED.value == "agent_interpreted"

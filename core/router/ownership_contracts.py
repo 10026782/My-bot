@@ -11,8 +11,64 @@ wiring status.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
+
+
+class ExecutionClass(str, Enum):
+    """Canonical executable route classes from SPEC_Agent_Last_Cost_Architecture."""
+
+    DETERMINISTIC = "DETERMINISTIC"
+    NARROW_MODEL = "NARROW_MODEL"
+    FULL_AGENT = "FULL_AGENT"
+
+
+class CapabilityResolutionError(ValueError):
+    """A bounded capability could not be resolved safely."""
+
+
+@dataclass(frozen=True)
+class ResolvedCapability:
+    """Immutable capability decision; references policies, never their contents."""
+
+    capability_id: str
+    execution_class: ExecutionClass
+    capability_version: str = ""
+    executor_ref: str = ""
+    validator_ref: str = ""
+    verification_ref: str = ""
+    approval_risk_ref: str = ""
+    fallback_ref: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.capability_id, str) or not self.capability_id.strip():
+            raise ValueError("capability_id is required")
+        if not isinstance(self.execution_class, ExecutionClass):
+            raise TypeError("execution_class must be an ExecutionClass")
+        for name in (
+            "capability_version", "executor_ref", "validator_ref",
+            "verification_ref", "approval_risk_ref", "fallback_ref",
+        ):
+            if not isinstance(getattr(self, name), str):
+                raise TypeError(f"{name} must be a string")
+
+
+def resolve_capability(
+    capability_id: str,
+    capabilities: Mapping[str, ResolvedCapability],
+) -> ResolvedCapability:
+    """Resolve a caller-composed capability map without I/O or fallback."""
+    if not isinstance(capability_id, str) or not capability_id.strip():
+        raise CapabilityResolutionError("capability_id is required")
+    resolved = capabilities.get(capability_id)
+    if resolved is None:
+        raise CapabilityResolutionError(f"unknown capability: {capability_id}")
+    if not isinstance(resolved, ResolvedCapability):
+        raise TypeError("capability map values must be ResolvedCapability")
+    if resolved.capability_id != capability_id:
+        raise CapabilityResolutionError("capability map key does not match capability_id")
+    return resolved
 
 
 @dataclass(frozen=True)
