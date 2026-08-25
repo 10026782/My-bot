@@ -10,13 +10,20 @@ from core.usage_telemetry import usage_attribution_from_context
 
 
 class FakeTranscriptions:
-    def __init__(self, duration=1.25):
+    def __init__(self, duration=1.25, usage_seconds=None, request_id=None):
         self.duration = duration
+        self.usage_seconds = usage_seconds
+        self.request_id = request_id
         self.calls = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(text="שלום", duration=self.duration)
+        return SimpleNamespace(
+            text="שלום",
+            duration=self.duration,
+            usage=(SimpleNamespace(seconds=self.usage_seconds) if self.usage_seconds is not None else None),
+            _request_id=self.request_id,
+        )
 
 
 class FakeOpenAI:
@@ -113,3 +120,50 @@ def test_missing_duration_and_telemetry_failure_remain_non_fatal(monkeypatch, tm
         str(path), execution_context=_context(),
     )
     assert (raw, language, duration) == ("שלום", "he", 1.25)
+
+
+def test_provider_duration_wins_and_request_id_is_persisted(monkeypatch, tmp_path):
+    provider = FakeTranscriptions(duration=2.5, usage_seconds=9.5, request_id="req-provider-1")
+    FakeOpenAI.transcriptions = provider
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    events = []
+    monkeypatch.setattr("core.usage_telemetry.record_stt_usage", lambda **kwargs: events.append(kwargs))
+    path = tmp_path / "voice.ogg"
+    path.write_bytes(b"audio")
+
+    raw, language, duration = voice_stt_adapter._transcribe_openai(str(path), execution_context=_context())
+
+    assert (raw, language, duration) == ("שלום", "he", 2.5)
+    assert len(events) == 1
+    assert events[0]["duration_seconds"] == 2.5
+    assert events[0]["request_id"] == "req-provider-1"
+
+
+def test_provider_usage_duration_fallback_reaches_event_and_transcript(monkeypatch):
+    provider = FakeTranscriptions(duration=None, usage_seconds=3.75, request_id="req-provider-2")
+    FakeOpenAI.transcriptions = provider
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    events = []
+    monkeypatch.setattr("core.usage_telemetry.record_stt_usage", lambda **kwargs: events.append(kwargs))
+
+    with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+        result = voice_stt_adapter.transcribe(b"audio", "audio/ogg")
+
+    assert result.ok and result.duration_sec == 3.75
+    assert len(events) == 1
+    assert events[0]["duration_seconds"] == 3.75
+    assert events[0]["request_id"] == "req-provider-2"
+
+
+def test_missing_provider_request_id_remains_none(monkeypatch, tmp_path):
+    provider = FakeTranscriptions(duration=1.25, request_id=None)
+    FakeOpenAI.transcriptions = provider
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    events = []
+    monkeypatch.setattr("core.usage_telemetry.record_stt_usage", lambda **kwargs: events.append(kwargs))
+    path = tmp_path / "voice.ogg"
+    path.write_bytes(b"audio")
+
+    voice_stt_adapter._transcribe_openai(str(path), execution_context=_context())
+
+    assert events[0]["request_id"] is None

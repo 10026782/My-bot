@@ -93,6 +93,10 @@ def _transcribe_openai(
             response_format="verbose_json",
         )
     duration = getattr(resp, "duration", None)
+    if duration is None:
+        usage = getattr(resp, "usage", None)
+        duration = getattr(usage, "seconds", None) if usage is not None else None
+    request_id = getattr(resp, "_request_id", None)
 
     # Cost Telemetry Reliability PR2 (shadow only): durable
     # provider/service/model-generic recording — additive, doesn't feed
@@ -105,6 +109,7 @@ def _transcribe_openai(
                 model            = stt_model,
                 duration_seconds = float(duration),
                 caller           = "voice_stt_adapter._transcribe_openai",
+                request_id       = request_id,
                 **usage_attribution_from_context(execution_context),
             )
         else:
