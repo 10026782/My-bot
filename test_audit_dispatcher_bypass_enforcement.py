@@ -23,6 +23,13 @@ def test_cross_track_finding_is_visible_but_non_blocking():
     assert groups["new"] == []
 
 
+def test_stable_identity_handles_shifted_cross_track_import():
+    finding = ("core/memory_retrieval.py", 108, "tools.airtable_tools")
+    groups = audit.classify([finding])
+    assert groups["cross_track"] == [finding]
+    assert groups["new"] == []
+
+
 def test_accepted_staging_finding_is_visible_but_non_blocking():
     finding = next(iter(audit.ACCEPTED))
     groups = audit.classify([finding])

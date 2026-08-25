@@ -48,6 +48,22 @@ def after(field: str, value: object) -> Query:
     return Query("after", (field, value))
 
 
+def date_add(value: object, amount: int, unit: str) -> Query:
+    return Query("date_add", (value, amount, unit))
+
+
+def today() -> Query:
+    return Query("today")
+
+
+def created_time() -> Query:
+    return Query("created_time")
+
+
+def same_day(field: object, value: object) -> Query:
+    return Query("same_day", (field, value))
+
+
 def greater_or_equal(field: str, value: object) -> Query:
     return Query("greater_or_equal", (field, value))
 

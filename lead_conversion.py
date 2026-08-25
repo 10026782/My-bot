@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 from feature_flags import is_enabled
 from airtable_schema import Tables, LeadFields, LeadStatus, LeadOutcome
+from core.query_contract import any_of, contains
 from crm import crm_add_contact
 
 logger = logging.getLogger(__name__)
@@ -38,9 +39,11 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
 
     from tma_api import _at_list, _at_patch  # lazy import — כמו ב-/done
 
-    safe = query.replace("'", "\\'")
-    formula = f"OR(SEARCH('{safe}', {{Name}}), SEARCH('{safe}', {{phone}}))"
-    leads = _at_list(Tables.LEADS, formula, max_records=5)
+    leads = _at_list(
+        Tables.LEADS,
+        any_of(contains("Name", query), contains("phone", query)),
+        max_records=5,
+    )
 
     if not leads:
         return False, f"🔍 לא נמצא ליד התואם '{query}'."

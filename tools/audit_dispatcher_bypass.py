@@ -253,15 +253,15 @@ def _stable_identity(finding: tuple[str, int, str]) -> tuple[str, str, str, int]
     return (rel_str, module, symbol, ordinal)
 
 
-def _baseline_stable_identities() -> frozenset[tuple[str, str, str, int]]:
-    """Resolve baseline imports by structure when their line has moved.
+def _stable_identities(entries) -> frozenset[tuple[str, str, str, int]]:
+    """Resolve classified imports by structure when their line has moved.
 
     A baseline line can now point at a neighbouring import after harmless file
     growth. Search the nearest same-module import in that file, then retain its
     imported symbol and ordinal as the stable identity.
     """
     identities: set[tuple[str, str, str, int]] = set()
-    for rel_str, line, module in BASELINE:
+    for rel_str, line, module in entries:
         try:
             source_lines = (_REPO_ROOT / rel_str).read_text(encoding="utf-8").splitlines()
         except (OSError, UnicodeDecodeError):
@@ -277,17 +277,27 @@ def _baseline_stable_identities() -> frozenset[tuple[str, str, str, int]]:
     return frozenset(identities)
 
 
+def _baseline_stable_identities() -> frozenset[tuple[str, str, str, int]]:
+    return _stable_identities(BASELINE)
+
+
 def _matches_stable_legacy_identity(finding: tuple[str, int, str]) -> bool:
     """Match a legacy import by structure, independent of line drift."""
     return _stable_identity(finding) in _baseline_stable_identities()
 
 
+def _matches_stable_classified_identity(
+    finding: tuple[str, int, str], entries,
+) -> bool:
+    return _stable_identity(finding) in _stable_identities(entries)
+
+
 def _classify_finding(finding: tuple[str, int, str]) -> str:
     if finding in _SANCTIONED_CALL_SITES:
         return "sanctioned"
-    if finding in CROSS_TRACK:
+    if finding in CROSS_TRACK or _matches_stable_classified_identity(finding, CROSS_TRACK):
         return "cross_track"
-    if finding in ACCEPTED:
+    if finding in ACCEPTED or _matches_stable_classified_identity(finding, ACCEPTED):
         return "accepted"
     if finding in BASELINE or _matches_stable_legacy_identity(finding):
         return "legacy"

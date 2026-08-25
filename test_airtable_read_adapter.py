@@ -33,7 +33,7 @@ def test_weekly_summary_query_and_return_shape_are_preserved(monkeypatch):
     read.assert_called_once_with(
         Tables.BUSINESS_MEMORY,
         "IS_AFTER({Date}, 'since')",
-        max_records="50",
+        limit="50",
     )
 
 

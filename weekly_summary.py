@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from domain_utils import normalize_business_domain
+from core.query_contract import after
 from tools.airtable_read_adapter import AirtableReadError, list_records
 from tma_api import record_fields
 
@@ -89,15 +90,14 @@ def _fetch_last_7_days() -> list[dict]:
         from airtable_schema import BusinessMemoryFields as BMF
 
         since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        formula = f"IS_AFTER({{{BMF.DATE}}}, '{since}')"
-        return _fetch_records_direct(formula)
+        return _fetch_records_direct(after(BMF.DATE, since))
 
     except Exception as e:
         logger.error(f"[C22] _fetch_last_7_days failed: {e}")
         return []
 
 
-def _fetch_records_direct(formula: str) -> list[dict]:
+def _fetch_records_direct(formula) -> list[dict]:
     """שליפת records גולמיים דרך read adapter — לסיכום בלבד."""
     from airtable_schema import Tables
 

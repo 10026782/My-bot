@@ -1,6 +1,9 @@
 """Provider-neutral query intent regression checks for Cluster #3."""
 
-from core.query_contract import after, all_of, any_of, array_contains, before, contains, equals, negate, record_id_equals
+from core.query_contract import (
+    after, all_of, any_of, array_contains, before, contains, created_time,
+    date_add, equals, negate, record_id_equals, same_day, today,
+)
 from tools.airtable_read_adapter import render_query
 
 
@@ -30,6 +33,18 @@ def test_date_and_case_insensitive_intents_are_provider_neutral():
     assert render_query(before("Due", "2026-08-25")) == "IS_BEFORE({Due}, '2026-08-25')"
     assert render_query(after("Due", "2026-08-01")) == "IS_AFTER({Due}, '2026-08-01')"
     assert render_query(equals("Name", "Dana", case_insensitive=True)) == "LOWER({Name})=LOWER('Dana')"
+
+
+def test_date_expression_intents_preserve_legacy_serialization():
+    assert render_query(before("Due_Date", date_add("2026-08-25", 1, "days"))) == (
+        "IS_BEFORE({Due_Date}, DATEADD('2026-08-25', 1, 'days'))"
+    )
+    assert render_query(same_day("Followup", today())) == (
+        "IS_SAME({Followup}, TODAY(), 'day')"
+    )
+    assert render_query(same_day(created_time(), date_add(today(), -1, "days"))) == (
+        "IS_SAME(CREATED_TIME(), DATEADD(TODAY(), -1, 'days'), 'day')"
+    )
 
 
 def test_lead_service_keeps_existing_search_contract():

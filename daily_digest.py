@@ -6,6 +6,7 @@ import os
 from datetime import date, timedelta
 
 from airtable_schema import LeadFields, Tables, PaymentFields, PaymentStatus
+from core.query_contract import after, all_of, before, contains, created_time, date_add, equals, not_equals, same_day, today
 from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ══════════════════════════════════════════════════
 
-def _fetch(table_real: str, formula: str = "", max_rec: int = 20) -> list:
+def _fetch(table_real: str, formula="", max_rec: int = 20) -> list:
     """Return Airtable records or raise RuntimeError, preserving the old contract."""
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     key  = os.environ.get("AIRTABLE_API_KEY", "")
@@ -89,7 +90,7 @@ def _followups_today(errors: list) -> str:
     try:
         records = _fetch(
             "אנשי קשר (Contacts)",
-            "IS_SAME({תאריך פולו אפ}, TODAY(), 'day')",
+            same_day("תאריך פולו אפ", today()),
             max_rec=15,
         )
         if not records:
@@ -114,11 +115,11 @@ def _roadmap_tasks_today(errors: list) -> str:
         today_str = date.today().isoformat()
         records   = _fetch(
             "Roadmap_Tasks",
-            f"AND("
-            f"{{Owner}}='אליהו', "
-            f"{{Status}}!='Done', "
-            f"IS_BEFORE({{Due_Date}}, DATEADD('{today_str}', 1, 'days'))"
-            f")",
+            all_of(
+                equals("Owner", "אליהו"),
+                not_equals("Status", "Done"),
+                before("Due_Date", date_add(today_str, 1, "days")),
+            ),
             max_rec=30,
         )
 
@@ -194,11 +195,11 @@ def _upcoming_payments(errors: list) -> str:
         deadline = today + timedelta(days=7)
         records  = _fetch(
             Tables.PAYMENTS,
-            f"AND("
-            f"{{{PaymentFields.STATUS}}} != '{PaymentStatus.RECEIVED}', "
-            f"IS_BEFORE({{{PaymentFields.DATE}}}, '{deadline.isoformat()}'), "
-            f"IS_AFTER({{{PaymentFields.DATE}}}, '{today.isoformat()}')"
-            f")",
+            all_of(
+                not_equals(PaymentFields.STATUS, PaymentStatus.RECEIVED),
+                before(PaymentFields.DATE, deadline.isoformat()),
+                after(PaymentFields.DATE, today.isoformat()),
+            ),
             max_rec=10,
         )
         if not records:
@@ -261,20 +262,20 @@ def _yesterday_changes(errors: list) -> str:
 
         lead_recs = _fetch(
             "Leads",
-            f"AND("
-            f"IS_AFTER({{created_at}}, '{yday_str}T00:00:00.000Z'), "
-            f"IS_BEFORE({{created_at}}, '{today_str}T00:00:00.000Z')"
-            f")",
+            all_of(
+                after("created_at", f"{yday_str}T00:00:00.000Z"),
+                before("created_at", f"{today_str}T00:00:00.000Z"),
+            ),
             max_rec=10,
         )
         deal_recs = _fetch(
             "עסקאות (Deals)",
-            "IS_SAME(CREATED_TIME(), DATEADD(TODAY(), -1, 'days'), 'day')",
+            same_day(created_time(), date_add(today(), -1, "days")),
             max_rec=5,
         )
         done_recs = _fetch(
             "משימות (Tasks)",
-            "{סטטוס} = 'בוצע'",
+            equals("סטטוס", "בוצע", spaced=True),
             max_rec=5,
         )
 

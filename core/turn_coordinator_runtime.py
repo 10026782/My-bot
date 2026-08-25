@@ -14,6 +14,7 @@ from core.router import (
     prepare_task_proposal,
 )
 from core.router.task_resolvers import TaskLookup
+from core.query_contract import contains
 
 TASK_OWNERSHIP = IntentOwnershipRegistry({
     Intent.CREATE_TASK: IntentOwnershipDecision(
@@ -69,12 +70,11 @@ def prepare_task_gateway_call(
 
 def airtable_task_lookup(query: str, scope: str, limit: int):
     """Return at most resolver-limit+1 matching task records."""
-    from tools.airtable_gateway import escape_formula_value
     from tools.airtable_tools import airtable_get_records
 
-    escaped = escape_formula_value(str(query).replace("\\", "\\\\"))
-    formula = f"SEARCH('{escaped}', {{{TaskFields.NAME}}})"
-    return airtable_get_records(Tables.TASKS, formula, max_records=limit + 1)
+    return airtable_get_records(
+        Tables.TASKS, contains(TaskFields.NAME, str(query)), max_records=limit + 1
+    )
 
 
 def queue_task_request(

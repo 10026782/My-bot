@@ -50,7 +50,21 @@ def render_query(query: Query | str) -> str:
         return f"RECORD_ID()='{escape_formula_value(args[0])}'"
     if op in {"before", "after"}:
         field, value = args
-        return f"IS_{op.upper()}({_field_ref(field)}, '{escape_formula_value(value)}')"
+        rendered_value = render_query(value) if isinstance(value, Query) else f"'{escape_formula_value(value)}'"
+        return f"IS_{op.upper()}({_field_ref(field)}, {rendered_value})"
+    if op == "date_add":
+        value, amount, unit = args
+        rendered_value = render_query(value) if isinstance(value, Query) else f"'{escape_formula_value(value)}'"
+        return f"DATEADD({rendered_value}, {amount}, '{escape_formula_value(unit)}')"
+    if op == "today":
+        return "TODAY()"
+    if op == "created_time":
+        return "CREATED_TIME()"
+    if op == "same_day":
+        field, value = args
+        rendered_field = render_query(field) if isinstance(field, Query) else _field_ref(field)
+        rendered_value = render_query(value) if isinstance(value, Query) else f"'{escape_formula_value(value)}'"
+        return f"IS_SAME({rendered_field}, {rendered_value}, 'day')"
     if op == "greater_or_equal":
         field, value = args
         return f"{_field_ref(field)}>={escape_formula_value(value)}"

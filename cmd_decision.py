@@ -18,8 +18,9 @@ from airtable_schema import (
     DecisionInboxFields, DecisionInboxChannel, DecisionInboxStatus,
 )
 from decision_matching import find_matching_decision, list_open_decisions
+from core.query_contract import array_contains, contains
 from tma_api import record_fields as _record_fields, record_id as _record_id
-from tools.airtable_read_adapter import AirtableReadError, escape_formula_value, get_record, list_records
+from tools.airtable_read_adapter import AirtableReadError, get_record, list_records
 
 logger = logging.getLogger(__name__)
 
@@ -848,8 +849,7 @@ def _resolve_decision_ref(ref: str) -> dict | None:
         if record:
             return record
 
-    formula = f"FIND('{escape_formula_value(ref)}', {{{DecisionFields.TITLE}}})"
-    matches = _at_list(Tables.DECISIONS, formula)
+    matches = _at_list(Tables.DECISIONS, contains(DecisionFields.TITLE, ref, case_sensitive=True))
     return matches[0] if matches else None
 
 
@@ -859,8 +859,10 @@ def _list_open_decisions(limit: int = 5) -> list:
 
 
 def _list_stakeholders(decision_id: str) -> list:
-    formula = f"FIND('{decision_id}', ARRAYJOIN({{{DecisionStakeholderFields.DECISION}}}))"
-    return _at_list(Tables.DECISION_STAKEHOLDERS, formula)
+    return _at_list(
+        Tables.DECISION_STAKEHOLDERS,
+        array_contains(DecisionStakeholderFields.DECISION, decision_id),
+    )
 
 
 def _latest_event(decision_id: str, events: list | None = None) -> dict | None:
@@ -872,8 +874,10 @@ def _latest_event(decision_id: str, events: list | None = None) -> dict | None:
 
 
 def _list_decision_events(decision_id: str) -> list:
-    formula = f"FIND('{decision_id}', ARRAYJOIN({{{DecisionEventFields.DECISION}}}))"
-    return _at_list(Tables.DECISION_EVENTS, formula)
+    return _at_list(
+        Tables.DECISION_EVENTS,
+        array_contains(DecisionEventFields.DECISION, decision_id),
+    )
 
 
 # ── פונקציות עזר כלליות ──────────────────────────────────────────
