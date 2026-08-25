@@ -30,6 +30,28 @@ def test_context_translation_uses_all_canonical_fields_without_creating_identity
     assert "create_execution_context" not in Path("core/usage_telemetry.py").read_text()
 
 
+def test_context_translation_rejects_duck_typed_and_mapping_authority():
+    matching_object = SimpleNamespace(
+        resolved_capability=SimpleNamespace(
+            capability_id="general.reasoning",
+            execution_class=SimpleNamespace(value="FULL_AGENT"),
+        ),
+        operation=SimpleNamespace(operation_id="fake-operation"),
+    )
+    matching_mapping = {
+        "resolved_capability": {"capability_id": "general.reasoning"},
+        "operation": {"operation_id": "fake-operation"},
+    }
+
+    for value in (matching_object, matching_mapping):
+        try:
+            usage_attribution_from_context(value)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("non-canonical authority must be rejected")
+
+
 def test_openai_attempts_keep_context_attribution_and_remain_separate(monkeypatch):
     class FakeOpenAI:
         def __init__(self, **_kwargs):
