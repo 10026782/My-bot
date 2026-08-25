@@ -80,7 +80,7 @@ def test_crm_get_preserves_tenant_formula_and_single_page_read():
     assert call.args[0] == "Contacts"
     assert render_query(call.args[1]) == "AND({Name}='Dana', {tenant_id}='tenant-a')"
     assert call.kwargs == {
-        "max_records": None,
+        "limit": None,
         "fields": None,
         "paginate": False,
         "timeout": 10,

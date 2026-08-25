@@ -24,7 +24,7 @@ def test_airtable_health_success_preserves_payload_and_read_contract():
 
     assert result["services"]["airtable"] == "ok"
     assert set(result) == {"status", "services", "emergency_flags", "active_emergency", "checked_at"}
-    read.assert_called_once_with("Leads", max_records=1, paginate=False, timeout=5)
+    read.assert_called_once_with("Leads", limit=1, paginate=False, timeout=5)
 
 
 def test_airtable_http_error_preserves_status_message():

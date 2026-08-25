@@ -790,7 +790,7 @@
         "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification.",
         "Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
-      "last_observed_commit": "612cac968523f84a54d39a24fc72f969d863d8bc"
+      "last_observed_commit": "e901f33b208e1ba0f524005d4454097d26e35c17"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -924,7 +924,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "11c707ecaf9f8e83947b1f04df162a5702a5fadf"
+      "last_observed_commit": "e901f33b208e1ba0f524005d4454097d26e35c17"
     },
     {
       "id": "decision.operation_identity_authority",

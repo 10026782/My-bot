@@ -61,7 +61,7 @@ def list_open_decisions(limit: int = 5) -> list[dict]:
         return list_records(
             Tables.DECISIONS,
             formula,
-            max_records=None,
+            limit=None,
             paginate=False,
             timeout=10,
         )[:limit]
