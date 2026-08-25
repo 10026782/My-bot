@@ -49,7 +49,7 @@ def test_matching_formula_is_preserved_and_limit_is_local():
         for status in (DecisionStatus.OPEN, DecisionStatus.PENDING_INPUT)
     ) + ")"
     read.assert_called_once_with(
-        Tables.DECISIONS, formula, max_records=None, paginate=False, timeout=10
+        Tables.DECISIONS, formula, limit=None, paginate=False, timeout=10
     )
 
 

@@ -25,5 +25,41 @@ def test_legacy_max_records_argument_remains_compatible(monkeypatch):
     assert captured["max_records"] == 12
 
 
+def test_limit_takes_precedence_over_legacy_max_records(monkeypatch):
+    captured = {}
+
+    def fake_list(table, formula, max_records, **kwargs):
+        captured["max_records"] = max_records
+        return []
+
+    monkeypatch.setattr(airtable_read_adapter, "at_list_by_formula", fake_list)
+    airtable_read_adapter.list_records("Leads", limit=7, max_records=12)
+    assert captured["max_records"] == 7
+
+
+def test_explicit_none_preserves_unlimited_legacy_behavior(monkeypatch):
+    captured = {}
+
+    def fake_list(table, formula, max_records, **kwargs):
+        captured["max_records"] = max_records
+        return []
+
+    monkeypatch.setattr(airtable_read_adapter, "at_list_by_formula", fake_list)
+    airtable_read_adapter.list_records("Leads", limit=None)
+    assert captured["max_records"] is None
+
+
+def test_omitted_limit_preserves_default_cap(monkeypatch):
+    captured = {}
+
+    def fake_list(table, formula, max_records, **kwargs):
+        captured["max_records"] = max_records
+        return []
+
+    monkeypatch.setattr(airtable_read_adapter, "at_list_by_formula", fake_list)
+    airtable_read_adapter.list_records("Leads")
+    assert captured["max_records"] == 20
+
+
 if __name__ == "__main__":
     print("Provider Portability Cluster #5: focused tests require pytest")

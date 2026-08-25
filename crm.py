@@ -55,7 +55,7 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
         return list_records(
             table,
             formula,
-            max_records=None,
+            limit=None,
             fields=fields,
             paginate=False,
             timeout=10,

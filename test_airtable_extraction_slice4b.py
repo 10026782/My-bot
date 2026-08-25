@@ -43,13 +43,13 @@ def test_timeline_reads_preserve_queries_and_shapes():
         "ProjectTimeline", "OR({Status}='open', {Status}='in_progress')"
     )
     assert calls[0][1] == {
-        "max_records": None,
+        "limit": None,
         "sort": [{"field": "Due", "direction": "asc"}],
         "paginate": False,
         "timeout": 10,
     }
     assert calls[1][0][0] == "ProjectTimeline"
-    assert calls[1][1] == {"max_records": None, "paginate": False, "timeout": 10}
+    assert calls[1][1] == {"limit": None, "paginate": False, "timeout": 10}
 
 
 def test_timeline_phase_count_preserves_fields_and_no_max_records():
@@ -59,7 +59,7 @@ def test_timeline_phase_count_preserves_fields_and_no_max_records():
     ]) as read:
         assert project_timeline._count_phases_done() == []
     read.assert_called_once_with(
-        "ProjectTimeline", max_records=None, fields=["Phase", "Status"],
+        "ProjectTimeline", limit=None, fields=["Phase", "Status"],
         paginate=False, timeout=10,
     )
 

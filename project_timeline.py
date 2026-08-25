@@ -212,7 +212,7 @@ def get_timeline_summary() -> dict:
         records = list_records(
             TIMELINE_TABLE,
             formula,
-            max_records=None,
+            limit=None,
             sort=[{"field": "Due", "direction": "asc"}],
             paginate=False,
             timeout=10,
@@ -247,7 +247,7 @@ def get_timeline_summary() -> dict:
             done_records = list_records(
                 TIMELINE_TABLE,
                 all_of(equals("Status", "done"), equals("Due", today_str)),
-                max_records=None,
+                limit=None,
                 paginate=False,
                 timeout=10,
             )
@@ -280,7 +280,7 @@ def _count_phases_done() -> list:
     try:
         records = list_records(
             TIMELINE_TABLE,
-            max_records=None,
+            limit=None,
             fields=["Phase", "Status"],
             paginate=False,
             timeout=10,
