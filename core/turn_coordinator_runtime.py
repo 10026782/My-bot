@@ -40,6 +40,31 @@ TASK_OWNERSHIP = IntentOwnershipRegistry({
 })
 
 
+def resolve_tma_contextual_answer_capability() -> ResolvedCapability:
+    """Resolve the fixed authenticated TMA contextual-answer contract."""
+    ownership = IntentOwnershipDecision(
+        intent=Intent.ASK_QUESTION,
+        owner="tma.contextual_answer",
+        reason="authenticated /api/ai/ask endpoint contract",
+        confidence=1.0,
+    )
+    return resolve_capability(
+        ownership,
+        {
+            Intent.ASK_QUESTION: (
+                ResolvedCapability(
+                    capability_id="general.contextual_answer",
+                    execution_class=ExecutionClass.NARROW_MODEL,
+                    executor_ref="tma.contextual_answer",
+                    validator_ref="tma.ask.request.v1",
+                    verification_ref="tma.answer.non_empty.v1",
+                    fallback_ref="llm_fallback",
+                ),
+            ),
+        },
+    )
+
+
 def resolve_agent_capability(route: RouteDecision) -> ResolvedCapability:
     """Adapt an authoritative Agent route to the canonical reasoning capability."""
     if not isinstance(route, RouteDecision):
