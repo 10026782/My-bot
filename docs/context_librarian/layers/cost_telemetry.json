@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "layer_id": "cost_telemetry",
+  "nodes": [
+    {
+      "id": "layer.cost_telemetry",
+      "name": "Cost Telemetry",
+      "type": "layer",
+      "status": "shadow",
+      "authority_level": "runtime_main",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "durable usage_events schema and provider usage recording contract",
+        "precedence": "core/migrations and core/usage_telemetry.py define the implemented contract; cost policy remains separate"
+      },
+      "owner": "cost_telemetry",
+      "code_paths": [
+        "core/database_migrations.py",
+        "core/migrations/002_usage_events.sql",
+        "core/migrations/005_usage_events_measurement_status.sql",
+        "core/model_pricing.py",
+        "core/usage_telemetry.py"
+      ],
+      "test_paths": [
+        "test_model_pricing.py",
+        "test_usage_telemetry.py",
+        "test_p23_m8b_usage_measurement_contract.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/specs/SPEC_Agent_Last_Cost_Architecture.md",
+          "role": "cost telemetry architecture and canonical usage ledger boundary",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-25",
+      "last_verified_commit": "74808625cd59a26a06d666dfa266540e7f0d1c89",
+      "confidence": 1.0,
+      "notes": [
+        "usage_events is shadow telemetry: this layer owns recording/schema truth, not aggregation, watchdog enforcement, or producer routing.",
+        "P23-M8B adds schema capability only; unknown-measurement producer and consumer behavior remains a #23 follow-up."
+      ]
+    }
+  ]
+}
