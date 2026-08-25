@@ -16,7 +16,7 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `28dbc7ab075653440d378c3a60100f11b9c8b411`
+**Truth Reset SHA at last update:** `00853b09f1c65a53535240545ba410da012c14f3`
 
 ---
 
@@ -180,6 +180,17 @@ the closure PR that created it for the search that established this.
   matching inline `RESOLVED / #12 CLOSED` resolution — see #18 below.
 
 ## ACTIVE
+
+- **#3 Data Contract** — **OPEN — CURRENT DATA CONTRACT GAP** (Truth-reset
+  26/08/2026, SHA `00853b09f1c65a53535240545ba410da012c14f3`). Five original
+  findings are CLOSED (#1, #3, #4, #5, #6); original #2 is
+  **DEFERRED — LIVE/SCHEMA CONTRACT DECISION**. One additional routed residual
+  remains: **I3 — HIGH CURRENT GAP**, owned by #3. `Logical Media Key` now
+  exists and partially covers provider-neutral identity/idempotency, but
+  provider-specific IDs are still written through the generic
+  `"Telegram File ID"` field on non-Telegram paths. I3 is active, not
+  deferred; no reopen trigger exists. Evidence and exact paths are recorded
+  in `BUG_AUDIT_LOG.md` and `MAINTENANCE_FILE_DRIFT_REGISTER.md`.
 
 - **No New Architectural Debt enforcement** — **ESTABLISHED (25/08/2026)**.
   PR #972 completed final noise verification and promoted A1–A5 to blocking.
