@@ -15,10 +15,42 @@ This file (`HORIZON.md`, no date suffix) is the persistent, update-in-place
 management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
-**Last updated:** 25/08/2026
-**Truth Reset SHA at last update:** `74808625cd59a26a06d666dfa266540e7f0d1c89`
+**Last updated:** 26/08/2026
+**Truth Reset SHA at last update:** `28dbc7ab075653440d378c3a60100f11b9c8b411`
 
 ---
+
+## OPEN
+
+- **#8 Test Gap** — 🔴 **OPEN — CURRENT TEST GAPS**
+  (status reconciliation 26/08/2026, Truth-Reset SHA
+  `28dbc7ab075653440d378c3a60100f11b9c8b411`; documentation-capture only, no
+  remediation performed in this pass). Full record: `BUG_AUDIT_LOG.md`
+  ("Audit #8 — Test Gap — STATUS RECONCILIATION (Documentation Capture
+  Only)"). Supersedes the "ALREADY CLOSED" status recorded in
+  `MAINTENANCE_STATUS_MATRIX.md`/`MAINTENANCE_DEFERRED_REGISTER.md`'s
+  "Track F follow-up closure — 24/08/2026" — that closure predates Audit #9
+  (25-26/08/2026), which routed both items below to #8 afterward; neither
+  historical entry is rewritten, both are marked bounded/historical instead.
+  - **#8-1 OPEN (no official severity yet)** — tenant-isolation negative-path
+    coverage gap, CROSS-TRACK from Audit #9 Finding #9-1. PR #1017 fixed the
+    #9-1 mock-fidelity issue and added one regression proving the corrected
+    mock — but #9's own documentation states twice, explicitly, that this
+    does **not** close the broader #8 gap. Do not conflate #9's closure with
+    #8 closure.
+  - **#8-2 HIGH (explicit justification)** — `test_phase_4b_1b_durable_lifecycle.py`
+    is written in `pytest` style (`pytest.raises`, no `if __name__` runner);
+    CI's generic "Run test_*.py scripts" step (`.github/workflows/ci.yml:141-155`)
+    invokes it via plain `python3 file.py`, which executes 0 tests silently
+    (verified: exit 0, no output). Confirmed unique, non-redundant blind
+    spot: repo-wide grep for the production rejection message ("invalid
+    lifecycle transition") returns only its definition
+    (`core/action_contract_repository.py:244`) and the one test asserting it
+    (`test_phase_4b_1b_durable_lifecycle.py:73`) — no other CI-executed test
+    file proves this legality-enforcement path. `ci.yml:227-233` already
+    documents and fixes the identical failure mode for
+    `test_context_librarian.py`/`test_refresh_after_merge.py`/`test_reconcile.py`
+    via dedicated `pytest` steps — the same treatment was not applied here.
 
 ## CLOSED
 

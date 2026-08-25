@@ -5570,3 +5570,59 @@ CRITICAL: 0 · HIGH: 1 · MEDIUM: 1 (latent) · LOW: 2 · INFORMATIONAL (not sco
 9. `git diff --check` — PASS (ריק).
 
 - **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED** — 4/4 findings מתוקנים ומאומתים סטטית על branch זה. #9-1's CROSS-TRACK → #8 (negative-path Test Gap) **נשאר פתוח, לא נסגר על ידי remediation זה**. אימות production (post-merge, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.
+
+---
+
+## Audit #8 — Test Gap — STATUS RECONCILIATION (Documentation Capture Only)
+
+- **תאריך:** 26/08/2026
+- **Truth-Reset SHA:** `28dbc7ab075653440d378c3a60100f11b9c8b411` (origin/main, לאחר merge של PR #1017 — Audit #9 remediation)
+- **Scope:** תיעוד סטטוס בלבד ל-track #9 בלבד — **לא בוצע audit חדש**, לא נבדקו/לא נפתחו מחדש שום מסלול אחר. שני ה-findings למטה כבר זוהו/נותבו קודם (מ-Audit #9 ומהעבודה הקודמת עליו); הרשומה הזו רק ממסמכת אותם רשמית תחת #8 ומתקנת את סטטוס ה-SSOT שהתיישן.
+- **Mode:** documentation-capture only. **אין שינוי production code/tests/CI בשלב זה — 0 שינויים.**
+- **Reason for reconciliation:** הסטטוס `#8 Test Gap — ALREADY CLOSED` שנרשם ב-`MAINTENANCE_STATUS_MATRIX.md` וב-`MAINTENANCE_DEFERRED_REGISTER.md` תקף אך ורק ל-"Track F follow-up closure — 24/08/2026" (re-verified מול SHA `7e38c8e4274285bb548e02830d8ef959148fb31a`) — **קודם לחלוטין** ל-Audit #9 (25-26/08/2026), שניתב שני items חדשים אל #8. אף אחד מהם לא השתקף בחזרה ב-SSOT עד כה.
+- **Final status:** 🔴 **OPEN — CURRENT TEST GAPS**. HIGH: 1 (#8-2, עם הצדקה מפורשת — ר' למטה) · MEDIUM: 0 · פריט ללא severity רשמי: 1 (#8-1, ר' למטה).
+
+### FINDING #8-1 — OPEN — Tenant-isolation negative-path coverage gap
+- **קונספט:** אין test שמאשש במפורש ש-`_is_canonical_tma_contract()` (`tma_api.py:2344`) דוחה contract שה-`tenant_id` שלו שונה מה-`tenant_id` של ה-identity המאשר — מעבר לבדיקת המקרה החיובי (הכל תואם).
+- **Origin:** CROSS-TRACK מ-Audit #9 Finding #9-1 (`BUG_AUDIT_LOG.md` — "Audit #9 — Mock Fidelity (Phase 1, Read-Only)", finding #9-1; ור' גם סעיף ה-CROSS-TRACK ב-closure entry שלו).
+- **חשוב — אין לבלבל עם סגירת #9:** PR #1017 (מיזוג `cb5aa30`/`c7bc87b`) תיקן את ה-Mock Fidelity issue (#9-1) עצמו — `_owner()`/`_FakeContract` בטסטים קיבלו `tenant_id` ריאליסטי תואם במקום שני `None`ים ש-vacuously שווים — **והוסיף גם test אחד** (`test_approval_concurrency.py` Test 6) שמוכיח ש-contract עם tenant אחר נדחה end-to-end. אבל התיעוד של PR #1017 עצמו קובע במפורש **פעמיים** ש-#8 הרחב יותר **נשאר פתוח**:
+  - `BUG_AUDIT_LOG.md` (Audit #9-1 closure): "ה-negative-path assertion החדשה כאן... **אינה** סוגרת/מחליפה את ה-#8 Test Gap הרחב יותר."
+  - `docs/governance/HORIZON.md` (#9 closure entry): "**CROSS-TRACK → #8 stays open** — the broader Test Gap this remediation routed to #8 is not closed by this fidelity fix."
+  - הטסט שנוסף ב-PR #1017 היה scoped במפורש רק כדי להוכיח את תיקון ה-mock fidelity — לא נבחן/לא אומץ כ-remediation רשמי של #8 עצמו.
+- **Classification:** OPEN. אין severity רשמי משויך — #8 מעולם לא אימץ finding זה כ-numbered finding בבעלותו לפני רשומה זו; #9 עצמו סיווג את בעיית ה-mock fidelity המקורית כ-HIGH, אבל הפער הכללי-יותר של #8 (coverage gap, לא contract mismatch) לא קיבל ציון עצמאי.
+- **Status:** OPEN — לא טופל, לא remediated תחת #8.
+
+### FINDING #8-2 — HIGH CURRENT GAP (explicit justification below) — pytest-style test file not actually executed by generic CI runner
+- **קונספט:** קובץ test כתוב בסגנון `pytest` (`pytest.raises`, `def test_...():`) בלי `if __name__ == "__main__":` runner, מופעל ב-CI על ידי ה-loop הגנרי שמריץ `python "$f"` — מריץ **0 בדיקות בשקט**, exit 0.
+- **File:** `test_phase_4b_1b_durable_lifecycle.py` (כל הקובץ — 18 test functions בסגנון pytest, ללא runner).
+- **CI mechanism:** `.github/workflows/ci.yml:141-155` — צעד "Run test_*.py scripts", `for f in test_*.py; do ... python "$f" ...; done`. הקובץ תואם ל-glob, אבל מריץ אפס assertions.
+- **וידוא (26/08/2026, Truth-Reset SHA `28dbc7ab075653440d378c3a60100f11b9c8b411`):**
+  - `python3 test_phase_4b_1b_durable_lifecycle.py` → exit 0, **אין פלט כלל**, 0 בדיקות רצות.
+  - `python3 -m pytest test_phase_4b_1b_durable_lifecycle.py -q` → 18 tests collected, 17 passed, 1 failed (`test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` — כשל **קיים-מראש, לא קשור**, reproduced זהה על `origin/main` נקי; לא חלק מ-finding זה).
+- **Existing precedent in this repo:** `.github/workflows/ci.yml:227-233` מתעד **באופן מפורש** בדיוק את אותו failure mode עבור `test_context_librarian.py` — "'Run test_\*.py scripts' loop above silently executes it as a no-op (exits 0 having run zero of its tests)" — עם dedicated `pytest` steps קיימים (`ci.yml:232-239`) עבור `test_context_librarian.py`, `test_refresh_after_merge.py`, `test_reconcile.py`. `test_phase_4b_1b_durable_lifecycle.py` **לא** מקבל טיפול דומה — לא ב-loop הגנרי, לא ב-dedicated step ייעודי.
+- **Uniqueness check (למניעת ניפוח severity אוטומטי):** `grep -n "invalid lifecycle transition"` ברחבי הריפו מחזיר **רק שתי תוצאות**: ההגדרה ב-`core/action_contract_repository.py:244` (production) וה-assertion היחיד עליה ב-`test_phase_4b_1b_durable_lifecycle.py:73` (הטסט של Audit #9-3, `test_fake_lifecycle_repository_rejects_illegal_transition`, נוסף ב-PR #1017). שלושה קבצי test אחרים שכן רצים ב-CI ונוגעים ב-`ALLOWED_CONTRACT_TRANSITIONS`/`ActionContractTransitionConflictError` (`test_bug127a_stale_lifecycle_version_retry.py`, `test_phase_4b2_approvals_projection.py`, `test_pa01_phantom_approval_enforcement.py`) בודקים **stale-version CAS** או **מבנה סטטי של הטבלה** — אף אחד מהם לא מאשש בפועל שה-production repository דוחה קפיצת-סטטוס לא-חוקית. **אין כיסוי כפול** — זהו blind spot ייחודי, לא redundancy.
+- **Impact:** false-green CI coverage על התנהגות lifecycle/action-contract — כולל בדיקת אכיפת חוקיות-מעברי-סטטוס (`ALLOWED_CONTRACT_TRANSITIONS`) של `core/action_contract_repository.py:241-245`, נתיב production חי ב-approval flow (ר' `CLAUDE.md`'s "Iron rule" על ה-approval flow כ-security-critical). רגרסיה עתידית שמחלישה/מסירה את בדיקת החוקיות תעבור את ה-suite ב-CI בלי להתגלות.
+- **Classification:** **HIGH CURRENT GAP** — לא ברירת מחדל אוטומטית ל-MEDIUM. הצדקה מפורשת: (1) הבדיקה שנעדרת מ-CI היא היחידה בריפו כולו שמאששת את התנהגות ה-legality enforcement הזו על production code אמיתי — לא redundant מול טסט אחר שכן רץ; (2) הנתיב המושפע הוא lifecycle/approval-contract state machine, נתיב live production, לא קוד מת/flag-gated; (3) הריפו עצמו כבר מכיר ומטפל בדיוק ב-failure mode הזה (ר' precedent למעלה) עבור 3 קבצים אחרים — כלומר הסיכון מוכר ומקובל כרציני מספיק כדי להצדיק dedicated CI step, פשוט לא הוחל כאן.
+- **Recommended remediation (לא בוצע כאן):** להוסיף dedicated `pytest` step ל-`.github/workflows/ci.yml` עבור `test_phase_4b_1b_durable_lifecycle.py`, באותו pattern כמו `test_context_librarian.py`/`test_refresh_after_merge.py`/`test_reconcile.py` (`ci.yml:232-239`).
+- **Status:** OPEN — לא טופל.
+
+### STATUS RECONCILIATION — SSOT updates
+- `MAINTENANCE_STATUS_MATRIX.md` §"Track F follow-up closure — 24/08/2026" — שורת `#8 Test Gap` עודכנה עם הפניה קדימה לסטטוס הנוכחי; **הטקסט ההיסטורי המקורי לא נמחק/לא נכתב-מחדש**, רק סומן כ-bounded/historical.
+- `MAINTENANCE_DEFERRED_REGISTER.md` §"Track F follow-up closure — 24/08/2026" — אותו טיפול.
+- `docs/governance/HORIZON.md` — נוסף `## OPEN` section מחדש (הוסר קודם כשנסגרו #9/#11) עם רשומת #8.
+- `MAINTENANCE_FILE_DRIFT_REGISTER.md` §"Future-audit cross-reference" — שורת `#8 Test Gap` עודכנה לשקף את שני ה-findings הפתוחים, בנוסף ל-placement concern הקיים (עדיין מנותב ל-#12, ללא שינוי).
+
+### Finding counts
+CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN ללא severity רשמי: 1 (#8-1) · CROSS-TRACK consumed: 1 (מ-#9-1).
+
+### VERIFY
+1. #8-1 recorded OPEN — ✅.
+2. #8-2 recorded OPEN — ✅.
+3. Stale "ALREADY CLOSED" status normalized בכל 3 ה-SSOT docs (`MAINTENANCE_STATUS_MATRIX.md`, `MAINTENANCE_DEFERRED_REGISTER.md`, `docs/governance/HORIZON.md`) + `MAINTENANCE_FILE_DRIFT_REGISTER.md` — ✅, ראה למטה.
+4. #9 עצמו נשאר CLOSED — ✅, לא נגעו בסעיפי #9 הקיימים (רק append, אין edit לתוכן #9).
+5. אין שינוי לשום test file — ✅ (`git status` מאמת: 5 קבצי `.md` בלבד).
+6. אין שינוי ל-CI — ✅ (`.github/workflows/ci.yml` לא נגע בו; אוזכר כראייה בלבד).
+7. שינויי production code: 0 — ✅.
+8. `git diff --check` — PASS.
+
+- **סטטוס:** 🔴 **OPEN — CURRENT TEST GAPS**. לא בוצע remediation בסבב זה — תיעוד/reconciliation בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.

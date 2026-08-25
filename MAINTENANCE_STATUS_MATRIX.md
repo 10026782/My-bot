@@ -20,9 +20,20 @@ This closure records documentation truth only; production verification is not cl
 | #16 Tool Contract | **ALREADY CLOSED** | No independent current #16 gap; recorded contract/data items remain cross-track. |
 | #5 Async / Concurrency | **BOUNDED FINDING CLOSED / MERGED**; process-local/shared-lock limitation **DEFERRED ARCHITECTURE** | Voice STT retry release via PR #878. |
 | #6 Scheduler | **DEFERRED ARCHITECTURE** | R-C06-10 retained; no demonstrated functional defect. |
-| #8 Test Gap | **ALREADY CLOSED** | Placement concern remains owned by #12 only. |
+| #8 Test Gap | **ALREADY CLOSED**¹ | Placement concern remains owned by #12 only. |
 | #14 Deprecated Compatibility | **DEFERRED ARCHITECTURE** | Active compatibility remains load-bearing. |
 | #19 Docs-to-Code | **CLOSED / DOC DRIFT REMEDIATED** | G1/G2 #882, G5/G6 #893, G3/G4/G15 #896, G7 closed by the accompanying documentation correction. |
+
+¹ **Superseded 26/08/2026 — see "#8 Test Gap status update" section below.** This row's text is preserved verbatim as the historical 24/08/2026 finding (valid at the time, against SHA `7e38c8e4274285bb548e02830d8ef959148fb31a`); it is a **bounded, historical closure claim, not the current status**. Two items were routed to #8 by Audit #9 (25-26/08/2026) after this row was written, neither reflected here until now.
+
+## #8 Test Gap status update — 26/08/2026
+
+Truth-Reset SHA `28dbc7ab075653440d378c3a60100f11b9c8b411` (origin/main, after PR #1017 — Audit #9 remediation). Documentation-capture only; no code/test/CI change in this pass.
+
+**Current status: #8 Test Gap — 🔴 OPEN — CURRENT TEST GAPS.** The 24/08/2026 "ALREADY CLOSED" row above is not rewritten — it remains accurate for its own date and evidence, but is no longer the current status. Full record: `BUG_AUDIT_LOG.md` ("Audit #8 — Test Gap — STATUS RECONCILIATION (Documentation Capture Only)"), `docs/governance/HORIZON.md` ("## OPEN").
+
+- **#8-1 OPEN (no official severity yet)** — tenant-isolation negative-path coverage gap, CROSS-TRACK from Audit #9 Finding #9-1. PR #1017 fixed the #9-1 mock-fidelity issue itself and added one regression proving the corrected mock, but #9's own documentation states explicitly, twice, that the broader #8 gap is **not** closed by that fix.
+- **#8-2 HIGH (explicit justification)** — `test_phase_4b_1b_durable_lifecycle.py` is pytest-style with no `__main__` runner; CI's generic `python "$f"` loop (`.github/workflows/ci.yml:141-155`) runs 0 of its tests silently. Confirmed a unique, non-redundant blind spot on the production `ALLOWED_CONTRACT_TRANSITIONS` legality-enforcement path (`core/action_contract_repository.py:241-245`) — no other CI-executed test proves it. `ci.yml:227-233` already documents and fixes this identical failure mode for 3 other files via dedicated `pytest` steps; not yet applied here.
 
 ## Track #13 closure — Naming Consistency
 
