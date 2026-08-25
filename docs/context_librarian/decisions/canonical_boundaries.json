@@ -348,7 +348,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
+      "last_observed_commit": "612cac968523f84a54d39a24fc72f969d863d8bc"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -790,7 +790,7 @@
         "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification.",
         "Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
-      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
+      "last_observed_commit": "612cac968523f84a54d39a24fc72f969d863d8bc"
     },
     {
       "id": "decision.n18_shared_write_primitives",
