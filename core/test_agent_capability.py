@@ -39,7 +39,7 @@ def test_one_reasoning_context_binds_one_operation_without_fallback_recreation()
     [
         {"handler": Handler.TOOL},
         {"handler": Handler.CLARIFY},
-        {"intent": Intent.UNKNOWN},
+        {"handler": "unknown"},
         {"intent": Intent.ENGINEERING_NOTE},
         {"response_override": "terminal"},
     ],

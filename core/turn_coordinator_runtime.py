@@ -46,7 +46,7 @@ def resolve_agent_capability(route: RouteDecision) -> ResolvedCapability:
         raise TypeError("route must be a RouteDecision")
     if (
         route.handler != Handler.AGENT
-        or route.intent in {Intent.UNKNOWN, Intent.ENGINEERING_NOTE}
+        or route.intent == Intent.ENGINEERING_NOTE
         or route.response_override
     ):
         raise ValueError("route is not an executable Agent decision")
