@@ -171,15 +171,18 @@ with patch("core.database.get_conn", return_value=fake_conn2), \
     chk("service is 'text' for an LLM call", params_sent[1] == "text")
     chk("legacy capability attribution is explicit", params_sent[12] == "legacy.unknown")
     chk("legacy execution class is explicit", params_sent[13] == "UNKNOWN")
+    chk("legacy operation correlation remains absent", params_sent[14] is None)
 
     fake_cursor2.reset_mock()
     ok = record_llm_usage(
         source="test", model="claude-sonnet-4-6", tokens_in=1, tokens_out=2,
         capability_id="lead.create", execution_class="NARROW_MODEL",
+        operation_id="owner:op-123",
     )
     params_sent = fake_cursor2.execute.call_args[0][1]
     chk("custom capability attribution is passed through", params_sent[12] == "lead.create")
     chk("custom execution class is passed through", params_sent[13] == "NARROW_MODEL")
+    chk("custom operation correlation is passed through", params_sent[14] == "owner:op-123")
 
 
 print("\n── record_stt_usage() uses service='stt', no input quantity ────────────────")
