@@ -20,6 +20,20 @@
 
 ---
 
+## Audit #2 — Schema Drift — AUDIT COMPLETE (DEFERRED LIVE VERIFICATION)
+
+- **Truth-reset:** `origin/main` `06cc2ba38c9e15c5b3aa92ff293887b33ee3843f`
+- **Finding #1:** `ALREADY VERIFIED / CLOSED` — schema seed/cache alignment verified; no runtime/static regression found.
+- **Finding #2:** `ALREADY VERIFIED / CLOSED` — `schema_intelligence.py` remains `READ-ONLY / NON-AUTHORITATIVE`; duplicate write validation is not active.
+- **Finding #3:** `DEFERRED — LIVE VERIFICATION REQUIRED` — 13 `*Fields` classes remain unregistered in `TABLE_CLASS_MAP`; no registration safety is inferred without Live Airtable evidence.
+- **Live blocker:** `env_present=false`; Live Airtable verification was unavailable.
+- **Deferred classes:** `BossBattlesFields`, `CashFlowFields`, `DeadlineFields`, `DebtMgmtFields`, `LeadSessionsFields`, `LearningFields`, `LoanFields`, `MarketingCreativesFields`, `ProjectsHubFields`, `SchemaSnapshotFields`, `TrafficSourcesFields`, `UnitFields`, `WeeklyGoalsFields`.
+- **Reopen condition:** reopen Finding #3 only when Live schema access becomes available, or when one of these classes enters an active schema/runtime change.
+- **Classification:** `AUDIT COMPLETE — DEFERRED LIVE VERIFICATION` — not `CLEAN`, and Finding #3 is not marked fixed.
+- **Related historical entries:** BUG-015/BUG-020/BUG-021 remain historical evidence and are not reclassified by this closure.
+
+---
+
 ## לוג באגים
 
 ### BUG-001 — PersonalMode field names mismatch

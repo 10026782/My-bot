@@ -195,7 +195,7 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 
 | Future audit | Consolidated findings routed here |
 |---|---|
-| #2 Schema Drift | K3, K6, K9, K10, I2, I6 |
+| #2 Schema Drift | **AUDIT COMPLETE — DEFERRED LIVE VERIFICATION**; K3, K6, K9, K10, I2, I6 remain separately tracked pending Live evidence |
 | #3 Data Contract | K1, K2, K4, K7-residual, K8, I3 |
 | #4 Exception Taxonomy follow-up | (none consolidated this pass) |
 | #5 Async/Concurrency follow-up | guards/idempotency lock-before-I/O behavior noted in L(e) |
