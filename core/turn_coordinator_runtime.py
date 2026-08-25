@@ -90,6 +90,31 @@ def resolve_marketing_creative_drafting_capability() -> ResolvedCapability:
     )
 
 
+def resolve_daily_persistence_gap_capability() -> ResolvedCapability:
+    """Resolve the fixed eligible daily persistence-gap analysis contract."""
+    ownership = IntentOwnershipDecision(
+        intent=Intent.DETECT_DAILY_PERSISTENCE_GAPS,
+        owner="daily_collector.analysis",
+        reason="eligible fixed daily persistence-gap analysis contract",
+        confidence=1.0,
+    )
+    return resolve_capability(
+        ownership,
+        {
+            Intent.DETECT_DAILY_PERSISTENCE_GAPS: (
+                ResolvedCapability(
+                    capability_id="business.daily_persistence_gap_detection",
+                    execution_class=ExecutionClass.NARROW_MODEL,
+                    executor_ref="daily_collector.analysis",
+                    validator_ref="daily_collector.history_eligibility.v1",
+                    verification_ref="daily_collector.result_schema.v1",
+                    fallback_ref="llm_fallback",
+                ),
+            ),
+        },
+    )
+
+
 def resolve_agent_capability(route: RouteDecision) -> ResolvedCapability:
     """Adapt an authoritative Agent route to the canonical reasoning capability."""
     if not isinstance(route, RouteDecision):

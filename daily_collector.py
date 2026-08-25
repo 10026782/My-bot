@@ -8,6 +8,8 @@
 import os
 import json
 import logging
+from core import create_execution_context, create_operation
+from core.turn_coordinator_runtime import resolve_daily_persistence_gap_capability
 from llm_fallback import call_anthropic_text
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,31 @@ _COLLECTOR_PROMPT = """עבור על שיחות היום הבאות.
 # Collect — לוגיקה ראשית
 # ══════════════════════════════════════════════════
 
+_ALLOWED_CATEGORIES = frozenset({"cashflow", "crm", "calendar", "task"})
+_ALLOWED_STATUSES = frozenset({"saved", "unclear"})
+
+
+def verify_daily_collector_result(result: object) -> dict:
+    """Accept only the collector's bounded structural result contract."""
+    if not isinstance(result, dict):
+        raise ValueError("collector result must be an object")
+    if not isinstance(result.get("items"), list):
+        raise ValueError("collector result items must be a list")
+    if not isinstance(result.get("all_clear"), bool):
+        raise ValueError("collector result all_clear must be a bool")
+    for item in result["items"]:
+        if not isinstance(item, dict):
+            raise ValueError("collector result item must be an object")
+        if item.get("category") not in _ALLOWED_CATEGORIES:
+            raise ValueError("collector result item category is invalid")
+        if item.get("status") not in _ALLOWED_STATUSES:
+            raise ValueError("collector result item status is invalid")
+        if not isinstance(item.get("text"), str):
+            raise ValueError("collector result item text must be a string")
+        if not isinstance(item.get("suggested_action"), str):
+            raise ValueError("collector result item suggested_action must be a string")
+    return result
+
 def collect_daily(memory_key: str) -> dict:
     """
     שולף את היסטוריית היום, שולח ל-Claude לניתוח,
@@ -92,6 +119,9 @@ def collect_daily(memory_key: str) -> dict:
 
     logger.info("collect_daily: fetch history done — start LLM analysis")
     try:
+        capability = resolve_daily_persistence_gap_capability()
+        operation = create_operation(capability)
+        execution_context = create_execution_context(capability, operation)
         raw = call_anthropic_text(
             source="daily_collector.collect_daily",
             model="claude-haiku-4-5-20251001",
@@ -101,13 +131,14 @@ def collect_daily(memory_key: str) -> dict:
             messages=[{
                 "role": "user",
                 "content": _COLLECTOR_PROMPT + convo_text
-            }]
+            }],
+            execution_context=execution_context,
         ).strip()
 
         # נקה ```json אם יש
         raw = raw.replace("```json", "").replace("```", "").strip()
 
-        result = json.loads(raw)
+        result = verify_daily_collector_result(json.loads(raw))
         logger.info(f"collect_daily: LLM analysis done — {len(result.get('items', []))} פריטים זוהו")
         return result
 
