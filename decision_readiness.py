@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from decision_confidence import ConfidenceResult, detect_missing_evidence
 from decision_pipeline import _trust_rank
+from tma_api import record_fields
 from airtable_schema import (
     DecisionFields as DF,
     DecisionReadiness as DR,
@@ -60,11 +61,11 @@ class ReadinessResult:
 
 
 def _active_events(events: list[dict]) -> list[dict]:
-    return [e for e in events if e.get("fields", {}).get(EF.STATUS, ES.ACTIVE) != ES.SUPERSEDED]
+    return [e for e in events if record_fields(e).get(EF.STATUS, ES.ACTIVE) != ES.SUPERSEDED]
 
 
 def _is_pressure_only(event: dict) -> bool:
-    return TAG.PRESSURE_ONLY in (event.get("fields", {}).get(EF.TAGS) or [])
+    return TAG.PRESSURE_ONLY in (record_fields(event).get(EF.TAGS) or [])
 
 
 def calc_readiness(decision: dict, events: list[dict], confidence_result: ConfidenceResult) -> ReadinessResult:
@@ -153,9 +154,9 @@ def calc_readiness(decision: dict, events: list[dict], confidence_result: Confid
 def detect_escalation(decision: dict, result: ReadinessResult) -> list[str]:
     """
     מחזיר רשימת תבניות escalation לפי המצב — מי כדאי שיבדוק את ההחלטה.
-    פועל רק על decision["fields"] + result המחושב — לא מקבל events (לפי חתימת SPEC).
+    פועל רק על decision fields + result המחושב — לא מקבל events (לפי חתימת SPEC).
     """
-    fields = decision.get("fields", {})
+    fields = record_fields(decision)
     exposure_type = fields.get(DF.EXPOSURE_TYPE, "")
     escalations: list[str] = []
 

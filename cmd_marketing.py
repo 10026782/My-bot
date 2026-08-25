@@ -470,11 +470,12 @@ def _authorized_demand_list(identity) -> list[dict]:
     """
     import marketing_gateway
     from airtable_schema import MarketingDemandFields as MDF
+    from tma_api import record_fields
 
     records = marketing_gateway.list_demands(limit=10)
     return [
         r for r in records
-        if identity.can_access_domain(r.get("fields", {}).get(MDF.DOMAIN, ""))
+        if identity.can_access_domain(record_fields(r).get(MDF.DOMAIN, ""))
     ]
 
 

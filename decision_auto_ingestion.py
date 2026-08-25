@@ -24,6 +24,7 @@ from airtable_schema import (
     Tables,
 )
 from decision_matching import find_matching_decision
+from tma_api import record_id
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +227,7 @@ def suggest_decision_link(raw_content: str, metadata: dict | None = None) -> dic
 
     if not match or score <= STRONG_MATCH_THRESHOLD:
         return {"decision_id": "", "match_confidence": float(score or 0.0)}
-    return {"decision_id": match.get("id", ""), "match_confidence": float(score)}
+    return {"decision_id": record_id(match) or "", "match_confidence": float(score)}
 
 
 def _features_enabled() -> bool:
