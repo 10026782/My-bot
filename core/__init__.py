@@ -1,3 +1,13 @@
-from .operation_identity import OperationIdentity, create_operation
+from .operation_identity import (
+    ExecutionContext,
+    OperationIdentity,
+    create_execution_context,
+    create_operation,
+)
 
-__all__ = ["OperationIdentity", "create_operation"]
+__all__ = [
+    "ExecutionContext",
+    "OperationIdentity",
+    "create_execution_context",
+    "create_operation",
+]

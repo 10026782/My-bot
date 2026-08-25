@@ -928,14 +928,14 @@
     },
     {
       "id": "decision.operation_identity_authority",
-      "name": "core/operation_identity.py is canonical for operation identity",
+      "name": "core/operation_identity.py is canonical for operation and execution context identity",
       "type": "decision",
       "status": "active",
       "authority_level": "canonical_contract",
       "source_of_truth": {
         "is_authority": true,
-        "scope": "immutable operation identity creation after capability/action selection and before approval or direct execution",
-        "precedence": "OperationIdentity is the sole authority for operation identity; ActionGateway, providers, telemetry, workflow, and idempotency layers may reference it but must not recreate it"
+        "scope": "immutable operation identity creation and immutable execution-context binding after capability/action selection and before approval or direct execution",
+        "precedence": "OperationIdentity and ExecutionContext are the canonical authority carrier; ActionGateway, providers, telemetry, workflow, and idempotency layers may reference them but must not recreate or rewrite authority"
       },
       "owner": "governance",
       "code_paths": [
@@ -963,7 +963,7 @@
       "confidence": 0.9,
       "notes": [
         "Owner decision for PR #978: CREATE NEW NODE after the pre-merge gate reported NO_POLICY_MATCH for core/operation_identity.py.",
-        "Scope is deliberately limited to the immutable OperationIdentity contract and pure ResolvedCapability-backed factory. Workflow identity, ActionContract persistence, telemetry, producers, and runtime propagation remain owned by their separate tracks."
+        "Scope is deliberately limited to immutable OperationIdentity/ExecutionContext contracts and pure construction helpers. Workflow identity, ActionContract persistence, telemetry, producers, and runtime propagation remain owned by their separate tracks."
       ],
       "extensions": {
         "context_librarian.registration": {
