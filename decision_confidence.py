@@ -214,7 +214,7 @@ def detect_missing_evidence(domain: str, events: list[dict]) -> list[str]:
     """
     required = REQUIRED_EVIDENCE.get(domain, _DEFAULT_REQUIRED_EVIDENCE)
     present_text = " ".join(
-        f"{e.get('fields', {}).get(EF.AI_SUMMARY, '')} {e.get('fields', {}).get(EF.RAW_CONTENT, '')}"
+        f"{record_fields(e).get(EF.AI_SUMMARY, '')} {record_fields(e).get(EF.RAW_CONTENT, '')}"
         for e in _active_events(events)
     )
     return [item for item in required if item not in present_text]

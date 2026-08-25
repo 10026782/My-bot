@@ -19,6 +19,7 @@ from airtable_schema import (
     DecisionStakeholderRole as StakeholderRole,
     DecisionStatus,
 )
+from tma_api import record_fields, record_id
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def orchestrate(
     event_records = list(events or [])
     stakeholder_records = list(stakeholders or [])
     fields = _fields(decision)
-    decision_id = decision.get("id", "")
+    decision_id = record_id(decision) or ""
     title = str(fields.get(DF.TITLE, ""))
     status = fields.get(DF.STATUS, "")
     readiness = fields.get(DF.READINESS, "")
@@ -350,7 +351,7 @@ def _feature_enabled() -> bool:
 
 
 def _fields(record: dict) -> dict:
-    return record.get("fields", record)
+    return record_fields(record)
 
 
 def _is_not_ready(value: str) -> bool:
@@ -454,7 +455,7 @@ def _confidence_bar(score: float) -> str:
 def _disabled_result(decision: dict) -> OrchestratorResult:
     fields = _fields(decision)
     return OrchestratorResult(
-        decision_id=decision.get("id", ""),
+        decision_id=record_id(decision) or "",
         title=str(fields.get(DF.TITLE, "")),
         phase=PHASE_COLLECTING,
         current_state="Orchestrator לא פעיל",

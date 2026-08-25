@@ -22,6 +22,7 @@ from decision_attention_policy import (
     PRIORITY_NONE,
     AttentionPolicy,
 )
+from tma_api import record_fields, record_id
 
 FEATURE_FLAG = "FEATURE_DECISION_HUB"
 
@@ -77,7 +78,7 @@ def detect_attention(
     items: list[AttentionItem] = []
 
     for decision in decisions:
-        decision_id = decision.get("id", "")
+        decision_id = record_id(decision) or ""
         item = calc_priority(
             decision,
             events_by_decision.get(decision_id, []),
@@ -174,7 +175,7 @@ def calc_priority(
         priority = PRIORITY_LOW
 
     return AttentionItem(
-        decision_id=decision.get("id", ""),
+        decision_id=record_id(decision) or "",
         title=fields.get(DecisionFields.TITLE, ""),
         priority=priority,
         score=score,
@@ -213,7 +214,7 @@ def _feature_enabled() -> bool:
 def _none_item(decision: dict) -> AttentionItem:
     fields = _fields(decision)
     return AttentionItem(
-        decision_id=decision.get("id", ""),
+        decision_id=record_id(decision) or "",
         title=fields.get(DecisionFields.TITLE, ""),
         priority=PRIORITY_NONE,
         score=0,
@@ -222,7 +223,7 @@ def _none_item(decision: dict) -> AttentionItem:
 
 
 def _fields(record: dict) -> dict:
-    return record.get("fields", record)
+    return record_fields(record)
 
 
 def _build_signals(
