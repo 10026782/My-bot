@@ -31,6 +31,7 @@ from media_gateway import (
 )
 import drive_adapter
 from voice_stt_adapter import transcribe
+from tma_api import record_fields, record_id
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +211,7 @@ def _save_transcript_to_memory(transcript: str, domain: str, source: str) -> boo
     fields = normalize_business_memory_fields(fields, domain)
     record = airtable_create(Tables.BUSINESS_MEMORY, fields, source=f"media_handler:{source}")
     if record:
-        logger.info("[media_handler] saved transcript to Business Memory id=%s", record.get("id"))
+        logger.info("[media_handler] saved transcript to Business Memory id=%s", record_id(record))
         return True
     logger.warning("[media_handler] failed to save transcript to Business Memory")
     return False
@@ -237,7 +238,7 @@ def _save_transcript_to_media_files(transcript: str, domain: str, source: str, s
     }
     record = airtable_create(Tables.MEDIA_FILES, fields, source=f"media_handler:{source}")
     if record:
-        logger.info("[media_handler] saved transcript to Voice Inbox (Media Files) id=%s status=%s", record.get("id"), status)
+        logger.info("[media_handler] saved transcript to Voice Inbox (Media Files) id=%s status=%s", record_id(record), status)
         return True
     logger.warning("[media_handler] failed to save transcript to Voice Inbox (Media Files)")
     return False
@@ -522,13 +523,13 @@ def handle_file_upload(
         release_reservation()
         return MediaResult(ok=False, file_size_tier=tier, error=MediaError("MEDIA_LOOKUP_FAILED", "Media Files lookup failed", True))
     if media_lookup.status == "reusable":
-        fields = media_lookup.record.get("fields", {})
+        fields = record_fields(media_lookup.record)
         return MediaResult(
-            ok=True, asset_id=media_lookup.record.get("id", ""),
+            ok=True, asset_id=record_id(media_lookup.record) or "",
             drive_url=fields.get("Drive URL", ""), file_size_tier=tier,
         )
     media_record = media_lookup.record if media_lookup.status == "incomplete" else None
-    media_record_id = media_record.get("id", "") if media_record else ""
+    media_record_id = (record_id(media_record) or "") if media_record else ""
 
     def mark_partial(record_id: str, drive_file_id: str, drive_url: str) -> None:
         if record_id:

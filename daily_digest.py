@@ -7,6 +7,7 @@ from datetime import date, timedelta
 
 from airtable_schema import LeadFields, Tables, PaymentFields, PaymentStatus
 from core.query_contract import after, all_of, before, contains, created_time, date_add, equals, not_equals, same_day, today
+from tma_api import record_fields
 from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ def _hot_leads(errors: list) -> str:
             return "🔥 *לידים חמים:* אין כרגע"
         lines = ["🔥 *לידים חמים:*"]
         for r in records:
-            f         = r.get("fields", {})
+            f         = record_fields(r)
             score     = int(f.get(LeadFields.SCORE, 0) or 0)
             tier      = _tier_label(score)
             next_step = f.get("next_step", "—") or "—"
@@ -97,7 +98,7 @@ def _followups_today(errors: list) -> str:
             return "📞 *מעקבים להיום:* אין"
         lines = ["📞 *מעקבים להיום:*"]
         for r in records:
-            f      = r.get("fields", {})
+            f      = record_fields(r)
             status = f.get("סטטוס", "—")
             due    = _fmt(f.get("תאריך פולו אפ", ""))
             lines.append(
@@ -129,12 +130,12 @@ def _roadmap_tasks_today(errors: list) -> str:
         # Sort by priority order
         _PRIO_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "": 4}
         records.sort(key=lambda r: _PRIO_ORDER.get(
-            r.get("fields", {}).get("Priority", ""), 4
+            record_fields(r).get("Priority", ""), 4
         ))
 
         buckets: dict[str, list[str]] = {"P0": [], "P1": [], "P2": [], "P3": []}
         for r in records:
-            f       = r.get("fields", {})
+            f       = record_fields(r)
             task    = f.get("Task", "?")
             prio    = f.get("Priority", "P3")
             status  = f.get("Status", "")
@@ -176,7 +177,7 @@ def _open_deals(errors: list) -> str:
             return "🤝 *עסקאות פתוחות:* אין"
         lines = ["🤝 *עסקאות פתוחות:*"]
         for r in records:
-            f      = r.get("fields", {})
+            f      = record_fields(r)
             amount = f.get("סכום", 0)
             amt    = f"₪{amount:,.0f}" if isinstance(amount, (int, float)) else "—"
             lines.append(
@@ -207,7 +208,7 @@ def _upcoming_payments(errors: list) -> str:
         lines = ["💰 *תשלומים קרובים:*"]
         total = 0
         for r in records:
-            f      = r.get("fields", {})
+            f      = record_fields(r)
             amount = f.get(PaymentFields.AMOUNT, 0)
             total += amount if isinstance(amount, (int, float)) else 0
             amt    = f"₪{amount:,.0f}" if isinstance(amount, (int, float)) else "—"
@@ -225,7 +226,7 @@ def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
     """מחזיר ספירות HOT/WARM/COLD לפי טווחי ציון הלידים הקנוניים."""
     hot = warm = cold = 0
     for record in records:
-        raw_score = record.get("fields", {}).get(LeadFields.SCORE, 0)
+        raw_score = record_fields(record).get(LeadFields.SCORE, 0)
         try:
             score = int(raw_score or 0)
         except (TypeError, ValueError):
@@ -285,7 +286,7 @@ def _yesterday_changes(errors: list) -> str:
         if lead_recs:
             lines.append(f"• *לידים חדשים ({len(lead_recs)}):*")
             for r in lead_recs:
-                f   = r.get("fields", {})
+                f   = record_fields(r)
                 src = f.get("source") or f.get("channel") or "—"
                 lines.append(f"  – {f.get('Name','?')} | {f.get('phone','—')} | {src}")
             any_data = True
@@ -293,14 +294,14 @@ def _yesterday_changes(errors: list) -> str:
         if deal_recs:
             lines.append(f"• *עסקאות חדשות ({len(deal_recs)}):*")
             for r in deal_recs:
-                f = r.get("fields", {})
+                f = record_fields(r)
                 lines.append(f"  – {f.get('שם העסקה','?')} | {f.get('שלב','—')}")
             any_data = True
 
         if done_recs:
             lines.append(f"• *משימות שהושלמו ({len(done_recs)}):*")
             for r in done_recs:
-                f = r.get("fields", {})
+                f = record_fields(r)
                 lines.append(f"  – {f.get('כותרת המשימה','?')}")
             any_data = True
 

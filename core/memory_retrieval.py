@@ -33,6 +33,7 @@ from core.memory_retrieval_contract import (
     SnapshotMetadata,
 )
 from tools.airtable_read_adapter import list_records
+from tma_api import record_fields, record_id as provider_record_id
 
 logger = logging.getLogger(__name__)
 
@@ -126,10 +127,10 @@ def _fetch_business_memory(
         )
         items = []
         for rec in records:
-            fields = rec.get("fields", {})
+            fields = record_fields(rec)
             items.append(
                 BusinessMemoryItem(
-                    record_id=rec.get("id", ""),
+                    record_id=provider_record_id(rec) or "",
                     title=fields.get(BMF.TITLE, ""),
                     description=fields.get(BMF.DESCRIPTION, ""),
                     event_type=fields.get(BMF.EVENT_TYPE),
