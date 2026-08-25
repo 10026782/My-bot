@@ -61,3 +61,28 @@ def test_stable_identity_handles_shifted_interaction_imports():
     groups = audit.classify(findings)
     assert groups["legacy"] == findings
     assert groups["new"] == []
+
+
+def test_stable_identity_handles_shifted_cmd_update_import():
+    finding = ("cmd_update.py", 547, "tools.airtable_tools")
+    groups = audit.classify([finding])
+    assert groups["legacy"] == [finding]
+    assert groups["new"] == []
+
+
+def test_stable_identity_does_not_hide_a_second_same_import(tmp_path, monkeypatch):
+    source = tmp_path / "feature.py"
+    source.write_text(
+        "from tools.airtable_tools import airtable_get\n"
+        "from tools.airtable_tools import airtable_get\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        audit, "BASELINE", frozenset({("feature.py", 1, "tools.airtable_tools")})
+    )
+    original = ("feature.py", 1, "tools.airtable_tools")
+    added_duplicate = ("feature.py", 2, "tools.airtable_tools")
+    groups = audit.classify([original, added_duplicate])
+    assert groups["legacy"] == [original]
+    assert groups["new"] == [added_duplicate]

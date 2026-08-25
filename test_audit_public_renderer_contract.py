@@ -17,6 +17,28 @@ def test_contract_import_is_detected_outside_canonical_path():
     assert found == [audit.Finding("feature.py", "contract_import", "message_contract", 1)]
 
 
+def test_contract_comments_and_strings_are_not_detected():
+    found = audit._contract_entries(
+        "feature.py",
+        '# MessageContract\ntext = "format_agent_message(MessageContract)"\n',
+        {1, 2},
+    )
+    assert found == []
+
+
+def test_contract_alias_import_and_use_are_detected_by_ast():
+    found = audit._contract_entries(
+        "feature.py",
+        "from core.message_contract import MessageContract as Contract\n"
+        "value = Contract()\n",
+        {1, 2},
+    )
+    assert found == [
+        audit.Finding("feature.py", "contract_import", "message_contract", 1),
+        audit.Finding("feature.py", "contract_entry", "message_contract", 2),
+    ]
+
+
 def test_canonical_paths_are_not_self_blocked():
     assert not audit._renderer_definitions(
         "core/agent_message_formatter.py", "def render_new_surface():\n    pass\n", {1}

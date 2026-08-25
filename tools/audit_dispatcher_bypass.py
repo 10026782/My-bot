@@ -116,17 +116,6 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("tools/contact_resolver.py", 133, "crm"),
 })
 
-# A line-number rebase correction: the lead_capture import is the same
-# historical call site as BASELINE's line 211, now at line 212 after unrelated
-# edits. Stable identity prevents this shift from becoming false NEW debt.
-_LEGACY_STABLE_IDENTITIES: frozenset[tuple[str, str, str]] = frozenset({
-    ("lead_capture.py", "tools.airtable_tools", "airtable_get"),
-    # Long-lived interaction paths may move as unrelated code is inserted;
-    # the imported symbol is the stable identity, while line is report context.
-    ("interaction_engine.py", "tools.airtable_tools", "airtable_add"),
-    ("interaction_engine.py", "tools.calendar_tools", "calendar_get_events"),
-})
-
 # These are intentionally not merged into BASELINE. They are active
 # cross-track handoffs and must remain visible as their own class.
 CROSS_TRACK: frozenset[tuple[str, int, str]] = frozenset({
@@ -228,34 +217,69 @@ def scan() -> list[tuple[str, int, str]]:
     return [f for f in findings if f not in _SANCTIONED_CALL_SITES]
 
 
-def _stable_identity(finding: tuple[str, int, str]) -> tuple[str, str, str]:
-    """Return path/module/imported-symbol identity, independent of line number."""
+def _module_from_line(line: str) -> str | None:
+    match = _TOOLS_IMPORT_RE.match(line)
+    if match:
+        return "tools." + (match.group(1) or match.group(2))
+    if _CRM_IMPORT_RE.match(line):
+        return "crm"
+    return None
+
+
+def _imported_symbol(line: str) -> str:
+    """Return the first imported symbol, which is stable across line shifts."""
+    match = re.match(r"^\s*from\s+\S+\s+import\s+(.+?)(?:\s+#.*)?$", line)
+    return match.group(1).strip().split(",", 1)[0].strip() if match else "*"
+
+
+def _stable_identity(finding: tuple[str, int, str]) -> tuple[str, str, str, int]:
+    """Return path/module/symbol/ordinal identity, independent of line number.
+
+    The ordinal matters when a file contains two imports of the same module and
+    symbol: moving the old import must be tolerated, while adding a second one
+    must remain a new finding.
+    """
     rel_str, line, module = finding
     try:
-        source_line = (_REPO_ROOT / rel_str).read_text(encoding="utf-8").splitlines()[line - 1]
+        source_lines = (_REPO_ROOT / rel_str).read_text(encoding="utf-8").splitlines()
+        source_line = source_lines[line - 1]
     except (IndexError, OSError, UnicodeDecodeError):
-        return (rel_str, module, "*")
-    match = re.match(r"^\s*from\s+\S+\s+import\s+(.+?)(?:\s+#.*)?$", source_line)
-    symbol = match.group(1).strip().split(",", 1)[0].strip() if match else "*"
-    return (rel_str, module, symbol)
+        return (rel_str, module, "*", 0)
+    symbol = _imported_symbol(source_line)
+    ordinal = sum(
+        1 for candidate in source_lines[:line]
+        if _module_from_line(candidate) == module and _imported_symbol(candidate) == symbol
+    )
+    return (rel_str, module, symbol, ordinal)
+
+
+def _baseline_stable_identities() -> frozenset[tuple[str, str, str, int]]:
+    """Resolve baseline imports by structure when their line has moved.
+
+    A baseline line can now point at a neighbouring import after harmless file
+    growth. Search the nearest same-module import in that file, then retain its
+    imported symbol and ordinal as the stable identity.
+    """
+    identities: set[tuple[str, str, str, int]] = set()
+    for rel_str, line, module in BASELINE:
+        try:
+            source_lines = (_REPO_ROOT / rel_str).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        candidates = [
+            index for index, candidate in enumerate(source_lines)
+            if _module_from_line(candidate) == module
+        ]
+        if not candidates:
+            continue
+        index = min(candidates, key=lambda candidate: abs(candidate + 1 - line))
+        identities.add(_stable_identity((rel_str, index + 1, module)))
+    return frozenset(identities)
 
 
 def _matches_stable_legacy_identity(finding: tuple[str, int, str]) -> bool:
-    """Match a legacy import by path/module/symbol, independent of line drift."""
-    if _stable_identity(finding) in _LEGACY_STABLE_IDENTITIES:
-        return True
-    rel_str, _line, module = finding
-    source_path = _REPO_ROOT / rel_str
-    try:
-        source_lines = source_path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
-        return False
-    for path, expected_module, symbol in _LEGACY_STABLE_IDENTITIES:
-        if path != rel_str or expected_module != module:
-            continue
-        if any(re.search(rf"^\s*from\s+\S+\s+import\s+{re.escape(symbol)}(?:\s|,|$)", line) for line in source_lines):
-            return True
-    return False
+    """Match a legacy import by structure, independent of line drift."""
+    return _stable_identity(finding) in _baseline_stable_identities()
 
 
 def _classify_finding(finding: tuple[str, int, str]) -> str:
