@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from core.query_contract import after
+from tma_api import record_fields
 
 logger = logging.getLogger(__name__)
 
@@ -388,14 +389,14 @@ def _load_leads_with_timeframe(days_back: int) -> list[dict]:
             return []
 
         return [{
-            "utm_source":   _norm(r.get("fields",{}).get("utm_source",  "")),
-            "utm_medium":   _norm(r.get("fields",{}).get("utm_medium",  "")),
-            "utm_campaign": _norm(r.get("fields",{}).get("utm_campaign","")),
-            "score":        int(r.get("fields",{}).get("Score", 0) or 0),
-            "status":       r.get("fields",{}).get("status",""),
-            "outcome":      r.get("fields",{}).get(LeadFields.OUTCOME,""),  # BUG-110: canonical post-fix conversion marker
-            "deal_value":   float(r.get("fields",{}).get("deal_value",0) or 0),
-            "referer":      r.get("fields",{}).get("referer",""),
+            "utm_source":   _norm(record_fields(r).get("utm_source",  "")),
+            "utm_medium":   _norm(record_fields(r).get("utm_medium",  "")),
+            "utm_campaign": _norm(record_fields(r).get("utm_campaign","")),
+            "score":        int(record_fields(r).get("Score", 0) or 0),
+            "status":       record_fields(r).get("status",""),
+            "outcome":      record_fields(r).get(LeadFields.OUTCOME,""),  # BUG-110: canonical post-fix conversion marker
+            "deal_value":   float(record_fields(r).get("deal_value",0) or 0),
+            "referer":      record_fields(r).get("referer",""),
         } for r in raw if isinstance(r, dict)]
 
     except (ImportError, TypeError):

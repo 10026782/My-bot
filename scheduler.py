@@ -8,6 +8,7 @@ import threading
 import schedule
 import time
 from datetime import date
+from tma_api import record_fields, record_id
 
 logger = logging.getLogger(__name__)
 
@@ -505,7 +506,7 @@ def _job_daily_game_digest():
         worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
         world_section = ""
         if worlds:
-            wf     = worlds[0].get("fields", {})
+            wf     = record_fields(worlds[0])
             target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
             earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
             pct    = round(100 * earned / target) if target > 0 else 0
@@ -520,15 +521,15 @@ def _job_daily_game_digest():
         all_quests  = _at_list(Tables.QUESTS, "", max_records=200)
         week_quests = [
             r for r in all_quests
-            if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
+            if (record_fields(r).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
         ] or [
             r for r in all_quests
-            if r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
+            if record_fields(r).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
         ]
 
         quest_lines = []
         for i, r in enumerate(week_quests, start=1):
-            qf     = r.get("fields", {})
+            qf     = record_fields(r)
             status = qf.get(QuestsFields.STATUS, "")
             coins  = int(qf.get(QuestsFields.COINS, 0) or 0)
             name   = qf.get(QuestsFields.NAME, "?")
@@ -543,7 +544,7 @@ def _job_daily_game_digest():
 
         # ── Total coins ───────────────────────────────────────────────
         log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
-        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+        total_coins = sum(int(record_fields(r).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
 
         # ── Days until Friday ─────────────────────────────────────────
         days_to_friday = (4 - today.weekday()) % 7
@@ -558,7 +559,7 @@ def _job_daily_game_digest():
         day_label = f"יום {_HE_DAY[today.weekday()]} {today.day}\\.{today.month}"
         open_count = sum(
             1 for r in week_quests
-            if r.get("fields", {}).get(QuestsFields.STATUS, "") not in {QuestStatus.DONE, QuestStatus.SKIPPED}
+            if record_fields(r).get(QuestsFields.STATUS, "") not in {QuestStatus.DONE, QuestStatus.SKIPPED}
         )
         lines = [
             f"🎮 *BOSS Daily Quest — {day_label}*",
@@ -606,7 +607,7 @@ def _job_weekly_quest_reset():
         all_quests       = _at_list(Tables.QUESTS, "", max_records=200)
         last_week_quests = [
             r for r in all_quests
-            if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == last_monday
+            if (record_fields(r).get(QuestsFields.WEEK_START, "") or "")[:10] == last_monday
         ]
 
         done_count   = 0
@@ -614,7 +615,7 @@ def _job_weekly_quest_reset():
         coins_earned = 0
 
         for r in last_week_quests:
-            qf     = r.get("fields", {})
+            qf     = record_fields(r)
             status = qf.get(QuestsFields.STATUS, "")
             coins  = int(qf.get(QuestsFields.COINS, 0) or 0)
             if status == QuestStatus.DONE:
@@ -622,7 +623,7 @@ def _job_weekly_quest_reset():
                 coins_earned += coins
             else:
                 # Roll unfinished quest forward to next Monday, reset to Todo
-                _at_patch(Tables.QUESTS, r["id"], {
+                _at_patch(Tables.QUESTS, record_id(r, required=True), {
                     QuestsFields.STATUS:     QuestStatus.TODO,
                     QuestsFields.WEEK_START: next_monday,
                 })
@@ -630,14 +631,14 @@ def _job_weekly_quest_reset():
 
         # Total coins
         log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
-        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+        total_coins = sum(int(record_fields(r).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
 
         # New week's open quests (freshly rolled + pre-scheduled)
         new_all    = _at_list(Tables.QUESTS, "", max_records=200)
         new_open   = [
             r for r in new_all
-            if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == next_monday
-            and r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.DONE
+            if (record_fields(r).get(QuestsFields.WEEK_START, "") or "")[:10] == next_monday
+            and record_fields(r).get(QuestsFields.STATUS, "") != QuestStatus.DONE
         ]
 
         lines = [
@@ -648,7 +649,7 @@ def _job_weekly_quest_reset():
             f"📋 *שבוע {next_monday} — {len(new_open)} Quests פתוחים:*",
         ]
         for r in new_open:
-            qf = r.get("fields", {})
+            qf = record_fields(r)
             lines.append(f"⬜ {qf.get(QuestsFields.NAME, '?')} — {int(qf.get(QuestsFields.COINS, 0) or 0)}🪙")
 
         _game_bot_send(token, chat_id, "\n".join(lines))
@@ -685,23 +686,23 @@ def _job_boss_battle_check():
         all_quests  = _at_list(Tables.QUESTS, "", max_records=200)
         week_quests = [
             r for r in all_quests
-            if (r.get("fields", {}).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
+            if (record_fields(r).get(QuestsFields.WEEK_START, "") or "")[:10] == week_str
         ] or [
             r for r in all_quests
-            if r.get("fields", {}).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
+            if record_fields(r).get(QuestsFields.STATUS, "") != QuestStatus.SKIPPED
         ]
 
-        done_quests  = [r for r in week_quests if r.get("fields", {}).get(QuestsFields.STATUS, "") == QuestStatus.DONE]
-        open_quests  = [r for r in week_quests if r.get("fields", {}).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}]
-        coins_week   = sum(int(r.get("fields", {}).get(QuestsFields.COINS, 0) or 0) for r in done_quests)
+        done_quests  = [r for r in week_quests if record_fields(r).get(QuestsFields.STATUS, "") == QuestStatus.DONE]
+        open_quests  = [r for r in week_quests if record_fields(r).get(QuestsFields.STATUS, "") in {QuestStatus.TODO, QuestStatus.IN_PROGRESS}]
+        coins_week   = sum(int(record_fields(r).get(QuestsFields.COINS, 0) or 0) for r in done_quests)
 
         log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
-        total_coins = sum(int(r.get("fields", {}).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
+        total_coins = sum(int(record_fields(r).get(CoinsLogFields.COINS, 0) or 0) for r in log_recs)
 
         worlds = _at_list(Tables.WORLDS, f"{{{WorldsFields.STATUS}}}='{WorldStatus.ACTIVE}'", max_records=1)
         world_section = ""
         if worlds:
-            wf     = worlds[0].get("fields", {})
+            wf     = record_fields(worlds[0])
             target = int(wf.get(WorldsFields.TOTAL_COINS_TARGET, 0) or 0)
             earned = int(wf.get(WorldsFields.COINS_EARNED, 0) or 0)
             pct    = round(100 * earned / target, 1) if target > 0 else 0.0
@@ -714,13 +715,13 @@ def _job_boss_battle_check():
             )
 
         if not open_quests and week_quests:
-            prize  = worlds[0].get("fields", {}).get(WorldsFields.PRIZE, "?") if worlds else "?"
+            prize  = record_fields(worlds[0]).get(WorldsFields.PRIZE, "?") if worlds else "?"
             header = f"🏆 *Boss Defeated!*\nפרס: {prize}\n\n"
             body   = f"כל {len(week_quests)} Quests הושלמו 🎯\n+{coins_week}🪙 השבוע  |  סה\"כ: {total_coins}🪙"
         else:
             header = f"⚠️ *Boss לא מנוצח — מה נשאר:*\n\n"
             remaining = "\n".join(
-                f"• {r.get('fields', {}).get(QuestsFields.NAME, '?')} — {int(r.get('fields', {}).get(QuestsFields.COINS, 0) or 0)}🪙"
+                f"• {record_fields(r).get(QuestsFields.NAME, '?')} — {int(record_fields(r).get(QuestsFields.COINS, 0) or 0)}🪙"
                 for r in open_quests
             )
             body = f"{remaining}\n\n✅ הושלם: {len(done_quests)}/{len(week_quests)}  |  +{coins_week}🪙 השבוע"

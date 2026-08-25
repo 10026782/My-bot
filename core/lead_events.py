@@ -10,6 +10,7 @@ import logging
 import os
 
 from core.query_contract import array_contains
+from tma_api import record_fields, record_id
 from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ class LeadEventStore:
 
             events = []
             for rec in records:
-                f = rec.get("fields", {})
+                f = record_fields(rec)
                 # נסה לחלץ keywords מ-JSON
                 try:
                     keywords = json.loads(f.get("keywords", "[]") or "[]")
@@ -61,7 +62,7 @@ class LeadEventStore:
                 event: dict = {
                     "type":       f.get("type", "message"),
                     "domain":     f.get("domain", domain or ""),
-                    "memory_key": f.get("memory_key", rec.get("id", "")),
+                    "memory_key": f.get("memory_key", record_id(rec) or ""),
                     "content":    f.get("summary", ""),
                     "keywords":   keywords,
                 }

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from decision_ports import DecisionPorts, build_default_ports
+from tma_api import record_fields, record_id
 from airtable_schema import (
     DecisionSourceReliability as SRC,
     DecisionEventChannel as CH,
@@ -242,11 +243,12 @@ def maybe_supersede(new_event: dict, decision: dict | None, ports: DecisionPorts
         f"{{Status}}='Active')",
     )
     for prior in prior_events:
-        prior_fields = prior.get("fields", prior)
+        prior_fields = record_fields(prior) or prior
+        prior_id = record_id(prior, required=True)
         prior_level = prior_fields.get("Trust Level", TL.T0)
         if _trust_rank(new_event["Trust Level"]) > _trust_rank(prior_level):
-            ports.storage.update("Decision Events", prior["id"], {"Status": "Superseded"}, source="gate_trust")
-            new_event["Supersedes"] = [prior["id"]]
+            ports.storage.update("Decision Events", prior_id, {"Status": "Superseded"}, source="gate_trust")
+            new_event["Supersedes"] = [prior_id]
 
 
 def _has_keyword_conflict(raw: str, decision: dict | None, ports: DecisionPorts) -> bool:

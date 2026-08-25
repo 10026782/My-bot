@@ -13,6 +13,7 @@ import re
 from collections.abc import Iterable
 
 from airtable_schema import DecisionFields, DecisionStatus, Tables
+from tma_api import record_fields
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def find_matching_decision(
     text_words = set(normalized_text.split())
     best, best_score = None, 0.0
     for decision in candidates:
-        title = decision.get("fields", {}).get(DecisionFields.TITLE, "")
+        title = record_fields(decision).get(DecisionFields.TITLE, "")
         normalized_title = normalize_text(title)
         if not normalized_title:
             continue
