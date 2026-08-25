@@ -64,12 +64,28 @@ from datetime import datetime, timedelta, timezone, date as _date
 from typing import Literal
 
 from core.model_pricing import compute_cost
+from core.operation_identity import ExecutionContext
 
 logger = logging.getLogger(__name__)
 
 WindowStatus = Literal["ok", "unavailable", "error"]
 LEGACY_CAPABILITY_ID = "legacy.unknown"
 UNKNOWN_EXECUTION_CLASS = "UNKNOWN"
+
+
+def usage_attribution_from_context(
+    execution_context: ExecutionContext | None,
+) -> dict:
+    """Translate existing execution authority into telemetry fields."""
+    if execution_context is None:
+        return {}
+    if not isinstance(execution_context, ExecutionContext):
+        raise TypeError("execution_context must be an ExecutionContext")
+    return {
+        "capability_id": execution_context.resolved_capability.capability_id,
+        "execution_class": execution_context.resolved_capability.execution_class.value,
+        "operation_id": execution_context.operation.operation_id,
+    }
 
 
 def record_usage(

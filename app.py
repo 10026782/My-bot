@@ -4777,7 +4777,10 @@ def run_agent(
             # two calls above (unchanged) — does not feed AI_Usage_Daily or
             # EMERGENCY_STOP_AI yet. See core/usage_telemetry.py.
             try:
-                from core.usage_telemetry import record_llm_usage
+                from core.usage_telemetry import (
+                    record_llm_usage,
+                    usage_attribution_from_context,
+                )
                 record_llm_usage(
                     source     = "run_agent",
                     model      = ctx.model,
@@ -4785,8 +4788,7 @@ def run_agent(
                     tokens_out = getattr(response.usage, "output_tokens", 0),
                     caller     = ctx.memory_key,
                     request_id = getattr(response, "id", None),
-                    capability_id  = "general.reasoning",
-                    execution_class = "FULL_AGENT",
+                    **usage_attribution_from_context(execution_context),
                 )
             except Exception as e:
                 logger.error(f"[UsageTelemetry] run_agent recording failed (non-fatal): {e}", exc_info=True)
