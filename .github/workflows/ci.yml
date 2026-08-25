@@ -74,7 +74,9 @@ jobs:
           echo "127.0.0.1 api.airtable.com" | sudo tee -a /etc/hosts
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Initialize PostgreSQL schema
         run: python -m core.database_migrations
