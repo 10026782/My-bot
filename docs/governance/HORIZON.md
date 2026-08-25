@@ -57,12 +57,11 @@ the closure PR that created it for the search that established this.
   business-logic change. Canonical posture: `ESTABLISHED`; detail:
   `docs/governance/NO_NEW_ARCHITECTURAL_DEBT_POSTURE.md`.
 
-- **Context Librarian provenance drift** — **FOLLOW-UP / NOT A #972
-  REGRESSION (25/08/2026)**. `refresh-after-merge --check` reports broad stale
-  or unregistered catalog provenance with `authority_review_required=false`.
-  This is a separate catalog-maintenance/governance follow-up; it does not
-  invalidate the #972 guard verification or the established enforcement
-  posture.
+- **Context Librarian provenance maintenance** — **CLOSED / COMPLETED
+  (25/08/2026)**. PR #977 applied the approved mechanical reconciliation;
+  `reconcile --check` is `CLEAN`, with no decision queue and no authority
+  review required. The earlier provenance drift was a separate maintenance
+  issue, not a #972 regression. Continue ordinary monitoring only.
 
 **Program structure:** `#7 → #13`, `#22 → #23`. D-CORE is a separate,
 independently verified track (see `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`
