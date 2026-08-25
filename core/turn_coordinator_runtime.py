@@ -115,6 +115,31 @@ def resolve_daily_persistence_gap_capability() -> ResolvedCapability:
     )
 
 
+def resolve_business_interaction_analysis_capability() -> ResolvedCapability:
+    """Resolve the fixed eligible business-interaction analysis contract."""
+    ownership = IntentOwnershipDecision(
+        intent=Intent.ANALYZE_BUSINESS_INTERACTION,
+        owner="interaction_engine.analysis",
+        reason="eligible fixed business interaction analysis contract",
+        confidence=1.0,
+    )
+    return resolve_capability(
+        ownership,
+        {
+            Intent.ANALYZE_BUSINESS_INTERACTION: (
+                ResolvedCapability(
+                    capability_id="business.interaction_analysis",
+                    execution_class=ExecutionClass.NARROW_MODEL,
+                    executor_ref="interaction_engine.analysis",
+                    validator_ref="interaction_engine.eligibility.v1",
+                    verification_ref="interaction_engine.analysis_schema.v1",
+                    fallback_ref="interaction_engine._rule_based_analysis",
+                ),
+            ),
+        },
+    )
+
+
 def resolve_agent_capability(route: RouteDecision) -> ResolvedCapability:
     """Adapt an authoritative Agent route to the canonical reasoning capability."""
     if not isinstance(route, RouteDecision):

@@ -209,6 +209,8 @@ def analyze_interaction(interaction: InteractionSchema) -> InteractionAnalysis:
     if not interaction.raw_content and not interaction.title:
         return InteractionAnalysis(summary="אין תוכן לניתוח.")
 
+    execution_context = _create_interaction_execution_context()
+
     try:
         import anthropic  # type: ignore
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY",""))
@@ -240,6 +242,9 @@ def analyze_interaction(interaction: InteractionSchema) -> InteractionAnalysis:
             )
         except Exception as _e:
             logger.error(f"[Interaction] usage recording failed (non-fatal): {_e}")
+        # R24-04E keeps legacy malformed-output recovery unchanged. The pure
+        # verifier is available for the authority contract and later adoption;
+        # enforcing it here would replace the current default analysis result.
         parsed = _parse_json(resp.content[0].text)
         return InteractionAnalysis(
             summary    = parsed.get("summary",""),
@@ -612,6 +617,39 @@ def _parse_json(text: str) -> dict:
         return json.loads(text)
     except Exception:
         return {}
+
+
+def verify_interaction_analysis_payload(payload: object) -> dict:
+    """Validate only the bounded structure of a paid analysis payload."""
+    if not isinstance(payload, dict):
+        raise ValueError("interaction analysis payload must be an object")
+    if not isinstance(payload.get("summary"), str):
+        raise ValueError("summary must be a string")
+    for field_name in ("decisions", "risks", "keywords"):
+        value = payload.get(field_name)
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError(f"{field_name} must be a list of strings")
+    tasks = payload.get("tasks")
+    if not isinstance(tasks, list):
+        raise ValueError("tasks must be a list")
+    for task in tasks:
+        if not isinstance(task, dict):
+            raise ValueError("each task must be an object")
+        for field_name in ("title", "owner", "due"):
+            if not isinstance(task.get(field_name), str):
+                raise ValueError(f"task {field_name} must be a string")
+    if not isinstance(payload.get("next_steps"), str):
+        raise ValueError("next_steps must be a string")
+    if payload.get("sentiment") not in {"positive", "neutral", "negative"}:
+        raise ValueError("sentiment is invalid")
+    return payload
+
+
+def _create_interaction_execution_context():
+    from core import create_execution_context, create_operation
+    from core.turn_coordinator_runtime import resolve_business_interaction_analysis_capability
+    capability = resolve_business_interaction_analysis_capability()
+    return create_execution_context(capability, create_operation(capability))
 
 
 def _detect_domain(text: str) -> str:
