@@ -92,56 +92,26 @@ class ScanResult:
 def scan_due_soon() -> list[PaymentAlert]:
     """
     מחזיר תשלומים שמועדם בעוד בדיוק REMIND_DAYS_BEFORE ימים.
-    משתמש ב-crm_upcoming_payments — לא נוגע ב-Airtable ישירות.
+    משתמש בתוצאת Payment typed — לא נוגע ב-Airtable ישירות.
     """
     try:
-        from crm import crm_upcoming_payments  # type: ignore
-        raw = crm_upcoming_payments(days_ahead=REMIND_DAYS_BEFORE)
-        return _parse_upcoming(raw)
+        from crm import crm_upcoming_payment_records  # type: ignore
+        records = crm_upcoming_payment_records(days_ahead=REMIND_DAYS_BEFORE)
+        today = date.today()
+        return [PaymentAlert(
+            name=record.name,
+            amount=record.amount,
+            due_date=record.due_date,
+            record_id=record.record_id,
+            days_delta=(date.fromisoformat(record.due_date) - today).days,
+            alert_type="upcoming",
+        ) for record in records]
     except ImportError:
         logger.warning("[PaymentReminder] crm not available — mock mode")
         return _mock_upcoming()
     except Exception as e:
         logger.error(f"[PaymentReminder] scan_due_soon error: {e}")
         return []
-
-
-def _parse_upcoming(raw: str) -> list[PaymentAlert]:
-    """
-    Parser ל-string שמחזיר crm_upcoming_payments.
-    Format: "• *Name* | ₪1,000 | DD/MM/YY"
-    """
-    if not raw or "אין תשלומים" in raw:
-        return []
-
-    alerts = []
-    today  = date.today()
-    target = today + timedelta(days=REMIND_DAYS_BEFORE)
-
-    import re
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line.startswith("•"):
-            continue
-        # שם
-        name_m = re.search(r'\*(.+?)\*', line)
-        name   = name_m.group(1) if name_m else "תשלום"
-        # סכום
-        amt_m  = re.search(r'₪([\d,]+)', line)
-        amount = float(amt_m.group(1).replace(",", "")) if amt_m else 0
-        # record_id (אם קיים)
-        id_m   = re.search(r'`(rec\w+)`', line)
-        rec_id = id_m.group(1) if id_m else ""
-
-        alerts.append(PaymentAlert(
-            name       = name,
-            amount     = amount,
-            due_date   = target.isoformat(),
-            record_id  = rec_id,
-            days_delta = REMIND_DAYS_BEFORE,
-            alert_type = "upcoming",
-        ))
-    return alerts
 
 
 def _mock_upcoming() -> list[PaymentAlert]:
@@ -164,66 +134,28 @@ def scan_overdue() -> list[PaymentAlert]:
     (לא כל האיחורים — רק "גלי" escalation — למנוע spam.)
     """
     try:
-        from crm import crm_overdue_payments  # type: ignore
-        raw = crm_overdue_payments()
-        return _parse_overdue(raw)
+        from crm import crm_overdue_payment_records  # type: ignore
+        records = crm_overdue_payment_records()
+        today = date.today()
+        alerts = []
+        for record in records:
+            days_late = (today - date.fromisoformat(record.due_date)).days
+            if days_late in OVERDUE_WAVES:
+                alerts.append(PaymentAlert(
+                    name=record.name,
+                    amount=record.amount,
+                    due_date=record.due_date,
+                    record_id=record.record_id,
+                    days_delta=-days_late,
+                    alert_type="overdue",
+                ))
+        return alerts
     except ImportError:
         logger.warning("[PaymentReminder] crm not available — mock mode")
         return _mock_overdue()
     except Exception as e:
         logger.error(f"[PaymentReminder] scan_overdue error: {e}")
         return []
-
-
-def _parse_overdue(raw: str) -> list[PaymentAlert]:
-    """
-    Parser ל-string שמחזיר crm_overdue_payments.
-    Format: "• *Name* | ₪1,000 | היה: DD/MM/YY"
-    מסנן רק לתשלומים שבגל escalation של היום.
-    """
-    if not raw or "אין תשלומים" in raw:
-        return []
-
-    import re
-    today   = date.today()
-    alerts  = []
-
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line.startswith("•"):
-            continue
-
-        name_m  = re.search(r'\*(.+?)\*', line)
-        name    = name_m.group(1) if name_m else "תשלום"
-
-        amt_m   = re.search(r'₪([\d,]+)', line)
-        amount  = float(amt_m.group(1).replace(",", "")) if amt_m else 0
-
-        # תאריך פירעון — "היה: DD/MM/YY"
-        date_m  = re.search(r'היה:\s*(\d{2}/\d{2}/\d{2,4})', line)
-        if not date_m:
-            continue
-        try:
-            raw_date = date_m.group(1)
-            # תמיכה ב-DD/MM/YY וגם DD/MM/YYYY
-            fmt = "%d/%m/%y" if len(raw_date) == 8 else "%d/%m/%Y"
-            due = date.strptime(raw_date, fmt)  # type: ignore[attr-defined]
-        except Exception:
-            continue
-
-        days_late = (today - due).days
-        if days_late in OVERDUE_WAVES:
-            id_m   = re.search(r'`(rec\w+)`', line)
-            rec_id = id_m.group(1) if id_m else ""
-            alerts.append(PaymentAlert(
-                name       = name,
-                amount     = amount,
-                due_date   = due.isoformat(),
-                record_id  = rec_id,
-                days_delta = -days_late,   # שלילי = איחור
-                alert_type = "overdue",
-            ))
-    return alerts
 
 
 def _mock_overdue() -> list[PaymentAlert]:

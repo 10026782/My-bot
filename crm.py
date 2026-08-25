@@ -104,6 +104,15 @@ class ContactResult:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class PaymentRecord:
+    """Canonical persisted Payment read shape for downstream consumers."""
+    name: str
+    amount: float
+    due_date: str
+    record_id: str = ""
+
+
 def _normalize_contact_phone(phone) -> str:
     """Return the exact Contact lookup/write representation, or empty if invalid."""
     if phone is None:
@@ -145,6 +154,12 @@ def _find_or_create_contact_unlocked(phone, name, *, email="", company="",
     normalized = _normalize_contact_phone(phone)
     if not normalized or not name:
         return ContactResult("invalid")
+    if notes:
+        return ContactResult(
+            "unsupported_field",
+            normalized_phone=normalized,
+            error="Contact notes are not supported by the canonical Contacts schema",
+        )
     if not _creds_ok():
         return ContactResult("lookup_error", normalized_phone=normalized,
                              error="missing Airtable credentials")
@@ -320,6 +335,29 @@ def crm_list_contacts(contact_type: str = "", identity=None) -> str:
 # DEALS
 # ══════════════════════════════════════════════════
 
+_LEGACY_DEAL_STATUS_TO_STAGE = {
+    DealStatus.PROSPECT: DealStage.OPPORTUNITY,
+    DealStatus.DUE_DILIGENCE: DealStage.NEGOTIATION,
+    DealStatus.ACTIVE: DealStage.NEGOTIATION,
+    DealStatus.CLOSED: DealStage.CLOSED_WIN,
+    DealStatus.CANCELLED: DealStage.CLOSED_LOSS,
+}
+_CANONICAL_DEAL_STAGES = frozenset({
+    DealStage.OPPORTUNITY,
+    DealStage.NEGOTIATION,
+    DealStage.CLOSED_WIN,
+    DealStage.CLOSED_LOSS,
+})
+
+
+def _normalize_deal_stage(value: str) -> str:
+    """Normalize legacy DealStatus inputs to the persisted DealStage enum."""
+    return _LEGACY_DEAL_STATUS_TO_STAGE.get(value, value)
+
+
+def _is_valid_deal_stage(value: str) -> bool:
+    return _normalize_deal_stage(value) in _CANONICAL_DEAL_STAGES
+
 def crm_add_deal(name: str, address: str, price: float,
                  funding_cost_pct: float, contact_id: str = "",
                  deadline: str = "", notes: str = "") -> str:
@@ -358,22 +396,16 @@ def crm_add_deal(name: str, address: str, price: float,
 
 
 def crm_update_deal_status(record_id: str, status: str, notes: str = "") -> str:
-    canonical_status = {
-        DealStatus.PROSPECT: DealStage.OPPORTUNITY,
-        DealStatus.DUE_DILIGENCE: DealStage.NEGOTIATION,
-        DealStatus.ACTIVE: DealStage.NEGOTIATION,
-        DealStatus.CLOSED: DealStage.CLOSED_WIN,
-        DealStatus.CANCELLED: DealStage.CLOSED_LOSS,
-    }.get(status, status)
-    valid = [DealStatus.PROSPECT, DealStatus.DUE_DILIGENCE,
-             DealStatus.ACTIVE, DealStatus.CLOSED, DealStatus.CANCELLED]
-    if status not in valid:
+    canonical_status = _normalize_deal_stage(status)
+    if not _is_valid_deal_stage(status):
+        valid = [DealStage.OPPORTUNITY, DealStage.NEGOTIATION,
+                 DealStage.CLOSED_WIN, DealStage.CLOSED_LOSS]
         return f"❌ סטטוס לא חוקי. אפשרויות: {', '.join(valid)}"
     try:
         fields = {DealFields.STATUS: canonical_status}
         if notes: fields[DealFields.NOTES] = notes
         _patch(Tables.DEALS, record_id, fields)
-        return f"✅ עסקה `{record_id}` עודכנה → *{status}*"
+        return f"✅ עסקה `{record_id}` עודכנה → *{canonical_status}*"
     except Exception as e:
         return f"❌ שגיאה: {e}"
 
@@ -382,13 +414,16 @@ def crm_list_deals(status: str = "", identity=None) -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        if status == "Active":
+        if status in ("Active", DealStatus.ACTIVE):
             formula = negate(any_of(
                 equals(DealFields.STAGE, DealStage.CLOSED_WIN, spaced=True),
                 equals(DealFields.STAGE, DealStage.CLOSED_LOSS, spaced=True),
             ))
         elif status:
-            formula = equals("שלב", status, spaced=True)
+            canonical_status = _normalize_deal_stage(status)
+            if canonical_status not in _CANONICAL_DEAL_STAGES:
+                return f"❌ סטטוס לא חוקי. אפשרויות: {', '.join(sorted(_CANONICAL_DEAL_STAGES))}"
+            formula = equals(DealFields.STAGE, canonical_status, spaced=True)
         else:
             formula = ""
         records = _get(Tables.DEALS, formula, identity=identity)
@@ -402,7 +437,7 @@ def crm_list_deals(status: str = "", identity=None) -> str:
             flag    = " ⚠️" if funding > 9 else ""
             lines.append(
                 f"• *{f.get(DealFields.NAME, '?')}*"
-                f" | {f.get(DealFields.STATUS, '?')}"
+                f" | {f.get(DealFields.STAGE, '?')}"
                 f" | ₪{f.get(DealFields.PRICE, 0):,.0f}"
                 f" | מימון: {funding}%{flag}"
             )
@@ -427,6 +462,7 @@ def crm_add_payment(name: str, amount: float, due_date: str,
             PaymentFields.STATUS:   PaymentStatus.IN_PROGRESS,
         }
         if deal_id:    fields[PaymentFields.DEAL]    = [deal_id]
+        if contact_id: fields[PaymentFields.CONTACT] = [contact_id]
 
         rec = _post(Tables.PAYMENTS, fields)
 
@@ -444,31 +480,52 @@ def crm_add_payment(name: str, amount: float, due_date: str,
         return f"❌ שגיאה בהוספת תשלום: {e}"
 
 
+def _read_upcoming_payments(days_ahead: int = 7, identity=None) -> list[PaymentRecord]:
+    today = date.today()
+    deadline = today + timedelta(days=days_ahead)
+    formula = all_of(
+        equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS, spaced=True),
+        before(PaymentFields.DUE_DATE, deadline.isoformat()),
+        after(PaymentFields.DUE_DATE, today.isoformat()),
+    )
+    return [
+        PaymentRecord(
+            name=_record_fields(record).get(PaymentFields.NAME, "?"),
+            amount=_record_fields(record).get(PaymentFields.AMOUNT, 0),
+            due_date=_record_fields(record).get(PaymentFields.DUE_DATE, ""),
+            record_id=_record_id(record),
+        )
+        for record in _get(Tables.PAYMENTS, formula, identity=identity)
+    ]
+
+
+def crm_upcoming_payment_records(days_ahead: int = 7, identity=None) -> list[PaymentRecord]:
+    """Return typed persisted Payment results for downstream consumers."""
+    if not _creds_ok():
+        return []
+    try:
+        return _read_upcoming_payments(days_ahead, identity=identity)
+    except Exception as e:
+        logger.error(f"crm_upcoming_payment_records: {e}")
+        return []
+
+
 def crm_upcoming_payments(days_ahead: int = 7, identity=None) -> str:
+    """Presentation-compatible wrapper over the typed Payment read contract."""
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        today    = date.today()
-        deadline = today + timedelta(days=days_ahead)
-        formula = all_of(
-            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS, spaced=True),
-            before(PaymentFields.DUE_DATE, deadline.isoformat()),
-            after(PaymentFields.DUE_DATE, today.isoformat()),
-        )
-        records = _get(Tables.PAYMENTS, formula, identity=identity)
+        records = crm_upcoming_payment_records(days_ahead, identity=identity)
         if not records:
             return f"✅ אין תשלומים ב-{days_ahead} הימים הקרובים"
 
         lines = [f"💳 *תשלומים קרובים ({len(records)}):*\n"]
         total = 0
-        for r in records:
-            f      = _record_fields(r)
-            amount = f.get(PaymentFields.AMOUNT, 0)
-            total += amount
-            due    = _fmt_date(f.get(PaymentFields.DUE_DATE, ""))
+        for record in records:
+            total += record.amount
             lines.append(
-                f"• *{f.get(PaymentFields.NAME, '?')}*"
-                f" | ₪{amount:,.0f} | {due}"
+                f"• *{record.name}*"
+                f" | ₪{record.amount:,.0f} | {_fmt_date(record.due_date)}"
             )
         lines.append(f"\n💰 *סה\"כ: ₪{total:,.0f}*")
         return "\n".join(lines)
@@ -486,33 +543,56 @@ def crm_mark_payment_paid(record_id: str) -> str:
         return f"❌ שגיאה: {e}"
 
 
+def _read_overdue_payments(identity=None) -> list[PaymentRecord]:
+    today = date.today().isoformat()
+    formula = all_of(
+        equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS, spaced=True),
+        before(PaymentFields.DUE_DATE, today),
+    )
+    result = []
+    for record in _get(Tables.PAYMENTS, formula, identity=identity):
+        fields = _record_fields(record)
+        result.append(PaymentRecord(
+            name=fields.get(PaymentFields.NAME, "?"),
+            amount=fields.get(PaymentFields.AMOUNT, 0),
+            due_date=fields.get(PaymentFields.DUE_DATE, ""),
+            record_id=_record_id(record),
+        ))
+    return result
+
+
+def crm_overdue_payment_records(identity=None) -> list[PaymentRecord]:
+    """Return typed overdue Payments while preserving status updates."""
+    if not _creds_ok():
+        return []
+    try:
+        records = _read_overdue_payments(identity=identity)
+        for record in records:
+            try:
+                _patch(Tables.PAYMENTS, record.record_id, {PaymentFields.STATUS: PaymentStatus.OVERDUE})
+            except Exception:
+                pass
+        return records
+    except Exception as e:
+        logger.error(f"crm_overdue_payment_records: {e}")
+        return []
+
+
 def crm_overdue_payments(identity=None) -> str:
+    """Presentation-compatible wrapper over the typed Payment read contract."""
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
-        today   = date.today().isoformat()
-        formula = all_of(
-            equals(PaymentFields.STATUS, PaymentStatus.IN_PROGRESS, spaced=True),
-            before(PaymentFields.DUE_DATE, today),
-        )
-        records = _get(Tables.PAYMENTS, formula, identity=identity)
+        records = crm_overdue_payment_records(identity=identity)
         if not records:
             return "✅ אין תשלומים שעברו מועד"
 
-        updated = 0
-        lines   = [f"🚨 *{len(records)} תשלומים באיחור:*\n"]
-        for r in records:
-            f      = _record_fields(r)
-            amount = f.get(PaymentFields.AMOUNT, 0)
-            due    = _fmt_date(f.get(PaymentFields.DUE_DATE, ""))
-            lines.append(f"• *{f.get(PaymentFields.NAME, '?')}* | ₪{amount:,.0f} | היה: {due}")
-            try:
-                _patch(Tables.PAYMENTS, _record_id(r, required=True), {PaymentFields.STATUS: PaymentStatus.OVERDUE})
-                updated += 1
-            except Exception:
-                pass
-
-        lines.append(f"\n⚠️ {updated} רשומות עודכנו ל-Overdue ב-Airtable")
+        lines = [f"🚨 *{len(records)} תשלומים באיחור:*\n"]
+        for record in records:
+            lines.append(
+                f"• *{record.name}* | ₪{record.amount:,.0f} | היה: {_fmt_date(record.due_date)}"
+            )
+        lines.append(f"\n⚠️ {len(records)} רשומות עודכנו ל-Overdue ב-Airtable")
         return "\n".join(lines)
     except Exception as e:
         return f"❌ שגיאה: {e}"
