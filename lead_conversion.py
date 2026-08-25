@@ -37,7 +37,7 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
     if not query:
         return False, "❌ חסר שם או טלפון לחיפוש."
 
-    from tma_api import _at_list, _at_patch  # lazy import — כמו ב-/done
+    from tma_api import _at_list, _at_patch, record_fields, record_id  # lazy import — כמו ב-/done
 
     leads = _at_list(
         Tables.LEADS,
@@ -49,11 +49,11 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
         return False, f"🔍 לא נמצא ליד התואם '{query}'."
 
     if len(leads) > 1:
-        names = ", ".join(l.get("fields", {}).get(LeadFields.NAME, "?") for l in leads)
+        names = ", ".join(record_fields(l).get(LeadFields.NAME, "?") for l in leads)
         return False, f"⚠️ נמצאו כמה לידים תואמים: {names}.\nנסה שם או טלפון מדויקים יותר."
 
     lead = leads[0]
-    lf   = lead.get("fields", {})
+    lf   = record_fields(lead)
     name = lf.get(LeadFields.NAME, "ליד ללא שם")
 
     if lf.get(LeadFields.STATUS, "") == "converted" or lf.get(LeadFields.CONVERTED_AT, ""):
@@ -68,7 +68,7 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
     notes = "\n".join(notes_parts)
 
     contact_result = crm_add_contact(name=name, phone=phone, notes=notes,
-                                      lead_source_id=lead["id"])
+                                      lead_source_id=record_id(lead, required=True))
     if contact_result.status not in ("created", "existing"):
         messages = {
             "ambiguous": "⚠️ נמצאו כמה אנשי קשר תואמים; ההמרה נעצרה.",
@@ -90,14 +90,14 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
             "create_contact_from_lead",
             _SystemIdentity(),
             {"table": Tables.CONTACTS},
-            f"lead→contact: {name} | lead_id={lead['id']}",
+            f"lead→contact: {name} | lead_id={record_id(lead, required=True)}",
         )
     except Exception as _audit_err:
         logger.warning(f"[LeadConversion] audit log failed (non-fatal): {_audit_err}")
 
     contact_id = contact_result.record_id
 
-    patched = _at_patch(Tables.LEADS, lead["id"], {
+    patched = _at_patch(Tables.LEADS, record_id(lead, required=True), {
         LeadFields.STATUS:       LeadStatus.DONE,
         LeadFields.OUTCOME:      LeadOutcome.CONVERTED,
         LeadFields.CONVERTED_AT: datetime.now(tz=timezone.utc).isoformat(),

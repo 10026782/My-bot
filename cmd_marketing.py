@@ -446,12 +446,13 @@ def _idea_keyboard(creative_id: str):
 def _demand_list_keyboard(records: list[dict]):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     from airtable_schema import MarketingDemandFields as MDF
+    from tma_api import record_fields, record_id
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(*[
         InlineKeyboardButton(
-            f"{_label(DOMAINS, r.get('fields', {}).get(MDF.DOMAIN, ''))} · "
-            f"{r.get('fields', {}).get(MDF.NAME, r['id'])}"[:60],
-            callback_data=f"mkt_status:{r['id']}",
+            f"{_label(DOMAINS, record_fields(r).get(MDF.DOMAIN, ''))} · "
+            f"{record_fields(r).get(MDF.NAME, record_id(r, required=True))}"[:60],
+            callback_data=f"mkt_status:{record_id(r, required=True)}",
         )
         for r in records
     ])

@@ -35,6 +35,7 @@ from airtable_schema import (
     DecisionTrustLevel as TL,
     DecisionExposureType as EXPOSURE,
 )
+from tma_api import record_fields
 
 _READY_THRESHOLD = 0.75
 _MIN_SUBSTANTIVE_TRUST = TL.T2
@@ -83,7 +84,7 @@ def calc_readiness(decision: dict, events: list[dict], confidence_result: Confid
     סף READY: score >= 0.75 וללא חסמים. REVIEW: קונפליקט פתוח / אנומליית
     סיכון-גבוה / מקור T0 פעיל. אחרת: NOT_READY.
     """
-    fields = decision.get("fields", {})
+    fields = record_fields(decision)
     active = _active_events(events)
 
     domain = fields.get(DF.DOMAIN, "")
@@ -94,7 +95,7 @@ def calc_readiness(decision: dict, events: list[dict], confidence_result: Confid
     if missing_evidence:
         blockers.append("ראיות חסרות: " + ", ".join(missing_evidence))
 
-    has_t0 = any(e["fields"].get(EF.TRUST_LEVEL) == TL.T0 for e in active)
+    has_t0 = any(record_fields(e).get(EF.TRUST_LEVEL) == TL.T0 for e in active)
     if has_t0:
         blockers.append("קיים מקור ברמת אמינות T0 בין הראיות הפעילות")
 
@@ -114,7 +115,7 @@ def calc_readiness(decision: dict, events: list[dict], confidence_result: Confid
 
     substantive = [e for e in active if not _is_pressure_only(e)]
     has_enough_substantive = any(
-        _trust_rank(e["fields"].get(EF.TRUST_LEVEL, "")) >= _trust_rank(_MIN_SUBSTANTIVE_TRUST)
+        _trust_rank(record_fields(e).get(EF.TRUST_LEVEL, "")) >= _trust_rank(_MIN_SUBSTANTIVE_TRUST)
         for e in substantive
     )
     if not has_enough_substantive:
