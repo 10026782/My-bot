@@ -90,6 +90,7 @@ class Intent:
     DRAFT_MARKETING_CREATIVES = "draft_marketing_creatives"
 
     DETECT_DAILY_PERSISTENCE_GAPS = "detect_daily_persistence_gaps"
+    ANALYZE_BUSINESS_INTERACTION = "analyze_business_interaction"
 
     ALL = {
         GREETING, SMALLTALK, BOT_STATUS_CHECK,
@@ -105,6 +106,7 @@ class Intent:
         SYSTEM_STATUS, ADMIN_ACTION,
         UNKNOWN, ENGINEERING_NOTE, DRAFT_MARKETING_CREATIVES,
         DETECT_DAILY_PERSISTENCE_GAPS,
+        ANALYZE_BUSINESS_INTERACTION,
     }
 
 
