@@ -7,7 +7,7 @@
 # התקרה מעל High.
 #
 # כתיבה: רק דרך tools/airtable_gateway.py (כלל ברזל #2 בספק).
-# קריאה: GET ישיר ל-Airtable (אין gateway לקריאות בקודבייס הזה כיום).
+# קריאה: דרך ה-read adapter הקנוני.
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from airtable_schema import (
     EmergencyWindowMaxRisk,
 )
 from tools.airtable_gateway import airtable_create, airtable_patch
+from core.query_contract import equals
 from tools.airtable_read_adapter import AirtableReadError, list_records
 
 logger = logging.getLogger(__name__)
@@ -64,8 +65,8 @@ def _fetch_active_record() -> dict | None:
     try:
         records = list_records(
             Tables.EMERGENCY_WINDOW,
-            f"{{{F.STATUS}}}='{Status.ACTIVE}'",
-            max_records=1,
+            equals(F.STATUS, Status.ACTIVE),
+            limit=1,
             sort=[{"field": F.ACTIVATED_AT, "direction": "desc"}],
             paginate=False,
             timeout=10,

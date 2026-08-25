@@ -83,6 +83,7 @@ def write_tma_lead_event(
     """
     try:
         from airtable_schema import LeadEventFields, LeadEventType, Tables
+        from tma_api import record_id, relation_payload
         from tools.airtable_gateway import airtable_create
 
         domain = _resolve_domain(lead_id, lead_domain)
@@ -92,7 +93,7 @@ def write_tma_lead_event(
 
         fields = {
             LeadEventFields.NAME:       f"tma:{action}:{lead_id}",
-            LeadEventFields.LEAD_LINK:  [lead_id],
+            LeadEventFields.LEAD_LINK:  relation_payload(lead_id),
             LeadEventFields.EVENT_TYPE: LeadEventType.OTHER,
             LeadEventFields.DOMAIN:     domain,
             LeadEventFields.MESSAGE:    message[:5000],
@@ -109,7 +110,7 @@ def write_tma_lead_event(
 
         logger.info(
             "[LeadEventWriter] created event: lead=%s event_id=%s action=%s domain=%s",
-            lead_id, rec.get("id", ""), action, domain,
+            lead_id, record_id(rec) or "", action, domain,
         )
         return True
 

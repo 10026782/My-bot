@@ -23,6 +23,7 @@ import logging
 from typing import Optional
 
 from airtable_schema import Tables
+from core.query_contract import equals, negate
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def _check_attribution_readiness() -> dict:
     """האם יש לידים עם campaign_source?"""
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
-        raw = airtable_get("Leads", "NOT({campaign_source}='')")
+        raw = airtable_get("Leads", negate(equals("campaign_source", "")))
         count = raw.count("•") if raw else 0
         if count < _MIN_LEADS_FOR_ATTRIBUTION:
             return {
@@ -202,15 +203,15 @@ def _basic_kpi() -> dict:
     try:
         from tools.airtable_tools import airtable_get  # type: ignore
 
-        leads_hot  = airtable_get("Leads", "{tier}='HOT'")
-        leads_warm = airtable_get("Leads", "{tier}='WARM'")
+        leads_hot  = airtable_get("Leads", equals("tier", "HOT"))
+        leads_warm = airtable_get("Leads", equals("tier", "WARM"))
         kpi["leads_hot"]  = leads_hot.count("•")  if leads_hot  else 0
         kpi["leads_warm"] = leads_warm.count("•") if leads_warm else 0
 
-        deals = airtable_get(Tables.DEALS, "{Status}='Active'")
+        deals = airtable_get(Tables.DEALS, equals("Status", "Active"))
         kpi["deals_active"] = deals.count("•") if deals else 0
 
-        overdue = airtable_get(Tables.PAYMENTS, "{Status}='Overdue'")
+        overdue = airtable_get(Tables.PAYMENTS, equals("Status", "Overdue"))
         kpi["payments_overdue"] = overdue.count("•") if overdue else 0
 
         kpi["status"] = "basic"
