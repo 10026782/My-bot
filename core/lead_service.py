@@ -629,6 +629,7 @@ def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, a
                 memory_key, domain=payload.domain, channel=payload.channel,
                 contact_name=payload.name, last_message=payload.summary,
                 summary=(payload.summary or "")[:500],
+                record_id=record_id,
             )
     except Exception as exc:
         logger.warning("[LeadService] lead_memory failed: %s", exc)
