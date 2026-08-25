@@ -120,7 +120,7 @@ def _fetch_business_memory(
             formula = ""
 
         records = airtable_get_records(
-            Tables.BUSINESS_MEMORY, formula, max_records=_BUSINESS_MEMORY_QUERY_CAP
+            Tables.BUSINESS_MEMORY, formula, _BUSINESS_MEMORY_QUERY_CAP
         )
         items = []
         for rec in records:

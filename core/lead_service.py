@@ -248,7 +248,7 @@ def find_existing_lead(name: str, phone: str) -> Optional[str]:
             records = list_records(
                 "Leads",
                 formula,
-                max_records=5,
+                limit=5,
                 paginate=False,
                 timeout=8,
             )

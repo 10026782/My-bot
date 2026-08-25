@@ -73,7 +73,7 @@ def airtable_task_lookup(query: str, scope: str, limit: int):
     from tools.airtable_tools import airtable_get_records
 
     return airtable_get_records(
-        Tables.TASKS, contains(TaskFields.NAME, str(query)), max_records=limit + 1
+        Tables.TASKS, contains(TaskFields.NAME, str(query)), limit + 1
     )
 
 

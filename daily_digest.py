@@ -23,7 +23,7 @@ def _fetch(table_real: str, formula="", max_rec: int = 20) -> list:
     if not base or not key:
         raise RuntimeError("Airtable credentials missing (AIRTABLE_BASE_ID / AIRTABLE_API_KEY)")
     try:
-        return list_records(table_real, formula, max_records=max_rec)
+        return list_records(table_real, formula, limit=max_rec)
     except AirtableReadError as exc:
         if exc.cause is not None:
             raise exc.cause
