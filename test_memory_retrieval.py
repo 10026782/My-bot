@@ -125,8 +125,8 @@ def _patch_episodic_repo(monkeypatch, db: _FakeDb) -> None:
 
 def _patch_business_memory(monkeypatch, records: list[dict]) -> None:
     monkeypatch.setattr(
-        "tools.airtable_tools.airtable_get_records",
-        lambda table, formula="", max_records=None: list(records),
+        "core.memory_retrieval.list_records",
+        lambda table, formula="", limit=None, paginate=None: list(records),
     )
 
 

@@ -70,10 +70,13 @@ def prepare_task_gateway_call(
 
 def airtable_task_lookup(query: str, scope: str, limit: int):
     """Return at most resolver-limit+1 matching task records."""
-    from tools.airtable_tools import airtable_get_records
+    from tools.airtable_read_adapter import list_records
 
-    return airtable_get_records(
-        Tables.TASKS, contains(TaskFields.NAME, str(query)), limit + 1
+    return list_records(
+        Tables.TASKS,
+        contains(TaskFields.NAME, str(query)),
+        limit=limit + 1,
+        paginate=True,
     )
 
 

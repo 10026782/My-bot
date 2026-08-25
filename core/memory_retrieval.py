@@ -32,6 +32,7 @@ from core.memory_retrieval_contract import (
     MemorySnapshot,
     SnapshotMetadata,
 )
+from tools.airtable_read_adapter import list_records
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +106,6 @@ def _fetch_business_memory(
         from airtable_schema import Tables
         from cmd_update import resolve_business_memory_domain
         from core.query_contract import any_of, array_contains, equals
-        from tools.airtable_tools import airtable_get_records
-
         domain = request.domain_id or ""
         if domain and domain != "general":
             resolved = resolve_business_memory_domain(domain)
@@ -119,8 +118,11 @@ def _fetch_business_memory(
         else:
             formula = ""
 
-        records = airtable_get_records(
-            Tables.BUSINESS_MEMORY, formula, _BUSINESS_MEMORY_QUERY_CAP
+        records = list_records(
+            Tables.BUSINESS_MEMORY,
+            formula,
+            limit=_BUSINESS_MEMORY_QUERY_CAP,
+            paginate=True,
         )
         items = []
         for rec in records:
