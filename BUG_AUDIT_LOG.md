@@ -5337,3 +5337,69 @@ YES — (א) `CLAUDE.md`/`voice_adapter.py` header מול `feature_flags.py` ע�
 6. `py_compile voice_adapter.py` — PASS. `git diff --check` — PASS (ריק).
 
 - **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED** — 3/3 findings מתוקנים ומאומתים סטטית על branch זה. אימות production (post-merge, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.
+
+---
+
+## Audit #11 — Security Surface (Phase 1, Read-Only)
+
+- **תאריך:** 25/08/2026
+- **Truth-Reset SHA:** `442eb15fd85175b6016fd490f34455169784a559` (origin/main)
+- **Scope:** track program #11 בלבד — Authentication/identity boundaries, Authorization, Secrets/credentials, External action safety, Input trust boundaries, Injection/unsafe dynamic execution, Sensitive-data exposure, Fail-open security behavior, Security enforcement coverage. לא נבדקו/לא נפתחו מחדש #2–#10, #12–#16, #18–#24 בסבב זה.
+- **Mode:** read-only static inspection (Phase 1). אין שינוי קוד/CI guard/Airtable formula construction/TMA error handling/branch/PR/flag בשלב האיתור עצמו. **הרשומה הזו היא documentation-capture בלבד — לא בוצע remediation.**
+- **Routed input (`MAINTENANCE_FILE_DRIFT_REGISTER.md` §"Future-audit cross-reference", שורת #11):** J2 fail-open context (owner R-C06-8) — ראה "ALREADY VERIFIED" #6 למטה; נצרך בסבב זה, לא נסגר.
+- **Final status:** 🔴 **OPEN — CURRENT SECURITY GAPS**. Finding #11-1 (HIGH) נשאר HIGH על בסיס ראיה סטטית; **אין להעלות אותו ל-CRITICAL בלי ראיית runtime שמראה ש-`EMAIL_INBOUND` פעיל בפרודקשן.** מצב production של `EMAIL_INBOUND`: **UNVERIFIED FROM READ-ONLY REPO AUDIT** — לא ניתן לאמת מ-audit ריפו read-only בלבד; דורש בדיקת Render env בנפרד.
+
+### FINDING #11-1 — HIGH CURRENT GAP — Airtable formula injection through unescaped identifier interpolation
+- **קונספט:** user-controlled text מוזרם ל-string literal בתוך `filterByFormula` בלי לעבור דרך ה-escaping helper הסנקציוני.
+- **Entry point:** `email_inbound.py:296-299` — `_extract_email()` מקבל regex `<([^>]+)>` על כותרת ה-`From:` הנכנסת בלי שום ולידציה שזו כתובת מייל תקינה; כל תו (כולל `'`) עובר כפי שהוא.
+- **Trust boundary:** מייל נכנס לא-מאומת (`EMAIL_INBOUND`, F06) → `sender_email` / `sender_id` / `external_id` → אינטרפולציה ישירה ל-`filterByFormula`.
+- **Current affected sites (מזוהים ב-audit):**
+  - `inbound_handler.py:46,60`
+  - `core/noninteractive_lead_cutovers.py:22,38`
+  - `lead_capture.py:215`
+  - `lead_memory.py:171`
+  - `core/lead_buffer.py:144`
+  - `ad_attribution.py:175,201`
+  - `session_store.py:616,647`
+- **Existing sanctioned protection:** `tools/airtable_gateway.py` — `escape_formula_value()` / `_safe_formula_param()`, מתועד שם במפורש כ-"ONLY sanctioned way to interpolate user-controlled text into a filterByFormula string" (BUG-DH-03/04). דוגמאות תקינות קיימות כבר ב-`tma_api.py` (`/api/leads` וכו', `_safe_formula_param` allowlist regex ב-`tma_api.py:1513-1521`) וב-`tools/airtable_read_adapter.py::render_query`.
+- **Bypass/failure mode:** אף אחד מ-~10 המקומות לעיל לא קורא ל-helper הסנקציוני — string מוזרם גולמי.
+- **Impact:** לא RCE, אבל שבירת ה-string literal יכולה לזייף match מול רשומת Lead קיימת/שרירותית (למשל `RECORD_ID()='rec...'` או תנאי always-true), מה שמנתב ל-`_update_existing()` וכותב תוכן שסופק ע"י התוקף (name/phone/summary) לתוך אותה רשומה — נתיב פוטנציאלי ל-cross-record data corruption דרך מייל לא-מאומת, ובנוסף blind-formula oracle לאנומרציה של נתוני leads.
+- **Reachability:** מאחורי `EMAIL_INBOUND` feature flag (אין entry default-on ב-`feature_flags.py`'s `_DEFAULTS`, כך שכבוי כברירת מחדל אלא אם Render env var מפעיל אותו). **מצב production בפועל לא ניתן לאימות מ-audit ריפו read-only** — `AI_CONTEXT.md` (24/08/2026) מתאר את ה-N18 Phase 3 email-lead-writer cutover כ"feature-flagged (off by default)" אבל לא מאשר במפורש את מצב `EMAIL_INBOUND` עצמו בפרודקשן.
+- **Classification:** HIGH CURRENT GAP — **PRODUCTION REACHABILITY UNVERIFIED** (יהיה CRITICAL אם `EMAIL_INBOUND` פעיל בפרודקשן).
+- **Recommended remediation (לא בוצע כאן):** לנתב את כל המקומות המפורטים דרך `escape_formula_value()` או המסלול הקנוני של `render_query`, בלי תלות במצב ה-flag הנוכחי.
+
+### FINDING #11-2 — MEDIUM CURRENT GAP — Verbose internal RuntimeError detail returned to TMA clients
+- **Evidence:** `tma_api.py:94-98` — `@tma_api.errorhandler(RuntimeError)` מחזיר `{"error": "internal_error", "detail": str(e)}` עם HTTP 500 לכל endpoint תחת `/api/*`, לכל identity מאומת (`require_tma_auth`, כל role) שמפעיל RuntimeError.
+- **Existing protection:** `logger.error(...)` שורה מעל כבר רושם את הפרטים בצד השרת.
+- **Classification:** MEDIUM CURRENT GAP.
+- **Recommended remediation (לא בוצע כאן):** להשאיר את `str(e)` בלוג השרת בלבד; להחזיר ללקוח הודעת internal_error גנרית.
+
+### FINDING #11-3 — MEDIUM CURRENT GAP / SECURITY ENFORCEMENT COVERAGE — no blocking guard for the sanctioned formula-escaping policy
+- **קונספט:** המדיניות הסנקציונית לאינטרפולציה ב-`filterByFormula` (ראה #11-1) מתועדת אבל לא נאכפת.
+- **Evidence:** `tools/airtable_gateway.py`'s docstring מגדיר את ה-escaping כ-"ONLY sanctioned way", אבל בניגוד למדיניות-אחיות מקבילות שיש להן blocking guard פעיל ב-CI — `tools/audit_gateway_bypass.py`, `tools/audit_dispatcher_bypass.py`, `tools/audit_provider_boundary.py` (כולם רצים כ-blocking steps ב-`.github/workflows/ci.yml`) — אין guard מקביל שאוכף את מדיניות ה-escaping.
+- **Impact:** זו בדיוק הסיבה ש-Finding #11-1 הצטבר על פני ~10 call sites בלי שיזוהה.
+- **Classification:** MEDIUM CURRENT GAP (coverage).
+- **Recommended remediation (לא בוצע כאן):** להוסיף blocking AST/grep guard לפי אותה תבנית כמו `tools/audit_*_boundary.py` הקיימים.
+
+### ALREADY VERIFIED (נבדק, ללא gap חי)
+1. Telegram webhook: fail-closed secret-token check — דוחה על config חסר או mismatch (`app.py:6140-6148`).
+2. Twilio signature validation (WhatsApp + שני מסלולי Voice IVR), fail-closed על token/signature חסרים (`app.py:438-449`, נקרא ב-`6376`, `6865`, `6881`).
+3. Meta WhatsApp `X-Hub-Signature-256` HMAC, fail-closed (`app.py:451-465`, נקרא ב-`6630`).
+4. TMA `initData`: HMAC נדרש תמיד, אין dev bypass — `TMA_DEV_MODE` מנוטרל hard-coded ורושם `critical` אם מוגדר (`tma_api.py:108-113`, `845-936`).
+5. `tool_registry.enforce()`/`dispatch_tool()`: deny-by-default על identity חסרה, tool לא-קיים, או role לא-מורשה, בלי except בולעני (`tools/dispatcher.py:136-149`); approval callback מריץ מחדש `enforce()` לפני dispatch אמיתי, לא סומך על ההחלטה השמורה (`app.py:2955-2962`, `~3118`).
+6. **J2 fail-open context (owner R-C06-8, routed input מ-`MAINTENANCE_FILE_DRIFT_REGISTER.md` §"Future-audit cross-reference")** — `identity.py:235-284`'s `resolve_identity()` אכן אף פעם לא מחזיר `None` (fallback ל-`Role.READONLY`/`Role.LEAD`), בניגוד לניסוח "hard-fail" המדויק ב-`CLAUDE.md`. **הערכת #11:** זה לא fail-open gap ביטחוני — ה-fallback הוא role מינימלי-הרשאות (READONLY/LEAD), לא role מועדף/מורחב, ו-`dispatch_tool`'s `enforce()` ממשיך לחסום את רוב הכלים עבור roles אלה. השאלה אם לתקן ניסוח-התיעוד ("hard-fail") מול קוד (fallback מכוון) נשארת **docs-or-code decision** בבעלות R-C06-8 — לא נסגרת כאן, רק נצרכת כקלט אבטחתי.
+7. Formula-injection allowlist regex מיושם נכון על כל query params פונים-למשתמש ב-TMA (`tma_api.py:1513-1521`, בשימוש ב-`1535/1541/1248/1267/2194`).
+8. `core/media_probe_adapter.py` subprocess/ffprobe boundary: list-args (ללא `shell=True`), symlink rejection, path-containment check, checksum + MIME allowlist, size caps (`:172-260`). `document_converter/converters/pandoc.py` — list-args + allowlisted format types, ללא `shell=True`.
+9. לא נמצאו secrets hardcoded בכל הריפו; לא נמצאו permissive env-fallback defaults ל-`TOKEN`/`KEY`/`SECRET`.
+
+### NOT COUNTED AS CURRENT GAPS
+- `tools/airtable_security.py:129`'s `tenant_filter` — אותה צורת אינטרפולציה לא-escaped, אבל `tenant_id` שם מגיע רק מ-identity registry מנוהל (curated) או מה-fallback הקבוע `"boss_hq"` — לא input נשלט-תוקף. **NOT CURRENTLY EXPLOITABLE.**
+- `tenant_provisioner.py:254,284` — אותו pattern, אבל המודול **לא מיובא היום ע"י שום דבר ב-live pipeline** (מאושש גם ע"י `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s #12-cluster entry — `tenant_provisioner.py` "remains by deliberate, already-documented owner-parked decision"). **NOT CURRENTLY REACHABLE.**
+
+### Finding counts
+CRITICAL: 0 · HIGH: 1 · MEDIUM: 2 · LOW: 0 · ALREADY VERIFIED: 9 (כולל J2/R-C06-8) · CROSS-TRACK: 0.
+
+### CROSS-TRACK
+לא זוהו ממצאים ששייכים באופן ברור למסלול ממוספר אחר בסבב זה.
+
+- **סטטוס:** 🔴 **OPEN — CURRENT SECURITY GAPS**. לא בוצע remediation בסבב זה — תיעוד בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
