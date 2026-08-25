@@ -21,24 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 def _write_success(result) -> bool:
-    """airtable_add/airtable_update return the C53-A structured dict
+    """airtable_update returns the C53-A structured dict
     ({ok, tool, external_id, evidence, user_message}) now, not a "✅"-prefixed
     string — keep both shapes working."""
     if isinstance(result, dict):
         return bool(result.get("ok") or result.get("id") or result.get("external_id"))
     return "✅" in (result or "")
 
-
-def _extract_record_id(result) -> str:
-    if isinstance(result, dict):
-        return (
-            result.get("id")
-            or result.get("external_id")
-            or (result.get("evidence") or {}).get("record_id", "")
-            or ""
-        )
-    m = re.search(r'rec\w+', result or "")
-    return m.group(0) if m else ""
 
 SAVE_EVERY = 3
 
@@ -161,10 +150,10 @@ class LeadMemory:
 
     def _write(self, state: LeadState) -> bool:
         """כותב לAirtable דרך airtable_tools בלבד.
-        מחפש לפי memory_key לפני יצירה — מונע רשומות כפולות עם W0/N02
-        שכבר עשויים ליצור/לעדכן את אותה רשומת Lead."""
+        LeadMemory הוא post-write enrichment בלבד: אם אין record_id, מחפש
+        Lead קיים לפי memory_key ומעדכן אותו; לעולם אינו יוצר Lead."""
         try:
-            from tools.airtable_tools import airtable_get, airtable_add, airtable_update  # type: ignore
+            from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
             from airtable_schema import Tables, LeadFields               # type: ignore
 
             fields = {
@@ -187,14 +176,12 @@ class LeadMemory:
             if state.record_id:
                 result = airtable_update(Tables.LEADS, state.record_id, fields)
                 return _write_success(result)
-            else:
-                result = airtable_add(Tables.LEADS, fields)
-                if _write_success(result):
-                    rec_id = _extract_record_id(result)
-                    if rec_id:
-                        state.record_id = rec_id
-                    return True
-                return False
+
+            logger.warning(
+                "[LeadMemory] no existing Lead for memory_key=%s; skipping enrichment write",
+                state.memory_key,
+            )
+            return False
         except ImportError:
             logger.debug(f"[LeadMemory] dry-run: {state.memory_key}")
             return False
