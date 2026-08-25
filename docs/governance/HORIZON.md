@@ -16,9 +16,40 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 25/08/2026
-**Truth Reset SHA at last update:** `b5eb29f37acd3fa8445738bde35f2ad73bfd6483`
+**Truth Reset SHA at last update:** `d22aa24fa320d6797ee3a36e9bda04d62c162e15`
 
 ---
+
+## OPEN
+
+- **#18 SSOT** — **OPEN — CURRENT SSOT GAPS** (Phase 1, read-only audit,
+  25/08/2026, Truth-Reset SHA `d22aa24fa320d6797ee3a36e9bda04d62c162e15`).
+  3 REAL CURRENT GAPS found; full evidence: `BUG_AUDIT_LOG.md` ("Audit #18 —
+  SSOT (Phase 1, Read-Only)"). Not marked CLOSED. No remediation applied by
+  the audit or by this entry — status recording only.
+  - **#18-1 HIGH** — Voice-IVR flag naming: `CLAUDE.md:150` and
+    `voice_adapter.py:3` say `FEATURE_VOICE_IVR`; the actual registry
+    (`feature_flags.py:71`) and every live call site
+    (`app.py:6871`, `app.py:6887`, `voice_adapter.py:336`) use `VOICE_IVR`.
+    Independently pre-flagged in
+    `docs/audit/M01_FEATURE_FLAG_CONSISTENCY_AUDIT.md:63` as
+    `REGISTRATION_DRIFT / HIGH`, never remediated.
+  - **#18-2 MEDIUM** — this file's own §CLOSED #12 entry below says
+    `MAINTENANCE_DEFERRED_REGISTER.md`'s §E-F row "still reads
+    `OPEN`/`NEEDS_PRODUCT_DECISION`", but that row (line 133) already carries
+    an inline `"RESOLVED / #12 CLOSED 25/08/2026"` — the two documents
+    disagree on whether that specific row has been reconciled.
+    `MAINTENANCE_FILE_DRIFT_REGISTER.md:18`'s §F1 "Status" column is
+    confirmed still unedited (`NEEDS_PRODUCT_DECISION`) against its own
+    "Current disposition" column (`REMOVED... #12 CLOSED`) on the same row.
+    Scope: documentation-consistency only — #12's underlying closure is not
+    reopened.
+  - **#18-3 LOW / DOC DRIFT** — `CLAUDE.md:159` still describes `worker.py`
+    in present tense ("defines a proactive Tasks-deadline Telegram nudge")
+    after the file was fully deleted from `origin/main` (commit `6b8573b`,
+    confirmed ancestor).
+  - Competing-authorities verdict: **YES** (flag-naming: docs/comments vs.
+    registry; closure-narrative: this file vs. its own companion registers).
 
 ## CLOSED
 
