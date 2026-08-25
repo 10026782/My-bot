@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import logging
 from dataclasses import dataclass, field
@@ -195,16 +194,7 @@ def detect_conflicts_ai_lazy(events: list[dict]) -> list[ConflictResult]:
                 capability = resolve_decision_conflict_detection_capability()
                 operation = create_operation(capability)
                 execution_context = create_execution_context(capability, operation)
-                detector_parameters = inspect.signature(detect_conflict_ai).parameters
-                accepts_context = (
-                    "execution_context" in detector_parameters
-                    or any(parameter.kind is inspect.Parameter.VAR_KEYWORD
-                           for parameter in detector_parameters.values())
-                )
-                if accepts_context:
-                    result = detect_conflict_ai(a, b, execution_context=execution_context)
-                else:  # legacy test doubles/callers without the additive keyword
-                    result = detect_conflict_ai(a, b)
+                result = detect_conflict_ai(a, b, execution_context=execution_context)
                 _conflict_cache[h] = result
                 if result.is_conflict:
                     results.append(result)
