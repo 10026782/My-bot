@@ -16,6 +16,12 @@ def _field_ref(field: str) -> str:
     return "{" + str(field) + "}"
 
 
+def _render_literal(value: object) -> str:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return "'" + escape_formula_value(value) + "'"
+
+
 def render_query(query: Query | str) -> str:
     """Translate provider-neutral intent at the Airtable boundary only."""
     if isinstance(query, str):
@@ -31,7 +37,7 @@ def render_query(query: Query | str) -> str:
         if case_insensitive:
             return f"LOWER({_field_ref(field)})=LOWER('{escape_formula_value(value)}')"
         separator = " = " if spaced else "="
-        return f"{_field_ref(field)}{separator}'{escape_formula_value(value)}'"
+        return f"{_field_ref(field)}{separator}{_render_literal(value)}"
     if op == "not_equals":
         field, value, spaced = args
         separator = " != " if spaced else "!="

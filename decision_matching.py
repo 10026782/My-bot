@@ -13,6 +13,7 @@ import re
 from collections.abc import Iterable
 
 from airtable_schema import DecisionFields, DecisionStatus, Tables
+from core.query_contract import any_of, equals
 from tma_api import record_fields
 
 logger = logging.getLogger(__name__)
@@ -54,14 +55,12 @@ def find_matching_decision(
 
 def list_open_decisions(limit: int = 5) -> list[dict]:
     """Load open matching candidates through the current Airtable read boundary."""
-    formula = "OR(" + ",".join(
-        f"{{{DecisionFields.STATUS}}}='{status}'" for status in OPEN_STATUSES
-    ) + ")"
+    query = any_of(*(equals(DecisionFields.STATUS, status) for status in OPEN_STATUSES))
     try:
         from tools.airtable_read_adapter import AirtableReadError, list_records
         return list_records(
             Tables.DECISIONS,
-            formula,
+            query,
             limit=None,
             paginate=False,
             timeout=10,

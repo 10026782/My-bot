@@ -10,7 +10,7 @@ import decision_matching
 from airtable_schema import DecisionFields, DecisionStatus, Tables
 from decision_ports import _AirtableStorageAdapter
 from tools.airtable_gateway import AirtableLookupError
-from tools.airtable_read_adapter import AirtableReadError, get_record
+from tools.airtable_read_adapter import AirtableReadError, get_record, render_query
 
 
 def test_cmd_list_and_record_preserve_read_contract():
@@ -44,13 +44,14 @@ def test_matching_formula_is_preserved_and_limit_is_local():
     records = [{"id": str(i)} for i in range(8)]
     with patch("tools.airtable_read_adapter.list_records", return_value=records) as read:
         assert decision_matching.list_open_decisions(limit=3) == records[:3]
-    formula = "OR(" + ",".join(
+    legacy_formula = "OR(" + ",".join(
         f"{{{DecisionFields.STATUS}}}='{status}'"
         for status in (DecisionStatus.OPEN, DecisionStatus.PENDING_INPUT)
     ) + ")"
-    read.assert_called_once_with(
-        Tables.DECISIONS, formula, limit=None, paginate=False, timeout=10
-    )
+    args, kwargs = read.call_args
+    assert args[0] == Tables.DECISIONS
+    assert render_query(args[1]).replace(", ", ",") == legacy_formula
+    assert kwargs == {"limit": None, "paginate": False, "timeout": 10}
 
 
 def test_matching_empty_and_error_fallbacks():

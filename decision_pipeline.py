@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from decision_ports import DecisionPorts, build_default_ports
+from core.query_contract import all_of, equals
 from tma_api import record_fields, record_id
 from airtable_schema import (
     DecisionSourceReliability as SRC,
@@ -235,12 +236,13 @@ def maybe_supersede(new_event: dict, decision: dict | None, ports: DecisionPorts
     if not decision or not decision_id or not new_event.get("Claim Topic"):
         return
 
-    from tools.airtable_gateway import escape_formula_value
     prior_events = ports.storage.get(
         "Decision Events",
-        f"AND({{Decision}}='{escape_formula_value(decision_id)}', "
-        f"{{Claim Topic}}='{escape_formula_value(new_event['Claim Topic'])}', "
-        f"{{Status}}='Active')",
+        all_of(
+            equals("Decision", decision_id),
+            equals("Claim Topic", new_event["Claim Topic"]),
+            equals("Status", "Active"),
+        ),
     )
     for prior in prior_events:
         prior_fields = record_fields(prior) or prior
