@@ -2,12 +2,19 @@ import pytest
 
 from core.router.ownership_contracts import (
     ActionLifecycleResult,
+    CapabilityResolutionError,
     CanonicalActionProposal,
+    ExecutionClass,
     EvidenceResult,
     IntentOwnershipDecision,
     IntentOwnershipRegistry,
+    ResolvedCapability,
     ResolverResult,
+    lookup_resolved_capability,
+    resolve_capability,
 )
+from core.router.route_decision import Handler
+from core.turn_envelope import ExecutionKind
 
 
 def test_contracts_are_frozen_and_registry_is_immutable():
@@ -72,3 +79,77 @@ def test_ws2_lifecycle_and_evidence_contracts_are_frozen_and_validated():
 
     with pytest.raises(ValueError):
         EvidenceResult("", "", "", False)
+
+
+def test_execution_class_is_closed_and_resolved_capability_is_immutable():
+    assert {item.value for item in ExecutionClass} == {
+        "DETERMINISTIC", "NARROW_MODEL", "FULL_AGENT",
+    }
+    capability = ResolvedCapability(
+        capability_id="general.reasoning",
+        capability_version="v1",
+        execution_class=ExecutionClass.FULL_AGENT,
+        executor_ref="agent.loop",
+        validator_ref="agent.output",
+        verification_ref="turn.evidence",
+        approval_risk_ref="route.policy",
+        fallback_ref="none",
+    )
+    assert lookup_resolved_capability(
+        capability.capability_id, {capability.capability_id: capability}
+    ) is capability
+    with pytest.raises((AttributeError, TypeError)):
+        capability.capability_id = "task.create"
+    with pytest.raises(TypeError):
+        ResolvedCapability("bad", "FULL_AGENT")
+
+
+def test_resolution_uses_existing_ownership_and_fails_closed():
+    ownership = IntentOwnershipDecision("create_task", "task_builder", "task intent", 1.0)
+    capability = ResolvedCapability(
+        "task.create", ExecutionClass.DETERMINISTIC, executor_ref="task_gateway"
+    )
+    candidates = {ownership.intent: (capability,)}
+
+    assert resolve_capability(ownership, candidates) is capability
+    with pytest.raises(CapabilityResolutionError):
+        resolve_capability(
+            IntentOwnershipDecision("missing", "task_builder", "task intent", 1.0),
+            candidates,
+        )
+
+
+def test_resolution_rejects_ambiguous_candidates_without_fallback():
+    ownership = IntentOwnershipDecision("create_task", "task_builder", "task intent", 1.0)
+    candidates = {
+        ownership.intent: (
+            ResolvedCapability("task.create", ExecutionClass.DETERMINISTIC, executor_ref="task_gateway"),
+            ResolvedCapability("general.reasoning", ExecutionClass.FULL_AGENT, executor_ref="agent.loop"),
+        ),
+    }
+
+    with pytest.raises(CapabilityResolutionError):
+        resolve_capability(ownership, candidates)
+
+
+def test_resolved_capability_requires_executor_identity():
+    with pytest.raises(ValueError):
+        ResolvedCapability("task.create", ExecutionClass.DETERMINISTIC)
+
+
+def test_capability_identity_is_independent_from_tool_identity():
+    capability = ResolvedCapability(
+        "lead.create", ExecutionClass.NARROW_MODEL, executor_ref="airtable_add"
+    )
+    replacement = ResolvedCapability(
+        "lead.create", ExecutionClass.NARROW_MODEL, executor_ref="lead_gateway_v2"
+    )
+    assert capability.capability_id == replacement.capability_id
+    assert capability.executor_ref != replacement.executor_ref
+
+
+def test_legacy_handler_and_execution_kind_values_remain_unchanged():
+    assert Handler.AGENT == "agent"
+    assert Handler.TOOL == "tool"
+    assert ExecutionKind.DETERMINISTIC.value == "deterministic"
+    assert ExecutionKind.AGENT_INTERPRETED.value == "agent_interpreted"

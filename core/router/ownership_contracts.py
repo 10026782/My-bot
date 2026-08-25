@@ -11,8 +11,85 @@ wiring status.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
+
+
+class ExecutionClass(str, Enum):
+    """Canonical executable route classes from SPEC_Agent_Last_Cost_Architecture."""
+
+    DETERMINISTIC = "DETERMINISTIC"
+    NARROW_MODEL = "NARROW_MODEL"
+    FULL_AGENT = "FULL_AGENT"
+
+
+class CapabilityResolutionError(ValueError):
+    """A bounded capability could not be resolved safely."""
+
+
+@dataclass(frozen=True)
+class ResolvedCapability:
+    """Immutable capability decision; references policies, never their contents."""
+
+    capability_id: str
+    execution_class: ExecutionClass
+    capability_version: str = ""
+    executor_ref: str = ""
+    validator_ref: str = ""
+    verification_ref: str = ""
+    approval_risk_ref: str = ""
+    fallback_ref: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.capability_id, str) or not self.capability_id.strip():
+            raise ValueError("capability_id is required")
+        if not isinstance(self.execution_class, ExecutionClass):
+            raise TypeError("execution_class must be an ExecutionClass")
+        for name in (
+            "capability_version", "executor_ref", "validator_ref",
+            "verification_ref", "approval_risk_ref", "fallback_ref",
+        ):
+            if not isinstance(getattr(self, name), str):
+                raise TypeError(f"{name} must be a string")
+        if not self.executor_ref.strip():
+            raise ValueError("executor_ref is required")
+
+
+def lookup_resolved_capability(
+    capability_id: str,
+    capabilities: Mapping[str, ResolvedCapability],
+) -> ResolvedCapability:
+    """Look up a known capability by id; this is not authority resolution."""
+    if not isinstance(capability_id, str) or not capability_id.strip():
+        raise CapabilityResolutionError("capability_id is required")
+    resolved = capabilities.get(capability_id)
+    if resolved is None:
+        raise CapabilityResolutionError(f"unknown capability: {capability_id}")
+    if not isinstance(resolved, ResolvedCapability):
+        raise TypeError("capability map values must be ResolvedCapability")
+    if resolved.capability_id != capability_id:
+        raise CapabilityResolutionError("capability map key does not match capability_id")
+    return resolved
+
+
+def resolve_capability(
+    ownership: "IntentOwnershipDecision",
+    candidates_by_intent: Mapping[str, tuple[ResolvedCapability, ...]],
+) -> ResolvedCapability:
+    """Resolve exactly one capability from an existing ownership decision."""
+    if not isinstance(ownership, IntentOwnershipDecision):
+        raise TypeError("ownership must be an IntentOwnershipDecision")
+    candidates = candidates_by_intent.get(ownership.intent, ())
+    if not isinstance(candidates, tuple) or not all(
+        isinstance(candidate, ResolvedCapability) for candidate in candidates
+    ):
+        raise TypeError("capability candidates must be a tuple of ResolvedCapability")
+    if len(candidates) != 1:
+        raise CapabilityResolutionError(
+            f"capability resolution requires exactly one match for intent: {ownership.intent}"
+        )
+    return candidates[0]
 
 
 @dataclass(frozen=True)
