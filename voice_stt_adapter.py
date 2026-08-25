@@ -11,6 +11,9 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass
+from numbers import Real
+
+from core import create_execution_context, create_operation
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +46,32 @@ class TranscriptResult:
         return self.error is None
 
 
+def verify_transcription_result_structure(result: object) -> TranscriptResult:
+    """Validate only the bounded structure of a successful transcription."""
+    if not isinstance(result, TranscriptResult):
+        raise ValueError("transcription result must be a TranscriptResult")
+    if not isinstance(result.raw_transcript, str):
+        raise ValueError("raw_transcript must be a string")
+    if not isinstance(result.language, str):
+        raise ValueError("language must be a string")
+    if result.duration_sec is not None and (
+        isinstance(result.duration_sec, bool) or not isinstance(result.duration_sec, Real)
+    ):
+        raise ValueError("duration_sec must be numeric or None")
+    return result
+
+
 def _normalize_hebrew(text: str) -> str:
     """Strip Hebrew nikud (cantillation/vowel points) and collapse whitespace."""
     stripped = _NIKUD_RE.sub("", text)
     return _WHITESPACE_RE.sub(" ", stripped).strip()
 
 
-def _transcribe_openai(path: str) -> tuple[str, str, float | None]:
+def _transcribe_openai(
+    path: str,
+    *,
+    execution_context=None,
+) -> tuple[str, str, float | None]:
     """Returns (raw_transcript, language, duration_seconds). Raises on failure.
 
     duration_seconds comes from OpenAI's own verbose_json response (real
@@ -137,7 +159,15 @@ def transcribe(audio_bytes: bytes, mime_type: str) -> TranscriptResult:
     try:
         if os.environ.get("OPENAI_API_KEY"):
             try:
-                raw, lang, duration = _transcribe_openai(tmp_path)
+                from core.turn_coordinator_runtime import resolve_voice_transcription_capability
+
+                capability = resolve_voice_transcription_capability()
+                operation = create_operation(capability)
+                execution_context = create_execution_context(capability, operation)
+                raw, lang, duration = _transcribe_openai(
+                    tmp_path,
+                    execution_context=execution_context,
+                )
                 logger.info("[voice_stt] provider=openai ok len=%d duration_sec=%s", len(raw), duration)
                 return TranscriptResult(
                     raw_transcript=raw,
