@@ -6,7 +6,7 @@ import os
 from datetime import date, timedelta
 
 from airtable_schema import LeadFields, Tables, PaymentFields, PaymentStatus
-from core.query_contract import after, all_of, before, contains, created_time, date_add, equals, not_equals, same_day, today
+from core.query_contract import after, all_of, any_of, before, contains, created_time, date_add, equals, greater_or_equal, negate, not_equals, same_day, today
 from tma_api import record_fields
 from tools.airtable_read_adapter import AirtableReadError, list_records
 
@@ -66,7 +66,12 @@ def _hot_leads(errors: list) -> str:
     try:
         records = _fetch(
             "Leads",
-            "OR({Score}>=50, {status}='hot', {status}='Hot', {status}='HOT')",
+            any_of(
+                greater_or_equal("Score", 50),
+                equals("status", "hot"),
+                equals("status", "Hot"),
+                equals("status", "HOT"),
+            ),
             max_rec=8,
         )
         if not records:
@@ -170,7 +175,10 @@ def _open_deals(errors: list) -> str:
     try:
         records = _fetch(
             "עסקאות (Deals)",
-            "NOT(OR({שלב}='סגור-ניצחון', {שלב}='סגור-הפסד'))",
+            negate(any_of(
+                equals("שלב", "סגור-ניצחון"),
+                equals("שלב", "סגור-הפסד"),
+            )),
             max_rec=10,
         )
         if not records:

@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from airtable_schema import Tables, TaskFields, TaskStatus
+from core.query_contract import all_of, equals, not_equals
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def scan_abandoned() -> list[AbandonedLead]:
         from tools.airtable_tools import airtable_get  # type: ignore
         raw = airtable_get(
             "LeadSessions",
-            "AND({done}=0, {drop_off_step}!='')"
+            all_of(equals("done", 0), not_equals("drop_off_step", "")),
         )
         result = _parse_sessions(raw)
         if not result:
