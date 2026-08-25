@@ -5256,3 +5256,52 @@ zero-match) שויך ל-BUG-126/BUG-127C הקיימים (shadow-only, אין ת�
 - **ניקוי מת:** הסרת `FLASK_ROUTES_PATCH` (string לא-executable) מ-`voice_adapter.py` — ה-routes שהוא הציע כבר קיימים ב-app.py (`/voice/incoming`, `/voice/step`). worker.py עצמו לא נגעו.
 - **בדיקות:** `py_compile voice_adapter.py`; import app + URL map זהה (43 rules); רישום jobs של scheduler ללא שינוי; `git diff --check`.
 - **סטטוס:** 🟡 CODE DONE, LOCALLY VERIFIED, NOT PRODUCTION VERIFIED (שינויי docs/dead-string בלבד; אין השפעה runtime).
+
+---
+
+## Audit #18 — SSOT (Phase 1, Read-Only)
+
+- **תאריך:** 25/08/2026
+- **Truth-Reset SHA:** `d22aa24fa320d6797ee3a36e9bda04d62c162e15` (origin/main)
+- **Scope:** track program #18 only — האם לכל truth חשוב יש מקור סמכות אחד וברור, והאם code/docs/runtime registries מסכימים מי authority. לא נבדקו/לא נפתחו מחדש #2–#16, #19–#24.
+- **Mode:** read-only static inspection. אין שינוי קוד/branch/PR/flag בשלב האיתור עצמו.
+- **Final status:** **OPEN — CURRENT SSOT GAPS** (3 REAL CURRENT GAPS).
+
+### FINDING #18-1 — HIGH CURRENT GAP — Voice-IVR feature-flag naming authority
+- **קונספט:** שם ה-flag הקנוני של Voice IVR.
+- **Authority נכון (registry):** `feature_flags.py:71` — `VOICE_IVR` (ללא prefix). מאומת חי בכל נקודת בדיקה: `app.py:6871`, `app.py:6887`, `voice_adapter.py:336` — כולן קוראות ל-`is_enabled("VOICE_IVR")`.
+- **מקור סותר נוכחי:** `CLAUDE.md:150` — `` `FEATURE_VOICE_IVR`/F07 ``; `voice_adapter.py:3` (header comment) — `# flag: FEATURE_VOICE_IVR`. שם זה לא קיים באף registry/call-site.
+- **ראיה תומכת קודמת:** `docs/audit/M01_FEATURE_FLAG_CONSISTENCY_AUDIT.md:63` — כבר תיעד את אותו drift בדיוק כ-`REGISTRATION_DRIFT / HIGH`; לא נמצא commit תיקון ב-`BUG_AUDIT_LOG.md`/`CHANGE_CONTROL_LOG.md`/`MAINTENANCE_DEFERRED_REGISTER.md` — עדיין פתוח על `origin/main` הנוכחי.
+- **Runtime impact:** מפעיל שיסמוך על `CLAUDE.md`/header התיעוד ויגדיר `FEATURE_VOICE_IVR=true` ב-Render לא ישנה שום התנהגות בפועל (השם לא נקרא בקוד).
+- **המלצת remediation (לא בוצע כאן):** תיקון תיעוד בלבד ב-`CLAUDE.md:150` ו-`voice_adapter.py:3` ל-`VOICE_IVR`. אין צורך בשינוי registry/call-sites.
+
+### FINDING #18-2 — MEDIUM CURRENT GAP — #12 closure status מיוצג בצורה לא-עקבית במסמכי ניהול
+- **קונספט:** האם סגירת ה-cluster המת (worker.py וכו', #12) כבר מתועדת בעקביות ב-registries הנלווים.
+- **Authority A:** `docs/governance/HORIZON.md:44-47` (25/08/2026) — טוען ששני ה-registries הנלווים "עדיין קוראים `OPEN` / `NEEDS_PRODUCT_DECISION`... stale relative to the removals" — כלומר עדיין לא רוככנו.
+- **מקור סותר:** `MAINTENANCE_DEFERRED_REGISTER.md:133` (§E-F) כבר נושא resolution מוטבע באותו תא: `"RESOLVED / #12 CLOSED 25/08/2026"` — מסמך זה **כן** רוכך, בסתירה לטענת HORIZON.
+- **אישוש חלקי:** `MAINTENANCE_FILE_DRIFT_REGISTER.md:18` (§F1) — עמודת "Status" עדיין קוראת מילולית `NEEDS_PRODUCT_DECISION (= R-C00-1)` ללא עריכה, בעוד עמודת "Current disposition" באותה שורה אומרת `REMOVED... #12 CLOSED` — שתי עמודות באותה שורה סותרות זו את זו.
+- **Runtime impact:** אין (docs בלבד), אך שלושה מסמכים נוכחיים לא מסכימים על אותה עובדה "כרגע".
+- **Scope note:** העובדה הבסיסית (הסרת המודולים, #12 סגור) שייכת ל-#12 ואינה נפתחת מחדש כאן; הממצא מוגבל לעקביות התיעוד עצמה — סמכות #18.
+- **המלצת remediation (לא בוצע כאן):** רק להתאים ניסוח בין `HORIZON.md` לבין §F1/§F3 של `MAINTENANCE_FILE_DRIFT_REGISTER.md`, או לצמצם את טענת HORIZON לעמודה הספציפית שעדיין לא נערכה.
+
+### FINDING #18-3 — LOW CURRENT GAP / DOC DRIFT — תיאור worker.py בזמן הווה לאחר מחיקתו
+- **קונספט:** האם `worker.py` עדיין קיים בקודבייס.
+- **Authority (repo state):** `worker.py` לא קיים על `origin/main` (`git show origin/main:worker.py` → לא נמצא); commit המחיקה `6b8573b` מאומת כ-ancestor של `origin/main`.
+- **מקור סותר:** `CLAUDE.md:159` — "`worker.py`: legacy, currently unwired — defines a proactive Tasks-deadline Telegram nudge (...)" — תיאור בזמן הווה של קובץ שכבר לא קיים. (הערה: תיקון-דוק קודם, ר' רשומת C00-F1 למעלה, כבר הסיר את הטענה השגויה "worker.py הוא יעד ה-Cron" — אך לא עודכן שוב אחרי המחיקה המלאה של הקובץ.)
+- **Runtime impact:** אין ישיר; מבזבז זמן agent עתידי שמנסה לאתר קובץ שנמחק, ומהדהד ניסוח "NEEDS_PRODUCT_DECISION" ש-`MAINTENANCE_FILE_DRIFT_REGISTER.md` עצמו כבר מכנה moot.
+- **המלצת remediation (לא בוצע כאן):** עדכון הסעיף לזמן עבר / הערת הסרה, בהתאם לאיך שאותו קובץ כבר מתעד נכון את מחיקת `core/tenant_config.py` במקום אחר.
+
+### ALREADY VERIFIED (נבדק, ללא gap חי)
+1. `MAINTENANCE_FILE_DRIFT_REGISTER.md` §G — שורות G3–G7, G17 (הקלט המנותב של #18 עצמו) — עדיין `RESOLVED / DOC DRIFT REMEDIATED` או ציטוט היסטורי משומר נכון (G17). ללא רגרסיה.
+2. `BOSS_PRODUCTION_RUNTIME_MAP.md` — מסמן את עצמו נכון כ-superseded ומפנה במפורש ל-`AI_CONTEXT.md` כסמכות נוכחית.
+3. `docs/architecture/f52-unified-approval-runtime/decisions/D-020_GATEWAY_RUNTIME_PATH_AUTHORITY_20260820.md` — מודל סמכות יחיד ומפורש (ActionContract קנוני; Airtable `Approvals` = projection, לא authority; EventBus = transport, לא authority) שתואם את התיאור ב-`CLAUDE.md` (ברירת מחדל flag כבוי) ללא סתירה.
+4. `CROSS_LAYER_AUTHORITY_CONTRACT_V1.md` מול `CROSS_LAYER_GOVERNANCE_REVISED_PLANNING_GATE.md` — היחס בין השניים כבר מובהר במפורש ב-`CLAUDE.md` (אחד בעלים על boundaries, השני על ה-process gate). ללא סתירה.
+5. Context Librarian catalog/governance (`docs/context_librarian/GOVERNANCE.md`, `RECONCILIATION.md`) — מצהיר במפורש שהוא לא source of truth עסקי; מודל בעלות שדות נקי (owner-authored `policy_registry.json` מול שדות מכניים נפרדים).
+
+### Finding counts
+CRITICAL: 0 · HIGH: 1 · MEDIUM: 1 · LOW: 1 · ALREADY VERIFIED: 5 clusters · DOC DRIFT: 1 · CROSS-TRACK: 0 blocking.
+
+### Competing authorities
+YES — (א) `CLAUDE.md`/`voice_adapter.py` header מול `feature_flags.py` על שם ה-flag; (ב) `HORIZON.md` מול ה-registries הנלווים שלו על ניסוח סגירת #12.
+
+- **סטטוס:** 🔴 **OPEN — CURRENT SSOT GAPS** (3 REAL CURRENT GAPS). לא בוצע remediation בסבב זה — תיעוד בלבד. ראה `docs/governance/HORIZON.md` ("## OPEN") לרישום המקביל ב-program-level status map.
