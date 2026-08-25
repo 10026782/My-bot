@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from decision_pipeline import _trust_rank
 from airtable_schema import (
@@ -37,6 +38,9 @@ from airtable_schema import (
 from tma_api import record_fields, record_id
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from core.operation_identity import ExecutionContext
 
 _MAX_AI_COMPARISONS_PER_RUN = 5
 _CONFLICT_PENALTY = 0.15
@@ -89,7 +93,29 @@ def _event_pair_hash(event_a: dict, event_b: dict) -> str:
     return hashlib.sha256("|".join(ids).encode()).hexdigest()
 
 
-def detect_conflict_ai(event_a: dict, event_b: dict) -> ConflictResult:
+def verify_decision_conflict_payload(payload: object) -> dict:
+    """Validate the bounded conflict-analysis result without coercion."""
+    if not isinstance(payload, dict):
+        raise ValueError("conflict payload must be an object")
+    for field_name in ("is_conflict", "aspect", "severity"):
+        if field_name not in payload:
+            raise ValueError(f"missing conflict field: {field_name}")
+    if type(payload["is_conflict"]) is not bool:
+        raise ValueError("is_conflict must be a bool")
+    if payload["aspect"] is not None and not isinstance(payload["aspect"], str):
+        raise ValueError("aspect must be a string or null")
+    severity = payload["severity"]
+    if severity is not None and (not isinstance(severity, str) or severity not in {"low", "med", "high"}):
+        raise ValueError("severity is invalid")
+    return payload
+
+
+def detect_conflict_ai(
+    event_a: dict,
+    event_b: dict,
+    *,
+    execution_context: "ExecutionContext | None" = None,
+) -> ConflictResult:
     """קריאה בודדת ל-Claude להשוואת שני אירועים מאותו Claim Topic.
     לא נקראת ישירות בזרימה — ראו detect_conflicts_ai_lazy() למגבלות."""
     from llm_fallback import call_anthropic_text
@@ -113,6 +139,7 @@ def detect_conflict_ai(event_a: dict, event_b: dict) -> ConflictResult:
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
+            execution_context=execution_context,
         )
         data = json.loads(raw)
         return ConflictResult(
@@ -161,7 +188,13 @@ def detect_conflicts_ai_lazy(events: list[dict]) -> list[ConflictResult]:
                 if comparisons >= _MAX_AI_COMPARISONS_PER_RUN:
                     continue  # ה-cache עדיין נבדק לזוגות אחרים; רק לא קוראים ל-Claude יותר בריצה הזו
                 comparisons += 1
-                result = detect_conflict_ai(a, b)
+                from core import create_execution_context, create_operation
+                from core.turn_coordinator_runtime import resolve_decision_conflict_detection_capability
+
+                capability = resolve_decision_conflict_detection_capability()
+                operation = create_operation(capability)
+                execution_context = create_execution_context(capability, operation)
+                result = detect_conflict_ai(a, b, execution_context=execution_context)
                 _conflict_cache[h] = result
                 if result.is_conflict:
                     results.append(result)

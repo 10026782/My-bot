@@ -150,7 +150,7 @@ def _reset_cache():
 
 
 def _mock_ai(calls_log, is_conflict=False):
-    def fake(event_a, event_b):
+    def fake(event_a, event_b, **_kwargs):
         calls_log.append((event_a["id"], event_b["id"]))
         return ConflictResult(is_conflict=is_conflict, event_ids=(event_a["id"], event_b["id"]))
     return fake
