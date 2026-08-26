@@ -1,6 +1,7 @@
 # BOSS Bot — DEPLOYMENT
-**מדריך פריסה מעשי. עודכן: 16/06/2026**
-תלוי ב-SETUP.md לפרטי env vars ו-Airtable schema.
+**מדריך פריסה מעשי. עודכן: 26/08/2026**
+פרטי הסביבה והדגלים נמצאים ב-`.env.example`; בדיקת schema ידנית מתועדת
+ב-`tools/check_airtable_schema_runtime.py`.
 
 ---
 
@@ -59,14 +60,14 @@ git clone https://github.com/10026782/My-bot.git
 cd My-bot
 
 # 2. Dependencies
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 # 3. ENV
-cp env_example.txt .env
-# מלא את כל הערכים (ראה SETUP.md)
+cp .env.example .env
+# מלא את הערכים הנדרשים לפי ההערות ב-.env.example
 
 # 4. רישום Telegram Webhook — פעם אחת בלבד
-SETUP_WEBHOOK=1 python app.py
+SETUP_WEBHOOK=1 python3 app.py
 # לאחר רישום, הסר SETUP_WEBHOOK מה-env
 
 # 5. רישום Twilio Webhooks — ידני
@@ -83,14 +84,14 @@ SETUP_WEBHOOK=1 python app.py
 |-------|-----|
 | Build Command | `pip install -r requirements.txt` |
 | Start Command | `gunicorn app:app` |
-| Pre-Deploy Command | `python -m core.predeploy` |
+| Pre-Deploy Command | `python3 -m core.predeploy` |
 | Python Version | 3.11 |
 | Auto-Deploy | Yes (main branch) |
 | Health Check Path | `/health` |
 
 **Pre-Deploy Command:** `core/predeploy.py` runs PostgreSQL migrations (`core/database_migrations.py::run_migrations()`, Phase 4B0.1A atomic coordination if `FEATURE_ATOMIC_CLAIMS=true`) and, only if those succeed, the Emergency Stop preflight (`core/emergency_stop_preflight.py`). Blocks deploy if either stage fails. Idempotent — safe to run repeatedly on each deploy. See `docs/PHASE_4B0_1C_STAGING_WIRING.md` for more details.
 
-**Environment Variables:** הוסף את כל המשתנים מ-SETUP.md ב-Render Dashboard → Environment. For atomic claims (staging only), also set:
+**Environment Variables:** הוסף את המשתנים מ-`.env.example` ב-Render Dashboard → Environment. For atomic claims (staging only), also set:
 ```
 FEATURE_ATOMIC_CLAIMS=true
 DATABASE_URL=postgresql://...  # Or individual DATABASE_HOST, DATABASE_PORT, etc.
@@ -102,7 +103,7 @@ DATABASE_URL=postgresql://...  # Or individual DATABASE_HOST, DATABASE_PORT, etc
 
 ```bash
 # פריסה ידנית
-cd tma/
+cd tma-frontend/
 vercel --prod
 
 # או: Auto-deploy מ-GitHub (מומלץ)
@@ -111,30 +112,26 @@ vercel --prod
 
 **Environment Variables ב-Vercel:**
 ```
-NEXT_PUBLIC_API_URL=https://my-bot-jqz2.onrender.com
-NEXT_PUBLIC_BOT_USERNAME=@YourBotUsername
+VITE_API_URL=https://my-bot-jqz2.onrender.com
+VITE_DEV_TELEGRAM_ID=7228089151  # local development only; do not use as production auth
 ```
 
 ---
 
 ## Feature Flags — מה פועל בפרודקשן
 
-ברירת מחדל: **כבוי** לכולם חוץ מאלה:
+ברירת מחדל: **כבוי** לכולם, אלא אם צוין אחרת ב-`feature_flags.py`.
+השתמש בשמות הדגלים המדויקים הבאים; אין שמות חלופיים לדגלי domain או lead:
 
 ```bash
-FEATURE_DOMAIN_PROMPTS=true
-FEATURE_DOMAIN_ROUTING=true
-FEATURE_ANTI_HALLUCINATION=true
-FEATURE_ACTION_VALIDATOR=true
-FEATURE_LEAD_CAPTURE=true       # W0 — WhatsApp lead capture
+LEAD_CAPTURE=true               # WhatsApp lead capture
 ```
 
 **לא להדליק בלי בדיקה מפורשת:**
 ```bash
-FEATURE_LEAD_SCORING=false
-FEATURE_LEAD_MEMORY=false
-FEATURE_FOLLOWUP_AUTOMATION=false
-FEATURE_AUTO_REPLY=false
+LEAD_SCORING=false
+LEAD_MEMORY=false
+FOLLOWUP_AUTOMATION=false
 ```
 
 ---
@@ -145,9 +142,9 @@ FEATURE_AUTO_REPLY=false
 # 1. HTTP health
 curl https://my-bot-jqz2.onrender.com/health
 
-# 2. Python imports
-python -c "from feature_flags import is_enabled; print('flags OK')"
-python -c "from airtable_tools import airtable_schema_diff; print('airtable OK')"
+# 2. Python syntax and on-demand Airtable schema diagnostic
+python3 -m py_compile app.py
+python3 tools/check_airtable_schema_runtime.py --dry-run
 
 # 3. Airtable connectivity (מטלגרם)
 # שלח: "בדיקת מערכת"
@@ -180,4 +177,4 @@ git push origin main
 | Render על commit ישן | `git log origin/main` מהקאש המקומי | השווה ל-`git ls-remote origin main` |
 | 403 מ-Airtable | Base ID שגוי או שם טבלה לא מדויק | בדוק `AIRTABLE_BASE_ID` ושמות טבלאות עם עברית מלאה |
 | Webhook לא מגיע | Twilio URL לא מעודכן | עדכן ב-Twilio Console ידנית |
-| TMA לא טוען | CORS או NEXT_PUBLIC_API_URL שגוי | בדוק TMA_ALLOWED_ORIGINS ב-Render env |
+| TMA לא טוען | CORS או VITE_API_URL שגוי | בדוק `VITE_API_URL` ב-Vercel ואת `TMA_ALLOWED_ORIGINS` ב-Render env |
