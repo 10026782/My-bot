@@ -66,7 +66,7 @@ Classification: DOC DRIFT = contradicts current code · SUPERSEDED = later merge
 | G7 | `docs/context_librarian/CONSUMPTION_ENFORCEMENT_PLAN.md:9-19` | "implementation still blocked… nothing implemented" | `verify_consumption()` live at `librarian.py:1361`, wired by `__main__.py:217,343`; Phase 1 = PR #490; Phase 3 CI gate remains planned | **RESOLVED / DOC DRIFT REMEDIATED** | #19 |
 | G8 | `docs/governance/HORIZON_STATUS_AND_NEXT_STEPS_AUDIT_20260821.md:70-73` | "terminal-turn-result contract remains next" | Assertion holds today (`core/turn_result.py` exists but ROADMAP:69 older entry superseded in-file) | CURRENT | #19 |
 | G9 | `ROADMAP.md:69` | Pre-PR-807 "terminal result contract missing" | Superseded by newer entry in same file (:36-62) | SUPERSEDED | #19 |
-| G10 | `docs/governance/ARCHITECTURE_DRIFT_MAP.md:14` (row 1, TODO) | Emergency-flag /tmp persistence fix pending | Landed: durable Airtable-backed `evaluate_emergency_stop()` (`feature_flags.py:260-281`); CLAUDE.md:98 "/tmp mechanism no longer exists"; map status column never updated | SUPERSEDED (map row stale) | #19/#24 |
+| G10 | `docs/governance/ARCHITECTURE_DRIFT_MAP.md:14` (row 1, TODO) | Emergency-flag /tmp persistence fix pending | Landed: durable Airtable-backed `evaluate_emergency_stop()` (`feature_flags.py:260-281`); CLAUDE.md:98 "/tmp mechanism no longer exists"; map status column never updated | SUPERSEDED (map row stale; #24 closure confirms this is governance/documentation drift, not a current #24 architecture defect) | #19/#24 |
 | G11 | `C02_C04_REMEDIATION_1_FINDING_3.md:19` | "not merged / not deployed" | Merged PR #853 (`38a382c`) | SUPERSEDED (original preserved per rule) | #19 |
 | G12 | `C02_C04_REMEDIATION_2_FINDINGS_7_8.md:20` | "implemented locally… no merge" | Merged PR #857 (`2b0c08e`) | SUPERSEDED | #19 |
 | G13 | `C02_C04_REMEDIATION_3_FINDING_1.md:56` | "no production writes, merge…" | Merged PR #859 (`d70a59f`,`9561ed6`, merge `5f0763f`) — post-dates prior matrix baseline | SUPERSEDED | #19 |
@@ -230,7 +230,7 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #21 Orphan Artifact | config.json, import_knowledge_base.json, review_diffs.txt review, memory.py, benchmark_token_estimate.py, reports/ provenance gaps — **#21 CLOSED for the identified orphan candidates** (`docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`); see F1/F2 tables' "Current disposition" columns for per-item evidence. The `reports/` provenance handoff is **CLOSED / ACKNOWLEDGED** as **DEFERRED — OWNER: #12 File / Folder Ownership**; #21 owns no further work on `reports/`. |
 | #22 Performance Smell | (none consolidated this pass) |
 | #23 Cost | D8/I8 cost-flag precedence (cross-ref) |
-| #24 Architecture Drift | G10 drift-map stale row; drift-map rows 3/4/5/8 UNKNOWN verification |
+| #24 Architecture Drift | Historical G10 drift-map stale row and rows 3/4/5/8 UNKNOWN verification — **#24 CLOSED / STATIC VERIFIED; runtime verification remains**. The historical map is retained for governance maintenance and does not represent a current #24-owned architecture defect. |
 
 ---
 

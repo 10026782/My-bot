@@ -134,7 +134,11 @@ Legend: **implemented** = merged on main · **exercised** = actually run against
 
 ### D13 — Architecture Drift Map piggyback queue
 - **Repo evidence:** `docs/governance/ARCHITECTURE_DRIFT_MAP.md` tracking table — 6×TODO (Emergency-Stop coverage P0, messaging facade P0, approvals canonicalization P0, task taxonomy P1, audit-event schema P1, Airtable read gateway P2), 1×DEFERRED (Google risk metadata, frozen), identity normalization smoke PASS 2026-06-14. Bodies intentionally not duplicated here (map is its own SSOT; do-not-autonomously-execute rule at map §"חשוב"). Note 23/08 file/drift pass: map row 1 (emergency /tmp persistence TODO) is now SUPERSEDED by the durable `evaluate_emergency_stop()` cutover (`feature_flags.py:260-281`) — status column in the map itself not yet updated.
-- **Status:** DEFERRED (piggyback triggers must arrive organically).
+- **Status:** DEFERRED — GOVERNANCE/DOCUMENTATION MAINTENANCE ONLY. Audit #24
+  is **CLOSED / STATIC VERIFIED**; the historical map's stale/unknown rows do
+  not keep #24 open and must not be treated as current runtime architecture
+  defects. Reopen only under a separately owned architecture-map maintenance
+  decision or a new audit with direct evidence.
 
 ---
 
