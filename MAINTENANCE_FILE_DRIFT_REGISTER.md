@@ -228,7 +228,7 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #19 Docs-to-Code | G1-G7, G15, K5 active subset **resolved**; G17 historical audit drift preserved; I8 cross-routed to #23 |
 | #20 Code-to-Docs | H1-H6, H9 (H8 optional expansion) |
 | #21 Orphan Artifact | config.json, import_knowledge_base.json, review_diffs.txt review, memory.py, benchmark_token_estimate.py, reports/ provenance gaps — **#21 CLOSED for the identified orphan candidates** (`docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`); see F1/F2 tables' "Current disposition" columns for per-item evidence. The `reports/` provenance handoff is **CLOSED / ACKNOWLEDGED** as **DEFERRED — OWNER: #12 File / Folder Ownership**; #21 owns no further work on `reports/`. |
-| #22 Performance Smell | (none consolidated this pass) |
+| #22 Performance Smell | **CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION REMAINS**; P22-01 instrumentation complete, runtime measurement pending; P22-02 **CROSS-TRACK → #5 Async / Concurrency** and non-blocking; P22-03 LOW accepted non-blocking observation. |
 | #23 Cost | D8/I8 cost-flag precedence (cross-ref) |
 | #24 Architecture Drift | Historical G10 drift-map stale row and rows 3/4/5/8 UNKNOWN verification — **#24 CLOSED / STATIC VERIFIED; runtime verification remains**. The historical map is retained for governance maintenance and does not represent a current #24-owned architecture defect. |
 

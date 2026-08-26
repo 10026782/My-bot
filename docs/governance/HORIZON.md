@@ -16,7 +16,7 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `e5033eeeee2e0b21383b269ac6b5759f36bba9d7`
+**Truth Reset SHA at last update:** `15004c8397763e605727a63066106df455efc421`
 
 ---
 
@@ -63,6 +63,15 @@ the closure PR that created it for the search that established this.
   dependency is intentionally feature-gated. Package lifecycle/EOL remains
   **EXTERNAL VERIFICATION REQUIRED**. Current HIGH/MEDIUM gaps: **0**.
   This is not `CLEAN` while deferred items and external verification remain.
+
+- **#22 Performance Smell** — **CLOSED / STATIC VERIFIED — RUNTIME
+  VERIFICATION REMAINS** (26/08/2026, Truth-Reset SHA
+  `15004c8397763e605727a63066106df455efc421`). P22-01 measurement
+  instrumentation remains present for pending/executed Approvals reads; runtime
+  measurement is not established. P22-02 is **CROSS-TRACK → #5 Async /
+  Concurrency** and non-blocking for #22. P22-03 is a LOW accepted
+  non-blocking observation. No current MEDIUM/HIGH #22-owned static gap
+  remains.
 
 - **#3 Data Contract** — **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
   FINDING #2 EXPLICITLY DEFERRED** (remediation 26/08/2026, Truth-reset SHA

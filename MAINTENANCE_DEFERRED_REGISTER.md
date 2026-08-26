@@ -40,6 +40,21 @@ Truth-Reset SHA: `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`).
   bounded deferred/external-verification items. No dependency or CI change is
   implied.
 
+### Audit #22 Performance Smell — 26/08/2026
+
+Truth-Reset SHA: `15004c8397763e605727a63066106df455efc421` (`origin/main`).
+
+- **Runtime measurement — NOT ESTABLISHED:** request frequency, latency
+  percentiles, Approvals request behavior, and owner-link cardinality remain
+  unmeasured. This does not keep #22 open.
+- **P22-02 — CROSS-TRACK → #5 Async / Concurrency:** sequential
+  Leads/Deals/Tasks reads remain; no concurrency change belongs to #22.
+- **P22-03 — LOW / ACCEPTED NON-BLOCKING OBSERVATION:** per-owner Profile
+  lookup remains; no optimization is justified without measurement evidence.
+
+These items are non-blocking and do not represent a current MEDIUM/HIGH
+#22-owned static gap.
+
 ---
 
 ## Section D — EFFICIENCY & OPERATIONAL DEBT

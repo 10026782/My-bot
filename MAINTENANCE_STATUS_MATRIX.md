@@ -72,6 +72,18 @@ deferred and lifecycle/EOL requires external verification.
 Evidence: PR #1003, PR #1004, PR #1006. Chronology is preserved; this entry
 normalizes the completed engineering status without rewriting historical rows.
 
+## Audit #22 Performance Smell closure — 26/08/2026
+
+Truth-Reset SHA: `15004c8397763e605727a63066106df455efc421` (`origin/main`).
+Documentation-only closure capture; no runtime, concurrency, optimization, or
+instrumentation changes were made.
+
+**#22 status: CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION REMAINS.**
+P22-01 instrumentation remains present; runtime measurement is not established.
+P22-02 is **CROSS-TRACK → #5 Async / Concurrency** and is non-blocking for
+#22. P22-03 is a LOW accepted non-blocking observation. No current
+MEDIUM/HIGH #22-owned static code gap remains.
+
 ## Track #13 closure — Naming Consistency
 
 **CLOSED / CLEAN IN OWNED SCOPE.** No runtime rename, compatibility-alias change,
