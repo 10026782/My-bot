@@ -4478,7 +4478,7 @@ script's own assertions were corrected.
     שקטה ל-Agent
   - `agent_calls=0` נשמר לכל קלט שהיה עובר כ-`.certain` אלמלא הפיסוק
     הבלתי-תקין
-  - אין regression לניקוי הקיים של מרכאות מאוזנות/prefix של "Eli:"/">"
+  - אין regression לניקוי הקיים של מרכאות מאו~~~~/prefix של "Eli:"/">"
 - **תוקן (07/08/2026):** נוסף מקרה שלישי, צר, ללולאת ה-strip הקיימת
   והחסומה של `_normalize_create_task_input()`: מרכאה/סוגר פותח שהתו-
   הסוגר התואם שלו **לא מופיע בשום מקום אחר במחרוזת** — מוסר רק תו-הפתיחה
@@ -4519,7 +4519,7 @@ router.route_request()` **הריאלי, הפעיל, בתוך תהליך ה-stagi
   בשעה 14:54` (מרכאה פותחת בלבד).
   תוצאה: `intent=create_task handler=tool risk=needs_approval` — המסלול
   הדטרמיניסטי, לא Agent. **PASS.**
-- Regression: `'"צור משימה בדיקה"'` (מרכאות מאוזנות) → `intent=create_task
+- Regression: `'"צור משימה בדיקה"'` (מרכאות מאו~~~~) → `intent=create_task
   handler=tool` — ללא שינוי התנהגות. **PASS.**
 
 - **סטטוס (13/08/2026):** ✅ **STAGING VERIFIED** (in-process, SHA
@@ -4568,7 +4568,7 @@ router.route_request()` **הריאלי, הפעיל, בתוך תהליך ה-stagi
     reconfirmation — משנה scope שכבר הוחלט במפורש כצר בכוונה, דורש
     Cross-Layer Impact Matrix חדש לפני כל שינוי קוד
   - בכל מקרה: אין הבטחה מ-Agent שה-runtime לא יכול לקיים
-- **תלות:** קשור ישירות ל-BUG-160 — אם BUG-160 ייסגר (מרכאות לא-מאוזנות
+- **תלות:** קשור ישירות ל-BUG-160 — אם BUG-160 ייסגר (מרכאות לא-מאו~~~~
   לא מפילות ל-Agent), חלק ניכר מהחשיפה בפועל לתרחיש הזה קטן, אך הפער
   העקרוני (Agent path אינו תומך reconfirmation) נשאר קיים לכל נפילה
   אחרת ל-Agent.
@@ -5666,6 +5666,35 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 
 ---
 
+## Audit #10 — Dependency Risk (25–26/08/2026) — **ENGINEERING CLOSED**
+
+- **Original scope:** reproducible dependency resolution; dead/unused/duplicate dependency cleanup; lifecycle/EOL verification; runtime/dev-test separation.
+- **Findings:** DG-1 through DG-8, plus lifecycle/EOL external verification.
+
+**DG-1 through DG-6 — CLOSED:**
+- **DG-1:** Unpinned dependencies → all 19 runtime + 2 dev/test pinned to exact compatible versions. PR #1004 (runtime pins) + PR #1006 (dev/test pins).
+- **DG-2:** `python-telegram-bot` dead dependency removed. PR #1003.
+- **DG-3:** `openai` duplicate (in both `requirements.txt` and `requirements-dev.txt`) deduplicated. PR #1003.
+- **DG-4:** `groq` unused dependency removed. PR #1003.
+- **DG-5:** `pytest` moved from runtime to dev/test. PR #1003.
+- **DG-6:** `python-dotenv` moved from runtime to dev/test. PR #1003.
+
+**DG-7 — DEFERRED LOW (intentional):**
+- `google-auth-httplib2` and `google-auth-oauthlib` have no direct imports in application code, but are transitive dependencies of `google-api-python-client`. Removing them risks breaking `discovery.build()`. Intentionally kept.
+
+**DG-8 — DEFERRED LOW (intentional):**
+- `psycopg2-binary` is conditionally activated via `FEATURE_POSTGRES_ENABLED` flag. Intentional architectural choice per `BOSS_UNIFIED_MASTER_PLAN`; feature-flag gated; documented.
+
+**Lifecycle/EOL verification — EXTERNAL VERIFICATION REQUIRED:**
+- No in-repo evidence found for any package's lifecycle or EOL status. Requires PyPI/release-check audit outside repo scope.
+
+**Evidence:**
+- PR #1003 (merged `5fbcd55`, 25/08/2026): runtime dedup/cleanup (DG-2–DG-6).
+- PR #1004 (merged `9a37b13`, 25/08/2026): exact runtime pins (DG-1).
+- PR #1006 (merged, 25/08/2026): exact dev/test pins (DG-1 continued).
+- 164 tests pass with pinned versions. CI installs both files; Render installs runtime file only. Parity confirmed.
+
+- **סטטוס:** ✅ **ENGINEERING CLOSED** — all HIGH/MEDIUM gaps resolved. 0 unpinned dependencies. DG-7/DG-8 intentionally deferred LOW. Lifecycle/EOL external verification only.
 ## Audit #8 — Test Gap — CLOSURE (Combined Fix)
 
 - **תאריך:** 26/08/2026
