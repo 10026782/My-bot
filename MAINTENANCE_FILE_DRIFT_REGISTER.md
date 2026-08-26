@@ -83,18 +83,18 @@ Notes: `CHANGE_CONTROL_LOG.md` contains no entries marked superseded (term hits 
 
 | # | Capability | Canonical doc? | Evidence / nearest coverage | Owner |
 |---|---|---|---|---|
-| H1 | Media processing result contract (`MediaError`/`MediaResult`/`MediaProcessingStatus`, `media_handler.py:48-69`) | **GAP** | Only audit narrative: C02_C04_REMEDIATION_3_FINDING_1.md:37-56 | #20 |
-| H2 | WhatsApp ACK vs processing-status behavior | **GAP** (post-fix behavior documented only inside remediation audit) | same doc :41-42; fix = PR #859 | #20 |
-| H3 | File upload/reuse architecture (`last_uploaded_file`) | **GAP + dangling citation** | `session_store.py:98` cites `SPEC_File_Context_Reference.md` — file does not exist on main; historical mentions only (F52_STATE_FLOW_MAP.md:45-46, ROADMAP:814) | #20 |
-| H4 | GoogleDriveArtifactStore general spec | **PARTIAL** | MPT-scoped `docs/MPT_PHASE_2A_DRIVE_STORAGE.md` exists; design-only gate doc `docs/research/ARTIFACT_FILE_GATEWAY_EXTRACTION_GATE.md`; no store-level spec | #20 |
-| H5 | Media Files Airtable table responsibility | **GAP** | One inline comment `airtable_schema.py:67`; passing mentions elsewhere | #20 |
-| H6 | Session persistence durability semantics | **GAP** | Research snapshots only (BOSS_OPEN_SOURCE_INFRA_AUDIT "DURABLE/PARTIAL", memory-retrieval arch doc); formally recorded as register item D9 | #20 |
+| H1 | Media processing result contract (`MediaError`/`MediaResult`/`MediaProcessingStatus`, `media_handler.py:48-69`) | **CLOSED / STATIC VERIFIED** | `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md` | #20 |
+| H2 | WhatsApp ACK vs processing-status behavior | **CLOSED / STATIC VERIFIED** | `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md`; fix = PR #859 | #20 |
+| H3 | File upload/reuse architecture (`last_uploaded_file`) | **CLOSED / STATIC VERIFIED** | `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md`; absent `SPEC_File_Context_Reference.md` explicitly marked historical/non-authoritative | #20 |
+| H4 | GoogleDriveArtifactStore general spec | **CLOSED / STATIC VERIFIED** | `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md`; MPT-specific scope retained | #20 |
+| H5 | Media Files Airtable table responsibility | **CLOSED / STATIC VERIFIED** | `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md` | #20 |
+| H6 | Session persistence durability semantics | **CLOSED / STATIC VERIFIED** | `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md` | #20 |
 | H7 | Scheduler/process ownership | EXISTS | CLAUDE.md:102 + "Background workers" (:157-160); RUNBOOK log-hints | — |
 | H8 | ActionGateway single-write-path invariant | EXISTS (in audit decision) | C05_C07 audit §DECISION + matrix architecture table; thin beyond those two pointers | #20 (optional expansion) |
-| H9 | Idempotency mechanisms overview | **GAP** | Mechanisms exist (`guards/idempotency.py`, dispatcher `_DEDUP_FIELDS`, `media_handler.py:140`); docs = one-line listing (CLAUDE.md:105). No dedicated inventory (= missing-artifact M3) | #20 |
+| H9 | Idempotency mechanisms overview | **CLOSED / STATIC VERIFIED** | `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md` | #20 |
 | H10 | Context Librarian usage contract | EXISTS | docs/context_librarian/README.md + AGENT_CONSUMPTION_CONTRACT.md wired into AGENTS.md bootstrap | — |
 
-Counts: GAP 5 (H1,H2,H3,H5,H9) · PARTIAL 2 (H4,H6) · EXISTS 3.
+Counts: #20 gaps closed: H1,H2,H3,H4,H5,H6,H9. H8 remains already satisfied.
 
 ---
 

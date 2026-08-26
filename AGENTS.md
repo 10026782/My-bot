@@ -162,15 +162,15 @@ ANTHROPIC_API_KEY=<key> TELEGRAM_TOKEN=<token> python3 app.py
 ```
 
 - Flask listens on `0.0.0.0:10000` by default (override with `PORT` env var).
-- At startup, `app.py` attempts to set a Telegram webhook pointing to the hardcoded Render URL. This call will fail in local dev (expected; caught by try/except). The Flask server still starts normally.
+- Telegram webhook setup is conditional: `app.py` calls `set_webhook()` only when `SETUP_WEBHOOK=1`; it uses `RENDER_APP_URL` and the `/telegram` route. The setup call is caught and logged if it fails.
 - The `TELEGRAM_TOKEN` must be in Telegram's `<bot_id>:<secret>` format (e.g. `123456789:ABCdef...`) or `telebot.TeleBot()` raises `ValueError: Token must contain a colon` at import time, preventing the server from starting.
 
 ### Key gotchas
 
-- **No `@app.route('/')` on `home()`**: The `home()` function exists but has no route decorator, so `GET /` returns 404. The only HTTP route is `POST /<TELEGRAM_TOKEN>` (the webhook).
+- `home()` is registered at `GET /` and returns the live-version string. Telegram webhook setup is separately gated by `SETUP_WEBHOOK=1`; it is not an unconditional import side effect.
 - Automated Python tests exist in the repository. Run the relevant focused tests for the change, in addition to any applicable repository checks.
 - **No linter config**: No `pyproject.toml`, `setup.cfg`, or linter configuration is present. If needed, run `python3 -m py_compile app.py` to check for syntax errors.
-- **Module-level side effects**: `app.py` creates the `TeleBot` instance and calls `bot.set_webhook()` at module load time (lines 11, 23-24). Any import of `app.py` triggers these calls.
+- **Module-level side effects**: `app.py` creates the `TeleBot` instance at import time. `bot.set_webhook()` is not called unless `SETUP_WEBHOOK=1` is present.
 - **`python` vs `python3`**: The VM may not have `python` on PATH; always use `python3`.
 
 ### Required environment variables
