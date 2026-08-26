@@ -16,11 +16,40 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `233dea50fdfa4418b502c09fcb49dda726fc8770`
+**Truth Reset SHA at last update:** `c10f5573b6b6935d511ddf074cb4683236c0595b`
+
+All SHA values inside the dated audit and remediation notes below are
+historical evidence references. They are not current-main claims; current
+program status is summarized here from the canonical Active Work Registry in
+`BOSS_UNIFIED_MASTER_PLAN.md` §3.5.
+
+## CURRENT MAJOR PROGRAM MAP
+
+This is a concise owner-facing projection of §3.5, not a second registry.
+
+| Initiative | Work State | Evidence State | Needs Verification | What materially advanced | What remains | Next Step |
+|---|---|---|---|---|---|---|
+| Turn Coordinator | ACTIVE | MERGED | YES | routing, lifecycle and reply-ownership work merged | authorization/runtime paths remain incomplete | connect and verify remaining paths |
+| Unified Approval / ActionGateway | ACTIVE | MERGED | YES | canonical lifecycle and approval paths merged | staged rollout/runtime verification | verify approved paths |
+| Cost / Agent-Last | ACTIVE | MERGED | YES | cost attribution lineage merged | shadow telemetry and enforcement decision | validate live cost and decide progression |
+| Architecture authority / execution boundaries | ACTIVE | MERGED | YES | static authority boundaries reconciled | deployed/runtime evidence | verify deployed-SHA authority |
+| No-new-architectural-debt | CLOSED | WIRED | NO | blocking guards established in CI | normal monitoring only | monitor |
+| Schema / Data Contracts | ACTIVE | MERGED | YES | #2/#3 statically reconciled | live schema/contract evidence | perform live verification |
+| Maintenance program | CLOSED | MERGED | YES | numbered audits closed; no owned static gaps | accepted deferred/runtime triggers | monitor triggers |
+| Test / CI hygiene | CLOSED | WIRED | NO | #8/#9 closure and CI enforcement | normal monitoring only | monitor |
+| Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |
+| Lead / CRM canonical flow | ACTIVE | MERGED | YES | shared write infrastructure and Lead consumer merged | end-to-end canary | run live canary |
+| Decision Hub | ACTIVE | MERGED | YES | Stage 0–1 and safety fixes merged | runtime/activation evidence | verify before activation |
+| Media | ACTIVE | MERGED | YES | gateway/probe and staging artifacts merged | production activation | run deployed-SHA canary |
+| Distribution / messaging | ACTIVE | MERGED | YES | canonical Marketing mapping exists | runtime gateway canary | run Marketing-map canary |
+| Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged | endpoint and UNKNOWN-source verification | verify endpoint/source |
+| Contacts Brain | PLANNED | UNKNOWN | NO | partial resolver exists | full capability and owner decision | decide whether capability is wanted |
+| Queue / worker architecture | PLANNED | PLANNED | NO | no queue implementation assumed | requirement decision | decide whether queue is required |
+| Generic Draft capability | PLANNED | PLANNED | NO | no generic capability claimed | business requirement confirmation | confirm requirement |
 
 ---
 
-## CLOSED
+## NUMBERED AUDIT SNAPSHOT — CURRENT TERMINAL STATUS
 
 - **#8 Test Gap** — **CLOSED / STATIC VERIFIED + CI ENFORCED**
   (remediation 26/08/2026, Truth-Reset SHA
@@ -235,7 +264,7 @@ the closure PR that created it for the search that established this.
   §F1 table "Status" column for this cluster's removed rows now carries a
   matching inline `RESOLVED / #12 CLOSED` resolution — see #18 below.
 
-## ACTIVE
+## GOVERNANCE NOTES / ACTIVE ITEMS
 
 - **No New Architectural Debt enforcement** — **ESTABLISHED (25/08/2026)**.
   PR #972 completed final noise verification and promoted A1–A5 to blocking.
