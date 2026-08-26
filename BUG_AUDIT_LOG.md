@@ -5835,6 +5835,31 @@ These residuals do not keep #24 open.
 - **Final status:** **AUDIT #24 CLOSED / STATIC VERIFIED — RUNTIME
   VERIFICATION REMAINS**.
 
+---
+
+## Audit #22 — Performance Smell — FINAL CLOSURE CAPTURE
+
+- **Date:** 26/08/2026
+- **Truth-Reset SHA:** `15004c8397763e605727a63066106df455efc421` (`origin/main`)
+- **Scope:** documentation/status capture only. No runtime behavior,
+  instrumentation, optimization, or concurrency behavior changed.
+- **P22-01:** **STATIC REMEDIATION COMPLETE — RUNTIME MEASUREMENT PENDING**.
+  The merged measurement instrumentation remains present for
+  `owner_approvals_snapshot.pending` and `.executed`, including request
+  characteristics, returned count, elapsed time, and success/failure without
+  recording approval payloads. Existing formulas, limits, and pagination were
+  preserved.
+- **P22-02:** **CROSS-TRACK → #5 Async / Concurrency — NON-BLOCKING FOR #22
+  CLOSURE**. Sequential Leads/Deals/Tasks reads remain; concurrency work is
+  outside #22 and #5 is not reopened here.
+- **P22-03:** **LOW / ACCEPTED NON-BLOCKING OBSERVATION**. Per-owner Profile
+  lookup remains, with no evidence of material latency, high-cardinality
+  behavior, MEDIUM/HIGH risk, or required architecture remediation.
+- **Runtime limitation:** runtime measurement is **NOT ESTABLISHED**. No
+  production or performance-verification claim is made.
+- **Final status:** **AUDIT #22 CLOSED / STATIC VERIFIED — RUNTIME
+  VERIFICATION REMAINS**. No current MEDIUM/HIGH #22-owned static code gap
+  remains.
 ## Audit #20 — Code-to-Docs — FINAL DOC-ONLY REMEDIATION
 
 - **Date:** 26/08/2026
