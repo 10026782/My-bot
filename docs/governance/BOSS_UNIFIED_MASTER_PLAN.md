@@ -2,7 +2,7 @@
 
 **Status:** שכבת-על יחידה — מאחד את `BOSS_ROADMAP_CONTINUATION.md` ו-`BOSS_UNIFIED_MASTER_PLAN_v2.md`.
 **לא מחליף את `ROADMAP.md`** — אינו נוגע, משנה, או ממספר מחדש שום C/N/F קיים שם. רק מפנה אליהם.
-**עודכן:** 21/08/2026 | **Owner:** אליהו
+**עודכן:** 27/08/2026 | **Owner:** אליהו
 
 **Canonical CORE completion status (10/08/2026):** `CORE v1 — COMPLETE /
 READY TO FREEZE`. See
@@ -83,7 +83,7 @@ live canary evidence.
 
 | Initiative Key | Initiative / Document | Scope | Horizon | Work State | Current Stage | Evidence State | Next Decided Step | Needs Verification | Blocked | Owner Decision Required | Last Reconciled | Evidence Source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| TURN_COORDINATOR_PROGRAM | Turn Coordinator | intent ownership, routing, authorization, reply ownership | H0 | ACTIVE | TC1–TC6 merged; TC7-B authorization remains unwired in the end-to-end path | MERGED | connect remaining authorization/runtime paths and verify them | true | false | false | 2026-08-26T00:00:00Z | git:main:c10f557;docs/architecture/turn-coordinator/README.md |
+| TURN_COORDINATOR_PROGRAM | Turn Coordinator | intent ownership, routing, authorization, reply ownership | H0 | ACTIVE | TC1–TC6 merged. TC7-B claim-authorization wiring + RP5 evidence enforcement merged (PR #1036, `44fd3605`, 26/08/2026): canonical `app.py` response path now captures TC7-B's `authorize_claim()`/`ClaimAuthorizationShadowComparison.authorized` verdict, and RP5 blocks an unauthorized execution-success claim by substituting the existing A32 fallback when `FEATURE_EVIDENCE_FINALIZER=enforce`. RP5 is OFF by default in production (flag not activated) — STATIC VERIFIED / MERGED / RUNTIME NOT ESTABLISHED for both. Two `core/action_gateway.py` ActionGateway-owned call sites still do not propagate the decision into a parallel audit/state sink — DEFERRED, does not reopen TC7-B/RP5. See §3.5.1 rows A/C for detail. | MERGED | owner decision on RP5 activation (`FEATURE_EVIDENCE_FINALIZER=enforce`) + ActionGateway sink propagation design | true | false | true | 2026-08-27T00:00:00Z | git:main:bdcd078e;PR#1036;docs/architecture/turn-coordinator/README.md |
 | UNIFIED_APPROVAL_ACTIONGATEWAY | Unified Approval / ActionGateway | canonical action lifecycle, approval and execution boundaries | H0 | ACTIVE | lifecycle and approval paths merged; staged rollout remains separate | MERGED | rollout and runtime verification of approved paths | true | false | false | 2026-08-26T00:00:00Z | git:main:c10f557;docs/architecture/action-gateway/ |
 | COST_AGENT_LAST | Cost / Agent-Last architecture | cost attribution, usage measurement and deterministic execution | H0 | ACTIVE | cost/watchdog lineage merged; usage telemetry remains shadow | MERGED | validate live usage/cost and decide enforcement progression | true | false | true | 2026-08-26T00:00:00Z | git:main:c10f557;docs/governance/MAINTENANCE_AUDIT_LEDGER.md |
 | ARCHITECTURE_AUTHORITY_BOUNDARIES | Architecture authority / execution boundaries | capability, operation identity and execution authority | H0 | ACTIVE | static authority boundaries reconciled; runtime evidence is separate | MERGED | deployed-SHA and runtime-authority verification | true | false | false | 2026-08-26T00:00:00Z | git:main:c10f557;docs/governance/MAINTENANCE_AUDIT_LEDGER.md |
@@ -176,55 +176,65 @@ ActionGateway, RP4/RP5, A32, F52, F14, Agent Cost). כל תכנית שומרת �
 
 | Program | Canonical authority/docs | Objective | Current implementation state | Runtime state | Verification state | Depends On | Next gate |
 |---|---|---|---|---|---|---|---|
-| **A. Turn Coordinator TC1–TC7** | `docs/architecture/turn-coordinator/README.md` (canonical current-status); `turn-coordinator-full/GAP_ANALYSIS.md` (gap↔workstream ownership) | Intent ownership, entity resolution, canonical proposal construction, reply ownership, per-action evidence | TC1–TC5: MERGED (TC1 admission gate wired only for CREATE_TASK — UPDATE_TASK/COMPLETE_TASK branch is dead code today). TC6: MERGED (PR #566 `684d299`, PR #569 `d0a8620`). TC7-A: MERGED (PR #573 `c16245c`). **TC7-B1/B1.1: MERGED (PR #583 `7676ca6`, PR #587 `0eafeeb`) — new `core/claim_authorization.py` (`authorize_claim()`), but grep-verified 10/08/2026: zero callers anywhere outside the module's own `__main__` block and its test file; does NOT connect TC7-A's `EvidenceResult` and RP4's `TurnEvidenceSummary` despite the name — BUILT_UNWIRED, target chain in §3.5.2 still not closed.** Separately, PR #579 (`2603b44`, supersedes #576) wired TC7-A's `project_evidence_result()` into RP4 comparison logging under `FEATURE_EVIDENCE_FINALIZER` shadow/enforce — this is RP4 shadow logging, not TC7-B claim authorization | `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` — code default `false`; last verified production value **`true`** (09/08/2026, Render dashboard env-var read + live app-log/Telegram transcript, deploy `7dbdddd`); current: not reverified in this pass | TC6: **RUNTIME_VERIFIED** for 3/6 scenarios (09/08/2026 — create→pending, status query, second-create-block; callback-button/RP5-classification/replay still open). TC7-A: unit-tested only, SHADOW-only observability (not wired to `final_reply`). TC7-B1/B1.1: unit-tested only, no runtime path exists to verify | ActionGateway (B); F14/TC5 (F) for entity resolution | See §3.5.3 Next Gates |
+| **A. Turn Coordinator TC1–TC7** | `docs/architecture/turn-coordinator/README.md` (canonical current-status); `turn-coordinator-full/GAP_ANALYSIS.md` (gap↔workstream ownership) | Intent ownership, entity resolution, canonical proposal construction, reply ownership, per-action evidence | TC1–TC5: MERGED (TC1 admission gate wired only for CREATE_TASK — UPDATE_TASK/COMPLETE_TASK branch is dead code today). TC6: MERGED (PR #566 `684d299`, PR #569 `d0a8620`). TC7-A: MERGED (PR #573 `c16245c`). **TC7-B1/B1.1: MERGED (PR #583 `7676ca6`, PR #587 `0eafeeb`) — new `core/claim_authorization.py` (`authorize_claim()`), but grep-verified 10/08/2026: zero callers anywhere outside the module's own `__main__` block and its test file; does NOT connect TC7-A's `EvidenceResult` and RP4's `TurnEvidenceSummary` despite the name — BUILT_UNWIRED, target chain in §3.5.2 still not closed.** Separately, PR #579 (`2603b44`, supersedes #576) wired TC7-A's `project_evidence_result()` into RP4 comparison logging under `FEATURE_EVIDENCE_FINALIZER` shadow/enforce — this is RP4 shadow logging, not TC7-B claim authorization. **Superseded 26/08/2026 — TC7-B3 wiring: MERGED (PR #1036, `44fd3605`)** — the three canonical `observe_claim_authorization_shadow()` call sites in `app.py`'s general Agent-loop/branch-A/branch-B response paths now assign the return value and capture `ClaimAuthorizationShadowComparison.authorized` (`= not divergent`, additive property) into `_out_meta["claim_authorization"]` instead of discarding it — the TC7-A/RP4→claim-authorization chain named above as "still not closed" is now closed as an *observable* decision. Two `core/action_gateway.py`-owned call sites (separate from these three) still do not capture the decision — DEFERRED, tracked, does not reopen this row | `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` — code default `false`; last verified production value **`true`** (09/08/2026, Render dashboard env-var read + live app-log/Telegram transcript, deploy `7dbdddd`); current: not reverified in this pass | TC6: **RUNTIME_VERIFIED** for 3/6 scenarios (09/08/2026 — create→pending, status query, second-create-block; callback-button/RP5-classification/replay still open). TC7-A: unit-tested only, SHADOW-only observability (not wired to `final_reply`). TC7-B1/B1.1/B3: STATIC VERIFIED (unit + AST structural regression, `test_tc7_b3_claim_authorization_wiring.py` 10/10) — MERGED, no production/deployed-SHA runtime verification exists yet, RUNTIME NOT ESTABLISHED | ActionGateway (B); F14/TC5 (F) for entity resolution | See §3.5.3 Next Gates |
 | **B. ActionGateway / Approval Runtime** | `docs/architecture/action-gateway/`; `core/action_gateway.py` | Canonical business-action lifecycle + approval + atomic execution ownership | MERGED — `ActionContract`, propose/approve/reject/cancel, BUG-157 CAS fingerprint-claim fix | `FEATURE_ACTION_GATEWAY`/`FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS` — code default `false`; last verified production value **`true`** (30/07/2026, `PRODUCTION_30JUL2026_RENDER_VERIFICATION.md`, direct Render env read); current: not reverified in this pass. `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` — code default `false`; **no production verification found in either direction** — do not report as off, report as unverified | RUNTIME_VERIFIED for core create/approve/cancel/replay-guard flows (30/07, 07/08) | A32 (D) for evidence validators; TC6 (A) for reply ownership | Staged `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` rollout — runbook exists (`docs/PHASE_4B_ROLLOUT_AND_CUTOVER.md`), not executed. Parallel, not a TC7-B blocker |
-| **C. RP4/RP5 Evidence Finalizer** | `core/turn_evidence.py`; `RP5_PREFLIGHT_BLOCKER.md` | Per-turn evidence aggregation (RP4) + claim/evidence enforcement (RP5) | RP4: MERGED, actively maintained. **RP5: no PR has ever merged** — zero implementation | `FEATURE_EVIDENCE_FINALIZER` (three-state off/shadow/enforce) — code default `off`; last verified production value **`shadow`** (28/07/2026, direct Render env read, `SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md`) — **that reading is 12+ days old and must be re-verified, not cited as current**; current: not reverified in this pass. `enforce` today behaves identically to `shadow` (no RP5 code exists to differentiate) | RP4: SHADOW (comparison logging vs. live traffic; BUG-139 open unresolved mismatch). RP5: BLOCKED — no implementation to verify | A32 (D) upstream evidence source; sits alongside TC7 (A) — structurally non-competing by test, no owner-decision doc found reconciling them | RP5 runtime re-verification + enforcement planning — see §3.5.3 |
+| **C. RP4/RP5 Evidence Finalizer** | `core/turn_evidence.py`; `RP5_PREFLIGHT_BLOCKER.md` | Per-turn evidence aggregation (RP4) + claim/evidence enforcement (RP5) | RP4: MERGED, actively maintained. **RP5: MERGED 26/08/2026 (PR #1036, `44fd3605`) — supersedes "no PR has ever merged."** `app.py`'s general Agent-loop response path now has a real enforcement block: when `FEATURE_EVIDENCE_FINALIZER=="enforce"` AND the agent's own text asserts execution success AND TC7-B's `.authorized` is `false`, `final_reply` is replaced with `core.anti_hallucination`'s existing `_NO_TOOL_EVIDENCE_FALLBACK` (no new fallback text invented, A32 itself untouched). Coverage: the one general Agent-loop `final_reply` site only — the two ActionGateway-owned sites (row A) and `mixed`-category claims are explicitly out of scope for this slice, DEFERRED not reopened | `FEATURE_EVIDENCE_FINALIZER` (three-state off/shadow/enforce) — code default `off`; last verified production value **`shadow`** (28/07/2026, direct Render env read, `SINGLE_SPEAKER_APPROVAL_UX_PRODUCTION_VERIFICATION_PLAN.md`) — **that reading is now 4+ weeks old and must be re-verified, not cited as current**; current: not reverified in this pass. RP5's block only activates on `enforce`; production has never been confirmed at `enforce`, so RP5 is OFF BY DEFAULT / RUNTIME NOT ESTABLISHED in production today regardless of the stale `shadow` reading | RP4: SHADOW (comparison logging vs. live traffic; BUG-139 open unresolved mismatch). RP5: STATIC VERIFIED (17/17 in `test_rp5_evidence_enforcement.py` — pure-predicate, real `app.run_agent()` end-to-end with TC7-B decision spied, and structural proof it sits after A32/is flag-gated/only touches "success" claims) — MERGED, RUNTIME NOT ESTABLISHED, no production/deployed-SHA canary exists for the `enforce` block itself | A32 (D) upstream evidence source; consumes TC7 (A)'s `.authorized` verdict directly — no longer "non-competing by test," now a real consumer | Owner decision: activate `FEATURE_EVIDENCE_FINALIZER=enforce` in production (with re-verification of current flag value first) + design for the two ActionGateway sink sites — see §3.5.3 |
 | **D. A32 Anti-Hallucination** | `core/anti_hallucination.py` | Post-hoc claim-detection + response sanitization | MERGED, unconditional | No flag — **ENFORCED**, always live | RUNTIME_VERIFIED (`test_a32_enforcement.py`) | None (foundational) — TC7/RP4/RP5 depend on it, not the reverse | None open — stable |
 | **E. F52 Unified Status / MessageContract** | `docs/architecture/f52-unified-approval-runtime/README.md`; `audits/phase-4c/CURRENT_STATE_MAP.md` | Single canonical rendering contract across approval/status surfaces | MERGED — D-001…D-019 decisions, PR1/PR4/PR5/PR6 shadow adapters, D-018 leak fix | `FEATURE_UNIFIED_STATUS_FORMATTER` (three-state off/shadow/on) — code default `off`; last verified production evidence: shadow logging observed live (`[UnifiedStatusFormatterShadow]` entries, 09/08/2026 sampling per `ROADMAP.md` N17 item 4) — **never confirmed `on` anywhere**; current: not reverified in this pass. D-018's tool_name-leak fix is unconditional/live regardless of this flag | SHADOW (log comparison in production); D-018 piece RUNTIME_VERIFIED | TC6 (A) feeds reply-owner; TC7 (A) feeds optional `evidence_status` metadata (non-authoritative, D-013) | F52 rollout prerequisites — parallel track, not a TC7-B blocker |
 | **F. F14 Entity Resolution / TC5** | `ROADMAP.md` §F14; `core/router/entity_resolvers.py` | Bounded, identity-scoped entity resolution + Contact find-or-create gate | F14-A1 (PR #568) + F14-B1 (PR #570): MERGED. TC5 framework: MERGED. **F14-B2 (PR #577 `cc67f9f`, 09/08/2026): MERGED** — `find_or_create_contact()` gains `create_writer`; two more live callers route through it (`tools/dispatcher.py`'s `airtable_add`→Contacts path, `tools/approval_actions.py`'s `tma_write` Contacts POST), grep-confirmed | Not flag-gated — always-on for the now-4 migrated callers only | **BUILT_UNWIRED** — gate covers 4 specific callers (`crm_add_contact`, `convert_lead_to_contact`, dispatcher `airtable_add`→Contacts, `tma_write` Contacts POST) via hardcoded interception, still not a centralized `ActionGateway`/dispatcher-wide gate; other agent-tool paths into Contacts remain unguarded. Unit-tested only | — | Centralized dispatcher/ActionGateway-wide gate (F14-B2's original scope) — parallel track, not a TC7-B blocker |
 | **G. Agent Cost / Deterministic Execution** | `cost_monitor.py`, `core/cost_watchdog.py`, `core/usage_telemetry.py` | Measure Claude/Agent token spend; maximize zero-Agent-call routing | MERGED — 3-tier measurement lineage (no duplicate system) | `cost_monitor.py`/`core/cost_watchdog.py` live (write `AI_Usage_Daily`, no flag). `core/usage_telemetry.py`/`usage_events` genuinely SHADOW, confirmed unread by any production code path; PR3 cutover explicitly **owner-blocked** pending real-billing comparison | RUNTIME_VERIFIED (live trigger); usage_telemetry SHADOW | Measures traffic from all other programs; not blocking | POST-TC COST VALIDATION after sufficient post-TC6/TC7 traffic — parallel track, not a TC7-B blocker |
 | **H. Durable State (TC8)** | `turn-coordinator-full/GAP_ANALYSIS.md` (BLOCKER rows); `TC8_DURABLE_TURN_STATE.md` | Single durable turn-ownership/concurrency record, replacing 4 coexisting pending/approval stores | **MERGED (PR #585 `a945ee7`, 10/08/2026)** — new `core/turn_state_repository.py` (`TurnStateRepository`) | Not flag-gated — grep-confirmed live/unconditional, called from `app.py`'s `_tc8_claim_contract()`/`_tc8_finish_contract()` at all 4 approve/reject/cancel callback+text sites; fails closed on repository unavailability | **MERGED, live/unflagged.** "Staging verified" (`TC8_DURABLE_TURN_STATE.md`, commit `c7b4d9b`) is asserted prose against staging commit `2750f8ca9b`, no checked-in artifact — not independently confirmed | TC6, TC7-B (A) | Independent artifact-based verification of the staging closure claim; TC10 regression harness (still code-absent) |
-| **I. MessageContract full-surface (TC9)** | `turn-coordinator-full/GAP_ANALYSIS.md` (FOLLOW_UP row) | One public composer across Telegram/WhatsApp/TMA | **MERGED (PR #588 `cec3f83`, 10/08/2026)** — `ActionFact`/`GatewayReply` gain MessageContract fields, `_message_contract_for_fact()` builds it unconditionally in `compose_status_reply()` | `FEATURE_UNIFIED_STATUS_FORMATTER` — code default `off`; construction is live/unconditional but the text-output switch stays gated by this flag (shadow/on). `GatewayReply.contract` has no downstream reader yet | BUILT, live construction, output-gated OFF by default; not runtime-verified as changing user-visible text anywhere | F52 (E) schema (stable, D-012); TC6/TC7 (A) | Wire `GatewayReply.contract` to an actual consumer; F52 rollout decision |
+| **I. MessageContract full-surface (TC9)** | `turn-coordinator-full/GAP_ANALYSIS.md` (FOLLOW_UP row) | One public composer across Telegram/WhatsApp/TMA | **MERGED (PR #588 `cec3f83`, 10/08/2026)** — `ActionFact`/`GatewayReply` gain MessageContract fields, `_message_contract_for_fact()` builds it unconditionally in `compose_status_reply()`. **Follow-up closed 27/08/2026 (read-only Truth Reset, no code change, no PR):** `_message_contract_for_fact()` now delegates through `core.action_fact_message_adapter.from_action_fact()` (a module not documented in this row before) → `build_message_contract()` → `_state_from_lifecycle()` — confirmed **single** state-computation authority, no competing logic in ActionGateway. `core/evidence_message_adapter.py`/`core/lifecycle_message_adapter.py` remain dormant (zero live callers) but are confirmed to be unused *front doors* to that same `build_message_contract()`, built for `core/turn_coordinator_runtime.py` (a different, already-live producer that does not yet build any MessageContract) — not a second authority, not a TC9 bypass. The `verified_read_only → MessageState.SUCCESS` mapping is confirmed present and **deliberate**, documented in `core/claim_authorization.py`'s own module docstring and pinned by `test_action_fact_message_adapter.py`/`test_message_contract.py` — explicitly not a defect to remediate | `FEATURE_UNIFIED_STATUS_FORMATTER` — code default `off`; construction is live/unconditional but the text-output switch stays gated by this flag (shadow/on). `GatewayReply.contract` has no downstream reader yet (not re-verified in the 27/08 follow-up) | BUILT, live construction, output-gated OFF by default; not runtime-verified as changing user-visible text anywhere. Construction itself: **STAGING RUNTIME VERIFIED (2026-08-10)** per row J's `scripts/verify_tc9_staging.py` evidence (pending/executed/failed/turn_id all confirmed against real staging) — **PRODUCTION NOT ESTABLISHED**; `outcome_unknown` state was never exercised against real staging, isolated-unit coverage only | F52 (E) schema (stable, D-012); TC6/TC7 (A) | Wire `GatewayReply.contract` to an actual consumer; F52 rollout decision. No TC9-owned code change identified as needed |
 | **J. Observability closure (TC10)** | `turn-coordinator-full/TC10_OPERATIONAL_VERIFICATION_HARNESS.md` | Verification harness + rollout/rollback gates | **COMPLETE AND VERIFIED (10/08/2026)** — `scripts/run_isolated_regression.py`/`scripts/regression_matrix.py`/`scripts/staging_identity.py` (new), `scripts/verify_tc9_staging.py` (new), `scripts/verify_tc8_staging.py` fixed (no longer runs the full regression matrix against real staging — root cause of the BUG-122 contamination the TC8 handoff described). Not a runtime layer — no ActionGateway/TC7/TC8/TC9/F14/router/approval-policy code touched | N/A — tooling only, no flags | Isolated regression: **RUNTIME_VERIFIED via real CI** — PR #590 commit `2b6ecb3`, `backend-ci` run 31362450916, `FINAL: PASS`, 39/39 callback hardening, 8/8 PR-0C, 11/11 BUG-158, 21/21 full matrix, stable across 2 repeated runs (harness doc §6.2). Staging runtime: **RUNTIME_VERIFIED against real staging (2026-08-10)** — `scripts/verify_tc8_staging.py` (`FINAL: TC8: DONE`, deploy SHA matched) and `scripts/verify_tc9_staging.py` (`FINAL: TC9 STAGING CANARY: DONE` — pending/turn_id/real successful execution/failed/clean cleanup all confirmed) both ran from the actual Render staging shell against real DATABASE_URL/AIRTABLE credentials (harness doc §6.3). Two self-caught bugs found and fixed along the way: an over-broad Telegram credential override (PR #590) and an Airtable-base-id name check that could never pass for any real base (PR #592) — both root-caused from real failures, not assumed | TC8 (H, MERGED), TC9 (I, MERGED) | None — closure gate satisfied |
 | **K. PA-01 Structural Enforcement** | `docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md` | Block phantom approval-pending claims lacking structural evidence | MERGED (PR #352, `2be2472`) | `FEATURE_PA01_ENFORCEMENT_STATE` (three-state) — code default `off`; **no production verification found in either direction** — do not report as off, report as unverified | BUILT_UNWIRED — not activated in production | Risk router contract-required-intent table | Does not itself close the TC1 CREATE_TASK-only admission gate — that remains open (see A) |
 
 ### 3.5.2 Target Canonical Harness Authority Chain
 
-> **⚠️ This is TARGET architecture, not a live end-to-end runtime flow
-> today.** The chain below is the intended shape once TC7-B, TC8, TC9, TC10
-> land. As of 09/08/2026, it is **not one connected pipeline** — several
-> links exist as independently-verified pieces that have not been wired
-> together. In particular: **TC7-A (`EvidenceResult`, per-action) and RP4
-> (`TurnEvidenceSummary`, per-turn) are two separate, MERGED-but-unconnected
-> mechanisms today** — nothing in the code imports across them, and no
-> "claim authorization" step consumes either to gate a reply. **TC7-B is
-> specifically the connection/claim-authorization stage that does not exist
-> yet** — it is what would join per-action evidence (TC7-A) and per-turn
-> aggregation (RP4) into an actual admission decision (RP5). Treat every
-> arrow below as "designed to connect here," not "already connected here."
+> **⚠️ Updated 27/08/2026 — the connector links below are now BUILT, but
+> still not production-activated.** As of 09/08/2026 this chain was target
+> architecture only. **Superseding that as of PR #1036 (`44fd3605`,
+> 26/08/2026):** TC7-B now consumes TC7-A's `EvidenceResult`-derived
+> `evidence_status` and RP4's `TurnEvidenceSummary`-derived
+> `legacy_response_claim` together (via
+> `core.claim_authorization_shadow.compare_claim_authorization_shadow()`),
+> producing a real `.authorized` verdict that `app.py` captures on every
+> general-Agent-loop/branch-A/branch-B turn; RP5 now consumes that verdict
+> to block an unauthorized execution-success claim, replacing it with A32's
+> existing no-tool-evidence fallback. Both are **STATIC VERIFIED / MERGED /
+> RUNTIME NOT ESTABLISHED** — RP5's block only fires when
+> `FEATURE_EVIDENCE_FINALIZER=="enforce"`, and production has never been
+> confirmed at `enforce` (see row C), so **the chain is wired but currently
+> inert in production**. The two `core/action_gateway.py`-owned call sites
+> remain outside this connected chain — DEFERRED, not reopening TC7-B/RP5.
+> Treat every arrow below as "connected in code," not yet "observed active
+> in production."
 
 ```
 Ingress/Identity → Intent Ownership/Routing (TC1) → Entity Resolution (TC5/F14)
   → Canonical Proposal (TC2/TC4) → ActionContract/Approval Runtime (ActionGateway)
   → Atomic Execution → Execution Evidence (TC7-A, MERGED, standalone)
   → Turn Evidence Aggregation (RP4, MERGED, standalone)
-  → [ TC7-B — claim authorization / the connector, NOT BUILT ]
-  → Claim Authorization (RP5, NOT BUILT) → Reply Ownership (TC6, ✅ live)
-  → Rendering/MessageContract (F52/TC9) → Observability/Cost (Cost program/TC10)
+  → Claim Authorization (TC7-B, MERGED — PR #1036, wired into app.py's 3 canonical call sites)
+  → Evidence Enforcement (RP5, MERGED — PR #1036, gated FEATURE_EVIDENCE_FINALIZER=enforce, OFF by default)
+  → Reply Ownership (TC6, ✅ live)
+  → Rendering/MessageContract (F52/TC9, construction live/unconditional, staging-verified 2026-08-10)
+  → Observability/Cost (Cost program/TC10)
 ```
 
 Live/verified today, independent of this target chain: TC6 reply ownership
 (RUNTIME_VERIFIED), A32's claim-detection/sanitization gate (ENFORCED,
-unconditional — today's actual, only, claim-admission mechanism, not RP5).
+unconditional — today's actual, only, claim-admission mechanism *in
+production*; RP5 is a second, code-complete but not-yet-activated
+mechanism sitting after it, not a replacement for it).
 
 ### 3.5.3 Next Gates (Core Harness) — ordered
 
 1. ~~TC6 documentation closure~~ — ✅ **done** (PR #574, `612a119`, 09/08/2026).
 2. ~~TC7-A review corrections and merge gate~~ — ✅ **done** (PR #573, `c16245c`, 09/08/2026).
-3. **TC7-B claim-authorization — PARTIALLY done, still not the actual gate.** `core/claim_authorization.py` merged (PR #583/#587, 10/08/2026) but grep-verified zero callers — it does not connect TC7-A/RP4 into a live decision. Remains the next real core gate: **wire `authorize_claim()` to an actual TC7-A/RP4 consumer and to a reply-suppression decision.**
-4. RP5 runtime/shadow re-verification (current `FEATURE_EVIDENCE_FINALIZER` production value is 12+ days stale as of 09/08; still not reverified as of 10/08) + enforcement planning.
+3. ~~TC7-B claim-authorization wiring~~ — ✅ **done** (PR #1036, `44fd3605`, 26/08/2026): `authorize_claim()`'s verdict is now captured at all 3 canonical `app.py` call sites via `_out_meta["claim_authorization"]`. STATIC VERIFIED / MERGED / RUNTIME NOT ESTABLISHED — no production activation performed or claimed. Two `core/action_gateway.py`-owned sites remain unwired — DEFERRED (design decision required), tracked separately, does not reopen this gate.
+4. ~~RP5 enforcement~~ — ✅ **implementation done** (PR #1036, `44fd3605`, 26/08/2026): `app.py`'s general Agent-loop path now blocks an unauthorized execution-success claim when `FEATURE_EVIDENCE_FINALIZER=="enforce"`. STATIC VERIFIED / MERGED / RUNTIME NOT ESTABLISHED / **OFF BY DEFAULT** — the flag has never been confirmed at `enforce` in production, and this pass did not activate it. Remaining: (a) re-verify `FEATURE_EVIDENCE_FINALIZER`'s actual current production value (last read `shadow`, 28/07/2026, now stale), (b) owner decision on activating `enforce`, (c) the two ActionGateway sink sites, (d) `mixed`-claim coverage — none of these reopen the current RP5 slice.
 5. ~~TC8 durable turn state~~ — ✅ **merged** (PR #585, `a945ee7`, 10/08/2026), live/unflagged; staging-verified claim not independently confirmed (see row H).
-6. ~~TC9 MessageContract full-surface integration~~ — ✅ **merged** (PR #588, `cec3f83`, 10/08/2026), construction live, output still gated off by `FEATURE_UNIFIED_STATUS_FORMATTER`.
+6. ~~TC9 MessageContract full-surface integration~~ — ✅ **merged** (PR #588, `cec3f83`, 10/08/2026), construction live, output still gated off by `FEATURE_UNIFIED_STATUS_FORMATTER`. **Follow-up closed 27/08/2026** — read-only Truth Reset confirmed no duplicate state-authority and no code gap remains on TC9's owned path (see row I); no PR opened, no code changed.
 7. ~~TC10 observability closure~~ — implementation complete 10/08/2026 (see row J): isolated regression harness built, TC8 handoff's BUG-122 staging-contamination bug fixed at its root cause, TC9 MessageContract staging canary written. Real-staging execution of that canary + `verify_tc8_staging.py`'s PG checks is still outstanding — no session has run them against real staging secrets yet.
 
 **Parallel tracks — explicitly NOT blockers to TC7-B:**
@@ -270,6 +280,62 @@ are rows in the same §3.5 Active Work Registry above, and
 `docs/research/HERMES_DEFERRED_PATTERNS_REVISIT_2026-08.md` /
 `docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md` remain the
 design/evidence references this section summarizes.
+
+### 3.5.6 TC7-B + RP5 wiring, TC9 follow-up closure (27/08/2026)
+
+**Truth Reset SHA:** `origin/main` `bdcd078e3e8499567a6980da442570848723d1c5`.
+
+**TC7-B (rows A) + RP5 (row C):** PR #1036 (`44fd3605`, merged 26/08/2026)
+wired `authorize_claim()`'s verdict into `app.py`'s 3 canonical response-path
+call sites (`_out_meta["claim_authorization"]`) and added RP5's evidence
+enforcement block (blocks an unauthorized execution-success claim under
+`FEATURE_EVIDENCE_FINALIZER=="enforce"`, replacing it with A32's existing
+`_NO_TOOL_EVIDENCE_FALLBACK`). Both:
+
+```
+TC7-B — STATIC VERIFIED / MERGED / RUNTIME NOT ESTABLISHED
+RP5   — STATIC VERIFIED / MERGED / RUNTIME NOT ESTABLISHED / OFF BY DEFAULT
+```
+
+Explicitly not closed by this PR, tracked separately, does not reopen either
+row: the two `core/action_gateway.py`-owned call sites that compute
+authorization but do not propagate it into a parallel sink
+(`DEFERRED — DESIGN DECISION REQUIRED`); RP5 coverage of `mixed`-category
+claims (`DEFERRED`); RP5 production activation (owner decision, not
+attempted). Test evidence: `test_tc7_b3_claim_authorization_wiring.py`
+(10/10), `test_rp5_evidence_enforcement.py` (17/17), plus a 16-suite
+regression run (`test_tc7_b1_claim_authorization.py`,
+`test_tc7_b2_claim_authorization_shadow.py`, `test_a32_enforcement.py`,
+`test_pa01_phantom_approval_enforcement.py`, `smoke_tests.py`,
+`test_integration.py`, and others) — all green, no regression.
+
+**TC9 (row I):** a same-day (27/08/2026) read-only follow-up re-verified
+`_message_contract_for_fact()` against current `origin/main` and found the
+concern it was asked to check — a duplicate MessageContract state authority
+between ActionGateway and the `evidence_projection.py`/
+`evidence_message_adapter.py`/`lifecycle_projection.py`/
+`lifecycle_message_adapter.py` cluster — **does not exist**:
+`_message_contract_for_fact()` delegates through `core.action_fact_message_adapter.from_action_fact()`
+(added since the 10/08/2026 pass that wrote row I, not previously documented
+here) to the same single `build_message_contract()`/`_state_from_lifecycle()`
+authority the other adapters would also use if wired. `evidence_message_adapter.py`/
+`lifecycle_message_adapter.py` remain dormant, confirmed built for
+`core/turn_coordinator_runtime.py` (a different, already-live producer that
+does not yet build a MessageContract), not a competing authority. The
+`verified_read_only → MessageState.SUCCESS` mapping is confirmed present and
+**deliberate** — documented in `core/claim_authorization.py`'s own module
+docstring, pinned by 2 existing tests — not a remediation item.
+
+```
+TC9 CORE       — STAGING RUNTIME VERIFIED (2026-08-10) / PRODUCTION NOT
+                 ESTABLISHED — outcome_unknown state: isolated-unit only
+                 (unchanged from row J; not re-walked in this pass)
+TC9 FOLLOW-UP  — ALREADY RESOLVED (no gap found, no code changed, no PR)
+```
+
+No PR opened for the TC9 portion — nothing to merge. This note only updates
+this registry; it does not re-litigate or re-run the underlying TC7-B/RP5/TC9
+work.
 
 ---
 
