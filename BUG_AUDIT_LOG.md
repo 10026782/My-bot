@@ -5714,3 +5714,33 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 - **פריט אגבי, לא תחת #8, ותוקן:** `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache` (עכשיו `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth`) היה test-staleness (לא production defect) שנחשף תוך כדי #8-2 — תוקן ישירות (ר' #8-2 למעלה) כדי שה-CI step יספק כיסוי אמיתי (18/18 PASS, 0 xfail), לא לעקוף אותו.
 
 - **סטטוס סופי:** ✅ **CLOSED / STATIC VERIFIED + CI ENFORCED** — 2/2 findings מתוקנים ומאומתים סטטית על branch זה. אימות production (post-merge, לפי כלל הברזל של `CLAUDE.md`) עדיין נדרש בנפרד לפני שסטטוס זה נחשב production-verified.
+
+---
+
+## Audit #23 — Cost Audit — FINAL CLOSURE CAPTURE
+
+- **תאריך:** 26/08/2026
+- **Truth-Reset SHA:** `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`)
+- **Scope:** תיעוד סגירת code scope בלבד; לא בוצע שינוי runtime, pricing,
+  watchdog behavior, feature-flag behavior או enforcement.
+- **Completion basis:** P23-M1 through P23-M8D verified on main. No successful
+  paid-call accounting omission was found among current reachable producers;
+  unknown measurement is represented truthfully; durable attribution and
+  aggregation/reporting are complete for the current reachable paid paths;
+  pricing coverage is understood.
+- **Corrected M8D disposition:** `core/reasoning_ports._AnthropicLLM` is not a
+  current executed paid producer because no production execution chain reaches
+  `ports.llm.call()`.
+- **I8 final disposition:** `COST_WATCHDOG_LIVE` and
+  `COST_WATCHDOG_ENABLED` control distinct but related cost-control
+  capabilities. This is intentional separation / flag-authority clarity debt,
+  not a duplicate live stop authority, enforcement defect, or #18 reopening
+  trigger. Runtime environment values remain unknown; neither flag is renamed
+  or removed here.
+- **Cross-track residuals:** durable telemetry persistence-failure
+  reconciliation → #15 Recovery / Fallback; remaining documentation/naming
+  clarity → current cross-track owner; live deployment evidence → operational
+  runtime verification only.
+- **Runtime limitation:** live deployment/runtime evidence is not established;
+  no production-verified claim is made.
+- **Final status:** **AUDIT #23 CODE SCOPE CLOSED — RUNTIME VERIFICATION REMAINS**
