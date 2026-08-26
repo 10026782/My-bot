@@ -46,6 +46,15 @@ class ClaimAuthorizationShadowComparison:
         """Structural enums/booleans/reason codes only -- no text/IDs/payload."""
         return asdict(self)
 
+    @property
+    def authorized(self) -> bool:
+        """TC7-B3: True iff the response's claim is authorized by TC7-B1's
+        evidence+lifecycle decision (authorize_claim()). Exact inverse of
+        `divergent` -- exposed under this name so a caller records/consumes
+        an explicit authorization verdict instead of re-deriving it from
+        `divergent`'s shadow-comparison framing."""
+        return not self.divergent
+
 
 # ClaimCategory value -> compatible legacy ShadowFinalizerComparison.response_claim
 # values. The two RP4-precedent exceptions (no_evidence+empty, narrow
