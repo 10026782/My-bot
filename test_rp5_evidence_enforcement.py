@@ -130,6 +130,20 @@ _cmp5b = compare_claim_authorization_shadow(_sfc("failure", "pending"))
 check("(A5b) non-'success' claim rejected by TC7-B (e.g. 'pending') -> still never blocked (RP5 only guards 'success')",
       _rp5_blocks(_cmp5b) is False)
 
+# mixed evidence (ClaimCategory.MIXED can never authorize a "success" claim --
+# core/claim_authorization.py's _EVIDENCE_ONLY table has no "mixed" -> SUCCESS
+# entry) + a 'success' claim -> blocked, same as any other unauthorized case.
+_cmp6 = compare_claim_authorization_shadow(_sfc("mixed", "success"))
+check("(A6a) mixed evidence + 'success' claim -> blocked", _rp5_blocks(_cmp6) is True)
+
+_cmp7 = compare_claim_authorization_shadow(_sfc("mixed_with_unknown", "success"))
+check("(A6b) mixed_with_unknown evidence + 'success' claim -> blocked", _rp5_blocks(_cmp7) is True)
+
+# mixed evidence claimed as 'mixed' (not 'success') -> never blocked, RP5
+# only ever guards a 'success' legacy claim.
+_cmp8 = compare_claim_authorization_shadow(_sfc("mixed", "mixed"))
+check("(A6c) mixed evidence + 'mixed' claim (not 'success') -> never blocked", _rp5_blocks(_cmp8) is False)
+
 
 # ═════════════════════════════════════════════════════════════════
 # PART B — end-to-end: real app.run_agent() canonical path

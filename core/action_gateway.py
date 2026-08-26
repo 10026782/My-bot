@@ -19,7 +19,7 @@ import threading
 import time
 import unicodedata
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from core.action_contract_repository import (
@@ -2060,11 +2060,32 @@ class ActionGateway:
                             state=_state, approval_prompt_sent=False,
                         )
                         if _legacy_comparison is not None:
-                            observe_claim_authorization_shadow(
+                            _claim_authorization = observe_claim_authorization_shadow(
                                 _legacy_comparison,
                                 lifecycle_state=_lifecycle_state,
                                 state=_state,
                             )
+                            # RP5 — same predicate as _execute_contract's own
+                            # sink below: the deferred handoff this method
+                            # exists for means enforcement must happen here,
+                            # against the actually-rendered safe_user_message,
+                            # not against the approve() string it discards.
+                            if (
+                                _state == "enforce"
+                                and _claim_authorization is not None
+                                and _claim_authorization.legacy_response_claim == "success"
+                                and not _claim_authorization.authorized
+                            ):
+                                from core.anti_hallucination import _NO_TOOL_EVIDENCE_FALLBACK
+                                logger.error(
+                                    "[RP5][ActionGateway] blocking unauthorized success claim: "
+                                    "contract=%s canonical_claim=%s authorization_reason=%s "
+                                    "evidence_status=%s",
+                                    contract_id, _claim_authorization.canonical_claim,
+                                    _claim_authorization.authorization_reason,
+                                    _claim_authorization.evidence_status,
+                                )
+                                result = replace(result, safe_user_message=_NO_TOOL_EVIDENCE_FALLBACK)
                     except Exception:
                         logger.debug(
                             "[TC7/RP5][ExecutionShadow] observation skipped: contract=%s",
@@ -3191,11 +3212,33 @@ class ActionGateway:
                             state=_last_evidence_state, approval_prompt_sent=False,
                         )
                         if _legacy_comparison is not None:
-                            observe_claim_authorization_shadow(
+                            _claim_authorization = observe_claim_authorization_shadow(
                                 _legacy_comparison,
                                 lifecycle_state=_last_lifecycle_state,
                                 state=_last_evidence_state,
                             )
+                            # RP5 — same enforcement predicate as app.py's
+                            # canonical Agent-loop path (see that block's own
+                            # comment): only a "success" legacy claim TC7-B
+                            # did not authorize is ever replaced, gated on the
+                            # existing FEATURE_EVIDENCE_FINALIZER "enforce"
+                            # state. No new flag, no new fallback text.
+                            if (
+                                _last_evidence_state == "enforce"
+                                and _claim_authorization is not None
+                                and _claim_authorization.legacy_response_claim == "success"
+                                and not _claim_authorization.authorized
+                            ):
+                                from core.anti_hallucination import _NO_TOOL_EVIDENCE_FALLBACK
+                                logger.error(
+                                    "[RP5][ActionGateway] blocking unauthorized success claim: "
+                                    "contract=%s canonical_claim=%s authorization_reason=%s "
+                                    "evidence_status=%s",
+                                    contract.contract_id, _claim_authorization.canonical_claim,
+                                    _claim_authorization.authorization_reason,
+                                    _claim_authorization.evidence_status,
+                                )
+                                text = _NO_TOOL_EVIDENCE_FALLBACK
                     except Exception:
                         logger.debug(
                             "[TC7/RP5][ExecutionShadow] observation skipped: contract=%s",
