@@ -55,6 +55,22 @@ Truth-Reset SHA: `15004c8397763e605727a63066106df455efc421` (`origin/main`).
 These items are non-blocking and do not represent a current MEDIUM/HIGH
 #22-owned static gap.
 
+### Final maintenance-audit program reconciliation — 26/08/2026
+
+Truth-Reset SHA: `233dea50fdfa4418b502c09fcb49dda726fc8770` (`origin/main`).
+This additive note records program-level identity and terminal-state decisions;
+it does not reopen deferred items or create a new audit.
+
+- #1: historical pre-track audit; original identity not recovered; non-blocking.
+- #17: **UNKNOWN / UNASSIGNED**; no primary source explicitly assigns an
+  original identity to #17. Later topic ordering is not sufficient. This is a
+  non-blocking historical provenance gap, not an active deferred item.
+- #20: **CLOSED / STATIC VERIFIED** (PR #1030). Production/deployed-SHA
+  verification was not claimed and is outside the static Code-to-Docs scope.
+- #22: **CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION REMAINS** (PR #1031).
+- Current owned static engineering gaps: **0**; deferred/runtime items remain
+  non-blocking.
+
 ---
 
 ## Section D — EFFICIENCY & OPERATIONAL DEBT

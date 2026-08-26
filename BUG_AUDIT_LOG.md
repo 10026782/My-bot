@@ -5876,3 +5876,23 @@ These residuals do not keep #24 open.
   operational gates and is not claimed here.
 - **Final status:** **AUDIT #20 CLOSED / STATIC VERIFIED — RUNTIME
   VERIFICATION REMAINS**.
+
+---
+
+## Final Maintenance Audit Program Reconciliation — 26/08/2026
+
+- **Truth-Reset SHA:** `233dea50fdfa4418b502c09fcb49dda726fc8770` (`origin/main`).
+- **Scope:** additive governance reconciliation only; no new audit, runtime
+  change, or remediation was performed.
+- **Historical identity:** #1 and #17 remain **UNKNOWN / UNASSIGNED**; no
+  primary source explicitly assigns their original identities. Later topic
+  ordering is not sufficient. Both are non-blocking historical provenance
+  gaps.
+- **Terminal status:** #20 is **CLOSED / STATIC VERIFIED** via PR #1030;
+  production/deployed-SHA verification was not claimed and is outside the
+  static Code-to-Docs closure scope. #22 is **CLOSED / STATIC VERIFIED —
+  RUNTIME VERIFICATION REMAINS** via PR #1031.
+- **Program reconciliation:** accepted deferred items, runtime-only
+  limitations, and terminal cross-track handoffs remain non-blocking and are recorded
+  in `docs/governance/MAINTENANCE_AUDIT_LEDGER.md`. Current owned static
+  engineering gaps: **0**.

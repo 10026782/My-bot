@@ -220,17 +220,24 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #10 Dependency Risk | **ENGINEERING CLOSED — HIGH/MEDIUM GAPS RESOLVED**. DG-1 through DG-6 **CLOSED** (PRs #1003, #1004, #1006); DG-7 **DEFERRED — LOW** for intentional transitive Google API dependencies; DG-8 **DEFERRED — LOW** for an intentional feature-gated PostgreSQL dependency; package lifecycle/EOL = **EXTERNAL VERIFICATION REQUIRED**; current HIGH/MEDIUM gaps = **0**. |
 | #11 Security Surface | J2 fail-open context (owner R-C06-8) — **CONSUMED, Audit #11 25/08/2026**: evaluated as ALREADY VERIFIED, not a security fail-open gap (`identity.py:235-284` falls back to minimal-privilege `READONLY`/`LEAD`, not an elevated role); the docs-or-code naming decision itself remains open under R-C06-8, unaffected by this evaluation. #11 itself is **CLOSED / STATIC VERIFIED + CI ENFORCED (25/08/2026)** — #11-1/#11-2/#11-3 all remediated — see `BUG_AUDIT_LOG.md` and `docs/governance/HORIZON.md` §CLOSED. |
 | #12 File/Folder Ownership | F1 cluster (worker/knowledge_engine/router/lead_qualifier/profile/creative_generator/tenant_provisioner/memory.py) — **#12 CLOSED 25/08/2026**: 7 of 8 modules removed (see F1 table's "Current disposition" column for per-file commit citations); `tenant_provisioner.py` remains parked by owner decision, not a gap. The #21 → #12 `reports/` provenance handoff is **DEFERRED — OWNER: #12**, with no current runtime gap and an explicit reopen trigger recorded in `MAINTENANCE_DEFERRED_REGISTER.md`. See `docs/governance/HORIZON.md` §CLOSED and `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md`. |
-| #13 Naming Consistency | I1-I3, I5, I7-I10, K10 |
-| #14 Deprecated Compatibility | I4, I6, I10, J1-J7 |
-| #15 Recovery/Fallback follow-up | L(f) orphaned-Drive-file on ASSET_SAVE_FAILED; burned-idempotency-key retry block L(e) |
-| #16 Tool Contract | I5 duplicate maps; K8 result-contract overloading |
-| #18 SSOT | G3-G7, G17 doc-authority conflicts; matrix/register are SSOT pointers |
+| #13 Naming Consistency | **CLOSED / VERIFIED in owned scope**; provider/data → #3, owner/schema → #2, documentation → #20; destinations terminal or explicitly deferred. |
+| #14 Deprecated Compatibility | **CLOSED / ACCEPTED DEFERRED ITEM REMAINS**; load-bearing compatibility architecture remains deferred. |
+| #15 Recovery/Fallback follow-up | **CLOSED / ACCEPTED DEFERRED ITEM REMAINS**; broader recovery/reconciliation architecture remains deferred. |
+| #16 Tool Contract | **CLOSED / VERIFIED**; known contract/data items are routed to terminal destinations. |
+| #18 SSOT | **CLOSED / VERIFIED**; all three SSOT findings closed/static verified. |
 | #19 Docs-to-Code | G1-G7, G15, K5 active subset **resolved**; G17 historical audit drift preserved; I8 cross-routed to #23 |
-| #20 Code-to-Docs | H1-H6, H9 (H8 optional expansion) |
+| #20 Code-to-Docs | **CLOSED / STATIC VERIFIED**; H1-H6 and H9/O1-O6 documented by PR #1030. Production/deployed-SHA verification was not claimed and is outside this scope. |
 | #21 Orphan Artifact | config.json, import_knowledge_base.json, review_diffs.txt review, memory.py, benchmark_token_estimate.py, reports/ provenance gaps — **#21 CLOSED for the identified orphan candidates** (`docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`); see F1/F2 tables' "Current disposition" columns for per-item evidence. The `reports/` provenance handoff is **CLOSED / ACKNOWLEDGED** as **DEFERRED — OWNER: #12 File / Folder Ownership**; #21 owns no further work on `reports/`. |
-| #22 Performance Smell | **CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION REMAINS**; P22-01 instrumentation complete, runtime measurement pending; P22-02 **CROSS-TRACK → #5 Async / Concurrency** and non-blocking; P22-03 LOW accepted non-blocking observation. |
-| #23 Cost | D8/I8 cost-flag precedence (cross-ref) |
+| #22 Performance Smell | **CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION REMAINS**; P22-01 instrumentation complete/runtime measurement pending; P22-02 → #5; P22-03 LOW accepted non-blocking. |
+| #23 Cost | **CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION REMAINS**; D8/I8 cost-flag precedence inputs are terminal. |
 | #24 Architecture Drift | Historical G10 drift-map stale row and rows 3/4/5/8 UNKNOWN verification — **#24 CLOSED / STATIC VERIFIED; runtime verification remains**. The historical map is retained for governance maintenance and does not represent a current #24-owned architecture defect. |
+
+**Final program identity reconciliation (26/08/2026):** #1 is a historical
+pre-track audit whose original identity was not recovered and is non-blocking;
+#17 remains **UNKNOWN / UNASSIGNED**: no primary source explicitly assigns an
+original identity to #17, and later topic ordering is not sufficient. #1 and
+#17 are non-blocking historical provenance gaps, not current owned static gaps.
+See `docs/governance/MAINTENANCE_AUDIT_LEDGER.md`.
 
 ---
 

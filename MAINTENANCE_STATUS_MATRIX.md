@@ -84,6 +84,26 @@ P22-02 is **CROSS-TRACK → #5 Async / Concurrency** and is non-blocking for
 #22. P22-03 is a LOW accepted non-blocking observation. No current
 MEDIUM/HIGH #22-owned static code gap remains.
 
+## Final maintenance-audit program reconciliation — 26/08/2026
+
+Truth-Reset SHA: `233dea50fdfa4418b502c09fcb49dda726fc8770` (`origin/main`).
+This is an additive documentation reconciliation; no new audit or remediation
+was performed. The authoritative historical ledger is
+`docs/governance/MAINTENANCE_AUDIT_LEDGER.md`.
+
+- #1: **HISTORICAL PRE-TRACK AUDIT — ORIGINAL IDENTITY NOT RECOVERED**;
+  non-blocking and not a current UNKNOWN blocker.
+- #17: **UNKNOWN / UNASSIGNED**; no primary source explicitly assigns an
+  original identity to #17. Later topic ordering is not sufficient; this is a
+  non-blocking historical provenance gap.
+- #20: **CLOSED / STATIC VERIFIED** (PR #1030). Production/deployed-SHA
+  verification was not claimed and is outside the static Code-to-Docs scope.
+- #22: **CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION REMAINS** (PR #1031).
+- Current owned static engineering gaps: **0**.
+- Open numbered audits: **0**; blocked audits: **0**; unknown blockers: **0**.
+
+Historical baselines and earlier dated status rows remain preserved.
+
 ## Track #13 closure — Naming Consistency
 
 **CLOSED / CLEAN IN OWNED SCOPE.** No runtime rename, compatibility-alias change,
