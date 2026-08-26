@@ -14,10 +14,17 @@ class F14B1LegacyMigrationTests(unittest.TestCase):
                 name="Dana", phone="054-821-2778", email="dana@example.com",
                 company="Acme", lead_source_id="recLEAD")
         self.assertEqual(result, expected)
-        gate.assert_called_once_with(
-            "054-821-2778", "Dana", email="dana@example.com", company="Acme",
-            contact_type="Client", notes="", lead_source_id="recLEAD",
-            source="crm_add_contact")
+        gate.assert_called_once()
+        args, kwargs = gate.call_args
+        self.assertEqual(args, ("054-821-2778", "Dana"))
+        self.assertEqual(kwargs["email"], "dana@example.com")
+        self.assertEqual(kwargs["company"], "Acme")
+        self.assertEqual(kwargs["contact_type"], "Client")
+        self.assertEqual(kwargs["notes"], "")
+        self.assertEqual(kwargs["lead_source_id"], "recLEAD")
+        self.assertEqual(kwargs["source"], "crm_add_contact")
+        self.assertIsNone(kwargs["identity"])
+        self.assertTrue(callable(kwargs["create_writer"]))
 
     def _convert(self, contact_result):
         lead = {"id": "recLEAD", "fields": {

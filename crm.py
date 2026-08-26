@@ -252,6 +252,27 @@ def find_or_create_contact(phone, name, *, email="", company="",
         )
 
 
+def create_contact_from_fields(fields: dict, *, identity=None, source="",
+                               notes="", lead_source_id="") -> ContactResult:
+    """Shared Contact-create boundary for approved/supported write callers."""
+    from airtable_schema import ContactFields
+    from tools.airtable_gateway import airtable_create
+
+    return find_or_create_contact(
+        fields.get(ContactFields.PHONE), fields.get(ContactFields.NAME),
+        email=fields.get(ContactFields.EMAIL, ""),
+        company=fields.get(ContactFields.COMPANY, ""),
+        contact_type=fields.get(ContactFields.ROLE_CATEGORY, "Client"),
+        notes=notes,
+        lead_source_id=lead_source_id,
+        identity=identity,
+        source=source,
+        create_writer=lambda create_fields: airtable_create(
+            Tables.CONTACTS, create_fields, source=source, return_outcome=True
+        ),
+    )
+
+
 def update_contact(record_id: str, fields: dict, *, source="contact_gate") -> bool:
     """Update an existing Contact through the canonical Contact boundary."""
     if not record_id:
@@ -264,11 +285,14 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
                     company: str = "", notes: str = "",
                     lead_source_id: str = "") -> ContactResult:
     """Find or create a Contact through the canonical deduplication gate."""
-    return find_or_create_contact(
-        phone, name,
-        email=email,
-        company=company,
-        contact_type=contact_type,
+    return create_contact_from_fields(
+        {
+            ContactFields.NAME: name,
+            ContactFields.PHONE: phone,
+            ContactFields.EMAIL: email,
+            ContactFields.COMPANY: company,
+            ContactFields.ROLE_CATEGORY: contact_type,
+        },
         notes=notes,
         lead_source_id=lead_source_id,
         source="crm_add_contact",

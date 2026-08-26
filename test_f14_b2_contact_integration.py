@@ -12,6 +12,61 @@ from tools.airtable_gateway import AirtableCreateOutcome, airtable_create
 class F14B2ContactIntegrationTests(unittest.TestCase):
     identity = Identity("u1", Role.OWNER)
 
+    def test_shared_contact_create_boundary_owns_gate_call(self):
+        fields = {ContactFields.NAME: "Dana", ContactFields.PHONE: "+972548212778"}
+        expected = crm.ContactResult("created", record_id="recNEW")
+        with patch.object(crm, "find_or_create_contact", return_value=expected) as gate:
+            result = crm.create_contact_from_fields(fields, identity=self.identity, source="test")
+        self.assertIs(result, expected)
+        self.assertEqual(gate.call_args.args[:2], ("+972548212778", "Dana"))
+        self.assertEqual(gate.call_args.kwargs["identity"], self.identity)
+        self.assertEqual(gate.call_args.kwargs["source"], "test")
+        self.assertTrue(callable(gate.call_args.kwargs["create_writer"]))
+
+    def test_dispatcher_contact_create_delegates_to_shared_boundary(self):
+        fields = {ContactFields.NAME: "Dana", ContactFields.PHONE: "+972548212778"}
+        with patch.object(crm, "create_contact_from_fields",
+                          return_value=crm.ContactResult("created", record_id="recNEW")) as boundary, \
+                patch.object(crm, "find_or_create_contact", side_effect=AssertionError("caller bypass")), \
+                patch("tools.dispatcher.audit_log_airtable"), \
+                patch("tools.dispatcher._ff.is_enabled", return_value=False):
+            from tools.dispatcher import dispatch_tool
+            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+        self.assertTrue(result["ok"])
+        expected_fields = dict(fields, tenant_id=self.identity.tenant_id)
+        boundary.assert_called_once_with(expected_fields, identity=self.identity, source="agent")
+
+    def test_tma_contact_post_delegates_to_shared_boundary(self):
+        fields = {ContactFields.NAME: "Dana", ContactFields.PHONE: "+972548212778"}
+        with patch.object(crm, "create_contact_from_fields",
+                          return_value=crm.ContactResult("created", record_id="recTMA")) as boundary, \
+                patch.object(crm, "find_or_create_contact", side_effect=AssertionError("caller bypass")), \
+                patch("tools.approval_actions._verify_active_execution_claim", return_value=True), \
+                patch("tools.airtable_gateway.airtable_create",
+                      side_effect=[{"id": "recAUDIT"}, {"id": "recRECEIPT"}]):
+            from tools.approval_actions import tma_write
+            result = tma_write(
+                op="post", table=Tables.CONTACTS, fields=fields,
+                identity=self.identity, trusted_source="tma_api",
+                execution_context={"contract_id": "c1", "approved_by": "u1", "claim_execution_id": "e1"},
+            )
+        self.assertTrue(result["ok"])
+        boundary.assert_called_once_with(fields, identity=self.identity, source="tma_write")
+
+    def test_crm_add_contact_delegates_to_shared_boundary(self):
+        expected = crm.ContactResult("created", record_id="recLEAD")
+        with patch.object(crm, "create_contact_from_fields", return_value=expected) as boundary:
+            result = crm.crm_add_contact(
+                name="Dana", phone="+972548212778", email="dana@example.com",
+                company="Acme", contact_type="Client", lead_source_id="recLEAD1",
+            )
+        self.assertIs(result, expected)
+        fields = boundary.call_args.args[0]
+        self.assertEqual(fields[ContactFields.NAME], "Dana")
+        self.assertEqual(fields[ContactFields.PHONE], "+972548212778")
+        self.assertEqual(boundary.call_args.kwargs["lead_source_id"], "recLEAD1")
+        self.assertEqual(boundary.call_args.kwargs["source"], "crm_add_contact")
+
     def test_gate_injected_writer_creates_without_legacy_post(self):
         writer = MagicMock(return_value=AirtableCreateOutcome("created", {"id": "recNEW"}))
         with patch.object(crm, "_creds_ok", return_value=True), \

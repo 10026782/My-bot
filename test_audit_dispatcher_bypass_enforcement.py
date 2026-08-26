@@ -17,8 +17,8 @@ def test_sanctioned_finding_is_not_new():
 
 
 def test_f14_contact_update_is_sanctioned_but_another_import_is_new():
-    update = ("tools/approval_actions.py", 403, "crm")
-    unrelated = ("tools/approval_actions.py", 404, "crm")
+    update = ("tools/approval_actions.py", 395, "crm")
+    unrelated = ("tools/approval_actions.py", 396, "crm")
     groups = audit.classify([update, unrelated])
     assert groups["sanctioned"] == [update]
     assert groups["new"] == [unrelated]
