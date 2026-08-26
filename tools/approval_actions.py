@@ -364,19 +364,11 @@ def tma_write(
         if table in (Tables.CONTACTS, "Contacts"):
             import crm
             from core.dispatcher_outcome import DispatcherOutcome
-            from tools.airtable_gateway import airtable_create
-            from airtable_schema import ContactFields
 
-            contact = crm.find_or_create_contact(
-                fields.get(ContactFields.PHONE), fields.get(ContactFields.NAME),
-                email=fields.get(ContactFields.EMAIL, ""),
-                company=fields.get(ContactFields.COMPANY, ""),
-                contact_type=fields.get(ContactFields.ROLE_CATEGORY, "Client"),
+            contact = crm.create_contact_from_fields(
+                fields,
                 identity=identity,
                 source="tma_write",
-                create_writer=lambda create_fields: airtable_create(
-                    Tables.CONTACTS, create_fields, source="tma_write", return_outcome=True
-                ),
             )
             if contact.status == "outcome_unknown":
                 result = _tool_result(ok=False, tool="tma_write",

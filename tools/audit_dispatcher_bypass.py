@@ -140,7 +140,7 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "post" branch contains this `import crm`.
-#   - tools/approval_actions.py:403 -- tools/dispatcher.py:26 does
+#   - tools/approval_actions.py:395 -- tools/dispatcher.py:26 does
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "patch" branch contains the B2-02 Contact UPDATE `import crm`.
@@ -153,7 +153,7 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 # WARN_NEW, and never need baselining.
 _SANCTIONED_CALL_SITES: frozenset[tuple[str, int, str]] = frozenset({
     ("tools/approval_actions.py", 365, "crm"),
-    ("tools/approval_actions.py", 403, "crm"),
+    ("tools/approval_actions.py", 395, "crm"),
     ("tools/schema_snapshot.py", 286, "tools.airtable_tools"),
 })
 

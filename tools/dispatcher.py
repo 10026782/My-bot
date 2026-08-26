@@ -347,10 +347,8 @@ def dispatch_tool(
                     return _tool_result(ok=False, tool="airtable_add", user_message=str(e))
 
                 if _ALIAS_MAP.get(table, table) == "אנשי קשר (Contacts)":
-                    from airtable_schema import ContactFields, Tables
                     import crm
                     from core.dispatcher_outcome import DispatcherOutcome
-                    from tools.airtable_gateway import airtable_create
 
                     def _finish_contact(result, audit_result=None):
                         audit_log_airtable(
@@ -360,16 +358,10 @@ def dispatch_tool(
                         )
                         return result
 
-                    contact = crm.find_or_create_contact(
-                        fields.get(ContactFields.PHONE), fields.get(ContactFields.NAME),
-                        email=fields.get(ContactFields.EMAIL, ""),
-                        company=fields.get(ContactFields.COMPANY, ""),
-                        contact_type=fields.get(ContactFields.ROLE_CATEGORY, "Client"),
+                    contact = crm.create_contact_from_fields(
+                        fields,
                         identity=identity,
                         source="agent",
-                        create_writer=lambda create_fields: airtable_create(
-                            Tables.CONTACTS, create_fields, source="agent", return_outcome=True
-                        ),
                     )
                     evidence = {"record_id": contact.record_id, "table": table,
                                 "contact_status": contact.status}
