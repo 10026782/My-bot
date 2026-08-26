@@ -16,7 +16,7 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `dddacc4c00fdebec247dc54000fbfd74b263951e`
+**Truth Reset SHA at last update:** `e5033eeeee2e0b21383b269ac6b5759f36bba9d7`
 
 ---
 
@@ -171,6 +171,17 @@ the closure PR that created it for the search that established this.
   not a current #23 runtime defect. `_AnthropicLLM` is not a current executed
   paid producer. Live deployment/runtime evidence remains unestablished.
   Full record: `BUG_AUDIT_LOG.md` (Audit #23 final closure capture).
+
+- **#24 Architecture Drift** — **CLOSED / STATIC VERIFIED — RUNTIME
+  VERIFICATION REMAINS** (26/08/2026, Truth-Reset SHA
+  `e5033eeeee2e0b21383b269ac6b5759f36bba9d7`). Canonical capability and
+  execution classification authority, immutable operation identity, shared
+  execution context, and current producer authority boundaries are verified
+  statically. Temporary `RouteDecision` authority is accepted; workflow
+  correlation remains optional; `ExecutionKind` is observational/static only;
+  no current competing legacy approval execution authority remains. Live
+  deployment/runtime evidence is not established. Full record:
+  `BUG_AUDIT_LOG.md` (Audit #24 final closure capture).
 
 - **#18 SSOT** — **CLOSED / STATIC VERIFIED** (remediation 25/08/2026,
   Truth-Reset SHA `ef8363f830253c324b8da8f1b7026f29ff6faf0f`). All 3 findings

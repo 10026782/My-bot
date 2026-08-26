@@ -5792,3 +5792,45 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 - **Current HIGH/MEDIUM gaps:** **0**.
 - **Boundary:** do not classify #10 as `CLEAN` while DG-7/DG-8 remain
   deferred and package lifecycle/EOL remains externally unverified.
+
+---
+
+## Audit #24 — Architecture Drift — FINAL CLOSURE CAPTURE
+
+- **Date:** 26/08/2026
+- **Truth-Reset SHA:** `e5033eeeee2e0b21383b269ac6b5759f36bba9d7` (`origin/main`)
+- **Scope:** documentation/status capture only. No runtime code, routing,
+  approval behavior, Turn Coordinator behavior, or execution-authority
+  behavior changed.
+- **Final architecture chain:** entry point → `RouteDecision` / ownership
+  decision → capability resolution → `ExecutionClass` → `OperationIdentity`
+  → `ExecutionContext` → executor → verification/result.
+
+### Final dispositions
+
+| Finding | Disposition |
+|---|---|
+| A24-01 | **CLOSED / VERIFIED** — temporary `RouteDecision` runtime authority is explicitly accepted. |
+| A24-02 | **CLOSED / VERIFIED** — canonical capability-to-execution authority exists. |
+| A24-03 | **CLOSED / VERIFIED** — canonical `ExecutionClass` authority exists. |
+| A24-04 | **CLOSED / VERIFIED** — immutable `OperationIdentity` establishes one logical execution attempt. |
+| A24-05 | **ACCEPTED** — workflow correlation remains optional; no unsafe current dependency exists. |
+| A24-06 | **CLOSED / VERIFIED** — immutable `ExecutionContext` binds capability and operation. |
+| A24-07 | **CLOSED / VERIFIED** — reachable producer boundaries carry canonical execution context where required. |
+| A24-08 | **CLOSED / VERIFIED** — **NO CURRENT COMPETING LEGACY APPROVAL EXECUTION AUTHORITY REMAINS**. Legacy infrastructure may remain for presentation, parsing, historical compatibility, or fail-closed compatibility; all legacy approval code was not claimed removed. |
+| A24-09 | **SUPERSEDED / NON-AUTHORITATIVE** — `ExecutionKind` remains observational/static only; `ExecutionClass` is canonical, and no executor selects behavior from `ExecutionKind`. |
+
+### Closure basis
+
+R24-01 through R24-04G established and verified the canonical capability,
+execution-class, operation/context, approval-continuation, and current
+producer authority boundaries on repository sources. Cross-layer residuals
+remain owned elsewhere: recovery/reconciliation → #15; concurrency → #5;
+cost/accounting → #23 (closed at code scope); documentation gaps → #20; and
+historical architecture-map maintenance → governance/docs maintenance only.
+These residuals do not keep #24 open.
+
+- **Repository/static verification:** VERIFIED.
+- **Live deployment/runtime verification:** NOT ESTABLISHED.
+- **Final status:** **AUDIT #24 CLOSED / STATIC VERIFIED — RUNTIME
+  VERIFICATION REMAINS**.
