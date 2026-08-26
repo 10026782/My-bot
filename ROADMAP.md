@@ -18,6 +18,47 @@ Current status: **CODE CLOSED / POLICY ITEMS REMAIN**. Detailed status and evide
 - Policy queue: **A2 system-generated Tasks**; see `R-C07-A2` in the deferred register.
 - Runtime status: **NOT PRODUCTION VERIFIED**.
 
+עודכן: 27/08/2026 — **TC7-B (app-path wiring) + RP5 (evidence enforcement) — STATIC
+VERIFIED, לא ב-`origin/main` עדיין.** ממשיך ישירות את הממצא מ-10/08/2026 למטה (**TC7-B1/
+B1.1** הוסיף `core/claim_authorization.py` אך **לא חיבר** אותו להחלטה חיה — "עדיין
+unwired"; **TC7/RP5 execution-shadow** חיבר את TC7-A ל-RP4 בפועל אך זו "RP4 shadow
+logging, לא claim-authorization"). מאז אותו ממצא נוספו בשקט (ללא רישום ROADMAP מלווה)
+**TC7-B2** (`core/claim_authorization_shadow.py` — dual-signal shadow comparison,
+עדיין תצפית-בלבד) ו-**TC7-B3**/**RP5** (הסבב הזה):
+
+- **TC7-B (app-path wiring).** Flow: `Execution Evidence → Turn Evidence → Claim
+  Authorization → structured turn output`. `_out_meta["claim_authorization"]` נלכד
+  כעת בפועל בשלושת קריאות ה-`observe_claim_authorization_shadow()` הקנוניות ב-`app.py`
+  (קודם לכן הוחזר ומיד הושלך — נגיש רק דרך שורת log). Scope: canonical `app.py` response
+  path בלבד. Status: **STATIC VERIFIED**. Runtime: **RUNTIME NOT ESTABLISHED**. Merge
+  evidence: **NOT YET ESTABLISHED** (לא ב-`origin/main`, ראה SHA למטה). Remaining: שני
+  call sites ב-`core/action_gateway.py` (`_execute_contract()`/
+  `approve_with_lifecycle_result()`) עדיין לא propagate/capture את ה-authorization
+  decision — classification: **DEFERRED — DESIGN DECISION REQUIRED** (אין sink מקביל
+  ל-`_out_meta` בעומק הזה; לא באג, החלטת-עיצוב פתוחה). **אין** לסמן את TC7-B כ-failed/open
+  רק בגלל שתי הנקודות הללו.
+- **RP5 (evidence enforcement).** Status: **STATIC VERIFIED**. Runtime: **RUNTIME NOT
+  ESTABLISHED**. Activation: **OFF BY DEFAULT**. Enforcement flag:
+  `FEATURE_EVIDENCE_FINALIZER=enforce` (דגל קיים, לא נוסף דגל חדש). Coverage: canonical
+  `app.py` user-facing response path, success claims בלבד. Current behavior: unauthorized
+  success claim (`claim_authorization.authorized == false`) מוחלף ב-fallback דטרמיניסטי
+  קיים (`core.anti_hallucination._NO_TOOL_EVIDENCE_FALLBACK`) — לעולם לא ממציא evidence,
+  לעולם לא הופך failure ל-success. Depends on: TC7-B app-path (לעיל). Remaining: 2
+  ActionGateway-owned execution paths אינם מכוסים (אותה מגבלה כמו TC7-B לעיל); claims
+  מסוג `"mixed"` אינם מכוסים בסלייס הנוכחי (רק `legacy_response_claim=="success"` נחסם).
+  Merge evidence: **NOT YET ESTABLISHED**.
+
+טסטים: `test_tc7_b1_claim_authorization.py` (31/31), `test_tc7_b2_claim_authorization_
+shadow.py` (78/78), `test_tc7_b3_claim_authorization_wiring.py` (10/10, חדש),
+`test_rp5_evidence_enforcement.py` (17/17, חדש — כולל end-to-end דרך `app.run_agent()`
+האמיתי), `test_a32_enforcement.py` (6/6, ללא regression), `test_pa01_phantom_approval_
+enforcement.py` (108/108), `test_tc7_rp5_gateway_execution_shadow.py` (85/85),
+`smoke_tests.py`, `test_integration.py`, וסוויטת response-pipeline רחבה (TC6/BUG-149/
+F52-PR6/pending-contract/turn_envelope) — כולם ירוקים, ללא regression. לא בוצע Render
+deploy/canary/activation. אין `docs/context_librarian/layers/rp5.json`/`turn_coordinator.
+json` עדכון בסבב הזה — אלו מנוהלים דרך `refresh-after-merge` בלבד לפי `last_verified_
+commit` על `main` אמיתי (`AGENTS.md` §7), לא hand-edit לפני merge.
+
 עודכן: 24/08/2026 — **Canonical Leads Schema v1 — Track A/B הושלמו במלואם (ידני + קוד).**
 בוצע ידנית ב-Airtable UI (owner, 22/08): (1) הוסרה האופציה `"ליד חדש"` מרשימת ה-choices
 של `status` וגם של `Business Outcome`; (2) שינוי-שם ל-7 מתוך 8 האופציות של `Business

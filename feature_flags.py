@@ -55,9 +55,13 @@ INFRA / DATA:
                                  check reports unavailable). Read through
                                  get_tool_availability_filter_state(), not is_enabled().
   FEATURE_EVIDENCE_FINALIZER    - "off" (default, no comparison) / "shadow"
-                                 (evidence-derived status compared and safely logged; user
-                                 text unchanged) / "enforce" (accepted but still shadow-only
-                                 in PR-RP4). Read through get_evidence_finalizer_state().
+                                 (evidence-derived status + TC7-B claim-authorization compared
+                                 and safely logged; user text unchanged) / "enforce" (RP5,
+                                 app.py: an unauthorized execution-success claim -- TC7-B's
+                                 claim_authorization.authorized is False -- is replaced with
+                                 core.anti_hallucination's existing _NO_TOOL_EVIDENCE_FALLBACK;
+                                 RP4's own evidence/text comparison itself still never mutates
+                                 final_reply). Read through get_evidence_finalizer_state().
   FEATURE_UNIFIED_STATUS_FORMATTER - F52: routes ActionGateway.compose_status_reply()
                                  through the single canonical formatter
                                  (core/agent_message_formatter.format_agent_message).
@@ -319,7 +323,13 @@ def get_tool_availability_filter_state() -> str:
 
 
 def get_evidence_finalizer_state() -> str:
-    """Return RP4's rollout state; enforce remains comparison-only until RP5."""
+    """Return RP4/RP5's rollout state.
+
+    "off"/"shadow": comparison + TC7-B claim-authorization only, never
+    mutates final_reply. "enforce": RP5 additionally blocks an unauthorized
+    execution-success claim (see app.py's PR-RP4/RP5 block) -- RP4's own
+    evidence/text comparison still never mutates final_reply by itself.
+    """
     value = os.environ.get("FEATURE_EVIDENCE_FINALIZER", "off").strip().lower()
     return value if value in _EVIDENCE_FINALIZER_STATES else "off"
 

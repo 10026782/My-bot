@@ -66,6 +66,7 @@ from core.turn_coordinator_runtime import resolve_agent_capability
 from core.anti_hallucination import (
     verify_execution, sanitize_agent_response,
     _SINGLE_SPEAKER_FALLBACK, _has_write_tool_evidence,
+    _NO_TOOL_EVIDENCE_FALLBACK,
 )
 from core.turn_evidence import TurnEvidenceSummary, observe_shadow_finalizer
 from core.claim_authorization_shadow import observe_claim_authorization_shadow
@@ -5199,11 +5200,16 @@ def run_agent(
                         # stands behind Branch B (see comment above) -- an
                         # RP4 agent-loop surface with no correlated
                         # lifecycle, exactly TC7-B1's lifecycle_state=None case.
-                        observe_claim_authorization_shadow(
+                        _claim_authorization = observe_claim_authorization_shadow(
                             _evidence_comparison,
                             lifecycle_state=None,
                             state=_evidence_finalizer_state,
                         )
+                        # TC7-B3: capture the authorization decision on the
+                        # turn's own recorded output -- previously computed
+                        # and discarded here, reachable only via a log line.
+                        if _out_meta is not None and _claim_authorization is not None:
+                            _out_meta["claim_authorization"] = _claim_authorization.safe_record()
                 except Exception:
                     logger.debug(
                         "[EvidenceFinalizerShadow] ownership-verification-failed "
@@ -5265,7 +5271,7 @@ def run_agent(
                         # granted reply_owner=="gateway" above) -- its
                         # .lifecycle_state, never the F52 canonical_state
                         # used for _out_meta above. No repository read.
-                        observe_claim_authorization_shadow(
+                        _claim_authorization = observe_claim_authorization_shadow(
                             _evidence_comparison,
                             lifecycle_state=getattr(
                                 _gateway_owned.get("action_lifecycle_result"),
@@ -5273,6 +5279,11 @@ def run_agent(
                             ),
                             state=_evidence_finalizer_state,
                         )
+                        # TC7-B3: capture the authorization decision on the
+                        # turn's own recorded output -- previously computed
+                        # and discarded here, reachable only via a log line.
+                        if _out_meta is not None and _claim_authorization is not None:
+                            _out_meta["claim_authorization"] = _claim_authorization.safe_record()
                 except Exception:
                     logger.debug(
                         "[EvidenceFinalizerShadow] gateway-owned observation skipped",
@@ -5540,6 +5551,8 @@ def run_agent(
         # inferred from evidence.approvals_pending alone: a deferred batch
         # item (__approval_deferred_batch__) also counts as approval_pending
         # evidence but never sends the owner a direct notification.
+        _claim_authorization = None
+        _evidence_finalizer_state = "off"
         try:
             _approval_prompt_sent_this_turn = any(
                 r.get("tool") == "__approval_queued__" and r.get("owner_notified")
@@ -5564,16 +5577,51 @@ def run_agent(
                 # calls). No repository read is added to derive one;
                 # lifecycle_state=None is exactly TC7-B1's designed-for
                 # RP4 agent-loop-surface case.
-                observe_claim_authorization_shadow(
+                _claim_authorization = observe_claim_authorization_shadow(
                     _evidence_comparison,
                     lifecycle_state=None,
                     state=_evidence_finalizer_state,
                 )
+                # TC7-B3: capture the authorization decision on the turn's
+                # own recorded output -- previously computed and discarded
+                # here, reachable only via a log line.
+                if _out_meta is not None and _claim_authorization is not None:
+                    _out_meta["claim_authorization"] = _claim_authorization.safe_record()
         except Exception as _evidence_exc:
             logger.warning(
                 "[EvidenceFinalizerShadow] observer_failed error_type=%s",
                 type(_evidence_exc).__name__,
             )
+
+        # RP5 — evidence enforcement. Gated on the SAME FEATURE_EVIDENCE_FINALIZER
+        # flag PR-RP4/TC7-B already read (get_evidence_finalizer_state() docstring:
+        # "enforce": RP5 additionally blocks..." -- no new flag). Only blocks the
+        # one shape TC7-B is actually authoritative over: the agent's own free text
+        # asserting execution success (legacy_response_claim == "success") when
+        # TC7-B's evidence+lifecycle decision does not authorize a success claim.
+        # Never invents evidence, never turns a failure into a success, never
+        # infers success from the absence of an exception -- authorized/not comes
+        # straight from the already-computed claim_authorization decision. An
+        # exception above leaves _claim_authorization None, so a computation
+        # failure fails OPEN here (final_reply unchanged), matching every other
+        # observer in this block (PA-01, RP4) -- never blocks a reply over an
+        # unrelated bug in the observer itself. Informational/non-execution
+        # claims (legacy_response_claim != "success") are never touched.
+        if (
+            _evidence_finalizer_state == "enforce"
+            and _claim_authorization is not None
+            and _claim_authorization.legacy_response_claim == "success"
+            and not _claim_authorization.authorized
+        ):
+            logger.error(
+                "[RP5] blocking unauthorized success claim: canonical_claim=%s "
+                "authorization_reason=%s evidence_status=%s user=%s",
+                _claim_authorization.canonical_claim,
+                _claim_authorization.authorization_reason,
+                _claim_authorization.evidence_status,
+                _sanitize_id(identity.memory_key),
+            )
+            final_reply = _NO_TOOL_EVIDENCE_FALLBACK
 
         # ── שמירת זיכרון ─────────────────────────
         memory.add(ctx.memory_key, "user",      clean_msg)
