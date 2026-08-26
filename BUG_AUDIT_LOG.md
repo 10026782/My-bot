@@ -5744,3 +5744,22 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 - **Runtime limitation:** live deployment/runtime evidence is not established;
   no production-verified claim is made.
 - **Final status:** **AUDIT #23 CODE SCOPE CLOSED — RUNTIME VERIFICATION REMAINS**
+
+## Audit #10 — Dependency Risk — CLOSURE (SSOT Reconciliation)
+
+- **Date:** 26/08/2026
+- **Truth-Reset SHA:** `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`)
+- **Scope:** documentation-only normalization of the completed engineering
+  closure. No dependency re-audit, requirements change, CI change, production
+  change, or package lifecycle claim was made here.
+- **Final status:** **ENGINEERING CLOSED — HIGH/MEDIUM GAPS RESOLVED**.
+- **DG-1 through DG-6:** **CLOSED**, with evidence in PRs #1003, #1004, and
+  #1006.
+- **DG-7:** **DEFERRED — LOW** — intentional transitive Google API
+  dependencies.
+- **DG-8:** **DEFERRED — LOW** — intentional feature-gated PostgreSQL
+  dependency.
+- **Package lifecycle/EOL:** **EXTERNAL VERIFICATION REQUIRED**.
+- **Current HIGH/MEDIUM gaps:** **0**.
+- **Boundary:** do not classify #10 as `CLEAN` while DG-7/DG-8 remain
+  deferred and package lifecycle/EOL remains externally unverified.

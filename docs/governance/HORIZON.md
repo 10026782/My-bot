@@ -53,7 +53,16 @@ the closure PR that created it for the search that established this.
     to assert the current intentional contract (conflict still raised,
     forbidden transition never persisted, durable truth stays authoritative,
     RAM cache may legitimately refresh from durable truth) rather than
-    marked `xfail`; production code untouched.
+  marked `xfail`; production code untouched.
+
+- **#10 Dependency Risk** — **ENGINEERING CLOSED — HIGH/MEDIUM GAPS RESOLVED**.
+  Truth-Reset SHA `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`).
+  DG-1 through DG-6 are **CLOSED**, evidenced by PRs #1003, #1004, and #1006.
+  DG-7 is **DEFERRED — LOW** because the transitive Google API dependencies
+  are intentional. DG-8 is **DEFERRED — LOW** because the PostgreSQL
+  dependency is intentionally feature-gated. Package lifecycle/EOL remains
+  **EXTERNAL VERIFICATION REQUIRED**. Current HIGH/MEDIUM gaps: **0**.
+  This is not `CLEAN` while deferred items and external verification remain.
 
 - **#3 Data Contract** — **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
   FINDING #2 EXPLICITLY DEFERRED** (remediation 26/08/2026, Truth-reset SHA
