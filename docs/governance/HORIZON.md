@@ -16,7 +16,7 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `15004c8397763e605727a63066106df455efc421`
+**Truth Reset SHA at last update:** `233dea50fdfa4418b502c09fcb49dda726fc8770`
 
 ---
 
@@ -73,6 +73,12 @@ the closure PR that created it for the search that established this.
   non-blocking observation. No current MEDIUM/HIGH #22-owned static gap
   remains.
 
+- **#20 Code-to-Docs** — **CLOSED / STATIC VERIFIED** (26/08/2026, PR #1030,
+  merge `15bad2e08129b96954dacfee442da7501f622040`). H1-H6 and H9/O1-O6 are
+  documented in the canonical media/file/session/idempotency contract.
+  Production/deployed-SHA verification was not claimed and is outside this
+  static Code-to-Docs closure scope.
+
 - **#3 Data Contract** — **AUDIT COMPLETE — ALL CURRENT CODE GAPS CLOSED /
   FINDING #2 EXPLICITLY DEFERRED** (remediation 26/08/2026, Truth-reset SHA
   `a52977278c1db0be41eeec026ce72e22fd0308a9`). Original findings #1, #3, #4,
@@ -96,8 +102,8 @@ the closure PR that created it for the search that established this.
     A new negative-path regression (`test_approval_concurrency.py` Test 6)
     proves a cross-tenant contract is refused (HTTP 409, gateway never
     called) through the real `_is_canonical_tma_contract` end-to-end path.
-    **CROSS-TRACK → #8 stays open** — the broader Test Gap this remediation
-    routed to #8 is not closed by this fidelity fix.
+    **CROSS-TRACK → #8 was subsequently resolved** — the broader Test Gap was
+    closed by #8 remediation PR #1024; this does not change #9's findings.
   - **#9-2 MEDIUM (latent)** — CLOSED / VERIFIED. All 5 affected
     `MockIdentity.is_internal` copies now derive from `role`
     (`role in ("owner", "partner", "manager", "employee")`), matching
@@ -248,10 +254,16 @@ the closure PR that created it for the search that established this.
 independently verified track (see `docs/audit/CORE_COMPLETION_AUDIT_20260810.md`
 — `COMPLETE / READY TO FREEZE`, formal freeze an owner decision).
 
-**Next Track-A item: #13 Naming Consistency.** Not started, not active — do
-not mark it complete or in-progress beyond this. Known routed input for #13
-(from `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s cross-reference table): I1–I3,
-I5, I7–I10, K10.
+**Historical Track-A note:** #13 Naming Consistency is **CLOSED / CLEAN IN
+OWNED SCOPE**. Its routed items remain recorded under #2, #3, and #20.
+
+**Historical identity boundary:** #1 and #17 remain **UNKNOWN / UNASSIGNED**;
+no primary source explicitly assigns their original identities. Later topic
+ordering or reconstructed lists are not sufficient. Both are non-blocking
+historical provenance gaps.
+
+The complete historical identity and terminal-state ledger is
+`docs/governance/MAINTENANCE_AUDIT_LEDGER.md`.
 
 ## CROSS-TRACK / HANDOFFS
 
