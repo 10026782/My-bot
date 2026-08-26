@@ -16,6 +16,14 @@ def test_sanctioned_finding_is_not_new():
     assert groups["new"] == []
 
 
+def test_f14_contact_update_is_sanctioned_but_another_import_is_new():
+    update = ("tools/approval_actions.py", 403, "crm")
+    unrelated = ("tools/approval_actions.py", 404, "crm")
+    groups = audit.classify([update, unrelated])
+    assert groups["sanctioned"] == [update]
+    assert groups["new"] == [unrelated]
+
+
 def test_cross_track_finding_is_visible_but_non_blocking():
     finding = next(iter(audit.CROSS_TRACK))
     groups = audit.classify([finding])

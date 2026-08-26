@@ -426,7 +426,21 @@ def dispatch_tool(
                     audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, f"blocked: {e}")
                     return str(e)
 
-                result = airtable_update(table, record_id, fields)
+                if _ALIAS_MAP.get(table, table) == "אנשי קשר (Contacts)":
+                    import crm
+                    ok = crm.update_contact(record_id, fields, source="agent")
+                    result = _tool_result(
+                        ok=ok,
+                        tool="airtable_update",
+                        external_id=record_id,
+                        evidence={"record_id": record_id, "table": table, "fields": fields},
+                        user_message=(
+                            f"✅ רשומה {record_id} עודכנה."
+                            if ok else "❌ שגיאה בעדכון — בדוק שמות השדות."
+                        ),
+                    )
+                else:
+                    result = airtable_update(table, record_id, fields)
                 audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                 return result
 

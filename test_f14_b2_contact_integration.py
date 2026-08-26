@@ -228,6 +228,73 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         self.assertEqual(gateway.call_args_list[0].kwargs["source"], "tma_write")
         legacy_post.assert_not_called()
 
+    def test_dispatcher_contact_update_uses_contact_boundary(self):
+        from tools.dispatcher import dispatch_tool
+
+        with patch("tools.dispatcher.enforce_tenant_scope"), \
+                patch("tools.dispatcher.airtable_update", side_effect=AssertionError("bypass")), \
+                patch.object(crm, "update_contact", return_value=True) as update_contact, \
+                patch("tools.dispatcher.audit_log_airtable"), \
+                patch("tools.dispatcher._ff.is_enabled", return_value=False):
+            result = dispatch_tool(
+                "airtable_update",
+                {"table": Tables.CONTACTS, "record_id": "recCONTACT", "fields": {ContactFields.COMPANY: "Acme"}},
+                self.identity,
+            )
+
+        self.assertTrue(result["ok"])
+        update_contact.assert_called_once_with(
+            "recCONTACT", {ContactFields.COMPANY: "Acme"}, source="agent")
+
+    def test_tma_contact_patch_uses_contact_boundary(self):
+        from tools.approval_actions import tma_write
+
+        with patch.object(crm, "update_contact", return_value=True) as update_contact, \
+                patch("crm.airtable_patch", side_effect=AssertionError("bypass")), \
+                patch("tools.approval_actions._verify_active_execution_claim", return_value=True), \
+                patch("tools.airtable_gateway.airtable_create", return_value={"id": "recLOG"}):
+            result = tma_write(
+                op="patch", table=Tables.CONTACTS, record_id="recCONTACT",
+                fields={ContactFields.COMPANY: "Acme"}, identity=self.identity,
+                trusted_source="tma_api",
+                execution_context={"contract_id": "c1", "approved_by": "u1", "claim_execution_id": "e1"},
+            )
+
+        self.assertTrue(result["ok"])
+        update_contact.assert_called_once_with(
+            "recCONTACT", {ContactFields.COMPANY: "Acme"}, source="tma_write")
+
+    def test_non_contact_dispatch_update_keeps_generic_path(self):
+        from tools.dispatcher import dispatch_tool
+
+        generic = {"ok": True, "tool": "airtable_update"}
+        with patch("tools.dispatcher.enforce_tenant_scope"), \
+                patch("tools.dispatcher.airtable_update", return_value=generic) as update, \
+                patch("tools.dispatcher._ff.is_enabled", return_value=False):
+            result = dispatch_tool(
+                "airtable_update",
+                {"table": "Tasks", "record_id": "recTASK", "fields": {"שם": "Task"}},
+                self.identity,
+            )
+
+        self.assertIs(result, generic)
+        update.assert_called_once_with("Tasks", "recTASK", {"שם": "Task"})
+
+    def test_non_contact_tma_patch_keeps_generic_path(self):
+        from tools.approval_actions import tma_write
+
+        with patch("tools.approval_actions._verify_active_execution_claim", return_value=True), \
+                patch("tools.airtable_gateway.airtable_patch", return_value=True) as patch_write, \
+                patch("tools.airtable_gateway.airtable_create", return_value={"id": "recLOG"}):
+            result = tma_write(
+                op="patch", table="Tasks", record_id="recTASK", fields={"שם": "Task"},
+                identity=self.identity, trusted_source="tma_api",
+                execution_context={"contract_id": "c1", "approved_by": "u1", "claim_execution_id": "e1"},
+            )
+
+        self.assertTrue(result["ok"])
+        patch_write.assert_called_once_with("Tasks", "recTASK", {"שם": "Task"}, source="tma_write")
+
 
 if __name__ == "__main__":
     unittest.main()
