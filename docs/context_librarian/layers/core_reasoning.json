@@ -83,7 +83,7 @@
           "layer-1"
         ]
       },
-      "last_observed_commit": "3406e7b5f4aad8a19245ff325e528c9846592199"
+      "last_observed_commit": "15004c8397763e605727a63066106df455efc421"
     },
     {
       "id": "component.command_center_read_model",
@@ -124,7 +124,7 @@
         "catalog.writes_state": false,
         "catalog.llm": false
       },
-      "last_observed_commit": "3406e7b5f4aad8a19245ff325e528c9846592199"
+      "last_observed_commit": "15004c8397763e605727a63066106df455efc421"
     }
   ],
   "edges": [
