@@ -26,6 +26,18 @@
 policy-dependent Approval Coverage queue item. No duplicate deferred-register
 entry was created; A1 remains a code item and is intentionally not listed here.
 
+### Audit #10 Dependency Risk — 26/08/2026
+
+Truth-Reset SHA: `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`).
+
+- **DG-7 — DEFERRED — LOW:** intentional transitive Google API dependencies.
+- **DG-8 — DEFERRED — LOW:** intentional feature-gated PostgreSQL dependency.
+- Package lifecycle/EOL: **EXTERNAL VERIFICATION REQUIRED**.
+- No current HIGH/MEDIUM gaps remain under #10.
+- Engineering remediation is complete; this register records only the
+  bounded deferred/external-verification items. No dependency or CI change is
+  implied.
+
 ---
 
 ## Section D — EFFICIENCY & OPERATIONAL DEBT

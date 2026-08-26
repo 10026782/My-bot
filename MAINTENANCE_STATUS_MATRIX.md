@@ -46,6 +46,32 @@ Truth-Reset SHA `00853b09f1c65a53535240545ba410da012c14f3` (origin/main, after P
 - **#8-1 CLOSED / VERIFIED** — evidence adopted from PR #1017's existing `test_approval_concurrency.py` regression (Test 1 + Test 6); no duplicate test added. Satisfies all 4 required proof criteria (matching-tenant success, mismatched-tenant HTTP 409 rejection, canonical `action_gateway.approve()` never called on mismatch, real production `_is_canonical_tma_contract()` guard exercised end-to-end).
 - **#8-2 CLOSED / CI ENFORCED** — dedicated blocking `pytest` CI step added for `test_phase_4b_1b_durable_lifecycle.py`, same pattern as the 3 existing Context Librarian steps. Verified: 18 tests collected, all 18 execute, **18 pass, 0 xfail, 0 skip**, a sabotaged assertion correctly failed `pytest -x` (then reverted), the `ALLOWED_CONTRACT_TRANSITIONS` legality regression is included, no `continue-on-error`/`|| true`. Incidental discovery during first-ever CI execution (not a production defect, not a new #8 item) — fixed directly, not xfailed: `test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`'s assertion predated `core/action_gateway.py`'s intentional BUG-127A stale-cache refresh; corrected (renamed to `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth`) to assert the current intentional contract — conflict still raised, forbidden transition never persisted, durable truth authoritative, RAM cache may refresh from durable truth. 0 production code changes.
 
+## Audit #10 Dependency Risk closure — 26/08/2026
+
+Truth-Reset SHA: `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`).
+Documentation-only SSOT normalization; no dependency, requirements, CI, or
+production changes were made in this closure entry.
+
+**#10 status: ENGINEERING CLOSED — HIGH/MEDIUM GAPS RESOLVED.**
+
+| Finding | Current status | Evidence / boundary |
+|---|---|---|
+| DG-1 | **CLOSED** | PR #1004; exact compatible production pins |
+| DG-2 | **CLOSED** | PR #1003; dependency hygiene and CI resolution guard |
+| DG-3 | **CLOSED** | PR #1003; dependency hygiene closure |
+| DG-4 | **CLOSED** | PR #1003; dependency hygiene closure |
+| DG-5 | **CLOSED** | PR #1003; dependency hygiene closure |
+| DG-6 | **CLOSED** | PR #1003; dependency hygiene closure |
+| DG-7 | **DEFERRED — LOW** | Intentional transitive Google API dependencies |
+| DG-8 | **DEFERRED — LOW** | Intentional feature-gated PostgreSQL dependency |
+
+Package lifecycle/EOL remains **EXTERNAL VERIFICATION REQUIRED**. Current
+HIGH/MEDIUM gaps: **0**. This is not `CLEAN` because DG-7/DG-8 remain
+deferred and lifecycle/EOL requires external verification.
+
+Evidence: PR #1003, PR #1004, PR #1006. Chronology is preserved; this entry
+normalizes the completed engineering status without rewriting historical rows.
+
 ## Track #13 closure — Naming Consistency
 
 **CLOSED / CLEAN IN OWNED SCOPE.** No runtime rename, compatibility-alias change,
