@@ -41,7 +41,8 @@
       "notes": [
         "usage_events is shadow telemetry: this layer owns recording/schema truth, not aggregation, watchdog enforcement, or producer routing.",
         "P23-M8B adds schema capability only; unknown-measurement producer and consumer behavior remains a #23 follow-up."
-      ]
+      ],
+      "last_observed_commit": "a5fda8efee6d44908295e54a43065e2e81bef8af"
     }
   ]
 }
