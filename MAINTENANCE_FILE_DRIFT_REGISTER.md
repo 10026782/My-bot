@@ -113,6 +113,20 @@ Counts: GAP 5 (H1,H2,H3,H5,H9) · PARTIAL 2 (H4,H6) · EXISTS 3.
 | I9 | Unregistered flag read path | `ERROR_REPORTING` direct env, absent from registry (`feature_flags.py:661`, `core/error_reporter.py:21,55`) | Registry canonical for flags | LOW | #13 |
 | I10 | DEAD_FLAG | `FEATURE_UNIFIED_APPROVAL_MESSAGES` registered, zero runtime consumers (planning-only) | n/a | LOW | #14 |
 
+### I8 current disposition — Audit #23 (26/08/2026)
+
+I8 was reviewed under Audit #23 against `origin/main` at
+`dddacc4c00fdebec247dc54000fbfd74b263951e`. `COST_WATCHDOG_LIVE` and
+`COST_WATCHDOG_ENABLED` control distinct but related capabilities: the former
+controls dollar accounting/alerts/`EMERGENCY_STOP_AI`; the latter controls
+count tracking, JSONL persistence, daily aggregation, Airtable projection and
+count alerts, falling back to `COST_WATCHDOG_LIVE`. This is intentional
+separation / flag-authority clarity debt, not a #23 runtime code defect and
+not a duplicate live stop authority. No #23 runtime remediation is required.
+Destructive rename/removal is deferred until runtime environment configuration
+is known (`RUNTIME ENV CONFIGURATION UNKNOWN`); documentation/naming follow-up
+may remain cross-track. The original I8 finding is preserved above.
+
 ### Track #13 closure disposition
 
 Track #13 is **CLOSED / CLEAN IN OWNED SCOPE**. The provider-identity naming
@@ -201,9 +215,9 @@ Never reconstruct these from memory/chat. If needed, re-run fresh audits against
 | #5 Async/Concurrency follow-up | guards/idempotency lock-before-I/O behavior noted in L(e) |
 | #6 Scheduler follow-up | R-C06-10 (existing), scheduler lazy-import inventory F3 |
 | #7 CLI/Admin Tools | F3 manual CLI list; diagnose_airtable.py no-main-guard note (**SUPERSEDED**, PR #930); benchmark_token_estimate.py — **#7 CLOSED 25/08/2026, see `docs/governance/HORIZON.md`; `benchmark_token_estimate.py`'s own orphan-suspect status remains routed to #21, unaffected by #7's closure** |
-| #8 Test Gap | tc8_test_repo_stub/emergency_stop_test_support root placement; test-only-import modules F1 (placement concern only — owned by #12, per Track F 24/08/2026 closure). **#8 itself is OPEN — CURRENT TEST GAPS (26/08/2026 status reconciliation)** — #8-1 (tenant-isolation negative-path gap, CROSS-TRACK from #9-1, not closed by PR #1017) and #8-2 (HIGH — `test_phase_4b_1b_durable_lifecycle.py` pytest-style file silently runs 0 tests in CI). See `BUG_AUDIT_LOG.md` ("Audit #8 — Test Gap — STATUS RECONCILIATION") and `docs/governance/HORIZON.md` §OPEN. Supersedes the "ALREADY CLOSED" status in `MAINTENANCE_STATUS_MATRIX.md`/`MAINTENANCE_DEFERRED_REGISTER.md`, which predates Audit #9. |
-| #9 Mock Fidelity | **CONSUMED, Audit #9 25/08/2026**: 4 findings (#9-1 HIGH, #9-2 MEDIUM-latent, #9-3/#9-4 LOW) — see `BUG_AUDIT_LOG.md` ("Audit #9 — Mock Fidelity (Phase 1, Read-Only)" and its closure entry) and `docs/governance/HORIZON.md` §CLOSED. #9 itself is **CLOSED / STATIC VERIFIED (25/08/2026)** — all 4 findings remediated (test/test-double changes only, 0 production code changes); CROSS-TRACK → #8 (negative-path Test Gap) stays open. |
-| #10 Dependency Risk | (none consolidated this pass) |
+| #8 Test Gap | tc8_test_repo_stub/emergency_stop_test_support root placement; test-only-import modules F1 (placement concern only — owned by #12, per Track F 24/08/2026 closure). **#8 itself is CLOSED / STATIC VERIFIED + CI ENFORCED (26/08/2026 remediation)** — #8-1 CLOSED/VERIFIED (evidence adopted from PR #1017's `test_approval_concurrency.py` Test 1+6, no duplicate test) and #8-2 CLOSED/CI ENFORCED (dedicated blocking `pytest` CI step added for `test_phase_4b_1b_durable_lifecycle.py`, matching the Context Librarian pattern). See `BUG_AUDIT_LOG.md` ("Audit #8 — Test Gap — CLOSURE (Combined Fix)") and `docs/governance/HORIZON.md` §CLOSED. The 24/08/2026 "ALREADY CLOSED" and 26/08/2026 "OPEN — CURRENT TEST GAPS" entries in `MAINTENANCE_STATUS_MATRIX.md`/`MAINTENANCE_DEFERRED_REGISTER.md` are both preserved as historical record, not rewritten. |
+| #9 Mock Fidelity | **CONSUMED, Audit #9 25/08/2026**: 4 findings (#9-1 HIGH, #9-2 MEDIUM-latent, #9-3/#9-4 LOW) — see `BUG_AUDIT_LOG.md` ("Audit #9 — Mock Fidelity (Phase 1, Read-Only)" and its closure entry) and `docs/governance/HORIZON.md` §CLOSED. #9 itself is **CLOSED / STATIC VERIFIED (25/08/2026)** — all 4 findings remediated (test/test-double changes only, 0 production code changes); CROSS-TRACK → #8 (negative-path Test Gap) stayed open until #8's own 26/08/2026 remediation closed it (see #8 row above) — #9's verdict/findings above are unchanged by that. |
+| #10 Dependency Risk | **ENGINEERING CLOSED — HIGH/MEDIUM GAPS RESOLVED**. DG-1 through DG-6 **CLOSED** (PRs #1003, #1004, #1006); DG-7 **DEFERRED — LOW** for intentional transitive Google API dependencies; DG-8 **DEFERRED — LOW** for an intentional feature-gated PostgreSQL dependency; package lifecycle/EOL = **EXTERNAL VERIFICATION REQUIRED**; current HIGH/MEDIUM gaps = **0**. |
 | #11 Security Surface | J2 fail-open context (owner R-C06-8) — **CONSUMED, Audit #11 25/08/2026**: evaluated as ALREADY VERIFIED, not a security fail-open gap (`identity.py:235-284` falls back to minimal-privilege `READONLY`/`LEAD`, not an elevated role); the docs-or-code naming decision itself remains open under R-C06-8, unaffected by this evaluation. #11 itself is **CLOSED / STATIC VERIFIED + CI ENFORCED (25/08/2026)** — #11-1/#11-2/#11-3 all remediated — see `BUG_AUDIT_LOG.md` and `docs/governance/HORIZON.md` §CLOSED. |
 | #12 File/Folder Ownership | F1 cluster (worker/knowledge_engine/router/lead_qualifier/profile/creative_generator/tenant_provisioner/memory.py) — **#12 CLOSED 25/08/2026**: 7 of 8 modules removed (see F1 table's "Current disposition" column for per-file commit citations); `tenant_provisioner.py` remains parked by owner decision, not a gap. The #21 → #12 `reports/` provenance handoff is **DEFERRED — OWNER: #12**, with no current runtime gap and an explicit reopen trigger recorded in `MAINTENANCE_DEFERRED_REGISTER.md`. See `docs/governance/HORIZON.md` §CLOSED and `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md`. |
 | #13 Naming Consistency | I1-I3, I5, I7-I10, K10 |

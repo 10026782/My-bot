@@ -28,6 +28,18 @@
 policy-dependent Approval Coverage queue item. No duplicate deferred-register
 entry was created; A1 remains a code item and is intentionally not listed here.
 
+### Audit #10 Dependency Risk — 26/08/2026
+
+Truth-Reset SHA: `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`).
+
+- **DG-7 — DEFERRED — LOW:** intentional transitive Google API dependencies.
+- **DG-8 — DEFERRED — LOW:** intentional feature-gated PostgreSQL dependency.
+- Package lifecycle/EOL: **EXTERNAL VERIFICATION REQUIRED**.
+- No current HIGH/MEDIUM gaps remain under #10.
+- Engineering remediation is complete; this register records only the
+  bounded deferred/external-verification items. No dependency or CI change is
+  implied.
+
 ---
 
 ## Section D — EFFICIENCY & OPERATIONAL DEBT
@@ -208,3 +220,38 @@ RECONCILIATION (Documentation Capture Only)"), `docs/governance/HORIZON.md`
   (`core/action_contract_repository.py:241-245`) — not redundant with any
   CI-executed test. The repo already fixes this identical failure mode for
   3 other files via dedicated `pytest` CI steps; not yet applied here.
+
+**Closed 26/08/2026 — see "#8 Test Gap closure" section below.** This section's
+"OPEN" text is preserved verbatim; #8 was remediated later the same day.
+
+### #8 Test Gap closure — 26/08/2026
+
+Truth-Reset SHA `00853b09f1c65a53535240545ba410da012c14f3` (origin/main,
+after PR #1020 — Audit #8 documentation capture). Test + CI-wiring fix;
+0 production business-logic changes.
+
+**Current status: #8 Test Gap — CLOSED / STATIC VERIFIED + CI ENFORCED.**
+Neither the 24/08/2026 "ALREADY CLOSED" entry nor the 26/08/2026
+"OPEN — CURRENT TEST GAPS" section above is rewritten — both stay as
+historical record; this is the next closure in the chronology. Full record:
+`BUG_AUDIT_LOG.md` ("Audit #8 — Test Gap — CLOSURE (Combined Fix)"),
+`docs/governance/HORIZON.md` ("## CLOSED").
+
+- **#8-1 CLOSED / VERIFIED** — evidence adopted from PR #1017's existing
+  `test_approval_concurrency.py` regression (Test 1 + Test 6); no duplicate
+  test added. All 4 required proof criteria satisfied.
+- **#8-2 CLOSED / CI ENFORCED** — dedicated blocking `pytest` CI step added
+  for `test_phase_4b_1b_durable_lifecycle.py`, matching the existing
+  Context Librarian pattern. 18 tests collected, all 18 execute, **18 pass,
+  0 xfail, 0 skip**, a sabotaged assertion correctly failed `pytest -x`
+  (then reverted), the `ALLOWED_CONTRACT_TRANSITIONS` legality regression is
+  included, no `continue-on-error`/`|| true`. Incidental discovery during
+  first-ever CI execution (not a production defect, not a new #8 item) —
+  fixed directly, not xfailed: one pre-existing test's assertion
+  (`test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache`,
+  now renamed `test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth`)
+  predated `core/action_gateway.py`'s intentional BUG-127A stale-cache
+  refresh; corrected to assert the current intentional contract (conflict
+  still raised, forbidden transition never persisted, durable truth
+  authoritative, RAM cache may refresh from durable truth). 0 production
+  code changes.

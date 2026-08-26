@@ -238,6 +238,16 @@ jobs:
       - name: pytest context librarian reconciliation
         run: python -m pytest test_reconcile.py -x --tb=short -q
 
+      # Audit #8-2 — same silent-no-op failure mode as the Context Librarian
+      # files above: test_phase_4b_1b_durable_lifecycle.py uses pytest
+      # fixtures/pytest.raises with no `if __name__` runner, so the plain
+      # "Run test_*.py scripts" loop silently executes 0 of its tests (exit
+      # 0). This is the only regression in the repo proving
+      # ALLOWED_CONTRACT_TRANSITIONS legality enforcement on the real
+      # ActionContractRepository — this step is what actually exercises it.
+      - name: pytest ActionContract durable lifecycle (Audit #8-2)
+        run: python -m pytest test_phase_4b_1b_durable_lifecycle.py -x --tb=short -q
+
       # Verification only — never mutates the catalog in CI. Reports whether
       # any file this PR touched is registered somewhere in the Context
       # Librarian catalog but wasn't re-verified (or is a new file the

@@ -258,7 +258,16 @@ def test_atomic_database_unavailable_never_dispatches_and_does_not_resurrect_pen
     assert "database unavailable" in reply
 
 
-def test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache():
+def test_stale_lifecycle_update_is_rejected_and_ram_cache_reflects_durable_truth():
+    """Audit #8-2 correction: this assertion previously expected the RAM
+    cache to stay frozen at its pre-conflict value. That predates BUG-127A's
+    stale-cache refresh (core/action_gateway.py:940,
+    _refresh_stale_contract_cache), which intentionally re-caches from
+    durable truth as part of handling the conflict — before deciding the
+    retry still fails. The conflict is still raised and the forbidden
+    "approved" transition is never persisted anywhere; the RAM cache is
+    allowed to reflect current durable truth ("rejected"), which is exactly
+    what BUG-127A's refresh is for."""
     repository = LifecycleRepository()
     ledger = ExecutionLedger(repository=repository)
     contract_id = _propose(ActionGateway(ledger=ledger))
@@ -270,7 +279,14 @@ def test_stale_lifecycle_update_is_rejected_without_mutating_ram_cache():
     with pytest.raises(ActionContractTransitionConflictError):
         ledger.update_status(contract_id, "approved")
 
-    assert ledger._store[contract_id].status == "pending"
+    # Forbidden transition never persisted anywhere — neither cache nor
+    # durable store ever shows "approved".
+    assert ledger._store[contract_id].status != "approved"
+    assert repository.get(contract_id).status != "approved"
+    # BUG-127A: RAM cache legitimately refreshes to current durable truth.
+    assert ledger._store[contract_id].status == "rejected"
+    # Durable repository truth remains authoritative and unchanged by the
+    # rejected attempt.
     assert repository.get(contract_id).status == "rejected"
 
 
