@@ -5834,3 +5834,20 @@ These residuals do not keep #24 open.
 - **Live deployment/runtime verification:** NOT ESTABLISHED.
 - **Final status:** **AUDIT #24 CLOSED / STATIC VERIFIED — RUNTIME
   VERIFICATION REMAINS**.
+
+## Audit #20 — Code-to-Docs — FINAL DOC-ONLY REMEDIATION
+
+- **Date:** 26/08/2026
+- **Base:** `origin/main` at `15004c8397763e605727a63066106df455efc421`.
+- **Scope:** documentation-only closure of H1-H6, H9, and O1-O6. Historical
+  audit snapshots and unrelated audit statuses were not rewritten.
+- **Canonical contract document:** `docs/architecture/MEDIA_FILE_SESSION_IDEMPOTENCY_CONTRACT.md`.
+- **Closed:** H1, H2, H3, H4, H5, H6, H9, O1, O2, O3, O4, O5, O6.
+- **H8:** already sufficiently documented; no action.
+- **Production code changes:** 0. Tests, CI, schema, dependencies, runtime
+  configuration, and deployment configuration were not changed.
+- **Runtime boundary:** this is static documentation verification only;
+  production/deployed-SHA verification remains governed by the existing
+  operational gates and is not claimed here.
+- **Final status:** **AUDIT #20 CLOSED / STATIC VERIFIED — RUNTIME
+  VERIFICATION REMAINS**.
