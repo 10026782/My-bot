@@ -162,6 +162,16 @@ the closure PR that created it for the search that established this.
 - **#21 Orphan Artifact** — CLOSED for the identified orphan candidates.
   Evidence: `docs/audit/ORPHAN_ARTIFACT_REMEDIATION_INVENTORY_20260824.md:42`.
 
+- **#23 Cost Audit** — **CLOSED / STATIC VERIFIED — RUNTIME VERIFICATION
+  REMAINS** (26/08/2026, Truth-Reset SHA
+  `dddacc4c00fdebec247dc54000fbfd74b263951e`). P23-M1 through P23-M8D
+  verified the current reachable paid producers, durable attribution,
+  truthful unknown-measurement handling, and aggregation/reporting semantics.
+  I8 was reviewed as intentional separation / flag-authority clarity debt,
+  not a current #23 runtime defect. `_AnthropicLLM` is not a current executed
+  paid producer. Live deployment/runtime evidence remains unestablished.
+  Full record: `BUG_AUDIT_LOG.md` (Audit #23 final closure capture).
+
 - **#18 SSOT** — **CLOSED / STATIC VERIFIED** (remediation 25/08/2026,
   Truth-Reset SHA `ef8363f830253c324b8da8f1b7026f29ff6faf0f`). All 3 findings
   from the Phase-1 read-only audit remediated; full record:

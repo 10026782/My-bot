@@ -113,6 +113,20 @@ Counts: GAP 5 (H1,H2,H3,H5,H9) · PARTIAL 2 (H4,H6) · EXISTS 3.
 | I9 | Unregistered flag read path | `ERROR_REPORTING` direct env, absent from registry (`feature_flags.py:661`, `core/error_reporter.py:21,55`) | Registry canonical for flags | LOW | #13 |
 | I10 | DEAD_FLAG | `FEATURE_UNIFIED_APPROVAL_MESSAGES` registered, zero runtime consumers (planning-only) | n/a | LOW | #14 |
 
+### I8 current disposition — Audit #23 (26/08/2026)
+
+I8 was reviewed under Audit #23 against `origin/main` at
+`dddacc4c00fdebec247dc54000fbfd74b263951e`. `COST_WATCHDOG_LIVE` and
+`COST_WATCHDOG_ENABLED` control distinct but related capabilities: the former
+controls dollar accounting/alerts/`EMERGENCY_STOP_AI`; the latter controls
+count tracking, JSONL persistence, daily aggregation, Airtable projection and
+count alerts, falling back to `COST_WATCHDOG_LIVE`. This is intentional
+separation / flag-authority clarity debt, not a #23 runtime code defect and
+not a duplicate live stop authority. No #23 runtime remediation is required.
+Destructive rename/removal is deferred until runtime environment configuration
+is known (`RUNTIME ENV CONFIGURATION UNKNOWN`); documentation/naming follow-up
+may remain cross-track. The original I8 finding is preserved above.
+
 ### Track #13 closure disposition
 
 Track #13 is **CLOSED / CLEAN IN OWNED SCOPE**. The provider-identity naming

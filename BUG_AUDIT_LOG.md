@@ -5717,6 +5717,34 @@ CRITICAL: 0 · HIGH: 1 (#8-2, explicit justification) · MEDIUM: 0 · OPEN לל�
 
 ---
 
+## Audit #23 — Cost Audit — FINAL CLOSURE CAPTURE
+
+- **תאריך:** 26/08/2026
+- **Truth-Reset SHA:** `dddacc4c00fdebec247dc54000fbfd74b263951e` (`origin/main`)
+- **Scope:** תיעוד סגירת code scope בלבד; לא בוצע שינוי runtime, pricing,
+  watchdog behavior, feature-flag behavior או enforcement.
+- **Completion basis:** P23-M1 through P23-M8D verified on main. No successful
+  paid-call accounting omission was found among current reachable producers;
+  unknown measurement is represented truthfully; durable attribution and
+  aggregation/reporting are complete for the current reachable paid paths;
+  pricing coverage is understood.
+- **Corrected M8D disposition:** `core/reasoning_ports._AnthropicLLM` is not a
+  current executed paid producer because no production execution chain reaches
+  `ports.llm.call()`.
+- **I8 final disposition:** `COST_WATCHDOG_LIVE` and
+  `COST_WATCHDOG_ENABLED` control distinct but related cost-control
+  capabilities. This is intentional separation / flag-authority clarity debt,
+  not a duplicate live stop authority, enforcement defect, or #18 reopening
+  trigger. Runtime environment values remain unknown; neither flag is renamed
+  or removed here.
+- **Cross-track residuals:** durable telemetry persistence-failure
+  reconciliation → #15 Recovery / Fallback; remaining documentation/naming
+  clarity → current cross-track owner; live deployment evidence → operational
+  runtime verification only.
+- **Runtime limitation:** live deployment/runtime evidence is not established;
+  no production-verified claim is made.
+- **Final status:** **AUDIT #23 CODE SCOPE CLOSED — RUNTIME VERIFICATION REMAINS**
+
 ## Audit #10 — Dependency Risk — CLOSURE (SSOT Reconciliation)
 
 - **Date:** 26/08/2026
