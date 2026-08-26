@@ -251,6 +251,14 @@ def find_or_create_contact(phone, name, *, email="", company="",
             identity=identity, source=source, create_writer=create_writer,
         )
 
+
+def update_contact(record_id: str, fields: dict, *, source="contact_gate") -> bool:
+    """Update an existing Contact through the canonical Contact boundary."""
+    if not record_id:
+        return False
+    return airtable_patch(Tables.CONTACTS, record_id, dict(fields or {}), source=source)
+
+
 def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
                     company: str = "", notes: str = "",
