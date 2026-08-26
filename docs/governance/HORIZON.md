@@ -15,8 +15,8 @@ This file (`HORIZON.md`, no date suffix) is the persistent, update-in-place
 management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
-**Last updated:** 26/08/2026
-**Truth Reset SHA at last update:** `c10f5573b6b6935d511ddf074cb4683236c0595b`
+**Last updated:** 27/08/2026
+**Truth Reset SHA at last update:** `bdcd078e3e8499567a6980da442570848723d1c5`
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -29,7 +29,7 @@ This is a concise owner-facing projection of §3.5, not a second registry.
 
 | Initiative | Work State | Evidence State | Needs Verification | What materially advanced | What remains | Next Step |
 |---|---|---|---|---|---|---|
-| Turn Coordinator | ACTIVE | MERGED | YES | routing, lifecycle and reply-ownership work merged | authorization/runtime paths remain incomplete | connect and verify remaining paths |
+| Turn Coordinator | ACTIVE | MERGED | YES | routing, lifecycle and reply-ownership work merged; TC7-B claim-authorization wiring + RP5 evidence enforcement merged 26/08/2026 (PR #1036) — STATIC VERIFIED, RUNTIME NOT ESTABLISHED, RP5 off by default | RP5 production activation (owner decision), 2 ActionGateway sink sites unwired, `mixed`-claim coverage | owner decision on `FEATURE_EVIDENCE_FINALIZER=enforce` activation + ActionGateway sink design |
 | Unified Approval / ActionGateway | ACTIVE | MERGED | YES | canonical lifecycle and approval paths merged | staged rollout/runtime verification | verify approved paths |
 | Cost / Agent-Last | ACTIVE | MERGED | YES | cost attribution lineage merged | shadow telemetry and enforcement decision | validate live cost and decide progression |
 | Architecture authority / execution boundaries | ACTIVE | MERGED | YES | static authority boundaries reconciled | deployed/runtime evidence | verify deployed-SHA authority |
