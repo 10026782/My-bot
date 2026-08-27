@@ -20,7 +20,7 @@ def test_whatsapp_capture_uses_canonical_writer_and_fails_closed():
         memory_key="boss_hq:+972500000000", domain_id="general",
     )
     with patch.object(lead_capture, "is_enabled", return_value=True), \
-         patch("tools.airtable_tools.airtable_get", return_value=""), \
+         patch("tools.airtable_read_adapter.list_records", return_value=[]), \
          patch("tools.airtable_tools.airtable_add", side_effect=AssertionError("legacy writer called")), \
          patch.object(lead_capture, "create_lead", return_value=_ok()) as canonical:
         result = lead_capture.capture_inbound_lead(identity, "need a quote", write_event=False)
@@ -32,7 +32,7 @@ def test_whatsapp_capture_uses_canonical_writer_and_fails_closed():
     assert canonical.call_args.args[1].source == "whatsapp_inbound"
 
     with patch.object(lead_capture, "is_enabled", return_value=True), \
-         patch("tools.airtable_tools.airtable_get", return_value=""), \
+         patch("tools.airtable_read_adapter.list_records", return_value=[]), \
          patch("tools.airtable_tools.airtable_add", side_effect=AssertionError("legacy writer called")), \
          patch.object(lead_capture, "create_lead", return_value=_failed()):
         result = lead_capture.capture_inbound_lead(identity, "need a quote", write_event=False)

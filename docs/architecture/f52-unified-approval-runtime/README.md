@@ -108,7 +108,7 @@ gate described in the readiness report.
 | F52 overall | PARTIALLY CLOSED | G1/G4/G5 remain open current gaps |
 | F52-G1 | OPEN — CURRENT GAP | Dispatcher-wide execution proof remains out of scope |
 | F52-G2 | CLOSED — STATIC VERIFIED | Commit `f17bfe9`; verified `origin/main` `d2ec703`; runtime NOT ESTABLISHED |
-| F52-G3 | PARTIALLY CLOSED | F52-G3-S1 and F52-G3-S2 close the LeadMemory and attribution slices; other string consumers remain |
+| F52-G3 | CLOSED — STATIC VERIFIED | S1–S7 close all current business-truth string consumers; only display/test assertions remain |
 | F52-G4 | OPEN — CURRENT GAP | Scheduler/background normalization remains out of scope |
 | F52-G5 | OPEN — CURRENT GAP | Durable generic evidence ledger remains out of scope |
 
@@ -170,3 +170,16 @@ gate described in the readiness report.
 - PR / commit: PR #1058, merge commit `d6e0718`; verified origin/main `d6e0718`.
 - Residual business-truth G3 consumers: `lead_capture.py::capture_inbound_lead` remains category A; `core/lead_buffer.py` has no further occurrence.
 - Runtime NOT REQUIRED FOR STATIC CLOSURE.
+
+### F52-G3-S7 — Structured Lead Capture lookup migration
+
+- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Consumer: `lead_capture.py::capture_inbound_lead`.
+- Previous authority: record identity extracted from rendered `airtable_get()` text via regex.
+- Structured authority: `airtable_read_adapter.list_records()` record `id`; FOUND and Lead Event decisions use that identity.
+- PR / commit: pending.
+- Tests: focused S7 `5 passed`; Lead Capture/structured-result regressions `8 passed`; response-contract regression `19 passed`.
+- G3 closure basis: no current business-state consumer derives success, record identity, or persistence truth from display strings.
+- Residual business-truth parsers: NONE.
+- Residual display/test assertions: `media_handler.py:852`, `startup_validator.py:353`.
+- Runtime NOT REQUIRED FOR STATIC G3 CLOSURE.
