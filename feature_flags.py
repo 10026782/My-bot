@@ -33,9 +33,11 @@ see is_enabled()/set_flag()'s own docstrings and the
 LEAD PIPELINE:
   LEAD_CAPTURE                - WhatsApp מספר לא מוכר → רשומת Leads
   WHATSAPP_CANONICAL_LEAD_WRITE - WhatsApp LeadPayload → create_lead(); default OFF until E2E/runtime verification
-  EMAIL_CANONICAL_LEAD_WRITE    - Email LeadPayload → create_lead(); default OFF until E2E/runtime verification
-  FURNITURE_CANONICAL_LEAD_WRITE - Furniture LeadPayload → create_lead(); default OFF until E2E/runtime verification
   VOICE_CANONICAL_LEAD_WRITE    - Voice LeadPayload → create_lead(); default OFF until E2E/runtime verification
+  (Email/Furniture Lead creation already routes through create_lead() unconditionally —
+   core.noninteractive_lead_cutovers.py, called from inbound_handler.py/furniture_lead_funnel.py
+   with no flag check; EMAIL_CANONICAL_LEAD_WRITE/FURNITURE_CANONICAL_LEAD_WRITE were removed
+   27/08/2026 — declared here but never read anywhere in live code, so they gated nothing)
   LEAD_SCORING                - score+tier נכתב בעת יצירת lead
   LEAD_MEMORY                 - lead_memory.update() מחובר ל-lead_capture
   FOLLOWUP_AUTOMATION         - scheduler סורק לידים HOT, מעלה לאישור
@@ -240,8 +242,6 @@ _DEFAULTS: dict[str, str] = {
     "WHATSAPP_CANONICAL_LEAD_WRITE": os.environ.get(
         "WHATSAPP_CANONICAL_LEAD_WRITE", "false",
     ),
-    "EMAIL_CANONICAL_LEAD_WRITE": os.environ.get("EMAIL_CANONICAL_LEAD_WRITE", "false"),
-    "FURNITURE_CANONICAL_LEAD_WRITE": os.environ.get("FURNITURE_CANONICAL_LEAD_WRITE", "false"),
     "VOICE_CANONICAL_LEAD_WRITE": os.environ.get("VOICE_CANONICAL_LEAD_WRITE", "false"),
 }
 

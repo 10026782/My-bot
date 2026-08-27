@@ -1626,8 +1626,8 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 
 ### N18 — Canonical Write Infrastructure (Lead System → Shared Write Framework) 🔲 בעבודה (נרשם 20/08/2026)
 
-עודכן: 27/08/2026 — **Phase 3, פרוסה ראשונה (Telegram Lead-preview) ✅ סגורה** — ראו
-פירוט תחת "Phase 3" למטה.
+עודכן: 27/08/2026 — **Phase 3, פרוסה ראשונה (Telegram Lead-preview) ✅ סגורה** + **dead-flag
+finding (Email/Furniture) ✅ סגור** — ראו פירוט תחת "Phase 3" למטה.
 
 **הקשר:** Phase 1 (canonical Lead creation service, `core/lead_service.py`, ענף
 `feat/canonical-lead-creation-phase1`, PR #780) נסגר — QA report מלא (15 תרחישים ממוספרים)
@@ -1725,10 +1725,15 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   Audit #9's אותה תצפית בדיוק). **STATIC VERIFIED — RUNTIME VERIFICATION REMAINS.**
   **מה עדיין פתוח ב-Phase 3:** שאר ה-writers (WhatsApp/Voice כבר מנותבים דרך
   `create_lead()` מאחורי flag; Email/Furniture מנותבים unconditionally דרך
-  `core.noninteractive_lead_cutovers.py`) לא נבדקו/נסגרו בסבב הזה — ראה גם ממצא נפרד:
-  `EMAIL_CANONICAL_LEAD_WRITE`/`FURNITURE_CANONICAL_LEAD_WRITE` מוצהרים ב-`feature_flags.py`
-  אך לא נצרכים בשום קוד חי (dead flag) — לא טופל כאן, owner decision נדרש. `lead_capture.py`
+  `core.noninteractive_lead_cutovers.py`) לא נבדקו/נסגרו בסבב הזה. `lead_capture.py`
   עצמו (ה-writer העצמאי המקורי) גם לא נבדק בסבב הזה.
+  **Dead-flag finding ✅ סגור (27/08/2026, PR נפרד):** `EMAIL_CANONICAL_LEAD_WRITE`/
+  `FURNITURE_CANONICAL_LEAD_WRITE` הוסרו מ-`feature_flags.py` — הוצהרו שם אך מעולם לא
+  נצרכו בשום קוד חי (grep מלא: 0 מופעים מחוץ להצהרה עצמה); ה-writers של Email/Furniture
+  כבר היו unconditional ללא תלות בהם, כך שההסרה היא ניקוי תיעודי בלבד, ללא שינוי
+  התנהגות. שני ה-flags האחרים (`WHATSAPP_CANONICAL_LEAD_WRITE`/`VOICE_CANONICAL_LEAD_WRITE`)
+  נשארים — הם כן נצרכים בפועל (`app.py`/`voice_adapter.py`) ובוחרים בין שני מסלולים
+  קנוניים, לא legacy-vs-canonical.
 - **Phase 4 — UX Contract:** ה-service מחזיר structured result
   (`entity`/`operation`/`status`/`display_name`/`domain`/`owner`/`external_id`), לא
   final user-facing string; שכבת UX נפרדת מחליטה מה מוצג. Internal IDs (Airtable record

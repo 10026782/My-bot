@@ -63,7 +63,7 @@
 
 ## 4. Next Priorities
 
-1. **N18 Phase 3 Activation Canary:** Owner decision on `WHATSAPP_CANONICAL_LEAD_WRITE`, `EMAIL_CANONICAL_LEAD_WRITE`, `FURNITURE_CANONICAL_LEAD_WRITE`, `VOICE_CANONICAL_LEAD_WRITE`. Fresh inbound test against live Airtable.
+1. **N18 Phase 3 Activation Canary:** Owner decision on `WHATSAPP_CANONICAL_LEAD_WRITE`, `VOICE_CANONICAL_LEAD_WRITE`. Fresh inbound test against live Airtable. (`EMAIL_CANONICAL_LEAD_WRITE`/`FURNITURE_CANONICAL_LEAD_WRITE` removed 27/08/2026 — never consumed by any live code; Email/Furniture Lead creation already runs unconditionally through `create_lead()`.)
 2. **H0 Production Truth:** Deploy the latest approved/current main SHA, record the actual deployed SHA, and run canaries for N18 Phase 3 activation, BUG-164 creative-grounding, Command Center route verification, lead product-flag readiness against that deployed SHA.
 3. **N18 Phase 4:** Terminal-turn-result formal contract implementation (broader scope, shared across all write flows).
 4. **H6 Command Center:** Verify `/api/owner/command-center` route on current SHA, resolve `system_health` `UNKNOWN` source, maintain read-only posture.
