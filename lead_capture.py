@@ -210,43 +210,38 @@ def capture_inbound_lead(
         else f"{identity.memory_key}:{_domain_key}"
     )
     try:
-        from tools.airtable_tools import airtable_get
+        from tools.airtable_read_adapter import list_records
 
-        # airtable_get מחזיר str — re.search תקין כאן
         safe_memory_key = escape_formula_value(memory_key)
-        raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'")
-        if isinstance(raw, str):
-            existing_m = re.search(r"\[([^\]]+)\]", raw)
-            if existing_m:
-                logger.debug("[LeadCapture] lead already exists, skipping: %s", memory_key)
-                # תיקון: claim_type=FOUND, לא CREATED — שום דבר לא נוצר כאן, רק
-                # חיפוש שמצא רשומה קיימת. record_id האמיתי (לא placeholder
-                # "existing") כדי שכל קוד עתידי שיכתוב Lead Event/Note יקבל ID
-                # תקין. tool_called/tool_http_ok=True כדי ש-ClaimGate._check_found
-                # (tool_called and tool_http_ok) יאשר את הclaim הזה כראוי —
-                # ה-airtable_get באמת רץ ובאמת הצליח.
-                existing_id = existing_m.group(0)
-                found_ar = ActionResult(
-                    tool_called=True,
-                    tool_http_ok=True,
-                    business_success=True,
-                    record_id=existing_id,
-                    claim_type=ClaimType.FOUND,
-                    source="lead_capture",
-                )
-                # N-LEAD-EVENT: ליד קיים + הודעה חדשה → כתוב Lead Event
-                # לא יוצרים ליד שני — רושמים את הנושא החדש כאירוע
-                # BUG-NEW-13: רק אם write_event=True — אחרת הקורא יכתוב את
-                # האירוע בעצמו, אחרי שה-Router פתר domain אמיתי.
-                if write_event:
-                    try:
-                        _ev = capture_lead_event(identity, message, existing_id, domain=domain)
-                        if _ev.business_success:
-                            logger.info("[LeadCapture] lead event written: rec=%s", _ev.record_id)
-                            found_ar.post_success = True
-                    except Exception as e:
-                        logger.warning("[LeadCapture] lead event failed for %s: %s", existing_id, e)
-                return found_ar
+        records = list_records(
+            Tables.LEADS,
+            f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'",
+            max_records=1,
+        )
+        if not isinstance(records, list):
+            return ActionResult.failure("malformed_structured_lookup", source="lead_capture")
+        if records:
+            if not isinstance(records[0], dict) or not records[0].get("id"):
+                return ActionResult.failure("missing_structured_record_id", source="lead_capture")
+            logger.debug("[LeadCapture] lead already exists, skipping: %s", memory_key)
+            existing_id = records[0]["id"]
+            found_ar = ActionResult(
+                tool_called=True,
+                tool_http_ok=True,
+                business_success=True,
+                record_id=existing_id,
+                claim_type=ClaimType.FOUND,
+                source="lead_capture",
+            )
+            if write_event:
+                try:
+                    _ev = capture_lead_event(identity, message, existing_id, domain=domain)
+                    if _ev.business_success:
+                        logger.info("[LeadCapture] lead event written: rec=%s", _ev.record_id)
+                        found_ar.post_success = True
+                except Exception as e:
+                    logger.warning("[LeadCapture] lead event failed for %s: %s", existing_id, e)
+            return found_ar
 
         _lead_name = identity.display_name or identity.external_id or "unknown"
         result = create_lead(
