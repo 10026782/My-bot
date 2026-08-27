@@ -143,6 +143,71 @@ grep -n "FUNCTION_NAME\|CLASS_NAME\|CONSTANT_NAME" path/to/file.py
 
 ראה גם `GOVERNANCE_RULES.md` — Rules 13-18.
 
+## STATUS-SYNC GOVERNANCE (חובה)
+
+For any engineering PR that materially changes actual implementation state:
+
+> VERIFY → UPDATE EVIDENCE → UPDATE STATUS → FINISH
+
+Before finishing the PR, inspect the applicable canonical current-status
+documents broadly enough to identify affected state, then update only the
+documents materially affected. The minimum applicable set is `ROADMAP.md`,
+`docs/governance/BOSS_UNIFIED_MASTER_PLAN.md`, `docs/governance/HORIZON.md`,
+the initiative's canonical status/architecture document, and, when required
+by their existing contracts, `CHANGE_CONTROL_LOG.md` and
+`docs/governance/MAINTENANCE_AUDIT_LEDGER.md`. Chat or report text does not
+substitute for repository status. Historical snapshots and evidence logs are
+not rewritten to make them agree with current state.
+
+Evidence levels are distinct and must not be pre-claimed:
+
+- `CODE_DONE` — implementation exists on the working branch.
+- `STATIC_VERIFIED` — relevant local/static tests or analysis passed.
+- `MERGED` — the change is verified reachable from current `origin/main`.
+- `WIRED` — the canonical production execution path is connected to it.
+- `DEPLOYED` — the exact merged SHA is verified deployed to the relevant environment.
+- `RUNTIME_VERIFIED` — live execution evidence proves the behavior.
+
+Local tests do not establish `MERGED`; a merge does not establish `DEPLOYED`;
+a deployed SHA does not establish `RUNTIME_VERIFIED`. Record the current level,
+remaining merge/deployment/runtime work, and only advance status when its
+evidence exists.
+
+After merge, before advancing repository status to `MERGED`:
+
+1. fetch `origin` and verify the current `origin/main`;
+2. verify the merged commit/change is reachable from `origin/main`;
+3. verify the expected content exists on `main` (including the relevant grep
+   or equivalent source check).
+
+If the merge materially changes canonical status and the PR could not honestly
+record `MERGED` before merge, perform a bounded status follow-up update; do not
+silently leave canonical status stale.
+
+When claiming `DEPLOYED` or `RUNTIME_VERIFIED`, repository evidence must record
+the exact SHA, environment, timestamp, verification method, and observed
+result. CI, merge state, or deployment metadata alone is not runtime evidence.
+Preserve audit semantics: cross-track ownership remains single-owner,
+accepted deferred work does not reopen an audit, `STATIC_VERIFIED` remains
+separate from `RUNTIME_VERIFIED`, and historical evidence remains historical.
+
+Every engineering PR completion report must include:
+
+```text
+## Status Documents Inspected
+## Status Documents Updated
+## Documents Intentionally Unchanged
+## Evidence Level Before
+## Evidence Level After This PR
+## Merge Verification Required
+## Deployment Verification Required
+## Runtime Verification Required
+## Remaining Work
+```
+
+Use `N/A` where a field does not apply. `CLAUDE.md` and other agent-entry
+files should point to this rule rather than duplicate it.
+
 ## Cursor Cloud specific instructions
 
 ### Definition of Done — ROADMAP.md
