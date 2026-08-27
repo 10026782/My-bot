@@ -31,9 +31,9 @@ def _is_junk(text: str) -> bool:
     return len(meaningful) < 2
 
 
-def _airtable_get():
-    from tools.airtable_tools import airtable_get
-    return airtable_get
+def _airtable_get(structured=False):
+    from tools.airtable_tools import airtable_get, airtable_get_records
+    return airtable_get_records if structured else airtable_get
 
 
 # ── Find helpers ──────────────────────────────────────────────────────────────
@@ -43,11 +43,14 @@ def _find_by_external_id(external_id: str) -> str | None:
     if not external_id:
         return None
     try:
-        get = _airtable_get()
+        get_records = _airtable_get(structured=True)
         safe_external_id = escape_formula_value(external_id)
-        raw = get(Tables.LEADS, f"{{{LeadFields.EXTERNAL_ID}}}='{safe_external_id}'")
-        m = re.search(r"rec\w+", raw or "")
-        return m.group(0) if m else None
+        records = get_records(
+            Tables.LEADS, f"{{{LeadFields.EXTERNAL_ID}}}='{safe_external_id}'", max_records=1
+        )
+        if not records or not isinstance(records[0], dict):
+            return None
+        return records[0].get("id") or None
     except Exception as e:
         logger.warning("[InboundHandler] find_by_external_id error: %s", e)
         return None
