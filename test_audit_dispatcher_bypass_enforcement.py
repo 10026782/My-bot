@@ -32,7 +32,7 @@ def test_cross_track_finding_is_visible_but_non_blocking():
 
 
 def test_stable_identity_handles_shifted_cross_track_import():
-    finding = ("core/memory_retrieval.py", 108, "tools.airtable_tools")
+    finding = ("core/runtime_schema_provider.py", 204, "tools.airtable_tools")
     groups = audit.classify([finding])
     assert groups["cross_track"] == [finding]
     assert groups["new"] == []
@@ -62,7 +62,7 @@ def test_synthetic_tracked_bypass_makes_main_fail(tmp_path, monkeypatch):
 
 
 def test_stable_identity_handles_shifted_legacy_import():
-    finding = ("lead_capture.py", 212, "tools.airtable_tools")
+    finding = ("lead_capture.py", 213, "tools.airtable_tools")
     groups = audit.classify([finding])
     assert groups["legacy"] == [finding]
     assert groups["new"] == []
@@ -70,12 +70,52 @@ def test_stable_identity_handles_shifted_legacy_import():
 
 def test_stable_identity_handles_shifted_interaction_imports():
     findings = [
-        ("interaction_engine.py", 389, "tools.airtable_tools"),
-        ("interaction_engine.py", 569, "tools.calendar_tools"),
+        ("interaction_engine.py", 310, "tools.airtable_tools"),
+        ("interaction_engine.py", 575, "tools.calendar_tools"),
     ]
     groups = audit.classify(findings)
     assert groups["legacy"] == findings
     assert groups["new"] == []
+
+
+def test_direct_contact_create_and_update_are_blocking(tmp_path, monkeypatch):
+    source = tmp_path / "new_contact_writer.py"
+    source.write_text(
+        "from tools.airtable_gateway import airtable_create, airtable_patch\n"
+        "def create(): airtable_create(\"Contacts\", {})\n"
+        "def update(): airtable_patch(\"Contacts\", \"rec1\", {})\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(audit, "_iter_py_files", lambda: [source.relative_to(tmp_path)])
+    assert {item[2] for item in audit.scan_contact_bypasses()} == {"airtable_create", "airtable_patch"}
+
+
+def test_generic_provider_contact_write_is_blocking_but_non_contact_is_allowed(tmp_path, monkeypatch):
+    source = tmp_path / "provider_writer.py"
+    source.write_text(
+        "storage.update(\"Contacts\", \"rec1\", {})\n"
+        "storage.update(\"Tasks\", \"rec2\", {})\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(audit, "_iter_py_files", lambda: [source.relative_to(tmp_path)])
+    assert audit.scan_contact_bypasses() == [("provider_writer.py", 1, "update")]
+
+
+def test_contact_boundaries_and_non_contact_writes_are_allowed(tmp_path, monkeypatch):
+    source = tmp_path / "crm.py"
+    source.write_text(
+        "from airtable_schema import Tables\n"
+        "from tools.airtable_gateway import airtable_create, airtable_patch\n"
+        "def create_contact_from_fields(): airtable_create(Tables.CONTACTS, {})\n"
+        "def update_contact(): airtable_patch(\"Contacts\", \"rec1\", {})\n"
+        "def other(): airtable_create(\"Tasks\", {})\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(audit, "_iter_py_files", lambda: [source.relative_to(tmp_path)])
+    assert audit.scan_contact_bypasses() == []
 
 
 def test_stable_identity_handles_shifted_cmd_update_import():
