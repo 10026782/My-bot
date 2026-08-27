@@ -23,8 +23,9 @@ is never read anywhere in the chain again.
 4. Attack simulation: a contract proposed with trusted_source="agent" (the
    default) but tool_inputs containing a spoofed "_source": "lead_capture"
    key is STILL blocked at execution time.
-5. Regression: the legitimate lead_capture flow (trusted_source="lead_capture"
-   passed explicitly, no "_source" key in tool_inputs at all) still works.
+5. A trusted_source label alone cannot bypass the dispatcher's canonical
+   execution-proof gate; the legitimate lead_capture flow uses the Gateway's
+   dedicated structured writer instead of direct dispatch.
 6. FEATURE_ACTION_GATEWAY shadow-mode propose (app.py's _queue_approval)
    is unaffected — still defaults to "agent".
 """
@@ -95,10 +96,10 @@ result_spoofed2 = _dispatch_leads_update(dict(spoofed), trusted_source="agent")
 chk("inputs['_source'] spoofed + trusted_source='agent' explicit -> still blocked",
     "עדכון ליד קיים דרך הצ׳אט חסום" in _message(result_spoofed2))
 
-# Legitimate trusted_source kwarg (no "_source" key in inputs at all) -> passes.
+# A trusted_source label alone is not execution proof, even for Lead Capture.
 result_trusted = _dispatch_leads_update(dict(base_inputs), trusted_source="lead_capture")
-chk("trusted_source='lead_capture' kwarg (no _source key needed) -> not blocked",
-    "עדכון ליד קיים דרך הצ׳אט חסום" not in _message(result_trusted))
+chk("trusted_source='lead_capture' alone -> still blocked without proof",
+    "approval-sensitive execution requires an approved ActionContract" in _message(result_trusted))
 
 # ══════════════════════════════════════════════════════════════════
 # 3-5. ActionGateway: trusted_source persisted on the contract, spoofing
@@ -135,7 +136,7 @@ with patch("tools.dispatcher.enforce_tenant_scope", return_value=legit_inputs), 
     from core.anti_hallucination import VerifyResult
     mock_verify.return_value = VerifyResult("ok")
     legit_exec = gw.approve(legit_result.contract_id, approver="boss_hq:owner1", approver_role="owner")
-chk("legitimate lead_capture contract executes without hitting the Leads gate",
+chk("legitimate lead_capture contract executes through the Gateway path",
     "עדכון ליד קיים דרך הצ׳אט חסום" not in legit_exec)
 
 # 4. Attack simulation: propose with the DEFAULT trusted_source ("agent" —
