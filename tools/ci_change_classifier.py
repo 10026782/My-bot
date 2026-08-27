@@ -109,8 +109,17 @@ def classify_paths(paths: object) -> Capabilities:
 
 
 def changed_paths(repo_root: Path, base: str, head: str) -> list[str]:
+    merge_base = subprocess.run(
+        ["git", "merge-base", base, head],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if not merge_base:
+        raise ValueError("git merge-base returned no commit")
     result = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}..{head}"],
+        ["git", "diff", "--name-only", f"{merge_base}..{head}"],
         cwd=repo_root,
         check=True,
         capture_output=True,
