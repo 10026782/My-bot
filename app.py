@@ -2625,7 +2625,7 @@ def _handle_lead_draft_callback(cq) -> None:
     )
     if lifecycle.canonical_state in {"executed", "completed", "failed", "rejected"}:
         lead_sessions.clear_lead_draft(chat_id)
-    bot.answer_callback_query(cq.id, lifecycle.safe_user_message)
+    bot.answer_callback_query(cq.id, "✅ התקבל")
     try:
         bot.edit_message_text(lifecycle.safe_user_message, cq.message.chat.id, cq.message.message_id)
     except Exception:
