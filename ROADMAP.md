@@ -8,6 +8,11 @@ Canonical current source:
 not complete. Freeze remains an owner/governance decision. Dated status
 snapshots below are historical evidence and do not override this audit.
 
+**SINGLE-SPEAKER APPROVAL UX — REFRESHED PLAN ESTABLISHED** — canonical
+continuation and Telegram/WhatsApp plan:
+[`SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md`](docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md).
+Evidence level: `DOCUMENTED / PLAN ESTABLISHED`; no runtime status is implied.
+
 ## C02–C04 Approval Coverage — current sequence (24/08/2026)
 
 Current status: **CODE CLOSED / POLICY ITEMS REMAIN**. Detailed status and evidence live in
