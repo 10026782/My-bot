@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import re
+import ast
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -59,6 +60,15 @@ _TOOLS_IMPORT_RE = re.compile(
     r"|import\s+tools\.(" + "|".join(_TOOL_MODULES) + r")\b)"
 )
 _CRM_IMPORT_RE = re.compile(r"^\s*(?:from\s+crm\s+import\b|import\s+crm\b)")
+
+_CONTACT_TABLE_NAMES = frozenset(("Contacts", "אנשי קשר (Contacts)"))
+_CONTACT_WRITE_NAMES = frozenset((
+    "airtable_add", "airtable_update", "airtable_create", "airtable_patch",
+))
+_GENERIC_WRITE_NAMES = frozenset(("create", "update"))
+_CONTACT_BOUNDARY_FUNCTIONS = frozenset((
+    "create_contact_from_fields", "update_contact",
+))
 
 # Baseline rebased on 2026-08-24 (Track D-Structure Audit #7): all 43 entries
 # known as of 2026-07-03 were individually re-verified against current
@@ -222,6 +232,81 @@ def scan() -> list[tuple[str, int, str]]:
     return [f for f in findings if f not in _SANCTIONED_CALL_SITES]
 
 
+def _contact_table_literal(node: ast.AST) -> bool:
+    if isinstance(node, ast.Constant):
+        return node.value in _CONTACT_TABLE_NAMES
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "Tables"
+        and node.attr == "CONTACTS"
+    )
+
+
+def _contact_table_argument(node: ast.Call) -> ast.AST | None:
+    if node.args:
+        return node.args[0]
+    for keyword in node.keywords:
+        if keyword.arg == "table":
+            return keyword.value
+    return None
+
+
+class _ContactWriteVisitor(ast.NodeVisitor):
+    def __init__(self, rel_str: str):
+        self.rel_str = rel_str
+        self.function_stack: list[str] = []
+        self.findings: list[tuple[str, int, str]] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.function_stack.append(node.name)
+        self.generic_visit(node)
+        self.function_stack.pop()
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Call(self, node: ast.Call) -> None:
+        table_arg = _contact_table_argument(node)
+        if table_arg is not None and _contact_table_literal(table_arg):
+            target = node.func
+            name = target.id if isinstance(target, ast.Name) else target.attr if isinstance(target, ast.Attribute) else ""
+            direct_generic = name in _CONTACT_WRITE_NAMES
+            receiver_parts: list[str] = []
+            receiver = target.value if isinstance(target, ast.Attribute) else None
+            while isinstance(receiver, ast.Attribute):
+                receiver_parts.append(receiver.attr.lower())
+                receiver = receiver.value
+            if isinstance(receiver, ast.Name):
+                receiver_parts.append(receiver.id.lower())
+            provider_generic = (
+                name in _GENERIC_WRITE_NAMES
+                and any(any(token in part for token in ("storage", "provider", "airtable")) for part in receiver_parts)
+            )
+            if (direct_generic or provider_generic) and not (
+                self.rel_str == "crm.py"
+                and self.function_stack[-1:] and self.function_stack[-1] in _CONTACT_BOUNDARY_FUNCTIONS
+            ):
+                self.findings.append((self.rel_str, node.lineno, name))
+        self.generic_visit(node)
+
+
+def scan_contact_bypasses() -> list[tuple[str, int, str]]:
+    """Find literal Contact writes outside the two canonical CRM boundaries."""
+    findings: list[tuple[str, int, str]] = []
+    for rel in _iter_py_files():
+        rel_str = rel.as_posix()
+        if rel_str in _EXCLUDE_FILES or rel.name.startswith(_EXCLUDE_FILE_PREFIXES):
+            continue
+        try:
+            tree = ast.parse(((_REPO_ROOT / rel).read_text(encoding="utf-8")), filename=rel_str)
+        except (SyntaxError, UnicodeDecodeError, OSError):
+            continue
+        visitor = _ContactWriteVisitor(rel_str)
+        visitor.visit(tree)
+        findings.extend(visitor.findings)
+    return findings
+
+
 def _module_from_line(line: str) -> str | None:
     match = _TOOLS_IMPORT_RE.match(line)
     if match:
@@ -323,6 +408,7 @@ def main() -> int:
         print(f"❌ {exc}", file=sys.stderr)
         return 2
     groups = classify(found)
+    contact_bypasses = scan_contact_bypasses()
 
     print("GOV — Dispatcher Bypass Audit (direct tool-implementation imports)")
     print("-" * 60)
@@ -337,6 +423,8 @@ def main() -> int:
     for key in ("legacy", "sanctioned", "cross_track", "accepted", "new"):
         for file, line, module in groups[key]:
             print(f"{labels[key]:13} {file}:{line}  import {module}")
+    for file, line, operation in contact_bypasses:
+        print(f"NEW_VIOLATION  {file}:{line}  direct Contact {operation} bypass")
 
     found_keys = {(f, l, m) for f, l, m in found}
     stable_legacy_paths = {
@@ -354,10 +442,11 @@ def main() -> int:
     print("-" * 60)
     sanctioned_count = len(_SANCTIONED_CALL_SITES)
     print(f"SANCTIONED      {sanctioned_count} exact call-site exception(s)")
+    new_count = len(groups["new"]) + len(contact_bypasses)
     print(f"Summary: legacy={len(groups['legacy'])} sanctioned={sanctioned_count} "
           f"cross_track={len(groups['cross_track'])} accepted={len(groups['accepted'])} "
-          f"new={len(groups['new'])} resolved={len(missing)}")
-    if groups["new"]:
+          f"new={new_count} resolved={len(missing)}")
+    if groups["new"] or contact_bypasses:
         print("FAIL: new dispatcher/tool bypass findings require remediation or explicit authority review.", file=sys.stderr)
         return 1
     return 0
