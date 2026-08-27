@@ -2580,6 +2580,71 @@ def _handle_approval_callback(cq) -> None:
         raise
 
 
+def _handle_lead_draft_callback(cq) -> None:
+    """Resolve a Telegram Lead Draft button through ActionGateway."""
+    action, token = (cq.data or "").split(":", 1)
+    chat_id = str(cq.message.chat.id)
+    approver = resolve_identity("telegram", str(cq.from_user.id))
+    if not (approver.is_owner or approver.can("actions.approve")):
+        bot.answer_callback_query(cq.id, "⛔ אין לך הרשאה לאשר פעולה זו")
+        return
+
+    from session_store import lead_sessions
+    draft = lead_sessions.get_lead_draft(chat_id)
+    if not draft or draft.get("mode") != "review" or draft.get("callback_token") != token:
+        bot.answer_callback_query(cq.id, "ℹ️ הטיוטה כבר אינה זמינה, ולכן לא בוצעה פעולה.")
+        try:
+            bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        return
+
+    if action == "lead_draft_cancel":
+        lead_sessions.clear_lead_draft(chat_id)
+        bot.answer_callback_query(cq.id, "🚫 בוטל")
+        try:
+            bot.edit_message_text("ביטלתי את יצירת הליד.", cq.message.chat.id, cq.message.message_id)
+        except Exception:
+            bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id, reply_markup=None)
+        return
+
+    from core.lead_candidate_handler import _propose_lead_write
+    proposal = _propose_lead_write(
+        approver, draft["name"], draft["phone"], draft.get("note", ""),
+        "telegram", draft.get("domain", "general"), origin_chat_id=chat_id,
+    )
+    if not proposal.ok or not proposal.contract_id:
+        bot.answer_callback_query(cq.id, proposal.user_message or "⚠️ הפעולה לא אושרה")
+        return
+
+    from core.action_gateway import action_gateway
+    lifecycle = action_gateway.approve_with_lifecycle_result(
+        proposal.contract_id,
+        approver=approver.memory_key,
+        approver_role=approver.role,
+    )
+    if lifecycle.canonical_state in {"executed", "completed", "failed", "rejected"}:
+        lead_sessions.clear_lead_draft(chat_id)
+    bot.answer_callback_query(cq.id, lifecycle.safe_user_message)
+    try:
+        bot.edit_message_text(lifecycle.safe_user_message, cq.message.chat.id, cq.message.message_id)
+    except Exception:
+        bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id, reply_markup=None)
+
+
+def _lead_draft_keyboard(token: str):
+    kb = telebot.types.InlineKeyboardMarkup()
+    kb.add(
+        telebot.types.InlineKeyboardButton(
+            "✅ אשר", callback_data=f"lead_draft_approve:{token}"
+        ),
+        telebot.types.InlineKeyboardButton(
+            "❌ בטל", callback_data=f"lead_draft_cancel:{token}"
+        ),
+    )
+    return kb
+
+
 def _notify_stale_or_resolved_callback(
     cq, *, notify_chat_id: str, label: str, state_text: str,
 ) -> None:
@@ -4628,6 +4693,11 @@ def run_agent(
                 ic=route.capture_ic, intent=route.intent, session=_session_snapshot,
             )
             if _lch_reply is not None:
+                if _out_meta is not None and channel == "telegram":
+                    from session_store import lead_sessions as _draft_sessions
+                    _draft = _draft_sessions.get_lead_draft(chat_id)
+                    if _draft and _draft.get("mode") == "review":
+                        _out_meta["lead_draft_callback_token"] = _draft.get("callback_token", "")
                 # BUG-SB-01: COG sees "lead_candidate_handler" as a different speaker.
                 # LCH is a deterministic Gateway path — mark as "action_gateway"
                 # so the Single Speaker guard passes, same as other GatewayReply paths.
@@ -6146,7 +6216,9 @@ def _apply_ingress_context_gate(
         # context_interrupted here previously forced an unnecessary
         # reconfirmation prompt on the very contract (or an unrelated
         # sibling) the button press was itself trying to resolve.
-        if event.kind == "callback" and (event.data or "").startswith(("approve:", "reject:")):
+        if event.kind == "callback" and (event.data or "").startswith(
+            ("approve:", "reject:", "lead_draft_approve:", "lead_draft_cancel:"),
+        ):
             return
         _gw.mark_context_interrupted(user)
     except Exception:
@@ -6214,6 +6286,8 @@ def _webhook_telegram_impl():
         try:
             if data.startswith(("approve:", "reject:")):
                 _handle_approval_callback(call)
+            elif data.startswith(("lead_draft_approve:", "lead_draft_cancel:")):
+                _handle_lead_draft_callback(call)
             else:
                 # העבר ל-pyTeleBot handlers (upd_domain:, upd_type:, weekly summary וכו')
                 bot.process_new_updates([update])
@@ -6373,6 +6447,9 @@ def _webhook_telegram_impl():
                     {"parse_mode": "Markdown", "disable_web_page_preview": True}
                     if _business_tool_reply else {}
                 )
+                _draft_token = _reply_meta.get("lead_draft_callback_token")
+                if _draft_token:
+                    _send_kwargs["reply_markup"] = _lead_draft_keyboard(_draft_token)
                 bot.send_message(reply_chat_id, reply, **_send_kwargs)
             except Exception as e:
                 logger.error(f"[Telegram] send error: {e}")
