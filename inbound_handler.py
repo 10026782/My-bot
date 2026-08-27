@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 import logging
-import re
 from datetime import datetime, timezone
 
 from airtable_schema import LeadFields, Tables, InteractionLogFields
@@ -61,11 +60,14 @@ def _find_by_sender(sender_id: str) -> str | None:
     if not sender_id:
         return None
     try:
-        get = _airtable_get()
+        get_records = _airtable_get(structured=True)
         safe_sender_id = escape_formula_value(sender_id)
-        raw = get(Tables.LEADS, f"{{{LeadFields.SENDER_ID}}}='{safe_sender_id}'")
-        m = re.search(r"rec\w+", raw or "")
-        return m.group(0) if m else None
+        records = get_records(
+            Tables.LEADS, f"{{{LeadFields.SENDER_ID}}}='{safe_sender_id}'", max_records=1
+        )
+        if not records or not isinstance(records[0], dict):
+            return None
+        return records[0].get("id") or None
     except Exception as e:
         logger.warning("[InboundHandler] find_by_sender error: %s", e)
         return None

@@ -143,10 +143,20 @@ gate described in the readiness report.
 
 ### F52-G3-S4 — Structured inbound duplicate lookup migration
 
-- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Status: CLOSED — STATIC VERIFIED.
 - Consumer: `inbound_handler.py::_find_by_external_id`.
 - Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
 - Structured authority: `airtable_get_records()` record `id`; duplicate decision uses the returned identity.
-- PR / commit: pending.
+- PR / commit: PR #1055, merge commit `bb782da`; verified origin/main `bb782da`.
 - Residual G3 consumers: `inbound_handler.py::_find_by_sender`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
+- Runtime NOT REQUIRED FOR STATIC CLOSURE.
+
+### F52-G3-S5 — Structured inbound sender lookup migration
+
+- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Consumer: `inbound_handler.py::_find_by_sender`.
+- Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
+- Structured authority: `airtable_get_records()` record `id`; sender-match decision uses the returned identity.
+- PR / commit: pending.
+- Residual G3 consumers: `core/lead_buffer.py`, plus other audit-listed legacy paths.
 - Runtime NOT REQUIRED FOR STATIC CLOSURE.
