@@ -203,6 +203,7 @@
         "tools/dispatcher.py",
         "tools/schemas.py",
         "tools/airtable_read_adapter.py",
+        "tools/ci_change_classifier.py",
         "core/anti_hallucination.py",
         "core/dispatcher_outcome.py",
         "core/last_tool_result_shadow.py"
@@ -264,6 +265,7 @@
       "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
       "confidence": 0.94,
       "notes": [
+        "CI-only path classifier used by .github/workflows/ci.yml; it is not imported by app.py, tools/dispatcher.py, or any production execution path and does not define tool identity or authority.",
         "Permission, availability, dispatch, approval, and evidence validation are separate boundaries.",
         "Unknown or ambiguous tool identity must fail closed.",
         "A display string is never execution evidence."
