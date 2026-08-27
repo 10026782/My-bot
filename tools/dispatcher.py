@@ -102,8 +102,6 @@ def _check_duplicate(real_table: str, field: str, value: str) -> dict | None:
 
 def _validate_execution_proof(name: str, inputs: dict, identity, execution_context: dict | None, trusted_source: str | None) -> str | None:
     """Require the ActionGateway's canonical, action-bound proof for writes."""
-    if inputs.get("table") == "Leads" and trusted_source == "lead_capture":
-        return None
     if not isinstance(execution_context, dict):
         if inputs.get("table") == "Leads" and trusted_source != "lead_capture":
             return "❌ עדכון ליד קיים דרך הצ׳אט חסום כרגע. לעדכון ליד קיים יש להשתמש במסך הלידים באפליקציה."
