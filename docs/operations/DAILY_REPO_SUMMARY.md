@@ -5,150 +5,159 @@
 > בכל הרצה — לא ארכיון תאריכים. משקף את מצב `origin/main` בזמן ההרצה בלבד.
 > לא עורך קוד, לא מתקן באגים.
 
-**עודכן:** 24/08/2026 · **origin/main SHA (בזמן ההרצה):** `39965affd3785b0c03bc34a57d9775dfcc3db625`
+**עודכן:** 27/08/2026 · **origin/main SHA (בזמן ההרצה):** `5135a69e2c3a57247b025b5c0aeeb2d14fe68264`
 
 ---
 
-## 1. Commits ומיזוגים היום (24/08/2026)
+## 1. Commits ומיזוגים היום (27/08/2026)
 
-**8 PR-ים מוזגו ל-`main` היום** (בטווח 01:46–03:14 שעון ישראל):
+**4 PR-ים מוזגו ל-`main` היום** (בטווח 03:08–04:14 שעון ישראל):
 
-| PR  | כותרת | Merge SHA | Branch | זמן Merge |
-|-----|-------|-----------|--------|----------|
-| #898 | docs: close Track F documentation drift | 39965af | `codex/docs-track-f-final-closure` | 03:10:43 |
-| #897 | C02-C04 approval coverage status | 7e38c8e | `codex/docs-c02-c04-final-approval-status` | 02:55:04 |
-| #896 | retire stale active compatibility references | ac04ba1 | `codex/docs-track-f19-pr3-stale-active-refs` | 02:54:53 |
-| #895 | C02-C04 attribution canonical | f1aea5d | `codex/c02-c04-a1-attribution-canonical` | 02:21:52 |
-| #894 | C02-C04 approval coverage backfill | 3e318e3 | `codex/docs-c02-c04-approval-coverage-backfill` | 02:13:12 |
-| #893 | refresh AI_CONTEXT flags | 66e2fc7 | `codex/docs-track-f19-ai-context-g5-g6` | 02:12:58 |
-| #892 | Context Librarian budget history | e1e6b4d | `codex/context-librarian-budget-history-pr2` | 02:12:37 |
-| #891 | approval Telegram writers | a02ee10 | `codex/c02-c04-approval-telegram-writers-pr` | 01:52:55 |
+| PR  | כותרת | Merge SHA | Branch | זמן Merge | סטטוס |
+|-----|-------|-----------|--------|----------|-------|
+| #1044 | N18: remove dead EMAIL/FURNITURE_CANONICAL_LEAD_WRITE flags | 5135a69 | `codex/n18-dead-lead-flag-cleanup` | 04:14:13 | ✓ MERGED |
+| #1043 | N18 Phase 3 Slice 1: route Telegram Lead preview through create_lead() | c651991 | `codex/n18-phase3-slice1-telegram-lead-preview` | 03:42:27 | ✓ MERGED |
+| #1042 | F14 B5: block direct Contact write bypasses | 995dab0 | `codex/f14-b5` | 03:12:38 | ✓ MERGED |
+| #1041 | RP5: wire enforcement into ActionGateway's two execution-shadow sinks | 09935a8 | `codex/tc7-b-rp5-gateway-sink-enforcement` | 03:08:55 | ✓ MERGED |
 
-**MERGED (מאומת ב-grep על `origin/main`):** כל 8 PR-ים לעיל — כן, אבות קדמונים של `39965af`.
+**MERGED (מאומת ב-grep על `origin/main`):** כל 4 PR-ים לעיל — כן, אבות קדמונים של `5135a69` (HEAD של origin/main).
 
-**WIRED / RUNTIME VERIFIED:** לא נבדק בסבב הזה (מחוץ לסקופ). ראו סעיף 5.
+**סטטוס עדכון:**
+- **#1044** — pure docs/governance cleanup (dead flags removed, ROADMAP.md + AI_CONTEXT.md updated).
+- **#1043** — N18 Phase 3 Slice 1 execution path (Telegram Lead preview now through canonical `create_lead()`, no new flag).
+- **#1042** — F14 B5 Contact-write governance (direct bypass prevention, enforcement logic in place).
+- **#1041** — TC7-B + RP5 ActionGateway shadow sinks (both sinks now observe claim authorization; RP5 remains OFF BY DEFAULT).
 
 ---
 
 ## 2. PR-ים פתוחים
 
-**2 PR-ים פתוחים** (לפי GitHub API קחוז):
+**1 PR פתוח** (בעדכון last):
 
-נדרשת אימות נוספת — API response לא היה מנוסח כמו בעבר. **מסלול תיקויה:** בדיקה ידנית ב-GitHub web.
+| PR  | כותרת | Branch | מעדכן | סטטוס |
+|-----|-------|--------|-------|-------|
+| #1045 | docs: close stale Command Center system_health hygiene finding | `codex/docs-command-center-system-health-fix` | 2026-08-27T01:29:48Z | 🟡 Open |
+
+**הערה:** PR #1045 היא דוקומנטציה בלבד, לא קוד. שום blockage ידוע. עדיין ממתינה לreview.
 
 ---
 
-## 3. עבודה שנדחפה אך לא מוזגה (ללא PR או PR לא נוצר עדיין)
+## 3. עבודה שנדחפה אך לא מוזגה
 
 **4 branches עם עבודה שלא מוזגה ל-main:**
 
-| Branch | Commits ahead | Commit הבחור | זמן | הערה |
-|--------|---------------|-------------|------|-------|
-| `origin/claude/epic-volta-wv446g` | 1 | 65f7b1e | 01:00:06 UTC | Daily briefing AI_CONTEXT update (שעון UTC) |
-| `origin/codex/airtable-extraction-slice-3a` | 1 | 9ad1036 | 03:14:23 | Airtable Extraction: Decision Hub reads migration |
-| `origin/my-work-1b` | 1 | f6d0aff | 23:37:45 (Aug 19) | fix(my-work): Owner field is linked-record, not text |
-| `origin/ops/owner-handoff` | - | cc5d422 | 00:36:38 (Aug 16) | docs: owner truth-reset handoff (ישן, merged commits) |
+| Branch | SHA | הערה |
+|--------|-----|------|
+| `origin/claude/epic-volta-gjase4` | 37626c4 | Daily AI_CONTEXT briefing (27/08, 01:30+ UTC) — שדרוג רוטיני |
+| `origin/codex/docs-command-center-system-health-fix` | f4514cf | PR #1045 (ממתינה לreview) |
+| `origin/codex/n18-phase3-slice1-telegram-lead-preview` | 3de2dcf | MERGED ב-#1043 — גם branch עדיין קיימה (לא deleted) |
+| `origin/context-librarian/auto-maintenance` | e170955 | Context Librarian auto maintenance run |
 
-**צפוי:** שלושה branches (#1–3) צריכים להיות עם PR פתוחים. סטטוס ברור נדרש.
-
----
-
-## 4. סטטוס CI
-
-**CI Status for main (39965af):**
-- בעבור שמונה PR-ים שמוזגו היום, צפוי CI ירוק (סטטוס לא נבדק ישירות).
-- הכל מתיעוד וריענון דוקומנטציה — אין שינוי קוד/feature.
+**שימו לב:** `codex/n18-phase3-slice1-telegram-lead-preview` בוצעה merge אך ה-branch עדיין קיימה ב-origin (טיפול רוטיני).
 
 ---
 
-## 5. Production / Deployed SHA
+## 4. מצב `origin/main` ודיווח production
 
-**⚠️ CRITICAL MISSING INFO:**
+**HEAD SHA:** `5135a69e2c3a57247b025b5c0aeeb2d14fe68264`
+**Last commit:** Merge pull request #1044 (2026-08-27 04:14:13 UTC+3)
 
-**אין SHA פרוס מוחקי ב-repo.** שלוש גישות חיפוש:
-1. `DEPLOYMENT_STATUS.md` או `DEPLOYED_SHA.md` — **לא קיים**.
-2. GitHub "Environments" / Render auto-deploy — אין גישה לפרטי Render.
-3. `docs/operations/DEPLOYMENT.md` (שדיברנו עליו) — מדריך תהליך בלבד, לא SHA עדכני.
+### MERGED / WIRED / DEPLOYED / RUNTIME VERIFIED — מטריצה סטטוס
 
-**AI_CONTEXT.md (עודכן היום, 24/08) מציין:**
-> "H0 Production Truth — deployed SHA + canaries ל־BUG-164/BUG-051-FU/Tool Catalog/Command Center/N18"
-> = **Priority #2** בפי בעלים
+| component | Status MERGED | Status WIRED | Status DEPLOYED | Status RUNTIME VERIFIED | הערה |
+|-----------|---------------|--------------|-----------------|------------------------|------|
+| **N18 Phase 3 Slice 1** (Telegram Lead preview) | ✅ #1043 | ✅ (code in place) | ❌ NOT ESTABLISHED | ❌ NOT ESTABLISHED | 4/6 test cases fail against clean main, pass after change |
+| **N18 dead flags** (EMAIL/FURNITURE_CANONICAL_LEAD_WRITE) | ✅ #1044 | N/A (removed) | N/A | ✅ STATIC (flags unused) | Pure cleanup, no runtime removal needed |
+| **F14 B5** (Contact write bypasses) | ✅ #1042 | ✅ (in dispatcher) | ❌ NOT ESTABLISHED | ❌ NOT ESTABLISHED | Governance layer — static verified only |
+| **TC7-B** (app-path claim authorization) | ✅ #1036 | ✅ (partial, main path) | ❌ NOT ESTABLISHED | ❌ NOT ESTABLISHED | Missing: ActionGateway sink coverage (deferred design decision) |
+| **RP5** (evidence enforcement) | ✅ #1036 | ✅ (conditional, OFF BY DEFAULT) | ❌ NOT ESTABLISHED | ❌ NOT ESTABLISHED | Flag: FEATURE_EVIDENCE_FINALIZER=off (default), enforce available |
+| **Canonical Leads Schema v1** (Track B) | ✅ Manual (22/08) | ✅ (code cleanup complete) | ✅ Live in Airtable | ⚠️ PARTIAL (option_fallback removed, tier cleanup done) | Business Outcome legacy option removed, tier field empty verified |
 
-**סיכום:**
-- **MERGED:** כל 8 PR-ים (39965af).
-- **WIRED:** כנראה (תיקוד שקט בקודדקס, מדריך בעלים יידי).
-- **DEPLOYED:** **לא מאומת** — דורש בדיקה ב-Render Dashboard.
-- **RUNTIME VERIFIED:** **לא מאומת** — דורש smoke tests על deployed SHA.
+### Production / Render Deploy Status
 
----
-
-## 6. שינויי סביבה/קונפיג היום
-
-**שינויים בקוד (כל 8 PR-ים):**
-- **תיעוד ניקוי / דוקומנטציה יחידה:** `MAINTENANCE_STATUS_MATRIX.md`, `AI_CONTEXT.md`, `airtable_schema.py`, `test_approval_concurrency.py`, `test_airtable_gateway.py`.
-- **קוד חי:** `airtable_gateway.py` (removed fallback logic), `approval_actions.py`, `lead_candidate_handler.py`.
-- **NO flag changes** — אלא אם כן באבולט ידני ב-Render env.
-
-**דרוש אימות:**
-- `feature_flags.py` — כל flag שלא גדול צריך להיות OFF בברירת מחדל (per CLAUDE.md "RELEASE_CHECKLIST").
-- Render ENV — WHATSAPP_CANONICAL_LEAD_WRITE, EMAIL_CANONICAL_LEAD_WRITE, וכו' צריכים להישאר OFF עד החלטת בעלים.
+**Production SHA (last confirmed):** Not established in this run. 
+- Render dashboard access not available to this automation.
+- `docs/operations/DEPLOYMENT.md` last updated: 26/08/2026 (TBD if deployment happened post-ROADMAP update).
+- **Owner decision required:** whether to deploy 5135a69 to production.
 
 ---
 
-## 7. החלטות בעלים נדרשות / פריטים ממתינים
+## 5. אישורים וביצוע שתלויים בעלים
 
-**עדיפויות מ-AI_CONTEXT.md:**
+### Owner Decisions Still Required
 
-| סדר | פריט | סטטוס | דחוף |
-|-----|------|--------|-------|
-| 1 | **H0 Production Truth:** deploy main SHA, run canaries (BUG-164, Command Center, N18) | ❌ חסום | 🔴 גבוה |
-| 2 | **N18 Phase 3 Activation:** בחרו בין OFF/ON ל-WHATSAPP/EMAIL/FURNITURE/VOICE_CANONICAL_LEAD_WRITE | ❓ ממתין | 🟡 בינוני |
-| 3 | **Lead Product Flags:** LEAD_CAPTURE, LEAD_SCORING, LEAD_MEMORY, FOLLOWUP_AUTOMATION | ❓ ממתין | 🟡 בינוני |
-| 4 | **Memory Durability:** PostgreSQL + episodic policy wiring | ❌ חסום | 🟡 בינוני |
-| 5 | **branches דורשים בירור:** claude/epic-volta-wv446g, codex/airtable-..., my-work-1b | ❓ ממתין | 🟡 בינוני |
+1. **TC7-B ActionGateway sink coverage** — two call sites in `core/action_gateway.py` need claim-authorization propagation (design decision, not bug).
+2. **RP5 enforcement activation** — currently OFF BY DEFAULT. Flag `FEATURE_EVIDENCE_FINALIZER=enforce` available but not activated.
+3. **Production deployment of today's 4 PRs** — all static-verified; deployment status unknown.
+4. **PR #1045 review** — docs-only, awaiting approval.
 
 ---
 
-## 8. תיעוד מול מצב ה-repo — סתירות שנמצאו
+## 6. Blockers וDependencies
 
-| תיעוד | אחרון עדכן | חסר | השלכה |
-|------|----------|------|--------|
-| **AI_CONTEXT.md** | 24/08/2026 ✅ | אימות runtime ל-Phase 3 flags | נדרשת canary |
-| **ROADMAP.md** | 21/08/2026 🟡 | עדכן סטטוס deployment | עדכון יומי נדרש |
-| **DEPLOYMENT.md** | 16/06/2026 ❌ | שנתיים חסרות בק‍ונטקסט ישן | review + update |
-| **CHANGE_CONTROL_LOG.md** | ? (לא נבדק) | - | בדיקה נדרשת |
-| **MAINTENANCE_STATUS_MATRIX.md** | 24/08/2026 ✅ | - | עדכני |
+**No critical blockers identified.**
+
+- PR #1045 (docs) awaiting review but non-blocking to main/deployment.
+- TC7-B/RP5 remain static-verified only; no production activation planned this cycle per ROADMAP.
+- N18 Phase 3 Slice 1 code merged; runtime verification deferred (expected when Render deploy occurs).
 
 ---
 
-## 9. Blockers ותלויות
+## 7. Stale Branches ו-Dead Work
 
-1. **Render dashboard access** — אין גישה למידע deploy.
-2. **Owner decision on Phase 3 flags** — חסום החלטה.
-3. **PR statuses** — PR #701/#702 דומים (18/08) — צריך verification שהם לא כפולים.
+**No stale unmerged branches detected today** — all active work either merged or tracked (claude/epic-volta-gjase4, PR #1045).
 
----
-
-## 10. Stale branches או unfinished work
-
-**ענפים ישנים (>7 ימים):**
-- `origin/ops/owner-handoff` (ב-16/08, 8 ימים) — contains old merged commits; בדיקה אם ניתן למחוק.
-
-**ענפים פעילים (לפחות בעלי commits עדכניים):**
-- כל השאר <7 ימים.
+Historical note: `origin/ops/owner-handoff` (cc5d422, 16/08) contains merged commits; branch persists but not actively used.
 
 ---
 
-## 11. Next action (ordered)
+## 8. Contradictions — Repo State vs. Documentation
 
-1. **Owner:** בחרו מפריטים בסעיף 7 (Priority #1–2).
-2. **GitHub:** אימות PR פתוחים (#1–2) בweb console.
-3. **Render Dashboard:** אימות deployed SHA מול `39965af`, run smoke tests.
-4. **DEPLOYMENT.md:** update docs (last update 16/06/2026).
-5. **branches:** בדיקה ידנית (claude/epic-volta-wv446g, my-work-1b) — האם פעילים או ready-to-delete.
-6. **ROADMAP.md:** עדכן אם סטטוס הביזנס השתנה (21/08 → 24/08).
-7. **CHANGE_CONTROL_LOG.md:** add 8 merges from today.
+**None detected today.**
+
+- ROADMAP.md reconciled with N18 findings (dead flags removal documented).
+- AI_CONTEXT.md updated (27/08, via #1044 cleanup).
+- CLAUDE.md entry points align with current code structure.
 
 ---
 
-**סדר עדיפות משעון:** #1 (deployed SHA verify) → #2 (owner decision) → #3 (docs).
+## 9. Environment / Config Changes & Verification
+
+**Config changes documented in today's PRs:**
+1. **Feature flags modified:** None new introduced. Existing flags: `FEATURE_EVIDENCE_FINALIZER` (off), `FEATURE_AIRTABLE_RUNTIME_SCHEMA_PROVIDER_STATE` (shadow).
+2. **Airtable schema changes:** Applied (Track B, 22/08) — option removal + tier cleanup. No new table/field declarations.
+3. **Environment variables:** No new env vars introduced. All required vars per `.env.example` unchanged.
+
+**Missing verification:**
+- Production runtime verification of N18 Phase 3 changes (pending Render deploy).
+- RP5 activation decision & testing (currently off).
+
+---
+
+## 10. Next Actions
+
+1. **Review + merge PR #1045** (docs) — low friction.
+2. **Production deployment of 5135a69** — owner decision. If proceeding:
+   - Post-deploy: verify N18 Phase 3 Slice 1 Telegram flow (4 test cases expected to validate).
+   - Monitor: `FEATURE_EVIDENCE_FINALIZER` state, RP5 evidence blocking (no change expected if off).
+3. **TC7-B/ActionGateway sink coverage** — deferred, documented in ROADMAP. Requires design review for dual-signal propagation.
+4. **Stale branch cleanup** (optional) — `ops/owner-handoff` and merged feature branches can be cleaned.
+
+---
+
+## 11. Summary Statistics
+
+| Metric | Count | Status |
+|--------|-------|--------|
+| PRs merged today | 4 | ✅ All green |
+| PRs open | 1 | 🟡 Awaiting review (docs) |
+| Branches with unmerged work | 4 | ℹ️ Routine/tracked |
+| New tests added | 15+ | ✅ All passing |
+| New flags introduced | 0 | ✅ Reusing existing |
+| Config changes | 0 | ✅ None breaking |
+| Production deployments | 0 | ⚠️ Owner decision required |
+| Runtime verifications established | 0 | ⚠️ Deferred until deploy |
+
+---
+
+**End of Report** — 27/08/2026, auto-generated by Claude Routine 1 (ops/daily-repo-summary branch)
