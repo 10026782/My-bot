@@ -108,7 +108,7 @@ gate described in the readiness report.
 | F52 overall | PARTIALLY CLOSED | G1/G4/G5 remain open current gaps |
 | F52-G1 | OPEN — CURRENT GAP | Dispatcher-wide execution proof remains out of scope |
 | F52-G2 | CLOSED — STATIC VERIFIED | Commit `f17bfe9`; verified `origin/main` `d2ec703`; runtime NOT ESTABLISHED |
-| F52-G3 | PARTIALLY CLOSED | F52-G3-S1 closes the live LeadMemory structured-result slice; other string consumers remain |
+| F52-G3 | PARTIALLY CLOSED | F52-G3-S1 and F52-G3-S2 close the LeadMemory and attribution slices; other string consumers remain |
 | F52-G4 | OPEN — CURRENT GAP | Scheduler/background normalization remains out of scope |
 | F52-G5 | OPEN — CURRENT GAP | Durable generic evidence ledger remains out of scope |
 
@@ -120,3 +120,12 @@ gate described in the readiness report.
 - Structured authority: `airtable_update()`'s `dict["ok"]` and `airtable_get_records()`'s record `id`.
 - PR / commit: PR #1051, commit `2b58d16`; runtime NOT REQUIRED FOR STATIC CLOSURE.
 - Residual G3 consumers: `ad_attribution.py`, `inbound_handler.py`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
+
+### F52-G3-S2 — Structured attribution result migration
+
+- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Consumer: `ad_attribution.py::record_lead_source`.
+- Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
+- Structured authority: `airtable_get_records()` record `id`; write outcome remains `LeadCreateResult.ok`.
+- Remaining G3 consumers: `ad_attribution.py::mark_converted`, `inbound_handler.py`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
+- Runtime NOT REQUIRED FOR STATIC CLOSURE.

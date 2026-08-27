@@ -109,13 +109,13 @@ _attribution_identity = Identity(
 
 _utm = UTMParams(source="meta", medium="cpc", campaign="apt_tlv")
 
-with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD1] memory_key: x"), \
+with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recLEAD1", "fields": {}}]), \
      patch("core.lead_service.update_lead_fields", return_value=LeadCreateResult(
          ok=True, action="updated", record_id="recLEAD1")):
     ok = record_lead_source("boss_hq:test", _utm, identity=_attribution_identity)
     chk("record_lead_source: ok=True → returns True", ok is True)
 
-with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD1] memory_key: x"), \
+with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recLEAD1", "fields": {}}]), \
      patch("core.lead_service.update_lead_fields", return_value=LeadCreateResult(
          ok=False, action="write_failed", record_id="recLEAD1")):
     ok = record_lead_source("boss_hq:test", _utm, identity=_attribution_identity)
