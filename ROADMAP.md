@@ -2256,8 +2256,9 @@ agent: `last_tool_result` נשמר ב-session אחרי כל tool dispatch אמי
 מה: פונקציה יחידה ב-`crm.py` — בודקת קיום איש קשר לפי טלפון לפני כל כתיבה.
 סיבה: התכונה "חפש לפי טלפון" נדרשת בשלושה מקומות: import ידני, `crm_add_contact`, המרת ליד→contact (עתידי). ללא gate — כפילויות בלתי נמנעות.
 ממשק: `find_or_create_contact(phone, name, **fields) → ContactResult` עם `created | existing | ambiguous | invalid | lookup_error`.
-F14-A מוזג ב-PR #568. F14-B1 מעביר את `crm_add_contact()` ואת `lead_conversion.py::convert_lead_to_contact()` דרך אותו gate; `ambiguous`, `invalid` ו-`lookup_error` נעצרים fail-closed.
-קבצים: crm.py, lead_conversion.py
+F14-A מוזג ב-PR #568. F14-B1 מוזג ב-PR #570. F14-B2 מוזג ב-PR #577 (`cc67f9f`) — שני callers נוספים עוברים דרך ה-gate. F14-B3/B4/B5 מוזגו ב-PR #1042 (`82681c8`, `10dee68`, `1e4a9d1`, `ed24a8a`): Contact create/update paths שנבדקו עוברים דרך גבולות canonical, ו-CI guard מונע bypass. `ambiguous`, `invalid` ו-`lookup_error` נעצרים fail-closed.
+מצב נוכחי: **MERGED / STATIC VERIFIED** עבור ה-callers וה-guards המפורטים לעיל. לא נטען שכל Contact write path קיים עבר audit מלא, ולא נטען runtime verification. ה-centralized dispatcher/ActionGateway-wide gate נשאר עבודה נפרדת.
+קבצים: crm.py, lead_conversion.py, tools/dispatcher.py, tools/approval_actions.py, tools/audit_dispatcher_bypass.py
 
 ### F15 — crm.py → airtable_gateway (write path migration)
 מה: החלפת `_post` / `_patch` הישירים ב-`crm.py` בקריאות ל-`airtable_gateway.upsert()`.
