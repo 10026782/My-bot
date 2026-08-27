@@ -80,7 +80,7 @@ print("\n── ad_attribution.py::mark_converted ──")
 
 import ad_attribution
 
-with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD2] memory_key: x"), \
+with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recLEAD2", "fields": {}}]), \
      patch("tools.airtable_tools.airtable_update") as mock_update:
     mock_update.return_value = {"ok": True, "external_id": "recLEAD2"}
 
@@ -106,7 +106,7 @@ with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD2] mem
         written_fields.get("deal_value") == 5000,
     )
 
-with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD2] memory_key: x"), \
+with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recLEAD2", "fields": {}}]), \
      patch("tools.airtable_tools.airtable_update", return_value={"ok": False}):
     ok = ad_attribution.mark_converted("boss_hq:test2", 5000)
     chk("mark_converted: ok=False on gateway failure → returns False", ok is False)
