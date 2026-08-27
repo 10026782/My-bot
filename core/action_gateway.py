@@ -2652,6 +2652,30 @@ class ActionGateway:
             )
             return False
 
+    def supersede_if_pending(self, contract_id: str) -> bool:
+        """Atomically make a pending contract non-executable."""
+        try:
+            repository = getattr(self._ledger, "_repository", None)
+            if repository is not None and getattr(
+                    repository, "supports_atomic_conditional_transition", False
+            ) is not True:
+                contract = self._ledger.find_by_id(contract_id)
+                if contract is None or contract.status != "pending":
+                    return False
+                # Durable repositories use the contract version as the CAS;
+                # this avoids the non-atomic conditional primitive explicitly
+                # rejected by ActionContractRepository.
+                return bool(self._ledger.update_status(contract_id, "superseded"))
+            return bool(self._ledger.update_status(
+                contract_id, "superseded", require_status="pending",
+            ))
+        except Exception as exc:
+            logger.warning(
+                "[ActionGateway] supersede_if_pending: transition failed contract=%s error=%s",
+                contract_id, exc,
+            )
+            return False
+
     def route_cancellation_word(
         self, canonical_user_id: str, *,
         live_contracts: list["ActionContract"] | None = None,

@@ -258,6 +258,27 @@ _pending_voice_edits: dict[str, dict] = {}
 _voice_callbacks_registered = False
 
 
+def _supersede_voice_contract(item: dict) -> bool:
+    """Make the old media-save authorization non-executable before editing."""
+    payload = item.get("payload", {})
+    if payload.get("tool_name") != "media_save_to_memory":
+        return True
+    from core.action_gateway import action_gateway as _gw
+    contract = _gw.find_contract(payload.get("contract_id", ""))
+    if contract is None:
+        inputs = payload.get("tool_inputs", {})
+        user_id = payload.get("canonical_user_id", "")
+        if user_id and inputs:
+            fingerprint = _gw.compute_business_fingerprint(
+                payload.get("tenant_id", "boss_hq"), user_id,
+                "media_save_to_memory", _gw.normalize_payload(inputs),
+            )
+            contract = _gw._ledger.find_by_fingerprint(fingerprint)
+    if contract is None or contract.status != "pending":
+        return True
+    return _gw.supersede_if_pending(contract.contract_id)
+
+
 def _register_voice_callbacks(bot) -> None:
     """Registers the ✏️ ערוך callback + follow-up text capture on the live bot instance.
     Idempotent — safe to call on every approval request."""
@@ -275,6 +296,10 @@ def _register_voice_callbacks(bot) -> None:
             bot.answer_callback_query(call.id, "⏰ פג תוקף — ההקלטה לא קיימת יותר.")
             return
 
+        if not _supersede_voice_contract(item):
+            bot.answer_callback_query(call.id, "⚠️ לא ניתן לעדכן את בקשת השמירה כרגע.")
+            return
+
         owner_id = str(call.from_user.id)
         # PR-0C Phase 3: fields now live under tool_inputs (see
         # _send_voice_approval_request) — not at the payload's top level.
@@ -282,6 +307,7 @@ def _register_voice_callbacks(bot) -> None:
         _pending_voice_edits[owner_id] = {
             "domain": _tool_inputs.get("domain", "general"),
             "source": _tool_inputs.get("source", "media_handler"),
+            "owner_chat_id": str(getattr(call.message.chat, "id", owner_id)),
         }
         try:
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
@@ -302,11 +328,12 @@ def _register_voice_callbacks(bot) -> None:
         state = _pending_voice_edits.pop(owner_id, None)
         if not state:
             return
-        saved = _save_transcript_to_memory(msg.text, state["domain"], state["source"])
-        bot.send_message(
-            msg.chat.id,
-            f"🧠 נשמר בזיכרון:\n{msg.text}" if saved else "❌ שמירה ל-Business Memory נכשלה",
+        result = _send_voice_approval_request(
+            msg.text, state["domain"], state["source"],
+            state["owner_chat_id"], reason="עריכת תמלול",
         )
+        if not result.startswith("📨"):
+            bot.send_message(msg.chat.id, result)
 
     _voice_callbacks_registered = True
 
@@ -340,6 +367,14 @@ def _send_voice_approval_request(
     if block_message:
         return block_message
 
+    contract = _gw._ledger.find_by_fingerprint(
+        _gw.compute_business_fingerprint(
+            getattr(identity, "tenant_id", "boss_hq"), identity.memory_key,
+            "media_save_to_memory", _gw.normalize_payload(tool_inputs),
+        )
+    )
+    contract_id = getattr(contract, "contract_id", "")
+
     action_id, _ = bus.request_approval(
         action="media_save_to_memory",
         payload={
@@ -350,6 +385,8 @@ def _send_voice_approval_request(
             "canonical_user_id": identity.memory_key,
             "user_chat_id":      owner_chat_id,
             "channel":           "telegram",
+            "tenant_id":         getattr(identity, "tenant_id", "boss_hq"),
+            "contract_id":       contract_id,
         },
         chat_id=owner_chat_id,
         label=f"🧠 שמירה ב-Business Memory ({reason}): {transcript[:60]}",
@@ -363,9 +400,12 @@ def _send_voice_approval_request(
         from app import bot
 
         _register_voice_callbacks(bot)
+        from app import _approval_callback_data
         kb = telebot.types.InlineKeyboardMarkup()
         kb.add(
-            telebot.types.InlineKeyboardButton("✅ שמור", callback_data=f"approve:{action_id}"),
+            telebot.types.InlineKeyboardButton(
+                "✅ שמור", callback_data=_approval_callback_data("approve", action_id, contract_id),
+            ),
             telebot.types.InlineKeyboardButton("✏️ ערוך", callback_data=f"voice_edit:{action_id}"),
             telebot.types.InlineKeyboardButton("❌ בטל", callback_data=f"reject:{action_id}"),
         )
