@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -21,12 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 def _write_success(result) -> bool:
-    """airtable_update returns the C53-A structured dict
-    ({ok, tool, external_id, evidence, user_message}) now, not a "✅"-prefixed
-    string — keep both shapes working."""
-    if isinstance(result, dict):
-        return bool(result.get("ok") or result.get("id") or result.get("external_id"))
-    return "✅" in (result or "")
+    """Use the Airtable write contract; display text is never execution truth."""
+    return isinstance(result, dict) and result.get("ok") is True
 
 
 SAVE_EVERY = 3
@@ -153,7 +148,7 @@ class LeadMemory:
         LeadMemory הוא post-write enrichment בלבד: אם אין record_id, מחפש
         Lead קיים לפי memory_key ומעדכן אותו; לעולם אינו יוצר Lead."""
         try:
-            from tools.airtable_tools import airtable_get, airtable_update  # type: ignore
+            from tools.airtable_tools import airtable_get_records, airtable_update  # type: ignore
             from airtable_schema import Tables, LeadFields               # type: ignore
             from tools.airtable_gateway import escape_formula_value      # type: ignore
 
@@ -170,10 +165,13 @@ class LeadMemory:
 
             if not state.record_id:
                 safe_memory_key = escape_formula_value(state.memory_key)
-                raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'")
-                m   = re.search(r'rec\w+', raw or "")
-                if m:
-                    state.record_id = m.group(0)
+                records = airtable_get_records(
+                    Tables.LEADS,
+                    f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'",
+                    max_records=1,
+                )
+                if records:
+                    state.record_id = records[0].get("id", "")
 
             if state.record_id:
                 result = airtable_update(Tables.LEADS, state.record_id, fields)

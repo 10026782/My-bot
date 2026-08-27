@@ -1,6 +1,6 @@
 # F52 — Unified Approval Runtime Migration and Implementation
 
-**Last Updated:** 2026-08-20
+**Last Updated:** 2026-08-27
 
 ## Purpose
 
@@ -100,3 +100,23 @@ while the production/main code examined was `09fc8a7e...`. The branches are
 diverged; the core Gateway/atomic modules were unchanged in the comparison,
 but production activation still requires the normal candidate-alignment/diff
 gate described in the readiness report.
+
+## F52 closure ledger
+
+| Area | Status | Evidence / residual |
+|---|---|---|
+| F52 overall | PARTIALLY CLOSED | G1/G4/G5 remain open current gaps |
+| F52-G1 | OPEN — CURRENT GAP | Dispatcher-wide execution proof remains out of scope |
+| F52-G2 | CLOSED — STATIC VERIFIED | Commit `f17bfe9`; verified `origin/main` `d2ec703`; runtime NOT ESTABLISHED |
+| F52-G3 | PARTIALLY CLOSED | F52-G3-S1 closes the live LeadMemory structured-result slice; other string consumers remain |
+| F52-G4 | OPEN — CURRENT GAP | Scheduler/background normalization remains out of scope |
+| F52-G5 | OPEN — CURRENT GAP | Durable generic evidence ledger remains out of scope |
+
+### F52-G3-S1 — LeadMemory result migration
+
+- Previous: OPEN; new: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Consumer: `lead_memory.py::LeadMemory._write` via `flush()` / `flush_all()`.
+- Legacy parsers removed: success inferred from `"✅"` and record ID extracted from rendered `airtable_get()` text.
+- Structured authority: `airtable_update()`'s `dict["ok"]` and `airtable_get_records()`'s record `id`.
+- PR / commit: to be filled after creation; runtime NOT REQUIRED FOR STATIC CLOSURE.
+- Residual G3 consumers: `ad_attribution.py`, `inbound_handler.py`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
