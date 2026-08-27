@@ -20,7 +20,7 @@ def test_write_uses_structured_record_id_not_rendered_text():
         "tools.airtable_tools.airtable_get_records",
         return_value=[{"id": "recSTRUCTURED", "fields": {}}],
     ) as get, patch(
-        "tools.airtable_tools.airtable_update",
+        "tools.airtable_gateway.airtable_patch",
         return_value={"ok": True, "external_id": "recSTRUCTURED", "user_message": "updated"},
     ) as update:
         assert memory.flush("lead-1") is True
@@ -37,6 +37,6 @@ def test_existing_successful_flush_behavior_is_preserved():
     memory = LeadMemory(save_every=1)
     memory.update("lead-1", record_id="recKNOWN", score=42)
     update = Mock(return_value={"ok": True, "user_message": "changed wording"})
-    with patch("tools.airtable_tools.airtable_update", update):
+    with patch("tools.airtable_gateway.airtable_patch", update):
         assert memory.flush("lead-1") is True
     assert memory.get("lead-1").dirty is False

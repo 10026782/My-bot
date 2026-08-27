@@ -18,7 +18,7 @@ def _flush_with_patches(*, record_id="", lookup="", **kwargs):
     added = Mock(side_effect=AssertionError("LeadMemory must not create Leads"))
     records = [{"id": lookup.split()[-1]}] if lookup.startswith("existing ") else []
     with patch("tools.airtable_tools.airtable_get_records", return_value=records) as get, \
-         patch("tools.airtable_tools.airtable_update", updated), \
+         patch("tools.airtable_gateway.airtable_patch", updated), \
          patch("tools.airtable_tools.airtable_add", added):
         result = memory.flush("tenant/lead@example.com")
     return result, memory, get, updated, added

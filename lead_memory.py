@@ -144,13 +144,15 @@ class LeadMemory:
             return list(self._store.values())
 
     def _write(self, state: LeadState) -> bool:
-        """כותב לAirtable דרך airtable_tools בלבד.
+        """כותב enrichment דרך ה-Gateway עם system principal מפורש.
         LeadMemory הוא post-write enrichment בלבד: אם אין record_id, מחפש
         Lead קיים לפי memory_key ומעדכן אותו; לעולם אינו יוצר Lead."""
         try:
-            from tools.airtable_tools import airtable_get_records, airtable_update  # type: ignore
+            from tools.airtable_tools import airtable_get_records  # type: ignore
             from airtable_schema import Tables, LeadFields               # type: ignore
             from tools.airtable_gateway import escape_formula_value      # type: ignore
+            from core.lead_service import update_lead_fields
+            from identity import Identity, Role
 
             fields = {
                 "memory_key": state.memory_key,
@@ -158,7 +160,6 @@ class LeadMemory:
                 "domain":     state.domain,
                 "channel":    state.channel,
                 "Name":       state.contact_name,
-                "updated_at": state.last_active,
             }
             if state.summary:
                 fields[LeadFields.SUMMARY] = state.summary
@@ -174,8 +175,22 @@ class LeadMemory:
                     state.record_id = records[0].get("id", "")
 
             if state.record_id:
-                result = airtable_update(Tables.LEADS, state.record_id, fields)
-                return _write_success(result)
+                tenant_id = state.memory_key.split(":", 1)[0] or "boss_hq"
+                system_identity = Identity(
+                    user_id="lead_memory_scheduler",
+                    role=Role.MANAGER,
+                    tenant_id=tenant_id,
+                    domain_id=state.domain or "general",
+                    channel="scheduler",
+                    external_id="lead_memory_scheduler",
+                )
+                result = update_lead_fields(
+                    system_identity,
+                    state.record_id,
+                    fields,
+                    source_module="lead_memory_scheduler",
+                )
+                return bool(result.ok)
 
             logger.warning(
                 "[LeadMemory] no existing Lead for memory_key=%s; skipping enrichment write",
