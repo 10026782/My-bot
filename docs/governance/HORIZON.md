@@ -42,7 +42,7 @@ This is a concise owner-facing projection of §3.5, not a second registry.
 | Decision Hub | ACTIVE | MERGED | YES | Stage 0–1 and safety fixes merged | runtime/activation evidence | verify before activation |
 | Media | ACTIVE | MERGED | YES | gateway/probe and staging artifacts merged | production activation | run deployed-SHA canary |
 | Distribution / messaging | ACTIVE | MERGED | YES | canonical Marketing mapping exists | runtime gateway canary | run Marketing-map canary |
-| Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged | endpoint and UNKNOWN-source verification | verify endpoint/source |
+| Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged; `system_health` UNKNOWN-source bug already fixed (`3e10dbc`, 18/08/2026, predates this table's prior citation of it as open) | endpoint verification (deployed-SHA) | verify endpoint |
 | Contacts Brain | PLANNED | UNKNOWN | NO | partial resolver exists | full capability and owner decision | decide whether capability is wanted |
 | Queue / worker architecture | PLANNED | PLANNED | NO | no queue implementation assumed | requirement decision | decide whether queue is required |
 | Generic Draft capability | PLANNED | PLANNED | NO | no generic capability claimed | business requirement confirmation | confirm requirement |
