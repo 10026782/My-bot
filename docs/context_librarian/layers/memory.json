@@ -52,7 +52,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-18",
-      "last_verified_commit": "37c502991276a089f7609065037b08ba90fce35f",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 1.0,
       "notes": [
         "Design authority: docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md (merged to main after this branch was cut; not added to canonical_docs here to avoid depending on a path absent from this branch's own diff).",
@@ -104,7 +104,7 @@
         }
       ],
       "valid_from": "2026-08-18",
-      "last_verified_commit": "db09fd73fc6f258153cf86fd2fff15992c5b7764",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 1.0,
       "notes": [
         "Phase 2 scope only: MemoryRetrievalRequest/MemorySnapshot contract + build_memory_snapshot() + a debug-only shadow-comparison helper.",

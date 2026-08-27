@@ -103,7 +103,7 @@
         }
       ],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "c70d7d73a3e053eb136c0de27e2a0abfbc83c69e",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 0.9,
       "notes": [
         "Stage 3A merged, PR #506 (6201e86): core/message_contract.py is the canonical MessageContract (15 states); test_message_contract.py is the foundation test authority. D-013 ratifies evidence_status as non-authoritative metadata. PR B (#509, merge 1c51570) adds the pure, unwired ApprovalLifecycleResult adapter. PR C (#511, merge f09ce28) adds the pure, unwired ActionFact adapter, delegating to the same lifecycle_state table. Neither is wired into app.py/tma_api.py/core/action_gateway.py.",
