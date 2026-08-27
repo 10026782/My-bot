@@ -118,5 +118,5 @@ gate described in the readiness report.
 - Consumer: `lead_memory.py::LeadMemory._write` via `flush()` / `flush_all()`.
 - Legacy parsers removed: success inferred from `"✅"` and record ID extracted from rendered `airtable_get()` text.
 - Structured authority: `airtable_update()`'s `dict["ok"]` and `airtable_get_records()`'s record `id`.
-- PR / commit: to be filled after creation; runtime NOT REQUIRED FOR STATIC CLOSURE.
+- PR / commit: PR #1051, commit `2b58d16`; runtime NOT REQUIRED FOR STATIC CLOSURE.
 - Residual G3 consumers: `ad_attribution.py`, `inbound_handler.py`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
