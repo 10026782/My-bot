@@ -129,7 +129,7 @@ def recover_blocked_lead_payload(identity, domain: str = "general") -> bool:
 
     try:
         from airtable_schema import LeadFields, Tables
-        from tools.airtable_tools import airtable_get
+        from tools.airtable_read_adapter import list_records
         from tools.airtable_gateway import escape_formula_value
         from core.action_result import ActionResult
 
@@ -143,15 +143,17 @@ def recover_blocked_lead_payload(identity, domain: str = "general") -> bool:
 
         # מצא את הליד שנוצר באותו request
         safe_memory_key = escape_formula_value(memory_key)
-        raw = airtable_get(Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'")
-
-        import re
-        existing_m = re.search(r"rec\w+", raw or "")
-        if not existing_m:
+        records = list_records(
+            Tables.LEADS, f"{{{LeadFields.MEMORY_KEY}}}='{safe_memory_key}'", max_records=1
+        )
+        if not records or not isinstance(records[0], dict):
             logger.info("[LeadBuffer] recovery: no lead found for %s — skipping", memory_key)
             return False
 
-        lead_id = existing_m.group(0)
+        lead_id = records[0].get("id")
+        if not lead_id:
+            logger.info("[LeadBuffer] recovery: lead identity missing for %s — skipping", memory_key)
+            return False
 
         # בדוק אילו שדות allowlisted ריקים — patch רק אותם
         _PATCHABLE = {

@@ -153,10 +153,20 @@ gate described in the readiness report.
 
 ### F52-G3-S5 — Structured inbound sender lookup migration
 
-- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Status: CLOSED — STATIC VERIFIED.
 - Consumer: `inbound_handler.py::_find_by_sender`.
 - Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
 - Structured authority: `airtable_get_records()` record `id`; sender-match decision uses the returned identity.
-- PR / commit: pending.
+- PR / commit: PR #1056, merge commit `894abbe`; verified origin/main `c040319`.
 - Residual G3 consumers: `core/lead_buffer.py`, plus other audit-listed legacy paths.
+- Runtime NOT REQUIRED FOR STATIC CLOSURE.
+
+### F52-G3-S6 — Structured LeadBuffer recovery lookup migration
+
+- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Consumer: `core/lead_buffer.py::recover_blocked_lead_payload`.
+- Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
+- Structured authority: `airtable_read_adapter.list_records()` record `id`; recovery patch target uses the returned identity.
+- PR / commit: pending.
+- Residual business-truth G3 consumers: `lead_capture.py::capture_inbound_lead` remains category A; `core/lead_buffer.py` has no further occurrence.
 - Runtime NOT REQUIRED FOR STATIC CLOSURE.
