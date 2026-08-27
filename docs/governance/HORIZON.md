@@ -1,6 +1,6 @@
 # HORIZON — Program Management Map
 
-**Role:** management-level status map across the D-Structure numbered audit
+**Role:** management-level status overview across the D-Structure numbered audit
 track program (#1–#24) referenced by `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
 "Future-audit cross-reference" table. Not an audit report — full bodies and
 evidence live in each track's own audit/remediation documents; this file
