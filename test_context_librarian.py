@@ -535,6 +535,16 @@ def test_budget_history_records_initial_snapshot_idempotently(catalog, tmp_path,
 
 def test_budget_history_records_growth_break_and_changed_paths(catalog, tmp_path, monkeypatch):
     first_report = build_budget_preflight(REPO_ROOT, catalog)
+    for row in first_report["profiles"]:
+        if row["profile"] == "cross_layer_architecture":
+            row.update(
+                usage=row["budget"] - 1,
+                headroom_tokens=1,
+                headroom_percent=round(100 / row["budget"], 2),
+                overflow_tokens=0,
+                fits=True,
+                health="CRITICAL",
+            )
     history_path = tmp_path / "budget_history.json"
     record_budget_snapshot(REPO_ROOT, first_report, history_path)
 
