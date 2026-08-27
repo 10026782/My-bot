@@ -66,6 +66,10 @@ def _dispatch_leads_update(inputs: dict, trusted_source: str | None):
         return dispatch_tool("airtable_update", inputs, _OWNER, trusted_source=trusted_source)
 
 
+def _message(result):
+    return result.get("user_message", "") if isinstance(result, dict) else result
+
+
 # ══════════════════════════════════════════════════════════════════
 # 1-2. dispatch_tool(): inputs["_source"] fully ignored; default is "agent"
 # ══════════════════════════════════════════════════════════════════
@@ -76,25 +80,25 @@ base_inputs = {"table": "Leads", "record_id": "recFAKE1234567890AB", "fields": {
 # No trusted_source passed at all -> defaults to "agent" -> blocked.
 result_default = _dispatch_leads_update(dict(base_inputs), trusted_source=None)
 chk("no trusted_source passed -> defaults to agent -> blocked",
-    "עדכון ליד קיים דרך הצ׳אט חסום" in result_default)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in _message(result_default))
 
 # Spoofed "_source" inside inputs, no trusted_source kwarg -> still blocked.
 spoofed = dict(base_inputs)
 spoofed["_source"] = "lead_capture"
 result_spoofed = _dispatch_leads_update(spoofed, trusted_source=None)
 chk("inputs['_source']='lead_capture' with no trusted_source kwarg -> STILL blocked (spoofing does not work)",
-    "עדכון ליד קיים דרך הצ׳אט חסום" in result_spoofed)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in _message(result_spoofed))
 
 # Spoofed "_source" AND an unrelated trusted_source="agent" explicitly passed
 # -> still blocked, proving the dict key is never consulted even as a fallback.
 result_spoofed2 = _dispatch_leads_update(dict(spoofed), trusted_source="agent")
 chk("inputs['_source'] spoofed + trusted_source='agent' explicit -> still blocked",
-    "עדכון ליד קיים דרך הצ׳אט חסום" in result_spoofed2)
+    "עדכון ליד קיים דרך הצ׳אט חסום" in _message(result_spoofed2))
 
 # Legitimate trusted_source kwarg (no "_source" key in inputs at all) -> passes.
 result_trusted = _dispatch_leads_update(dict(base_inputs), trusted_source="lead_capture")
 chk("trusted_source='lead_capture' kwarg (no _source key needed) -> not blocked",
-    "עדכון ליד קיים דרך הצ׳אט חסום" not in result_trusted)
+    "עדכון ליד קיים דרך הצ׳אט חסום" not in _message(result_trusted))
 
 # ══════════════════════════════════════════════════════════════════
 # 3-5. ActionGateway: trusted_source persisted on the contract, spoofing

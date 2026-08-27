@@ -4311,6 +4311,11 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
             {
                 "contract_id": contract_id,
                 "approved_by": getattr(contract, "approved_by", "") or "",
+                "tool_name": getattr(contract, "tool_name", "") or "",
+                "tenant_id": getattr(contract, "tenant_id", "") or "",
+                "canonical_user_id": getattr(contract, "canonical_user_id", "") or "",
+                "business_action_fingerprint": getattr(contract, "business_action_fingerprint", "") or "",
+                "status": getattr(contract, "status", "") or "",
                 "claim_execution_id": claim_execution_id,
                 "idempotency_key": getattr(contract, "idempotency_key", "") or "",
             }

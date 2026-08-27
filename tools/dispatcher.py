@@ -100,6 +100,40 @@ def _check_duplicate(real_table: str, field: str, value: str) -> dict | None:
     return None
 
 
+def _validate_execution_proof(name: str, inputs: dict, identity, execution_context: dict | None, trusted_source: str | None) -> str | None:
+    """Require the ActionGateway's canonical, action-bound proof for writes."""
+    if inputs.get("table") == "Leads" and trusted_source == "lead_capture":
+        return None
+    if not isinstance(execution_context, dict):
+        if inputs.get("table") == "Leads" and trusted_source != "lead_capture":
+            return "❌ עדכון ליד קיים דרך הצ׳אט חסום כרגע. לעדכון ליד קיים יש להשתמש במסך הלידים באפליקציה."
+        return "approval-sensitive execution requires an approved ActionContract."
+    if name in {"tma_write", "external_execution.submit"}:
+        return None if execution_context.get("contract_id") else "approval-sensitive execution proof is incomplete."
+    required = (
+        "contract_id", "approved_by", "tool_name", "tenant_id",
+        "canonical_user_id", "business_action_fingerprint", "status",
+    )
+    if any(not execution_context.get(key) for key in required):
+        return "approval-sensitive execution proof is incomplete."
+    if execution_context["status"] not in {"approved", "executing"}:
+        return "approval-sensitive execution proof is stale."
+    if execution_context["tool_name"] != name:
+        return "approval-sensitive execution proof targets another tool."
+    if execution_context["tenant_id"] != identity.tenant_id:
+        return "approval-sensitive execution proof targets another tenant."
+    if execution_context["canonical_user_id"] != identity.memory_key:
+        return "approval-sensitive execution proof targets another identity."
+    from core.action_gateway import ActionGateway
+    expected = ActionGateway.compute_business_fingerprint(
+        execution_context["tenant_id"], execution_context["canonical_user_id"], name,
+        ActionGateway.normalize_payload(inputs),
+    )
+    if execution_context["business_action_fingerprint"] != expected:
+        return "approval-sensitive execution proof does not match the action payload."
+    return None
+
+
 def dispatch_tool(
     name: str,
     inputs: dict,
@@ -144,7 +178,7 @@ def dispatch_tool(
         logger.warning(f"[Dispatch] denied — missing identity | tool={name}")
         return f"❌ גישה נחסמה: נדרשת זהות מאומתת להפעלת '{name}'."
     try:
-        enforce(name, identity)
+        meta = enforce(name, identity)
     except ToolDenied as e:
         logger.warning(f"[Dispatch] denied | tool={name} user={user_id} role={identity.role} | {e}")
         return f"❌ גישה נחסמה: {e}"
@@ -156,6 +190,12 @@ def dispatch_tool(
     if _ff.is_enabled("EMERGENCY_STOP_ALL") and name in _EMERGENCY_BLOCKED_TOOLS:
         logger.critical(f"[EmergencyStop] BLOCKED {name} | tenant={tenant_id} user={user_id}")
         return "🚨 מצב חירום פעיל — כל פעולות הכתיבה חסומות. פנה לבעלים."
+
+    if meta.requires_approval:
+        proof_error = _validate_execution_proof(name, inputs, identity, execution_context, trusted_source)
+        if proof_error:
+            logger.warning("[Dispatch] denied — missing/invalid execution proof | tool=%s reason=%s", name, proof_error)
+            return _tool_result(ok=False, tool=name, user_message=proof_error)
 
     validation = validate_action(name, inputs)
     if isinstance(validation, ActionBlocked):
