@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ad_attribution import UTMParams, record_lead_source
+from ad_attribution import UTMParams, mark_converted, record_lead_source
 from core.lead_service import LeadCreateResult, update_lead_fields
 from identity import Identity, Role
 
@@ -95,6 +95,31 @@ def test_missing_structured_identity_fails_closed_without_display_fallback():
         assert not record_lead_source("boss_hq:test", UTM, identity=IDENTITY)
 
     canonical.assert_not_called()
+
+
+def test_conversion_uses_structured_record_id_not_rendered_text():
+    with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recCONVERT", "fields": {}}]), \
+         patch("tools.airtable_tools.airtable_get", side_effect=AssertionError("display lookup")), \
+         patch("tools.airtable_tools.airtable_update", return_value={"ok": True}) as writer:
+        assert mark_converted("boss_hq:test", 5000)
+
+    assert writer.call_args.args[1] == "recCONVERT"
+
+
+def test_conversion_failure_stays_failure_even_with_success_looking_text():
+    with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recCONVERT", "fields": {}}]), \
+         patch("tools.airtable_tools.airtable_get", return_value="✅ המרה הושלמה | ID: recFAKE"), \
+         patch("tools.airtable_tools.airtable_update", return_value={"ok": False}):
+        assert not mark_converted("boss_hq:test", 5000)
+
+
+def test_conversion_missing_structured_identity_fails_closed_without_fallback():
+    with patch("tools.airtable_tools.airtable_get_records", return_value=[{"fields": {}}]), \
+         patch("tools.airtable_tools.airtable_get", side_effect=AssertionError("display fallback")), \
+         patch("tools.airtable_tools.airtable_update") as writer:
+        assert not mark_converted("boss_hq:test", 5000)
+
+    writer.assert_not_called()
 
 
 def test_gateway_failure_fails_closed_without_airtable_mutation():

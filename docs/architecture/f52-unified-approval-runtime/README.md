@@ -114,18 +114,29 @@ gate described in the readiness report.
 
 ### F52-G3-S1 — LeadMemory result migration
 
-- Previous: OPEN; new: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Previous: OPEN; new: CLOSED — STATIC VERIFIED.
 - Consumer: `lead_memory.py::LeadMemory._write` via `flush()` / `flush_all()`.
 - Legacy parsers removed: success inferred from `"✅"` and record ID extracted from rendered `airtable_get()` text.
 - Structured authority: `airtable_update()`'s `dict["ok"]` and `airtable_get_records()`'s record `id`.
-- PR / commit: PR #1051, commit `2b58d16`; runtime NOT REQUIRED FOR STATIC CLOSURE.
+- PR / commit: PR #1051, commit `2b58d16`; verified main `3039ba5`; runtime NOT REQUIRED FOR STATIC CLOSURE.
 - Residual G3 consumers: `ad_attribution.py`, `inbound_handler.py`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
 
 ### F52-G3-S2 — Structured attribution result migration
 
-- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Status: CLOSED — STATIC VERIFIED.
 - Consumer: `ad_attribution.py::record_lead_source`.
 - Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
 - Structured authority: `airtable_get_records()` record `id`; write outcome remains `LeadCreateResult.ok`.
+- PR / commit: PR #1052, commit `2945e44`; verified origin/main `9a1950c`.
 - Remaining G3 consumers: `ad_attribution.py::mark_converted`, `inbound_handler.py`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
+- Runtime NOT REQUIRED FOR STATIC CLOSURE.
+
+### F52-G3-S3 — Structured conversion result migration
+
+- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Consumer: `ad_attribution.py::mark_converted`.
+- Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
+- Structured authority: `airtable_get_records()` record `id`; conversion outcome remains `airtable_update()`'s `dict["ok"]`.
+- PR / commit: pending.
+- Residual G3 consumers: `inbound_handler.py`, `core/lead_buffer.py`, plus other audit-listed legacy paths.
 - Runtime NOT REQUIRED FOR STATIC CLOSURE.

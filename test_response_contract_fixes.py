@@ -121,12 +121,12 @@ with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "re
     ok = record_lead_source("boss_hq:test", _utm, identity=_attribution_identity)
     chk("record_lead_source: ok=False → returns False", ok is False)
 
-with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD2] memory_key: x"), \
+with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recLEAD2", "fields": {}}]), \
      patch("tools.airtable_tools.airtable_update", return_value=_ok_result("recLEAD2")):
     ok = mark_converted("boss_hq:test2", 5000)
     chk("mark_converted: ok=True → returns True", ok is True)
 
-with patch("tools.airtable_tools.airtable_get", return_value="• [recLEAD2] memory_key: x"), \
+with patch("tools.airtable_tools.airtable_get_records", return_value=[{"id": "recLEAD2", "fields": {}}]), \
      patch("tools.airtable_tools.airtable_update", return_value=_fail_result()):
     ok = mark_converted("boss_hq:test2", 5000)
     chk("mark_converted: ok=False → returns False", ok is False)
