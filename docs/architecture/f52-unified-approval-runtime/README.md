@@ -112,6 +112,17 @@ gate described in the readiness report.
 | F52-G4 | OPEN — CURRENT GAP | Scheduler/background normalization remains out of scope |
 | F52-G5 | OPEN — CURRENT GAP | Durable generic evidence ledger remains out of scope |
 
+### F52-G4-S1 — LeadMemory scheduler writer
+
+- Status: IMPLEMENTED / STATIC TESTED.
+- Consumer: `lead_memory.py::job_flush_lead_memory()` via `LeadMemory.flush_all()` / `_write()`.
+- Previous path: direct `tools.airtable_tools.airtable_update()`.
+- Canonical path: `core.lead_service.update_lead_fields()` → `ActionGateway.propose_action()` → lifecycle update → structured `LeadCreateResult`.
+- System identity: `Identity(user_id="lead_memory_scheduler", role=Role.MANAGER, channel="scheduler")`, tenant derived from the state memory key.
+- Authorization: `trusted_source="lead_memory_scheduler"` with an exact enrichment-field allowlist; classified as `self_confirm` at the canonical proposal boundary.
+- Idempotency: ActionGateway business fingerprint plus existing LeadMemory dirty/debounce state.
+- Evidence/result: `LeadCreateResult.ok`, `record_id`, and `evidence.contract_id`.
+
 ### F52-G3-S1 — LeadMemory result migration
 
 - Previous: OPEN; new: CLOSED — STATIC VERIFIED.

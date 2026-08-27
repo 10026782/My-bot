@@ -8,3 +8,4 @@ that approved the implementation and its single owner.
 
 | Path | Symbol | Owner | Architecture decision |
 | --- | --- | --- | --- |
+| `test_f52_g4_s1_lead_memory_writer.py` | `<module>` | `action_contracts` | `F52-G4-S1` |
