@@ -5,7 +5,7 @@ track program (#1–#24) referenced by `MAINTENANCE_FILE_DRIFT_REGISTER.md`'s
 "Future-audit cross-reference" table. Not an audit report — full bodies and
 evidence live in each track's own audit/remediation documents; this file
 records only CLOSED / ACTIVE / DEFERRED / handoff status at a glance.
-Reconcile this file rather than duplicating audit content into it.
+Use this file for reconciliation rather than duplicating audit content into it.
 
 **Distinct from** `docs/governance/HORIZON_STATUS_AND_NEXT_STEPS_AUDIT_20260821.md`
 — a one-off dated Truth-Reset audit for an unrelated H0–H9 finding series
