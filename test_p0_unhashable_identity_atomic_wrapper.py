@@ -70,14 +70,17 @@ def _flag_atomic_only(name, *a, **kw):
 
 
 def _make_contract(contract_id, trusted_source="lead_capture"):
-    from core.action_gateway import ActionContract
+    from core.action_gateway import ActionContract, ActionGateway
     return ActionContract(
         contract_id=contract_id,
         tenant_id="boss_hq",
         canonical_user_id="boss_hq:eliyahu",
         tool_name="airtable_update",
         normalized_payload={"table": "Leads", "record_id": "recXOW7FBZQZcNdw1", "fields": {"Status": "Won"}},
-        business_action_fingerprint=f"fp_{contract_id}",
+        business_action_fingerprint=ActionGateway.compute_business_fingerprint(
+            "boss_hq", "boss_hq:eliyahu", "airtable_update",
+            ActionGateway.normalize_payload({"table": "Leads", "record_id": "recXOW7FBZQZcNdw1", "fields": {"Status": "Won"}}),
+        ),
         status="approved",
         origin_channel="telegram",
         origin_chat_id="chat_1",
@@ -157,7 +160,10 @@ def test_permission_denial_dispatcher_called_provider_not_reached():
         canonical_user_id="boss_hq:readonly_user",
         tool_name="airtable_update",
         normalized_payload={"table": "Leads", "record_id": "recXOW7FBZQZcNdw1", "fields": {"Status": "Won"}},
-        business_action_fingerprint="fp_denied",
+        business_action_fingerprint=ActionGateway.compute_business_fingerprint(
+            "boss_hq", "boss_hq:readonly_user", "airtable_update",
+            ActionGateway.normalize_payload({"table": "Leads", "record_id": "recXOW7FBZQZcNdw1", "fields": {"Status": "Won"}}),
+        ),
         status="approved",
         origin_channel="telegram",
         origin_chat_id="chat_1",

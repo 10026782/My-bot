@@ -65,6 +65,7 @@ from identity import Identity, Role  # noqa: E402
 from core.action_gateway import (  # noqa: E402
     action_gateway as _real_gw,
     build_approval_lifecycle_result,
+    ActionGateway,
 )
 from event_bus import bus as _real_bus  # noqa: E402
 
@@ -508,6 +509,21 @@ _EXISTING_RECORD = {
 }
 
 _dup_identity = _identity("owner-hard-dup", Role.OWNER)
+_dup_inputs = {"table": "Tasks", "fields": {"Task": "כפילות"}}
+_dup_proof = {
+    "contract_id": "duplicate-test-contract",
+    "approved_by": _dup_identity.memory_key,
+    "tool_name": "airtable_add",
+    "tenant_id": _dup_identity.tenant_id,
+    "canonical_user_id": _dup_identity.memory_key,
+    "business_action_fingerprint": ActionGateway.compute_business_fingerprint(
+        _dup_identity.tenant_id,
+        _dup_identity.memory_key,
+        "airtable_add",
+        ActionGateway.normalize_payload(_dup_inputs),
+    ),
+    "status": "approved",
+}
 
 with patch.object(_dispatcher_mod, "_check_duplicate", return_value=_EXISTING_RECORD), \
      patch.object(_dispatcher_mod, "_ALIAS_MAP", {}), \
@@ -516,8 +532,8 @@ with patch.object(_dispatcher_mod, "_check_duplicate", return_value=_EXISTING_RE
      patch.object(_dispatcher_mod, "enforce_tenant_scope", return_value=None), \
      patch.object(_dispatcher_mod, "audit_log_airtable", return_value=None):
     result = _dispatcher_mod.dispatch_tool(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "כפילות"}},
-        identity=_dup_identity, trusted_source="agent",
+        "airtable_add", _dup_inputs,
+        identity=_dup_identity, trusted_source="agent", execution_context=_dup_proof,
     )
 
 chk("duplicate airtable_add returns a dict, not a plain string", isinstance(result, dict))

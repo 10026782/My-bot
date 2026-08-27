@@ -7,10 +7,14 @@ import crm
 from airtable_schema import ContactFields, Tables
 from identity import Identity, Role
 from tools.airtable_gateway import AirtableCreateOutcome, airtable_create
+from core.action_gateway import ActionGateway
 
 
 class F14B2ContactIntegrationTests(unittest.TestCase):
     identity = Identity("u1", Role.OWNER)
+
+    def _proof(self, name, inputs):
+        return {"contract_id": "test-contract", "approved_by": self.identity.memory_key, "tool_name": name, "tenant_id": self.identity.tenant_id, "canonical_user_id": self.identity.memory_key, "business_action_fingerprint": ActionGateway.compute_business_fingerprint(self.identity.tenant_id, self.identity.memory_key, name, ActionGateway.normalize_payload(inputs)), "status": "approved"}
 
     def test_shared_contact_create_boundary_owns_gate_call(self):
         fields = {ContactFields.NAME: "Dana", ContactFields.PHONE: "+972548212778"}
@@ -31,7 +35,8 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
                 patch("tools.dispatcher.audit_log_airtable"), \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
             from tools.dispatcher import dispatch_tool
-            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+            inputs = {"table": Tables.CONTACTS, "fields": fields}
+            result = dispatch_tool("airtable_add", inputs, self.identity, execution_context=self._proof("airtable_add", inputs))
         self.assertTrue(result["ok"])
         expected_fields = dict(fields, tenant_id=self.identity.tenant_id)
         boundary.assert_called_once_with(expected_fields, identity=self.identity, source="agent")
@@ -178,7 +183,8 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
                 patch("tools.dispatcher.airtable_add", side_effect=AssertionError("bypass")), \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
             from tools.dispatcher import dispatch_tool
-            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+            inputs = {"table": Tables.CONTACTS, "fields": fields}
+            result = dispatch_tool("airtable_add", inputs, self.identity, execution_context=self._proof("airtable_add", inputs))
         self.assertTrue(result["ok"])
         self.assertEqual(result["external_id"], "recNEW")
         gateway.assert_called_once()
@@ -196,7 +202,8 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
                 patch("tools.dispatcher.audit_log_airtable") as audit, \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
             from tools.dispatcher import dispatch_tool
-            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+            inputs = {"table": Tables.CONTACTS, "fields": fields}
+            result = dispatch_tool("airtable_add", inputs, self.identity, execution_context=self._proof("airtable_add", inputs))
         self.assertIsInstance(result, DispatcherOutcome)
         self.assertTrue(result.is_outcome_unknown())
         gateway.assert_called_once()
@@ -211,7 +218,8 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
                 patch("tools.dispatcher.audit_log_airtable") as audit, \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
             from tools.dispatcher import dispatch_tool
-            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+            inputs = {"table": Tables.CONTACTS, "fields": fields}
+            result = dispatch_tool("airtable_add", inputs, self.identity, execution_context=self._proof("airtable_add", inputs))
         self.assertTrue(result["ok"])
         self.assertEqual(result["external_id"], "recOLD")
         gateway.assert_not_called()
@@ -228,7 +236,8 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
                 patch("tools.dispatcher.audit_log_airtable") as audit, \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
             from tools.dispatcher import dispatch_tool
-            result = dispatch_tool("airtable_add", {"table": Tables.CONTACTS, "fields": fields}, self.identity)
+            inputs = {"table": Tables.CONTACTS, "fields": fields}
+            result = dispatch_tool("airtable_add", inputs, self.identity, execution_context=self._proof("airtable_add", inputs))
         self.assertFalse(result["ok"])
         self.assertEqual(result["evidence"]["contact_status"], "create_error")
         gateway.assert_called_once()
@@ -291,11 +300,8 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
                 patch.object(crm, "update_contact", return_value=True) as update_contact, \
                 patch("tools.dispatcher.audit_log_airtable"), \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
-            result = dispatch_tool(
-                "airtable_update",
-                {"table": Tables.CONTACTS, "record_id": "recCONTACT", "fields": {ContactFields.COMPANY: "Acme"}},
-                self.identity,
-            )
+            inputs = {"table": Tables.CONTACTS, "record_id": "recCONTACT", "fields": {ContactFields.COMPANY: "Acme"}}
+            result = dispatch_tool("airtable_update", inputs, self.identity, execution_context=self._proof("airtable_update", inputs))
 
         self.assertTrue(result["ok"])
         update_contact.assert_called_once_with(
@@ -326,11 +332,8 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         with patch("tools.dispatcher.enforce_tenant_scope"), \
                 patch("tools.dispatcher.airtable_update", return_value=generic) as update, \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
-            result = dispatch_tool(
-                "airtable_update",
-                {"table": "Tasks", "record_id": "recTASK", "fields": {"שם": "Task"}},
-                self.identity,
-            )
+            inputs = {"table": "Tasks", "record_id": "recTASK", "fields": {"שם": "Task"}}
+            result = dispatch_tool("airtable_update", inputs, self.identity, execution_context=self._proof("airtable_update", inputs))
 
         self.assertIs(result, generic)
         update.assert_called_once_with("Tasks", "recTASK", {"שם": "Task"})

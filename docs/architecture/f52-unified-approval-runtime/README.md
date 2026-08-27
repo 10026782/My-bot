@@ -106,7 +106,7 @@ gate described in the readiness report.
 | Area | Status | Evidence / residual |
 |---|---|---|
 | F52 overall | PARTIALLY CLOSED | G1/G4/G5 remain open current gaps |
-| F52-G1 | OPEN — CURRENT GAP | Dispatcher-wide execution proof remains out of scope |
+| F52-G1 | IMPLEMENTED / STATIC TESTED | Approval-sensitive dispatcher execution requires canonical, action-bound ActionGateway proof; runtime NOT ESTABLISHED |
 | F52-G2 | CLOSED — STATIC VERIFIED | Commit `f17bfe9`; verified `origin/main` `d2ec703`; runtime NOT ESTABLISHED |
 | F52-G3 | CLOSED — STATIC VERIFIED | S1–S7 close all current business-truth string consumers; only display/test assertions remain |
 | F52-G4 | OPEN — CURRENT GAP | Scheduler/background normalization remains out of scope |
