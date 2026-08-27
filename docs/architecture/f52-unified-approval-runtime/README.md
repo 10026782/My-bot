@@ -177,7 +177,7 @@ gate described in the readiness report.
 - Consumer: `lead_capture.py::capture_inbound_lead`.
 - Previous authority: record identity extracted from rendered `airtable_get()` text via regex.
 - Structured authority: `airtable_read_adapter.list_records()` record `id`; FOUND and Lead Event decisions use that identity.
-- PR / commit: pending.
+- PR / commit: PR #1060, implementation commit `ce39b5e`.
 - Tests: focused S7 `5 passed`; Lead Capture/structured-result regressions `8 passed`; response-contract regression `19 passed`.
 - G3 closure basis: no current business-state consumer derives success, record identity, or persistence truth from display strings.
 - Residual business-truth parsers: NONE.
