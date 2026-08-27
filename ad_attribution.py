@@ -169,20 +169,22 @@ def record_lead_source(memory_key: str, utm: UTMParams, *, identity=None) -> boo
     """רושם 3 שדות UTM דרך ה־Lead service הקנוני."""
     try:
         from core.lead_service import update_lead_fields
-        from tools.airtable_tools import airtable_get  # type: ignore
+        from tools.airtable_tools import airtable_get_records  # type: ignore
         from tools.airtable_gateway import escape_formula_value  # type: ignore
         if identity is None:
             return False
         safe_memory_key = escape_formula_value(memory_key)
-        raw = airtable_get("Leads", f"{{memory_key}}='{safe_memory_key}'")
-        if "אין רשומות" in (raw or "") or not raw:
+        records = airtable_get_records(
+            "Leads", f"{{memory_key}}='{safe_memory_key}'", max_records=1
+        )
+        if not records or not isinstance(records[0], dict):
             return False
-        rec_m = re.search(r'rec\w+', raw)
-        if not rec_m:
+        record_id = records[0].get("id", "")
+        if not record_id:
             return False
         result = update_lead_fields(
             identity,
-            rec_m.group(0),
+            record_id,
             utm.to_airtable_fields(),
             source_module="ad_attribution",
         )
