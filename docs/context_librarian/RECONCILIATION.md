@@ -440,9 +440,10 @@ writes the human-readable Markdown report
 (`tools/context_librarian/owner_decision_report.py::format_pr_summary()`)
 to a file, used by CI to populate `$GITHUB_STEP_SUMMARY`.
 
-**CI wiring** (`.github/workflows/ci.yml`, `backend-ci` job, step "Context
-Librarian pre-merge owner decision gate", `if: github.event_name ==
-'pull_request'`): resolves `--head-ref` to the PR's actual head commit
+**CI wiring** (`.github/workflows/ci.yml`, universal `classify-change` job,
+step "Context Librarian pre-merge owner decision gate", `if:
+github.event_name == 'pull_request'`): resolves `--head-ref` to the PR's
+actual head commit
 (`github.event.pull_request.head.sha`, not the ephemeral PR-merge-ref
 `actions/checkout@v4` checks out by default) so the diff is against the
 real PR content. Captures the exit code before appending the summary to

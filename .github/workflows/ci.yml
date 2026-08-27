@@ -6,7 +6,60 @@ on:
     branches: [main]
 
 jobs:
+  classify-change:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_required: ${{ steps.classify.outputs.backend_required }}
+      frontend_required: ${{ steps.classify.outputs.frontend_required }}
+      governance_required: ${{ steps.classify.outputs.governance_required }}
+      librarian_required: ${{ steps.classify.outputs.librarian_required }}
+      full_ci_required: ${{ steps.classify.outputs.full_ci_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies for the universal PR gate
+        run: pip install -r requirements.txt
+
+      - name: Classify changed paths (fail-safe)
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python tools/ci_change_classifier.py
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --github-output "$GITHUB_OUTPUT"
+
+      # Universal blocking PR gate; lightweight routes must not bypass source
+      # ownership decisions.
+      - name: Context Librarian pre-merge owner decision gate
+        if: github.event_name == 'pull_request'
+        run: |
+          set +e
+          python -m tools.context_librarian reconcile-pr \
+            --base-ref origin/main \
+            --head-ref "${{ github.event.pull_request.head.sha }}" \
+            --summary-output /tmp/librarian_pr_summary.md
+          status=$?
+          set -e
+          if [ -f /tmp/librarian_pr_summary.md ]; then
+            cat /tmp/librarian_pr_summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
   backend-ci:
+    needs: classify-change
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.classify-change.outputs.full_ci_required == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -105,38 +158,6 @@ jobs:
       - name: Context Librarian authoritative post-merge reconciliation
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: python -m tools.context_librarian reconcile --check
-
-      # Pre-merge owner-decision gate (RECONCILIATION.md section F): moves
-      # OWNER_DECISION_REQUIRED detection to PR time, so the post-merge job
-      # above becomes a safety net that catches drift/bypasses rather than
-      # the first place an unregistered runtime/authority source is ever
-      # discovered. Reuses the identical classification engine
-      # (reconcile.py's _route_new_sources()) the post-merge job uses --
-      # only the new-sources diff base differs (this PR's own diff against
-      # origin/main, not main's own scan-commit history). Read-only: never
-      # writes the catalog or reconciliation_state.json. Only
-      # OWNER_DECISION_REQUIRED fails this step, matching the post-merge
-      # step's own contract; AUTO_MAINTENANCE_REQUIRED/CLEAN never block.
-      - name: Context Librarian pre-merge owner decision gate
-        if: github.event_name == 'pull_request'
-        run: |
-          set +e
-          python -m tools.context_librarian reconcile-pr \
-            --base-ref origin/main \
-            --head-ref "${{ github.event.pull_request.head.sha }}" \
-            --summary-output /tmp/librarian_pr_summary.md
-          status=$?
-          set -e
-          # Publish the summary to the GitHub UI before deciding whether to
-          # fail the step -- an OWNER_DECISION_REQUIRED exit must never
-          # swallow the very report a human needs to resolve it. A missing
-          # summary file (e.g. the command crashed before writing one) means
-          # status is already non-zero for an unrelated reason -- the
-          # crash's own stderr output above is the real signal then.
-          if [ -f /tmp/librarian_pr_summary.md ]; then
-            cat /tmp/librarian_pr_summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-          exit "$status"
 
       - name: Run test_*.py scripts
         run: |
@@ -264,7 +285,64 @@ jobs:
             python -m tools.context_librarian.refresh_after_merge --check --base "$BASE_SHA" --head "${{ github.sha }}" || true
           fi
 
+  governance-ci:
+    needs: classify-change
+    if: >-
+      needs.classify-change.outputs.governance_required == 'true' &&
+      needs.classify-change.outputs.full_ci_required != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Canonical Active Work Registry validation
+        run: python tools/dev_registry_validator.py
+
+      - name: Schema governance (warning only, never blocks)
+        run: python tools/schema_governance.py || true
+
+  context-librarian-ci:
+    needs: classify-change
+    if: >-
+      needs.classify-change.outputs.librarian_required == 'true' &&
+      needs.classify-change.outputs.full_ci_required != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Context Librarian catalog validation
+        run: python -m tools.context_librarian validate
+
+      - name: Context Librarian budget growth signal
+        run: python -m tools.context_librarian budget-preflight --all-profiles
+
+      - name: pytest context librarian
+        run: python -m pytest test_context_librarian.py -x --tb=short -q
+
+      - name: pytest context librarian freshness automation
+        run: python -m pytest test_refresh_after_merge.py -x --tb=short -q
+
+      - name: pytest context librarian reconciliation
+        run: python -m pytest test_reconcile.py -x --tb=short -q
+
   frontend-ci:
+    needs: classify-change
+    if: needs.classify-change.outputs.frontend_required == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
