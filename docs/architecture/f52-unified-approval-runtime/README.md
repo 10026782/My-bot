@@ -168,16 +168,16 @@ gate described in the readiness report.
 - Legacy parser removed: record identity extracted from rendered `airtable_get()` text via regex.
 - Structured authority: `airtable_read_adapter.list_records()` record `id`; recovery patch target uses the returned identity.
 - PR / commit: PR #1058, merge commit `d6e0718`; verified origin/main `d6e0718`.
-- Residual business-truth G3 consumers: `lead_capture.py::capture_inbound_lead` remains category A; `core/lead_buffer.py` has no further occurrence.
+- Residual business-truth G3 consumers: none; `core/lead_buffer.py` has no further occurrence.
 - Runtime NOT REQUIRED FOR STATIC CLOSURE.
 
 ### F52-G3-S7 — Structured Lead Capture lookup migration
 
-- Status: IMPLEMENTED / STATIC TESTED (pending merge verification).
+- Status: CLOSED — STATIC VERIFIED.
 - Consumer: `lead_capture.py::capture_inbound_lead`.
 - Previous authority: record identity extracted from rendered `airtable_get()` text via regex.
 - Structured authority: `airtable_read_adapter.list_records()` record `id`; FOUND and Lead Event decisions use that identity.
-- PR / commit: PR #1060, implementation commit `ce39b5e`.
+- PR / commit: PR #1060, merge commit `b549097`; verified origin/main `b549097`.
 - Tests: focused S7 `5 passed`; Lead Capture/structured-result regressions `8 passed`; response-contract regression `19 passed`.
 - G3 closure basis: no current business-state consumer derives success, record identity, or persistence truth from display strings.
 - Residual business-truth parsers: NONE.
