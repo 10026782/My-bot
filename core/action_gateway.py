@@ -4223,6 +4223,44 @@ def _make_dispatch_executor(ledger: ExecutionLedger):
         # normalize_payload() unchanged (including any "_source" key).
         _trusted_source = getattr(contract, "trusted_source", "agent") if contract else "agent"
 
+        # N18 Phase 3 Slice 1: an approved Telegram Lead-preview write
+        # (core.lead_candidate_handler._propose_lead_write, always
+        # trusted_source="lead_capture") must execute through the canonical
+        # core.lead_service.create_lead() writer, not the generic
+        # dispatcher — avoids a second Lead writer here and reuses
+        # create_lead()'s own validation/owner-resolution/dedup, exactly
+        # like every other Lead entry point (WhatsApp/Voice/Email/
+        # Furniture). manage_action_contract=False: this contract IS
+        # already the approved record — create_lead() must not open a
+        # second, nested one for the same write. "_lead_payload" (a plain
+        # dataclasses.asdict(LeadPayload) dict) is the signal, not just
+        # table=="Leads" alone — an older pending contract proposed before
+        # this slice shipped won't carry it and safely falls through to the
+        # legacy dispatch path below instead of crashing.
+        if (
+            isinstance(tool_inputs, dict)
+            and tool_inputs.get("table") == "Leads"
+            and _trusted_source == "lead_capture"
+            and "_lead_payload" in tool_inputs
+        ):
+            from core.lead_service import LeadPayload, create_lead
+            _lead_result = create_lead(
+                identity,
+                LeadPayload(**tool_inputs["_lead_payload"]),
+                source_module="core.action_gateway",
+                existing_id=tool_inputs.get("record_id"),
+                manage_action_contract=False,
+            )
+            return {
+                "ok": _lead_result.ok,
+                "tool": tool_name,
+                "external_id": _lead_result.record_id,
+                "evidence": _lead_result.evidence,
+                "user_message": "",
+                "action": _lead_result.action,
+                "reason": _lead_result.reason,
+            }
+
         # Phase 4B-2 follow-up: execution_context is the ONLY legitimate
         # source of contract_id/approved_by for tools (like tma_write) that
         # refuse to run outside the propose/approve ceremony. Populated only

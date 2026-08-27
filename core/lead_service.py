@@ -351,6 +351,7 @@ def create_lead(
     source_module: str,
     existing_id: Optional[str] = None,
     write_event: bool = True,
+    manage_action_contract: bool = True,
 ) -> LeadCreateResult:
     """
     The single canonical entry point for writing a Lead record.
@@ -361,6 +362,15 @@ def create_lead(
     that patch its module-level `_at_find_lead`) to skip a second lookup
     here. None (default) makes this function do its own lookup — used by
     the structured-command path below, which has no caller-side lookup.
+
+    manage_action_contract: when True (default), this call opens its own
+    inner ActionContract for dedup/audit (the historical behavior for every
+    existing caller — WhatsApp/Voice/Email/Furniture/structured-command).
+    Pass False when the caller is itself executing an already-approved
+    ActionContract (N18 Phase 3 Slice 1: the Telegram Lead-preview path via
+    ActionGateway's dispatch executor) — that outer contract is already the
+    authoritative approval/execution record, so this call must not open a
+    second, nested one for the same write.
     """
     try:
         _validate(payload)
@@ -412,48 +422,53 @@ def create_lead(
     # ActionGateway dedup fingerprint / idempotency ledger — the same
     # mechanism every Lead write already went through (BUG-077); preserved
     # here, not removed (Phase 1 Step 6: don't strip existing safeguards).
+    # Skipped when manage_action_contract=False — the caller (ActionGateway's
+    # own dispatch executor) is already executing an approved outer contract
+    # that owns this write's lifecycle; opening a second one here would be a
+    # duplicate/nested ActionContract for the same write.
     contract_id = None
     contract_ledger = None
-    try:
-        from core.action_gateway import action_gateway as _gw
-        tool_name = "airtable_update" if existing_id else "airtable_add"
-        if existing_id:
-            gw_fields = {
-                k: v for k, v in fields.items()
-                if k in (LeadFields.PHONE, LeadFields.SUMMARY, LeadFields.DOMAIN, LeadFields.OWNER)
-            }
-            gw_inputs = {"table": "Leads", "record_id": existing_id, "fields": gw_fields}
-        else:
-            gw_inputs = {"table": "Leads", "fields": fields}
-        gw_result = _gw.propose_action(
-            tenant_id=tenant_id,
-            canonical_user_id=identity.memory_key,
-            tool_name=tool_name,
-            tool_inputs=gw_inputs,
-            origin_channel=payload.channel,
-            origin_chat_id=identity.memory_key,
-            requires_approval=False,
-            identity=identity,
-        )
-        if not gw_result.ok:
-            logger.info("[LeadService] gateway blocked for %r: %s", payload.name, gw_result.reason)
-            return LeadCreateResult(ok=False, action="duplicate", reason=gw_result.reason or "gateway_blocked")
-        contract_id = gw_result.contract_id
-        contract_ledger = _gw._ledger
-    except Exception as exc:
-        logger.error(
-            "[LeadService] gateway proposal failed; lead mutation NOT executed: %s",
-            exc,
-        )
-        return LeadCreateResult(
-            ok=False,
-            action="gateway_failed",
-            reason="gateway_proposal_failed",
-            evidence={
-                "gateway_proposal": "failed",
-                "mutation_executed": False,
-            },
-        )
+    if manage_action_contract:
+        try:
+            from core.action_gateway import action_gateway as _gw
+            tool_name = "airtable_update" if existing_id else "airtable_add"
+            if existing_id:
+                gw_fields = {
+                    k: v for k, v in fields.items()
+                    if k in (LeadFields.PHONE, LeadFields.SUMMARY, LeadFields.DOMAIN, LeadFields.OWNER)
+                }
+                gw_inputs = {"table": "Leads", "record_id": existing_id, "fields": gw_fields}
+            else:
+                gw_inputs = {"table": "Leads", "fields": fields}
+            gw_result = _gw.propose_action(
+                tenant_id=tenant_id,
+                canonical_user_id=identity.memory_key,
+                tool_name=tool_name,
+                tool_inputs=gw_inputs,
+                origin_channel=payload.channel,
+                origin_chat_id=identity.memory_key,
+                requires_approval=False,
+                identity=identity,
+            )
+            if not gw_result.ok:
+                logger.info("[LeadService] gateway blocked for %r: %s", payload.name, gw_result.reason)
+                return LeadCreateResult(ok=False, action="duplicate", reason=gw_result.reason or "gateway_blocked")
+            contract_id = gw_result.contract_id
+            contract_ledger = _gw._ledger
+        except Exception as exc:
+            logger.error(
+                "[LeadService] gateway proposal failed; lead mutation NOT executed: %s",
+                exc,
+            )
+            return LeadCreateResult(
+                ok=False,
+                action="gateway_failed",
+                reason="gateway_proposal_failed",
+                evidence={
+                    "gateway_proposal": "failed",
+                    "mutation_executed": False,
+                },
+            )
 
     # Write
     record_id = ""

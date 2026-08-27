@@ -1626,6 +1626,9 @@ ActionContract), ואין Cross-Layer Impact Matrix שלם לאף אחת — **�
 
 ### N18 — Canonical Write Infrastructure (Lead System → Shared Write Framework) 🔲 בעבודה (נרשם 20/08/2026)
 
+עודכן: 27/08/2026 — **Phase 3, פרוסה ראשונה (Telegram Lead-preview) ✅ סגורה** — ראו
+פירוט תחת "Phase 3" למטה.
+
 **הקשר:** Phase 1 (canonical Lead creation service, `core/lead_service.py`, ענף
 `feat/canonical-lead-creation-phase1`, PR #780) נסגר — QA report מלא (15 תרחישים ממוספרים)
 אישר את כל המסלול; הפער היחיד שנמצא בבנייה עצמה (structured note parsing, `/` כ-delimiter
@@ -1689,11 +1692,43 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   הליד. אף אחת מ-5 הפרוסות של Phase 2 לא נגעה בזה — כולן היו backend/state-machine, לא שכבת
   שליחה/UI. זה שייך מבחינה מהותית ל-Phase 4 (UX Contract, ראו למטה) — לא "finished" כחלק
   מ-Phase 2, ולא בוצעה בו עבודה חדשה בממצא הזה עצמו (תיעוד בלבד).
-- **Phase 3 — Canonical Writers:** איחוד כל Lead writers החיים (כולל אלה שעוקפים
+- **Phase 3 — Canonical Writers 🔲 בעבודה:** איחוד כל Lead writers החיים (כולל אלה שעוקפים
   dispatcher/governance checks, שנמצאו באודיט) למסלול `create_lead(payload, context)` יחיד;
   כל מקור (Telegram/WhatsApp/UI/Campaign/API/Voice/Email) הופך ל-adapter שלא כותב בעצמו.
   `lead_capture.py` לא נשאר writer עצמאי — רכיבי parsing/enrichment שימושיים בו נשמרים,
   אך היצירה עצמה עוברת דרך ה-canonical service.
+  **Slice 1 — Telegram Lead-preview approval ✅ סגור (27/08/2026, read-only Truth Reset +
+  focused code slice, לא Render):** אישור Telegram (`route_confirmation_word`) לתצוגה
+  מקדימה של ליד היה מבצע את הכתיבה בפועל דרך ה-dispatcher הגנרי
+  (`tools/dispatcher.dispatch_tool`), לא דרך `core.lead_service.create_lead()` — הפער
+  היחיד שנשאר ב-Phase 3 לנתיב הזה. `core/action_gateway.py`'s dispatch executor מזהה
+  כעת `tool_inputs.table=="Leads"` + `trusted_source=="lead_capture"` + מפתח
+  `_lead_payload` (dataclass `LeadPayload` שנבנה כבר ב-`core.lead_candidate_handler.
+  _propose_lead_write()`, `dataclasses.asdict`) ומנתב ישירות ל-`create_lead()` — ללא
+  writer שני, ללא כפילות validation/owner-resolution/dedup (`create_lead()` מבצע את כל
+  אלה בעצמו, כמו בכל נתיב ליד אחר). `create_lead()` קיבל פרמטר חדש
+  `manage_action_contract: bool = True` — `False` מדלג על ה-inner `propose_action()`
+  שהפונקציה פותחת כרגיל לעצמה (dedup/audit), כדי שלא ייפתח ActionContract מקונן כפול
+  כש-`create_lead()` נקרא מתוך ביצוע של contract שכבר אושר; כל caller קיים אחר
+  (WhatsApp/Voice/Email/Furniture/structured-command) ממשיך לקבל את ברירת המחדל `True`
+  ללא שינוי התנהגות. אימות: `test_n18_slice1_lead_preview.py` (6/6, נכשל 4/6 על
+  `origin/main` נקי לפני התיקון — "legacy Leads dispatcher reached" — עובר במלואו
+  אחריו), `test_action_gateway.py` (43/43), `test_lead_service_phase1.py` (107/107),
+  `test_whatsapp_lead_cutover.py`/`test_noninteractive_lead_cutovers.py`/
+  `test_furniture_lead_funnel.py`/`test_inbound_handler.py`/
+  `test_c02_c04_approval_legacy_inbound_leads.py`/`test_n18_draft_dispatch_unification.py`/
+  `test_draft_flow.py`/`test_structured_command.py`/`test_approval_concurrency.py`/
+  `test_pa01_phantom_approval_enforcement.py`/`test_fire_and_forget_fixes.py`
+  (ללא רגרסיה), `smoke_tests.py` ירוק.
+  `test_bug153_create_task_reconfirmation_after_rejection.py` (3/16 נכשלים) הוא כשל
+  קיים-מראש לא-קשור, משוחזר זהה גם על `origin/main` נקי ללא השינוי הזה (ר' `HORIZON.md`
+  Audit #9's אותה תצפית בדיוק). **STATIC VERIFIED — RUNTIME VERIFICATION REMAINS.**
+  **מה עדיין פתוח ב-Phase 3:** שאר ה-writers (WhatsApp/Voice כבר מנותבים דרך
+  `create_lead()` מאחורי flag; Email/Furniture מנותבים unconditionally דרך
+  `core.noninteractive_lead_cutovers.py`) לא נבדקו/נסגרו בסבב הזה — ראה גם ממצא נפרד:
+  `EMAIL_CANONICAL_LEAD_WRITE`/`FURNITURE_CANONICAL_LEAD_WRITE` מוצהרים ב-`feature_flags.py`
+  אך לא נצרכים בשום קוד חי (dead flag) — לא טופל כאן, owner decision נדרש. `lead_capture.py`
+  עצמו (ה-writer העצמאי המקורי) גם לא נבדק בסבב הזה.
 - **Phase 4 — UX Contract:** ה-service מחזיר structured result
   (`entity`/`operation`/`status`/`display_name`/`domain`/`owner`/`external_id`), לא
   final user-facing string; שכבת UX נפרדת מחליטה מה מוצג. Internal IDs (Airtable record

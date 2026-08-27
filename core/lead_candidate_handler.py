@@ -420,6 +420,8 @@ def _propose_lead_write(
     through app.py's confirm-word handling -> dispatch_tool() (unchanged;
     out of Phase 1 scope — see the audit's remaining-work list).
     """
+    import dataclasses
+
     from core.action_gateway import action_gateway as _gw
     from core.lead_service import LeadPayload, build_lead_fields, build_memory_key, resolve_owner
     from airtable_schema import LeadFields
@@ -428,6 +430,18 @@ def _propose_lead_write(
     existing_id = _at_find_lead(name, phone)
     _domain_key = _lead_domain_key(domain)
     owner_record_id, _resolved_owner = resolve_owner(identity)
+
+    # N18 Phase 3 Slice 1: built for BOTH branches (not just "new lead") —
+    # ActionGateway's dispatch executor extracts this via tool_inputs's
+    # "_lead_payload" key to call core.lead_service.create_lead() directly
+    # on approval, instead of the generic dispatcher. owner_user_id is left
+    # "" deliberately: create_lead() re-resolves Owner from `identity`
+    # itself; passing a pre-resolved value here would duplicate that
+    # resolution outside the canonical writer.
+    payload = LeadPayload(
+        name=name, phone=phone, domain=_domain_key, source="owner_dictation",
+        channel=channel, summary=text, status="new", score=0, tenant_id=tenant_id,
+    )
 
     if existing_id:
         tool_name = "airtable_update"
@@ -443,12 +457,10 @@ def _propose_lead_write(
     else:
         memory_key = build_memory_key(tenant_id, phone, name)
         tool_name = "airtable_add"
-        payload = LeadPayload(
-            name=name, phone=phone, domain=_domain_key, source="owner_dictation",
-            channel=channel, summary=text, status="new", score=0, tenant_id=tenant_id,
-        )
         fields = build_lead_fields(payload, owner_record_id, memory_key)
         tool_inputs = {"table": "Leads", "fields": fields}
+
+    tool_inputs["_lead_payload"] = dataclasses.asdict(payload)
 
     return _gw.propose_action(
         tenant_id         = tenant_id,
