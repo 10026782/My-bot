@@ -36,7 +36,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-25",
-      "last_verified_commit": "74808625cd59a26a06d666dfa266540e7f0d1c89",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 1.0,
       "notes": [
         "usage_events is shadow telemetry: this layer owns recording/schema truth, not aggregation, watchdog enforcement, or producer routing.",

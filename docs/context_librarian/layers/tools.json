@@ -31,7 +31,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-16",
-      "last_verified_commit": "f3f3eb536653274eacb2a6c994ec4632cd87694c",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 1.0,
       "notes": [
         "Read-only consumer; it does not write the Registry, runtime state, Airtable, caches, or persistence.",
@@ -76,7 +76,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-16",
-      "last_verified_commit": "e14ebaeacc5038e153b5831ace00be15d90d2f30",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 1.0,
       "notes": [
         "Development/governance maintenance only; deterministic and no LLM or network dependency.",
@@ -122,7 +122,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-16",
-      "last_verified_commit": "b2125b9f917d71fb8f29252d794d717ec36b0c1b",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 1.0,
       "notes": [
         "Read-only development/governance validator; it does not own runtime state.",
@@ -168,7 +168,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-21",
-      "last_verified_commit": "7f58497af7a2cc5c83cbcff9fb336516e0705e36",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 1.0,
       "notes": [
         "Development-only standalone package; not imported by app.py, tools/dispatcher.py, or core/action_gateway.py.",
@@ -262,7 +262,7 @@
         }
       ],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "f14190de8ee4311b0efc46a74be240c38169d173",
+      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
       "confidence": 0.94,
       "notes": [
         "CI-only path classifier used by .github/workflows/ci.yml; it is not imported by app.py, tools/dispatcher.py, or any production execution path and does not define tool identity or authority.",
