@@ -392,6 +392,7 @@ def _propose_lead_write(
     text: str,
     channel: str,
     domain: str,
+    origin_chat_id: str | None = None,
 ):
     """
     Tier 1 preview (auto_write=False): proposes a REAL pending ActionContract
@@ -468,7 +469,7 @@ def _propose_lead_write(
         tool_name         = tool_name,
         tool_inputs       = tool_inputs,
         origin_channel    = channel,
-        origin_chat_id    = identity.memory_key,
+        origin_chat_id    = origin_chat_id or identity.memory_key,
         requires_approval = True,
         identity          = identity,
         trusted_source    = "lead_capture",
@@ -886,6 +887,9 @@ def _start_lead_draft(identity, free_text: str, chat_id: str, channel: str, rout
     from session_store import lead_sessions as _ls
 
     draft = build_draft_from_text(free_text, channel, router_domain) if free_text else new_empty_draft(channel)
+    if draft["mode"] == "review" and channel == "telegram":
+        import uuid
+        draft["callback_token"] = uuid.uuid4().hex
     _ls.set_lead_draft(chat_id, draft)
 
     if draft["mode"] == "review":
@@ -1046,6 +1050,9 @@ def _resolve_lead_draft(
         return _finalize_draft_confirm(identity, chat_id, draft)
 
     if outcome.draft is not None:
+        if outcome.draft.get("mode") == "review" and channel == "telegram":
+            import uuid
+            outcome.draft.setdefault("callback_token", draft.get("callback_token") or uuid.uuid4().hex)
         _ls.set_lead_draft(chat_id, outcome.draft)
     from core.turn_result import TurnResult
     return TurnResult(message=outcome.message)

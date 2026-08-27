@@ -1749,6 +1749,10 @@ Canonical UX response flow שנבנה עבור Lead הופך לתשתית כתי
   ראו Phase 2 (6) למעלה): חיבור כרטיס ה-Draft של ליד לכפתורי Telegram אמיתיים
   (`InlineKeyboardMarkup`) במקום אישור/ביטול בטקסט חופשי בלבד — התשתית לכפתורים כבר קיימת
   ב-`app.py` (סביב שורה 1964) לזרימות אישור אחרות, פשוט לא מחוברת לכרטיס הליד.
+  **Slice: Telegram approve/cancel buttons — CODE_DONE / STATIC_VERIFIED (27/08/2026):**
+  כרטיס Lead Draft ב-Telegram מקבל כפתורי אישור/ביטול דרך callback router קיים; אישור
+  עובר דרך ActionContract ו-ActionGateway אל `create_lead()`, וביטול אינו כותב. כיסוי
+  מקומי כולל replay safety; אין כאן טענת MERGED, DEPLOYED או RUNTIME_VERIFIED.
 - **Phase 5 — Attribution + Lead Screen:** taxonomy קנונית ל-campaign attribution
   (source/platform/campaign/ad set/ad/creative/tracking IDs — `ad_attribution.py` נמצא
   כותב UTM fields שלא קיימים בסכימה החיה) ול-Score/Temperature/Status (נמצאו כמה
