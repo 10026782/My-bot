@@ -39,6 +39,21 @@ def run() -> bool:
                     return f"[{rec_id}]"
         return "📭 אין רשומות"
 
+    def fake_airtable_get_records(table, formula, max_records=None):
+        if "external_id" in formula:
+            return [
+                {"id": rec_id, "fields": {}}
+                for ext_id, rec_id in existing_external.items()
+                if ext_id in formula
+            ][:max_records]
+        if "sender_id" in formula:
+            return [
+                {"id": rec_id, "fields": {}}
+                for sender, rec_id in existing_sender.items()
+                if sender in formula
+            ][:max_records]
+        return []
+
     def fake_airtable_add(table, fields):
         adds.append((table, dict(fields)))
         # C53-A contract shape (matches the real tools.airtable_tools.airtable_add) —
@@ -59,6 +74,7 @@ def run() -> bool:
 
     at_tools = types.ModuleType("tools.airtable_tools")
     at_tools.airtable_get = fake_airtable_get
+    at_tools.airtable_get_records = fake_airtable_get_records
     at_tools.airtable_add = fake_airtable_add
 
     at_gateway = types.ModuleType("tools.airtable_gateway")
