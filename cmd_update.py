@@ -3,6 +3,7 @@
 # Feature flag: FEATURE_BUSINESS_UPDATE (כבוי ברירת מחדל)
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -72,6 +73,7 @@ def register_update_command(bot, get_identity):
             "step":       "domain",
             "identity":   identity,
             "created_at": _now_ts(),
+            "token":      uuid.uuid4().hex,
         }
 
         bot.send_message(
@@ -96,19 +98,20 @@ def register_update_command(bot, get_identity):
         uid   = str(call.from_user.id)
         state = _get_valid_state(uid)
 
-        if not state or state.get("step") != "domain":
+        if not state or state.get("step") not in {"domain", "edit_domain"}:
             bot.answer_callback_query(call.id, "פג תוקף — נסה /update מחדש.")
             return
 
         state["domain"] = call.data.split(":")[1]
-        state["step"]   = "type"
+        editing = state.get("step") == "edit_domain"
+        state["step"]   = "review" if editing else "type"
         _pending[uid]   = state
 
         bot.edit_message_text(
-            f"✅ תחום: *{_domain_label(state['domain'])}*\n\nסוג עדכון:",
+            _update_review(state) if editing else f"✅ תחום: *{_domain_label(state['domain'])}*\n\nסוג עדכון:",
             call.message.chat.id,
             call.message.message_id,
-            reply_markup=_type_keyboard(),
+            reply_markup=_update_review_keyboard(state["token"]) if editing else _type_keyboard(),
             parse_mode="Markdown",
         )
         bot.answer_callback_query(call.id)
@@ -119,39 +122,57 @@ def register_update_command(bot, get_identity):
         uid   = str(call.from_user.id)
         state = _get_valid_state(uid)
 
-        if not state or state.get("step") != "type":
+        if not state or state.get("step") not in {"type", "edit_type"}:
             bot.answer_callback_query(call.id, "פג תוקף — נסה /update מחדש.")
             return
 
         state["entry_type"] = call.data.split(":")[1]
-        state["step"]       = "text"
+        editing = state.get("step") == "edit_type"
+        state["step"]       = "review" if editing else "text"
         _pending[uid]       = state
 
         bot.edit_message_text(
-            f"✅ {_domain_label(state['domain'])} → {state['entry_type']}\n\n"
-            "✍️ מה קרה? כתוב בחופשיות:",
+            _update_review(state) if editing else f"✅ {_domain_label(state['domain'])} → {state['entry_type']}\n\n✍️ מה קרה? כתוב בחופשיות:",
             call.message.chat.id,
             call.message.message_id,
+            reply_markup=_update_review_keyboard(state["token"]) if editing else None,
             parse_mode="Markdown",
         )
         bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("upd_review:"))
+    def cb_review(call):
+        _resolve_update_callback(bot, call, get_identity)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("upd_edit:"))
+    def cb_edit(call):
+        _start_update_edit(bot, call)
 
     # ── לכידת טקסט חופשי ────────────────────────────────────────
     # סינון כפול: step==text AND לא פקודה.
     # הסינון נשען רק על ה-dict המקומי — אסור לקרוא resolve_identity כאן.
     @bot.message_handler(
         func=lambda m: (
-            _pending.get(str(m.from_user.id), {}).get("step") == "text"
+            _pending.get(str(m.from_user.id), {}).get("step") in {"text", "edit_text", "edit_choice", "review"}
             and bool(getattr(m, "text", None))
             and not m.text.startswith("/")
         )
     )
     def capture_text(msg):
-        uid   = str(msg.from_user.id)
-        state = _pending.pop(uid, None)
+        uid = str(msg.from_user.id)
+        state = _get_valid_state(uid)
 
         if not state:
             return
+
+        if state.get("step") == "review":
+            _handle_update_review_text(bot, msg, state, get_identity)
+            return
+        if state.get("step") == "edit_choice":
+            _handle_update_edit_choice(bot, msg, state)
+            return
+
+        state = _pending.pop(uid, None)
 
         # TTL check פעם נוספת — הגנה כפולה
         if _is_expired(state):
@@ -164,34 +185,155 @@ def register_update_command(bot, get_identity):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             return
 
-        result = _save_to_business_memory(
-            identity   = identity,
-            title      = f"{state['entry_type']}: {msg.text[:60]}",
-            raw_text   = msg.text,
-            domain     = state.get("domain", "general"),
-            entry_type = state.get("entry_type", "Other"),
-        )
-
-        if result["ok"]:
-            bot.send_message(
-                msg.chat.id,
-                f"✅ *נשמר בזיכרון עסקי*\n\n"
-                f"📌 {state['entry_type']} | {_domain_label(state['domain'])}\n"
-                f"_{msg.text[:80]}{'...' if len(msg.text) > 80 else ''}_",
-                parse_mode="Markdown",
-            )
-        elif "Domain resolution failed" in result["error"]:
-            bot.send_message(
-                msg.chat.id,
-                "❌ לא הצלחתי לשמור — בעיה בזיהוי תחום העסק (Domain). נסה שוב או פנה לבעל המערכת.",
-            )
-        else:
-            bot.send_message(
-                msg.chat.id,
-                "⚠️ הטקסט התקבל אבל לא נשמר. בדוק logs.",
-            )
+        if not msg.text.strip():
+            _pending[uid] = state
+            bot.send_message(msg.chat.id, "✍️ הטקסט לא יכול להיות ריק. נסה שוב:")
+            return
+        state["raw_text"] = msg.text.strip()
+        state["step"] = "review"
+        _pending[uid] = state
+        bot.send_message(msg.chat.id, _update_review(state), reply_markup=_update_review_keyboard(state["token"]))
 
     logger.info("[/update] handler registered successfully")
+
+
+def _update_review(state: dict) -> str:
+    text = state.get("raw_text", "")
+    return (
+        "📋 *עדכון עסקי — לבדיקה*\n\n"
+        f"תחום: {_domain_label(state.get('domain', 'general'))}\n"
+        f"סוג: {state.get('entry_type', 'Other')}\n"
+        f"תוכן: {text[:120]}{'...' if len(text) > 120 else ''}\n\n"
+        "בחר/י ✅ אישור, ✏️ עריכה או ↩️ ביטול."
+    )
+
+
+def _update_review_keyboard(token: str):
+    from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("✅ אישור", callback_data=f"upd_review:{token}:confirm"),
+        InlineKeyboardButton("✏️ עריכה", callback_data=f"upd_review:{token}:edit"),
+        InlineKeyboardButton("↩️ ביטול", callback_data=f"upd_review:{token}:cancel"),
+    )
+    return markup
+
+
+def _update_edit_keyboard(token: str):
+    from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("תחום", callback_data=f"upd_edit:{token}:domain"),
+        InlineKeyboardButton("סוג", callback_data=f"upd_edit:{token}:type"),
+        InlineKeyboardButton("תוכן", callback_data=f"upd_edit:{token}:text"),
+    )
+    return markup
+
+
+def _update_receipt(result: dict, state: dict) -> str:
+    if result.get("ok"):
+        return f"✅ העדכון נשמר\n\n{_domain_label(state['domain'])} | {state['entry_type']}\n{state['raw_text'][:80]}"
+    if "Domain resolution failed" in result.get("error", ""):
+        return "⚠️ העדכון לא נשמר — לא ניתן לזהות את תחום העסק."
+    return "⚠️ העדכון לא נשמר."
+
+
+def _execute_update(state: dict, uid: str, get_identity) -> dict:
+    identity = get_identity("telegram", uid)
+    if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
+        return {"ok": False, "error": "unauthorized"}
+    return _save_to_business_memory(
+        identity=identity,
+        title=f"{state['entry_type']}: {state['raw_text'][:60]}",
+        raw_text=state["raw_text"],
+        domain=state["domain"],
+        entry_type=state["entry_type"],
+    )
+
+
+def _resolve_update_callback(bot, call, get_identity) -> None:
+    uid = str(call.from_user.id)
+    state = _get_valid_state(uid)
+    parts = (call.data or "").split(":", 2)
+    token, action = parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""
+    if not state or state.get("step") != "review" or state.get("token") != token:
+        bot.answer_callback_query(call.id, "ℹ️ התהליך כבר אינו זמין.")
+        return
+    if action == "cancel":
+        _pending.pop(uid, None)
+        bot.answer_callback_query(call.id, "✅ התקבל")
+        bot.edit_message_text("↩️ העדכון בוטל.", call.message.chat.id, call.message.message_id)
+    elif action == "edit":
+        state["step"] = "edit_choice"
+        _pending[uid] = state
+        bot.answer_callback_query(call.id, "✏️ עריכה")
+        bot.edit_message_text("בחר שדה לעריכה:", call.message.chat.id, call.message.message_id, reply_markup=_update_edit_keyboard(token))
+    elif action == "confirm":
+        _pending.pop(uid, None)
+        result = _execute_update(state, uid, get_identity)
+        bot.answer_callback_query(call.id, "✅ התקבל")
+        bot.edit_message_text(_update_receipt(result, state), call.message.chat.id, call.message.message_id)
+
+
+def _start_update_edit(bot, call) -> None:
+    uid = str(call.from_user.id)
+    state = _get_valid_state(uid)
+    parts = (call.data or "").split(":", 2)
+    token, field = parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""
+    if not state or state.get("step") != "review" or state.get("token") != token:
+        bot.answer_callback_query(call.id, "ℹ️ התהליך כבר אינו זמין.")
+        return
+    if field == "domain":
+        state["step"] = "edit_domain"
+        markup = _domain_keyboard()
+        prompt = "בחר תחום חדש:"
+    elif field == "type":
+        state["step"] = "edit_type"
+        markup = _type_keyboard()
+        prompt = "בחר סוג עדכון חדש:"
+    elif field == "text":
+        state["step"] = "edit_text"
+        markup = None
+        prompt = "✍️ הזן את הטקסט החדש:"
+    else:
+        bot.answer_callback_query(call.id, "שדה לא מוכר.")
+        return
+    _pending[uid] = state
+    bot.answer_callback_query(call.id, "✏️ עריכה")
+    bot.edit_message_text(prompt, call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+
+def _handle_update_review_text(bot, msg, state, get_identity) -> None:
+    text = msg.text.strip().lower()
+    uid = str(msg.from_user.id)
+    if text in {"בטל", "ביטול", "cancel", "לא"}:
+        _pending.pop(uid, None)
+        bot.send_message(msg.chat.id, "↩️ העדכון בוטל.")
+    elif text in {"ערוך", "עריכה", "edit"}:
+        state["step"] = "edit_choice"
+        _pending[uid] = state
+        bot.send_message(msg.chat.id, "בחר שדה לעריכה: תחום / סוג / תוכן.")
+    elif text in {"כן", "אשר", "מאשר", "אישור", "ok", "yes"}:
+        _pending.pop(uid, None)
+        bot.send_message(msg.chat.id, _update_receipt(_execute_update(state, uid, get_identity), state))
+    else:
+        bot.send_message(msg.chat.id, _update_review(state), reply_markup=_update_review_keyboard(state["token"]))
+
+
+def _handle_update_edit_choice(bot, msg, state) -> None:
+    field = {"תחום": "domain", "סוג": "type", "תוכן": "text"}.get(msg.text.strip())
+    if field == "domain":
+        state["step"] = "edit_domain"
+        bot.send_message(msg.chat.id, "בחר תחום חדש:", reply_markup=_domain_keyboard())
+    elif field == "type":
+        state["step"] = "edit_type"
+        bot.send_message(msg.chat.id, "בחר סוג עדכון חדש:", reply_markup=_type_keyboard())
+    elif field == "text":
+        state["step"] = "edit_text"
+        bot.send_message(msg.chat.id, "✍️ הזן את הטקסט החדש:")
+    else:
+        bot.send_message(msg.chat.id, "שדה לא מוכר. בחר/י: תחום / סוג / תוכן.")
+    _pending[str(msg.from_user.id)] = state
 
 
 # ── תפיסת קובץ (photo/document) בשלב 'text' ──────────────────────
@@ -252,29 +394,11 @@ def capture_photo_or_document(bot, message, get_identity) -> None:
     if drive_url:
         raw_text = f"{raw_text}\n📎 {drive_url}"
 
-    result = _save_to_business_memory(
-        identity   = identity,
-        title      = f"{state['entry_type']}: {(caption or 'קובץ מצורף')[:60]}",
-        raw_text   = raw_text,
-        domain     = state.get("domain", "general"),
-        entry_type = state.get("entry_type", "Other"),
-    )
-
-    if result["ok"]:
-        lines = [
-            "✅ *נשמר בזיכרון עסקי*",
-            "",
-            f"📌 {state['entry_type']} | {_domain_label(state['domain'])}",
-        ]
-        if drive_url:
-            lines.append(f"🔗 {drive_url}")
-        if caption:
-            lines.append(f"_{caption[:80]}{'...' if len(caption) > 80 else ''}_")
-        bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
-    elif "Domain resolution failed" in result["error"]:
-        bot.send_message(chat_id, "❌ לא הצלחתי לשמור — בעיה בזיהוי תחום העסק (Domain). נסה שוב או פנה לבעל המערכת.")
-    else:
-        bot.send_message(chat_id, "⚠️ הקובץ התקבל אבל לא נשמר. בדוק logs.")
+    state["raw_text"] = raw_text
+    state["step"] = "review"
+    state.setdefault("token", uuid.uuid4().hex)
+    _pending[uid] = state
+    bot.send_message(chat_id, _update_review(state), reply_markup=_update_review_keyboard(state["token"]))
 
 
 def _upload_attachment(bot, message, uid: str, domain: str) -> str:
