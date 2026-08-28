@@ -128,7 +128,7 @@
         }
       ],
       "valid_from": "2026-07-28",
-      "last_verified_commit": "178f55fd31daa4b86863aa12a564fc5c88ea2227",
+      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
       "confidence": 0.85,
       "notes": [
         "CLARIFICATION — Two things named 'TurnCoordinator' must not be conflated: (1) **Formal Layer-2 TurnCoordinator component** — zero implementation, class TurnCoordinator does not exist (per CORE_COMPLETION_AUDIT_20260810.md §8, line 113; zero implementation is a non-blocking architectural gap). De-facto handled by router.py::route_request() + lead_candidate_handler.py. (2) **TC2-TC10 distributed functional machinery** — MERGED (PRs #562–#588, 08–10/08/2026), WIRED (4 unconditional callback sites in app.py for TC8 turn-state r/w), VERIFIED in staging (TC10_OPERATIONAL_VERIFICATION_HARNESS.md, verify_tc8/9_staging.py runs PASS, regression matrix 21/21 stable). This node's code_paths register the machinery; its status=\"shadow\" and precedence=\"frozen decision contract planning-only\" refer to formal Layer-2 authority (not yet approved), not machinery implementation status.",
