@@ -49,6 +49,16 @@ This is a concise owner-facing projection of §3.5, not a second registry.
 | Queue / worker architecture | PLANNED | PLANNED | NO | no queue implementation assumed | requirement decision | decide whether queue is required |
 | Generic Draft capability | PLANNED | PLANNED | NO | no generic capability claimed | business requirement confirmation | confirm requirement |
 
+### F52 / UX-01 reconciliation
+
+`U1 — Understanding Layer Architecture` is resolved at architecture/static
+level. `UX-01 — Unified BOSS Experience` is `IN_PROGRESS`; its implementation
+program/slice is `F52 / Single-Speaker Approval UX`, which preserves UX-01 as
+the canonical identity. R3.2 and R4 are merged/static at the current
+truth-reset SHA; R5 is next. This is a documentation status, not a deployment
+or runtime claim. Detailed evidence is recorded in
+`docs/audit/PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md`.
+
 ---
 
 ## NUMBERED AUDIT SNAPSHOT — CURRENT TERMINAL STATUS
