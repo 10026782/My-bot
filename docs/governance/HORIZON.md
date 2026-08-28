@@ -15,8 +15,8 @@ This file (`HORIZON.md`, no date suffix) is the persistent, update-in-place
 management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
-**Last updated:** 27/08/2026
-**Truth Reset SHA at last update:** `5135a69e2c3a57247b025b5c0aeeb2d14fe68264`
+**Last updated:** 28/08/2026
+**Truth Reset SHA at last update:** `16e82c7d0c2394d57a0fb8f75133df009e6ca64d`
 (row-level correction pass only — Turn Coordinator and Command Center rows
 re-verified against this SHA; other rows not re-walked in this pass)
 
@@ -55,7 +55,8 @@ This is a concise owner-facing projection of §3.5, not a second registry.
 level. `UX-01 — Unified BOSS Experience` is `IN_PROGRESS`; its implementation
 program/slice is `F52 / Single-Speaker Approval UX`, which preserves UX-01 as
 the canonical identity. R3.2 and R4 are merged/static at the current
-truth-reset SHA; R5 is next. This is a documentation status, not a deployment
+truth-reset SHA; R5's gate rejected a new abstraction and R6.1 is
+CODE_DONE / STATIC_VERIFIED for `/decision new`. This is a documentation status, not a deployment
 or runtime claim. Detailed evidence is recorded in
 `docs/audit/PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md`.
 
