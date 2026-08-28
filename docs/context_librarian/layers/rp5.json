@@ -70,7 +70,7 @@
         }
       ],
       "valid_from": "2026-07-28",
-      "last_verified_commit": "e60e0fddb380fbcb3f575ec7e35c4241dfcc19e7",
+      "last_verified_commit": "178f55fd31daa4b86863aa12a564fc5c88ea2227",
       "confidence": 0.88,
       "notes": [
         "The current implementation compares claims and always returns user text unchanged in shadow/enforce states.",
