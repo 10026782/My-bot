@@ -33,6 +33,13 @@ read-only gate found no second uniform consumer, so R6.1 aligned `/decision new`
 R6.1 is merged/static in PR #1091 (`40bc446`). R6.2 then adopted the shared
 DraftFlow interaction primitive while preserving Decision-owned state and
 persistence; it is CODE_DONE / STATIC_VERIFIED.
+R6.3 aligned `/update` independently to the same six-stage lifecycle without
+adopting DraftFlow; it is also CODE_DONE / STATIC_VERIFIED.
+R6.4 adopted DraftFlow for `/update` while preserving its state and writer
+authority; it is CODE_DONE / STATIC_VERIFIED.
+R6.5 aligned `/marketing_new` independently, preserving Marketing-owned pending
+state and deferring its existing execution boundary until explicit confirmation;
+it is CODE_DONE / STATIC_VERIFIED. DraftFlow adoption remains out of scope.
 Runtime is not implied. The registry rows below are reconciled to this decision
 and current main evidence.
 
