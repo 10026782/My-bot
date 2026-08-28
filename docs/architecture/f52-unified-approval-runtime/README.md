@@ -105,11 +105,11 @@ gate described in the readiness report.
 
 | Area | Status | Evidence / residual |
 |---|---|---|
-| F52 overall | PARTIALLY CLOSED | G1/G4/G5 remain open current gaps |
+| F52 overall | PARTIALLY CLOSED | G4/G5 remain open current gaps |
 | F52-G1 | CLOSED — STATIC VERIFIED | PR #1067; implementation commit `bfab582`; verified `origin/main` `d735395cb495d7e18a9d4337026f8c0d0f8851e1`; focused tests 4 passed; BUG-091 regression 10 passed; `py_compile` PASS; `git diff --check` PASS; runtime NOT ESTABLISHED |
 | F52-G2 | CLOSED — STATIC VERIFIED | Commit `f17bfe9`; verified `origin/main` `d2ec703`; runtime NOT ESTABLISHED |
 | F52-G3 | CLOSED — STATIC VERIFIED | S1–S7 close all current business-truth string consumers; only display/test assertions remain |
-| F52-G4 | OPEN — CURRENT GAP | Scheduler/background normalization remains out of scope |
+| F52-G4 | PARTIALLY CLOSED | Scheduler/background normalization remains incomplete; S1–S3 are bounded slices |
 | F52-G5 | OPEN — CURRENT GAP | Durable generic evidence ledger remains out of scope |
 
 ### F52-G4-S1 — LeadMemory scheduler writer
@@ -136,7 +136,19 @@ gate described in the readiness report.
 - PR: #1073.
 - Commit: `0d23abd`.
 - Tests: focused 14 passed; response-contract 19 passed; ActionGateway 43 passed; guards PASS; `py_compile` PASS; `git diff --check` PASS.
-- Residual G4 writers: `interaction_engine.py::create_tasks_from_analysis()`, `abandoned_lead_worker.py::create_human_pipeline_task()`, `scheduler.py::_job_weekly_quest_reset()`; follow-up/recovery outbound adapters remain separately scoped.
+- Residual G4 writers: `interaction_engine.py::create_tasks_from_analysis()`, `scheduler.py::_job_weekly_quest_reset()`; follow-up/recovery outbound adapters remain separately scoped.
+
+### F52-G4-S3 — Abandoned-lead Tasks scheduler writer
+
+- Status: IMPLEMENTED / STATIC TESTED.
+- Consumer: `abandoned_lead_worker.py::create_human_pipeline_task()`.
+- Previous path: direct `airtable_add(Tasks)`.
+- Canonical path: `ActionGateway.propose_action()` → self-confirm approval → Gateway executor → structured Airtable result/evidence.
+- System identity: `Identity(user_id="abandoned_lead_scheduler", role=Role.MANAGER, channel="scheduler")`, tenant `boss_hq`, domain from the abandoned lead.
+- Authorization: exact Tasks field allowlist with `trusted_source="abandoned_lead_scheduler"`.
+- Idempotency: stable `fingerprint_payload` over sender/channel/domain/step/answers; duplicate proposals are rejected by the ActionGateway fingerprint.
+- Evidence/result: completed ActionContract plus `execution_fact.record_id`; missing status or record ID fails closed.
+- Residual G4 writers: `interaction_engine.py::create_tasks_from_analysis()`, `scheduler.py::_job_weekly_quest_reset()`.
 
 ### F52-G3-S1 — LeadMemory result migration
 

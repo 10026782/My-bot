@@ -244,7 +244,8 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
     לשימוש כשערוץ = voice (IVR).
     """
     try:
-        from tools.airtable_tools import airtable_add  # type: ignore
+        from core.action_gateway import action_gateway
+        from identity import Identity, Role
         answers_str = " | ".join(f"{k}={v}" for k, v in lead.answers.items())
         priority = "high" if lead.step >= 3 else "medium"
         fields = {
@@ -258,9 +259,57 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
                 f"תשובות: {answers_str}"
             ),
         }
-        result = airtable_add(Tables.TASKS, fields)
-        if not result.get("ok"):
-            logger.warning(f"[D02] create_human_pipeline_task not ok for {lead.sender}: {result.get('user_message', result)}")
+        system_identity = Identity(
+            user_id="abandoned_lead_scheduler",
+            role=Role.MANAGER,
+            tenant_id="boss_hq",
+            domain_id=lead.domain or "general",
+            channel="scheduler",
+            external_id="abandoned_lead_scheduler",
+        )
+        proposal = action_gateway.propose_action(
+            tenant_id=system_identity.tenant_id,
+            canonical_user_id=system_identity.memory_key,
+            tool_name="airtable_add",
+            tool_inputs={"table": Tables.TASKS, "fields": fields},
+            origin_channel="scheduler",
+            origin_chat_id=system_identity.memory_key,
+            requires_approval=True,
+            identity=system_identity,
+            trusted_source="abandoned_lead_scheduler",
+            fingerprint_payload={
+                "table": Tables.TASKS,
+                "fields": {
+                    TaskFields.NAME: fields[TaskFields.NAME],
+                    "abandoned_event": (
+                        lead.sender, lead.channel, lead.domain, lead.step,
+                        tuple(sorted(lead.answers.items())),
+                    ),
+                },
+            },
+        )
+        if not proposal.ok or not proposal.contract_id:
+            logger.warning("[D02] task proposal not accepted for %s: %s", lead.sender, proposal.reason)
+            return False
+
+        action_gateway.approve(
+            proposal.contract_id,
+            approver=system_identity.memory_key,
+            approver_role=system_identity.role,
+        )
+        contract = action_gateway.find_by_id(proposal.contract_id)
+        if not contract or contract.status not in {"completed", "executed"}:
+            logger.warning("[D02] task execution failed for %s: status=%s", lead.sender, getattr(contract, "status", "missing"))
+            return False
+        record_id = next(
+            (
+                observation.get("record_id", "")
+                for observation in reversed(contract.agent_observations)
+                if observation.get("kind") == "execution_fact"
+            ),
+        )
+        if not record_id:
+            logger.warning("[D02] task execution lacked structured record_id for %s", lead.sender)
             return False
         _notify_human_pipeline(lead, owner_chat_id)
         return True
