@@ -8,7 +8,7 @@ and conservatively projects them into the frozen public presentation contract.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 from enum import Enum
 from typing import Any, Mapping
 
@@ -42,6 +42,85 @@ class TurnContextSource(str, Enum):
     TURN_COORDINATOR = "turn_coordinator"
     LEGACY_INGRESS = "legacy_ingress"
     UNAVAILABLE = "unavailable"
+
+
+class InteractionType(str, Enum):
+    CONFIRM_CANCEL = "confirm_cancel"
+    SINGLE_CHOICE = "single_choice"
+    MULTI_CHOICE = "multi_choice"
+    FREE_TEXT = "free_text"
+    REVIEW_EDIT = "review_edit"
+
+
+_INTERACTION_KEYS = frozenset({
+    "type", "actions", "options", "field", "selected_values", "editable",
+})
+
+
+def _string_tuple(value: Any, field_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise MessageContractValidationError(f"{field_name} must be a sequence")
+    return tuple(_required_string(item, f"{field_name} item") for item in value)
+
+
+@dataclass(frozen=True)
+class MessageInteraction:
+    """Provider-neutral interaction intent for a public message surface."""
+
+    type: InteractionType
+    actions: tuple[str, ...] = dataclass_field(default_factory=tuple)
+    options: tuple[str, ...] = dataclass_field(default_factory=tuple)
+    field: str | None = None
+    selected_values: tuple[str, ...] = dataclass_field(default_factory=tuple)
+    editable: bool = False
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> "MessageInteraction | None":
+        if data is None:
+            return None
+        if not isinstance(data, Mapping):
+            raise MessageContractValidationError("interaction must be a mapping")
+        _reject_unknown_keys(data, _INTERACTION_KEYS, "MessageInteraction")
+        try:
+            interaction_type = InteractionType(data.get("type"))
+        except (TypeError, ValueError) as exc:
+            raise MessageContractValidationError("invalid interaction type") from exc
+        editable = data.get("editable", False)
+        if not isinstance(editable, bool):
+            raise MessageContractValidationError("interaction.editable must be bool")
+        return cls(
+            type=interaction_type,
+            actions=_string_tuple(data.get("actions"), "interaction.actions"),
+            options=_string_tuple(data.get("options"), "interaction.options"),
+            field=_optional_string(data.get("field"), "interaction.field"),
+            selected_values=_string_tuple(data.get("selected_values"), "interaction.selected_values"),
+            editable=editable,
+        )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.type, InteractionType):
+            raise MessageContractValidationError("interaction.type must be an InteractionType")
+        for name in ("actions", "options", "selected_values"):
+            values = getattr(self, name)
+            if not isinstance(values, tuple) or any(not isinstance(value, str) or not value.strip() for value in values):
+                raise MessageContractValidationError(f"interaction.{name} must contain non-empty strings")
+        _optional_string(self.field, "interaction.field")
+        if not isinstance(self.editable, bool):
+            raise MessageContractValidationError("interaction.editable must be bool")
+        if self.type is InteractionType.SINGLE_CHOICE and len(self.selected_values) > 1:
+            raise MessageContractValidationError("single_choice supports at most one selected value")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type.value,
+            "actions": list(self.actions),
+            "options": list(self.options),
+            "field": self.field,
+            "selected_values": list(self.selected_values),
+            "editable": self.editable,
+        }
 
 
 _DISPLAY_PAYLOAD_KEYS = frozenset({
@@ -174,9 +253,9 @@ class DisplayPayload:
     action: str | None = None
     entity_type: str | None = None
     entity_name: str | None = None
-    key_fields: tuple[DisplayField, ...] = field(default_factory=tuple)
+    key_fields: tuple[DisplayField, ...] = dataclass_field(default_factory=tuple)
     count: int | None = None
-    items: tuple[DisplayItem, ...] = field(default_factory=tuple)
+    items: tuple[DisplayItem, ...] = dataclass_field(default_factory=tuple)
     reason_code: str | None = None
     execution_verified: bool | None = None
     occurred_at: str | None = None
@@ -262,6 +341,7 @@ class MessageContract:
     reason_code: str | None = None
     execution_verified: bool | None = None
     occurred_at: str | None = None
+    interaction: MessageInteraction | None = None
 
     def __post_init__(self) -> None:
         if self.version != MESSAGE_CONTRACT_VERSION:
@@ -270,6 +350,8 @@ class MessageContract:
             raise MessageContractValidationError("state must be a MessageState")
         if not isinstance(self.display_payload, DisplayPayload):
             raise MessageContractValidationError("display_payload must be a DisplayPayload")
+        if self.interaction is not None and not isinstance(self.interaction, MessageInteraction):
+            raise MessageContractValidationError("interaction must be a MessageInteraction or None")
         if not isinstance(self.turn_context_source, TurnContextSource):
             raise MessageContractValidationError("turn_context_source must be a TurnContextSource")
         _required_string(self.reply_owner, "reply_owner")
@@ -299,10 +381,13 @@ class MessageContract:
             raise MessageContractValidationError(f"{field_name} conflicts with display_payload")
 
     def user_safe_record(self) -> dict[str, Any]:
-        return {
+        result = {
             "state": self.state.value,
             "display_payload": self.display_payload.to_dict(),
         }
+        if self.interaction is not None:
+            result["interaction"] = self.interaction.to_dict()
+        return result
 
     def observability_record(self) -> dict[str, Any]:
         return {
@@ -321,7 +406,7 @@ class MessageContract:
         }
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "version": self.version,
             "turn_id": self.turn_id,
             "reply_owner": self.reply_owner,
@@ -335,6 +420,9 @@ class MessageContract:
             "evidence_ref": self.evidence_ref,
             "occurred_at": self.occurred_at,
         }
+        if self.interaction is not None:
+            result["interaction"] = self.interaction.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "MessageContract":
@@ -344,6 +432,7 @@ class MessageContract:
             "version", "turn_id", "reply_owner", "turn_context_source",
             "state", "display_payload", "reason_code", "execution_verified",
             "source_module", "evidence_status", "evidence_ref", "occurred_at",
+            "interaction",
         })
         _reject_unknown_keys(data, allowed, "MessageContract")
         if "display_payload" not in data:
@@ -369,6 +458,7 @@ class MessageContract:
             reason_code=data.get("reason_code"),
             execution_verified=data.get("execution_verified"),
             occurred_at=data.get("occurred_at"),
+            interaction=MessageInteraction.from_mapping(data.get("interaction")),
         )
 
 
@@ -452,6 +542,7 @@ def build_message_contract(
     reason_code: str | None = None,
     execution_verified: bool | None = None,
     occurred_at: str | None = None,
+    interaction: MessageInteraction | Mapping[str, Any] | None = None,
     version: str = MESSAGE_CONTRACT_VERSION,
 ) -> MessageContract:
     """Build one immutable envelope from already-structured authority data."""
@@ -487,6 +578,11 @@ def build_message_contract(
         reason_code=_optional_string(resolved_reason, "reason_code"),
         execution_verified=resolved_verified,
         occurred_at=_optional_string(resolved_occurred, "occurred_at"),
+        interaction=(
+            interaction
+            if isinstance(interaction, MessageInteraction)
+            else MessageInteraction.from_mapping(interaction)
+        ),
     )
 
 
