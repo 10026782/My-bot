@@ -241,6 +241,10 @@ runtime claim is made here.
   the post-milestone uniformity gate.
 - R6.4 — **CODE_DONE / STATIC VERIFIED**: `/update` adopts the existing
   DraftFlow primitive while preserving its state, writer, callbacks, and receipts.
+- R6.5 — **CODE_DONE / STATIC VERIFIED**: `/marketing_new` now keeps its
+  Marketing-owned pending state through review/edit and crosses the existing
+  demand-and-ideas execution boundary only after explicit confirmation. DraftFlow
+  adoption remains out of scope.
 
 ## Refreshed Phase Plan
 
@@ -258,6 +262,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R6.1 | Align the existing Decision New flow with the unified UX. | Preserve canonical state, one reply owner, and existing lifecycle authority. | MERGED / STATIC VERIFIED (`40bc446`, PR #1091) | Runtime/deployment verification and broader eligible wizard slices. |
 | R6.3 | Align `/update` independently to collect, edit, validate, review, confirm/cancel, and receipt. | Preserve current update state and write authority; no DraftFlow adoption yet. | CODE_DONE / STATIC_VERIFIED | Post-milestone uniformity gate and any later DraftFlow decision. |
 | R6.4 | Adopt the existing DraftFlow primitive for `/update`. | Preserve current update state, validation, write authority, callbacks, and receipts. | CODE_DONE / STATIC_VERIFIED | Post-adoption uniformity gate; no new generic abstraction. |
+| R6.5 | Align `/marketing_new` to collect, edit, validate, review, confirm/cancel, and receipt. | Preserve Marketing-owned pending state and the existing execution boundary; no DraftFlow adoption. | CODE_DONE / STATIC_VERIFIED | Re-run uniformity gate; marketing-specific creative selection remains downstream. |
 | R7 | Add WhatsApp interactive adapter plus text fallback. | Same semantics as Telegram; limits stay in adapter. | Static/provider tests, then runtime | Enabling outbound providers without evidence/approval. |
 | R8 | Consolidate duplicate formatter paths behind MessageContract. | One public presentation contract and one response. | Regression/static, then canary | Lifecycle or authorization redesign. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
