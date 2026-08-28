@@ -71,7 +71,7 @@ DEMAND_TYPES = [
 # ── State store — key: telegram user_id (str) ───────────────────
 # MarketingCaptureState shape (plain dict, matches cmd_update.py/
 # cmd_decision.py convention — no new state engine):
-#   step: "domain" | "demand_type" | "intake" | "constraints"
+#   step: "domain" | "demand_type" | "intake" | "constraints" | "review"
 #   domain, demand_type: str
 #   q_index: int                 — position in INTAKE_QUESTIONS[demand_type]
 #   answers: dict[str, str]      — semantic_key -> free-text answer
@@ -237,9 +237,13 @@ def register_marketing_command(bot, get_identity):
         uid = str(call.from_user.id)
         state = _get_valid_state(uid)
         if not state or state.get("step") != "domain":
-            bot.answer_callback_query(call.id, "פג תוקף — נסה /marketing_new מחדש.")
+            _stale_callback(bot, call)
             return
-        state["domain"] = call.data.split(":", 1)[1]
+        domain = call.data.split(":", 1)[1]
+        if domain not in {value for _, value in DOMAINS}:
+            _stale_callback(bot, call)
+            return
+        state["domain"] = domain
         state["step"] = "demand_type"
         _pending[uid] = state
         bot.edit_message_text(
@@ -247,16 +251,19 @@ def register_marketing_command(bot, get_identity):
             call.message.chat.id, call.message.message_id,
             reply_markup=_demand_type_keyboard(),
         )
-        bot.answer_callback_query(call.id)
+        _transport_ack(bot, call)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_type:"))
     def cb_type(call):
         uid = str(call.from_user.id)
         state = _get_valid_state(uid)
         if not state or state.get("step") != "demand_type":
-            bot.answer_callback_query(call.id, "פג תוקף — נסה /marketing_new מחדש.")
+            _stale_callback(bot, call)
             return
         demand_type = call.data.split(":", 1)[1]
+        if demand_type not in {value for _, value in DEMAND_TYPES}:
+            _stale_callback(bot, call)
+            return
         state["demand_type"] = demand_type
         state["step"] = "intake"
         state["q_index"] = 0
@@ -267,7 +274,121 @@ def register_marketing_command(bot, get_identity):
             f"✅ סוג: {_label(DEMAND_TYPES, demand_type)}\n\n{first_prompt}",
             call.message.chat.id, call.message.message_id,
         )
-        bot.answer_callback_query(call.id)
+        _transport_ack(bot, call)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_review:"))
+    def cb_review(call):
+        identity = _authorized_callback(bot, call, get_identity)
+        if not identity:
+            return
+        uid = str(call.from_user.id)
+        state = _get_valid_state(uid)
+        if not state or state.get("step") != "review":
+            _stale_callback(bot, call)
+            return
+        action = call.data.split(":", 1)[1]
+        if action == "cancel":
+            _pending.pop(uid, None)
+            _transport_ack(bot, call)
+            bot.edit_message_text("↩️ בוטל.", call.message.chat.id, call.message.message_id)
+            return
+        if action == "edit":
+            state["step"] = "edit_choice"
+            _pending[uid] = state
+            _transport_ack(bot, call)
+            bot.edit_message_text("✏️ מה לערוך?", call.message.chat.id, call.message.message_id,
+                                  reply_markup=_edit_keyboard(state))
+            return
+        if action != "confirm":
+            _stale_callback(bot, call)
+            return
+        if not _marketing_state_ready(state):
+            _transport_ack(bot, call)
+            bot.edit_message_text("⚠️ חסר מידע — יש להשלים את הפרטים לפני האישור.",
+                                  call.message.chat.id, call.message.message_id)
+            return
+
+        _pending.pop(uid, None)
+        _transport_ack(bot, call)
+        result = _create_demand_and_generate_ideas(
+            state,
+            triggered_by=f"telegram:{identity.user_id}",
+            execution_context=_create_marketing_execution_context(),
+        )
+        if not result["ok"]:
+            bot.edit_message_text("⚠️ הדרישה לא נשמרה.", call.message.chat.id, call.message.message_id)
+            return
+        lines = ["✅ דרישת השיווק נשמרה — 3 רעיונות מוכנים:", ""]
+        for i, idea in enumerate(result["ideas"], start=1):
+            lines.append(f"רעיון {i}:\n{idea}\n")
+        bot.edit_message_text("\n".join(lines), call.message.chat.id, call.message.message_id,
+                              reply_markup=_idea_keyboard(result["creative_id"]))
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_edit_field:"))
+    def cb_edit_field(call):
+        uid = str(call.from_user.id)
+        state = _get_valid_state(uid)
+        if not state or state.get("step") != "edit_choice":
+            _stale_callback(bot, call)
+            return
+        key = call.data.split(":", 1)[1]
+        valid = {field for field, _ in INTAKE_QUESTIONS[state["demand_type"]]} | {"domain", "demand_type", "constraints"}
+        if key not in valid:
+            _stale_callback(bot, call)
+            return
+        state["edit_key"] = key
+        if key == "domain":
+            state["step"] = "edit_domain"
+            markup = _domain_keyboard("mkt_edit_domain")
+        elif key == "demand_type":
+            state["step"] = "edit_demand_type"
+            markup = _demand_type_keyboard("mkt_edit_type")
+        else:
+            state["step"] = "edit_value"
+            markup = None
+        _pending[uid] = state
+        _transport_ack(bot, call)
+        bot.edit_message_text(_edit_prompt(state, key), call.message.chat.id, call.message.message_id,
+                              reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_edit_domain:"))
+    def cb_edit_domain(call):
+        uid = str(call.from_user.id)
+        state = _get_valid_state(uid)
+        if not state or state.get("step") != "edit_domain":
+            _stale_callback(bot, call)
+            return
+        key = call.data.split(":", 1)[1]
+        if key not in {value for _, value in DOMAINS}:
+            _stale_callback(bot, call)
+            return
+        state["domain"] = key
+        state.pop("edit_key", None)
+        state["step"] = "review"
+        _pending[uid] = state
+        _transport_ack(bot, call)
+        bot.edit_message_text(_marketing_review(state), call.message.chat.id, call.message.message_id,
+                              reply_markup=_review_keyboard())
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_edit_type:"))
+    def cb_edit_type(call):
+        uid = str(call.from_user.id)
+        state = _get_valid_state(uid)
+        if not state or state.get("step") != "edit_demand_type":
+            _stale_callback(bot, call)
+            return
+        key = call.data.split(":", 1)[1]
+        if key not in {value for _, value in DEMAND_TYPES}:
+            _stale_callback(bot, call)
+            return
+        state["demand_type"] = key
+        state["answers"] = {}
+        state["q_index"] = 0
+        state["step"] = "intake"
+        state.pop("edit_key", None)
+        _pending[uid] = state
+        _transport_ack(bot, call)
+        bot.edit_message_text(INTAKE_QUESTIONS[key][0][1], call.message.chat.id, call.message.message_id)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("mkt_select:"))
     def cb_select(call):
@@ -275,7 +396,7 @@ def register_marketing_command(bot, get_identity):
         if not identity:
             return
         _, creative_id, idea_num = call.data.split(":", 2)
-        bot.answer_callback_query(call.id, "בוחר...")
+        _transport_ack(bot, call)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
 
         ok = _select_creative_and_generate_handoff(creative_id, idea_num)
@@ -316,7 +437,11 @@ def register_marketing_command(bot, get_identity):
         if step == "intake":
             questions = INTAKE_QUESTIONS[state["demand_type"]]
             key, _ = questions[state["q_index"]]
-            state["answers"][key] = msg.text.strip()
+            value = msg.text.strip()
+            if not value:
+                bot.send_message(msg.chat.id, "הערך לא יכול להיות ריק — נסה שוב.")
+                return
+            state["answers"][key] = value
             state["q_index"] += 1
             if state["q_index"] < len(questions):
                 _pending[uid] = state
@@ -327,35 +452,28 @@ def register_marketing_command(bot, get_identity):
                 bot.send_message(msg.chat.id, _CONSTRAINTS_PROMPT)
             return
 
-        # step == "constraints" — השלב האחרון: יוצר Demand, מרכיב brief, קורא ל-AI
-        identity = get_identity("telegram", uid)
-        if not identity or not (identity.is_owner or identity.role in _ALLOWED_ROLES):
-            bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
-            _pending.pop(uid, None)
+        if step == "edit_value":
+            value = msg.text.strip()
+            if not value:
+                bot.send_message(msg.chat.id, "הערך לא יכול להיות ריק — נסה שוב.")
+                return
+            state["answers"][state["edit_key"]] = value
+            state.pop("edit_key", None)
+            state["step"] = "review"
+            _pending[uid] = state
+            bot.send_message(msg.chat.id, _marketing_review(state), reply_markup=_review_keyboard())
             return
 
-        state["answers"]["constraints"] = msg.text.strip()
-        _pending.pop(uid, None)
-        bot.send_message(msg.chat.id, "⏳ יוצר דרישה ומרכיב 3 רעיונות...")
-
-        execution_context = _create_marketing_execution_context()
-        result = _create_demand_and_generate_ideas(
-            state,
-            triggered_by=f"telegram:{identity.user_id}",
-            execution_context=execution_context,
-        )
-        if not result["ok"]:
-            bot.send_message(msg.chat.id, f"❌ {result['error']}")
+        # step == "constraints" — the final pending field; execution waits for approval.
+        value = msg.text.strip()
+        if not value:
+            bot.send_message(msg.chat.id, "יש להזין אילוצים או לכתוב \"אין\".")
             return
-
-        lines = ["✅ 3 רעיונות מוכנים — בחר אחד:", ""]
-        for i, idea in enumerate(result["ideas"], start=1):
-            lines.append(f"רעיון {i}:\n{idea}\n")
-        bot.send_message(msg.chat.id, "\n".join(lines))
-        bot.send_message(
-            msg.chat.id, "בחר רעיון:",
-            reply_markup=_idea_keyboard(result["creative_id"]),
-        )
+        state["answers"]["constraints"] = value
+        state["step"] = "review"
+        _pending[uid] = state
+        bot.send_message(msg.chat.id, _marketing_review(state), reply_markup=_review_keyboard())
+        return
 
     logger.info("[F23] /marketing_new registered successfully")
 
@@ -425,24 +543,90 @@ def _label(pairs: list[tuple[str, str]], key: str) -> str:
     return next((label for label, k in pairs if k == key), key)
 
 
-def _domain_keyboard():
+def _domain_keyboard(prefix: str = "mkt_domain"):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     markup = InlineKeyboardMarkup(row_width=3)
     markup.add(*[
-        InlineKeyboardButton(label, callback_data=f"mkt_domain:{key}")
+        InlineKeyboardButton(label, callback_data=f"{prefix}:{key}")
         for label, key in DOMAINS
     ])
     return markup
 
 
-def _demand_type_keyboard():
+def _demand_type_keyboard(prefix: str = "mkt_type"):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(*[
-        InlineKeyboardButton(label, callback_data=f"mkt_type:{key}")
+        InlineKeyboardButton(label, callback_data=f"{prefix}:{key}")
         for label, key in DEMAND_TYPES
     ])
     return markup
+
+
+def _review_keyboard():
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("✅ אשר", callback_data="mkt_review:confirm"),
+        InlineKeyboardButton("✏️ ערוך", callback_data="mkt_review:edit"),
+        InlineKeyboardButton("↩️ בטל", callback_data="mkt_review:cancel"),
+    )
+    return markup
+
+
+def _edit_keyboard(state: dict):
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=2)
+    fields = [("תחום", "domain"), ("סוג דרישה", "demand_type")]
+    fields += [(prompt.rstrip("?")[:28], key) for key, prompt in INTAKE_QUESTIONS[state["demand_type"]]]
+    fields.append(("אילוצים", "constraints"))
+    markup.add(*[
+        InlineKeyboardButton(label, callback_data=f"mkt_edit_field:{key}")
+        for label, key in fields
+    ])
+    return markup
+
+
+def _marketing_review(state: dict) -> str:
+    lines = ["📣 דרישת שיווק חדשה", "", f"תחום: {_label(DOMAINS, state['domain'])}",
+             f"סוג דרישה: {_label(DEMAND_TYPES, state['demand_type'])}"]
+    for key, prompt in INTAKE_QUESTIONS[state["demand_type"]]:
+        lines.append(f"{prompt.split('?', 1)[0].replace('✍️ ', '')}: {state['answers'].get(key, '')}")
+    lines.append(f"אילוצים: {state['answers'].get('constraints', '')}")
+    lines.extend(["", "⏳ ממתין לאישור"])
+    return "\n".join(lines)
+
+
+def _edit_prompt(state: dict, key: str) -> str:
+    if key == "domain":
+        return "בחר תחום חדש:"
+    if key == "demand_type":
+        return "בחר סוג דרישה חדש:"
+    if key == "constraints":
+        return _CONSTRAINTS_PROMPT
+    return next(prompt for field, prompt in INTAKE_QUESTIONS[state["demand_type"]] if field == key)
+
+
+def _transport_ack(bot, call):
+    bot.answer_callback_query(call.id, "✅ התקבל")
+
+
+def _marketing_state_ready(state: dict) -> bool:
+    valid_domains = {value for _, value in DOMAINS}
+    valid_types = {value for _, value in DEMAND_TYPES}
+    if state.get("domain") not in valid_domains or state.get("demand_type") not in valid_types:
+        return False
+    fields = [key for key, _ in INTAKE_QUESTIONS[state["demand_type"]]] + ["constraints"]
+    return all(
+        isinstance(state.get("answers", {}).get(key), str)
+        and state["answers"][key].strip()
+        for key in fields
+    )
+
+
+def _stale_callback(bot, call):
+    _transport_ack(bot, call)
+    bot.edit_message_text("⌛ פג תוקף — נסה /marketing_new מחדש.", call.message.chat.id, call.message.message_id)
 
 
 def _idea_keyboard(creative_id: str):
