@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 logging.basicConfig(level=logging.WARNING)
@@ -78,13 +79,31 @@ _lead = AbandonedLead(
     step=2, total_steps=5, minutes_silent=15.0, answers={"name": "Test"},
 )
 
-with patch("tools.airtable_tools.airtable_add", return_value=_ok_result("recTASK1")), \
+class _FakeAbandonedGateway:
+    def __init__(self, ok):
+        self.ok = ok
+
+    def propose_action(self, **kwargs):
+        if not self.ok:
+            return SimpleNamespace(ok=False, contract_id="", reason="write failed")
+        return SimpleNamespace(ok=True, contract_id="contract-task", reason="accepted")
+
+    def approve(self, *args, **kwargs):
+        return "display text"
+
+    def find_by_id(self, contract_id):
+        return SimpleNamespace(
+            status="completed",
+            agent_observations=[{"kind": "execution_fact", "record_id": "recTASK1"}],
+        )
+
+with patch("core.action_gateway.action_gateway", _FakeAbandonedGateway(ok=True)), \
      patch("abandoned_lead_worker._notify_human_pipeline") as mock_notify:
     ok = create_human_pipeline_task(_lead, "owner_chat")
     chk("create_human_pipeline_task: ok=True → returns True", ok is True)
     chk("create_human_pipeline_task: ok=True → owner notified", mock_notify.called)
 
-with patch("tools.airtable_tools.airtable_add", return_value=_fail_result()), \
+with patch("core.action_gateway.action_gateway", _FakeAbandonedGateway(ok=False)), \
      patch("abandoned_lead_worker._notify_human_pipeline") as mock_notify:
     ok = create_human_pipeline_task(_lead, "owner_chat")
     chk(

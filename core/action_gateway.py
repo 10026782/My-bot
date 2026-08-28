@@ -191,8 +191,8 @@ def _lead_safe_fields() -> tuple[frozenset, frozenset]:
 def classify_approval_policy(tool_name: str, tool_inputs: dict, trusted_source: str = "agent") -> str:
     """
     Returns APPROVAL_POLICY_SELF_CONFIRM only for exact scheduler-safe field
-    allowlists for Leads and Interaction Log writes. Everything else is
-    APPROVAL_POLICY_APPROVAL, the strict default.
+    allowlists for Leads, Interaction Log, and abandoned-lead Tasks writes.
+    Everything else is APPROVAL_POLICY_APPROVAL, the strict default.
     """
     if tool_name not in ("airtable_add", "airtable_update"):
         return APPROVAL_POLICY_APPROVAL
@@ -216,6 +216,19 @@ def classify_approval_policy(tool_name: str, tool_inputs: dict, trusted_source: 
             InteractionLogFields.PARTICIPANTS,
             InteractionLogFields.KEY_INSIGHTS,
             InteractionLogFields.FOLLOWUP_ACTIONS,
+        }
+        if set(fields) == allowed_fields:
+            return APPROVAL_POLICY_SELF_CONFIRM
+
+    if tool_name == "airtable_add" and (
+        trusted_source == "abandoned_lead_scheduler"
+        and is_task_table(tool_inputs.get("table"))
+    ):
+        from airtable_schema import TaskFields
+        allowed_fields = {
+            TaskFields.NAME,
+            TaskFields.STATUS,
+            TaskFields.DESCRIPTION,
         }
         if set(fields) == allowed_fields:
             return APPROVAL_POLICY_SELF_CONFIRM
