@@ -8,10 +8,14 @@
 - לכל פריט יש מקור קנוני מפורט אחד. Snapshot היסטורי ישן אינו גובר על ראיה חדשה.
 - טענות runtime/deployment דורשות evidence מפורש; מיזוג או בדיקה מקומית אינם הוכחת production.
 - פריט שגדל מעבר לתמצית מפוצל למסמך קנוני ייעודי, ולא מורחב כאן ללא גבול.
+- Program ID הוא זהות יציבה; `ROADMAP` מתאר current state; Horizon והמסמך הקנוני
+  מתארים phases פנימיים; archive שומר narrative היסטורי.
+- טבלת ה־registry משתמשת רק ב־`PLANNED`, `IN_PROGRESS`, `MERGED_STATIC`,
+  `DEPLOYED`, `RUNTIME_VERIFIED`. כל שורה פעילה מפנה למקור מפורט אחד.
 
 ## 1. Current System Status
 
-המערכת נמצאת במצב **ACTIVE / MERGED / טעונת אימות**: תשתיות הליבה,
+המערכת נמצאת במצב **IN_PROGRESS**: תשתיות הליבה,
 ה־Turn Coordinator, ה־ActionGateway, מסלולי הכתיבה הקנוניים ו־Command Center
 מוזגו, אך מרבית היכולות עדיין דורשות אימות deployed-SHA/runtime. אין להסיק
 הפעלת feature flag, deployment או production behavior ממסמך תכנון או מטסט מקומי.
@@ -22,9 +26,21 @@ owner משום שה־formal Layer 2 TurnCoordinator עדיין אינו שלם. 
 
 ## 2. Active Programs
 
+| ID | Canonical Name | Status | Evidence | Next | Canonical Source |
+|---|---|---|---|---|---|
+| TURN_COORDINATOR_PROGRAM | Turn Coordinator | IN_PROGRESS | MERGED_STATIC — TC7-B/RP5 coverage recorded in HORIZON | Decide RP5 activation and verify deployed-SHA | [`HORIZON.md`](docs/governance/HORIZON.md) |
+| UNIFIED_APPROVAL_ACTIONGATEWAY | Unified Approval / ActionGateway | IN_PROGRESS | MERGED_STATIC — lifecycle and approval paths | Verify approved paths in runtime | [`HORIZON.md`](docs/governance/HORIZON.md) |
+| N18 | Canonical Write Infrastructure | IN_PROGRESS | MERGED_STATIC — Lead consumer and current slice recorded | Continue gated write-flow sequence | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
+| LEAD_CRM_CANONICAL_FLOW | Lead / CRM canonical flow | IN_PROGRESS | MERGED_STATIC — canary not verified | Run Draft → Approval → Write → Evidence canary | [`HORIZON.md`](docs/governance/HORIZON.md) |
+| MEDIA_LAYER_F16 | Media Layer (F16) | IN_PROGRESS | MERGED_STATIC — staging-gated assets | Run gated deployed-SHA canary | [`HORIZON.md`](docs/governance/HORIZON.md) |
+| COMMAND_CENTER_KNOWLEDGE_HUB | Command Center / Knowledge Hub | IN_PROGRESS | MERGED_STATIC — endpoint verification pending | Verify endpoint | [`HORIZON.md`](docs/governance/HORIZON.md) |
+| BOSS_MEMORY_RETRIEVAL | BOSS Memory & Retrieval Architecture | IN_PROGRESS | MERGED_STATIC — retrieval remains shadow-only | Accumulate shadow evidence before cutover | [`BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md`](docs/research/BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md) |
+| DECISION_HUB | Decision Hub | IN_PROGRESS | MERGED_STATIC — activation evidence pending | Verify before activation | [`HORIZON.md`](docs/governance/HORIZON.md) |
+| F52_UNIFIED_USER_MESSAGES | F52 Unified Approval Runtime — Unified User Messages | IN_PROGRESS | MERGED_STATIC — refreshed Single-Speaker plan established | Continue the current implementation program under its plan | [`SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md`](docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md) |
+
 ### Turn Coordinator / RP5
 
-Status: ACTIVE — MERGED; static verification קיימת.
+Status: IN_PROGRESS.
 Current phase: TC7-B ו־RP5 כוללים גם את שני sinks של ActionGateway ואת כיסוי `mixed`.
 Evidence: PR #1041, `09935a8`, לפי HORIZON.
 Runtime: NOT ESTABLISHED; RP5 כבוי כברירת מחדל.
@@ -34,7 +50,7 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md), [`TURN_COORDINATOR
 
 ### Unified Approval / ActionGateway
 
-Status: ACTIVE — MERGED; rollout/runtime verification pending.
+Status: IN_PROGRESS.
 Current phase: canonical lifecycle, approval ו־execution paths.
 Evidence: current program map and approval audits.
 Runtime: NOT ESTABLISHED כאן.
@@ -44,7 +60,7 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md), [`f52-unified-appr
 
 ### N18 — Canonical Write Infrastructure
 
-Status: ACTIVE — Lead הוא consumer ראשון של shared write infrastructure.
+Status: IN_PROGRESS — Lead הוא consumer ראשון של shared write infrastructure.
 Current phase: Phase 3 slice 1 (Telegram Lead preview) is recorded as closed; later phases remain sequenced.
 Evidence: [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) §3.5 and N18 records.
 Runtime: end-to-end Draft→Approval→Write→Evidence not established כאן.
@@ -54,7 +70,7 @@ Canonical source: [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_M
 
 ### Lead / CRM Canonical Flow
 
-Status: ACTIVE — MERGED; live verification pending.
+Status: IN_PROGRESS — live verification pending.
 Current phase: shared write path and canonical Lead flow are available.
 Evidence: HORIZON major program map; schema status is tracked separately.
 Runtime: NOT ESTABLISHED.
@@ -64,7 +80,7 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md), [`MAINTENANCE_STAT
 
 ### Media / H4
 
-Status: ACTIVE — MERGED; staging-gated.
+Status: IN_PROGRESS — staging-gated.
 Current phase: Media Probe, artifact contract and gateway canary assets exist.
 Evidence: HORIZON major program map.
 Runtime: production activation NOT ESTABLISHED.
@@ -74,7 +90,7 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md), [`GATEWAY_CUTOVER_
 
 ### Command Center / H6
 
-Status: ACTIVE — MERGED; endpoint verification pending.
+Status: IN_PROGRESS — endpoint verification pending.
 Current phase: read-only API/UI and registry projection exist.
 Evidence: HORIZON records the `system_health` source correction as historical merged evidence.
 Runtime: deployed-SHA endpoint behavior NOT ESTABLISHED כאן.
@@ -84,7 +100,7 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md), [`BOSS_UNIFIED_MAS
 
 ### Memory & Retrieval
 
-Status: ACTIVE — MERGED; shadow/retrieval expansion remains gated.
+Status: IN_PROGRESS — shadow/retrieval expansion remains gated.
 Current phase: episodic capture and retrieval contracts are merged; retrieval remains shadow-only.
 Evidence: [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) runtime capability registry.
 Runtime: flag activation and live behavior NOT ESTABLISHED.
@@ -94,7 +110,7 @@ Canonical source: [`BOSS_MEMORY_RETRIEVAL_ARCHITECTURE_2026-08.md`](docs/researc
 
 ### Decision Hub / Distribution
 
-Status: ACTIVE — MERGED; activation/canary evidence pending.
+Status: IN_PROGRESS — activation/canary evidence pending.
 Current phase: Decision Hub safety work and canonical distribution mapping exist.
 Evidence: [`HORIZON.md`](docs/governance/HORIZON.md).
 Runtime: NOT ESTABLISHED.
@@ -106,7 +122,7 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md), [`BOSS_UNIFIED_MAS
 
 ### U1 — Understanding Layer Architecture
 
-Status: OWNER_DECISION / UNKNOWN for the broader architecture.
+Status: PLANNED for the broader architecture; owner decision required.
 Decision required: הרחבת המנגנונים הקיימים או בניית Understanding Contract כללי חדש.
 Why it matters: ההחלטה קובעת את מבנה ה־clarification/status/error messages ואת סדר העבודה.
 Blocks: UX-01.
@@ -114,7 +130,7 @@ Canonical source: [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_M
 
 ### RP5 Production Activation
 
-Status: OWNER_DECISION; implementation is not an activation decision.
+Status: PLANNED; implementation is not an activation decision.
 Decision required: האם ומתי להפעיל `FEATURE_EVIDENCE_FINALIZER=enforce` בסביבת production.
 Why it matters: enforcement changes the handling of unauthorized success claims.
 Blocks: production rollout claim for RP5.
@@ -131,6 +147,7 @@ Canonical source: [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_M
 
 ### Single-Speaker Approval UX
 
+Status: IN_PROGRESS.
 Reason: the refreshed plan is established, while later phases and runtime rollout remain sequenced work.
 Owner: F52 / Turn Coordinator owner.
 Revisit condition: complete the next permitted phase with its own evidence; no runtime claim is implied by the plan.
