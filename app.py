@@ -1988,15 +1988,25 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             getattr(_gw_result, "contract_id", None),
         )
         _callback_contract_id = _lifecycle_result.contract_id or ""
+        from core.approval_lifecycle_message_adapter import from_approval_lifecycle_result
+        from core.message_contract import InteractionType, MessageInteraction
+        _approval_contract = from_approval_lifecycle_result(
+            _lifecycle_result,
+            interaction=MessageInteraction(
+                type=InteractionType.CONFIRM_CANCEL,
+                actions=("✅ אשר", "↩️ בטל"),
+            ),
+        )
+        _approval_actions = _approval_contract.interaction.actions
         kb = telebot.types.InlineKeyboardMarkup()
         kb.add(
             telebot.types.InlineKeyboardButton(
-                "✅ אשר", callback_data=_approval_callback_data(
+                _approval_actions[0], callback_data=_approval_callback_data(
                     "approve", action_id, _callback_contract_id,
                 ),
             ),
             telebot.types.InlineKeyboardButton(
-                "❌ בטל", callback_data=_approval_callback_data(
+                _approval_actions[1], callback_data=_approval_callback_data(
                     "reject", action_id, _callback_contract_id,
                 ),
             ),

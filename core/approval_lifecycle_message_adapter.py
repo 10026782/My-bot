@@ -11,6 +11,7 @@ from typing import Protocol
 
 from core.message_contract import (
     MessageContract,
+    MessageInteraction,
     MessageContractValidationError,
     MessageState,
     TurnContextSource,
@@ -70,6 +71,7 @@ def from_approval_lifecycle_result(
     result: ApprovalLifecycleResultLike,
     *,
     repeated: bool = False,
+    interaction: MessageInteraction | None = None,
 ) -> MessageContract:
     """Adapt structured approval semantics into the canonical envelope.
 
@@ -79,6 +81,8 @@ def from_approval_lifecycle_result(
     """
     if not isinstance(repeated, bool):
         raise MessageContractValidationError("repeated must be bool")
+    if interaction is not None and not isinstance(interaction, MessageInteraction):
+        raise MessageContractValidationError("interaction must be a MessageInteraction or None")
 
     description = result.safe_business_description
     if not isinstance(description, str):
@@ -98,4 +102,5 @@ def from_approval_lifecycle_result(
         reason_code=None,
         execution_verified=None,
         occurred_at=None,
+        interaction=interaction,
     )
