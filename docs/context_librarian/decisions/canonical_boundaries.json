@@ -975,6 +975,57 @@
         }
       },
       "last_observed_commit": "8ac763fe5459768246bf44ffb13548cfaff9371e"
+    },
+    {
+      "id": "decision.oracle_migration_infrastructure",
+      "name": "Oracle Always Free migration M0 deploy/ops scaffolding is infrastructure tooling, not SCOREBOS application runtime or business logic",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "container/orchestration, reverse-proxy/TLS, environment-variable contract, CD workflow, and backup/restore/healthcheck tooling for a possible future Oracle Cloud Ampere A1 deployment of the existing BOSS backend -- introduced by the Oracle migration audit's M0 (repository readiness) slice",
+        "precedence": "carries no authority over application business logic, tool_registry.py/dispatcher.py's execution authority, identity/role/tenant enforcement, or Airtable schema governance. Render remains the live production deployment target; nothing in this boundary changes that until a separate, explicit M1+ decision does. gunicorn.conf.py's workers=1 (the in-process scheduler's single-active-instance invariant) is read by, but not owned or modified by, any file in this boundary -- Dockerfile passes --bind as a CLI flag specifically so it never edits that shared, Render-loaded file."
+      },
+      "owner": "governance",
+      "code_paths": [
+        "Dockerfile",
+        "docker-compose.oracle.yml",
+        "Caddyfile.oracle",
+        ".env.oracle.example",
+        ".github/workflows/deploy-oracle.yml",
+        "scripts/oracle/backup_postgres.sh",
+        "scripts/oracle/restore_postgres.sh",
+        "scripts/oracle/healthcheck_alert.sh"
+      ],
+      "test_paths": [],
+      "canonical_docs": [
+        {
+          "path": "docs/operations/ORACLE_MIGRATION_M0.md",
+          "role": "M0 readiness scope, live-Render-evidence findings, and unresolved-decision record",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-28",
+      "last_verified_commit": "0a4e41b376acc4da7676fc83e9f74d49ddb03c26",
+      "confidence": 0.85,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #1095: all 8 files were new sources with no matching policy_registry.json entry (block_reason NO_POLICY_MATCH), classified REVIEW_REQUIRED/'new source with unknown role' by classify_new_sources() purely because none of Dockerfile/.yml/.sh/.example extensions match its .py/.md/image buckets.",
+        "OWNER DECISION: the owner explicitly approved these 8 files as intentional, canonical Oracle infrastructure/deployment sources belonging to the Oracle migration infrastructure boundary introduced by M0 -- not accidental architecture drift. Registered directly into this node's code_paths (exact literal paths, no glob) rather than as a policy_registry.json entry: this resolves the current 8 named files without granting reusable auto-approval to any future file merely for living under scripts/oracle/ or matching *.oracle.* -- a genuinely new 9th file in this area still falls through to OWNER_DECISION_REQUIRED, unchanged, per the owner's explicit instruction not to introduce wildcard approval for arbitrary future infrastructure files.",
+        "Role sub-classification within this single boundary (owner-specified, 2026-08-28): container/runtime definition (Dockerfile, docker-compose.oracle.yml); network/TLS infrastructure (Caddyfile.oracle); environment contract/template (.env.oracle.example -- explicitly not a secrets file, no real credentials permitted); deployment automation (.github/workflows/deploy-oracle.yml -- intentionally manual/gated until Oracle runtime exists); operations/disaster recovery (scripts/oracle/backup_postgres.sh, restore_postgres.sh, healthcheck_alert.sh).",
+        "No production Oracle deployment exists as of this registration -- no VM provisioned, no DNS/domain pointed, no secret populated beyond local test dummies. This node makes no production-deployment-state claim; see docs/operations/ORACLE_MIGRATION_M0.md for what was and wasn't verified (live Render API evidence for the Render side; local Docker build/run/restart/backup-restore verification for these files, explicitly NOT ARM64 runtime-verified -- this sandbox has no QEMU/binfmt emulation)."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "oracle_migration_infrastructure_scaffolding",
+          "authority": false,
+          "purpose": "container/TLS/env-contract/CD/backup/observability scaffolding for a possible future Oracle deployment of the existing BOSS backend; does not itself run in, or get imported by, the live request-handling path",
+          "runtime_consumed": false
+        }
+      }
     }
   ],
   "edges": [
