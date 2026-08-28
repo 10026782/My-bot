@@ -233,6 +233,19 @@ def classify_approval_policy(tool_name: str, tool_inputs: dict, trusted_source: 
         if set(fields) == allowed_fields:
             return APPROVAL_POLICY_SELF_CONFIRM
 
+    if tool_name == "airtable_add" and (
+        trusted_source == "interaction_engine_scheduler"
+        and is_task_table(tool_inputs.get("table"))
+    ):
+        from airtable_schema import TaskFields
+        required_fields = {
+            TaskFields.NAME,
+            TaskFields.STATUS,
+            TaskFields.DESCRIPTION,
+        }
+        if required_fields <= set(fields) <= required_fields | {TaskFields.DUE_DATE}:
+            return APPROVAL_POLICY_SELF_CONFIRM
+
     if tool_inputs.get("table") != _LEAD_CAPTURE_TABLE:
         return APPROVAL_POLICY_APPROVAL
 

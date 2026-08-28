@@ -106,11 +106,15 @@ with patch("core.action_gateway.action_gateway", _FakeInteractionGateway(SimpleN
 
 _analysis_with_tasks = InteractionAnalysis(tasks=[{"title": "Task 1", "owner": "Eli"}])
 
-with patch("tools.airtable_tools.airtable_add", return_value=_ok_result("recTASK1")):
+with patch("core.action_gateway.action_gateway", _FakeInteractionGateway(
+    SimpleNamespace(ok=True, record_id="recTASK1")
+)):
     created = create_tasks_from_analysis(_analysis_with_tasks, _interaction)
     chk("create_tasks_from_analysis: ok=True → created counter increments", created == 1)
 
-with patch("tools.airtable_tools.airtable_add", return_value=_fail_result()):
+with patch("core.action_gateway.action_gateway", _FakeInteractionGateway(
+    SimpleNamespace(ok=False, record_id="")
+)):
     created = create_tasks_from_analysis(_analysis_with_tasks, _interaction)
     chk("create_tasks_from_analysis: ok=False → created counter stays 0", created == 0)
 
