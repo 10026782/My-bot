@@ -81,7 +81,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
+      "last_verified_commit": "26a4ca4d62133039bfbc89508345556d847c84e3",
       "confidence": 1.0,
       "notes": [
         "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
@@ -255,7 +255,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
+      "last_verified_commit": "26a4ca4d62133039bfbc89508345556d847c84e3",
       "confidence": 1.0,
       "notes": [
         "Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."
@@ -410,7 +410,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "26a4ca4d62133039bfbc89508345556d847c84e3",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
