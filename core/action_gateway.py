@@ -159,6 +159,7 @@ APPROVAL_POLICY_SELF_CONFIRM = "self_confirm"
 _LEAD_CAPTURE_TABLE = "Leads"
 _TASK_CREATION_TABLE = "Tasks"
 _INTERACTION_LOG_TABLE = "Interaction Log"
+_QUESTS_TABLE = "Quests"
 
 
 def _lead_safe_fields() -> tuple[frozenset, frozenset]:
@@ -245,6 +246,14 @@ def classify_approval_policy(tool_name: str, tool_inputs: dict, trusted_source: 
         }
         if required_fields <= set(fields) <= required_fields | {TaskFields.DUE_DATE}:
             return APPROVAL_POLICY_SELF_CONFIRM
+
+    if tool_name == "airtable_update" and (
+        trusted_source == "weekly_quest_reset_scheduler"
+        and tool_inputs.get("table") == _QUESTS_TABLE
+        and set(fields) == {"Status", "Week_Start"}
+        and tool_inputs.get("record_id")
+    ):
+        return APPROVAL_POLICY_SELF_CONFIRM
 
     if tool_inputs.get("table") != _LEAD_CAPTURE_TABLE:
         return APPROVAL_POLICY_APPROVAL
