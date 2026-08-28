@@ -109,7 +109,7 @@ gate described in the readiness report.
 | F52-G1 | CLOSED — STATIC VERIFIED | PR #1067; implementation commit `bfab582`; verified `origin/main` `d735395cb495d7e18a9d4337026f8c0d0f8851e1`; focused tests 4 passed; BUG-091 regression 10 passed; `py_compile` PASS; `git diff --check` PASS; runtime NOT ESTABLISHED |
 | F52-G2 | CLOSED — STATIC VERIFIED | Commit `f17bfe9`; verified `origin/main` `d2ec703`; runtime NOT ESTABLISHED |
 | F52-G3 | CLOSED — STATIC VERIFIED | S1–S7 close all current business-truth string consumers; only display/test assertions remain |
-| F52-G4 | PARTIALLY CLOSED | Scheduler/background normalization remains incomplete; S1–S3 are bounded slices |
+| F52-G4 | PARTIALLY CLOSED | Scheduler/background normalization remains incomplete; S1–S4 are bounded slices |
 | F52-G5 | OPEN — CURRENT GAP | Durable generic evidence ledger remains out of scope |
 
 ### F52-G4-S1 — LeadMemory scheduler writer
@@ -148,7 +148,20 @@ gate described in the readiness report.
 - Authorization: exact Tasks field allowlist with `trusted_source="abandoned_lead_scheduler"`.
 - Idempotency: stable `fingerprint_payload` over sender/channel/domain/step/answers; duplicate proposals are rejected by the ActionGateway fingerprint.
 - Evidence/result: completed ActionContract plus `execution_fact.record_id`; missing status or record ID fails closed.
-- Residual G4 writers: `interaction_engine.py::create_tasks_from_analysis()`, `scheduler.py::_job_weekly_quest_reset()`.
+- Residual G4 writers: `scheduler.py::_job_weekly_quest_reset()`.
+
+### F52-G4-S4 — Interaction-engine Task writer
+
+- Status: IMPLEMENTED / STATIC TESTED.
+- Consumer: `interaction_engine.py::create_tasks_from_analysis()`.
+- Previous path: one direct `airtable_add(Tasks)` call per emitted Task.
+- Canonical path: one shared Task-create policy through `ActionGateway.propose_action()` → self-confirm approval → Gateway executor → structured Airtable result/evidence.
+- System identity: `Identity(user_id="interaction_engine_scheduler", role=Role.MANAGER, channel="scheduler")`, tenant from interaction metadata or `boss_hq`.
+- Authorization: one exact Task allowlist for `NAME`, `STATUS`, `DESCRIPTION`, with optional `DUE_DATE`; due/no-due Tasks use the same policy.
+- Idempotency: stable fingerprint over action/table/source event/task index and canonical Task fields; transient `Memory ID` is excluded.
+- Partial success: each Task is counted only after its own completed/executed contract has a structured `execution_fact.record_id`; later Tasks continue after a failed result.
+- Evidence/result: structured ActionContract status and `execution_fact.record_id`; display strings are not authority.
+- Residual G4 writers: `scheduler.py::_job_weekly_quest_reset()`.
 
 ### F52-G3-S1 — LeadMemory result migration
 
