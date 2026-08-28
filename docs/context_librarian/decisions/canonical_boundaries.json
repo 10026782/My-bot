@@ -81,7 +81,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
       "confidence": 1.0,
       "notes": [
         "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
@@ -255,7 +255,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
       "confidence": 1.0,
       "notes": [
         "Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."
@@ -342,7 +342,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
@@ -781,7 +781,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-20",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
       "confidence": 1.0,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #785 (block_reason=NO_POLICY_MATCH): core/lead_service.py had no existing catalog owner across any of the 8 registered layers or 18 decision nodes as of this registration — owner decision was CREATE NEW NODE.",
@@ -822,7 +822,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-20",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
       "confidence": 0.9,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that merges N18 Phase 2's first two slices — core/structured_command.py and core/draft_flow.py had no existing catalog owner. Explicitly anticipated by decision.canonical_lead_write_service's own registration notes: these primitives 'carry no Lead-specific authority themselves' — classified REGISTER_SUPPORTING, not a new authority node, matching the precedent set by decision.tma_screens for similar non-authority infrastructure.",
@@ -868,7 +868,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-21",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
       "confidence": 0.85,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that merges N18 Phase 2's fifth (closing) slice — core/turn_result.py had no existing catalog owner. Classified REGISTER_SUPPORTING, not a new authority node, matching the identical precedent set by decision.n18_shared_write_primitives (same reasoning: pure data type, no I/O, no business semantics).",
