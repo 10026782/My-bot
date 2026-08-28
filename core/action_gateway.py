@@ -158,6 +158,7 @@ APPROVAL_POLICY_SELF_CONFIRM = "self_confirm"
 
 _LEAD_CAPTURE_TABLE = "Leads"
 _TASK_CREATION_TABLE = "Tasks"
+_INTERACTION_LOG_TABLE = "Interaction Log"
 
 
 def _lead_safe_fields() -> tuple[frozenset, frozenset]:
@@ -189,20 +190,37 @@ def _lead_safe_fields() -> tuple[frozenset, frozenset]:
 
 def classify_approval_policy(tool_name: str, tool_inputs: dict, trusted_source: str = "agent") -> str:
     """
-    Returns APPROVAL_POLICY_SELF_CONFIRM ONLY for a narrow, allowlisted class
-    of safe lead-capture writes on the Leads table (create, or update
-    restricted to {phone, summary, domain}). Everything else — any other
-    tool, any other table, or any Leads write that touches a field outside
-    the allowlist (status, score, tier, owner, next-step, or anything not
-    explicitly listed) — is APPROVAL_POLICY_APPROVAL, the strict default.
+    Returns APPROVAL_POLICY_SELF_CONFIRM only for exact scheduler-safe field
+    allowlists for Leads and Interaction Log writes. Everything else is
+    APPROVAL_POLICY_APPROVAL, the strict default.
     """
     if tool_name not in ("airtable_add", "airtable_update"):
         return APPROVAL_POLICY_APPROVAL
-    if not isinstance(tool_inputs, dict) or tool_inputs.get("table") != _LEAD_CAPTURE_TABLE:
+    if not isinstance(tool_inputs, dict):
         return APPROVAL_POLICY_APPROVAL
 
     fields = tool_inputs.get("fields")
     if not isinstance(fields, dict) or not fields:
+        return APPROVAL_POLICY_APPROVAL
+
+    if tool_name == "airtable_add" and (
+        trusted_source == "interaction_engine_scheduler"
+        and tool_inputs.get("table") == _INTERACTION_LOG_TABLE
+    ):
+        from airtable_schema import InteractionLogFields
+        allowed_fields = {
+            InteractionLogFields.TITLE,
+            InteractionLogFields.SUMMARY,
+            InteractionLogFields.CHANNEL,
+            InteractionLogFields.TIMESTAMP,
+            InteractionLogFields.PARTICIPANTS,
+            InteractionLogFields.KEY_INSIGHTS,
+            InteractionLogFields.FOLLOWUP_ACTIONS,
+        }
+        if set(fields) == allowed_fields:
+            return APPROVAL_POLICY_SELF_CONFIRM
+
+    if tool_inputs.get("table") != _LEAD_CAPTURE_TABLE:
         return APPROVAL_POLICY_APPROVAL
 
     if (

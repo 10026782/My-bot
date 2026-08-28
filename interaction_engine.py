@@ -305,10 +305,8 @@ def save_to_interaction_log(
     מחזיר record_id, או "" אם נכשל.
     Single Source of Truth לאינטראקציות אוטומטיות — נשמר לפני Telegram.
     """
-    from airtable_schema import Tables, InteractionLogFields
     try:
-        from tools.airtable_tools import airtable_add  # type: ignore
-
+        from airtable_schema import InteractionLogFields
         fields = {
             InteractionLogFields.TITLE:            interaction.title,
             InteractionLogFields.SUMMARY:          analysis.summary,
@@ -318,14 +316,7 @@ def save_to_interaction_log(
             InteractionLogFields.KEY_INSIGHTS:     analysis.next_steps or analysis.sentiment,
             InteractionLogFields.FOLLOWUP_ACTIONS: ", ".join(str(t) for t in analysis.tasks) if analysis.tasks else "",
         }
-
-        result = airtable_add(Tables.INTERACTION_LOG, fields)
-        if result.get("ok"):
-            record_id = result.get("external_id") or "saved"
-            logger.info(f"[InteractionLog] saved: {interaction.title} → {record_id}")
-            return record_id
-        logger.warning(f"[InteractionLog] write failed: {result.get('user_message', result)}")
-        return ""
+        return _save_interaction_via_gateway(interaction, fields)
 
     except ImportError:
         logger.debug(f"[InteractionLog] dry-run: {interaction.title}")
@@ -769,6 +760,58 @@ def _run_tests() -> bool:
     print(f"\n{'='*40}")
     print(f"D06.1 Tests: {passed} passed, {failed} failed")
     return failed == 0
+
+
+def _save_interaction_via_gateway(interaction: InteractionSchema, fields: dict) -> str:
+    """Execute the Interaction Log write under one explicit system contract."""
+    from core.action_gateway import action_gateway
+    from identity import Identity, Role
+
+    tenant_id = str(interaction.metadata.get("tenant_id") or "boss_hq")
+    system_identity = Identity(
+        user_id="interaction_engine_scheduler",
+        role=Role.MANAGER,
+        tenant_id=tenant_id,
+        domain_id=interaction.domain or "general",
+        channel="scheduler",
+        external_id="interaction_engine_scheduler",
+    )
+    proposal = action_gateway.propose_action(
+        tenant_id=tenant_id,
+        canonical_user_id=system_identity.memory_key,
+        tool_name="airtable_add",
+        tool_inputs={"table": "Interaction Log", "fields": fields},
+        origin_channel="scheduler",
+        origin_chat_id=system_identity.memory_key,
+        requires_approval=True,
+        identity=system_identity,
+        trusted_source="interaction_engine_scheduler",
+    )
+    if not proposal.ok or not proposal.contract_id:
+        logger.warning("[InteractionLog] gateway proposal failed: %s", proposal.reason)
+        return ""
+    action_gateway.approve(
+        proposal.contract_id,
+        approver=system_identity.memory_key,
+        approver_role=system_identity.role,
+    )
+    contract = action_gateway._ledger.find_by_id(proposal.contract_id)
+    if not contract or contract.status not in {"completed", "executed"}:
+        logger.warning("[InteractionLog] structured execution failed: status=%s", getattr(contract, "status", "missing"))
+        return ""
+    record_id = next(
+        (
+            observation.get("record_id", "")
+            for observation in reversed(contract.agent_observations)
+            if observation.get("kind") == "execution_fact"
+        ),
+        "",
+    )
+    if not record_id:
+        logger.warning("[InteractionLog] structured execution lacked record_id")
+        return ""
+    logger.info(f"[InteractionLog] saved: {interaction.title} → {record_id}")
+    return record_id
 
 
 if __name__ == "__main__":
