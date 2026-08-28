@@ -207,15 +207,17 @@ approve/cancel buttons while preserving `lead_sessions` as draft state,
 canonical lead writing, and ActionGateway lifecycle handling. The R3.2 callback
 correction is also merged at `1a42a00` (merge `bca2f33`) and keeps callback
 acknowledgment transport-only while the one persistent message carries the
-final business result. R4 alignment is merged/static in `3a5242d`; R5 — shared
-field-choice primitive — is the next implementation slice. No deployment or
+final business result. R4 alignment is merged/static in `3a5242d`; R5's
+uniformity gate found no second current uniform consumer, so R6.1 — Decision
+New UX Alignment — is the next implementation slice. No deployment or
 runtime claim is made here.
 
 ### Current phase evidence at origin/main `1d5ca86`
 
 - R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
 - R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
-- R5 — **NEXT**; the F52/UX-01 program remains `IN_PROGRESS`.
+- R5 gate — **NO NEW ABSTRACTION JUSTIFIED**; the F52/UX-01 program remains
+  `IN_PROGRESS` and R6.1 is the current implementation slice.
 
 ## Refreshed Phase Plan
 
@@ -228,7 +230,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R2 | Minimal MessageContract interaction extension and adapters. | Presentation only; no new store; no internal IDs. | CODE_DONE / STATIC_VERIFIED | Provider rendering and activation. |
 | R3 | Migrate generic Telegram approvals to the shared semantic contract. | Exact correlation, replay safety, one response. | Static and channel evidence | WhatsApp controls and unrelated flows. |
 | R4 | Integrate PR #1065 Lead Draft buttons after callback correction. | Cancel writes nothing; approval writes once; replay safe. | Static/merged and targeted runtime | Generic wizard abstraction. |
-| R5 | Add a shared field-choice primitive. | Provider-neutral meaning and existing authority boundaries. | CODE_DONE / STATIC_VERIFIED | Provider rendering. |
+| R5 | Gate whether a shared field-choice primitive is justified. | No premature abstraction. | Read-only uniformity gate | Treating hypothetical migrations as current consumers. |
 | R6 | Migrate eligible Telegram wizard flows, one slice at a time. | No big-bang rewrite; one response; replay safety. | Focused static/channel evidence | Unsupported provider features. |
 | R7 | Add WhatsApp interactive adapter plus text fallback. | Same semantics as Telegram; limits stay in adapter. | Static/provider tests, then runtime | Enabling outbound providers without evidence/approval. |
 | R8 | Consolidate duplicate formatter paths behind MessageContract. | One public presentation contract and one response. | Regression/static, then canary | Lifecycle or authorization redesign. |
