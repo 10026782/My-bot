@@ -351,6 +351,9 @@ chk("same-chat callback sends no additional Telegram message",
     reject_bot.send_message.call_count == 0)
 chk("same-chat callback edits exactly one persistent final response",
     reject_bot.edit_message_text.call_count == 1)
+chk("button reject callback acknowledgment is transport-only",
+    reject_bot.answer_callback_query.call_args is not None and
+    reject_bot.answer_callback_query.call_args[0][1] == "🚫 בוטל")
 
 print("\n── Cross-chat callback finalization + replay safety ───────────")
 

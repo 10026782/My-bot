@@ -378,28 +378,88 @@ def create_tasks_from_analysis(
     interaction: InteractionSchema,
     memory_id:   str = "",
 ) -> int:
-    """יוצר Tasks ב-Airtable עם קישור לרשומת הזיכרון."""
+    """יוצר Tasks דרך boundary יחיד, תוך שמירת partial-success הקיים."""
     if not analysis.tasks:
         return 0
     created = 0
     try:
-        from tools.airtable_tools import airtable_add  # type: ignore
-        for task in analysis.tasks:
+        from core.action_gateway import action_gateway
+        from identity import Identity, Role
+
+        tenant_id = str(interaction.metadata.get("tenant_id") or "boss_hq")
+        system_identity = Identity(
+            user_id="interaction_engine_scheduler",
+            role=Role.MANAGER,
+            tenant_id=tenant_id,
+            domain_id=interaction.domain or "general",
+            channel="scheduler",
+            external_id="interaction_engine_scheduler",
+        )
+        source_event_id = interaction.raw_id or interaction.title
+
+        for task_index, task in enumerate(analysis.tasks):
             priority = "high" if analysis.sentiment == "negative" else "medium"
+            stable_description = (
+                f"מקור: {interaction.source_channel} — {interaction.title}\n"
+                f"בעלים: {task.get('owner','')}\n"
+                f"עדיפות: {priority}"
+            )
             fields = {
                 TaskFields.NAME:        task.get("title", ""),
                 TaskFields.STATUS:      TaskStatus.PENDING,
                 TaskFields.DESCRIPTION: (
-                    f"מקור: {interaction.source_channel} — {interaction.title}\n"
-                    f"בעלים: {task.get('owner','')}\n"
-                    f"עדיפות: {priority}\n"
+                    f"{stable_description}\n"
                     f"Memory ID: {memory_id}"
                 ),
             }
             if task.get("due"):
                 fields[TaskFields.DUE_DATE] = task.get("due", "")
-            result = airtable_add(Tables.TASKS, fields)
-            if result.get("ok"):
+
+            # Memory ID is a storage result and may change on replay; the
+            # source event, task position, and canonical Task fields are stable.
+            fingerprint_fields = {
+                TaskFields.NAME: fields[TaskFields.NAME],
+                TaskFields.STATUS: fields[TaskFields.STATUS],
+                TaskFields.DESCRIPTION: stable_description,
+            }
+            if TaskFields.DUE_DATE in fields:
+                fingerprint_fields[TaskFields.DUE_DATE] = fields[TaskFields.DUE_DATE]
+            proposal = action_gateway.propose_action(
+                tenant_id=tenant_id,
+                canonical_user_id=system_identity.memory_key,
+                tool_name="airtable_add",
+                tool_inputs={"table": Tables.TASKS, "fields": fields},
+                origin_channel="scheduler",
+                origin_chat_id=system_identity.memory_key,
+                requires_approval=True,
+                identity=system_identity,
+                trusted_source="interaction_engine_scheduler",
+                fingerprint_payload={
+                    "action": "create_task",
+                    "table": Tables.TASKS,
+                    "source_event_id": source_event_id,
+                    "task_index": task_index,
+                    "fields": fingerprint_fields,
+                },
+            )
+            if not proposal.ok or not proposal.contract_id:
+                logger.warning("[Interaction] task proposal failed: %s", proposal.reason)
+                continue
+            action_gateway.approve(
+                proposal.contract_id,
+                approver=system_identity.memory_key,
+                approver_role=system_identity.role,
+            )
+            contract = action_gateway._ledger.find_by_id(proposal.contract_id)
+            record_id = next(
+                (
+                    observation.get("record_id", "")
+                    for observation in reversed(contract.agent_observations)
+                    if observation.get("kind") == "execution_fact"
+                ),
+                "",
+            ) if contract else ""
+            if contract and contract.status in {"completed", "executed"} and record_id:
                 created += 1
     except ImportError:
         pass
