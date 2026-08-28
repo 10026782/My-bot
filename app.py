@@ -3048,7 +3048,9 @@ def _handle_approval_callback_impl(cq) -> None:
             )
             if _callback_result.canonical_state != "pending":
                 _callback_contract = _callback_gateway.find_contract(callback_contract_id)
-                bot.answer_callback_query(cq.id, _callback_result.safe_user_message)
+                bot.answer_callback_query(
+                    cq.id, "↩️ בוטל" if action == "reject" else "✅ התקבל",
+                )
                 _deliver_callback_final(
                     cq,
                     origin_channel=getattr(_callback_contract, "origin_channel", "telegram"),
@@ -3267,7 +3269,9 @@ def _handle_approval_callback_impl(cq) -> None:
                     "action_id=%s contract=%s tool=%s status=%s",
                     action_id, _gw_terminal_contract_id, tool_name, _gw_terminal_status,
                 )
-                bot.answer_callback_query(cq.id, _gw_terminal_reply)
+                bot.answer_callback_query(
+                    cq.id, "↩️ בוטל" if action == "reject" else "✅ התקבל",
+                )
                 _notify_stale_or_resolved_callback(
                     cq, notify_chat_id=approver_chat_id,
                     label=item.get("label") or _describe_tool_call(tool_name, tool_inputs),
