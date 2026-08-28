@@ -139,6 +139,8 @@ chk("A: stale callback produces zero dispatcher calls",
     _dt_a.call_count == 0 and _dt_legacy_a.call_count == 0)
 chk("A: answer_callback_query popup was sent (immediate ack)",
     mock_bot_a.answer_callback_query.called)
+chk("A: callback popup is transport-only",
+    mock_bot_a.answer_callback_query.call_args[0][1] == "✅ התקבל")
 chk("A: same-chat callback emits no separate persistent send_message",
     not mock_bot_a.send_message.called)
 chk("A: original approval message was edited (final state shown, button removed)",
