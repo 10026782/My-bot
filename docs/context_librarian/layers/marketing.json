@@ -57,7 +57,7 @@
         }
       ],
       "valid_from": "2026-08-12",
-      "last_verified_commit": "7308395c282bf47763a6b6e4a4efaabed9014ea9",
+      "last_verified_commit": "178f55fd31daa4b86863aa12a564fc5c88ea2227",
       "confidence": 0.7,
       "notes": [
         "New layer, registered as part of a Context Librarian catalog freshness fix (backend-ci was failing because these 4 files existed on main unregistered). Not yet exercised by a real consumption pilot the way cross_layer_architecture was — confidence is lower than the other 6 layers for that reason, not because the classification itself is in doubt.",
