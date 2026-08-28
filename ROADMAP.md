@@ -26,7 +26,7 @@ READY TO FREEZE`; הכרעת freeze ו־formal Layer 2 TurnCoordinator עדיי�
 |---|---|---|---|---|---|
 | TURN_COORDINATOR_PROGRAM | Turn Coordinator | IN_PROGRESS | MERGED_STATIC — TC7-B/RP5 paths recorded | RP5 activation decision and deployed-SHA verification | [`HORIZON.md`](docs/governance/HORIZON.md) |
 | UNIFIED_APPROVAL_ACTIONGATEWAY | Unified Approval / ActionGateway | IN_PROGRESS | MERGED_STATIC — lifecycle and approval paths | Runtime verification of approved paths | [`HORIZON.md`](docs/governance/HORIZON.md) |
-| F52 | F52 Unified Approval Runtime — Unified User Messages | IN_PROGRESS | R3.1 MERGED / STATIC FOUNDATION; Single-Speaker implementation program | R3.2 REQUIRED / NEXT | [`SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md`](docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md) |
+| F52 | F52 Unified Approval Runtime — Unified User Messages | IN_PROGRESS | R3.2 and R4 MERGED / STATIC FOUNDATION; Single-Speaker implementation program | R5 — shared field-choice primitive | [`SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md`](docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md) |
 | N18 | Canonical Write Infrastructure | IN_PROGRESS | MERGED_STATIC — Lead is first consumer | Continue gated shared-write sequence | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | LEAD_CRM_CANONICAL_FLOW | Lead / CRM canonical flow | IN_PROGRESS | MERGED_STATIC — canary pending | Draft → Approval → Write → Evidence canary | [`HORIZON.md`](docs/governance/HORIZON.md) |
 | MEDIA_LAYER_F16 | Media Layer (F16) | IN_PROGRESS | MERGED_STATIC — staging-gated | Gated deployed-SHA canary | [`HORIZON.md`](docs/governance/HORIZON.md) |
@@ -47,11 +47,13 @@ READY TO FREEZE`; הכרעת freeze ו־formal Layer 2 TurnCoordinator עדיי�
 | SPEC_PREVIEW_CONTENT_FIX | SPEC Preview Content Fix | IN_PROGRESS | MERGED_STATIC — production verification remains pending | Perform post-merge production verification | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | BUG_099_LEAD_EXTRACTION | BUG-099 Lead Extraction Integrity | IN_PROGRESS | MERGED_STATIC — current remediation/status is canonicalized | Follow the registered next gate | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | HERMES_INTERNAL_ARCHITECTURE_LEARNINGS | Hermes Internal Architecture Learnings | IN_PROGRESS | MERGED_STATIC — selective adoption only | Continue only for a concrete architecture gap | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
-| U1 | Understanding Layer Architecture | PLANNED | Architecture decision remains unresolved | Owner architecture decision | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) §3.5 |
-| UX-01 | Unified BOSS Experience | PLANNED | No implementation start claimed | Blocked by U1; resume after U1 decision | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) §3.5 |
+| U1 | Understanding Layer Architecture | MERGED_STATIC | Owner decision recorded: no new general Understanding Contract or PendingAction Store; reuse existing layers | Continue with the approved reuse architecture | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) §3.5 |
+| UX-01 | Unified BOSS Experience | IN_PROGRESS | R0.1, R1.1, R2.0, R2.1, R3.1, R3.2 and R4 merged/static through F52 Single-Speaker | R5 — shared field-choice primitive | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) §3.5 |
 
-U1 is the architecture dependency for UX-01. Single-Speaker Approval UX is the
-current F52 implementation program; it does not rename or replace UX-01.
+The historical dependency Pending Approval stable → U1 decision → UX-01 is
+satisfied. U1 is resolved at architecture/static level. F52 / Single-Speaker
+Approval UX is the implementation program/slice of UX-01; it does not rename
+or replace the UX-01 identity.
 
 ## 3. Open Architecture / Owner Decisions
 
@@ -81,5 +83,6 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md).
 - [`MAINTENANCE_STATUS_MATRIX.md`](MAINTENANCE_STATUS_MATRIX.md) — maintenance/audit evidence status.
 - [`BOSS_CURRENT_STATE.md`](BOSS_CURRENT_STATE.md) — operational current-state companion.
 - [`SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md`](docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md) — F52/Single-Speaker canonical plan.
+- [`PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md`](docs/audit/PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md) — read-only drift audit and reconciliation evidence.
 - [`BUG_AUDIT_LOG.md`](BUG_AUDIT_LOG.md) — audit evidence and historical findings.
 - [`archive/ROADMAP_HISTORICAL_ARCHIVE_20260828.md`](archive/ROADMAP_HISTORICAL_ARCHIVE_20260828.md) — complete pre-cleanup ROADMAP snapshot, HISTORICAL only.

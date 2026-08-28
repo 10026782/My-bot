@@ -8,6 +8,10 @@ ownership invariant with the later deterministic-turn and MessageContract
 work. It does not replace the F52, Turn Coordinator, RP5, or ActionGateway
 authorities.
 
+Relationship to the program registry: F52 / Single-Speaker Approval UX is the
+implementation program/slice of `UX-01 — Unified BOSS Experience`. It preserves
+`UX-01` as the canonical identity and does not replace or rename it.
+
 Evidence level: **DOCUMENTED / UX LANGUAGE APPROVED**. This document is a plan,
 not code, deployment, or runtime verification.
 
@@ -197,13 +201,21 @@ to weaken ActionContracts or Gateway rules.
 
 ## PR #1065 Position
 
-PR #1065 is **MERGED** (`2484f3c` on `origin/main`). It adds Telegram Lead Draft
+PR #1065 is **MERGED / STATIC VERIFIED** on `origin/main` at implementation
+commit `2484f3c`. It adds Telegram Lead Draft
 approve/cancel buttons while preserving `lead_sessions` as draft state,
-canonical lead writing, and ActionGateway lifecycle handling. The later R3.2
-callback correction is also merged and keeps callback acknowledgment
-transport-only while the one persistent message carries the final business
-result. R4 alignment remains a separate code/static-verification slice; no
-deployment or runtime claim is made here.
+canonical lead writing, and ActionGateway lifecycle handling. The R3.2 callback
+correction is also merged at `1a42a00` (merge `bca2f33`) and keeps callback
+acknowledgment transport-only while the one persistent message carries the
+final business result. R4 alignment is merged/static in `3a5242d`; R5 — shared
+field-choice primitive — is the next implementation slice. No deployment or
+runtime claim is made here.
+
+### Current phase evidence at origin/main `1d5ca86`
+
+- R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
+- R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
+- R5 — **NEXT**; the F52/UX-01 program remains `IN_PROGRESS`.
 
 ## Refreshed Phase Plan
 
