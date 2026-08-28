@@ -133,6 +133,10 @@ gate described in the readiness report.
 - Authorization policy: exact Interaction Log field allowlist with `trusted_source="interaction_engine_scheduler"`.
 - Idempotency: existing `is_duplicate(raw_id)` gate plus ActionGateway business fingerprint.
 - Evidence/result: completed ActionContract status and its structured `execution_fact.record_id`; missing status/identity/evidence fails closed.
+- PR: #1073.
+- Commit: `0d23abd`.
+- Tests: focused 14 passed; response-contract 19 passed; ActionGateway 43 passed; guards PASS; `py_compile` PASS; `git diff --check` PASS.
+- Residual G4 writers: `interaction_engine.py::create_tasks_from_analysis()`, `abandoned_lead_worker.py::create_human_pipeline_task()`, `scheduler.py::_job_weekly_quest_reset()`; follow-up/recovery outbound adapters remain separately scoped.
 
 ### F52-G3-S1 — LeadMemory result migration
 
