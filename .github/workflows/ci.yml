@@ -55,6 +55,39 @@ jobs:
           fi
           exit "$status"
 
+  status-sync:
+    needs: classify-change
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      needs.classify-change.outputs.governance_required == 'true' ||
+      needs.classify-change.outputs.full_ci_required == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Blocking current-state status sync
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            MAIN_REF="$BASE_SHA"
+          else
+            MAIN_REF="$HEAD_SHA"
+          fi
+          python tools/status_sync_validator.py \
+            --repo-root . \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --main-ref "$MAIN_REF"
+
   backend-ci:
     needs: classify-change
     if: >-
@@ -193,6 +226,9 @@ jobs:
 
       - name: Canonical Active Work Registry validation
         run: python tools/dev_registry_validator.py
+
+      - name: Status sync validator tests (blocking)
+        run: python -m pytest test_status_sync_validator.py -x --tb=short -q
 
       - name: Airtable boundary guard (blocking)
         run: python tools/audit_gateway_bypass.py --boundary
