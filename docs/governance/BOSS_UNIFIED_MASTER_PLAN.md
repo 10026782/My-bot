@@ -29,8 +29,10 @@ the older U1 registry wording that said the architecture decision was pending.
 `UX-01` is therefore `IN_PROGRESS` through the F52 / Single-Speaker Approval
 UX implementation path; R0.1, R1.1, R2.0, R2.1, R3.1, R3.2 and R4 are recorded
 as merged/static. R4.1 is also merged/static in PR #1088 (`16e82c7`). R5's
-read-only gate found no second uniform consumer, so R6.1 aligns only
-`/decision new`; R6.1 is merged/static in PR #1091 (`40bc446`).
+read-only gate found no second uniform consumer, so R6.1 aligned `/decision new`;
+R6.1 is merged/static in PR #1091 (`40bc446`). R6.2 then adopted the shared
+DraftFlow interaction primitive while preserving Decision-owned state and
+persistence; it is CODE_DONE / STATIC_VERIFIED.
 Runtime is not implied. The registry rows below are reconciled to this decision
 and current main evidence.
 
