@@ -59,9 +59,9 @@ level. `UX-01 — Unified BOSS Experience` is `IN_PROGRESS`; its implementation
 program/slice is `F52 / Single-Speaker Approval UX`, which preserves UX-01 as
 the canonical identity. R3.2, R4, R4.1 and R6.1 are merged/static at the current
 truth-reset SHA; R5 completed a read-only gate that rejected a new abstraction.
-R6.1 is the current merged/static Decision New alignment slice. This is a
-documentation status, not a deployment or runtime claim. Detailed evidence is
-recorded in
+R6.2 adopted the existing DraftFlow primitive for Decision New and is
+CODE_DONE / STATIC_VERIFIED. This is a documentation status, not a deployment
+or runtime claim. Detailed evidence is recorded in
 `docs/audit/PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md`.
 
 Read-only discovery, audit and gate conclusions that change status, phase, Next,

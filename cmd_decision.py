@@ -20,6 +20,7 @@ from airtable_schema import (
 )
 from decision_matching import find_matching_decision, list_open_decisions
 from core.query_contract import array_contains, contains
+from core.draft_flow import DraftSpec, resolve_draft_reply
 from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_read_adapter import AirtableReadError, get_record, list_records
 
@@ -145,6 +146,8 @@ def register_decision_command(bot, get_identity):
         state["domain"] = call.data.split(":", 1)[1]
         editing = state.get("step") == "edit_choice"
         state["step"] = "review" if editing else "exposure"
+        state["mode"] = "review" if editing else "filling"
+        state["awaiting_field"] = None if editing else "exposure"
         _pending[uid] = state
 
         bot.edit_message_text(
@@ -288,7 +291,7 @@ def _decision_domains() -> tuple[str, ...]:
 
 def _new_decision_state(identity) -> dict:
     return {
-        "command": "new", "step": "title", "identity": identity,
+        "command": "new", "step": "title", "mode": "filling", "awaiting_field": "title", "identity": identity,
         "created_at": _now_ts(), "token": uuid.uuid4().hex,
         "title": "", "domain": "", "exposure": 0.0,
         "stakeholder_names": [],
@@ -307,6 +310,37 @@ def _validate_new_field(field: str, raw: str):
         names = _parse_names(text)
         return (names, "") if names else (None, "נדרש לפחות צד אחד.")
     return text, ""
+
+
+def _set_new_draft_field(draft: dict, field: str, raw: str) -> tuple[bool, str]:
+    validation_field = "stakeholders" if field in {"stakeholders", "stakeholder_names"} else field
+    value, error = _validate_new_field(validation_field, raw)
+    if error:
+        return False, error
+    draft["stakeholder_names" if field in {"stakeholders", "stakeholder_names"} else field] = value
+    return True, ""
+
+
+def _render_new_draft(draft: dict) -> str:
+    return _decision_new_review(draft)
+
+
+_DECISION_NEW_DRAFT_SPEC = DraftSpec(
+    required_fields=("title", "domain", "exposure", "stakeholder_names"),
+    field_prompts={
+        "title": "שם ההחלטה?",
+        "domain": "דומיין?",
+        "exposure": "💰 חשיפה כספית משוערת? (מספר)",
+        "stakeholder_names": "👥 מי הצדדים? (שמות, מופרדים בפסיק)",
+    },
+    edit_labels={
+        "שם": "title", "דומיין": "domain", "חשיפה": "exposure", "צדדים": "stakeholder_names",
+    },
+    set_field=_set_new_draft_field,
+    render=_render_new_draft,
+    unknown_field_message="שדה לא מוכר. בחר/י: שם / דומיין / חשיפה / צדדים.",
+    edit_choice_prompt="איזה שדה לערוך? שם / דומיין / חשיפה / צדדים.",
+)
 
 
 def _decision_new_review(state: dict) -> str:
@@ -371,83 +405,53 @@ def _resolve_new_terminal_callback(bot, call, action: str) -> None:
 
 def _handle_new_step(bot, msg, state):
     if state["step"] == "review":
-        text = msg.text.strip().lower()
-        if text in _CONFIRM_WORDS:
-            _pending.pop(str(msg.from_user.id), None)
-            record = _create_decision(
-                state["identity"], state["title"], state["domain"],
-                state["exposure"], state["stakeholder_names"],
-            )
-            bot.send_message(msg.chat.id, _decision_new_receipt(record, state["title"]))
-        elif text in _CANCEL_WORDS:
-            _pending.pop(str(msg.from_user.id), None)
-            bot.send_message(msg.chat.id, "↩️ ההחלטה בוטלה.")
-        elif text in _EDIT_WORDS:
-            state["step"] = "edit_choice"
-            _pending[str(msg.from_user.id)] = state
-            bot.send_message(msg.chat.id, "איזה שדה לערוך? שם / דומיין / חשיפה / צדדים.")
-        else:
-            bot.send_message(msg.chat.id, _decision_new_review(state), reply_markup=_decision_new_review_keyboard(state["token"]))
+        state["mode"] = "review"
+    elif state["step"] in {"title", "exposure", "stakeholders"}:
+        state["mode"] = "filling"
+        state["awaiting_field"] = {"stakeholders": "stakeholder_names"}.get(state["step"], state["step"])
+    if state["step"] == "domain":
+        state["mode"] = "filling"
+        state["awaiting_field"] = "domain"
+        bot.send_message(msg.chat.id, "בחר דומיין חדש:", reply_markup=_domain_keyboard())
         return
-
+    was_edit_choice = state["step"] == "edit_choice"
     if state["step"] == "edit_choice":
-        field = {"שם": "title", "דומיין": "domain", "חשיפה": "exposure", "צדדים": "stakeholders"}.get(msg.text.strip())
-        if field == "domain":
-            bot.send_message(msg.chat.id, "בחר דומיין חדש:", reply_markup=_domain_keyboard())
-        elif field:
+        state["mode"] = "edit_choice"
+    elif state["step"] == "edit_value":
+        state["mode"] = "filling"
+        state["awaiting_field"] = state.pop("edit_field")
+
+    outcome = resolve_draft_reply(msg.text, state, _DECISION_NEW_DRAFT_SPEC)
+    if outcome.kind == "confirm":
+        _pending.pop(str(msg.from_user.id), None)
+        record = _create_decision(
+            state["identity"], state["title"], state["domain"],
+            state["exposure"], state["stakeholder_names"],
+        )
+        bot.send_message(msg.chat.id, _decision_new_receipt(record, state["title"]))
+    elif outcome.kind == "cancel":
+        _pending.pop(str(msg.from_user.id), None)
+        bot.send_message(msg.chat.id, "↩️ ההחלטה בוטלה.")
+    elif outcome.kind == "reply":
+        if state.get("awaiting_field") == "domain":
+            state["step"] = "domain"
+            bot.send_message(msg.chat.id, "דומיין?", reply_markup=_domain_keyboard())
+        elif state.get("mode") == "review":
+            state["step"] = "review"
+            bot.send_message(msg.chat.id, outcome.message, reply_markup=_decision_new_review_keyboard(state["token"]))
+        elif state.get("mode") == "edit_choice":
+            state["step"] = "edit_choice"
+            bot.send_message(msg.chat.id, outcome.message)
+        elif was_edit_choice:
             state["step"] = "edit_value"
-            state["edit_field"] = field
-            _pending[str(msg.from_user.id)] = state
-            bot.send_message(msg.chat.id, f"{_NEW_EDIT_FIELDS[field]} — הזן ערך חדש:")
+            state["edit_field"] = state.get("awaiting_field")
+            bot.send_message(msg.chat.id, outcome.message)
         else:
-            bot.send_message(msg.chat.id, "שדה לא מוכר. בחר/י: שם / דומיין / חשיפה / צדדים.")
-        return
-
-    if state["step"] == "edit_value":
-        field = state["edit_field"]
-        value, error = _validate_new_field(field, msg.text)
-        if error:
-            bot.send_message(msg.chat.id, f"❌ {error}")
-            return
-        state[field if field != "stakeholders" else "stakeholder_names"] = value
-        state.pop("edit_field", None)
-        state["step"] = "review"
-        _pending[str(msg.from_user.id)] = state
-        bot.send_message(msg.chat.id, _decision_new_review(state), reply_markup=_decision_new_review_keyboard(state["token"]))
-        return
-
-    if state["step"] == "title":
-        value, error = _validate_new_field("title", msg.text)
-        if error:
-            bot.send_message(msg.chat.id, f"❌ {error}")
-            return
-        state["title"] = value
-        state["step"] = "domain"
-        _pending[str(msg.from_user.id)] = state
-        bot.send_message(msg.chat.id, "דומיין?", reply_markup=_domain_keyboard())
-        return
-
-    if state["step"] == "exposure":
-        value, error = _validate_new_field("exposure", msg.text)
-        if error:
-            bot.send_message(msg.chat.id, f"❌ {error}")
-            return
-        state["exposure"] = value
-        state["step"] = "stakeholders"
-        _pending[str(msg.from_user.id)] = state
-        bot.send_message(msg.chat.id, "👥 מי הצדדים? (שמות, מופרדים בפסיק)")
-        return
-
-    if state["step"] == "stakeholders":
-        value, error = _validate_new_field("stakeholders", msg.text)
-        if error:
-            bot.send_message(msg.chat.id, f"❌ {error}")
-            return
-        state["stakeholder_names"] = value
-        state["step"] = "review"
-        _pending[str(msg.from_user.id)] = state
-        bot.send_message(msg.chat.id, _decision_new_review(state), reply_markup=_decision_new_review_keyboard(state["token"]))
-        return
+            state["step"] = {"stakeholder_names": "stakeholders"}.get(
+                state.get("awaiting_field"), state.get("awaiting_field", "title")
+            )
+            _pending[str(msg.from_user.id)] = state
+            bot.send_message(msg.chat.id, outcome.message)
 
 
 def _create_decision(identity, title: str, domain: str, exposure: float, stakeholder_names: list[str]) -> dict | None:

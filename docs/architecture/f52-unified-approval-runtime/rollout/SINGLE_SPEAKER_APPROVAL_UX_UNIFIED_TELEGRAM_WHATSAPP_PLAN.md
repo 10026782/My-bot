@@ -218,7 +218,8 @@ final business result. R4 alignment is merged/static in `3a5242d`; R4.1 optional
 Lead Draft note consistency is merged/static in PR #1088 (`16e82c7`). R5's
 uniformity gate found no second current uniform consumer, so R6.1 — Decision
 New UX Alignment — was the next implementation slice and is now merged/static
-in PR #1091 (`40bc446`). No deployment or
+in PR #1091 (`40bc446`). R6.2 — Decision New DraftFlow Adoption — is
+CODE_DONE / STATIC_VERIFIED. No deployment or
 runtime claim is made here.
 
 ### Current phase evidence at origin/main `40bc446`
@@ -228,11 +229,13 @@ runtime claim is made here.
 - R4.1 — **MERGED / STATIC VERIFIED** (PR #1088, `16e82c7`; optional Lead
   Draft note consistency).
 - R5 gate — **GATE_COMPLETE / NO NEW ABSTRACTION JUSTIFIED**: only one current
-  uniform consumer was proven, Lead Draft was the only uniform flow, no second
-  uniform flow existed at the gate, and DraftFlow remained unchanged.
+  uniform consumer was proven before R6.1; the post-R6.1 gate enabled reuse of
+  the existing DraftFlow primitive.
 - R6.1 — **MERGED / STATIC VERIFIED** (PR #1091, `40bc446`; Decision New UX
-  alignment). The F52/UX-01 program remains `IN_PROGRESS`; the next step is a
-  new post-milestone uniformity-gate evaluation, not another R6.1 implementation.
+  alignment).
+- R6.2 — **CODE_DONE / STATIC VERIFIED**: Decision New adopts DraftFlow while
+  retaining Decision-owned state, callbacks, persistence, and receipts. The
+  F52/UX-01 program remains `IN_PROGRESS`.
 
 ## Refreshed Phase Plan
 

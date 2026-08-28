@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import cmd_decision
+from core.draft_flow import DraftSpec
 
 
 def _msg(text):
@@ -122,3 +123,32 @@ def test_decision_new_failure_receipt_is_business_facing():
 
     assert receipt == "⚠️ ההחלטה לא נשמרה."
     assert "logs" not in receipt
+
+
+def test_decision_new_uses_shared_draftflow_spec_and_resolver():
+    assert isinstance(cmd_decision._DECISION_NEW_DRAFT_SPEC, DraftSpec)
+    bot = Mock()
+    state = _state()
+    with patch.object(cmd_decision, "resolve_draft_reply", wraps=cmd_decision.resolve_draft_reply) as resolver:
+        cmd_decision._handle_new_step(bot, _msg("Decision"), state)
+    resolver.assert_called_once_with("Decision", state, cmd_decision._DECISION_NEW_DRAFT_SPEC)
+    assert state["step"] == "domain"
+
+
+def test_decision_new_shared_edit_updates_one_field_without_writing():
+    bot = Mock()
+    state = _state()
+    state.update({
+        "step": "review", "mode": "review", "title": "Old",
+        "domain": "כללי", "exposure": 1.0, "stakeholder_names": ["A"],
+    })
+    cmd_decision._handle_new_step(bot, _msg("ערוך"), state)
+    cmd_decision._handle_new_step(bot, _msg("שם"), state)
+    with patch.object(cmd_decision, "_create_decision") as create:
+        cmd_decision._handle_new_step(bot, _msg("New"), state)
+    assert state["step"] == "review"
+    assert state["title"] == "New"
+    assert state["domain"] == "כללי"
+    assert state["exposure"] == 1.0
+    assert state["stakeholder_names"] == ["A"]
+    create.assert_not_called()
