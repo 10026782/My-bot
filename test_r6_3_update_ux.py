@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import cmd_update
+from core.draft_flow import DraftSpec
 
 
 def _identity():
@@ -79,3 +80,16 @@ def test_update_callback_edit_enters_field_choice_without_writing():
     assert cmd_update._pending["u"]["step"] == "edit_choice"
     assert bot.edit_message_text.call_args.kwargs["reply_markup"] is not None
     cmd_update._pending.pop("u", None)
+
+
+def test_update_uses_shared_draftflow_spec_for_text_transition():
+    assert isinstance(cmd_update._UPDATE_DRAFT_SPEC, DraftSpec)
+    state = _state()
+    state["step"] = "text"
+    state["mode"] = "filling"
+    state["awaiting_field"] = "raw_text"
+    with patch.object(cmd_update, "resolve_draft_reply", wraps=cmd_update.resolve_draft_reply) as resolver:
+        outcome = cmd_update.resolve_draft_reply("new text", state, cmd_update._UPDATE_DRAFT_SPEC)
+    assert outcome.kind == "reply"
+    assert state["mode"] == "review"
+    resolver.assert_called_once_with("new text", state, cmd_update._UPDATE_DRAFT_SPEC)
