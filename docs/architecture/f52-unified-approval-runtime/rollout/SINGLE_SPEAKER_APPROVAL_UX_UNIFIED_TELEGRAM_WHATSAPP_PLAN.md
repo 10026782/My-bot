@@ -12,6 +12,13 @@ Relationship to the program registry: F52 / Single-Speaker Approval UX is the
 implementation program/slice of `UX-01 — Unified BOSS Experience`. It preserves
 `UX-01` as the canonical identity and does not replace or rename it.
 
+Current-state rule: current status and phase are read only from `origin/main` at
+the recorded Truth Reset SHA. Open PRs, branches, local commits and drafts are
+proposed/not-current evidence only. F52 is `IMPLEMENTATION_OF: UX-01`; it does
+not replace UX-01, UX-01 does not replace F52, and resolved U1 is not an active
+blocker. Other relationships require an explicit marker; do not infer them from
+names, shared files, architecture area or chronology.
+
 Evidence level: **DOCUMENTED / UX LANGUAGE APPROVED**. This document is a plan,
 not code, deployment, or runtime verification.
 
@@ -207,17 +214,25 @@ approve/cancel buttons while preserving `lead_sessions` as draft state,
 canonical lead writing, and ActionGateway lifecycle handling. The R3.2 callback
 correction is also merged at `1a42a00` (merge `bca2f33`) and keeps callback
 acknowledgment transport-only while the one persistent message carries the
-final business result. R4 alignment is merged/static in `3a5242d`; R5's
+final business result. R4 alignment is merged/static in `3a5242d`; R4.1 optional
+Lead Draft note consistency is merged/static in PR #1088 (`16e82c7`). R5's
 uniformity gate found no second current uniform consumer, so R6.1 — Decision
-New UX Alignment — is the next implementation slice. No deployment or
+New UX Alignment — was the next implementation slice and is now merged/static
+in PR #1091 (`40bc446`). No deployment or
 runtime claim is made here.
 
-### Current phase evidence at origin/main `1d5ca86`
+### Current phase evidence at origin/main `40bc446`
 
 - R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
 - R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
-- R5 gate — **NO NEW ABSTRACTION JUSTIFIED**; the F52/UX-01 program remains
-  `IN_PROGRESS` and R6.1 is the current implementation slice.
+- R4.1 — **MERGED / STATIC VERIFIED** (PR #1088, `16e82c7`; optional Lead
+  Draft note consistency).
+- R5 gate — **GATE_COMPLETE / NO NEW ABSTRACTION JUSTIFIED**: only one current
+  uniform consumer was proven, Lead Draft was the only uniform flow, no second
+  uniform flow existed at the gate, and DraftFlow remained unchanged.
+- R6.1 — **MERGED / STATIC VERIFIED** (PR #1091, `40bc446`; Decision New UX
+  alignment). The F52/UX-01 program remains `IN_PROGRESS`; the next step is a
+  new post-milestone uniformity-gate evaluation, not another R6.1 implementation.
 
 ## Refreshed Phase Plan
 
@@ -232,6 +247,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R4 | Integrate PR #1065 Lead Draft buttons after callback correction. | Cancel writes nothing; approval writes once; replay safe. | Static/merged and targeted runtime | Generic wizard abstraction. |
 | R5 | Gate whether a shared field-choice primitive is justified. | No premature abstraction. | Read-only uniformity gate | Treating hypothetical migrations as current consumers. |
 | R6 | Migrate eligible Telegram wizard flows, one slice at a time. | No big-bang rewrite; one response; replay safety. | Focused static/channel evidence | Unsupported provider features. |
+| R6.1 | Align the existing Decision New flow with the unified UX. | Preserve canonical state, one reply owner, and existing lifecycle authority. | MERGED / STATIC VERIFIED (`40bc446`, PR #1091) | Runtime/deployment verification and broader eligible wizard slices. |
 | R7 | Add WhatsApp interactive adapter plus text fallback. | Same semantics as Telegram; limits stay in adapter. | Static/provider tests, then runtime | Enabling outbound providers without evidence/approval. |
 | R8 | Consolidate duplicate formatter paths behind MessageContract. | One public presentation contract and one response. | Regression/static, then canary | Lifecycle or authorization redesign. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
