@@ -759,6 +759,7 @@ DRAFT_FIELD_PROMPT_HE = {
     "name": "מה שם הליד?",
     "phone": "מה מספר הטלפון?",
     "domain": _domain_prompt_text(),
+    "note": "יש הערה לליד? כתוב/י אותה או השב/י 'דלג'.",
 }
 
 # Free-text tokens that identify which field an "ערוך" reply means —
@@ -961,6 +962,7 @@ from core.draft_flow import DraftSpec as _DraftSpec  # noqa: E402
 
 LEAD_DRAFT_SPEC = _DraftSpec(
     required_fields=DRAFT_REQUIRED_FIELDS,
+    optional_fields=("note",),
     field_prompts=_DRAFT_FIELD_PROMPT_FULL_HE,
     edit_labels=_DRAFT_EDIT_LABELS,
     set_field=set_draft_field,

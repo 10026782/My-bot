@@ -395,7 +395,7 @@ draft_state = lead_sessions.get_lead_draft(chat_bare)
 chk("draft: session now holds a filling-mode draft awaiting 'name'",
     draft_state is not None and draft_state["mode"] == "filling" and draft_state["awaiting_field"] == "name")
 
-# 7b. Sequential fill: name -> phone -> domain -> review card.
+# 7b. Sequential fill: name -> phone -> domain -> optional note -> review card.
 r1 = lch.handle_lead_candidate(identity, "עידן מושקוביץ", chat_bare, "telegram",
                                 session=lead_sessions.get_or_create(chat_bare))
 chk("draft: after name, asks for phone next", r1 == "מה מספר הטלפון?")
@@ -407,8 +407,12 @@ chk("draft: after phone, asks for domain next",
 
 r3 = lch.handle_lead_candidate(identity, "recruitment", chat_bare, "telegram",
                                 session=lead_sessions.get_or_create(chat_bare))
-chk("draft: once all required fields are filled, shows the full review card",
-    isinstance(r3, str) and "👤 ליד חדש" in r3 and "עידן מושקוביץ" in r3 and "0506872216" in r3 and "גיוס" in r3)
+chk("draft: after required fields, asks for optional note",
+    r3 == "יש הערה לליד? כתוב/י אותה או השב/י 'דלג'.")
+r3_review = lch.handle_lead_candidate(identity, "דלג", chat_bare, "telegram",
+                                      session=lead_sessions.get_or_create(chat_bare))
+chk("draft: once optional note is skipped, shows the full review card",
+    isinstance(r3_review, str) and "👤 ליד חדש" in r3_review and "עידן מושקוביץ" in r3_review and "0506872216" in r3_review and "גיוס" in r3_review)
 draft_state2 = lead_sessions.get_lead_draft(chat_bare)
 chk("draft: state switched to review mode", draft_state2["mode"] == "review")
 
@@ -473,6 +477,9 @@ chk("draft: picking 'טלפון' asks for the new phone, showing the current one
 
 r_edit3 = lch.handle_lead_candidate(identity, "0501112222", chat_edit, "telegram",
                                      session=lead_sessions.get_or_create(chat_edit))
+if isinstance(r_edit3, str) and r_edit3.startswith("יש הערה"):
+    r_edit3 = lch.handle_lead_candidate(identity, "דלג", chat_edit, "telegram",
+                                         session=lead_sessions.get_or_create(chat_edit))
 chk("draft: after supplying the new value, lands back on the full review card",
     isinstance(r_edit3, str) and "👤 ליד חדש" in r_edit3 and "0501112222" in r_edit3
     and "0506872216" not in r_edit3)
@@ -533,8 +540,12 @@ chk("chain: still awaiting domain after the rejected value",
 
 r_chain_final = lch.handle_lead_candidate(identity, "recruitment", chat_chain, "telegram",
                                            session=lead_sessions.get_or_create(chat_chain))
-chk("chain: valid domain completes required fields -> review card",
-    isinstance(r_chain_final, str) and "👤 ליד חדש" in r_chain_final and "אור לוי" in r_chain_final)
+chk("chain: valid domain advances to optional note",
+    r_chain_final == "יש הערה לליד? כתוב/י אותה או השב/י 'דלג'.")
+r_chain_review = lch.handle_lead_candidate(identity, "דלג", chat_chain, "telegram",
+                                            session=lead_sessions.get_or_create(chat_chain))
+chk("chain: skipping optional note reaches review card",
+    isinstance(r_chain_review, str) and "👤 ליד חדש" in r_chain_review and "אור לוי" in r_chain_review)
 chk("chain: mode switched to review", lead_sessions.get_lead_draft(chat_chain)["mode"] == "review")
 
 
@@ -738,11 +749,14 @@ chk("draft: domain prompt shows a numbered list", "1." in r_numbered and "2." in
 recruitment_index = CANONICAL_LEAD_DOMAINS_ORDERED.index("recruitment") + 1
 r_pick = lch.handle_lead_candidate(identity, str(recruitment_index), chat_numbered, "telegram",
                                     session=lead_sessions.get_or_create(chat_numbered))
+if isinstance(r_pick, str) and r_pick.startswith("יש הערה"):
+    r_pick = lch.handle_lead_candidate(identity, "דלג", chat_numbered, "telegram",
+                                        session=lead_sessions.get_or_create(chat_numbered))
 chk("draft: picking the domain by number lands on the review card with the right domain",
     isinstance(r_pick, str) and "👤 ליד חדש" in r_pick and "גיוס" in r_pick)
 
 no_asterisks_texts = [
-    r3,                      # section 7's full review card
+    r3_review,               # section 7's full review card
     reply_prefill,           # section 7's prefilled review card
     r_edit1, r_edit2, r_edit3,
 ]

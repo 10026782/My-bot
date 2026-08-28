@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 CONFIRM_WORDS = frozenset({"כן", "אשר", "מאשר", "מאשרת", "✅", "yes", "y", "ok", "אוקי", "שמור", "בצע"})
 CANCEL_WORDS = frozenset({"לא", "בטל", "ביטול", "עצור", "cancel", "no", "❌"})
+SKIP_WORDS = frozenset({"דלג", "ללא הערה", "skip"})
 EDIT_WORDS = frozenset({"ערוך", "עריכה", "לתקן", "תקן", "edit"})
 
 DRAFT_TTL_SECONDS = 1800
@@ -55,6 +56,7 @@ class DraftSpec:
     render: Callable[[dict], str]
     unknown_field_message: str
     edit_choice_prompt: str
+    optional_fields: tuple[str, ...] = ()
 
 
 def first_missing_required_field(draft: dict, spec: DraftSpec) -> Optional[str]:
@@ -100,6 +102,11 @@ def resolve_draft_reply(text: str, draft: dict, spec: DraftSpec) -> DraftOutcome
             return DraftOutcome(kind="abandon")
         if lower in CANCEL_WORDS:
             return DraftOutcome(kind="cancel")
+        if field_key in spec.optional_fields and lower in SKIP_WORDS:
+            draft[field_key] = ""
+            draft["mode"] = "review"
+            draft["awaiting_field"] = None
+            return DraftOutcome(kind="reply", draft=draft, message=spec.render(draft))
         ok, err = spec.set_field(draft, field_key, text)
         if not ok:
             return DraftOutcome(kind="reply", draft=draft, message=f"❌ {err}")
@@ -107,6 +114,10 @@ def resolve_draft_reply(text: str, draft: dict, spec: DraftSpec) -> DraftOutcome
         if missing:
             draft["awaiting_field"] = missing
             return DraftOutcome(kind="reply", draft=draft, message=spec.field_prompts[missing])
+        for optional in spec.optional_fields:
+            if not draft.get(optional):
+                draft["awaiting_field"] = optional
+                return DraftOutcome(kind="reply", draft=draft, message=spec.field_prompts[optional])
         draft["mode"] = "review"
         draft["awaiting_field"] = None
         return DraftOutcome(kind="reply", draft=draft, message=spec.render(draft))
