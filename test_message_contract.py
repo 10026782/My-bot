@@ -13,8 +13,10 @@ from core.agent_message_formatter import format_agent_message
 from core.message_contract import (
     MESSAGE_CONTRACT_VERSION,
     DisplayPayload,
+    InteractionType,
     MessageContract,
     MessageContractValidationError,
+    MessageInteraction,
     MessageState,
     TurnContextSource,
     build_message_contract,
@@ -192,6 +194,53 @@ def test_display_payload_limits_and_types_are_validated():
         DisplayPayload.from_mapping({"count": -1})
     with pytest.raises(MessageContractValidationError, match="v1 registry"):
         DisplayPayload.from_mapping({"action": "execute_shell"})
+
+
+@pytest.mark.parametrize(
+    "interaction",
+    [
+        MessageInteraction(
+            InteractionType.CONFIRM_CANCEL,
+            actions=("✅ אשר", "↩️ בטל"),
+        ),
+        MessageInteraction(
+            InteractionType.SINGLE_CHOICE,
+            options=("גיוס", "נדל״ן"),
+            field="תחום",
+            selected_values=("גיוס",),
+        ),
+        MessageInteraction(
+            InteractionType.MULTI_CHOICE,
+            options=("א", "ב"),
+            selected_values=("א", "ב"),
+        ),
+        MessageInteraction(
+            InteractionType.FREE_TEXT,
+            field="שם",
+        ),
+        MessageInteraction(
+            InteractionType.REVIEW_EDIT,
+            actions=("✏️ ערוך", "↩️ בטל"),
+            editable=True,
+        ),
+    ],
+)
+def test_provider_neutral_interaction_semantics_round_trip(interaction):
+    contract = _build(interaction=interaction)
+    restored = MessageContract.from_dict(contract.to_dict())
+    assert restored.interaction == interaction
+    assert restored.user_safe_record()["interaction"] == interaction.to_dict()
+    rendered = format_message_contract(contract)
+    assert "contract" not in rendered.lower()
+    assert "callback" not in rendered.lower()
+
+
+def test_interaction_is_optional_and_provider_identifiers_are_not_schema_fields():
+    legacy = _build()
+    assert legacy.interaction is None
+    assert "interaction" not in legacy.to_dict()
+    with pytest.raises(MessageContractValidationError, match="unsupported fields"):
+        MessageInteraction.from_mapping({"type": "confirm_cancel", "callback_data": "secret"})
 
 
 def test_serialization_round_trip_is_json_compatible():
