@@ -81,7 +81,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "178f55fd31daa4b86863aa12a564fc5c88ea2227",
+      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
       "confidence": 1.0,
       "notes": [
         "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
@@ -255,7 +255,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "178f55fd31daa4b86863aa12a564fc5c88ea2227",
+      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
       "confidence": 1.0,
       "notes": [
         "Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."
@@ -410,7 +410,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "e60e0fddb380fbcb3f575ec7e35c4241dfcc19e7",
+      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
@@ -781,7 +781,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-20",
-      "last_verified_commit": "a605195c1d7bae2638f54685a5e24fcc57997949",
+      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
       "confidence": 1.0,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #785 (block_reason=NO_POLICY_MATCH): core/lead_service.py had no existing catalog owner across any of the 8 registered layers or 18 decision nodes as of this registration — owner decision was CREATE NEW NODE.",
@@ -868,7 +868,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-21",
-      "last_verified_commit": "a605195c1d7bae2638f54685a5e24fcc57997949",
+      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
       "confidence": 0.85,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that merges N18 Phase 2's fifth (closing) slice — core/turn_result.py had no existing catalog owner. Classified REGISTER_SUPPORTING, not a new authority node, matching the identical precedent set by decision.n18_shared_write_primitives (same reasoning: pure data type, no I/O, no business semantics).",
