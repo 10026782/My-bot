@@ -207,14 +207,14 @@ approve/cancel buttons while preserving `lead_sessions` as draft state,
 canonical lead writing, and ActionGateway lifecycle handling. The R3.2 callback
 correction is also merged at `1a42a00` (merge `bca2f33`) and keeps callback
 acknowledgment transport-only while the one persistent message carries the
-final business result. R4 is therefore merged/static; R5 — shared field-choice
-primitive — is the next implementation slice. No deployment or runtime claim
-is made here.
+final business result. R4 alignment is merged/static in `3a5242d`; R5 — shared
+field-choice primitive — is the next implementation slice. No deployment or
+runtime claim is made here.
 
-### Current phase evidence at origin/main `c8f1ab7`
+### Current phase evidence at origin/main `1d5ca86`
 
 - R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
-- R4 — **MERGED / STATIC VERIFIED** through PR #1065 (`2484f3c`).
+- R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
 - R5 — **NEXT**; the F52/UX-01 program remains `IN_PROGRESS`.
 
 ## Refreshed Phase Plan

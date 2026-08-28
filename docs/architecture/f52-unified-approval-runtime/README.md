@@ -109,7 +109,7 @@ gate described in the readiness report.
 | F52-G1 | CLOSED — STATIC VERIFIED | PR #1067; implementation commit `bfab582`; verified `origin/main` `d735395cb495d7e18a9d4337026f8c0d0f8851e1`; focused tests 4 passed; BUG-091 regression 10 passed; `py_compile` PASS; `git diff --check` PASS; runtime NOT ESTABLISHED |
 | F52-G2 | CLOSED — STATIC VERIFIED | Commit `f17bfe9`; verified `origin/main` `d2ec703`; runtime NOT ESTABLISHED |
 | F52-G3 | CLOSED — STATIC VERIFIED | S1–S7 close all current business-truth string consumers; only display/test assertions remain |
-| F52-G4 | PARTIALLY CLOSED | `scheduler.py::_job_weekly_quest_reset()` remains the only current direct background mutation; S1–S4 are closed bounded slices |
+| F52-G4 | CLOSED — STATIC VERIFIED | S1–S5 are closed bounded slices; runtime NOT ESTABLISHED |
 | F52-G5 | OPEN — CURRENT GAP | Durable generic evidence ledger remains out of scope |
 
 ### F52-G4-S1 — LeadMemory scheduler writer
@@ -148,7 +148,7 @@ gate described in the readiness report.
 - Authorization: exact Tasks field allowlist with `trusted_source="abandoned_lead_scheduler"`.
 - Idempotency: stable `fingerprint_payload` over sender/channel/domain/step/answers; duplicate proposals are rejected by the ActionGateway fingerprint.
 - Evidence/result: completed ActionContract plus `execution_fact.record_id`; missing status or record ID fails closed.
-- Residual G4 writers: `scheduler.py::_job_weekly_quest_reset()`.
+- Residual G4 writer before S5: `scheduler.py::_job_weekly_quest_reset()`.
 
 ### F52-G4-S4 — Interaction-engine Task writer
 
@@ -163,6 +163,18 @@ gate described in the readiness report.
 - Evidence/result: structured ActionContract status and `execution_fact.record_id`; display strings are not authority.
 - Implementation merge: `178f55f`; runtime NOT ESTABLISHED.
 - Residual G4 writers: `scheduler.py::_job_weekly_quest_reset()`.
+
+### F52-G4-S5 — Weekly Quest reset
+
+- Status: CLOSED — STATIC VERIFIED.
+- Consumer: `scheduler.py::_job_weekly_quest_reset()`.
+- Previous path: one direct `_at_patch()` call per unfinished Quest.
+- Canonical path: scheduler system principal → `ActionGateway.propose_action()` → self-confirm policy → Gateway executor → structured Airtable update result.
+- System identity: `Identity(user_id="weekly_quest_reset_scheduler", role=Role.MANAGER, tenant_id="boss_hq", channel="scheduler")`.
+- Authorization: exact `Quests` update allowlist for `Status` and `Week_Start`, classified by `trusted_source="weekly_quest_reset_scheduler"`.
+- Idempotency: stable fingerprint over weekly reset action, ending week, target Quest record, and canonical update fields; same week+target is the same logical identity.
+- Partial success: each Quest returns structured `ok`, `record_id`, `status`, and `error`; aggregate status is `partial` when any mutation fails.
+- Runtime: NOT ESTABLISHED.
 
 ### F52-G3-S1 — LeadMemory result migration
 

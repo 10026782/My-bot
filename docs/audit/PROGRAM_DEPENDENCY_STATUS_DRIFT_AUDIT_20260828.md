@@ -2,7 +2,7 @@
 
 **Audit date:** 28/08/2026  
 **Truth-reset source:** `origin/main`  
-**Truth-reset SHA:** `c8f1ab74b7c13f29ea8058a33eeaf493b88fd35b`  
+**Truth-reset SHA:** `1d5ca86ae3883e1b664189c93cc70449a98b6262`  
 **Mode:** Read-only audit, documented after reconciliation
 
 ## Scope and sources
@@ -22,9 +22,10 @@ state, feature flag, or business logic was changed by the audit.
 ### F1 — F52 next-step drift
 
 ROADMAP previously listed R3.2 as next. At the truth-reset SHA, R3.2 callback
-correction is merged (`1a42a00`, merge `bca2f33`) and PR #1065/R4 is merged
-(`2484f3c`). Correct program status remains `IN_PROGRESS`; correct next phase
-is R5. Confidence: **HIGH**.
+correction is merged (`1a42a00`, merge `bca2f33`), PR #1065 is merged
+(`2484f3c`), R4 alignment is merged (`3a5242d`), and F52-G4-S5 is merged.
+Correct program status remains `IN_PROGRESS`; correct next phase is R5.
+Confidence: **HIGH**.
 
 ### F2 — PR #1065 status-source drift
 

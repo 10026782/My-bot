@@ -12,6 +12,48 @@ from tma_api import record_fields, record_id
 
 logger = logging.getLogger(__name__)
 
+
+def _apply_weekly_quest_mutation(last_monday, next_monday, target_id):
+    """Apply one reset through the canonical scheduler execution boundary."""
+    from airtable_schema import Tables, QuestsFields, QuestStatus
+    from core.action_gateway import action_gateway
+    from identity import Identity, Role
+
+    identity = Identity(
+        user_id="weekly_quest_reset_scheduler", role=Role.MANAGER,
+        tenant_id="boss_hq", domain_id="general", channel="scheduler",
+        external_id="weekly_quest_reset_scheduler",
+    )
+    fields = {QuestsFields.STATUS: QuestStatus.TODO, QuestsFields.WEEK_START: next_monday}
+    proposal = action_gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="airtable_update",
+        tool_inputs={"table": Tables.QUESTS, "record_id": target_id, "fields": fields},
+        origin_channel="scheduler", origin_chat_id=identity.memory_key,
+        requires_approval=True, identity=identity,
+        trusted_source="weekly_quest_reset_scheduler",
+        fingerprint_payload={
+            "action": "weekly_quest_reset", "table": Tables.QUESTS,
+            "week": last_monday, "target": target_id, "fields": fields,
+        },
+    )
+    if not proposal.ok or not proposal.contract_id:
+        return {"ok": False, "record_id": target_id, "status": "rejected", "error": proposal.reason}
+    action_gateway.approve(
+        proposal.contract_id, approver=identity.memory_key, approver_role=identity.role,
+    )
+    contract = action_gateway.find_by_id(proposal.contract_id)
+    execution_id = next(
+        (o.get("record_id", "") for o in reversed(contract.agent_observations)
+         if o.get("kind") == "execution_fact"), "",
+    ) if contract else ""
+    ok = bool(contract and contract.status in {"completed", "executed"} and execution_id == target_id)
+    return {
+        "ok": ok, "record_id": execution_id or target_id,
+        "status": getattr(contract, "status", "missing"),
+        "error": "" if ok else "structured execution result missing",
+    }
+
 # נכתב ע"י record_security_review() אחרי review מוצלח, נקרא ב-_get_last_review_date().
 # בלי זה, התאריך תלוי לחלוטין בעדכון ידני של LAST_SECURITY_REVIEW ב-Render — שלא קרה בפועל
 # (BUG-016: התזכורת הציגה 999 ימים תמיד כי אף קוד לא כתב תאריך).
@@ -591,7 +633,7 @@ def _job_weekly_quest_reset():
             return
 
         from datetime import date, timedelta
-        from tma_api import _at_list, _at_patch
+        from tma_api import _at_list
         from airtable_schema import Tables, QuestsFields, CoinsLogFields, QuestStatus
 
         token   = os.environ.get("TELEGRAM_TOKEN", "")
@@ -613,6 +655,7 @@ def _job_weekly_quest_reset():
         done_count   = 0
         rolled_count = 0
         coins_earned = 0
+        mutation_results = []
 
         for r in last_week_quests:
             qf     = record_fields(r)
@@ -623,11 +666,22 @@ def _job_weekly_quest_reset():
                 coins_earned += coins
             else:
                 # Roll unfinished quest forward to next Monday, reset to Todo
-                _at_patch(Tables.QUESTS, record_id(r, required=True), {
-                    QuestsFields.STATUS:     QuestStatus.TODO,
-                    QuestsFields.WEEK_START: next_monday,
-                })
-                rolled_count += 1
+                target_id = record_id(r, required=True)
+                try:
+                    result = _apply_weekly_quest_mutation(
+                        last_monday, next_monday, target_id,
+                    )
+                except Exception as exc:
+                    result = {
+                        "ok": False,
+                        "record_id": target_id,
+                        "status": "failed",
+                        "error": type(exc).__name__,
+                    }
+                    logger.warning("[Game] weekly reset mutation failed: %s", type(exc).__name__)
+                mutation_results.append(result)
+                if result["ok"]:
+                    rolled_count += 1
 
         # Total coins
         log_recs    = _at_list(Tables.COINS_LOG, "", max_records=500)
@@ -654,6 +708,14 @@ def _job_weekly_quest_reset():
 
         _game_bot_send(token, chat_id, "\n".join(lines))
         logger.info(f"[Game] weekly reset | done={done_count} rolled={rolled_count} next_week={len(new_open)}")
+        if not mutation_results:
+            return {"ok": True, "status": "completed", "results": []}
+        aggregate_ok = all(result["ok"] for result in mutation_results)
+        return {
+            "ok": aggregate_ok,
+            "status": "completed" if aggregate_ok else "partial",
+            "results": mutation_results,
+        }
 
     except ImportError as e:
         logger.warning(f"[Game] not available: {e}")

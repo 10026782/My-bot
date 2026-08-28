@@ -408,7 +408,7 @@ chk("draft: after phone, asks for domain next",
 r3 = lch.handle_lead_candidate(identity, "recruitment", chat_bare, "telegram",
                                 session=lead_sessions.get_or_create(chat_bare))
 chk("draft: once all required fields are filled, shows the full review card",
-    isinstance(r3, str) and "📇" in r3 and "עידן מושקוביץ" in r3 and "0506872216" in r3 and "recruitment" in r3)
+    isinstance(r3, str) and "👤 ליד חדש" in r3 and "עידן מושקוביץ" in r3 and "0506872216" in r3 and "גיוס" in r3)
 draft_state2 = lead_sessions.get_lead_draft(chat_bare)
 chk("draft: state switched to review mode", draft_state2["mode"] == "review")
 
@@ -433,8 +433,8 @@ reply_prefill = lch.handle_lead_candidate(
     chat_prefill, "telegram", session=lead_sessions.get_or_create(chat_prefill),
 )
 chk("draft: prefilled from free text goes straight to the review card (all required fields found)",
-    isinstance(reply_prefill, str) and "📇" in reply_prefill
-    and "עידן מושקוביץ" in reply_prefill and "0506872216" in reply_prefill and "recruitment" in reply_prefill)
+    isinstance(reply_prefill, str) and "👤 ליד חדש" in reply_prefill
+    and "עידן מושקוביץ" in reply_prefill and "0506872216" in reply_prefill and "גיוס" in reply_prefill)
 
 # 7d. Confirm ("כן") writes the lead through the SAME canonical create_lead().
 with patch("feature_flags.is_enabled", return_value=False), \
@@ -474,7 +474,7 @@ chk("draft: picking 'טלפון' asks for the new phone, showing the current one
 r_edit3 = lch.handle_lead_candidate(identity, "0501112222", chat_edit, "telegram",
                                      session=lead_sessions.get_or_create(chat_edit))
 chk("draft: after supplying the new value, lands back on the full review card",
-    isinstance(r_edit3, str) and "📇" in r_edit3 and "0501112222" in r_edit3
+    isinstance(r_edit3, str) and "👤 ליד חדש" in r_edit3 and "0501112222" in r_edit3
     and "0506872216" not in r_edit3)
 
 # 7f. Cancel at any stage clears the draft, no write.
@@ -484,7 +484,7 @@ lch.handle_lead_candidate(identity, "ליד חדש", chat_cancel, "telegram",
 r_cancel = lch.handle_lead_candidate(identity, "לא", chat_cancel, "telegram",
                                       session=lead_sessions.get_or_create(chat_cancel))
 chk("draft: cancelling during filling mode clears the draft",
-    r_cancel == "ביטלתי את יצירת הליד." and lead_sessions.get_lead_draft(chat_cancel) is None)
+    r_cancel == "↩️ בוטל" and lead_sessions.get_lead_draft(chat_cancel) is None)
 
 # 7g. Owner Contract hardened: unresolved Owner blocks creation outright —
 # no half-canonical Lead, no write attempted.
@@ -534,7 +534,7 @@ chk("chain: still awaiting domain after the rejected value",
 r_chain_final = lch.handle_lead_candidate(identity, "recruitment", chat_chain, "telegram",
                                            session=lead_sessions.get_or_create(chat_chain))
 chk("chain: valid domain completes required fields -> review card",
-    isinstance(r_chain_final, str) and "📇" in r_chain_final and "אור לוי" in r_chain_final)
+    isinstance(r_chain_final, str) and "👤 ליד חדש" in r_chain_final and "אור לוי" in r_chain_final)
 chk("chain: mode switched to review", lead_sessions.get_lead_draft(chat_chain)["mode"] == "review")
 
 
@@ -633,7 +633,7 @@ from core.turn_result import STATUS_CANCELLED as _STATUS_CANCELLED
 reply_early_cancel = lch.resolve_lead_draft_confirmation(identity, chat_early_cancel, "telegram",
                                                           is_confirm=False, is_cancel=True)
 chk("regression: early-dispatch cancel resolves against the review-mode draft",
-    reply_early_cancel.message == "ביטלתי את יצירת הליד."
+    reply_early_cancel.message == "↩️ בוטל"
     and reply_early_cancel.status == _STATUS_CANCELLED)
 chk("regression: draft cleared after early-dispatch cancel",
     lead_sessions.get_lead_draft(chat_early_cancel) is None)
@@ -739,7 +739,7 @@ recruitment_index = CANONICAL_LEAD_DOMAINS_ORDERED.index("recruitment") + 1
 r_pick = lch.handle_lead_candidate(identity, str(recruitment_index), chat_numbered, "telegram",
                                     session=lead_sessions.get_or_create(chat_numbered))
 chk("draft: picking the domain by number lands on the review card with the right domain",
-    isinstance(r_pick, str) and "📇" in r_pick and "recruitment" in r_pick)
+    isinstance(r_pick, str) and "👤 ליד חדש" in r_pick and "גיוס" in r_pick)
 
 no_asterisks_texts = [
     r3,                      # section 7's full review card

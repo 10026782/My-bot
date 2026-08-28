@@ -115,7 +115,7 @@ chk("cancel: should_prefer_lead_draft called exactly once per turn",
     len(calls_cancel) == 1)
 chk("cancel: 'לא' against the review-mode draft resolves to the cancel "
     "message",
-    reply_cancel == "ביטלתי את יצירת הליד.")
+    reply_cancel == "↩️ בוטל")
 chk("cancel: draft cleared from the session after cancel",
     lead_sessions.get_lead_draft(chat_cancel) is None)
 
