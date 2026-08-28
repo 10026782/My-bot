@@ -8,7 +8,7 @@ ownership invariant with the later deterministic-turn and MessageContract
 work. It does not replace the F52, Turn Coordinator, RP5, or ActionGateway
 authorities.
 
-Evidence level: **DOCUMENTED / PLAN ESTABLISHED**. This document is a plan,
+Evidence level: **DOCUMENTED / UX LANGUAGE APPROVED**. This document is a plan,
 not code, deployment, or runtime verification.
 
 ## Core Invariant
@@ -79,6 +79,76 @@ Multi Choice, Free Text, Review, Edit, Pending, Success, Failure, Validation
 Error, Expired, Replay, No Pending, and Multiple Pending. Provider adapters may
 choose controls and transport, but may not change meaning, authority, or final
 reply ownership.
+
+## Canonical UX Language Contract (R2.0)
+
+UX Direction 1 is the canonical language for approval and review interactions:
+
+```text
+Title
+→ Business details
+→ Actions
+```
+
+Use minimal icons and clean business language. Do not expose record IDs,
+contract IDs, tool names, table names, or transport identifiers. The canonical
+actions are:
+
+```text
+✅ אשר    ✏️ ערוך    ↩️ בטל
+```
+
+Do not use X-style cancel iconography. Canonical status wording is:
+
+| Semantic status | User-facing wording |
+| --- | --- |
+| Pending | `⏳ ממתין לאישור` |
+| Success | `✅ <entity/action> נשמר / הושלם` |
+| Failure | `⚠️ לא הושלם` |
+| Expired | `⌛ פג תוקף` |
+| Cancellation | `↩️ בוטל` |
+
+Use entity-specific wording where it is clearer. A final success response is
+concise but includes the exact meaningful business data persisted, for example:
+
+```text
+✅ הליד נשמר
+
+שם: ישראל ישראלי
+תחום: גיוס
+אחראי: אליהו
+סטטוס: חדש
+```
+
+Do not force every entity to display every stored field. Prefer fields created
+or changed by the operation, plus important business context; omit low-value
+metadata.
+
+The canonical review card is:
+
+```text
+👤 ליד חדש
+
+שם: ...
+טלפון: ...
+תחום: ...
+מקור: ...
+אחראי: ...
+סטטוס: ...
+
+[ ✅ אשר ] [ ✏️ ערוך ] [ ↩️ בטל ]
+```
+
+Tasks use the same semantic structure with task-specific business fields, and
+approval prompts use the same structure with action, entity, change, and new
+value. Choices use a clear prompt and provider-supported controls, with `↩️
+חזרה` for return.
+
+Telegram and WhatsApp must use the same status wording, field labels, final
+meaning, reply ownership, success/failure semantics, and cancellation semantics.
+Only controls, layout, provider limits, callback/reply identifiers, and
+edit/send transport behavior may differ. Provider differences affect controls,
+not business meaning.
 
 ## Telegram Boundary
 
