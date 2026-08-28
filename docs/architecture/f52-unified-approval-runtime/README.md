@@ -123,6 +123,21 @@ gate described in the readiness report.
 - Idempotency: ActionGateway business fingerprint plus existing LeadMemory dirty/debounce state.
 - Evidence/result: `LeadCreateResult.ok`, `record_id`, and `evidence.contract_id`.
 
+### F52-G4-S2 — Interaction Log scheduler writer
+
+- Status: IMPLEMENTED / STATIC TESTED.
+- Consumer: `interaction_engine.py::save_to_business_memory()` (alias of `save_to_interaction_log()`).
+- Previous path: direct `tools.airtable_tools.airtable_add()` to Interaction Log.
+- Canonical path: `ActionGateway.propose_action()` → self-confirm approval → Gateway executor → structured Airtable result/evidence.
+- System identity: `Identity(user_id="interaction_engine_scheduler", role=Role.MANAGER, channel="scheduler")`, tenant from interaction metadata or `boss_hq`.
+- Authorization policy: exact Interaction Log field allowlist with `trusted_source="interaction_engine_scheduler"`.
+- Idempotency: existing `is_duplicate(raw_id)` gate plus ActionGateway business fingerprint.
+- Evidence/result: completed ActionContract status and its structured `execution_fact.record_id`; missing status/identity/evidence fails closed.
+- PR: #1073.
+- Commit: `0d23abd`.
+- Tests: focused 14 passed; response-contract 19 passed; ActionGateway 43 passed; guards PASS; `py_compile` PASS; `git diff --check` PASS.
+- Residual G4 writers: `interaction_engine.py::create_tasks_from_analysis()`, `abandoned_lead_worker.py::create_human_pipeline_task()`, `scheduler.py::_job_weekly_quest_reset()`; follow-up/recovery outbound adapters remain separately scoped.
+
 ### F52-G3-S1 — LeadMemory result migration
 
 - Previous: OPEN; new: CLOSED — STATIC VERIFIED.

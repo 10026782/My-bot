@@ -23,6 +23,7 @@ from __future__ import annotations
 import ast
 import logging
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -76,11 +77,30 @@ from interaction_engine import (
 _interaction = InteractionSchema(source_channel="whatsapp", raw_id="raw1", title="Test Interaction")
 _analysis = InteractionAnalysis(summary="summary", next_steps="follow up")
 
-with patch("tools.airtable_tools.airtable_add", return_value=_ok_result("recINT1")):
+class _FakeInteractionGateway:
+    def __init__(self, result):
+        self.result = result
+        self.contract = SimpleNamespace(
+            status="completed" if result.ok else "failed",
+            agent_observations=([{"kind": "execution_fact", "record_id": result.record_id}] if result.ok else []),
+        )
+        self._ledger = self
+
+    def propose_action(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(ok=self.result.ok, contract_id="contract-1", reason="test")
+
+    def approve(self, *args, **kwargs):
+        return "test"
+
+    def find_by_id(self, _contract_id):
+        return self.contract
+
+with patch("core.action_gateway.action_gateway", _FakeInteractionGateway(SimpleNamespace(ok=True, record_id="recINT1"))):
     record_id = save_to_interaction_log(_interaction, _analysis)
     chk("save_to_interaction_log: ok=True → returns external_id (not empty)", record_id == "recINT1")
 
-with patch("tools.airtable_tools.airtable_add", return_value=_fail_result()):
+with patch("core.action_gateway.action_gateway", _FakeInteractionGateway(SimpleNamespace(ok=False, record_id=""))):
     record_id = save_to_interaction_log(_interaction, _analysis)
     chk("save_to_interaction_log: ok=False → returns empty string", record_id == "")
 
