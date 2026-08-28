@@ -301,7 +301,6 @@ See `docs/governance/ARCHITECTURE_DRIFT_MAP.md` for the full list of 8 deferred 
 | מרכיב | סטטוס | פרטים |
 |--------|--------|--------|
 | `core/cost_watchdog.py` | ✅ חדש | `log_usage()` → `logs/usage.jsonl` (append-only, ephemeral) |
-| `creative_generator.py` | ✅ תוקן | claude-sonnet → claude-haiku + log_usage אחרי קריאה |
 | `app.py` run_agent | ✅ מחובר | log_usage אחרי כל client.messages.create |
 | `scheduler.py` | ✅ נוסף | `_job_daily_usage_report` כל יום 08:00 |
 | `AI_Usage_Daily` Airtable | ⏳ טבלה חדשה | יש ליצור ב-Airtable לפני שה-daily job כותב לה |
