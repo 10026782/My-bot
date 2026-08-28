@@ -5,11 +5,15 @@
 # (core/emergency_stop_preflight.py). A migrations failure prevents the
 # preflight from running at all.
 #
-# NOT yet wired as Render's Pre-Deploy Command (see render.yaml — untouched
-# by this step). The switch happens only after: the "Emergency Stop Flags"
-# table is created, the 5 canonical flag records are seeded from observed
-# production state, and a manual `python -m core.emergency_stop_preflight`
-# run against the live base succeeds — see Step 4's boundaries.
+# WIRED as Render's live Pre-Deploy Command — confirmed 2026-08-28 via a
+# read-only Render API query (GET /v1/services/srv-d80ehsf7f7vs73cq5rn0:
+# serviceDetails.envSpecificDetails.preDeployCommand == "python -m
+# core.predeploy"). This module's prior docstring claimed the opposite and
+# referenced a render.yaml that has never existed in this repo — that was
+# stale; Render's Pre-Deploy Command is dashboard-only config, not
+# repo-tracked. See docs/operations/ORACLE_MIGRATION_M0.md for the full
+# verification and the other dashboard-vs-docs discrepancies found the same
+# way (autoDeploy, healthCheckPath).
 #
 # `python -m core.database_migrations` is untouched and keeps working
 # completely independently, exactly as before — this module imports and

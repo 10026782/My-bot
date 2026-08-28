@@ -84,12 +84,14 @@ SETUP_WEBHOOK=1 python3 app.py
 |-------|-----|
 | Build Command | `pip install -r requirements.txt` |
 | Start Command | `gunicorn app:app` |
-| Pre-Deploy Command | `python3 -m core.predeploy` |
-| Python Version | 3.11 |
-| Auto-Deploy | Yes (main branch) |
-| Health Check Path | `/health` |
+| Pre-Deploy Command | `python -m core.predeploy` — **confirmed wired**, verified live 2026-08-28 (see below) |
+| Python Version | 3.11 (live: `3.11.0` exactly, via `PYTHON_VERSION` env var) |
+| Auto-Deploy | **No** — corrected 2026-08-28; live Render config reports `autoDeploy: "no"`, not the "Yes" previously documented here. Deploys are manual/dashboard-triggered. |
+| Health Check Path | **Not configured** — corrected 2026-08-28; live Render config reports `healthCheckPath: ""`, not `/health` as previously documented here. `/health` exists in `app.py` but Render is not currently polling it as a platform health check. |
 
 **Pre-Deploy Command:** `core/predeploy.py` runs PostgreSQL migrations (`core/database_migrations.py::run_migrations()`, Phase 4B0.1A atomic coordination if `FEATURE_ATOMIC_CLAIMS=true`) and, only if those succeed, the Emergency Stop preflight (`core/emergency_stop_preflight.py`). Blocks deploy if either stage fails. Idempotent — safe to run repeatedly on each deploy. See `docs/PHASE_4B0_1C_STAGING_WIRING.md` for more details.
+
+**Live verification (2026-08-28):** the three corrections above, plus `FEATURE_ATOMIC_CLAIMS=true` and `DATABASE_URL` both being set in production (PostgreSQL is **required** today, not staging-only), were confirmed via a read-only `GET /v1/services` / `GET /v1/services/{id}/env-vars` call against the Render API (service `srv-d80ehsf7f7vs73cq5rn0`, plan `starter`, region `virginia`). No Render configuration was changed to obtain this. Full detail: `docs/operations/ORACLE_MIGRATION_M0.md`.
 
 **Environment Variables:** הוסף את המשתנים מ-`.env.example` ב-Render Dashboard → Environment. For atomic claims (staging only), also set:
 ```

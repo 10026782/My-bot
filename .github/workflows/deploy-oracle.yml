@@ -1,0 +1,111 @@
+# deploy-oracle.yml — M0 Oracle migration readiness scaffold.
+#
+# workflow_dispatch ONLY — never runs on push, never touches ci.yml's
+# existing jobs. No Oracle VM exists yet: the `deploy` job's very first
+# step fails loudly and immediately if the ORACLE_SSH_HOST/ORACLE_SSH_KEY
+# repo secrets aren't configured, which they are not as of this commit.
+# Running this workflow today builds and publishes an image to GHCR and
+# then stops — it cannot reach a live host without secrets that don't
+# exist, by design.
+
+name: Deploy to Oracle (manual, gated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag to build/deploy (defaults to the commit SHA)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: meta
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_SHA::12}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${{ github.repository }}:$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (linux/amd64,linux/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Oracle deploy is configured
+        run: |
+          if [ -z "${{ secrets.ORACLE_SSH_HOST }}" ] || [ -z "${{ secrets.ORACLE_SSH_KEY }}" ]; then
+            echo "::error::ORACLE_SSH_HOST / ORACLE_SSH_KEY are not set. No Oracle VM exists yet (M0 scope) — this job stops here by design. Configure these secrets only when M1 provisions a real host."
+            exit 1
+          fi
+
+      # Everything below is unreachable until the secrets above exist —
+      # left in place as the M1 target, not executed by M0.
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_SSH_HOST }}
+          username: ${{ secrets.ORACLE_SSH_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/boss-bot
+            export BOSS_BACKEND_IMAGE="${{ needs.build-and-push.outputs.image }}"
+            docker compose -f docker-compose.oracle.yml pull backend
+            docker compose -f docker-compose.oracle.yml up -d --no-deps backend
+
+      - name: Health check
+        id: health
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "https://${{ secrets.ORACLE_HEALTH_URL }}/health"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Rollback on failed health check
+        if: failure() && steps.health.outcome == 'failure'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_SSH_HOST }}
+          username: ${{ secrets.ORACLE_SSH_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/boss-bot
+            docker compose -f docker-compose.oracle.yml up -d --no-deps backend_previous || true
+            echo "Rollback attempted — verify manually, this is an M1+ mechanism, not yet battle-tested."

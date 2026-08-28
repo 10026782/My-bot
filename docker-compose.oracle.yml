@@ -1,0 +1,113 @@
+# docker-compose.oracle.yml — M0 Oracle migration readiness.
+#
+# NOT connected to any live host. No Oracle VM, DNS, or secret exists yet —
+# this is scaffolding for M1+ (see docs/operations/ORACLE_MIGRATION_M0.md).
+#
+# PostgreSQL is included by default, not gated behind a profile: live Render
+# API evidence (2026-08-28) confirms FEATURE_ATOMIC_CLAIMS=true and
+# DATABASE_URL is set in the current production service — Postgres is
+# REQUIRED today, not speculative. core/database_migrations.py still
+# no-ops gracefully if DATABASE_URL is absent, so the postgres service can
+# be removed and DATABASE_URL unset without touching application code, if
+# atomic claims are ever deliberately turned off.
+#
+# Only `caddy` publishes host ports. `backend` and `postgres` are reachable
+# solely over the `internal` network — never bound to a host port.
+# No Docker socket is mounted anywhere in this file.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: boss-bot-backend:oracle-m0
+    restart: unless-stopped
+    env_file:
+      # Lives outside this repo checkout on the VM — never committed.
+      # See docs/operations/ORACLE_MIGRATION_M0.md (M0-D) for the required
+      # variable list and 0600 permission expectation.
+      - ${BOSS_ENV_FILE:-/etc/boss-bot/backend.env}
+    environment:
+      PORT: "10000"
+    expose:
+      - "10000"
+    networks:
+      - internal
+    volumes:
+      # Opt-in durable mount for core/cost_watchdog.py's usage.jsonl and
+      # scheduler.py's security_review.json, which today default to /tmp
+      # (ephemeral on Render already — this is an upgrade, not a
+      # requirement). Point USAGE_LOG_PATH at this mount in backend.env to
+      # use it; otherwise these stay in the container's own ephemeral /tmp,
+      # matching current Render behavior exactly.
+      - usage_state:/var/lib/boss-bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Supplied at deploy time, e.g. `BOSS_DOMAIN=bot.example.com docker compose ...`.
+      # No hostname is hard-coded in this file or in Caddyfile.oracle.
+      BOSS_DOMAIN: ${BOSS_DOMAIN:?set BOSS_DOMAIN before starting caddy}
+    volumes:
+      - ./Caddyfile.oracle:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    depends_on:
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ${BOSS_ENV_FILE:-/etc/boss-bot/backend.env}
+    environment:
+      # core/database_migrations.py reads DATABASE_URL (or the discrete
+      # DATABASE_* vars) from the same env file — POSTGRES_* here just
+      # need to describe the same database to the postgres image itself.
+      POSTGRES_DB: ${POSTGRES_DB:-boss_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-boss_bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in BOSS_ENV_FILE}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-boss_bot} -d ${POSTGRES_DB:-boss_bot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  usage_state:
