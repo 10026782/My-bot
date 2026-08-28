@@ -2611,9 +2611,27 @@ def _handle_lead_draft_callback(cq) -> None:
 
     if action == "lead_draft_cancel":
         lead_sessions.clear_lead_draft(chat_id)
-        bot.answer_callback_query(cq.id, "🚫 בוטל")
+        bot.answer_callback_query(cq.id, "↩️ בוטל")
         try:
-            bot.edit_message_text("ביטלתי את יצירת הליד.", cq.message.chat.id, cq.message.message_id)
+            from core.lead_service import render_lead_draft_message
+            bot.edit_message_text(
+                render_lead_draft_message(draft, state="cancelled"),
+                cq.message.chat.id, cq.message.message_id,
+            )
+        except Exception:
+            bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id, reply_markup=None)
+        return
+
+    if action == "lead_draft_edit":
+        draft["mode"] = "edit_choice"
+        draft["awaiting_field"] = None
+        lead_sessions.set_lead_draft(chat_id, draft)
+        bot.answer_callback_query(cq.id, "✏️ עריכה")
+        try:
+            bot.edit_message_text(
+                "איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה.",
+                cq.message.chat.id, cq.message.message_id,
+            )
         except Exception:
             bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id, reply_markup=None)
         return
@@ -2635,9 +2653,16 @@ def _handle_lead_draft_callback(cq) -> None:
     )
     if lifecycle.canonical_state in {"executed", "completed", "failed", "rejected"}:
         lead_sessions.clear_lead_draft(chat_id)
-    bot.answer_callback_query(cq.id, "✅ התקבל")
+    bot.answer_callback_query(
+        cq.id, "↩️ בוטל" if lifecycle.canonical_state == "rejected" else "✅ התקבל",
+    )
     try:
-        bot.edit_message_text(lifecycle.safe_user_message, cq.message.chat.id, cq.message.message_id)
+        from core.lead_service import render_lead_draft_message
+        final_state = "success" if lifecycle.canonical_state in {"executed", "completed"} else "failed"
+        bot.edit_message_text(
+            render_lead_draft_message(draft, state=final_state),
+            cq.message.chat.id, cq.message.message_id,
+        )
     except Exception:
         bot.edit_message_reply_markup(cq.message.chat.id, cq.message.message_id, reply_markup=None)
 
@@ -2649,7 +2674,10 @@ def _lead_draft_keyboard(token: str):
             "✅ אשר", callback_data=f"lead_draft_approve:{token}"
         ),
         telebot.types.InlineKeyboardButton(
-            "❌ בטל", callback_data=f"lead_draft_cancel:{token}"
+            "✏️ ערוך", callback_data=f"lead_draft_edit:{token}"
+        ),
+        telebot.types.InlineKeyboardButton(
+            "↩️ בטל", callback_data=f"lead_draft_cancel:{token}"
         ),
     )
     return kb

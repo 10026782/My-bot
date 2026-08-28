@@ -63,6 +63,7 @@ STATE_OUTCOME_UNKNOWN         = "outcome_unknown"
 STATE_UNVERIFIED_EFFECT       = "unverified_effect"
 STATE_MIXED                   = "mixed"
 STATE_MIXED_WITH_UNKNOWN      = "mixed_with_unknown"
+STATE_CANCELLED               = "cancelled"
 
 # D-019 context-free vocabulary.  These summaries do not replace the richer
 # surface renderers governed by D-014 through D-017.
@@ -94,7 +95,7 @@ CANONICAL_STATES = frozenset({
     STATE_APPROVAL_PENDING_QUERY,
     STATE_APPROVAL_PENDING_BATCH, STATE_CLARIFICATION_NEEDED, STATE_IDLE,
     STATE_OUTCOME_UNKNOWN, STATE_UNVERIFIED_EFFECT, STATE_MIXED,
-    STATE_MIXED_WITH_UNKNOWN,
+    STATE_MIXED_WITH_UNKNOWN, STATE_CANCELLED,
 })
 
 # UX-standard version-1 names -> this module's canonical names.
@@ -312,6 +313,7 @@ def _normalize_payload(payload) -> dict:
         "user_options":        p.get("user_options") or [],
         "execution_verified":  p.get("execution_verified"),
         "human_summary":       p.get("human_summary"),   # compatibility hint only
+        "interaction":         p.get("interaction"),
         "_structured":         structured,
     }
 
@@ -392,6 +394,10 @@ def _bound_total(text: str) -> str:
 # ── Per-state renderers ───────────────────────────────────────────────────────
 
 def _render_success(norm: dict, redactor: _Redactor) -> str:
+    if norm.get("entity_type") == "lead" and norm.get("items"):
+        rows = _render_items(norm, redactor, numbered=False)
+        head = "✅ הליד עודכן" if norm.get("action") == "update" else "✅ הליד נשמר"
+        return head + ("\n" + "\n".join(rows) if rows else "")
     # Success wording is generated here; it is never derived from a tool name or
     # raw parameters. A single leading marker only.
     # display_payload evidence gate: an explicit execution_verified=False is
@@ -430,6 +436,10 @@ def _render_approval_pending(norm: dict, redactor: _Redactor) -> str:
     point of view, so the framing is forward-looking ("כדי ... נדרש אישור"),
     not a status report. See _render_approval_pending_query() below for the
     "already pending, user is asking" wording."""
+    interaction = norm.get("interaction") or {}
+    if interaction.get("type") == "review_edit" and norm.get("entity_type") == "lead":
+        rows = _render_items(norm, redactor, numbered=False)
+        return "👤 ליד חדש" + ("\n\n" + "\n".join(rows) if rows else "")
     is_task = norm.get("entity_type") == "task"
     if is_task:
         intro = "כדי ליצור את המשימה הזו נדרש אישור"
@@ -503,6 +513,10 @@ def _render_unverified_effect(payload: dict, redactor: _Redactor) -> str:
     )
 
 
+def _render_cancelled(payload: dict, redactor: _Redactor) -> str:
+    return "↩️ בוטל"
+
+
 def _render_mixed(payload: dict, redactor: _Redactor) -> str:
     # Must not collapse into full success.
     rows = _render_items(payload, redactor, numbered=False)
@@ -536,6 +550,7 @@ _RENDERERS = {
     STATE_UNVERIFIED_EFFECT:      _render_unverified_effect,
     STATE_MIXED:                  _render_mixed,
     STATE_MIXED_WITH_UNKNOWN:     _render_mixed_with_unknown,
+    STATE_CANCELLED:              _render_cancelled,
 }
 
 

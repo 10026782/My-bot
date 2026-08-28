@@ -899,9 +899,11 @@ def _start_lead_draft(identity, free_text: str, chat_id: str, channel: str, rout
 
 def _finalize_draft_cancel(chat_id: str) -> "TurnResult":
     from session_store import lead_sessions as _ls
+    from core.lead_service import render_lead_draft_message
     from core.turn_result import TurnResult, STATUS_CANCELLED
+    draft = _ls.get_lead_draft(chat_id) or {}
     _ls.clear_lead_draft(chat_id)
-    return TurnResult(message="ביטלתי את יצירת הליד.", status=STATUS_CANCELLED)
+    return TurnResult(message=render_lead_draft_message(draft, state="cancelled"), status=STATUS_CANCELLED)
 
 
 def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> "TurnResult":
@@ -911,7 +913,10 @@ def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> "TurnResult"
     so the two entry points can never drift apart on what counts as a
     complete draft or what create_lead() gets called with."""
     from session_store import lead_sessions as _ls
-    from core.lead_service import first_missing_required_field, draft_to_payload, create_lead, DRAFT_FIELD_PROMPT_HE
+    from core.lead_service import (
+        first_missing_required_field, draft_to_payload, create_lead,
+        render_lead_draft_message, DRAFT_FIELD_PROMPT_HE,
+    )
     from core.turn_result import TurnResult, STATUS_INCOMPLETE, STATUS_FAILED, STATUS_CONFIRMED
 
     missing = first_missing_required_field(draft)
@@ -926,12 +931,9 @@ def _finalize_draft_confirm(identity, chat_id: str, draft: dict) -> "TurnResult"
     if not result.ok:
         return TurnResult(message=f"❌ לא הצלחתי לשמור את הליד: {result.reason}", status=STATUS_FAILED)
     _ls.clear_lead_draft(chat_id)
-    verb = "עודכן" if result.action == "updated" else "נוצר"
-    owner_note = f", Owner: {result.owner_user_id}" if result.owner_user_id else ""
     return TurnResult(
-        message=(
-            f"✅ ליד {verb}: {draft.get('name')} ({draft.get('phone')}), "
-            f"domain: {result.domain}{owner_note} | {result.record_id}"
+        message=render_lead_draft_message(
+            draft, state="success", action="update" if result.action == "updated" else "create",
         ),
         status=STATUS_CONFIRMED,
     )

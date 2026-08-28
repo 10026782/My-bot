@@ -601,7 +601,10 @@ def format_message_contract_with_meta(contract: MessageContract) -> tuple[str, d
 
     text, formatter_meta = format_agent_message_with_meta(
         contract.state.value,
-        contract.display_payload.to_dict(),
+        {
+            **contract.display_payload.to_dict(),
+            "interaction": contract.interaction.to_dict() if contract.interaction else None,
+        },
     )
     meta = contract.observability_record()
     meta.update({

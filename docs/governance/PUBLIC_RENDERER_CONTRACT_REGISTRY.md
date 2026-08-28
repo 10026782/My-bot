@@ -7,3 +7,7 @@ review metadata; it does not itself wire or activate a runtime surface.
 
 | Path | Kind | Symbol | Surface owner | Architecture decision |
 | --- | --- | --- | --- | --- |
+| `core/lead_service.py` | `public_renderer` | `build_lead_draft_message_contract` | f52_lead_draft | `D-012/R4` |
+| `core/lead_service.py` | `contract_import` | `message_contract` | f52_lead_draft | `D-012/R4` |
+| `core/lead_service.py` | `contract_entry` | `message_contract` | f52_lead_draft | `D-012/R4` |
+| `core/lead_service.py` | `public_renderer` | `render_lead_draft_message` | f52_lead_draft | `D-012/R4` |

@@ -197,13 +197,13 @@ to weaken ActionContracts or Gateway rules.
 
 ## PR #1065 Position
 
-PR #1065 is **OPEN / STATIC_VERIFIED** on the current branch evidence. It adds
-Telegram Lead Draft approve/cancel buttons while preserving `lead_sessions` as
-draft state, canonical lead writing, and ActionGateway lifecycle handling.
-Before merge, callback acknowledgment must remain transport-only while the one
-persistent message carries the final business result. This is an original
-single-speaker contract correction, not a new lifecycle authority. No merged or
-runtime claim is made here.
+PR #1065 is **MERGED** (`2484f3c` on `origin/main`). It adds Telegram Lead Draft
+approve/cancel buttons while preserving `lead_sessions` as draft state,
+canonical lead writing, and ActionGateway lifecycle handling. The later R3.2
+callback correction is also merged and keeps callback acknowledgment
+transport-only while the one persistent message carries the final business
+result. R4 alignment remains a separate code/static-verification slice; no
+deployment or runtime claim is made here.
 
 ## Refreshed Phase Plan
 

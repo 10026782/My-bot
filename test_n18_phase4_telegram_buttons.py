@@ -13,6 +13,7 @@ from unittest.mock import patch
 import app
 from core.action_gateway import action_gateway
 from core.lead_service import LeadCreateResult
+from core.lead_service import render_lead_draft_message
 from session_store import lead_sessions
 
 
@@ -47,7 +48,8 @@ def test_lead_draft_buttons_use_existing_callback_and_gateway_once():
     keyboard = app._lead_draft_keyboard(token)
     buttons = [button for row in keyboard.keyboard for button in row]
     assert [button.callback_data for button in buttons] == [
-        f"lead_draft_approve:{token}", f"lead_draft_cancel:{token}"
+        f"lead_draft_approve:{token}", f"lead_draft_edit:{token}",
+        f"lead_draft_cancel:{token}"
     ]
 
     writes = []
@@ -81,5 +83,27 @@ def test_lead_draft_cancel_button_writes_nothing():
          patch.object(app.bot, "edit_message_text") as edit:
         app._handle_lead_draft_callback(_callback(f"lead_draft_cancel:{token}"))
     assert lead_sessions.get_lead_draft("n18_buttons_chat") is None
-    assert answer.call_args_list[0].args == ("callback-1", "🚫 בוטל")
-    assert edit.call_args_list[0].args[0] == "ביטלתי את יצירת הליד."
+    assert answer.call_args_list[0].args == ("callback-1", "↩️ בוטל")
+    assert edit.call_args_list[0].args[0] == "↩️ בוטל"
+
+
+def test_lead_draft_contract_uses_business_labels_and_preserves_note():
+    text = render_lead_draft_message(_draft("safe-token"))
+    assert text.startswith("👤 ליד חדש")
+    assert "תחום: גיוס" in text
+    assert "הערה: בדיקה" in text
+    assert "סטטוס: חדש" in text
+    assert "safe-token" not in text
+    assert "recruitment" not in text
+
+
+def test_lead_draft_edit_button_uses_existing_bounded_edit_flow():
+    token = "c" * 32
+    lead_sessions.set_lead_draft("n18_buttons_chat", _draft(token))
+    with patch.object(app, "resolve_identity", return_value=IDENTITY), \
+         patch.object(app.bot, "answer_callback_query") as answer, \
+         patch.object(app.bot, "edit_message_text") as edit:
+        app._handle_lead_draft_callback(_callback(f"lead_draft_edit:{token}"))
+    assert lead_sessions.get_lead_draft("n18_buttons_chat")["mode"] == "edit_choice"
+    assert answer.call_args_list[0].args == ("callback-1", "✏️ עריכה")
+    assert "איזה שדה לערוך" in edit.call_args_list[0].args[0]
