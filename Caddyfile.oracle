@@ -1,0 +1,28 @@
+# Caddyfile.oracle — M0 Oracle migration readiness.
+#
+# No hostname is hard-coded here. {$BOSS_DOMAIN} is supplied by
+# docker-compose.oracle.yml's `caddy` service environment at deploy time —
+# DNS for that domain does not exist yet (M0 does not touch DNS).
+#
+# Caddy issues and renews the TLS certificate for BOSS_DOMAIN automatically
+# via Let's Encrypt the first time it can complete an HTTP-01 challenge on
+# port 80, which requires BOSS_DOMAIN's DNS to already point at this host —
+# an M1+ step, not part of this slice.
+
+{$BOSS_DOMAIN} {
+	encode gzip
+
+	# app.py:6187 — same endpoint referenced throughout docs/operations/.
+	handle /health {
+		reverse_proxy backend:10000
+	}
+
+	handle {
+		reverse_proxy backend:10000
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
