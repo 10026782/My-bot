@@ -138,6 +138,50 @@
       "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
     },
     {
+      "id": "component.status_sync_validator",
+      "name": "Canonical Program Status Sync Validator",
+      "type": "component",
+      "status": "active",
+      "authority_level": "verified_audit",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "read-only CI validation of the ROADMAP current-state registry against explicit repository evidence",
+        "precedence": "ROADMAP.md remains the only status authority; this validator reports contradictions and never edits status"
+      },
+      "owner": "development_governance",
+      "code_paths": [
+        "tools/status_sync_validator.py"
+      ],
+      "test_paths": [
+        "test_status_sync_validator.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "ROADMAP.md",
+          "role": "canonical current-state program registry validated by this CI-only tool",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-08-28",
+      "last_verified_commit": "16e82c7d0c2394d57a0fb8f75133df009e6ca64d",
+      "confidence": 1.0,
+      "notes": [
+        "Read-only CI/governance validator; it is not imported by app.py or any production execution path.",
+        "It compares explicit ROADMAP status, relationships, phase markers, and merge evidence but never promotes a program or rewrites documentation.",
+        "The validator's own source registration prevents Context Librarian from treating this intentionally bounded governance tool as an unreviewed runtime authority."
+      ],
+      "extensions": {
+        "catalog.role": "ci_only_current_state_validation",
+        "catalog.runtime_consumed": false,
+        "catalog.writes_registry": false,
+        "catalog.reconciles_evidence": false,
+        "catalog.business_write_ownership": false
+      },
+      "last_observed_commit": "16e82c7d0c2394d57a0fb8f75133df009e6ca64d"
+    },
+    {
       "id": "component.free_worker_pilot",
       "name": "Standalone Free Worker Pilot",
       "type": "component",
