@@ -869,13 +869,67 @@ def set_draft_field(draft: dict, field_key: str, raw_value: str) -> tuple[bool, 
 
 
 def render_lead_draft_card(draft: dict) -> str:
-    lines = ["📇 ליד חדש", ""]
-    for key in DRAFT_FIELD_ORDER:
-        value = draft.get(key) or "______"
-        lines.append(f"{DRAFT_FIELD_HE[key]}: {value}")
-    lines.append("")
-    lines.append("ענה/י כן לשמירה, ערוך לשינוי שדה, או לא לביטול.")
-    return "\n".join(lines)
+    return render_lead_draft_message(draft)
+
+
+_LEAD_DOMAIN_LABELS = {
+    "recruitment": "גיוס", "real_estate": "נדל״ן", "import": "ייבוא",
+    "finance": "כספים", "general": "כללי",
+}
+
+
+def _lead_display_items(draft: dict) -> list[str]:
+    items = []
+    for key in ("name", "phone", "domain", "source", "note"):
+        value = (draft.get(key) or "").strip()
+        if not value or (key == "source" and value in {"Telegram", "WhatsApp", "Manual"}):
+            continue
+        if key == "domain":
+            value = _LEAD_DOMAIN_LABELS.get(value, value)
+        items.append(f"{DRAFT_FIELD_HE[key]}: {value}")
+    status = {"new": "חדש"}.get(draft.get("status") or "new", draft.get("status") or "new")
+    items.append(f"סטטוס: {status}")
+    return items
+
+
+def build_lead_draft_message_contract(draft: dict, *, state: str = "pending", action: str = "create"):
+    """Project Lead Draft business data into the one public message contract."""
+    from core.message_contract import (
+        InteractionType, MessageInteraction, MessageState, build_message_contract,
+    )
+
+    contract_state = {
+        "pending": MessageState.APPROVAL_PENDING,
+        "success": MessageState.SUCCESS,
+        "failed": MessageState.FAILURE,
+        "cancelled": MessageState.CANCELLED,
+    }[state]
+    kwargs = {
+        "state": contract_state,
+        "display_payload": {
+            "action": action,
+            "entity_type": "lead",
+            "items": _lead_display_items(draft),
+        },
+        "reply_owner": "gateway",
+        "turn_context_source": "legacy_ingress",
+        "source_module": "core.lead_service",
+    }
+    if state == "pending":
+        kwargs["interaction"] = MessageInteraction(
+            InteractionType.REVIEW_EDIT,
+            actions=("✅ אשר", "✏️ ערוך", "↩️ בטל"), editable=True,
+        )
+    elif state == "success":
+        kwargs.update(execution_verified=True, evidence_status="verified_write_success")
+    elif state == "failed":
+        kwargs["reason_code"] = "VALIDATION_FAILED"
+    return build_message_contract(**kwargs)
+
+
+def render_lead_draft_message(draft: dict, *, state: str = "pending", action: str = "create") -> str:
+    from core.message_contract import format_message_contract
+    return format_message_contract(build_lead_draft_message_contract(draft, state=state, action=action))
 
 
 def draft_to_payload(draft: dict) -> LeadPayload:
