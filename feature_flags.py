@@ -41,15 +41,11 @@ LEAD PIPELINE:
   LEAD_SCORING                - score+tier נכתב בעת יצירת lead
   LEAD_MEMORY                 - lead_memory.update() מחובר ל-lead_capture
   FOLLOWUP_AUTOMATION         - scheduler סורק לידים HOT, מעלה לאישור
-  LEAD_QUALIFIER              - מנוע שאלון lead_qualifier (F09, לא פעיל)
   LEAD_RECOVERY               - זיהוי לידים דועכים + שליחה מחדש
   ABANDONED_LEADS             - מעקב לידים שנטשו
 
 INFRA / DATA:
-  KNOWLEDGE_ENGINE            - בניית context דינמי (Supabase-backed)
-  SUPABASE                    - מאפשר קריאה/כתיבה ל-Supabase
   COST_WATCHDOG_LIVE          - לוג שימוש + daily Sonnet limit (CORE_05)
-  IMPORT_DOMAIN               - ברירת מחדל ON; פיצ'רים יבוא/עץ
   MULTITENANT                 - מצב multi-tenant (כבוי, F08)
   FEATURE_TOOL_AVAILABILITY_FILTER - "off" (default, no checks) / "shadow"
                                  (local readiness diagnostics only; schemas unchanged) /
@@ -76,7 +72,6 @@ INFRA / DATA:
 INTEGRATIONS:
   VOICE_IVR                   - קו טלפוני Twilio IVR (F07)
   EMAIL_INBOUND               - ערוץ email נכנס (F06)
-  CREATIVE_GENERATOR          - יצירת תוכן שיווקי אוטומטי
   AD_ATTRIBUTION              - ייחוס UTM מפרסום → ליד
   CONTACT_RESOLVER            - פתרון אנשי קשר אוטומטי
   LLM_FALLBACK                - fallback ל-OpenAI כש-Anthropic מחזיר שגיאה/timeout (ברירת מחדל: כבוי)
@@ -230,7 +225,6 @@ _RUNTIME: dict[str, bool] = {}
 # Flags that default to ON when the env var is unset (unlike the standard
 # default-OFF behavior). Each entry mirrors os.environ.get(NAME, default).
 _DEFAULTS: dict[str, str] = {
-    "IMPORT_DOMAIN": os.environ.get("IMPORT_DOMAIN", "true"),
     "FEATURE_INGRESS_ENVELOPE": os.environ.get("FEATURE_INGRESS_ENVELOPE", "true"),
     "FEATURE_SINGLE_SPEAKER_APPROVAL_UX": os.environ.get(
         "FEATURE_SINGLE_SPEAKER_APPROVAL_UX", "false",

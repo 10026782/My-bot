@@ -129,10 +129,10 @@ Legend: **implemented** = merged on main · **exercised** = actually run against
 - **Status:** DEFERRED (nodes); plan itself MERGED/CLOSED.
 
 ### D8 — Cost watchdog measurement (token/model-cost & usage attribution)
-- **Repo evidence:** `cost_monitor.py` logs each Claude call (tokens_in/out, model, caller) with $ computation + hourly/daily limits; gated `COST_WATCHDOG_LIVE`, default off; M01 flags `COST_WATCHDOG_ENABLED` override precedence as undocumented READ_PATH_DRIFT.
+- **Repo evidence:** `cost_monitor.py` logs each Claude call (tokens_in/out, model, caller) with $ computation + hourly/daily limits; it uses registry `COST_WATCHDOG_LIVE` (default off). Separately, `core/cost_watchdog.py` gives direct `COST_WATCHDOG_ENABLED` precedence; when both env vars are absent, its current fallback resolves ON. The two-layer split is intentional for now; consolidation is deferred.
 - **Implemented:** yes. **Exercised:** flag-off → no production attribution stream. **Measured:** no spend/attribution report exists in repo.
 - **Risk:** token/model-cost exposure unquantified; limits never proven live.
-- **Next verification step:** staging enablement decision; document override precedence; produce one attribution report.
+- **Next verification step:** staging enablement decision; produce one attribution report. Runtime values remain NOT ESTABLISHED.
 - **Status:** NEEDS_RUNTIME_VERIFICATION; enablement DEFERRED (owner).
 
 ### D9 — Session lifecycle debt (session_store / LeadSessions)

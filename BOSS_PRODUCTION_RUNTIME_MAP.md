@@ -10,7 +10,7 @@ Status: planning snapshot only; no deployment or environment was queried. Date: 
 - **Off** means the code default is off and there is no supplied evidence that the production environment overrides it.
 - **Dormant** means implementation exists but its activation flags are off or production activation is unverified.
 - **Broken** means the repository itself structurally blocks activation or documents a missing execution path.
-- Environment values in Render are **not observable in this read-only audit**. BOSS reads ordinary flags from an environment variable with the same name unless a runtime override exists (`feature_flags.py:206-225`). Only `IMPORT_DOMAIN` and `FEATURE_INGRESS_ENVELOPE` default on (`feature_flags.py:156-161`); other ordinary flags default off.
+- Environment values in Render are **not observable in this read-only audit**. BOSS reads ordinary flags from an environment variable with the same name unless a runtime override exists (`feature_flags.py:206-225`). `FEATURE_INGRESS_ENVELOPE` defaults on (`feature_flags.py:156-161`); other ordinary flags default off. The former `IMPORT_DOMAIN` entry was removed as a registry-only dead flag.
 - Documentation freshness is a known limitation: `AI_CONTEXT.md` says the roadmap/change logs lag roughly 15 merged PRs and none of that newer work was then production-verified (`AI_CONTEXT.md:8-10`). “Last proof” below therefore distinguishes code/default evidence from production evidence.
 
 ## Runtime map
