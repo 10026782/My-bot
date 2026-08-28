@@ -35,6 +35,8 @@ DraftFlow interaction primitive while preserving Decision-owned state and
 persistence; it is CODE_DONE / STATIC_VERIFIED.
 R6.3 aligned `/update` independently to the same six-stage lifecycle without
 adopting DraftFlow; it is also CODE_DONE / STATIC_VERIFIED.
+R6.4 adopted DraftFlow for `/update` while preserving its state and writer
+authority; it is CODE_DONE / STATIC_VERIFIED.
 Runtime is not implied. The registry rows below are reconciled to this decision
 and current main evidence.
 

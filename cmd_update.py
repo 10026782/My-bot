@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
+from core.draft_flow import DraftSpec, resolve_draft_reply
+
 # ── קבועים ──────────────────────────────────────────────────────
 # מפתחות domain תואמים ל-Domain.ALL ב-identity.py — כדי שתגי
 # Business Memory יתאמו בפועל ל-identity.domain_id בעת context injection.
@@ -71,6 +73,8 @@ def register_update_command(bot, get_identity):
         uid = str(msg.from_user.id)
         _pending[uid] = {
             "step":       "domain",
+            "mode":       "filling",
+            "awaiting_field": "domain",
             "identity":   identity,
             "created_at": _now_ts(),
             "token":      uuid.uuid4().hex,
@@ -105,6 +109,8 @@ def register_update_command(bot, get_identity):
         state["domain"] = call.data.split(":")[1]
         editing = state.get("step") == "edit_domain"
         state["step"]   = "review" if editing else "type"
+        state["mode"] = "review" if editing else "filling"
+        state["awaiting_field"] = None if editing else "entry_type"
         _pending[uid]   = state
 
         bot.edit_message_text(
@@ -129,6 +135,8 @@ def register_update_command(bot, get_identity):
         state["entry_type"] = call.data.split(":")[1]
         editing = state.get("step") == "edit_type"
         state["step"]       = "review" if editing else "text"
+        state["mode"] = "review" if editing else "filling"
+        state["awaiting_field"] = None if editing else "raw_text"
         _pending[uid]       = state
 
         bot.edit_message_text(
@@ -172,6 +180,7 @@ def register_update_command(bot, get_identity):
             _handle_update_edit_choice(bot, msg, state)
             return
 
+        editing_text = state.get("step") == "edit_text"
         state = _pending.pop(uid, None)
 
         # TTL check פעם נוספת — הגנה כפולה
@@ -185,14 +194,18 @@ def register_update_command(bot, get_identity):
             bot.send_message(msg.chat.id, "אין הרשאה לפקודה זו.")
             return
 
-        if not msg.text.strip():
+        state["mode"] = "filling"
+        state["awaiting_field"] = "raw_text"
+        outcome = resolve_draft_reply(msg.text, state, _UPDATE_DRAFT_SPEC)
+        if outcome.kind == "reply":
+            state["step"] = "review" if state.get("mode") == "review" else ("edit_text" if editing_text else "text")
             _pending[uid] = state
-            bot.send_message(msg.chat.id, "✍️ הטקסט לא יכול להיות ריק. נסה שוב:")
-            return
-        state["raw_text"] = msg.text.strip()
-        state["step"] = "review"
-        _pending[uid] = state
-        bot.send_message(msg.chat.id, _update_review(state), reply_markup=_update_review_keyboard(state["token"]))
+            bot.send_message(msg.chat.id, outcome.message, reply_markup=_update_review_keyboard(state["token"]) if state["step"] == "review" else None)
+        elif outcome.kind == "cancel":
+            bot.send_message(msg.chat.id, "↩️ העדכון בוטל.")
+        else:
+            _pending[uid] = state
+            bot.send_message(msg.chat.id, "⚠️ לא ניתן להשלים את העדכון.")
 
     logger.info("[/update] handler registered successfully")
 
@@ -206,6 +219,35 @@ def _update_review(state: dict) -> str:
         f"תוכן: {text[:120]}{'...' if len(text) > 120 else ''}\n\n"
         "בחר/י ✅ אישור, ✏️ עריכה או ↩️ ביטול."
     )
+
+
+def _set_update_draft_field(draft: dict, field: str, raw: str) -> tuple[bool, str]:
+    value = (raw or "").strip()
+    if field == "domain":
+        if value not in {key for _, key in DOMAINS}:
+            return False, "בחר/י תחום מהרשימה."
+    elif field == "entry_type":
+        if value not in {key for _, key in ENTRY_TYPES}:
+            return False, "בחר/י סוג עדכון מהרשימה."
+    elif field == "raw_text" and not value:
+        return False, "הטקסט לא יכול להיות ריק."
+    draft[field] = value
+    return True, ""
+
+
+_UPDATE_DRAFT_SPEC = DraftSpec(
+    required_fields=("domain", "entry_type", "raw_text"),
+    field_prompts={
+        "domain": "בחר תחום:",
+        "entry_type": "בחר סוג עדכון:",
+        "raw_text": "✍️ מה קרה? כתוב בחופשיות:",
+    },
+    edit_labels={"תחום": "domain", "סוג": "entry_type", "תוכן": "raw_text"},
+    set_field=_set_update_draft_field,
+    render=_update_review,
+    unknown_field_message="שדה לא מוכר. בחר/י: תחום / סוג / תוכן.",
+    edit_choice_prompt="בחר שדה לעריכה: תחום / סוג / תוכן.",
+)
 
 
 def _update_review_keyboard(token: str):
@@ -285,14 +327,20 @@ def _start_update_edit(bot, call) -> None:
         return
     if field == "domain":
         state["step"] = "edit_domain"
+        state["mode"] = "filling"
+        state["awaiting_field"] = "domain"
         markup = _domain_keyboard()
         prompt = "בחר תחום חדש:"
     elif field == "type":
         state["step"] = "edit_type"
+        state["mode"] = "filling"
+        state["awaiting_field"] = "entry_type"
         markup = _type_keyboard()
         prompt = "בחר סוג עדכון חדש:"
     elif field == "text":
         state["step"] = "edit_text"
+        state["mode"] = "filling"
+        state["awaiting_field"] = "raw_text"
         markup = None
         prompt = "✍️ הזן את הטקסט החדש:"
     else:
@@ -304,35 +352,42 @@ def _start_update_edit(bot, call) -> None:
 
 
 def _handle_update_review_text(bot, msg, state, get_identity) -> None:
-    text = msg.text.strip().lower()
     uid = str(msg.from_user.id)
-    if text in {"בטל", "ביטול", "cancel", "לא"}:
+    state["mode"] = "review"
+    outcome = resolve_draft_reply(msg.text, state, _UPDATE_DRAFT_SPEC)
+    if outcome.kind == "cancel":
         _pending.pop(uid, None)
         bot.send_message(msg.chat.id, "↩️ העדכון בוטל.")
-    elif text in {"ערוך", "עריכה", "edit"}:
-        state["step"] = "edit_choice"
-        _pending[uid] = state
-        bot.send_message(msg.chat.id, "בחר שדה לעריכה: תחום / סוג / תוכן.")
-    elif text in {"כן", "אשר", "מאשר", "אישור", "ok", "yes"}:
+    elif outcome.kind == "confirm":
         _pending.pop(uid, None)
         bot.send_message(msg.chat.id, _update_receipt(_execute_update(state, uid, get_identity), state))
+    elif outcome.kind == "reply" and state.get("mode") == "edit_choice":
+        state["step"] = "edit_choice"
+        _pending[uid] = state
+        bot.send_message(msg.chat.id, outcome.message)
     else:
-        bot.send_message(msg.chat.id, _update_review(state), reply_markup=_update_review_keyboard(state["token"]))
+        state["step"] = "review" if state.get("mode") == "review" else state.get("step", "review")
+        _pending[uid] = state
+        bot.send_message(msg.chat.id, outcome.message, reply_markup=_update_review_keyboard(state["token"]) if state["step"] == "review" else None)
 
 
 def _handle_update_edit_choice(bot, msg, state) -> None:
-    field = {"תחום": "domain", "סוג": "type", "תוכן": "text"}.get(msg.text.strip())
+    state["mode"] = "edit_choice"
+    outcome = resolve_draft_reply(msg.text, state, _UPDATE_DRAFT_SPEC)
+    if outcome.kind != "reply" or state.get("mode") != "filling":
+        _pending[str(msg.from_user.id)] = state
+        bot.send_message(msg.chat.id, outcome.message or _UPDATE_DRAFT_SPEC.unknown_field_message)
+        return
+    field = state.get("awaiting_field")
     if field == "domain":
         state["step"] = "edit_domain"
         bot.send_message(msg.chat.id, "בחר תחום חדש:", reply_markup=_domain_keyboard())
-    elif field == "type":
+    elif field == "entry_type":
         state["step"] = "edit_type"
         bot.send_message(msg.chat.id, "בחר סוג עדכון חדש:", reply_markup=_type_keyboard())
-    elif field == "text":
+    elif field == "raw_text":
         state["step"] = "edit_text"
         bot.send_message(msg.chat.id, "✍️ הזן את הטקסט החדש:")
-    else:
-        bot.send_message(msg.chat.id, "שדה לא מוכר. בחר/י: תחום / סוג / תוכן.")
     _pending[str(msg.from_user.id)] = state
 
 
