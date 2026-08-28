@@ -232,7 +232,7 @@ runtime claim is made here.
   uniform flow existed at the gate, and DraftFlow remained unchanged.
 - R6.1 — **MERGED / STATIC VERIFIED** (PR #1091, `40bc446`; Decision New UX
   alignment). The F52/UX-01 program remains `IN_PROGRESS`; the next step is a
-  new uniformity-gate evaluation after R6.1, not R6.1 itself.
+  new post-milestone uniformity-gate evaluation, not another R6.1 implementation.
 
 ## Refreshed Phase Plan
 
