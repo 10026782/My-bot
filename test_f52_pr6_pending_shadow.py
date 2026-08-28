@@ -488,6 +488,13 @@ if bot4a.send_message.call_count == 1:
         for row in _sent_markup_4a.keyboard
         for button in row
     ]
+    _sent_labels_4a = [
+        button.text
+        for row in _sent_markup_4a.keyboard
+        for button in row
+    ]
+    chk("T4a: Telegram labels come from the provider-neutral interaction contract",
+        _sent_labels_4a == ["✅ אשר", "↩️ בטל"])
     chk("T4a: both generated Telegram approval callbacks are present",
         {payload.split(":", 1)[0] for payload in _sent_callbacks_4a}
         == {"approve", "reject"})

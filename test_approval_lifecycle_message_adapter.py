@@ -16,7 +16,9 @@ from core.approval_lifecycle_message_adapter import (
     from_approval_lifecycle_result,
 )
 from core.message_contract import (
+    InteractionType,
     MessageContract,
+    MessageInteraction,
     MessageContractValidationError,
     MessageState,
     TurnContextSource,
@@ -134,6 +136,19 @@ def test_adapter_output_round_trips_through_canonical_schema():
     )
     restored = MessageContract.from_dict(json.loads(json.dumps(original.to_dict())))
     assert restored == original
+
+
+def test_generic_approval_interaction_is_provider_neutral():
+    interaction = MessageInteraction(
+        type=InteractionType.CONFIRM_CANCEL,
+        actions=("✅ אשר", "↩️ בטל"),
+    )
+    contract = from_approval_lifecycle_result(_result(), interaction=interaction)
+
+    assert contract.interaction == interaction
+    assert contract.interaction.type is InteractionType.CONFIRM_CANCEL
+    assert contract.interaction.actions == ("✅ אשר", "↩️ בטל")
+    assert all("callback" not in action for action in contract.interaction.actions)
 
 
 def test_adapter_is_deterministic_and_does_not_mutate_input():
