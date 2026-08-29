@@ -11,10 +11,83 @@
 import hashlib
 import logging
 import os
+from dataclasses import dataclass
+from typing import Any
 
 from core.action_result import ActionResult, ClaimType
+from core.message_contract import InteractionType, MessageContract, format_message_contract
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class WhatsAppRenderResult:
+    """Pure Twilio-facing presentation data; no lifecycle state or I/O."""
+
+    body: str
+    interactive: dict[str, Any] | None = None
+
+    @property
+    def interactive_used(self) -> bool:
+        return self.interactive is not None
+
+
+_ACTION_LABELS = {
+    "confirm": "✅ אשר",
+    "approve": "✅ אשר",
+    "edit": "✏️ ערוך",
+    "cancel": "↩️ בטל",
+    "reject": "↩️ בטל",
+}
+
+
+def _label(value: str) -> str:
+    normalized = value.strip().lower()
+    return _ACTION_LABELS.get(normalized, value.strip())
+
+
+def _quick_replies(interaction) -> list[dict[str, str]]:
+    values = interaction.options if interaction.type in {
+        InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE,
+    } else interaction.actions
+    return [
+        {"id": f"wa_{index}", "title": _label(value)}
+        for index, value in enumerate(values, 1)
+        if value.strip()
+    ]
+
+
+def render_whatsapp_message(
+    contract: MessageContract, *, interactive_enabled: bool = False,
+) -> WhatsAppRenderResult:
+    """Render one MessageContract for Twilio, falling back to complete text.
+
+    `interactive_enabled` is an explicit adapter capability, not account or
+    template discovery. This function never approves, writes, or sends.
+    """
+    if not isinstance(contract, MessageContract):
+        raise TypeError("contract must be a MessageContract")
+
+    body = format_message_contract(contract)
+    interaction = contract.interaction
+    if interaction is None:
+        return WhatsAppRenderResult(body=body)
+
+    values = interaction.options if interaction.type in {
+        InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE,
+    } else interaction.actions
+    labels = tuple(_label(value) for value in values if value.strip())
+    missing = tuple(label for label in labels if label not in body)
+    if missing:
+        body = f"{body}\n\n" + " | ".join(missing)
+
+    controls = _quick_replies(interaction)
+    if not interactive_enabled or not controls or interaction.type is InteractionType.FREE_TEXT:
+        return WhatsAppRenderResult(body=body)
+    return WhatsAppRenderResult(
+        body=body,
+        interactive={"type": "quick_reply", "buttons": controls},
+    )
 
 
 def _assert_gateway_context() -> None:
