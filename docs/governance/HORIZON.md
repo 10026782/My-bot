@@ -15,10 +15,10 @@ This file (`HORIZON.md`, no date suffix) is the persistent, update-in-place
 management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
-**Last updated:** 28/08/2026
-**Truth Reset SHA at last update:** `40bc4467f42db2d65aa7f7d9fd69102000b1f868`
-(row-level correction pass only — Turn Coordinator and Command Center rows
-re-verified against this SHA; other rows not re-walked in this pass)
+**Last updated:** 30/08/2026
+**Truth Reset SHA at last update:** `3219ba63d765b9aac9e24b2894f214e6471cc3ac`
+(R6 closure reconciliation; R6.1–R6.6 merge reachability and focused static
+evidence re-verified; no deployment or runtime claim)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -59,15 +59,10 @@ level. `UX-01 — Unified BOSS Experience` is `IN_PROGRESS`; its implementation
 program/slice is `F52 / Single-Speaker Approval UX`, which preserves UX-01 as
 the canonical identity. R3.2, R4, R4.1 and R6.1 are merged/static at the current
 truth-reset SHA; R5 completed a read-only gate that rejected a new abstraction.
-R6.2 adopted the existing DraftFlow primitive for Decision New and is
-CODE_DONE / STATIC_VERIFIED. R6.3 aligned `/update` independently and is
-CODE_DONE / STATIC_VERIFIED. This is a documentation status, not a deployment
-or runtime claim. R6.4 adopted DraftFlow for `/update` and is CODE_DONE /
-STATIC_VERIFIED. This is a documentation status, not a deployment or runtime
-claim. R6.5 aligned `/marketing_new` independently to the same six-stage
-lifecycle and is CODE_DONE / STATIC_VERIFIED; DraftFlow adoption remains out of
-scope. R6.6 adopts DraftFlow mechanics through a Marketing-owned adapter and is
-CODE_DONE / STATIC_VERIFIED. Detailed evidence is recorded in
+R6.2–R6.6 are merged/static. The R6 uniform consumer set is now closed: Lead
+Draft, Decision New, `/update`, and `/marketing_new` are DraftFlow consumers.
+Furniture and Voice remain specialized flows and are not forced into DraftFlow.
+This is a documentation status, not a deployment or runtime claim. Detailed evidence is recorded in
 `docs/audit/PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md`.
 
 Read-only discovery, audit and gate conclusions that change status, phase, Next,

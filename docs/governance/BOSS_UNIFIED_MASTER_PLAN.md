@@ -2,7 +2,7 @@
 
 **Status:** שכבת-על יחידה — מאחד את `BOSS_ROADMAP_CONTINUATION.md` ו-`BOSS_UNIFIED_MASTER_PLAN_v2.md`.
 **לא מחליף את `ROADMAP.md`** — אינו נוגע, משנה, או ממספר מחדש שום C/N/F קיים שם. רק מפנה אליהם.
-**עודכן:** 28/08/2026 | **Owner:** אליהו
+**עודכן:** 30/08/2026 | **Owner:** אליהו
 
 **Canonical CORE completion status (10/08/2026):** `CORE v1 — COMPLETE /
 READY TO FREEZE`. See
@@ -21,7 +21,7 @@ staging-gated MPT plus Media Probe/Gateway canary artifacts, still not productio
 activated. Runtime/deployment claims still require explicit deployed-SHA and
 live canary evidence.
 
-**Status reconciliation (28/08/2026):** Owner decision recorded for `U1`:
+**Status reconciliation (30/08/2026):** Owner decision recorded for `U1`:
 do not build a new general Understanding Contract or PendingAction Store.
 Reuse the existing Core Reasoning, ActionContracts/DraftFlow, ActionGateway,
 Turn Coordinator, MessageContract, and channel-adapter layers. This supersedes
@@ -32,17 +32,18 @@ as merged/static. R4.1 is also merged/static in PR #1088 (`16e82c7`). R5's
 read-only gate found no second uniform consumer, so R6.1 aligned `/decision new`;
 R6.1 is merged/static in PR #1091 (`40bc446`). R6.2 then adopted the shared
 DraftFlow interaction primitive while preserving Decision-owned state and
-persistence; it is CODE_DONE / STATIC_VERIFIED.
+persistence; it is MERGED / STATIC VERIFIED.
 R6.3 aligned `/update` independently to the same six-stage lifecycle without
-adopting DraftFlow; it is also CODE_DONE / STATIC_VERIFIED.
+adopting DraftFlow; it is also MERGED / STATIC VERIFIED.
 R6.4 adopted DraftFlow for `/update` while preserving its state and writer
-authority; it is CODE_DONE / STATIC_VERIFIED.
+authority; it is MERGED / STATIC VERIFIED.
 R6.5 aligned `/marketing_new` independently, preserving Marketing-owned pending
 state and deferring its existing execution boundary until explicit confirmation;
-it is CODE_DONE / STATIC_VERIFIED. DraftFlow adoption remains out of scope.
+it is MERGED / STATIC VERIFIED. DraftFlow adoption is now merged.
 R6.6 adopts the existing DraftFlow mechanics through a Marketing-owned dynamic
 adapter while preserving state, validation, execution and receipt ownership; it
-is CODE_DONE / STATIC_VERIFIED.
+is MERGED / STATIC VERIFIED. The R6 uniform consumer set is closed; Furniture
+and Voice remain specialized and are excluded from this closure.
 Runtime is not implied. The registry rows below are reconciled to this decision
 and current main evidence.
 
