@@ -40,6 +40,9 @@ authority; it is CODE_DONE / STATIC_VERIFIED.
 R6.5 aligned `/marketing_new` independently, preserving Marketing-owned pending
 state and deferring its existing execution boundary until explicit confirmation;
 it is CODE_DONE / STATIC_VERIFIED. DraftFlow adoption remains out of scope.
+R6.6 adopts the existing DraftFlow mechanics through a Marketing-owned dynamic
+adapter while preserving state, validation, execution and receipt ownership; it
+is CODE_DONE / STATIC_VERIFIED.
 Runtime is not implied. The registry rows below are reconciled to this decision
 and current main evidence.
 
