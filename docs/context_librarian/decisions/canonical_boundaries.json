@@ -44,7 +44,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.actioncontracts_authority",
@@ -86,7 +86,7 @@
       "notes": [
         "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
       ],
-      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.no_new_source_of_truth",
@@ -156,7 +156,7 @@
       "notes": [
         "A code default is not evidence of the current deployed environment."
       ],
-      "last_observed_commit": "8e67fd73890ade676787c0ed6f4f7f9f3e9f638c"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.production_verification",
@@ -192,7 +192,7 @@
       "notes": [
         "Without all three gates report Implemented but not yet verified."
       ],
-      "last_observed_commit": "a5fda8efee6d44908295e54a43065e2e81bef8af"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.historical_evidence_precedence",
@@ -223,7 +223,7 @@
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
       ],
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.ux_no_internal_ids",
@@ -260,7 +260,7 @@
       "notes": [
         "Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."
       ],
-      "last_observed_commit": "60a23302286e9dcb6672095ee702b46686d1a3a8"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.cross_layer_authority",
@@ -348,7 +348,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "612cac968523f84a54d39a24fc72f969d863d8bc"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -417,7 +417,7 @@
         "Stage 3A (PR #506, merge 6201e86) implements this decision: core/message_contract.py is the canonical MessageContract (15 MessageState values, frozen V1/D-012 schema); D-013 ratifies evidence_status as optional non-authoritative metadata (never determines/upgrades MessageState, fails closed on unknown values); build_message_contract() and the formatter wrapper are pure with zero production imports/callers/wiring/output change. test_message_contract.py is the test authority (41/41 passing).",
         "PR B (#509, merge 1c51570) registers a pure, unwired ApprovalLifecycleResult adapter that delegates to the canonical builder; PR C (ActionFact/GatewayReply adapter) remains pending."
       ],
-      "last_observed_commit": "8e67fd73890ade676787c0ed6f4f7f9f3e9f638c"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.business_domain_vocabulary",
@@ -790,7 +790,7 @@
         "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification.",
         "Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
-      "last_observed_commit": "a5fda8efee6d44908295e54a43065e2e81bef8af"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -838,7 +838,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.n18_terminal_turn_result",
@@ -884,7 +884,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "ba2cbcec7100f89e23aa487320fcdb534eea5311"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "decision.provider_neutral_query_contract",

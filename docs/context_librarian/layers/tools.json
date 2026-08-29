@@ -46,7 +46,7 @@
         "catalog.reconciles_evidence": false,
         "catalog.business_write_ownership": false
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "component.dev_registry_reconcile",
@@ -91,7 +91,7 @@
         "catalog.reconciles_evidence": true,
         "catalog.no_network_dependency": true
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "component.dev_registry_validator",
@@ -135,7 +135,7 @@
         "catalog.writes_registry": false,
         "catalog.reconciles_evidence": false
       },
-      "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "component.status_sync_validator",
@@ -179,7 +179,7 @@
         "catalog.reconciles_evidence": false,
         "catalog.business_write_ownership": false
       },
-      "last_observed_commit": "16e82c7d0c2394d57a0fb8f75133df009e6ca64d"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     },
     {
       "id": "component.free_worker_pilot",
@@ -321,7 +321,7 @@
           "dispatcher"
         ]
       },
-      "last_observed_commit": "a5fda8efee6d44908295e54a43065e2e81bef8af"
+      "last_observed_commit": "881ea337fea12e30e2eef3c9f747fd25d4c2c3b2"
     }
   ],
   "edges": [
