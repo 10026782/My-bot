@@ -66,7 +66,8 @@ or runtime claim. R6.4 adopted DraftFlow for `/update` and is CODE_DONE /
 STATIC_VERIFIED. This is a documentation status, not a deployment or runtime
 claim. R6.5 aligned `/marketing_new` independently to the same six-stage
 lifecycle and is CODE_DONE / STATIC_VERIFIED; DraftFlow adoption remains out of
-scope. Detailed evidence is recorded in
+scope. R6.6 adopts DraftFlow mechanics through a Marketing-owned adapter and is
+CODE_DONE / STATIC_VERIFIED. Detailed evidence is recorded in
 `docs/audit/PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md`.
 
 Read-only discovery, audit and gate conclusions that change status, phase, Next,

@@ -45,6 +45,8 @@ import json
 import logging
 import re
 
+from core.draft_flow import DraftSpec, resolve_draft_reply
+
 logger = logging.getLogger(__name__)
 
 _ALLOWED_ROLES = ("owner", "manager", "partner")
@@ -117,6 +119,45 @@ INTAKE_QUESTIONS: dict[str, list[tuple[str, str]]] = {
         ("objective", "✍️ מה המטרה? (למשל: X פניות תוך שבוע)"),
     ],
 }
+
+
+def _set_marketing_draft_field(draft: dict, field: str, raw: str) -> tuple[bool, str]:
+    value = (raw or "").strip()
+    if not value:
+        return False, "הערך לא יכול להיות ריק — נסה שוב."
+    draft[field] = value
+    draft.setdefault("answers", {})[field] = value
+    return True, ""
+
+
+def _marketing_draft_spec(state: dict) -> DraftSpec:
+    """Marketing-owned dynamic spec; DraftFlow supplies transitions only."""
+    questions = INTAKE_QUESTIONS[state["demand_type"]]
+    fields = tuple(key for key, _ in questions) + ("constraints",)
+    prompts = dict(questions)
+    prompts["constraints"] = _CONSTRAINTS_PROMPT
+    labels = {prompt.split("?", 1)[0].replace("✍️ ", ""): key for key, prompt in questions}
+    labels["אילוצים"] = "constraints"
+    return DraftSpec(
+        required_fields=fields,
+        field_prompts=prompts,
+        edit_labels=labels,
+        set_field=_set_marketing_draft_field,
+        render=_marketing_review,
+        unknown_field_message="שדה לא מוכר.",
+        edit_choice_prompt="✏️ מה לערוך?",
+    )
+
+
+def _resolve_marketing_reply(text: str, state: dict):
+    """Adapt Marketing's nested answers to DraftFlow's flat pure input."""
+    spec = _marketing_draft_spec(state)
+    for field in spec.required_fields:
+        state[field] = state.get("answers", {}).get(field, "")
+    outcome = resolve_draft_reply(text, state, spec)
+    for field in spec.required_fields:
+        state.setdefault("answers", {})[field] = state.pop(field, "")
+    return outcome
 
 
 def _materialize_demand_fields(demand_type: str, answers: dict) -> dict:
@@ -245,6 +286,7 @@ def register_marketing_command(bot, get_identity):
             return
         state["domain"] = domain
         state["step"] = "demand_type"
+        state["mode"] = "filling"
         _pending[uid] = state
         bot.edit_message_text(
             f"✅ תחום: {_label(DOMAINS, state['domain'])}\n\nבחר סוג דרישה:",
@@ -268,6 +310,8 @@ def register_marketing_command(bot, get_identity):
         state["step"] = "intake"
         state["q_index"] = 0
         state["answers"] = {}
+        state["mode"] = "filling"
+        state["awaiting_field"] = INTAKE_QUESTIONS[demand_type][0][0]
         _pending[uid] = state
         first_prompt = INTAKE_QUESTIONS[demand_type][0][1]
         bot.edit_message_text(
@@ -345,6 +389,8 @@ def register_marketing_command(bot, get_identity):
             markup = _demand_type_keyboard("mkt_edit_type")
         else:
             state["step"] = "edit_value"
+            state["mode"] = "filling"
+            state["awaiting_field"] = key
             markup = None
         _pending[uid] = state
         _transport_ack(bot, call)
@@ -385,6 +431,8 @@ def register_marketing_command(bot, get_identity):
         state["answers"] = {}
         state["q_index"] = 0
         state["step"] = "intake"
+        state["mode"] = "filling"
+        state["awaiting_field"] = INTAKE_QUESTIONS[key][0][0]
         state.pop("edit_key", None)
         _pending[uid] = state
         _transport_ack(bot, call)
@@ -434,46 +482,46 @@ def register_marketing_command(bot, get_identity):
             bot.send_message(msg.chat.id, "בחר אחת מהאפשרויות בכפתורים למעלה 👆")
             return
 
-        if step == "intake":
+        if step in ("intake", "constraints"):
             questions = INTAKE_QUESTIONS[state["demand_type"]]
-            key, _ = questions[state["q_index"]]
-            value = msg.text.strip()
-            if not value:
-                bot.send_message(msg.chat.id, "הערך לא יכול להיות ריק — נסה שוב.")
+            if step == "intake":
+                state["awaiting_field"] = questions[state["q_index"]][0]
+            state["mode"] = "filling"
+            outcome = _resolve_marketing_reply(msg.text, state)
+            if outcome.kind == "cancel":
+                _pending.pop(uid, None)
+                bot.send_message(msg.chat.id, "↩️ בוטל.")
                 return
-            state["answers"][key] = value
-            state["q_index"] += 1
-            if state["q_index"] < len(questions):
-                _pending[uid] = state
-                bot.send_message(msg.chat.id, questions[state["q_index"]][1])
-            else:
-                state["step"] = "constraints"
-                _pending[uid] = state
-                bot.send_message(msg.chat.id, _CONSTRAINTS_PROMPT)
-            return
+            if outcome.kind == "reply":
+                next_field = state.get("awaiting_field")
+                if state.get("mode") == "review":
+                    state["step"] = "review"
+                    _pending[uid] = state
+                    bot.send_message(msg.chat.id, outcome.message, reply_markup=_review_keyboard())
+                else:
+                    state["step"] = "constraints" if next_field == "constraints" else "intake"
+                    if next_field != "constraints":
+                        state["q_index"] = next(i for i, (key, _) in enumerate(questions) if key == next_field)
+                    _pending[uid] = state
+                    bot.send_message(msg.chat.id, outcome.message)
+                return
 
         if step == "edit_value":
-            value = msg.text.strip()
-            if not value:
-                bot.send_message(msg.chat.id, "הערך לא יכול להיות ריק — נסה שוב.")
-                return
-            state["answers"][state["edit_key"]] = value
-            state.pop("edit_key", None)
-            state["step"] = "review"
-            _pending[uid] = state
-            bot.send_message(msg.chat.id, _marketing_review(state), reply_markup=_review_keyboard())
+            state["mode"] = "filling"
+            state["awaiting_field"] = state["edit_key"]
+            outcome = _resolve_marketing_reply(msg.text, state)
+            if outcome.kind == "cancel":
+                _pending.pop(uid, None)
+                bot.send_message(msg.chat.id, "↩️ בוטל.")
+            elif outcome.kind == "reply" and state.get("mode") == "review":
+                state.pop("edit_key", None)
+                state["step"] = "review"
+                _pending[uid] = state
+                bot.send_message(msg.chat.id, outcome.message, reply_markup=_review_keyboard())
+            else:
+                _pending[uid] = state
+                bot.send_message(msg.chat.id, outcome.message or "הערך לא תקין — נסה שוב.")
             return
-
-        # step == "constraints" — the final pending field; execution waits for approval.
-        value = msg.text.strip()
-        if not value:
-            bot.send_message(msg.chat.id, "יש להזין אילוצים או לכתוב \"אין\".")
-            return
-        state["answers"]["constraints"] = value
-        state["step"] = "review"
-        _pending[uid] = state
-        bot.send_message(msg.chat.id, _marketing_review(state), reply_markup=_review_keyboard())
-        return
 
     logger.info("[F23] /marketing_new registered successfully")
 

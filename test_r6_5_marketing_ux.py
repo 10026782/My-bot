@@ -115,6 +115,35 @@ def test_marketing_new_cancel_clears_pending_without_execution():
         execute.assert_not_called()
 
 
+def test_marketing_draftflow_spec_preserves_dynamic_order_and_validation():
+    state = {"demand_type": "recruitment", "answers": {}}
+    spec = cmd_marketing._marketing_draft_spec(state)
+    assert spec.required_fields == ("role_experience", "area", "quantity_deadline", "constraints")
+    outcome = cmd_marketing._resolve_marketing_reply("מגייס", {**state, "mode": "filling", "awaiting_field": "role_experience"})
+    assert outcome.kind == "reply"
+    assert outcome.message == "✍️ אזור עבודה?"
+
+    state = {"demand_type": "recruitment", "answers": {}, "mode": "filling", "awaiting_field": "role_experience"}
+    outcome = cmd_marketing._resolve_marketing_reply("   ", state)
+    assert outcome.kind == "reply"
+    assert state["answers"] == {"role_experience": "", "area": "", "quantity_deadline": "", "constraints": ""}
+
+
+def test_marketing_demand_type_change_resets_dependent_answers():
+    state = {
+        "demand_type": "recruitment",
+        "answers": {"role_experience": "old", "area": "old", "quantity_deadline": "old", "constraints": "old"},
+    }
+    state["demand_type"] = "service"
+    state["answers"] = {}
+    state["q_index"] = 0
+    state["mode"] = "filling"
+    state["awaiting_field"] = "service_type"
+    outcome = cmd_marketing._resolve_marketing_reply("ייעוץ", state)
+    assert outcome.message == "✍️ איזור שירות?"
+    assert "role_experience" not in state["answers"]
+
+
 if __name__ == "__main__":
     test_marketing_new_has_review_edit_confirm_and_cancel_boundary()
     test_marketing_new_cancel_clears_pending_without_execution()
