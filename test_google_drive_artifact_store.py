@@ -71,6 +71,31 @@ def test_upload_verify_and_result_ref(tmp_path):
     assert stored.mime_type == "video/mp4"
 
 
+def test_put_accepts_mime_type_matching_artifact_store_protocol(tmp_path):
+    """F16-M6: put()'s signature must match the ArtifactStore Protocol
+    (core/artifact_store.py), which declares mime_type. Passing one must
+    actually flow into the Drive upload body, not just be accepted."""
+    artifact = tmp_path / "final-1.mp4"
+    artifact.write_bytes(b"test")
+    service = _Service()
+    _store(tmp_path, service).put(
+        path=artifact, identity="contract:provider", metadata={}, mime_type="application/pdf",
+    )
+    create_kwargs = next(kwargs for name, kwargs in service.files_api.calls if name == "create")
+    assert create_kwargs["body"]["mimeType"] == "application/pdf"
+
+
+def test_put_default_mime_type_unchanged_when_omitted(tmp_path):
+    """Existing sole caller (core/moneyprinterturbo_adapter.py) never passes
+    mime_type -- default behavior must stay exactly video/mp4."""
+    artifact = tmp_path / "final-1.mp4"
+    artifact.write_bytes(b"test")
+    service = _Service()
+    _store(tmp_path, service).put(path=artifact, identity="contract:provider", metadata={})
+    create_kwargs = next(kwargs for name, kwargs in service.files_api.calls if name == "create")
+    assert create_kwargs["body"]["mimeType"] == "video/mp4"
+
+
 def test_shared_drive_calls_enable_all_drives(tmp_path):
     artifact = tmp_path / "final-1.mp4"
     artifact.write_bytes(b"test")
