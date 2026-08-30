@@ -6219,3 +6219,66 @@ Remaining work: callback enumeration and mutation scope hardening,
 tenant/domain propagation, and callback regression coverage.
 
 Next: **bounded callback/record-scope remediation**.
+
+## F16 Media — Remediation Slice 2 (F16-M2, F16-M3) — STATIC VERIFIED IN PR / MERGE PENDING
+
+**Truth Reset:** `origin/main` at `8574e9a1ece5831cbc9bd0b3119d64532f486a13` (merge of PR #1128, F16-M2/M3 owner decisions + discovery). Both decisions confirmed present on this SHA before editing.
+
+Scope: only F16-M2 and F16-M3, per the decisions and discovery persisted in PR #1128. F16-M1/M4 (already closed) not touched; F16-M5/M6/M7/M8 not touched; no schema, flag, or unrelated-adapter change.
+
+### F16-M2 — MIME allowlist, fail-closed — STATIC VERIFIED IN PR / MERGE PENDING
+
+- **Prior defect:** zero MIME enforcement anywhere in F16 ingestion — every provider-declared `mime_type` was accepted unconditionally.
+- **Implementation:** `media_handler.py` — new `ALLOWED_MEDIA_MIME_TYPES` frozenset (canonical SSOT, seeded only from the discovery's evidenced-supported set: `image/jpeg`, `image/png`, `audio/ogg`, `audio/mpeg`, `audio/mp3`, `audio/wav`, `video/mp4`, `application/pdf`, `text/plain`, `text/csv`, `text/html`, `text/markdown`, both `application/vnd.openxmlformats-officedocument...` docx/xlsx types); new `_validate_mime(mime_type, filename="")` helper. `application/octet-stream` (the provider-unknown sentinel flagged as a risk in PR #1128) is accepted only when the filename extension maps to an already-allowed type via a small `_OCTET_STREAM_EXTENSION_MIME` map — the exact resolution that discovery's Risks section anticipated, not a new invention.
+- **Canonical allowlist location:** `media_handler.py` (module-level, as the discovery specified — already the single funnel).
+- **Callers changed:** `handle_file_upload()` and `handle_voice_note()` — both call `_validate_mime()` as their first check, before idempotency/Drive/Airtable. `handle_tma_upload()` is covered transitively (it calls `handle_file_upload()`). No other caller required a change — matches the discovery's "exact callers" list exactly.
+- **Not applicable (confirmed, not skipped):** decision-text §7 (declared-vs-detected MIME comparison) — no content-based MIME detection exists anywhere in F16's ingestion path (re-confirmed on this SHA), so there is no such comparison to enforce; per decision §8/requirement 8, no new content-inspection subsystem was built to manufacture one.
+- **Tests:** `test_f16_m2_mime_allowlist.py` — 7 tests: allowed MIME passes, unsupported rejected, missing rejected, octet-stream accepted only with known extension, policy reads from the SSOT constant (not a hardcoded literal), `handle_file_upload`/`handle_voice_note` reject before any I/O (mocked collaborators asserted never called). All exercise the real `_validate_mime()`/handler code paths, not a mock of the policy itself.
+- **Verdict:** STATIC VERIFIED IN PR / MERGE PENDING.
+
+### F16-M3 — durable failure trace — STATIC VERIFIED IN PR / MERGE PENDING
+
+- **Prior evidence-loss path:** `mark_partial()` only ever updated an existing Airtable record; called with an empty/falsy `record_id` it silently did nothing, at the two sites the discovery identified (`media_handler.py:631`/`:705` in the pre-Slice-2 line numbering) — plus a **third site the discovery didn't call out explicitly**: `handle_file_upload()`'s `if not reconciled_id:` branch (the "Drive object reused, first Airtable save fails, no prior record" path) had **no `mark_partial()` call at all**, not even a no-op one — it returned directly with zero trace-write attempt. Found while writing the regression test for the reused-Drive-object path; same minimal fix (add the missing `mark_partial()` call), one more call site than discovery's literal citation — not a different architecture, so no owner-decision blocker was raised for it.
+- **Durable trace implementation:** `mark_partial()`'s empty-`record_id` branch now calls `save_asset()` (existing creation primitive) with `persistence_state=PARTIAL`, `logical_media_key`, whatever Drive fields are known (`drive_file_id`/`drive_url`), and `last_error_code="MEDIA_FILES_PARTIAL"`. Reservation-id-present behavior (update via `update_asset_persistence()`) is byte-for-byte unchanged.
+- **Recovery identity:** `logical_media_key`, per the persisted policy — unchanged computation, just now actually persisted on the fallback-created record.
+- **Retry/idempotency behavior:** a retry's `find_asset_by_logical_media_key()` classifies the new record `"incomplete"` (existing classification logic, untouched) and the existing `media_record_id` reconciliation branch updates it — no new code path was added for retry; the existing one now has something to find. Verified no duplicate record is created on retry.
+- **Tests:** `test_f16_m3_durable_trace.py` — 4 tests: reservation-id-present keeps update-only behavior (asserts `save_asset` never called); no-reservation-id fresh-upload path creates the durable trace with correct fields; no-reservation-id reused-Drive-object path (the third, previously-uncalled site) creates the durable trace; a simulated retry reconciles against the created trace via `update_asset_persistence()` and never calls `save_asset()` again (no duplicate). Also updated `test_c02_c04_finding2_pr3.py::test_pending_creation_failure_recovers_tagged_drive_on_retry` — its mock only allowed 2 `save_asset()` calls under the old (broken) contract; extended to 3 to assert the new durable-trace-creation call, which is the fix working as intended, not a regression.
+- **Verdict:** STATIC VERIFIED IN PR / MERGE PENDING.
+
+### Scope audit
+
+No remediation performed for F16-M5/M6/M7 (still open, untouched) or F16-M8 (still cross-track reference). No live/deployed canary run. No feature-flag activation change. No new MIME types introduced. No schema change (`MediaFileFields`/`MediaPersistenceState` already had every field/value needed, confirmed by discovery and re-confirmed during implementation). No unrelated adapter changed — `drive_adapter.py`, `whatsapp_media_adapter.py`, `meta_whatsapp_media_adapter.py`, `tma_api.py` are all untouched; every entry path is covered because they all converge on `media_handler.handle_file_upload()`/`handle_voice_note()`.
+
+### Verification run
+
+```
+python3 -m py_compile media_handler.py meta_whatsapp_media_adapter.py test_f16_m1_meta_media_host.py test_f16_m2_mime_allowlist.py test_f16_m3_durable_trace.py test_c02_c04_finding2_pr3.py   # OK
+python3 -m pytest test_f16_m2_mime_allowlist.py -v            # 7 passed
+python3 -m pytest test_f16_m3_durable_trace.py -v              # 4 passed
+python3 -m pytest -m "not integration and not airtable and not live" test_f16_m1_meta_media_host.py test_f16_m2_mime_allowlist.py test_f16_m3_durable_trace.py test_audit3_i3_media_contract.py test_c02_c04_finding1_remediation.py test_c02_c04_finding2_pr2.py test_c02_c04_finding2_pr3.py test_c02_c04_finding3_remediation.py test_c02_c04_findings_7_8_remediation.py test_f52_g2_voice_edit_replacement.py test_f15_idempotency_retry.py test_f5_voice_idempotency_retry.py test_whatsapp_media.py --tb=short -q
+  # 63 passed
+python3 test_c90_structured_file_capture.py   # 45 passed, 0 failed (CI's actual invocation: plain python, not pytest)
+python3 test_pr0c_writer_migration.py         # 16 passed, 0 failed (same)
+python3 test_media_layer.py                   # 33/33 passed (same)
+python3 media_handler.py                      # self-test OK, unchanged output — no regression on the pre-existing M4 scenario
+python3 smoke_tests.py                        # PASS: all smoke checks passed
+```
+
+`test_provider_portability_envelope1d.py::test_scope_has_no_raw_provider_envelope_access` remains the sole pre-existing/unrelated failure (already in `ci.yml`'s `KNOWN_PYTEST_FAILURES`, `ad_attribution.py` provider-envelope scope, untouched by this slice) — re-confirmed against this same baseline SHA before attributing it as pre-existing rather than merely asserting it.
+
+### Ledger status after this slice
+
+| ID | Status |
+|----|--------|
+| F16-M1 | **CLOSED — STATIC VERIFIED** |
+| F16-M2 | **STATIC VERIFIED IN PR / MERGE PENDING** |
+| F16-M3 | **STATIC VERIFIED IN PR / MERGE PENDING** |
+| F16-M4 | **CLOSED — STATIC VERIFIED** |
+| F16-M5 | OPEN (unchanged) |
+| F16-M6 | OPEN (unchanged) |
+| F16-M7 | OPEN (unchanged) |
+| F16-M8 | CROSS-TRACK REFERENCE (unchanged) |
+
+### Terminal status (this slice)
+
+**F16 = CORE REMEDIATION COMPLETE (STATIC VERIFIED IN PR, MERGE PENDING) / LOW-RISK CLEANUP REMAINS / RUNTIME NOT ESTABLISHED.** All four owned static findings from the original audit (M1, M2, M3, M4) are now statically verified fixed once this PR merges; M5/M6/M7 remain open low-risk cleanup; M8 remains cross-track. **F16 overall is not closed** — no `MERGED` claim until this PR actually merges into `main`, and no runtime/deployment/production claim is made regardless.
