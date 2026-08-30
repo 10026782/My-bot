@@ -45,6 +45,13 @@ def test_accepted_staging_finding_is_visible_but_non_blocking():
     assert groups["new"] == []
 
 
+def test_standalone_commercial_crm_helper_import_is_explicitly_accepted():
+    finding = ("commercial_crm.py", 37, "tools.airtable_tools")
+    groups = audit.classify([finding])
+    assert groups["accepted"] == [finding]
+    assert groups["new"] == []
+
+
 def test_synthetic_new_bypass_is_blocking():
     finding = ("new_feature.py", 1, "tools.airtable_tools")
     assert audit.classify([finding])["new"] == [finding]
@@ -62,7 +69,7 @@ def test_synthetic_tracked_bypass_makes_main_fail(tmp_path, monkeypatch):
 
 
 def test_stable_identity_handles_shifted_legacy_import():
-    finding = ("lead_capture.py", 213, "tools.airtable_tools")
+    finding = ("lead_capture.py", 132, "tools.airtable_tools")
     groups = audit.classify([finding])
     assert groups["legacy"] == [finding]
     assert groups["new"] == []
@@ -70,8 +77,8 @@ def test_stable_identity_handles_shifted_legacy_import():
 
 def test_stable_identity_handles_shifted_interaction_imports():
     findings = [
-        ("interaction_engine.py", 310, "tools.airtable_tools"),
-        ("interaction_engine.py", 575, "tools.calendar_tools"),
+        ("interaction_engine.py", 339, "tools.airtable_tools"),
+        ("interaction_engine.py", 626, "tools.calendar_tools"),
     ]
     groups = audit.classify(findings)
     assert groups["legacy"] == findings
@@ -119,7 +126,7 @@ def test_contact_boundaries_and_non_contact_writes_are_allowed(tmp_path, monkeyp
 
 
 def test_stable_identity_handles_shifted_cmd_update_import():
-    finding = ("cmd_update.py", 547, "tools.airtable_tools")
+    finding = ("cmd_update.py", 726, "tools.airtable_tools")
     groups = audit.classify([finding])
     assert groups["legacy"] == [finding]
     assert groups["new"] == []

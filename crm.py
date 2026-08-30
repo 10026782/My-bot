@@ -283,8 +283,16 @@ def update_contact(record_id: str, fields: dict, *, source="contact_gate") -> bo
 def crm_add_contact(name: str, phone: str = "", email: str = "",
                     contact_type: str = ContactType.CLIENT,
                     company: str = "", notes: str = "",
-                    lead_source_id: str = "") -> ContactResult:
-    """Find or create a Contact through the canonical deduplication gate."""
+                    lead_source_id: str = "", identity=None) -> ContactResult:
+    """Find or create a Contact through the canonical deduplication gate.
+
+    identity: threaded through to find_or_create_contact()'s dedup lookup for
+    tenant-scoped matching (F14). Optional/None for backward compatibility
+    with existing callers that predate this parameter (tests, the F15
+    staging verification script) — those keep today's untenant-scoped
+    lookup; callers that have an Identity in hand (e.g. lead_conversion.py's
+    /convert command) should pass it.
+    """
     return create_contact_from_fields(
         {
             ContactFields.NAME: name,
@@ -296,6 +304,7 @@ def crm_add_contact(name: str, phone: str = "", email: str = "",
         notes=notes,
         lead_source_id=lead_source_id,
         source="crm_add_contact",
+        identity=identity,
     )
 
 
