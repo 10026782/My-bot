@@ -5945,7 +5945,6 @@ Whether `FEATURE_MEDIA_UPLOAD`/`FEATURE_VOICE_NOTES` are enabled in the deployed
 ### Terminal status
 
 **STATIC AUDIT COMPLETE / REMEDIATION REQUIRED / RUNTIME NOT ESTABLISHED.** Not `CLOSED`, not `STATIC VERIFIED` — 2 owned MEDIUM findings (F16-M2, F16-M3) remain open pending owner policy decisions, plus 1 owned HIGH (F16-M1) and 1 HIGH test defect (F16-M4) pending narrow-fix approval. `CHANGE_CONTROL_LOG.md` was reconciled against but not appended to in this pass — its format requires a completed merge/commit/PR, which does not yet exist for this audit; it will gain an entry once remediation actually merges.
-
 ## F16 Media — Remediation Slice 1 (F16-M1, F16-M4) — STATIC VERIFIED
 
 **Truth Reset:** `origin/main` at `5331093637c001027fd7d9f53a2502cd9ab6e792` (merge of PR #1122, the F16 Media Findings Documentation Gate). Both findings confirmed still present on this SHA before editing — neither was already remediated upstream.
@@ -6002,3 +6001,33 @@ python3 smoke_tests.py                        # PASS: all smoke checks passed
 ### Terminal status (this slice)
 
 **F16 = PARTIALLY REMEDIATED / NOT STATICALLY CLOSED.** Two narrow findings (M1, M4) are statically verified fixed; two owner-decision-gated findings (M2, M3) and three low-priority cleanup findings (M5-M7) remain open. F16 overall is not closed and no runtime/production claim is made — this is a local-fixture/static verification only.
+## Audit Task 9 — Decision Hub Documentation & Policy Gate
+
+- **תאריך:** 30/08/2026
+- **Truth-Reset SHA:** `5331093637c001027fd7d9f53a2502cd9ab6e792` (`origin/main`)
+- **Scope:** תיעוד ומדיניות בלבד לאחר האודיט הסטטי; ללא שינוי runtime code, access-control behavior, tests או feature flags.
+- **Program status:** `ACTIVE / STATIC AUDIT COMPLETE / REMEDIATION REQUIRED / RUNTIME NOT ESTABLISHED`.
+
+### Stable findings
+
+| ID | Finding | Status | Evidence / disposition |
+|---|---|---|---|
+| DH-S1 | Formula safety | `CLOSED / STATIC VERIFIED` | `test_bugdh03_04_formula_injection.py` 15/15; escaping/query construction verified for Decision Hub formula inputs. No runtime claim. |
+| DH-S2 | Access policy drift | `OPEN / OWNER DECISION REQUIRED` | `/home/elichazan/My-bot/cmd_decision.py:30,85,506` permits `owner`, `manager`, and `partner`; Horizon/Decision Hub policy language identifies the activation track as Owner-only. Do not resolve by assumption. |
+| DH-S3 | Fail-closed read paths | `STATIC VERIFIED` | Decision read adapters return empty/none on read failure and prevent lookup continuation; covered by `test_decision_hub_read_adapter.py` 7/7. |
+| DH-S4 | Stakeholder/event write observability | `OPEN` | `_create_stakeholder()` ignores the add result and update flow still renders after `_create_decision_event()` returns no ID (`cmd_decision.py:472-475,523-527`). This is a partial-persistence/observability gap; no remediation in this gate. |
+
+### Explicit owner decision — `DECISION_HUB_ACCESS_POLICY`
+
+Current code evidence is explicit: `_ALLOWED_ROLES = ("owner", "manager", "partner")`, and the command/update guards accept those roles. Current policy evidence is explicit: `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §“Horizon 3 — Decision Hub Owner-Only” and `docs/governance/HORIZON.md` identify the activation track as Owner-only.
+
+Owner must select one option before implementation:
+
+- **A. `OWNER_ONLY`** — align code and tests to owner-only access.
+- **B. `OWNER_MANAGER_PARTNER`** — revise canonical policy language and tests to approve the current internal-role access model.
+
+Until selected, access policy is **undetermined**. No access-control behavior is changed by this entry.
+
+### Required next step
+
+Resolve `DECISION_HUB_ACCESS_POLICY`, then align code/tests/docs and remediate DH-S4 partial-persistence observability. Runtime/deployment evidence remains `NOT ESTABLISHED`; the feature flag must not be activated by this documentation gate.
