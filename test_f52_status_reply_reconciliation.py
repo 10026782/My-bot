@@ -674,6 +674,38 @@ def test_describe_pending_queue_count_zero_on_is_clean_idle_message():
     assert out == "אין כרגע פעולה שממתינה. אפשר להמשיך."
 
 
+def test_pending_empty_on_uses_no_pending_message_contract():
+    from unittest.mock import patch
+    import core.message_contract as message_contract_module
+
+    gw = ActionGateway()
+    try:
+        _set("on")
+        with patch.object(
+            message_contract_module,
+            "format_message_contract_with_meta",
+            wraps=message_contract_module.format_message_contract_with_meta,
+        ) as render:
+            out = gw._render_pending_empty_reply("legacy")
+    finally:
+        _set(None)
+    assert render.call_count == 1
+    contract = render.call_args.args[0]
+    assert contract.state.value == "no_pending_action"
+    assert contract.display_payload.to_dict() == {
+        "action": None,
+        "entity_type": None,
+        "entity_name": None,
+        "key_fields": [],
+        "items": [],
+        "count": None,
+        "reason_code": None,
+        "execution_verified": None,
+        "occurred_at": None,
+    }
+    assert out == "אין כרגע פעולה שממתינה. אפשר להמשיך."
+
+
 def test_describe_pending_queue_count_one_on_uses_singular_wording_no_list():
     """OQ1: count=1 must NOT be a numbered list once the flag is on — no
     '1.'/bullet, no 'שלח מספר'. describe_pending_queue() is a STATUS QUERY

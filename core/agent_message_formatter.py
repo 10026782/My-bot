@@ -50,6 +50,7 @@ STATE_APPROVAL_PENDING        = "approval_pending"
 # authority remains the existing pending ActionContract.
 STATE_APPROVAL_PENDING_QUERY  = "approval_pending_query"
 STATE_APPROVAL_PENDING_BATCH  = "approval_pending_batch"
+STATE_NO_PENDING_ACTION       = "no_pending_action"
 STATE_CLARIFICATION_NEEDED    = "clarification_needed"
 STATE_IDLE                    = "idle"
 STATE_OUTCOME_UNKNOWN         = "outcome_unknown"
@@ -86,7 +87,8 @@ def format_baseline_status_summary(
 CANONICAL_STATES = frozenset({
     STATE_SUCCESS, STATE_FAILURE, STATE_APPROVAL_PENDING,
     STATE_APPROVAL_PENDING_QUERY,
-    STATE_APPROVAL_PENDING_BATCH, STATE_CLARIFICATION_NEEDED, STATE_IDLE,
+    STATE_APPROVAL_PENDING_BATCH, STATE_NO_PENDING_ACTION,
+    STATE_CLARIFICATION_NEEDED, STATE_IDLE,
     STATE_OUTCOME_UNKNOWN, STATE_UNVERIFIED_EFFECT, STATE_MIXED,
     STATE_MIXED_WITH_UNKNOWN, STATE_CANCELLED,
 })
@@ -535,6 +537,7 @@ _RENDERERS = {
     STATE_APPROVAL_PENDING:       _render_approval_pending,
     STATE_APPROVAL_PENDING_QUERY: _render_approval_pending_query,
     STATE_APPROVAL_PENDING_BATCH: _render_approval_pending_batch,
+    STATE_NO_PENDING_ACTION:      _render_idle,
     STATE_CLARIFICATION_NEEDED:   _render_clarification,
     STATE_IDLE:                   _render_idle,
     STATE_OUTCOME_UNKNOWN:        _render_outcome_unknown,
