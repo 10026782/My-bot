@@ -1,16 +1,18 @@
 #!/bin/bash
-# PRE-SESSION GATE — Branch Merge Enforcement
+# PRE-SESSION BRANCH NOTICE — Warning by default, strict on request
 #
-# מטרה: לעצור Claude Code מלפתוח ענף חדש כשיש ענף פתוח ולא ממוזג.
+# מטרה: לדווח על ענפים לא ממוזגים בלי לחסום עבודה לא קשורה.
 # ריצה: בתחילת כל סשן, לפני git checkout -b
 #
-# שימוש: bash pre_session_gate.sh "<task-description>"
+# שימוש: bash pre_session_gate.sh "<task-description>" [--strict]
 # דוגמה: bash pre_session_gate.sh "fix schema cache"
+# בדיקה מחמירה: bash pre_session_gate.sh "governance audit" --strict
 #
 # exit 0 = מותר להמשיך
-# exit 1 = STOP — חייב טיפול לפני המשך
+# exit 1 = STOP — רק במצב --strict
 
 TASK="${1:-unknown task}"
+MODE="${2:-}"
 
 echo "======================================"
 echo "PRE-SESSION GATE"
@@ -41,32 +43,23 @@ if [ "$COUNT" -gt 10 ]; then
   echo "  ... ועוד $REMAINING ענפות"
 fi
 
-# --- שלב 3: הנחיות מה לעשות ---
+# --- שלב 3: ברירת מחדל — אזהרה והמשך ---
 echo ""
 echo "======================================"
-echo "STOP — נדרשת החלטה לפני פתיחת ענף חדש"
+echo "WARNING — נמצאו ענפים לא ממוזגים; המשך מותר כברירת מחדל"
 echo "======================================"
 echo ""
-echo "אפשרויות:"
-echo "  A) checkout לענף קיים והמשך שם:"
-echo "     git checkout <branch-name>"
-echo ""
-echo "  B) מזג ענף קיים ל-main לפני שממשיכים:"
-echo "     git checkout main && git merge <branch-name>"
-echo ""
-echo "  C) קיבלת אישור מפורש מהמשתמש לפתוח ענף חדש בכל זאת:"
-echo "     bash pre_session_gate.sh \"$TASK\" --force"
-echo ""
-echo "❌ אסור להריץ git checkout -b לפני בחירת אחת מהאפשרויות."
+echo "בדוק overlap של הענפים עם scope המשימה לפני פתיחת ענף חדש."
+echo "אין לבצע merge או מחיקה אוטומטיים."
 echo ""
 
-# --- שלב 4: force override (עם תיעוד) ---
-if [ "$2" = "--force" ]; then
-  echo "⚠️  FORCE OVERRIDE — פתיחת ענף חדש למרות ענפות פתוחות."
-  echo "⚠️  זה מותר רק אם קיבלת אישור מפורש מהמשתמש."
-  echo "⚠️  תעד את הסיבה ב-commit message הראשון."
+# --- שלב 4: strict mode (אופציונלי) ---
+if [ "$MODE" = "--strict" ]; then
   echo ""
-  exit 0
+  echo "STOP — strict mode: נדרשת החלטה לפני פתיחת ענף חדש."
+  echo "השתמש בברירת המחדל עבור עבודה שאינה חופפת לענפים אלה."
+  echo ""
+  exit 1
 fi
 
-exit 1
+exit 0
