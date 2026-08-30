@@ -3348,6 +3348,9 @@ def _handle_approval_callback_impl(cq) -> None:
                     approver_role=approver_identity.role,
                 )
                 result = _gw_approval_result.safe_user_message
+                result = _gw_exec._render_approval_lifecycle_reply(
+                    _gw_approval_result, result,
+                )
                 _contract_after = _gw_exec._ledger.find_by_id(_gw_contract_id)
                 _tc8_finish_contract(_tc8_context, _contract_after, failure=_contract_after is None)
                 exec_failed = not (
@@ -3393,7 +3396,7 @@ def _handle_approval_callback_impl(cq) -> None:
                     )
                 except Exception as e:
                     logger.error("[Approval] final callback delivery failed: %s", e)
-                bot.answer_callback_query(cq.id, "❌ הביצוע נכשל")
+                bot.answer_callback_query(cq.id, "✅ התקבל")
                 return
 
             # PR #188: raw chat_id fingerprint
@@ -3496,7 +3499,7 @@ def _handle_approval_callback_impl(cq) -> None:
             )
         except Exception as e:
             logger.error("[Approval] final callback delivery failed: %s", e)
-        bot.answer_callback_query(cq.id, "✅ בוצע!")
+        bot.answer_callback_query(cq.id, "✅ התקבל")
         # BUG-BATCH-DISCARD: this contract just resolved — promote the next
         # deferred batch item for this identity, if any and if none other is
         # still live.
