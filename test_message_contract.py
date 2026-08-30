@@ -115,6 +115,23 @@ def test_pending_query_is_distinct_presentation_semantic():
     assert format_message_contract(contract).startswith("יש פעולה שממתינה לאישור:")
 
 
+def test_no_pending_action_uses_canonical_no_pending_wording():
+    contract = _build(
+        state=MessageState.NO_PENDING_ACTION,
+        display_payload={},
+    )
+    assert format_message_contract(contract) == "אין כרגע פעולה שממתינה. אפשר להמשיך."
+    assert format_message_contract(contract) != format_message_contract(
+        _build(state=MessageState.APPROVAL_PENDING, display_payload={})
+    )
+    assert format_message_contract(contract) != format_message_contract(
+        _build(state=MessageState.APPROVAL_PENDING_QUERY, display_payload={})
+    )
+    assert format_message_contract(contract) != format_message_contract(
+        _build(state=MessageState.NEUTRAL, display_payload={})
+    )
+
+
 def test_success_is_rejected_without_matching_verified_evidence():
     with pytest.raises(MessageContractValidationError, match="success requires"):
         _build(state=MessageState.SUCCESS)

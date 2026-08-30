@@ -2627,14 +2627,28 @@ class ActionGateway:
         if state == "off":
             return legacy_text
 
-        from core.agent_message_formatter import format_agent_message_with_meta
+        from core.message_contract import (
+            MessageState,
+            TurnContextSource,
+            build_message_contract,
+            format_message_contract_with_meta,
+        )
 
         try:
-            unified_text, meta = format_agent_message_with_meta("idle", {})
+            message_contract = build_message_contract(
+                state=MessageState.NO_PENDING_ACTION,
+                display_payload={},
+                reply_owner="gateway",
+                turn_context_source=TurnContextSource.LEGACY_INGRESS,
+                source_module="core.action_gateway",
+            )
+            unified_text, meta = format_message_contract_with_meta(message_contract)
         except Exception as exc:
             logger.warning("[ActionGateway] unified pending-empty formatter failed: %s", exc)
             return legacy_text
-        meta["contract_path"] = "agent_message_formatter_direct"
+        meta["contract_path"] = "message_contract"
+        meta["message_state"] = meta["formatter_state"]
+        meta["contract_version"] = meta["version"]
 
         fact = ActionFact(
             tool_name="", contract_id="", outcome="pending",
