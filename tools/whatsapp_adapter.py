@@ -108,6 +108,11 @@ _TEXT_ACTIONS = {
 }
 
 
+def _normalize_text(value: str) -> str:
+    """Apply the deterministic plain-text grammar normalization."""
+    return " ".join(value.split()).casefold()
+
+
 def _event_value(event: Mapping[str, Any], *keys: str) -> str:
     for key in keys:
         value = event.get(key)
@@ -117,7 +122,7 @@ def _event_value(event: Mapping[str, Any], *keys: str) -> str:
 
 
 def _action_from_label(value: str, interaction) -> str | None:
-    normalized = value.strip().lower()
+    normalized = _normalize_text(value)
     action = _TEXT_ACTIONS.get(normalized)
     if action:
         return action
@@ -127,7 +132,7 @@ def _action_from_label(value: str, interaction) -> str | None:
     if interaction.type in {InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE}:
         return None
     for candidate in values:
-        if candidate.strip().lower() == normalized:
+        if _normalize_text(candidate) == normalized:
             return _TEXT_ACTIONS.get(normalized, normalized)
     return None
 
@@ -178,11 +183,13 @@ def normalize_whatsapp_action(
             InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE,
         }:
             options = tuple(_label(value) for value in interaction.options)
-            if candidate.strip() in options:
-                return WhatsAppSemanticAction("choice", candidate.strip(), source)
+            normalized = _normalize_text(candidate)
+            normalized_options = {_normalize_text(option): option for option in interaction.options}
+            if normalized in normalized_options:
+                return WhatsAppSemanticAction("choice", normalized_options[normalized], source)
 
     if body:
-        return WhatsAppSemanticAction("text", body, "text")
+        return WhatsAppSemanticAction("text", _normalize_text(body), "text")
     return WhatsAppSemanticAction("unknown")
 
 
