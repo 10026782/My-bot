@@ -44,6 +44,10 @@ R6.6 adopts the existing DraftFlow mechanics through a Marketing-owned dynamic
 adapter while preserving state, validation, execution and receipt ownership; it
 is MERGED / STATIC VERIFIED. The R6 uniform consumer set is closed; Furniture
 and Voice remain specialized and are excluded from this closure.
+R7.1 (PR #1102, `3c45a87`) and R7.2 (PR #1103, `1ff1cee`) are also
+MERGED / STATIC VERIFIED: WhatsApp presentation and inbound semantic-action
+normalization are in the adapter boundary only. No provider activation,
+deployment, or runtime verification is implied.
 Runtime is not implied. The registry rows below are reconciled to this decision
 and current main evidence.
 
