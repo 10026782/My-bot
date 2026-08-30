@@ -34,6 +34,9 @@ class ApprovalLifecycleResultLike(Protocol):
     should_remove_keyboard: bool
     final_response_required: bool
     final_response_count: int
+    execution_verified: bool | None
+    evidence_status: str | None
+    evidence_ref: str | None
 
 
 _CANONICAL_STATE_MAP = {
@@ -50,13 +53,22 @@ _CANONICAL_STATE_MAP = {
 }
 
 
-def _message_state(canonical_state: str, *, repeated: bool) -> MessageState:
+def _message_state(result: ApprovalLifecycleResultLike, *, repeated: bool) -> MessageState:
+    canonical_state = result.canonical_state
     if not isinstance(canonical_state, str) or not canonical_state.strip():
         raise MessageContractValidationError(
             "ApprovalLifecycleResult.canonical_state must be a non-empty string"
         )
     if canonical_state == "completed" and repeated:
         return MessageState.ALREADY_COMPLETED
+    if (
+        canonical_state == "completed"
+        and getattr(result, "execution_verified", None) is True
+        and getattr(result, "evidence_status", None) == "verified_write_success"
+        and isinstance(getattr(result, "evidence_ref", None), str)
+        and bool(getattr(result, "evidence_ref", "").strip())
+    ):
+        return MessageState.SUCCESS
     if canonical_state == "rejected" and repeated:
         return MessageState.ALREADY_CANCELLED
     try:
@@ -91,16 +103,16 @@ def from_approval_lifecycle_result(
         )
 
     return build_message_contract(
-        state=_message_state(result.canonical_state, repeated=repeated),
+        state=_message_state(result, repeated=repeated),
         display_payload={"entity_name": description if description.strip() else None},
         reply_owner=result.reply_owner,
         turn_context_source=TurnContextSource.LEGACY_INGRESS,
         source_module=ADAPTER_SOURCE_MODULE,
         turn_id=None,
-        evidence_status=None,
-        evidence_ref=None,
+        evidence_status=getattr(result, "evidence_status", None),
+        evidence_ref=getattr(result, "evidence_ref", None),
         reason_code=None,
-        execution_verified=None,
+        execution_verified=getattr(result, "execution_verified", None),
         occurred_at=None,
         interaction=interaction,
     )

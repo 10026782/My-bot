@@ -251,6 +251,21 @@ replay handling, and final delivery boundary remain unchanged.
 Evidence level: **MERGED / STATIC VERIFIED** (PR #1137, merge `a3ffa61`). No
 deployment or runtime claim is made here.
 
+### R8.7-A Gateway success-evidence handoff
+
+R8.7-A exposes the same-turn `EvidenceResult` already produced by the
+ActionGateway execution boundary through the Gateway-owned
+`ApprovalLifecycleResult`. The existing `MessageContract.SUCCESS` semantic is
+used only when `execution_verified=True`,
+`evidence_status="verified_write_success"`, and an evidence reference is
+present. Lifecycle `completed` without matching evidence remains
+`OUTCOME_UNKNOWN`. The no-contract/stale callback path remains fail-closed and
+separate; no lifecycle, approval, execution, or Telegram transport authority
+changes.
+
+Evidence level: **CODE_DONE / STATIC VERIFIED**. No deployment or runtime
+claim is made here.
+
 ## Single Speaker Rules
 
 1. Exactly one component owns the final user-facing response.
@@ -377,6 +392,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R8.4 | Migrate the empty pending presentation through the `NO_PENDING_ACTION` MessageContract semantic. | Absence of a live pending ActionContract remains the authority; wording is preserved; off/shadow/on behavior and all other paths remain unchanged. | MERGED / STATIC VERIFIED (PR #1130, `b9823e0`) | Pending-query, pending-batch, generic fallback, and runtime/deployment verification. |
 | R8.5 | Migrate rejection/cancellation presentation through the existing `CANCELLED` MessageContract semantic. | ActionContracts remain lifecycle authority; reject/execute boundaries and off/shadow/on behavior remain unchanged. | MERGED / STATIC VERIFIED (PR #1134, `8b04a60`) | Telegram callback presentation path, generic fallback, and runtime/deployment verification. |
 | R8.6 | Migrate the Telegram inline rejection callback's persistent presentation through the existing `CANCELLED` MessageContract semantic. | Callback acknowledgment is transport-only; ActionContract/TC8 authority, rejection, replay, and final delivery remain unchanged. | MERGED / STATIC VERIFIED (PR #1137, `a3ffa61`) | Runtime/deployment verification and unrelated callback paths. |
+| R8.7-A | Hand off same-turn Gateway execution evidence to the approval MessageContract adapter. | Existing `SUCCESS` requires verified evidence; `completed` alone remains `OUTCOME_UNKNOWN`; no-contract fallback stays separate. | CODE_DONE / STATIC VERIFIED | Runtime/deployment verification and Telegram transport changes. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
 | R10 | Runtime rollout, canary, and flag decision. | Governed flags; safe rollback. | DEPLOYED / RUNTIME_VERIFIED with direct evidence | Unresolved evidence or owner decisions. |
 
