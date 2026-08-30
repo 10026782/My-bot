@@ -186,6 +186,39 @@ open item is narrower: Voice IVR's *legacy fallback branch* does not go
 through this resolution at all (see §9) — that is a cutover-completion gap,
 not a missing policy.
 
+### 6a. Owner Resolution — Remaining Work (reconciled 30/08/2026)
+
+Re-verified by an independent read-only audit that re-traced `config.py`,
+`core/source_owner_mapping.py`, and every wrapper/call site directly against
+current `origin/main` — not by re-reading this document. Confirms §6/§9/§12
+below: there is no remaining Owner Resolution *design* work. What remains is
+four operational/runtime steps, strictly in this order:
+
+1. **Populate `config.OWNER_USER_ID_MAPPINGS`.** Its three inner dicts
+   (`whatsapp_destination` / `email_recipient` / `voice_destination`) are
+   empty by design — `resolve_owner_user_id()` fails closed on a miss, so
+   every non-interactive writer stays `blocked` until real
+   destination-account → canonical `user_id` entries are added. This is a
+   config/data-entry step; no code changes it.
+2. **Activate `VOICE_CANONICAL_LEAD_WRITE`.** This is the one flag whose
+   *off* state currently bypasses Owner Resolution entirely (§9) — Voice's
+   `else` branch calls `airtable_add()` directly with no Owner field, not
+   just a different canonical path. (`WHATSAPP_CANONICAL_LEAD_WRITE` is a
+   separate, non-Owner-Resolution concern: per §0's corrected state, both of
+   WhatsApp's paths already call `create_lead()`, so that flag toggles
+   between two already-canonical routes, not a legacy bypass — out of this
+   list's scope.)
+3. **Run a deployed-SHA live canary** for the newly-activated Voice path —
+   one real inbound Lead created through `create_voice_inbound_lead()` in
+   production, evidenced the way `verify_a1.py` evidenced SPEC A1 (§15).
+   **Not established and not claimed by this document or this reconciliation
+   pass.**
+4. **Retire Voice's legacy `airtable_add()` writer** in `_save_voice_lead()`
+   — only *after* step 3's runtime evidence exists. Per §14's ordering
+   constraint: deleting the fallback before the canonical path has live
+   proof would leave Voice with no safety net for an undiscovered runtime
+   defect in the canonical path.
+
 ## 7. Validation / Dedup / Owner / Attribution Authority
 
 All four live inside `create_lead()` (§4, steps 1/5/4/9) — never
