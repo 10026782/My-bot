@@ -6013,7 +6013,7 @@ python3 smoke_tests.py                        # PASS: all smoke checks passed
 | ID | Finding | Status | Evidence / disposition |
 |---|---|---|---|
 | DH-S1 | Formula safety | `CLOSED / STATIC VERIFIED` | `test_bugdh03_04_formula_injection.py` 15/15; escaping/query construction verified for Decision Hub formula inputs. No runtime claim. |
-| DH-S2 | Access-policy wording | `DOC/POLICY DRIFT / REMEDIATION REQUIRED` | Owner decision: Decision Hub is a shared capability. Existing code permits `owner`, `manager`, and `partner` at `/home/elichazan/My-bot/cmd_decision.py:30,85,506`; this is not inherently incorrect. The stale Owner-only wording in Horizon/Master Plan is corrected by this pass. |
+| DH-S2 | Access-policy wording | `DOC/POLICY DRIFT / REMEDIATION REQUIRED` | Owner decision: Decision Hub is a shared capability. Existing code permits `owner`, `manager`, and `partner` at `/home/elichazan/My-bot/cmd_decision.py:30,85,506`; this is not inherently incorrect. The stale Owner-only wording in Horizon/Master Plan is corrected by this pass. Focused denial and data-scope tests were added; broader callback/record-scope review remains. |
 | DH-S3 | Fail-closed read paths | `STATIC VERIFIED` | Decision read adapters return empty/none on read failure and prevent lookup continuation; covered by `test_decision_hub_read_adapter.py` 7/7. |
 | DH-S4 | Stakeholder/event write observability | `OPEN` | `_create_stakeholder()` ignores the add result and update flow still renders after `_create_decision_event()` returns no ID (`cmd_decision.py:472-475,523-527`). This is a partial-persistence/observability gap; no remediation in this gate. |
 
@@ -6031,6 +6031,14 @@ relevant, and action-specific policy remain separate controls. The existing
 evidence; this decision does not broaden it and does not change runtime
 behavior. Negative unauthorized-role/user tests and tenant/data-scope tests
 remain required before activation.
+
+### Authorization test follow-up
+
+`test_r6_1_decision_new_ux.py` now covers unauthorized-role denial, cross-tenant
+denial, partner out-of-domain denial, and matching tenant/domain acceptance
+(13/13 passed). `cmd_decision.py` now applies tenant/domain scope when resolving
+status/update records. This is static coverage only; callback and all-record
+enumeration paths still require a bounded review before runtime claims.
 
 ### Required next step
 
