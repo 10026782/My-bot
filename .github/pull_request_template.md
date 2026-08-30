@@ -1,171 +1,84 @@
-Summary
+# Pull Request — CI-aware checklist
 
-תיאור קצר וברור של השינוי ומה הוא פותר.
+> Fill only the sections relevant to this PR. CI is authoritative; this checklist exposes the expected gates before review.
 
-Scope
+## Summary
 
-- Phase / Stage:
-- Bug / Ticket:
-- Branch:
-- שינוי קוד / תיעוד בלבד:
-- מחוץ לתחום:
-- Governance Gate
-  - [ ] ה־PR מיועד ל־"main", והענף נוצר או עודכן מול "origin/main" העדכני
-  
-  - [ ] נבדק שהשינוי אינו כבר קיים ב־"main" או נפתר במקום אחר
-  
-  - [ ] השינוי תואם ל־ROADMAP, לתכנית הארכיטקטונית ול־SPEC הפעילים
-  
-  - [ ] אין יצירת תכנית, runtime, write path או מקור אמת מקביל
-  
-  - [ ] ה־diff כולל רק קבצים השייכים ל־scope של ה־PR
-- 
-- סתירה או חריגה:
-  "None" / פרט בקצרה והפנה להכרעת הבעלים או למסמך המאשר:
+- What changed:
+- Why / scope:
+- Related issue or PR:
+- Change type: `runtime` / `test` / `docs-governance` / `CI-audit` / `schema` / `deployment`
 
-Problem
+## Required for every PR
 
-מה הייתה ההתנהגות הקיימת או הבעיה שנצפתה?
+- [ ] `git fetch origin main` completed; base SHA checked: `________________`
+- [ ] `bash pre_session_gate.sh "<task>"` completed; branch warnings reviewed.
+- [ ] Scope is limited to this PR; no unrelated branch was merged or overwritten.
+- [ ] No secrets or production data are included.
+- [ ] `git diff --check` passed.
 
-Root Cause
+## Select only applicable gates
 
-מהו שורש הבעיה שאומת בקוד, בלוגים או בבדיקות?
+### Material implementation, architecture, status, schema, flag, or deployment change
 
-Changes
+- [ ] I inspected the affected canonical status documents, including `ROADMAP.md` and the applicable governance/initiative plan.
+- [ ] I updated only materially affected status documents, or recorded why none need updating: `________________`
+- [ ] Program status, phase status, dependencies, and blockers reflect current evidence.
+- [ ] `python3 tools/status_sync_validator.py --base origin/main --head HEAD --main-ref origin/main` passed.
 
-- 
-- 
-- 
+### Core Reasoning, routing, approvals, tools, F52/UX, RP5, authority, or production-state task
 
-Architecture and Contracts
+- [ ] Context Librarian suggest-profile was run; manual choice recorded: `Selected profile: __________`
+- [ ] The selected bundle and cited canonical sources were read; context expansions were recorded when needed.
+- [ ] New authority/runtime sources have owner review and registration; no silent registration.
 
-ציין אילו חוזים, invariants או שכבות מושפעים:
+### Python/runtime/backend change
 
-- Turn Coordinator:
-- ActionContracts / Approval Runtime:
-- Atomic Claim / Idempotency:
-- Tool Registry / Canonical Tool:
-- Sessions / Identity:
-- Evidence Finalizer / RP5:
-- Unified Status Formatter / F52:
-- Mini-app / API:
-- Other:
+- [ ] `pip install -r requirements.txt` (or CI-equivalent environment) passed.
+- [ ] `python3 -m compileall -q .` passed.
+- [ ] `python3 smoke_tests.py` passed.
+- [ ] `python3 -c "import app; import tma_api; import tools.dispatcher"` passed.
+- [ ] Relevant focused tests passed with `python3 -m pytest <files> -m "not airtable and not live and not integration" -x --tb=short -q`.
 
-Safety Invariants
+### Governance, status, registry, Context Librarian, or CI guard change
 
-אשר שהשינוי שומר על הכללים הרלוונטיים:
+- [ ] `python3 tools/dev_registry_validator.py` passed when registry files changed.
+- [ ] Relevant focused guard/audit tests were run directly; no silent `python test_*.py` no-op was relied on.
+- [ ] Context Librarian changes also ran `validate`, `budget-preflight --all-profiles`, and relevant focused tests.
+- [ ] New audit findings are remediated or have explicit authority review.
 
-- [ ] אין execution ללא אישור מפורש כאשר policy דורש אישור
-- [ ] לכל business action יש ActionContract אחד בלבד
-- [ ] atomic claim יחיד לכל contract
-- [ ] אין Agent response כאשר Gateway הוא "reply_owner"
-- [ ] אין יצירת contract עם tool או payload לא קנוניים
-- [ ] אין ערבוב tenant, user, channel או context
-- [ ] אין resurrection של פעולה שנדחתה
-- [ ] אין bypass ישיר לכתיבה עסקית
-- [ ] אין שינוי התנהגות מחוץ ל־scope
+### Frontend, schema, or deployment change
 
-Feature Flags and Runtime State
+- [ ] Relevant frontend/schema/migration/deployment checks were run.
+- [ ] No live or deployment verification is claimed from local tests alone.
 
-- Feature flags שנוספו או שונו:
-- ערכי ברירת מחדל:
-- Production:
-- Staging:
-- Shadow / Enforce / Off:
-- האם נדרש שינוי Environment:
+Not-applicable gates / reason:
 
-Database and Airtable
+## Evidence and current status
 
-- [ ] אין שינוי schema
-- [ ] יש migration מצורף
-- [ ] migration idempotent
-- [ ] pre-deploy נדרש
-- [ ] אין גישה חדשה לטבלה ללא entity/table resolution
+- Evidence before this PR: `CODE_DONE` / `STATIC_VERIFIED` / `MERGED` / `WIRED` / `DEPLOYED` / `RUNTIME_VERIFIED`
+- Evidence after this PR: `CODE_DONE` / `STATIC_VERIFIED` / `MERGED` / `WIRED` / `DEPLOYED` / `RUNTIME_VERIFIED`
+- Exact SHA and test/artifact evidence:
+- Remaining merge, deployment, or runtime work:
 
-פירוט:
+> Local tests do not prove merge, deployment, or runtime behavior. `DEPLOYED` requires exact SHA, environment, timestamp, method, and observed result. `RUNTIME_VERIFIED` requires live behavior evidence.
 
-Tests
+## Review handoff
 
-Automated
+- Risks / owner decisions:
+- Status documents inspected:
+- Status documents updated:
+- Documents intentionally unchanged:
+- Known failures or skipped checks and owner:
 
-- 
-- 
-
-Targeted / Regression
-
-- 
-- 
-
-Live or Staging Evidence
-
-- 
-- 
-
-Test Results
-
-הדבק כאן את פלט הבדיקות המרכזי.
-
-Observability
-
-לוגים, counters או shadow signals שנוספו או השתנו:
-
-- 
-- 
-
-Performance and Call Volume
-
-- Anthropic calls לפני:
-- Anthropic calls אחרי:
-- Airtable calls לפני:
-- Airtable calls אחרי:
-- האם השינוי משפיע על מסלול legacy שעומד להימחק:
-
-Deployment
-
-- [ ] ללא deploy מיוחד
-- [ ] Staging תחילה
-- [ ] Production לאחר exit criteria
-- [ ] נדרש restart
-- [ ] נדרש pre-deploy command
-- [ ] נדרש cleanup ידני
-
-שלבי deploy:
-
-1. 
-2. 
-3. 
-
-Rollback
-
-כיצד חוזרים להתנהגות הקודמת בבטחה?
-
-- Flag / commit revert:
-- Data cleanup:
-- Runtime considerations:
-
-Documentation
-
-- [ ] "AI_CONTEXT.md" עודכן
-- [ ] "BUG_AUDIT_LOG.md" עודכן
-- [ ] SPEC / Decision Log עודכן
-- [ ] Current Execution Status עודכן
-- [ ] לא נדרש עדכון תיעוד
-
-Evidence and References
-
-- Logs:
-- Contracts:
-- Airtable records:
-- Test files:
-- Related PRs / commits:
-
-Final Checklist
-
-- [ ] ה־diff תואם ל־scope
-- [ ] אין קבצים לא קשורים
-- [ ] אין secrets או tokens
-- [ ] כל הבדיקות הרלוונטיות עברו
-- [ ] backward compatibility נבדקה
-- [ ] rollback אפשרי
-- [ ] Exit criteria הוגדרו
-- [ ] מוכן ל־review
+```text
+## Status Documents Inspected
+## Status Documents Updated
+## Documents Intentionally Unchanged
+## Evidence Level Before
+## Evidence Level After This PR
+## Merge Verification Required
+## Deployment Verification Required
+## Runtime Verification Required
+## Remaining Work
+```
