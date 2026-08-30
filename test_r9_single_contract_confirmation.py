@@ -68,3 +68,47 @@ def test_reconfirmation_does_not_use_terminal_approval_renderer():
     assert "לאשר אותה" in message
     gateway.approve_with_lifecycle_result.assert_not_called()
     gateway._render_approval_lifecycle_reply.assert_not_called()
+
+
+def test_multi_contract_confirmation_uses_batch_renderer():
+    gateway = ActionGateway(ledger=ExecutionLedger())
+    contracts = [_contract(), _contract()]
+    contracts[1].contract_id = "r9-contract-2"
+    gateway._render_pending_batch_reply = Mock(return_value="batch receipt")
+
+    assert gateway.route_confirmation_word(
+        "boss_hq:user", live_contracts=contracts, use_session_bookmark=False,
+    ) == "batch receipt"
+    gateway._render_pending_batch_reply.assert_called_once()
+
+
+def test_disambiguation_confirmation_uses_terminal_approval_renderer():
+    gateway = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract()
+    gateway._disambiguation["boss_hq:user"] = [contract]
+    gateway.approve_with_lifecycle_result = Mock(return_value=_result())
+    gateway._render_approval_lifecycle_reply = Mock(return_value="canonical receipt")
+
+    assert gateway.route_disambiguation(
+        "boss_hq:user", "1", approver_role="owner",
+    ) == "canonical receipt"
+    gateway._render_approval_lifecycle_reply.assert_called_once_with(
+        gateway.approve_with_lifecycle_result.return_value,
+        "legacy receipt",
+    )
+
+
+def test_combined_confirmation_uses_terminal_approval_renderer():
+    gateway = ActionGateway(ledger=ExecutionLedger())
+    contract = _contract()
+    gateway.find_live_contracts = Mock(return_value=[contract])
+    gateway.approve_with_lifecycle_result = Mock(return_value=_result())
+    gateway._render_approval_lifecycle_reply = Mock(return_value="canonical receipt")
+
+    assert gateway.route_combined_word(
+        "boss_hq:user", "כן 1", approver_role="owner",
+    ) == "canonical receipt"
+    gateway._render_approval_lifecycle_reply.assert_called_once_with(
+        gateway.approve_with_lifecycle_result.return_value,
+        "legacy receipt",
+    )

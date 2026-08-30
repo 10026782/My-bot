@@ -2362,7 +2362,8 @@ class ActionGateway:
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
             self._disambiguation[canonical_user_id] = list(live)
-        return build_approval_lifecycle_result(contracts=live).safe_user_message
+        legacy_text = build_approval_lifecycle_result(contracts=live).safe_user_message
+        return self._render_pending_batch_reply(live, legacy_text)
 
     # ── BUG-056 — route_cancellation_word ───────────────────────────
 
@@ -3030,11 +3031,14 @@ class ActionGateway:
             "[ActionGateway] disambiguation: user=%s selected idx=%d contract=%s tool=%s rejected_siblings=%d",
             canonical_user_id, idx, contract.contract_id, contract.tool_name, rejected_siblings,
         )
-        result = self.approve_with_lifecycle_result(
+        lifecycle_result = self.approve_with_lifecycle_result(
             contract.contract_id,
             approver=canonical_user_id,
             approver_role=approver_role,
-        ).safe_user_message
+        )
+        result = self._render_approval_lifecycle_reply(
+            lifecycle_result, lifecycle_result.safe_user_message,
+        )
         # Staging finding #3 (23/07/2026): the user was never told that
         # picking one item from the list silently rejected the others — see
         # §21 comment above. Disclosure only, does not change what got
@@ -3091,11 +3095,14 @@ class ActionGateway:
                 "[ActionGateway] combined_word: user=%s confirm idx=%d contract=%s tool=%s rejected_siblings=%d",
                 canonical_user_id, idx, contract.contract_id, contract.tool_name, rejected_siblings,
             )
-            result = self.approve_with_lifecycle_result(
+            lifecycle_result = self.approve_with_lifecycle_result(
                 contract.contract_id,
                 approver=canonical_user_id,
                 approver_role=approver_role,
-            ).safe_user_message
+            )
+            result = self._render_approval_lifecycle_reply(
+                lifecycle_result, lifecycle_result.safe_user_message,
+            )
             # Staging finding #3 (23/07/2026) — see route_disambiguation()'s
             # identical disclosure for the full rationale.
             if rejected_siblings:
