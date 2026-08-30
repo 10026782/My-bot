@@ -2292,7 +2292,9 @@ class ActionGateway:
             approver=canonical_user_id,
             approver_role=approver_role,
         )
-        return result.safe_user_message, True
+        return self._render_approval_lifecycle_reply(
+            result, result.safe_user_message,
+        ), True
 
     def route_confirmation_word(
         self, canonical_user_id: str, approver_role: str = "", *,
