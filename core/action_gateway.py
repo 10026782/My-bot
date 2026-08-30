@@ -2516,16 +2516,12 @@ class ActionGateway:
     # never STATE_APPROVAL_PENDING (the new-prompt state) — that distinction
     # is the entire point of D-015.
     #
-    # Rendered via a DIRECT format_agent_message_with_meta() call, not
-    # through the ActionFact/MessageContract adapter: ActionFact is scoped
-    # to a single tool-call's outcome (D-002/D-012), not to "the ledger was
-    # asked a question about an existing contract" — inventing a fact shape
-    # for that would be new MessageContract wiring, which D-015 explicitly
-    # ruled out. A synthetic ActionFact(outcome="pending", ...) is still
-    # built here, but ONLY as the shared, already-safe input to
-    # _log_shadow_comparison()/_shadow_leak_flags() (reused as-is, exactly
-    # like _render_pending_prompt() and _render_rejection_reply() already
-    # do) — never passed to from_action_fact()/build_message_contract().
+    # This is a presentation projection of an existing ActionContract, not an
+    # ActionFact execution outcome. The distinct MessageContract state keeps
+    # D-015's status-query wording separate from the new-prompt wording.
+    # A synthetic ActionFact(outcome="pending", ...) is still built below,
+    # but ONLY for the shared shadow leak comparison — never for business
+    # semantics or lifecycle authority.
     #
     # off (default): returns the caller's own legacy_text (build_approval_
     # lifecycle_result(contract).safe_user_message) byte-identical.
@@ -2554,7 +2550,12 @@ class ActionGateway:
         if state == "off":
             return legacy_text
 
-        from core.agent_message_formatter import format_agent_message_with_meta
+        from core.message_contract import (
+            MessageState,
+            TurnContextSource,
+            build_message_contract,
+            format_message_contract_with_meta,
+        )
 
         is_task = _is_task_creation_contract(contract)
         description = _safe_task_title(contract) if is_task else _safe_contract_business_description(contract)
@@ -2563,12 +2564,23 @@ class ActionGateway:
             "entity_type": "task" if is_task else None,
         }
         try:
-            unified_text, meta = format_agent_message_with_meta("approval_pending_query", payload)
+            # The ActionContract remains the lifecycle authority: this helper
+            # is only a presentation projection of its existing pending state.
+            message_contract = build_message_contract(
+                state=MessageState.APPROVAL_PENDING_QUERY,
+                display_payload=payload,
+                reply_owner="gateway",
+                turn_context_source=TurnContextSource.LEGACY_INGRESS,
+                source_module="core.action_gateway",
+            )
+            unified_text, meta = format_message_contract_with_meta(message_contract)
         except Exception as exc:
             # A status-query reply must never break because of the formatter.
             logger.warning("[ActionGateway] unified pending-query formatter failed: %s", exc)
             return legacy_text
-        meta["contract_path"] = "agent_message_formatter_direct"
+        meta["contract_path"] = "message_contract"
+        meta["message_state"] = meta["formatter_state"]
+        meta["contract_version"] = meta["version"]
 
         fact = ActionFact(
             tool_name=contract.tool_name, contract_id=contract.contract_id,

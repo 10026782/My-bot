@@ -51,6 +51,7 @@ def test_message_state_registry_is_exactly_v1():
     assert {state.value for state in MessageState} == {
         "needs_input",
         "approval_pending",
+        "approval_pending_query",
         "approval_pending_batch",
         "approved_processing",
         "success",
@@ -65,7 +66,7 @@ def test_message_state_registry_is_exactly_v1():
         "no_pending_action",
         "neutral",
     }
-    assert len(MessageState) == 15
+    assert len(MessageState) == 16
     assert "idle" not in {state.value for state in MessageState}
     assert "clarification_needed" not in {state.value for state in MessageState}
 
@@ -102,6 +103,16 @@ def test_lifecycle_evidence_precedence(lifecycle, evidence, multiple, expected):
         execution_verified=True if expected is MessageState.SUCCESS else None,
     )
     assert contract.state is expected
+
+
+def test_pending_query_is_distinct_presentation_semantic():
+    contract = _build(
+        state=MessageState.APPROVAL_PENDING_QUERY,
+        display_payload={"entity_name": "יצירת ליד עבור דני כהן"},
+    )
+    assert contract.state is MessageState.APPROVAL_PENDING_QUERY
+    assert contract.state is not MessageState.APPROVAL_PENDING
+    assert format_message_contract(contract).startswith("יש פעולה שממתינה לאישור:")
 
 
 def test_success_is_rejected_without_matching_verified_evidence():

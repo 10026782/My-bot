@@ -23,6 +23,7 @@ class MessageContractValidationError(ValueError):
 class MessageState(str, Enum):
     NEEDS_INPUT = "needs_input"
     APPROVAL_PENDING = "approval_pending"
+    APPROVAL_PENDING_QUERY = "approval_pending_query"
     APPROVAL_PENDING_BATCH = "approval_pending_batch"
     APPROVED_PROCESSING = "approved_processing"
     SUCCESS = "success"

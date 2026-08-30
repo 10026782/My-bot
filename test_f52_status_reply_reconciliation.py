@@ -529,7 +529,8 @@ def test_pending_query_shadow_returns_legacy_and_logs_correct_state():
     assert "record_id_leak=False" in line
     assert "tool_name_leak=False" in line
     assert "contract_id_leak=False" in line
-    assert "contract_path=agent_message_formatter_direct" in line
+    assert "contract_path=message_contract" in line
+    assert "contract_version=1.0" in line
 
 
 def test_pending_query_on_returns_unified_text_task_aware():
@@ -543,6 +544,29 @@ def test_pending_query_on_returns_unified_text_task_aware():
     assert out.startswith("יש משימה שממתינה לאישור:")
     assert "חזרה לספק" in out
     assert out != legacy_text
+
+
+def test_pending_query_uses_message_contract_without_action_fact_business_input():
+    from unittest.mock import patch
+    import core.message_contract as message_contract_module
+
+    gw, fake = _gw_with_task_contract("חזרה לספק")
+    legacy_text = build_approval_lifecycle_result(fake, canonical_state="pending").safe_user_message
+    try:
+        _set("on")
+        with patch.object(
+            message_contract_module,
+            "format_message_contract_with_meta",
+            wraps=message_contract_module.format_message_contract_with_meta,
+        ) as render:
+            out = gw._render_pending_query_reply(fake, legacy_text)
+    finally:
+        _set(None)
+    assert render.call_count == 1
+    contract = render.call_args.args[0]
+    assert contract.state.value == "approval_pending_query"
+    assert fake.status == "pending"
+    assert out.startswith("יש משימה שממתינה לאישור:")
 
 
 def test_pending_query_new_prompt_and_status_query_wordings_stay_distinct():
