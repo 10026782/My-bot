@@ -176,6 +176,10 @@ record/data-scope and action-specific checks still require explicit negative
 test coverage before activation. Being allowed to use Decision Hub does not
 imply access to all Decision Hub data.
 
+This shared-capability wording is canonical for Decision Hub product access and
+supersedes any older Owner-only product-gate wording. Owner-only may still be
+required by a specific critical action; it is not the capability-level gate.
+
 ---
 
 # 5. Airtable Schema

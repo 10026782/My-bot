@@ -6122,6 +6122,28 @@ Hub regression suite: **70 passed**. Auto-ingestion: **18/18 passed**. Smoke
 tests, compilation, and `git diff --check` passed. Runtime/deployment evidence
 remains `NOT ESTABLISHED`.
 
+## Decision Hub — DH-S2 Access-Policy Wording Reconciliation (30/08/2026)
+
+Truth Reset: `b05a218a69a45ccddc0d59b518489703b1196da9` (`origin/main` after PR #1138).
+
+### Finding closure
+
+| Finding | Status | Reconciliation |
+|---|---|---|
+| DH-S2 | **DOC/POLICY DRIFT — CLOSED** | Product-level access is documented as shared capability access followed by permission/role, tenant/data-scope, domain, record, and action-specific authorization. |
+
+Decision Hub is **not Owner-only**. The existing `owner / manager / partner`
+capability boundary is documented as current code evidence and is not changed
+or broadened by this docs-only reconciliation. Being allowed to use the
+capability does not imply access to all Decision Hub data. Owner-only remains a
+possible requirement for a specific critical action, not the product-level gate.
+
+ROADMAP, HORIZON, the unified master plan, and the Decision Hub master spec now
+use the same wording. No runtime code, permissions, flags, deployment, or
+production evidence was changed. Decision Hub is now:
+
+`STATIC COMPLETE / RUNTIME NOT ESTABLISHED`
+
 ## F16 Media — Decision Gate (F16-M2, F16-M3) — OWNER DECISIONS RECORDED, NOT IMPLEMENTED
 
 **Truth Reset:** `origin/main` at `5c2c60131c120e326fd777892bcf3fcb177880a7` (merge of PR #1124, F16 Remediation Slice 1: M1+M4). Architecture/policy gate only — **no code, schema, or test changes in this pass.**

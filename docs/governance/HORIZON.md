@@ -16,8 +16,8 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 30/08/2026
-**Truth Reset SHA at last update:** `117ecbded44287d0d710864c647d8c4cb66e8c12`
-(Decision Hub DH-S4 remediation recorded; no deployment or runtime claim)
+**Truth Reset SHA at last update:** `b05a218a69a45ccddc0d59b518489703b1196da9`
+(Decision Hub DH-S2 reconciliation recorded; no deployment or runtime claim)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -43,7 +43,7 @@ evidence and never override this map.
 | Test / CI hygiene | CLOSED | WIRED | NO | #8/#9 closure and CI enforcement | normal monitoring only | monitor |
 | Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |
 | Lead / CRM canonical flow | ACTIVE | MERGED | YES | shared write infrastructure and Lead consumer merged | end-to-end canary | run live canary |
-| Decision Hub | ACTIVE | STATIC REMEDIATION COMPLETE | YES | Callback/record-scope remediation is statically verified: DH-CB-01–DH-CB-09 CLOSED / STATIC VERIFIED. Stage 0–1 and formula-safety fixes remain statically verified; DH-S1 CLOSED / STATIC VERIFIED; DH-S2 access-policy wording remains DOC/POLICY DRIFT / REMEDIATION REQUIRED; DH-S3 fail-closed reads STATIC VERIFIED; DH-S4 partial-persistence observability CLOSED / STATIC VERIFIED. Structured persistence outcomes prevent false full success; protected CLI paths remain positive evidence; the full authorization layer is not claimed broken | runtime/deployment evidence remains NOT ESTABLISHED; DH-S2 wording cleanup remains tracked | pursue separately gated runtime evidence without broadening permissions |
+| Decision Hub | ACTIVE | STATIC COMPLETE | YES | Callback/record-scope remediation is statically verified: DH-CB-01–DH-CB-09 CLOSED / STATIC VERIFIED. Stage 0–1 and formula-safety fixes remain statically verified; DH-S1 CLOSED / STATIC VERIFIED; DH-S2 access-policy wording DOC/POLICY DRIFT — CLOSED; DH-S3 fail-closed reads STATIC VERIFIED; DH-S4 partial-persistence observability CLOSED / STATIC VERIFIED. Canonical access is shared-capability plus scoped-data authorization; protected CLI paths remain positive evidence; the full authorization layer is not claimed broken | runtime/deployment evidence remains NOT ESTABLISHED | pursue separately gated runtime evidence without broadening permissions |
 | Media | ACTIVE | MERGED + CORE REMEDIATION COMPLETE (STATIC VERIFIED IN PR / MERGE PENDING) | YES | gateway/probe and staging artifacts merged; F16-M1/M4 statically verified fixed and merged (Slice 1); F16-M2 (MIME allowlist) and F16-M3 (durable failure trace) implemented and statically verified in an open PR, not yet merged | merge the open Slice 2 PR, then low-risk F16-M5/M6/M7 cleanup, then deployed-SHA canary | merge the open Slice 2 PR |
 | Distribution / messaging | ACTIVE | MERGED | YES | canonical Marketing mapping exists | runtime gateway canary | run Marketing-map canary |
 | Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged; `system_health` UNKNOWN-source bug already fixed (`3e10dbc`, 18/08/2026, predates this table's prior citation of it as open) | endpoint verification (deployed-SHA) | verify endpoint |
