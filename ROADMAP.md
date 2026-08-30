@@ -71,8 +71,10 @@ assumed without an explicit marker.
 
 ### RP5 Production Activation
 
-Status: PLANNED. Decision required: whether and when to enable
-`FEATURE_EVIDENCE_FINALIZER=enforce` in production. This is an activation decision,
+Status: PLANNED / ACTIVATION DEFERRED. Owner decision: continue shadow evidence
+collection and keep `FEATURE_EVIDENCE_FINALIZER=enforce` OFF. Reconsider activation
+only after production shadow evidence review, deployed-SHA/canary conditions,
+rollback readiness, and separate owner approval. This is an activation decision,
 not permission to change the implementation. Canonical source:
 [`RP5_PREFLIGHT_BLOCKER.md`](RP5_PREFLIGHT_BLOCKER.md).
 

@@ -215,6 +215,12 @@ ActionGateway, RP4/RP5, A32, F52, F14, Agent Cost). כל תכנית שומרת �
 בסבב הזה. איפה שלא אומת עכשיו, נכתב במפורש "not reverified in this pass" —
 **אף פעם לא מוסק OFF רק כי code default=false.**
 
+> **Current RP5 owner decision (30/08/2026):** the older activation wording in
+> the RP5 row is superseded. Continue shadow evidence collection and keep
+> `FEATURE_EVIDENCE_FINALIZER=enforce` OFF. Activation remains deferred until
+> the evidence, canary, rollback, and separate owner-approval gate in
+> `RP5_PREFLIGHT_BLOCKER.md` passes.
+
 | Program | Canonical authority/docs | Objective | Current implementation state | Runtime state | Verification state | Depends On | Next gate |
 |---|---|---|---|---|---|---|---|
 | **A. Turn Coordinator TC1–TC7** | `docs/architecture/turn-coordinator/README.md` (canonical current-status); `turn-coordinator-full/GAP_ANALYSIS.md` (gap↔workstream ownership) | Intent ownership, entity resolution, canonical proposal construction, reply ownership, per-action evidence | TC1–TC5: MERGED (TC1 admission gate wired only for CREATE_TASK — UPDATE_TASK/COMPLETE_TASK branch is dead code today). TC6: MERGED (PR #566 `684d299`, PR #569 `d0a8620`). TC7-A: MERGED (PR #573 `c16245c`). **TC7-B1/B1.1: MERGED (PR #583 `7676ca6`, PR #587 `0eafeeb`) — new `core/claim_authorization.py` (`authorize_claim()`), but grep-verified 10/08/2026: zero callers anywhere outside the module's own `__main__` block and its test file; does NOT connect TC7-A's `EvidenceResult` and RP4's `TurnEvidenceSummary` despite the name — BUILT_UNWIRED, target chain in §3.5.2 still not closed.** Separately, PR #579 (`2603b44`, supersedes #576) wired TC7-A's `project_evidence_result()` into RP4 comparison logging under `FEATURE_EVIDENCE_FINALIZER` shadow/enforce — this is RP4 shadow logging, not TC7-B claim authorization. **Superseded 26/08/2026 — TC7-B3 wiring: MERGED (PR #1036, `44fd3605`)** — the three canonical `observe_claim_authorization_shadow()` call sites in `app.py`'s general Agent-loop/branch-A/branch-B response paths now assign the return value and capture `ClaimAuthorizationShadowComparison.authorized` (`= not divergent`, additive property) into `_out_meta["claim_authorization"]` instead of discarding it — the TC7-A/RP4→claim-authorization chain named above as "still not closed" is now closed as an *observable* decision. **Superseded 27/08/2026 (PR #1041, `09935a8`):** the two `core/action_gateway.py`-owned call sites (separate from these three) now also capture the decision — both `approve_with_lifecycle_result()`'s and `_execute_contract()`'s `_finish()` closures call `observe_claim_authorization_shadow()` and enforce RP5, grep-confirmed at `core/action_gateway.py:2081`/`:3234` on current `origin/main` — DEFERRED status closed, does not reopen this row further | `FEATURE_SINGLE_SPEAKER_APPROVAL_UX` — code default `false`; last verified production value **`true`** (09/08/2026, Render dashboard env-var read + live app-log/Telegram transcript, deploy `7dbdddd`); current: not reverified in this pass | TC6: **RUNTIME_VERIFIED** for 3/6 scenarios (09/08/2026 — create→pending, status query, second-create-block; callback-button/RP5-classification/replay still open). TC7-A: unit-tested only, SHADOW-only observability (not wired to `final_reply`). TC7-B1/B1.1/B3: STATIC VERIFIED (unit + AST structural regression, `test_tc7_b3_claim_authorization_wiring.py` 10/10) — MERGED, no production/deployed-SHA runtime verification exists yet, RUNTIME NOT ESTABLISHED | ActionGateway (B); F14/TC5 (F) for entity resolution | See §3.5.3 Next Gates |
@@ -413,11 +419,12 @@ regression sweep (`test_rp5_evidence_enforcement.py` 20/20,
 `smoke_tests.py`) — all green, no regression, all re-run in an isolated
 worktree off `origin/main` before merge.
 
-**Only remaining Turn Coordinator/RP5 item:** owner decision to activate
-`FEATURE_EVIDENCE_FINALIZER=enforce` in production (with re-verification of
-its current value — last read `shadow`, 28/07/2026, now stale). RP5 stays
-OFF BY DEFAULT; no runtime/production activation performed or claimed by
-this note.
+**Only remaining Turn Coordinator/RP5 item:** owner decision recorded
+30/08/2026 — continue shadow evidence collection and keep
+`FEATURE_EVIDENCE_FINALIZER=enforce` OFF. Activation remains deferred until
+the evidence, canary, rollback, and separate owner-approval gate in
+`RP5_PREFLIGHT_BLOCKER.md` passes. RP5 stays OFF BY DEFAULT; no
+runtime/production activation was performed or claimed by this note.
 
 **Same-pass reconciliation (read-only, no code change) found and corrected**
 five separate locations in §3.5/§3.5.1/§3.5.2/§3.5.3 above still describing
