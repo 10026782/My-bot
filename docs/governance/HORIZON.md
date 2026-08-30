@@ -16,8 +16,8 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 30/08/2026
-**Truth Reset SHA at last update:** `1ff1ceed6ec3368c9d6b1a6621e8ae9533514d73`
-(R7.2 merge reachability re-verified; no deployment or runtime claim)
+**Truth Reset SHA at last update:** `8574e9a1ece5831cbc9bd0b3119d64532f486a13`
+(Decision Hub callback/record-scope audit recorded; no deployment or runtime claim)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -43,7 +43,7 @@ evidence and never override this map.
 | Test / CI hygiene | CLOSED | WIRED | NO | #8/#9 closure and CI enforcement | normal monitoring only | monitor |
 | Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |
 | Lead / CRM canonical flow | ACTIVE | MERGED | YES | shared write infrastructure and Lead consumer merged | end-to-end canary | run live canary |
-| Decision Hub | ACTIVE | STATIC AUDIT COMPLETE | YES | Stage 0–1 and formula-safety fixes are statically verified; DH-S1 CLOSED / STATIC VERIFIED; DH-S2 access-policy wording DOC/POLICY DRIFT / REMEDIATION REQUIRED; DH-S3 fail-closed reads STATIC VERIFIED; DH-S4 partial-persistence observability OPEN; focused negative authorization/data-scope tests pass | REMEDIATION REQUIRED; runtime/deployment evidence NOT ESTABLISHED | remediate partial-persistence observability; complete broader callback/record-scope review; pursue runtime evidence without broadening permissions |
+| Decision Hub | ACTIVE | STATIC AUDIT COMPLETE | YES | PROGRAM STATUS DRIFT FOUND — CALLBACK / RECORD-SCOPE REMEDIATION REQUIRED — RUNTIME NOT ESTABLISHED. Stage 0–1 and formula-safety fixes are statically verified; DH-S1 CLOSED / STATIC VERIFIED; DH-S2 access-policy wording DOC/POLICY DRIFT / REMEDIATION REQUIRED; DH-S3 fail-closed reads STATIC VERIFIED; DH-S4 partial-persistence observability OPEN; DH-CB-01–DH-CB-09 are recorded. Protected CLI paths remain positive evidence; the full authorization layer is not claimed broken | callback enumeration + mutation scope hardening, tenant/domain propagation, callback regression coverage; runtime/deployment evidence remains NOT ESTABLISHED | bounded callback/record-scope remediation |
 | Media | ACTIVE | MERGED + PARTIALLY REMEDIATED | YES | gateway/probe and staging artifacts merged; F16-M1/M4 statically verified fixed (Slice 1); F16-M2/M3 OWNER DECISION COMPLETE / REMEDIATION REQUIRED (MIME allowlist + durable failure trace, decided 30/08/2026, not implemented) | implement the recorded MIME-allowlist (M2) and durable-failure-trace (M3) remediation as the next Media slice, then low-risk cleanup, then deployed-SHA canary | implement the recorded M2/M3 remediation |
 | Distribution / messaging | ACTIVE | MERGED | YES | canonical Marketing mapping exists | runtime gateway canary | run Marketing-map canary |
 | Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged; `system_health` UNKNOWN-source bug already fixed (`3e10dbc`, 18/08/2026, predates this table's prior citation of it as open) | endpoint verification (deployed-SHA) | verify endpoint |
