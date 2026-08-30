@@ -6046,3 +6046,95 @@ Align code/tests/docs to the shared-capability policy, add negative authorizatio
 and tenant/data-scope tests without broadening permissions, then remediate DH-S4
 partial-persistence observability. Runtime/deployment evidence remains
 `NOT ESTABLISHED`; the feature flag must not be activated by this gate.
+
+## F16 Media — Decision Gate (F16-M2, F16-M3) — OWNER DECISIONS RECORDED, NOT IMPLEMENTED
+
+**Truth Reset:** `origin/main` at `5c2c60131c120e326fd777892bcf3fcb177880a7` (merge of PR #1124, F16 Remediation Slice 1: M1+M4). Architecture/policy gate only — **no code, schema, or test changes in this pass.**
+
+### Owner decision — F16-M2: canonical MIME ingestion policy
+
+**Policy:** MIME ingestion is allowlist-based and fail-closed.
+
+1. One canonical Media MIME allowlist is the SSOT for what F16 ingestion accepts.
+2. Ingestion must not accept an arbitrary MIME value solely because a provider supplied it.
+3. Where a reliable detected/content MIME value exists, it must be compared against the declared/provider MIME; materially incompatible values fail closed.
+4. Missing, unsupported, or materially mismatched MIME produces a deterministic ingestion failure — never a silent guess or accept.
+5. Adapters/providers consume the canonical policy rather than maintaining divergent local allowlists.
+6. Current supported Media capabilities are preserved unless existing code/evidence proves a type unsupported.
+
+**Decision status:** `F16-M2 — OWNER DECISION COMPLETE / REMEDIATION REQUIRED`. No allowlist has been added and no code path enforces this yet.
+
+### Owner decision — F16-M3: durable failure/partial trace policy
+
+**Policy:** meaningful Media failures must leave a durable trace even when no reservation `record_id` exists.
+
+1. A failure/partial state must not disappear merely because a reservation id is unavailable.
+2. `logical_media_key` is the canonical recovery identity when the reservation id is unavailable, subject to the existing idempotency contract.
+3. If durable external state (e.g. a Drive object) was created/discovered before failure, recovery evidence must preserve: logical media identity, stage reached, failure/partial state, known external artifact identity/location where available, and retry/reconciliation status.
+4. Retry must reconcile against the durable trace rather than blindly repeating completed external side effects.
+5. No duplicate Media records merely to obtain a trace.
+6. Existing reservation-id-based tracking remains valid when a reservation exists; this decision adds a durable recovery path for the no-reservation-id case only.
+7. `mark_partial()` silently doing nothing solely because `record_id` is absent no longer satisfies policy.
+
+**Decision status:** `F16-M3 — OWNER DECISION COMPLETE / REMEDIATION REQUIRED`. `mark_partial()`'s no-op-on-empty-`record_id` behavior is unchanged; no durable-trace creation has been implemented.
+
+### M2 discovery — current MIME landscape
+
+**Current behavior:** F16 ingestion performs **zero** MIME enforcement anywhere. Every `mime_type` value is caller/provider-declared and passed straight through to Drive upload and the `Media Files` record with no accept/reject gate:
+- **Telegram** (`app.py:5992,5998,6004,6086,6116,6123`): photos hardcoded `"image/jpeg"` (Telegram always re-encodes photos); voice defaults to `"audio/ogg"`; documents use Telegram's own declared `doc.mime_type`, falling back to `"application/octet-stream"` if absent.
+- **Twilio/WhatsApp** (`whatsapp_media_adapter.py:37`): `mime_type = request_values.get("MediaContentType0", "application/octet-stream")` — Twilio's own declared form field, unverified.
+- **Meta WhatsApp** (`meta_whatsapp_media_adapter.py:122-137`, `infer_mime_type_from_meta_type`): Meta doesn't supply a raw MIME at all — the adapter infers one purely from Meta's coarse category (`image`→`image/jpeg`, `video`→`video/mp4`, `audio`→`audio/ogg`) or, for documents, from the filename extension (`.pdf`/`.txt`, else `application/octet-stream`).
+- **TMA** (`tma_api.py:4407`): `uploaded.mimetype or "application/octet-stream"` — the browser's own multipart `Content-Type` header, unverified.
+
+No content-based detection (`python-magic`, `filetype`, `mimetypes`, ffprobe, or similar) is wired into this path at all. `core/media_probe_adapter.py` has real content-based MIME verification (`_ALLOWED_INPUT_MIME` allowlist + `_sha256_file`), but it belongs to the separate External Capability Contract program (`core/external_capability_contract.py`) and is not called from `media_handler.py`/`app.py`'s F16 ingestion — confirmed by grep, no import edge between them.
+
+**Existing local, non-enforcing MIME dicts (the "divergent local allowlists" §5 addresses):** none of these three reject anything — they only pick a filename extension, defaulting to `.bin`/`"document"` for anything unrecognized:
+- `drive_adapter._MIME_EXT` (5 entries: `audio/ogg`, `audio/mpeg`, `image/jpeg`, `image/png`, `application/pdf`)
+- `whatsapp_media_adapter.py`'s `extension_map` inside `infer_filename()` (7 entries, including the non-standard `audio/mp3` alongside `audio/mpeg`, plus `audio/wav`)
+- `media_handler._DOCUMENT_MIME_TO_TYPE` / `tools/google_tools._MIME_TO_TYPE` (6 entries each, identical, deliberately duplicated per that file's own comment) — these gate `extract_text_if_document()`'s text-extraction feature only, not ingestion accept/reject.
+
+**Evidenced-supported MIME set** (from the above three dicts plus test assertions in `test_media_layer.py`, `test_whatsapp_media.py`, `test_c02_c04_*`, `test_c90_structured_file_capture.py`): `image/jpeg`, `image/png`, `audio/ogg`, `audio/mpeg` (+ `audio/mp3` as an already-tolerated alias), `audio/wav`, `video/mp4`, `application/pdf`, `text/plain`, `text/csv`, `text/html`, `text/markdown`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`. `application/octet-stream` is not a real content type — it is the pervasive "provider didn't tell us" sentinel used by Twilio/TMA/Telegram-document fallbacks today; a naive fail-closed allowlist would break every one of those existing flows unless this sentinel is deliberately addressed (flagged under Risks below, not resolved here).
+
+**Best SSOT location:** `media_handler.py` — it is already the single funnel both `handle_file_upload()` and `handle_voice_note()` pass through regardless of source (Telegram/Twilio/Meta/TMA all converge there before Drive/Airtable), so a module-level frozen allowlist + one validation helper there requires no new file and no new import edges.
+
+**Exact callers that must consume it:** `media_handler.handle_file_upload()` (all non-voice sources) and `media_handler.handle_voice_note()` (voice) — enforcing at these two points covers every current entry path (`app.py`'s Telegram/Twilio/Meta handlers and `tma_api.py`'s upload route all call into one of these two functions; no other ingestion entry point exists).
+
+**Focused regression tests required:** allowlisted MIME passes unchanged (no behavior change for existing supported types); an unsupported/unknown MIME is rejected with a deterministic new error code before any Drive/Airtable call is made (mirroring the existing `FILE_TOO_LARGE` early-return pattern); a missing/empty MIME is rejected the same way; existing `test_whatsapp_media.py`/`test_media_layer.py`/`test_c90_structured_file_capture.py` suites re-run to confirm no currently-supported type regresses.
+
+### M3 discovery — current failure lifecycle
+
+**Reservation lifecycle:** `guards.idempotency.IdempotencyStore.is_duplicate()` is check-and-reserve (in-memory, 5-minute TTL, `guards/idempotency.py:19-27`) keyed on `sha256(source:file_id:user_id)`. Every failure exit in `handle_file_upload()` (10 return points) explicitly calls `release_reservation()`, so a resend of the same provider `file_id` is never blocked by a prior failed attempt — retry-by-resend already works at the idempotency layer.
+
+**`logical_media_key` lifecycle:** computed once per call (`logical_media_key(source, file_id, file_bytes)`, `media_handler.py:151-161`) — provider-ID-based for telegram/twilio/meta, content-sha256-based for tma. It is looked up via `find_asset_by_logical_media_key()` (Airtable, exact-match formula) and `drive_adapter.find_existing_by_logical_media_key()` (Drive, `appProperties` exact match, tagged on every upload at `drive_adapter.py:158`) — both already exist and already drive the reconciliation branch (`media_handler.py:584-640`) that reuses a Drive object found without a matching Airtable record.
+
+**All calls to `mark_partial()`:** exactly two, both already silent no-ops when their `record_id` argument is falsy (`media_handler.py:574-576`, `if record_id:` guard):
+- `media_handler.py:631` — Drive object was *found/reused* (`existing_drive.ok`, no prior Airtable record existed) but the reconciling `save_asset()` call at line 604 itself failed, returning `None`/falsy `reconciled_id`. `mark_partial(None, ...)` no-ops; the function returns `MEDIA_FILES_RECONCILIATION_FAILED` with **zero Airtable trace** despite a known, tagged Drive object existing.
+- `media_handler.py:705` — no prior record and no reusable Drive object: the *first* `save_asset()` attempt (line 646, before any Drive upload) already failed leaving `media_record_id = ""`; Drive upload then succeeds; the *second* `save_asset()` attempt (line 688) also fails. `mark_partial("", ...)` no-ops; returns `MEDIA_FILES_PARTIAL` with **zero Airtable trace** despite a freshly-uploaded Drive object.
+
+(The third call site, `media_handler.py:598`, and the `asset_id` argument at line 719, are both only reachable when the id is already known-truthy — not evidence-loss paths.)
+
+**Exact evidence-loss path:** both gaps above share one root cause — `mark_partial()` only ever *updates* an existing Airtable record; it has no fallback to *create* one when `record_id` is empty. The Drive-side artifact remains fully recoverable (tagged with `logical_media_key`, discoverable via `find_existing_by_logical_media_key()` on the next retry), but nothing durable/queryable records that the failure happened until a human or process re-triggers the exact same upload.
+
+**Existing recovery primitives already usable (no new store needed):** `media_gateway.save_asset()` (create) and `media_gateway.update_asset_persistence()` (update) are the only two Media Files write primitives in the codebase; `find_asset_by_logical_media_key()` already classifies a found-but-incomplete record as `"incomplete"` (missing `DRIVE_FILE_ID` or non-`ASSET_PERSISTED` state, `media_gateway.py:99-104`), which is exactly the shape a "create-on-empty-record_id" fix would produce — a retry would find it via this existing classification and reconcile through the existing `media_record_id` branch (`media_handler.py:571-572`) rather than creating a second record.
+
+**Retry/reconciliation paths already present:** the `existing_drive.ok` branch (`media_handler.py:584-640`) is already a full reconciliation path for "Drive object exists, Airtable doesn't" — it is the mechanism a fixed `mark_partial()` would feed into on the next attempt.
+
+**Smallest design that satisfies the policy without a parallel Media subsystem:** when `mark_partial()` is invoked with a falsy `record_id`, call `save_asset()` (the existing creation primitive) to write a new record carrying `persistence_state=FAILED` (or `PARTIAL` — exact state-name choice is a slice-2 implementation detail, not an owner-decision blocker, since the policy text specifies *what information* must be captured, not the enum label) plus whatever is known: `logical_media_key`, `drive_file_id`/`drive_url` if a Drive object exists, and `last_error_code`. No new table, no new module, no new store — reuses the two existing write primitives and the existing lookup-by-key classification that already drives reconciliation.
+
+### Proposed Slice 2 scope (not yet authorized)
+
+**M2:** `media_handler.py` — add a frozen MIME allowlist constant (seeded from the evidenced-supported set above) and a validation helper called at the top of `handle_file_upload()` and `handle_voice_note()`, returning a new deterministic error code on rejection. New test additions/updates: extend `test_whatsapp_media.py`/`test_media_layer.py` (or a new narrowly-scoped `test_f16_m2_mime_allowlist.py`) covering allow / reject-unsupported / reject-missing, plus a full rerun of the existing Media test surface to confirm zero regression on currently-supported types.
+
+**M3:** `media_handler.py` — change `mark_partial()`'s empty-`record_id` branch from no-op to `save_asset()`-backed creation, at both call sites (`media_handler.py:631` and `:705`). New test additions/updates: extend `media_handler.py`'s own `__main__` self-test (or a new narrowly-scoped `test_f16_m3_durable_trace.py`) covering "Drive reused + Airtable save fails" (line 631 path) and "no prior record + fresh Drive upload + second save fails" (line 705 path), asserting a durable record is actually created with the correct `persistence_state`/`logical_media_key`/`last_error_code`, and that a subsequent retry reconciles against it rather than duplicating it.
+
+No `airtable_schema.py` changes are expected — `MediaFileFields`/`MediaPersistenceState` already define every field/state value both fixes need.
+
+### Risks (may require a separate owner gate)
+
+- **`application/octet-stream` sentinel vs. fail-closed §M2:** a naive allowlist that excludes `application/octet-stream` will fail-closed on today's normal-path Twilio/TMA/Telegram-document uploads whenever the provider itself didn't declare a specific type — this is current, working behavior, not an edge case. Slice 2 must decide how the allowlist treats this sentinel (e.g. accept it only paired with a recognized filename extension) without silently loosening the fail-closed policy; flagging now so slice 2 doesn't invent that call unreviewed.
+- **`FEATURE_MEDIA_UPLOAD`/`FEATURE_VOICE_NOTES` flag state:** both gates land inside always-compiled code paths gated only by these flags at the caller level (per `test_c90_structured_file_capture.py`/`test_media_layer.py`); no flag/schema/deployment change is anticipated, but this hasn't been confirmed against the live Render environment (no runtime claim made).
+- **M3's `persistence_state` value for a brand-new failure record** (`FAILED` vs `PARTIAL`) has product-visible implications if any dashboard/report already filters on one or the other — worth a one-line confirmation at slice-2 implementation time, not a blocker to this gate.
+
+### Verdict
+
+**READY FOR F16 REMEDIATION SLICE 2**
