@@ -47,12 +47,17 @@ _DEDUP_FIELDS: dict[str, str] = {
 }
 
 # מיפוי alias → שם אמיתי (mirrors airtable_tools._TABLE_ALIAS_MAP)
+# Track 8C: dropped a stale "Payments" -> "תשלומים (Payments)" entry — that
+# Hebrew table no longer exists live (Track 8B), the live table is plain
+# "Payments" (see airtable_schema.TABLE_ALIASES, which already maps
+# "Payments" -> Tables.PAYMENTS == "Payments"), and no write path used this
+# local map for Payments (writes go through the raw `table` value at the
+# airtable_add()/airtable_update() call sites below, not through this dict).
 _ALIAS_MAP: dict[str, str] = {
     "Tasks":    "משימות (Tasks)",
     "Contacts": "אנשי קשר (Contacts)",
     "Deals":    "עסקאות (Deals)",
     "Expenses": "הוצאות (Expenses)",
-    "Payments": "תשלומים (Payments)",
 }
 
 

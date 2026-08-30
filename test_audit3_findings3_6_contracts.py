@@ -62,14 +62,6 @@ def test_contact_notes_are_rejected_explicitly_when_schema_has_no_notes_field():
     post.assert_not_called()
 
 
-def test_payment_contact_relation_is_persisted_through_canonical_field():
-    with patch("crm._creds_ok", return_value=True), \
-         patch("crm.airtable_create", return_value={"id": "recPAY"}) as create:
-        crm.crm_add_payment("Payment", 50, "2026-08-20", contact_id="recCONTACT")
-    fields = create.call_args.args[1]
-    assert fields[PaymentFields.CONTACT] == ["recCONTACT"]
-
-
 def test_typed_upcoming_result_preserves_persisted_due_date_and_public_format():
     record = _payment_record(due_date="2026-08-28")
     with patch("crm._creds_ok", return_value=True), patch("crm._get", return_value=[record]):

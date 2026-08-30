@@ -492,7 +492,7 @@ def crm_list_deals(status: str = "", identity=None) -> str:
 # ══════════════════════════════════════════════════
 
 def crm_add_payment(name: str, amount: float, due_date: str,
-                    deal_id: str = "", contact_id: str = "", notes: str = "") -> str:
+                    deal_id: str = "", notes: str = "") -> str:
     if not _creds_ok():
         return "❌ חסרים מפתחות Airtable"
     try:
@@ -503,7 +503,6 @@ def crm_add_payment(name: str, amount: float, due_date: str,
             PaymentFields.STATUS:   PaymentStatus.IN_PROGRESS,
         }
         if deal_id:    fields[PaymentFields.DEAL]    = [deal_id]
-        if contact_id: fields[PaymentFields.CONTACT] = [contact_id]
 
         rec = _post(Tables.PAYMENTS, fields)
 
