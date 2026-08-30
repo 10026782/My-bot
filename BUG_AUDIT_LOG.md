@@ -6434,11 +6434,44 @@ No new pre-existing-failure baseline check was needed this slice — `test_provi
 | F16-M2 | **CLOSED — STATIC VERIFIED** (merged, PR #1131) |
 | F16-M3 | **CLOSED — STATIC VERIFIED** (merged, PR #1131) |
 | F16-M4 | **CLOSED — STATIC VERIFIED** |
-| F16-M5 | **OPEN — BLOCKED / OWNER DECISION REQUIRED** (content-hash architecture for non-TMA sources) |
+| F16-M5 | **DEFERRED — ACCEPTED** *(owner decision, see closure gate below; superseded)* |
 | F16-M6 | **CLOSED — STATIC VERIFIED** |
 | F16-M7 | **CLOSED — STATIC VERIFIED** |
 | F16-M8 | CROSS-TRACK REFERENCE (unchanged) |
 
 ### Terminal status (this slice)
 
-**F16 = STATIC CLOSED (MECHANICAL FINDINGS) / M5 OWNER DECISION REQUIRED / RUNTIME NOT ESTABLISHED.** All mechanical/no-decision F16-owned static findings (M1, M2, M3, M4, M6, M7) are closed and statically verified. F16-M5 remains open — it is not a mechanical cleanup item; it requires a separate owner decision on content-hash architecture for non-TMA sources and must not be closed by inventing that policy here. F16-M8 remains cross-track, not F16-owned. **No runtime, deployment, production, or feature-activation evidence is claimed by this slice.** Next gate, once M5 is separately decided or explicitly deferred: **deployed-SHA Media canary / runtime verification**.
+*(Superseded by the F16-M5 closure gate below — this section's "M5 OWNER DECISION REQUIRED" framing was accurate only until the owner decision recorded there.)* All mechanical/no-decision F16-owned static findings (M1, M2, M3, M4, M6, M7) are closed and statically verified. F16-M8 remains cross-track, not F16-owned. No runtime, deployment, production, or feature-activation evidence is claimed by this slice.
+
+## F16-M5 Closure Gate — DEFERRED / ACCEPTED (owner decision)
+
+**Truth Reset:** `origin/main` at `3ac37fb4cd2f86197bcb79078c13dfd607ad50d9`. PR #1143 (F16-M6/M7 closure) confirmed merged and reachable (`b5dc85a`). Documentation-only gate — no code, schema, or test change.
+
+### Owner decision
+
+**F16-M5 is closed as DEFERRED / ACCEPTED**, not remediated. Owner's stated basis: there is no evidence that content hashing, actual-content MIME detection, or quality inspection were ever approved requirements of F16. The Media Probe / GoFile-class capabilities remain separate capability references (a different program — the External Capability Contract, `core/external_capability_contract.py` / `core/media_probe_adapter.py` — already noted in the original F16-M5 discovery as architecturally distinct from F16 ingestion) and do not constitute a gap in the F16 media path itself.
+
+A content hash for Telegram/Twilio/Meta-sourced Media Files records **may be considered later only as a secondary fingerprint** — explicitly not as a load-bearing identity/dedup mechanism, and explicitly not authorized by this decision. Reopening this as an implementation item requires a new, separate decision; this closure does not pre-approve one.
+
+`logical_media_key()`'s existing identity contract (provider-ID-based for telegram/twilio/meta, content-sha256-based for tma) is unchanged and remains the canonical recovery identity per the F16-M3 durable-trace policy (PR #1131, merged).
+
+### Disposition
+
+**F16-M5 — DEFERRED / ACCEPTED.** Not `CLOSED — STATIC VERIFIED` (nothing was remediated) and not `OPEN` (the owner decision resolves it as a matter of scope, not as a pending question). No code changed.
+
+### Ledger status after this gate
+
+| ID | Status |
+|----|--------|
+| F16-M1 | **CLOSED — STATIC VERIFIED** |
+| F16-M2 | **CLOSED — STATIC VERIFIED** (merged, PR #1131) |
+| F16-M3 | **CLOSED — STATIC VERIFIED** (merged, PR #1131) |
+| F16-M4 | **CLOSED — STATIC VERIFIED** |
+| F16-M5 | **DEFERRED — ACCEPTED** (owner decision, 30/08/2026 — content hash may be considered later only as a secondary fingerprint, not a load-bearing identity mechanism) |
+| F16-M6 | **CLOSED — STATIC VERIFIED** (merged, PR #1143) |
+| F16-M7 | **CLOSED — STATIC VERIFIED** (merged, PR #1143) |
+| F16-M8 | **CROSS-TRACK REFERENCE** (unchanged — owned by the pre-existing #8/#9 CI-wiring concern, not F16) |
+
+### Terminal status
+
+**F16 = STATIC CLOSED / RUNTIME NOT ESTABLISHED.** Every F16-owned static finding is resolved (closed/static-verified or deferred/accepted by owner decision); F16-M8 remains cross-track and was never F16-owned. This is a static-closure claim only — no runtime, deployment, production, or feature-activation evidence is established or claimed. **Next and only remaining gate: deployed-SHA Media canary / runtime verification** (a separate execution gate, not performed here).
