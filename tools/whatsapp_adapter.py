@@ -12,7 +12,7 @@ import hashlib
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from core.action_result import ActionResult, ClaimType
 from core.message_contract import InteractionType, MessageContract, format_message_contract
@@ -30,6 +30,15 @@ class WhatsAppRenderResult:
     @property
     def interactive_used(self) -> bool:
         return self.interactive is not None
+
+
+@dataclass(frozen=True)
+class WhatsAppSemanticAction:
+    """Provider-free action selected from one inbound WhatsApp event."""
+
+    action: str
+    value: str | None = None
+    source: str = "unknown"
 
 
 _ACTION_LABELS = {
@@ -88,6 +97,93 @@ def render_whatsapp_message(
         body=body,
         interactive={"type": "quick_reply", "buttons": controls},
     )
+
+
+_TEXT_ACTIONS = {
+    "כן": "confirm", "אשר": "confirm", "מאשר": "confirm", "מאשרת": "confirm",
+    "✅": "confirm", "✅ אשר": "confirm", "yes": "confirm", "ok": "confirm",
+    "ערוך": "edit", "✏️ ערוך": "edit", "עריכה": "edit", "edit": "edit",
+    "לא": "cancel", "בטל": "cancel", "ביטול": "cancel", "↩️ בטל": "cancel",
+    "cancel": "cancel", "no": "cancel", "↩️": "cancel",
+}
+
+
+def _event_value(event: Mapping[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = event.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _action_from_label(value: str, interaction) -> str | None:
+    normalized = value.strip().lower()
+    action = _TEXT_ACTIONS.get(normalized)
+    if action:
+        return action
+    if interaction is None:
+        return None
+    values = interaction.actions
+    if interaction.type in {InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE}:
+        return None
+    for candidate in values:
+        if candidate.strip().lower() == normalized:
+            return _TEXT_ACTIONS.get(normalized, normalized)
+    return None
+
+
+def normalize_whatsapp_action(
+    event: Mapping[str, Any], *, interaction=None,
+) -> WhatsAppSemanticAction:
+    """Normalize Twilio/Meta reply data into an existing semantic action.
+
+    Provider IDs are used only transiently to resolve the adapter's own
+    positional ``wa_N`` controls against the supplied interaction; they are
+    never returned. Unknown payloads fail closed instead of guessing.
+    """
+    if not isinstance(event, Mapping):
+        raise TypeError("event must be a mapping")
+
+    nested = event.get("interactive")
+    nested = nested if isinstance(nested, Mapping) else {}
+    reply = nested.get("button_reply") or nested.get("list_reply")
+    reply = reply if isinstance(reply, Mapping) else {}
+    payload = _event_value(event, "ButtonPayload", "button_payload", "reply_id") or _event_value(reply, "id")
+    label = _event_value(event, "ButtonText", "button_text", "reply_title") or _event_value(reply, "title")
+    body = _event_value(event, "Body", "body", "text")
+
+    if payload.startswith("wa_") and interaction is not None:
+        try:
+            index = int(payload[3:]) - 1
+        except ValueError:
+            index = -1
+        values = interaction.options if interaction.type in {
+            InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE,
+        } else interaction.actions
+        if 0 <= index < len(values):
+            selected = _label(values[index])
+            action = _action_from_label(selected, interaction)
+            if action:
+                return WhatsAppSemanticAction(action, source="payload")
+            if interaction.type in {InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE}:
+                return WhatsAppSemanticAction("choice", selected, "payload")
+
+    for candidate, source in ((label, "reply"), (body, "text")):
+        if not candidate:
+            continue
+        action = _action_from_label(candidate, interaction)
+        if action:
+            return WhatsAppSemanticAction(action, source=source)
+        if interaction is not None and interaction.type in {
+            InteractionType.SINGLE_CHOICE, InteractionType.MULTI_CHOICE,
+        }:
+            options = tuple(_label(value) for value in interaction.options)
+            if candidate.strip() in options:
+                return WhatsAppSemanticAction("choice", candidate.strip(), source)
+
+    if body:
+        return WhatsAppSemanticAction("text", body, "text")
+    return WhatsAppSemanticAction("unknown")
 
 
 def _assert_gateway_context() -> None:
