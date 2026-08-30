@@ -37,6 +37,7 @@ class Tables:
     CASH_FLOW       = "Weekly Cash Flow Reports"
     EXPENSES        = "Expenses"
     PAYMENTS        = "Payments"
+    PAYMENT_TERMS   = "Payment Terms"      # Canonical Deal/Payment Architecture track — created 30/08/2026 (app4bcgoX7t0HUVnm/tblyFWgrujJpTqkg5)
     # קשרים ועסקאות
     CONTACTS        = "אנשי קשר (Contacts)"
     DEALS           = "עסקאות (Deals)"
@@ -197,8 +198,8 @@ class ExpenseFields:
 
 class PaymentFields:
     REF             = "reference"
-    AMOUNT          = "amount"
-    DATE            = "date"
+    AMOUNT          = "amount"           # authoritative payable/total amount — never duplicated by a second "total" field
+    DATE            = "date"             # due date
     STATUS          = "status"          # pending | received | overdue | cancelled
     DEAL_LINK       = "deal_id"
     DOMAIN          = "domain"
@@ -207,7 +208,17 @@ class PaymentFields:
     DUE_DATE        = "date"
     DEAL            = "deal_id"
     CONTACT         = "contact_id"
-    NOTES           = "notes"
+    NOTES           = "Notes"            # corrected 30/08/2026: "notes" (lowercase) never existed live — real field is "Notes" (added below)
+    # Canonical Deal/Payment Architecture track (30/08/2026) — added to live Airtable
+    ORIGIN_LEAD     = "Origin Lead"      # linked record — fldFdXaw6bJWJUycT
+    PAYMENT_TERM    = "Payment Term"     # linked record → Payment Terms — fldga5J10hTc1k3Wf
+    BASE_AMOUNT     = "Base Amount"      # calculation-basis snapshot at generation time — never live
+    RATE_PCT        = "Rate %"           # snapshot of the Term's Rate % at generation time
+    VAT_RULE        = "VAT Rule"         # snapshot of the Term's VAT Rule — see VATRule
+    VAT_AMOUNT      = "VAT Amount"       # snapshot, computed once at generation time
+    TRIGGER_EVIDENCE = "Trigger Evidence"  # human-readable explanation of how the due date was derived
+    PAID_AT         = "Paid At"          # set when Status moves to received — distinct from the due DATE
+    OWNER           = "owner"            # lowercase, matches live field — business ownership metadata only, NOT beneficiary/payee (see docs/governance)
 
 
 class ContactFields:
@@ -234,6 +245,11 @@ class DealFields:
     TASKS_LINK      = "משימות (Tasks)"
     PAYMENTS_LINK   = "תשלומים (Payments)"
     ORIGIN_LEAD     = "Origin Lead"     # linked record — fldoobGq4PS78C0Em
+    DOMAIN          = "Domain"          # canonical domain field — fldz3pTAHF3xWxG6f. "Select" (fld4xBgWxdB7fFitf) was a duplicate, now renamed "DEPRECATED - Select"
+    OWNER           = "Owner"           # business ownership metadata only — NOT an authorization boundary (see docs/governance — internal per-record authorization is a known, deferred gap)
+    VENTURE_LINK    = "Ventures"
+    PRIORITY        = "Priority"        # High|Medium|Low
+    PAYMENT_TERMS_LINK = "Payment Terms"  # auto inverse of PaymentTermFields.DEAL — fldQCZO5rWVRJIaNG
     # backwards compat — crm.py uses these
     STATUS          = "שלב"
     PRICE           = "סכום"
@@ -244,6 +260,62 @@ class DealFields:
     CONTACT         = "מקושר לאנשי קשר"
     DEADLINE        = "תאריך סגירה"
     NOTES           = "Notes"
+    # NOTE (30/08/2026): "Select"/"BLUE VIEW BUYERS"/"Status" fields on the live Deals
+    # table were confirmed at 0/2 occupancy and renamed "DEPRECATED - ..." in Airtable.
+    # They are not modeled here — never write to them.
+
+
+class PaymentTermCalcType:
+    FIXED       = "fixed"
+    PERCENTAGE  = "percentage"
+
+
+class PaymentTermBasis:
+    MONTHLY_SALARY  = "monthly_salary"
+    FIRST_SALARY    = "first_salary"
+    DEAL_AMOUNT     = "deal_amount"
+    UNIT_COUNT      = "unit_count"
+    CUSTOM_AMOUNT   = "custom_amount"
+
+
+class PaymentTermTrigger:
+    IMMEDIATE       = "immediate"
+    SPECIFIC_DATE   = "specific_date"
+    AFTER_PERIOD    = "after_period"
+    EVENT_BASED     = "event_based"
+
+
+class PaymentTermCadence:
+    ONCE    = "once"
+    MONTHLY = "monthly"
+
+
+class VATRule:
+    NONE     = "none"
+    ADD      = "add"
+    INCLUDED = "included"
+
+
+class PaymentTermFields:
+    """Payment Terms — reusable calculation/eligibility rule attached to a Deal.
+    Table: Tables.PAYMENT_TERMS (tblyFWgrujJpTqkg5), created 30/08/2026.
+    Generated Payments snapshot their calculation inputs from a Term at creation
+    time (see PaymentFields.BASE_AMOUNT/RATE_PCT/VAT_RULE/VAT_AMOUNT) and never
+    retroactively change even if the Term is edited afterward."""
+    NAME             = "Name"
+    DEAL             = "Deal"                 # required — linked record → Deals
+    CALC_TYPE        = "Calculation Type"     # PaymentTermCalcType
+    FIXED_AMOUNT     = "Fixed Amount"
+    RATE_PCT         = "Rate %"
+    CALC_BASIS       = "Calculation Basis"    # PaymentTermBasis
+    TRIGGER_TYPE     = "Trigger Type"         # PaymentTermTrigger
+    TRIGGER_DATE     = "Trigger Date"
+    TRIGGER_DELAY_DAYS = "Trigger Delay Days"
+    CADENCE          = "Cadence"              # PaymentTermCadence
+    VAT_RULE         = "VAT Rule"             # VATRule
+    START_DATE       = "Start Date"
+    END_DATE         = "End Date"
+    NOTES            = "Notes"
 
 
 class VentureFields:

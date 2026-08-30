@@ -86,7 +86,56 @@
       "שלב",
       "שם העסקה",
       "תאריך סגירה",
-      "תשלומים (Payments)"
+      "תשלומים (Payments)",
+      "Owner",
+      "Domain",
+      "Ventures",
+      "Origin Lead",
+      "Payment Terms",
+      "Role (from Owner)",
+      "Priority",
+      "Decisions",
+      "Sessions",
+      "DEPRECATED - Select (unused, do not use)",
+      "DEPRECATED - BLUE VIEW BUYERS (unused, do not use)",
+      "DEPRECATED - Status (unused, do not use)"
+    ],
+    "Payment Terms": [
+      "Name",
+      "Deal",
+      "Calculation Type",
+      "Fixed Amount",
+      "Rate %",
+      "Calculation Basis",
+      "Trigger Type",
+      "Trigger Date",
+      "Trigger Delay Days",
+      "Cadence",
+      "VAT Rule",
+      "Start Date",
+      "End Date",
+      "Notes",
+      "Payments"
+    ],
+    "Payments": [
+      "reference",
+      "amount",
+      "date",
+      "status",
+      "deal_id",
+      "domain",
+      "owner",
+      "role (from Owner)",
+      "Sessions",
+      "Origin Lead",
+      "Payment Term",
+      "Base Amount",
+      "Rate %",
+      "VAT Rule",
+      "VAT Amount",
+      "Trigger Evidence",
+      "Paid At",
+      "Notes"
     ],
     "Approvals": [
       "בוקש בתאריך",
@@ -216,5 +265,5 @@
     ]
   },
   "fetched_at": "seed-from-schema-py",
-  "note": "seed — run schema_audit.py to refresh from live Airtable"
+  "note": "seed — run schema_audit.py to refresh from live Airtable. Manually patched 30/08/2026 for the Canonical Deal/Payment Architecture track (Payment Terms table + Deals/Payments field additions, verified against live Airtable via MCP) because this session has no AIRTABLE_API_KEY to run schema_audit.py's own refresh."
 }
