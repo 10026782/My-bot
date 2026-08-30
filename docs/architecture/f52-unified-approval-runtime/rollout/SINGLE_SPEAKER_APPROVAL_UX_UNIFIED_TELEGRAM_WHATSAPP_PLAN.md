@@ -200,8 +200,9 @@ wording while using the canonical MessageContract renderer. Only
 `ActionGateway._render_pending_query_reply()` is migrated; idle, pending-batch,
 and generic legacy fallback paths remain unchanged.
 
-Evidence level: **CODE_DONE / STATIC_VERIFIED**. No deployment or runtime
-claim is made here.
+Evidence level: **MERGED / STATIC VERIFIED** (`PR #1118`, merge `b31f11d`,
+verified on `origin/main` `c65085b`). No deployment or runtime claim is made
+here.
 
 ## Single Speaker Rules
 
@@ -251,7 +252,7 @@ in PR #1091 (`40bc446`). R6.2 — Decision New DraftFlow Adoption — is
 CODE_DONE / STATIC_VERIFIED. No deployment or
 runtime claim is made here.
 
-### Current phase evidence at origin/main `e34b2ff`
+### Current phase evidence at origin/main `c65085b`
 
 - R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
 - R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
@@ -278,7 +279,8 @@ runtime claim is made here.
   DraftFlow transition/parser through a Marketing-owned dynamic adapter. State,
   validation, execution, callbacks, review rendering, and receipts remain
   Marketing-owned.
-- R8.2 — **CODE_DONE / STATIC VERIFIED**: `approval_pending_query` is a
+- R8.2 — **MERGED / STATIC VERIFIED** (PR #1118, `b31f11d`):
+  `approval_pending_query` is a
   distinct MessageContract presentation semantic; the existing pending
   ActionContract remains lifecycle authority, and only the status-query path
   is migrated. No deployment or runtime claim is made.
@@ -306,7 +308,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R7.2 | Normalize WhatsApp button/reply payloads and text into semantic actions. | Provider IDs stay adapter-local; unknown input fails closed; no lifecycle authority is added. | MERGED / STATIC VERIFIED (PR #1103, `1ff1cee`) | Correlation/replay policy, Meta outbound activation, lifecycle changes. |
 | R7.3 | Formalize deterministic WhatsApp plain-text fallback grammar over the existing R7.2 semantic normalizer. | Exact normalized reserved-token matches only; all other non-empty input remains `text`; no fuzzy intent inference or lifecycle authority. | MERGED / STATIC VERIFIED (PR #1111, `85cd048`) | Provider activation, lifecycle changes, and broader F52 formatter work. |
 | R8 | Consolidate duplicate formatter paths behind MessageContract. | One public presentation contract and one response. | Regression/static, then canary | Lifecycle or authorization redesign. |
-| R8.2 | Add `approval_pending_query` as a distinct MessageContract presentation semantic and migrate the single status-query path. | Lifecycle remains `pending`; ActionContract remains authority; no synthetic ActionFact business input; other legacy paths unchanged. | CODE_DONE / STATIC_VERIFIED | Idle, pending-batch, fallback migration and runtime/deployment verification. |
+| R8.2 | Add `approval_pending_query` as a distinct MessageContract presentation semantic and migrate the single status-query path. | Lifecycle remains `pending`; ActionContract remains authority; no synthetic ActionFact business input; other legacy paths unchanged. | MERGED / STATIC VERIFIED (PR #1118, `b31f11d`) | Idle, pending-batch, fallback migration and runtime/deployment verification. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
 | R10 | Runtime rollout, canary, and flag decision. | Governed flags; safe rollback. | DEPLOYED / RUNTIME_VERIFIED with direct evidence | Unresolved evidence or owner decisions. |
 
