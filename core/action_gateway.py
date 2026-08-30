@@ -2378,9 +2378,8 @@ class ActionGateway:
     # this surface (PR4 only wired the EXECUTED/status-query path). This closes
     # that gap the same way PR4 did for compose_status_reply(): off (default)
     # returns the caller's own legacy text byte-identical; shadow computes the
-    # unified text via the SAME formatter/state-mapping already used for the
-    # executed path ("rejected" -> "failure" family, locked in PR1-3 — no new
-    # canonical state invented here) and logs the SAME safe comparison record
+    # unified text via the canonical MessageContract state mapping
+    # ("rejected" -> CANCELLED) and logs the SAME safe comparison record
     # PR4 already built (_log_shadow_comparison/_shadow_leak_flags, reused
     # as-is, not duplicated); on returns the unified text.
     #
@@ -2425,7 +2424,20 @@ class ActionGateway:
             raw_tool_response={},
         )
         try:
-            unified_text, meta = self._compose_status_reply_unified(fact)
+            message_contract = self._message_contract_for_fact(fact)
+            if message_contract is None:
+                return legacy_text
+            from core.message_contract import format_message_contract_with_meta
+            unified_text, contract_meta = format_message_contract_with_meta(message_contract)
+            meta = {
+                "message_state": contract_meta["formatter_state"],
+                "formatter_version": contract_meta["formatter_version"],
+                "fallback_used": contract_meta["fallback_used"],
+                "redaction_count": contract_meta["redaction_count"],
+                "contract_path": "message_contract",
+                "contract_version": contract_meta["version"],
+                "source_component": contract_meta["source_component"],
+            }
         except Exception as exc:
             # A rejection reply must never break because of the formatter.
             logger.warning("[ActionGateway] unified rejection formatter failed: %s", exc)
@@ -3686,7 +3698,7 @@ class ActionGateway:
         projects its already-structured fields; it never reads provider state,
         infers evidence, or changes lifecycle semantics.
         """
-        if fact.outcome not in ("executed", "failed", "pending", "outcome_unknown"):
+        if fact.outcome not in ("executed", "failed", "pending", "rejected", "outcome_unknown"):
             return None
         try:
             from core.action_fact_message_adapter import from_action_fact

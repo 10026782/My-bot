@@ -19,9 +19,8 @@
 # EXACT same off/shadow/on machinery PR4 already built
 # (_compose_status_reply_unified/_log_shadow_comparison/_shadow_leak_flags —
 # not duplicated, not reimplemented), applied to a "rejected" ActionFact.
-# "rejected" continues to map to the "failure" family state — a decision
-# already locked in PR1-3 (see agent_message_formatter.py's PR1 note);
-# this PR does not add a new canonical state. Deliberately NOT folded into
+# "rejected" maps to the existing CANCELLED MessageContract state; this PR
+# does not add a new canonical state. Deliberately NOT folded into
 # reject() itself (see the "F52 PR5" comment in core/action_gateway.py) —
 # rendering happens at route_cancellation_word()'s and
 # route_combined_word()'s own final return points, the actually-user-visible
@@ -165,8 +164,10 @@ chk("T2: shadow -> exactly one [UnifiedStatusFormatterShadow] comparison logged"
 if shadow_lines2:
     line2 = shadow_lines2[0]
     chk("T2: shadow log -> outcome=rejected", "outcome=rejected" in line2)
-    chk("T2: shadow log -> mapped_state is the failure family (locked "
-        "since PR1-3, not a new state)", "mapped_state=failure" in line2)
+    chk("T2: shadow log -> mapped_state is the canonical cancelled state",
+        "mapped_state=cancelled" in line2)
+    chk("T2: shadow log -> contract path is MessageContract",
+        "contract_path=message_contract" in line2)
     chk("T2: shadow log -> text_differs is present as a boolean field",
         "text_differs=" in line2)
     chk("T2: shadow log -> record_id_leak=False", "record_id_leak=False" in line2)
@@ -201,8 +202,8 @@ shadow_lines3 = [m for m in log3 if "UnifiedStatusFormatterShadow" in m]
 chk("T3: combined cancel -> exactly one shadow comparison logged",
     len(shadow_lines3) == 1)
 if shadow_lines3:
-    chk("T3: combined cancel shadow log -> outcome=rejected, mapped_state=failure",
-        "outcome=rejected" in shadow_lines3[0] and "mapped_state=failure" in shadow_lines3[0])
+    chk("T3: combined cancel shadow log -> outcome=rejected, mapped_state=cancelled",
+        "outcome=rejected" in shadow_lines3[0] and "mapped_state=cancelled" in shadow_lines3[0])
 chk("T3: contract durably rejected", gw3._ledger.find_by_id(cid3).status == "rejected")
 
 
