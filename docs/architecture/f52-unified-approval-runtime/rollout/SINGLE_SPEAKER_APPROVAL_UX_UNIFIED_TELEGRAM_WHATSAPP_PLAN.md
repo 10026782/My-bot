@@ -236,7 +236,7 @@ in PR #1091 (`40bc446`). R6.2 — Decision New DraftFlow Adoption — is
 CODE_DONE / STATIC_VERIFIED. No deployment or
 runtime claim is made here.
 
-### Current phase evidence at origin/main `1ff1cee`
+### Current phase evidence at origin/main `85cd048`
 
 - R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
 - R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
@@ -285,7 +285,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R7 | Add WhatsApp interactive adapter plus text fallback. | Same semantics as Telegram; limits stay in adapter. | Static/provider tests, then runtime | Enabling outbound providers without evidence/approval. |
 | R7.1 | Add the Twilio-focused WhatsApp semantic presentation adapter. | MessageContract remains the sole presentation input; controls are optional and text fallback is complete. | MERGED / STATIC VERIFIED (PR #1102, `3c45a87`) | Inbound normalization, Meta outbound, lifecycle and provider activation. |
 | R7.2 | Normalize WhatsApp button/reply payloads and text into semantic actions. | Provider IDs stay adapter-local; unknown input fails closed; no lifecycle authority is added. | MERGED / STATIC VERIFIED (PR #1103, `1ff1cee`) | Correlation/replay policy, Meta outbound activation, lifecycle changes. |
-| R7.3 | Formalize deterministic WhatsApp plain-text fallback grammar over the existing R7.2 semantic normalizer. | Exact normalized reserved-token matches only; all other non-empty input remains `text`; no fuzzy intent inference or lifecycle authority. | CODE_DONE / STATIC_VERIFIED (PR; not current until merged) | Provider activation, lifecycle changes, and broader F52 formatter work. |
+| R7.3 | Formalize deterministic WhatsApp plain-text fallback grammar over the existing R7.2 semantic normalizer. | Exact normalized reserved-token matches only; all other non-empty input remains `text`; no fuzzy intent inference or lifecycle authority. | MERGED / STATIC VERIFIED (PR #1111, `85cd048`) | Provider activation, lifecycle changes, and broader F52 formatter work. |
 | R8 | Consolidate duplicate formatter paths behind MessageContract. | One public presentation contract and one response. | Regression/static, then canary | Lifecycle or authorization redesign. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
 | R10 | Runtime rollout, canary, and flag decision. | Governed flags; safe rollback. | DEPLOYED / RUNTIME_VERIFIED with direct evidence | Unresolved evidence or owner decisions. |
