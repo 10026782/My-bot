@@ -3572,6 +3572,11 @@ def _handle_approval_callback_impl(cq) -> None:
                 rejected_by=approver_identity.memory_key or approver_identity.user_id,
             )
             _reject_reply = _reject_result.safe_user_message
+            # R8.6: the persistent callback surface follows the canonical
+            # cancellation presenter; the callback popup remains transport-only.
+            _reject_reply = _gw_reject._render_rejection_reply(
+                _reject_contract, _reject_reply,
+            )
             _reject_after = _gw_reject._ledger.find_by_id(_reject_contract.contract_id)
             _tc8_finish_contract(_reject_context, _reject_after, failure=_reject_after is None)
             if not _reject_after or _reject_after.status != "rejected":
@@ -3590,7 +3595,7 @@ def _handle_approval_callback_impl(cq) -> None:
                     )
                 except Exception:
                     pass
-                bot.answer_callback_query(cq.id, "❌ הביטול לא נשמר")
+                bot.answer_callback_query(cq.id, "✅ התקבל")
                 return
 
         logger.info(
@@ -3610,7 +3615,7 @@ def _handle_approval_callback_impl(cq) -> None:
             )
         except Exception as e:
             logger.error("[Approval] final callback delivery failed: %s", e)
-        bot.answer_callback_query(cq.id, "🚫 בוטל")
+        bot.answer_callback_query(cq.id, "✅ התקבל")
         _promote_next_batch_item(canonical_user_id)
 
     else:

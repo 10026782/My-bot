@@ -341,7 +341,8 @@ reject_bot = MagicMock()
 with patch.object(app, "bot", reject_bot), \
      patch.object(app, "resolve_identity", return_value=requester4), \
      patch.object(app, "_flag_enabled", side_effect=_flag_on), \
-     patch("feature_flags.is_enabled", side_effect=_flag_on):
+     patch("feature_flags.is_enabled", side_effect=_flag_on), \
+     patch("feature_flags.get_unified_status_formatter_state", return_value="on"):
     app._handle_approval_callback_impl(reject_cq)
 
 reject_contract = _real_gw.find_contract(reject_proposal.contract_id)
@@ -353,7 +354,10 @@ chk("same-chat callback edits exactly one persistent final response",
     reject_bot.edit_message_text.call_count == 1)
 chk("button reject callback acknowledgment is transport-only",
     reject_bot.answer_callback_query.call_args is not None and
-    reject_bot.answer_callback_query.call_args[0][1] == "🚫 בוטל")
+    reject_bot.answer_callback_query.call_args[0][1] == "✅ התקבל")
+chk("button reject persistent response uses canonical cancellation wording",
+    reject_bot.edit_message_text.call_args is not None and
+    reject_bot.edit_message_text.call_args[0][0] == "↩️ בוטל")
 
 print("\n── Cross-chat callback finalization + replay safety ───────────")
 
