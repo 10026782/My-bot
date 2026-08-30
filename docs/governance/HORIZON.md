@@ -72,6 +72,47 @@ document, even when no code PR is created. Program relationships are explicit
 only: use `IMPLEMENTATION_OF`, `DEPENDS_ON`, `BLOCKED_BY`, `MERGED_INTO` or
 `CONTINUES`; otherwise report `UNKNOWN` / no explicit relationship.
 
+### N18 Phase 3/4 reconciliation (documentation gate, 30/08/2026)
+
+A documentation-gate pass requested a Phase 3 status write-up assuming Slice 1
+was still open and Owner Resolution for non-interactive sources was an
+unsolved prerequisite. Read-only Truth Reset against `origin/main` (git
+ancestry + running the actual test files, not just doc claims) found both
+assumptions **stale**:
+
+- **N18 Phase 2 (Shared Write Primitives) — CLOSED** (20–21/08/2026).
+- **N18 Phase 3 Slice 1 (Telegram Lead Preview → `create_lead()`) — CLOSED**
+  (PR #1043, `3de2dcf`, 27/08/2026). `test_n18_slice1_lead_preview.py` 6/6 on
+  current `origin/main`.
+- **N18 Phase 4 (Telegram approve/cancel buttons slice) — CLOSED** (PR #1065,
+  `2484f3c`, 28/08/2026) — a phase the request didn't even know had already
+  landed. `test_n18_phase4_telegram_buttons.py` 4/4,
+  `test_n18_draft_dispatch_unification.py` 8/8.
+- **Owner Resolution for non-interactive Lead sources — already implemented**,
+  not `PLANNED`: `core/source_owner_mapping.py` (`resolve_owner_user_id()`,
+  `resolve_furniture_owner_user_id()`) is consumed by
+  `core/noninteractive_lead_cutovers.py`'s `create_email_inbound_lead()`,
+  `create_furniture_inbound_lead()` and `create_voice_inbound_lead()`, all
+  three of which call the canonical `create_lead()` directly.
+- Of the 5 writers the request listed as "remaining legacy/direct": WhatsApp
+  (`lead_capture.py` and the flag-gated `core/whatsapp_lead_cutover.py`),
+  Email and Furniture are **already canonical in code today**. `LeadMemory`
+  is a post-write enrichment/update path (`core.lead_service.update_lead_fields()`)
+  and never creates a Lead — not a creation-writer gap at all. **Voice IVR**
+  is the one genuine remaining gap: its canonical path
+  (`create_voice_inbound_lead()`) exists and already resolves Owner, but a
+  live `airtable_add()` fallback still executes whenever
+  `VOICE_CANONICAL_LEAD_WRITE` is off (its current default).
+
+**ACTIVE status stands** — this is Phase 5/N18 remaining-work reconciliation,
+not a reopening. Remaining work is exactly what `N18` already said in
+`BOSS_UNIFIED_MASTER_PLAN.md` §3.5 and `ROADMAP.md`: owner-gated
+`WHATSAPP_CANONICAL_LEAD_WRITE`/`VOICE_CANONICAL_LEAD_WRITE` activation and a
+live canary, constrained today by the inability to perform a new deployment
+from this environment — a runtime-verification constraint, not a development
+freeze. Full writer-by-writer detail:
+[`N18_PHASE_3_CANONICAL_LEAD_WRITERS_SPEC.md`](../architecture/n18-canonical-lead-writers/N18_PHASE_3_CANONICAL_LEAD_WRITERS_SPEC.md).
+
 ---
 
 ## NUMBERED AUDIT SNAPSHOT — CURRENT TERMINAL STATUS
