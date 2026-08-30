@@ -6090,6 +6090,38 @@ suite passed 65 tests, and auto-ingestion passed 18/18. Compilation and
 `git diff --check` passed. DH-S4 partial-persistence observability remains
 open and runtime/deployment evidence remains `NOT ESTABLISHED`.
 
+## Decision Hub — DH-S4 Partial-Persistence Observability Remediation (30/08/2026)
+
+Truth Reset: `117ecbded44287d0d710864c647d8c4cb66e8c12` (`origin/main`).
+
+### Failure contract
+
+Decision creation is the primary write. Stakeholder persistence is required
+for full operation success; a missing stakeholder record produces a structured
+`PARTIAL` result while preserving the already-created Decision. Decision Event
+persistence is required for update/link success; a failed Event write produces
+an explicit structured `FAILED` result and cannot render full success. Inbox
+linking does not mark the Inbox `LINKED` when its required Event write fails.
+No rollback or transaction abstraction is implied.
+
+### Finding closure
+
+| Finding | Status | Evidence |
+|---|---|---|
+| DH-S4 | **CLOSED / STATIC VERIFIED** | `_create_stakeholder()` and `_create_decision_event()` now return explicit persistence outcomes; callers expose partial/failure state and suppress false full-success responses. |
+
+The result contract uses `SUCCESS`, `PARTIAL`, and `FAILED`, with record IDs and
+failed-step metadata. Existing Decision Hub scope hardening from PR #1136 is
+preserved. No permissions, flags, deployment, or runtime behavior were
+changed or claimed.
+
+### Verification
+
+Focused DH-S4, writer, and callback tests: **28 passed**. The required Decision
+Hub regression suite: **70 passed**. Auto-ingestion: **18/18 passed**. Smoke
+tests, compilation, and `git diff --check` passed. Runtime/deployment evidence
+remains `NOT ESTABLISHED`.
+
 ## F16 Media — Decision Gate (F16-M2, F16-M3) — OWNER DECISIONS RECORDED, NOT IMPLEMENTED
 
 **Truth Reset:** `origin/main` at `5c2c60131c120e326fd777892bcf3fcb177880a7` (merge of PR #1124, F16 Remediation Slice 1: M1+M4). Architecture/policy gate only — **no code, schema, or test changes in this pass.**

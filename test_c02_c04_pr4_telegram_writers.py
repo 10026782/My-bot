@@ -23,12 +23,14 @@ def test_decision_writes_use_existing_storage_port():
             identity, "recDecision", {"raw_content": "update"}
         )
 
-    assert decision["id"] == "recDecision"
-    assert event_id == "recEvent"
+    assert decision.status == "SUCCESS"
+    assert decision.record["id"] == "recDecision"
+    assert event_id.status == "SUCCESS"
+    assert event_id.record_id == "recEvent"
     assert [call.args[0] for call in storage.add.call_args_list] == [
         Tables.DECISIONS, Tables.DECISION_STAKEHOLDERS, Tables.DECISION_EVENTS,
     ]
-    assert decision["fields"][DecisionFields.STATUS]
+    assert decision.record["fields"][DecisionFields.STATUS]
 
 
 def test_cmd_decision_has_no_direct_airtable_business_writer():

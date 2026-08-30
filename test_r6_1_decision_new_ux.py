@@ -177,6 +177,23 @@ def test_decision_link_callback_writes_same_scope_event_with_tenant():
     storage.update.assert_called_once()
 
 
+def test_decision_link_event_failure_does_not_mark_inbox_fully_linked():
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
+    bot = _registered_decision_bot(identity)
+    storage = Mock()
+    storage.add.return_value = None
+    decision = {"id": "rec-d", "fields": {"tenant_id": "tenant-a", "Domain": "general", "Title": "Decision"}}
+    inbox = {"id": "rec-i", "fields": {"tenant_id": "tenant-a", "Status": "Pending", "Raw Input": "update"}}
+    outcome = {"halted_at": "delta", "result": SimpleNamespace(user_flag="", reason="")}
+    with patch.object(cmd_decision, "_decision_storage", return_value=storage), patch.object(
+        cmd_decision, "_at_get_record", side_effect=[decision, inbox]
+    ), patch("decision_pipeline.run_pipeline", return_value=outcome):
+        bot.callbacks["cb_inbox_link"](_callback("dec_inbox_link:rec-i:rec-d"))
+
+    storage.update.assert_not_called()
+    assert "לא נשמר" in bot.messages[-2][0][0]
+
+
 def test_decision_new_collects_validates_reviews_without_writing():
     bot = Mock()
     state = _state()

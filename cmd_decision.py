@@ -8,6 +8,7 @@
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -31,6 +32,20 @@ logger = logging.getLogger(__name__)
 
 _STATE_TTL_SECONDS = 30 * 60  # 30 דקות
 _ALLOWED_ROLES = DECISION_ALLOWED_ROLES
+
+
+@dataclass(frozen=True)
+class DecisionPersistenceResult:
+    """Structured write outcome; side-effect failures must not look successful."""
+
+    status: str
+    record_id: str | None = None
+    record: dict | None = None
+    failed_steps: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "SUCCESS"
 
 # ── State store — key: telegram user_id (str) ───────────────────
 _pending: dict[str, dict] = {}
@@ -430,7 +445,13 @@ def _decision_new_edit_keyboard(token: str):
     return markup
 
 
-def _decision_new_receipt(record: dict | None, title: str = "") -> str:
+def _decision_new_receipt(result: DecisionPersistenceResult | dict | None, title: str = "") -> str:
+    if isinstance(result, DecisionPersistenceResult):
+        if result.status == "PARTIAL":
+            return "⚠️ ההחלטה נשמרה חלקית; חלק מפרטי הצדדים לא נשמרו. בדוק לפני המשך."
+        record = result.record
+    else:
+        record = result
     if not record:
         return "⚠️ ההחלטה לא נשמרה."
     return f"✅ ההחלטה נשמרה: {title}" if title else "✅ ההחלטה נשמרה."
@@ -507,7 +528,9 @@ def _handle_new_step(bot, msg, state):
             bot.send_message(msg.chat.id, outcome.message)
 
 
-def _create_decision(identity, title: str, domain: str, exposure: float, stakeholder_names: list[str]) -> dict | None:
+def _create_decision(
+    identity, title: str, domain: str, exposure: float, stakeholder_names: list[str]
+) -> DecisionPersistenceResult:
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
     fields = {
         DecisionFields.TITLE: title,
@@ -519,16 +542,24 @@ def _create_decision(identity, title: str, domain: str, exposure: float, stakeho
     record_id = _decision_storage().add(Tables.DECISIONS, fields, source=source_tag)
     if not record_id:
         logger.warning(f"[DecisionHub] _create_decision failed source={source_tag}")
-        return None
+        return DecisionPersistenceResult(status="FAILED", failed_steps=("decision",))
     record = {"id": record_id, "fields": fields}
 
+    failed_steps = []
     for name in stakeholder_names:
-        _create_stakeholder(identity, _record_id(record, required=True), name)
+        stakeholder_result = _create_stakeholder(identity, _record_id(record, required=True), name)
+        if not stakeholder_result.ok:
+            failed_steps.append("stakeholder")
 
-    return record
+    return DecisionPersistenceResult(
+        status="PARTIAL" if failed_steps else "SUCCESS",
+        record_id=record_id,
+        record=record,
+        failed_steps=tuple(failed_steps),
+    )
 
 
-def _create_stakeholder(identity, decision_id: str, name: str) -> None:
+def _create_stakeholder(identity, decision_id: str, name: str) -> DecisionPersistenceResult:
     from tools.contact_resolver import resolve, ResolveStatus
 
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
@@ -545,7 +576,17 @@ def _create_stakeholder(identity, decision_id: str, name: str) -> None:
     if contact_id:
         fields[DecisionStakeholderFields.CONTACT] = [contact_id]
 
-    _decision_storage().add(Tables.DECISION_STAKEHOLDERS, fields, source=source_tag)
+    try:
+        record_id = _decision_storage().add(
+            Tables.DECISION_STAKEHOLDERS, fields, source=source_tag
+        )
+    except Exception:
+        logger.exception("[DecisionHub] stakeholder persistence failed")
+        return DecisionPersistenceResult(status="FAILED", failed_steps=("stakeholder",))
+    if not record_id:
+        logger.warning("[DecisionHub] stakeholder persistence returned no record id")
+        return DecisionPersistenceResult(status="FAILED", failed_steps=("stakeholder",))
+    return DecisionPersistenceResult(status="SUCCESS", record_id=record_id)
 
 
 # ── /decision update — Event + run_pipeline ─────────────────────
@@ -573,14 +614,16 @@ def _handle_update_step(bot, msg, state, get_identity):
     from decision_pipeline import run_pipeline
     outcome = run_pipeline(event, _record_fields(decision))
 
-    event_id = _create_decision_event(identity, _record_id(decision, required=True), event)
-    text = _format_pipeline_outcome(_record_fields(decision).get(DecisionFields.TITLE, ""), outcome, event)
+    event_result = _create_decision_event(identity, _record_id(decision, required=True), event)
+    text = _format_pipeline_outcome(
+        _record_fields(decision).get(DecisionFields.TITLE, ""), outcome, event, event_result
+    )
     bot.send_message(msg.chat.id, text, parse_mode="Markdown")
-    if event_id:
-        logger.info(f"[DecisionHub] event created id={event_id} halted_at={outcome['halted_at']}")
+    if event_result.ok:
+        logger.info(f"[DecisionHub] event created id={event_result.record_id} halted_at={outcome['halted_at']}")
 
 
-def _create_decision_event(identity, decision_id: str, event: dict) -> str | None:
+def _create_decision_event(identity, decision_id: str, event: dict) -> DecisionPersistenceResult:
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
     fields = {
         DecisionEventFields.DECISION: [decision_id],
@@ -592,7 +635,17 @@ def _create_decision_event(identity, decision_id: str, event: dict) -> str | Non
         DecisionEventFields.TENANT_ID: identity.tenant_id,
     }
     _add_trust_fields(fields, event)
-    return _decision_storage().add(Tables.DECISION_EVENTS, fields, source=source_tag)
+    try:
+        record_id = _decision_storage().add(
+            Tables.DECISION_EVENTS, fields, source=source_tag
+        )
+    except Exception:
+        logger.exception("[DecisionHub] event persistence failed")
+        return DecisionPersistenceResult(status="FAILED", failed_steps=("event",))
+    if not record_id:
+        logger.warning("[DecisionHub] event persistence returned no record id")
+        return DecisionPersistenceResult(status="FAILED", failed_steps=("event",))
+    return DecisionPersistenceResult(status="SUCCESS", record_id=record_id)
 
 
 def _add_trust_fields(fields: dict, event: dict) -> None:
@@ -615,7 +668,16 @@ def _add_trust_fields(fields: dict, event: dict) -> None:
         fields[DecisionEventFields.SUPERSEDES] = event["Supersedes"]
 
 
-def _format_pipeline_outcome(title: str, outcome: dict, event: dict) -> str:
+def _format_pipeline_outcome(
+    title: str,
+    outcome: dict,
+    event: dict,
+    persistence: DecisionPersistenceResult | None = None,
+) -> str:
+    if persistence and not persistence.ok:
+        if persistence.record_id:
+            return f"⚠️ «{title}» — העדכון נשמר חלקית; היסטוריית האירוע לא נשמרה. אין זו הצלחה מלאה."
+        return f"⚠️ «{title}» — העדכון לא הושלם; היסטוריית האירוע לא נשמרה."
     halted_at = outcome["halted_at"]
     result = outcome["result"]
     delta_type = event.get("Delta Type", "")
@@ -875,24 +937,22 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str, identity
     }
     outcome = run_pipeline(event, _record_fields(decision_record))
 
-    event_fields = {
-        DecisionEventFields.DECISION: [decision_id],
-        DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
-        DecisionEventFields.CHANNEL: event.get("Channel", DecisionEventChannel.TELEGRAM),
-        DecisionEventFields.RAW_CONTENT: raw_text,
-        DecisionEventFields.DELTA_TYPE: event.get("Delta Type", ""),
-        DecisionEventFields.STATUS: event.get("Status", DecisionEventStatus.LOGGED),
-        DecisionEventFields.TENANT_ID: identity.tenant_id,
-    }
-    _add_trust_fields(event_fields, event)
-    event_id = _decision_storage().add(Tables.DECISION_EVENTS, event_fields, source="cmd_decision:inbox_link")
+    event_result = _create_decision_event(identity, decision_id, event)
+    if not event_result.ok:
+        bot.edit_message_text(
+            "⚠️ השיוך לא הושלם במלואו; אירוע ההחלטה לא נשמר. אין זו הצלחה מלאה.",
+            call.message.chat.id,
+            call.message.message_id,
+        )
+        bot.answer_callback_query(call.id)
+        return
+    event_id = event_result.record_id
 
     patch_fields = {
         DecisionInboxFields.STATUS: DecisionInboxStatus.LINKED,
         DecisionInboxFields.SUGGESTED_DECISION: [decision_id],
     }
-    if event_id:
-        patch_fields[DecisionInboxFields.LINKED_EVENT] = [event_id]
+    patch_fields[DecisionInboxFields.LINKED_EVENT] = [event_id]
     _decision_storage().update(Tables.DECISION_INBOX, inbox_id, patch_fields, source="cmd_decision:inbox_link")
 
     title = _record_fields(decision_record).get(DecisionFields.TITLE, "")
