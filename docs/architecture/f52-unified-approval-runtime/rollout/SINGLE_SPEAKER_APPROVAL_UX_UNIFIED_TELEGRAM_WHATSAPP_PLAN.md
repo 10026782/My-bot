@@ -222,7 +222,7 @@ in PR #1091 (`40bc446`). R6.2 — Decision New DraftFlow Adoption — is
 CODE_DONE / STATIC_VERIFIED. No deployment or
 runtime claim is made here.
 
-### Current phase evidence at origin/main `3219ba6`
+### Current phase evidence at origin/main `1ff1cee`
 
 - R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
 - R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
@@ -269,8 +269,8 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R6.5 | Align `/marketing_new` to collect, edit, validate, review, confirm/cancel, and receipt. | Preserve Marketing-owned pending state and the existing execution boundary; no DraftFlow adoption. | MERGED / STATIC VERIFIED (`9133e7f` includes `779d430`) | Marketing-specific creative selection remains downstream. |
 | R6.6 | Adopt DraftFlow mechanics for `/marketing_new`. | Preserve Marketing state ownership, dynamic field semantics, validation, execution boundary, callbacks, and receipts. | MERGED / STATIC VERIFIED (`3219ba6` includes `5dafd11`) | R6 uniform consumer set closed; no UX redesign or new abstraction. |
 | R7 | Add WhatsApp interactive adapter plus text fallback. | Same semantics as Telegram; limits stay in adapter. | Static/provider tests, then runtime | Enabling outbound providers without evidence/approval. |
-| R7.1 | Add the Twilio-focused WhatsApp semantic presentation adapter. | MessageContract remains the sole presentation input; controls are optional and text fallback is complete. | CODE_DONE / STATIC_VERIFIED (PR; not current until merged) | Inbound normalization, Meta outbound, lifecycle and provider activation. |
-| R7.2 | Normalize WhatsApp button/reply payloads and text into semantic actions. | Provider IDs stay adapter-local; unknown input fails closed; no lifecycle authority is added. | CODE_DONE / STATIC_VERIFIED (PR; not current until merged) | Correlation/replay policy, Meta outbound activation, lifecycle changes. |
+| R7.1 | Add the Twilio-focused WhatsApp semantic presentation adapter. | MessageContract remains the sole presentation input; controls are optional and text fallback is complete. | MERGED / STATIC VERIFIED (PR #1102, `3c45a87`) | Inbound normalization, Meta outbound, lifecycle and provider activation. |
+| R7.2 | Normalize WhatsApp button/reply payloads and text into semantic actions. | Provider IDs stay adapter-local; unknown input fails closed; no lifecycle authority is added. | MERGED / STATIC VERIFIED (PR #1103, `1ff1cee`) | Correlation/replay policy, Meta outbound activation, lifecycle changes. |
 | R8 | Consolidate duplicate formatter paths behind MessageContract. | One public presentation contract and one response. | Regression/static, then canary | Lifecycle or authorization redesign. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
 | R10 | Runtime rollout, canary, and flag decision. | Governed flags; safe rollback. | DEPLOYED / RUNTIME_VERIFIED with direct evidence | Unresolved evidence or owner decisions. |

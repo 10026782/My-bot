@@ -16,9 +16,8 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 30/08/2026
-**Truth Reset SHA at last update:** `3219ba63d765b9aac9e24b2894f214e6471cc3ac`
-(R6 closure reconciliation; R6.1–R6.6 merge reachability and focused static
-evidence re-verified; no deployment or runtime claim)
+**Truth Reset SHA at last update:** `1ff1ceed6ec3368c9d6b1a6621e8ae9533514d73`
+(R7.2 merge reachability re-verified; no deployment or runtime claim)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -57,9 +56,11 @@ evidence and never override this map.
 `U1 — Understanding Layer Architecture` is resolved at architecture/static
 level. `UX-01 — Unified BOSS Experience` is `IN_PROGRESS`; its implementation
 program/slice is `F52 / Single-Speaker Approval UX`, which preserves UX-01 as
-the canonical identity. R3.2, R4, R4.1 and R6.1 are merged/static at the current
+the canonical identity. R3.2, R4, R4.1, R6.1 and R7.1–R7.2 are merged/static at the current
 truth-reset SHA; R5 completed a read-only gate that rejected a new abstraction.
-R6.2–R6.6 are merged/static. The R6 uniform consumer set is now closed: Lead
+R6.2–R6.6 are merged/static. R7.1 (PR #1102, `3c45a87`) added the WhatsApp
+semantic presentation adapter, and R7.2 (PR #1103, `1ff1cee`) normalized
+inbound WhatsApp actions; both remain static/merged only. The R6 uniform consumer set is now closed: Lead
 Draft, Decision New, `/update`, and `/marketing_new` are DraftFlow consumers.
 Furniture and Voice remain specialized flows and are not forced into DraftFlow.
 This is a documentation status, not a deployment or runtime claim. Detailed evidence is recorded in
