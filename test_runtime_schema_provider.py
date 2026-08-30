@@ -68,8 +68,11 @@ _EXPECTED_CACHE_TABLES = {
 for _table, _expected in _EXPECTED_CACHE_TABLES.items():
     _actual = set(_CACHE_TABLES.get(_table, []))
     chk(f"{_table}: cache entry exists", _table in _CACHE_TABLES)
-    chk(f"{_table}: cache == current contract", _actual == _expected)
-    chk(f"{_table}: no stale extras", not (_actual - _expected))
+    # schema_cache.json is now a live-fetched snapshot (Track 8B/8C), not a
+    # hand-seeded mirror of *Fields constants — it legitimately carries extra
+    # live fields (auto-generated link/lookup columns, etc.) code never
+    # references. Extra fields don't cause false "unknown field" validation
+    # rejections, so only missing fields — which would — are a real regression.
     chk(f"{_table}: no missing fields", not (_expected - _actual))
 
 

@@ -300,3 +300,34 @@ clean on every edited file.
 
 **Evidence:** commit `0f1bcd4` (this worktree, local/unpushed at time of
 writing).
+
+**Post-push CI addendum:** PR #1129's `backend-ci` run caught one real
+regression the local test sweep above missed —
+`test_runtime_schema_provider.py`'s "seed/cache contract alignment" block
+(added by `28a44c0`, "Schema Drift #1: align Airtable seed cache with
+current contract", closing `BUG_AUDIT_LOG.md`'s Audit #2 Finding #1)
+asserted *exact* set equality between `schema_cache.json`'s Leads/Assets/Media
+Files entries and the corresponding `*Fields` constants — a check that only
+held because that cache had, until this Track, always been a hand-typed
+mirror of the code contract (`"note": "seed — run schema_audit.py to refresh
+from live Airtable"`), never an actual live pull. Regenerating the whole file
+from live truth (item 1 above) legitimately introduced extra fields on those
+3 tables — the same auto-generated link/lookup columns already classified
+SAFE/EXPECTED for every other table in Track 8B/`schema_audit.py`'s
+`missing_from_code` bucket — which the strict equality check had no way to
+distinguish from a real regression. Fixed by narrowing the assertion to what
+actually matters for the seed tier's job (feeding
+`schema_validator.validate_fields()`'s unknown-field gate): extra cache
+fields never cause a false rejection, only *missing* ones would, so only "no
+missing fields" remains a hard check; "cache == contract" / "no stale extras"
+are removed as an artifact of the old hand-seeding process, not a real
+invariant. Fixed in this same commit.
+
+Also surfaced by the same CI run, and explicitly **not** fixed here as
+out of scope: `test_bug153_create_task_reconfirmation_after_rejection.py`
+fails identically (3/16 sub-checks) on a clean `origin/main` checkout
+(confirmed via a throwaway worktree at tip `8574e9a`) — a pre-existing,
+already-broken-on-`main` approval/task-reconfirmation test unrelated to
+schema/Airtable and untouched by this Track. `origin/main`'s own recent CI
+runs are red for the same reason. Flagged for separate triage; not this
+Track's scope.
