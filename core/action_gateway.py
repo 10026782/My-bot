@@ -2469,6 +2469,57 @@ class ActionGateway:
         # state == "on"
         return unified_text
 
+    def _render_approval_lifecycle_reply(
+        self, lifecycle_result: ApprovalLifecycleResult, legacy_text: str,
+    ) -> str:
+        """Render a Gateway-owned approval result through MessageContract."""
+        try:
+            from feature_flags import get_unified_status_formatter_state
+            state = get_unified_status_formatter_state()
+        except Exception:
+            state = "off"
+        if state == "off":
+            return legacy_text
+
+        from core.approval_lifecycle_message_adapter import from_approval_lifecycle_result
+        from core.message_contract import format_message_contract_with_meta
+        try:
+            contract = from_approval_lifecycle_result(lifecycle_result)
+            unified_text, contract_meta = format_message_contract_with_meta(contract)
+            meta = {
+                "message_state": contract_meta["formatter_state"],
+                "formatter_version": contract_meta["formatter_version"],
+                "fallback_used": contract_meta["fallback_used"],
+                "redaction_count": contract_meta["redaction_count"],
+                "contract_path": "message_contract",
+                "contract_version": contract_meta["version"],
+                "source_component": contract_meta["source_component"],
+            }
+        except Exception as exc:
+            logger.warning("[ActionGateway] unified approval formatter failed: %s", exc)
+            return legacy_text
+
+        if state == "shadow":
+            outcome = {
+                "completed": "executed",
+                "failed": "failed",
+                "rejected": "rejected",
+            }.get(lifecycle_result.canonical_state, "outcome_unknown")
+            fact = ActionFact(
+                tool_name="approval_lifecycle",
+                contract_id=lifecycle_result.contract_id or "",
+                outcome=outcome,
+                record_id=None,
+                error_code=None,
+                raw_tool_response={},
+                evidence_status=lifecycle_result.evidence_status,
+                evidence_ref=lifecycle_result.evidence_ref,
+                execution_verified=lifecycle_result.execution_verified,
+            )
+            self._log_shadow_comparison(fact, legacy_text, unified_text, meta)
+            return legacy_text
+        return unified_text
+
     # ── F52 PR6 — approval_pending prompt shadow rendering ───────────────
     # Same architectural gap PR5 closed for rejections, now for the
     # approval-pending notification surface: app.py's
