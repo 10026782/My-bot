@@ -100,3 +100,11 @@ def test_material_implementation_without_status_doc_blocks():
 
 def test_unrelated_asset_does_not_require_status_doc():
     assert validate_status_sync(_roadmap(_row()), repo_root=ROOT, changed_paths=["assets/logo.svg"]) == []
+
+
+def test_governance_audit_tool_does_not_require_program_status_doc():
+    assert validate_status_sync(
+        _roadmap(_row()),
+        repo_root=ROOT,
+        changed_paths=["tools/audit_dispatcher_bypass.py"],
+    ) == []
