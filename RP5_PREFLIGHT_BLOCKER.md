@@ -4,11 +4,37 @@
 **Program:** BOSS Agent Reliability and Permission Hardening — `PR-RP5` (Evidence Finalizer enforcement).
 **Source of truth:** `BOSS_AGENT_RELIABILITY_AND_PERMISSION_HARDENING_SPEC.md` §4 R4/R5, delivery-plan row `PR-RP5`; `docs/architecture/f52-unified-approval-runtime/spec/UNIFIED_MESSAGE_UX_STANDARD.md` ("Relationship to RP5 Evidence Contract").
 
+## Owner decision — 30/08/2026
+
+**Decision: CONTINUE SHADOW / KEEP ENFORCE OFF.**
+
+RP5 is accepted as `MERGED_STATIC`, but production activation of
+`FEATURE_EVIDENCE_FINALIZER=enforce` is explicitly deferred. Shadow evidence
+collection may continue; this decision authorizes no flag change, redeploy, or
+runtime behavior change.
+
+Reconsider `enforce` only after review of real production shadow evidence,
+including all nine classifications, every `mismatch=true` event, deployed-SHA
+identity, canary scope, and rollback to `shadow`/`off`, followed by separate
+owner approval.
+
+```text
+RP5 STATUS: MERGED_STATIC
+SHADOW: CONTINUE
+ENFORCE: OFF
+ACTIVATION: DEFERRED
+```
+
 ---
 
-## 1. Finding: RP5 is blocked
+## 1. Finding: RP5 enforcement activation is deferred
 
-RP5 (`FEATURE_EVIDENCE_FINALIZER=enforce` actually changing `final_reply`) cannot start yet. RP4 (`core/turn_evidence.py`, PR #362, `3a3edbe`) is code-complete and fully unit-tested (`test_turn_evidence_shadow.py`, 11 functions), but the flag is `off` in production, and `get_evidence_finalizer_state()` treats `"enforce"` as still comparison-only ("enforce remains comparison-only until RP5" — `feature_flags.py`). **There is zero production shadow evidence.** The spec's own §8 recommendation says the fallback-removal change "should land only after the shadow accumulator proves how current turns are classified" — that proof doesn't exist yet.
+At the original preflight snapshot, RP5 (`FEATURE_EVIDENCE_FINALIZER=enforce`
+actually changing `final_reply`) could not start: RP4
+(`core/turn_evidence.py`, PR #362, `3a3edbe`) was code-complete and fully
+unit-tested, but no production shadow evidence had yet been reviewed. This
+historical finding does not override the current owner decision above. The
+flag remains non-enforcing until the evidence and activation gates pass.
 
 This blocks the spec's own rollout gates: gate 3 (shadow observation) is technically satisfiable but never exercised; gate 4 (canary, "with before/after evidence") has no evidence to point to.
 

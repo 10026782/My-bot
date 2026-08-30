@@ -41,6 +41,20 @@ REQUIRED_TOOLS = {
     "calendar_get_events",
 }
 
+# Legacy literal table names to guard against hardcoding instead of using
+# Tables.* constants — historically these were common mistakes for the
+# Hebrew-named live tables (Tables.TASKS="משימות (Tasks)", Tables.DEALS=
+# "עסקאות (Deals)"). NOTE (30/08/2026, Track 8 schema/data-contract audit):
+# "Payments" is no longer purely a legacy literal — Tables.PAYMENTS is now
+# itself the canonical English name for the separate, live Canonical
+# Deal/Payment Architecture "Payments" table (see airtable_schema.py's
+# PaymentFields/commercial_crm.py), distinct from the older Hebrew
+# "תשלומים (Payments)" table. This AST check only flags a hardcoded string
+# literal "Payments" passed directly to an Airtable call (not the Tables.
+# PAYMENTS constant), so it does not block correct current usage — kept here
+# only as a reminder that "Payments" is ambiguous between two real tables and
+# any new literal-string use of it should be double-checked against which one
+# is intended.
 OLD_TABLE_NAMES = {"Tasks", "Deals", "Payments"}
 AIRTABLE_CALLS = {
     "airtable_get",

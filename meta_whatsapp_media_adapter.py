@@ -98,7 +98,7 @@ def get_meta_media_download_url(media_id: str, access_token: str) -> str | None:
     try:
         import requests
 
-        url = f"https://graph.instagram.com/v19.0/{media_id}"
+        url = f"https://graph.facebook.com/v19.0/{media_id}"
         params = {"fields": "media_product_type,url", "access_token": access_token}
 
         resp = requests.get(url, params=params, timeout=10)

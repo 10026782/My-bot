@@ -10,7 +10,7 @@ Most comments, log messages, and docstrings in this codebase are in **Hebrew** â
 
 **Before doing task work**, read and follow the canonical Context Librarian bootstrap in `AGENTS.md` when its trigger scope applies. Do not duplicate or reinterpret that contract here. Read `AI_CONTEXT.md` only when the selected bundle cites it, the selected profile requires it, or an operational-state claim cannot be resolved from other current evidence. If `AI_CONTEXT.md` is stale (>7 days per its own header), do not trust it as production proof.
 
-**Before opening a new branch**, run `bash pre_session_gate.sh "<task description>"` (see `AGENTS.md`). It blocks (`exit 1`) if there are unmerged `claude/*` branches against `origin/main`, to stop work from fragmenting across abandoned branches. Only pass `--force` if the user has explicitly approved opening a new branch anyway.
+**Before opening a new branch**, run `bash pre_session_gate.sh "<task description>"` (see `AGENTS.md`). It reports unmerged `claude/*` branches against `origin/main` as a warning by default and does not block unrelated work. Use the optional `--strict` mode only for an explicitly requested governance check; block normal work only when a branch has unique commits and materially overlaps the requested scope.
 
 ## Running locally
 

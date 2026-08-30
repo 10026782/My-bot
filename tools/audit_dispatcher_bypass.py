@@ -139,6 +139,13 @@ CROSS_TRACK: frozenset[tuple[str, int, str]] = frozenset({
 # dispatcher exception and must remain separately visible.
 ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
     ("scripts/verify_f15_staging.py", 143, "crm"),
+    # Explicit owner review for the standalone commercial Deal/Payment
+    # implementation (PR #1104): this imports only the legacy result-shape
+    # helper; all provider writes go through tools.airtable_gateway. The
+    # module has no current callers and is not registered in the dispatcher,
+    # so this is not a reachable dispatcher bypass. Keep the exact call site
+    # visible as ACCEPTED rather than hiding it in the legacy baseline.
+    ("commercial_crm.py", 37, "tools.airtable_tools"),
 })
 
 # Exact call sites verified sanctioned despite failing _is_allowed()'s

@@ -33,7 +33,7 @@ evidence and never override this map.
 
 | Initiative | Work State | Evidence State | Needs Verification | What materially advanced | What remains | Next Step |
 |---|---|---|---|---|---|---|
-| Turn Coordinator | ACTIVE | MERGED | YES | routing, lifecycle and reply-ownership work merged; TC7-B claim-authorization wiring + RP5 evidence enforcement merged 26/08/2026 (PR #1036), both ActionGateway sink sites + `mixed`-claim coverage closed 27/08/2026 (PR #1041, `09935a8`) — STATIC VERIFIED, RUNTIME NOT ESTABLISHED, RP5 off by default | RP5 production activation (owner decision) — the ActionGateway sink sites and `mixed`-claim coverage are done | owner decision on `FEATURE_EVIDENCE_FINALIZER=enforce` activation |
+| Turn Coordinator | ACTIVE | MERGED | YES | routing, lifecycle and reply-ownership work merged; TC7-B claim-authorization wiring + RP5 evidence enforcement merged 26/08/2026 (PR #1036), both ActionGateway sink sites + `mixed`-claim coverage closed 27/08/2026 (PR #1041, `09935a8`) — STATIC VERIFIED, RUNTIME NOT ESTABLISHED, RP5 off by default | RP5 shadow evidence review; enforce activation remains deferred | continue shadow; owner approval required before `FEATURE_EVIDENCE_FINALIZER=enforce` |
 | Unified Approval / ActionGateway | ACTIVE | MERGED | YES | canonical lifecycle and approval paths merged | staged rollout/runtime verification | verify approved paths |
 | Cost / Agent-Last | ACTIVE | MERGED | YES | cost attribution lineage merged | shadow telemetry and enforcement decision | validate live cost and decide progression |
 | Architecture authority / execution boundaries | ACTIVE | MERGED | YES | static authority boundaries reconciled | deployed/runtime evidence | verify deployed-SHA authority |
@@ -44,7 +44,7 @@ evidence and never override this map.
 | Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |
 | Lead / CRM canonical flow | ACTIVE | MERGED | YES | shared write infrastructure and Lead consumer merged | end-to-end canary | run live canary |
 | Decision Hub | ACTIVE | MERGED | YES | Stage 0–1 and safety fixes merged | runtime/activation evidence | verify before activation |
-| Media | ACTIVE | MERGED | YES | gateway/probe and staging artifacts merged | production activation | run deployed-SHA canary |
+| Media | ACTIVE | MERGED + PARTIALLY REMEDIATED | YES | gateway/probe and staging artifacts merged; F16-M1/M4 statically verified fixed (Remediation Slice 1, 30/08/2026) | F16-M2/M3 owner decisions + low-risk F16-M5/M6/M7 cleanup, then deployed-SHA canary | resolve F16-M2/M3 owner decisions |
 | Distribution / messaging | ACTIVE | MERGED | YES | canonical Marketing mapping exists | runtime gateway canary | run Marketing-map canary |
 | Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged; `system_health` UNKNOWN-source bug already fixed (`3e10dbc`, 18/08/2026, predates this table's prior citation of it as open) | endpoint verification (deployed-SHA) | verify endpoint |
 | Contacts Brain | PLANNED | UNKNOWN | NO | partial resolver exists | full capability and owner decision | decide whether capability is wanted |

@@ -114,3 +114,113 @@ evidence.
 
 This ledger does not claim production verification and does not replace the
 individual historical audit bodies.
+
+## Track 8 — Schema / Data-Contract Reconciliation (30/08/2026)
+
+Not one of the numbered audits #1–#24 (namespace closed above at 24) — a
+separate, later "Track" identity, same category as Track F/D-CORE/D-STRUCTURE
+in the Namespace rules. Requested as the dedicated static audit that #2/#3's
+Accepted Deferrals and `MAINTENANCE_FILE_DRIFT_REGISTER.md` Section K
+(K3/K6/K9/K10) had been waiting on. Static-only: no live Airtable access, no
+`schema_cache.json` regeneration, no runtime behavior change beyond two
+LOW-risk docs/test commits (see below).
+
+**Truth-reset basis:** `origin/main` @ `b238379ac2f8d42806df34c4a691c8c85f516537`
+(30/08/2026) — the commit the Canonical Deal/Payment Architecture track
+(Payment Terms table, Deals/Payments field additions, `commercial_crm.py`)
+landed on.
+
+**Terminal status: `CLOSED / STATIC VERIFIED / LIVE VERIFICATION NOT ESTABLISHED`.**
+
+| ID | Finding | Severity | Classification | Current impact |
+|---|---|---|---|---|
+| F1 | `commercial_crm.py`'s Deal/Payment-Term/Payment writers: every field constant resolves against `schema_cache.json`; all linked-record fields written as record-ID lists, never display-name strings | — | STATIC VERIFIED (positive) | Confirms ROADMAP's SCHEMA_DATA_CONTRACTS 30/08/2026 claims independently |
+| F2 | `smoke_tests.py`'s `OLD_TABLE_NAMES` sentinel treats literal `"Payments"` as purely legacy, but `Tables.PAYMENTS` is now also the canonical English live table for the new track, distinct from the Hebrew `תשלומים (Payments)` table | LOW | DOC DRIFT — **FIXED** | Comment-only clarification; AST check only flags hardcoded literals, not `Tables.PAYMENTS`, so behavior unaffected |
+| F3 | `test_commercial_crm.py`'s original 54 tests asserted only internal contract consistency (constant in → same constant out of the mock), never truth against `schema_cache.json` | LOW | MOCK FIDELITY GAP — **FIXED** | 43 new snapshot-fidelity checks added (97/97 passing) |
+| F4 | `PaymentFields.CONTACT = "contact_id"` (used only by `crm.py:crm_add_payment()`) is absent from the live-cached `Payments` (English) field list | LOW (would be MEDIUM if reachable) | STATIC GAP / SNAPSHOT DRIFT | `crm_add_payment()` confirmed unwired — zero references in `tool_registry.py`/`tools/dispatcher.py`/`tools/schemas.py`; called only from tests/scripts. No live agent path exercises it |
+| F5 | `data_engines._basic_kpi()` filters `Tables.DEALS`/`Tables.PAYMENTS` on a literal `"Status"` (renamed to `DEPRECATED - Status` on Deals; wrong case on Payments) and Leads on tier values `"HOT"`/`"WARM"` (live options are Hebrew) | LOW (would be MEDIUM if enabled) | STATIC GAP | `KPI_ENGINE` flag defaults off (no `_DEFAULTS` override) — matches CLAUDE.md's documented "intentionally blocked" status for `data_engines.py` |
+| F6 | `tools/airtable_tools._TABLE_FIELDS[Tables.PAYMENTS]` holds the OLD Hebrew `תשלומים (Payments)` table's field set, not the new canonical English `Payments` table's fields | LOW | STATIC GAP / SNAPSHOT DRIFT, DEAD CODE | `_sanitize_fields()`, the sole consumer, has zero callers anywhere in the repo (grep-confirmed) — inert unless revived |
+| F7 | 14 of the 29 tables `schema_audit.py`'s own `TABLE_CLASS_MAP` covers (Sessions, ActionContracts, Business Memory, Profile, Ventures, Expenses, Decision Events, Decisions, Decision Inbox, Decision Stakeholders, Marketing Demand, Marketing Publications, Emergency Stop Flags, External Execution Jobs) have zero field data in `schema_cache.json` | MEDIUM (in principle) / ACCEPTED-DEFERRED (in practice) | SNAPSHOT DRIFT | `schema_validator.validate_fields()` is a total no-op for writes to any of these 14 tables. **Confirmed pre-existing, not a regression from the 30/08/2026 commercial_crm.py commit** — `git show 28a44c0:schema_cache.json` shows the cache was already 17/19 partial before that commit added 2 more tables |
+| F8 | Live `Deals` fields `Decisions`, `Sessions`, `Role (from Owner)` not modeled in `DealFields` | INFO | DOC DRIFT (trivial) | Confirmed harmless — auto-generated inverse-link/lookup fields, no writer targets them |
+| F9 | K3 (LeadOutcome trailing-space) and K10 (owner-field fragmentation) from `MAINTENANCE_FILE_DRIFT_REGISTER.md` Section K | — | RECONFIRMED, NOT REOPENED | K3's hardening unchanged; K10's fragmentation pattern unchanged, with one new confirmed instance: `PaymentFields.OWNER="owner"` (lowercase) vs `DealFields.OWNER="Owner"` (capitalized) — both individually correct against their live-cached tables, naming inconsistency itself not resolved. See `MAINTENANCE_FILE_DRIFT_REGISTER.md` Section K for the full K1–K10 disposition table |
+
+**Closure basis:** no owned MEDIUM/HIGH static contract gap remains (F4–F6 are
+LOW-severity and unreachable/flag-off; F7 is a pre-existing, already-accepted
+snapshot limitation under #2/#3, not new). Snapshot/mock reconciliation for
+the new Deal/Payment/Payment-Term contract passes (F1, machine-verified by
+F3's added tests). All tests pass: `test_commercial_crm.py` 97/97,
+`test_airtable_gateway.py` 37/37, `smoke_tests.py` all-pass,
+`schema_audit.py --offline` run as the primary static-diff instrument.
+
+**Live verification backlog (explicitly NOT closed by static evidence):**
+- Full live schema/cache refresh for the 14 tables in F7.
+- Exact live select options for the Deal/Payment/Payment-Term enums
+  (`PaymentTermCalcType`, `PaymentTermTrigger`, `PaymentTermCadence`,
+  `VATRule`, `PaymentTermBasis`, `DealStage`, `PaymentStatus`) — the
+  checked-in cache is name-only by design and cannot carry this.
+- Live relationship/type verification anywhere the snapshot cannot encode
+  field type or a linked field's target table.
+- Whether `Tables.LEAD_EVENTS` ("Lead Events") has actually been created live
+  — the inline comment says "create manually before use" while
+  `lead_capture.py`/`core/lead_event_writer.py` actively write to it; this
+  tension is unresolved from repo state alone.
+
+None of the above are converted into static defects — they remain LIVE
+VERIFICATION REQUIRED, same disposition as #2/#3's existing runtime remainder.
+
+**Evidence:** commit `9ebaa1e` (this worktree, local/unpushed) — the two
+LOW-risk fixes (F2, F3). Full findings detail and reconciliation method: see
+this session's Track 8 audit report (not itself a repo artifact).
+
+**Not closed by this pass:** F4/F6 (dead/stale code paths) remain
+unremediated by design — fixing them touches canonical writer behavior
+(`crm.py`) or a validation dict (`tools/airtable_tools.py`), both outside a
+static-audit's Remediation Gate. Separate, explicitly-approved slices only.
+
+## Track 8B — Live Airtable Schema Reconciliation (30/08/2026)
+
+Follow-on to Track 8, closing its explicitly-deferred "live verification
+backlog" using read-only live Airtable MCP access (`list_tables_for_base`,
+`get_table_schema` — no mutating tool ever called; no code file changed;
+`schema_cache.json` not regenerated). Distinguishes two separate
+verification dimensions from here on: **STATIC VERIFIED** (Track 8, true
+since 30/08/2026) and **LIVE SCHEMA VERIFIED** (Track 8B, also true since
+30/08/2026) — the two are not the same claim and this ledger no longer
+conflates them.
+
+**Terminal status: `CLOSED / STATIC VERIFIED + LIVE SCHEMA VERIFIED (31/31 mapped tables)`.**
+
+Full table-by-table evidence, F7's individual 14-table resolution, the
+enum/select-option live verification for the Deal/Payment/Payment-Term
+contract, and two new live-only findings (N1: `PaymentStatus.CANCELLED`
+spelling drift vs live `canceled`; N2: `ContactFields.TYPE` phantom field)
+are in the dedicated report:
+[`TRACK_8B_LIVE_SCHEMA_RECONCILIATION_30082026.md`](TRACK_8B_LIVE_SCHEMA_RECONCILIATION_30082026.md).
+
+Headline resolution of F7: **all 14 tables it named (Sessions,
+ActionContracts, Business Memory, Profile, Ventures, Expenses, Decision
+Events, Decisions, Decision Inbox, Decision Stakeholders, Marketing Demand,
+Marketing Publications, Emergency Stop Flags, External Execution Jobs)
+exist live**, with real field sets that match code (11/14 exact 1:1,
+3/14 with only auto-generated extra fields). None were missing or
+misconfigured. Root cause confirmed as operational (no full live
+`schema_audit.py` run has ever completed in-session, per the cache's own
+seed note), not a scope gap in `schema_audit.py` itself. `Tables.LEAD_EVENTS`
+("Lead Events") — a separate open question from F7 — is also confirmed to
+exist live (8/8 exact field match), closing that question definitively.
+
+F4 (`PaymentFields.CONTACT = "contact_id"`) and F6
+(`tools/airtable_tools._TABLE_FIELDS[Tables.PAYMENTS]`) are now
+**live-confirmed as genuinely dead** (no such live field/table backs them);
+both remain open pending the same dead-code-deletion slice Track 8 already
+deferred — this pass adds live confirmation, not a new remediation path.
+K3 is closed specifically for the `Leads.Business Outcome` field (8/8 live
+options confirmed trimmed, no trailing spaces); its broader "verify other
+tables' option strings" claim stays open. K10 is narrowed: every Owner-link
+field across every table checked resolves to the same live Profile table
+regardless of `Owner`/`owner` casing — live-confirmed as a naming-only
+issue with zero relationship-integrity risk.
+
+`schema_cache.json` can safely be regenerated by a live `schema_audit.py`
+run whenever `AIRTABLE_API_KEY` is available in-session (see the report's
+§6 for rationale) — not run this pass, read-only mandate.

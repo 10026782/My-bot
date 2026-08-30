@@ -189,12 +189,10 @@ def test_approval_pending_missing_data_fallback_differs_new_prompt_vs_query():
     _assert_no_success_marker(query_fallback)
 
 
-def test_approval_pending_query_state_not_in_message_contract_schema():
-    """F52 D-015: approval_pending_query must stay reachable only via a direct
-    format_agent_message_*() call, never via the MessageContract crossing —
-    no MessageContract/MessageState schema change for this decision."""
+def test_approval_pending_query_state_is_in_message_contract_schema():
+    """F52 D-015: status-query wording is a distinct presentation semantic."""
     from core.message_contract import MessageState
-    assert "approval_pending_query" not in {s.value for s in MessageState}
+    assert "approval_pending_query" in {s.value for s in MessageState}
     assert "approval_pending_query" in CANONICAL_STATES
 
 

@@ -46,15 +46,8 @@ STATE_APPROVAL_PENDING        = "approval_pending"
 # F52 D-015: a NEW approval prompt (right after the user's request is queued)
 # and a STATUS QUERY about an already-pending action need distinct wording —
 # "כדי לבצע/ליצור ... נדרש אישור" vs. "יש פעולה/משימה שממתינה לאישור". This
-# state is intentionally NOT part of core.message_contract.MessageState (no
-# MessageContract schema/wiring change) — it is reachable only by a caller
-# invoking format_agent_message_with_meta() directly with this state string,
-# never via the MessageContract crossing (ActionGateway._render_pending_prompt(),
-# the only live pending caller today, keeps using STATE_APPROVAL_PENDING —
-# see _render_approval_pending() below). No live call site uses this state
-# yet; it exists so the status-query wording is defined and independently
-# testable ahead of a future migration of describe_pending_queue()/
-# query_execution_status() onto the shared formatter.
+# state is a distinct MessageContract presentation semantic; lifecycle
+# authority remains the existing pending ActionContract.
 STATE_APPROVAL_PENDING_QUERY  = "approval_pending_query"
 STATE_APPROVAL_PENDING_BATCH  = "approval_pending_batch"
 STATE_CLARIFICATION_NEEDED    = "clarification_needed"
@@ -457,11 +450,9 @@ def _render_approval_pending(norm: dict, redactor: _Redactor) -> str:
 def _render_approval_pending_query(norm: dict, redactor: _Redactor) -> str:
     """STATUS QUERY wording — rendered when the user asks about an action/task
     that is ALREADY pending approval (F52 D-015). Distinct from
-    _render_approval_pending() above, which is the new-prompt wording. Not
-    wired to a live call site yet (describe_pending_queue()/
-    query_execution_status() still render their own legacy text directly,
-    unconditionally, ahead of any flag) — this exists as the tested, canonical
-    definition for when/if that surface is migrated onto the shared formatter."""
+    _render_approval_pending() above, which is the new-prompt wording. The
+    status-query path reaches this renderer through MessageContract; other
+    legacy formatter paths remain intentionally unmigrated."""
     noun = "משימה" if norm.get("entity_type") == "task" else "פעולה"
     desc = _descriptor(norm, redactor)
     if not desc:
