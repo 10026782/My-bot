@@ -18,6 +18,7 @@ class _DecisionBot:
     def __init__(self):
         self.command = None
         self.messages = []
+        self.callbacks = {}
 
     def message_handler(self, **kwargs):
         def register(fn):
@@ -27,9 +28,18 @@ class _DecisionBot:
         return register
 
     def callback_query_handler(self, **kwargs):
-        return lambda fn: fn
+        def register(fn):
+            self.callbacks[fn.__name__] = fn
+            return fn
+        return register
 
     def send_message(self, *args, **kwargs):
+        self.messages.append((args, kwargs))
+
+    def answer_callback_query(self, *args, **kwargs):
+        self.messages.append((args, kwargs))
+
+    def edit_message_text(self, *args, **kwargs):
         self.messages.append((args, kwargs))
 
 
@@ -69,6 +79,102 @@ def test_decision_record_scope_allows_existing_role_with_matching_tenant_domain(
         "tenant_id": "tenant-a", "Domain": "real_estate", "Title": "Own",
     }}
     assert cmd_decision._decision_in_scope(decision, partner) is True
+
+
+def _callback(data, user_id="u1"):
+    return SimpleNamespace(
+        id="callback-1", data=data, from_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(chat=SimpleNamespace(id="c1"), message_id=4),
+    )
+
+
+def _registered_decision_bot(identity):
+    bot = _DecisionBot()
+    with patch("feature_flags.is_enabled", return_value=True):
+        cmd_decision.register_decision_command(bot, lambda *_: identity)
+    return bot
+
+
+def test_decision_link_callback_rejects_cross_tenant_without_writes():
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
+    bot = _registered_decision_bot(identity)
+    storage = Mock()
+    decision = {"id": "rec-d", "fields": {"tenant_id": "tenant-b", "Domain": "general"}}
+    inbox = {"id": "rec-i", "fields": {"tenant_id": "tenant-a", "Status": "Pending"}}
+    with patch.object(cmd_decision, "_decision_storage", return_value=storage), patch.object(
+        cmd_decision, "_at_get_record", side_effect=[decision, inbox]
+    ):
+        bot.callbacks["cb_inbox_link"](_callback("dec_inbox_link:rec-i:rec-d"))
+    storage.add.assert_not_called()
+    storage.update.assert_not_called()
+
+
+def test_decision_ignore_callback_rejects_unauthorized_role_without_writes():
+    identity = Identity(user_id="u1", role=Role.READONLY, tenant_id="tenant-a")
+    bot = _registered_decision_bot(identity)
+    storage = Mock()
+    with patch.object(cmd_decision, "_decision_storage", return_value=storage):
+        bot.callbacks["cb_inbox_ignore"](_callback("dec_inbox_ignore:rec-i"))
+    storage.update.assert_not_called()
+
+
+def test_decision_ignore_callback_rejects_cross_tenant_and_stale_inbox():
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
+    bot = _registered_decision_bot(identity)
+    storage = Mock()
+    foreign = {"id": "rec-i", "fields": {"tenant_id": "tenant-b", "Status": "Pending"}}
+    with patch.object(cmd_decision, "_decision_storage", return_value=storage), patch.object(
+        cmd_decision, "_at_get_record", return_value=foreign
+    ):
+        bot.callbacks["cb_inbox_ignore"](_callback("dec_inbox_ignore:rec-i"))
+    storage.update.assert_not_called()
+
+    stale = {"id": "rec-i", "fields": {"tenant_id": "tenant-a", "Status": "Linked"}}
+    with patch.object(cmd_decision, "_decision_storage", return_value=storage), patch.object(
+        cmd_decision, "_at_get_record", return_value=stale
+    ):
+        bot.callbacks["cb_inbox_ignore"](_callback("dec_inbox_ignore:rec-i"))
+    storage.update.assert_not_called()
+
+
+def test_decision_link_callback_rejects_partner_inaccessible_domain_without_writes():
+    identity = Identity(user_id="u1", role=Role.PARTNER, tenant_id="tenant-a", allowed_domains=["real_estate"])
+    bot = _registered_decision_bot(identity)
+    storage = Mock()
+    decision = {"id": "rec-d", "fields": {"tenant_id": "tenant-a", "Domain": "general"}}
+    inbox = {"id": "rec-i", "fields": {"tenant_id": "tenant-a", "Status": "Pending"}}
+    with patch.object(cmd_decision, "_decision_storage", return_value=storage), patch.object(
+        cmd_decision, "_at_get_record", side_effect=[decision, inbox]
+    ):
+        bot.callbacks["cb_inbox_link"](_callback("dec_inbox_link:rec-i:rec-d"))
+    storage.add.assert_not_called()
+    storage.update.assert_not_called()
+
+
+def test_dependent_reads_reject_unauthorized_parent_before_listing():
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
+    foreign = {"id": "rec-d", "fields": {"tenant_id": "tenant-b", "Domain": "general"}}
+    with patch.object(cmd_decision, "_at_get_record", return_value=foreign), patch.object(cmd_decision, "_at_list") as listing:
+        assert cmd_decision._list_stakeholders("rec-d", identity) == []
+        assert cmd_decision._list_decision_events("rec-d", identity) == []
+    listing.assert_not_called()
+
+
+def test_decision_link_callback_writes_same_scope_event_with_tenant():
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
+    bot = _registered_decision_bot(identity)
+    storage = Mock()
+    storage.add.return_value = "rec-event"
+    decision = {"id": "rec-d", "fields": {"tenant_id": "tenant-a", "Domain": "general", "Title": "Decision"}}
+    inbox = {"id": "rec-i", "fields": {"tenant_id": "tenant-a", "Status": "Pending", "Raw Input": "update"}}
+    outcome = {"halted_at": "delta", "result": SimpleNamespace(user_flag="", reason="")}
+    with patch.object(cmd_decision, "_decision_storage", return_value=storage), patch.object(
+        cmd_decision, "_at_get_record", side_effect=[decision, inbox]
+    ), patch("decision_pipeline.run_pipeline", return_value=outcome):
+        bot.callbacks["cb_inbox_link"](_callback("dec_inbox_link:rec-i:rec-d"))
+    event_fields = storage.add.call_args.args[1]
+    assert event_fields["tenant_id"] == "tenant-a"
+    storage.update.assert_called_once()
 
 
 def test_decision_new_collects_validates_reviews_without_writing():
