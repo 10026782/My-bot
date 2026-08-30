@@ -5945,3 +5945,60 @@ Whether `FEATURE_MEDIA_UPLOAD`/`FEATURE_VOICE_NOTES` are enabled in the deployed
 ### Terminal status
 
 **STATIC AUDIT COMPLETE / REMEDIATION REQUIRED / RUNTIME NOT ESTABLISHED.** Not `CLOSED`, not `STATIC VERIFIED` — 2 owned MEDIUM findings (F16-M2, F16-M3) remain open pending owner policy decisions, plus 1 owned HIGH (F16-M1) and 1 HIGH test defect (F16-M4) pending narrow-fix approval. `CHANGE_CONTROL_LOG.md` was reconciled against but not appended to in this pass — its format requires a completed merge/commit/PR, which does not yet exist for this audit; it will gain an entry once remediation actually merges.
+
+## F16 Media — Remediation Slice 1 (F16-M1, F16-M4) — STATIC VERIFIED
+
+**Truth Reset:** `origin/main` at `5331093637c001027fd7d9f53a2502cd9ab6e792` (merge of PR #1122, the F16 Media Findings Documentation Gate). Both findings confirmed still present on this SHA before editing — neither was already remediated upstream.
+
+Scope: only the two findings explicitly classified as narrow/isolated fixes needing no policy decision. F16-M2, F16-M3, F16-M5, F16-M6, F16-M7, F16-M8 are untouched — see Non-Scope Confirmation below.
+
+### F16-M1 — Meta media API host — CLOSED / STATIC VERIFIED
+
+- **Root cause:** `meta_whatsapp_media_adapter.py:101` built the Meta media-fetch URL against `graph.instagram.com`, which is not a valid host for the WhatsApp Business Cloud API.
+- **Fix:** changed line 101 to `https://graph.facebook.com/v19.0/{media_id}` — host only, no other change to `get_meta_media_download_url()`, no refactor of surrounding Meta/WhatsApp code.
+- **Regression test:** new `test_f16_m1_meta_media_host.py` — mocks `requests.get` (the network boundary), not `get_meta_media_download_url()` itself, so it fails if the wrong host is reintroduced. Asserts the resolved host, media-ID path placement, API version prefix, and the failure-path return value. Verified to FAIL against the pre-fix code (reintroduced `graph.instagram.com` locally, reran, saw the assertion fail) and PASS against the fix — confirmed capable of catching the regression, not just observing current behavior.
+- **Evidence:** `python3 -m pytest test_f16_m1_meta_media_host.py -v` → `2 passed`.
+
+### F16-M4 — `media_handler.py` self-test — CLOSED / STATIC VERIFIED
+
+- **Why stale/non-hermetic:** the embedded `__main__` self-test's last scenario (originally around line 961) asserted `error_code == "ASSET_SAVE_FAILED"`, a code that no longer exists anywhere in the current implementation (dead since the reservation/reconciliation rewrite). It also did not mock `find_asset_by_logical_media_key` or `drive_adapter.find_existing_by_logical_media_key`, so running it made real Airtable/Drive lookup calls instead of exercising the intended "Drive upload succeeds, Airtable save fails" branch — the real current behavior down that path is `MEDIA_FILES_PARTIAL` (see `media_handler.py:707-712`).
+- **Fix:** updated the scenario to mock every external lookup it touches — `find_asset_by_logical_media_key` (forced to `not_found`), `drive_adapter.find_existing_by_logical_media_key` (forced to `DRIVE_NOT_FOUND`), `drive_adapter._get_upload_folder`, `drive_adapter.upload_file`, and `save_asset` — and changed the assertion to the real current contract, `error_code == "MEDIA_FILES_PARTIAL"`. No production semantics were changed; the test was made to follow the existing implementation, not redefine it.
+- **Dependencies mocked:** `find_asset_by_logical_media_key`, `drive_adapter.find_existing_by_logical_media_key`, `drive_adapter._get_upload_folder`, `drive_adapter.upload_file`, `save_asset` — no real Airtable, Drive, or network access occurs anywhere in the self-test.
+- **Evidence:** `python3 media_handler.py` → prints `✅ Drive upload succeeds but Airtable save fails → MEDIA_FILES_PARTIAL (not silently ok=True); no network/lookup calls made` and `media_handler.py self-test OK`, full run in well under a second (no network stalls).
+
+### Non-Scope Confirmation
+
+No remediation performed for: **F16-M2** (MIME policy — remains `OPEN / OWNER DECISION REQUIRED`, no allowlist added, no policy chosen), **F16-M3** (durability/orphan-recovery — remains `OPEN / OWNER DECISION REQUIRED`, `mark_partial()`'s no-op-on-empty-record_id behavior is untouched), **F16-M5/M6/M7** (untouched, still open, no mechanical cleanup performed), **F16-M8** (still `CROSS-TRACK REFERENCE`, not absorbed into F16).
+
+### Verification run
+
+```
+python3 -m py_compile media_handler.py meta_whatsapp_media_adapter.py test_f16_m1_meta_media_host.py   # OK
+python3 -m pytest test_f16_m1_meta_media_host.py -v --tb=short          # 2 passed
+python3 media_handler.py                                                 # self-test OK (hermetic)
+python3 -m pytest -m "not integration and not airtable and not live" test_audit3_i3_media_contract.py test_c02_c04_finding2_pr3.py test_c02_c04_finding2_pr2.py test_c02_c04_finding1_remediation.py test_f52_g2_voice_edit_replacement.py test_f15_idempotency_retry.py test_f5_voice_idempotency_retry.py test_c02_c04_findings_7_8_remediation.py test_whatsapp_media.py --tb=short -q
+  # 3+5+9+8+5+3+3+3+6 = 45 passed
+python3 test_c90_structured_file_capture.py   # 45 passed, 0 failed (CI's actual invocation: plain python, not pytest)
+python3 test_pr0c_writer_migration.py         # 16 passed, 0 failed (same)
+python3 test_media_layer.py                   # 33/33 passed (same)
+python3 smoke_tests.py                        # PASS: all smoke checks passed
+```
+
+`test_provider_portability_envelope1d.py::test_scope_has_no_raw_provider_envelope_access` fails both before and after this change — it is a pre-existing, unrelated failure already listed in `ci.yml`'s `KNOWN_PYTEST_FAILURES` (ad_attribution.py provider-envelope scope check), not touched by F16-M1/M4.
+
+### Ledger status after this slice
+
+| ID | Status |
+|----|--------|
+| F16-M1 | **CLOSED — STATIC VERIFIED** |
+| F16-M2 | OPEN — OWNER DECISION REQUIRED |
+| F16-M3 | OPEN — OWNER DECISION REQUIRED |
+| F16-M4 | **CLOSED — STATIC VERIFIED** |
+| F16-M5 | OPEN (unchanged) |
+| F16-M6 | OPEN (unchanged) |
+| F16-M7 | OPEN (unchanged) |
+| F16-M8 | CROSS-TRACK REFERENCE (unchanged) |
+
+### Terminal status (this slice)
+
+**F16 = PARTIALLY REMEDIATED / NOT STATICALLY CLOSED.** Two narrow findings (M1, M4) are statically verified fixed; two owner-decision-gated findings (M2, M3) and three low-priority cleanup findings (M5-M7) remain open. F16 overall is not closed and no runtime/production claim is made — this is a local-fixture/static verification only.

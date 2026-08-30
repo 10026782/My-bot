@@ -943,7 +943,16 @@ if __name__ == "__main__":
         assert not no_folder.ok and no_folder.error.error_code == "DRIVE_FAILED"
     print("✅ missing/unresolvable Drive folder → DRIVE_FAILED, no crash")
 
+    from media_gateway import MediaLookupResult
+
     with patch.object(drive_adapter, "_get_upload_folder", return_value="folder123"), \
+         patch.object(_this, "find_asset_by_logical_media_key", return_value=MediaLookupResult("not_found")), \
+         patch.object(
+             drive_adapter, "find_existing_by_logical_media_key",
+             return_value=drive_adapter.DriveFile(
+                 error=drive_adapter.MediaError("DRIVE_NOT_FOUND", "no Drive object found", False)
+             ),
+         ), \
          patch.object(drive_adapter, "upload_file") as mock_upload, \
          patch.object(_this, "save_asset", return_value=None):
         mock_upload.return_value = drive_adapter.DriveFile(
@@ -958,7 +967,7 @@ if __name__ == "__main__":
             user_id="u1",
             domain="general",
         )
-        assert not save_failed.ok and save_failed.error.error_code == "ASSET_SAVE_FAILED"
-    print("✅ Drive upload succeeds but Airtable save fails → ASSET_SAVE_FAILED (not silently ok=True)")
+        assert not save_failed.ok and save_failed.error.error_code == "MEDIA_FILES_PARTIAL"
+    print("✅ Drive upload succeeds but Airtable save fails → MEDIA_FILES_PARTIAL (not silently ok=True); no network/lookup calls made")
 
     print("media_handler.py self-test OK")
