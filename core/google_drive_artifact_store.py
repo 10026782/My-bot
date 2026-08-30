@@ -40,7 +40,7 @@ class GoogleDriveArtifactStore:
         except Exception as exc:
             raise ArtifactStoreError("AUTH_REFRESH_FAILED") from exc
 
-    def put(self, *, path, identity: str, metadata: dict) -> StoredArtifact:
+    def put(self, *, path, identity: str, metadata: dict, mime_type: str | None = None) -> StoredArtifact:
         path = Path(path)
         if not path.is_file() or path.is_symlink():
             raise ArtifactStoreError("artifact_missing")
@@ -48,15 +48,16 @@ class GoogleDriveArtifactStore:
         sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         name = f"mpt_{_SAFE_ID.sub('-', identity)}.mp4"
         app_properties = {"mpt_identity": identity, "mpt_sha256": sha256}
+        resolved_mime_type = mime_type or "video/mp4"
 
         existing = self._find_existing(identity)
         if existing:
             return self._verify(existing, name=name, size=size, sha256=sha256, identity=identity)
 
-        body = {"name": name, "parents": [self.folder_id], "mimeType": "video/mp4", "appProperties": app_properties}
+        body = {"name": name, "parents": [self.folder_id], "mimeType": resolved_mime_type, "appProperties": app_properties}
         try:
             from googleapiclient.http import MediaFileUpload
-            media = MediaFileUpload(str(path), mimetype="video/mp4", resumable=True)
+            media = MediaFileUpload(str(path), mimetype=resolved_mime_type, resumable=True)
             response = None
             for attempt in range(_MAX_RETRIES + 1):
                 try:

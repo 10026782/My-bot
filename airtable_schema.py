@@ -720,10 +720,10 @@ class MediaFileFields:
 
 
 class MediaPersistenceState:
-    """Exact lifecycle values for the additive Media Files persistence field.
+    """Exact lifecycle values for the Media Files persistence field.
 
-    These constants are foundation-only in PR1. No runtime media flow reads or
-    writes them until the durable lookup/reconciliation PRs land.
+    All five states are read and written throughout media_handler.py's
+    handle_file_upload() reservation/reconciliation flow.
     """
 
     PENDING         = "PENDING"         # event accepted; upload not completed
