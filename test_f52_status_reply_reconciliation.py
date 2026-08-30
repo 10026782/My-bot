@@ -734,8 +734,38 @@ def test_describe_pending_queue_shadow_returns_legacy_and_logs_batch_state():
                      if lvl == "info" and "UnifiedStatusFormatterShadow" in m]
     assert len(shadow_lines) == 1
     assert "mapped_state=approval_pending_batch" in shadow_lines[0]
+    assert "contract_path=message_contract" in shadow_lines[0]
+    assert "contract_version=1.0" in shadow_lines[0]
     assert "record_id_leak=False" in shadow_lines[0]
     assert "contract_id_leak=False" in shadow_lines[0]
+
+
+def test_pending_batch_on_uses_message_contract_without_action_fact_authority():
+    from unittest.mock import patch
+    import core.message_contract as message_contract_module
+
+    gw, fake1 = _gw_with_task_contract("חזרה לספק")
+    fake2 = types.SimpleNamespace(
+        tool_name="airtable_add", contract_id="c-task-2", created_at=time.time(),
+        normalized_payload={"table": _TASK_CREATION_TABLE, "fields": {"Name": "עוד משימה"}},
+    )
+    try:
+        _set("on")
+        with patch.object(
+            message_contract_module,
+            "format_message_contract_with_meta",
+            wraps=message_contract_module.format_message_contract_with_meta,
+        ) as render:
+            out = gw._render_pending_batch_reply(
+                [fake1, fake2], "legacy",
+            )
+    finally:
+        _set(None)
+    assert render.call_count == 1
+    contract = render.call_args.args[0]
+    assert contract.state.value == "approval_pending_batch"
+    assert len(contract.display_payload.items) == 2
+    assert out.startswith("יש 2 פעולות שממתינות לאישור:")
 
 
 def test_query_execution_status_multi_pending_converges_with_describe_pending_queue():
