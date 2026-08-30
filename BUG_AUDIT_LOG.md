@@ -6013,21 +6013,28 @@ python3 smoke_tests.py                        # PASS: all smoke checks passed
 | ID | Finding | Status | Evidence / disposition |
 |---|---|---|---|
 | DH-S1 | Formula safety | `CLOSED / STATIC VERIFIED` | `test_bugdh03_04_formula_injection.py` 15/15; escaping/query construction verified for Decision Hub formula inputs. No runtime claim. |
-| DH-S2 | Access policy drift | `OPEN / OWNER DECISION REQUIRED` | `/home/elichazan/My-bot/cmd_decision.py:30,85,506` permits `owner`, `manager`, and `partner`; Horizon/Decision Hub policy language identifies the activation track as Owner-only. Do not resolve by assumption. |
+| DH-S2 | Access-policy wording | `DOC/POLICY DRIFT / REMEDIATION REQUIRED` | Owner decision: Decision Hub is a shared capability. Existing code permits `owner`, `manager`, and `partner` at `/home/elichazan/My-bot/cmd_decision.py:30,85,506`; this is not inherently incorrect. The stale Owner-only wording in Horizon/Master Plan is corrected by this pass. |
 | DH-S3 | Fail-closed read paths | `STATIC VERIFIED` | Decision read adapters return empty/none on read failure and prevent lookup continuation; covered by `test_decision_hub_read_adapter.py` 7/7. |
 | DH-S4 | Stakeholder/event write observability | `OPEN` | `_create_stakeholder()` ignores the add result and update flow still renders after `_create_decision_event()` returns no ID (`cmd_decision.py:472-475,523-527`). This is a partial-persistence/observability gap; no remediation in this gate. |
 
-### Explicit owner decision — `DECISION_HUB_ACCESS_POLICY`
+### Owner decision recorded — `DECISION_HUB_ACCESS_POLICY`
 
-Current code evidence is explicit: `_ALLOWED_ROLES = ("owner", "manager", "partner")`, and the command/update guards accept those roles. Current policy evidence is explicit: `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` §“Horizon 3 — Decision Hub Owner-Only” and `docs/governance/HORIZON.md` identify the activation track as Owner-only.
+Decision: **shared capability, not Owner-only**. The canonical policy is:
 
-Owner must select one option before implementation:
+```text
+capability access → permission/role check → data-scope check → action-specific authorization
+```
 
-- **A. `OWNER_ONLY`** — align code and tests to owner-only access.
-- **B. `OWNER_MANAGER_PARTNER`** — revise canonical policy language and tests to approve the current internal-role access model.
-
-Until selected, access policy is **undetermined**. No access-control behavior is changed by this entry.
+Tenant boundary, role/permission set, record/data scope, ownership where
+relevant, and action-specific policy remain separate controls. The existing
+`owner / manager / partner` role allowlist is preserved as current code
+evidence; this decision does not broaden it and does not change runtime
+behavior. Negative unauthorized-role/user tests and tenant/data-scope tests
+remain required before activation.
 
 ### Required next step
 
-Resolve `DECISION_HUB_ACCESS_POLICY`, then align code/tests/docs and remediate DH-S4 partial-persistence observability. Runtime/deployment evidence remains `NOT ESTABLISHED`; the feature flag must not be activated by this documentation gate.
+Align code/tests/docs to the shared-capability policy, add negative authorization
+and tenant/data-scope tests without broadening permissions, then remediate DH-S4
+partial-persistence observability. Runtime/deployment evidence remains
+`NOT ESTABLISHED`; the feature flag must not be activated by this gate.
