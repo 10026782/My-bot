@@ -230,6 +230,17 @@ Any synthetic ActionFact remains shadow-only observability input.
 Evidence level: **MERGED / STATIC VERIFIED** (PR #1130, merge `b9823e0`). No
 deployment or runtime claim is made here.
 
+### R8.5 Rejection/cancellation MessageContract migration
+
+R8.5 routes the existing rejection presentation through the existing
+`MessageContract` `CANCELLED` semantic. ActionContracts remain lifecycle
+authority; `reject()` and all execution boundaries are unchanged. Only
+`ActionGateway._render_rejection_reply()` changes presentation routing, while
+off/shadow/on behavior and legacy fallback wording remain bounded.
+
+Evidence level: **CODE_DONE / STATIC VERIFIED**. No deployment or runtime claim
+is made here.
+
 ## Single Speaker Rules
 
 1. Exactly one component owns the final user-facing response.
@@ -319,6 +330,10 @@ runtime claim is made here.
   presentation uses the `NO_PENDING_ACTION` MessageContract semantic through
   the canonical renderer; only the empty pending path is migrated. No
   deployment or runtime claim is made here.
+- R8.5 — **CODE_DONE / STATIC VERIFIED**: rejection/cancellation presentation
+  uses the existing `CANCELLED` MessageContract semantic through the canonical
+  renderer; lifecycle authority and execution remain unchanged. No deployment
+  or runtime claim is made here.
 
 ## Refreshed Phase Plan
 
@@ -346,6 +361,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R8.2 | Add `approval_pending_query` as a distinct MessageContract presentation semantic and migrate the single status-query path. | Lifecycle remains `pending`; ActionContract remains authority; no synthetic ActionFact business input; other legacy paths unchanged. | MERGED / STATIC VERIFIED (PR #1118, `b31f11d`) | Idle, pending-batch, fallback migration and runtime/deployment verification. |
 | R8.3 | Migrate the multi-pending batch presentation through the existing `APPROVAL_PENDING_BATCH` MessageContract semantic. | Existing pending ActionContracts remain authority; numbered-list semantics and off/shadow/on behavior remain bounded; other legacy paths unchanged. | MERGED / STATIC VERIFIED (PR #1123, `ab38b2a`) | Idle, singular pending-query, generic fallback, and runtime/deployment verification. |
 | R8.4 | Migrate the empty pending presentation through the `NO_PENDING_ACTION` MessageContract semantic. | Absence of a live pending ActionContract remains the authority; wording is preserved; off/shadow/on behavior and all other paths remain unchanged. | MERGED / STATIC VERIFIED (PR #1130, `b9823e0`) | Pending-query, pending-batch, generic fallback, and runtime/deployment verification. |
+| R8.5 | Migrate rejection/cancellation presentation through the existing `CANCELLED` MessageContract semantic. | ActionContracts remain lifecycle authority; reject/execute boundaries and off/shadow/on behavior remain unchanged. | CODE_DONE / STATIC VERIFIED | Telegram callback presentation path, generic fallback, and runtime/deployment verification. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
 | R10 | Runtime rollout, canary, and flag decision. | Governed flags; safe rollback. | DEPLOYED / RUNTIME_VERIFIED with direct evidence | Unresolved evidence or owner decisions. |
 
