@@ -42,7 +42,7 @@ def _run(monkeypatch, gateway_result=None, gateway_error=None):
     monkeypatch.setattr(lead_service, "find_existing_lead", lambda name, phone: None)
     monkeypatch.setattr("core.action_gateway.action_gateway", gateway)
     monkeypatch.setattr("tools.airtable_gateway.airtable_create", writer)
-    monkeypatch.setattr(lead_service, "_run_post_write_enrichment", lambda *args: None)
+    monkeypatch.setattr(lead_service, "_run_post_write_enrichment", lambda *args, **kwargs: None)
     result = lead_service.create_lead(
         _Identity(),
         lead_service.LeadPayload(name="Dana", phone="0501234567", domain="general"),

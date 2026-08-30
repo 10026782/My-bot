@@ -8,9 +8,16 @@
 # פקודת /done קיימת כבר כתבנית: owner מקליד פקודה מפורשת = האישור עצמו.
 # אותה תבנית כאן — בטוחה, פשוטה, ועובדת היום.
 #
-# NOTE: crm_add_contact עוקף את airtable_gateway write-path (אין tenant scope / gateway validation).
-# Mitigated: owner-only + LEAD_AUTO_CONVERT=false default + audit log added here.
-# TODO (future): migrate to gateway when crm.py is refactored.
+# F14 note: crm_add_contact() already routes through crm.py's canonical
+# find_or_create_contact() dedup gate (tools/airtable_gateway.airtable_create
+# underneath) — it is not a raw provider write. The remaining gap this file
+# used to carry was that its own call omitted `identity`, so the dedup
+# lookup ran untenant-scoped; convert_lead_to_contact() now accepts an
+# `identity` and threads it through, matching the F14-migrated dispatcher/
+# approval_actions call sites. Direct `from crm import ...` (rather than via
+# tools/dispatcher.py) remains a deliberate, tracked LEGACY import per
+# tools/audit_dispatcher_bypass.py — non-blocking, owner-only command,
+# LEAD_AUTO_CONVERT=false default, audit-logged below.
 
 import logging
 from datetime import datetime, timezone
@@ -25,11 +32,17 @@ logger = logging.getLogger(__name__)
 FLAG = "LEAD_AUTO_CONVERT"
 
 
-def convert_lead_to_contact(query: str) -> tuple[bool, str]:
+def convert_lead_to_contact(query: str, identity=None) -> tuple[bool, str]:
     """
     מחפש ליד לפי שם או טלפון, יוצר ממנו איש קשר ב-CRM,
     ומסמן את הליד כ-converted (status + converted_at).
     מחזיר (success, הודעה למשתמש).
+
+    identity: the resolved caller (owner/admin) from app.py's /convert
+    command, threaded through to crm_add_contact()'s dedup lookup (F14
+    tenant-scoped matching) and used for the audit log entry instead of a
+    fabricated system identity. None (default) preserves the prior
+    behavior for callers that don't have one (tests).
     """
     if not is_enabled(FLAG):
         return False, f"⚠️ המרת לידים כבויה. הפעל עם משתנה הסביבה {FLAG}=true."
@@ -68,7 +81,8 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
     notes = "\n".join(notes_parts)
 
     contact_result = crm_add_contact(name=name, phone=phone, notes=notes,
-                                      lead_source_id=record_id(lead, required=True))
+                                      lead_source_id=record_id(lead, required=True),
+                                      identity=identity)
     if contact_result.status not in ("created", "existing"):
         messages = {
             "ambiguous": "⚠️ נמצאו כמה אנשי קשר תואמים; ההמרה נעצרה.",
@@ -81,14 +95,17 @@ def convert_lead_to_contact(query: str) -> tuple[bool, str]:
     try:
         from tools.airtable_security import audit_log_airtable
 
-        class _SystemIdentity:
-            tenant_id = "system"
-            user_id   = "lead_conversion"
-            role      = "system"
+        audit_identity = identity
+        if audit_identity is None:
+            class _SystemIdentity:
+                tenant_id = "system"
+                user_id   = "lead_conversion"
+                role      = "system"
+            audit_identity = _SystemIdentity()
 
         audit_log_airtable(
             "create_contact_from_lead",
-            _SystemIdentity(),
+            audit_identity,
             {"table": Tables.CONTACTS},
             f"lead→contact: {name} | lead_id={record_id(lead, required=True)}",
         )
