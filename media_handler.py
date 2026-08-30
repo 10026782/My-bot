@@ -38,6 +38,68 @@ logger = logging.getLogger(__name__)
 TIER_NORMAL = 10 * 1024 * 1024
 TIER_LARGE = 50 * 1024 * 1024
 
+# ── F16-M2: canonical MIME allowlist (SSOT) ─────────────────────────
+# Ingestion is allowlist-based and fail-closed (BUG_AUDIT_LOG.md "F16 Media —
+# Decision Gate", F16-M2). Seeded only from types already evidenced as
+# supported by existing code/tests (drive_adapter._MIME_EXT,
+# whatsapp_media_adapter's extension_map, media_handler._DOCUMENT_MIME_TO_TYPE,
+# and the Media test suite) — no speculative new types added.
+ALLOWED_MEDIA_MIME_TYPES = frozenset({
+    "image/jpeg",
+    "image/png",
+    "audio/ogg",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "video/mp4",
+    "application/pdf",
+    "text/plain",
+    "text/csv",
+    "text/html",
+    "text/markdown",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+})
+
+# application/octet-stream is the pervasive "provider didn't declare a type"
+# sentinel used today by Twilio/TMA/Telegram-document fallbacks — not a real
+# content type. Accepted only when the filename extension maps to an
+# already-allowed type, so the fail-closed policy isn't silently loosened for
+# a sentinel value (mirrors the existing extension-based inference already
+# used by drive_adapter._MIME_EXT / _DOCUMENT_MIME_TO_TYPE).
+_OCTET_STREAM_EXTENSION_MIME = {
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".md": "text/markdown",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".ogg": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".mp4": "video/mp4",
+}
+
+
+def _validate_mime(mime_type: str, filename: str = "") -> MediaError | None:
+    """Fail-closed MIME gate (F16-M2). Returns a MediaError to reject, or
+    None to accept."""
+    if not mime_type:
+        return MediaError("MIME_MISSING", "סוג הקובץ לא זוהה.", False)
+    if mime_type in ALLOWED_MEDIA_MIME_TYPES:
+        return None
+    if mime_type == "application/octet-stream":
+        ext = filename[filename.rfind("."):].lower() if "." in filename else ""
+        if _OCTET_STREAM_EXTENSION_MIME.get(ext) in ALLOWED_MEDIA_MIME_TYPES:
+            return None
+    return MediaError("MIME_UNSUPPORTED", "סוג הקובץ לא נתמך.", False)
+
+
 _MEMORY_KEYWORDS = (
     "פגישה", "סיכמנו", "החלטנו", "הלקוח אמר", "חשוב",
     "לזכור", "הסכמנו", "התחייבנו", "עסקה", "מחיר סופי",
@@ -449,6 +511,10 @@ def handle_voice_note(
 ) -> MediaResult:
     """Voice-note pipeline: transcribe always -> detect action prefix -> route.
     No Drive, no Media Files record — see module header for the full decision tree."""
+    mime_error = _validate_mime(mime_type)
+    if mime_error:
+        return MediaResult(ok=False, error=mime_error)
+
     size_bytes = len(audio_bytes)
     if _classify_size(size_bytes) == "oversized":
         return MediaResult(
@@ -524,6 +590,10 @@ def handle_file_upload(
     linked_lead_id: str = "",
 ) -> MediaResult:
     """Photo/document pipeline: idempotency -> Drive -> Airtable. No STT, no memory approval."""
+    mime_error = _validate_mime(mime_type, filename)
+    if mime_error:
+        return MediaResult(ok=False, error=mime_error)
+
     size_bytes = len(file_bytes)
     tier = _classify_size(size_bytes)
     if tier == "oversized":
@@ -580,6 +650,29 @@ def handle_file_upload(
                 drive_url=drive_url,
                 last_error_code="MEDIA_FILES_PARTIAL",
             )
+            return
+        # F16-M3: no prior record exists (both reservation attempts failed
+        # before a record_id was ever assigned). Without this, the failure
+        # left zero durable trace despite a real Drive artifact existing.
+        # logical_media_key is the recovery identity: a retry's lookup
+        # (find_asset_by_logical_media_key) classifies this record
+        # "incomplete" and reconciles it rather than creating a duplicate.
+        save_asset(AssetRecord(
+            name=filename,
+            file_type=file_type,
+            mime_type=mime_type,
+            drive_url=drive_url,
+            drive_file_id=drive_file_id,
+            domain=domain,
+            source=source,
+            size_bytes=size_bytes,
+            created_by=user_id,
+            provider_media_id=file_id,
+            linked_lead_id=linked_lead_id,
+            logical_media_key=media_key,
+            persistence_state=MediaPersistenceState.PARTIAL,
+            last_error_code="MEDIA_FILES_PARTIAL",
+        ))
 
     existing_drive = drive_adapter.find_existing_by_logical_media_key(media_key, parent_folder_id)
     if existing_drive.ok:
@@ -617,6 +710,7 @@ def handle_file_upload(
             persistence_state=MediaPersistenceState.DRIVE_UPLOADED,
         ))
         if not reconciled_id:
+            mark_partial(reconciled_id, existing_drive.file_id, existing_drive.web_url)
             release_reservation()
             return MediaResult(
                 ok=False, drive_url=existing_drive.web_url, file_size_tier=tier,
