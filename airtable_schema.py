@@ -207,7 +207,6 @@ class PaymentFields:
     NAME            = "reference"
     DUE_DATE        = "date"
     DEAL            = "deal_id"
-    CONTACT         = "contact_id"
     NOTES           = "Notes"            # corrected 30/08/2026: "notes" (lowercase) never existed live — real field is "Notes" (added below)
     # Canonical Deal/Payment Architecture track (30/08/2026) — added to live Airtable
     ORIGIN_LEAD     = "Origin Lead"      # linked record — fldFdXaw6bJWJUycT
@@ -226,7 +225,6 @@ class ContactFields:
     COMPANY       = "חברה"
     EMAIL         = "אימייל"
     PHONE         = "טלפון"
-    TYPE          = "Type"            # Client | Supplier | Partner | Lawyer | Accountant
     FOLLOWUP_DATE = "תאריך פולו אפ"
     STATUS        = "סטטוס"           # חדש|בתהליכים|פולו-אפ|לא רלוונטי
     ROLE_CATEGORY = "Role Category"   # single select — ראה ContactRoleCategory
@@ -620,7 +618,7 @@ class PaymentStatus:
     PENDING         = "pending"
     RECEIVED        = "received"
     OVERDUE         = "overdue"
-    CANCELLED       = "cancelled"
+    CANCELLED       = "canceled"        # live Airtable single-select option is American spelling (Track 8B N1, 30/08/2026)
     # backwards compat — crm.py
     IN_PROGRESS     = "pending"
     PAID            = "received"

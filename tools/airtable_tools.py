@@ -2,7 +2,6 @@
 import os
 import logging
 from typing import Any
-from airtable_schema import Tables
 from guards.circuit_breaker import with_airtable_breaker
 
 logger = logging.getLogger(__name__)
@@ -35,93 +34,6 @@ def _audit(tool_name: str, table: str, record_id: str = "", result: str = "") ->
         )
     except Exception:
         pass
-
-# ══════════════════════════════════════════════════
-# סכמה — שדות חוקיים לכל טבלה
-# Claude לא ישלח שדות שלא קיימים ב-Airtable
-# ══════════════════════════════════════════════════
-
-_TABLE_FIELDS: dict[str, set[str]] = {
-    Tables.TASKS: {
-        "כותרת המשימה", "תיאור", "תאריך יעד", "סטטוס",
-        "מקושר לאנשי קשר", "מקושר לעסקאות",
-        "Domain", "Owner", "Leads",
-    },
-    Tables.CONTACTS: {
-        "שם", "חברה", "אימייל", "טלפון", "תאריך פולו אפ",
-        "סטטוס", "עסקאות (Deals)", "משימות (Tasks)",
-    },
-    Tables.DEALS: {
-        "שם העסקה", "סכום", "שלב", "תאריך סגירה",
-        "מקושר לאנשי קשר", "משימות (Tasks)", "תשלומים (Payments)",
-    },
-    Tables.EXPENSES: {
-        "שם ההוצאה", "סכום", "קטגוריה", "תאריך",
-    },
-    Tables.PAYMENTS: {
-        "אסמכתא", "סכום", "תאריך", "סטטוס", "מקושר לעסקאות",
-    },
-    Tables.DEADLINES: {
-        "שם המשימה", "סטטוס", "תאריך דדליין", "אחראי",
-        "תיאור המשימה", "עדיפות", "קישור לרשומת מכירה/יחידה", "הערות",
-    },
-    # ── Leads — lowercase keys כפי שנוצרו ב-Airtable ──
-    "Leads": {
-        "Score",
-        "Name", "phone", "status",
-        "summary", "answers", "source", "channel",
-        "memory_key", "tenant_id", "domain",
-        "notes", "next_step", "Next Action", "tier", "Temperature",
-        "utm_source", "utm_medium", "utm_campaign", "platform",
-        "deal_value", "converted_at", "campaign_source",
-        "Business Outcome", "Next Followup", "Owner",
-    },
-    # ── Projects / Units ──────────────────────────
-    "Projects": {
-        "Project Name", "Location", "Status", "Total Units",
-        "Project Type", "Start Date", "End Date",
-        "Total Cost", "Total Revenue", "Project Manager",
-        "Primary Lender", "Notes",
-    },
-    "Units": {
-        "Unit Number", "Project", "Type", "Size (sqft)", "Price",
-        "Status", "Floor", "Bedrooms", "Bathrooms", "Features",
-        "Owner/Tenant", "Availability Date", "Notes", "Sale Price (NIS)",
-    },
-    "Loans": {
-        "Loan Name/ID", "Project", "Lender", "Loan Amount",
-        "Interest Rate (%)", "Term (months)", "Start Date", "End Date",
-        "Payment Schedule", "Outstanding Balance",
-        "Next Payment Due", "Payment Status", "Notes",
-    },
-    # ── Roadmap / Boss-Game ───────────────────────
-    "Roadmap_Tasks": {
-        "Task", "World", "Quest", "Owner", "Priority",
-        "Status", "Due_Date", "Estimated_Hours", "Coins", "Blocker", "Notes",
-    },
-    "Weekly_Goals": {
-        "Goal", "World", "Target_Date", "Status",
-    },
-    "Boss_Battles": {
-        "Week", "Week_Start", "Question", "Answer", "Status", "Coins_Earned",
-    },
-    "Daily_Tasks": {
-        "Date", "Task", "Quest", "Coins", "Status", "Who",
-    },
-    "Worlds": {
-        "Name", "Number", "Status", "Boss", "Prize",
-        "Total_Coins_Target", "Coins_Earned", "Start_Date", "End_Date", "Notes",
-    },
-    "Quests": {
-        "Name", "World", "Status", "Coins", "Week_Start", "Impact", "Done_By", "Notes",
-    },
-    "Coins_Log": {
-        "Action", "Coins", "Date", "Quest", "Note",
-    },
-}
-
-# שדות שClaude ממציא ולא קיימים בשום טבלה
-_ALWAYS_FORBIDDEN = {"tenant", "owner_id", "user_id", "chat_id"}
 
 # _TABLE_ALIAS_MAP מיובא מ-airtable_schema — מקור אמת יחיד
 from airtable_schema import TABLE_ALIASES as _TABLE_ALIAS_MAP
@@ -208,31 +120,6 @@ def _resolve_linked_fields(table: str, fields: dict) -> dict:
                 )
                 del result[field]
     return result
-
-
-def _sanitize_fields(table: str, fields: dict) -> dict:
-    """
-    מסנן שדות:
-    1. הסרת שדות אסורים תמיד (tenant_id וכו')
-    2. אם הטבלה ידועה — מסנן רק לשדות בסכמה
-    מחזיר dict נקי + מוגיש לוג על מה הוסר.
-    """
-    # שלב 1 — הסרת forbidden
-    cleaned = {k: v for k, v in fields.items() if k not in _ALWAYS_FORBIDDEN}
-    removed_forbidden = set(fields) - set(cleaned)
-    if removed_forbidden:
-        logger.warning(f"airtable: הוסרו שדות אסורים: {removed_forbidden}")
-
-    # שלב 2 — סינון לפי סכמה אם קיימת
-    allowed = _TABLE_FIELDS.get(_resolve_table(table))
-    if allowed:
-        valid   = {k: v for k, v in cleaned.items() if k in allowed}
-        invalid = set(cleaned) - set(valid)
-        if invalid:
-            logger.warning(f"airtable[{table}]: שדות לא מוכרים הוסרו: {invalid}")
-        return valid
-
-    return cleaned
 
 
 def _base() -> str:

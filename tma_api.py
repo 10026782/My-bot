@@ -1374,7 +1374,7 @@ SCREEN_CONFIGS: dict[str, dict] = {
         "views": {
             "active": {
                 # הצג הכל חוץ מבוטל — חישוב Python מחלק לקטגוריות
-                "exclude_statuses": ["cancelled"],
+                "exclude_statuses": ["canceled"],  # live Airtable spelling (Track 8B N1 / Track 8C)
                 "label": "פעילים",
             },
             "overdue": {
