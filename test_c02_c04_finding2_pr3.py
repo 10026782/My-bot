@@ -141,14 +141,18 @@ def test_pending_creation_failure_recovers_tagged_drive_on_retry():
     ), patch(
         "media_handler.drive_adapter.find_existing_by_logical_media_key", return_value=_missing_drive()
     ), patch(
-        "media_handler.save_asset", side_effect=[None, None]
+        "media_handler.save_asset", side_effect=[None, None, "recPARTIAL"]
     ) as first_save, patch(
         "media_handler.drive_adapter.upload_file", return_value=drive
     ) as first_upload:
         first = media_handler.handle_file_upload(*_upload_kwargs())
 
     assert not first.ok
-    assert first_save.call_count == 2
+    # PENDING save fails, DRIVE_UPLOADED save fails, then mark_partial()
+    # (F16-M3) creates a durable PARTIAL trace record instead of losing the
+    # failure evidence — this 3rd call is the fix, not a regression.
+    assert first_save.call_count == 3
+    assert first_save.call_args_list[2].args[0].persistence_state == MediaPersistenceState.PARTIAL
     assert first_upload.call_args.kwargs["logical_media_key"] == "telegram:f1"
 
     with patch("media_handler._idem_store.is_duplicate", return_value=False), patch(
