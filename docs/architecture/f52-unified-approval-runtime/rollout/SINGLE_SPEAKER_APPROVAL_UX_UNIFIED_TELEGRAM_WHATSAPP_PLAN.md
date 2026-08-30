@@ -240,6 +240,16 @@ off/shadow/on behavior and legacy fallback wording remain bounded.
 
 Evidence level: **MERGED / STATIC VERIFIED** (PR #1134, merge `8b04a60`). No
 deployment or runtime claim is made here.
+### R8.6 Telegram inline rejection MessageContract migration
+
+R8.6 routes the Telegram inline rejection callback's persistent final message
+through the existing `CANCELLED` MessageContract presentation via the bounded
+R8.5 rejection renderer. The callback acknowledgment is transport-only. The
+existing ActionContract lookup, TC8 ownership claim, rejection transition,
+replay handling, and final delivery boundary remain unchanged.
+
+Evidence level: **CODE_DONE / STATIC VERIFIED**. No deployment or runtime claim
+is made here.
 
 ## Single Speaker Rules
 
@@ -334,6 +344,10 @@ runtime claim is made here.
   rejection/cancellation presentation uses the existing `CANCELLED`
   MessageContract semantic through the canonical renderer; lifecycle authority
   and execution remain unchanged. No deployment or runtime claim is made here.
+- R8.6 — **CODE_DONE / STATIC VERIFIED**: Telegram inline rejection's
+  persistent final message uses the existing `CANCELLED` MessageContract
+  semantic, with a transport-only callback acknowledgment. No deployment or
+  runtime claim is made here.
 
 ## Refreshed Phase Plan
 
@@ -362,6 +376,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R8.3 | Migrate the multi-pending batch presentation through the existing `APPROVAL_PENDING_BATCH` MessageContract semantic. | Existing pending ActionContracts remain authority; numbered-list semantics and off/shadow/on behavior remain bounded; other legacy paths unchanged. | MERGED / STATIC VERIFIED (PR #1123, `ab38b2a`) | Idle, singular pending-query, generic fallback, and runtime/deployment verification. |
 | R8.4 | Migrate the empty pending presentation through the `NO_PENDING_ACTION` MessageContract semantic. | Absence of a live pending ActionContract remains the authority; wording is preserved; off/shadow/on behavior and all other paths remain unchanged. | MERGED / STATIC VERIFIED (PR #1130, `b9823e0`) | Pending-query, pending-batch, generic fallback, and runtime/deployment verification. |
 | R8.5 | Migrate rejection/cancellation presentation through the existing `CANCELLED` MessageContract semantic. | ActionContracts remain lifecycle authority; reject/execute boundaries and off/shadow/on behavior remain unchanged. | MERGED / STATIC VERIFIED (PR #1134, `8b04a60`) | Telegram callback presentation path, generic fallback, and runtime/deployment verification. |
+| R8.6 | Migrate the Telegram inline rejection callback's persistent presentation through the existing `CANCELLED` MessageContract semantic. | Callback acknowledgment is transport-only; ActionContract/TC8 authority, rejection, replay, and final delivery remain unchanged. | CODE_DONE / STATIC VERIFIED | Runtime/deployment verification and unrelated callback paths. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
 | R10 | Runtime rollout, canary, and flag decision. | Governed flags; safe rollback. | DEPLOYED / RUNTIME_VERIFIED with direct evidence | Unresolved evidence or owner decisions. |
 
