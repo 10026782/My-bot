@@ -715,7 +715,7 @@ def cmd_convert(msg):
             bot.send_message(msg.chat.id, "שימוש: /convert [שם או טלפון של ליד]")
             return
 
-        ok, reply = convert_lead_to_contact(query)
+        ok, reply = convert_lead_to_contact(query, identity=identity)
         bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
         logger.info(f"[LeadConvert] /convert '{query}' → {'OK' if ok else 'skip'} by {identity.display_name}")
     except Exception as e:
