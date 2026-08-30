@@ -44,7 +44,7 @@ evidence and never override this map.
 | Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |
 | Lead / CRM canonical flow | ACTIVE | MERGED | YES | shared write infrastructure and Lead consumer merged | end-to-end canary | run live canary |
 | Decision Hub | ACTIVE | MERGED | YES | Stage 0–1 and safety fixes merged | runtime/activation evidence | verify before activation |
-| Media | ACTIVE | MERGED + STATIC AUDIT COMPLETE | YES | gateway/probe and staging artifacts merged | F16-M1/M2/M3/M4 remediation + low-risk cleanup, then deployed-SHA canary | remediate approved static findings |
+| Media | ACTIVE | MERGED + PARTIALLY REMEDIATED | YES | gateway/probe and staging artifacts merged; F16-M1/M4 statically verified fixed (Remediation Slice 1, 30/08/2026) | F16-M2/M3 owner decisions + low-risk F16-M5/M6/M7 cleanup, then deployed-SHA canary | resolve F16-M2/M3 owner decisions |
 | Distribution / messaging | ACTIVE | MERGED | YES | canonical Marketing mapping exists | runtime gateway canary | run Marketing-map canary |
 | Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged; `system_health` UNKNOWN-source bug already fixed (`3e10dbc`, 18/08/2026, predates this table's prior citation of it as open) | endpoint verification (deployed-SHA) | verify endpoint |
 | Contacts Brain | PLANNED | UNKNOWN | NO | partial resolver exists | full capability and owner decision | decide whether capability is wanted |
