@@ -3248,39 +3248,51 @@ def _handle_approval_callback_impl(cq) -> None:
             _gw_terminal_contract_id = None
             _gw_terminal_status = None
             _tc8_context = None
-            if _flag_enabled("FEATURE_ACTION_GATEWAY"):
-                try:
-                    from core.action_gateway import action_gateway as _gw_exec
-                    _contract_exec = _gw_exec.find_contract(
-                        callback_contract_id or payload.get("contract_id", "")
+            # STATIC-AUDIT-20260830 (follow-up 2/3): this lookup used to run
+            # only when FEATURE_ACTION_GATEWAY was on, so a Telegram button
+            # approval failed closed (LEGACY_GATEWAY_DISABLED, see the removed
+            # `else` branch below) even against a live, valid contract
+            # whenever the flag was off — while the free-text confirm path
+            # (BUG-056, above in this same file) already looks up
+            # ActionGateway contracts unconditionally, regardless of the
+            # flag. Mirroring BUG-056 here: the flag no longer gates whether
+            # a callback consults the Gateway, only whether propose_action()
+            # additionally enforces at proposal time (see
+            # _queue_approval_detailed_impl()). A button approval and a
+            # free-text "כן" for the same contract now behave identically
+            # regardless of FEATURE_ACTION_GATEWAY.
+            try:
+                from core.action_gateway import action_gateway as _gw_exec
+                _contract_exec = _gw_exec.find_contract(
+                    callback_contract_id or payload.get("contract_id", "")
+                )
+                if _contract_exec is None:
+                    _fp_exec = _gw_exec.compute_business_fingerprint(
+                        getattr(identity, "tenant_id", "boss_hq"),
+                        canonical_user_id or identity.memory_key, tool_name,
+                        _gw_exec.normalize_payload(tool_inputs),
                     )
-                    if _contract_exec is None:
-                        _fp_exec = _gw_exec.compute_business_fingerprint(
-                            getattr(identity, "tenant_id", "boss_hq"),
-                            canonical_user_id or identity.memory_key, tool_name,
-                            _gw_exec.normalize_payload(tool_inputs),
-                        )
-                        _contract_exec = _gw_exec._ledger.find_by_fingerprint(_fp_exec)
-                    if _contract_exec:
-                        if _contract_exec.status == "pending":
-                            _gw_contract_id = _contract_exec.contract_id
-                        elif _contract_exec.status in ("completed", "executed"):
-                            _gw_terminal_reply = _gw_exec.lifecycle_result(
-                                _contract_exec.contract_id, repeated=True,
-                            ).safe_user_message
-                            _gw_terminal_contract_id = _contract_exec.contract_id
-                            _gw_terminal_status = _contract_exec.status
-                        elif _contract_exec.status == "rejected":
-                            _gw_terminal_reply = _gw_exec.lifecycle_result(
-                                _contract_exec.contract_id, repeated=True,
-                            ).safe_user_message
-                            _gw_terminal_contract_id = _contract_exec.contract_id
-                            _gw_terminal_status = _contract_exec.status
-                except Exception as _gw_lookup_exc:
-                    logger.warning(
-                        "[ActionGateway] contract lookup failed for execution — "
-                        "falling back to legacy dispatch: %s", _gw_lookup_exc,
-                    )
+                    _contract_exec = _gw_exec._ledger.find_by_fingerprint(_fp_exec)
+                if _contract_exec:
+                    if _contract_exec.status == "pending":
+                        _gw_contract_id = _contract_exec.contract_id
+                    elif _contract_exec.status in ("completed", "executed"):
+                        _gw_terminal_reply = _gw_exec.lifecycle_result(
+                            _contract_exec.contract_id, repeated=True,
+                        ).safe_user_message
+                        _gw_terminal_contract_id = _contract_exec.contract_id
+                        _gw_terminal_status = _contract_exec.status
+                    elif _contract_exec.status == "rejected":
+                        _gw_terminal_reply = _gw_exec.lifecycle_result(
+                            _contract_exec.contract_id, repeated=True,
+                        ).safe_user_message
+                        _gw_terminal_contract_id = _contract_exec.contract_id
+                        _gw_terminal_status = _contract_exec.status
+            except Exception as _gw_lookup_exc:
+                logger.warning(
+                    "[ActionGateway] contract lookup failed for execution — "
+                    "falling back to legacy dispatch: %s", _gw_lookup_exc,
+                )
 
             if _gw_terminal_reply:
                 # BUG-POST-COMPLETION-FALLTHROUGH: the durable ActionContract for
@@ -3342,17 +3354,20 @@ def _handle_approval_callback_impl(cq) -> None:
                     _contract_after and _contract_after.status in ("completed", "executed")
                 )
                 fail_text   = result
-            elif _flag_enabled("FEATURE_ACTION_GATEWAY"):
-                # BUG-STALE-CALLBACK-FALLTHROUGH: FEATURE_ACTION_GATEWAY is on
-                # but no contract — pending or terminal — was found for this
-                # exact fingerprint at all (a stale/replayed/unlinked
+            else:
+                # BUG-STALE-CALLBACK-FALLTHROUGH, unified regardless of
+                # FEATURE_ACTION_GATEWAY (STATIC-AUDIT-20260830 follow-up
+                # 2/3): no contract — pending or terminal — was found for
+                # this exact fingerprint at all (a stale/replayed/unlinked
                 # callback, or the shadow-mode propose_action() at
-                # _queue_approval() time failed silently). Live incident:
-                # such a callback reached direct dispatch_tool() with no
-                # ActionGateway approval and no Atomic Claim behind it at
-                # all. Once the Gateway is the authority, a callback must
+                # _queue_approval() time failed silently). A callback must
                 # never execute a real write without a contract to back it —
                 # fail closed with a deterministic reply, zero dispatches.
+                # Previously this branch existed only for flag-on; flag-off
+                # instead hard-disabled the callback entirely
+                # (LEGACY_GATEWAY_DISABLED) even when a live contract DID
+                # exist, purely because the lookup above never ran — that
+                # asymmetry is what this change removes.
                 logger.warning(
                     "[ActionGateway] stale/unlinked callback: no contract found for "
                     "fingerprint — refusing legacy dispatch. action_id=%s tool=%s",
@@ -3365,29 +3380,6 @@ def _handle_approval_callback_impl(cq) -> None:
                     state_text="כבר טופלה או שאין לה רישום אישור פעיל",
                 )
                 return
-            else:
-                # A legacy approval callback must not become a second business
-                # write path when the canonical Gateway is disabled. Every
-                # tool that can reach this callback is side-effecting and is
-                # marked requires_approval in tool_registry; read-only tools
-                # never enter this approval queue.
-                logger.warning(
-                    "[ActionGateway] blocked legacy approval execution: "
-                    "gateway disabled action_id=%s tool=%s",
-                    action_id, tool_name,
-                )
-                result = {
-                    "ok": False,
-                    "tool": tool_name,
-                    "error_code": "LEGACY_GATEWAY_DISABLED",
-                    "user_message": (
-                        "❌ מסלול האישור הישן מושבת; "
-                        "נדרש ActionGateway קנוני לביצוע הפעולה."
-                    ),
-                    "evidence": {"mutation_executed": False},
-                }
-                exec_failed = True
-                fail_text = result["user_message"]
 
             if exec_failed:
                 logger.error(f"[Approval:A32] Execution failed: {tool_name} -- {fail_text}")

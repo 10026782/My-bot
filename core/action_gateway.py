@@ -1498,6 +1498,28 @@ class ActionGateway:
         # observation, and no exception/early return can leak deferred
         # state past this call either.
         self._execution_shadow_tls = threading.local()
+        # STATIC-AUDIT-20260830: approve() does a check-then-write on
+        # contract.status (find_by_id -> compare -> update_status) with no
+        # atomic guard of its own. update_status(require_status=...) can't
+        # close this here — it fails closed unconditionally once a durable
+        # repository without CAS support is active (Airtable's `transition()`
+        # is read-check-PATCH; see its own supports_atomic_conditional_
+        # transition=False), which would break every approve() call, not
+        # just concurrent ones. A striped in-process lock closes the actual
+        # race (two threads approving the same contract_id concurrently)
+        # without depending on repository CAS support. Every existing caller
+        # (app.py's TC8 turn-claim, tma_api.py's per-approval_id lock)
+        # already serializes externally; this makes that guarantee inherent
+        # to the Gateway instead of a convention every future caller must
+        # remember to repeat.
+        # ponytail: 64-way striping, not one lock per contract_id — bounded
+        # memory over the singleton's lifetime. Two different contract_ids
+        # can rarely collide onto the same stripe (harmless extra
+        # serialization); the same contract_id always maps to the same
+        # stripe (the guarantee that actually matters here). Upgrade to a
+        # real per-contract lock (with cleanup) if stripe contention ever
+        # shows up under load.
+        self._approve_locks = tuple(threading.Lock() for _ in range(64))
         # BUG-149: same dependency-injection pattern as tool_executor above —
         # keeps this module free of any memory_store import. None (the
         # default) means "no projection wired" — _emit_resolution() is then
@@ -3031,6 +3053,16 @@ class ActionGateway:
     # ── §3.3 — approve ──────────────────────────────────────────────
 
     def approve(self, contract_id: str, approver: str, approver_role: str = "") -> str:
+        """Serializes _approve_unlocked() per contract_id (striped lock — see
+        __init__'s STATIC-AUDIT-20260830 comment) so two concurrent approve()
+        calls for the SAME contract_id can never both observe "pending" and
+        both proceed to execute. All actual approval logic lives in
+        _approve_unlocked(); this wrapper only owns the concurrency guard.
+        """
+        with self._approve_locks[hash(contract_id) % len(self._approve_locks)]:
+            return self._approve_unlocked(contract_id, approver, approver_role)
+
+    def _approve_unlocked(self, contract_id: str, approver: str, approver_role: str = "") -> str:
         """
         מאשר contract ומבצע אותו.
         Fail closed: אם _tool_executor חסר — לא מחזיר success, לא מסמן executed.

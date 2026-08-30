@@ -386,6 +386,66 @@ chk("BUG-077: no override for a tool the registry does NOT require approval for"
 
 
 # ══════════════════════════════════════════════════
+# STATIC-AUDIT-20260830: approve() has no atomic require_status guard of its
+# own around the check-then-write on contract.status — safety previously
+# depended entirely on every caller externally serializing (app.py's TC8
+# turn-claim, tma_api.py's per-approval_id lock). This proves the striped
+# per-contract lock added to ActionGateway.__init__/approve() closes the
+# race INSIDE the Gateway itself, with no external lock at all: N threads
+# racing approve() on the same contract_id must dispatch exactly once.
+# ══════════════════════════════════════════════════
+print("\n── STATIC-AUDIT-20260830: concurrent approve() dispatches once ──")
+import threading as _threading
+
+gw_race = _make_gw()
+_race_dispatches = []
+_race_dispatch_lock = _threading.Lock()
+
+
+def _race_executor(tool_name, tool_inputs, contract_id):
+    # Sleep while "dispatching" to widen the race window a real network
+    # call would leave — without this, both threads could race entirely
+    # inside Python's GIL-protected bytecode steps and never overlap.
+    time.sleep(0.05)
+    with _race_dispatch_lock:
+        _race_dispatches.append(tool_name)
+    return {"ok": True, "tool": tool_name, "external_id": "rec_race"}
+
+
+gw_race._tool_executor = _race_executor
+r_race = gw_race.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:user_race",
+    tool_name="gmail_send_draft",
+    tool_inputs={"to": "race@example.com"},
+    origin_channel="telegram", origin_chat_id="tg:race",
+    requires_approval=True,
+)
+cid_race = r_race.contract_id
+
+_race_results = [None] * 8
+_race_threads = [
+    _threading.Thread(
+        target=lambda i=i: _race_results.__setitem__(
+            i, gw_race.approve(cid_race, approver="boss_hq:owner_race", approver_role="owner"),
+        ),
+    )
+    for i in range(8)
+]
+for t in _race_threads:
+    t.start()
+for t in _race_threads:
+    t.join(timeout=5)
+
+chk("RACE: exactly one dispatch across 8 concurrent approve() calls",
+    len(_race_dispatches) == 1)
+contract_after_race = gw_race.find_contract(cid_race)
+chk("RACE: contract reaches a terminal executed status",
+    contract_after_race.status in ("completed", "executed"))
+chk("RACE: at least one caller was told the contract was no longer pending",
+    any("המתנה" in (r or "") for r in _race_results))
+
+
+# ══════════════════════════════════════════════════
 print(f"\n{'='*50}")
 print(f"Action Gateway tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

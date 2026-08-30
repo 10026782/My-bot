@@ -70,7 +70,19 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     # Self-test assertions on our own formatter output (not external
     # tool-result parsing) — noise, but left in the baseline rather than
     # special-cased so the script stays a simple grep, not a scope-aware parser.
-    ("media_handler.py", 521, "emoji"),
+    # STATIC-AUDIT-20260830 (follow-up 3/3): this is a plain line-number
+    # baseline, not a stable-identity one (contrast tools/audit_dispatcher_
+    # bypass.py's _stable_identity()) — any edit above a baselined line in
+    # the same file shifts it and produces a spurious NEW + a spurious
+    # "no longer present" pair. media_handler.py grew from ~600 to ~1500+
+    # lines since the 2026-07-03 baseline was taken (F16 media layer +
+    # later additions), pushing this same self-test assert from line 521 to
+    # 852 without ever touching its content — re-verified 2026-08-30 by
+    # confirming line 521 no longer matches the pattern at all and line 852
+    # is the identical `assert "✅" in ok_text` against _format_media_
+    # result()'s own output. Updated in place rather than adding a second
+    # entry, since it's the same assert, not a new occurrence.
+    ("media_handler.py", 852, "emoji"),
     ("startup_validator.py", 353, "emoji"),
 })
 

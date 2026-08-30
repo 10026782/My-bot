@@ -6,7 +6,9 @@ through ActionGateway.approve() when a live contract exists, instead of
 re-implementing dispatch+verify by hand.
 
 Coverage:
-  1. FEATURE_ACTION_GATEWAY off -> legacy business dispatch is fail-closed.
+  1. FEATURE_ACTION_GATEWAY off + no live contract -> fail-closed, zero
+     dispatches (stale/unlinked callback — same deterministic reply as the
+     flag-on case, Test 4).
   2. Flag on + a live pending contract exists -> ActionGateway.approve() is
      used; dispatch_tool called exactly once (via the Gateway's own executor);
      contract ends "executed".
@@ -19,11 +21,19 @@ Coverage:
      contract found (shadow propose_action() failed silently, or a stale/
      replayed/unlinked callback) used to fall back to legacy dispatch_tool()
      with no ActionGateway approval and no Atomic Claim behind it at all —
-     a live incident. Now fails closed: zero dispatches, a deterministic
-     expired/already-resolved reply. The flag-off case (no Gateway
-     involvement in that mode at all) is unaffected — see Test 1.
+     a live incident. Fails closed: zero dispatches, a deterministic
+     expired/already-resolved reply.
   5. Flag on + contract found + execution fails -> contract ends "failed",
      dispatch_tool called exactly once (no retry), user notified.
+  6. STATIC-AUDIT-20260830 (follow-up 2/3): flag OFF + a live pending
+     contract exists -> the callback now executes through
+     ActionGateway.approve() exactly like Test 2, instead of hard-failing
+     with LEGACY_GATEWAY_DISABLED. Before this fix, a Telegram button click
+     against a genuinely live contract was refused solely because the
+     contract lookup never ran when the flag was off — an availability gap,
+     not a security one (it failed closed, never open), but one that made
+     button approvals strictly weaker than the free-text confirm path
+     (BUG-056), which already ignored the flag for this exact lookup.
 """
 
 from __future__ import annotations
@@ -140,9 +150,10 @@ def _run_callback(
 
 
 # ══════════════════════════════════════════════════════════════════
-# 1. Flag OFF — legacy business execution fails closed
+# 1. Flag OFF + no live contract — fail closed (same reply as Test 4's
+#    flag-on stale-callback case; STATIC-AUDIT-20260830 unified these)
 # ══════════════════════════════════════════════════════════════════
-print("\n── Test 1: FEATURE_ACTION_GATEWAY off — fail closed ─────────")
+print("\n── Test 1: FEATURE_ACTION_GATEWAY off, no contract — fail closed ─")
 
 requester = _identity("req_1", Role.OWNER)
 approver = _identity("appr_1", Role.OWNER)
@@ -154,13 +165,17 @@ calls, contract, bot = _run_callback(
 )
 chk("Test1: business dispatch_tool is never called", calls == 0)
 chk(
-    "Test1: deterministic legacy-disabled failure is returned",
+    "Test1: deterministic stale/expired failure is returned",
     bot.answer_callback_query.call_args is not None
-    and "מסלול האישור הישן מושבת" in str(bot.mock_calls),
+    and "פגה או כבר טופלה" in str(bot.mock_calls),
 )
 chk(
     "Test1: no success evidence is emitted",
-    "בוצע" not in str(bot.mock_calls),
+    "✅ הפעולה בוצעה" not in str(bot.mock_calls),
+)
+chk(
+    "Test1: reply explicitly confirms no duplicate execution happened",
+    "לא בוצעה שוב" in str(bot.mock_calls),
 )
 chk("Test1: no ActionContract is falsely completed", contract is None)
 
@@ -227,6 +242,29 @@ calls, contract, _bot = _run_callback(
 )
 chk("Test5: dispatch_tool called exactly once (no retry on failure)", calls == 1)
 chk("Test5: contract ends 'failed', never 'executed'", contract is not None and contract.status == "failed")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 6. STATIC-AUDIT-20260830 (follow-up 2/3): flag OFF + a live contract DOES
+# exist — must now execute through ActionGateway.approve() exactly like
+# Test 2, not fail with LEGACY_GATEWAY_DISABLED. This is the asymmetry fix:
+# before it, this exact scenario returned calls == 0 and a "מסלול האישור
+# הישן מושבת" message even though a real, live, approvable contract existed.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Test 6: flag off + live contract — now executes (asymmetry fix) ──")
+
+requester = _identity("req_6", Role.OWNER)
+approver = _identity("appr_6", Role.OWNER)
+calls, contract, bot = _run_callback(
+    requester=requester, approver=approver, dispatch_mock=_ok_dispatch,
+    seed_contract=True, feature_gw=False, tool_inputs={"chat_id": "req_6", "draft": "u"},
+)
+chk("Test6: dispatch_tool called exactly once even with the flag off", calls == 1)
+chk("Test6: contract ends 'executed'", contract is not None and contract.status == "executed")
+chk(
+    "Test6: no LEGACY_GATEWAY_DISABLED wording leaks through",
+    "מסלול האישור הישן מושבת" not in str(bot.mock_calls),
+)
 
 
 # ══════════════════════════════════════════════════════════════════
