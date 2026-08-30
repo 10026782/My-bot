@@ -154,6 +154,28 @@ Decision Hub מתחבר לתשתיות קיימות.
 
 אסור לבנות משהו שמתאים רק למשתמש יחיד.
 
+### 4.6 Capability access and data authorization
+
+Decision Hub is a shared product capability, not an owner-only product gate.
+Access follows this order:
+
+```text
+capability access
+  → permission / role check
+  → tenant and record/data-scope check
+  → ownership where relevant
+  → action-specific authorization
+```
+
+The current Telegram implementation is evidence of the existing boundary, not
+a permission-broadening decision: `FEATURE_DECISION_HUB` controls registration,
+`cmd_decision.py::_ALLOWED_ROLES` currently permits `owner`, `manager`, and
+`partner`, and Decision/Stakeholder/Event/Inbox records carry `tenant_id`.
+The current role allowlist must not be expanded by this policy decision. The
+record/data-scope and action-specific checks still require explicit negative
+test coverage before activation. Being allowed to use Decision Hub does not
+imply access to all Decision Hub data.
+
 ---
 
 # 5. Airtable Schema
@@ -719,6 +741,8 @@ Response:
 16. כל ספק או בלבול נכנס ל־Review Queue, לא לניחוש.
 17. כל Stage נבדק עצמאית.
 18. כל פיתוח מתחיל מקריאת מסמך זה.
+19. capability authorization and record/data authorization are separate checks.
+20. אין להניח ש-role allowlist לבדו מוכיח tenant או record scope.
 
 ---
 

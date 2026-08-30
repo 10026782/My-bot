@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 import cmd_decision
 from core.draft_flow import DraftSpec
+from identity import Identity, Role
 
 
 def _msg(text):
@@ -11,6 +12,63 @@ def _msg(text):
 
 def _state():
     return cmd_decision._new_decision_state(SimpleNamespace(tenant_id="t", user_id="u"))
+
+
+class _DecisionBot:
+    def __init__(self):
+        self.command = None
+        self.messages = []
+
+    def message_handler(self, **kwargs):
+        def register(fn):
+            if kwargs.get("commands") == ["decision"]:
+                self.command = fn
+            return fn
+        return register
+
+    def callback_query_handler(self, **kwargs):
+        return lambda fn: fn
+
+    def send_message(self, *args, **kwargs):
+        self.messages.append((args, kwargs))
+
+
+def test_decision_capability_denies_unauthorized_role_before_flow():
+    bot = _DecisionBot()
+    identity = Identity(user_id="guest-1", role=Role.READONLY, tenant_id="tenant-a")
+    with patch("feature_flags.is_enabled", return_value=True):
+        cmd_decision.register_decision_command(bot, lambda *_: identity)
+
+    bot.command(_msg("/decision status rec123"))
+
+    assert bot.messages[-1][0][1] == "אין הרשאה לפקודה זו."
+
+
+def test_decision_record_scope_rejects_other_tenant_and_partner_other_domain():
+    other_tenant = {"id": "rec-other", "fields": {
+        "tenant_id": "tenant-b", "Domain": "general", "Title": "Other",
+    }}
+    partner = Identity(
+        user_id="partner-1", role=Role.PARTNER, tenant_id="tenant-a",
+        allowed_domains=["real_estate"],
+    )
+    assert cmd_decision._decision_in_scope(other_tenant, partner) is False
+
+    same_tenant_other_domain = {"id": "rec-domain", "fields": {
+        "tenant_id": "tenant-a", "Domain": "general", "Title": "Other domain",
+    }}
+    assert cmd_decision._decision_in_scope(same_tenant_other_domain, partner) is False
+
+
+def test_decision_record_scope_allows_existing_role_with_matching_tenant_domain():
+    partner = Identity(
+        user_id="partner-1", role=Role.PARTNER, tenant_id="tenant-a",
+        allowed_domains=["real_estate"],
+    )
+    decision = {"id": "rec-own", "fields": {
+        "tenant_id": "tenant-a", "Domain": "real_estate", "Title": "Own",
+    }}
+    assert cmd_decision._decision_in_scope(decision, partner) is True
 
 
 def test_decision_new_collects_validates_reviews_without_writing():

@@ -19,7 +19,7 @@ from airtable_schema import (
     DecisionInboxFields, DecisionInboxChannel, DecisionInboxStatus,
 )
 from decision_matching import find_matching_decision, list_open_decisions
-from core.query_contract import array_contains, contains
+from core.query_contract import all_of, array_contains, contains, equals
 from core.draft_flow import DraftSpec, resolve_draft_reply
 from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_read_adapter import AirtableReadError, get_record, list_records
@@ -99,7 +99,7 @@ def register_decision_command(bot, get_identity):
             if not arg:
                 bot.send_message(msg.chat.id, "שימוש: `/decision update <decision_id>`", parse_mode="Markdown")
                 return
-            decision = _resolve_decision_ref(arg)
+            decision = _resolve_decision_ref(arg, identity)
             if not decision:
                 bot.send_message(msg.chat.id, f"❌ לא נמצאה החלטה תואמת ל-'{arg}'.")
                 return
@@ -114,7 +114,7 @@ def register_decision_command(bot, get_identity):
             if not arg:
                 bot.send_message(msg.chat.id, "שימוש: `/decision status <decision_id>`", parse_mode="Markdown")
                 return
-            decision = _resolve_decision_ref(arg)
+            decision = _resolve_decision_ref(arg, identity)
             if not decision:
                 bot.send_message(msg.chat.id, f"❌ לא נמצאה החלטה תואמת ל-'{arg}'.")
                 return
@@ -1052,15 +1052,29 @@ def _at_get_record(table: str, record_id: str) -> dict | None:
     return None
 
 
-def _resolve_decision_ref(ref: str) -> dict | None:
+def _decision_in_scope(decision: dict, identity) -> bool:
+    """Enforce tenant and record/domain scope after capability authorization."""
+    fields = _record_fields(decision) or {}
+    if fields.get(DecisionFields.TENANT_ID) != getattr(identity, "tenant_id", None):
+        return False
+    return identity.can_access_domain(fields.get(DecisionFields.DOMAIN, ""))
+
+
+def _resolve_decision_ref(ref: str, identity=None) -> dict | None:
     ref = ref.strip()
     if ref.startswith("rec"):
         record = _at_get_record(Tables.DECISIONS, ref)
-        if record:
+        if record and (identity is None or _decision_in_scope(record, identity)):
             return record
 
-    matches = _at_list(Tables.DECISIONS, contains(DecisionFields.TITLE, ref, case_sensitive=True))
-    return matches[0] if matches else None
+    query = contains(DecisionFields.TITLE, ref, case_sensitive=True)
+    if identity is not None:
+        query = all_of(query, equals(DecisionFields.TENANT_ID, identity.tenant_id))
+    matches = _at_list(Tables.DECISIONS, query)
+    for match in matches:
+        if identity is None or _decision_in_scope(match, identity):
+            return match
+    return None
 
 
 def _list_open_decisions(limit: int = 5) -> list:
