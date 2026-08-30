@@ -2674,16 +2674,30 @@ class ActionGateway:
         if state == "off":
             return legacy_text
 
-        from core.agent_message_formatter import format_agent_message_with_meta
+        from core.message_contract import (
+            MessageState,
+            TurnContextSource,
+            build_message_contract,
+            format_message_contract_with_meta,
+        )
 
         items = [{"human_summary": _describe_contract_for_reconfirmation(c)} for c in contracts]
         payload = {"items": items, "count": len(contracts)}
         try:
-            unified_text, meta = format_agent_message_with_meta("approval_pending_batch", payload)
+            message_contract = build_message_contract(
+                state=MessageState.APPROVAL_PENDING_BATCH,
+                display_payload={"items": items[:10], "count": len(contracts)},
+                reply_owner="gateway",
+                turn_context_source=TurnContextSource.LEGACY_INGRESS,
+                source_module="core.action_gateway",
+            )
+            unified_text, meta = format_message_contract_with_meta(message_contract)
         except Exception as exc:
             logger.warning("[ActionGateway] unified pending-batch formatter failed: %s", exc)
             return legacy_text
-        meta["contract_path"] = "agent_message_formatter_direct"
+        meta["contract_path"] = "message_contract"
+        meta["message_state"] = meta["formatter_state"]
+        meta["contract_version"] = meta["version"]
 
         representative = contracts[0] if contracts else None
         fact = ActionFact(
