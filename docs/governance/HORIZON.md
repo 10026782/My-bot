@@ -16,9 +16,8 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 30/08/2026
-**Truth Reset SHA at last update:** `3219ba63d765b9aac9e24b2894f214e6471cc3ac`
-(R6 closure reconciliation; R6.1–R6.6 merge reachability and focused static
-evidence re-verified; no deployment or runtime claim)
+**Truth Reset SHA at last update:** `1ff1ceed6ec3368c9d6b1a6621e8ae9533514d73`
+(R7.2 merge reachability re-verified; no deployment or runtime claim)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
