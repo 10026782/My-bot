@@ -161,6 +161,7 @@ def _material_status_docs(paths: list[str]) -> bool:
 
 def _material_implementation(paths: list[str]) -> bool:
     governance_tools = {
+        "tools/audit_dispatcher_bypass.py",
         "tools/status_sync_validator.py",
         "tools/ci_change_classifier.py",
         "tools/dev_registry_validator.py",
