@@ -11,6 +11,8 @@ throughout. Uses this repo's plain chk()/run() convention (not pytest) so
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import commercial_crm as ccrm
@@ -23,6 +25,46 @@ from airtable_schema import (
     VATRule,
 )
 from tools.airtable_gateway import AirtableCreateOutcome
+
+# Static invariant (Track 8 schema/data-contract reconciliation, 30/08/2026):
+# every field constant the three canonical writers below actually put on the
+# wire must resolve against the checked-in schema_cache.json snapshot for its
+# table. This is a name-only check (the cache carries no types/select
+# options — see schema_validator.py) but it does catch a typo'd/renamed
+# constant that the writer-contract tests above cannot, since those only
+# assert internal consistency (constant in -> same constant out of the mock),
+# never truth against the snapshot.
+_WRITER_FIELDS: dict[str, list[str]] = {
+    Tables.DEALS: [
+        DealFields.NAME, DealFields.DOMAIN, DealFields.OWNER, DealFields.STAGE,
+        DealFields.ORIGIN_LEAD, DealFields.VENTURE_LINK, DealFields.CONTACTS_LINK,
+        DealFields.AMOUNT, DealFields.PRIORITY, DealFields.RISK_LEVEL, DealFields.NOTES,
+    ],
+    Tables.PAYMENT_TERMS: [
+        PaymentTermFields.NAME, PaymentTermFields.DEAL, PaymentTermFields.CALC_TYPE,
+        PaymentTermFields.TRIGGER_TYPE, PaymentTermFields.CADENCE, PaymentTermFields.VAT_RULE,
+        PaymentTermFields.FIXED_AMOUNT, PaymentTermFields.RATE_PCT, PaymentTermFields.CALC_BASIS,
+        PaymentTermFields.TRIGGER_DATE, PaymentTermFields.TRIGGER_DELAY_DAYS,
+        PaymentTermFields.START_DATE, PaymentTermFields.END_DATE, PaymentTermFields.NOTES,
+    ],
+    Tables.PAYMENTS: [
+        PaymentFields.AMOUNT, PaymentFields.DOMAIN, PaymentFields.STATUS, PaymentFields.OWNER,
+        PaymentFields.REF, PaymentFields.DATE, PaymentFields.DEAL_LINK, PaymentFields.PAYMENT_TERM,
+        PaymentFields.ORIGIN_LEAD, PaymentFields.BASE_AMOUNT, PaymentFields.RATE_PCT,
+        PaymentFields.VAT_RULE, PaymentFields.VAT_AMOUNT, PaymentFields.TRIGGER_EVIDENCE,
+        PaymentFields.NOTES,
+    ],
+}
+
+
+def _check_snapshot_fidelity(chk) -> None:
+    cache = json.loads((Path(__file__).parent / "schema_cache.json").read_text(encoding="utf-8"))
+    tables = cache.get("tables", {})
+    for table, field_constants in _WRITER_FIELDS.items():
+        known = set(tables.get(table, []))
+        chk(f"snapshot: {table!r} present in schema_cache.json", bool(known))
+        for field in field_constants:
+            chk(f"snapshot: {table!r} field {field!r} resolves in schema_cache.json", field in known)
 
 
 def _created(record_id: str) -> AirtableCreateOutcome:
@@ -172,6 +214,8 @@ def run() -> bool:
         ccrm.create_payment(200, "general", "recOwner1", origin_lead_id="recLead9")
         fields = create.call_args.args[1]
         chk("create_payment: Origin Lead written as list when given", fields[PaymentFields.ORIGIN_LEAD] == ["recLead9"])
+
+    _check_snapshot_fidelity(chk)
 
     print(f"\n{'='*40}")
     print(f"commercial_crm Tests: {passed} passed, {failed} failed")
