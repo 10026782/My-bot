@@ -227,8 +227,8 @@ The canonical renderer preserves the existing no-pending wording. Only
 pending-batch, generic fallback, and other legacy paths remain unchanged.
 Any synthetic ActionFact remains shadow-only observability input.
 
-Evidence level: **CODE_DONE / STATIC VERIFIED**. No deployment or runtime claim
-is made here.
+Evidence level: **MERGED / STATIC VERIFIED** (PR #1130, merge `b9823e0`). No
+deployment or runtime claim is made here.
 
 ## Single Speaker Rules
 
@@ -278,7 +278,7 @@ in PR #1091 (`40bc446`). R6.2 — Decision New DraftFlow Adoption — is
 CODE_DONE / STATIC_VERIFIED. No deployment or
 runtime claim is made here.
 
-### Current phase evidence at origin/main `8574e9a`
+### Current phase evidence at origin/main `b9823e0`
 
 - R3.2 — **MERGED / STATIC VERIFIED** (`1a42a00`, merge `bca2f33`).
 - R4 — **MERGED / STATIC VERIFIED** (`3a5242d`, including PR #1065 alignment).
@@ -315,10 +315,10 @@ runtime claim is made here.
   batch presentation uses the existing `APPROVAL_PENDING_BATCH`
   MessageContract semantic; other legacy paths remain unchanged. No deployment
   or runtime claim is made here.
-- R8.4 — **CODE_DONE / STATIC VERIFIED**: the no-pending presentation uses the
-  `NO_PENDING_ACTION` MessageContract semantic through the canonical renderer;
-  only the empty pending path is migrated. No deployment or runtime claim is
-  made here.
+- R8.4 — **MERGED / STATIC VERIFIED** (PR #1130, `b9823e0`): the no-pending
+  presentation uses the `NO_PENDING_ACTION` MessageContract semantic through
+  the canonical renderer; only the empty pending path is migrated. No
+  deployment or runtime claim is made here.
 
 ## Refreshed Phase Plan
 
@@ -345,7 +345,7 @@ Each phase is one small PR; no phase changes authority or adds a state store.
 | R8 | Consolidate duplicate formatter paths behind MessageContract. | One public presentation contract and one response. | Regression/static, then canary | Lifecycle or authorization redesign. |
 | R8.2 | Add `approval_pending_query` as a distinct MessageContract presentation semantic and migrate the single status-query path. | Lifecycle remains `pending`; ActionContract remains authority; no synthetic ActionFact business input; other legacy paths unchanged. | MERGED / STATIC VERIFIED (PR #1118, `b31f11d`) | Idle, pending-batch, fallback migration and runtime/deployment verification. |
 | R8.3 | Migrate the multi-pending batch presentation through the existing `APPROVAL_PENDING_BATCH` MessageContract semantic. | Existing pending ActionContracts remain authority; numbered-list semantics and off/shadow/on behavior remain bounded; other legacy paths unchanged. | MERGED / STATIC VERIFIED (PR #1123, `ab38b2a`) | Idle, singular pending-query, generic fallback, and runtime/deployment verification. |
-| R8.4 | Migrate the empty pending presentation through the `NO_PENDING_ACTION` MessageContract semantic. | Absence of a live pending ActionContract remains the authority; wording is preserved; off/shadow/on behavior and all other paths remain unchanged. | CODE_DONE / STATIC VERIFIED | Pending-query, pending-batch, generic fallback, and runtime/deployment verification. |
+| R8.4 | Migrate the empty pending presentation through the `NO_PENDING_ACTION` MessageContract semantic. | Absence of a live pending ActionContract remains the authority; wording is preserved; off/shadow/on behavior and all other paths remain unchanged. | MERGED / STATIC VERIFIED (PR #1130, `b9823e0`) | Pending-query, pending-batch, generic fallback, and runtime/deployment verification. |
 | R9 | Close remaining non-universal PR2 paths. | One snapshot; no ambiguous mutation; no Agent continuation. | Per-path static/runtime evidence | Unrelated performance work. |
 | R10 | Runtime rollout, canary, and flag decision. | Governed flags; safe rollback. | DEPLOYED / RUNTIME_VERIFIED with direct evidence | Unresolved evidence or owner decisions. |
 
