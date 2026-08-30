@@ -36,6 +36,9 @@ def _result(**overrides) -> ApprovalLifecycleResult:
         "should_remove_keyboard": False,
         "final_response_required": True,
         "final_response_count": 1,
+        "execution_verified": None,
+        "evidence_status": None,
+        "evidence_ref": None,
     }
     values.update(overrides)
     return ApprovalLifecycleResult(**values)
@@ -72,6 +75,34 @@ def test_completed_without_evidence_never_claims_success():
     assert contract.evidence_status is None
     assert contract.evidence_ref is None
     assert contract.execution_verified is None
+
+
+def test_completed_with_verified_evidence_uses_existing_success_semantic():
+    contract = from_approval_lifecycle_result(_result(
+        canonical_state="completed",
+        execution_verified=True,
+        evidence_status="verified_write_success",
+        evidence_ref="rec_verified",
+    ))
+    assert contract.state is MessageState.SUCCESS
+    assert contract.execution_verified is True
+    assert contract.evidence_status == "verified_write_success"
+    assert contract.evidence_ref == "rec_verified"
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"execution_verified": False, "evidence_status": "verified_write_success", "evidence_ref": "rec"},
+        {"execution_verified": True, "evidence_status": "verified_write_success", "evidence_ref": None},
+        {"execution_verified": True, "evidence_status": "outcome_unknown", "evidence_ref": "rec"},
+    ],
+)
+def test_completed_without_matching_verified_evidence_stays_unknown(evidence):
+    contract = from_approval_lifecycle_result(_result(
+        canonical_state="completed", **evidence,
+    ))
+    assert contract.state is MessageState.OUTCOME_UNKNOWN
 
 
 def test_repeated_is_explicit_and_never_inferred_from_wording():

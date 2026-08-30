@@ -426,6 +426,9 @@ class ApprovalLifecycleResult:
     should_remove_keyboard: bool
     final_response_required: bool
     final_response_count: int = 1
+    execution_verified: bool | None = None
+    evidence_status: str | None = None
+    evidence_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2137,8 +2140,24 @@ class ActionGateway:
                 pending = getattr(self._execution_shadow_tls, "pending", None)
                 self._execution_shadow_tls.pending = None
                 if pending is not None:
-                    _summary, _state, _lifecycle_state = pending
+                    _summary, _state, _lifecycle_state, _evidence = pending
+                    if _evidence is not None:
+                        evidence_status = (
+                            "verified_write_success"
+                            if _evidence.result == "success" and _evidence.verified
+                            else "failure"
+                            if _evidence.result == "failed"
+                            else "outcome_unknown"
+                        )
+                        result = replace(
+                            result,
+                            execution_verified=_evidence.verified,
+                            evidence_status=evidence_status,
+                            evidence_ref=_evidence.evidence_ref or None,
+                        )
                     try:
+                        if _summary is None or _state is None:
+                            return result
                         _returned_text, _legacy_comparison = observe_shadow_finalizer(
                             result.safe_user_message, _summary,
                             state=_state, approval_prompt_sent=False,
@@ -3370,10 +3389,11 @@ class ActionGateway:
             observation happens either way: here (default) or there
             (deferred) — never both, never neither, for a resolved
             contract."""
-            if _last_evidence_summary is not None and _last_evidence_state is not None:
+            if _last_evidence_summary is not None or _last_evidence is not None:
                 if getattr(self._execution_shadow_tls, "defer", False):
                     self._execution_shadow_tls.pending = (
-                        _last_evidence_summary, _last_evidence_state, _last_lifecycle_state,
+                        _last_evidence_summary, _last_evidence_state,
+                        _last_lifecycle_state, _last_evidence,
                     )
                 else:
                     try:
