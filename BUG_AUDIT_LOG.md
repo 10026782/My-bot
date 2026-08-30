@@ -6138,3 +6138,84 @@ No `airtable_schema.py` changes are expected — `MediaFileFields`/`MediaPersist
 ### Verdict
 
 **READY FOR F16 REMEDIATION SLICE 2**
+
+---
+
+## Decision Hub — Callback / Record-Scope Findings Documentation Gate (30/08/2026)
+
+### Truth reset and verdict
+
+Truth Reset: `8574e9a1ece5831cbc9bd0b3119d64532f486a13` (`origin/main`).
+
+Canonical verdict:
+
+**PROGRAM STATUS DRIFT FOUND — CALLBACK / RECORD-SCOPE REMEDIATION REQUIRED — RUNTIME NOT ESTABLISHED**
+
+This is a documentation record of a read-only static audit. No callback,
+authorization, feature-flag, deployment, or Airtable-record change is included.
+
+### Stable findings
+
+| Finding | Severity | Status | Evidence / boundary |
+|---|---|---|---|
+| DH-CB-01 | HIGH | OPEN | `cb_inbox_pick` enumerates open decisions without tenant/domain scope. |
+| DH-CB-02 | HIGH | OPEN | `_suggest_decision_link` drops identity; matching uses global candidates. |
+| DH-CB-03 | HIGH | OPEN | Link callbacks mutate by supplied IDs without sufficient execution-time authorization. |
+| DH-CB-04 | HIGH | OPEN | Ignore callback updates Decision Inbox by ID without scope validation. |
+| DH-CB-05 | HIGH | OPEN | Inbox↔Decision linking does not enforce same-tenant consistency. |
+| DH-CB-06 | MEDIUM | OPEN | Stakeholder/event reads rely on the decision relation, without independent tenant filtering. |
+| DH-CB-07 | HIGH | OPEN | Link-generated Decision Events omit `tenant_id`. |
+| DH-CB-08 | MEDIUM/HIGH | OPEN | Auto-ingestion matching is global although tenant metadata exists. |
+| DH-CB-09 | HIGH TEST GAP | OPEN | No callback-level fail-closed proof exists. |
+
+Positive evidence is preserved: `/decision status`, `/decision update`, and
+`_resolve_decision_ref` already perform capability plus tenant/domain checks.
+The findings do not establish that the entire Decision Hub authorization layer
+is broken.
+
+### Canonical access policy
+
+Decision Hub is not owner-only. The owner decision remains:
+
+```text
+capability permission → tenant scope → domain scope → record/action authorization
+```
+
+Possession of a callback payload or record ID is never authorization. Every
+Decision Hub read or mutation must re-establish tenant, domain, record, and
+action scope at execution time. Existing `owner` / `manager` / `partner`
+capability access is not broadened by this record.
+
+### Remediation plan — next implementation slice
+
+1. Propagate `identity` / tenant context through callback paths.
+2. Scope `_list_open_decisions()`.
+3. Scope `find_matching_decision()`.
+4. Validate Inbox and Decision independently.
+5. Enforce same-tenant relationships before linking.
+6. Enforce `identity.can_access_domain()`.
+7. Write `tenant_id` on link-generated Decision Events.
+8. Harden the ignore callback.
+9. Add complete callback fail-closed tests.
+
+### Required tests / Definition of Done
+
+The remediation slice must prove: authorized same-tenant callback succeeds;
+unauthorized role is rejected; cross-tenant Decision and Inbox are rejected;
+inaccessible domain is rejected; cross-tenant Inbox→Decision linking is
+rejected; unauthorized ignore is rejected; stale/invalid callbacks fail
+closed; auto-ingestion cannot suggest an out-of-scope Decision; and every
+link-generated Decision Event carries tenant context.
+
+### Current-state projection
+
+Decision Hub remains:
+
+```text
+ACTIVE / STATIC AUDIT COMPLETE / REMEDIATION REQUIRED / RUNTIME NOT ESTABLISHED
+```
+
+Remaining work: callback enumeration and mutation scope hardening,
+tenant/domain propagation, and callback regression coverage.
+
+Next: **bounded callback/record-scope remediation**.
