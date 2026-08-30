@@ -11,6 +11,7 @@ from airtable_schema import DecisionFields, DecisionStatus, Tables
 from decision_ports import _AirtableStorageAdapter
 from tools.airtable_gateway import AirtableLookupError
 from tools.airtable_read_adapter import AirtableReadError, get_record, render_query
+from identity import Identity, Role
 
 
 def test_cmd_list_and_record_preserve_read_contract():
@@ -42,26 +43,46 @@ def test_cmd_fallbacks_and_storage_read_contract():
 
 def test_matching_formula_is_preserved_and_limit_is_local():
     records = [{"id": str(i)} for i in range(8)]
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
     with patch("tools.airtable_read_adapter.list_records", return_value=records) as read:
-        assert decision_matching.list_open_decisions(limit=3) == records[:3]
+        assert decision_matching.list_open_decisions(limit=3, identity=identity) == records[:3]
     legacy_formula = "OR(" + ",".join(
         f"{{{DecisionFields.STATUS}}}='{status}'"
         for status in (DecisionStatus.OPEN, DecisionStatus.PENDING_INPUT)
     ) + ")"
     args, kwargs = read.call_args
     assert args[0] == Tables.DECISIONS
-    assert render_query(args[1]).replace(", ", ",") == legacy_formula
+    scoped_formula = "AND(" + legacy_formula + "," + f"{{{DecisionFields.TENANT_ID}}}='tenant-a'" + ")"
+    assert render_query(args[1]).replace(", ", ",") == scoped_formula
     assert kwargs == {"limit": None, "paginate": False, "timeout": 10}
 
 
 def test_matching_empty_and_error_fallbacks():
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
     with patch("tools.airtable_read_adapter.list_records", return_value=[]):
-        assert decision_matching.list_open_decisions() == []
+        assert decision_matching.list_open_decisions(identity=identity) == []
     with patch(
         "tools.airtable_read_adapter.list_records",
         side_effect=AirtableReadError("Decisions list: HTTP 503", status_code=503),
     ):
+        assert decision_matching.list_open_decisions(identity=identity) == []
+
+
+def test_matching_requires_identity_for_database_enumeration():
+    with patch("tools.airtable_read_adapter.list_records") as read:
         assert decision_matching.list_open_decisions() == []
+    read.assert_not_called()
+
+
+def test_matching_filters_explicit_candidates_to_identity_scope():
+    identity = Identity(user_id="u1", role=Role.MANAGER, tenant_id="tenant-a")
+    candidates = [
+        {"id": "foreign", "fields": {DecisionFields.TITLE: "Target", "tenant_id": "tenant-b", "Domain": "general"}},
+        {"id": "local", "fields": {DecisionFields.TITLE: "Target", "tenant_id": "tenant-a", "Domain": "general"}},
+    ]
+    match, score = decision_matching.find_matching_decision("Target", candidates, identity=identity)
+    assert match["id"] == "local"
+    assert score == 100.0
 
 
 def test_public_record_adapter_preserves_record_or_error_contract():

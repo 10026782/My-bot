@@ -24,6 +24,7 @@ from airtable_schema import (
     Tables,
 )
 from decision_matching import find_matching_decision
+from identity import Identity
 from tma_api import record_id
 
 logger = logging.getLogger(__name__)
@@ -218,9 +219,18 @@ def create_decision_inbox_item(
 
 def suggest_decision_link(raw_content: str, metadata: dict | None = None) -> dict:
     """Suggest a Decision link using the shared channel-independent matcher."""
-    del metadata
+    metadata = metadata or {}
+    identity = metadata.get("identity")
+    if identity is None and metadata.get("tenant_id") and metadata.get("role") and metadata.get("user_id"):
+        identity = Identity(
+            user_id=str(metadata["user_id"]), role=str(metadata["role"]),
+            tenant_id=str(metadata["tenant_id"]), domain_id=str(metadata.get("domain_id", "general")),
+            allowed_domains=list(metadata.get("allowed_domains", ()) or ()),
+        )
+    if identity is None:
+        return {"decision_id": "", "match_confidence": 0.0}
     try:
-        match, score = find_matching_decision(raw_content or "")
+        match, score = find_matching_decision(raw_content or "", identity=identity)
     except Exception as e:
         logger.warning("[DecisionAutoIngestion] suggest_decision_link failed: %s", e)
         return {"decision_id": "", "match_confidence": 0.0}

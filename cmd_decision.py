@@ -18,7 +18,10 @@ from airtable_schema import (
     DecisionStakeholderFields, DecisionStakeholderRole, DecisionStakeholderPosition,
     DecisionInboxFields, DecisionInboxChannel, DecisionInboxStatus,
 )
-from decision_matching import find_matching_decision, list_open_decisions
+from decision_matching import (
+    DECISION_ALLOWED_ROLES, decision_in_scope, find_matching_decision,
+    has_decision_capability, list_open_decisions,
+)
 from core.query_contract import all_of, array_contains, contains, equals
 from core.draft_flow import DraftSpec, resolve_draft_reply
 from tma_api import record_fields as _record_fields, record_id as _record_id
@@ -27,7 +30,7 @@ from tools.airtable_read_adapter import AirtableReadError, get_record, list_reco
 logger = logging.getLogger(__name__)
 
 _STATE_TTL_SECONDS = 30 * 60  # 30 דקות
-_ALLOWED_ROLES = ("owner", "manager", "partner")
+_ALLOWED_ROLES = DECISION_ALLOWED_ROLES
 
 # ── State store — key: telegram user_id (str) ───────────────────
 _pending: dict[str, dict] = {}
@@ -59,6 +62,30 @@ def _decision_storage():
     """Canonical Decision domain storage boundary for Telegram writes."""
     from decision_ports import build_default_ports
     return build_default_ports().storage
+
+
+def _callback_identity(get_identity, call):
+    try:
+        identity = get_identity("telegram", str(call.from_user.id))
+    except Exception as exc:
+        logger.warning("[DecisionHub] callback identity error: %s", exc)
+        return None
+    return identity if has_decision_capability(identity) else None
+
+
+def _reject_callback(bot, call) -> None:
+    bot.answer_callback_query(call.id, "לא ניתן לבצע פעולה זו.")
+
+
+def _inbox_in_scope(inbox: dict | None, identity) -> bool:
+    return bool(
+        inbox and has_decision_capability(identity)
+        and _record_fields(inbox).get(DecisionInboxFields.TENANT_ID) == getattr(identity, "tenant_id", None)
+    )
+
+
+def _inbox_callback_valid(inbox: dict | None) -> bool:
+    return bool(inbox and _record_fields(inbox).get(DecisionInboxFields.STATUS) == DecisionInboxStatus.PENDING)
 
 
 # ── Registration ─────────────────────────────────────────────────
@@ -118,7 +145,7 @@ def register_decision_command(bot, get_identity):
             if not decision:
                 bot.send_message(msg.chat.id, f"❌ לא נמצאה החלטה תואמת ל-'{arg}'.")
                 return
-            bot.send_message(msg.chat.id, _format_decision_card(decision), parse_mode="Markdown")
+            bot.send_message(msg.chat.id, _format_decision_card(decision, identity), parse_mode="Markdown")
 
         else:
             bot.send_message(
@@ -200,18 +227,35 @@ def register_decision_command(bot, get_identity):
     # ── inline: forward→Inbox — שיוך מוצע / נבחר ────────────────
     @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_inbox_link:"))
     def cb_inbox_link(call):
-        _, inbox_id, decision_id = call.data.split(":", 2)
-        _link_inbox_to_decision(bot, call, inbox_id, decision_id)
+        parts = (call.data or "").split(":", 2)
+        identity = _callback_identity(get_identity, call)
+        if len(parts) != 3 or not identity:
+            _reject_callback(bot, call)
+            return
+        _link_inbox_to_decision(bot, call, parts[1], parts[2], identity)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_inbox_pick_choice:"))
     def cb_inbox_pick_choice(call):
-        _, inbox_id, decision_id = call.data.split(":", 2)
-        _link_inbox_to_decision(bot, call, inbox_id, decision_id)
+        parts = (call.data or "").split(":", 2)
+        identity = _callback_identity(get_identity, call)
+        if len(parts) != 3 or not identity:
+            _reject_callback(bot, call)
+            return
+        _link_inbox_to_decision(bot, call, parts[1], parts[2], identity)
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_inbox_pick:"))
     def cb_inbox_pick(call):
-        inbox_id = call.data.split(":", 1)[1]
-        open_decisions = _list_open_decisions()
+        parts = (call.data or "").split(":", 1)
+        identity = _callback_identity(get_identity, call)
+        if len(parts) != 2 or not identity:
+            _reject_callback(bot, call)
+            return
+        inbox_id = parts[1]
+        inbox_record = _at_get_record(Tables.DECISION_INBOX, inbox_id)
+        if not _inbox_in_scope(inbox_record, identity) or not _inbox_callback_valid(inbox_record):
+            _reject_callback(bot, call)
+            return
+        open_decisions = _list_open_decisions(identity=identity)
         if not open_decisions:
             bot.answer_callback_query(call.id, "אין החלטות פתוחות.")
             return
@@ -225,7 +269,16 @@ def register_decision_command(bot, get_identity):
 
     @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_inbox_ignore:"))
     def cb_inbox_ignore(call):
-        inbox_id = call.data.split(":", 1)[1]
+        parts = (call.data or "").split(":", 1)
+        identity = _callback_identity(get_identity, call)
+        if len(parts) != 2 or not identity:
+            _reject_callback(bot, call)
+            return
+        inbox_id = parts[1]
+        inbox_record = _at_get_record(Tables.DECISION_INBOX, inbox_id)
+        if not _inbox_in_scope(inbox_record, identity) or not _inbox_callback_valid(inbox_record):
+            _reject_callback(bot, call)
+            return
         _decision_storage().update(
             Tables.DECISION_INBOX, inbox_id,
             {DecisionInboxFields.STATUS: DecisionInboxStatus.REJECTED},
@@ -583,7 +636,7 @@ def _format_pipeline_outcome(title: str, outcome: dict, event: dict) -> str:
 
 # ── /decision status — כרטיס מלא ────────────────────────────────
 
-def _format_decision_card(decision: dict) -> str:
+def _format_decision_card(decision: dict, identity=None) -> str:
     f = _record_fields(decision)
     title = f.get(DecisionFields.TITLE, "")
     draft = f.get(DecisionFields.CURRENT_DRAFT, "")
@@ -593,7 +646,7 @@ def _format_decision_card(decision: dict) -> str:
     risk_no = f.get(DecisionFields.RISK_IF_NO, "")
     missing = f.get(DecisionFields.MISSING_INFO, "")
 
-    stakeholders = _list_stakeholders(_record_id(decision, required=True))
+    stakeholders = _list_stakeholders(_record_id(decision, required=True), identity)
     stakeholder_lines = "\n".join(
         f"  {_position_emoji(_record_fields(s).get(DecisionStakeholderFields.POSITION))} "
         f"{_linked_label(_record_fields(s).get(DecisionStakeholderFields.CONTACT))} — "
@@ -601,7 +654,7 @@ def _format_decision_card(decision: dict) -> str:
         for s in stakeholders
     ) or "  (אין)"
 
-    events = _list_decision_events(_record_id(decision, required=True))
+    events = _list_decision_events(_record_id(decision, required=True), identity)
     latest = _latest_event(_record_id(decision, required=True), events)
     latest_summary = _record_fields(latest).get(DecisionEventFields.AI_SUMMARY, "") if latest else "(אין)"
     attention_summary = ""
@@ -775,12 +828,12 @@ def _handle_forward(bot, msg, identity) -> None:
         bot.send_message(msg.chat.id, "⚠️ ההודעה המועברת לא נשמרה. בדוק logs.")
         return
 
-    _suggest_decision_link(bot, msg.chat.id, inbox_id, text)
+    _suggest_decision_link(bot, msg.chat.id, inbox_id, text, identity)
 
 
-def _suggest_decision_link(bot, chat_id, inbox_id: str, text: str) -> None:
+def _suggest_decision_link(bot, chat_id, inbox_id: str, text: str, identity) -> None:
     """התאמה + הצעת שיוך — tail משותף בין _handle_forward ו-route_file_to_decision_inbox."""
-    match, score = _find_matching_decision(text)
+    match, score = _find_matching_decision(text, identity)
 
     if match and score > 60:
         title = _record_fields(match).get(DecisionFields.TITLE, "")
@@ -788,7 +841,7 @@ def _suggest_decision_link(bot, chat_id, inbox_id: str, text: str) -> None:
         bot.send_message(chat_id, f"נראה כמו «{title}» — לשייך?", reply_markup=markup)
         return
 
-    open_decisions = _list_open_decisions()
+    open_decisions = _list_open_decisions(identity=identity)
     if not open_decisions:
         bot.send_message(chat_id, "📥 נשמר ב-Decision Inbox. אין החלטות פתוחות לשיוך כרגע.")
         return
@@ -797,15 +850,21 @@ def _suggest_decision_link(bot, chat_id, inbox_id: str, text: str) -> None:
     bot.send_message(chat_id, "לאיזו החלטה זה שייך?", reply_markup=markup)
 
 
-def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
+def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str, identity) -> None:
     from decision_pipeline import run_pipeline
 
     decision_record = _at_get_record(Tables.DECISIONS, decision_id)
-    if not decision_record:
-        bot.answer_callback_query(call.id, "❌ ההחלטה לא נמצאה.")
+    inbox_record = _at_get_record(Tables.DECISION_INBOX, inbox_id)
+    if (
+        not decision_in_scope(decision_record, identity)
+        or not _inbox_in_scope(inbox_record, identity)
+        or not _inbox_callback_valid(inbox_record)
+        or _record_fields(decision_record).get(DecisionFields.TENANT_ID)
+        != _record_fields(inbox_record).get(DecisionInboxFields.TENANT_ID)
+    ):
+        _reject_callback(bot, call)
         return
 
-    inbox_record = _at_get_record(Tables.DECISION_INBOX, inbox_id)
     raw_text = _record_fields(inbox_record).get(DecisionInboxFields.RAW_INPUT, "") if inbox_record else ""
 
     event = {
@@ -823,6 +882,7 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str) -> None:
         DecisionEventFields.RAW_CONTENT: raw_text,
         DecisionEventFields.DELTA_TYPE: event.get("Delta Type", ""),
         DecisionEventFields.STATUS: event.get("Status", DecisionEventStatus.LOGGED),
+        DecisionEventFields.TENANT_ID: identity.tenant_id,
     }
     _add_trust_fields(event_fields, event)
     event_id = _decision_storage().add(Tables.DECISION_EVENTS, event_fields, source="cmd_decision:inbox_link")
@@ -943,7 +1003,7 @@ def route_file_to_decision_inbox(
         except Exception as e:
             logger.warning(f"[DecisionHub] set_last_file failed: {e}")
 
-    _suggest_decision_link(bot, chat_id, inbox_id, text)
+    _suggest_decision_link(bot, chat_id, inbox_id, text, identity)
 
     return {
         "ok": True,
@@ -980,7 +1040,7 @@ def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
         return True
 
     if last_file.get("type") == "inbox_file" and last_file.get("file_id"):
-        _suggest_decision_link(bot, chat_id, last_file["file_id"], text)
+        _suggest_decision_link(bot, chat_id, last_file["file_id"], text, identity)
         return True
 
     source_tag = f"cmd_decision:{identity.tenant_id}:{identity.user_id}"
@@ -1013,15 +1073,15 @@ def handle_attachment_reference(bot, identity, chat_id, text: str) -> bool:
         domain=identity.domain_id,
         channel="telegram",
     )
-    _suggest_decision_link(bot, chat_id, inbox_id, filename)
+    _suggest_decision_link(bot, chat_id, inbox_id, filename, identity)
     return True
 
 
 # ── Matching helpers ──────────────────────────────────────────
 
-def _find_matching_decision(text: str) -> tuple[dict | None, float]:
+def _find_matching_decision(text: str, identity=None) -> tuple[dict | None, float]:
     """Compatibility wrapper for existing command-layer callers."""
-    return find_matching_decision(text)
+    return find_matching_decision(text, identity=identity)
 
 
 # ── Airtable read helpers (cmd layer — direct, not through ports) ──
@@ -1054,10 +1114,7 @@ def _at_get_record(table: str, record_id: str) -> dict | None:
 
 def _decision_in_scope(decision: dict, identity) -> bool:
     """Enforce tenant and record/domain scope after capability authorization."""
-    fields = _record_fields(decision) or {}
-    if fields.get(DecisionFields.TENANT_ID) != getattr(identity, "tenant_id", None):
-        return False
-    return identity.can_access_domain(fields.get(DecisionFields.DOMAIN, ""))
+    return decision_in_scope(decision, identity)
 
 
 def _resolve_decision_ref(ref: str, identity=None) -> dict | None:
@@ -1077,15 +1134,18 @@ def _resolve_decision_ref(ref: str, identity=None) -> dict | None:
     return None
 
 
-def _list_open_decisions(limit: int = 5) -> list:
+def _list_open_decisions(limit: int = 5, identity=None) -> list:
     """Compatibility wrapper for existing command-layer callers."""
-    return list_open_decisions(limit)
+    return list_open_decisions(limit, identity=identity)
 
 
-def _list_stakeholders(decision_id: str) -> list:
+def _list_stakeholders(decision_id: str, identity=None) -> list:
+    parent = _at_get_record(Tables.DECISIONS, decision_id) if identity is not None else None
+    if not decision_in_scope(parent, identity):
+        return []
     return _at_list(
         Tables.DECISION_STAKEHOLDERS,
-        array_contains(DecisionStakeholderFields.DECISION, decision_id),
+        all_of(array_contains(DecisionStakeholderFields.DECISION, decision_id), equals(DecisionStakeholderFields.TENANT_ID, identity.tenant_id)),
     )
 
 
@@ -1097,10 +1157,13 @@ def _latest_event(decision_id: str, events: list | None = None) -> dict | None:
     return events[0]
 
 
-def _list_decision_events(decision_id: str) -> list:
+def _list_decision_events(decision_id: str, identity=None) -> list:
+    parent = _at_get_record(Tables.DECISIONS, decision_id) if identity is not None else None
+    if not decision_in_scope(parent, identity):
+        return []
     return _at_list(
         Tables.DECISION_EVENTS,
-        array_contains(DecisionEventFields.DECISION, decision_id),
+        all_of(array_contains(DecisionEventFields.DECISION, decision_id), equals(DecisionEventFields.TENANT_ID, identity.tenant_id)),
     )
 
 

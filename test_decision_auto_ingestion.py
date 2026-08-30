@@ -17,6 +17,7 @@ from airtable_schema import (
     Tables,
 )
 from feature_flags import set_flag
+from identity import Identity, Role
 
 _passed = 0
 _failed = 0
@@ -139,8 +140,8 @@ invalid = dai.ingest_message("email", "   ", {"tenant_id": "t1"})
 check("Empty/invalid input fails safely", not invalid.ok and fake.created == [])
 
 candidates = [
-    {"id": "recBLUE", "fields": {DecisionFields.TITLE: "Blue View"}},
-    {"id": "recGREEN", "fields": {DecisionFields.TITLE: "Green Field Contract"}},
+    {"id": "recBLUE", "fields": {DecisionFields.TITLE: "Blue View", "tenant_id": "t1", "Domain": "general"}},
+    {"id": "recGREEN", "fields": {DecisionFields.TITLE: "Green Field Contract", "tenant_id": "t1", "Domain": "general"}},
 ]
 exact_match, exact_score = dm.find_matching_decision("Update for Blue View", candidates)
 check("Shared matcher returns exact title match", exact_match["id"] == "recBLUE" and exact_score == 100.0)
@@ -149,9 +150,12 @@ partial_match, partial_score = dm.find_matching_decision("Green contract update"
 check("Shared matcher returns deterministic partial match", partial_match["id"] == "recGREEN" and partial_score > 60)
 
 original_loader = dm.list_open_decisions
-dm.list_open_decisions = lambda limit=5: candidates[:limit]
+dm.list_open_decisions = lambda limit=5, identity=None: candidates[:limit] if identity else []
 dai.suggest_decision_link = _real_suggest_decision_link
-channel_suggestion = dai.suggest_decision_link("Blue View from another channel")
+channel_suggestion = dai.suggest_decision_link(
+    "Blue View from another channel",
+    {"identity": Identity(user_id="u1", role=Role.MANAGER, tenant_id="t1")},
+)
 check(
     "Auto ingestion uses shared matcher without command layer",
     channel_suggestion == {"decision_id": "recBLUE", "match_confidence": 100.0},

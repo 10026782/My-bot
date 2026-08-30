@@ -6010,6 +6010,11 @@ python3 smoke_tests.py                        # PASS: all smoke checks passed
 
 ### Stable findings
 
+This section is the historical pre-remediation baseline from the prior
+read-only audit. Its `OPEN` values are superseded by the closure ledger in
+`Decision Hub — Callback / Record-Scope Remediation` below; the original
+evidence is preserved unchanged.
+
 | ID | Finding | Status | Evidence / disposition |
 |---|---|---|---|
 | DH-S1 | Formula safety | `CLOSED / STATIC VERIFIED` | `test_bugdh03_04_formula_injection.py` 15/15; escaping/query construction verified for Decision Hub formula inputs. No runtime claim. |
@@ -6046,6 +6051,44 @@ Align code/tests/docs to the shared-capability policy, add negative authorizatio
 and tenant/data-scope tests without broadening permissions, then remediate DH-S4
 partial-persistence observability. Runtime/deployment evidence remains
 `NOT ESTABLISHED`; the feature flag must not be activated by this gate.
+
+## Decision Hub — Callback / Record-Scope Remediation (30/08/2026)
+
+Implementation Truth Reset: `2a75541e21cf83189878de9283581e99954ac346`
+(`origin/main` at remediation start). The preceding audit Truth Reset remains
+`8574e9a1ece5831cbc9bd0b3119d64532f486a13`.
+
+### Closure ledger
+
+| Finding | Status | Static evidence |
+|---|---|---|
+| DH-CB-01 | **CLOSED / STATIC VERIFIED** | Open-decision enumeration requires authorized identity and scopes the query by tenant and partner domains. |
+| DH-CB-02 | **CLOSED / STATIC VERIFIED** | `_suggest_decision_link` propagates identity into matching and scoped enumeration. |
+| DH-CB-03 | **CLOSED / STATIC VERIFIED** | Link callbacks re-resolve caller identity and authorize before pipeline or write. |
+| DH-CB-04 | **CLOSED / STATIC VERIFIED** | Ignore callback validates capability, tenant, pending state, and record before update. |
+| DH-CB-05 | **CLOSED / STATIC VERIFIED** | Inbox and Decision are independently loaded and must share tenant scope before linking. |
+| DH-CB-06 | **CLOSED / STATIC VERIFIED** | Stakeholder/event readers re-authorize the parent Decision and add tenant filtering. |
+| DH-CB-07 | **CLOSED / STATIC VERIFIED** | Inbox-link-created Decision Events carry the validated caller tenant. |
+| DH-CB-08 | **CLOSED / STATIC VERIFIED** | Auto-ingestion requires identity/tenant context and filters candidates before selection. |
+| DH-CB-09 | **CLOSED / STATIC VERIFIED** | Direct regressions cover authorized, unauthorized, cross-tenant, domain, stale, and zero-write denial paths. |
+
+### Implementation boundary and invariant
+
+The canonical access model remains:
+
+`capability permission → tenant scope → domain scope → record/action authorization`
+
+No permissions were broadened, no Owner-only conversion was made, and no
+feature flag, deployment, or runtime behavior claim is made by this slice.
+Possession of a callback payload or record ID is never authorization; every
+read or mutation re-establishes scope at execution time.
+
+### Verification and remaining work
+
+The focused callback/read suites passed 28 tests, the required Decision Hub
+suite passed 65 tests, and auto-ingestion passed 18/18. Compilation and
+`git diff --check` passed. DH-S4 partial-persistence observability remains
+open and runtime/deployment evidence remains `NOT ESTABLISHED`.
 
 ## F16 Media — Decision Gate (F16-M2, F16-M3) — OWNER DECISIONS RECORDED, NOT IMPLEMENTED
 
