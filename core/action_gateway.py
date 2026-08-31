@@ -5,7 +5,11 @@
 # Agent הוא מקור סיגנלים בלבד — לא מקור סמכות.
 #
 # FEATURE_ACTION_GATEWAY=false כברירת מחדל.
-# כשהדגל כבוי — כל המסלולים הקיימים ממשיכים לפעול ללא שינוי.
+# הדגל הזה שולט רק בעוצמת ה-blocking עבור קורא בודד (app.py::_queue_approval) —
+# הוא אינו gate גלובלי. propose_action()/approve() פועלים ללא תלות בדגל: מעקב
+# הקשר בצד ה-ingress, dedup, וכל 6+ הקוראים (scheduler jobs, TMA generic write,
+# Interaction Engine, Lead Tier-1 preview, core/lead_service.py) קוראים להם
+# ללא תנאי, בין אם הדגל דלוק או כבוי (ראה docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md §10.1).
 # כשהדגל פעיל — כל mutating tool חייב לעבור דרך Gateway (§6 SPEC).
 
 from __future__ import annotations

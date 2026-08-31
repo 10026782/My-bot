@@ -310,15 +310,20 @@ Distinguishing STATIC VERIFIED (confirmed by reading this audit's code) / MERGED
 
 ---
 
-## 11. Post-Audit Remediation (PR #1153)
+## 11. Post-Audit Remediation (PR #1153 + 31/08/2026 reconciliation)
 
-Three of §10's findings were code-fixed following this audit. Status is **🟡 CODE DONE, NOT VERIFIED IN PROD** per this repo's own verification rule — no Render deploy/production check has been performed.
+Six of §10's ten findings are now resolved. Code fixes are **🟡 CODE DONE, NOT VERIFIED IN PROD** per this repo's own verification rule — no Render deploy/production check has been performed.
 
+- **Finding 1** (`core/action_gateway.py` "dormant/shadow" mischaracterization): fixed — the module header comment now states plainly that `FEATURE_ACTION_GATEWAY` only controls blocking strength for `app.py::_queue_approval`, and that `propose_action()`/`approve()` and their 6+ production callers run unconditionally regardless of the flag.
+- **Finding 3** (`boss_doctor.py` doc drift in CLAUDE.md): resolved — CLAUDE.md's `boss_doctor.py` entry now correctly states it is wired to the owner-only `/boss_doctor` command.
+- **Finding 4** (`.env.example` STT provider drift): resolved — `.env.example` now documents `GROQ_API_KEY` as reserved/unwired and OpenAI Whisper as the actual live provider.
+- **Finding 5** (`/health` response shape drift): resolved — `docs/operations/DEPLOYMENT.md`'s example no longer includes the undocumented `"version"` key.
 - **Finding 6** (`core/reasoning_ports.py::_ProductionContacts.find_or_create()` broken import): fixed to import `tools.contact_resolver.resolve`/`ResolveStatus` (the real, tested module), matching `decision_ports.py`'s working adapter pattern. Covered by new tests in `test_core_reasoning.py`.
 - **Finding 8** (Sunday 08:00 `audience_report`/`weekly_quest_reset` collision): `audience_report` moved to 08:05 in `scheduler.py`.
 - **Finding 9** (`commercial_crm.py` writers unwired): `crm_create_deal`, `crm_create_payment_term`, `crm_create_payment` registered end-to-end in `tool_registry.py`, `tools/dispatcher.py`, `tools/schemas.py`, `action_validator.py`, and `core/anti_hallucination.py`. Covered by new `test_commercial_crm_dispatcher_wiring.py`.
+- **Finding 7** (Google Workspace credential contradiction): resolved by owner confirmation (31/08/2026) — Google Workspace was frozen, then unfrozen; `ORACLE_MIGRATION_M0.md` ("live") reflects current reality. `docs/governance/ARCHITECTURE_DRIFT_MAP.md` row 7 and `docs/operations/RUNTIME_VERIFICATION_MASTER_RUNBOOK.md`'s A1 updated accordingly.
 
-Findings 2 (Voice canonical lead writer) and 7 (Google Workspace credential contradiction) remain open — both require an owner/ops decision (flag flip, Render dashboard check) outside code-fix scope.
+Finding 2 (Voice canonical lead writer) remains open — pending a Render deploy the owner is running separately; no flag change made here per owner instruction. Finding 10 is a SHA pointer, not an actionable item.
 
 ---
 
