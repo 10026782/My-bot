@@ -310,6 +310,18 @@ Distinguishing STATIC VERIFIED (confirmed by reading this audit's code) / MERGED
 
 ---
 
+## 11. Post-Audit Remediation (PR #1153)
+
+Three of §10's findings were code-fixed following this audit. Status is **🟡 CODE DONE, NOT VERIFIED IN PROD** per this repo's own verification rule — no Render deploy/production check has been performed.
+
+- **Finding 6** (`core/reasoning_ports.py::_ProductionContacts.find_or_create()` broken import): fixed to import `tools.contact_resolver.resolve`/`ResolveStatus` (the real, tested module), matching `decision_ports.py`'s working adapter pattern. Covered by new tests in `test_core_reasoning.py`.
+- **Finding 8** (Sunday 08:00 `audience_report`/`weekly_quest_reset` collision): `audience_report` moved to 08:05 in `scheduler.py`.
+- **Finding 9** (`commercial_crm.py` writers unwired): `crm_create_deal`, `crm_create_payment_term`, `crm_create_payment` registered end-to-end in `tool_registry.py`, `tools/dispatcher.py`, `tools/schemas.py`, `action_validator.py`, and `core/anti_hallucination.py`. Covered by new `test_commercial_crm_dispatcher_wiring.py`.
+
+Findings 2 (Voice canonical lead writer) and 7 (Google Workspace credential contradiction) remain open — both require an owner/ops decision (flag flip, Render dashboard check) outside code-fix scope.
+
+---
+
 ## Related canonical sources (cited, not duplicated)
 
 `ROADMAP.md` (current-state SSOT, 30/08/2026) · `docs/governance/HORIZON.md` (program status map, 30/08/2026) · `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md` (§3.5 Active Work Registry, 30/08/2026) · `feature_flags.py` (flag registry docstring — the authoritative source for §3, reconciled here) · `docs/governance/SECURITY_CHECKLIST.md` (dispatcher/registry grep checks) · `docs/governance/MAINTENANCE_AUDIT_LEDGER.md` (Track 8/8B/8C schema reconciliation) · `docs/operations/ORACLE_MIGRATION_M0.md` (infra readiness, Render env snapshot 28/08/2026) · `docs/architecture/n18-canonical-lead-writers/N18_PHASE_3_CANONICAL_LEAD_WRITERS_SPEC.md` (Lead-writer program detail) · `docs/architecture/turn-coordinator/` and `docs/architecture/f52-unified-approval-runtime/` (Turn Coordinator / F52 program detail, not re-litigated here).
