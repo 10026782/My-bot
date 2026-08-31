@@ -133,6 +133,13 @@ CROSS_TRACK: frozenset[tuple[str, int, str]] = frozenset({
     ("core/memory_retrieval.py", 107, "tools.airtable_tools"),
     ("core/runtime_schema_provider.py", 204, "tools.airtable_tools"),
     ("core/turn_coordinator_runtime.py", 73, "tools.airtable_tools"),
+    # core/reasoning_ports.py is the ReasoningPorts adapter layer (own
+    # docstring: engines import only from this file, never providers
+    # directly) — same architectural role as the two entries above.
+    # Callers are gated behind FEATURE_DECISION_HUB/FEATURE_CORE_REASONING_LEADS_STATE
+    # (both off by default), same reachability profile as the other
+    # CROSS_TRACK adapter entries here.
+    ("core/reasoning_ports.py", 158, "tools.contact_resolver"),
 })
 
 # Verification-only staging utility; it is legitimate but not a runtime
