@@ -52,7 +52,7 @@ class ContactPort(Protocol):
 
     def find_or_create(self, name: str) -> dict:
         """
-        Return {"status": "found"|"created"|"ambiguous", "matches": [...]}
+        Return {"status": "found_one"|"ambiguous"|"not_found", "matches": [...]}
         """
         ...
 
@@ -144,13 +144,24 @@ class _ProductionVerifier:
 
 
 class _ProductionContacts:
+    """ContactPort over tools/contact_resolver.py — finds, never creates (no create exists yet).
+
+    Mirrors decision_ports.py::_ContactResolverAdapter (the only other
+    ContactPort implementation in the repo) rather than the previous
+    `from contact_resolver import find_or_create_contact` call, which
+    targeted a module/function that never existed and always raised
+    ImportError, silently swallowed into a fabricated empty match.
+    """
+
     def find_or_create(self, name: str) -> dict:
         try:
-            from contact_resolver import find_or_create_contact
-            return find_or_create_contact(name)
+            from tools.contact_resolver import resolve, ResolveStatus
+            result = resolve(name)
+            contact = result.matches[0] if result.status == ResolveStatus.FOUND_ONE and result.matches else None
+            return {"status": result.status.value, "contact": contact, "matches": result.matches}
         except Exception as e:
             logger.warning("[ReasoningPorts] contacts failed: %s", e)
-            return {"status": "found", "matches": []}
+            return {"status": "not_found", "matches": []}
 
 
 class _AnthropicLLM:

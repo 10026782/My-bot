@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+import os
 import sys
 import types
 import unittest
@@ -223,20 +225,33 @@ def _install_stubs():
     ff.is_enabled = lambda name: True
     sys.modules["feature_flags"] = ff
 
+    # tools.contact_resolver has no heavy deps by itself, but `import
+    # tools.contact_resolver` would run tools/__init__.py first, which
+    # eagerly imports tools.dispatcher -> tools.airtable_tools ->
+    # airtable_schema.TABLE_ALIASES, none of which exist in this stubbed
+    # environment. Load the file directly instead, bypassing tools/__init__.py.
+    _cr_path = os.path.join(os.path.dirname(__file__), "tools", "contact_resolver.py")
+    _cr_spec = importlib.util.spec_from_file_location("tools.contact_resolver", _cr_path)
+    _real_contact_resolver = importlib.util.module_from_spec(_cr_spec)
+    sys.modules["tools.contact_resolver"] = _real_contact_resolver  # needed by dataclass() before exec
+    _cr_spec.loader.exec_module(_real_contact_resolver)
+
     # tools.airtable_gateway stub
     tools = types.ModuleType("tools")
     ag = types.ModuleType("tools.airtable_gateway")
     ag.airtable_search = lambda *a, **kw: []
     ag.airtable_create = lambda *a, **kw: None
     ag.airtable_patch  = lambda *a, **kw: None
+    tools.contact_resolver = _real_contact_resolver
     sys.modules["tools"] = tools
     sys.modules["tools.airtable_gateway"] = ag
+    sys.modules["tools.contact_resolver"] = _real_contact_resolver
 
 
 _STUBBED_MODULE_NAMES = (
     "airtable_schema", "decision_pipeline", "decision_confidence",
     "decision_attention", "decision_orchestrator", "feature_flags",
-    "tools", "tools.airtable_gateway",
+    "tools", "tools.airtable_gateway", "tools.contact_resolver",
 )
 _ORIGINAL_MODULES: dict = {}
 
@@ -273,7 +288,7 @@ from core.reasoning_entity import (   # noqa: E402
     TRUST_T2, TRUST_T3,
     NextStep, ReasoningAdapter, ReasoningEntity, ReasoningResult,
 )
-from core.reasoning_ports import ReasoningPorts, _NullStorage, _NullVerifier
+from core.reasoning_ports import ReasoningPorts, _NullStorage, _NullVerifier, _ProductionContacts
 from core.reasoning_engines import run
 from core.adapters.decision_adapter import DecisionAdapter, append_reasoning_block as decision_block
 from core.adapters.leads_adapter import LeadsAdapter, append_reasoning_block as leads_block
@@ -420,6 +435,27 @@ class TestReasoningPorts(unittest.TestCase):
         fake = FakeVerifier(status="warn")
         ports = ReasoningPorts(verifier=fake)
         self.assertEqual(ports.verifier.verify("x", "y")["status"], "warn")
+
+    def test_production_contacts_delegates_to_contact_resolver(self):
+        # Regression: _ProductionContacts previously imported a
+        # contact_resolver.find_or_create_contact that never existed anywhere
+        # in the repo, always raised ImportError, and silently swallowed it
+        # into a fabricated {"status": "found", "matches": []}. It must now
+        # call the real tools/contact_resolver.py::resolve(), same as
+        # decision_ports.py's working _ContactResolverAdapter.
+        from tools.contact_resolver import ResolveStatus, ContactMatch, ResolveResult
+        match = ContactMatch(record_id="rec1", name="Dana", email="", phone="", contact_type="", company="", score=0.9)
+        fake_result = ResolveResult(status=ResolveStatus.FOUND_ONE, query="Dana", matches=[match], message="")
+        with patch("tools.contact_resolver.resolve", return_value=fake_result) as mock_resolve:
+            out = _ProductionContacts().find_or_create("Dana")
+        mock_resolve.assert_called_once_with("Dana")
+        self.assertEqual(out["status"], "found_one")
+        self.assertEqual(out["contact"], match)
+
+    def test_production_contacts_fails_soft_to_not_found(self):
+        with patch("tools.contact_resolver.resolve", side_effect=RuntimeError("boom")):
+            out = _ProductionContacts().find_or_create("Dana")
+        self.assertEqual(out, {"status": "not_found", "matches": []})
 
 
 # ══════════════════════════════════════════════════════════════════════════════

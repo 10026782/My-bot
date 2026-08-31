@@ -40,6 +40,9 @@ CONCRETE_MODULE_PREFIXES = (
 APPROVED_BOUNDARY_FILES = frozenset({
     "core/google_drive_artifact_store.py",  # Google Drive artifact adapter
     "core/runtime_schema_provider.py",      # schema/provider boundary
+    "core/reasoning_ports.py",              # ReasoningPorts adapter layer — its own
+                                             # docstring states engines import only
+                                             # from this file, never providers directly
 })
 
 

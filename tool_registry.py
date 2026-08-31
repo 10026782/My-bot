@@ -355,6 +355,38 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         description_he   = "סימון תשלום כ-שולם — דורש אישור owner/partner",
     ),
 
+    # ── commercial_crm.py — canonical Deal/PaymentTerm/Payment writers ──
+    ToolMeta(
+        name             = "crm_create_deal",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "יצירת עסקה (Deal) חדשה — דורש אישור",
+    ),
+    ToolMeta(
+        name             = "crm_create_payment_term",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "יצירת תנאי תשלום (Payment Term) לעסקה קיימת — דורש אישור",
+    ),
+    ToolMeta(
+        name             = "crm_create_payment",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "יצירת תשלום (Payment) חדש — דורש אישור",
+    ),
+
     # ── PR-0C — ActionGateway adapters for former event_bus custom actions ──
     # Internal-execution-only: not in tools/schemas.py's TOOL_SCHEMAS, so the
     # Agent tool_use loop can never propose these directly — only trusted

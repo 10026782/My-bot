@@ -929,7 +929,7 @@ def start_scheduler() -> threading.Thread:
     getattr(schedule.every(), learning_day).at(learning_time).do(_automation_guard(_job_learning_cycle, name="learning_cycle"))            # F02
     schedule.every(email_interval).minutes.do(_automation_guard(_job_email_inbound, name="email_inbound"))
     schedule.every(abandoned_interval).minutes.do(shabbat_safe(_automation_guard(_job_abandoned_scan, name="abandoned_scan")))             # D02
-    getattr(schedule.every(), "sunday").at("08:00").do(shabbat_safe(_automation_guard(_job_audience_report, name="audience_report")))       # D04
+    getattr(schedule.every(), "sunday").at("08:05").do(shabbat_safe(_automation_guard(_job_audience_report, name="audience_report")))       # D04 (08:05 — מניעת cluster עם Game weekly_quest_reset ב-Sunday 08:00, ראו הערה ב-daily_usage_report)
     getattr(schedule.every(), "sunday").at("08:30").do(_automation_guard(_job_attribution_report, name="attribution_report"))                  # D05
     schedule.every(15).minutes.do(shabbat_safe(_automation_guard(_job_interaction_scan, name="interaction_scan")))                           # D06
     getattr(schedule.every(), security_day).at(security_time).do(_automation_guard(_job_security_reminder, name="security_reminder"))

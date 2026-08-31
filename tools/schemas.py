@@ -220,6 +220,74 @@ TOOL_SCHEMAS = [
             "required": ["record_id"]
         }
     },
+    {
+        "name": "crm_create_deal",
+        "description": (
+            "יצירת עסקה (Deal) חדשה. השתמש כשהמשתמש מבקש לפתוח עסקה/הזדמנות חדשה "
+            "— 'תפתח עסקה עם X' / 'יש לנו הזדמנות חדשה ב-Y'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name":           {"type": "string", "description": "שם העסקה"},
+                "domain":         {"type": "string", "description": "דומיין עסקי (real_estate/import/media/saas/finance/general)"},
+                "owner_id":       {"type": "string", "description": "מזהה record של הבעלים העסקי (rec...)"},
+                "origin_lead_id": {"type": "string", "description": "מזהה ליד המקור, אם רלוונטי (rec...)"},
+                "contact_ids":    {"type": "array", "items": {"type": "string"}, "description": "מזהי אנשי קשר מקושרים (rec...)"},
+                "amount":         {"type": "number", "description": "סכום העסקה"},
+                "stage":          {"type": "string", "description": "שלב העסקה (ברירת מחדל: הזדמנות)"},
+                "notes":          {"type": "string", "description": "הערות חופשיות"}
+            },
+            "required": ["name", "domain", "owner_id"]
+        }
+    },
+    {
+        "name": "crm_create_payment_term",
+        "description": (
+            "יצירת תנאי תשלום (Payment Term) לעסקה קיימת — כלל חישוב חוזר "
+            "(סכום קבוע או אחוז מבסיס). תמיד מקושר ל-deal_id קיים."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "deal_id":      {"type": "string", "description": "מזהה העסקה (rec...) — חובה"},
+                "name":         {"type": "string", "description": "שם תנאי התשלום"},
+                "calc_type":    {"type": "string", "enum": ["fixed", "percentage"], "description": "שיטת חישוב"},
+                "fixed_amount": {"type": "number", "description": "סכום קבוע — חובה כש-calc_type=fixed"},
+                "rate_pct":     {"type": "number", "description": "אחוז — חובה כש-calc_type=percentage"},
+                "calc_basis":   {"type": "string", "description": "בסיס לחישוב אחוז (deal_amount/monthly_salary/first_salary) — חובה כש-calc_type=percentage"},
+                "trigger_type": {"type": "string", "enum": ["immediate", "specific_date", "after_period", "event_based"], "description": "מתי התשלום מופעל"},
+                "trigger_date": {"type": "string", "description": "תאריך הפעלה, אם trigger_type=specific_date"},
+                "cadence":      {"type": "string", "enum": ["once", "monthly"], "description": "תדירות"},
+                "vat_rule":     {"type": "string", "enum": ["none", "add", "included"], "description": "טיפול במע\"מ"},
+                "notes":        {"type": "string", "description": "הערות חופשיות"}
+            },
+            "required": ["deal_id", "calc_type"]
+        }
+    },
+    {
+        "name": "crm_create_payment",
+        "description": (
+            "יצירת תשלום (Payment) חדש. יכול להיות מקושר לעסקה/תנאי תשלום, "
+            "או עצמאי (אינו חייב עסקה)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "amount":          {"type": "number", "description": "סכום סופי לתשלום"},
+                "domain":          {"type": "string", "description": "דומיין עסקי"},
+                "owner_id":        {"type": "string", "description": "מזהה record של הבעלים העסקי (rec...)"},
+                "deal_id":         {"type": "string", "description": "מזהה עסקה מקושרת, אם קיימת (rec...)"},
+                "payment_term_id": {"type": "string", "description": "מזהה תנאי תשלום מקושר, אם קיים (rec...)"},
+                "origin_lead_id":  {"type": "string", "description": "מזהה ליד המקור, אם רלוונטי (rec...)"},
+                "reference":       {"type": "string", "description": "מספר אסמכתא/הפניה"},
+                "due_date":        {"type": "string", "description": "תאריך יעד לתשלום"},
+                "vat_rule":        {"type": "string", "enum": ["none", "add", "included"], "description": "טיפול במע\"מ"},
+                "notes":           {"type": "string", "description": "הערות חופשיות"}
+            },
+            "required": ["amount", "domain", "owner_id"]
+        }
+    },
 ]
 
 # ══════════════════════════════════════════════════

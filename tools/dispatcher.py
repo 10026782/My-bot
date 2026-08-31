@@ -16,6 +16,7 @@ from .calendar_tools import calendar_get_events, calendar_create_event
 from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
 from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead, _tool_result
+from airtable_schema import DealStage, PaymentTermTrigger, PaymentTermCadence, VATRule
 from .airtable_read_adapter import AirtableReadError, list_records
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
 try:
@@ -514,6 +515,78 @@ def dispatch_tool(
                 from crm import crm_mark_payment_paid
                 result = crm_mark_payment_paid(record_id)
                 audit_log_airtable("crm_mark_payment_paid", identity, {"record_id": record_id}, result)
+                return result
+
+            # ── commercial_crm.py — canonical Deal/PaymentTerm/Payment writers ──
+            case "crm_create_deal":
+                try:
+                    enforce_tenant_scope("crm_create_deal", identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable("crm_create_deal", identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool="crm_create_deal", user_message=str(e))
+
+                from commercial_crm import create_deal
+                result = create_deal(
+                    name=inputs["name"],
+                    domain=inputs["domain"],
+                    owner_id=inputs["owner_id"],
+                    origin_lead_id=inputs.get("origin_lead_id", ""),
+                    contact_ids=inputs.get("contact_ids"),
+                    amount=inputs.get("amount"),
+                    stage=inputs.get("stage", DealStage.OPPORTUNITY),
+                    notes=inputs.get("notes", ""),
+                    source="agent",
+                )
+                audit_log_airtable("crm_create_deal", identity, inputs, result)
+                return result
+
+            case "crm_create_payment_term":
+                try:
+                    enforce_tenant_scope("crm_create_payment_term", identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable("crm_create_payment_term", identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool="crm_create_payment_term", user_message=str(e))
+
+                from commercial_crm import create_payment_term
+                result = create_payment_term(
+                    deal_id=inputs["deal_id"],
+                    name=inputs.get("name", ""),
+                    calc_type=inputs["calc_type"],
+                    fixed_amount=inputs.get("fixed_amount"),
+                    rate_pct=inputs.get("rate_pct"),
+                    calc_basis=inputs.get("calc_basis", ""),
+                    trigger_type=inputs.get("trigger_type", PaymentTermTrigger.IMMEDIATE),
+                    trigger_date=inputs.get("trigger_date", ""),
+                    cadence=inputs.get("cadence", PaymentTermCadence.ONCE),
+                    vat_rule=inputs.get("vat_rule", VATRule.NONE),
+                    notes=inputs.get("notes", ""),
+                    source="agent",
+                )
+                audit_log_airtable("crm_create_payment_term", identity, inputs, result)
+                return result
+
+            case "crm_create_payment":
+                try:
+                    enforce_tenant_scope("crm_create_payment", identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable("crm_create_payment", identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool="crm_create_payment", user_message=str(e))
+
+                from commercial_crm import create_payment
+                result = create_payment(
+                    amount=inputs["amount"],
+                    domain=inputs["domain"],
+                    owner_id=inputs["owner_id"],
+                    deal_id=inputs.get("deal_id", ""),
+                    payment_term_id=inputs.get("payment_term_id", ""),
+                    origin_lead_id=inputs.get("origin_lead_id", ""),
+                    reference=inputs.get("reference", ""),
+                    due_date=inputs.get("due_date", ""),
+                    vat_rule=inputs.get("vat_rule", VATRule.NONE),
+                    notes=inputs.get("notes", ""),
+                    source="agent",
+                )
+                audit_log_airtable("crm_create_payment", identity, inputs, result)
                 return result
 
             # ── PR-0C — ActionGateway adapters (former event_bus custom actions) ──
