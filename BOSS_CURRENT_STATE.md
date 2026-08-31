@@ -1,5 +1,7 @@
 # BOSS CURRENT STATE
 
+> **Current-state reconciliation:** Truth Reset `origin/main` = `9df318e1c473782096cf48fdaa983950a8485832` (31/08/2026). The execution map and runtime runbook are evidence indexes; the ledger below is the canonical disposition for their newly established findings. Static verification is not deployment or production verification.
+
 > **⚠️ STALE (flagged 09/08/2026):** this file was last updated 26/06/2026 —
 > roughly 6 weeks and 150+ merged PRs behind `origin/main`. Despite its name,
 > it is **not** the current-state authority. For current core-program status,
@@ -17,6 +19,27 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 - STUB: returns coming_soon / empty — honest, not misleading.
 - BROKEN: fails or blocked by known runtime error.
 - NOT IMPLEMENTED: no runtime implementation found.
+
+## Truth Reconciliation — 31/08/2026
+
+| ID | Finding / current truth | Owner | Severity | Status / dependency |
+|---|---|---|---|---|
+| TR-01 | `core/action_gateway.py` is live for ingress prefetch, dedup/proposal behavior, and multiple unconditional callers. `FEATURE_ACTION_GATEWAY` controls enforcement strength for the general-agent path only; it does not make the whole module dormant. | ActionGateway | High | **OPEN — static/current**; runtime flag and canary evidence required before changing enforcement |
+| TR-02 | Canonical Voice wrapper exists, but the default flag leaves the legacy direct-write path reachable. Legacy Voice lacks canonical Owner, dedup, and scope behavior. | N18 | High | **OPEN — runtime-gated**; activation + canary, then retirement only after proof |
+| TR-03 | `commercial_crm.py` Deal/Payment/PaymentTerm writers and calculation contract exist; static foundation is complete, but there are zero production callers and no registry/dispatcher/schema wiring. | Schema/Data Contracts | High | **OPEN — unwired capability**; owner-approved wiring slice required |
+| TR-04 | `_ProductionContacts.find_or_create()` has a broken import and returns a fabricated empty result after swallowing `ImportError`. | Core Reasoning | High | **OPEN — latent**; fix before either gated reasoning/Decision Hub path is activated |
+| TR-05 | Sunday 08:00 (`audience_report`/`weekly_quest_reset`) and Sunday 08:30 (`attribution_report`/`weekly_summary`) are static schedule collisions. | Scheduler | Medium | **OPEN — runtime-only/config**; retime or explicitly accept before relevant activation |
+| TR-06 | Render env/config state is not established by static repository evidence. | Operations | High | **OPEN — live verification required**; do not select a stale source as truth |
+| TR-07 | Meta inbound has no real outbound-send implementation; `META_OUTBOUND_ENABLED=true` only permits reply computation/logging and never enables delivery. | Meta adapter | High | **OPEN — new adapter capability**; structurally adapter-gated, not a rollout-flag activation |
+| TR-08 | `/boss_doctor` is wired owner-only and read-only; `.env.example` now identifies OpenAI Whisper as current STT and Groq as unwired future work; `/health` returns `{"status": ...}` only. | Operations | Medium | **CLOSED — documentation drift**; no runtime code change required |
+| TR-09 | Current conversion behavior and Contact notes mismatch remain a tracked product/backend gap unless separately remediated; no Contact list/detail TMA surface exists. | CRM/TMA | Medium | **OPEN — product/backend**; one canonical conversion/Contact surface decision |
+| TR-10 | No first-class Deal/Payment TMA surface exists; this remains aligned with TR-03 rather than a second duplicate item. | Schema/Data Contracts | High | **OPEN — capability missing**; resolve with the single TR-03 wiring/surface slice |
+| TR-11 | No dedicated task lifecycle/status-change TMA API; Tasks remain insufficiently tenant-aware in dispatcher; task creation paths diverge. | Tasks/TMA | High | **OPEN — backend contract**; define lifecycle API and tenant-scoped dispatcher ownership |
+| TR-12 | No dedicated Knowledge backend exists today; Activity reuse is a product recommendation only. No dedicated Media browse/detail TMA surface exists; Assets are not Media Files. | Product/TMA | Medium | **OPEN — new capability / owner decision** |
+| TR-13 | Emergency Stop is implemented. General feature-flag management and identity-management UI are not implemented; classify those as API MISSING / NEW CAPABILITY, not merely unwired. | Owner Control/TMA | Medium | **OPEN — new capability**; schema/backend capability may exist, but no TMA surface; activation remains separately gated |
+| TR-14 | Current frontend truth is the existing TMA/mobile-oriented surface; a desktop Admin App is a separate product decision, not an existing product. | Product/TMA | Medium | **OPEN — owner decision** |
+
+These rows are the single cross-track owner ledger for the findings above. Audit reports and historical snapshots may retain their original wording only with an explicit historical banner; they do not reopen or duplicate these items.
 
 ---
 
