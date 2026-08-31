@@ -1,6 +1,6 @@
 # BOSS CURRENT STATE
 
-> **Current-state reconciliation:** Truth Reset `origin/main` = `9df318e1c473782096cf48fdaa983950a8485832` (31/08/2026). The execution map and runtime runbook are evidence indexes; the ledger below is the canonical disposition for their newly established findings. Static verification is not deployment or production verification.
+> **Current-state reconciliation:** Truth Reset `origin/main` = `894320409a67df992afedeb70aae8e76fdfd00d1` (01/09/2026). The execution map, verification matrix, and runbooks are evidence indexes; the ledger below is the canonical disposition for the latest PR1152–1155 findings. Static verification is not deployment or production verification.
 
 > **⚠️ STALE (flagged 09/08/2026):** this file was last updated 26/06/2026 —
 > roughly 6 weeks and 150+ merged PRs behind `origin/main`. Despite its name,
@@ -20,16 +20,16 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 - BROKEN: fails or blocked by known runtime error.
 - NOT IMPLEMENTED: no runtime implementation found.
 
-## Truth Reconciliation — 31/08/2026
+## Truth Reconciliation — 01/09/2026
 
 | ID | Finding / current truth | Owner | Severity | Status / dependency |
 |---|---|---|---|---|
 | TR-01 | `core/action_gateway.py` is live for ingress prefetch, dedup/proposal behavior, and multiple unconditional callers. `FEATURE_ACTION_GATEWAY` controls enforcement strength for the general-agent path only; it does not make the whole module dormant. | ActionGateway | High | **OPEN — static/current**; runtime flag and canary evidence required before changing enforcement |
 | TR-02 | Canonical Voice wrapper exists, but the default flag leaves the legacy direct-write path reachable. Legacy Voice lacks canonical Owner, dedup, and scope behavior. | N18 | High | **OPEN — runtime-gated**; activation + canary, then retirement only after proof |
-| TR-03 | `commercial_crm.py` Deal/Payment/PaymentTerm writers and calculation contract exist; static foundation is complete, but there are zero production callers and no registry/dispatcher/schema wiring. | Schema/Data Contracts | High | **OPEN — unwired capability**; owner-approved wiring slice required |
-| TR-04 | `_ProductionContacts.find_or_create()` has a broken import and returns a fabricated empty result after swallowing `ImportError`. | Core Reasoning | High | **OPEN — latent**; fix before either gated reasoning/Decision Hub path is activated |
-| TR-05 | Sunday 08:00 (`audience_report`/`weekly_quest_reset`) and Sunday 08:30 (`attribution_report`/`weekly_summary`) are static schedule collisions. | Scheduler | Medium | **OPEN — runtime-only/config**; retime or explicitly accept before relevant activation |
-| TR-06 | Render env/config state is not established by static repository evidence. | Operations | High | **OPEN — live verification required**; do not select a stale source as truth |
+| TR-03 | `commercial_crm.py` Deal/Payment/PaymentTerm writers and calculation contract exist and are now registered as `crm_create_deal`, `crm_create_payment_term`, `crm_create_payment` with policy/schema/dispatcher coverage (PR1153). | Schema/Data Contracts | High | **CODE DONE, NOT VERIFIED IN PROD**; owner-approved canary and raw-write ownership decision remain open |
+| TR-04 | `_ProductionContacts.find_or_create()` now delegates to `tools.contact_resolver.resolve()` with regression coverage (PR1153); the old broken-import statement is historical. | Core Reasoning | High | **CODE DONE, NOT VERIFIED IN PROD**; verify before gated reasoning/Decision Hub activation |
+| TR-05 | Sunday 08:30 (`attribution_report`/`weekly_summary`) remains a static collision; the 08:00 pair was retimed (`audience_report`→08:05) by PR1153. | Scheduler | Medium | **OPEN — static/config**; add a schedule assertion and resolve/accept the remaining 08:30 overlap |
+| TR-06 | Render env/config state is not established by static repository evidence; Google Workspace’s prior frozen/live contradiction was owner-confirmed as unfrozen on 31/08, but current values are still not independently live-verified. | Operations | High | **OPEN — live verification required** |
 | TR-07 | Meta inbound has no real outbound-send implementation; `META_OUTBOUND_ENABLED=true` only permits reply computation/logging and never enables delivery. | Meta adapter | High | **OPEN — new adapter capability**; structurally adapter-gated, not a rollout-flag activation |
 | TR-08 | `/boss_doctor` is wired owner-only and read-only; `.env.example` now identifies OpenAI Whisper as current STT and Groq as unwired future work; `/health` returns `{"status": ...}` only. | Operations | Medium | **CLOSED — documentation drift**; no runtime code change required |
 | TR-09 | Current conversion behavior and Contact notes mismatch remain a tracked product/backend gap unless separately remediated; no Contact list/detail TMA surface exists. | CRM/TMA | Medium | **OPEN — product/backend**; one canonical conversion/Contact surface decision |
@@ -38,6 +38,12 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 | TR-12 | No dedicated Knowledge backend exists today; Activity reuse is a product recommendation only. No dedicated Media browse/detail TMA surface exists; Assets are not Media Files. | Product/TMA | Medium | **OPEN — new capability / owner decision** |
 | TR-13 | Emergency Stop is implemented. General feature-flag management and identity-management UI are not implemented; classify those as API MISSING / NEW CAPABILITY, not merely unwired. | Owner Control/TMA | Medium | **OPEN — new capability**; schema/backend capability may exist, but no TMA surface; activation remains separately gated |
 | TR-14 | Current frontend truth is the existing TMA/mobile-oriented surface; a desktop Admin App is a separate product decision, not an existing product. | Product/TMA | Medium | **OPEN — owner decision** |
+| TR-15 | CI defines `airtable`/`integration`/`live` pytest markers but no test file uses them; the exclusion mechanism is therefore vacuous. | CI/Governance | Medium | **OPEN — test-harness governance**; add marker coverage or remove the false assurance |
+| TR-16 | `test_phase_4b0_1b_concurrency.py` and `test_phase_4b_1c_concurrent_approvals.py` contain non-raising `chk()` checks inside real pytest tests; they can false-pass. | CI/Governance | High | **OPEN — test correctness**; replace with raising assertions and retain TC10 backstop where applicable |
+| TR-17 | `test_bug153_create_task_reconfirmation_after_rejection.py` has three known-failing assertions and no CI carve-out; CI-log status needs direct confirmation. | Tasks/CI | High | **OPEN — CI verification/fix**; do not treat the suite as green from file presence |
+| TR-18 | The Admin App spec describes eight screens, but current TMA route access is materially narrower than the proposed six-role model; broader role access is a policy/build decision. | Product/TMA | High | **OPEN — policy decision**; do not infer Manager/Partner/Employee access |
+| TR-19 | TMA write-capable screens depend on `FEATURE_ACTION_CONTRACT_PERSISTENCE` and `FEATURE_ATOMIC_CLAIMS`; if either is not live, writes return 503 rather than falling back. | TMA/Operations | High | **OPEN — live flag verification**; prove deployed flags before promising write availability |
+| TR-20 | `/api/owner/command-center` is the live Command Center route consumed by the TMA; `/api/owner/control-center` is a separate dead/unused endpoint and must not be documented as equivalent. | TMA/API | Medium | **OPEN — route ownership**; keep one canonical route or explicitly deprecate the other |
 
 These rows are the single cross-track owner ledger for the findings above. Audit reports and historical snapshots may retain their original wording only with an explicit historical banner; they do not reopen or duplicate these items.
 

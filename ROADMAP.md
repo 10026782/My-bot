@@ -1,6 +1,12 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 31/08/2026
+עודכן: 01/09/2026
+
+## Latest truth reconciliation — PR1152–1155
+
+Truth Reset: `origin/main` = `894320409a67df992afedeb70aae8e76fdfd00d1` (01/09/2026). PR1153 fixes the Contacts reasoning adapter, retimes `audience_report` to 08:05, and statically wires the three `commercial_crm` create tools. These items are **CODE DONE, NOT VERIFIED IN PROD**; the first-class Deal/Payment TMA surface, owner decision on raw-write ownership, and a real canary remain open. The remaining scheduler collision is Sunday 08:30 (`attribution_report`/`weekly_summary`); the former 08:00 collision is historical/code-done. PR1154 is the authority for the Admin App screen/API gap classification, and PR1155 makes shared-checkout rules canonical in `AGENTS.md`.
+
+The older `SCHEMA_DATA_CONTRACTS` row below predates PR1153's wiring and must be read with this reconciliation as the current status: registration is no longer open; canary, TMA surface, and raw-write ownership remain open.
 
 ## תחזוקת המסמך
 

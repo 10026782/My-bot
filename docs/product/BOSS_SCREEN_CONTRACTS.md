@@ -160,7 +160,7 @@ Airtable `Leads` table (`LeadFields`) via `GET /api/leads[?domain=][?view=]`, `G
 
 **Dead/inconsistent surfaces worth flagging before extending this screen:**
 - `PATCH /api/leads/<id>/status` is a fully wired backend route with **zero frontend callers** — resurrect it deliberately (e.g. for a quick-status dropdown) rather than leaving two divergent status-write paths (`/status` always queues; `PATCH /api/leads/<id>` auto-executes for Owner) both live.
-- `/convert` (Lead → Contact) is Telegram-command-only (`LEAD_AUTO_CONVERT` flag, default off) and **currently broken for most real leads** — it passes a `notes` string to `crm_add_contact`, but `Contacts` has no `Notes` field, so the write is rejected with a generic, unhelpful error. Fix the field mismatch before building a Pipeline "Convert to Contact" button, not after.
+- `/convert` (Lead → Contact) is Telegram-command-only (`LEAD_AUTO_CONVERT` flag, default off) and **currently broken for most real leads** — it passes a `notes` string to `crm_add_contact`, but `Contacts` has no `Notes` field, so the write is rejected with a generic, unhelpful error. This is separate from PR1153's fixed reasoning adapter; fix the field mismatch before building a Pipeline "Convert to Contact" button.
 
 ### States
 Loading / Success / Empty ("no leads in view") / Error (502 `data_unavailable` on Airtable failure) / Unauthorized (distinct message for a partner attempting a write vs. a role with no pipeline access at all) — no "stale" concept.
@@ -186,7 +186,7 @@ Loading / Success / Empty ("no leads in view") / Error (502 `data_unavailable` o
 |---|---|---|---|---|---|---|---|
 | Score | ציון | `LeadFields.SCORE` | number | no | 0–100 | current score | **owner only** |
 
-**Not built anywhere — flag before promising it:** Deal creation/edit has no form at all today; see Permission Matrix's Pipeline gap row (`commercial_crm.py::create_deal()` fully built, zero callers).
+**Not built anywhere — flag before promising it:** Deal creation/edit has no TMA form at all today; the backend writer is now statically wired as `crm_create_deal` by PR1153, but has no production canary.
 
 ---
 
@@ -285,7 +285,7 @@ Loading / Success / Empty (no assets / no recent payments) / Error (502 `data_un
 
 `Ownership %` is backend-editable but **has no UI input anywhere in the current Asset Detail form** — gap.
 
-**Not built anywhere:** Payment / Deal / Expense creation forms — 100% new build (`commercial_crm.py` unwired for Deal/Payment; `Expenses` has no writer at all, ever, in this codebase).
+**Not built anywhere:** Payment / Deal / Expense creation forms — the TMA surfaces are new build. `commercial_crm.py` Deal/Payment writers are statically wired by PR1153 but lack a production canary; `Expenses` has no writer at all.
 
 ---
 
