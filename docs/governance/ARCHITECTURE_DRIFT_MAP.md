@@ -17,7 +17,7 @@
 | 4 | Task taxonomy freeze | P1 | `task_gateway` (עתידי) | בזמן N04 Lead Memory (נוגע ב-task creation) | TODO |
 | 5 | Audit event schema unification | P1 | `audit_gateway` (עתידי) | בזמן עבודה על Activity Feed v2 | TODO |
 | 6 | Identity normalization (TMA↔Telegram↔WhatsApp) | P1 | `identity.py` (helpers) | לפני חיבור Meta WhatsApp בפועל (סעיף 1 ברודמאפ) | smoke test added — PASS (2026-06-14) |
-| 7 | Google action risk metadata centralization | P1 | `tool_registry.py` | כשהקפאת Google Tools מבוטלת | DEFERRED (Google frozen) |
+| 7 | Google action risk metadata centralization | P1 | `tool_registry.py` | אופורטוניסטי — בפעם הבאה שנוגעים ב-Google tools ב-`tool_registry.py` | TODO — הקפאת Google Tools בוטלה (אישור בעלים, 31/08/2026) |
 | 8 | Airtable read gateway | P2 | extend `airtable_gateway.py` | אופורטוניסטי — כל פעם שנוגעים בקובץ עם raw read | TODO |
 
 ---
@@ -106,10 +106,10 @@
 
 ---
 
-### 7. Google Action Risk Metadata (P1) — DEFERRED
+### 7. Google Action Risk Metadata (P1) — TODO
 **הבעיה**: risk/approval policy מפוזר בין `event_bus`, `app.py`, `dispatcher`, `action_validator`, `core_knowledge`.
 
-**הערה**: Google Tools מוקפאים ברודמאפ (סעיף 6, "cost of fixing outweighs current benefit"). **לא לפתוח את זה** עד שההקפאה מבוטלת. נשאר כתיעוד בלבד.
+**עדכון (31/08/2026)**: ההקפאה שצוינה כאן בוטלה — Google Workspace פעיל שוב (אישור בעלים). הפריט פתוח כעת ל-piggyback רגיל, כמו שאר השורות בטבלה — אין עדיין minimal step מוגדר, לבצע אופורטוניסטית בפעם הבאה שנוגעים ב-Google tools.
 
 ---
 

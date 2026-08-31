@@ -14,7 +14,7 @@ These confirm facts this audit could not check without live access, and resolve 
 
 | Step | Action | Evidence to capture | GO criteria | STOP criteria |
 |---|---|---|---|---|
-| A1 | Confirm current Render env: `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` set or unset — resolves the CLAUDE.md ("frozen") vs `ORACLE_MIGRATION_M0.md` ("live 28/08") discrepancy | Screenshot/export of Render env var list (redact secrets) | Either source updated to match reality | N/A — read-only |
+| A1 | ~~Confirm current Render env: `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` set or unset~~ — **RESOLVED 31/08/2026 (owner confirmation)**: Google Workspace was frozen, then unfrozen; `ORACLE_MIGRATION_M0.md` ("live") is current, CLAUDE.md/`ARCHITECTURE_DRIFT_MAP.md`'s "frozen" notes were stale and have been updated | Owner statement (chat) | Resolved | N/A — read-only |
 | A2 | Confirm `FEATURE_ATOMIC_CLAIMS` and `DATABASE_URL` current live values on Render | Render env export | Matches or corrects `ORACLE_MIGRATION_M0.md`'s 28/08/2026 snapshot | N/A |
 | A3 | Confirm `/health` route is (still) not wired as Render's platform health check | Render service settings screenshot | Documented either way in `DEPLOYMENT.md` | N/A |
 | A4 | Pull current `GET /telegram` webhook info (`getWebhookInfo`) to confirm the live webhook URL/secret match this deploy | Telegram API response | Matches expected URL, no pending update backlog | Backlog present → investigate before touching anything else |
