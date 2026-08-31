@@ -6476,21 +6476,21 @@ A content hash for Telegram/Twilio/Meta-sourced Media Files records **may be con
 
 **F16 = STATIC CLOSED / RUNTIME NOT ESTABLISHED.** Every F16-owned static finding is resolved (closed/static-verified or deferred/accepted by owner decision); F16-M8 remains cross-track and was never F16-owned. This is a static-closure claim only — no runtime, deployment, production, or feature-activation evidence is established or claimed. **Next and only remaining gate: deployed-SHA Media canary / runtime verification** (a separate execution gate, not performed here).
 
-## Truth Reconciliation Ledger — Execution Map / Runtime Runbook — 31/08/2026
+## Truth Reconciliation Ledger — PR1152–1155 follow-up — 01/09/2026
 
 Source: `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md` and
 `docs/operations/RUNTIME_VERIFICATION_MASTER_RUNBOOK.md`, reconciled against
-`origin/main` `9df318e1c473782096cf48fdaa983950a8485832`. This section is the
+`origin/main` `894320409a67df992afedeb70aae8e76fdfd00d1`. This section is the
 canonical finding ledger; the source documents remain static evidence indexes.
 
 | ID | Finding → source → action → status | Owner / dependency |
 |---|---|---|
 | TR-01 | ActionGateway characterization → execution map §10.1 → **UPDATE** current docs → **OPEN, static verified** | ActionGateway; runtime flag/canary before enforcement change |
 | TR-02 | Voice canonical/legacy writer split → map §10.2, runbook C2/F1 → **ADD OPEN ITEM** → **OPEN, runtime-gated** | N18; activation + canary before retirement |
-| TR-03 | Commercial CRM writers exist but have zero callers → map §2/§10.9, runbook C3/F3 → **NO CHANGE — ALREADY CANONICAL**, add TMA alignment → **OPEN, unwired** | Schema/Data Contracts; registry/dispatcher/schema wiring |
-| TR-04 | Broken `_ProductionContacts.find_or_create()` import → map §10.6/runbook F4 → **ADD OPEN ITEM** → **OPEN, latent** | Core Reasoning; fix before gated path activation |
-| TR-05 | Sunday 08:00 and 08:30 collisions → map §6, runbook notes → **ADD OPEN ITEM** → **OPEN, runtime/config-only** | Scheduler; retime or owner-accept before activation |
-| TR-06 | Render/Google/flag state unresolved → map §7, runbook A1–A5 → **UPDATE** wording → **OPEN, live verification required** | Operations; no static source selected as truth |
+| TR-03 | Commercial CRM writers → PR1153 + map §2/§10.9 → **UPDATE** to statically wired tools → **CODE DONE, NOT VERIFIED IN PROD**; TMA surface and raw-write ownership remain open | Schema/Data Contracts; owner-approved canary |
+| TR-04 | Broken `_ProductionContacts.find_or_create()` import → PR1153 + map §10.6/runbook F4 → **CLOSE stale current claim** → **CODE DONE, NOT VERIFIED IN PROD** | Core Reasoning; verify before gated activation |
+| TR-05 | Sunday scheduler collisions → PR1153 + map §6 → **CLOSE 08:00 pair as code-done; retain 08:30** → **OPEN, static/config-only** | Scheduler; add schedule assertion and resolve/accept 08:30 |
+| TR-06 | Render/Google/flag state → PR1153 owner confirmation + map §7 → **UPDATE** wording → **OPEN, live verification required**; Google frozen/live contradiction owner-resolved as unfrozen | Operations; current Render values still need live evidence |
 | TR-07 | Meta outbound sender missing; flag does not deliver → map §1.3/§7, runbook cross-cutting note → **UPDATE** `.env.example`/runtime map → **OPEN, new adapter capability** | Meta adapter; not a flag-only rollout |
 | TR-08 | `/boss_doctor`, STT provider, `/health` shape drift → map §10.3–§10.5 → **UPDATE** source docs → **CLOSED, documentation drift** | Operations; static only |
 | TR-09 | Conversion/Contact notes mismatch and absent Contact list/detail TMA → Admin spec findings → **ADD OPEN ITEM** → **OPEN, product/backend gap** | CRM/TMA; one owner decision |
@@ -6499,6 +6499,12 @@ canonical finding ledger; the source documents remain static evidence indexes.
 | TR-12 | No dedicated Knowledge backend; no Media browse/detail surface; Assets ≠ Media → Admin spec → **ADD DEFERRED ITEM** → **OPEN, owner decision/new capability** | Product/TMA; Activity reuse is recommendation only |
 | TR-13 | Emergency Stop implemented; general flag and identity UI missing → Admin spec → **UPDATE** classification → **OPEN, API MISSING / NEW CAPABILITY** | Owner Control/TMA; schema capability does not imply surface |
 | TR-14 | Desktop Admin App not current product → Admin spec → **MARK HISTORICAL** conflicting planning prose → **OPEN, owner decision** | Product; current surface is TMA/mobile |
+| TR-15 | CI markers are defined but unused → PR1152 matrix §0.1 → **ADD OPEN ITEM** → **OPEN, test-harness governance** | CI/Governance; marker coverage or explicit removal |
+| TR-16 | Two concurrency tests use non-raising `chk()` inside pytest tests → PR1152 matrix §0.2 → **ADD OPEN ITEM** → **OPEN, false-pass risk** | CI/Governance; replace with raising assertions |
+| TR-17 | BUG-153 test has three known failures without a carve-out → PR1152 matrix → **ADD OPEN ITEM** → **OPEN, CI verification/fix** | Tasks/CI; confirm CI log and repair or classify |
+| TR-18 | Admin App proposed six-role model exceeds current TMA route reality → PR1154 permission matrix → **ADD POLICY ITEM** → **OPEN, policy decision** | Product/TMA; no access inferred from spec prose |
+| TR-19 | TMA write screens require both persistence and atomic-claims flags; no fallback → PR1154 implementation spec → **ADD LIVE-GATE ITEM** → **OPEN, live flag verification** | TMA/Operations; verify deployed flags before write claims |
+| TR-20 | `/api/owner/command-center` is consumed; `/api/owner/control-center` is dead/unused → PR1154 implementation spec → **ADD ROUTE-OWNERSHIP ITEM** → **OPEN, API cleanup** | TMA/API; preserve one canonical route |
 
 No remediation commit or production closure is claimed for TR-01–TR-14. Any
 future closure must name the remediation commit/PR, static verification, and
