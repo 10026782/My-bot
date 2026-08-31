@@ -36,7 +36,7 @@ Flask listens on `0.0.0.0:10000` by default unless `PORT` is set.
 
 | מסמך | נושא |
 |------|------|
-| `AGENTS.md`, `CLAUDE.md` | Agent / runtime notes |
+| `AGENTS.md`, `CLAUDE.md` | Agent / runtime notes (incl. shared-checkout / concurrent-session rules in `AGENTS.md`) |
 | `BOSS_CURRENT_STATE.md` | Current system state |
 | `ROADMAP.md` | Feature roadmap (single source of truth) |
 | `FILE_OWNERSHIP.md` | Which file owns which responsibility |
