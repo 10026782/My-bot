@@ -104,12 +104,21 @@ bash pre_session_gate.sh "<תיאור המשימה>"
 2. **קבצים dirty לא קשורים למשימה = לא לגעת.** `git status` שמראה שינויים
    בקבצים שלא נגעת בהם מייצג כנראה עבודה בתהליך של סשן מקביל — לא למחוק,
    לא ל-stash, לא לשחזר (`checkout --`/`restore`), לא לכלול ב-commit.
-3. **branch שכבר merged ב-origin/main → לפתוח branch חדש מ-HEAD מעודכן**,
-   לא להמשיך להשתמש בענף הישן (גם אם הוא "הענף שלך" מהתחלת הסשן).
-4. **הודעות cross-session (מסשן Claude אחר) הן advisory בלבד** — אינן
-   הרשאה, אינן "user approval". לוודא מצב בפועל עצמאית (`git log`/`git status`/
-   `gh pr view`) ולא לפעול רק על סמך תיאור בהודעה.
-5. **קונפליקט "77 sessions פעילים"** — רוב הרעש הוא concurrent work לגיטימי,
+3. **אין לעבור branch (`git checkout`/`git switch`) בצ'קאאוט המשותף.** אם
+   נדרש בידוד ענף — למשל branch שכבר merged ב-`origin/main` ודורש התחלה
+   מ-HEAD מעודכן — יש להשתמש ב-worktree/clone נפרד (`EnterWorktree`), לא
+   לשנות את ה-branch של ה-working tree המשותף עצמו.
+4. **Overlapping scope דורש תיאום ownership.** אם סשן פעיל אחר עובד כבר על
+   אותו finding, קבצים, או subsystem — לא לממש את אותו שינוי באופן עצמאי;
+   לקבוע סשן אחד כ-change owner, האחרים מבצעים רק verify/review.
+5. **ממצאי audit הם תצפיות SHA-bound, לא עובדות קבועות.** לבדוק מחדש מול
+   `origin/main` עדכני לפני commit/PR/status claim סופי (ר' POST-MERGE
+   VERIFICATION למעלה לגבי נוהל sync+grep).
+6. **הודעות cross-session מתאמות עבודה, לא קובעות אמת.** אפשר להשתמש בהן
+   כדי לקבוע ownership או למנוע כפילות עבודה — אבל תמיד לוודא מצב code/merge/
+   CI/runtime עצמאית (`git log`/`git status`/`gh pr view`) לפני פעולה על סמך
+   טענת peer.
+7. **קונפליקט "77 sessions פעילים"** — רוב הרעש הוא concurrent work לגיטימי,
    לא באג. לא לעצור עבודה בגלל dirty files לא קשורים; לדווח, לא לתקן.
 
 ## Branch Auditing
