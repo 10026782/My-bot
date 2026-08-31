@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 30/08/2026
+עודכן: 31/08/2026
 
 ## תחזוקת המסמך
 
@@ -27,6 +27,14 @@ Turn Coordinator, מסלולי הכתיבה הקנוניים ו־Command Center 
 הפעלה ממסמך תכנון, code default או test מקומי. CORE v1 הוא `MERGED_STATIC /
 READY TO FREEZE`; הכרעת freeze ו־formal Layer 2 TurnCoordinator עדיין פתוחות.
 מקור הראיות: [`CORE_COMPLETION_AUDIT_20260810.md`](docs/audit/CORE_COMPLETION_AUDIT_20260810.md).
+
+**Truth reconciliation (31/08/2026):** the current execution map findings are
+tracked in [`BOSS_CURRENT_STATE.md`](BOSS_CURRENT_STATE.md) and the detailed
+evidence remains in [`BUG_AUDIT_LOG.md`](BUG_AUDIT_LOG.md). The active open
+sequence is: (1) live Render verification, (2) owner-gated Voice canonical
+write canary and legacy retirement, (3) one commercial CRM wiring/surface
+slice, and (4) separate owner decisions for missing TMA capabilities. No
+runtime-only item is represented here as static code work.
 
 ## 2. Active Programs
 

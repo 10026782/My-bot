@@ -41,7 +41,7 @@ git ls-remote origin main
 ### 3. בדוק חיות
 ```bash
 curl https://my-bot-jqz2.onrender.com/health
-# צפוי: {"status": "ok", "version": "..."}
+# צפוי: {"status": "ok"} — `/health` is intentionally limited; owner-authenticated detail is at `/api/owner/health`.
 ```
 
 ### 4. שלח בדיקת smoke מטלגרם

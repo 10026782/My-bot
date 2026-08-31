@@ -16,7 +16,7 @@ The prior migration audit (`FULL MIGRATION POSSIBLE — REMEDIATION REQUIRED`) l
 
 Two additional discrepancies surfaced, not fixed here (out of scope — they're facts about production, not repo readiness):
 
-- **Google Workspace is not actually dormant.** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN` are all set in production, contradicting `CLAUDE.md`'s "(currently frozen)" note. Migrate these values as-is; whether the integration is truly inactive needs a separate check, not assumed either way.
+- **Google Workspace configuration snapshot (28/08/2026):** the Render API read recorded `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN` as present at that time. This is not current-date proof of runtime behavior or integration activity. **RUNTIME CONFIG STATUS REQUIRES LIVE VERIFICATION** before treating the snapshot as current; migrate no value or activation assumption from this row alone.
 - **A malformed env var key exists on Render**: literally named `GOOGLE_DRIVE_FOLDER_IDGOOGLE_DRIVE_FOLDER_IDGOOGLE_DRIVE_FOLDER_ID` (alongside a separate, correctly-named `GOOGLE_DRIVE_ARTIFACT_FOLDER_ID`). Almost certainly a dashboard copy-paste artifact. Flagged for the owner to clean up directly in Render — not guessed at or silently corrected here.
 - `SETUP_WEBHOOK=1` is set permanently in production, though `.env.example` documents it as a one-time flag meant to be removed after first webhook registration. Not changed here; carried into `.env.oracle.example` with a note.
 

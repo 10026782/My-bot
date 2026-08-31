@@ -1,6 +1,6 @@
 # Runtime Verification Master Runbook
 
-**Companion to:** `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md` (the execution map this runbook sequences against). **Truth Reset SHA:** `origin/main` = `5387c909818d80af667d439e297e1f255508b610` (31/08/2026).
+**Companion to:** `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md` (the execution map this runbook sequences against). **Truth Reset SHA:** `origin/main` = `9df318e1c473782096cf48fdaa983950a8485832` (31/08/2026).
 
 **Purpose:** an ordered, dependency-aware runtime verification sequence for the next deployment window, derived from the execution map's feature-flag dependency chains and current runtime-evidence gaps. This is a sequencing tool, not a new authorization — every activation below still requires the owner decision its governing program (ROADMAP.md/HORIZON.md) already calls for. Nothing in this document changes a flag, deploys anything, or grants an activation by itself.
 
@@ -78,5 +78,5 @@ Sequenced per the execution map's §3 dependency chains — do not activate a de
 
 - `EMAIL_INBOUND` and `ABANDONED_LEADS` are **not** part of any phase above — they are structurally hard-blocked (`_ADAPTER_GATED_FLAGS`) until `send_email_reply`/`send_bounce` exist as registered dispatcher tools. That is new feature work, not a flag flip; do not attempt to activate either flag as part of this runbook.
 - `META_OUTBOUND_ENABLED` similarly cannot produce any user-visible change — no outbound Meta send path exists in the codebase at all. Flipping it only changes whether a reply is computed and logged, never sent.
-- The two Sunday 08:00 scheduler collisions (`audience_report` vs `weekly_quest_reset`) should be resolved (retime one of them) before either `AUDIENCE_INTELLIGENCE` or `GAME_SCHEDULER` moves from a rarely-exercised state to steady daily/weekly production traffic — both currently default off, so the collision is latent, not yet observed.
+- The Sunday 08:00 collision (`audience_report` vs `weekly_quest_reset`) and the Sunday 08:30 collision (`attribution_report` vs conditionally registered `weekly_summary`) should be resolved or explicitly accepted before the relevant flags/jobs move to steady production traffic. Both collisions are currently static findings; no runtime occurrence is claimed.
 - Every "GO" in this document requires the STATUS/EVIDENCE template CLAUDE.md's Hebrew "כלל ברזל" section mandates before any ✅ is recorded anywhere: commit hash, actual `git push` output, Render deploy hash match, and current flag state — this runbook does not substitute for that per-change protocol, it only sequences which changes happen in which order.

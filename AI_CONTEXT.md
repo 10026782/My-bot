@@ -1,7 +1,8 @@
 # AI CONTEXT
 
-**Updated:** 24/08/2026
-**Sources:** ROADMAP.md (last canonical update 21/08), CHANGELOG.md (through 20/08), git/code truth verified through a02ee10ededa9d0ab9a1b3f5ca8aa56e0c3147a7
+**Updated:** 31/08/2026
+**Truth Reset:** `origin/main` = `9df318e1c473782096cf48fdaa983950a8485832`
+**Sources:** `ROADMAP.md`, `docs/governance/HORIZON.md`, `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md`, `BOSS_CURRENT_STATE.md`, and `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md`
 **Read this before anything else.** Compressed briefing for all AI agents — not exhaustive documentation.  
 **"Merged" ≠ "deployed" ≠ "production-verified."** Owner holds field truth.
 
@@ -23,6 +24,11 @@
 - Approval flow: Telegram/TMA buttons, TC8 turn-state, fail-closed on exception.
 - Inbound: WhatsApp via Twilio (signature-validated) + Meta receiver; deterministic lead routing via `core/whatsapp_lead_cutover.py` (feature-gated, new).
 - Emergency Stop: five durable Airtable-backed flags.
+- `core/action_gateway.py` is active for ingress context/prefetch, proposal deduplication, and several unconditional callers. `FEATURE_ACTION_GATEWAY` specifically controls enforcement strength for the general-agent path; it is not a global dormant/shadow switch.
+- Voice has a canonical writer wrapper, but its default flag leaves the legacy direct-write path reachable; the legacy path lacks canonical Owner/dedup/scope behavior. Activation and canary proof precede retirement.
+- `commercial_crm.py` contains a statically complete Deal/Payment/PaymentTerm foundation with zero production callers; registry/dispatcher/schema wiring and a first-class TMA surface remain open.
+- Meta outbound has no real send implementation. `META_OUTBOUND_ENABLED` alone never enables delivery; this is structurally adapter-gated.
+- The current frontend is TMA/mobile-oriented. Contact, Deal/Payment, Knowledge, task-lifecycle, and Media browse/detail surfaces are not currently available; desktop admin is a separate product decision.
 - Daily digest, Finance Pulse, payment reminders, Game/TMA persistence, task writes all live.
 
 **Code Complete / Merged Since 22/08:**

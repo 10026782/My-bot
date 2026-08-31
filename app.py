@@ -6962,7 +6962,7 @@ def webhook_meta_whatsapp():
     if not _flag_enabled("META_OUTBOUND_ENABLED"):
         logger.info(
             "[Meta WhatsApp] inbound received — outbound stub, skipping run_agent. "
-            "Set META_OUTBOUND_ENABLED=true to activate."
+            "META_OUTBOUND_ENABLED only enables reply computation; outbound delivery requires a real Meta adapter and is not implemented."
         )
         response = {"status": "received_no_outbound"}
         if media_processing is not None:
