@@ -39,6 +39,10 @@ _REQUIRED: dict[str, list[str]] = {
     "crm_upcoming_payments":     [],
     "crm_mark_payment_paid":     ["record_id"],
     "crm_overdue_payments":      [],
+    # commercial_crm.py — canonical Deal/PaymentTerm/Payment writers
+    "crm_create_deal":           ["name", "domain", "owner_id"],
+    "crm_create_payment_term":   ["deal_id", "calc_type"],
+    "crm_create_payment":        ["amount", "domain", "owner_id"],
     # Knowledge
     "add_knowledge":             ["key", "value"],
     # Contact Resolver / Business Memory / Daily Report
@@ -68,12 +72,15 @@ _FIELD_QUESTIONS: dict[str, str] = {
     "funding_cost_pct": "מה עלות המימון? (%)", "status": "מה הסטטוס?",
     "amount": "מה הסכום? (₪)", "due_date": "מתי תאריך התשלום? (YYYY-MM-DD)",
     "key": "מה המפתח?", "value": "מה הערך?",
+    "domain": "מה הדומיין העסקי?", "owner_id": "מי הבעלים? (מזהה record)",
+    "deal_id": "לאיזו עסקה? (מזהה record)", "calc_type": "שיטת חישוב? (fixed/percentage)",
 }
 
 _SENSITIVE_TOOLS = {
     "gmail_send_draft", "airtable_update", "airtable_add",
     "crm_add_contact", "crm_add_deal", "crm_add_payment",
     "crm_update_deal_status", "crm_mark_payment_paid",
+    "crm_create_deal", "crm_create_payment_term", "crm_create_payment",
 }
 
 _ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?$")
