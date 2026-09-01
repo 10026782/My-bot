@@ -43,9 +43,9 @@ dispatcher→writer→Airtable→evidence→response) שהוכיחה פער אר
 
 1. **`_DEAL_FIELD_MAP` / `_PAYMENT_TERM_FIELD_MAP` / `_PAYMENT_FIELD_MAP`**
    (`tools/dispatcher.py:116-152`) — מיפוי סגור משדה Airtable גנרי (קבועי
-   `airtable_schema.py`) לפרמטר של הכותב הקנוני; זהה בדיוק לחשיפת השדות
-   שכבר קיימת בכלים הייעודיים הסנקציונים (`crm_create_deal` וכו') — לא
-   רחב יותר.
+   `airtable_schema.py`) לפרמטר של הכותב הקנוני; כל פרמטר אופציונלי שנתמך
+   בפועל על ידי הכותב הקנוני מיוצג כאן, כך שאין דחייה או אובדן שקט של שדה
+   חוקי.
 2. **`_CRM_TABLE_ROUTING`** (`tools/dispatcher.py:159-163`) — טבלה →
    (שם כלי קנוני, מיפוי שדות, פרמטרי-חובה) לכל אחת משלוש הטבלאות.
 3. **`_map_generic_fields_to_canonical()`** (`tools/dispatcher.py:166-186`)
@@ -58,6 +58,9 @@ dispatcher→writer→Airtable→evidence→response) שהוכיחה פער אר
    של הכלי הקנוני — לא זה הרחב של `airtable_add`), ואז ממפה ומעביר את
    הבקשה לכותב הקנוני (`commercial_crm.create_deal`/`create_payment_term`/
    `create_payment`) — לעולם לא לכתיבה הגנרית.
+
+   resolver קנוני מנרמל רווחים ואותיות עבור aliases מוכרים; שם מוגן לא מוכר
+   או דו-משמעי, כולל `PaymentTerms`, נכשל סגור ואינו מגיע לכותב הגנרי.
 
 ### נקודת יירוט: זמן ביצוע (post-approval), לא זמן הצעה
 

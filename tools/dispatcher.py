@@ -101,11 +101,9 @@ _ALIAS_MAP: dict[str, str] = {
 # Each map's exact key set matches the fields tools/dispatcher.py's own
 # "crm_create_deal"/"crm_create_payment_term"/"crm_create_payment" cases
 # already forward from the dedicated tool's `inputs` (see those cases
-# further down) — writer-only parameters those cases don't expose either
-# (venture_id/priority/risk_level for Deal; trigger_delay_days/start_date/
-# end_date for PaymentTerm; base_amount/rate_pct/vat_amount/
-# trigger_evidence for Payment) are intentionally absent here too, so this
-# back-door path never offers a WIDER surface than the sanctioned tool.
+# further down). Every optional parameter supported by the canonical writer is
+# represented here as well, so this route cannot reject or silently lose a
+# valid payload.
 #
 # Map value = (canonical kwarg name, link mode):
 #   None     -> scalar, passed through as-is
@@ -119,8 +117,11 @@ _DEAL_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     DealFields.OWNER:         ("owner_id", "single"),
     DealFields.ORIGIN_LEAD:   ("origin_lead_id", "single"),
     DealFields.CONTACTS_LINK: ("contact_ids", "list"),
+    DealFields.VENTURE_LINK:  ("venture_id", "single"),
     DealFields.AMOUNT:        ("amount", None),
     DealFields.STAGE:         ("stage", None),
+    DealFields.PRIORITY:      ("priority", None),
+    DealFields.RISK_LEVEL:    ("risk_level", None),
     DealFields.NOTES:         ("notes", None),
 }
 _PAYMENT_TERM_FIELD_MAP: dict[str, tuple[str, str | None]] = {
@@ -132,8 +133,11 @@ _PAYMENT_TERM_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     PaymentTermFields.CALC_BASIS:   ("calc_basis", None),
     PaymentTermFields.TRIGGER_TYPE: ("trigger_type", None),
     PaymentTermFields.TRIGGER_DATE: ("trigger_date", None),
+    PaymentTermFields.TRIGGER_DELAY_DAYS: ("trigger_delay_days", None),
     PaymentTermFields.CADENCE:      ("cadence", None),
     PaymentTermFields.VAT_RULE:     ("vat_rule", None),
+    PaymentTermFields.START_DATE:   ("start_date", None),
+    PaymentTermFields.END_DATE:     ("end_date", None),
     PaymentTermFields.NOTES:        ("notes", None),
 }
 _PAYMENT_FIELD_MAP: dict[str, tuple[str, str | None]] = {
@@ -145,13 +149,42 @@ _PAYMENT_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     PaymentFields.ORIGIN_LEAD:  ("origin_lead_id", "single"),
     PaymentFields.REF:          ("reference", None),
     PaymentFields.DATE:         ("due_date", None),
+    PaymentFields.BASE_AMOUNT:  ("base_amount", None),
+    PaymentFields.RATE_PCT:     ("rate_pct", None),
     PaymentFields.VAT_RULE:     ("vat_rule", None),
+    PaymentFields.VAT_AMOUNT:   ("vat_amount", None),
+    PaymentFields.TRIGGER_EVIDENCE: ("trigger_evidence", None),
     PaymentFields.NOTES:        ("notes", None),
 }
 # Keys the dispatcher itself injects into `fields` (see the _TENANT_AWARE
 # block in dispatch_tool()) — never user/agent-supplied, never mapped, and
 # never counted as an "unrecognized field" fail-closed trigger.
 _GENERIC_WRITE_IGNORED_KEYS: frozenset[str] = frozenset({"tenant_id"})
+
+_PROTECTED_CRM_ALIASES: dict[str, str] = {
+    "עסקאות (Deals)": Tables.DEALS,
+    "Deals": Tables.DEALS,
+    "Payment Terms": Tables.PAYMENT_TERMS,
+    "Payments": Tables.PAYMENTS,
+}
+
+
+def _normalize_table_name(table: str) -> str:
+    return re.sub(r"\s+", " ", str(table).strip()).casefold()
+
+
+def _resolve_protected_crm_table(table: str) -> tuple[str | None, bool]:
+    """Resolve known aliases; flag protected-looking unknown aliases."""
+    normalized = _normalize_table_name(table)
+    for alias, canonical in _PROTECTED_CRM_ALIASES.items():
+        if normalized == _normalize_table_name(alias):
+            return canonical, False
+    compact = re.sub(r"[^\w]+", "", normalized, flags=re.UNICODE)
+    protected_compact = {
+        re.sub(r"[^\w]+", "", _normalize_table_name(alias), flags=re.UNICODE)
+        for alias in _PROTECTED_CRM_ALIASES
+    }
+    return None, compact in protected_compact
 
 # table -> (dedicated tool name to authority-check, its field map, its
 # required-kwarg names that have no Python default and must never be
@@ -566,7 +599,11 @@ def dispatch_tool(
                 # each of the three blocks below re-checks role authority
                 # independently rather than trusting airtable_add's own
                 # (wider) role grant.
-                _resolved_table = _ALIAS_MAP.get(table, table)
+                _resolved_table, _protected_alias_error = _resolve_protected_crm_table(table)
+                if _protected_alias_error:
+                    _message = f"❌ שם טבלת CRM לא מוכר או דו-משמעי: {table!r}."
+                    audit_log_airtable("airtable_add", identity, {"table": table}, _message)
+                    return _tool_result(ok=False, tool="airtable_add", user_message=_message)
                 if _resolved_table in _CRM_TABLE_ROUTING:
                     _canonical_tool, _field_map, _required_kwargs = _CRM_TABLE_ROUTING[_resolved_table]
 

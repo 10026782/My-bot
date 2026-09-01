@@ -56,17 +56,9 @@ from identity import Identity, Role  # noqa: E402
 _no_emergency_stop = patch.object(dispatcher_module._ff, "is_enabled", return_value=False)
 _no_emergency_stop.start()
 
-passed = failed = 0
-
-
 def chk(desc: str, cond: bool) -> None:
-    global passed, failed
-    if cond:
-        print(f"✅ {desc}")
-        passed += 1
-    else:
-        print(f"❌ {desc}")
-        failed += 1
+    assert cond, desc
+    print(f"✅ {desc}")
 
 
 owner = Identity(
@@ -160,6 +152,65 @@ chk("Payment: canonical create_payment() was called", mock_pay.call_count == 1)
 chk("Payment: generic airtable_add() was NEVER called", mock_generic_add3.call_count == 0)
 chk("Payment: linked owner_id accepted as a bare string too (not just a list)",
     mock_pay.call_args.kwargs.get("owner_id") == "recOWNER000000002")
+
+print("\n── B2: every supported canonical writer field survives interception ──")
+with patch("commercial_crm.create_deal", return_value=_OK_RESULT) as m_deal:
+    _dispatch("airtable_add", {"table": Tables.DEALS, "fields": {
+        DealFields.NAME: "n", DealFields.DOMAIN: "d", DealFields.OWNER: ["o"],
+        DealFields.VENTURE_LINK: ["v"], DealFields.PRIORITY: "high",
+        DealFields.RISK_LEVEL: "low",
+    }}, owner)
+chk("Deal: venture/priority/risk fields map to canonical kwargs",
+    m_deal.call_args.kwargs["venture_id"] == "v"
+    and m_deal.call_args.kwargs["priority"] == "high"
+    and m_deal.call_args.kwargs["risk_level"] == "low")
+
+with patch("commercial_crm.create_payment_term", return_value=_OK_RESULT) as m_term:
+    _dispatch("airtable_add", {"table": Tables.PAYMENT_TERMS, "fields": {
+        PaymentTermFields.DEAL: ["d"], PaymentTermFields.NAME: "n",
+        PaymentTermFields.CALC_TYPE: "fixed", PaymentTermFields.TRIGGER_DELAY_DAYS: 2,
+        PaymentTermFields.START_DATE: "2026-09-01", PaymentTermFields.END_DATE: "2026-10-01",
+    }}, manager)
+chk("Payment Term: delay/start/end fields map to canonical kwargs",
+    m_term.call_args.kwargs["trigger_delay_days"] == 2
+    and m_term.call_args.kwargs["start_date"] == "2026-09-01"
+    and m_term.call_args.kwargs["end_date"] == "2026-10-01")
+
+with patch("commercial_crm.create_payment", return_value=_OK_RESULT) as m_payment:
+    _dispatch("airtable_add", {"table": Tables.PAYMENTS, "fields": {
+        PaymentFields.AMOUNT: 1, PaymentFields.DOMAIN: "d", PaymentFields.OWNER: "o",
+        PaymentFields.BASE_AMOUNT: 1, PaymentFields.RATE_PCT: 10,
+        PaymentFields.VAT_AMOUNT: 0.18, PaymentFields.TRIGGER_EVIDENCE: "term",
+    }}, owner)
+chk("Payment: calculation snapshot/evidence fields map to canonical kwargs",
+    m_payment.call_args.kwargs["base_amount"] == 1
+    and m_payment.call_args.kwargs["rate_pct"] == 10
+    and m_payment.call_args.kwargs["vat_amount"] == 0.18
+    and m_payment.call_args.kwargs["trigger_evidence"] == "term")
+
+print("\n── B3: protected aliases resolve or fail closed ──")
+for alias in ("Deals", " deals ", "DEALS", Tables.DEALS):
+    with patch("commercial_crm.create_deal", return_value=_OK_RESULT) as m_writer, \
+         patch.object(dispatcher_module, "airtable_add") as m_raw:
+        _dispatch("airtable_add", {"table": alias, "fields": {
+            DealFields.NAME: "n", DealFields.DOMAIN: "d", DealFields.OWNER: ["o"],
+        }}, owner)
+    chk(f"Deal alias {alias!r}: canonical writer only", m_writer.call_count == 1 and m_raw.call_count == 0)
+
+for alias in ("Payment Terms", " payment   terms ", "PAYMENT TERMS"):
+    with patch("commercial_crm.create_payment_term", return_value=_OK_RESULT) as m_writer, \
+         patch.object(dispatcher_module, "airtable_add") as m_raw:
+        _dispatch("airtable_add", {"table": alias, "fields": {
+            PaymentTermFields.DEAL: ["d"], PaymentTermFields.NAME: "n",
+            PaymentTermFields.CALC_TYPE: "fixed",
+        }}, manager)
+    chk(f"Payment Term alias {alias!r}: canonical writer only", m_writer.call_count == 1 and m_raw.call_count == 0)
+
+with patch("commercial_crm.create_payment_term") as m_writer, \
+     patch.object(dispatcher_module, "airtable_add") as m_raw:
+    result_bad_alias = _dispatch("airtable_add", {"table": "PaymentTerms", "fields": {}}, owner)
+chk("PaymentTerms: wrong alias denied", result_bad_alias.get("ok") is False)
+chk("PaymentTerms: wrong alias never reaches either writer", m_writer.call_count == 0 and m_raw.call_count == 0)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -312,6 +363,9 @@ chk("tampered post-approval payload: execution proof REJECTS (fail closed), "
 
 print()
 print("=" * 50)
-print(f"BUG-CRM-BYPASS (Commercial CRM dispatcher bypass closure) tests: {passed} passed, {failed} failed")
-if failed:
-    raise SystemExit(1)
+print("BUG-CRM-BYPASS (Commercial CRM dispatcher bypass closure) tests: PASS")
+
+
+def test_crm_dispatcher_bypass_closure_completed() -> None:
+    """Expose the module-level security assertions to pytest collection."""
+    assert True
