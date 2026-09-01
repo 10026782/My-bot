@@ -162,6 +162,14 @@ _PAYMENT_FIELD_MAP: dict[str, tuple[str, str | None]] = {
 # never counted as an "unrecognized field" fail-closed trigger.
 _GENERIC_WRITE_IGNORED_KEYS: frozenset[str] = frozenset({"tenant_id"})
 
+# Natural-language field labels accepted at the generic Airtable boundary;
+# every other unknown key remains fail-closed.
+_GENERIC_FIELD_ALIASES = {
+    "domain": DealFields.DOMAIN,
+    "תחום": DealFields.DOMAIN,
+    "בעלות": DealFields.OWNER,
+}
+
 _PROTECTED_CRM_ALIASES: dict[str, str] = {
     "עסקאות (Deals)": Tables.DEALS,
     "Deals": Tables.DEALS,
@@ -232,9 +240,10 @@ def _map_generic_fields_to_canonical(
     for key, value in fields.items():
         if key in _GENERIC_WRITE_IGNORED_KEYS:
             continue
-        if key not in field_map:
+        mapped_key = _GENERIC_FIELD_ALIASES.get(str(key).strip().casefold(), key)
+        if mapped_key not in field_map:
             return {}, f"שדה לא נתמך בכתיבה ישירה לטבלה זו: {key!r}."
-        kwarg_name, link_mode = field_map[key]
+        kwarg_name, link_mode = field_map[mapped_key]
         if link_mode == "single":
             if isinstance(value, list):
                 if len(value) != 1:
@@ -669,7 +678,7 @@ def dispatch_tool(
                     for _req in _required_kwargs:
                         _mapped.setdefault(_req, None if _req == "amount" else "")
 
-                    if "owner_id" in _field_map:
+                    if any(kwarg_name == "owner_id" for kwarg_name, _ in _field_map.values()):
                         _owner_record_id, _owner_error = _resolve_authenticated_crm_owner(
                             identity, _mapped.get("owner_id")
                         )

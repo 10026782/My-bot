@@ -52,3 +52,23 @@ def test_dispatcher_passes_resolved_owner_to_deal_and_payment_writers():
         )
     assert deal.call_args.kwargs["owner_id"] == "recPROFILE123"
     assert payment.call_args.kwargs["owner_id"] == "recPROFILE123"
+
+
+def test_generic_deal_aliases_map_before_owner_resolution():
+    with patch.object(dispatcher, "_validate_execution_proof", return_value=None), \
+         patch.object(dispatcher._ff, "is_enabled", return_value=False), \
+         patch.object(dispatcher._owner_resolution, "resolve_profile_record_id",
+                      return_value="recPROFILE123"), \
+         patch("commercial_crm.create_deal", return_value={"ok": True}) as deal:
+        result = dispatcher.dispatch_tool(
+            "airtable_add",
+            {"table": "Deals", "fields": {
+                "שם העסקה": "Canary Test",
+                "תחום": "Import",
+                "בעלות": ["אליהו חזן"],
+            }},
+            IDENTITY, trusted_source="agent", execution_context={"contract_id": "c"},
+        )
+    assert result["ok"] is True
+    assert deal.call_args.kwargs["domain"] == "Import"
+    assert deal.call_args.kwargs["owner_id"] == "recPROFILE123"
