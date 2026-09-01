@@ -569,31 +569,48 @@ _DOMAIN_DISPLAY_HE = {
 def _validate_clarification_name(text: str) -> Optional[str]:
     """
     Validates a raw reply as a lead name for the clarification flow.
-    Reuses _HEBREW_NAME_RE/_is_name_stop_token (core/ingress_classifier.py —
-    the SAME building blocks normal dictation extraction uses, not new
-    validation logic) but with fullmatch semantics: unlike
-    _extract_name_from_window() (which segments noisy free text to FIND a
-    name inside it), a clarification reply is expected to BE the name and
-    nothing else — no segmentation, no partial credit. "בקומה" (a stop-word,
-    even after BUG-099b.1's prefix-aware check) correctly returns None here.
+    Reuses _HEBREW_WORD_RE/_HEBREW_NAME_RE/_is_name_stop_token
+    (core/ingress_classifier.py — the SAME building blocks normal dictation
+    extraction uses, not new validation logic) but with fullmatch semantics:
+    unlike _extract_name_from_window() (which segments noisy free text to
+    FIND a name inside it), a clarification reply is expected to BE the name
+    and nothing else — no segmentation, no partial credit. "בקומה" (a
+    stop-word, even after BUG-099b.1's prefix-aware check) correctly returns
+    None here.
 
-    Word count is capped at exactly 2 (first+last name — the only shape the
-    spec's own examples exercise, "יוסי כהן"). This is NOT just cosmetic:
-    a stop-word blocklist alone is too permissive for a full-reply check —
-    "נדבר אחר כך" ("we'll talk later," a real conversational sentence)
-    contains no property/lead-dictation stop-words at all and would
-    otherwise fullmatch as a 3-word "name." Capping at 2 words rejects it
-    as an unclear reply instead of a false-positive name, without adding
-    stemming/grammar detection (still out of scope).
+    Word count is accepted at 1 or 2 (a single given name, e.g. "דולב", or
+    first+last name, "יוסי כהן") and capped there — never 3+. This is NOT
+    just cosmetic: a stop-word blocklist alone is too permissive for a
+    full-reply check — "נדבר אחר כך" ("we'll talk later," a real
+    conversational sentence) contains no property/lead-dictation stop-words
+    at all and would otherwise fullmatch as a 3-word "name." Capping at 2
+    words rejects it as an unclear reply instead of a false-positive name,
+    without adding stemming/grammar detection (still out of scope).
+
+    BUG-LEAD-02 (R10 live bug report, 01/09/2026): the previous version
+    required EXACTLY 2 words via _HEBREW_NAME_RE alone (which itself only
+    matches 2+ space-separated Hebrew groups), so a single-token Hebrew name
+    ("דולב", "יבגני") was rejected here even though both the historical
+    structured "ליד חדש | שם | טלפון" parser and the Lead Draft flow's
+    set_draft_field() (core/lead_service.py) already accept a single-word
+    name for the exact same field — an inconsistency with no other
+    justification in this module's own history. Single stop-words ("כן",
+    "לא", etc.) remain rejected by the unchanged _is_name_stop_token() check
+    below, so this does not reopen a "one-word chat noise" false positive.
+    Non-Hebrew-script names (e.g. Latin transliterations) are a separate,
+    larger scope decision and are NOT addressed by this fix.
     """
-    from core.ingress_classifier import _HEBREW_NAME_RE, _is_name_stop_token
+    from core.ingress_classifier import _HEBREW_NAME_RE, _HEBREW_WORD_RE, _is_name_stop_token
 
     stripped = text.strip()
-    m = _HEBREW_NAME_RE.fullmatch(stripped)
-    if not m:
-        return None
     words = stripped.split()
-    if len(words) != 2:
+    if len(words) == 1:
+        if not _HEBREW_WORD_RE.fullmatch(words[0]):
+            return None
+    elif len(words) == 2:
+        if not _HEBREW_NAME_RE.fullmatch(stripped):
+            return None
+    else:
         return None
     if any(_is_name_stop_token(w) for w in words):
         return None
