@@ -2,6 +2,8 @@
 
 **Date:** 01/09/2026. **Type:** three independent static/diagnostic fixes found during a read-only Grade-A runtime-verification pass (agent-verifiable without owner interaction — no flags changed, no Render config changed, no business writes, no canary). **PR:** #1159, branch `claude/pa01-scheduler-owner-mapping-fixes`. **Status at merge time: code-complete, CI-passing — not yet deployed/production-verified per CLAUDE.md's "כלל ברזל".**
 
+> **HISTORICAL_NEXT — superseded:** the "not yet deployed" status above describes this document's state *at merge time only*. All three commits are now merged into `origin/main` and deployed to Render, and commits 1–2 additionally have runtime-verified evidence (PA-01 config corrected + restart-verified; scheduler diagnostic confirmed live `RUNNING_WITH_JOBS`). Current status: `BOSS_CURRENT_STATE.md` TR-24/TR-28/TR-29 — read those, not this paragraph, for current truth.
+
 Full findings, business-impact framing, and cross-references live in `BOSS_CURRENT_STATE.md` TR-21–TR-27 (`docs: reconcile runtime truth after Grade-A env verification pass`, PR #1160) — this note exists only to satisfy this repo's status-sync gate (a material `.py` implementation change requires an accompanying current-state/architecture doc touch in the same PR) without duplicating that reconciliation's content here.
 
 ## Commit 1 — `5e7585c`: surface malformed PA-01 enforcement state
