@@ -1,6 +1,6 @@
 # Current System Execution Map
 
-**Truth Reset SHA:** `origin/main` = `894320409a67df992afedeb70aae8e76fdfd00d1` (01/09/2026). This is the merge containing the latest reconciled PRs; all runtime claims below remain static unless explicitly labelled runtime-verified.
+**Truth Reset SHA:** `origin/main` = `b58b27f8771c8ffd4c633a84a28b4009178fbeca` (01/09/2026). This is the merge containing the latest reconciled PRs; all runtime claims below remain static unless explicitly labelled runtime-verified.
 
 **Date:** 31/08/2026. **Type:** read-only architecture audit. No runtime code was modified, no flags changed, nothing deployed.
 
@@ -291,7 +291,7 @@ Distinguishing STATIC VERIFIED (confirmed by reading this audit's code) / MERGED
 | ActionGateway (`core/action_gateway.py`) | STATIC VERIFIED as always-active for dedup + several unconditional callers (§4) — **not** dormant as `feature_flags.py`'s comment suggests | `FEATURE_ACTION_GATEWAY` off | RUNTIME NOT ESTABLISHED for the blocking-enforcement branch specifically | See §10 contradiction |
 | PostgreSQL atomic claims (`FEATURE_ATOMIC_CLAIMS`) | STATIC VERIFIED gate location (§3, §4) | **Claimed live** per `ORACLE_MIGRATION_M0.md` (28/08/2026) | Not independently re-verified fresh in this pass | Confirm against current Render env before relying on this |
 | Emergency Stop (5 flags) | STATIC VERIFIED, durable via `EmergencyStopManager` | Claimed production-verified by the owner directly per `AI_CONTEXT.md` (23/07/2026) | Owner-reported, not independently re-checked here | None known |
-| Schema governance pipeline (Track 8/8B/8C) | STATIC VERIFIED + LIVE SCHEMA VERIFIED per `ROADMAP.md`'s `SCHEMA_DATA_CONTRACTS` row (30/08/2026, via a read-only Airtable MCP pass) | N/A (schema state, not a runtime toggle) | RUNTIME VERIFIED for the schema shape itself, not for any code path built on it | Deal/Payment tools are now statically registered by PR1153; verify canary and TMA ownership |
+| Schema governance pipeline (Track 8/8B/8C) | STATIC VERIFIED + LIVE SCHEMA VERIFIED per `ROADMAP.md`'s `SCHEMA_DATA_CONTRACTS` row (30/08/2026, via a read-only Airtable MCP pass) | N/A (schema state, not a runtime toggle) | LIVE SCHEMA SHAPE VERIFIED; application runtime not established | Deal/Payment tools are statically registered by PR1153; verify canary and TMA ownership |
 
 ---
 
@@ -306,7 +306,7 @@ Distinguishing STATIC VERIFIED (confirmed by reading this audit's code) / MERGED
 7. **Owner-confirmed, runtime still unverified: Google Workspace.** The prior “frozen vs live” contradiction was resolved by the 31/08 owner confirmation that Workspace was unfrozen; the current Render values still require live verification.
 8. **One Sunday scheduler collision remains:** 08:30 (`attribution_report` vs conditionally registered `weekly_summary`). The 08:00 pair is no longer colliding after `audience_report` moved to 08:05 in PR1153; no schedule assertion exists yet.
 9. **Closed/code-done: commercial CRM wiring.** PR1153 registered the three canonical tools with policy/schema/dispatcher coverage; runtime canary and ownership against generic raw writes remain open.
-10. **Truth Reset SHA:** this document is now reconciled against `origin/main` at `894320409a67df992afedeb70aae8e76fdfd00d1`; earlier SHA references and pre-PR1153 findings are historical.
+10. **Truth Reset SHA:** this document is now reconciled against `origin/main` at `b58b27f8771c8ffd4c633a84a28b4009178fbeca`; earlier SHA references and pre-PR1153 findings are historical.
 
 ---
 
@@ -318,9 +318,9 @@ Six of §10's ten findings are now resolved. Code fixes are **🟡 CODE DONE, NO
 - **Finding 3** (`boss_doctor.py` doc drift in CLAUDE.md): resolved — CLAUDE.md's `boss_doctor.py` entry now correctly states it is wired to the owner-only `/boss_doctor` command.
 - **Finding 4** (`.env.example` STT provider drift): resolved — `.env.example` now documents `GROQ_API_KEY` as reserved/unwired and OpenAI Whisper as the actual live provider.
 - **Finding 5** (`/health` response shape drift): resolved — `docs/operations/DEPLOYMENT.md`'s example no longer includes the undocumented `"version"` key.
-- **Finding 6** (`core/reasoning_ports.py::_ProductionContacts.find_or_create()` broken import): fixed to import `tools.contact_resolver.resolve`/`ResolveStatus` (the real, tested module), matching `decision_ports.py`'s working adapter pattern. Covered by new tests in `test_core_reasoning.py`.
+- **Finding 6** (historical `core/reasoning_ports.py::_ProductionContacts.find_or_create()` broken-import claim): fixed to import `tools.contact_resolver.resolve`/`ResolveStatus`, covered by `test_core_reasoning.py`; runtime activation remains unverified.
 - **Finding 8** (Sunday 08:00 `audience_report`/`weekly_quest_reset` collision): `audience_report` moved to 08:05 in `scheduler.py`.
-- **Finding 9** (`commercial_crm.py` writers unwired): `crm_create_deal`, `crm_create_payment_term`, `crm_create_payment` registered end-to-end in `tool_registry.py`, `tools/dispatcher.py`, `tools/schemas.py`, `action_validator.py`, and `core/anti_hallucination.py`. Covered by new `test_commercial_crm_dispatcher_wiring.py`.
+- **Finding 9** (historical `commercial_crm.py` writers-unwired claim): `crm_create_deal`, `crm_create_payment_term`, `crm_create_payment` are registered end-to-end in `tool_registry.py`, `tools/dispatcher.py`, `tools/schemas.py`, `action_validator.py`, and `core/anti_hallucination.py`; runtime canary and TMA/raw-write ownership remain open.
 - **Finding 7** (Google Workspace credential contradiction): resolved by owner confirmation (31/08/2026) — Google Workspace was frozen, then unfrozen; `ORACLE_MIGRATION_M0.md` ("live") reflects current reality. `docs/governance/ARCHITECTURE_DRIFT_MAP.md` row 7 and `docs/operations/RUNTIME_VERIFICATION_MASTER_RUNBOOK.md`'s A1 updated accordingly.
 
 Finding 2 (Voice canonical lead writer) remains open — pending a Render deploy the owner is running separately; no flag change made here per owner instruction. Finding 10 is a SHA pointer, not an actionable item.
