@@ -39,8 +39,20 @@ logger = logging.getLogger(__name__)
 # core.router.route_decision.RouterDomain — that catalog also carries
 # routing-only meta-domains (crm/internal) that are meaningless as a lead's
 # business vertical and 422 against the live Airtable schema.
+#
+# NOTE: "furniture_import" is deliberately NOT a domain here (owner
+# correction, 02/09/2026) — furniture is one example product within the
+# "import" business, not a domain of its own. The dedicated furniture
+# WhatsApp funnel (furniture_lead_funnel.py, config.py's get_domain())
+# still uses "furniture_import" as an internal routing/funnel identifier
+# to pick the right handler, but the Lead record it writes now uses
+# domain="import" (core/noninteractive_lead_cutovers.py) like any other
+# import lead. "furniture_import" remains a valid Demand Type/marketing
+# profile key elsewhere (cmd_marketing.py, marketing_domain_profiles.py,
+# marketing_fact_authority.py) — that's a different, unrelated concept
+# (airtable_schema.py's own DEMAND_TYPE comment: "בורר פרופיל, לא תחום").
 CANONICAL_LEAD_DOMAINS = frozenset({
-    "real_estate", "import", "furniture_import", "media", "saas", "finance", "recruitment", "general",
+    "real_estate", "import", "media", "saas", "finance", "recruitment", "general",
 })
 
 # A stable, numbered ordering of the same set — lets a reply be a bare
@@ -876,17 +888,17 @@ def render_lead_draft_card(draft: dict) -> str:
 _LEAD_DOMAIN_LABELS = {
     "recruitment": "גיוס", "real_estate": "נדל״ן", "import": "ייבוא",
     "finance": "כספים", "general": "כללי",
-    # These three were missing entirely — a Lead Draft Card for one of
-    # these domains showed the raw internal slug ("saas"/"media"/
-    # "furniture_import") instead of a Hebrew label. Values match the
-    # established convention already used elsewhere for the same domains
-    # (cmd_marketing.py's DOMAINS list, weekly_summary.py's _DOMAIN_LABELS,
-    # core/lead_candidate_handler.py's _DOMAIN_DISPLAY_HE) — not invented
-    # here. See _CANONICAL_LEAD_DOMAINS_LABEL_COVERAGE_CHECK below: this
-    # dict is asserted at import time to cover every CANONICAL_LEAD_DOMAINS
+    # These two were missing entirely — a Lead Draft Card for one of
+    # these domains showed the raw internal slug ("saas"/"media")
+    # instead of a Hebrew label. Values match the established convention
+    # already used elsewhere for the same domains (weekly_summary.py's
+    # _DOMAIN_LABELS, cmd_update.py's DOMAINS) — not invented here. See
+    # _CANONICAL_LEAD_DOMAINS_LABEL_COVERAGE_CHECK below: this dict is
+    # asserted at import time to cover every CANONICAL_LEAD_DOMAINS
     # value, so a future domain addition fails loudly instead of silently
-    # falling back to the raw slug again.
-    "saas": "SaaS", "media": "מדיה", "furniture_import": "ייבוא רהיטים",
+    # falling back to the raw slug again. ("furniture_import" is
+    # deliberately not a Lead domain — see CANONICAL_LEAD_DOMAINS above.)
+    "saas": "SaaS", "media": "מדיה",
 }
 
 _missing_lead_domain_labels = set(CANONICAL_LEAD_DOMAINS) - set(_LEAD_DOMAIN_LABELS)

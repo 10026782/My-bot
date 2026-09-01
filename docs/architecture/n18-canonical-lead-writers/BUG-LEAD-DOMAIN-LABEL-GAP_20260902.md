@@ -90,9 +90,65 @@ Draft, לא בהודעות הבהרה) ולא נבדק אמפירית כאן. נ
 - `python3 tools/audit_turn_coordinator_bypass.py` — PASS, לא מושפע
 - `git diff --check` — נקי
 
-## סטטוס
+## סטטוס (חלק 1 — completeness)
 
-קוד מומש ונבדק מקומית (STATIC_VERIFIED). **לא מוזג, לא deployed, לא
-verified בפרודקשן.** תיקון זה נפרד במכוון מ-`BUG-CRM-BYPASS-FINGERPRINT-PARITY`
-(PR #1175) — branch שונה, אין נגיעה ל-Deal/CRM/ActionGateway — לפי
-בקשת הבעלים המפורשת ("תקן בנפרד").
+קוד מומש ונבדק מקומית (STATIC_VERIFIED). תיקון זה נפרד במכוון מ-
+`BUG-CRM-BYPASS-FINGERPRINT-PARITY` (PR #1175) — branch שונה, אין נגיעה
+ל-Deal/CRM/ActionGateway — לפי בקשת הבעלים המפורשת ("תקן בנפרד").
+
+---
+
+## תיקון המשך — BUG-LEAD-DOMAIN-FURNITURE-NOT-A-DOMAIN (אותו יום, אותו branch)
+
+מיד לאחר התיקון לעיל, הבעלים תיקן הנחת-יסוד: "הענף הנכון הוא ייבוא
+(IMPORT) ולא רהיטים — שזו רק דוגמא למוצר, ולא הענף בעצמו." כלומר
+`furniture_import` **מעולם לא היה אמור** להיות אחד מ-8 הדומיינים
+הקנוניים — התווית שהושלמה לו לעיל (סעיף 1) תיקנה סימפטום (slug גולמי
+בכרטיס) על גבי דומיין שגוי מיסודו.
+
+**חקירת scope שנעשתה לפני התיקון** (ראה `BUG_AUDIT_LOG.md`'s
+`BUG-LEAD-DOMAIN-FURNITURE-NOT-A-DOMAIN` entry לפירוט המלא): אומת בקוד
+ש-`furniture_import` מופיע בשני מושגים שונים ולא-קשורים —
+(1) כערך ב-`CANONICAL_LEAD_DOMAINS` (הפגם), ו-(2) כערך "Demand Type"
+במערכת השיווק (`cmd_marketing.py`, `marketing_domain_profiles.py`,
+`marketing_fact_authority.py`) — מושג נפרד ותקין, לא נגוע. גם `config.py::get_domain()`
+ו-`furniture_lead_funnel.py::DOMAIN` ממשיכים להשתמש ב-`"furniture_import"`
+כמפתח ניתוב פנימי בלבד (בחירת handler) — לא כערך שנכתב לרשומת Lead,
+ולכן **לא שונו**: שינוים היה שובר את הניתוב הלייב לפאנל הרהיטים הייעודי
+בלי צורך אמיתי.
+
+**התיקון בפועל:**
+1. `core/lead_service.py::CANONICAL_LEAD_DOMAINS` — הוסר `"furniture_import"`
+   (נשארו 7 דומיינים קנוניים: `real_estate, import, media, saas, finance,
+   recruitment, general`).
+2. `core/lead_service.py::_LEAD_DOMAIN_LABELS` — הוסרה התווית התואמת.
+3. `core/noninteractive_lead_cutovers.py::create_furniture_inbound_lead()` —
+   `domain="furniture_import"` → `domain="import"` (זהו הקורא היחיד
+   שכתב בפועל ליד עם דומיין זה).
+4. `test_noninteractive_lead_cutovers.py` — עודכן לאמת `domain == "import"`.
+
+**חשוב — לא backfill רטרואקטיבי:** רשומות Lead קיימות ב-Airtable עם
+`Domain=furniture_import` (שנוצרו לפני התיקון) לא משתנות על ידי תיקון
+זה — זהו תיקון prospective בלבד. Backfill היסטורי, אם רצוי, הוא החלטת
+בעלים נפרדת.
+
+### Verification (חלק 2)
+
+חבילת regression מלאה ירוקה, כולל בדיקה מפורשת שמערכת ה-Demand
+Type/שיווק לא נפגעה (מושג נפרד לגמרי): `test_noninteractive_lead_cutovers.py`
+(4/4), `test_n18_slice1_lead_preview.py` (6/6), `test_lead_service_phase1.py`
+(109/109), `test_draft_flow.py` (16/16), `test_n18_draft_dispatch_unification.py`
+(8/8), `test_structured_command.py` (11/11),
+`test_bug_lead_02_single_word_name_clarification.py` (17/17),
+`test_f52_g3_s7_structured_lead_capture.py` + `test_r4_1_optional_note.py`
++ `test_n18_phase4_telegram_buttons.py` + `test_marketing_fact_authority.py`
++ `test_marketing_creative_templates.py` (32/32, pytest).
+`python3 -m compileall -q .`, `smoke_tests.py`, imports (כולל
+`core.noninteractive_lead_cutovers`, `furniture_lead_funnel`),
+`tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`,
+`git diff --check` — כולם עברו.
+
+## סטטוס (סופי)
+
+קוד מומש ונבדק מקומית (STATIC_VERIFIED) עבור שני התיקונים ביחד.
+**לא מוזג, לא deployed, לא verified בפרודקשן.**
