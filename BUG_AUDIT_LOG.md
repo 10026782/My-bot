@@ -6512,3 +6512,21 @@ are current on `origin/main`. Any
 future closure must name the remediation commit/PR, static verification, and
 runtime requirement where applicable; resolved items must be removed from OPEN
 status here and from `BOSS_CURRENT_STATE.md` together.
+
+---
+
+### BUG-TASK-01 — Task approval execution-proof fingerprint mismatch (R10 live bug report)
+- **דווח:** 01/09/2026 (R10 live bug report — Telegram/ActionGateway/Lead/Task verification campaign)
+- **דווח על ידי:** בעלים (בדיקת runtime חיה)
+- **מסך / מודול:** `core/router/router.py` (`DeterministicTaskParse.business_identity()`), `core/action_gateway.py` (`propose_action()`), `tools/dispatcher.py` (`_validate_execution_proof()`)
+- **תיאור:** כל משימה שנוצרה דרך מסלול ה-create_task הדטרמיניסטי (למשל "צור משימה טיפול במשכנתא דחוף") אושרה בהצלחה על ידי הבעלים, אבל נכשלה בביצוע: `[Dispatch] denied — missing/invalid execution proof | reason=approval-sensitive execution proof does not match the action payload.` תשובה למשתמש: "❌ אושר אך נכשל בביצוע / הפעולה לא הושלמה". Lead creation דרך אותה גבול-ביצוע (ActionGateway/Dispatcher) שימש כ-control והצליח קצה-לקצה — הבאג לא היה גלובלי ל-Dispatcher/ActionGateway, אלא ספציפי למסלול ה-Task הדטרמיניסטי.
+- **Severity:** Critical (P0) — כל Task דרך המסלול הדטרמיניסטי נכשל, ללא תלות בתוכן
+- **Root Cause:** `DeterministicTaskParse.business_identity()` בנה את ה-`fingerprint_payload` שמוזן ל-`propose_action()` עם table alias ("`Tasks`") ו-field key ("`title`") שונים **מבנית** מה-payload האמיתי שנשלח לביצוע (`Tables.TASKS`="`משימות (Tasks)`", `TaskFields.NAME`="`כותרת המשימה`", דרך `core/router/task_builders.py`/`core/turn_coordinator_runtime.py::gateway_call()`). `tools/dispatcher.py::_validate_execution_proof()` מחשב מחדש, בעצמאות, fingerprint מתוך ה-payload האמיתי בזמן הביצוע — fingerprint שחושב מ-payload שונה במבנהו לא יכול להיות שווה לזה שנשמר על ה-contract. היפותזה ראשונית (Dispatcher לא מפעיל מחדש `_canonical_task_payload()`) נבדקה ונשללה בשחזור סטטי אמפירי לפני כתיבת התיקון — `contract.normalized_payload` כבר קנוני בזמן ה-propose, אז הפעלה חוזרת היא no-op.
+- **תוקן ב-commit:** `a85f398713710a41ca09e54186853fab99a89452` (התיקון עצמו) + `c88f145169fd3ecbfdae3c30674066d5c04682ca` (מסמך ארכיטקטורה נדרש ע"י `status_sync_validator.py`)
+- **תוקן ב-branch:** `claude/r10-live-bug-report-wo6mty`
+- **Merged:** כן — PR #1161, merge commit `bb73364a3efd3fade242138d0f440d5ec5635c97`. אומת ישירות מול `origin/main` (`git merge-base --is-ancestor` + grep על `Tables.TASKS`/`TaskFields.NAME` ב-`core/router/router.py` בפועל על main, לא רק לפי סטטוס PR).
+- **Deployed:** כן — Render, SHA `bb73364a3efd3fade242138d0f440d5ec5635c97`.
+- **Verified בפרודקשן:** כן
+- **Verification ראיה:** קנרי חי לאחר deploy — USER: "צור משימה בדיקת Task proof runtime" → BOT: "המשימה נוצרה: בדיקת Task proof runtime". contract `4e2525f0-1621-4e52-9757-1336ca0e97f3`, fingerprint `a30ad86d9702...`. שרשרת מלאה אומתה: propose_action (pending) → approved (payload_keys=['fields','table']) → atomic claim acquired (execution_id `d5963cef-3996-4e0b-bbb2-5702e5e813a1`) → **Dispatcher proof validated ללא הודעת mismatch** (השגיאה הקודמת לא הופיעה) → כתיבה עסקית (`POST משימות (Tasks)` → HTTP 200, `recmCE0vGjedbsmNK`) → "Execution succeeded (explicit)" (`outcome=completed`) → TC7A evidence (`result=success verified=True outcome_unknown=False evidence_ref_present=True`) → turn evidence `evidence_status=verified_write_success` (`verified_writes=1 failed_calls=0 outcome_unknown=0`) → claim authorization shadow `divergent=false code=match` → single-speaker (`agent_calls=0 contract_reads=1 final_responses=1 deterministic=True`, `reply_owner=gateway`, `duplicate_reply_suppressed=true`) → תשובה סופית אחת, ללא הצלחה כוזבת. פרטים מלאים: `docs/architecture/action-gateway/BUG-TASK-01_CREATE_TASK_FINGERPRINT_IDENTITY_PARITY_20260901.md`.
+- **היקף:** ראיית ה-verification הזו מכסה **רק** BUG-TASK-01 (מסלול ה-create_task הדטרמיניסטי). אינה מהווה runtime verification לאף ממצא R10 אחר (BUG-LEAD-01/02/03, OBS-STATUS-01, OBS-DOMAIN-01) — אלו נותרים בסטטוסם הנפרד, שלא נגעו/הושפעו מהתיקון הזה (מאומת ב-Lead control test suites, ראה מסמך הארכיטקטורה).
+- **סטטוס:** Verified

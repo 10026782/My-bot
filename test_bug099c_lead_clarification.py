@@ -166,8 +166,10 @@ print("── Unclear reply — not a cancel, not a new command, not a valid nam
 c = "unclear"
 _start(c)
 reply = _send(c, "נדבר אחר כך")
-chk("T12: unclear reply gets the exact re-ask message",
-    reply == "עדיין חסר לי שם הליד. מה השם?")
+chk("T12: unclear reply gets the exact re-ask message (BUG-LEAD-03: now "
+    "names the rejected value + shows the accepted format/example)",
+    reply == "'נדבר אחר כך' לא נראה כמו שם תקין. שם ליד צריך להיות מילה "
+             "אחת או שתיים בעברית (לדוגמה: \"דולב\" או \"יוסי כהן\"). מה שם הליד?")
 snap = _snap(c)
 chk("T13: 'נדבר אחר כך' is NOT saved as a name (would be a 3-word false positive "
     "on a plain stop-word blocklist check)",
@@ -182,7 +184,10 @@ print("── Invalid name reply (the BUG-099b.1 stop-word itself) ──")
 c = "invalidname"
 _start(c)
 reply = _send(c, "בקומה")
-chk("T14: 'בקומה' is rejected as a name, asks again", reply == "עדיין חסר לי שם הליד. מה השם?")
+chk("T14: 'בקומה' is rejected as a name, asks again with actionable "
+    "feedback (BUG-LEAD-03)",
+    reply == "'בקומה' לא נראה כמו שם תקין. שם ליד צריך להיות מילה אחת או "
+             "שתיים בעברית (לדוגמה: \"דולב\" או \"יוסי כהן\"). מה שם הליד?")
 chk("T15: state still pending", _snap(c).get("active_lead_candidate") is not None)
 
 
