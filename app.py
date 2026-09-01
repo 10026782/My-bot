@@ -58,7 +58,7 @@ from guards          import idempotency, rate_limiter, validate_tool_output
 from config          import get_domain as _channel_domain
 from core.router     import (
     route_request, RouteDecision, Handler, deterministic_create_task_title,
-    parse_deterministic_create_task,
+    parse_deterministic_create_task, parse_deterministic_create_deal,
 )
 from core.router.deterministic_denial import check_deterministic_denial
 from core import create_execution_context, create_operation
@@ -1138,6 +1138,58 @@ def _queue_deterministic_create_task(
         )
         return ""
     return outcome.get("message") or "לא הצלחתי להכניס את המשימה לאישור."
+
+
+def _queue_deterministic_create_deal(
+    name: str, domain: str, chat_id: str, channel: str, user_text: str,
+    identity, out_meta: dict | None = None, deal_parse=None,
+) -> str:
+    """מתזמן בקשת יצירת עסקה מלאה בלי להפעיל את הסוכן.
+
+    BUG-CRM-BYPASS follow-up: mirrors _queue_deterministic_create_task()
+    exactly (see that function's docstring for the full Turn Coordinator
+    rationale) — the difference is that Deal creation already has a
+    dedicated canonical tool (crm_create_deal, unlike Tasks which only has
+    generic airtable_add), so this proposes directly against it with no
+    intermediate table/fields translation and no entity-resolution step
+    (this is CREATE only, never UPDATE-by-reference, so
+    core/turn_coordinator_runtime.py's resolver-wrapping queue_task_request()
+    is not needed here). owner_id is deliberately left out of the payload —
+    tools/dispatcher.py's existing "crm_create_deal" case already resolves
+    a missing owner_id to the caller's own identity via
+    _resolve_authenticated_crm_owner()/core/owner_resolution.py.
+    """
+    try:
+        enforce("crm_create_deal", identity)
+    except ToolDenied as exc:
+        logger.warning(
+            "[DeterministicCreateDeal] נדחה לפני queue role=%s reason=%s",
+            getattr(identity, "role", "unknown"), type(exc).__name__,
+        )
+        return str(exc)
+
+    fingerprint_payload = {"name": name, "domain": domain}
+    if deal_parse is not None:
+        fingerprint_payload = deal_parse.business_identity()
+
+    outcome = _queue_approval_detailed(
+        "crm_create_deal", {"name": name, "domain": domain},
+        chat_id, channel, user_text,
+        fingerprint_payload=fingerprint_payload,
+        # BUG-153-style marker (see _queue_deterministic_create_task): identifies
+        # this proposal as originating from the deterministic router path for
+        # the current turn's inbound text only — never an autonomous Agent
+        # tool_use replay.
+        trusted_source="deterministic_create_deal",
+    )
+    if out_meta is not None and outcome.get("created_this_turn"):
+        out_meta["source_module"] = "action_gateway"
+    logger.info(
+        "[DeterministicCreateDeal] בעלות_coordinator=True agent_calls=0 "
+        "action_tool=%s created_this_turn=%s",
+        outcome.get("action_tool"), outcome.get("created_this_turn"),
+    )
+    return outcome.get("message") or "לא הצלחתי להכניס את העסקה לאישור."
 
 
 def _queue_deterministic_task_update(
@@ -4715,6 +4767,16 @@ def run_agent(
         return _queue_deterministic_task_update(
             route.intent, user_text, chat_id, channel, identity, _out_meta,
         )
+    # BUG-CRM-BYPASS follow-up: same Turn Coordinator short-circuit as
+    # create_task above — the Agent must never choose between crm_create_deal
+    # and generic airtable_add for a structured Deal-creation request.
+    if route.handler == Handler.TOOL and route.intent == "create_deal":
+        _deal_parse = parse_deterministic_create_deal(user_text)
+        if _deal_parse.certain:
+            return _queue_deterministic_create_deal(
+                _deal_parse.name, _deal_parse.domain, chat_id, channel, user_text,
+                identity, _out_meta, deal_parse=_deal_parse,
+            )
 
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
     # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.

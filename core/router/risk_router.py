@@ -42,7 +42,7 @@ _NORMAL_INTENTS = {
     Intent.CREATE_EVENT, Intent.UPDATE_EVENT, Intent.SCHEDULE_MEETING,
     Intent.CREATE_CONTACT, Intent.UPDATE_CONTACT,
     Intent.CREATE_LEAD, Intent.UPDATE_LEAD,
-    Intent.QUALIFY_LEAD, Intent.UPDATE_DEAL_STAGE,
+    Intent.QUALIFY_LEAD, Intent.UPDATE_DEAL_STAGE, Intent.CREATE_DEAL,
     Intent.DRAFT_EMAIL, Intent.DRAFT_MESSAGE,
     Intent.STORE_MEMORY,
 }
@@ -65,6 +65,7 @@ _CONTRACT_REQUIRED_INTENT_TO_TOOL: dict[str, str] = {
     Intent.CREATE_LEAD:       "airtable_add",
     Intent.UPDATE_LEAD:       "airtable_update",
     Intent.UPDATE_DEAL_STAGE: "airtable_update",
+    Intent.CREATE_DEAL:       "crm_create_deal",
 }
 assert set(_CONTRACT_REQUIRED_INTENT_TO_TOOL) <= _NORMAL_INTENTS
 _NON_CONTRACT_NORMAL_INTENTS = _NORMAL_INTENTS - set(_CONTRACT_REQUIRED_INTENT_TO_TOOL)

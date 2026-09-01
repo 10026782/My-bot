@@ -21,6 +21,25 @@ This is `STATIC_VERIFIED`
 only. The failed Deal canary remains historical runtime evidence; a new
 owner-approved canary is required after deployment.
 
+**Architecture correction — 01/09/2026:** the post-deploy canary failures
+after the above fix (unsupported natural-language field aliases, PR #1169)
+exposed the actual root cause — Deal creation had no deterministic
+`Intent` at all, so it always reached `Handler.AGENT` and the LLM chose
+between `crm_create_deal` and generic `airtable_add`. That contradicts the
+decided Turn Coordinator / Single Speaker architecture (the system routes
+mutation intents deterministically; the agent is not relied on to choose).
+PR #1171 (`route Commercial CRM through canonical tools`), which tried to
+fix tool-selection via better tool descriptions, was **closed without
+merging** for exactly this reason — it still left the choice to the agent.
+`Intent.CREATE_DEAL` was added instead, mirroring `Intent.CREATE_TASK`'s
+existing deterministic route exactly (`core/router/router.py`'s
+`parse_deterministic_create_deal` → `Handler.TOOL`/`Handler.CLARIFY`,
+`app.py`'s `_queue_deterministic_create_deal()` with `agent_calls=0`) —
+see `docs/architecture/action-gateway/BUG-CRM-BYPASS_DETERMINISTIC_CREATE_DEAL_ROUTE_20260901.md`.
+PR #1169's generic-write alias fix is held (not merged, not closed) as a
+defense-in-depth layer, no longer the primary Deal-creation path. This is
+`STATIC_VERIFIED` only — not merged, deployed, or runtime-verified.
+
 ## תחזוקת המסמך
 
 - `ROADMAP.md` הוא current-state SSOT וניווט, לא implementation ledger.
