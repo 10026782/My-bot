@@ -150,8 +150,10 @@ print("\n── End-to-end: an unclear single-token reply still re-asks (regress
 c2 = "bug_lead_02_unclear"
 _start(c2, "צור ליד חדש טלפון 0587041554")
 reply_unclear = _send(c2, "כן")
-chk("T5: a stop-word reply ('כן') does NOT get accepted as a name — bot asks again",
-    reply_unclear == "עדיין חסר לי שם הליד. מה השם?")
+chk("T5: a stop-word reply ('כן') does NOT get accepted as a name — bot asks "
+    "again (BUG-LEAD-03 wording, updated separately)",
+    reply_unclear == "'כן' לא נראה כמו שם תקין. שם ליד צריך להיות מילה אחת "
+                      "או שתיים בעברית (לדוגמה: \"דולב\" או \"יוסי כהן\"). מה שם הליד?")
 
 
 print()

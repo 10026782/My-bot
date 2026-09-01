@@ -802,8 +802,19 @@ def _resolve_lead_clarification(
                 payload.get("domain", domain), auto_write=False,
                 clear_clarification=True,
             )
-        # unclear reply for the single-phone case — state stays, ask again
-        return "עדיין חסר לי שם הליד. מה השם?"
+        # BUG-LEAD-03 (R10 live bug report, 01/09/2026): an unclear reply used
+        # to get the generic "עדיין חסר לי שם הליד. מה השם?" — it never named
+        # the rejected value, explained why, or showed the accepted format,
+        # unlike both the historical structured "ליד חדש | שם | טלפון" parser
+        # error (names the bad value + shows the format + an example) and
+        # this module's own _resolve_batch_name_clarification() sibling
+        # (already quotes the rejected line). Brought up to the same
+        # standard here — state still stays "needs_clarification", still
+        # asks again, only the wording changed.
+        return (
+            f"'{text.strip()}' לא נראה כמו שם תקין. שם ליד צריך להיות מילה "
+            f"אחת או שתיים בעברית (לדוגמה: \"דולב\" או \"יוסי כהן\"). מה שם הליד?"
+        )
 
     # BUG-111 — Priority 4b: batch clarification (2+ phones, see
     # _maybe_start_lead_clarification). One name per line, matching the
