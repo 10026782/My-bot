@@ -6654,3 +6654,23 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה חוזרת (אותה הודעה: "צור עסקה בשם X בתחום Y") לפני שסטטוס זה יעודכן ל-Verified.
+
+---
+
+### BUG-LEAD-DOMAIN-LABEL-GAP — Lead Draft Card showed raw internal domain slug for 3 of 8 canonical domains
+- **דווח:** 02/09/2026 (בעלים, תוך כדי חקירת "לא מתרגם לגיוס" בזרימת Lead ב-"bostaging")
+- **דווח על ידי:** agent session, אימות אמפירי ישיר על `origin/main` (לא תיקוף מסך בלבד)
+- **מסך / מודול:** `core/lead_service.py` (`_LEAD_DOMAIN_LABELS`, `_lead_display_items()`, צרכן: `build_lead_draft_message_contract()` → `render_lead_draft_message()`/`render_lead_draft_card()`)
+- **תיאור:** `_LEAD_DOMAIN_LABELS` כיסה רק 5 מתוך 8 הערכים ב-`CANONICAL_LEAD_DOMAINS` (`recruitment`, `real_estate`, `import`, `finance`, `general`) — חסרים `saas`, `media`, `furniture_import`. כרטיס תצוגה מקדימה (Lead Draft Card) לליד באחד משלושת התחומים החסרים היה מציג את ה-slug הפנימי הגולמי ("saas"/"media"/"furniture_import") במקום תווית עברית, כי `_lead_display_items()` נופל בחזרה על הערך הגולמי כשאין מיפוי ב-dict. זהו פער נקודתי בשכבת ה-**הצגה** בלבד — לא בפרסור, בכתיבה, או בשמירה: הערך הפנימי הנשמר ב-Airtable תמיד היה נכון; רק המחרוזת שהוצגה למשתמש לפני אישור הייתה שגויה.
+- **הבהרה חשובה — לא אותו באג כמו מה שהודגם ב-"bostaging":** הרצתי את הטקסט המדויק מהצילום-מסך של הבעלים ("ליד חדש/משה בדיקה/0502222222/recruitment/בעל מספר צוותים") דרך `parse_structured_command()` על `origin/main` הנוכחי, ועקבתי אחר הקורא שלו — `core/lead_candidate_handler.py::_handle_structured_command()`. הפונקציה הזו מבצעת **כתיבה מיידית** (`create_lead()` + "✅ ליד נוצר: ...") **בלי שום כרטיס אישור** בכלל. זה **סותר** את מה שהצילום-מסך של "bostaging" הראה (כרטיס אישור מלא לפני כתיבה) — סימן חזק שסביבת "bostaging" מריצה קוד ישן/שונה מ-`origin/main` הנוכחי, ולא שיש כאן רגרסיה ב-parsing/תרגום שניתן לשחזר בנתיב הזה בקוד הנוכחי. **מומלץ לבעלים לוודא באופן עצמאי איזה commit רץ בפועל בסביבת ה-staging** (Render dashboard מול `origin/main`) — זה לא תוקן במסגרת פריט זה כי אין כאן קוד לתקן: התנהגות `origin/main` בנתיב המדויק הזה נכונה (כתיבה מיידית, ללא בעיית תרגום, כי אין כרטיס תצוגה בנתיב הזה כלל).
+- **הפער האמיתי שנמצא ותוקן:** נתיב הכרטיס-לפני-כתיבה (free-text draft flow, לא הפקודה המובנית) עדיין כן קיים ב-`origin/main` וכן משתמש ב-`_LEAD_DOMAIN_LABELS` — וב-3 מתוך 8 תחומים היה מציג slug גולמי, ללא תלות ב-"bostaging". זהו הבאג שתוקן כאן.
+- **Severity:** Low — קוסמטי בלבד (תווית תצוגה), לא חוסם כתיבה, לא פוגע בנתונים; משפיע רק על 3 מתוך 8 תחומים קנוניים, רק בנתיב תצוגה מקדימה מסוימת.
+- **Root Cause:** `_LEAD_DOMAIN_LABELS` נבנה בשלב מוקדם יותר של הפיתוח כשרק 5 תחומים היו קיימים, ולא עודכן כש-`CANONICAL_LEAD_DOMAINS` הורחב ל-8 — ללא שום בדיקת-שלמות (completeness check) שהייתה תופסת את הפער אוטומטית.
+- **תוקן ב-commit:** (ראה מיד לאחר merge)
+- **תוקן ב-branch:** `claude/fix-lead-domain-labels-completeness`
+- **תיקון:** הושלמו שלוש התוויות החסרות ב-`_LEAD_DOMAIN_LABELS` — `"saas": "SaaS"`, `"media": "מדיה"`, `"furniture_import": "ייבוא רהיטים"` — ערכים שאולים מקונבנציות קיימות כבר במקומות אחרים בקוד (`cmd_marketing.py`'s רשימת DOMAINS ל-`furniture_import`; `"SaaS"`/`"מדיה"` הזהים ב-`weekly_summary.py::_DOMAIN_LABELS` וב-`cmd_update.py::DOMAINS`), **לא הומצאו כאן**. נוסף גם `assert` ברמת ה-מודול (`_missing_lead_domain_labels`) שבודק כיסוי מלא של `CANONICAL_LEAD_DOMAINS` בזמן import — תוספת תחום עתידי ל-`CANONICAL_LEAD_DOMAINS` בלי תווית תגרום לכשל import מיידי וברור, במקום נפילה שקטה חזרה ל-slug הגולמי. תיקון דטרמיניסטי טהור (dict lookup + assert) — **ללא regex**, לפי דרישת הבעלים המפורשת.
+- **Verification:** אומת אמפירית — כל 8 התחומים מתורגמים נכון (`saas`→SaaS, `media`→מדיה, `furniture_import`→ייבוא רהיטים, וחמשת הקיימים ללא שינוי). חבילת regression מלאה ירוקה, אפס רגרסיות: `test_n18_slice1_lead_preview.py` (6/6), `test_f52_g3_s7_structured_lead_capture.py`+`test_r4_1_optional_note.py`+`test_n18_phase4_telegram_buttons.py` (12/12, pytest), `test_lead_service_phase1.py` (109/109), `test_draft_flow.py` (16/16), `test_n18_draft_dispatch_unification.py` (8/8), `test_structured_command.py` (11/11), `test_bug_lead_02_single_word_name_clarification.py` (17/17). `python3 -m compileall -q .`, `smoke_tests.py`, imports (`app`/`tma_api`/`tools.dispatcher`/`core.lead_service`), `tools/audit_turn_coordinator_bypass.py`, `git diff --check` — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. תיקון זה **נפרד** מ-`BUG-CRM-BYPASS-FINGERPRINT-PARITY`/PR #1175 (branch שונה, לא קשור ל-Deal/CRM) לפי בקשת הבעלים המפורשת ("תקן בנפרד").

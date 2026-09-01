@@ -876,7 +876,24 @@ def render_lead_draft_card(draft: dict) -> str:
 _LEAD_DOMAIN_LABELS = {
     "recruitment": "גיוס", "real_estate": "נדל״ן", "import": "ייבוא",
     "finance": "כספים", "general": "כללי",
+    # These three were missing entirely — a Lead Draft Card for one of
+    # these domains showed the raw internal slug ("saas"/"media"/
+    # "furniture_import") instead of a Hebrew label. Values match the
+    # established convention already used elsewhere for the same domains
+    # (cmd_marketing.py's DOMAINS list, weekly_summary.py's _DOMAIN_LABELS,
+    # core/lead_candidate_handler.py's _DOMAIN_DISPLAY_HE) — not invented
+    # here. See _CANONICAL_LEAD_DOMAINS_LABEL_COVERAGE_CHECK below: this
+    # dict is asserted at import time to cover every CANONICAL_LEAD_DOMAINS
+    # value, so a future domain addition fails loudly instead of silently
+    # falling back to the raw slug again.
+    "saas": "SaaS", "media": "מדיה", "furniture_import": "ייבוא רהיטים",
 }
+
+_missing_lead_domain_labels = set(CANONICAL_LEAD_DOMAINS) - set(_LEAD_DOMAIN_LABELS)
+assert not _missing_lead_domain_labels, (
+    f"_LEAD_DOMAIN_LABELS is missing a Hebrew label for: {_missing_lead_domain_labels} "
+    f"— a Lead Draft Card would show the raw internal domain slug instead."
+)
 
 
 def _lead_display_items(draft: dict) -> list[str]:
