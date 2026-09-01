@@ -2684,7 +2684,15 @@ def _owner_strategic_pipeline() -> dict:
 def owner_health(identity):
     if not identity.is_owner:
         return jsonify({"error": "owner only"}), 403
-    health_status = get_health_status(scheduler=None, memory=None)
+    # Deferred import: tma_api.py must not import app.py at module level
+    # (app.py registers this blueprint — circular). Re-imported on every
+    # call so this always reads app._scheduler's *current* value, not a
+    # stale snapshot from before run_startup_sequence() set it.
+    try:
+        from app import _scheduler as _live_scheduler  # noqa: PLC0415
+    except Exception:
+        _live_scheduler = None
+    health_status = get_health_status(scheduler=_live_scheduler, memory=None)
     return jsonify({
         "status":  health_status["status"],
         "version": "3.0",

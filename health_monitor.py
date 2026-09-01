@@ -28,13 +28,21 @@ def _check_airtable() -> tuple[bool, str]:
 
 
 def _check_scheduler(scheduler) -> tuple[bool, str]:
-    """Check that the APScheduler instance has running jobs."""
+    """Check the background scheduler thread is alive and jobs are registered.
+
+    This codebase runs the `schedule` library's jobs on one background
+    `threading.Thread` (scheduler.py::start_scheduler()) — there is no
+    APScheduler instance anywhere in the repo. `scheduler` here is that
+    Thread; job count comes from the `schedule` library's own module-level
+    `schedule.jobs`, not from the thread object.
+    """
     try:
         if scheduler is None:
             return False, "not started"
-        if hasattr(scheduler, "running") and not scheduler.running:
+        if hasattr(scheduler, "is_alive") and not scheduler.is_alive():
             return False, "stopped"
-        jobs = scheduler.get_jobs() if hasattr(scheduler, "get_jobs") else []
+        import schedule as _schedule_lib
+        jobs = _schedule_lib.jobs
         if not jobs:
             return False, "no jobs registered"
         return True, f"{len(jobs)} jobs"
