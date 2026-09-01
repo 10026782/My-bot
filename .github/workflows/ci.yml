@@ -159,6 +159,18 @@ jobs:
           # error instead of silently reaching api.airtable.com.
           echo "127.0.0.1 api.airtable.com" | sudo tee -a /etc/hosts
 
+      - name: Enforce live-marker isolation contract
+        run: |
+          set -e
+          # No current test qualifies for an integration/live marker. Keep
+          # that fact explicit: a future marked test must get its own approved
+          # job, never disappear silently behind the unit-run exclusion.
+          if grep -R -n -E '@pytest\.mark\.(airtable|integration|live)|pytestmark[[:space:]]*=.*(airtable|integration|live)' \
+              --include='test_*.py' .; then
+            echo "Marked integration/live tests require a dedicated CI job"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt

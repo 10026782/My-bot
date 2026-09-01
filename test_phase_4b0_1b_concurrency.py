@@ -66,6 +66,7 @@ def chk(desc: str, cond: bool) -> None:
     else:
         print(f"❌ {desc}")
         failed += 1
+        raise AssertionError(desc)
 
 
 @dataclass
