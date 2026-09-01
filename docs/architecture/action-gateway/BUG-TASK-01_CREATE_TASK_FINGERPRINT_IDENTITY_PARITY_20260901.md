@@ -139,7 +139,24 @@ cross-layer tests: `test_bug_task_01_execution_proof_fingerprint_parity.py`
 
 ## סטטוס
 
-קוד מומש ונבדק מקומית (STATIC_VERIFIED). **לא מוזג, לא deployed, לא
-verified בפרודקשן.** לאחר merge + deploy: קנרי חי אחד — "צור משימה בדיקת
-Task proof runtime" ואישור מיידי — צפוי ליצור משימה בפועל ללא כשל
-execution-proof.
+**MERGED / DEPLOYED / RUNTIME VERIFIED** (עודכן 01/09/2026).
+
+- **Merged:** PR #1161, commit `c88f145169fd3ecbfdae3c30674066d5c04682ca`
+  (מוזג ל-main כ-`bb73364a3efd3fade242138d0f440d5ec5635c97`) — אומת ישירות
+  ב-`origin/main` (`git merge-base --is-ancestor` + grep על
+  `Tables.TASKS`/`TaskFields.NAME` ב-`core/router/router.py`).
+- **Deployed:** כן — Render, SHA `bb73364a3efd3fade242138d0f440d5ec5635c97`.
+- **קנרי חי לאחר deploy:** USER: "צור משימה בדיקת Task proof runtime" →
+  BOT: "המשימה נוצרה: בדיקת Task proof runtime". contract
+  `4e2525f0-1621-4e52-9757-1336ca0e97f3`, fingerprint `a30ad86d9702...`.
+  Dispatcher **לא** החזיר עוד "approval-sensitive execution proof does not
+  match the action payload" — proof validated, כתיבה עסקית בוצעה
+  (`POST משימות (Tasks)` → HTTP 200, `recmCE0vGjedbsmNK`), evidence
+  `verified_write_success` (`verified_writes=1`, `failed_calls=0`,
+  `outcome_unknown=0`), claim authorization `divergent=false`, single-speaker
+  `agent_calls=0 final_responses=1 deterministic=True`. ראה
+  `BUG_AUDIT_LOG.md` ("BUG-TASK-01") לרשומה המלאה.
+- **היקף הראיה:** הקנרי הזה מוודא רק את מסלול ה-create_task הדטרמיניסטי
+  שהתוקן כאן. אינו מהווה runtime verification לאף באג/מסלול R10 אחר
+  (BUG-LEAD-01/02/03, OBS-STATUS-01, OBS-DOMAIN-01) — אלו נותרים בסטטוסם
+  הקודם, לא הושפעו ולא אומתו על ידי ראיה זו.
