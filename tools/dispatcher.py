@@ -16,7 +16,10 @@ from .calendar_tools import calendar_get_events, calendar_create_event
 from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
 from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead, _tool_result
-from airtable_schema import DealStage, PaymentTermTrigger, PaymentTermCadence, VATRule
+from airtable_schema import (
+    DealStage, PaymentTermTrigger, PaymentTermCadence, VATRule,
+    Tables, DealFields, PaymentTermFields, PaymentFields,
+)
 from .airtable_read_adapter import AirtableReadError, list_records
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
 try:
@@ -60,6 +63,136 @@ _ALIAS_MAP: dict[str, str] = {
     "Deals":    "עסקאות (Deals)",
     "Expenses": "הוצאות (Expenses)",
 }
+
+
+# ══════════════════════════════════════════════════
+# Commercial CRM write-boundary closure (Deals/Payment Terms/Payments)
+#
+# Contacts already has this: the generic "airtable_add" case below
+# redirects any raw write to the Contacts table into
+# crm.create_contact_from_fields() (the canonical writer), so no caller can
+# reach that table without its dedup/validation gate — see that block
+# further down. Deals/Payment Terms/Payments had NO equivalent redirect:
+# a raw airtable_add call to those tables fell straight through to the
+# generic `airtable_add(table, fields)` write at the bottom of this case,
+# skipping commercial_crm.py's required-field/calc_type/VAT validation
+# entirely. Worse, "airtable_add"'s own registry role set (_INTERNAL,
+# tool_registry.py) includes "employee", while crm_create_deal/
+# crm_create_payment_term/crm_create_payment are _MANAGEMENT-only — so an
+# employee identity, explicitly denied crm_create_deal by enforce(), could
+# still reach the same business mutation through this generic tool. Found
+# during the R10 write-path golden-writer audit, 01/09/2026.
+#
+# Fix mirrors the Contacts pattern exactly: recognize the protected table,
+# map the generic Airtable field names onto the canonical writer's own
+# keyword arguments, and call that writer — never reimplementing its
+# validation. Two things Contacts' block didn't need to add explicitly:
+#   1. An enforce("crm_create_X", identity) re-check, closing the wider-
+#      role-reaches-narrower-tool gap above (Contacts creation has no
+#      _MANAGEMENT-only canonical tool to under-cut, so it never needed
+#      this).
+#   2. A closed field map (_DEAL_FIELD_MAP / _PAYMENT_TERM_FIELD_MAP /
+#      _PAYMENT_FIELD_MAP below) that FAILS CLOSED on any field name it
+#      doesn't recognize — a raw airtable_add payload uses real Airtable
+#      column names (DealFields.NAME etc.), not the canonical writer's own
+#      parameter names, so a mapping step is required; an unmapped field
+#      must never be silently dropped.
+#
+# Each map's exact key set matches the fields tools/dispatcher.py's own
+# "crm_create_deal"/"crm_create_payment_term"/"crm_create_payment" cases
+# already forward from the dedicated tool's `inputs` (see those cases
+# further down) — writer-only parameters those cases don't expose either
+# (venture_id/priority/risk_level for Deal; trigger_delay_days/start_date/
+# end_date for PaymentTerm; base_amount/rate_pct/vat_amount/
+# trigger_evidence for Payment) are intentionally absent here too, so this
+# back-door path never offers a WIDER surface than the sanctioned tool.
+#
+# Map value = (canonical kwarg name, link mode):
+#   None     -> scalar, passed through as-is
+#   "single" -> linked-record field; Airtable gives a 1-element list or a
+#               bare record-id string, the writer wants a bare string
+#   "list"   -> linked-record field where the writer itself wants a list
+#               (currently only Deal.contact_ids)
+_DEAL_FIELD_MAP: dict[str, tuple[str, str | None]] = {
+    DealFields.NAME:          ("name", None),
+    DealFields.DOMAIN:        ("domain", None),
+    DealFields.OWNER:         ("owner_id", "single"),
+    DealFields.ORIGIN_LEAD:   ("origin_lead_id", "single"),
+    DealFields.CONTACTS_LINK: ("contact_ids", "list"),
+    DealFields.AMOUNT:        ("amount", None),
+    DealFields.STAGE:         ("stage", None),
+    DealFields.NOTES:         ("notes", None),
+}
+_PAYMENT_TERM_FIELD_MAP: dict[str, tuple[str, str | None]] = {
+    PaymentTermFields.DEAL:         ("deal_id", "single"),
+    PaymentTermFields.NAME:         ("name", None),
+    PaymentTermFields.CALC_TYPE:    ("calc_type", None),
+    PaymentTermFields.FIXED_AMOUNT: ("fixed_amount", None),
+    PaymentTermFields.RATE_PCT:     ("rate_pct", None),
+    PaymentTermFields.CALC_BASIS:   ("calc_basis", None),
+    PaymentTermFields.TRIGGER_TYPE: ("trigger_type", None),
+    PaymentTermFields.TRIGGER_DATE: ("trigger_date", None),
+    PaymentTermFields.CADENCE:      ("cadence", None),
+    PaymentTermFields.VAT_RULE:     ("vat_rule", None),
+    PaymentTermFields.NOTES:        ("notes", None),
+}
+_PAYMENT_FIELD_MAP: dict[str, tuple[str, str | None]] = {
+    PaymentFields.AMOUNT:       ("amount", None),
+    PaymentFields.DOMAIN:       ("domain", None),
+    PaymentFields.OWNER:        ("owner_id", "single"),
+    PaymentFields.DEAL_LINK:    ("deal_id", "single"),
+    PaymentFields.PAYMENT_TERM: ("payment_term_id", "single"),
+    PaymentFields.ORIGIN_LEAD:  ("origin_lead_id", "single"),
+    PaymentFields.REF:          ("reference", None),
+    PaymentFields.DATE:         ("due_date", None),
+    PaymentFields.VAT_RULE:     ("vat_rule", None),
+    PaymentFields.NOTES:        ("notes", None),
+}
+# Keys the dispatcher itself injects into `fields` (see the _TENANT_AWARE
+# block in dispatch_tool()) — never user/agent-supplied, never mapped, and
+# never counted as an "unrecognized field" fail-closed trigger.
+_GENERIC_WRITE_IGNORED_KEYS: frozenset[str] = frozenset({"tenant_id"})
+
+# table -> (dedicated tool name to authority-check, its field map, its
+# required-kwarg names that have no Python default and must never be
+# omitted from the call).
+_CRM_TABLE_ROUTING: dict[str, tuple[str, dict[str, tuple[str, str | None]], tuple[str, ...]]] = {
+    Tables.DEALS:         ("crm_create_deal", _DEAL_FIELD_MAP, ("name", "domain", "owner_id")),
+    Tables.PAYMENT_TERMS: ("crm_create_payment_term", _PAYMENT_TERM_FIELD_MAP, ("deal_id", "name", "calc_type")),
+    Tables.PAYMENTS:      ("crm_create_payment", _PAYMENT_FIELD_MAP, ("amount", "domain", "owner_id")),
+}
+
+
+def _map_generic_fields_to_canonical(
+    fields: dict, field_map: dict[str, tuple[str, str | None]],
+) -> tuple[dict, str]:
+    """Maps a raw airtable_add `fields` dict onto a canonical writer's own
+    kwargs using an explicit, closed field_map. Returns (kwargs, error) —
+    error is non-empty (and kwargs is {}) the moment any field can't be
+    represented, so a caller never silently drops part of what was asked
+    for. Never inspects field VALUES for business validity (empty name,
+    bad calc_type, amount<=0, ...) — that stays the canonical writer's job."""
+    kwargs: dict = {}
+    for key, value in fields.items():
+        if key in _GENERIC_WRITE_IGNORED_KEYS:
+            continue
+        if key not in field_map:
+            return {}, f"שדה לא נתמך בכתיבה ישירה לטבלה זו: {key!r}."
+        kwarg_name, link_mode = field_map[key]
+        if link_mode == "single":
+            if isinstance(value, list):
+                if len(value) != 1:
+                    return {}, f"ערך לא תקין לשדה מקושר {key!r} — נדרש בדיוק ערך אחד."
+                value = value[0]
+            elif not isinstance(value, str):
+                return {}, f"ערך לא תקין לשדה מקושר {key!r}."
+        elif link_mode == "list":
+            if isinstance(value, str):
+                value = [value]
+            elif not isinstance(value, list):
+                return {}, f"ערך לא תקין לשדה מקושר {key!r} — נדרש רשימה."
+        kwargs[kwarg_name] = value
+    return kwargs, ""
 
 
 def _sanitize_formula_value(value: str) -> str:
@@ -427,6 +560,67 @@ def dispatch_tool(
                         ok=False, tool="airtable_add", evidence=evidence,
                         user_message=crm.describe_contact_failure(contact),
                     ))
+
+                # Commercial CRM write-boundary closure — see the long
+                # comment above _DEAL_FIELD_MAP for why this exists and why
+                # each of the three blocks below re-checks role authority
+                # independently rather than trusting airtable_add's own
+                # (wider) role grant.
+                _resolved_table = _ALIAS_MAP.get(table, table)
+                if _resolved_table in _CRM_TABLE_ROUTING:
+                    _canonical_tool, _field_map, _required_kwargs = _CRM_TABLE_ROUTING[_resolved_table]
+
+                    # BUG-CRM-BYPASS: airtable_add's own registry entry
+                    # (roles_allowed=_INTERNAL, includes "employee") is
+                    # wider than the canonical tool's (roles_allowed=
+                    # _MANAGEMENT) — without this re-check, an identity
+                    # already denied crm_create_deal/_payment_term/_payment
+                    # by enforce() could still reach the identical business
+                    # mutation through this generic tool. Never trust
+                    # airtable_add's own role grant for a table with a
+                    # narrower dedicated tool.
+                    try:
+                        enforce(_canonical_tool, identity)
+                    except ToolDenied as e:
+                        logger.warning(
+                            "[Dispatcher] airtable_add->%s redirect denied | role=%s | %s",
+                            _canonical_tool, getattr(identity, "role", "unknown"), e,
+                        )
+                        audit_log_airtable("airtable_add", identity, {"table": table}, f"blocked: {e}")
+                        return _tool_result(ok=False, tool="airtable_add", user_message=f"❌ גישה נחסמה: {e}")
+
+                    _mapped, _map_error = _map_generic_fields_to_canonical(fields, _field_map)
+                    if _map_error:
+                        audit_log_airtable(
+                            "airtable_add", identity,
+                            {"table": table, "fields_keys": list(fields.keys())},
+                            f"blocked: {_map_error}",
+                        )
+                        return _tool_result(ok=False, tool="airtable_add", user_message=f"❌ {_map_error}")
+
+                    # Required canonical kwargs have no Python default —
+                    # default any missing one to a falsy placeholder so the
+                    # call never raises TypeError; the canonical writer's
+                    # OWN existing "if not name:"/"if amount is None:" etc.
+                    # checks then produce the exact same validation-failure
+                    # message a direct crm_create_* call would get. This is
+                    # presence-safety for the function call, never a second
+                    # copy of the writer's business rules.
+                    for _req in _required_kwargs:
+                        _mapped.setdefault(_req, None if _req == "amount" else "")
+
+                    if _resolved_table == Tables.DEALS:
+                        from commercial_crm import create_deal as _crm_writer
+                    elif _resolved_table == Tables.PAYMENT_TERMS:
+                        from commercial_crm import create_payment_term as _crm_writer
+                    else:
+                        from commercial_crm import create_payment as _crm_writer
+                    result = _crm_writer(source="agent", **_mapped)
+                    audit_log_airtable(
+                        "airtable_add", identity,
+                        {"table": table, "fields_keys": list(fields.keys())}, result,
+                    )
+                    return result
 
                 result = airtable_add(table, fields)
                 audit_log_airtable("airtable_add", identity, {"table": table, "fields_keys": list(fields.keys())}, result)
