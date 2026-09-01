@@ -1,6 +1,6 @@
 # Runtime Verification Master Runbook
 
-**Companion to:** `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md` (the execution map this runbook sequences against). **Truth Reset SHA:** `origin/main` = `894320409a67df992afedeb70aae8e76fdfd00d1` (01/09/2026).
+**Companion to:** `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md` (the execution map this runbook sequences against). **Truth Reset SHA:** `origin/main` = `b58b27f8771c8ffd4c633a84a28b4009178fbeca` (01/09/2026).
 
 **Purpose:** an ordered, dependency-aware runtime verification sequence for the next deployment window, derived from the execution map's feature-flag dependency chains and current runtime-evidence gaps. This is a sequencing tool, not a new authorization — every activation below still requires the owner decision its governing program (ROADMAP.md/HORIZON.md) already calls for. Nothing in this document changes a flag, deploys anything, or grants an activation by itself.
 

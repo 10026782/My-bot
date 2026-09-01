@@ -6480,7 +6480,7 @@ A content hash for Telegram/Twilio/Meta-sourced Media Files records **may be con
 
 Source: `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md` and
 `docs/operations/RUNTIME_VERIFICATION_MASTER_RUNBOOK.md`, reconciled against
-`origin/main` `894320409a67df992afedeb70aae8e76fdfd00d1`. This section is the
+`origin/main` `b58b27f8771c8ffd4c633a84a28b4009178fbeca`. This section is the
 canonical finding ledger; the source documents remain static evidence indexes.
 
 | ID | Finding → source → action → status | Owner / dependency |
@@ -6506,7 +6506,8 @@ canonical finding ledger; the source documents remain static evidence indexes.
 | TR-19 | TMA write screens require both persistence and atomic-claims flags; no fallback → PR1154 implementation spec → **ADD LIVE-GATE ITEM** → **OPEN, live flag verification** | TMA/Operations; verify deployed flags before write claims |
 | TR-20 | `/api/owner/command-center` is consumed; `/api/owner/control-center` is dead/unused → PR1154 implementation spec → **ADD ROUTE-OWNERSHIP ITEM** → **OPEN, API cleanup** | TMA/API; preserve one canonical route |
 
-No remediation commit or production closure is claimed for TR-01–TR-14. Any
+No production closure is claimed for TR-01–TR-14; the static dispositions above
+are current on `origin/main`. Any
 future closure must name the remediation commit/PR, static verification, and
 runtime requirement where applicable; resolved items must be removed from OPEN
 status here and from `BOSS_CURRENT_STATE.md` together.
