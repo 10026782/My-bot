@@ -83,6 +83,13 @@ _RULES: list[tuple[str, str, float]] = [
     (r"(כשיר|qualify|דרג).*(ליד|lead)", Intent.QUALIFY_LEAD, 0.90),
     (r"(סגור|סגירת).*(עסק|עסקה|deal)", Intent.CLOSE_DEAL, 0.90),
     (r"(עדכן|שנה).*(שלב|סטטוס|stage).*(עסק|עסקה|deal)", Intent.UPDATE_DEAL_STAGE, 0.90),
+    # BUG-CRM-BYPASS follow-up: CREATE_DEAL must be a distinct Intent (not a
+    # generic write intent the agent freely fulfills) so the Turn Coordinator
+    # can deterministically route it — see router.py's
+    # _STRUCTURED_CREATE_DEAL_RE. Placed after CLOSE_DEAL/UPDATE_DEAL_STAGE
+    # (specific-before-general is irrelevant here — no keyword overlap) but
+    # before the generic Leads/CRM block ends.
+    (r"(פתח|תפתח|צור|תיצור|הוסף|תוסיף).*(עסקה|עסק חדש|deal)", Intent.CREATE_DEAL, 0.95),
 
     # ── Contacts ─────────────────────────────────
     (r"(הוסף|צור|פתח).*(איש קשר|contact|לקוח|ספק)", Intent.CREATE_CONTACT, 0.90),

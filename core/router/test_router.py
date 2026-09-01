@@ -141,6 +141,31 @@ TESTS = [
         "עדכן את המשימה בדיקה-PA01 לסטטוס בוצע",
         "telegram", "lead", "", Intent.UPDATE_TASK, RouterDomain.GENERAL, Handler.AGENT,
     ),
+
+    # ── BUG-CRM-BYPASS follow-up — CREATE_DEAL deterministic routing ──────
+    # Same Turn Coordinator gate as CREATE_TASK: a structured request never
+    # reaches the Agent's free tool choice between crm_create_deal and
+    # generic airtable_add.
+    (
+        "CREATE_DEAL certain structured request → tool",
+        "צור עסקה בשם רכישת ציוד בתחום יבוא",
+        "telegram", "owner", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.TOOL,
+    ),
+    (
+        "CREATE_DEAL explicit non-self owner → clarify, not a corrupted write",
+        "צור עסקה בשם X בתחום יבוא בבעלות אורי",
+        "telegram", "owner", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.CLARIFY,
+    ),
+    (
+        "CREATE_DEAL loose/unstructured phrasing → agent (never tool)",
+        "צור לי עסקה חדשה בתחום יבוא, אני אשלים פרטים אחר כך",
+        "telegram", "owner", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.AGENT,
+    ),
+    (
+        "CREATE_DEAL certain structured request, lead role → agent (never tool)",
+        "צור עסקה בשם רכישת ציוד בתחום יבוא",
+        "telegram", "lead", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.AGENT,
+    ),
 ]
 
 

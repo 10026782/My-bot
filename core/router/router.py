@@ -245,6 +245,75 @@ def deterministic_create_task_title(text: str) -> str | None:
     return parsed.title if parsed.certain else None
 
 
+# BUG-CRM-BYPASS follow-up (01/09/2026): Deal creation used to reach
+# Handler.AGENT unconditionally — no Intent.CREATE_DEAL existed at all, so
+# the LLM was always the one choosing between crm_create_deal and the
+# generic airtable_add. That is the actual root cause of the repeated
+# production failures (PR #1165/#1166/#1169): every fix patched the
+# generic-write interception layer instead of keeping the agent out of the
+# decision. Turn Coordinator already solved this for Task creation (see
+# _STRUCTURED_CREATE_TASK_RE above) — this mirrors that exact pattern
+# instead of inventing a new one: same anchored-fullmatch strictness, same
+# certain/uncertain split, same "unstructured phrasing falls through to the
+# existing risk-based route" behavior (Task's own gate is equally narrow —
+# see its own comment above route_request()'s wiring).
+_STRUCTURED_CREATE_DEAL_RE = re.compile(
+    r"^\s*(?:פתח|תפתח|צור|תיצור|הוסף|תוסיף)\s+עסק(?:ה|ת)\s+"
+    r"(?:בשם\s+(?P<name_a>.+?)\s+בתחום\s+(?P<domain_a>.+?)"
+    r"|בתחום\s+(?P<domain_b>.+?)\s+בשם\s+(?P<name_b>.+?))"
+    r"(?:\s+בבעלותי)?\s*$"
+)
+
+
+@dataclass(frozen=True)
+class DeterministicDealParse:
+    name:      str | None = None
+    domain:    str | None = None
+    matched:   bool = False
+    uncertain: bool = False
+
+    @property
+    def certain(self) -> bool:
+        return self.matched and not self.uncertain and bool(self.name) and bool(self.domain)
+
+    def business_identity(self) -> dict:
+        """Identity-only payload — the same flat shape actually dispatched
+        to crm_create_deal (see tools/dispatcher.py's "crm_create_deal"
+        case: inputs["name"]/inputs["domain"]), so ActionGateway's
+        business_action_fingerprint and dispatcher's execution-time
+        recomputation can never diverge (BUG-TASK-01's exact lesson —
+        different table/field keys than the real write payload broke every
+        approved deterministic create_task contract). owner_id is
+        deliberately omitted: the dispatcher already resolves it from the
+        authenticated identity when absent (core/owner_resolution.py via
+        _resolve_authenticated_crm_owner()) — nothing here should assume or
+        fabricate a record id.
+        """
+        return {"name": self.name or "", "domain": self.domain or ""}
+
+
+def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
+    normalized = _normalize_create_task_input(text)  # generic reply/quote-wrapper stripping, not Task-specific
+    match = _STRUCTURED_CREATE_DEAL_RE.fullmatch(normalized)
+    if not match:
+        return DeterministicDealParse()
+    name = (match.group("name_a") or match.group("name_b") or "").strip()
+    domain = (match.group("domain_a") or match.group("domain_b") or "").strip()
+    if not name or not domain:
+        return DeterministicDealParse(matched=True, uncertain=True)
+    # An explicit "בבעלות <מישהו>" (a named owner other than the caller)
+    # isn't the literal self-ownership suffix "בבעלותי" the regex expects,
+    # so it isn't stripped — without this guard it silently gets absorbed
+    # into whichever group's ".+?" reaches the end of string first (usually
+    # domain), corrupting that field instead of being rejected. Resolving a
+    # named owner deterministically is out of scope here (see
+    # business_identity()'s docstring) — fail to CLARIFY instead of writing
+    # a corrupted field.
+    if "בעלות" in name or "בעלות" in domain:
+        return DeterministicDealParse(matched=True, uncertain=True)
+    return DeterministicDealParse(name=name, domain=domain, matched=True)
+
+
 def route_request(
     text:                str,
     channel_raw:         str,
@@ -322,6 +391,18 @@ def route_request(
     if (
         intent in (Intent.UPDATE_TASK, Intent.COMPLETE_TASK)
         and _task_ref_parse.certain
+        and identity.role not in ("lead", "guest", "readonly")
+    ):
+        risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
+
+    # BUG-CRM-BYPASS follow-up: same deterministic gate, reused for Deal
+    # creation — see _STRUCTURED_CREATE_DEAL_RE's comment for why this
+    # exists. Structured requests are queued straight to crm_create_deal;
+    # the Agent is never given a choice of tool for this intent.
+    _create_deal_parse = parse_deterministic_create_deal(text)
+    if (
+        intent == Intent.CREATE_DEAL
+        and _create_deal_parse.certain
         and identity.role not in ("lead", "guest", "readonly")
     ):
         risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
@@ -416,6 +497,15 @@ def route_request(
         needs_approval = False
         response_override = (
             "לא בטוח לאיזו משימה התכוונת. נא לציין את שם המשימה במדויק."
+        )
+
+    elif intent == Intent.CREATE_DEAL and _create_deal_parse.uncertain:
+        handler = Handler.CLARIFY
+        tool_allowed = False
+        needs_approval = False
+        response_override = (
+            "לא בטוח שהבנתי את שם העסקה או את התחום. נסח כך: "
+            "\"פתח עסקה בשם X בתחום Y\"."
         )
 
     elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85 and not restricted:
