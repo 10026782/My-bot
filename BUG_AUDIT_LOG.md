@@ -6618,3 +6618,22 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Verified בפרודקשן:** לא רלוונטי
 - **Verification ראיה:** קנרי חי מדגים את הדחייה (ראה תיאור) — זו ראיית **קיום הבעיה**, לא ראיית תיקון.
 - **סטטוס:** Open — NEW, פריט עיצוב-מדיניות. שמות בכתב לטיני ("Jenya Bondorenko", "Karen Avanisyan") נשארים `DEFERRED` בנפרד ואינם חלק מהחלטת המדיניות העברית הזו.
+
+---
+
+### GRADE-A-CONFIG-01 — PA-01 malformed env value + Google Drive malformed key, both corrected and restart-verified
+- **דווח:** 01/09/2026 (Grade-A runtime reverify + final cleanup pass)
+- **דווח על ידי:** agent session, read-only Render API + owner-authenticated diagnostic reads
+- **מסך / מודול:** Render env config (`FEATURE_PA01_ENFORCEMENT_STATE`, `GOOGLE_DRIVE_FOLDER_ID`) — no application code changed in this entry, config-only
+- **תיאור:** Two live Render config defects, both originally found by static code read (see `BOSS_CURRENT_STATE.md` TR-24/TR-25) and closed this pass:
+  1. `FEATURE_PA01_ENFORCEMENT_STATE` held `'shadow.'` (stray trailing period) instead of `'shadow'`. Corrected via Render API (`PUT /env-vars/FEATURE_PA01_ENFORCEMENT_STATE`, value verified before and after: `'shadow.'` → `'shadow'`).
+  2. `GOOGLE_DRIVE_FOLDER_ID` did not exist; a malformed triple-concatenated key (`GOOGLE_DRIVE_FOLDER_IDGOOGLE_DRIVE_FOLDER_IDGOOGLE_DRIVE_FOLDER_ID`) held the real value instead. Corrected by reading the malformed key's value in-process (never printed/written to disk), creating the correctly-named key with the identical value, verifying both keys present and matching, then deleting the malformed key (HTTP 204 confirmed).
+  Both changes require a running-process restart to take effect (env vars are read at process start, not live-reloaded). The owner restarted the Render service directly; Render's own event log confirms `server_restarted`, and the subsequent boot log shows an unchanged `startup_validator` result (**18 OK | 1 WARNING | 0 CRITICAL** — same as pre-change) plus fresh `PostgreSQL pool initialized from DATABASE_URL` and `Telegram Webhook set (secret=yes)` lines — no regression introduced.
+- **Severity:** Low — both were silent-fallback config defects, neither ever caused a crash or blocked `/health`'s critical status; PA-01 ran in "off" instead of intended "shadow", Drive fell back to `"root"` instead of the intended folder.
+- **Root Cause:** Human data-entry error in the Render dashboard (stray character; a key-name typo/duplication), unrelated to any code defect.
+- **תוקן ב-commit:** N/A — Render env config change only, no code commit involved.
+- **Merged:** N/A (config, not code)
+- **Deployed:** כן — Render env verified via API read before and after each change; restart confirmed via Render's `server_restarted` event.
+- **Verified בפרודקשן:** Config-level yes (value corrected + restart applied + no regression in boot log). **Functional runtime behavior is NOT verified**: PA-01's warning-on-malformed-value code path was never exercised live (requires a real inbound agent turn — Grade B, not performed), and Drive's target-folder behavior was never exercised (requires a real Drive write — Grade B, not performed).
+- **Verification ראיה:** Render API before/after value reads (both keys); Render events log (`server_restarted`); post-restart boot log lines (startup_validator counts, PostgreSQL pool init, Telegram webhook set); owner-signed `/api/owner/health` diagnostic read post-restart (`scheduler: true, "23 jobs"`, `airtable_live: true`).
+- **סטטוס:** Closed — config corrected and restart-verified. Functional/business-flow verification for both remains a separate open Grade-B item (see `BOSS_CURRENT_STATE.md` TR-28/TR-29).
