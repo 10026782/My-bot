@@ -4,6 +4,7 @@ config.py — Channel → Domain Mapping
 להוסיף מספרים כאן בלבד — שאר הקוד לא נוגעים.
 """
 
+import json
 import logging
 import os
 
@@ -21,12 +22,56 @@ CHANNEL_DOMAINS: dict[str, str] = {
 
 # ─── Inbound source → canonical Owner mapping ───────────────────────────────
 # Values are canonical identity user_ids, never Airtable Profile record IDs.
-# Missing entries are intentional: the resolver fails closed.
-OWNER_USER_ID_MAPPINGS: dict[str, dict[str, str]] = {
-    "whatsapp_destination": {},
-    "email_recipient": {},
-    "voice_destination": {},
-}
+# Missing entries are intentional: the resolver fails closed
+# (core/source_owner_mapping.py::resolve_owner_user_id()).
+#
+# Populated via the OWNER_USER_ID_MAPPINGS env var (Render) — same
+# env-JSON-first, hardcoded-fallback pattern as IDENTITY_MAP
+# (see identity.py::_load_registry()). Shape:
+#   {"whatsapp_destination": {"whatsapp:+972...": "<user_id>"},
+#    "email_recipient":      {"leads@example.com": "<user_id>"},
+#    "voice_destination":    {"+972...": "<user_id>"}}
+# No code change is needed to populate real values — only the env var.
+_OWNER_USER_ID_MAPPING_SOURCES = ("whatsapp_destination", "email_recipient", "voice_destination")
+
+
+def _load_owner_user_id_mappings() -> dict[str, dict[str, str]]:
+    defaults: dict[str, dict[str, str]] = {source: {} for source in _OWNER_USER_ID_MAPPING_SOURCES}
+
+    raw = os.environ.get("OWNER_USER_ID_MAPPINGS", "").strip()
+    if not raw:
+        return defaults
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error(f"[Config] OWNER_USER_ID_MAPPINGS parse error: {e} — falling back to empty (fail-closed)")
+        return defaults
+
+    if not isinstance(parsed, dict):
+        logger.error("[Config] OWNER_USER_ID_MAPPINGS must be a JSON object — falling back to empty (fail-closed)")
+        return defaults
+
+    for source in _OWNER_USER_ID_MAPPING_SOURCES:
+        value = parsed.get(source)
+        if value is None:
+            continue
+        if isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+            defaults[source] = value
+        else:
+            logger.error(
+                f"[Config] OWNER_USER_ID_MAPPINGS[{source!r}] must be an object of "
+                "string→string — ignoring, this source stays empty (fail-closed)"
+            )
+
+    unknown_keys = set(parsed) - set(_OWNER_USER_ID_MAPPING_SOURCES)
+    if unknown_keys:
+        logger.warning(f"[Config] OWNER_USER_ID_MAPPINGS has unrecognized keys, ignored: {sorted(unknown_keys)}")
+
+    return defaults
+
+
+OWNER_USER_ID_MAPPINGS: dict[str, dict[str, str]] = _load_owner_user_id_mappings()
 
 # דומיין ברירת מחדל כשאין מיפוי מוגדר
 DEFAULT_DOMAIN = "general"

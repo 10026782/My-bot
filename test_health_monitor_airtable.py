@@ -45,6 +45,40 @@ def test_unexpected_error_never_escapes(monkeypatch):
         assert health_monitor._check_airtable() == (False, "error: ValueError")
 
 
+def test_check_scheduler_none_means_not_started():
+    assert health_monitor._check_scheduler(None) == (False, "not started")
+
+
+def test_check_scheduler_dead_thread_reported_stopped():
+    class _DeadThread:
+        def is_alive(self):
+            return False
+
+    assert health_monitor._check_scheduler(_DeadThread()) == (False, "stopped")
+
+
+def test_check_scheduler_alive_thread_reads_schedule_lib_jobs(monkeypatch):
+    class _AliveThread:
+        def is_alive(self):
+            return True
+
+    import schedule as schedule_lib
+
+    monkeypatch.setattr(schedule_lib, "jobs", [object(), object()])
+    assert health_monitor._check_scheduler(_AliveThread()) == (True, "2 jobs")
+
+
+def test_check_scheduler_alive_thread_no_jobs():
+    class _AliveThread:
+        def is_alive(self):
+            return True
+
+    import schedule as schedule_lib
+
+    with patch.object(schedule_lib, "jobs", []):
+        assert health_monitor._check_scheduler(_AliveThread()) == (False, "no jobs registered")
+
+
 def test_health_aggregation_uses_check_result(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     monkeypatch.setenv("TELEGRAM_TOKEN", "x")
