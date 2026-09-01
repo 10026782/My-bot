@@ -34,7 +34,11 @@ def test_furniture_reuses_whatsapp_destination_mapping():
          patch("core.noninteractive_lead_cutovers.create_lead", return_value=OK) as writer:
         result = create_furniture_inbound_lead("+972500000000", "whatsapp:+972501234567", "Lead", "Bed", "{}")
     assert result is OK
-    assert writer.call_args.args[1].domain == "furniture_import"
+    # BUG-LEAD-DOMAIN-FURNITURE-NOT-A-DOMAIN (02/09/2026, owner correction):
+    # furniture is a product example within the "import" business, not its
+    # own Lead domain -- the funnel's routing key stays "furniture_import"
+    # internally, but the Lead record's domain field is "import".
+    assert writer.call_args.args[1].domain == "import"
     assert writer.call_args.args[1].owner_user_id == "owner-1"
 
 

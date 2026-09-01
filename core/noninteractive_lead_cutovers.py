@@ -32,7 +32,13 @@ def create_furniture_inbound_lead(sender: str, destination: str, name: str, summ
     from identity import resolve_identity
     identity = resolve_identity("whatsapp", sender)
     return create_lead(identity, LeadPayload(
-        name=name or sender, phone=sender, domain="furniture_import", owner_user_id=owner_user_id,
+        # domain="import", not "furniture_import" -- furniture is one example
+        # product within the import business, not a Lead domain of its own
+        # (owner correction, 02/09/2026; see core/lead_service.py's
+        # CANONICAL_LEAD_DOMAINS comment). The funnel's own routing key stays
+        # "furniture_import" (furniture_lead_funnel.py, config.py) -- that's
+        # an internal handler-selection signal, unrelated to this field.
+        name=name or sender, phone=sender, domain="import", owner_user_id=owner_user_id,
         source="twilio_whatsapp_furniture_funnel", channel="whatsapp",
         summary=f"{summary}\n{answers}"[:500], status=status, score=score,
         memory_key=f"boss_hq:{sender}", answers=answers,
