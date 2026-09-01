@@ -110,11 +110,27 @@ class DeterministicTaskParse:
         task() still fail-closes on a malformed time) and still shown to the
         user before approval (see app.py's _queue_deterministic_create_task()
         due-time note) — it's excluded from the identity/fingerprint only.
+
+        BUG-TASK-01: table/field keys must match exactly what
+        core/router/task_builders.py::build_create_task_proposal() /
+        core/turn_coordinator_runtime.py::gateway_call() actually dispatch
+        (Tables.TASKS / TaskFields.NAME / TaskFields.DUE_DATE) — this identity
+        payload becomes the ActionGateway's business_action_fingerprint basis
+        (core/action_gateway.py propose_action()), which
+        tools/dispatcher.py::_validate_execution_proof() independently
+        recomputes from the real dispatched payload (contract.
+        normalized_payload) at execution time. Using ad-hoc "Tasks"/"title"
+        keys here — a different table alias and field name than the write
+        payload — made that recomputed fingerprint never equal the stored
+        one, so every approved deterministic create_task contract failed
+        Dispatcher's proof check ("approval-sensitive execution proof does
+        not match the action payload") regardless of the task content.
         """
-        fields = {"title": self.title or ""}
+        from airtable_schema import Tables, TaskFields
+        fields = {TaskFields.NAME: self.title or ""}
         if self.due_date:
-            fields["due_date"] = self.due_date
-        return {"table": "Tasks", "fields": fields}
+            fields[TaskFields.DUE_DATE] = self.due_date
+        return {"table": Tables.TASKS, "fields": fields}
 
 
 def _normalize_create_task_input(text: str) -> str:
