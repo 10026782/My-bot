@@ -28,6 +28,7 @@ except ImportError:
     _save_lead_buffer = None  # fallback — לא שובר אם core חסר
 from .contact_resolver  import resolve_contact
 from . import approval_actions
+from core import owner_resolution as _owner_resolution
 
 from tool_registry import enforce, ToolDenied
 import feature_flags as _ff
@@ -167,6 +168,28 @@ _PROTECTED_CRM_ALIASES: dict[str, str] = {
     "Payment Terms": Tables.PAYMENT_TERMS,
     "Payments": Tables.PAYMENTS,
 }
+
+
+def _resolve_authenticated_crm_owner(identity, requested_owner: object) -> tuple[str | None, str]:
+    """Resolve CRM Owner from the authenticated actor; never trust display text."""
+    user_id = str(getattr(identity, "user_id", "") or "").strip()
+    if not user_id:
+        return None, "Owner resolution requires an authenticated canonical identity."
+    requested = str(requested_owner or "").strip()
+    if requested and re.fullmatch(r"rec[A-Za-z0-9]+", requested):
+        return requested, ""
+    accepted_self_values = {
+        user_id,
+        str(getattr(identity, "memory_key", "") or "").strip(),
+        str(getattr(identity, "display_name", "") or "").strip(),
+    }
+    accepted_self_values.discard("")
+    if requested and requested not in accepted_self_values:
+        return None, "Explicit CRM Owner must resolve through an authorized canonical identity."
+    record_id = _owner_resolution.resolve_profile_record_id(user_id)
+    if not record_id:
+        return None, f"No Profile record found for canonical identity {user_id!r}."
+    return record_id, ""
 
 
 def _normalize_table_name(table: str) -> str:
@@ -646,6 +669,15 @@ def dispatch_tool(
                     for _req in _required_kwargs:
                         _mapped.setdefault(_req, None if _req == "amount" else "")
 
+                    if "owner_id" in _field_map:
+                        _owner_record_id, _owner_error = _resolve_authenticated_crm_owner(
+                            identity, _mapped.get("owner_id")
+                        )
+                        if _owner_error:
+                            return _tool_result(ok=False, tool=_canonical_tool,
+                                                user_message=f"❌ {_owner_error}")
+                        _mapped["owner_id"] = _owner_record_id
+
                     if _resolved_table == Tables.DEALS:
                         from commercial_crm import create_deal as _crm_writer
                     elif _resolved_table == Tables.PAYMENT_TERMS:
@@ -758,11 +790,17 @@ def dispatch_tool(
                     audit_log_airtable("crm_create_deal", identity, inputs, f"blocked: {e}")
                     return _tool_result(ok=False, tool="crm_create_deal", user_message=str(e))
 
+                _owner_record_id, _owner_error = _resolve_authenticated_crm_owner(
+                    identity, inputs.get("owner_id")
+                )
+                if _owner_error:
+                    return _tool_result(ok=False, tool="crm_create_deal",
+                                        user_message=f"❌ {_owner_error}")
                 from commercial_crm import create_deal
                 result = create_deal(
                     name=inputs["name"],
                     domain=inputs["domain"],
-                    owner_id=inputs["owner_id"],
+                    owner_id=_owner_record_id,
                     origin_lead_id=inputs.get("origin_lead_id", ""),
                     contact_ids=inputs.get("contact_ids"),
                     amount=inputs.get("amount"),
@@ -805,11 +843,17 @@ def dispatch_tool(
                     audit_log_airtable("crm_create_payment", identity, inputs, f"blocked: {e}")
                     return _tool_result(ok=False, tool="crm_create_payment", user_message=str(e))
 
+                _owner_record_id, _owner_error = _resolve_authenticated_crm_owner(
+                    identity, inputs.get("owner_id")
+                )
+                if _owner_error:
+                    return _tool_result(ok=False, tool="crm_create_payment",
+                                        user_message=f"❌ {_owner_error}")
                 from commercial_crm import create_payment
                 result = create_payment(
                     amount=inputs["amount"],
                     domain=inputs["domain"],
-                    owner_id=inputs["owner_id"],
+                    owner_id=_owner_record_id,
                     deal_id=inputs.get("deal_id", ""),
                     payment_term_id=inputs.get("payment_term_id", ""),
                     origin_lead_id=inputs.get("origin_lead_id", ""),
