@@ -72,3 +72,21 @@ def test_generic_deal_aliases_map_before_owner_resolution():
     assert result["ok"] is True
     assert deal.call_args.kwargs["domain"] == "Import"
     assert deal.call_args.kwargs["owner_id"] == "recPROFILE123"
+
+
+def test_generic_payment_keeps_canonical_lowercase_domain_key():
+    with patch.object(dispatcher, "_validate_execution_proof", return_value=None), \
+         patch.object(dispatcher._ff, "is_enabled", return_value=False), \
+         patch("commercial_crm.create_payment", return_value={"ok": True}) as payment:
+        result = dispatcher.dispatch_tool(
+            "airtable_add",
+            {"table": "Payments", "fields": {
+                "amount": 1,
+                "domain": "import",
+                "owner": "recPROFILE123",
+            }},
+            IDENTITY, trusted_source="agent", execution_context={"contract_id": "c"},
+        )
+    assert result["ok"] is True
+    assert payment.call_args.kwargs["domain"] == "import"
+    assert payment.call_args.kwargs["owner_id"] == "recPROFILE123"

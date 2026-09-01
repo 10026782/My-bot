@@ -156,7 +156,7 @@ chk("Payment: linked owner_id accepted as a bare string too (not just a list)",
 print("\n── B2: every supported canonical writer field survives interception ──")
 with patch("commercial_crm.create_deal", return_value=_OK_RESULT) as m_deal:
     _dispatch("airtable_add", {"table": Tables.DEALS, "fields": {
-        DealFields.NAME: "n", DealFields.DOMAIN: "d", DealFields.OWNER: ["o"],
+        DealFields.NAME: "n", DealFields.DOMAIN: "d", DealFields.OWNER: ["recOWNER000000003"],
         DealFields.VENTURE_LINK: ["v"], DealFields.PRIORITY: "high",
         DealFields.RISK_LEVEL: "low",
     }}, owner)
@@ -178,7 +178,7 @@ chk("Payment Term: delay/start/end fields map to canonical kwargs",
 
 with patch("commercial_crm.create_payment", return_value=_OK_RESULT) as m_payment:
     _dispatch("airtable_add", {"table": Tables.PAYMENTS, "fields": {
-        PaymentFields.AMOUNT: 1, PaymentFields.DOMAIN: "d", PaymentFields.OWNER: "o",
+        PaymentFields.AMOUNT: 1, PaymentFields.DOMAIN: "d", PaymentFields.OWNER: "recOWNER000000003",
         PaymentFields.BASE_AMOUNT: 1, PaymentFields.RATE_PCT: 10,
         PaymentFields.VAT_AMOUNT: 0.18, PaymentFields.TRIGGER_EVIDENCE: "term",
     }}, owner)
@@ -193,7 +193,7 @@ for alias in ("Deals", " deals ", "DEALS", Tables.DEALS):
     with patch("commercial_crm.create_deal", return_value=_OK_RESULT) as m_writer, \
          patch.object(dispatcher_module, "airtable_add") as m_raw:
         _dispatch("airtable_add", {"table": alias, "fields": {
-            DealFields.NAME: "n", DealFields.DOMAIN: "d", DealFields.OWNER: ["o"],
+            DealFields.NAME: "n", DealFields.DOMAIN: "d", DealFields.OWNER: ["recOWNER000000003"],
         }}, owner)
     chk(f"Deal alias {alias!r}: canonical writer only", m_writer.call_count == 1 and m_raw.call_count == 0)
 
@@ -224,8 +224,8 @@ result_missing_owner = _dispatch("airtable_add", {
     "table": Tables.DEALS,
     "fields": {DealFields.NAME: "עסקה בלי בעלים", DealFields.DOMAIN: "finance"},
 }, owner)
-chk("Deal: missing owner_id -> the canonical writer's OWN message, verbatim",
-    result_missing_owner.get("user_message") == "❌ owner_id חסר.")
+chk("Deal: missing owner_id -> owner resolution fails closed",
+    "Profile record" in result_missing_owner.get("user_message", ""))
 chk("Deal: missing-field rejection is ok=False", result_missing_owner.get("ok") is False)
 
 result_bad_calc = _dispatch("airtable_add", {

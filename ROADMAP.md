@@ -20,6 +20,9 @@ and are never written; raw channel identifiers and unknown owners fail closed.
 This is `STATIC_VERIFIED`
 only. The failed Deal canary remains historical runtime evidence; a new
 owner-approved canary is required after deployment.
+The 01/09/2026 post-deploy attempts failed closed before Owner resolution on
+unsupported natural-language field aliases; PR #1169 contains the narrow
+mapping correction and remains unmerged.
 
 ## תחזוקת המסמך
 
@@ -71,7 +74,7 @@ runtime-only item is represented here as static code work.
 | DECISION_HUB | Decision Hub | IN_PROGRESS | STATIC COMPLETE / RUNTIME NOT ESTABLISHED. DH-S1 formula safety CLOSED / STATIC VERIFIED; DH-S2 access-policy wording DOC/POLICY DRIFT — CLOSED; DH-S3 fail-closed reads STATIC VERIFIED; DH-S4 partial-persistence observability CLOSED / STATIC VERIFIED; DH-CB-01–DH-CB-09 CLOSED / STATIC VERIFIED with direct callback and scope regressions. Structured persistence outcomes prevent false full success; runtime/deployment is not claimed. | Pursue separately gated runtime evidence without broadening permissions | [`HORIZON.md`](docs/governance/HORIZON.md) |
 | COST_AGENT_LAST | Cost / Agent-Last architecture | IN_PROGRESS | MERGED_STATIC — telemetry remains shadow | Validate live usage/cost and decide progression | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | ARCHITECTURE_AUTHORITY_BOUNDARIES | Architecture authority / execution boundaries | IN_PROGRESS | MERGED_STATIC — runtime evidence separate | Verify deployed-SHA authority | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
-| SCHEMA_DATA_CONTRACTS | Schema / Data Contracts | IN_PROGRESS | MERGED_STATIC + LIVE SCHEMA VERIFIED — Track 8/8B/8C static and live-schema reconciliation is complete; the three `commercial_crm` create tools are registered with policy/schema/dispatcher coverage by PR1153. Application runtime and canary are not established; first-class Deal/Payment TMA surface and raw-write ownership remain open. | Owner-approved Deal/Payment canary, TMA surface decision, and raw-write ownership decision; K10 naming-only fragmentation remains open | [`MAINTENANCE_AUDIT_LEDGER.md`](docs/governance/MAINTENANCE_AUDIT_LEDGER.md) |
+| SCHEMA_DATA_CONTRACTS | Schema / Data Contracts | IN_PROGRESS | MERGED_STATIC + LIVE SCHEMA VERIFIED — Track 8/8B/8C static and live-schema reconciliation is complete; the three `commercial_crm` create tools are registered with policy/schema/dispatcher coverage by PR1153. PR #1169 adds the production-observed generic Deal field aliases (`תחום`/`domain` → `Domain`, `בעלות` → `Owner`) before canonical writer resolution; no successful production canary exists yet. | Merge/deploy PR #1169, then owner-approved Deal/Payment canary; first-class Deal/Payment TMA surface and raw-write ownership remain open; K10 naming-only fragmentation remains open | [`MAINTENANCE_AUDIT_LEDGER.md`](docs/governance/MAINTENANCE_AUDIT_LEDGER.md) |
 | N17 | Context Librarian Follow-up Hardening & Verification Backlog | IN_PROGRESS | MERGED_STATIC — maintenance remains ongoing | Continue bounded reconciliation and owner-gated follow-ups | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | BOSS_CONTEXT_LIBRARIAN_PHASE_0 | BOSS Context Librarian | IN_PROGRESS | MERGED_STATIC — mandatory bootstrap/index layer | Continue bounded reconciliation and maintenance PRs | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | ROADMAP_CORE | ROADMAP current-state SSOT | IN_PROGRESS | MERGED_STATIC — registry cleanup is this program's current slice | Keep current-state view compact and reconciled | [`ROADMAP.md`](ROADMAP.md) |

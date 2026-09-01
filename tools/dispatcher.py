@@ -241,6 +241,8 @@ def _map_generic_fields_to_canonical(
         if key in _GENERIC_WRITE_IGNORED_KEYS:
             continue
         mapped_key = _GENERIC_FIELD_ALIASES.get(str(key).strip().casefold(), key)
+        if mapped_key not in field_map and key in field_map:
+            mapped_key = key
         if mapped_key not in field_map:
             return {}, f"שדה לא נתמך בכתיבה ישירה לטבלה זו: {key!r}."
         kwarg_name, link_mode = field_map[mapped_key]
