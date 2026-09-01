@@ -12,6 +12,8 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from tools.airtable_gateway import escape_formula_value
+
 if TYPE_CHECKING:
     from identity import Identity
 
@@ -121,7 +123,9 @@ def enforce_tenant_scope(
             raise TenantScopeViolation("❌ חיפוש אנשי קשר דורש הקשר ליד/עסקה מורשה.")
         if not field or not domains:
             raise TenantScopeViolation("❌ גישה נחסמה: לא הוגדר תחום פעילות מורשה.")
-        domain_filter = "OR(" + ",".join(f"{{{field}}}='{d}'" for d in domains) + ")"
+        domain_filter = "OR(" + ",".join(
+            f"{{{field}}}='{escape_formula_value(d)}'" for d in domains
+        ) + ")"
         existing = params.get("filterByFormula", "").strip()
         params["filterByFormula"] = f"AND({existing}, {domain_filter})" if existing else domain_filter
         return params
