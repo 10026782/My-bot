@@ -1,6 +1,6 @@
 # BOSS CURRENT STATE
 
-> **Current-state reconciliation:** Truth Reset `origin/main` = `b58b27f8771c8ffd4c633a84a28b4009178fbeca` (01/09/2026). The execution map, verification matrix, and runbooks are evidence indexes; the ledger below is the canonical disposition for the latest PR1152–1155 findings. Static verification is not deployment or production verification.
+> **Current-state reconciliation:** Truth Reset `origin/main` = `c6bcd0c8f20835bf8652f1726059c7d708af2c62` (01/09/2026). The execution map, verification matrix, and runbooks are evidence indexes; the ledger below is the canonical disposition for the latest PR1152–1155 findings. Static verification is not deployment or production verification.
 
 > **Historical-body warning:** the pre-existing body below contains older
 > program snapshots. The reconciliation table above is the current-state
@@ -22,7 +22,7 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 - NOT IMPLEMENTED: no runtime implementation found.
 
 ## Truth Reconciliation — 01/09/2026
-| ID | Current truth on `b58b27f` | Classification | Owning track | Next |
+| ID | Current truth on `c6bcd0c` | Classification | Owning track | Next |
 |---|---|---|---|---|
 | TR-01 | `core/action_gateway.py` is active for ingress prefetch, dedup/proposal behavior, and multiple unconditional callers; the feature flag controls general-agent enforcement strength only. | OPEN_STATIC | ActionGateway | runtime flag and canary evidence before changing enforcement |
 | TR-02 | Canonical Voice wrapper exists, but the default flag leaves the legacy direct-write path reachable without canonical Owner, dedup, and scope behavior. | RUNTIME_GATED | N18 | activation + canary, then retirement only after proof |
@@ -38,9 +38,9 @@ Reflects: Stabilization Sprint + W0/W1 + Security Audit Fixes (H1-H3) + TIER rea
 | TR-12 | No dedicated Knowledge backend or Media browse/detail TMA surface exists. | OWNER_DECISION | Product/TMA | decide whether either capability is wanted |
 | TR-13 | Emergency Stop exists; general flag and identity-management UI do not. | OWNER_DECISION | Owner Control/TMA | decide/build the missing API/UI capability; activation remains separately gated |
 | TR-14 | Current frontend is TMA/mobile-oriented; desktop Admin App is a separate product decision. | OWNER_DECISION | Product/TMA | make the desktop Admin App decision |
-| TR-15 | CI markers are defined but unused, so the exclusion mechanism is vacuous. | OPEN_STATIC | CI/Governance | add marker coverage or remove the false assurance |
-| TR-16 | Two concurrency tests use non-raising `chk()` helpers and can false-pass. | OPEN_STATIC | CI/Governance | replace with raising assertions; retain TC10 backstop |
-| TR-17 | BUG-153 has three known-failing assertions without a CI carve-out. | OPEN_STATIC | Tasks/CI | confirm CI status and repair or classify the test |
+| TR-15 | CI markers remain defined with no qualifying tests; CI now fails loudly if a future test uses an excluded marker without a dedicated job. | CLOSED_STATIC | CI/Governance | none; add a dedicated job before introducing a marked test |
+| TR-16 | Both concurrency `chk()` helpers preserve diagnostics and raise `AssertionError` on failed invariants; TC10 coverage remains in place. | CLOSED_STATIC | CI/Governance | none |
+| TR-17 | The three reported BUG-153 failures were no-DB fixture drift at the separate TC8 boundary; the ActionGateway contract is unchanged and the focused script passes 16/16. | CLOSED_STATIC | Tasks/CI | none |
 | TR-18 | Admin App role access is materially narrower than the proposed model. | OWNER_DECISION | Product/TMA | decide broader role access; do not infer it from spec prose |
 | TR-19 | TMA writes depend on persistence and atomic-claims flags and fail with 503 when unavailable. | RUNTIME_GATED | TMA/Operations | verify deployed flags before promising write availability |
 | TR-20 | `/api/owner/command-center` is consumed; `/api/owner/control-center` is dead/unused. | OPEN_STATIC | TMA/API | preserve one canonical route or explicitly deprecate the other |

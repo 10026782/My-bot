@@ -214,7 +214,13 @@ _reject_cq4 = SimpleNamespace(
 with patch.object(app, "bot", MagicMock()), \
      patch.object(app, "resolve_identity", side_effect=_resolve_identity4), \
      patch.object(app, "_flag_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"), \
-     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
+     patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"), \
+     patch.object(app, "_tc8_claim_contract", return_value=None), \
+     patch.object(app, "_tc8_finish_contract"):
+    # Fixture isolation: this test targets BUG-153's ActionGateway/callback
+    # contract. TC8 is a separate durable coordination boundary and requires
+    # PostgreSQL; keeping it out here makes the focused regression deterministic
+    # in the same no-DB environment used by the persistence-off setup above.
     app._handle_approval_callback_impl(_reject_cq4)
 
 chk(

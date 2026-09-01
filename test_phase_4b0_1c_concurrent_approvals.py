@@ -24,7 +24,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import patch, MagicMock
 from typing import Optional
 
-os.environ.setdefault("FEATURE_ATOMIC_CLAIMS", "false")  # Flag OFF by default
+# This file owns the flag value for its isolated unit cases; another pytest
+# module may have imported the atomic-claims path first in the same process.
+os.environ["FEATURE_ATOMIC_CLAIMS"] = "false"
 
 # Per-run UUID to namespace all test contract IDs (prevents collisions on repeated staging runs)
 TEST_RUN_ID = str(uuid.uuid4())[:8]
@@ -40,6 +42,7 @@ def chk(desc: str, cond: bool) -> None:
     else:
         print(f"❌ {desc}")
         failed += 1
+        raise AssertionError(desc)
 
 
 # ══════════════════════════════════════════════════════════════════

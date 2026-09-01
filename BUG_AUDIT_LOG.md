@@ -6480,8 +6480,9 @@ A content hash for Telegram/Twilio/Meta-sourced Media Files records **may be con
 
 Source: `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md` and
 `docs/operations/RUNTIME_VERIFICATION_MASTER_RUNBOOK.md`, reconciled against
-`origin/main` `b58b27f8771c8ffd4c633a84a28b4009178fbeca`. This section is the
-canonical finding ledger; the source documents remain static evidence indexes.
+`origin/main` `c6bcd0c8f20835bf8652f1726059c7d708af2c62`. This section is the
+evidence record; `BOSS_CURRENT_STATE.md` is the canonical finding ledger and
+the source documents remain static evidence indexes.
 
 | ID | Finding → source → action → status | Owner / dependency |
 |---|---|---|
@@ -6499,9 +6500,9 @@ canonical finding ledger; the source documents remain static evidence indexes.
 | TR-12 | No dedicated Knowledge backend; no Media browse/detail surface; Assets ≠ Media → Admin spec → **ADD DEFERRED ITEM** → **OPEN, owner decision/new capability** | Product/TMA; Activity reuse is recommendation only |
 | TR-13 | Emergency Stop implemented; general flag and identity UI missing → Admin spec → **UPDATE** classification → **OPEN, API MISSING / NEW CAPABILITY** | Owner Control/TMA; schema capability does not imply surface |
 | TR-14 | Desktop Admin App not current product → Admin spec → **MARK HISTORICAL** conflicting planning prose → **OPEN, owner decision** | Product; current surface is TMA/mobile |
-| TR-15 | CI markers are defined but unused → PR1152 matrix §0.1 → **ADD OPEN ITEM** → **OPEN, test-harness governance** | CI/Governance; marker coverage or explicit removal |
-| TR-16 | Two concurrency tests use non-raising `chk()` inside pytest tests → PR1152 matrix §0.2 → **ADD OPEN ITEM** → **OPEN, false-pass risk** | CI/Governance; replace with raising assertions |
-| TR-17 | BUG-153 test has three known failures without a carve-out → PR1152 matrix → **ADD OPEN ITEM** → **OPEN, CI verification/fix** | Tasks/CI; confirm CI log and repair or classify |
+| TR-15 | CI markers are defined but unused → targeted CI guard added → **CLOSED_STATIC** | CI/Governance; future marked tests require a dedicated job |
+| TR-16 | Two concurrency tests used non-raising `chk()` inside pytest tests → raising assertions added → **CLOSED_STATIC** | CI/Governance; diagnostics and TC10 retained |
+| TR-17 | BUG-153's three failures were isolated from the production contract as TC8 no-DB fixture drift → focused script 16/16 → **CLOSED_STATIC** | Tasks/CI; no production change |
 | TR-18 | Admin App proposed six-role model exceeds current TMA route reality → PR1154 permission matrix → **ADD POLICY ITEM** → **OPEN, policy decision** | Product/TMA; no access inferred from spec prose |
 | TR-19 | TMA write screens require both persistence and atomic-claims flags; no fallback → PR1154 implementation spec → **ADD LIVE-GATE ITEM** → **OPEN, live flag verification** | TMA/Operations; verify deployed flags before write claims |
 | TR-20 | `/api/owner/command-center` is consumed; `/api/owner/control-center` is dead/unused → PR1154 implementation spec → **ADD ROUTE-OWNERSHIP ITEM** → **OPEN, API cleanup** | TMA/API; preserve one canonical route |
