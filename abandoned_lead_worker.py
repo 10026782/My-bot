@@ -267,6 +267,17 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
             channel="scheduler",
             external_id="abandoned_lead_scheduler",
         )
+        # BUG-CRM-BYPASS-FINGERPRINT-PARITY follow-up (02/09/2026): this used
+        # to pass a custom fingerprint_payload (a synthetic "abandoned_event"
+        # dedup key not present in the real dispatched fields) so a retry
+        # wouldn't be deduped just because DESCRIPTION's minutes_silent text
+        # changed. But propose_action() computes the STORED
+        # business_action_fingerprint from fingerprint_payload when one is
+        # given, while tools/dispatcher.py's _validate_execution_proof()
+        # always recomputes from the real tool_inputs at execution time — the
+        # two could never match, so this task silently failed to ever be
+        # created, defeating the dedup goal far worse than the volatility it
+        # was trying to avoid. No custom fingerprint_payload here at all.
         proposal = action_gateway.propose_action(
             tenant_id=system_identity.tenant_id,
             canonical_user_id=system_identity.memory_key,
@@ -277,16 +288,6 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
             requires_approval=True,
             identity=system_identity,
             trusted_source="abandoned_lead_scheduler",
-            fingerprint_payload={
-                "table": Tables.TASKS,
-                "fields": {
-                    TaskFields.NAME: fields[TaskFields.NAME],
-                    "abandoned_event": (
-                        lead.sender, lead.channel, lead.domain, lead.step,
-                        tuple(sorted(lead.answers.items())),
-                    ),
-                },
-            },
         )
         if not proposal.ok or not proposal.contract_id:
             logger.warning("[D02] task proposal not accepted for %s: %s", lead.sender, proposal.reason)

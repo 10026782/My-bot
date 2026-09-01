@@ -1142,7 +1142,7 @@ def _queue_deterministic_create_task(
 
 def _queue_deterministic_create_deal(
     name: str, domain: str, chat_id: str, channel: str, user_text: str,
-    identity, out_meta: dict | None = None, deal_parse=None,
+    identity, out_meta: dict | None = None,
 ) -> str:
     """מתזמן בקשת יצירת עסקה מלאה בלי להפעיל את הסוכן.
 
@@ -1184,15 +1184,20 @@ def _queue_deterministic_create_deal(
         return str(exc)
 
     owner_self_reference = str(getattr(identity, "user_id", "") or "")
-    fingerprint_payload = {"name": name, "domain": domain}
-    if deal_parse is not None:
-        fingerprint_payload = deal_parse.business_identity()
 
+    # BUG-CRM-BYPASS-FINGERPRINT-PARITY: no custom fingerprint_payload here
+    # (unlike _queue_deterministic_create_task() above) — propose_action()
+    # then computes business_action_fingerprint from this same tool_inputs
+    # dict, the exact one tools/dispatcher.py's _validate_execution_proof()
+    # recomputes from at execution time. A second, hand-maintained
+    # "identity" representation is exactly what broke this twice in
+    # production (see core/router/router.py's DeterministicDealParse
+    # comment for the full history) — there is nothing here worth diverging
+    # from the real payload for, so don't create the divergence at all.
     outcome = _queue_approval_detailed(
         "crm_create_deal",
         {"name": name, "domain": domain, "owner_id": owner_self_reference},
         chat_id, channel, user_text,
-        fingerprint_payload=fingerprint_payload,
         # BUG-153-style marker (see _queue_deterministic_create_task): identifies
         # this proposal as originating from the deterministic router path for
         # the current turn's inbound text only — never an autonomous Agent
@@ -4792,7 +4797,7 @@ def run_agent(
         if _deal_parse.certain:
             return _queue_deterministic_create_deal(
                 _deal_parse.name, _deal_parse.domain, chat_id, channel, user_text,
-                identity, _out_meta, deal_parse=_deal_parse,
+                identity, _out_meta,
             )
 
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────

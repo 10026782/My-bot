@@ -41,6 +41,24 @@ was broken:
      unless the same diff also touches core/router/router.py — this is
      exactly PR #1171's pattern (fix tool selection by asking the LLM
      nicely instead of routing deterministically).
+  4. FINGERPRINT_PAYLOAD_DIVERGENCE — BUG-CRM-BYPASS-FINGERPRINT-PARITY
+     (02/09/2026): a deterministic route passed a custom fingerprint_payload
+     to _queue_approval_detailed() that structurally diverged from the real
+     dispatched tool_inputs — core/action_gateway.py's propose_action()
+     computes the STORED business_action_fingerprint from fingerprint_payload
+     when one is given, so the stored fingerprint could never match
+     tools/dispatcher.py's execution-time recomputation from the real
+     payload. Every approved contract failed with "approval-sensitive
+     execution proof does not match the action payload" — the exact
+     BUG-TASK-01 failure class, recreated by a method whose own docstring
+     cited BUG-TASK-01's lesson. Checked against the CURRENT tree
+     unconditionally: any call passing a non-None fingerprint_payload must
+     be an exact, pre-registered (file, function) exception in
+     _FINGERPRINT_DIVERGENCE_REGISTRY with a documented, tested reason the
+     divergence is safe (the Task due_time precedent is the only current
+     example) — an unregistered one blocks. Removing the custom
+     fingerprint_payload entirely (never diverge from the real dispatched
+     payload) is always the preferred fix over registering a new exception.
 
 Static and read-only. No runtime or persistence side effects.
 """
@@ -84,6 +102,21 @@ _TC_ROUTE_REGISTRY: dict[str, tuple[str, str]] = {
     "crm_create_payment": (
         "EXEMPT",
         "same as crm_create_payment_term — not yet migrated.",
+    ),
+}
+
+# (file, function_name) -> documented reason a custom fingerprint_payload is
+# safe there. New entries require explicit owner sign-off — this is the
+# enforcement point for BUG-CRM-BYPASS-FINGERPRINT-PARITY. The bar is the
+# same as the Task precedent: the reason must name exactly which key(s)
+# differ from the real dispatched payload and why that's provably safe
+# (not just "it works today").
+_FINGERPRINT_DIVERGENCE_REGISTRY: dict[tuple[str, str], str] = {
+    ("app.py", "_queue_deterministic_create_task"): (
+        "due_time is deliberately excluded (BUG-156) — Tasks' due-date "
+        "field is Airtable type 'date', not 'dateTime', so no write ever "
+        "persists a time value; business_identity() agrees with the real "
+        "dispatched payload on every other key (table alias, field name)."
     ),
 }
 
@@ -298,11 +331,103 @@ def check_schema_nudge_language() -> list[str]:
     return failures
 
 
+def find_fingerprint_payload_divergences(source: str) -> list[tuple[str, int]]:
+    """Return (enclosing_function_name, line) for every call in `source`
+    that passes a non-None fingerprint_payload keyword argument."""
+    results: list[tuple[str, int]] = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return results
+
+    class _Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.func_stack: list[str] = []
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.func_stack.append(node.name)
+            self.generic_visit(node)
+            self.func_stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
+
+        def visit_Call(self, node: ast.Call) -> None:
+            for kw in node.keywords:
+                if kw.arg != "fingerprint_payload":
+                    continue
+                is_none = isinstance(kw.value, ast.Constant) and kw.value.value is None
+                # A same-name passthrough (fingerprint_payload=fingerprint_payload,
+                # inside a thin wrapper like _queue_approval_detailed/_impl)
+                # introduces no NEW divergence at this call site — whatever
+                # value it forwards was already decided by its own caller.
+                # Attributing it here would only flag the generic plumbing,
+                # never the actual place a custom payload gets constructed.
+                is_passthrough = isinstance(kw.value, ast.Name) and kw.value.id == kw.arg
+                if not is_none and not is_passthrough:
+                    # Attribute to the OUTERMOST enclosing function, not the
+                    # innermost — a custom fingerprint_payload built in an
+                    # outer scope and used by a nested closure (e.g. Task's
+                    # _queue_task() inside _queue_deterministic_create_task())
+                    # is owned by the outer function for registry purposes.
+                    func_name = self.func_stack[0] if self.func_stack else "<module>"
+                    results.append((func_name, node.lineno))
+            self.generic_visit(node)
+
+    _Visitor().visit(tree)
+    return results
+
+
+def _tracked_python_files() -> list[str]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.py"],
+        cwd=ROOT, check=True, stdout=subprocess.PIPE,
+    )
+    excluded_dirs = {".git", "__pycache__", ".venv", "venv", "node_modules"}
+    paths = []
+    for raw in result.stdout.decode().split("\0"):
+        if not raw:
+            continue
+        path = Path(raw)
+        if any(part in excluded_dirs for part in path.parts):
+            continue
+        if path.name.startswith("test_"):
+            continue
+        paths.append(raw)
+    return sorted(paths)
+
+
+def check_fingerprint_payload_divergence() -> list[str]:
+    failures: list[str] = []
+    for relpath in _tracked_python_files():
+        full = ROOT / relpath
+        if not full.exists():
+            continue
+        for func_name, lineno in find_fingerprint_payload_divergences(_read(full)):
+            key = (relpath, func_name)
+            if key not in _FINGERPRINT_DIVERGENCE_REGISTRY:
+                failures.append(
+                    f"{relpath}:{lineno} function '{func_name}' passes a "
+                    f"non-None fingerprint_payload — this is the exact "
+                    f"BUG-CRM-BYPASS-FINGERPRINT-PARITY/BUG-TASK-01 failure "
+                    f"class (a hand-maintained second payload representation "
+                    f"that can silently drift from what's actually "
+                    f"dispatched, breaking every approved contract's "
+                    f"execution proof). Register ({relpath!r}, {func_name!r}) "
+                    f"in _FINGERPRINT_DIVERGENCE_REGISTRY with a documented, "
+                    f"tested reason the divergence is safe, or — preferred — "
+                    f"remove the custom fingerprint_payload entirely so the "
+                    f"fingerprint is always computed from the real dispatched "
+                    f"payload."
+                )
+    return failures
+
+
 def main() -> int:
     failures: list[str] = []
     failures += check_route_regressions()
     failures += check_new_unrouted_tools()
     failures += check_schema_nudge_language()
+    failures += check_fingerprint_payload_divergence()
     if failures:
         print(
             "FAIL: Turn Coordinator / Single Speaker architecture bypass risk detected:",

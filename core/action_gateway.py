@@ -1286,6 +1286,21 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
         description = "כתיבה לגיליון" + (f": {table}" if table else "")
     elif tool_name in ("send_followup", "send_recovery"):
         description = "שליחת הודעת המשך"
+    elif tool_name == "crm_create_deal":
+        # BUG-CRM-BYPASS follow-up (live observation, 02/09/2026): crm_create_deal's
+        # payload is flat kwargs ({"name":..., "domain":...}), not the
+        # {"table":..., "fields": {...}} shape _first_field_preview() reads —
+        # falling through to the generic "הפעולה המבוקשת" gave the owner no
+        # way to tell which pending approval was which after a Deal-creation
+        # canary. Same gap exists for the other two Commercial CRM writers.
+        deal_name = str(payload.get("name") or "").strip()
+        description = "פתיחת עסקה" + (f": {deal_name}" if deal_name else "")
+    elif tool_name == "crm_create_payment_term":
+        term_name = str(payload.get("name") or "").strip()
+        description = "הוספת תנאי תשלום" + (f": {term_name}" if term_name else "")
+    elif tool_name == "crm_create_payment":
+        amount = payload.get("amount")
+        description = "יצירת תשלום" + (f": {amount}" if amount not in (None, "") else "")
     else:
         description = "הפעולה המבוקשת"
 

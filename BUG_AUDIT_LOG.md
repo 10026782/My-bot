@@ -6650,10 +6650,49 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **תוקן ב-commit:** (ראה מיד לאחר merge)
 - **תוקן ב-branch:** `claude/fix-create-deal-owner-id-presence`
 - **תיקון:** `_queue_deterministic_create_deal()` שולח כעת `owner_id=identity.user_id` (ה-self-reference הגולמי של הזהות המאומתת, לא record ID מפוברק) — מספק את שער-הנוכחות **וגם** תואם בדיוק לרשימת ה-"self values" שכבר קיימת ונבדקה ב-`_resolve_authenticated_crm_owner()`, שממשיכה לפתור אותו ל-Profile record ID אמיתי כרגיל. נוסף regression test חדש (`test_bug_crm_bypass_create_deal_deterministic_route.py`'s "regression: full execution path") שמריץ את שער action_validator+dispatcher+owner-resolution האמיתיים יחד (רק קריאת ה-Airtable עצמה מדומה) — אומת שנכשל בדיוק עם ההודעה האמיתית מהפרודקשן (`מי הבעלים?`) על הקוד הישן, ועובר עם התיקון.
+- **Merged:** כן — PR #1173, merge commit `2eff18f`. אומת ישירות מול `origin/main` (grep `owner_self_reference`/`owner_id=owner_self_reference` ב-`app.py` בפועל על main).
+- **Deployed:** כן — Render.
+- **Verified בפרודקשן:** כן, **לתיקון הספציפי הזה בלבד**. קנרית חיה חוזרת ("צור עסקה בשם בדיקת-קנרית 3/4 בתחום יבוא") הוכיחה: `action_validator`'s שער-הנוכחות **כבר לא חוסם** — ההודעה "מי הבעלים?" נעלמה. הביצוע כן התקדם הלאה מעבר לנקודה שבה נכשל קודם. **אבל** נחשף מיד באג שני, נפרד ("approval-sensitive execution proof does not match the action payload") — ראה `BUG-CRM-BYPASS-FINGERPRINT-PARITY` למטה. שני הבאגים נפרדים לחלוטין (presence gate מול fingerprint parity) ואין לבלבל ביניהם: התיקון הזה עבד בדיוק כמתוכנן עבור מה שהוא תיקן.
+- **Verification ראיה:** קנרי חי — הודעת השגיאה השתנתה מ-"מי הבעלים? (מזהה record)" ל-"approval-sensitive execution proof does not match the action payload" בין ניסיון הקנריה שלפני התיקון לזה שאחריו, מוכיח באופן חד-משמעי שהתיקון פתר את הבעיה שהוא כיוון אליה.
+- **סטטוס:** Verified (לתיקון הספציפי). ה-flow המלא של יצירת עסקה עדיין לא Verified end-to-end — ראה הבאג הבא.
+
+---
+
+### BUG-CRM-BYPASS-FINGERPRINT-PARITY — Deal deterministic route approved but failed execution ("approval-sensitive execution proof does not match the action payload")
+- **דווח:** 02/09/2026 (בעלים, קנרית production חיה מיד אחרי deploy של PR #1173)
+- **דווח על ידי:** בעלים (Telegram)
+- **מסך / מודול:** `app.py` (`_queue_deterministic_create_deal()`), `core/router/router.py` (`DeterministicDealParse.business_identity()`, הוסר), `core/action_gateway.py` (`propose_action()`'s `fingerprint_payload` override), `tools/dispatcher.py` (`_validate_execution_proof()`)
+- **תיאור:** מיד לאחר deploy של PR #1173 (תיקון BUG-CRM-BYPASS-OWNER-PRESENCE), הבעלים שלח שוב "צור עסקה בשם בדיקת-קנרית 3/4 בתחום יבוא". הפעם ה-`action_validator` לא חסם (התיקון הקודם עבד) — אבל הביצוע נכשל בכל זאת: "❌ אושר אך נכשל בביצוע", עם `error=approval-sensitive execution proof does not match the action payload.` בלוג. **אותה מחלקת באג בדיוק כמו BUG-TASK-01** (fingerprint/payload divergence), הפעם ב-Deal creation.
+- **Severity:** Critical (P0) — כל בקשת יצירת עסקה עדיין נכשלה ב-100% מהמקרים אחרי PR #1173, בביטוי אחר.
+- **Root Cause:** `_queue_deterministic_create_deal()` המשיך להעביר `fingerprint_payload=deal_parse.business_identity()` (`{"name":..., "domain":...}`, **בלי** `owner_id`) בעוד ש-`tool_inputs` בפועל (הנשלח ל-`_queue_approval_detailed()`, הנשמר כ-`normalized_payload`, והנשלח לביצוע) כלל `owner_id` (מ-PR #1173). `core/action_gateway.py:1711`: `fingerprint_basis = normalized if fingerprint_payload is None else self.normalize_payload(fingerprint_payload)` — כלומר כש-`fingerprint_payload` מסופק במפורש, ה-fingerprint הנשמר על ה-contract מחושב **ממנו**, לא מ-`tool_inputs` האמיתי. `tools/dispatcher.py::_validate_execution_proof()` מחשב מחדש, בזמן ביצוע, fingerprint מתוך ה-`inputs` **האמיתיים** (3 שדות) ומשווה מול הנשמר (2 שדות) — לעולם לא יכולים להיות שווים. אירוני: השיטה שהכילה את הבאג (`business_identity()`) ציטטה במפורש את הלקח של BUG-TASK-01 בתיעוד שלה, תוך יצירתו מחדש בפועל.
+- **תוקן ב-commit:** (ראה מיד לאחר merge)
+- **תוקן ב-branch:** `claude/fix-create-deal-fingerprint-parity`
+- **תיקון:** הוסרה ה-divergence מהמקור — `_queue_deterministic_create_deal()` כבר לא מעביר `fingerprint_payload` מותאם-אישית כלל; ה-fingerprint מחושב תמיד מאותו `tool_inputs` אחד שבאמת נשלח לביצוע, כך שאין עוד ייצוג שני שיכול להתיישן. `DeterministicDealParse.business_identity()` הוסרה לגמרי (יחד עם ה-import/פרמטר `deal_parse` שהפכו מיותרים). regression test חדש מריץ round-trip אמיתי (propose_action אמיתי → execution_context אמיתי מה-contract → `_validate_execution_proof()` אמיתי) ומאמת שאין mismatch — אומת דרך `git stash` שנכשל בדיוק עם הודעת הפרודקשן על הקוד הישן.
+- **תיקון נלווה (אותו commit):** `core/action_gateway.py::_safe_contract_business_description()` לא הכיר את `crm_create_deal`/`crm_create_payment_term`/`crm_create_payment` כלל ונפל תמיד ל-fallback הגנרי "הפעולה המבוקשת" — בדיוק מה שהבעלים ראה בהודעות ה-pending-approval בקנריות החיות. נוספו 3 ענפים ייעודיים (שם העסקה/תנאי התשלום/הסכום), מראה של `is_task_creation`'s special-casing הקיים ל-Tasks בלי לגעת באותו מנגנון עצמו.
+- **הקשר לבקשת הבעלים:** "אנחנו עכשיו חוזרים לבאגים שתוקנו כבר... הכותב הוא זהב אבל כל מה שסביבו מעולם לא נבחן... צריך לבנות סביבה זהה לשאר הכותבים" — נכון: `commercial_crm.py`'s הכותב עצמו מעולם לא היה הבעיה בשתי הסבבים האלה (BUG-CRM-BYPASS-OWNER-PRESENCE ו-BUG-CRM-BYPASS-FINGERPRINT-PARITY כאחד) — הבעיה תמיד הייתה בשכבת ה-Turn Coordinator/caller החדשה סביבו, שלא קיבלה את אותה רמת round-trip regression testing ש-`create_task`'s מסלול הדטרמיניסטי כבר קיבל (ראה BUG-TASK-01). התיקון הזה סוגר את הפער הזה במפורש לגבי fingerprint parity; regression test חדש נבנה במכוון להיות round-trip מלא ולא רק "propose ואז stop", בדיוק הפער שאיפשר לשני הבאגים האלה לחמוק מ-PR #1172/#1173.
 - **Merged:** לא עדיין
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
-- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה חוזרת (אותה הודעה: "צור עסקה בשם X בתחום Y") לפני שסטטוס זה יעודכן ל-Verified.
+- **Merged:** כן — אומת ישירות: `git show origin/main:app.py` (לאחר `git fetch origin main`) מציג את השורה `# BUG-CRM-BYPASS-FINGERPRINT-PARITY: no custom fingerprint_payload here` בתוך `_queue_deterministic_create_deal()`, ואין יותר `fingerprint_payload=deal_parse.business_identity()` בקובץ. PR #1175 מוזג.
+- **סטטוס:** Fixed, Merged ל-`origin/main`. **לא עדיין deployed/verified בפרודקשן** — ממתין ל-deploy + קנרית production חיה **שלישית** (אותה הודעה: "צור עסקה בשם X בתחום Y") שהפעם צריכה להצליח **עד הסוף**, כולל רשומת Deal אמיתית ב-Airtable, לפני שסטטוס זה יעודכן ל-Verified.
+
+---
+
+### FINGERPRINT-PAYLOAD-DIVERGENCE-CI-GUARD — 3 pre-existing scheduler modules with the same divergent-fingerprint bug, found by the new CI check
+- **דווח:** 02/09/2026 (הבעלים ביקש הוספת שער CI למניעת הישנות BUG-CRM-BYPASS-FINGERPRINT-PARITY; השער עצמו חשף את הממצאים)
+- **דווח על ידי:** agent session, בעקבות בקשת הבעלים
+- **מסך / מודול:** `scheduler.py::_apply_weekly_quest_mutation()`, `abandoned_lead_worker.py::create_human_pipeline_task()`, `interaction_engine.py`'s task-creation-from-analysis
+- **תיאור:** שער CI חדש (`tools/audit_turn_coordinator_bypass.py`'s `FINGERPRINT_PAYLOAD_DIVERGENCE` check) שנוסף כדי למנוע הישנות של `BUG-CRM-BYPASS-FINGERPRINT-PARITY` (אותו יום) חשף **3 מופעים נוספים, קיימים מראש ולא קשורים ל-Deal**, של אותה מחלקת באג בדיוק: `fingerprint_payload` מותאם-אישית שמועבר ל-`propose_action()`, מתפצל מבנית מה-`tool_inputs` האמיתי. אומת בקוד (`core/action_gateway.py:4555-4568`) ש-`execution_context["business_action_fingerprint"]` תמיד נלקח מהערך המקורי שנשמר בזמן ה-propose — לעולם לא מחושב מחדש — כך שכל שלושת המופעים היו נכשלים ב-100% מהריצות בפועל.
+- **Severity:** Critical (P0) עבור `scheduler.py` (Weekly Quest Reset — **לא מוגן flag**, רץ אוטומטית כל יום ראשון 08:00 — כשל ודאי בכל ריצה). Medium עבור השניים האחרים (מוגני flag, `ABANDONED_LEADS`/`INTERACTION_INTELLIGENCE`, כבויים כברירת מחדל — לא אומת אם דלוקים live).
+- **Root Cause:** זהה ל-BUG-CRM-BYPASS-FINGERPRINT-PARITY — כל שלושת המודולים בנו ייצוג "זהות עסקית" נפרד (`fingerprint_payload`) שהתכוון להחריג שדה תנודתי (week/target אצל scheduler — לא באמת תנודתיים; minutes_silent אצל abandoned_lead_worker; Memory ID אצל interaction_engine) — אבל `_validate_execution_proof()` תמיד משווה מול ה-payload **האמיתי** שנשלח לביצוע, לא מול הייצוג הנפרד.
+- **תוקן ב-commit:** (ראה לאחר merge, PR #1175 המורחב)
+- **תוקן ב-branch:** `claude/fix-create-deal-fingerprint-parity`
+- **תיקון:** לכל שלושה — הוסרה ה-divergence מהמקור. `scheduler.py`: הוסר לגמרי, ללא פשרה (השדות שהיו ב-fingerprint_payload דטרמיניסטיים ממילא). `interaction_engine.py`: Memory ID הוסר **מה-payload האמיתי עצמו**, לא רק מה-fingerprint — ללא פשרה (הערת דיבוג בלבד). `abandoned_lead_worker.py`: **פשרה מודעת ומתועדת** — `minutes_silent` הוא תוכן אמיתי שלא ניתן להסיר; retry עם ערך שונה כבר לא נחשב לאותה זהות עסקית (dedup לא-רגיש-לזמן אבד), אך המשימה בפועל נוצרת במקום להיכשל תמיד. dedup אמיתי חסין-לזמן, אם רצוי, דורש מנגנון נפרד מחוץ ל-`business_action_fingerprint`.
+- **שער CI חדש:** `tools/audit_turn_coordinator_bypass.py`'s `FINGERPRINT_PAYLOAD_DIVERGENCE` — סורק AST על כל קובצי `.py` במעקב git לאיתור `fingerprint_payload=` לא-`None`; חוסם כל ממצא שאינו רשום מפורשות עם סיבה מתועדת ונבדקת (בדיוק כמו תקדים `due_time` של Task). ראה `docs/architecture/action-gateway/BUG-CRM-BYPASS-FINGERPRINT-PARITY-CI-GUARD_20260902.md`.
+- **Merged:** כן — אותו commit/PR כמו BUG-CRM-BYPASS-FINGERPRINT-PARITY (PR #1175), אומת ישירות מול `origin/main`.
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed, Merged. `scheduler.py`'s Weekly Quest Reset ניתן לאימות בקנרייה חיה ביום ראשון הקרוב; השניים האחרים דורשים הפעלת flag לפני בדיקה.
 
 ---
 
