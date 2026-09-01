@@ -6674,3 +6674,21 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה **שלישית** (אותה הודעה: "צור עסקה בשם X בתחום Y") שהפעם צריכה להצליח **עד הסוף**, כולל רשומת Deal אמיתית ב-Airtable, לפני שסטטוס זה יעודכן ל-Verified.
+
+---
+
+### FINGERPRINT-PAYLOAD-DIVERGENCE-CI-GUARD — 3 pre-existing scheduler modules with the same divergent-fingerprint bug, found by the new CI check
+- **דווח:** 02/09/2026 (הבעלים ביקש הוספת שער CI למניעת הישנות BUG-CRM-BYPASS-FINGERPRINT-PARITY; השער עצמו חשף את הממצאים)
+- **דווח על ידי:** agent session, בעקבות בקשת הבעלים
+- **מסך / מודול:** `scheduler.py::_apply_weekly_quest_mutation()`, `abandoned_lead_worker.py::create_human_pipeline_task()`, `interaction_engine.py`'s task-creation-from-analysis
+- **תיאור:** שער CI חדש (`tools/audit_turn_coordinator_bypass.py`'s `FINGERPRINT_PAYLOAD_DIVERGENCE` check) שנוסף כדי למנוע הישנות של `BUG-CRM-BYPASS-FINGERPRINT-PARITY` (אותו יום) חשף **3 מופעים נוספים, קיימים מראש ולא קשורים ל-Deal**, של אותה מחלקת באג בדיוק: `fingerprint_payload` מותאם-אישית שמועבר ל-`propose_action()`, מתפצל מבנית מה-`tool_inputs` האמיתי. אומת בקוד (`core/action_gateway.py:4555-4568`) ש-`execution_context["business_action_fingerprint"]` תמיד נלקח מהערך המקורי שנשמר בזמן ה-propose — לעולם לא מחושב מחדש — כך שכל שלושת המופעים היו נכשלים ב-100% מהריצות בפועל.
+- **Severity:** Critical (P0) עבור `scheduler.py` (Weekly Quest Reset — **לא מוגן flag**, רץ אוטומטית כל יום ראשון 08:00 — כשל ודאי בכל ריצה). Medium עבור השניים האחרים (מוגני flag, `ABANDONED_LEADS`/`INTERACTION_INTELLIGENCE`, כבויים כברירת מחדל — לא אומת אם דלוקים live).
+- **Root Cause:** זהה ל-BUG-CRM-BYPASS-FINGERPRINT-PARITY — כל שלושת המודולים בנו ייצוג "זהות עסקית" נפרד (`fingerprint_payload`) שהתכוון להחריג שדה תנודתי (week/target אצל scheduler — לא באמת תנודתיים; minutes_silent אצל abandoned_lead_worker; Memory ID אצל interaction_engine) — אבל `_validate_execution_proof()` תמיד משווה מול ה-payload **האמיתי** שנשלח לביצוע, לא מול הייצוג הנפרד.
+- **תוקן ב-commit:** (ראה לאחר merge, PR #1175 המורחב)
+- **תוקן ב-branch:** `claude/fix-create-deal-fingerprint-parity`
+- **תיקון:** לכל שלושה — הוסרה ה-divergence מהמקור. `scheduler.py`: הוסר לגמרי, ללא פשרה (השדות שהיו ב-fingerprint_payload דטרמיניסטיים ממילא). `interaction_engine.py`: Memory ID הוסר **מה-payload האמיתי עצמו**, לא רק מה-fingerprint — ללא פשרה (הערת דיבוג בלבד). `abandoned_lead_worker.py`: **פשרה מודעת ומתועדת** — `minutes_silent` הוא תוכן אמיתי שלא ניתן להסיר; retry עם ערך שונה כבר לא נחשב לאותה זהות עסקית (dedup לא-רגיש-לזמן אבד), אך המשימה בפועל נוצרת במקום להיכשל תמיד. dedup אמיתי חסין-לזמן, אם רצוי, דורש מנגנון נפרד מחוץ ל-`business_action_fingerprint`.
+- **שער CI חדש:** `tools/audit_turn_coordinator_bypass.py`'s `FINGERPRINT_PAYLOAD_DIVERGENCE` — סורק AST על כל קובצי `.py` במעקב git לאיתור `fingerprint_payload=` לא-`None`; חוסם כל ממצא שאינו רשום מפורשות עם סיבה מתועדת ונבדקת (בדיוק כמו תקדים `due_time` של Task). ראה `docs/architecture/action-gateway/BUG-CRM-BYPASS-FINGERPRINT-PARITY-CI-GUARD_20260902.md`.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. `scheduler.py`'s Weekly Quest Reset ניתן לאימות בקנרייה חיה ביום ראשון הקרוב; השניים האחרים דורשים הפעלת flag לפני בדיקה.

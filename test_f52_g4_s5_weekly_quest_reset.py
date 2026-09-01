@@ -51,11 +51,24 @@ def test_weekly_reset_uses_explicit_system_identity_and_policy():
 
 
 def test_same_week_and_target_have_same_logical_identity():
+    # BUG-CRM-BYPASS-FINGERPRINT-PARITY follow-up (02/09/2026): this used to
+    # assert on a custom fingerprint_payload with extra "action"/"week" keys
+    # not present in the real dispatched tool_inputs — core/action_gateway.py's
+    # propose_action() stores THAT as the contract's business_action_fingerprint,
+    # but tools/dispatcher.py's _validate_execution_proof() always recomputes
+    # from the real tool_inputs at execution time, so the two could never
+    # match and this job failed every single run. _apply_weekly_quest_mutation()
+    # no longer passes a custom fingerprint_payload at all — but the logical
+    # identity property this test cares about is unaffected: last_monday/
+    # target_id are fully deterministic (never volatile), so tool_inputs
+    # alone already has the same "same params -> same identity" property,
+    # with no separate representation left to diverge.
     gateway = FakeGateway()
     with patch("core.action_gateway.action_gateway", gateway):
         scheduler._apply_weekly_quest_mutation("2026-08-24", "2026-08-31", "rec-q1")
         scheduler._apply_weekly_quest_mutation("2026-08-24", "2026-08-31", "rec-q1")
-    assert gateway.proposals[0]["fingerprint_payload"] == gateway.proposals[1]["fingerprint_payload"]
+    assert gateway.proposals[0]["tool_inputs"] == gateway.proposals[1]["tool_inputs"]
+    assert "fingerprint_payload" not in gateway.proposals[0]
 
 
 def test_week_or_target_changes_logical_identity():
@@ -64,8 +77,8 @@ def test_week_or_target_changes_logical_identity():
         scheduler._apply_weekly_quest_mutation("2026-08-24", "2026-08-31", "rec-q1")
         scheduler._apply_weekly_quest_mutation("2026-08-31", "2026-09-07", "rec-q1")
         scheduler._apply_weekly_quest_mutation("2026-08-24", "2026-08-31", "rec-q2")
-    fingerprints = [repr(p["fingerprint_payload"]) for p in gateway.proposals]
-    assert len(set(fingerprints)) == 3
+    identities = [repr(p["tool_inputs"]) for p in gateway.proposals]
+    assert len(set(identities)) == 3
 
 
 def test_structured_failure_is_not_aggregate_success():

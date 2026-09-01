@@ -93,7 +93,31 @@ def test_replay_fails_closed_when_gateway_reports_duplicate():
     notify.assert_not_called()
 
 
-def test_retry_uses_stable_abandoned_event_fingerprint():
+def test_retry_with_different_elapsed_silence_is_a_new_identity():
+    # BUG-CRM-BYPASS-FINGERPRINT-PARITY follow-up (02/09/2026): this test
+    # used to assert the OPPOSITE — that a retry with a different
+    # minutes_silent produced the SAME fingerprint_payload, via a custom
+    # "abandoned_event" identity object distinct from the real dispatched
+    # fields. That object became the contract's stored
+    # business_action_fingerprint (core/action_gateway.py's propose_action()),
+    # but tools/dispatcher.py's _validate_execution_proof() always recomputes
+    # from the real dispatched tool_inputs (whose DESCRIPTION embeds
+    # minutes_silent) at execution time — the two could never match, so
+    # every one of these tasks failed execution 100% of the time. No retry
+    # was ever actually deduped, because no task was ever actually created.
+    #
+    # Fix: no custom fingerprint_payload — the fingerprint is always the real
+    # dispatched payload, so execution now succeeds. Acknowledged trade-off:
+    # since DESCRIPTION legitimately shows the human-facing elapsed-silence
+    # minutes (not a debug breadcrumb like interaction_engine.py's Memory ID
+    # was — see test_f52_g4_s4), two calls for the same abandoned-lead event
+    # with a different minutes_silent are no longer recognized as the same
+    # logical identity, and retry-dedup insensitive to elapsed time is not
+    # provided by this mechanism. A working write beats a perfectly-deduped
+    # write that never happens; true elapsed-time-insensitive dedup (if
+    # wanted) needs a separate, dedicated check keyed on
+    # (sender, channel, domain, step) BEFORE propose_action() is ever
+    # called, not a second fingerprint representation.
     first = FakeGateway()
     second = FakeGateway()
     with patch("core.action_gateway.action_gateway", first), patch.object(worker, "_notify_human_pipeline"):
@@ -102,4 +126,5 @@ def test_retry_uses_stable_abandoned_event_fingerprint():
         assert worker.create_human_pipeline_task(
             worker.AbandonedLead(**{**_lead().__dict__, "minutes_silent": 99.0}), "owner"
         ) is True
-    assert first.proposal["fingerprint_payload"] == second.proposal["fingerprint_payload"]
+    assert "fingerprint_payload" not in first.proposal
+    assert first.proposal["tool_inputs"] != second.proposal["tool_inputs"]
