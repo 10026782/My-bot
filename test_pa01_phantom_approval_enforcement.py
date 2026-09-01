@@ -1688,13 +1688,13 @@ chk("memory.add('assistant', ...) receives the replaced Phantom fallback, never 
 
 
 # ══════════════════════════════════════════════════
-# N. Policy source sanity — all 10 mappings point to real, requires_approval=True tools
+# N. Policy source sanity — all 11 mappings point to real, requires_approval=True tools
 # ══════════════════════════════════════════════════
 
 from core.router.risk_router import _NORMAL_INTENTS  # noqa: E402
 
-chk("_CONTRACT_REQUIRED_INTENT_TO_TOOL has exactly 10 entries",
-    len(_CONTRACT_REQUIRED_INTENT_TO_TOOL) == 10)
+chk("_CONTRACT_REQUIRED_INTENT_TO_TOOL has exactly 11 entries",
+    len(_CONTRACT_REQUIRED_INTENT_TO_TOOL) == 11)
 chk("_CONTRACT_REQUIRED_INTENT_TO_TOOL is a subset of _NORMAL_INTENTS",
     set(_CONTRACT_REQUIRED_INTENT_TO_TOOL) <= _NORMAL_INTENTS)
 
