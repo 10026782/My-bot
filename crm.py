@@ -16,7 +16,7 @@ from airtable_schema import (
     PaymentFields, PaymentStatus,
     validate_funding_cost,
 )
-from core.query_contract import after, all_of, any_of, before, contains, equals, negate
+from core.query_contract import after, all_of, any_of, before, contains, equals, negate, record_id_equals
 from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_gateway import airtable_create, airtable_patch
 from tools.airtable_read_adapter import (
@@ -50,6 +50,28 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
     if is_external and tenant_id and tenant_id != "unknown":
         tenant_filter = equals("tenant_id", tenant_id)
         formula = all_of(formula, tenant_filter)
+
+    if getattr(identity, "role", None) == "partner":
+        domains = list(getattr(identity, "allowed_domains", None) or [])
+        if not domains:
+            raise RuntimeError("partner scope has no allowed domains")
+        if table == Tables.CONTACTS:
+            # ponytail: bounded relationship lookup; paginate if volume requires it.
+            deal_records = list_records(Tables.DEALS, any_of(*(equals(DealFields.DOMAIN, d) for d in domains)), limit=100, fields=[DealFields.CONTACTS_LINK], paginate=False, timeout=10)
+            task_records = list_records(Tables.TASKS, any_of(*(equals("Domain", d) for d in domains)), limit=100, fields=["מקושר לאנשי קשר"], paginate=False, timeout=10)
+            contact_ids = set()
+            for records, field_name in ((deal_records, DealFields.CONTACTS_LINK), (task_records, "מקושר לאנשי קשר")):
+                for record in records:
+                    linked = record.get("fields", {}).get(field_name, [])
+                    for item in linked if isinstance(linked, list) else [linked]:
+                        if isinstance(item, dict) and item.get("id"):
+                            contact_ids.add(item["id"])
+                        elif isinstance(item, str) and item:
+                            contact_ids.add(item)
+            formula = all_of(formula, any_of(*(record_id_equals(rid) for rid in contact_ids)) if contact_ids else record_id_equals("__no_partner_contact_scope__"))
+        elif table in (Tables.DEALS, Tables.PAYMENTS):
+            field = DealFields.DOMAIN if table == Tables.DEALS else PaymentFields.DOMAIN
+            formula = all_of(formula, any_of(*(equals(field, d) for d in domains)))
 
     try:
         return list_records(

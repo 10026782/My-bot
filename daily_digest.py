@@ -17,12 +17,20 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ══════════════════════════════════════════════════
 
-def _fetch(table_real: str, formula="", max_rec: int = 20) -> list:
+def _fetch(table_real: str, formula="", max_rec: int = 20, identity=None) -> list:
     """Return Airtable records or raise RuntimeError, preserving the old contract."""
     base = os.environ.get("AIRTABLE_BASE_ID", "")
     key  = os.environ.get("AIRTABLE_API_KEY", "")
     if not base or not key:
         raise RuntimeError("Airtable credentials missing (AIRTABLE_BASE_ID / AIRTABLE_API_KEY)")
+    if getattr(identity, "role", None) == "partner":
+        domains = list(getattr(identity, "allowed_domains", None) or [])
+        if not domains:
+            raise RuntimeError("partner scope has no allowed domains")
+        field = {"Leads": "domain", "עסקאות (Deals)": "Domain", "Payments": "domain"}.get(table_real)
+        if not field:
+            raise RuntimeError(f"daily report section is not available for partner scope: {table_real}")
+        formula = all_of(formula, any_of(*(equals(field, d) for d in domains)))
     try:
         return list_records(table_real, formula, limit=max_rec)
     except AirtableReadError as exc:
@@ -61,7 +69,7 @@ def _tier_label(score: int) -> str:
     return "❄️ קר"
 
 
-def _hot_leads(errors: list) -> str:
+def _hot_leads(errors: list, identity=None) -> str:
     """🔥 לידים חמים — Score>=50 (סף HOT/ULTRA_HOT) או status legacy='hot'"""
     try:
         records = _fetch(
@@ -72,7 +80,7 @@ def _hot_leads(errors: list) -> str:
                 equals("status", "Hot"),
                 equals("status", "HOT"),
             ),
-            max_rec=8,
+            max_rec=8, identity=identity,
         )
         if not records:
             return "🔥 *לידים חמים:* אין כרגע"
@@ -91,13 +99,13 @@ def _hot_leads(errors: list) -> str:
         return "🔥 *לידים חמים:* שגיאה"
 
 
-def _followups_today(errors: list) -> str:
+def _followups_today(errors: list, identity=None) -> str:
     """📞 מעקבים להיום — contacts עם תאריך פולו אפ = היום"""
     try:
         records = _fetch(
             "אנשי קשר (Contacts)",
             same_day("תאריך פולו אפ", today()),
-            max_rec=15,
+            max_rec=15, identity=identity,
         )
         if not records:
             return "📞 *מעקבים להיום:* אין"
@@ -115,7 +123,7 @@ def _followups_today(errors: list) -> str:
         return "📞 *מעקבים להיום:* שגיאה"
 
 
-def _roadmap_tasks_today(errors: list) -> str:
+def _roadmap_tasks_today(errors: list, identity=None) -> str:
     """📅 משימות היום — Roadmap_Tasks של אליהו, Due_Date <= היום, לא Done, ממוין P0→P3"""
     try:
         today_str = date.today().isoformat()
@@ -126,7 +134,7 @@ def _roadmap_tasks_today(errors: list) -> str:
                 not_equals("Status", "Done"),
                 before("Due_Date", date_add(today_str, 1, "days")),
             ),
-            max_rec=30,
+            max_rec=30, identity=identity,
         )
 
         if not records:
@@ -170,7 +178,7 @@ def _roadmap_tasks_today(errors: list) -> str:
         return "📅 *משימות היום:* שגיאה"
 
 
-def _open_deals(errors: list) -> str:
+def _open_deals(errors: list, identity=None) -> str:
     """🤝 עסקאות פתוחות"""
     try:
         records = _fetch(
@@ -179,7 +187,7 @@ def _open_deals(errors: list) -> str:
                 equals("שלב", "סגור-ניצחון"),
                 equals("שלב", "סגור-הפסד"),
             )),
-            max_rec=10,
+            max_rec=10, identity=identity,
         )
         if not records:
             return "🤝 *עסקאות פתוחות:* אין"
@@ -197,7 +205,7 @@ def _open_deals(errors: list) -> str:
         return "🤝 *עסקאות פתוחות:* שגיאה"
 
 
-def _upcoming_payments(errors: list) -> str:
+def _upcoming_payments(errors: list, identity=None) -> str:
     """💰 תשלומים קרובים — 7 ימים, לא שולמו"""
     try:
         today    = date.today()
@@ -209,7 +217,7 @@ def _upcoming_payments(errors: list) -> str:
                 before(PaymentFields.DATE, deadline.isoformat()),
                 after(PaymentFields.DATE, today.isoformat()),
             ),
-            max_rec=10,
+            max_rec=10, identity=identity,
         )
         if not records:
             return "💰 *תשלומים קרובים:* אין"
@@ -248,10 +256,13 @@ def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
     return hot, warm, cold
 
 
-def _leads_scoring_summary(errors: list) -> str:
+def _leads_scoring_summary(errors: list, identity=None) -> str:
     """מסכם את כל הלידים לפי קבוצת טמפרטורה HOT/WARM/COLD."""
     try:
-        hot, warm, cold = _lead_temperature_counts(_fetch("Leads", "", max_rec=0))
+        kwargs = {"max_rec": 0}
+        if identity is not None:
+            kwargs["identity"] = identity
+        hot, warm, cold = _lead_temperature_counts(_fetch("Leads", "", **kwargs))
         total = hot + warm + cold
         return (
             f"📊 *לידים:* 🔥 {hot} HOT | 🌤️ {warm} WARM | "
@@ -262,7 +273,7 @@ def _leads_scoring_summary(errors: list) -> str:
         return "📊 *לידים:* שגיאה"
 
 
-def _yesterday_changes(errors: list) -> str:
+def _yesterday_changes(errors: list, identity=None) -> str:
     """🧠 מה השתנה אתמול — לידים חדשים, עסקאות חדשות, משימות שהושלמו"""
     try:
         yesterday = date.today() - timedelta(days=1)
@@ -275,17 +286,17 @@ def _yesterday_changes(errors: list) -> str:
                 after("created_at", f"{yday_str}T00:00:00.000Z"),
                 before("created_at", f"{today_str}T00:00:00.000Z"),
             ),
-            max_rec=10,
+            max_rec=10, identity=identity,
         )
         deal_recs = _fetch(
             "עסקאות (Deals)",
             same_day(created_time(), date_add(today(), -1, "days")),
-            max_rec=5,
+            max_rec=5, identity=identity,
         )
         done_recs = _fetch(
             "משימות (Tasks)",
             equals("סטטוס", "בוצע", spaced=True),
-            max_rec=5,
+            max_rec=5, identity=identity,
         )
 
         lines = ["🧠 *מה השתנה אתמול:*"]
@@ -326,7 +337,7 @@ def _yesterday_changes(errors: list) -> str:
 # Main
 # ══════════════════════════════════════════════════
 
-def build_digest() -> str:
+def build_digest(identity=None) -> str:
     today_str = date.today().strftime("%d/%m/%Y")
     errors: list = []
 
@@ -338,13 +349,13 @@ def build_digest() -> str:
         pass
 
     sections = [
-        _leads_scoring_summary(errors),
-        _hot_leads(errors),
-        _followups_today(errors),
-        _roadmap_tasks_today(errors),
-        _open_deals(errors),
-        _upcoming_payments(errors),
-        _yesterday_changes(errors),
+        _leads_scoring_summary(errors, identity),
+        _hot_leads(errors, identity),
+        _followups_today(errors, identity),
+        _roadmap_tasks_today(errors, identity),
+        _open_deals(errors, identity),
+        _upcoming_payments(errors, identity),
+        _yesterday_changes(errors, identity),
     ]
 
     # log every section error so it reaches the server logs

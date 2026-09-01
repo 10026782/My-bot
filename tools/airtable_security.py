@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 import logging
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -107,6 +108,23 @@ def enforce_tenant_scope(
     זה מונע מצב שבו Claude שולח filter "חכם" שעוקף את tenant.
     """
     params = dict(params)  # לא מוטציה של המקור
+
+    if getattr(identity, "role", None) == "partner" and tool_name == "airtable_get":
+        table = str(params.get("table", "")).strip()
+        field = {
+            "Leads": "domain", "Tasks": "Domain", "משימות (Tasks)": "Domain",
+            "Deals": "Domain", "עסקאות (Deals)": "Domain", "Payments": "domain",
+        }.get(table)
+        domains = [re.sub(r"[^\w -]", "", str(d).strip()) for d in (getattr(identity, "allowed_domains", None) or [])]
+        domains = [d for d in domains if d]
+        if table in {"Contacts", "אנשי קשר (Contacts)"}:
+            raise TenantScopeViolation("❌ חיפוש אנשי קשר דורש הקשר ליד/עסקה מורשה.")
+        if not field or not domains:
+            raise TenantScopeViolation("❌ גישה נחסמה: לא הוגדר תחום פעילות מורשה.")
+        domain_filter = "OR(" + ",".join(f"{{{field}}}='{d}'" for d in domains) + ")"
+        existing = params.get("filterByFormula", "").strip()
+        params["filterByFormula"] = f"AND({existing}, {domain_filter})" if existing else domain_filter
+        return params
 
     # ── owner / staff — מותר הכל, רק log ───────────
     if identity.is_internal:
