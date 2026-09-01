@@ -39,11 +39,17 @@ class ContactGateTests(unittest.TestCase):
                          ("+71234567890",))
 
     def test_invalid_phone_does_not_lookup_or_write(self):
+        # BUG-LEAD-03-class gap fix (R10 write-path audit, 01/09/2026):
+        # a bad-phone-with-valid-name rejection is now the distinct
+        # "invalid_phone" status (with an explanatory error string) rather
+        # than the old collapsed "invalid" that gave no reason at all —
+        # see crm.py's describe_contact_failure().
         for phone in (None, "", "054-821-27"):
             with self.subTest(phone=phone), patch.object(crm, "_get") as get, \
                     patch.object(crm, "_post") as post:
                 result = crm.find_or_create_contact(phone, "Dana")
-            self.assertEqual(result.status, "invalid")
+            self.assertEqual(result.status, "invalid_phone")
+            self.assertTrue(result.error)
             get.assert_not_called()
             post.assert_not_called()
 

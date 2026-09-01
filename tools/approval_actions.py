@@ -377,8 +377,11 @@ def tma_write(
                 return DispatcherOutcome("outcome_unknown", result["user_message"],
                                           error=contact.error, raw_response=result)
             if contact.status not in ("created", "existing"):
-                return _tool_result(ok=False, tool="tma_write",
-                                    user_message=f"❌ יצירת איש הקשר נכשלה: {contact.status}")
+                evidence = {"table": table, "contact_status": contact.status}
+                if contact.matches:
+                    evidence["matches"] = list(contact.matches)
+                return _tool_result(ok=False, tool="tma_write", evidence=evidence,
+                                    user_message=crm.describe_contact_failure(contact))
             result_record_id = contact.record_id
         else:
             rec = airtable_create(table, fields, source="tma_write")

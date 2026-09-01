@@ -409,6 +409,8 @@ def dispatch_tool(
                     )
                     evidence = {"record_id": contact.record_id, "table": table,
                                 "contact_status": contact.status}
+                    if contact.matches:
+                        evidence["matches"] = list(contact.matches)
                     if contact.status == "outcome_unknown":
                         result = _tool_result(ok=False, tool="airtable_add", evidence=evidence,
                                               user_message="⚠️ תוצאת יצירת איש הקשר אינה ידועה. אין לנסות שוב אוטומטית.")
@@ -423,7 +425,7 @@ def dispatch_tool(
                         ))
                     return _finish_contact(_tool_result(
                         ok=False, tool="airtable_add", evidence=evidence,
-                        user_message=f"❌ יצירת איש הקשר נכשלה: {contact.status}",
+                        user_message=crm.describe_contact_failure(contact),
                     ))
 
                 result = airtable_add(table, fields)

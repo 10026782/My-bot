@@ -164,10 +164,14 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "post" branch contains this `import crm`.
-#   - tools/approval_actions.py:395 -- tools/dispatcher.py:26 does
+#   - tools/approval_actions.py:398 -- tools/dispatcher.py:26 does
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "patch" branch contains the B2-02 Contact UPDATE `import crm`.
+#     (Shifted from line 395 by BUG-CONTACT-03's 3-line insertion earlier
+#     in the "post" branch, 01/09/2026 -- exactly the (file, line, module)
+#     baseline fragility this script's own C05-C07 audit refresh already
+#     documented; the call site itself is unchanged, only its line moved.)
 #   - tools/schema_snapshot.py:286 -- scheduler.py:66 imports and calls
 #     run_snapshot_archive() (scheduled at scheduler.py:857), which calls
 #     apply_retention_policy() at tools/schema_snapshot.py:265, containing
@@ -177,7 +181,7 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 # WARN_NEW, and never need baselining.
 _SANCTIONED_CALL_SITES: frozenset[tuple[str, int, str]] = frozenset({
     ("tools/approval_actions.py", 365, "crm"),
-    ("tools/approval_actions.py", 395, "crm"),
+    ("tools/approval_actions.py", 398, "crm"),
     ("tools/schema_snapshot.py", 286, "tools.airtable_tools"),
 })
 

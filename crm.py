@@ -104,6 +104,41 @@ class ContactResult:
     error: str = ""
 
 
+# BUG-LEAD-03-class gap (found during the R10 write-path audit, 01/09/2026):
+# every non-success ContactResult.status used to reach the user either via a
+# per-status dict that silently fell through to a generic message for any
+# status it didn't name, or via the raw status string shown verbatim
+# ("❌ יצירת איש הקשר נכשלה: invalid") — neither told the user WHY. "invalid"
+# specifically collapsed two unrelated causes (bad phone vs. missing name)
+# into one status with no error text at all, and "ambiguous" dropped its own
+# `matches` evidence entirely. describe_contact_failure() is the single
+# place every caller should get its user-facing message from, so a new
+# status added here never needs a second edit at each call site.
+_CONTACT_FAILURE_MESSAGES: dict[str, str] = {
+    "invalid_phone":    "❌ מספר הטלפון חסר או אינו תקין.",
+    "missing_name":     "❌ שם איש הקשר חסר.",
+    "invalid":          "❌ שם וטלפון של איש הקשר חסרים/אינם תקינים.",
+    "unsupported_field": "❌ שדה שאינו נתמך בסכימת אנשי הקשר.",
+    "lookup_error":     "❌ שגיאה באיתור איש קשר קיים.",
+    "create_error":     "❌ יצירת איש קשר נכשלה.",
+}
+
+
+def describe_contact_failure(result: "ContactResult") -> str:
+    """Human-facing message for a non-success ContactResult — never the raw
+    internal status string, and never silently generic when a real reason
+    (result.error) or match evidence (result.matches) is available."""
+    if result.status == "ambiguous":
+        return (
+            f"⚠️ נמצאו {len(result.matches)} אנשי קשר תואמים לאותו מספר טלפון — "
+            f"לא ברור לאיזה מהם להתייחס. יש לטפל ידנית."
+        )
+    base = _CONTACT_FAILURE_MESSAGES.get(
+        result.status, f"❌ יצירת איש קשר נכשלה: {result.status}",
+    )
+    return f"{base} ({result.error})" if result.error else base
+
+
 @dataclass(frozen=True)
 class PaymentRecord:
     """Canonical persisted Payment read shape for downstream consumers."""
@@ -152,8 +187,17 @@ def _find_or_create_contact_unlocked(phone, name, *, email="", company="",
                                      identity=None, source="", create_writer=None) -> ContactResult:
     """Find exactly by canonical phone, creating only when lookup is empty."""
     normalized = _normalize_contact_phone(phone)
-    if not normalized or not name:
-        return ContactResult("invalid")
+    # BUG-LEAD-03-class gap: these two rejection reasons used to collapse
+    # into one "invalid" status with no error text — the caller (and
+    # therefore the user) could never tell which field was actually the
+    # problem. See describe_contact_failure() above for how each status is
+    # now rendered.
+    if not normalized and not name:
+        return ContactResult("invalid", error="phone and name are both missing/invalid")
+    if not normalized:
+        return ContactResult("invalid_phone", error=f"invalid phone: {phone!r}")
+    if not name:
+        return ContactResult("missing_name", error="contact name is missing/empty")
     if notes:
         return ContactResult(
             "unsupported_field",
