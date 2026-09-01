@@ -125,15 +125,27 @@ VITE_DEV_TELEGRAM_ID=7228089151  # local development only; do not use as product
 ברירת מחדל: **כבוי** לכולם, אלא אם צוין אחרת ב-`feature_flags.py`.
 השתמש בשמות הדגלים המדויקים הבאים; אין שמות חלופיים לדגלי domain או lead:
 
+> **תוקן 01/09/2026** (`BOSS_CURRENT_STATE.md` TR-23) — קריאה ישירה של Render env (read-only API, לא הסקה ממסמכים) מצאה ש-`LEAD_CAPTURE` בפועל **`false`** בפרודקשן, לא `true` כפי שתועד כאן קודם. הטבלה למטה משקפת את הערכים שאומתו בפועל ב-01/09/2026 — ייתכן שינו מאז; לפני הסתמכות, אמת מול Render Dashboard.
+
 ```bash
-LEAD_CAPTURE=true               # WhatsApp lead capture
+LEAD_CAPTURE=false              # WhatsApp lead capture — כבוי בפועל, בניגוד לתיעוד הקודם כאן
+LEAD_SCORING=true                # מוגדר true, אך אינרטי כל עוד LEAD_CAPTURE=false (השער המוקדם ב-lead_capture.py חוסם לפני שמגיעים לניקוד)
+LEAD_MEMORY=true                 # מוגדר true, אינרטי מאותה סיבה
+FEATURE_ACTION_GATEWAY=true
+FEATURE_DECISION_HUB=true
+FEATURE_MEDIA_UPLOAD=true
+FEATURE_VOICE_NOTES=true
+FEATURE_MARKETING_BRIDGE=true
+FEATURE_SINGLE_SPEAKER_APPROVAL_UX=true
+FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS=true
 ```
 
-**לא להדליק בלי בדיקה מפורשת:**
+**לא להדליק בלי בדיקה מפורשת (מצב מאומת 01/09/2026):**
 ```bash
-LEAD_SCORING=false
-LEAD_MEMORY=false
-FOLLOWUP_AUTOMATION=false
+FOLLOWUP_AUTOMATION=false        # לא מופיע ב-env — כבוי כברירת מחדל
+WHATSAPP_CANONICAL_LEAD_WRITE=   # לא מוגדר — כבוי; חסום גם ע"י OWNER_USER_ID_MAPPINGS ריק (ר' TR-22)
+VOICE_CANONICAL_LEAD_WRITE=      # לא מוגדר — כבוי; חסום גם ע"י OWNER_USER_ID_MAPPINGS ריק וגם VOICE_IVR כבוי
+VOICE_IVR=                       # לא מוגדר — כבוי
 ```
 
 ---

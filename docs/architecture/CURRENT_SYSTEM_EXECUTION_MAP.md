@@ -1,6 +1,8 @@
 # Current System Execution Map
 
-**Truth Reset SHA:** `origin/main` = `b58b27f8771c8ffd4c633a84a28b4009178fbeca` (01/09/2026). This is the merge containing the latest reconciled PRs; all runtime claims below remain static unless explicitly labelled runtime-verified.
+**Truth Reset SHA:** `origin/main` = `b58b27f8771c8ffd4c633a84a28b4009178fbeca` (01/09/2026) — one commit behind current tip `a45f304` (CI/test-hygiene only, no capability change). This is the merge containing the latest reconciled PRs; all runtime claims below remain static unless explicitly labelled runtime-verified.
+
+> **RECONCILIATION ADDENDUM (01/09/2026, same-day, `a45f304`):** a fresh Grade-A pass (read-only Render env read + owner-authenticated diagnostic GETs — not doc inference) found the §3 flag table's "default OFF" framing does not describe several flags' *actual live Render values*: `FEATURE_ACTION_GATEWAY`, `FEATURE_DECISION_HUB`, `FEATURE_MEDIA_UPLOAD`, `FEATURE_VOICE_NOTES`, `FEATURE_MARKETING_BRIDGE`, `FEATURE_SINGLE_SPEAKER_APPROVAL_UX`, `FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS` are all `true` in production. §3's default-value statements remain correct as *code defaults*; treat them as such, not as production state. Separately: §2's "Leads" row calls Owner Resolution for non-interactive sources "already implemented" — true of the mechanism, but `config.py::OWNER_USER_ID_MAPPINGS` (the data it reads) is empty, so every non-interactive canonical writer fails closed today; **do not read this document as saying the WhatsApp/Voice canonical-write canary is ready.** Full detail and two additional diagnostic-only findings (scheduler health-check wiring, a malformed `FEATURE_PA01_ENFORCEMENT_STATE` value): current authority is `BOSS_CURRENT_STATE.md` TR-21–TR-27, not this document.
 
 **Date:** 31/08/2026. **Type:** read-only architecture audit. No runtime code was modified, no flags changed, nothing deployed.
 

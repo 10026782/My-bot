@@ -1,8 +1,8 @@
 # AI CONTEXT
 
 **Updated:** 01/09/2026
-**Truth Reset:** `origin/main` = `c6bcd0c8f20835bf8652f1726059c7d708af2c62`
-**Sources:** `ROADMAP.md`, `docs/governance/HORIZON.md`, `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md`, `BOSS_CURRENT_STATE.md`, and `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md`
+**Truth Reset:** `origin/main` = `a45f304ab2387139287bc13d07e3313ec6019b40` (`c6bcd0c` previously named here is one commit behind; the gap is CI/test-hygiene only, already captured by TR-15/16/17 = CLOSED_STATIC)
+**Sources:** `ROADMAP.md`, `docs/governance/HORIZON.md`, `docs/governance/BOSS_UNIFIED_MASTER_PLAN.md`, `BOSS_CURRENT_STATE.md` (see TR-21–TR-27 for a fresh 01/09 Render-env/runtime Grade-A pass), and `docs/architecture/CURRENT_SYSTEM_EXECUTION_MAP.md`
 **Read this before anything else.** Compressed briefing for all AI agents — not exhaustive documentation.  
 **"Merged" ≠ "deployed" ≠ "production-verified."** Owner holds field truth.
 
@@ -44,9 +44,9 @@
 **Partially Implemented / Code Present, Not Fully Deployed:**
 - **N18 Phase 2 (Slices 1-5):** Shared Write Primitives (`structured_command.py`, `draft_flow.py`) extracted; confirm/cancel unified; multi-field validation end-to-end tested. No fresh canary since merge.
 - **BUG-164 Creative-Grounding:** Prompt defense (`_DEMAND_FIDELITY_RULE`) added to free-text brief tasks; deterministic route already fixed separately. Needs fresh live AI call verification.
-- **Lead Capture/Scoring/Memory/Followup:** All code operationally wired; product flags default off. Activation requires owner env decision + canary.
-- **H6 Command Center:** API/UI live; route verification against current SHA needed. Known: `system_health` can degrade to `UNKNOWN`.
-- **H4 Media/Gateway:** MoneyPrinterTurbo E2E staging-verified; Artifact Contract v1, gateway readiness merged — no production without explicit hash/path/publishing-off gates.
+- **Lead Capture/Scoring/Memory/Followup:** All code operationally wired; product flags default off. **Live Render env as of 01/09/2026 is asymmetric** (`BOSS_CURRENT_STATE.md` TR-21/TR-23): `LEAD_CAPTURE=false` (matches doc default — WhatsApp inbound lead creation is currently off) but `LEAD_SCORING=true`/`LEAD_MEMORY=true` are already set — currently inert only because `LEAD_CAPTURE`'s early gate in `lead_capture.py` short-circuits before either is reached; worth owner awareness before flipping `LEAD_CAPTURE`, since scoring/memory would activate immediately alongside it, not as a separate later step. `FOLLOWUP_AUTOMATION` remains unset/off. Activation requires owner env decision + canary.
+- **H6 Command Center:** API/UI live. **Route verification done 01/09/2026** (`BOSS_CURRENT_STATE.md` TR-26) — `/api/owner/command-center` and `/api/owner/health` both hit with a real owner-authenticated read-only GET on current SHA `a45f304`, both returned `200` with live data. Read path is functionally verified; TMA write endpoints remain unexercised. Known: `system_health` can degrade to `UNKNOWN`.
+- **H4 Media/Gateway:** `FEATURE_MEDIA_UPLOAD`/`FEATURE_VOICE_NOTES` confirmed live-`true` in Render env as of 01/09/2026 (`BOSS_CURRENT_STATE.md` TR-21) — the base upload/voice-note capture path is flag-active, not off as some historical docs describe (those described the code *default*, not the actual Render value). This is separate from M5/MoneyPrinterTurbo production gating: MoneyPrinterTurbo E2E staging-verified; Artifact Contract v1, gateway readiness merged — no MPT production run without explicit hash/path/publishing-off gates, which remain unmet regardless of the base flags being on.
 
 **Shadow / Zero Impact:**
 - TC7-B1, RP4/RP5 evidence shadow (`FEATURE_EVIDENCE_FINALIZER` off).
@@ -70,7 +70,7 @@
 
 ## 4. Next Priorities
 
-1. **N18 Phase 3 Activation Canary:** Owner decision on `WHATSAPP_CANONICAL_LEAD_WRITE`, `VOICE_CANONICAL_LEAD_WRITE`. Fresh inbound test against live Airtable. (`EMAIL_CANONICAL_LEAD_WRITE`/`FURNITURE_CANONICAL_LEAD_WRITE` removed 27/08/2026 — never consumed by any live code; Email/Furniture Lead creation already runs unconditionally through `create_lead()`.)
+1. **N18 Phase 3 Activation Canary — BLOCKED on a prerequisite found 01/09/2026 (`BOSS_CURRENT_STATE.md` TR-22):** `config.py::OWNER_USER_ID_MAPPINGS` is empty, so `WHATSAPP_CANONICAL_LEAD_WRITE`/`VOICE_CANONICAL_LEAD_WRITE` would fail closed if activated today — this is not simply an "owner decision on the flag," it requires the owner to first supply real destination→owner-user-id mapping values. Once populated: owner decision on the flags, then a fresh inbound test against live Airtable. (`EMAIL_CANONICAL_LEAD_WRITE`/`FURNITURE_CANONICAL_LEAD_WRITE` removed 27/08/2026 — never consumed by any live code; Email/Furniture Lead creation already runs unconditionally through `create_lead()`, and are equally mapping-blocked if their sources were ever activated.)
 2. **H0 Production Truth:** Deploy the latest approved/current main SHA, record the actual deployed SHA, and run canaries for N18 Phase 3 activation, BUG-164 creative-grounding, Command Center route verification, lead product-flag readiness against that deployed SHA.
 3. **N18 Phase 4:** Terminal-turn-result formal contract implementation (broader scope, shared across all write flows).
 4. **H6 Command Center:** Verify `/api/owner/command-center` route on current SHA, resolve `system_health` `UNKNOWN` source, maintain read-only posture.
