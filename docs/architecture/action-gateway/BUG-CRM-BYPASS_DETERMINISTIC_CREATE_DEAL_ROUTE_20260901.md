@@ -83,6 +83,35 @@ PR נוסף (`codex/commercial-crm-canonical-path`, #1171) ניסה לתקן א�
   `intent_requires_contract_for_success()`'s בדיקה, בדיוק כמו לכל intent
   אחר במדיניות זו.
 
+## CI enforcement — `tools/audit_turn_coordinator_bypass.py`
+
+בעקבות סבב הכשלים החוזרים (#1165→#1166→#1169→#1171), נוסף שער CI חוסם
+(`tools/audit_turn_coordinator_bypass.py`, מריץ ב-`backend-ci` מיד אחרי
+`audit_dispatcher_bypass.py`) שמונע **חזרה** על אותה מחלקת באג, לא רק
+סוגר את המופע הנוכחי שלה. שלושה checks עצמאיים:
+
+1. **ROUTE_REGRESSION** — כל `Intent` שכבר קיבל שער דטרמיניסטי
+   (`CREATE_TASK`/`UPDATE_TASK`/`COMPLETE_TASK`/`CREATE_DEAL`) חייב לשמור
+   גם על שער `Handler.TOOL` (למקרה "certain") וגם על נפילה ל-`Handler.CLARIFY`
+   (למקרה "uncertain") — רץ על העץ הנוכחי תמיד, לא רק על diff, כדי שהסרה
+   שקטה של שער קיים תיכשל גם ב-PR לא-קשור שנוגע ב-`router.py`.
+2. **NEW_TOOL_UNROUTED** — כלי `ToolMeta` חדש שנוסף ל-`tool_registry.py`
+   עם `requires_approval=True`+`high_risk=True` ושם התואם למוסכמת
+   "יוצר רשומה עסקית חדשה" (`crm_create_*`/`create_*`) חייב רישום מפורש
+   ב-`_TC_ROUTE_REGISTRY` של הסקריפט — `ROUTED` (עם Intent קיים שבאמת
+   מקושר) או `EXEMPT` מנומק. בלי רישום → חסימה. זה בדיוק המקרה שקרה
+   בפועל: `crm_create_deal` היה כלי קנוני קיים בלי אף מנגנון שמונע מהסוכן
+   לעקוף אותו.
+3. **SCHEMA_NUDGE_LANGUAGE** — תיאור כלי חדש ב-`tools/schemas.py` שמכיל
+   ניסוח "אל תשתמש"/"חובה להשתמש"/וכו' נחסם אלא אם אותו diff נוגע גם
+   ב-`core/router/router.py` — תופס במדויק את הדפוס של PR #1171 (לנסות
+   לפתור בחירת-כלי ע"י ניסוח טוב יותר ל-LLM במקום ניתוב דטרמיניסטי).
+
+בדיקות: `test_audit_turn_coordinator_bypass.py` (16 בדיקות, כולל אימות
+שהרישום/השערים בפועל בקוד תואמים, לא רק שהלוגיקה של הסקריפט נכונה על
+קלט מזויף). מומש כ-static/read-only בלבד — אותו invariant כמו כל שאר
+`tools/audit_*.py`.
+
 ## Verification
 
 - `python3 -m py_compile app.py core/router/*.py test_bug_crm_bypass_create_deal_deterministic_route.py` — עבר
@@ -101,6 +130,8 @@ PR נוסף (`codex/commercial-crm-canonical-path`, #1171) ניסה לתקן א�
   `test_identity_smoke.py` (4/4), `test_airtable_gateway.py` (37/37), `test_approval_concurrency.py` (22/22),
   `test_c53a.py` (50/50), `test_inbound_handler.py` (8/8), `test_avi_pilot_scope.py` — כולם ירוקים.
 - `python3 tools/audit_dispatcher_bypass.py` — `new=0`
+- `python3 tools/audit_turn_coordinator_bypass.py` — `PASS`
+- `python3 -m pytest test_audit_turn_coordinator_bypass.py -q` — 16/16
 - `git diff --check` — נקי
 - `python3 -c "import app; import tma_api; import tools.dispatcher"` (עם משתני CI) — עבר
 
