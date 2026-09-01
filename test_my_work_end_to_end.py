@@ -301,32 +301,35 @@ def test_resolve_profile_record_id_matches_case_insensitively():
     lowercase 'eliyahu' -- resolution must not depend on exact case."""
     from tma_api import _resolve_profile_record_id
 
-    orig_at_list = tma_api._at_list
+    import core.owner_resolution as owner_resolution
+
+    orig_list_records = owner_resolution.list_records
     captured = []
 
-    def fake_at_list(table, formula="", max_records=50, strict=False):
+    def fake_list_records(table, formula="", max_records=50, paginate=True):
         captured.append((table, formula, max_records))
         return [{"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}]
 
-    tma_api._at_list = fake_at_list
+    owner_resolution.list_records = fake_list_records
     try:
         result = _resolve_profile_record_id("eliyahu")
         assert result == OWNER_RECORD_ID
         assert captured[0][0] == Tables.PROFILE
         assert "LOWER" in render_query(captured[0][1])
     finally:
-        tma_api._at_list = orig_at_list
+        owner_resolution.list_records = orig_list_records
 
 
 def test_resolve_profile_record_id_no_match_returns_none():
     from tma_api import _resolve_profile_record_id
+    import core.owner_resolution as owner_resolution
 
-    orig_at_list = tma_api._at_list
-    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
+    orig_list_records = owner_resolution.list_records
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: []
     try:
         assert _resolve_profile_record_id("nobody") is None
     finally:
-        tma_api._at_list = orig_at_list
+        owner_resolution.list_records = orig_list_records
 
 
 def test_resolve_profile_record_id_empty_user_id_returns_none():
@@ -418,6 +421,8 @@ def test_route_get_my_work_returns_200_and_filters_by_owner():
     orig_validate = tma_api._validate_initdata
     orig_resolve = tma_api.resolve_identity
     orig_at_list = tma_api._at_list
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
 
     client = _make_client()
     tma_api._validate_initdata = lambda s: {"id": "999999"}
@@ -430,6 +435,9 @@ def test_route_get_my_work_returns_200_and_filters_by_owner():
         create_test_task(record_id="rec_other", owner_record_ids=(OTHER_OWNER_RECORD_ID,), status=TaskStatus.PENDING),
     ]
     tma_api._at_list = _fake_at_list_for_route(profile_records, task_records, captured_calls)
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: (
+        captured_calls.append((table, formula, max_records)) or profile_records
+    )
 
     try:
         r = client.get("/api/owner/my-work", headers=_HDR)
@@ -448,6 +456,7 @@ def test_route_get_my_work_returns_200_and_filters_by_owner():
         tma_api._validate_initdata = orig_validate
         tma_api.resolve_identity = orig_resolve
         tma_api._at_list = orig_at_list
+        owner_resolution.list_records = orig_list_records
 
 
 def test_route_get_my_work_no_profile_record_returns_empty_not_500():
@@ -456,11 +465,14 @@ def test_route_get_my_work_no_profile_record_returns_empty_not_500():
     orig_validate = tma_api._validate_initdata
     orig_resolve = tma_api.resolve_identity
     orig_at_list = tma_api._at_list
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
 
     client = _make_client()
     tma_api._validate_initdata = lambda s: {"id": "999999"}
     tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="ghost_user")
     tma_api._at_list = lambda table, formula="", max_records=50, strict=False: []
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: []
 
     try:
         r = client.get("/api/owner/my-work", headers=_HDR)
@@ -472,6 +484,7 @@ def test_route_get_my_work_no_profile_record_returns_empty_not_500():
         tma_api._validate_initdata = orig_validate
         tma_api.resolve_identity = orig_resolve
         tma_api._at_list = orig_at_list
+        owner_resolution.list_records = orig_list_records
 
 
 def test_route_get_my_work_non_owner_returns_403():
@@ -494,6 +507,8 @@ def test_route_get_my_work_airtable_failure_returns_500():
     orig_validate = tma_api._validate_initdata
     orig_resolve = tma_api.resolve_identity
     orig_at_list = tma_api._at_list
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
 
     client = _make_client()
     tma_api._validate_initdata = lambda s: {"id": "999999"}
@@ -507,6 +522,7 @@ def test_route_get_my_work_airtable_failure_returns_500():
         raise RuntimeError("Airtable timeout")
 
     tma_api._at_list = failing_at_list
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: profile_records
 
     try:
         r = client.get("/api/owner/my-work", headers=_HDR)
@@ -515,6 +531,7 @@ def test_route_get_my_work_airtable_failure_returns_500():
         tma_api._validate_initdata = orig_validate
         tma_api.resolve_identity = orig_resolve
         tma_api._at_list = orig_at_list
+        owner_resolution.list_records = orig_list_records
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -557,14 +574,19 @@ def test_create_lead_task_defaults_owner_to_creator_when_lead_has_none():
     orig_queue = tma_api._queue_tma_write_approval
     orig_claim_execute = tma_api._claim_and_execute_approval
     orig_at_list = tma_api._at_list
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
 
     client = _make_client()
     tma_api._validate_initdata = lambda s: {"id": "999999"}
     tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
     tma_api._at_get_record = lambda table, rid: {"id": rid, "fields": {}}  # lead with no Owner
     tma_api._at_list = lambda table, formula="", max_records=50, strict=False: (
-        [{"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}] if table == Tables.PROFILE else []
+        []
     )
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: [
+        {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}
+    ]
 
     posted = []
     tma_api._queue_tma_write_approval, tma_api._claim_and_execute_approval = _fake_owner_autoapprove_gateway(posted)
@@ -583,6 +605,7 @@ def test_create_lead_task_defaults_owner_to_creator_when_lead_has_none():
         tma_api._queue_tma_write_approval = orig_queue
         tma_api._claim_and_execute_approval = orig_claim_execute
         tma_api._at_list = orig_at_list
+        owner_resolution.list_records = orig_list_records
 
 
 def test_create_lead_task_preserves_lead_owner_when_present():
