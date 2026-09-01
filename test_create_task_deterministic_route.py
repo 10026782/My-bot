@@ -72,11 +72,21 @@ def test_create_task_parser_builds_structured_business_identity():
     # Airtable write ends up byte-identical. See
     # docs/architecture/action-gateway/
     # BUG-156_DUE_TIME_FINGERPRINT_VS_PERSISTENCE_FIX_20260804.md.
+    #
+    # BUG-TASK-01: table/field keys must be the SAME Tables.TASKS/TaskFields
+    # constants the real write payload uses (core/router/task_builders.py::
+    # build_create_task_proposal() / core/turn_coordinator_runtime.py::
+    # gateway_call()) — this identity payload is what ActionGateway hashes
+    # into business_action_fingerprint, and tools/dispatcher.py independently
+    # recomputes that same fingerprint from the real dispatched payload at
+    # execution time. An ad-hoc "Tasks"/"title" shape here (superficially
+    # equivalent, structurally different) made every approved deterministic
+    # create_task contract fail Dispatcher's execution-proof check.
     assert parsed.business_identity() == {
-        "table": "Tasks",
+        "table": Tables.TASKS,
         "fields": {
-            "title": "פרסום מודעות",
-            "due_date": "2026-08-06",
+            TaskFields.NAME: "פרסום מודעות",
+            TaskFields.DUE_DATE: "2026-08-06",
         },
     }
 
