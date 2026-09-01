@@ -379,10 +379,22 @@ def get_pa01_enforcement_state() -> str:
     FEATURE_ACTION_GATEWAY by design — see
     docs/architecture/turn-coordinator/PA-01_PLANNING_GATE.md §1 for why.
     Returns "off" for any unset/unrecognized value — fail closed to old
-    (log-only) behavior.
+    (log-only) behavior. An unset var is silent (expected); a *set but
+    invalid* value (e.g. a stray trailing character) logs a warning instead
+    of silently degrading, so a typo in Render env doesn't masquerade as an
+    intentional "off" — see BUG: FEATURE_PA01_ENFORCEMENT_STATE="shadow."
+    silently ran as "off" in production with no signal.
     """
-    value = os.environ.get("FEATURE_PA01_ENFORCEMENT_STATE", "off").strip().lower()
-    return value if value in _PA01_STATES else "off"
+    raw = os.environ.get("FEATURE_PA01_ENFORCEMENT_STATE", "off").strip().lower()
+    if raw in _PA01_STATES:
+        return raw
+    if raw:
+        logging.getLogger(__name__).warning(
+            "[FeatureFlags] FEATURE_PA01_ENFORCEMENT_STATE=%r is not a valid "
+            "state %s — falling back to 'off'. Check for a typo or stray "
+            "character in Render env.", raw, sorted(_PA01_STATES),
+        )
+    return "off"
 
 
 _CORE_REASONING_LEADS_STATES = frozenset({"off", "shadow", "on"})
