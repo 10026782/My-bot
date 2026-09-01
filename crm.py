@@ -62,10 +62,10 @@ def _get(table: str, formula: str = "", fields: list = None, identity=None) -> l
             contact_ids = set()
             for records, field_name in ((deal_records, DealFields.CONTACTS_LINK), (task_records, "מקושר לאנשי קשר")):
                 for record in records:
-                    linked = record.get("fields", {}).get(field_name, [])
+                    linked = _record_fields(record).get(field_name, [])
                     for item in linked if isinstance(linked, list) else [linked]:
-                        if isinstance(item, dict) and item.get("id"):
-                            contact_ids.add(item["id"])
+                        if isinstance(item, dict) and _record_id(item):
+                            contact_ids.add(_record_id(item))
                         elif isinstance(item, str) and item:
                             contact_ids.add(item)
             formula = all_of(formula, any_of(*(record_id_equals(rid) for rid in contact_ids)) if contact_ids else record_id_equals("__no_partner_contact_scope__"))
