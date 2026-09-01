@@ -276,20 +276,27 @@ class DeterministicDealParse:
     def certain(self) -> bool:
         return self.matched and not self.uncertain and bool(self.name) and bool(self.domain)
 
-    def business_identity(self) -> dict:
-        """Identity-only payload — the same flat shape actually dispatched
-        to crm_create_deal (see tools/dispatcher.py's "crm_create_deal"
-        case: inputs["name"]/inputs["domain"]), so ActionGateway's
-        business_action_fingerprint and dispatcher's execution-time
-        recomputation can never diverge (BUG-TASK-01's exact lesson —
-        different table/field keys than the real write payload broke every
-        approved deterministic create_task contract). owner_id is
-        deliberately omitted: the dispatcher already resolves it from the
-        authenticated identity when absent (core/owner_resolution.py via
-        _resolve_authenticated_crm_owner()) — nothing here should assume or
-        fabricate a record id.
-        """
-        return {"name": self.name or "", "domain": self.domain or ""}
+    # BUG-CRM-BYPASS-FINGERPRINT-PARITY (live production regression,
+    # 01-02/09/2026): a business_identity() method used to live here,
+    # returning {"name":..., "domain":...} without owner_id, on the theory
+    # that this was a safe "identity-only" fingerprint basis distinct from
+    # the real dispatched payload. It was passed to app.py's
+    # _queue_deterministic_create_deal() as a custom fingerprint_payload —
+    # which core/action_gateway.py's propose_action() then uses INSTEAD of
+    # the real tool_inputs to compute the stored business_action_fingerprint
+    # (fingerprint_basis = normalized if fingerprint_payload is None else
+    # normalize_payload(fingerprint_payload)). Once BUG-CRM-BYPASS-OWNER-
+    # PRESENCE added owner_id to the real dispatched inputs, that stored
+    # fingerprint (2 keys) could never again match tools/dispatcher.py's
+    # _validate_execution_proof() recomputation from the real inputs
+    # (3 keys) — every approved contract failed with "approval-sensitive
+    # execution proof does not match the action payload," the exact
+    # BUG-TASK-01 failure mode this method's own docstring warned about
+    # while itself recreating it. Fixed by removing the divergence at its
+    # source: app.py no longer passes a custom fingerprint_payload at all,
+    # so the fingerprint is always computed from the one real payload that
+    # actually gets dispatched — there is no second representation left to
+    # go stale.
 
 
 def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
