@@ -283,7 +283,11 @@ def airtable_update(table: str, record_id: str, fields: dict) -> dict:
     )
 
 
-def search_lead(name: str) -> str:
+def search_lead(name: str, identity=None) -> str:
     """חיפוש ליד לפי שם חלקי — SEARCH formula של Airtable."""
     safe = name.replace("'", "\\'")
-    return airtable_get("Leads", f"SEARCH('{safe}', {{Name}})")
+    formula = f"SEARCH('{safe}', {{Name}})"
+    if identity is not None:
+        from tools.airtable_security import enforce_tenant_scope
+        formula = enforce_tenant_scope("airtable_get", identity, {"table": "Leads", "filterByFormula": formula}).get("filterByFormula", formula)
+    return airtable_get("Leads", formula)

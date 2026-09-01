@@ -749,7 +749,7 @@ def dispatch_tool(
                 return airtable_get_schema()
 
             case "search_lead":
-                return search_lead(inputs["name"])
+                return search_lead(inputs["name"], identity)
 
             # ── Contact Resolver (N03) ────────────────
             case "resolve_contact":
@@ -758,7 +758,7 @@ def dispatch_tool(
             # ── Daily Digest on-demand ───────────────
             case "get_daily_report":
                 from daily_digest import build_digest
-                return build_digest()
+                return build_digest(identity=identity)
 
             # ── D06 — Business Memory ─────────────────
             case "search_business_memory":
