@@ -159,8 +159,38 @@ chk("owner_id in the dispatched payload is the caller's own raw identity "
     "own _resolve_authenticated_crm_owner() turns this into a real Profile "
     "record ID at execution time",
     deal_contracts[0].normalized_payload.get("owner_id") == _owner_e2e.user_id)
-chk("fingerprint identity still excludes owner_id (deal_parse.business_identity())",
-    "owner_id" not in parse_deterministic_create_deal(text).business_identity())
+
+# BUG-CRM-BYPASS-FINGERPRINT-PARITY (live production regression,
+# 01-02/09/2026): the assertion this replaces only checked that
+# fingerprint_payload's shape excluded owner_id — it never checked that
+# shape against what actually gets recomputed at execution time, which is
+# exactly the gap that let a real, divergent fingerprint_payload ship and
+# break every approved contract with "approval-sensitive execution proof
+# does not match the action payload." This is the real, unmocked
+# round-trip check: build execution_context from the REAL contract
+# _queue_deterministic_create_deal() (via run_agent() above) just
+# proposed, and confirm the REAL _validate_execution_proof() accepts its
+# own real payload. If app.py ever again passes a fingerprint_payload that
+# structurally diverges from the real dispatched inputs, this fails.
+from tools.dispatcher import _validate_execution_proof as _real_validate_execution_proof  # noqa: E402
+
+_real_execution_context = {
+    "contract_id": deal_contracts[0].contract_id,
+    "approved_by": _owner_e2e.memory_key,
+    "tool_name": deal_contracts[0].tool_name,
+    "tenant_id": deal_contracts[0].tenant_id,
+    "canonical_user_id": deal_contracts[0].canonical_user_id,
+    "business_action_fingerprint": deal_contracts[0].business_action_fingerprint,
+    "status": "approved",
+}
+_real_proof_error = _real_validate_execution_proof(
+    "crm_create_deal", deal_contracts[0].normalized_payload, _owner_e2e,
+    _real_execution_context, "deterministic_create_deal",
+)
+chk("REAL execution-proof check on the REAL contract from the deterministic "
+    "route: the stored fingerprint matches what gets recomputed from the "
+    "real dispatched payload (no divergent fingerprint_payload)",
+    _real_proof_error is None)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -221,6 +251,37 @@ chk("the OLD payload shape (no owner_id at all) genuinely reproduces the "
     and "מי הבעלים" in blocked_result.get("user_message", ""))
 chk("the writer is never reached when action_validator blocks first",
     mock_create_deal_missing.call_count == 0)
+
+
+# ══════════════════════════════════════════════════════════════════
+print("\n── UX: pending-approval message names the Deal, not a generic fallback ──")
+# Live observation (02/09/2026): the owner's pending-approval message for a
+# crm_create_deal contract read "יש פעולה שממתינה לאישור: הפעולה המבוקשת" —
+# a useless generic fallback, because _safe_contract_business_description()
+# only knew about the {"table":...,"fields":{...}} payload shape
+# (airtable_add/update) and Task's own special-cased title, never
+# crm_create_deal's flat {"name":..., "domain":...} kwargs shape.
+
+from core.action_gateway import (  # noqa: E402
+    ActionContract, build_approval_lifecycle_result,
+)
+
+
+def _fake_deal_contract(name: str) -> ActionContract:
+    return ActionContract(
+        contract_id="fake-contract-desc-test", tenant_id="boss_hq",
+        canonical_user_id="boss_hq:eliyahu", tool_name="crm_create_deal",
+        normalized_payload={"name": name, "domain": "יבוא", "owner_id": "eliyahu"},
+        business_action_fingerprint="fake", origin_channel="telegram",
+        origin_chat_id="eliyahu", requires_approval=True, status="pending",
+        created_at=0.0,
+    )
+
+
+_lifecycle = build_approval_lifecycle_result(_fake_deal_contract("בדיקת-קנרית 5"))
+chk("pending crm_create_deal contract names the Deal in the approval message",
+    "בדיקת-קנרית 5" in _lifecycle.safe_user_message
+    and "הפעולה המבוקשת" not in _lifecycle.safe_user_message)
 
 
 print()

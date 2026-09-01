@@ -24,6 +24,16 @@ def _apply_weekly_quest_mutation(last_monday, next_monday, target_id):
         tenant_id="boss_hq", domain_id="general", channel="scheduler",
         external_id="weekly_quest_reset_scheduler",
     )
+    # BUG-CRM-BYPASS-FINGERPRINT-PARITY follow-up (02/09/2026): this used to
+    # pass a custom fingerprint_payload with extra keys ("action"/"week")
+    # not present in the real dispatched tool_inputs. propose_action()
+    # computes the STORED business_action_fingerprint from fingerprint_payload
+    # when one is given, but tools/dispatcher.py's _validate_execution_proof()
+    # always recomputes from the real tool_inputs at execution time — the two
+    # could never match, so this job failed every single run (unconditional,
+    # every Sunday) with "approval-sensitive execution proof does not match
+    # the action payload." No custom fingerprint_payload here at all: it's
+    # always computed from the one real payload that gets dispatched.
     fields = {QuestsFields.STATUS: QuestStatus.TODO, QuestsFields.WEEK_START: next_monday}
     proposal = action_gateway.propose_action(
         tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
@@ -32,10 +42,6 @@ def _apply_weekly_quest_mutation(last_monday, next_monday, target_id):
         origin_channel="scheduler", origin_chat_id=identity.memory_key,
         requires_approval=True, identity=identity,
         trusted_source="weekly_quest_reset_scheduler",
-        fingerprint_payload={
-            "action": "weekly_quest_reset", "table": Tables.QUESTS,
-            "week": last_monday, "target": target_id, "fields": fields,
-        },
     )
     if not proposal.ok or not proposal.contract_id:
         return {"ok": False, "record_id": target_id, "status": "rejected", "error": proposal.reason}

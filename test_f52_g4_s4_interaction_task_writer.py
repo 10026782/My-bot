@@ -87,6 +87,19 @@ def test_due_date_and_no_due_date_use_one_policy():
 
 
 def test_fingerprint_ignores_transient_memory_id_and_changes_for_logical_task():
+    # BUG-CRM-BYPASS-FINGERPRINT-PARITY follow-up (02/09/2026): this used to
+    # assert on a custom fingerprint_payload built to exclude Memory ID from
+    # a separate "identity" object — core/action_gateway.py's propose_action()
+    # stores THAT as the contract's business_action_fingerprint, but
+    # tools/dispatcher.py's _validate_execution_proof() always recomputes
+    # from the real dispatched tool_inputs (which DID include "Memory ID:
+    # ..." in DESCRIPTION) at execution time — the two could never match, so
+    # every proposed task failed execution. Fixed at the source: Memory ID is
+    # no longer embedded in the dispatched DESCRIPTION at all, so tool_inputs
+    # itself is now memory-id-invariant — no separate fingerprint object
+    # needed, and the exact same two properties this test checks (memory-a
+    # vs memory-b -> identical; a different task title -> different) still
+    # hold, now via tool_inputs directly.
     tasks = [{"title": "Call supplier", "owner": "Eli", "due": "2026-09-01"}]
     analysis, interaction = _inputs(tasks)
     first = FakeGateway()
@@ -95,13 +108,15 @@ def test_fingerprint_ignores_transient_memory_id_and_changes_for_logical_task():
         interaction_engine.create_tasks_from_analysis(analysis, interaction, "memory-a")
     with patch("core.action_gateway.action_gateway", second):
         interaction_engine.create_tasks_from_analysis(analysis, interaction, "memory-b")
-    assert first.proposals[0]["fingerprint_payload"] == second.proposals[0]["fingerprint_payload"]
+    assert first.proposals[0]["tool_inputs"] == second.proposals[0]["tool_inputs"]
+    assert "fingerprint_payload" not in first.proposals[0]
+    assert "Memory ID" not in first.proposals[0]["tool_inputs"]["fields"][TaskFields.DESCRIPTION]
 
     changed_analysis, _ = _inputs([{"title": "Different task", "owner": "Eli", "due": "2026-09-01"}])
     changed = FakeGateway()
     with patch("core.action_gateway.action_gateway", changed):
         interaction_engine.create_tasks_from_analysis(changed_analysis, interaction, "memory-a")
-    assert changed.proposals[0]["fingerprint_payload"] != first.proposals[0]["fingerprint_payload"]
+    assert changed.proposals[0]["tool_inputs"] != first.proposals[0]["tool_inputs"]
 
 
 def test_structured_result_controls_success_not_display_text():

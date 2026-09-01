@@ -395,35 +395,39 @@ def create_tasks_from_analysis(
             channel="scheduler",
             external_id="interaction_engine_scheduler",
         )
-        source_event_id = interaction.raw_id or interaction.title
-
-        for task_index, task in enumerate(analysis.tasks):
+        for task in analysis.tasks:
             priority = "high" if analysis.sentiment == "negative" else "medium"
             stable_description = (
                 f"מקור: {interaction.source_channel} — {interaction.title}\n"
                 f"בעלים: {task.get('owner','')}\n"
                 f"עדיפות: {priority}"
             )
+            # BUG-CRM-BYPASS-FINGERPRINT-PARITY follow-up (02/09/2026): Memory
+            # ID used to be embedded in the dispatched DESCRIPTION text, with
+            # a separate fingerprint_fields object built to exclude it from
+            # the dedup identity (it's a storage result that can change on
+            # replay). But propose_action() computes the STORED
+            # business_action_fingerprint from fingerprint_payload when one
+            # is given, while tools/dispatcher.py's _validate_execution_proof()
+            # always recomputes from the real dispatched tool_inputs — the two
+            # could never match (the real DESCRIPTION includes Memory ID, the
+            # fingerprinted one didn't), so every proposed task failed
+            # execution, defeating the dedup goal far worse than the
+            # volatility it was trying to avoid. Fixed at the source instead
+            # of hand-syncing two representations: Memory ID is no longer
+            # part of the dispatched fields at all (it was a debug breadcrumb,
+            # not core Task content), so there is nothing left to diverge —
+            # same pattern as Task's own due_time exclusion (safely excluded
+            # because it's never dispatched either, not because a second
+            # fingerprint object tries to hide it after the fact).
             fields = {
                 TaskFields.NAME:        task.get("title", ""),
                 TaskFields.STATUS:      TaskStatus.PENDING,
-                TaskFields.DESCRIPTION: (
-                    f"{stable_description}\n"
-                    f"Memory ID: {memory_id}"
-                ),
+                TaskFields.DESCRIPTION: stable_description,
             }
             if task.get("due"):
                 fields[TaskFields.DUE_DATE] = task.get("due", "")
 
-            # Memory ID is a storage result and may change on replay; the
-            # source event, task position, and canonical Task fields are stable.
-            fingerprint_fields = {
-                TaskFields.NAME: fields[TaskFields.NAME],
-                TaskFields.STATUS: fields[TaskFields.STATUS],
-                TaskFields.DESCRIPTION: stable_description,
-            }
-            if TaskFields.DUE_DATE in fields:
-                fingerprint_fields[TaskFields.DUE_DATE] = fields[TaskFields.DUE_DATE]
             proposal = action_gateway.propose_action(
                 tenant_id=tenant_id,
                 canonical_user_id=system_identity.memory_key,
@@ -434,13 +438,6 @@ def create_tasks_from_analysis(
                 requires_approval=True,
                 identity=system_identity,
                 trusted_source="interaction_engine_scheduler",
-                fingerprint_payload={
-                    "action": "create_task",
-                    "table": Tables.TASKS,
-                    "source_event_id": source_event_id,
-                    "task_index": task_index,
-                    "fields": fingerprint_fields,
-                },
             )
             if not proposal.ok or not proposal.contract_id:
                 logger.warning("[Interaction] task proposal failed: %s", proposal.reason)
