@@ -10,6 +10,17 @@ Truth Reset: `origin/main` = `a45f304ab2387139287bc13d07e3313ec6019b40` (01/09/2
 
 The older `SCHEMA_DATA_CONTRACTS` row below predates PR1153's wiring and must be read with this reconciliation as the current status: registration is closed-static; canary, TMA surface, and raw-write ownership remain open.
 
+## Commercial CRM Owner SSOT remediation — 01/09/2026
+
+`origin/main` at Truth Reset was `809ffc9054d68219cd1259b65b5ebc6f582e39cd`.
+The Deal/Payment dispatcher boundary now resolves the authenticated canonical
+identity through one shared Profile resolver before calling the canonical
+writers. Display names are accepted only as a self-ownership presentation alias
+and are never written; raw channel identifiers and unknown owners fail closed.
+This is `STATIC_VERIFIED`
+only. The failed Deal canary remains historical runtime evidence; a new
+owner-approved canary is required after deployment.
+
 ## תחזוקת המסמך
 
 - `ROADMAP.md` הוא current-state SSOT וניווט, לא implementation ledger.

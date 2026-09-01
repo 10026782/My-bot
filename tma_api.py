@@ -2774,11 +2774,8 @@ def _resolve_profile_record_id(user_id: str) -> str | None:
     (`from tma_api import _resolve_profile_record_id`) rather than
     reimplementing it, so Leads and Tasks resolve Owner identically.
     """
-    if not user_id:
-        return None
-    formula = _query_equals(ProfileFields.NAME, user_id, case_insensitive=True)
-    records = _at_list(Tables.PROFILE, formula, max_records=5)
-    return record_id(records[0]) if records else None
+    from core.owner_resolution import resolve_profile_record_id
+    return resolve_profile_record_id(user_id)
 
 
 def _resolve_profile_display_names(record_ids: list[str]) -> list[str]:
