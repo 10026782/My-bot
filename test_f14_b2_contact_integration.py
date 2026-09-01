@@ -103,9 +103,13 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
         writer.assert_called_once()
 
     def test_ambiguous_invalid_and_lookup_error_never_call_writer(self):
+        # BUG-LEAD-03-class gap fix (R10 write-path audit, 01/09/2026): a
+        # bad-phone-with-valid-name case is now the distinct "invalid_phone"
+        # status rather than the old collapsed "invalid" — see crm.py's
+        # describe_contact_failure().
         for status, get_side_effect, phone, expected_get_calls in (
             ("ambiguous", [[{"id": "rec1"}, {"id": "rec2"}], [], [], []], "+972548212778", 4),
-            ("invalid", None, "not-a-phone", 0),
+            ("invalid_phone", None, "not-a-phone", 0),
             ("lookup_error", RuntimeError("read failed"), "+972548212778", 4),
         ):
             with self.subTest(status=status), \

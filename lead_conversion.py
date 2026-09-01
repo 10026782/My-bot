@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from feature_flags import is_enabled
 from airtable_schema import Tables, LeadFields, LeadStatus, LeadOutcome
 from core.query_contract import any_of, contains
-from crm import crm_add_contact
+from crm import crm_add_contact, describe_contact_failure
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +84,13 @@ def convert_lead_to_contact(query: str, identity=None) -> tuple[bool, str]:
                                       lead_source_id=record_id(lead, required=True),
                                       identity=identity)
     if contact_result.status not in ("created", "existing"):
-        messages = {
-            "ambiguous": "⚠️ נמצאו כמה אנשי קשר תואמים; ההמרה נעצרה.",
-            "invalid": "❌ מספר הטלפון חסר או אינו תקין; ההמרה נעצרה.",
-            "lookup_error": "❌ לא ניתן לאמת את איש הקשר; ההמרה נעצרה.",
-        }
-        return False, messages.get(contact_result.status,
-                                   "❌ יצירת איש קשר נכשלה; ההמרה נעצרה.")
+        # BUG-LEAD-03-class gap (R10 write-path audit, 01/09/2026): this used
+        # to be a local, incomplete status->message map (missing the
+        # invalid_phone/missing_name split, and any future ContactResult
+        # status would silently fall through to a generic message here).
+        # describe_contact_failure() is the single shared source for this
+        # now — see crm.py.
+        return False, f"{describe_contact_failure(contact_result)}\nההמרה נעצרה."
 
     try:
         from tools.airtable_security import audit_log_airtable
