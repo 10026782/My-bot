@@ -108,7 +108,10 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "airtable_add",
-        "description": "הוספת רשומה חדשה ל-Airtable",
+        "description": (
+            "הוספת רשומה כללית ל-Airtable. לא להשתמש ליצירת עסקה, תנאי תשלום "
+            "או תשלום — עבורם חובה להשתמש בכלי ה-CRM הקנוני המתאים."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -224,7 +227,8 @@ TOOL_SCHEMAS = [
         "name": "crm_create_deal",
         "description": (
             "יצירת עסקה (Deal) חדשה. השתמש כשהמשתמש מבקש לפתוח עסקה/הזדמנות חדשה "
-            "— 'תפתח עסקה עם X' / 'יש לנו הזדמנות חדשה ב-Y'."
+            "— 'תפתח עסקה עם X' / 'יש לנו הזדמנות חדשה ב-Y' / "
+            "'צור עסקה בשם X בתחום Y בבעלותי'."
         ),
         "input_schema": {
             "type": "object",

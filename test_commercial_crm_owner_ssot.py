@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from identity import Identity, Role
 from tools import dispatcher
+from tools.schemas import TOOL_SCHEMAS
 
 
 IDENTITY = Identity(
@@ -52,3 +53,9 @@ def test_dispatcher_passes_resolved_owner_to_deal_and_payment_writers():
         )
     assert deal.call_args.kwargs["owner_id"] == "recPROFILE123"
     assert payment.call_args.kwargs["owner_id"] == "recPROFILE123"
+
+
+def test_crm_writes_are_selected_as_dedicated_tools_not_generic_airtable():
+    descriptions = {tool["name"]: tool["description"] for tool in TOOL_SCHEMAS}
+    assert "לא להשתמש ליצירת עסקה" in descriptions["airtable_add"]
+    assert "בבעלותי" in descriptions["crm_create_deal"]

@@ -17,6 +17,9 @@ The Deal/Payment dispatcher boundary now resolves the authenticated canonical
 identity through one shared Profile resolver before calling the canonical
 writers. Display names are accepted only as a self-ownership presentation alias
 and are never written; raw channel identifiers and unknown owners fail closed.
+The tool contract directs Deal creation to `crm_create_deal` rather than the
+generic `airtable_add` surface; the generic dispatcher interception remains a
+defense-in-depth compatibility boundary, not the normal CRM route.
 This is `STATIC_VERIFIED`
 only. The failed Deal canary remains historical runtime evidence; a new
 owner-approved canary is required after deployment.
