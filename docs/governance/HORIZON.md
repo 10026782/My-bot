@@ -24,6 +24,8 @@ historical evidence references. They are not current-main claims; current
 program status is summarized here from the canonical Active Work Registry in
 `BOSS_UNIFIED_MASTER_PLAN.md` §3.5.
 
+> **RECONCILIATION ADDENDUM (01/09/2026, `a45f304`):** `BOSS_UNIFIED_MASTER_PLAN.md` §3.5's DECISION_HUB and MEDIA_LAYER_F16 rows were corrected this date — `FEATURE_DECISION_HUB`/`FEATURE_MEDIA_UPLOAD`/`FEATURE_VOICE_NOTES` are confirmed `true` in live Render env, not off. Also new: `WHATSAPP_CANONICAL_LEAD_WRITE`/`VOICE_CANONICAL_LEAD_WRITE` are blocked by an empty `config.py::OWNER_USER_ID_MAPPINGS`, a prerequisite not previously tracked here or in the N18 rows below. Current authority for both: `BOSS_CURRENT_STATE.md` TR-21–TR-27.
+
 ## CURRENT MAJOR PROGRAM MAP
 
 This is a concise owner-facing projection of §3.5, not a second registry.
@@ -94,6 +96,11 @@ assumptions **stale**:
   `core/noninteractive_lead_cutovers.py`'s `create_email_inbound_lead()`,
   `create_furniture_inbound_lead()` and `create_voice_inbound_lead()`, all
   three of which call the canonical `create_lead()` directly.
+  **Precision added 01/09/2026 (`BOSS_CURRENT_STATE.md` TR-22):** this describes
+  the *mechanism* only. Its data source, `config.py::OWNER_USER_ID_MAPPINGS`,
+  is empty for all three sources — every one of these writers fails closed on
+  every real destination today. Read "already implemented" as "the code
+  exists," not "ready to activate without further owner input."
 - Of the 5 writers the request listed as "remaining legacy/direct": WhatsApp
   (`lead_capture.py` and the flag-gated `core/whatsapp_lead_cutover.py`),
   Email and Furniture are **already canonical in code today**. `LeadMemory`
