@@ -64,6 +64,8 @@ _RULES: list[EnvVar] = [
            validator="url", feature="webhooks"),
     EnvVar("WORKER_SECRET",        "warning",  "Secret for /worker endpoint — missing means scheduler jobs run unauthenticated",
            feature="scheduler"),
+    EnvVar("OWNER_USER_ID_MAPPINGS", "warning", "JSON map of WhatsApp/email/voice destination → owner user_id — missing means non-interactive canonical Lead writers (N18) stay fail-closed",
+           feature="canonical_lead_writers"),
 
     # ── INFO — אופציונלי, מוצג בlog ───────────────
     EnvVar("TWILIO_ACCOUNT_SID",  "info", "Twilio for WhatsApp/Voice",
