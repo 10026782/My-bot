@@ -1026,6 +1026,57 @@
           "runtime_consumed": false
         }
       }
+    },
+    {
+      "id": "decision.commercial_crm_owner_resolution",
+      "name": "Shared canonical Profile resolution for Commercial CRM Owner fields",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "Resolve authenticated canonical identity.user_id to an Airtable Profile record ID at the Deal and Payment writer boundary.",
+        "precedence": "Commercial CRM writers receive only canonical Profile record IDs for Owner; display names and raw channel identifiers are never linked-record authority. This decision governs only Owner identity resolution at commercial_crm.py, not the writer's other business rules. Lead and Task paths retain their existing compatibility wrapper and behavior."
+      },
+      "owner": "commercial_crm",
+      "code_paths": [
+        "core/owner_resolution.py",
+        "commercial_crm.py"
+      ],
+      "test_paths": [
+        "test_commercial_crm_owner_ssot.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "BOSS_CURRENT_STATE.md",
+          "role": "current Commercial CRM Owner contract and runtime-gated canary status",
+          "status": "active"
+        },
+        {
+          "path": "ROADMAP.md",
+          "role": "current-state navigation for the Commercial CRM remediation",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-01",
+      "last_verified_commit": "809ffc9054d68219cd1259b65b5ebc6f582e39cd",
+      "confidence": 0.95,
+      "notes": [
+        "Owner-approved registration for PR #1166 after Context Librarian reported NO_POLICY_MATCH for this new runtime source.",
+        "This is one shared lookup implementation, not a new identity model: canonical identity remains identity.user_id and the linked value remains the Profile record ID.",
+        "The resolver is fail-closed on missing identity, lookup failure, or missing Profile record. Runtime/deployment verification is intentionally not claimed; a new owner-approved Deal canary is required after deployment."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_AUTHORITY",
+          "role": "commercial_crm_owner_profile_resolver",
+          "authority": true,
+          "purpose": "single canonical identity-to-Profile-ID boundary for Deal and Payment Owner linked fields",
+          "runtime_consumed": true
+        }
+      }
     }
   ],
   "edges": [
