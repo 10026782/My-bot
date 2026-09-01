@@ -6530,3 +6530,91 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Verification ראיה:** קנרי חי לאחר deploy — USER: "צור משימה בדיקת Task proof runtime" → BOT: "המשימה נוצרה: בדיקת Task proof runtime". contract `4e2525f0-1621-4e52-9757-1336ca0e97f3`, fingerprint `a30ad86d9702...`. שרשרת מלאה אומתה: propose_action (pending) → approved (payload_keys=['fields','table']) → atomic claim acquired (execution_id `d5963cef-3996-4e0b-bbb2-5702e5e813a1`) → **Dispatcher proof validated ללא הודעת mismatch** (השגיאה הקודמת לא הופיעה) → כתיבה עסקית (`POST משימות (Tasks)` → HTTP 200, `recmCE0vGjedbsmNK`) → "Execution succeeded (explicit)" (`outcome=completed`) → TC7A evidence (`result=success verified=True outcome_unknown=False evidence_ref_present=True`) → turn evidence `evidence_status=verified_write_success` (`verified_writes=1 failed_calls=0 outcome_unknown=0`) → claim authorization shadow `divergent=false code=match` → single-speaker (`agent_calls=0 contract_reads=1 final_responses=1 deterministic=True`, `reply_owner=gateway`, `duplicate_reply_suppressed=true`) → תשובה סופית אחת, ללא הצלחה כוזבת. פרטים מלאים: `docs/architecture/action-gateway/BUG-TASK-01_CREATE_TASK_FINGERPRINT_IDENTITY_PARITY_20260901.md`.
 - **היקף:** ראיית ה-verification הזו מכסה **רק** BUG-TASK-01 (מסלול ה-create_task הדטרמיניסטי). אינה מהווה runtime verification לאף ממצא R10 אחר (BUG-LEAD-01/02/03, OBS-STATUS-01, OBS-DOMAIN-01) — אלו נותרים בסטטוסם הנפרד, שלא נגעו/הושפעו מהתיקון הזה (מאומת ב-Lead control test suites, ראה מסמך הארכיטקטורה).
 - **סטטוס:** Verified
+
+---
+
+### BUG-LEAD-02 — שם ליד בן מילה אחת נדחה בזרימת ה-clarification המונחית
+- **דווח:** 01/09/2026 (R10 live bug report — Telegram/ActionGateway/Lead/Task verification campaign)
+- **דווח על ידי:** בעלים (בדיקת runtime חיה)
+- **מסך / מודול:** `core/lead_candidate_handler.py` (`_validate_clarification_name()`)
+- **תיאור:** בזרימת יצירת ליד מונחית (guided), לאחר ששלב הליבון שאל "אבל לא מצאתי שם. מה שם הליד?", תשובה עם שם עברי בן מילה אחת (למשל "דולב", "יבגני") נדחתה — המשתמש נאלץ להוסיף מילה שנייה כדי שהליד יתקבל. מקביל היסטורי: הפרסר המובנה "ליד חדש | שם | טלפון" כבר קיבל שם עברי בן מילה אחת ("סרגי"); `core/lead_service.py::set_draft_field()` (זרימת ה-Lead Draft) מקבל כל שם לא-ריק ללא הגבלה כלל. רק ה-resolver של תגובת הליבון הטיל כלל בלתי-מתועד של "בדיוק 2 מילים".
+- **Severity:** High (P1) — חוסם יצירת ליד תקין לחלוטין כשהשם נמסר כמילה אחת בזרימה המונחית
+- **Root Cause:** `_validate_clarification_name()` דרש fullmatch מדויק של 2 מילים מול `_HEBREW_NAME_RE`, שממילא תואם רק 2+ קבוצות עבריות מופרדות ברווח — מילה עברית בודדת מעולם לא תאמה, ללא קשר לתוכן.
+- **תוקן ב-commit:** `3633461` (מוזג כ-`1ec4ac2`/`84845a7`)
+- **תוקן ב-branch:** `claude/r10-live-bug-report-wo6mty`
+- **Merged:** כן — PR #1162, merge commit `84845a7b533103a507e404efeb7e69a6afd2d405`. אומת ישירות מול `origin/main` (`git merge-base --is-ancestor` + grep על `_HEBREW_WORD_RE` ב-`core/lead_candidate_handler.py` בפועל על main).
+- **Deployed:** כן — Render, SHA `84845a7b533103a507e404efeb7e69a6afd2d405`.
+- **Verified בפרודקשן:** כן
+- **Verification ראיה:** קנרי חי לאחר deploy — USER: "צור ליד חדש 0522166101 דולב recruitment" → BOT מבקש שם ("אבל לא מצאתי שם. מה שם הליד?") → USER: "דולב" → BOT: "📋 זיהיתי ליד: דולב (0522166101) לשמור? ענה כן לאישור או לא לביטול." שרשרת מלאה אומתה: propose_action (contract `bbcfe990-e53b-4022-bc99-3f0455e1f519`, table=Leads, pending) → approved → atomic claim acquired (execution_id `26d5206b-1294-4124-8f42-7b6d7cbc02fe`) → כתיבה עסקית (`POST Leads` → HTTP 200, `reccdLJAXlN5oahu3`) → scoring PATCH הצליח → "Execution succeeded (explicit)" → TC7A evidence (`result=success verified=True outcome_unknown=False`) → turn evidence `evidence_status=verified_write_success` (`verified_writes=1 failed_calls=0`) → single-speaker (`agent_calls=0 contract_reads=1 final_responses=1 deterministic=True`) → "הפעולה הושלמה: הוספת רשומה: דולב". אותו ערך "דולב" שנדחה קודם לכן ב-clarification (לפני התיקון) התקבל כעת כשם ליד תקין.
+- **היקף:** מכסה **רק** את קבלת שם עברי בן מילה אחת בשלב ה-clarification. אינה מכסה את הרחבת המדיניות ל-3+ מילים (ראה `POLICY-LEAD-NAME-01` למטה) ואינה מכסה שמות בכתב לטיני (נותר `DEFERRED`, ראה סעיף 7 בדוח ה-R10 מ-01/09/2026).
+- **סטטוס:** Verified
+
+---
+
+### BUG-LEAD-03 — היעדר משוב תיקוף פעיל ב-clarification של ליד
+- **דווח:** 01/09/2026 (R10 live bug report — Telegram/ActionGateway/Lead/Task verification campaign)
+- **דווח על ידי:** בעלים (בדיקת runtime חיה)
+- **מסך / מודול:** `core/lead_candidate_handler.py` (`_resolve_lead_clarification()`)
+- **תיאור:** כשתגובת ליבון נדחתה כשם לא תקין, הבוט החזיר תמיד את אותה הודעה גנרית "עדיין חסר לי שם הליד. מה השם?" — ללא ציון הערך שנדחה, הסיבה, או הפורמט המצופה. איבד את ההבחנה בין "לא סופק ערך כלל" לבין "סופק ערך אבל נדחה". הפונקציה האחות `_resolve_batch_name_clarification()` (מקרה 2+ טלפונים) כבר ציטטה את השורה שנדחתה — רק מסלול הטלפון הבודד פיגר מאחור.
+- **Severity:** Medium (P2) — UX בלבד, לא חוסם השלמת הליד (המשתמש עדיין יכול לנחש/לתקן)
+- **Root Cause:** הענף "unclear reply" ב-`_resolve_lead_clarification()` (Priority 4, מקרה single-phone) החזיר מחרוזת קבועה ללא תלות בערך/בסיבת הדחייה.
+- **תוקן ב-commit:** `1ec4ac2` (מוזג כ-`84845a7`)
+- **תוקן ב-branch:** `claude/r10-live-bug-report-wo6mty`
+- **Merged:** כן — PR #1162, merge commit `84845a7b533103a507e404efeb7e69a6afd2d405`. אומת ישירות מול `origin/main`.
+- **Deployed:** כן — Render, SHA `84845a7b533103a507e404efeb7e69a6afd2d405`.
+- **Verified בפרודקשן:** כן
+- **Verification ראיה:** קנרי חי לאחר deploy — USER: "צור ליד חדש 0523000001 recruitment" → BOT מבקש שם → USER: "דוד לוי כהן" → BOT: "'דוד לוי כהן' לא נראה כמו שם תקין. שם ליד צריך להיות מילה אחת או שתיים בעברית (לדוגמה: \"דולב\" או \"יוסי כהן\"). מה שם הליד?" → USER: "יוסף חיים כהן" → אותה הודעה מדויקת עם הערך המעודכן מצוטט. מוכיח: הבוט מצטט את הערך שנדחה, מסביר את הכלל, ונותן דוגמאות — כפי שנדרש.
+- **היקף:** משנה **רק** את הניסוח כשתגובה נדחית. **לא** משנה אילו תגובות מתקבלות/נדחות (זה `BUG-LEAD-02`/`POLICY-LEAD-NAME-01`).
+- **סטטוס:** Verified
+
+---
+
+### BUG-LEAD-04 — חילוץ שם מטקסט חופשי ראשוני לא מוצא שם שקיים באותה הודעה (NEW — לא root-caused)
+- **דווח:** 01/09/2026 (R10 live bug report — ראיית runtime לאחר deploy PR #1162)
+- **דווח על ידי:** בעלים (בדיקת runtime חיה)
+- **מסך / מודול:** לא ידוע במדויק — חשד ראשוני: נתיב חילוץ המועמד הראשוני (`core/lead_candidate_handler.py`) ו/או `core/ingress_classifier.py` (classify_ingress), **לא** אומת בקוד עדיין
+- **תיאור:** הבקשה "צור ליד חדש 0522166101 דולב recruitment" (שם "דולב" קיים באותה הודעה יחד עם הטלפון) גרמה ל-`classify_ingress()`/handler להחזיר Tier 5 (`no_lead_candidates`) ולבקש שם בנפרד ("אבל לא מצאתי שם. מה שם הליד?"), למרות שהשם היה נוכח בטקסט המקורי. בתגובת ההבהרה הבאה, אותו הערך "דولב" בדיוק התקבל בהצלחה — מוכיח שהוולידטור אינו הגורם; הכשל הוא בשלב חילוץ/הבנייה הראשוני של המועמד.
+- **Severity:** Medium — UX, לא חוסם לגמרי (מתאושש דרך ה-clarification), אבל דורש סיבוב נוסף מהמשתמש שלא אמור להידרש
+- **Root Cause:** **לא הוכח עדיין.** חשדות אפשריים (טרם נבדקו בקוד): סדר השדות בטקסט, דקדוק החילוץ ב-Router, `ingress_classifier.py`, פרסר מועמד הליד, או פיצול בין נתיב טקסט-חופשי לנתיב מובנה. נדרשת בדיקה מבוקרת של 5 הפרמוטציות שהדוח מפרט לפני קביעת בעלות.
+- **תוקן ב-commit:** —
+- **תוקן ב-branch:** —
+- **Merged:** לא
+- **Deployed:** לא רלוונטי (לא תוקן)
+- **Verified בפרודקשן:** לא רלוונטי
+- **Verification ראיה:** ראיית שחזור חיה בלבד (ראה תיאור). אין עדיין ניתוח קוד מאמת בעלות.
+- **סטטוס:** Open — NEW, לא root-caused. אין לתקן ע"י החלשת הוולידטור של ה-clarification.
+
+---
+
+### R10-OWNERSHIP-01 — מעבר בעלות-תשובה מ-Gateway ל-Agent באמצע turn עם ActionContract ממתין (NEW — לא root-caused)
+- **דווח:** 01/09/2026 (R10 live bug report — ראיית runtime לאחר deploy PR #1162)
+- **דווח על ידי:** בעלים (בדיקת runtime חיה)
+- **מסך / מודול:** לא ידוע במדויק — חשד ראשוני: `core/turn_envelope.py` (שדות `turn_mode`/`reply_owner`/`queue_sources`/`selected_handler` קיימים בקוד בפועל — אומת ב-grep), Router/Turn Coordinator, **לא** אומת בקוד עדיין מי בפועל מקבל את ההחלטה במקרה הזה
+- **תיאור:** בעוד ActionContract ליצירת ליד היה pending, המשתמש שלח טקסט מעורב ("כן Domain recruitment"). ה-TurnEnvelope דיווח `turn_mode=approval_pending`, `queue_sources=["action_gateway"]`, `reply_owner=gateway` — אך הניתוב בפועל המשיך ל-`intent=unknown`, `handler=agent`, והתשובה הסופית הייתה תשובה שיחתית לא-קשורה מה-Agent (`selected_handler=agent`, `reply_owner=agent`). ה-Lead הממתין לא נפגע ולא נוצרה הצלחה כוזבת — המערכת התאוששה בתור הבא כשהמשתמש שלח "מאשר".
+- **Severity:** Medium — לא גרם לנזק עסקי/כשל אבטחה, אבל שיבש שיחת אישור תחומה ודרש התאוששות בתור נוסף
+- **Root Cause:** **לא הוכח עדיין.** שאלת המדיניות הפתוחה: כש-`turn_mode=approval_pending` וה-`reply_owner` שכבר הוקצה הוא `gateway`, האם מותר ל-Agent "ליפול" (fallback) על טקסט מעורב/לא-חד-משמעי לפני שהפעולה הממתינה נפתרת? נדרשת בדיקה מול חוזי TC/R9 הקיימים (context_interrupted handling, mixed-text confirmation handling) לפני כל שינוי.
+- **תוקן ב-commit:** —
+- **תוקן ב-branch:** —
+- **Merged:** לא
+- **Deployed:** לא רלוונטי (לא תוקן)
+- **Verified בפרודקשן:** לא רלוונטי
+- **Verification ראיה:** ראיית שחזור חיה בלבד (ראה תיאור). שמות השדות (`turn_mode`, `reply_owner`, `queue_sources`, `selected_handler`, `tool_use_emitted`, `approval_queued`, `context_interrupted`) אומתו כקיימים בפועל בקוד (`core/turn_envelope.py` ומודולים קשורים) — אין עדיין ניתוח קוד מלא הקובע בעלות/שורש.
+- **סטטוס:** Open — NEW, לא root-caused. **אין** לשנות סמנטיקת lifecycle לפני בדיקת חוזי TC/R9 קיימים.
+
+---
+
+### POLICY-LEAD-NAME-01 — מדיניות תיקוף שם ליד: תקרה של 1-2 מילים דוחה שמות רב-חלקיים לגיטימיים (NEW — פריט מדיניות, לא באג-רגרסיה)
+- **דווח:** 01/09/2026 (R10 live bug report — ראיית runtime לאחר deploy PR #1162)
+- **דווח על ידי:** בעלים (בדיקת runtime חיה)
+- **מסך / מודול:** `core/lead_candidate_handler.py` (`_validate_clarification_name()`) — המדיניות הנוכחית שיושמה ב-BUG-LEAD-02/03 (PR #1162)
+- **תיאור:** המדיניות הנוכחית ("שם ליד צריך להיות מילה אחת או שתיים בעברית") דוחה שמות עבריים לגיטימיים בני 3+ מילים ("דוד לוי כהן", "יוסף חיים כהן"). זהו **לא** רגרסיה מ-PR #1162 — ה-PR מימש בדיוק את המדיניות שהוגדרה לו (תקרה של 2 מילים, במקור נועדה למנוע פירוש משפט מלא כשם). אבל שם אישי אמיתי יכול לכלול שם אמצעי, כמה שמות פרטיים, או כמה רכיבי שם משפחה — ולכן ספירת מילים בלבד אינה גבול סמנטי מספיק בין "שם" ל"משפט".
+- **Severity:** Medium — מגביל מדיניות, לא באג טכני; חוסם שמות תקינים אך נדירים יחסית
+- **סטטוס נדרש (מטרת מדיניות, טרם מומש):** לא להשתמש בתקרת-מילים קשיחה כחוק הראשי. הוולידטור צריך לתמוך בשמות רב-חלקיים לגיטימיים תוך המשך הגנה מפני משפטים שיחתיים ברורים, פקודות, ומילות-עצירה. אותות אפשריים לבדיקה (טרם הוחלט): מצב ה-clarification הפעיל, הרכב הטוקנים העבריים, פיסוק, פעלים/מסמני-פקודה, רשימת מילות-עצירה, אורך שדה סביר, ואישור מפורש של המשתמש לפני כתיבה (שכבת האישור הקיימת — מועמד ← תצוגה מקדימה ← אישור ← ActionContract — היא גבול בטיחות נוסף שכבר קיים ויש לנצל בעיצוב המדיניות המחודשת).
+- **אזהרה מפורשת מהדוח:** אין לשנות סתם את `{1,2}` ל-`{1,4}` או תקרה שרירותית אחרת בלי לבדוק את התנהגות false-positive.
+- **תוקן ב-commit:** — (לא מומש עדיין — פריט מדיניות פתוח)
+- **תוקן ב-branch:** —
+- **Merged:** לא
+- **Deployed:** לא רלוונטי
+- **Verified בפרודקשן:** לא רלוונטי
+- **Verification ראיה:** קנרי חי מדגים את הדחייה (ראה תיאור) — זו ראיית **קיום הבעיה**, לא ראיית תיקון.
+- **סטטוס:** Open — NEW, פריט עיצוב-מדיניות. שמות בכתב לטיני ("Jenya Bondorenko", "Karen Avanisyan") נשארים `DEFERRED` בנפרד ואינם חלק מהחלטת המדיניות העברית הזו.
