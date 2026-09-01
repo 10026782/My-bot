@@ -1154,10 +1154,25 @@ def _queue_deterministic_create_deal(
     intermediate table/fields translation and no entity-resolution step
     (this is CREATE only, never UPDATE-by-reference, so
     core/turn_coordinator_runtime.py's resolver-wrapping queue_task_request()
-    is not needed here). owner_id is deliberately left out of the payload —
-    tools/dispatcher.py's existing "crm_create_deal" case already resolves
-    a missing owner_id to the caller's own identity via
-    _resolve_authenticated_crm_owner()/core/owner_resolution.py.
+    is not needed here).
+
+    BUG-CRM-BYPASS-OWNER-PRESENCE (live production regression, 01/09/2026):
+    owner_id was originally left out of the payload entirely, on the
+    assumption that tools/dispatcher.py's "crm_create_deal" case would
+    resolve a missing owner_id to the caller's own identity via
+    _resolve_authenticated_crm_owner()/core/owner_resolution.py. That
+    resolution code never got a chance to run: action_validator.py's
+    presence gate (_REQUIRED_PARAMS["crm_create_deal"] = ["name", "domain",
+    "owner_id"]) runs BEFORE the dispatcher's per-tool logic and blocks any
+    call missing the literal key, independent of whether the dispatcher
+    could have filled it in. Every real canary ("צור עסקה בשם X בתחום Y")
+    proposed and got approved correctly (proving the deterministic route
+    itself works — agent_calls=0, correct canonical tool) but then failed
+    at execution with "מי הבעלים? (מזהה record)". Passing the caller's own
+    identity.user_id here satisfies the presence gate AND is exactly the
+    self-reference value _resolve_authenticated_crm_owner() already
+    resolves to a real Profile record ID — never a fabricated or guessed
+    record id, never bypassing that resolution/validation logic.
     """
     try:
         enforce("crm_create_deal", identity)
@@ -1168,12 +1183,14 @@ def _queue_deterministic_create_deal(
         )
         return str(exc)
 
+    owner_self_reference = str(getattr(identity, "user_id", "") or "")
     fingerprint_payload = {"name": name, "domain": domain}
     if deal_parse is not None:
         fingerprint_payload = deal_parse.business_identity()
 
     outcome = _queue_approval_detailed(
-        "crm_create_deal", {"name": name, "domain": domain},
+        "crm_create_deal",
+        {"name": name, "domain": domain, "owner_id": owner_self_reference},
         chat_id, channel, user_text,
         fingerprint_payload=fingerprint_payload,
         # BUG-153-style marker (see _queue_deterministic_create_task): identifies

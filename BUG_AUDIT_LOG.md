@@ -6637,3 +6637,20 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Verified בפרודקשן:** Config-level yes (value corrected + restart applied + no regression in boot log). **Functional runtime behavior is NOT verified**: PA-01's warning-on-malformed-value code path was never exercised live (requires a real inbound agent turn — Grade B, not performed), and Drive's target-folder behavior was never exercised (requires a real Drive write — Grade B, not performed).
 - **Verification ראיה:** Render API before/after value reads (both keys); Render events log (`server_restarted`); post-restart boot log lines (startup_validator counts, PostgreSQL pool init, Telegram webhook set); owner-signed `/api/owner/health` diagnostic read post-restart (`scheduler: true, "23 jobs"`, `airtable_live: true`).
 - **סטטוס:** Closed — config corrected and restart-verified. Functional/business-flow verification for both remains a separate open Grade-B item (see `BOSS_CURRENT_STATE.md` TR-28/TR-29).
+
+---
+
+### BUG-CRM-BYPASS-OWNER-PRESENCE — Deal deterministic route approved but failed execution ("מי הבעלים?")
+- **דווח:** 01/09/2026 (בעלים, קנרית production חיה על PR #1172 שכבר deployed)
+- **דווח על ידי:** בעלים (Telegram, sha `86c5c13`)
+- **מסך / מודול:** `app.py` (`_queue_deterministic_create_deal()`), `action_validator.py` (`_REQUIRED_PARAMS["crm_create_deal"]`), `tools/dispatcher.py` (`case "crm_create_deal":` → `_resolve_authenticated_crm_owner()`)
+- **תיאור:** אחרי מיזוג/deploy של PR #1172 (המסלול הדטרמיניסטי ל-`Intent.CREATE_DEAL`), הבעלים שלח "צור עסקה בשם בדיקת-קנרית 2 בתחום יבוא" מ-Telegram. המסלול הדטרמיניסטי עבד כמתוכנן במדויק (`intent=create_deal handler=tool`, `[DeterministicCreateDeal] agent_calls=0 action_tool=crm_create_deal created_this_turn=True`, contract הוצע ואושר ע"י הבעלים) — אבל הביצוע נכשל: "❌ אושר אך נכשל בביצוע". חזר פעמיים (`בדיקת-קנרית 2`, `בדיקת-קנרית 3`), אותה תוצאה בדיוק.
+- **Severity:** Critical (P0) — כל בקשת יצירת עסקה דרך המסלול הדטרמיניסטי (הנתיב הראשי היחיד כרגע ל-Deal creation מובנה) נכשלה ב-100% מהמקרים, ללא תלות בתוכן.
+- **Root Cause:** `_queue_deterministic_create_deal()` בנה במכוון payload בלי `owner_id` בכלל (הנחה: `tools/dispatcher.py`'s `case "crm_create_deal":` הקיים יפתור owner חסר בעצמו דרך `_resolve_authenticated_crm_owner()`/`core/owner_resolution.py`, שנוסף ב-PR #1166). ההנחה שגויה: `action_validator.py`'s שער-נוכחות (`_REQUIRED_PARAMS["crm_create_deal"] = ["name", "domain", "owner_id"]`, שער עצמאי ל-`tool_registry.enforce()`, שוכפל בכוונה כ-defense-in-depth) **רץ לפני** לוגיקת ה-case הפרטנית של הדיספצ'ר, וחוסם כל קריאה בלי המפתח `owner_id` — בלי קשר לזה שהדיספצ'ר בעצמו יכול היה למלא אותו. לוגיקת ה-resolution מעולם לא הופעלה בפועל — הבקשה נחסמה מוקדם יותר, כל פעם, עם `[Dispatch] blocked by action_validator | reason=מי הבעלים? (מזהה record)`. באג בקוד שכתבתי, לא באג קיים שנחשף — הבדיקות שכתבתי ל-PR #1172 בדקו רק את שלב ה-`propose` (contract pending), ואף אחת מהן לא הריצה את שלב ה-`approve`+`execute` בפועל.
+- **תוקן ב-commit:** (ראה מיד לאחר merge)
+- **תוקן ב-branch:** `claude/fix-create-deal-owner-id-presence`
+- **תיקון:** `_queue_deterministic_create_deal()` שולח כעת `owner_id=identity.user_id` (ה-self-reference הגולמי של הזהות המאומתת, לא record ID מפוברק) — מספק את שער-הנוכחות **וגם** תואם בדיוק לרשימת ה-"self values" שכבר קיימת ונבדקה ב-`_resolve_authenticated_crm_owner()`, שממשיכה לפתור אותו ל-Profile record ID אמיתי כרגיל. נוסף regression test חדש (`test_bug_crm_bypass_create_deal_deterministic_route.py`'s "regression: full execution path") שמריץ את שער action_validator+dispatcher+owner-resolution האמיתיים יחד (רק קריאת ה-Airtable עצמה מדומה) — אומת שנכשל בדיוק עם ההודעה האמיתית מהפרודקשן (`מי הבעלים?`) על הקוד הישן, ועובר עם התיקון.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה חוזרת (אותה הודעה: "צור עסקה בשם X בתחום Y") לפני שסטטוס זה יעודכן ל-Verified.

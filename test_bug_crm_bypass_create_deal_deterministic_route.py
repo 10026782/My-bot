@@ -154,9 +154,73 @@ deal_contracts = [
 chk("exactly one pending crm_create_deal contract was created — the "
     "dedicated canonical tool, never generic airtable_add",
     len(deal_contracts) == 1 and deal_contracts[0].status == "pending")
-chk("no owner_id was fabricated into the fingerprint (dispatcher resolves "
-    "it from identity at execution time, not the router)",
-    "owner_id" not in deal_contracts[0].normalized_payload)
+chk("owner_id in the dispatched payload is the caller's own raw identity "
+    "self-reference (never a fabricated/guessed record id) — dispatcher's "
+    "own _resolve_authenticated_crm_owner() turns this into a real Profile "
+    "record ID at execution time",
+    deal_contracts[0].normalized_payload.get("owner_id") == _owner_e2e.user_id)
+chk("fingerprint identity still excludes owner_id (deal_parse.business_identity())",
+    "owner_id" not in parse_deterministic_create_deal(text).business_identity())
+
+
+# ══════════════════════════════════════════════════════════════════
+print("\n── regression: full execution path (BUG-CRM-BYPASS-OWNER-PRESENCE) ──")
+# 01/09/2026 live production incident: the deterministic route above
+# proposed and got approved correctly, but execution failed with
+# "מי הבעלים? (מזהה record)" — action_validator.py's presence gate
+# (_REQUIRED_PARAMS["crm_create_deal"] includes "owner_id") runs BEFORE
+# tools/dispatcher.py's per-tool owner-resolution logic and blocks any
+# call missing the literal key, regardless of whether the dispatcher could
+# have filled it in. The two tests above only proved the contract gets
+# proposed — neither exercised execution, which is exactly where this
+# broke. This exercises the real action_validator + dispatcher +
+# owner-resolution chain together (only the Airtable network call itself
+# is mocked).
+
+from tools import dispatcher as _dispatcher_module  # noqa: E402
+from tools.dispatcher import dispatch_tool as _dispatch_tool  # noqa: E402
+
+
+def _dispatch_bypassing_proof(name, inputs, identity):
+    with patch.object(_dispatcher_module, "_validate_execution_proof", return_value=None), \
+         patch.object(_dispatcher_module._ff, "is_enabled", return_value=False), \
+         patch.object(_dispatcher_module._owner_resolution, "resolve_profile_record_id",
+                       return_value="recPROFILE0000001"):
+        return _dispatch_tool(name, inputs, identity=identity, trusted_source="agent",
+                               execution_context={"contract_id": "regression-owner-presence"})
+
+
+_deal_owner = _owner(user_id="owner-deterministic-create-deal-exec")
+_ok_deal_result = {
+    "ok": True, "tool": "crm_create_deal", "external_id": "recDEALCANARY0001",
+    "evidence": {"record_id": "recDEALCANARY0001"}, "user_message": "✅ עסקה נוצרה",
+}
+
+with patch("commercial_crm.create_deal", return_value=_ok_deal_result) as mock_create_deal:
+    result = _dispatch_bypassing_proof(
+        "crm_create_deal",
+        {"name": "בדיקת-קנרית", "domain": "יבוא", "owner_id": _deal_owner.user_id},
+        _deal_owner,
+    )
+chk("the exact payload _queue_deterministic_create_deal builds is NOT "
+    "blocked by action_validator's presence gate (the live production bug)",
+    result.get("ok") is True)
+chk("commercial_crm.create_deal was actually reached and called once",
+    mock_create_deal.call_count == 1)
+
+with patch("commercial_crm.create_deal", return_value=_ok_deal_result) as mock_create_deal_missing:
+    blocked_result = _dispatch_bypassing_proof(
+        "crm_create_deal",
+        {"name": "בדיקת-קנרית", "domain": "יבוא"},  # the OLD (broken) payload shape
+        _deal_owner,
+    )
+chk("the OLD payload shape (no owner_id at all) genuinely reproduces the "
+    "live failure — proves this regression test would have caught it "
+    "before merge",
+    blocked_result.get("ok") is False
+    and "מי הבעלים" in blocked_result.get("user_message", ""))
+chk("the writer is never reached when action_validator blocks first",
+    mock_create_deal_missing.call_count == 0)
 
 
 print()
