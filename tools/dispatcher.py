@@ -826,7 +826,25 @@ def dispatch_tool(
                             )
                             audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                             return result
-                        fields[_domain_field] = _canonical_domain
+                        # BUG-CRM-BYPASS-DOMAIN-SELECT-CASING: the canonical
+                        # slug above (e.g. "import") still isn't what
+                        # Airtable's live Domain select expects (e.g.
+                        # "Import") — see commercial_crm.py's create_deal()/
+                        # create_payment() for the full USER LANGUAGE ->
+                        # BUSINESS CANONICAL -> AIRTABLE LIVE VALUE contract
+                        # this mirrors. This update path has no canonical
+                        # writer to redirect to, so the mapping happens here
+                        # directly instead.
+                        from core.runtime_schema_provider import resolve_live_select_value
+                        _live_domain = resolve_live_select_value(_resolved_table, _domain_field, _canonical_domain)
+                        if _live_domain is None:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[_domain_field]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        fields[_domain_field] = _live_domain
 
                     result = airtable_update(_resolved_table, record_id, fields)
                     audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
@@ -860,7 +878,18 @@ def dispatch_tool(
                             )
                             audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                             return result
-                        fields[TaskFields.DOMAIN] = _canonical_task_domain
+                        # BUG-CRM-BYPASS-DOMAIN-SELECT-CASING follow-up —
+                        # same live-value mapping as the CRM block above.
+                        from core.runtime_schema_provider import resolve_live_select_value
+                        _live_task_domain = resolve_live_select_value(Tables.TASKS, TaskFields.DOMAIN, _canonical_task_domain)
+                        if _live_task_domain is None:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[TaskFields.DOMAIN]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        fields[TaskFields.DOMAIN] = _live_task_domain
 
                     result = airtable_update(Tables.TASKS, record_id, fields)
                     audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)

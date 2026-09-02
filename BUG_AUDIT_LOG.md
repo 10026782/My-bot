@@ -6825,3 +6825,20 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. עם התיקון הזה, כל 6 הטבלאות שהוזכרו במפורש בחוק המקורי של הבעלים (Leads/Contacts/Deals/Payment Terms/Payments/Tasks) מוגנות תחת אותו עיקרון אחיד.
+
+---
+
+### BUG-CRM-BYPASS-DOMAIN-SELECT-CASING-UPDATE-PATH — same domain-select-casing fix extended to the airtable_update domain gates in this PR
+- **דווח:** 02/09/2026 (בעלים, קנרית production חיה "בדיקת-קנרית 10" על ה-branch המקביל `claude/fix-crm-domain-select-value-mapping`)
+- **דווח על ידי:** agent session, יזום בעקבות התיקון המקביל ל-`commercial_crm.py` — כדי לא לשלוח את אותו הבאג לפרודקשן פעמיים דרך שני PR-ים שונים
+- **מסך / מודול:** `tools/dispatcher.py` (`case "airtable_update":`'s CRM domain gate ו-Tasks domain gate — שתיהן נוספו באותו PR, `BUG-CRM-BYPASS-UPDATE`/`BUG-CRM-BYPASS-UPDATE-TASKS`)
+- **תיאור:** במקביל לעבודה על PR זה, קנריית production חיה על תיקון הדומיין הדטרמיניסטי (BUG-CRM-BYPASS-DOMAIN-TRANSLATION) חשפה שכבה נוספת: הסלאג הקנוני ("import") עדיין שונה מהערך שה-Airtable select מצפה לו בפועל ("Import") — ראה `BUG-CRM-BYPASS-DOMAIN-SELECT-CASING` (branch נפרד, `claude/fix-crm-domain-select-value-mapping`). שני הענפים שהוספתי ל-`case "airtable_update":` באותו PR הזה (Deals/Payments דרך `_CRM_TABLE_ROUTING`, ו-Tasks) כתבו את הסלאג הקנוני **ישירות** דרך `airtable_update()`, בלי לעבור דרך `commercial_crm.py` — כלומר שני הענפים האלה נשאו את **אותו באג בדיוק**, לא מתוקנים על ידי התיקון המקביל (ששינה רק את `commercial_crm.py`'s נתיב היצירה).
+- **Severity:** Critical (P0) — עדכון שדה Domain דרך `airtable_update` (למשל Task/Deal/Payment) עם ערך תקני היה נכשל באותו אופן בדיוק כמו היצירה.
+- **תוקן ב-commit:** (ראה מיד לאחר merge, אותו PR/branch כמו BUG-CRM-BYPASS-UPDATE)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוספה אותה פונקציה `core.runtime_schema_provider.resolve_live_select_value()` (הוגדרה באופן עצמאי גם ב-branch הזה, כדי לא ליצור תלות בין שני ה-PR-ים הבלתי-תלויים — קונפליקט merge טריוויאלי צפוי אם/כש-`claude/fix-crm-domain-select-value-mapping` ממוזג ראשון, כי שני ה-branches מוסיפים בדיוק את אותה פונקציה באותו מיקום). שני הענפים ב-`case "airtable_update":` (CRM ו-Tasks) קוראים לה מיד אחרי `resolve_domain_word()`, לפני הכתיבה בפועל: אם `resolve_live_select_value()` מחזיר `None` (ערך לא-מוכר גם ב-Airtable), נכשל סגור לפני `airtable_update()`.
+- **Verification:** `test_bug_crm_bypass_airtable_update.py` — 8 טסטים חדשים (Deal + Task: הפונקציה נקראת עם הסלאג הקנוני, הערך ה-live נכתב בפועל, ערך לא-פתיר נכשל סגור). `test_runtime_schema_provider.py` — הועתקו אותם 9 טסטים מה-branch המקביל (75/75). `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports, `test_audit_turn_coordinator_bypass.py`, `test_f14_b2_contact_integration.py`, `test_bug_commercial_crm_dispatcher_bypass_closure.py` — כולם עברו, אפס רגרסיות.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. **הערה טכנית:** אם שני ה-PR-ים (`claude/fix-crm-domain-select-value-mapping` ו-`claude/fix-crm-airtable-update-bypass`) ימוזגו שניהם, ה-merge השני יראה קונפליקט טריוויאלי ב-`core/runtime_schema_provider.py` (אותה פונקציה נוספה פעמיים באותו מיקום) — פתרון: לקחת גרסה אחת (זהות), למחוק את הכפילות.

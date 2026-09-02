@@ -131,6 +131,39 @@ chk("Payment domain update: unrecognized word never reaches Airtable",
 
 
 # ══════════════════════════════════════════════════════════════════
+print("\n── BUG-CRM-BYPASS-DOMAIN-SELECT-CASING: canonical slug -> live Airtable value ──")
+# Same fix as commercial_crm.py's create_deal()/create_payment() (this
+# update path has no canonical writer to redirect to, so the mapping
+# happens directly in the dispatcher instead).
+
+with patch.object(dispatcher_module, "airtable_update", return_value={
+    "ok": True, "tool": "airtable_update", "external_id": "recDEAL01",
+    "evidence": {}, "user_message": "✅",
+}) as mock_update_live, \
+     patch("core.runtime_schema_provider.resolve_live_select_value", return_value="Import") as resolve:
+    result_live_domain = _dispatch("airtable_update", {
+        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "fields": {DealFields.DOMAIN: "Import"},
+    }, owner)
+chk("Deal domain update: resolve_live_select_value called with the canonical slug",
+    resolve.call_args.args == (Tables.DEALS, DealFields.DOMAIN, "import"))
+chk("Deal domain update: the LIVE resolved value is written, not the raw canonical slug",
+    mock_update_live.call_args.args[2][DealFields.DOMAIN] == "Import")
+chk("Deal domain update: succeeds once the live value resolves", result_live_domain.get("ok") is True)
+
+with patch.object(dispatcher_module, "airtable_update") as mock_update_unresolvable, \
+     patch("core.runtime_schema_provider.resolve_live_select_value", return_value=None):
+    result_unresolvable = _dispatch("airtable_update", {
+        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "fields": {DealFields.DOMAIN: "import"},
+    }, owner)
+chk("Deal domain update: a value resolve_live_select_value can't match fails closed",
+    result_unresolvable.get("ok") is False)
+chk("Deal domain update: never reaches Airtable when the live value can't be resolved",
+    mock_update_unresolvable.call_count == 0)
+
+
+# ══════════════════════════════════════════════════════════════════
 print("\n── field allowlist: unmappable field fails closed — no silent field loss ──")
 
 with patch.object(dispatcher_module, "airtable_update") as mock_update_unmapped:
@@ -257,6 +290,32 @@ chk("Task domain update: unrecognized word fails closed (ok=False)",
     result_task_bad_domain.get("ok") is False)
 chk("Task domain update: unrecognized word never reaches Airtable",
     m_task_bad_domain.call_count == 0)
+
+with patch.object(dispatcher_module, "airtable_update", return_value={
+    "ok": True, "tool": "airtable_update", "external_id": "recTASK01",
+    "evidence": {}, "user_message": "✅",
+}) as m_task_live, \
+     patch("core.runtime_schema_provider.resolve_live_select_value", return_value="Import") as resolve_task:
+    result_task_live = _dispatch("airtable_update", {
+        "table": "משימות (Tasks)", "record_id": "recTASK01",
+        "fields": {TaskFields.DOMAIN: "Import"},
+    }, owner)
+chk("Task domain update: resolve_live_select_value called with the canonical slug",
+    resolve_task.call_args.args == (Tables.TASKS, TaskFields.DOMAIN, "import"))
+chk("Task domain update: the LIVE resolved value is written, not the raw canonical slug",
+    m_task_live.call_args.args[2][TaskFields.DOMAIN] == "Import")
+chk("Task domain update: succeeds once the live value resolves", result_task_live.get("ok") is True)
+
+with patch.object(dispatcher_module, "airtable_update") as m_task_unresolvable, \
+     patch("core.runtime_schema_provider.resolve_live_select_value", return_value=None):
+    result_task_unresolvable = _dispatch("airtable_update", {
+        "table": "משימות (Tasks)", "record_id": "recTASK01",
+        "fields": {TaskFields.DOMAIN: "import"},
+    }, owner)
+chk("Task domain update: a value resolve_live_select_value can't match fails closed",
+    result_task_unresolvable.get("ok") is False)
+chk("Task domain update: never reaches Airtable when the live value can't be resolved",
+    m_task_unresolvable.call_count == 0)
 
 
 # ══════════════════════════════════════════════════════════════════

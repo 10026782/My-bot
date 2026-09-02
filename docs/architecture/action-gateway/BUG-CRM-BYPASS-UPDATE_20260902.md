@@ -156,6 +156,26 @@ turn_coordinator_bypass.py` — 2 טסטים חדשים (22/22). סוויטת re
 עם זה, כל 6 הטבלאות מהחוק המקורי של הבעלים (Leads/Contacts/Deals/Payment
 Terms/Payments/Tasks) מוגנות תחת אותו עיקרון אחיד.
 
+## תוספת המשך ג' — BUG-CRM-BYPASS-DOMAIN-SELECT-CASING-UPDATE-PATH
+
+במקביל לעבודה על ה-PR הזה, קנרייה חיה על branch נפרד
+(`claude/fix-crm-domain-select-value-mapping`) חשפה שכבה נוספת: הסלאג
+הקנוני ("import") עדיין שונה מהערך שה-Airtable select מצפה לו בפועל
+("Import") — ראה `BUG-CRM-BYPASS-DOMAIN-SELECT-CASING_20260902.md`
+לפירוט המלא. שני ענפי ה-Domain שנוספו כאן (CRM ו-Tasks) כותבים ישירות
+דרך `airtable_update()`, בלי לעבור דרך `commercial_crm.py` — נשאו את
+אותו באג בדיוק, לא מכוסים ע"י התיקון המקביל (שנגע רק בנתיב היצירה).
+
+**התיקון:** אותה פונקציה, `core.runtime_schema_provider.resolve_live_select_value()`,
+הוגדרה **עצמאית גם כאן** (לא cherry-pick מה-branch המקביל) — כדי לא
+ליצור תלות בין שני PR-ים בלתי-תלויים. קונפליקט merge טריוויאלי צפוי אם
+שניהם ימוזגו (אותה פונקציה, אותו מיקום בדיוק) — פתרון: לקחת גרסה אחת.
+שני הענפים קוראים לה מיד אחרי `resolve_domain_word()`, לפני הכתיבה.
+
+**Verification:** 8 טסטים חדשים ב-`test_bug_crm_bypass_airtable_update.py`
+(Deal + Task), אותם 9 טסטים ל-`resolve_live_select_value()` הועתקו
+ל-`test_runtime_schema_provider.py` המקומי. כל הסוויטה הרלוונטית ירוקה.
+
 ## סטטוס
 
 קוד מומש ונבדק מקומית (STATIC_VERIFIED) עבור כל ההרחבות. **לא מוזג, לא
