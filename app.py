@@ -1206,11 +1206,40 @@ def _queue_deterministic_create_deal(
     )
     if out_meta is not None and outcome.get("created_this_turn"):
         out_meta["source_module"] = "action_gateway"
+        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
+        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
     logger.info(
         "[DeterministicCreateDeal] בעלות_coordinator=True agent_calls=0 "
         "action_tool=%s created_this_turn=%s",
         outcome.get("action_tool"), outcome.get("created_this_turn"),
     )
+    # BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY (regression, 02/09/2026): this
+    # deterministic route was built to "mirror _queue_deterministic_create_
+    # task() exactly" (see docstring above), but the mirroring missed this
+    # specific guard — the one that closed the same duplicate-message UX bug
+    # for Tasks. _queue_approval_detailed() above already sent the owner an
+    # interactive "⏳ בקשת אישור..." message with the approve/reject keyboard
+    # (bot.send_message(owner_chat_id, ...) inside _queue_approval_detailed_
+    # impl) BEFORE returning here. When the requester IS the owner (the
+    # normal case for this single-owner bot), returning outcome["message"]
+    # unconditionally sends a SECOND, plain-text "יש פעולה שממתינה לאישור: ..."
+    # reply into the same chat — and only the FIRST (interactive) message is
+    # tracked by the approve/reject callback for editing-in-place, so after
+    # approval the second message is left behind forever, still reading
+    # "ממתין לאישור" even though the action already completed. See
+    # _queue_deterministic_create_task()'s identical
+    # duplicate_reply_suppressed guard just above.
+    owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
+    if outcome.get("owner_notified") and str(owner_chat_id) == str(chat_id):
+        logger.info(
+            "[DeterministicCreateDeal] duplicate_reply_suppressed=true "
+            "reason=owner_notification_already_sent"
+        )
+        return ""
     return outcome.get("message") or "לא הצלחתי להכניס את העסקה לאישור."
 
 
