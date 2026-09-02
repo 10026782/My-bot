@@ -15,9 +15,9 @@ This file (`HORIZON.md`, no date suffix) is the persistent, update-in-place
 management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
-**Last updated:** 30/08/2026
-**Truth Reset SHA at last update:** `b05a218a69a45ccddc0d59b518489703b1196da9`
-(Decision Hub DH-S2 reconciliation recorded; no deployment or runtime claim)
+**Last updated:** 02/09/2026
+**Truth Reset SHA at last update:** `a45f304ab2387139287bc13d07e3313ec6019b40`
+(Gateway cutover canary evidence recorded; unrelated capability gates remain separate)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -36,7 +36,7 @@ evidence and never override this map.
 | Initiative | Work State | Evidence State | Needs Verification | What materially advanced | What remains | Next Step |
 |---|---|---|---|---|---|---|
 | Turn Coordinator | ACTIVE | MERGED | YES | routing, lifecycle and reply-ownership work merged; TC7-B claim-authorization wiring + RP5 evidence enforcement merged 26/08/2026 (PR #1036), both ActionGateway sink sites + `mixed`-claim coverage closed 27/08/2026 (PR #1041, `09935a8`) — STATIC VERIFIED, RUNTIME NOT ESTABLISHED, RP5 off by default | RP5 shadow evidence review; enforce activation remains deferred | continue shadow; owner approval required before `FEATURE_EVIDENCE_FINALIZER=enforce` |
-| Unified Approval / ActionGateway | ACTIVE | MERGED | YES | canonical lifecycle and approval paths merged | staged rollout/runtime verification | verify approved paths |
+| Unified Approval / ActionGateway | ACTIVE | RUNTIME_VERIFIED | NO (for the verified Gateway path) | canonical lifecycle and approval paths merged; controlled-staging Import canary passed 02/09/2026 on `a45f304` | post-cutover soak/monitoring; unrelated capability canaries remain separate | monitor |
 | Cost / Agent-Last | ACTIVE | MERGED | YES | cost attribution lineage merged | shadow telemetry and enforcement decision | validate live cost and decide progression |
 | Architecture authority / execution boundaries | ACTIVE | MERGED | YES | static authority boundaries reconciled | deployed/runtime evidence | verify deployed-SHA authority |
 | No-new-architectural-debt | CLOSED | WIRED | NO | blocking guards established in CI | normal monitoring only | monitor |

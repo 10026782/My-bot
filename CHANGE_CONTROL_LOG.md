@@ -2285,3 +2285,19 @@ cross-track handoffs.
 
 - **Verification (all seven):** STATIC + LIVE STRUCTURE VERIFIED, each re-confirmed by commit-ancestry check against `origin/main` post-merge (not PR status alone); focused regression suites green; **production verification: NO** (these are dev-tooling/governance-script and one read-path fix, no production-behavior claim made beyond the merged code itself).
 - **Remaining, explicitly not #7 debt:** 4 cross-track `WARN_NEW` findings (routed onward — see HORIZON.md), 1 accepted/legitimate staging-CLI exception, global branch-hygiene gate blocked by an unrelated fresh branch.
+
+### Gateway cutover verification closure — 02/09/2026
+
+- **Scope:** controlled-staging Gateway runtime canary only; no runtime code or
+  flag change.
+- **Candidate/deployed SHA:** `a45f304ab2387139287bc13d07e3313ec6019b40`.
+- **Method:** direct Render application-log export for service
+  `srv-d80ehsf7f7vs73cq5rn0`, 12:40:35–12:40:41 Asia/Jerusalem, plus the
+  owner-supplied canary result.
+- **Observed:** one ActionContract, one atomic claim, one executor, one
+  successful `Deals` write, execution evidence `success`/`verified=True`,
+  lifecycle `completed`, one final response, zero agent calls, RP5
+  `verified_write_success`, canonical claim `success`, and no divergence.
+- **Disposition:** `RUNTIME_VERIFIED`; Gateway cutover verification is closed.
+  Remaining work is post-cutover soak/monitoring. Unrelated capability canaries
+  and RP5 enforce activation remain separate.
