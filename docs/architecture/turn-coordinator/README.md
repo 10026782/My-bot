@@ -1,5 +1,16 @@
 # TurnCoordinator + TurnEnvelope
 
+## Current cutover status — 2026-09-02
+
+The Gateway callback cutover verification is closed for the tested deployed
+path. Render evidence for the controlled-staging Import canary `בדיקת-קנרית 12`
+on `a45f304ab2387139287bc13d07e3313ec6019b40` shows one ActionContract, one
+atomic claim, one executor, one successful provider write, lifecycle
+`completed`, one final response, zero agent calls, RP5
+`verified_write_success`, canonical claim `success`, and no divergence.
+Remaining work is post-cutover soak/monitoring; unrelated capability canaries
+and RP5 `enforce` activation remain separate.
+
 ## Current implementation status — 2026-08-09 (supersedes the TC6/flag claims in the 07/08/2026 note below)
 
 **TC6 is merged and production-verified as of today.** WS2's exact-contract

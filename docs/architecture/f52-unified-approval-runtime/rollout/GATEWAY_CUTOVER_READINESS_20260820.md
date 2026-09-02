@@ -1,9 +1,9 @@
 # F52 Gateway Cutover Readiness — Verified Runtime Authority
 
-**Last Updated:** 2026-08-20  
-**Status:** `READY WITH DOCUMENTED NON-BLOCKING FOLLOW-UPS`  
+**Last Updated:** 2026-09-02
+**Status:** `CUTOVER VERIFICATION CLOSED — POST-CUTOVER SOAK/MONITORING`
 **Scope:** Gateway / approval runtime cutover readiness and runtime-path authority.  
-**Production mutation:** None. Production flags were not changed during this readiness work.
+**Controlled-staging mutation:** exact candidate SHA `a45f304ab2387139287bc13d07e3313ec6019b40` was redeployed to the no-user Production service; Gateway flags were not changed.
 
 ---
 
@@ -101,12 +101,13 @@ Therefore:
 
 > The staging canary is valid proof of the **core Gateway + persistence + atomic-claim execution chain**, but it must not be described as byte-for-byte proof of every current `main` confirmation-routing behavior.
 
-Before production activation, the reviewed production candidate must either:
+Before the 02/09/2026 closure, the reviewed candidate had to either:
 
 1. contain the verified staging behavior, or
 2. receive a final approval-path diff check proving no material cutover-path regression.
 
-This is a release-alignment requirement, not evidence that the core canary failed.
+That release-alignment requirement is satisfied by the current deployed-SHA
+canary recorded in §10; it is not an additional gate before soak/monitoring.
 
 ---
 
@@ -255,20 +256,41 @@ This is the evidence that the core atomic approval design behaves as intended un
 
 ## 10. Readiness verdict
 
+### Current cutover closure — 2026-09-02
+
+Render application logs for the controlled-staging Import canary `בדיקת-קנרית 12`
+(`12:40:35–12:40:41 Asia/Jerusalem`, deployed SHA
+`a45f304ab2387139287bc13d07e3313ec6019b40`) verified:
+
+- one ActionContract: `09e1fd02-619f-401f-b419-aeb5cc5a815a`;
+- one winning atomic claim and execution ID `01cc8515-9364-4333-837b-d44370ec6603`;
+- one `crm_create_deal` executor invocation and one successful Deals provider write (`recMNqJFqV3NSsiZK`);
+- execution evidence `success`, `verified=True`, lifecycle `completed`;
+- one final response, zero agent calls, RP5 `verified_write_success`, canonical claim `success`, and `divergent=false`.
+
+EmergencyStop allowed the path to proceed through the successful provider write,
+and no legacy callback execution path was observed; these two invariants are
+accepted here by the canary's observational fail-closed semantics rather than
+by dedicated success markers.
+
+The Gateway cutover verification stage is closed. Remaining work is
+post-cutover soak/monitoring only for this verified path; no additional staging
+canary or architecture/readiness audit is required before that monitoring.
+
 ### Decision
 
-`READY WITH DOCUMENTED NON-BLOCKING FOLLOW-UPS`
+`RUNTIME VERIFIED — POST-CUTOVER SOAK/MONITORING`
 
 This verdict means:
 
-- the core Gateway cutover execution chain has passed in staging;
+- the core Gateway cutover execution chain has passed in controlled staging;
 - no proven live duplicate-executor conflict was found;
 - the canonical authority model is consistent with the code and Phase 4B rollout contract;
-- remaining tests improve cutover completeness but do not currently demonstrate a core architecture failure.
+- remaining work is operational soak/monitoring for this path, not another cutover gate.
 
-This verdict does **not** authorize an unreviewed Production flag flip by itself.
-
-Production activation still requires the candidate-code alignment check described in §4 and the normal production activation/rollback checklist.
+This verdict closes the cutover-verification gate for the tested Gateway path.
+It does not close unrelated capability canaries or the separate RP5
+`FEATURE_EVIDENCE_FINALIZER=enforce` activation decision.
 
 ---
 
