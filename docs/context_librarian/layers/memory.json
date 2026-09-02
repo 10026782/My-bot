@@ -114,7 +114,7 @@
         "No writes to Business Memory/Episodic Memory/context/prompt anywhere in this surface, no calls to the LLM or the approval/tool-execution pipeline — verified by a dedicated test (test_memory_retrieval.py::test_no_llm_or_action_gateway_or_write_calls).",
         "Phase 2B follow-up (2026-08-19): FEATURE_MEMORY_SHADOW_LOGGING (default off) adds a daily scheduler job (scheduler.py::_job_memory_shadow_scan) that writes ONLY structured comparison counts (never memory item text, and error fields are the exception class name only — never the raw exception message) to a new memory_shadow_comparisons Postgres table, so a later Phase 3/cutover decision has owner-scoped scheduled comparison evidence — one sample/day for the single owner identity, not a broad or tenant-wide dataset — see record_shadow_comparison() in core/memory_retrieval_shadow.py and core/migrations/004_memory_shadow_comparisons.sql. This is the one intentional write path in the surface; it writes observability data about the comparison, not to Business Memory/Episodic Memory/context/prompt."
       ],
-      "last_observed_commit": "095a2725fd72c29a8a2f78d3c940d7a85654f043"
+      "last_observed_commit": "c358d741d4cb6fe11b73bcaf74e38e7fa39f3c92"
     }
   ]
 }
