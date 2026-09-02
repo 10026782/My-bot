@@ -723,6 +723,48 @@ def cmd_convert(msg):
         bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
 
 
+@bot.message_handler(commands=["dealfromlead"])
+def cmd_deal_from_lead(msg):
+    """/dealfromlead [שם/טלפון] — פותח עסקה (crm_create_deal) מליד קיים, עם
+    Origin Lead מקושר (owner בלבד, דורש LEAD_TO_DEAL).
+
+    LEAD-TO-DEAL-ORIGIN-LINK (02/09/2026): אותו מסלול דטרמיניסטי בדיוק כמו
+    "צור עסקה בשם X בתחום Y" (Handler.TOOL, agent_calls=0, ה-Agent אף פעם
+    לא בוחר בין crm_create_deal ל-airtable_add) — רק ש-name/domain מגיעים
+    מרשומת הליד עצמה במקום מטקסט חופשי, ו-origin_lead_id מצורף. חיפוש
+    הליד עצמו (lead_conversion.resolve_lead_for_deal) לא מבצע שום כתיבה —
+    הכתיבה היחידה קורית דרך _queue_deterministic_create_deal(), אותה
+    פונקציה שהמסלול הטקסטואלי כבר משתמש בה."""
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    try:
+        from lead_conversion import resolve_lead_for_deal
+        query = msg.text.split(maxsplit=1)[1].strip() if len(msg.text.split()) > 1 else ""
+        if not query:
+            bot.send_message(msg.chat.id, "שימוש: /dealfromlead [שם או טלפון של ליד]")
+            return
+
+        name, domain, lead_id, err = resolve_lead_for_deal(query)
+        if err:
+            bot.send_message(msg.chat.id, err, parse_mode="Markdown")
+            return
+
+        reply = _queue_deterministic_create_deal(
+            name, domain, str(msg.chat.id), "telegram", msg.text, identity,
+            origin_lead_id=lead_id,
+        )
+        if reply:
+            bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
+        logger.info(
+            f"[LeadToDeal] /dealfromlead '{query}' → lead={lead_id} deal_name={name} "
+            f"domain={domain} by {identity.display_name}"
+        )
+    except Exception as e:
+        logger.error(f"cmd_deal_from_lead error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
 @bot.message_handler(commands=["quest"])
 def cmd_quest(msg):
     """/quest — Quest Log השבוע."""
@@ -1180,7 +1222,7 @@ def _queue_deterministic_create_task(
 
 def _queue_deterministic_create_deal(
     name: str, domain: str, chat_id: str, channel: str, user_text: str,
-    identity, out_meta: dict | None = None,
+    identity, out_meta: dict | None = None, origin_lead_id: str = "",
 ) -> str:
     """מתזמן בקשת יצירת עסקה מלאה בלי להפעיל את הסוכן.
 
@@ -1193,6 +1235,19 @@ def _queue_deterministic_create_deal(
     (this is CREATE only, never UPDATE-by-reference, so
     core/turn_coordinator_runtime.py's resolver-wrapping queue_task_request()
     is not needed here).
+
+    origin_lead_id (LEAD-TO-DEAL-ORIGIN-LINK, 02/09/2026): optional,
+    default "" — preserves the exact prior payload/behavior for the
+    free-text trigger ("צור עסקה בשם X בתחום Y"), which never has a Lead
+    reference. Set by /dealfromlead's caller (see lead_conversion.py's
+    resolve_lead_for_deal()) when the Deal originates from an existing
+    Lead record. THIS is the single function that builds the deterministic
+    crm_create_deal payload — a future Lead-linked trigger must call this
+    function with origin_lead_id set, never build its own tool_inputs dict
+    and propose crm_create_deal to the approval queue directly.
+    tools/audit_turn_coordinator_bypass.py's
+    CRM_CREATE_DEAL_SINGLE_PAYLOAD_BUILDER guard enforces there is exactly
+    one such call site in this file.
 
     BUG-CRM-BYPASS-OWNER-PRESENCE (live production regression, 01/09/2026):
     owner_id was originally left out of the payload entirely, on the
@@ -1232,9 +1287,13 @@ def _queue_deterministic_create_deal(
     # production (see core/router/router.py's DeterministicDealParse
     # comment for the full history) — there is nothing here worth diverging
     # from the real payload for, so don't create the divergence at all.
+    deal_inputs = {"name": name, "domain": domain, "owner_id": owner_self_reference}
+    if origin_lead_id:
+        deal_inputs["origin_lead_id"] = origin_lead_id
+
     outcome = _queue_approval_detailed(
         "crm_create_deal",
-        {"name": name, "domain": domain, "owner_id": owner_self_reference},
+        deal_inputs,
         chat_id, channel, user_text,
         # BUG-153-style marker (see _queue_deterministic_create_task): identifies
         # this proposal as originating from the deterministic router path for

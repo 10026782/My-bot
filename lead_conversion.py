@@ -1,12 +1,20 @@
-# lead_conversion.py — Lead → Contact conversion
+# lead_conversion.py — Lead → Contact conversion, Lead → Deal resolution
 #
-# קובץ עצמאי. לא נוגע ב-app.py מעבר לרישום פקודת /convert (כמו /done, /quest).
-# מומר רק כש-LEAD_AUTO_CONVERT דלוק (כבוי כברירת מחדל — Iron Rule #1).
+# קובץ עצמאי. לא נוגע ב-app.py מעבר לרישום פקודות /convert ו-/dealfromlead
+# (כמו /done, /quest). convert_lead_to_contact() מומר רק כש-LEAD_AUTO_CONVERT
+# דלוק; resolve_lead_for_deal() רק כש-LEAD_TO_DEAL דלוק (שניהם כבויים
+# כברירת מחדל — Iron Rule #1).
 #
-# למה owner-only command ולא agent tool עם approval flow:
+# למה /convert הוא owner-only command ולא agent tool עם approval flow:
 # ה-event_bus approval flow קיים אך לא תמיד מחווט עד הסוף (ראה lead_recovery).
 # פקודת /done קיימת כבר כתבנית: owner מקליד פקודה מפורשת = האישור עצמו.
 # אותה תבנית כאן — בטוחה, פשוטה, ועובדת היום.
+#
+# resolve_lead_for_deal() (LEAD-TO-DEAL-ORIGIN-LINK, 02/09/2026) שונה: היא
+# resolve בלבד, לא ביצוע. הכתיבה בפועל (crm_create_deal) עוברת דרך
+# app.py's _queue_deterministic_create_deal() — אותו writer יחיד שהמסלול
+# הטקסטואלי "צור עסקה בשם X בתחום Y" כבר משתמש בו, כולל בקשת אישור
+# אינטראקטיבית רגילה (לא "הקלדה=אישור" כמו /convert).
 #
 # F14 note: crm_add_contact() already routes through crm.py's canonical
 # find_or_create_contact() dedup gate (tools/airtable_gateway.airtable_create
@@ -30,6 +38,27 @@ from crm import crm_add_contact, describe_contact_failure
 logger = logging.getLogger(__name__)
 
 FLAG = "LEAD_AUTO_CONVERT"
+FLAG_DEAL = "LEAD_TO_DEAL"
+
+
+def _resolve_single_lead_by_query(query: str) -> tuple[dict | None, str]:
+    """מחפש ליד יחיד לפי שם/טלפון. מחזיר (lead_record, error_message) — בדיוק
+    אחד מהשניים ריק. חולץ מ-convert_lead_to_contact() כדי ש-resolve_lead_for_deal()
+    (LEAD-TO-DEAL-ORIGIN-LINK) ישתמש באותה לוגיקת חיפוש בדיוק, במקום להעתיק
+    אותה בשנית."""
+    from tma_api import _at_list, record_fields  # lazy import — כמו שאר הקובץ
+
+    leads = _at_list(
+        Tables.LEADS,
+        any_of(contains("Name", query), contains("phone", query)),
+        max_records=5,
+    )
+    if not leads:
+        return None, f"🔍 לא נמצא ליד התואם '{query}'."
+    if len(leads) > 1:
+        names = ", ".join(record_fields(l).get(LeadFields.NAME, "?") for l in leads)
+        return None, f"⚠️ נמצאו כמה לידים תואמים: {names}.\nנסה שם או טלפון מדויקים יותר."
+    return leads[0], ""
 
 
 def convert_lead_to_contact(query: str, identity=None) -> tuple[bool, str]:
@@ -50,22 +79,11 @@ def convert_lead_to_contact(query: str, identity=None) -> tuple[bool, str]:
     if not query:
         return False, "❌ חסר שם או טלפון לחיפוש."
 
-    from tma_api import _at_list, _at_patch, record_fields, record_id  # lazy import — כמו ב-/done
+    from tma_api import _at_patch, record_fields, record_id  # lazy import — כמו ב-/done
 
-    leads = _at_list(
-        Tables.LEADS,
-        any_of(contains("Name", query), contains("phone", query)),
-        max_records=5,
-    )
-
-    if not leads:
-        return False, f"🔍 לא נמצא ליד התואם '{query}'."
-
-    if len(leads) > 1:
-        names = ", ".join(record_fields(l).get(LeadFields.NAME, "?") for l in leads)
-        return False, f"⚠️ נמצאו כמה לידים תואמים: {names}.\nנסה שם או טלפון מדויקים יותר."
-
-    lead = leads[0]
+    lead, err = _resolve_single_lead_by_query(query)
+    if lead is None:
+        return False, err
     lf   = record_fields(lead)
     name = lf.get(LeadFields.NAME, "ליד ללא שם")
 
@@ -127,3 +145,48 @@ def convert_lead_to_contact(query: str, identity=None) -> tuple[bool, str]:
 
     logger.info(f"[LeadConversion] '{query}' → {name} → contact {contact_id or '?'}")
     return True, msg
+
+
+def resolve_lead_for_deal(query: str) -> tuple[str, str, str, str]:
+    """LEAD-TO-DEAL-ORIGIN-LINK (02/09/2026): מחפש ליד לפי שם/טלפון ומחלץ
+    ממנו את מה ש-app.py's _queue_deterministic_create_deal() צריך כדי
+    לפתוח עסקה מקושרת — (name, domain, lead_id, error). בדיוק אחד מ-error
+    ומ-(name/domain/lead_id) לא ריק.
+
+    אינו מבצע שום כתיבה — resolve בלבד. הכתיבה היחידה (crm_create_deal)
+    קורית ב-_queue_deterministic_create_deal() עצמה, שם גם עובר enforce()
+    התפקיד ומתועד ה-Turn Coordinator; שומר על אותו writer יחיד שהמסלול
+    הטקסטואלי ("צור עסקה בשם X בתחום Y") כבר משתמש בו.
+
+    domain: נקרא ישירות משדה ה-Domain של הליד (LeadFields.DOMAIN) — הוא כבר
+    נשמר שם כ-slug קנוני (core/lead_service.py's resolve_domain(), אותה
+    טבלה קנונית ש-CRM Deal expects) בזמן יצירת הליד, ולא כמילה בשפה
+    חופשית. resolve_domain_word() מופעל בכל זאת כשער אימות/מעבר (ולא
+    כניחוש) — בדיוק אותה טבלת מילים משותפת שה-Deal-from-text path כבר
+    עובר דרכה (core/router/router.py's parse_deterministic_create_deal),
+    ולא טבלת ניחוש שנייה — כדי לתפוס ליד עם domain ריק/לא-קנוני ולהיכשל
+    ל-CLARIFY במקום לכתוב ערך שגוי.
+    """
+    if not is_enabled(FLAG_DEAL):
+        return "", "", "", f"⚠️ יצירת עסקה מליד כבויה. הפעל עם משתנה הסביבה {FLAG_DEAL}=true."
+
+    if not query:
+        return "", "", "", "❌ חסר שם או טלפון לחיפוש."
+
+    lead, err = _resolve_single_lead_by_query(query)
+    if lead is None:
+        return "", "", "", err
+
+    from tma_api import record_fields, record_id  # lazy import — כמו שאר הקובץ
+
+    lf = record_fields(lead)
+    name = lf.get(LeadFields.NAME, "").strip()
+    if not name:
+        return "", "", "", "❌ לליד אין שם — לא ניתן לפתוח ממנו עסקה."
+
+    from core.lead_service import resolve_domain_word
+    domain = resolve_domain_word(lf.get(LeadFields.DOMAIN, ""))
+    if not domain:
+        return "", "", "", f"❌ תחום הליד לא מוכר/חסר ({lf.get(LeadFields.DOMAIN, '') or '—'})."
+
+    return name, domain, record_id(lead, required=True), ""

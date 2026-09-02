@@ -429,6 +429,92 @@ def test_no_deterministic_queue_functions_at_all_is_flagged(monkeypatch, tmp_pat
 
 # ══════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════
+# Guard 7 — exactly one deterministic crm_create_deal payload builder
+# ══════════════════════════════════════════════════════════════════
+
+_LIVE_SINGLE_DEAL_BUILDER_SNIPPET = '''
+def _queue_deterministic_create_deal(
+    name: str, domain: str, chat_id: str, channel: str, user_text: str,
+    identity, out_meta: dict | None = None, origin_lead_id: str = "",
+) -> str:
+    deal_inputs = {"name": name, "domain": domain, "owner_id": "x"}
+    if origin_lead_id:
+        deal_inputs["origin_lead_id"] = origin_lead_id
+    outcome = _queue_approval_detailed(
+        "crm_create_deal",
+        deal_inputs,
+        chat_id, channel, user_text,
+        trusted_source="deterministic_create_deal",
+    )
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicCreateDeal", "fallback",
+    )
+'''
+
+
+def test_current_repo_has_no_crm_create_deal_second_payload_builder():
+    """Runs against the real, current source — proves the deterministic
+    Lead→Deal route (origin_lead_id) still has exactly one proposer:
+    _queue_deterministic_create_deal()."""
+    assert audit.check_crm_create_deal_single_payload_builder() == []
+
+
+def test_single_call_site_is_clean(monkeypatch, tmp_path):
+    app_py = tmp_path / "app.py"
+    app_py.write_text(_LIVE_SINGLE_DEAL_BUILDER_SNIPPET, encoding="utf-8")
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    assert audit.check_crm_create_deal_single_payload_builder() == []
+
+
+def test_a_comment_or_docstring_mentioning_the_call_shape_is_not_a_false_positive(monkeypatch, tmp_path):
+    """AST-based, not a text/count scan: a docstring or comment merely
+    describing the call shape (exactly what happened once while writing
+    this guard) must never be mistaken for a real second call site."""
+    app_py = tmp_path / "app.py"
+    snippet = _LIVE_SINGLE_DEAL_BUILDER_SNIPPET + '''
+
+def some_other_function():
+    """Never call _queue_approval_detailed("crm_create_deal", ...) directly
+    from here — see _queue_deterministic_create_deal()."""
+    # _queue_approval_detailed("crm_create_deal", ...) — also not a real call
+    return None
+'''
+    app_py.write_text(snippet, encoding="utf-8")
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    assert audit.check_crm_create_deal_single_payload_builder() == []
+
+
+def test_second_call_site_is_flagged(monkeypatch, tmp_path):
+    """The exact LEAD-TO-DEAL-ORIGIN-LINK regression shape: a new trigger
+    builds its own crm_create_deal payload and proposes it directly instead
+    of reusing _queue_deterministic_create_deal(origin_lead_id=...)."""
+    app_py = tmp_path / "app.py"
+    second_site = '''
+
+def cmd_deal_from_lead_BROKEN(msg):
+    deal_inputs = {"name": "x", "domain": "import", "owner_id": "y"}
+    outcome = _queue_approval_detailed(
+        "crm_create_deal", deal_inputs, chat_id, channel, user_text,
+    )
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, None, "DeterministicCreateDealFromLead", "fallback",
+    )
+'''
+    app_py.write_text(_LIVE_SINGLE_DEAL_BUILDER_SNIPPET + second_site, encoding="utf-8")
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    failures = audit.check_crm_create_deal_single_payload_builder()
+    assert any("cmd_deal_from_lead_BROKEN" in f for f in failures)
+
+
+def test_no_call_site_at_all_is_flagged(monkeypatch, tmp_path):
+    app_py = tmp_path / "app.py"
+    app_py.write_text("# no crm_create_deal queueing here at all\n", encoding="utf-8")
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    failures = audit.check_crm_create_deal_single_payload_builder()
+    assert any("no longer proposes" in f for f in failures)
+
+
 def test_no_runtime_or_persistence_side_effects():
     """The module must be pure static analysis — same invariant every
     other tools/audit_*.py governance script upholds."""
