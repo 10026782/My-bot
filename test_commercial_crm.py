@@ -147,6 +147,30 @@ def run() -> bool:
         result = ccrm.create_deal("Name", "general", "recOwner")
         chk("create_deal: failed provider outcome → ok=False", result["ok"] is False)
 
+    # ── create_deal: BUG-CRM-BYPASS-DOMAIN-SELECT-CASING ──────────────
+    # Live production canary #10 (02/09/2026): "צור עסקה בשם X בתחום Import"
+    # correctly resolved to the canonical slug "import" (BUG-CRM-BYPASS-
+    # DOMAIN-TRANSLATION's fix works), but writing "import" straight to
+    # Airtable's Domain single-select 422'd -- the live configured option
+    # is "Import" (capital). resolve_live_select_value() is the missing
+    # persistence-boundary mapping step; these tests prove create_deal()
+    # actually calls it and respects both outcomes.
+    with patch("commercial_crm.airtable_create", return_value=_created("recDEAL2")) as create, \
+         patch("core.runtime_schema_provider.resolve_live_select_value", return_value="Import") as resolve:
+        result = ccrm.create_deal("Canary Deal", "import", "recOwner1")
+        table, fields = create.call_args.args[0], create.call_args.args[1]
+        chk("create_deal: resolve_live_select_value called with the canonical slug",
+            resolve.call_args.args == (Tables.DEALS, DealFields.DOMAIN, "import"))
+        chk("create_deal: the LIVE resolved value is written, not the raw canonical slug",
+            fields[DealFields.DOMAIN] == "Import")
+        chk("create_deal: succeeds once the live value resolves", result["ok"] is True)
+
+    with patch("commercial_crm.airtable_create") as create, \
+         patch("core.runtime_schema_provider.resolve_live_select_value", return_value=None):
+        result = ccrm.create_deal("Canary Deal", "שטויות", "recOwner1")
+        chk("create_deal: an unresolvable domain fails closed (ok=False)", result["ok"] is False)
+        chk("create_deal: never reaches Airtable for an unresolvable domain", not create.called)
+
     # ── create_payment_term ──────────────────────────────────────────
 
     with patch("commercial_crm.airtable_create") as create:
@@ -214,6 +238,23 @@ def run() -> bool:
         ccrm.create_payment(200, "general", "recOwner1", origin_lead_id="recLead9")
         fields = create.call_args.args[1]
         chk("create_payment: Origin Lead written as list when given", fields[PaymentFields.ORIGIN_LEAD] == ["recLead9"])
+
+    # ── create_payment: BUG-CRM-BYPASS-DOMAIN-SELECT-CASING follow-up ──
+    with patch("commercial_crm.airtable_create", return_value=_created("recPAY4")) as create, \
+         patch("core.runtime_schema_provider.resolve_live_select_value", return_value="Import") as resolve:
+        result = ccrm.create_payment(100, "import", "recOwner1")
+        fields = create.call_args.args[1]
+        chk("create_payment: resolve_live_select_value called with the canonical slug",
+            resolve.call_args.args == (Tables.PAYMENTS, PaymentFields.DOMAIN, "import"))
+        chk("create_payment: the LIVE resolved value is written, not the raw canonical slug",
+            fields[PaymentFields.DOMAIN] == "Import")
+        chk("create_payment: succeeds once the live value resolves", result["ok"] is True)
+
+    with patch("commercial_crm.airtable_create") as create, \
+         patch("core.runtime_schema_provider.resolve_live_select_value", return_value=None):
+        result = ccrm.create_payment(100, "שטויות", "recOwner1")
+        chk("create_payment: an unresolvable domain fails closed (ok=False)", result["ok"] is False)
+        chk("create_payment: never reaches Airtable for an unresolvable domain", not create.called)
 
     _check_snapshot_fidelity(chk)
 

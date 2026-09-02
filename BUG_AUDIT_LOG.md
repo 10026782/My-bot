@@ -6828,6 +6828,32 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 
 ---
 
+### BUG-CRM-BYPASS-DOMAIN-SELECT-CASING — canonical domain slug written raw to Airtable's Domain select, casing mismatch caused HTTP 422
+- **דווח:** 02/09/2026 (בעלים, קנרית production חיה "בדיקת-קנרית 10", מיד לאחר deploy של PR #1177)
+- **דווח על ידי:** בעלים (Telegram)
+- **מסך / מודול:** `commercial_crm.py` (`create_deal()`, `create_payment()`)
+- **תיאור:** הבעלים שלח "צור עסקה בשם בדיקת-קנרית 10 בתחום Import". תיקון BUG-CRM-BYPASS-DOMAIN-TRANSLATION (PR #1177) עבד כמתוכנן במדויק — "Import" תורגם נכון לסלאג הקנוני "import". אבל הביצוע נכשל בכל זאת: `[SelectValueValidation:SHADOW] invalid value table=עסקאות (Deals) field=Domain value='import' allowed=['Real Estate ', 'General', 'SaaS', 'Recruitment', 'Import']` ואז `HTTP 422: INVALID_MULTIPLE_CHOICE_OPTIONS — Insufficient permissions to create new select option "import"`. שכבת ה-select-value-validation הקיימת כבר **זיהתה** את אי-ההתאמה (לוג SHADOW), אבל היא רק בצב shadow (לא חוסמת) — הכתיבה הגולמית המשיכה ל-Airtable ונדחתה שם.
+- **Severity:** Critical (P0) — כל יצירת עסקה עם דומיין תקני נכשלה ב-100% מהמקרים, כי הסלאג הקנוני הפנימי ("import", lowercase) **תמיד** שונה מהאפשרות המוגדרת בפועל ב-Airtable ("Import", capitalized).
+- **הבחנה ארכיטקטונית קריטית (הנחיית הבעלים):** זה **לא** אמור להיתקן ב-parser. `resolve_domain_word()` צריך להמשיך להחזיר "import" (הסלאג הקנוני) — אחרת שכבת ההבנה/שפה חוזרת להיות תלויה בפרטי-תצוגה של Airtable, בדיוק הבעיה שהוקדש לה כל התיקון הקודם. הפער האמיתי הוא בגבול ה-**persistence** — שכבה חדשה, נפרדת, שממפה בין הסלאג הקנוני לערך ה-live המדויק שה-Airtable select מצפה לו:
+  ```
+  USER LANGUAGE ("יבוא"/"Import"/"import")
+    ↓ resolve_domain_word()           [ללא שינוי]
+  BUSINESS CANONICAL ("import")
+    ↓ storage/schema mapping          [חדש]
+  AIRTABLE DEAL DOMAIN ("Import")
+  ```
+- **בדיקה שנעשתה לפני התיקון (לפי בקשת הבעלים):** אומת שאין mapper קיים כבר ל-Leads/טבלאות אחרות — `core/lead_service.py::build_lead_fields()` כותב `LeadFields.DOMAIN: payload.domain` **ישירות**, בלי שום מיפוי, אותה חשיפה בדיוק (לא תוקן כאן — נתיב כתיבה נפרד, דורש אימות נפרד אם ה-Leads Domain select אכן מוגדר עם casing שונה גם הוא). `schema_validator.py` בודק רק שמות שדות, לא ערכים. **התשתית היחידה שכן קיימת ורלוונטית**: `core/runtime_schema_provider.py`'s `RuntimeSchemaProvider.get_table_contract()` — כבר שולף choices חיים מ-Meta API (בדיוק מה ש-`tools/airtable_gateway.py`'s `_provider_invalid_select_values()` כבר משתמש בו כדי לזהות את אי-ההתאמה ב-shadow) — אבל לא היה שום דבר שמשתמש בזה כדי **לתקן**, רק לזהות.
+- **תוקן ב-commit:** (ראה מיד לאחר merge)
+- **תוקן ב-branch:** `claude/fix-crm-domain-select-value-mapping`
+- **תיקון:** נוספה פונקציה משותפת חדשה, `core.runtime_schema_provider.resolve_live_select_value(table, field, canonical_value)` — משתמשת **באותה תשתית קיימת בדיוק** (`RuntimeSchemaProvider.get_table_contract()`), לא מקור schema שני. מתאימה את הסלאג הקנוני לערך ה-live המדויק (case-insensitive match), עם 3 תוצאות אפשריות: (1) התאמה מדויקת קיימת → ללא שינוי; (2) התאמה case-insensitive נמצאה → מוחזר הערך ה-live המדויק (הbreaking casing/spacing); (3) אין התאמה בכלל, וגם יש choices אמיתיים לבדוק מולם → `None` (המשמעות: דומיין לא-מוכר, נכשל סגור — **לעולם לא** ממציא/כותב ערך לא-מאומת). כשה-contract במצב `mode="name_only"` (אין choices לבדוק מולם בכלל) → מוחזר ללא שינוי, בלי risk של false rewrite/false rejection. הוחל ב-`commercial_crm.py::create_deal()`/`create_payment()`, מיד לפני בניית ה-`fields` dict לכתיבה — כל קריאה (agent ישירה, המסלול הדטרמיניסטי, ההפניה מ-`airtable_add`) נהנית מהתיקון באותה נקודת-מעבר יחידה.
+- **Verification:** `test_runtime_schema_provider.py` — 9 טסטים חדשים ל-`resolve_live_select_value()` (התאמה מדויקת, case-insensitive, ערך לא-מוכר → None, שדה לא-select לא נבדק כלל, contract name_only → ללא שינוי) — 75/75 סה"כ. `test_commercial_crm.py` — 10 טסטים חדשים ל-`create_deal()`/`create_payment()` (הפונקציה נקראת עם הסלאג הקנוני; הערך ה-live נכתב בפועל, לא הסלאג הגולמי; דומיין לא-פתיר נכשל סגור לפני שהכתיבה מתבצעת בכלל) — 107/107 סה"כ, כולל 97 הטסטים הקיימים שהמשיכו לעבור ללא שינוי (סביבת הטסט חסרת גישה חיה ל-Airtable → contract תמיד `name_only` → ההתנהגות הישנה נשמרת בדיוק כשאין מה לבדוק מולו). `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports, וסוויטת CRM/dispatcher/router מלאה — כולם עברו, אפס רגרסיות.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה **חמישית**. **הבהרה חשובה:** Leads' `build_lead_fields()` כותב את אותו סלאג קנוני ישירות לשדה Domain, עם אותה חשיפה מבנית בדיוק — **לא תוקן כאן** (נתיב כתיבה נפרד, לא אומת אם ה-Leads Domain select אכן מוגדר עם casing שונה בפועל). מומלץ אימות/תיקון נפרד אם רלוונטי.
+
+---
+
 ### BUG-CRM-BYPASS-DOMAIN-SELECT-CASING-UPDATE-PATH — same domain-select-casing fix extended to the airtable_update domain gates in this PR
 - **דווח:** 02/09/2026 (בעלים, קנרית production חיה "בדיקת-קנרית 10" על ה-branch המקביל `claude/fix-crm-domain-select-value-mapping`)
 - **דווח על ידי:** agent session, יזום בעקבות התיקון המקביל ל-`commercial_crm.py` — כדי לא לשלוח את אותו הבאג לפרודקשן פעמיים דרך שני PR-ים שונים
@@ -6838,7 +6864,7 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
 - **תיקון:** נוספה אותה פונקציה `core.runtime_schema_provider.resolve_live_select_value()` (הוגדרה באופן עצמאי גם ב-branch הזה, כדי לא ליצור תלות בין שני ה-PR-ים הבלתי-תלויים — קונפליקט merge טריוויאלי צפוי אם/כש-`claude/fix-crm-domain-select-value-mapping` ממוזג ראשון, כי שני ה-branches מוסיפים בדיוק את אותה פונקציה באותו מיקום). שני הענפים ב-`case "airtable_update":` (CRM ו-Tasks) קוראים לה מיד אחרי `resolve_domain_word()`, לפני הכתיבה בפועל: אם `resolve_live_select_value()` מחזיר `None` (ערך לא-מוכר גם ב-Airtable), נכשל סגור לפני `airtable_update()`.
 - **Verification:** `test_bug_crm_bypass_airtable_update.py` — 8 טסטים חדשים (Deal + Task: הפונקציה נקראת עם הסלאג הקנוני, הערך ה-live נכתב בפועל, ערך לא-פתיר נכשל סגור). `test_runtime_schema_provider.py` — הועתקו אותם 9 טסטים מה-branch המקביל (75/75). `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports, `test_audit_turn_coordinator_bypass.py`, `test_f14_b2_contact_integration.py`, `test_bug_commercial_crm_dispatcher_bypass_closure.py` — כולם עברו, אפס רגרסיות.
-- **Merged:** לא עדיין
+- **Merged:** כן (PR #1178, כבר ב-`origin/main`)
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
-- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. **הערה טכנית:** אם שני ה-PR-ים (`claude/fix-crm-domain-select-value-mapping` ו-`claude/fix-crm-airtable-update-bypass`) ימוזגו שניהם, ה-merge השני יראה קונפליקט טריוויאלי ב-`core/runtime_schema_provider.py` (אותה פונקציה נוספה פעמיים באותו מיקום) — פתרון: לקחת גרסה אחת (זהות), למחוק את הכפילות.
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממוזג ל-main. **הערה טכנית (התממשה):** מיזוג PR #1179 (`claude/fix-crm-domain-select-value-mapping`) לאחר #1178 אכן הראה קונפליקט טריוויאלי ב-`BUG_AUDIT_LOG.md` בלבד (לא ב-`core/runtime_schema_provider.py` — git מיזג אוטומטית את שתי ההוספות הזהות של `resolve_live_select_value()` ללא קונפליקט) — נפתר על ידי שילוב רשומות שני ה-PR-ים ללא אובדן.
