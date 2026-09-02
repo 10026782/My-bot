@@ -6775,6 +6775,59 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 
 ---
 
+### BUG-CRM-BYPASS-UPDATE — generic airtable_update reached Deals/Payment Terms/Payments with no field allowlist or domain canonicalization
+- **דווח:** 02/09/2026 (אודיט קריאה-בלבד חיצוני על `origin/main`, בעקבות סבב תיקוני BUG-CRM-BYPASS-DOMAIN-TRANSLATION/DEAL-AGENT-FALLTHROUGH)
+- **דווח על ידי:** אודיט אוטומטי (read-only, ללא שינויי קבצים) שסרק את כל שכבת ה-dispatcher/router; הבעלים אישר סדר עדיפויות ובחר את הפריט הזה לתיקון ראשון
+- **מסך / מודול:** `tools/dispatcher.py` (`case "airtable_update":`)
+- **תיאור:** `airtable_add` כבר הופנה (BUG-CRM-BYPASS, 01/09/2026) אל הכותבים הקנוניים עבור Deals/Payment Terms/Payments — אבל `airtable_update` לא קיבל הפניה מקבילה מעולם. `airtable_update(table="Deals"/"Payments"/"Payment Terms", ...)` גולמי היה ממשיך ישר ל-`airtable_update()` הגנרי, בלי allowlist שדות, בלי בדיקת role צרה יותר, ובלי תרגום דומיין (אם עודכן שדה Domain).
+- **Severity:** High (per האודיט) — כתיבת שדה שרירותי/לא-מוכר לטבלת CRM מוגנת, וערך domain גולמי לא-מתורגם יכול להיכתב דרך עדכון (לא רק יצירה).
+- **הבחנה חשובה שנבדקה לפני התיקון:** בניגוד ל-Contacts, אין כותב-update קנוני כללי ("update_deal()") להפנות אליו — ו-`Intent.UPDATE_DEAL_STAGE` (`core/router/risk_router.py`) מסתמך במפורש ולגיטימית על אותו `airtable_update` גנרי היום. **לכן לא ניתן לחסום את הטבלה כליל** — זה היה שובר פיצ'ר קיים אמיתי. נבדק גם ש-`airtable_update`'s roles_allowed הוא כבר `_MANAGEMENT` (לא `_INTERNAL` כמו `airtable_add`) — כך שפער ה"role רחב מגיע לכלי צר" שהיה קיים ב-airtable_add **לא קיים** באותה חומרה כאן; ה-role re-check שנוסף הוא הגנת-עומק (inert כרגע, בטוח לעתיד) לא סגירת פרצת role בפועל.
+- **תוקן ב-commit:** (ראה מיד לאחר merge)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוסף בלוק "Commercial CRM update-boundary closure" ב-`case "airtable_update":`, המפעיל **שימוש חוזר** באותם closed field maps שכבר קיימים ל-create (`_DEAL_FIELD_MAP`/`_PAYMENT_TERM_FIELD_MAP`/`_PAYMENT_FIELD_MAP` דרך `_CRM_TABLE_ROUTING`) — לא מפה חדשה: (1) `enforce(_canonical_tool, identity)` re-check (הגנת-עומק). (2) whitelist שדות — כל שדה שלא מוכר לכותב הקנוני נכשל סגור עם שם השדה בהודעה (לא נשמט בשקט). (3) אם שדה Domain מעודכן, מתורגם דרך `core.lead_service.resolve_domain_word()` — **אותה טבלה משותפת בדיוק** שכבר משמשת ל-Leads ולפרסר הדטרמיניסטי של Deal (BUG-CRM-BYPASS-DOMAIN-TRANSLATION) — מילה לא מוכרת נכשלת סגור. עדכון שדה סטטוס (למשל UPDATE_DEAL_STAGE) ממשיך לעבוד ללא שינוי כי `Stage` כבר קיים ב-`_DEAL_FIELD_MAP`.
+- **Verification:** קובץ regression חדש (`test_bug_crm_bypass_airtable_update.py`) מכסה: עדכון stage לגיטימי ממשיך לעבוד; תרגום דומיין (עברית→קנוני) ודחיית מילה לא-מוכרת; שדה לא-נתמך נכשל סגור עם שם השדה בהודעה; role gate (מתועד שהוא כבר קורה ב-enforce() העליון, לא בבלוק החדש); aliases מוגנים (כולל alias דו-משמעי "PaymentTerms" בלי רווח שנכשל סגור); טבלאות שאינן-CRM (Tasks) לא מושפעות כלל. הורצה סוויטת regression רחבה של ~40 קבצי טסט שמזכירים `airtable_update` — כולם ירוקים, אפס רגרסיות. `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. נותרים פתוחים מהאודיט המקורי (לא בסקופ תיקון זה, לפי בחירת הבעלים): voice legacy Lead writer bypass, gateway-level protected-table enforcement, domain-resolver consolidation, LCH ownership explicit, ו-Agent-fallthrough עבור contacts/events/payments/update_lead.
+
+---
+
+### PROTECTED-BUSINESS-TABLE-RAW-UPDATE-CI-GUARD — CI guard formalizing "airtable_update is for system/infra data only"
+- **דווח:** 02/09/2026 (בעלים, ניסוח מפורש של כלל ארכיטקטורה בעקבות BUG-CRM-BYPASS-UPDATE)
+- **דווח על ידי:** בעלים: "airtable_update מותר רק לנתונים מערכתיים/תשתיתיים. מידע עסקי חייב לעבור דרך writer קנוני ייעודי... זה גם נותן כלל שקל לבדוק ב-CI."
+- **מסך / מודול:** `tools/audit_turn_coordinator_bypass.py` (שער CI חמישי חדש), `test_audit_turn_coordinator_bypass.py`
+- **תיאור:** הבעלים ניסח במפורש את הכלל הארכיטקטוני מאחורי BUG-CRM-BYPASS-UPDATE כחוק כללי: `airtable_update` מותר לכתוב ישירות רק לנתונים מערכתיים/תשתיתיים (Sessions, schema snapshots, tenant config וכו') — מידע עסקי (Leads, Contacts, Deals, Payment Terms, Payments) חייב לעבור דרך הפניה לכותב קנוני, שכבת whitelist+ולידציה, או חסימה מוחלטת — לעולם לא כתיבה גולמית. ביקש שהחוק הזה יהיה **בר-בדיקה ב-CI**, עם רשימת טבלאות עסקיות מוגנות.
+- **Severity:** N/A — זהו תיקון גילוי-רגרסיה (CI enforcement), לא תיקון באג פונקציונלי. שלוש ההגנות שהחוק מגן עליהן (Leads/Contacts/Deals-Payments-PaymentTerms) כבר קיימות בפועל (Leads/Contacts מלפני היום, Deals/Payments/PaymentTerms מ-BUG-CRM-BYPASS-UPDATE באותו יום) — השער מוודא שהן **יישארו** קיימות.
+- **תוקן ב-commit:** (ראה מיד לאחר merge, אותו commit/branch כמו BUG-CRM-BYPASS-UPDATE)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוסף שער CI חמישי (`PROTECTED_BUSINESS_TABLE_RAW_UPDATE`) ל-`tools/audit_turn_coordinator_bypass.py`, באותו דפוס בדיוק כמו השערים הקיימים (registry דורש רישום מפורש, נכשל אם חסר): `_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY` ממפה "חתימת הגנה" טקסטואלית (`"enforce_leads_write_gate"`, `'"אנשי קשר (Contacts)"'`, `"_CRM_TABLE_ROUTING"`) למנגנון ההגנה המתועד שלה. השער מחלץ את גוף ה-`case "airtable_update":` מתוך `tools/dispatcher.py` (regex, לא AST מלא — אותה רמת קפדנות כמו שאר השערים בקובץ) ומוודא שכל חתימה רשומה עדיין מופיעה שם. **נבדק בפועל** (לא רק תיאורטית) — כל אחת משלוש ההגנות הוסרה זמנית וידנית ואומת שהשער אכן נכשל, ואז שוחזרה ואומת שהשער עובר שוב.
+- **Verification:** נוספו 5 טסטים חדשים ל-`test_audit_turn_coordinator_bypass.py` (21/21 עם הקיימים): `check_protected_business_table_raw_update()` על הקוד האמיתי (0 כשלים), חילוץ גוף ה-case, שער חסר לגמרי, הגנה חסרה מזוהה, כל ההגנות קיימות → נקי. `python3 -m compileall -q .`, `smoke_tests.py`, `tools/status_sync_validator.py`, imports — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** N/A — שער CI בלבד, לא קוד runtime
+- **Verified בפרודקשן:** N/A
+- **סטטוס:** Fixed (STATIC_VERIFIED). **הבהרה לגבי scope:** החוק המנוסח מכסה כרגע רק Leads/Contacts/Deals/Payment Terms/Payments (הטבלאות שכבר טופלו). Tasks **לא** נכלל ברשימה — `update_task`/`complete_task` מסתמכים אף הם כרגע על `airtable_update` גנרי ללא whitelist, אבל התאמת אותם לכלל הזה הייתה חוסמת פיצ'ר חי ללא כותב-update חלופי, ולכן הושארה בכוונה מחוץ לסקופ הפריט הזה — פתוחה לבירור נפרד אם וכאשר הבעלים ירצה להרחיב את הרשימה.
+
+---
+
+### BUG-CRM-BYPASS-UPDATE-TASKS — extended the "airtable_update for system data only" rule to Tasks
+- **דווח:** 02/09/2026 (בעלים: "yes bring Tasks under this same rule", תגובה ישירה לפריט הקודם)
+- **דווח על ידי:** בעלים, בעקבות ההבהרה המפורשת שהחוק לא כיסה את Tasks
+- **מסך / מודול:** `tools/dispatcher.py` (`case "airtable_update":`), `tools/audit_turn_coordinator_bypass.py` (הרחבת `_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY`)
+- **תיאור:** בהמשך ישיר ל-BUG-CRM-BYPASS-UPDATE ולשער ה-CI שנוסף עבורו, הבעלים ביקש להרחיב את החוק ("airtable_update לנתונים מערכתיים בלבד") גם ל-Tasks, שהוצא בכוונה מהסקופ הקודם. `update_task`/`complete_task` הסתמכו על `airtable_update` גנרי ללא whitelist שדות ובלי תרגום דומיין — אותה מחלקת פער בדיוק כמו Deals/Payments לפני BUG-CRM-BYPASS-UPDATE.
+- **הבחנה חשובה שנבדקה לפני התיקון:** בניגוד ל-Deals (שיש להם `crm_create_deal` כתוסף ייעודי צר יותר מ-`airtable_add`), ל-Tasks **אין** כותב-create ייעודי נפרד כלל — יצירת Task עצמה עוברת דרך אותו `airtable_add` גנרי, מגודרת רק ע"י הניתוב הדטרמיניסטי (לא ע"י זהות הכלי). לכן **אין** כאן פער "role רחב מגיע לכלי צר" לבדוק מחדש — רק את אותו פער whitelist/דומיין שכבר נסגר ל-CRM.
+- **Severity:** Medium — כמו ה-CRM המקביל: כתיבת שדה שרירותי/לא-מוכר ל-Tasks, וערך domain גולמי לא-מתורגם (שדה `Domain` ב-Tasks, "מועתק מ-Lead ביצירה-מ-ליד") יכול היה להיכתב ללא ולידציה.
+- **תוקן ב-commit:** (ראה מיד לאחר merge, אותו commit/branch כמו BUG-CRM-BYPASS-UPDATE)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוסף `_TASK_ALLOWED_UPDATE_FIELDS` (frozenset שמות שדות Airtable מותרים: NAME/DESCRIPTION/DUE_DATE/STATUS/CONTACTS_LINK/DEALS_LINK/DOMAIN/OWNER/LEAD_LINK — כל `TaskFields`) — whitelist שמות-שדות פשוט, **בלי** המרת kwargs (אין פונקציית writer להפנות אליה, בדיוק כמו נתיב העדכון של Deals/Payments). ענף חדש ב-`case "airtable_update":`, ממוקם לפני ה-fallback הגנרי הסופי: שדה לא-מוכר נכשל סגור עם שמו בהודעה; אם `TaskFields.DOMAIN` מעודכן, מתורגם דרך `resolve_domain_word()` — **אותה טבלה משותפת בדיוק**. נרשם `_TASK_ALLOWED_UPDATE_FIELDS` ב-`_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY` של שער ה-CI, כך שהסרה שקטה של ההגנה תיתפס.
+- **Verification:** `test_bug_crm_bypass_airtable_update.py` הורחב (סעיף Tasks חדש — עדכון סטטוס לגיטימי ממשיך לעבוד, aliases, שדה לא-נתמך נכשל סגור, תרגום/דחיית דומיין) — הסעיף הישן "Tasks unaffected" הוסר כי כבר לא נכון (Tasks כן מוגן כעת). `test_audit_turn_coordinator_bypass.py` — 2 טסטים חדשים (22/22 סה"כ): הסרת ה-allowlist מזוהה, קיום ההגנה נבדק. אומת ישירות (לא רק תיאורטית) שהסרת `_TASK_ALLOWED_UPDATE_FIELDS` מקובץ זמני גורמת לשער להיכשל, ואז שוחזר. הורצה סוויטת regression רחבה של כל קבצי הטסט שנוגעים ב-Tasks/`TaskFields`/`airtable_update` (`core/router/test_task_builders.py`, `core/router/test_task_integration.py`, `test_create_task_deterministic_route.py`, `test_turn_coordinator_task_runtime_integration.py`, `test_bug_task_01_execution_proof_fingerprint_parity.py`, ועוד) — כולם ירוקים, אפס רגרסיות (כולל `update_task`/`complete_task`'s שימוש הקיים ב-`STATUS`, ששייך ל-allowlist). `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. עם התיקון הזה, כל 6 הטבלאות שהוזכרו במפורש בחוק המקורי של הבעלים (Leads/Contacts/Deals/Payment Terms/Payments/Tasks) מוגנות תחת אותו עיקרון אחיד.
+
+---
+
 ### BUG-CRM-BYPASS-DOMAIN-SELECT-CASING — canonical domain slug written raw to Airtable's Domain select, casing mismatch caused HTTP 422
 - **דווח:** 02/09/2026 (בעלים, קנרית production חיה "בדיקת-קנרית 10", מיד לאחר deploy של PR #1177)
 - **דווח על ידי:** בעלים (Telegram)
@@ -6798,3 +6851,20 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה **חמישית**. **הבהרה חשובה:** Leads' `build_lead_fields()` כותב את אותו סלאג קנוני ישירות לשדה Domain, עם אותה חשיפה מבנית בדיוק — **לא תוקן כאן** (נתיב כתיבה נפרד, לא אומת אם ה-Leads Domain select אכן מוגדר עם casing שונה בפועל). מומלץ אימות/תיקון נפרד אם רלוונטי.
+
+---
+
+### BUG-CRM-BYPASS-DOMAIN-SELECT-CASING-UPDATE-PATH — same domain-select-casing fix extended to the airtable_update domain gates in this PR
+- **דווח:** 02/09/2026 (בעלים, קנרית production חיה "בדיקת-קנרית 10" על ה-branch המקביל `claude/fix-crm-domain-select-value-mapping`)
+- **דווח על ידי:** agent session, יזום בעקבות התיקון המקביל ל-`commercial_crm.py` — כדי לא לשלוח את אותו הבאג לפרודקשן פעמיים דרך שני PR-ים שונים
+- **מסך / מודול:** `tools/dispatcher.py` (`case "airtable_update":`'s CRM domain gate ו-Tasks domain gate — שתיהן נוספו באותו PR, `BUG-CRM-BYPASS-UPDATE`/`BUG-CRM-BYPASS-UPDATE-TASKS`)
+- **תיאור:** במקביל לעבודה על PR זה, קנריית production חיה על תיקון הדומיין הדטרמיניסטי (BUG-CRM-BYPASS-DOMAIN-TRANSLATION) חשפה שכבה נוספת: הסלאג הקנוני ("import") עדיין שונה מהערך שה-Airtable select מצפה לו בפועל ("Import") — ראה `BUG-CRM-BYPASS-DOMAIN-SELECT-CASING` (branch נפרד, `claude/fix-crm-domain-select-value-mapping`). שני הענפים שהוספתי ל-`case "airtable_update":` באותו PR הזה (Deals/Payments דרך `_CRM_TABLE_ROUTING`, ו-Tasks) כתבו את הסלאג הקנוני **ישירות** דרך `airtable_update()`, בלי לעבור דרך `commercial_crm.py` — כלומר שני הענפים האלה נשאו את **אותו באג בדיוק**, לא מתוקנים על ידי התיקון המקביל (ששינה רק את `commercial_crm.py`'s נתיב היצירה).
+- **Severity:** Critical (P0) — עדכון שדה Domain דרך `airtable_update` (למשל Task/Deal/Payment) עם ערך תקני היה נכשל באותו אופן בדיוק כמו היצירה.
+- **תוקן ב-commit:** (ראה מיד לאחר merge, אותו PR/branch כמו BUG-CRM-BYPASS-UPDATE)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוספה אותה פונקציה `core.runtime_schema_provider.resolve_live_select_value()` (הוגדרה באופן עצמאי גם ב-branch הזה, כדי לא ליצור תלות בין שני ה-PR-ים הבלתי-תלויים — קונפליקט merge טריוויאלי צפוי אם/כש-`claude/fix-crm-domain-select-value-mapping` ממוזג ראשון, כי שני ה-branches מוסיפים בדיוק את אותה פונקציה באותו מיקום). שני הענפים ב-`case "airtable_update":` (CRM ו-Tasks) קוראים לה מיד אחרי `resolve_domain_word()`, לפני הכתיבה בפועל: אם `resolve_live_select_value()` מחזיר `None` (ערך לא-מוכר גם ב-Airtable), נכשל סגור לפני `airtable_update()`.
+- **Verification:** `test_bug_crm_bypass_airtable_update.py` — 8 טסטים חדשים (Deal + Task: הפונקציה נקראת עם הסלאג הקנוני, הערך ה-live נכתב בפועל, ערך לא-פתיר נכשל סגור). `test_runtime_schema_provider.py` — הועתקו אותם 9 טסטים מה-branch המקביל (75/75). `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports, `test_audit_turn_coordinator_bypass.py`, `test_f14_b2_contact_integration.py`, `test_bug_commercial_crm_dispatcher_bypass_closure.py` — כולם עברו, אפס רגרסיות.
+- **Merged:** כן (PR #1178, כבר ב-`origin/main`)
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממוזג ל-main. **הערה טכנית (התממשה):** מיזוג PR #1179 (`claude/fix-crm-domain-select-value-mapping`) לאחר #1178 אכן הראה קונפליקט טריוויאלי ב-`BUG_AUDIT_LOG.md` בלבד (לא ב-`core/runtime_schema_provider.py` — git מיזג אוטומטית את שתי ההוספות הזהות של `resolve_live_select_value()` ללא קונפליקט) — נפתר על ידי שילוב רשומות שני ה-PR-ים ללא אובדן.

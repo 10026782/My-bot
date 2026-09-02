@@ -18,7 +18,7 @@ from .sheets_tools   import sheets_append
 from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead, _tool_result
 from airtable_schema import (
     DealStage, PaymentTermTrigger, PaymentTermCadence, VATRule,
-    Tables, DealFields, PaymentTermFields, PaymentFields,
+    Tables, DealFields, PaymentTermFields, PaymentFields, TaskFields,
 )
 from .airtable_read_adapter import AirtableReadError, list_records
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
@@ -168,6 +168,23 @@ _PROTECTED_CRM_ALIASES: dict[str, str] = {
     "Payment Terms": Tables.PAYMENT_TERMS,
     "Payments": Tables.PAYMENTS,
 }
+
+# BUG-CRM-BYPASS-UPDATE follow-up (owner rule, 02/09/2026): "airtable_update
+# is for system/infrastructure data only; business records must be blocked
+# or redirected — never a raw write" extended to Tasks. Unlike Deals/
+# Payment Terms/Payments there is no separate dedicated create-tool for
+# Tasks to under-cut (Task creation itself goes through the SAME
+# airtable_add, gated only by the deterministic route, not by tool
+# identity) — so there is no "wider role reaches narrower tool" gap to
+# re-check here, only the same missing-allowlist/missing-domain-
+# canonicalization gap Deals/Payments had. A plain field-name allowlist
+# (no kwarg conversion — there's no writer function to redirect to, same
+# as Deals/Payments' update path) is the enforceable floor.
+_TASK_ALLOWED_UPDATE_FIELDS: frozenset[str] = frozenset({
+    TaskFields.NAME, TaskFields.DESCRIPTION, TaskFields.DUE_DATE,
+    TaskFields.STATUS, TaskFields.CONTACTS_LINK, TaskFields.DEALS_LINK,
+    TaskFields.DOMAIN, TaskFields.OWNER, TaskFields.LEAD_LINK,
+})
 
 
 def _resolve_authenticated_crm_owner(identity, requested_owner: object) -> tuple[str | None, str]:
@@ -740,8 +757,145 @@ def dispatch_tool(
                             if ok else "❌ שגיאה בעדכון — בדוק שמות השדות."
                         ),
                     )
-                else:
-                    result = airtable_update(table, record_id, fields)
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                # BUG-CRM-BYPASS-UPDATE: Commercial CRM update-boundary
+                # closure. airtable_add already redirects Deals/Payment
+                # Terms/Payments to their canonical create writers (see the
+                # long comment above _DEAL_FIELD_MAP) — airtable_update had
+                # NO equivalent for updates: a raw airtable_update(table=
+                # "Deals"/"Payments"/"Payment Terms", ...) fell straight
+                # through to the generic airtable_update() at the bottom of
+                # this case, with no role re-check narrower than
+                # airtable_update's own (wider) grant, no field allowlist,
+                # and no domain canonicalization on a Domain field edit.
+                # There is no general canonical "update_deal()"-style writer
+                # to redirect to (unlike Contacts) — Intent.UPDATE_DEAL_STAGE
+                # legitimately relies on this same generic airtable_update
+                # today (core/router/risk_router.py's contract-required-tool
+                # mapping), so this cannot simply block the table outright.
+                # Instead: reuse the SAME closed field maps the create path
+                # already validates against (an update can only touch fields
+                # the canonical writer itself knows about), re-check the
+                # canonical tool's role authority the same way airtable_add
+                # does, and canonicalize a Domain field edit through the
+                # same shared resolver Leads already use — never a second
+                # guess table.
+                _resolved_table, _protected_alias_error = _resolve_protected_crm_table(table)
+                if _protected_alias_error:
+                    result = _tool_result(
+                        ok=False, tool="airtable_update",
+                        user_message=f"❌ שם טבלת CRM לא מוכר או דו-משמעי: {table!r}.",
+                    )
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                if _resolved_table in _CRM_TABLE_ROUTING:
+                    _canonical_tool, _field_map, _ = _CRM_TABLE_ROUTING[_resolved_table]
+                    try:
+                        enforce(_canonical_tool, identity)
+                    except ToolDenied as e:
+                        logger.warning(
+                            "[Dispatcher] airtable_update->%s redirect denied | role=%s | %s",
+                            _canonical_tool, getattr(identity, "role", "unknown"), e,
+                        )
+                        result = _tool_result(ok=False, tool="airtable_update", user_message=f"❌ גישה נחסמה: {e}")
+                        audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                        return result
+
+                    _unsupported = sorted(set(fields) - set(_field_map) - _GENERIC_WRITE_IGNORED_KEYS)
+                    if _unsupported:
+                        result = _tool_result(
+                            ok=False, tool="airtable_update",
+                            user_message=f"❌ שדה לא נתמך בעדכון ישיר לטבלה זו: {_unsupported!r}.",
+                        )
+                        audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                        return result
+
+                    _domain_field = {
+                        Tables.DEALS: DealFields.DOMAIN, Tables.PAYMENTS: PaymentFields.DOMAIN,
+                    }.get(_resolved_table)
+                    if _domain_field and _domain_field in fields:
+                        from core.lead_service import resolve_domain_word
+                        _canonical_domain = resolve_domain_word(str(fields[_domain_field]))
+                        if not _canonical_domain:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[_domain_field]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        # BUG-CRM-BYPASS-DOMAIN-SELECT-CASING: the canonical
+                        # slug above (e.g. "import") still isn't what
+                        # Airtable's live Domain select expects (e.g.
+                        # "Import") — see commercial_crm.py's create_deal()/
+                        # create_payment() for the full USER LANGUAGE ->
+                        # BUSINESS CANONICAL -> AIRTABLE LIVE VALUE contract
+                        # this mirrors. This update path has no canonical
+                        # writer to redirect to, so the mapping happens here
+                        # directly instead.
+                        from core.runtime_schema_provider import resolve_live_select_value
+                        _live_domain = resolve_live_select_value(_resolved_table, _domain_field, _canonical_domain)
+                        if _live_domain is None:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[_domain_field]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        fields[_domain_field] = _live_domain
+
+                    result = airtable_update(_resolved_table, record_id, fields)
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                # BUG-CRM-BYPASS-UPDATE follow-up: same rule extended to
+                # Tasks (owner request, 02/09/2026) — a field-name allowlist
+                # (_TASK_ALLOWED_UPDATE_FIELDS) plus Domain-field
+                # canonicalization, mirroring the CRM block above. No role
+                # re-check here: there is no dedicated create-tool narrower
+                # than airtable_add/airtable_update for Tasks to under-cut.
+                if _ALIAS_MAP.get(table, table) == Tables.TASKS:
+                    _unsupported_task_fields = sorted(
+                        set(fields) - _TASK_ALLOWED_UPDATE_FIELDS - _GENERIC_WRITE_IGNORED_KEYS
+                    )
+                    if _unsupported_task_fields:
+                        result = _tool_result(
+                            ok=False, tool="airtable_update",
+                            user_message=f"❌ שדה לא נתמך בעדכון ישיר לטבלה זו: {_unsupported_task_fields!r}.",
+                        )
+                        audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                        return result
+
+                    if TaskFields.DOMAIN in fields:
+                        from core.lead_service import resolve_domain_word
+                        _canonical_task_domain = resolve_domain_word(str(fields[TaskFields.DOMAIN]))
+                        if not _canonical_task_domain:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[TaskFields.DOMAIN]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        # BUG-CRM-BYPASS-DOMAIN-SELECT-CASING follow-up —
+                        # same live-value mapping as the CRM block above.
+                        from core.runtime_schema_provider import resolve_live_select_value
+                        _live_task_domain = resolve_live_select_value(Tables.TASKS, TaskFields.DOMAIN, _canonical_task_domain)
+                        if _live_task_domain is None:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[TaskFields.DOMAIN]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        fields[TaskFields.DOMAIN] = _live_task_domain
+
+                    result = airtable_update(Tables.TASKS, record_id, fields)
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                result = airtable_update(table, record_id, fields)
                 audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                 return result
 
