@@ -305,8 +305,8 @@ def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
     if not match:
         return DeterministicDealParse()
     name = (match.group("name_a") or match.group("name_b") or "").strip()
-    domain = (match.group("domain_a") or match.group("domain_b") or "").strip()
-    if not name or not domain:
+    domain_raw = (match.group("domain_a") or match.group("domain_b") or "").strip()
+    if not name or not domain_raw:
         return DeterministicDealParse(matched=True, uncertain=True)
     # An explicit "בבעלות <מישהו>" (a named owner other than the caller)
     # isn't the literal self-ownership suffix "בבעלותי" the regex expects,
@@ -316,7 +316,23 @@ def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
     # named owner deterministically is out of scope here (see
     # business_identity()'s docstring) — fail to CLARIFY instead of writing
     # a corrupted field.
-    if "בעלות" in name or "בעלות" in domain:
+    if "בעלות" in name or "בעלות" in domain_raw:
+        return DeterministicDealParse(matched=True, uncertain=True)
+    # BUG-CRM-BYPASS-DOMAIN-TRANSLATION (live production, 02/09/2026): this
+    # used to write domain_raw (the literal Hebrew/English word the caller
+    # typed, e.g. "יבוא") straight into crm_create_deal's payload. Airtable's
+    # Domain single-select only accepts the canonical English slugs
+    # ("import", "real_estate", ...) and rejected every raw Hebrew word with
+    # HTTP 422 -- every deterministic Deal creation with a Hebrew domain word
+    # failed. Fixed by canonicalizing through the SAME shared word->slug
+    # table Leads already use (core.lead_service.resolve_domain_word / its
+    # core.ingress_classifier._DOMAIN_HINT_CANONICAL table) -- one shared
+    # vocabulary, never a second guess table. An unrecognized word fails to
+    # CLARIFY, exactly like a missing name/domain above -- never guessed,
+    # never written raw.
+    from core.lead_service import resolve_domain_word
+    domain = resolve_domain_word(domain_raw)
+    if not domain:
         return DeterministicDealParse(matched=True, uncertain=True)
     return DeterministicDealParse(name=name, domain=domain, matched=True)
 
@@ -506,7 +522,25 @@ def route_request(
             "לא בטוח לאיזו משימה התכוונת. נא לציין את שם המשימה במדויק."
         )
 
-    elif intent == Intent.CREATE_DEAL and _create_deal_parse.uncertain:
+    # BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH (live production, 02/09/2026):
+    # the condition below used to check only `.uncertain` (matched=True but
+    # incomplete), so a message the intent_router still classified as
+    # create_deal but that didn't fit _STRUCTURED_CREATE_DEAL_RE at all
+    # (matched=False -- e.g. "domain X" instead of "בתחום X") fell through
+    # this whole elif chain untouched and reached Handler.AGENT with normal,
+    # unrestricted tool access. The agent then picked the generic
+    # airtable_add bypass tool (no deterministic route ever offers it
+    # crm_create_deal directly), which has no owner-resolution fallback and
+    # hard-fails with "owner_id חסר" -- the exact BUG-CRM-BYPASS-OWNER-
+    # PRESENCE failure class this session already fixed for the
+    # deterministic route, reopened via the one path that was never routed
+    # at all. Per the standing architecture decision for this intent (the
+    # system routes Deal creation deterministically; the Agent is never
+    # given a tool choice for it), ANY non-certain parse -- uncertain OR
+    # unmatched -- must CLARIFY, never fall through to the Agent. This does
+    # not touch Intent.CREATE_TASK's deliberately different design (broader
+    # task phrasings intentionally stay on the Agent path).
+    elif intent == Intent.CREATE_DEAL and not _create_deal_parse.certain:
         handler = Handler.CLARIFY
         tool_allowed = False
         needs_approval = False
