@@ -449,5 +449,40 @@ with patch.object(p8, "_fetch_live", side_effect=_slow_fetch):
 chk("thread-safety: no exceptions across 20 concurrent calls", not errors_seen)
 chk("thread-safety: all 20 calls got a contract", len(results) == 20)
 
+
+# ══════════════════════════════════════════════════════════════════
+# 9. resolve_live_select_value() — BUG-CRM-BYPASS-DOMAIN-SELECT-CASING
+# ══════════════════════════════════════════════════════════════════
+print("\n── resolve_live_select_value(): canonical slug -> live Airtable value ──")
+
+import core.runtime_schema_provider as _rsp_module
+from core.runtime_schema_provider import resolve_live_select_value
+
+p9 = RuntimeSchemaProvider(ttl_seconds=300)
+with patch.object(p9, "_fetch_live", side_effect=lambda table: _fresh_entry()), \
+     patch.object(_rsp_module, "_provider", p9):
+    chk("exact live choice passes through unchanged",
+        resolve_live_select_value("Leads", "Domain", "Import") == "Import")
+    chk("case-insensitive canonical slug resolves to the exact live casing",
+        resolve_live_select_value("Leads", "Domain", "import") == "Import")
+    chk("live choice with different internal spacing still resolves case-insensitively",
+        resolve_live_select_value("Leads", "Domain", "real estate") == "Real Estate")
+    chk("a genuinely unknown value returns None (fail closed, never invented)",
+        resolve_live_select_value("Leads", "Domain", "שטויות") is None)
+    chk("a non-select field (Name) is left completely unchecked",
+        resolve_live_select_value("Leads", "Name", "anything at all") == "anything at all")
+    chk("empty canonical_value passes through unchanged (nothing to resolve)",
+        resolve_live_select_value("Leads", "Domain", "") == "")
+
+p9b = RuntimeSchemaProvider(ttl_seconds=300)
+with patch.object(p9b, "_fetch_live", return_value=None), \
+     patch.object(p9b, "_load_snapshot", return_value=None), \
+     patch.object(_rsp_module, "_provider", p9b):
+    # cold start, no live/cached/snapshot -> falls to the seed contract,
+    # mode="name_only", choices=[] always -- must never risk a false
+    # rewrite (or false rejection) from a contract with no real choices.
+    chk("name_only seed contract (nothing to check against) -> unchanged, never None",
+        resolve_live_select_value("Leads", "Domain", "import") == "import")
+
 print(f"\n{'='*50}\n{passed} passed, {failed} failed\n{'='*50}")
 sys.exit(1 if failed else 0)
