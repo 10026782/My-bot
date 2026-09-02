@@ -740,8 +740,82 @@ def dispatch_tool(
                             if ok else "❌ שגיאה בעדכון — בדוק שמות השדות."
                         ),
                     )
-                else:
-                    result = airtable_update(table, record_id, fields)
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                # BUG-CRM-BYPASS-UPDATE: Commercial CRM update-boundary
+                # closure. airtable_add already redirects Deals/Payment
+                # Terms/Payments to their canonical create writers (see the
+                # long comment above _DEAL_FIELD_MAP) — airtable_update had
+                # NO equivalent for updates: a raw airtable_update(table=
+                # "Deals"/"Payments"/"Payment Terms", ...) fell straight
+                # through to the generic airtable_update() at the bottom of
+                # this case, with no role re-check narrower than
+                # airtable_update's own (wider) grant, no field allowlist,
+                # and no domain canonicalization on a Domain field edit.
+                # There is no general canonical "update_deal()"-style writer
+                # to redirect to (unlike Contacts) — Intent.UPDATE_DEAL_STAGE
+                # legitimately relies on this same generic airtable_update
+                # today (core/router/risk_router.py's contract-required-tool
+                # mapping), so this cannot simply block the table outright.
+                # Instead: reuse the SAME closed field maps the create path
+                # already validates against (an update can only touch fields
+                # the canonical writer itself knows about), re-check the
+                # canonical tool's role authority the same way airtable_add
+                # does, and canonicalize a Domain field edit through the
+                # same shared resolver Leads already use — never a second
+                # guess table.
+                _resolved_table, _protected_alias_error = _resolve_protected_crm_table(table)
+                if _protected_alias_error:
+                    result = _tool_result(
+                        ok=False, tool="airtable_update",
+                        user_message=f"❌ שם טבלת CRM לא מוכר או דו-משמעי: {table!r}.",
+                    )
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                if _resolved_table in _CRM_TABLE_ROUTING:
+                    _canonical_tool, _field_map, _ = _CRM_TABLE_ROUTING[_resolved_table]
+                    try:
+                        enforce(_canonical_tool, identity)
+                    except ToolDenied as e:
+                        logger.warning(
+                            "[Dispatcher] airtable_update->%s redirect denied | role=%s | %s",
+                            _canonical_tool, getattr(identity, "role", "unknown"), e,
+                        )
+                        result = _tool_result(ok=False, tool="airtable_update", user_message=f"❌ גישה נחסמה: {e}")
+                        audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                        return result
+
+                    _unsupported = sorted(set(fields) - set(_field_map) - _GENERIC_WRITE_IGNORED_KEYS)
+                    if _unsupported:
+                        result = _tool_result(
+                            ok=False, tool="airtable_update",
+                            user_message=f"❌ שדה לא נתמך בעדכון ישיר לטבלה זו: {_unsupported!r}.",
+                        )
+                        audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                        return result
+
+                    _domain_field = {
+                        Tables.DEALS: DealFields.DOMAIN, Tables.PAYMENTS: PaymentFields.DOMAIN,
+                    }.get(_resolved_table)
+                    if _domain_field and _domain_field in fields:
+                        from core.lead_service import resolve_domain_word
+                        _canonical_domain = resolve_domain_word(str(fields[_domain_field]))
+                        if not _canonical_domain:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[_domain_field]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        fields[_domain_field] = _canonical_domain
+
+                    result = airtable_update(_resolved_table, record_id, fields)
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                result = airtable_update(table, record_id, fields)
                 audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                 return result
 

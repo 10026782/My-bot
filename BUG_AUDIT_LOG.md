@@ -6772,3 +6772,21 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה **רביעית** (אותה הודעה: "צור עסקה בשם X בתחום Y") שהפעם צריכה להצליח עד הסוף.
+
+---
+
+### BUG-CRM-BYPASS-UPDATE — generic airtable_update reached Deals/Payment Terms/Payments with no field allowlist or domain canonicalization
+- **דווח:** 02/09/2026 (אודיט קריאה-בלבד חיצוני על `origin/main`, בעקבות סבב תיקוני BUG-CRM-BYPASS-DOMAIN-TRANSLATION/DEAL-AGENT-FALLTHROUGH)
+- **דווח על ידי:** אודיט אוטומטי (read-only, ללא שינויי קבצים) שסרק את כל שכבת ה-dispatcher/router; הבעלים אישר סדר עדיפויות ובחר את הפריט הזה לתיקון ראשון
+- **מסך / מודול:** `tools/dispatcher.py` (`case "airtable_update":`)
+- **תיאור:** `airtable_add` כבר הופנה (BUG-CRM-BYPASS, 01/09/2026) אל הכותבים הקנוניים עבור Deals/Payment Terms/Payments — אבל `airtable_update` לא קיבל הפניה מקבילה מעולם. `airtable_update(table="Deals"/"Payments"/"Payment Terms", ...)` גולמי היה ממשיך ישר ל-`airtable_update()` הגנרי, בלי allowlist שדות, בלי בדיקת role צרה יותר, ובלי תרגום דומיין (אם עודכן שדה Domain).
+- **Severity:** High (per האודיט) — כתיבת שדה שרירותי/לא-מוכר לטבלת CRM מוגנת, וערך domain גולמי לא-מתורגם יכול להיכתב דרך עדכון (לא רק יצירה).
+- **הבחנה חשובה שנבדקה לפני התיקון:** בניגוד ל-Contacts, אין כותב-update קנוני כללי ("update_deal()") להפנות אליו — ו-`Intent.UPDATE_DEAL_STAGE` (`core/router/risk_router.py`) מסתמך במפורש ולגיטימית על אותו `airtable_update` גנרי היום. **לכן לא ניתן לחסום את הטבלה כליל** — זה היה שובר פיצ'ר קיים אמיתי. נבדק גם ש-`airtable_update`'s roles_allowed הוא כבר `_MANAGEMENT` (לא `_INTERNAL` כמו `airtable_add`) — כך שפער ה"role רחב מגיע לכלי צר" שהיה קיים ב-airtable_add **לא קיים** באותה חומרה כאן; ה-role re-check שנוסף הוא הגנת-עומק (inert כרגע, בטוח לעתיד) לא סגירת פרצת role בפועל.
+- **תוקן ב-commit:** (ראה מיד לאחר merge)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוסף בלוק "Commercial CRM update-boundary closure" ב-`case "airtable_update":`, המפעיל **שימוש חוזר** באותם closed field maps שכבר קיימים ל-create (`_DEAL_FIELD_MAP`/`_PAYMENT_TERM_FIELD_MAP`/`_PAYMENT_FIELD_MAP` דרך `_CRM_TABLE_ROUTING`) — לא מפה חדשה: (1) `enforce(_canonical_tool, identity)` re-check (הגנת-עומק). (2) whitelist שדות — כל שדה שלא מוכר לכותב הקנוני נכשל סגור עם שם השדה בהודעה (לא נשמט בשקט). (3) אם שדה Domain מעודכן, מתורגם דרך `core.lead_service.resolve_domain_word()` — **אותה טבלה משותפת בדיוק** שכבר משמשת ל-Leads ולפרסר הדטרמיניסטי של Deal (BUG-CRM-BYPASS-DOMAIN-TRANSLATION) — מילה לא מוכרת נכשלת סגור. עדכון שדה סטטוס (למשל UPDATE_DEAL_STAGE) ממשיך לעבוד ללא שינוי כי `Stage` כבר קיים ב-`_DEAL_FIELD_MAP`.
+- **Verification:** קובץ regression חדש (`test_bug_crm_bypass_airtable_update.py`) מכסה: עדכון stage לגיטימי ממשיך לעבוד; תרגום דומיין (עברית→קנוני) ודחיית מילה לא-מוכרת; שדה לא-נתמך נכשל סגור עם שם השדה בהודעה; role gate (מתועד שהוא כבר קורה ב-enforce() העליון, לא בבלוק החדש); aliases מוגנים (כולל alias דו-משמעי "PaymentTerms" בלי רווח שנכשל סגור); טבלאות שאינן-CRM (Tasks) לא מושפעות כלל. הורצה סוויטת regression רחבה של ~40 קבצי טסט שמזכירים `airtable_update` — כולם ירוקים, אפס רגרסיות. `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. נותרים פתוחים מהאודיט המקורי (לא בסקופ תיקון זה, לפי בחירת הבעלים): voice legacy Lead writer bypass, gateway-level protected-table enforcement, domain-resolver consolidation, LCH ownership explicit, ו-Agent-fallthrough עבור contacts/events/payments/update_lead.
