@@ -63,6 +63,42 @@ Deals/Payment Terms/Payments **אין** להם כותב-update קנוני כלל
    UPDATE_DEAL_STAGE) כבר קיים ב-`_DEAL_FIELD_MAP`, כך שהפיצ'ר הקיים
    ממשיך לעבוד ללא שינוי.
 
+## תוספת המשך — שער CI מפורש לחוק "airtable_update לנתונים מערכתיים בלבד"
+
+מיד לאחר התיקון לעיל, הבעלים ניסח את העיקרון מאחוריו כחוק כללי מפורש:
+"airtable_update מותר רק לנתונים מערכתיים/תשתיתיים. מידע עסקי חייב לעבור
+דרך writer קנוני ייעודי... זה גם נותן כלל שקל לבדוק ב-CI." — וביקש רשימת
+טבלאות עסקיות מוגנות בת-בדיקה ב-CI.
+
+נוסף שער CI חמישי, `PROTECTED_BUSINESS_TABLE_RAW_UPDATE`, ל-
+`tools/audit_turn_coordinator_bypass.py` — באותו דפוס בדיוק כמו 4 השערים
+הקיימים (registry שדורש רישום מפורש):
+
+```python
+_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY: dict[str, str] = {
+    "enforce_leads_write_gate": "Leads: blocked outright ...",
+    '"אנשי קשר (Contacts)"': "redirected to crm.update_contact() ...",
+    "_CRM_TABLE_ROUTING": "Deals/Payment Terms/Payments: field-allowlist ...",
+}
+```
+
+השער מחלץ את גוף ה-`case "airtable_update":` מ-`tools/dispatcher.py` (regex
+על גבולות ה-case, לא AST מלא — אותה רמת קפדנות כמו שאר השערים בקובץ) ומוודא
+שכל "חתימת הגנה" רשומה עדיין מופיעה בגוף הזה. אם הגנה נעלמת בשקט (למשל
+מישהו "מפשט" את ה-case ומוחק ענף) — השער נכשל, גם על diff שלא נגע ב-CRM
+בכלל.
+
+**אומת בפועל, לא רק תיאורטית:** כל אחת משלוש ההגנות (Leads/Contacts/
+Deals-Payments-PaymentTerms) הוסרה זמנית וידנית מקובץ זמני, אומת שהשער
+נכשל עם ההודעה הנכונה, ואז שוחזר ואומת שהשער עובר שוב — לפני כתיבת
+הטסטים האוטומטיים המקבילים.
+
+**הבהרת scope מכוונת:** `Tasks` (משימות) **אינו** ברשימה. `update_task`/
+`complete_task` מסתמכים גם הם היום על `airtable_update` גנרי ללא
+whitelist — אבל אין להם כותב-update חלופי, ולכן הוספתם לרשימה הייתה
+חוסמת פיצ'ר חי. זו החלטת scope מכוונת, לא פער שנשכח — פתוחה להרחבה
+נפרדת אם וכאשר הבעלים ירצה.
+
 ## מה נשאר פתוח (לא בסקופ תיקון זה)
 
 מתוך 9 הממצאים באודיט, הבעלים בחר בפריט הזה בלבד לתיקון ראשון. נותרו
@@ -84,6 +120,9 @@ Deals/Payment Terms/Payments **אין** להם כותב-update קנוני כלל
   דו-משמעי), וטבלאות לא-CRM (לא מושפעות).
 - כ-40 קובצי טסט קיימים שמזכירים `airtable_update` (Leads/Tasks/Contacts/
   approval flows) — כולם ירוקים, אפס רגרסיות.
+- `test_audit_turn_coordinator_bypass.py` — 5 טסטים חדשים לשער החמישי
+  (21/21 עם הקיימים): הקוד האמיתי נקי, חילוץ גוף ה-case, שער חסר לגמרי,
+  הגנה חסרה מזוהה, כל ההגנות קיימות → נקי.
 - `python3 -m compileall -q .`, `smoke_tests.py`,
   `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`,
   imports (`app`/`tma_api`/`tools.dispatcher`) — עברו.

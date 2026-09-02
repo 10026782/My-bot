@@ -59,6 +59,23 @@ was broken:
      example) — an unregistered one blocks. Removing the custom
      fingerprint_payload entirely (never diverge from the real dispatched
      payload) is always the preferred fix over registering a new exception.
+  5. PROTECTED_BUSINESS_TABLE_RAW_UPDATE — BUG-CRM-BYPASS-UPDATE follow-up,
+     owner rule (02/09/2026): tools/airtable_tools.py's generic
+     "airtable_update" may only write system/infrastructure data (Sessions,
+     schema snapshots, tenant config, ...) directly. Business records
+     (Leads, Contacts, Deals, Payment Terms, Payments) must either be
+     blocked outright or pass through a canonical-writer redirect / a
+     field-allowlist + canonicalization gate before ever reaching a raw
+     write — never straight through. Checked against the CURRENT tree
+     unconditionally: tools/dispatcher.py's `case "airtable_update":` block
+     must still contain a recognizable protection signature for every
+     entry in _PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY before that block's
+     final, unconditional generic-write fallback line — if a signature
+     silently disappears (e.g. someone "simplifies" the case statement and
+     drops a branch), this fails even on an unrelated change. A brand-new
+     protected business table needs an explicit new registry entry naming
+     its protection mechanism — the same "register or fail" discipline as
+     guards 2 and 4 above.
 
 Static and read-only. No runtime or persistence side effects.
 """
@@ -77,6 +94,7 @@ ROUTER_PY = ROOT / "core/router/router.py"
 ROUTE_DECISION_PY = ROOT / "core/router/route_decision.py"
 TOOL_REGISTRY_PY = ROOT / "tool_registry.py"
 SCHEMAS_PY = ROOT / "tools/schemas.py"
+DISPATCHER_PY = ROOT / "tools/dispatcher.py"
 
 # Every Intent that MUST keep a live Handler.TOOL (certain) + Handler.CLARIFY
 # (uncertain) deterministic gate in core/router/router.py. Adding an intent
@@ -117,6 +135,37 @@ _FINGERPRINT_DIVERGENCE_REGISTRY: dict[tuple[str, str], str] = {
         "field is Airtable type 'date', not 'dateTime', so no write ever "
         "persists a time value; business_identity() agrees with the real "
         "dispatched payload on every other key (table alias, field name)."
+    ),
+}
+
+# Table-name/mechanism-name literal -> documented protection mechanism.
+# Each key must appear, verbatim, somewhere inside tools/dispatcher.py's
+# `case "airtable_update":` block (checked by check_protected_business_
+# table_raw_update() below) -- if a key silently disappears from that
+# source, the corresponding protection was removed, whether or not the
+# table name itself was touched. New protected business tables require an
+# explicit new entry naming their protection mechanism; a table this
+# session's owner rule (02/09/2026) explicitly excludes -- system/
+# infrastructure data (Sessions, schema snapshots, tenant config, feature
+# flags, ...) -- must NEVER be added here, since airtable_update writing
+# those directly is the intended, allowed behavior.
+_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY: dict[str, str] = {
+    "enforce_leads_write_gate": (
+        "Leads: blocked outright via enforce_leads_write_gate() -- no "
+        "canonical update writer exists or is needed; Lead edits happen "
+        "through the TMA UI, never the chat Agent."
+    ),
+    '"אנשי קשר (Contacts)"': (
+        "redirected to the canonical writer crm.update_contact()."
+    ),
+    "_CRM_TABLE_ROUTING": (
+        "Deals/Payment Terms/Payments (BUG-CRM-BYPASS-UPDATE, 02/09/2026): "
+        "field-allowlist + domain canonicalization gate reusing the same "
+        "closed field maps the create path already validates against -- "
+        "no general canonical update writer exists yet (Intent."
+        "UPDATE_DEAL_STAGE legitimately depends on this same generic "
+        "airtable_update today), so this is the enforceable floor until "
+        "one does."
     ),
 }
 
@@ -422,12 +471,62 @@ def check_fingerprint_payload_divergence() -> list[str]:
     return failures
 
 
+_AIRTABLE_UPDATE_CASE_RE = re.compile(
+    r'case\s+"airtable_update":\s*\n(?P<body>.*?)(?=\n {12}case\s+"|\Z)',
+    re.DOTALL,
+)
+
+
+def find_airtable_update_case_body(dispatcher_source: str) -> str | None:
+    """Returns tools/dispatcher.py's `case "airtable_update":` block source
+    (from just after the case line to the next same-indent `case` or EOF),
+    or None if the case itself can no longer be found at all."""
+    match = _AIRTABLE_UPDATE_CASE_RE.search(dispatcher_source)
+    return match.group("body") if match else None
+
+
+def check_protected_business_table_raw_update() -> list[str]:
+    """BUG-CRM-BYPASS-UPDATE follow-up, owner rule (02/09/2026): airtable_update
+    may only write system/infrastructure data directly -- every business
+    table's protection mechanism (block or canonical-writer/allowlist
+    redirect) must still be present in tools/dispatcher.py's `case
+    "airtable_update":` block. This is a textual-presence check (the same
+    rigor level as this script's other guards), not a full control-flow
+    proof -- it catches a registered protection's signature silently
+    disappearing from the block, not every conceivable new bypass."""
+    if not DISPATCHER_PY.exists():
+        return [f"{DISPATCHER_PY.relative_to(ROOT)} no longer exists — cannot verify airtable_update protections."]
+    source = _read(DISPATCHER_PY)
+    body = find_airtable_update_case_body(source)
+    if body is None:
+        return [
+            'tools/dispatcher.py no longer has a `case "airtable_update":` '
+            "block at all — every registered business-table protection "
+            "(_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY) is unverifiable."
+        ]
+    failures: list[str] = []
+    for signature, reason in _PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY.items():
+        if signature not in body:
+            failures.append(
+                f'tools/dispatcher.py\'s `case "airtable_update":` block no '
+                f"longer contains the protection signature {signature!r} — "
+                f"its registered protection ({reason}) appears to have been "
+                f"removed. Business records must never reach a raw, "
+                f"unvalidated airtable_update; restore the protection or, if "
+                f"it was deliberately replaced, update "
+                f"_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY to match the new "
+                f"mechanism's signature."
+            )
+    return failures
+
+
 def main() -> int:
     failures: list[str] = []
     failures += check_route_regressions()
     failures += check_new_unrouted_tools()
     failures += check_schema_nudge_language()
     failures += check_fingerprint_payload_divergence()
+    failures += check_protected_business_table_raw_update()
     if failures:
         print(
             "FAIL: Turn Coordinator / Single Speaker architecture bypass risk detected:",

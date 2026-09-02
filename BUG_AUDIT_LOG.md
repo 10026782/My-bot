@@ -6790,3 +6790,20 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. נותרים פתוחים מהאודיט המקורי (לא בסקופ תיקון זה, לפי בחירת הבעלים): voice legacy Lead writer bypass, gateway-level protected-table enforcement, domain-resolver consolidation, LCH ownership explicit, ו-Agent-fallthrough עבור contacts/events/payments/update_lead.
+
+---
+
+### PROTECTED-BUSINESS-TABLE-RAW-UPDATE-CI-GUARD — CI guard formalizing "airtable_update is for system/infra data only"
+- **דווח:** 02/09/2026 (בעלים, ניסוח מפורש של כלל ארכיטקטורה בעקבות BUG-CRM-BYPASS-UPDATE)
+- **דווח על ידי:** בעלים: "airtable_update מותר רק לנתונים מערכתיים/תשתיתיים. מידע עסקי חייב לעבור דרך writer קנוני ייעודי... זה גם נותן כלל שקל לבדוק ב-CI."
+- **מסך / מודול:** `tools/audit_turn_coordinator_bypass.py` (שער CI חמישי חדש), `test_audit_turn_coordinator_bypass.py`
+- **תיאור:** הבעלים ניסח במפורש את הכלל הארכיטקטוני מאחורי BUG-CRM-BYPASS-UPDATE כחוק כללי: `airtable_update` מותר לכתוב ישירות רק לנתונים מערכתיים/תשתיתיים (Sessions, schema snapshots, tenant config וכו') — מידע עסקי (Leads, Contacts, Deals, Payment Terms, Payments) חייב לעבור דרך הפניה לכותב קנוני, שכבת whitelist+ולידציה, או חסימה מוחלטת — לעולם לא כתיבה גולמית. ביקש שהחוק הזה יהיה **בר-בדיקה ב-CI**, עם רשימת טבלאות עסקיות מוגנות.
+- **Severity:** N/A — זהו תיקון גילוי-רגרסיה (CI enforcement), לא תיקון באג פונקציונלי. שלוש ההגנות שהחוק מגן עליהן (Leads/Contacts/Deals-Payments-PaymentTerms) כבר קיימות בפועל (Leads/Contacts מלפני היום, Deals/Payments/PaymentTerms מ-BUG-CRM-BYPASS-UPDATE באותו יום) — השער מוודא שהן **יישארו** קיימות.
+- **תוקן ב-commit:** (ראה מיד לאחר merge, אותו commit/branch כמו BUG-CRM-BYPASS-UPDATE)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוסף שער CI חמישי (`PROTECTED_BUSINESS_TABLE_RAW_UPDATE`) ל-`tools/audit_turn_coordinator_bypass.py`, באותו דפוס בדיוק כמו השערים הקיימים (registry דורש רישום מפורש, נכשל אם חסר): `_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY` ממפה "חתימת הגנה" טקסטואלית (`"enforce_leads_write_gate"`, `'"אנשי קשר (Contacts)"'`, `"_CRM_TABLE_ROUTING"`) למנגנון ההגנה המתועד שלה. השער מחלץ את גוף ה-`case "airtable_update":` מתוך `tools/dispatcher.py` (regex, לא AST מלא — אותה רמת קפדנות כמו שאר השערים בקובץ) ומוודא שכל חתימה רשומה עדיין מופיעה שם. **נבדק בפועל** (לא רק תיאורטית) — כל אחת משלוש ההגנות הוסרה זמנית וידנית ואומת שהשער אכן נכשל, ואז שוחזרה ואומת שהשער עובר שוב.
+- **Verification:** נוספו 5 טסטים חדשים ל-`test_audit_turn_coordinator_bypass.py` (21/21 עם הקיימים): `check_protected_business_table_raw_update()` על הקוד האמיתי (0 כשלים), חילוץ גוף ה-case, שער חסר לגמרי, הגנה חסרה מזוהה, כל ההגנות קיימות → נקי. `python3 -m compileall -q .`, `smoke_tests.py`, `tools/status_sync_validator.py`, imports — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** N/A — שער CI בלבד, לא קוד runtime
+- **Verified בפרודקשן:** N/A
+- **סטטוס:** Fixed (STATIC_VERIFIED). **הבהרה לגבי scope:** החוק המנוסח מכסה כרגע רק Leads/Contacts/Deals/Payment Terms/Payments (הטבלאות שכבר טופלו). Tasks **לא** נכלל ברשימה — `update_task`/`complete_task` מסתמכים אף הם כרגע על `airtable_update` גנרי ללא whitelist, אבל התאמת אותם לכלל הזה הייתה חוסמת פיצ'ר חי ללא כותב-update חלופי, ולכן הושארה בכוונה מחוץ לסקופ הפריט הזה — פתוחה לבירור נפרד אם וכאשר הבעלים ירצה להרחיב את הרשימה.
