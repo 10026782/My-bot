@@ -128,7 +128,35 @@ whitelist — אבל אין להם כותב-update חלופי, ולכן הוספ
   imports (`app`/`tma_api`/`tools.dispatcher`) — עברו.
 - `git diff --check` — נקי.
 
+## תוספת המשך ב' — הרחבה ל-Tasks (BUG-CRM-BYPASS-UPDATE-TASKS)
+
+הבעלים ביקש במפורש: "yes bring Tasks under this same rule" — מיד לאחר
+ההבהרה ש-Tasks היה מוצא בכוונה מהסקופ הקודם. `update_task`/`complete_task`
+הסתמכו על אותו `airtable_update` גנרי בדיוק, ללא whitelist ובלי תרגום
+דומיין.
+
+**הבחנה שנבדקה:** ל-Tasks אין כותב-create ייעודי צר יותר מ-`airtable_add`
+(בשונה מ-Deal's `crm_create_deal`) — יצירת Task מגודרת רק ע"י ניתוב
+דטרמיניסטי, לא ע"י זהות הכלי. לכן אין כאן פער role לבדוק — רק whitelist
+שדות ותרגום דומיין, אותו דפוס בדיוק כמו ה-CRM.
+
+**התיקון:** `_TASK_ALLOWED_UPDATE_FIELDS` — frozenset שמות שדות (כל
+`TaskFields`: NAME/DESCRIPTION/DUE_DATE/STATUS/CONTACTS_LINK/DEALS_LINK/
+DOMAIN/OWNER/LEAD_LINK). Whitelist שמות-שדות פשוט (בלי המרת kwargs — אין
+writer להפנות אליו). שדה `Domain` מעודכן מתורגם דרך `resolve_domain_word()`.
+נרשם ב-`_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY` של השער.
+
+**Verification:** אומת בפועל (לא רק תיאורטית) שהסרת `_TASK_ALLOWED_UPDATE_FIELDS`
+גורמת לשער להיכשל, ואז שוחזר. `test_bug_crm_bypass_airtable_update.py`
+עודכן (הסעיף הישן "Tasks unaffected" הוסר — כבר לא נכון). `test_audit_
+turn_coordinator_bypass.py` — 2 טסטים חדשים (22/22). סוויטת regression
+מלאה של קבצי Tasks/`TaskFields`/`airtable_update` — כולם ירוקים, כולל
+`update_task`/`complete_task`'s שימוש הקיים ב-STATUS.
+
+עם זה, כל 6 הטבלאות מהחוק המקורי של הבעלים (Leads/Contacts/Deals/Payment
+Terms/Payments/Tasks) מוגנות תחת אותו עיקרון אחיד.
+
 ## סטטוס
 
-קוד מומש ונבדק מקומית (STATIC_VERIFIED). **לא מוזג, לא deployed, לא
-verified בפרודקשן.**
+קוד מומש ונבדק מקומית (STATIC_VERIFIED) עבור כל ההרחבות. **לא מוזג, לא
+deployed, לא verified בפרודקשן.**

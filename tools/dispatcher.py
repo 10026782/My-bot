@@ -18,7 +18,7 @@ from .sheets_tools   import sheets_append
 from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead, _tool_result
 from airtable_schema import (
     DealStage, PaymentTermTrigger, PaymentTermCadence, VATRule,
-    Tables, DealFields, PaymentTermFields, PaymentFields,
+    Tables, DealFields, PaymentTermFields, PaymentFields, TaskFields,
 )
 from .airtable_read_adapter import AirtableReadError, list_records
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
@@ -168,6 +168,23 @@ _PROTECTED_CRM_ALIASES: dict[str, str] = {
     "Payment Terms": Tables.PAYMENT_TERMS,
     "Payments": Tables.PAYMENTS,
 }
+
+# BUG-CRM-BYPASS-UPDATE follow-up (owner rule, 02/09/2026): "airtable_update
+# is for system/infrastructure data only; business records must be blocked
+# or redirected — never a raw write" extended to Tasks. Unlike Deals/
+# Payment Terms/Payments there is no separate dedicated create-tool for
+# Tasks to under-cut (Task creation itself goes through the SAME
+# airtable_add, gated only by the deterministic route, not by tool
+# identity) — so there is no "wider role reaches narrower tool" gap to
+# re-check here, only the same missing-allowlist/missing-domain-
+# canonicalization gap Deals/Payments had. A plain field-name allowlist
+# (no kwarg conversion — there's no writer function to redirect to, same
+# as Deals/Payments' update path) is the enforceable floor.
+_TASK_ALLOWED_UPDATE_FIELDS: frozenset[str] = frozenset({
+    TaskFields.NAME, TaskFields.DESCRIPTION, TaskFields.DUE_DATE,
+    TaskFields.STATUS, TaskFields.CONTACTS_LINK, TaskFields.DEALS_LINK,
+    TaskFields.DOMAIN, TaskFields.OWNER, TaskFields.LEAD_LINK,
+})
 
 
 def _resolve_authenticated_crm_owner(identity, requested_owner: object) -> tuple[str | None, str]:
@@ -812,6 +829,40 @@ def dispatch_tool(
                         fields[_domain_field] = _canonical_domain
 
                     result = airtable_update(_resolved_table, record_id, fields)
+                    audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                # BUG-CRM-BYPASS-UPDATE follow-up: same rule extended to
+                # Tasks (owner request, 02/09/2026) — a field-name allowlist
+                # (_TASK_ALLOWED_UPDATE_FIELDS) plus Domain-field
+                # canonicalization, mirroring the CRM block above. No role
+                # re-check here: there is no dedicated create-tool narrower
+                # than airtable_add/airtable_update for Tasks to under-cut.
+                if _ALIAS_MAP.get(table, table) == Tables.TASKS:
+                    _unsupported_task_fields = sorted(
+                        set(fields) - _TASK_ALLOWED_UPDATE_FIELDS - _GENERIC_WRITE_IGNORED_KEYS
+                    )
+                    if _unsupported_task_fields:
+                        result = _tool_result(
+                            ok=False, tool="airtable_update",
+                            user_message=f"❌ שדה לא נתמך בעדכון ישיר לטבלה זו: {_unsupported_task_fields!r}.",
+                        )
+                        audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                        return result
+
+                    if TaskFields.DOMAIN in fields:
+                        from core.lead_service import resolve_domain_word
+                        _canonical_task_domain = resolve_domain_word(str(fields[TaskFields.DOMAIN]))
+                        if not _canonical_task_domain:
+                            result = _tool_result(
+                                ok=False, tool="airtable_update",
+                                user_message=f"❌ תחום לא מוכר: {fields[TaskFields.DOMAIN]!r}.",
+                            )
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        fields[TaskFields.DOMAIN] = _canonical_task_domain
+
+                    result = airtable_update(Tables.TASKS, record_id, fields)
                     audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                     return result
 

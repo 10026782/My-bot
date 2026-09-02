@@ -6807,3 +6807,21 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** N/A — שער CI בלבד, לא קוד runtime
 - **Verified בפרודקשן:** N/A
 - **סטטוס:** Fixed (STATIC_VERIFIED). **הבהרה לגבי scope:** החוק המנוסח מכסה כרגע רק Leads/Contacts/Deals/Payment Terms/Payments (הטבלאות שכבר טופלו). Tasks **לא** נכלל ברשימה — `update_task`/`complete_task` מסתמכים אף הם כרגע על `airtable_update` גנרי ללא whitelist, אבל התאמת אותם לכלל הזה הייתה חוסמת פיצ'ר חי ללא כותב-update חלופי, ולכן הושארה בכוונה מחוץ לסקופ הפריט הזה — פתוחה לבירור נפרד אם וכאשר הבעלים ירצה להרחיב את הרשימה.
+
+---
+
+### BUG-CRM-BYPASS-UPDATE-TASKS — extended the "airtable_update for system data only" rule to Tasks
+- **דווח:** 02/09/2026 (בעלים: "yes bring Tasks under this same rule", תגובה ישירה לפריט הקודם)
+- **דווח על ידי:** בעלים, בעקבות ההבהרה המפורשת שהחוק לא כיסה את Tasks
+- **מסך / מודול:** `tools/dispatcher.py` (`case "airtable_update":`), `tools/audit_turn_coordinator_bypass.py` (הרחבת `_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY`)
+- **תיאור:** בהמשך ישיר ל-BUG-CRM-BYPASS-UPDATE ולשער ה-CI שנוסף עבורו, הבעלים ביקש להרחיב את החוק ("airtable_update לנתונים מערכתיים בלבד") גם ל-Tasks, שהוצא בכוונה מהסקופ הקודם. `update_task`/`complete_task` הסתמכו על `airtable_update` גנרי ללא whitelist שדות ובלי תרגום דומיין — אותה מחלקת פער בדיוק כמו Deals/Payments לפני BUG-CRM-BYPASS-UPDATE.
+- **הבחנה חשובה שנבדקה לפני התיקון:** בניגוד ל-Deals (שיש להם `crm_create_deal` כתוסף ייעודי צר יותר מ-`airtable_add`), ל-Tasks **אין** כותב-create ייעודי נפרד כלל — יצירת Task עצמה עוברת דרך אותו `airtable_add` גנרי, מגודרת רק ע"י הניתוב הדטרמיניסטי (לא ע"י זהות הכלי). לכן **אין** כאן פער "role רחב מגיע לכלי צר" לבדוק מחדש — רק את אותו פער whitelist/דומיין שכבר נסגר ל-CRM.
+- **Severity:** Medium — כמו ה-CRM המקביל: כתיבת שדה שרירותי/לא-מוכר ל-Tasks, וערך domain גולמי לא-מתורגם (שדה `Domain` ב-Tasks, "מועתק מ-Lead ביצירה-מ-ליד") יכול היה להיכתב ללא ולידציה.
+- **תוקן ב-commit:** (ראה מיד לאחר merge, אותו commit/branch כמו BUG-CRM-BYPASS-UPDATE)
+- **תוקן ב-branch:** `claude/fix-crm-airtable-update-bypass`
+- **תיקון:** נוסף `_TASK_ALLOWED_UPDATE_FIELDS` (frozenset שמות שדות Airtable מותרים: NAME/DESCRIPTION/DUE_DATE/STATUS/CONTACTS_LINK/DEALS_LINK/DOMAIN/OWNER/LEAD_LINK — כל `TaskFields`) — whitelist שמות-שדות פשוט, **בלי** המרת kwargs (אין פונקציית writer להפנות אליה, בדיוק כמו נתיב העדכון של Deals/Payments). ענף חדש ב-`case "airtable_update":`, ממוקם לפני ה-fallback הגנרי הסופי: שדה לא-מוכר נכשל סגור עם שמו בהודעה; אם `TaskFields.DOMAIN` מעודכן, מתורגם דרך `resolve_domain_word()` — **אותה טבלה משותפת בדיוק**. נרשם `_TASK_ALLOWED_UPDATE_FIELDS` ב-`_PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY` של שער ה-CI, כך שהסרה שקטה של ההגנה תיתפס.
+- **Verification:** `test_bug_crm_bypass_airtable_update.py` הורחב (סעיף Tasks חדש — עדכון סטטוס לגיטימי ממשיך לעבוד, aliases, שדה לא-נתמך נכשל סגור, תרגום/דחיית דומיין) — הסעיף הישן "Tasks unaffected" הוסר כי כבר לא נכון (Tasks כן מוגן כעת). `test_audit_turn_coordinator_bypass.py` — 2 טסטים חדשים (22/22 סה"כ): הסרת ה-allowlist מזוהה, קיום ההגנה נבדק. אומת ישירות (לא רק תיאורטית) שהסרת `_TASK_ALLOWED_UPDATE_FIELDS` מקובץ זמני גורמת לשער להיכשל, ואז שוחזר. הורצה סוויטת regression רחבה של כל קבצי הטסט שנוגעים ב-Tasks/`TaskFields`/`airtable_update` (`core/router/test_task_builders.py`, `core/router/test_task_integration.py`, `test_create_task_deterministic_route.py`, `test_turn_coordinator_task_runtime_integration.py`, `test_bug_task_01_execution_proof_fingerprint_parity.py`, ועוד) — כולם ירוקים, אפס רגרסיות (כולל `update_task`/`complete_task`'s שימוש הקיים ב-`STATUS`, ששייך ל-allowlist). `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, `tools/status_sync_validator.py`, imports — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. עם התיקון הזה, כל 6 הטבלאות שהוזכרו במפורש בחוק המקורי של הבעלים (Leads/Contacts/Deals/Payment Terms/Payments/Tasks) מוגנות תחת אותו עיקרון אחיד.

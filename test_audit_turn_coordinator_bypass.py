@@ -233,6 +233,9 @@ _LIVE_UPDATE_CASE_SNIPPET = '''
                     result = crm.update_contact(record_id, fields, source="agent")
                 elif _resolved_table in _CRM_TABLE_ROUTING:
                     result = airtable_update(_resolved_table, record_id, fields)
+                elif _ALIAS_MAP.get(table, table) == Tables.TASKS:
+                    _unsupported = set(fields) - _TASK_ALLOWED_UPDATE_FIELDS
+                    result = airtable_update(Tables.TASKS, record_id, fields)
                 else:
                     result = airtable_update(table, record_id, fields)
                 return result
@@ -244,7 +247,7 @@ _LIVE_UPDATE_CASE_SNIPPET = '''
 
 def test_current_repo_has_no_protected_business_table_regressions():
     """Runs against the real, current source — proves today's protections
-    (Leads/Contacts/Deals/Payment Terms/Payments) are all still wired."""
+    (Leads/Contacts/Deals/Payment Terms/Payments/Tasks) are all still wired."""
     assert audit.check_protected_business_table_raw_update() == []
 
 
@@ -253,6 +256,7 @@ def test_find_airtable_update_case_body_extracts_only_that_case():
     assert body is not None
     assert "enforce_leads_write_gate" in body
     assert "_CRM_TABLE_ROUTING" in body
+    assert "_TASK_ALLOWED_UPDATE_FIELDS" in body
     assert "airtable_get_schema" not in body  # next case must not leak in
 
 
@@ -266,12 +270,16 @@ def test_missing_case_entirely_is_flagged(monkeypatch, tmp_path):
 
 def test_removed_protection_signature_is_flagged(monkeypatch, tmp_path):
     dispatcher = tmp_path / "dispatcher.py"
-    # Contacts' redirect signature is missing entirely from this snippet.
+    # Contacts' redirect signature is missing entirely from this snippet
+    # (every other protection, including Tasks, is present).
     dispatcher.write_text('''
             case "airtable_update":
                 enforce_leads_write_gate("airtable_update", {"table": table}, source=_write_source)
                 if _resolved_table in _CRM_TABLE_ROUTING:
                     result = airtable_update(_resolved_table, record_id, fields)
+                elif _ALIAS_MAP.get(table, table) == Tables.TASKS:
+                    _unsupported = set(fields) - _TASK_ALLOWED_UPDATE_FIELDS
+                    result = airtable_update(Tables.TASKS, record_id, fields)
                 else:
                     result = airtable_update(table, record_id, fields)
 ''', encoding="utf-8")
@@ -279,6 +287,27 @@ def test_removed_protection_signature_is_flagged(monkeypatch, tmp_path):
     failures = audit.check_protected_business_table_raw_update()
     assert any("אנשי קשר (Contacts)" in f for f in failures)
     assert not any("enforce_leads_write_gate" in f and "no longer contains" in f for f in failures)
+    assert not any("_TASK_ALLOWED_UPDATE_FIELDS" in f for f in failures)
+
+
+def test_removed_task_allowlist_signature_is_flagged(monkeypatch, tmp_path):
+    dispatcher = tmp_path / "dispatcher.py"
+    # Tasks' field allowlist is missing entirely; every other protection
+    # (including Contacts) is present.
+    dispatcher.write_text('''
+            case "airtable_update":
+                enforce_leads_write_gate("airtable_update", {"table": table}, source=_write_source)
+                if _ALIAS_MAP.get(table, table) == "אנשי קשר (Contacts)":
+                    result = crm.update_contact(record_id, fields, source="agent")
+                elif _resolved_table in _CRM_TABLE_ROUTING:
+                    result = airtable_update(_resolved_table, record_id, fields)
+                else:
+                    result = airtable_update(table, record_id, fields)
+''', encoding="utf-8")
+    monkeypatch.setattr(audit, "DISPATCHER_PY", dispatcher)
+    failures = audit.check_protected_business_table_raw_update()
+    assert any("_TASK_ALLOWED_UPDATE_FIELDS" in f for f in failures)
+    assert not any("אנשי קשר (Contacts)" in f for f in failures)
 
 
 def test_all_protections_present_is_clean(monkeypatch, tmp_path):

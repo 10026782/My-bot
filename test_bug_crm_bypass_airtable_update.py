@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 test_bug_crm_bypass_airtable_update.py — BUG-CRM-BYPASS-UPDATE
-(closes the generic airtable_update bypass into Deals/Payments; Payment
-Terms updates are equally protected via the same _CRM_TABLE_ROUTING map).
+(closes the generic airtable_update bypass into Deals/Payments/Payment
+Terms via _CRM_TABLE_ROUTING, and into Tasks via _TASK_ALLOWED_UPDATE_FIELDS).
 
 Found during an external read-only audit of origin/main (02/09/2026),
 immediately after BUG-CRM-BYPASS/BUG-CRM-BYPASS-DOMAIN-TRANSLATION closed
@@ -26,6 +26,15 @@ through core.lead_service.resolve_domain_word() -- the same shared resolver
 Leads and (as of BUG-CRM-BYPASS-DOMAIN-TRANSLATION) the deterministic Deal
 parser already use.
 
+Follow-up (owner rule, 02/09/2026): "airtable_update may only write system/
+infrastructure data directly; business records must be blocked or
+redirected" extended to Tasks. Tasks has no dedicated create-tool narrower
+than airtable_add/airtable_update to under-cut (Task creation itself goes
+through the SAME airtable_add, gated only by deterministic routing, not
+tool identity), so there is no role-gap to re-check -- only the same
+missing field-allowlist/domain-canonicalization gap, closed the same way
+via a plain field-name allowlist (_TASK_ALLOWED_UPDATE_FIELDS).
+
 This file exercises the REAL dispatch_tool()/enforce()/field-allowlist
 logic end-to-end; the underlying airtable_update() call is mocked (no live
 Airtable access), matching test_bug_commercial_crm_dispatcher_bypass_closure.py's
@@ -47,7 +56,7 @@ os.environ["FEATURE_ACTION_CONTRACT_PERSISTENCE"] = "false"
 
 import tools.dispatcher as dispatcher_module  # noqa: E402
 from tools.dispatcher import dispatch_tool  # noqa: E402
-from airtable_schema import Tables, DealFields, PaymentFields, DealStage  # noqa: E402
+from airtable_schema import Tables, DealFields, PaymentFields, DealStage, TaskFields  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 
 _no_emergency_stop = patch.object(dispatcher_module._ff, "is_enabled", return_value=False)
@@ -191,17 +200,77 @@ chk("Ambiguous protected-looking alias: never reaches any writer",
 
 
 # ══════════════════════════════════════════════════════════════════
-print("\n── non-CRM tables are entirely unaffected ──")
+print("\n── Tasks: legitimate updates still work, unsupported fields fail closed ──")
 
 with patch.object(dispatcher_module, "airtable_update", return_value={
     "ok": True, "tool": "airtable_update", "external_id": "recTASK01",
     "evidence": {}, "user_message": "✅",
 }) as m_task:
     result_task = _dispatch("airtable_update", {
-        "table": "משימות (Tasks)", "record_id": "recTASK01", "fields": {"סטטוס": "בוצע"},
+        "table": "משימות (Tasks)", "record_id": "recTASK01",
+        "fields": {TaskFields.STATUS: "בוצע"},
     }, owner)
-chk("Tasks update: unaffected by the CRM field allowlist (any field passes through)",
+chk("Task status update: still reaches the generic writer (allowed field)",
     m_task.call_count == 1 and result_task.get("ok") is True)
+
+for alias in ("Tasks", "משימות (Tasks)", Tables.TASKS):
+    with patch.object(dispatcher_module, "airtable_update", return_value={
+        "ok": True, "tool": "airtable_update", "external_id": "recTASK01",
+        "evidence": {}, "user_message": "✅",
+    }) as m_task_alias:
+        _dispatch("airtable_update", {
+            "table": alias, "record_id": "recTASK01",
+            "fields": {TaskFields.DESCRIPTION: "d"},
+        }, owner)
+    chk(f"Task alias {alias!r}: resolves to the Tasks allowlist", m_task_alias.call_count == 1)
+
+with patch.object(dispatcher_module, "airtable_update") as m_task_unmapped:
+    result_task_bad_field = _dispatch("airtable_update", {
+        "table": "משימות (Tasks)", "record_id": "recTASK01",
+        "fields": {"שדה_לא_קיים_בכלל": "value that must never be silently written"},
+    }, owner)
+chk("Task update: unrecognized field -> fail closed (ok=False)",
+    result_task_bad_field.get("ok") is False)
+chk("Task update: the unrecognized field name is named in the message",
+    "שדה_לא_קיים_בכלל" in result_task_bad_field.get("user_message", ""))
+chk("Task update: generic airtable_update was NEVER called for an unmappable payload",
+    m_task_unmapped.call_count == 0)
+
+with patch.object(dispatcher_module, "airtable_update", return_value={
+    "ok": True, "tool": "airtable_update", "external_id": "recTASK01",
+    "evidence": {}, "user_message": "✅",
+}) as m_task_domain:
+    result_task_domain = _dispatch("airtable_update", {
+        "table": "משימות (Tasks)", "record_id": "recTASK01",
+        "fields": {TaskFields.DOMAIN: "יבוא"},
+    }, owner)
+chk("Task domain update: raw Hebrew word canonicalized before the write",
+    m_task_domain.call_args.args[2][TaskFields.DOMAIN] == "import")
+chk("Task domain update: succeeds once canonicalized", result_task_domain.get("ok") is True)
+
+with patch.object(dispatcher_module, "airtable_update") as m_task_bad_domain:
+    result_task_bad_domain = _dispatch("airtable_update", {
+        "table": "משימות (Tasks)", "record_id": "recTASK01",
+        "fields": {TaskFields.DOMAIN: "שטויות"},
+    }, owner)
+chk("Task domain update: unrecognized word fails closed (ok=False)",
+    result_task_bad_domain.get("ok") is False)
+chk("Task domain update: unrecognized word never reaches Airtable",
+    m_task_bad_domain.call_count == 0)
+
+
+# ══════════════════════════════════════════════════════════════════
+print("\n── non-protected tables are entirely unaffected ──")
+
+with patch.object(dispatcher_module, "airtable_update", return_value={
+    "ok": True, "tool": "airtable_update", "external_id": "recX01",
+    "evidence": {}, "user_message": "✅",
+}) as m_other:
+    result_other = _dispatch("airtable_update", {
+        "table": "Expenses", "record_id": "recX01", "fields": {"כל שדה שהוא": "value"},
+    }, owner)
+chk("A table with no registered allowlist (Expenses): any field passes through unchanged",
+    m_other.call_count == 1 and result_other.get("ok") is True)
 
 
 print()

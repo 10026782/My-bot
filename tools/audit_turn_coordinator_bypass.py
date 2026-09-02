@@ -167,6 +167,13 @@ _PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY: dict[str, str] = {
         "airtable_update today), so this is the enforceable floor until "
         "one does."
     ),
+    "_TASK_ALLOWED_UPDATE_FIELDS": (
+        "Tasks (BUG-CRM-BYPASS-UPDATE follow-up, owner rule, 02/09/2026): "
+        "plain field-name allowlist -- no dedicated create-tool narrower "
+        "than airtable_add/airtable_update exists for Tasks to under-cut, "
+        "so this closes only the missing field-allowlist/domain-"
+        "canonicalization gap, same as the CRM tables above."
+    ),
 }
 
 _TOOL_GATE_RE = re.compile(
