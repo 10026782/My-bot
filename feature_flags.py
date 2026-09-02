@@ -43,6 +43,11 @@ LEAD PIPELINE:
   FOLLOWUP_AUTOMATION         - scheduler סורק לידים HOT, מעלה לאישור
   LEAD_RECOVERY               - זיהוי לידים דועכים + שליחה מחדש
   ABANDONED_LEADS             - מעקב לידים שנטשו
+  LEAD_TO_DEAL                 - /dealfromlead: פותח crm_create_deal מליד קיים
+                                  עם Origin Lead מקושר (owner בלבד, resolve
+                                  בלבד ב-lead_conversion.resolve_lead_for_deal,
+                                  הכתיבה עצמה עוברת אישור אינטראקטיבי רגיל
+                                  דרך app.py's _queue_deterministic_create_deal)
 
 INFRA / DATA:
   COST_WATCHDOG_LIVE          - לוג שימוש + daily Sonnet limit (CORE_05)

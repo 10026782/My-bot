@@ -100,6 +100,31 @@ was broken:
      the CURRENT tree unconditionally, that every `_queue_deterministic_*`
      function in app.py calls it, so a brand-new sibling writer can never
      ship this duplicate-message bug by omission again.
+  7. CRM_CREATE_DEAL_SINGLE_PAYLOAD_BUILDER — LEAD-TO-DEAL-ORIGIN-LINK
+     (02/09/2026): a Lead→Deal gap audit found that the deterministic Deal
+     route (guard 1's create_deal Handler.TOOL gate) had no inlet for
+     origin_lead_id — every Lead-linked Deal could only be created via the
+     Agent path this whole file exists to route around. The fix
+     (app.py's _queue_deterministic_create_deal() gaining an
+     origin_lead_id parameter, and a new /dealfromlead command supplying
+     it via lead_conversion.resolve_lead_for_deal()) deliberately reuses
+     that ONE existing function rather than adding a second call site that
+     builds its own tool_inputs dict — the exact same "shared writer, not
+     a hand-mirrored copy" discipline guard 6 already enforces for reply
+     finalization, applied here to payload construction. The deterministic
+     route never calls the writer (commercial_crm.create_deal) directly —
+     like every tool, it proposes a crm_create_deal ActionContract via
+     _queue_approval_detailed(), and tools/dispatcher.py reaches the real
+     writer at execution time. This guard checks, against the CURRENT tree
+     unconditionally and via AST (not a text/count scan — a naive regex
+     also matched this very docstring's own prose once, while writing the
+     guard), that every Call node shaped
+     `_queue_approval_detailed("crm_create_deal", ...)` lives inside
+     _queue_deterministic_create_deal()'s own function body — a proposal
+     from any other function means a new deterministic Deal-creation
+     trigger built its own payload instead of reusing that one function,
+     silently dropping origin_lead_id (and any future field added there)
+     for that new trigger.
 
 Static and read-only. No runtime or persistence side effects.
 """
@@ -620,6 +645,94 @@ def check_deterministic_queue_duplicate_reply_suppression() -> list[str]:
     return failures
 
 
+_CRM_CREATE_DEAL_CANONICAL_BUILDER = "_queue_deterministic_create_deal"
+
+
+def _find_crm_create_deal_propose_call_sites(source: str) -> list[str]:
+    """AST-based (not regex/substring) — returns the name of the enclosing
+    top-level function for every real Python Call node shaped
+    `_queue_approval_detailed("crm_create_deal", ...)` in `source`.
+    Deliberately not a text/count scan: a naive regex over raw source also
+    matches the same shape appearing in a comment or docstring (hit while
+    writing this guard — see LEAD-TO-DEAL-ORIGIN-LINK's own docstring
+    above, which had to be reworded once for exactly this reason) — the
+    real invariant is a structural one (which function PROPOSES this
+    ActionContract), not a string count."""
+
+    class _Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.func_stack: list[str] = []
+            self.hits: list[str] = []
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.func_stack.append(node.name)
+            self.generic_visit(node)
+            self.func_stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "_queue_approval_detailed"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "crm_create_deal"
+            ):
+                self.hits.append(self.func_stack[-1] if self.func_stack else "<module level>")
+            self.generic_visit(node)
+
+    visitor = _Visitor()
+    visitor.visit(ast.parse(source))
+    return visitor.hits
+
+
+def check_crm_create_deal_single_payload_builder() -> list[str]:
+    """LEAD-TO-DEAL-ORIGIN-LINK (02/09/2026): the deterministic
+    (non-Agent) Deal-creation route must never call the writer
+    (commercial_crm.create_deal) directly — same as every other tool, it
+    proposes a crm_create_deal ActionContract via _queue_approval_detailed(),
+    and tools/dispatcher.py reaches the real writer at execution time, once
+    the contract is approved. That proposal must come from exactly ONE
+    function: _queue_deterministic_create_deal(), which builds the
+    deterministic tool_inputs dict (name/domain/owner_id/origin_lead_id).
+    A second function proposing the same tool means a new deterministic
+    Deal-creation trigger built its own payload by hand instead of reusing
+    that function — silently dropping origin_lead_id (and any future field
+    added there) for that new trigger. The same class of gap guard 6
+    closes for reply finalization, here applied to payload construction."""
+    if not APP_PY.exists():
+        return [f"{APP_PY.relative_to(ROOT)} no longer exists — cannot verify crm_create_deal payload construction."]
+    source = _read(APP_PY)
+    try:
+        call_sites = _find_crm_create_deal_propose_call_sites(source)
+    except SyntaxError as exc:
+        return [f"app.py failed to parse as Python — cannot verify crm_create_deal payload construction ({exc})."]
+    if not call_sites:
+        return [
+            'app.py no longer proposes a crm_create_deal ActionContract '
+            '(_queue_approval_detailed("crm_create_deal", ...)) from '
+            f"anywhere — {_CRM_CREATE_DEAL_CANONICAL_BUILDER}() appears to "
+            "have been removed or renamed. The deterministic Lead→Deal "
+            "route (origin_lead_id) has no writer to verify."
+        ]
+    offenders = sorted(set(call_sites) - {_CRM_CREATE_DEAL_CANONICAL_BUILDER})
+    if offenders:
+        return [
+            'app.py proposes a crm_create_deal ActionContract '
+            f'(_queue_approval_detailed("crm_create_deal", ...)) from '
+            f"{', '.join(offenders)} — the only function allowed to build "
+            f"this deterministic payload is {_CRM_CREATE_DEAL_CANONICAL_BUILDER}(). "
+            "A second builder means a new deterministic Deal-creation "
+            f"trigger constructed its own tool_inputs dict instead of "
+            f"calling {_CRM_CREATE_DEAL_CANONICAL_BUILDER}(origin_lead_id=...), "
+            "silently dropping origin_lead_id (and any future field added "
+            f"there) for that trigger. Route it through "
+            f"{_CRM_CREATE_DEAL_CANONICAL_BUILDER}() instead."
+        ]
+    return []
+
+
 def main() -> int:
     failures: list[str] = []
     failures += check_route_regressions()
@@ -628,6 +741,7 @@ def main() -> int:
     failures += check_fingerprint_payload_divergence()
     failures += check_protected_business_table_raw_update()
     failures += check_deterministic_queue_duplicate_reply_suppression()
+    failures += check_crm_create_deal_single_payload_builder()
     if failures:
         print(
             "FAIL: Turn Coordinator / Single Speaker architecture bypass risk detected:",
