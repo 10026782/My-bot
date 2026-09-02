@@ -293,3 +293,65 @@ def get_provider() -> RuntimeSchemaProvider:
     if _provider is None:
         _provider = RuntimeSchemaProvider()
     return _provider
+
+
+def resolve_live_select_value(table: str, field: str, canonical_value: str) -> str | None:
+    """
+    BUG-CRM-BYPASS-DOMAIN-SELECT-CASING (02/09/2026): closes the layer
+    BUG-CRM-BYPASS-DOMAIN-TRANSLATION's fix stopped short of. That fix made
+    core.router.router.parse_deterministic_create_deal() translate a raw
+    user word ("יבוא"/"Import") into the business-canonical slug
+    ("import") -- correct, and NOT to be undone: the parser must keep
+    returning the lowercase canonical slug, never anything Airtable-
+    specific, or the language layer grows a dependency on Airtable's
+    display casing again.
+
+    But the canonical slug still isn't what live Airtable expects: Deal's
+    Domain single-select's actual configured option is "Import" (capital
+    I), not "import". Writing the raw canonical slug got a live production
+    422 ("Insufficient permissions to create new select option ''import''")
+    -- the same class of bug, one layer later, at the write boundary
+    instead of the language boundary.
+
+    This function is that missing boundary-crossing step:
+        USER LANGUAGE --[resolve_domain_word()]--> BUSINESS CANONICAL
+            --[resolve_live_select_value()]--> AIRTABLE LIVE VALUE
+
+    It reuses RuntimeSchemaProvider's existing live-choices contract
+    (the same one tools/airtable_gateway.py's _provider_invalid_select_values()
+    already reads to log [SelectValueValidation:SHADOW] warnings) rather
+    than a second schema source -- checked, no separate mapper for this
+    already existed anywhere (Leads' core.lead_service.build_lead_fields()
+    writes the raw canonical slug too, with the same latent exposure --
+    not fixed here since it's a separate write path with its own callers
+    to verify; flagged for the same treatment separately).
+
+    Returns:
+      - `canonical_value` unchanged if it already matches a live choice
+        exactly, or if the field can't be safely checked yet (contract
+        mode isn't "full", the field isn't a select type, or it has no
+        configured choices) -- never risk a false rewrite from a
+        name_only seed contract.
+      - the exact live choice string (correct casing/spacing) when
+        `canonical_value` matches one case-insensitively.
+      - None when the contract IS full, the field IS a select with real
+        choices, and `canonical_value` matches none of them even
+        case-insensitively -- callers must treat that as a genuine
+        unknown value (fail closed), never invent or silently write it:
+        Airtable itself already refuses to auto-create a new option.
+    """
+    if not canonical_value:
+        return canonical_value
+    contract = get_provider().get_table_contract(table)
+    if contract["mode"] != "full":
+        return canonical_value
+    info = contract["fields"].get(field)
+    if not info or info["type"] not in ("singleSelect", "multipleSelects") or not info["choices"]:
+        return canonical_value
+    if canonical_value in info["choices"]:
+        return canonical_value
+    lowered = canonical_value.strip().casefold()
+    for choice in info["choices"]:
+        if choice.strip().casefold() == lowered:
+            return choice
+    return None

@@ -131,9 +131,27 @@ def create_deal(
     if not owner_id:
         return _tool_result(ok=False, tool="crm_create_deal", user_message="❌ owner_id חסר.")
 
+    # BUG-CRM-BYPASS-DOMAIN-SELECT-CASING (02/09/2026): `domain` here is
+    # always the business-canonical slug (e.g. "import") -- resolve_domain_word()
+    # upstream must keep returning that, never Airtable's own display
+    # casing. But Deal's live Domain single-select's actual configured
+    # option is "Import" (capital), not "import" -- writing the canonical
+    # slug straight through 422'd in production ("Insufficient permissions
+    # to create new select option"). This is the persistence-boundary
+    # mapping step, not a parser fix -- see resolve_live_select_value()'s
+    # own docstring for the full USER LANGUAGE -> BUSINESS CANONICAL ->
+    # AIRTABLE LIVE VALUE contract.
+    from core.runtime_schema_provider import resolve_live_select_value
+    domain_value = resolve_live_select_value(Tables.DEALS, DealFields.DOMAIN, domain)
+    if domain_value is None:
+        return _tool_result(
+            ok=False, tool="crm_create_deal",
+            user_message=f"❌ תחום לא מוכר בטבלת העסקאות: {domain!r}.",
+        )
+
     fields: dict[str, Any] = {
         DealFields.NAME: name.strip(),
-        DealFields.DOMAIN: domain,
+        DealFields.DOMAIN: domain_value,
         DealFields.OWNER: [owner_id],
         DealFields.STAGE: stage,
     }
@@ -287,9 +305,20 @@ def create_payment(
     if not owner_id:
         return _tool_result(ok=False, tool="crm_create_payment", user_message="❌ owner_id חסר.")
 
+    # BUG-CRM-BYPASS-DOMAIN-SELECT-CASING follow-up: same persistence-
+    # boundary mapping as create_deal() -- see that function's comment and
+    # resolve_live_select_value()'s docstring for the full contract.
+    from core.runtime_schema_provider import resolve_live_select_value
+    domain_value = resolve_live_select_value(Tables.PAYMENTS, PaymentFields.DOMAIN, domain)
+    if domain_value is None:
+        return _tool_result(
+            ok=False, tool="crm_create_payment",
+            user_message=f"❌ תחום לא מוכר בטבלת התשלומים: {domain!r}.",
+        )
+
     fields: dict[str, Any] = {
         PaymentFields.AMOUNT: amount,
-        PaymentFields.DOMAIN: domain,
+        PaymentFields.DOMAIN: domain_value,
         PaymentFields.STATUS: PaymentStatus.PENDING,
         PaymentFields.OWNER: [owner_id],
     }
