@@ -330,17 +330,27 @@ class F14B2ContactIntegrationTests(unittest.TestCase):
             "recCONTACT", {ContactFields.COMPANY: "Acme"}, source="tma_write")
 
     def test_non_contact_dispatch_update_keeps_generic_path(self):
+        # BUG-CRM-BYPASS-UPDATE-TASKS follow-up (02/09/2026): this used
+        # "Tasks" as the stand-in for "any table other than Contacts" --
+        # that stopped being a valid example once Tasks got its own
+        # protection (_TASK_ALLOWED_UPDATE_FIELDS), which correctly rejects
+        # "שם" (not a real Task field; TaskFields.NAME is "כותרת המשימה").
+        # Switched to "Expenses", a table with no dispatcher-level
+        # protection at all, to keep testing the thing this test actually
+        # verifies: the Contacts-specific redirect doesn't intercept other
+        # tables. Tasks' own allowlist has dedicated coverage in
+        # test_bug_crm_bypass_airtable_update.py.
         from tools.dispatcher import dispatch_tool
 
         generic = {"ok": True, "tool": "airtable_update"}
         with patch("tools.dispatcher.enforce_tenant_scope"), \
                 patch("tools.dispatcher.airtable_update", return_value=generic) as update, \
                 patch("tools.dispatcher._ff.is_enabled", return_value=False):
-            inputs = {"table": "Tasks", "record_id": "recTASK", "fields": {"שם": "Task"}}
+            inputs = {"table": "Expenses", "record_id": "recEXP", "fields": {"שם": "Expense"}}
             result = dispatch_tool("airtable_update", inputs, self.identity, execution_context=self._proof("airtable_update", inputs))
 
         self.assertIs(result, generic)
-        update.assert_called_once_with("Tasks", "recTASK", {"שם": "Task"})
+        update.assert_called_once_with("Expenses", "recEXP", {"שם": "Expense"})
 
     def test_non_contact_tma_patch_keeps_generic_path(self):
         from tools.approval_actions import tma_write
