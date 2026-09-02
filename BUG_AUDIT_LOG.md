@@ -6736,3 +6736,39 @@ status here and from `BOSS_CURRENT_STATE.md` together.
 - **Deployed:** לא עדיין
 - **Verified בפרודקשן:** לא עדיין
 - **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy. שים לב: כל ליד קיים ב-Airtable עם `Domain=furniture_import` (שנוצר לפני התיקון) **לא** יתוקן רטרואקטיבית על ידי שינוי זה — זהו תיקון prospective בלבד לכתיבות עתידיות. אם נדרש backfill לרשומות היסטוריות, זו החלטה נפרדת של הבעלים.
+
+---
+
+### BUG-CRM-BYPASS-DOMAIN-TRANSLATION — Deal deterministic route sent raw Hebrew domain word, Airtable rejected with HTTP 422
+- **דווח:** 02/09/2026 (בעלים, קנרית production חיה מיד אחרי deploy של PR #1175/#1176)
+- **דווח על ידי:** בעלים (Telegram, "בדיקת-קנרית 6")
+- **מסך / מודול:** `core/router/router.py` (`parse_deterministic_create_deal()`)
+- **תיאור:** הבעלים שלח "צור עסקה בשם בדיקת-קנרית 6 בתחום יבוא". המסלול הדטרמיניסטי אושר ונשלח לביצוע, אבל נכשל: "❌ אושר אך נכשל בביצוע" עם `error=❌ יצירת עסקה נכשלה: provider returned HTTP 422`. `parse_deterministic_create_deal()` חילץ את המילה העברית הגולמית שהמשתמש הקליד ("יבוא") ושלח אותה כפי שהיא כערך Domain אל `crm_create_deal` → `commercial_crm.create_deal()` → Airtable, בלי שום תרגום לסלאג הקנוני ("import") — Airtable's single-select דחה את הערך הלא-מוכר.
+- **Severity:** Critical (P0) — כל בקשת יצירת עסקה עם ניסוח עברי תקין ("בתחום יבוא"/"בתחום נדל״ן"/וכו') נכשלה ב-100% מהמקרים; רק הקלדת הסלאג האנגלי הקנוני במפורש ("בתחום import") הייתה עוקפת את התקלה במקרה.
+- **Root Cause:** תרגום מילה עברית→סלאג קנוני קיים כבר במקום אחד ויחיד בקוד — `core.ingress_classifier._DOMAIN_HINT_CANONICAL`, הצרוך דרך `core.lead_service.resolve_domain_word()` עבור Leads — אבל `parse_deterministic_create_deal()` (שנוסף ב-PR #1172, 01/09/2026) מעולם לא הופנה לאותה טבלה, וכתב את הטקסט הגולמי היישר לתוך ה-payload.
+- **תוקן ב-commit:** (ראה מיד לאחר merge)
+- **תוקן ב-branch:** `claude/fix-create-deal-domain-translation-and-routing-gap`
+- **תיקון:** `parse_deterministic_create_deal()` מעביר כעת את המילה שחולצה דרך `core.lead_service.resolve_domain_word()` — אותה טבלה משותפת בדיוק שכבר משמשת ל-Leads, לא טבלת-ניחוש שנייה. מילה לא מוכרת (למשל "שטויות") → `uncertain=True` (CLARIFY), **לעולם לא** נכתבת גולמית — עקבי עם "לעולם לא מנחש" של `resolve_domain_word()` עצמו. נבדק גם שהקלדת הסלאג האנגלי במפורש ("בתחום import") ממשיכה לעבוד (מיפוי זהות בטבלה המשותפת).
+- **Verification:** regression test חדש משחזר את הטקסט המדויק מהקנריה ("צור עסקה בשם בדיקת-קנרית 6 בתחום יבוא") ומאמת ש-domain הופך ל-"import" ולא נשאר "יבוא". כל הבדיקות הקיימות שהניחו `domain == "יבוא"` עודכנו ל-`"import"` (`test_bug_crm_bypass_create_deal_deterministic_route.py`, `core/router/test_router.py`). `python3 -m compileall -q .`, `smoke_tests.py`, `tools/audit_turn_coordinator_bypass.py`, imports — כולם עברו.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה חוזרת.
+
+---
+
+### BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH — CREATE_DEAL messages that don't fit the exact structured template reached the Agent, which picked the generic airtable_add bypass and failed on missing owner_id
+- **דווח:** 02/09/2026 (בעלים, אותה סבב קנריות — "בדיקת-קנרית 7", מיד אחרי canary #6 לעיל)
+- **דווח על ידי:** בעלים (Telegram)
+- **מסך / מודול:** `core/router/router.py` (`route_request()`'s CREATE_DEAL edge-case elif chain)
+- **תיאור:** הבעלים שלח "צור עסקה בשם בדיקת-קנרית 7 domain import" (מילת המפתח האנגלית "domain" במקום "בתחום"). `intent_router` עדיין סיווג את זה נכון כ-`Intent.CREATE_DEAL` (regex רחב, confidence=0.95), אבל `_STRUCTURED_CREATE_DEAL_RE` הצר לא תאם בכלל (`matched=False` — לא `uncertain=True`). ה-elif שמפעיל CLARIFY בדק רק `.uncertain`, לא `matched=False`, אז ההודעה "נפלה" דרך כל שרשרת ה-elif ללא טיפול, והגיעה ל-`Handler.AGENT` עם גישה מלאה וחופשית לכלים. הסוכן בחר את כלי ה-bypass הגנרי `airtable_add(table="עסקאות (Deals)", ...)` במקום `crm_create_deal` הייעודי, ונכשל עם `❌ owner_id חסר.` — **אותה מחלקת באג בדיוק כמו BUG-CRM-BYPASS-OWNER-PRESENCE**, שנפתחה מחדש דרך המסלול היחיד שמעולם לא נותב דטרמיניסטית.
+- **Severity:** Critical (P0) — כל ניסוח create_deal לגיטימי שלא תואם בדיוק לתבנית הצרה ("פתח/צור עסקה בשם X בתחום Y") נכשל ב-100% מהמקרים, וגרוע מכך: חושף מחדש בדיוק את הפרצה האדריכלית שכל המאמץ הזה (Turn Coordinator, PR #1172) נועד לסגור — הסוכן בוחר כלי בעצמו במקום שהמערכת תנתב.
+- **Root Cause:** ה-elif ב-`route_request()` בדק `_create_deal_parse.uncertain` בלבד — נכון עבור "matched=True אך חסר" (למשל בעלות מפורשת של מישהו אחר), אבל לא כיסה "matched=False" (לא תאם את התבנית הצרה בכלל). זו אבחנה שלא הייתה קיימת עבור CREATE_TASK במכוון (תיעוד קיים: "ניסוחים רחבים יותר נשארים במסלול Agent" — החלטת עיצוב שונה ומכוונת ל-Task, לא רלוונטית ל-Deal), אבל מעולם לא הוחלה נכון על Deal, שיש לו החלטת ארכיטקטורה שונה ומפורשת (הסוכן לעולם לא בוחר כלי בעצמו).
+- **תוקן ב-commit:** (ראה מיד לאחר merge, אותו commit כמו BUG-CRM-BYPASS-DOMAIN-TRANSLATION)
+- **תוקן ב-branch:** `claude/fix-create-deal-domain-translation-and-routing-gap`
+- **תיקון:** תנאי ה-elif שונה מ-`_create_deal_parse.uncertain` ל-`not _create_deal_parse.certain` — מכסה גם `uncertain=True` וגם `matched=False` כאחד. כל בקשת create_deal שאינה "certain" באופן מלא כעת מקבלת CLARIFY, **לעולם לא** מגיעה ל-Handler.AGENT. שינוי זה **אינו** נוגע ב-Intent.CREATE_TASK — ההחלטה השונה והמכוונת שם (ניסוחים רחבים נשארים ב-Agent) לא שונתה.
+- **Verification:** regression test חדש משחזר את הטקסט המדויק מהקנריה ("צור עסקה בשם בדיקת-קנרית 7 domain import") ומאמת CLARIFY במקום AGENT. עודכן טסט קיים ב-`core/router/test_router.py` ("CREATE_DEAL loose/unstructured phrasing") שהניח בעבר את ההתנהגות הישנה (AGENT) כרצויה — תועד במפורש למה זה השתנה. `tools/audit_turn_coordinator_bypass.py` (שער ה-CI ה-ROUTE_REGRESSION) ממשיך לעבור — אומת שהמבנה הסטטי (elif condition + Handler.CLARIFY בשורה הבאה) עדיין מזוהה כראוי אחרי הזזת הערת התיעוד מעל ל-`elif` (כדי לא לשבור את זיהוי הרגקס של השער). כל 54 טסטים ב-`core/router/test_router.py`, כל טסטי `test_commercial_crm*`, `test_bug_commercial_crm_dispatcher_bypass_closure.py`, `test_audit_turn_coordinator_bypass.py`, `test_phase_4b2_wiring.py`, `test_bug157_atomic_fingerprint_claim.py` — כולם ירוקים.
+- **Merged:** לא עדיין
+- **Deployed:** לא עדיין
+- **Verified בפרודקשן:** לא עדיין
+- **סטטוס:** Fixed (STATIC_VERIFIED) — ממתין ל-merge + deploy + קנרית production חיה **רביעית** (אותה הודעה: "צור עסקה בשם X בתחום Y") שהפעם צריכה להצליח עד הסוף.

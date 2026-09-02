@@ -157,9 +157,17 @@ TESTS = [
         "telegram", "owner", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.CLARIFY,
     ),
     (
-        "CREATE_DEAL loose/unstructured phrasing → agent (never tool)",
+        # BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH (live production, 02/09/2026):
+        # this used to expect Handler.AGENT here, unlike CREATE_TASK's own
+        # loose-phrasing case above. But Deal creation (unlike Task) has a
+        # standing architecture decision that the Agent never gets a tool
+        # choice for this intent at all — reaching Handler.AGENT let the
+        # agent pick the generic airtable_add bypass tool and fail on a
+        # missing owner_id, the exact BUG-CRM-BYPASS-OWNER-PRESENCE failure
+        # class this session already fixed for the deterministic route.
+        "CREATE_DEAL loose/unstructured phrasing → clarify (never a bare agent tool menu)",
         "צור לי עסקה חדשה בתחום יבוא, אני אשלים פרטים אחר כך",
-        "telegram", "owner", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.AGENT,
+        "telegram", "owner", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.CLARIFY,
     ),
     (
         "CREATE_DEAL certain structured request, lead role → agent (never tool)",

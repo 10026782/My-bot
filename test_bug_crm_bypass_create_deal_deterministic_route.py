@@ -59,16 +59,26 @@ def chk(desc: str, cond: bool) -> None:
 print("── parser: certain/uncertain/no-match shape ──")
 
 _certain = parse_deterministic_create_deal("צור עסקה בשם רכישת ציוד בתחום יבוא")
-chk("certain structured request parses name+domain", _certain.certain
-    and _certain.name == "רכישת ציוד" and _certain.domain == "יבוא")
+chk("certain structured request parses name+canonicalized domain "
+    "(BUG-CRM-BYPASS-DOMAIN-TRANSLATION: 'יבוא' -> 'import', never the raw word)",
+    _certain.certain and _certain.name == "רכישת ציוד" and _certain.domain == "import")
 
 _reversed = parse_deterministic_create_deal("פתח עסקה בתחום יבוא בשם רכישת ציוד")
 chk("reversed field order also parses (name/domain order-independent)",
-    _reversed.certain and _reversed.name == "רכישת ציוד" and _reversed.domain == "יבוא")
+    _reversed.certain and _reversed.name == "רכישת ציוד" and _reversed.domain == "import")
 
 _self_owner = parse_deterministic_create_deal("צור עסקה בשם X בתחום יבוא בבעלותי")
 chk("trailing self-ownership marker (בבעלותי) does not break the parse",
-    _self_owner.certain and _self_owner.name == "X" and _self_owner.domain == "יבוא")
+    _self_owner.certain and _self_owner.name == "X" and _self_owner.domain == "import")
+
+_english_slug = parse_deterministic_create_deal("צור עסקה בשם X בתחום import")
+chk("typing the canonical English slug directly also resolves (identity mapping)",
+    _english_slug.certain and _english_slug.domain == "import")
+
+_unrecognized_domain = parse_deterministic_create_deal("צור עסקה בשם X בתחום שטויות")
+chk("an unrecognized domain word -> uncertain (CLARIFY), never guessed/written raw",
+    _unrecognized_domain.matched and _unrecognized_domain.uncertain
+    and _unrecognized_domain.domain is None)
 
 _named_owner = parse_deterministic_create_deal("צור עסקה בשם X בתחום יבוא בבעלות אורי")
 chk("explicit named owner -> uncertain, NEVER a corrupted domain field "
@@ -101,12 +111,52 @@ chk("Handler.CLARIFY -> tool_allowed=False", route_uncertain.tool_allowed is Fal
 route_loose = route_request(
     "צור לי עסקה חדשה בתחום יבוא, אני אשלים פרטים אחר כך", "telegram", owner,
 )
-chk("loose phrasing -> Handler.AGENT (deliberately narrow gate, same as CREATE_TASK's)",
-    route_loose.handler == Handler.AGENT)
+# BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH (live production, 02/09/2026): this
+# used to assert Handler.AGENT here ("deliberately narrow gate, same as
+# CREATE_TASK's") — but unlike Task, Deal creation has a standing
+# architecture decision that the Agent is NEVER given a tool choice for
+# this intent. Falling through to Handler.AGENT let the agent pick the
+# generic airtable_add bypass tool (no owner-resolution fallback there),
+# reproducing the exact BUG-CRM-BYPASS-OWNER-PRESENCE failure class this
+# session already fixed for the deterministic route. Now: any intent=
+# create_deal message that isn't .certain -- matched or not -- CLARIFIES.
+chk("loose/unmatched phrasing -> Handler.CLARIFY, never a bare Agent tool menu "
+    "(regression: this used to reach Handler.AGENT, which could pick the "
+    "generic airtable_add bypass and fail on missing owner_id)",
+    route_loose.handler == Handler.CLARIFY)
+chk("Handler.CLARIFY for unmatched phrasing -> tool_allowed=False",
+    route_loose.tool_allowed is False)
 
 route_lead = route_request("צור עסקה בשם רכישת ציוד בתחום יבוא", "telegram", _lead())
 chk("lead role never gets Handler.TOOL even for a certain structured request",
     route_lead.handler == Handler.AGENT)
+
+
+# ══════════════════════════════════════════════════════════════════
+print("\n── regression: exact live production canary inputs (02/09/2026) ──")
+
+# Canary #6: "צור עסקה בשם בדיקת-קנרית 6 בתחום יבוא" -- approved, then failed
+# execution with "provider returned HTTP 422" because the deterministic
+# route sent the raw Hebrew word "יבוא" as the Domain value, which
+# Airtable's single-select rejected outright (BUG-CRM-BYPASS-DOMAIN-
+# TRANSLATION).
+_canary_6 = parse_deterministic_create_deal("צור עסקה בשם בדיקת-קנרית 6 בתחום יבוא")
+chk("canary #6 exact text now resolves domain to the canonical slug",
+    _canary_6.certain and _canary_6.name == "בדיקת-קנרית 6" and _canary_6.domain == "import")
+
+# Canary #7: "צור עסקה בשם בדיקת-קנרית 7 domain import" -- the English
+# "domain" keyword (instead of "בתחום") never matched the structured regex
+# at all, so this fell through to Handler.AGENT, which picked the generic
+# airtable_add bypass tool and failed with "owner_id חסר" -- the exact
+# BUG-CRM-BYPASS-OWNER-PRESENCE failure class, reopened via the one path
+# that was never deterministically routed (BUG-CRM-BYPASS-DEAL-AGENT-
+# FALLTHROUGH).
+_canary_7_parse = parse_deterministic_create_deal("צור עסקה בשם בדיקת-קנרית 7 domain import")
+chk("canary #7 exact text does not match the structured template at all",
+    not _canary_7_parse.matched)
+route_canary_7 = route_request("צור עסקה בשם בדיקת-קנרית 7 domain import", "telegram", owner)
+chk("canary #7 now CLARIFIES instead of reaching Handler.AGENT",
+    route_canary_7.handler == Handler.CLARIFY)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -149,7 +199,7 @@ deal_contracts = [
     item for item in contracts
     if item.tool_name == "crm_create_deal"
     and item.normalized_payload.get("name") == "רכישת ציוד תעשייתי"
-    and item.normalized_payload.get("domain") == "יבוא"
+    and item.normalized_payload.get("domain") == "import"
 ]
 chk("exactly one pending crm_create_deal contract was created — the "
     "dedicated canonical tool, never generic airtable_add",
