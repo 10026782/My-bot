@@ -318,6 +318,116 @@ def test_all_protections_present_is_clean(monkeypatch, tmp_path):
 
 
 # ══════════════════════════════════════════════════════════════════
+# Guard 6 — every deterministic queue-then-approve turn must route through
+# the shared duplicate-reply-suppression helper
+# ══════════════════════════════════════════════════════════════════
+
+_LIVE_DETERMINISTIC_QUEUE_SNIPPET = '''
+def _finalize_deterministic_queue_outcome(
+    outcome: dict, chat_id: str, out_meta: dict | None, log_prefix: str,
+    fallback_message: str,
+) -> str:
+    """shared duplicate-reply-suppression guard."""
+    return outcome.get("message") or fallback_message
+
+
+def _queue_deterministic_create_task(
+    title: str, chat_id: str, channel: str, user_text: str,
+    identity, out_meta: dict | None = None, task_parse=None,
+) -> str:
+    outcome = queue_task_request(intent="create_task", queue=_queue_task)
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicCreateTask", "fallback",
+    )
+
+
+def _queue_deterministic_create_deal(
+    name: str, domain: str, chat_id: str, channel: str, user_text: str,
+    identity, out_meta: dict | None = None,
+) -> str:
+    outcome = _queue_approval_detailed("crm_create_deal", {}, chat_id, channel, user_text)
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicCreateDeal", "fallback",
+    )
+
+
+def _queue_deterministic_task_update(
+    intent: str, user_text: str, chat_id: str, channel: str, identity,
+    out_meta: dict | None = None,
+) -> str:
+    outcome = queue_task_request(intent=intent, queue=lambda t, p: _queue_approval_detailed(t, p, chat_id, channel, user_text))
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicTaskUpdate", "fallback",
+    )
+'''
+
+
+def test_current_repo_has_no_deterministic_queue_duplicate_reply_regressions():
+    """Runs against the real, current source — proves every
+    `_queue_deterministic_*()` function today (create_task, create_deal,
+    task_update) routes through the shared helper."""
+    assert audit.check_deterministic_queue_duplicate_reply_suppression() == []
+
+
+def test_find_deterministic_queue_functions_extracts_all_three():
+    functions = dict(audit.find_deterministic_queue_functions(_LIVE_DETERMINISTIC_QUEUE_SNIPPET))
+    assert set(functions) == {
+        "_queue_deterministic_create_task",
+        "_queue_deterministic_create_deal",
+        "_queue_deterministic_task_update",
+    }
+    for body in functions.values():
+        assert "_finalize_deterministic_queue_outcome(" in body
+
+
+def test_helper_removed_entirely_is_flagged(monkeypatch, tmp_path):
+    app_py = tmp_path / "app.py"
+    app_py.write_text("# no _finalize_deterministic_queue_outcome() at all\n", encoding="utf-8")
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    failures = audit.check_deterministic_queue_duplicate_reply_suppression()
+    assert any("no longer defines" in f for f in failures)
+
+
+def test_one_sibling_bypassing_the_helper_is_flagged(monkeypatch, tmp_path):
+    app_py = tmp_path / "app.py"
+    # create_deal composes its reply inline instead of calling the helper —
+    # the exact BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY regression shape.
+    broken = _LIVE_DETERMINISTIC_QUEUE_SNIPPET.replace(
+        'outcome = _queue_approval_detailed("crm_create_deal", {}, chat_id, channel, user_text)\n'
+        "    return _finalize_deterministic_queue_outcome(\n"
+        '        outcome, chat_id, out_meta, "DeterministicCreateDeal", "fallback",\n'
+        "    )",
+        'outcome = _queue_approval_detailed("crm_create_deal", {}, chat_id, channel, user_text)\n'
+        '    return outcome.get("message") or "fallback"',
+    )
+    assert "_finalize_deterministic_queue_outcome(\n        outcome, chat_id, out_meta, \"DeterministicCreateDeal\"" not in broken
+    app_py.write_text(broken, encoding="utf-8")
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    failures = audit.check_deterministic_queue_duplicate_reply_suppression()
+    assert any("_queue_deterministic_create_deal" in f for f in failures)
+    assert not any("_queue_deterministic_create_task" in f for f in failures)
+    assert not any("_queue_deterministic_task_update" in f for f in failures)
+
+
+def test_all_three_using_the_helper_is_clean(monkeypatch, tmp_path):
+    app_py = tmp_path / "app.py"
+    app_py.write_text(_LIVE_DETERMINISTIC_QUEUE_SNIPPET, encoding="utf-8")
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    assert audit.check_deterministic_queue_duplicate_reply_suppression() == []
+
+
+def test_no_deterministic_queue_functions_at_all_is_flagged(monkeypatch, tmp_path):
+    app_py = tmp_path / "app.py"
+    app_py.write_text(
+        f"def {audit._DETERMINISTIC_QUEUE_OUTCOME_HELPER}():\n    pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "APP_PY", app_py)
+    failures = audit.check_deterministic_queue_duplicate_reply_suppression()
+    assert any("has no `_queue_deterministic_*()` functions at all" in f for f in failures)
+
+
+# ══════════════════════════════════════════════════════════════════
 
 def test_no_runtime_or_persistence_side_effects():
     """The module must be pure static analysis — same invariant every
