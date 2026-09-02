@@ -76,6 +76,30 @@ was broken:
      protected business table needs an explicit new registry entry naming
      its protection mechanism — the same "register or fail" discipline as
      guards 2 and 4 above.
+  6. DETERMINISTIC_QUEUE_DUPLICATE_REPLY_SUPPRESSION —
+     BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY (02/09/2026): every deterministic
+     (non-Agent) queue-then-approve turn in app.py (a
+     `_queue_deterministic_*` function) calls _queue_approval_detailed(),
+     which — for a real, newly-queued approval — already sends the owner
+     an interactive "⏳ בקשת אישור..." message with an approve/reject
+     keyboard, tracked for edit-in-place on approve/reject. Returning that
+     call's own outcome["message"] too is a SECOND, untracked message: when
+     the requester chat is the owner chat (the normal single-owner case),
+     that second message is left behind forever, frozen at "ממתין לאישור"
+     even after the action completes. This exact guard
+     (duplicate_reply_suppressed) was written once, only for
+     _queue_deterministic_create_task() — then had to be independently
+     rediscovered for _queue_deterministic_create_deal() after a live
+     production incident, because that function's own docstring promising
+     to "mirror _queue_deterministic_create_task() exactly" did not
+     actually prevent the gap. A third latent instance
+     (_queue_deterministic_task_update(), for update_task/complete_task)
+     was found and closed the same day, while building this guard. The fix
+     is now ONE shared function, app.py's
+     _finalize_deterministic_queue_outcome() — this guard checks, against
+     the CURRENT tree unconditionally, that every `_queue_deterministic_*`
+     function in app.py calls it, so a brand-new sibling writer can never
+     ship this duplicate-message bug by omission again.
 
 Static and read-only. No runtime or persistence side effects.
 """
@@ -95,6 +119,7 @@ ROUTE_DECISION_PY = ROOT / "core/router/route_decision.py"
 TOOL_REGISTRY_PY = ROOT / "tool_registry.py"
 SCHEMAS_PY = ROOT / "tools/schemas.py"
 DISPATCHER_PY = ROOT / "tools/dispatcher.py"
+APP_PY = ROOT / "app.py"
 
 # Every Intent that MUST keep a live Handler.TOOL (certain) + Handler.CLARIFY
 # (uncertain) deterministic gate in core/router/router.py. Adding an intent
@@ -527,6 +552,74 @@ def check_protected_business_table_raw_update() -> list[str]:
     return failures
 
 
+_DETERMINISTIC_QUEUE_OUTCOME_HELPER = "_finalize_deterministic_queue_outcome"
+
+_DETERMINISTIC_QUEUE_DEF_RE = re.compile(
+    r"\ndef (_queue_deterministic_\w+)\([\s\S]*?\)\s*(?:->\s*[^\n:]+)?:\n"
+    r"(?P<body>.*?)(?=\ndef |\Z)",
+    re.DOTALL,
+)
+
+
+def find_deterministic_queue_functions(app_source: str) -> list[tuple[str, str]]:
+    """Returns (function_name, body) for every `_queue_deterministic_*()`
+    def in app.py, in source order. Body extraction mirrors
+    find_airtable_update_case_body()'s technique: from just after the
+    signature's closing `:` to the next top-level `def` or EOF."""
+    return [
+        (match.group(1), match.group("body"))
+        for match in _DETERMINISTIC_QUEUE_DEF_RE.finditer(app_source)
+    ]
+
+
+def check_deterministic_queue_duplicate_reply_suppression() -> list[str]:
+    """BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY (02/09/2026): every
+    `_queue_deterministic_*()` function in app.py must route its
+    _queue_approval_detailed() outcome through the single shared
+    `_finalize_deterministic_queue_outcome()` helper — the one place the
+    owner-notified duplicate-reply-suppression guard lives — rather than
+    composing its final reply inline. This is a textual-presence check
+    (the same rigor level as this script's other guards), not a full
+    control-flow proof: it catches a `_queue_deterministic_*` function
+    that never calls the shared helper at all (the exact class of gap that
+    let this bug ship twice, once for Deal and once, latently, for Task
+    updates), not every conceivable way to reintroduce the underlying
+    duplicate-message bug."""
+    if not APP_PY.exists():
+        return [f"{APP_PY.relative_to(ROOT)} no longer exists — cannot verify deterministic-queue duplicate-reply suppression."]
+    source = _read(APP_PY)
+    if f"def {_DETERMINISTIC_QUEUE_OUTCOME_HELPER}(" not in source:
+        return [
+            f"app.py no longer defines {_DETERMINISTIC_QUEUE_OUTCOME_HELPER}() "
+            f"— the single shared duplicate-reply-suppression guard for every "
+            f"deterministic queue-then-approve turn appears to have been "
+            f"removed. See BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY."
+        ]
+    functions = find_deterministic_queue_functions(source)
+    failures: list[str] = []
+    if not functions:
+        failures.append(
+            "app.py has no `_queue_deterministic_*()` functions at all — "
+            "cannot verify duplicate-reply-suppression coverage (expected "
+            "at least _queue_deterministic_create_task, "
+            "_queue_deterministic_create_deal, and "
+            "_queue_deterministic_task_update)."
+        )
+    for func_name, body in functions:
+        if f"{_DETERMINISTIC_QUEUE_OUTCOME_HELPER}(" not in body:
+            failures.append(
+                f"app.py's {func_name}() does not call "
+                f"{_DETERMINISTIC_QUEUE_OUTCOME_HELPER}() — it may be "
+                f"composing/returning its reply directly (e.g. "
+                f"outcome.get(\"message\")), which reintroduces "
+                f"BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY's duplicate-message "
+                f"bug for this specific deterministic route. Route its "
+                f"outcome through {_DETERMINISTIC_QUEUE_OUTCOME_HELPER}() "
+                f"instead."
+            )
+    return failures
+
+
 def main() -> int:
     failures: list[str] = []
     failures += check_route_regressions()
@@ -534,6 +627,7 @@ def main() -> int:
     failures += check_schema_nudge_language()
     failures += check_fingerprint_payload_divergence()
     failures += check_protected_business_table_raw_update()
+    failures += check_deterministic_queue_duplicate_reply_suppression()
     if failures:
         print(
             "FAIL: Turn Coordinator / Single Speaker architecture bypass risk detected:",

@@ -1059,6 +1059,65 @@ def approval_response(route: RouteDecision, original_text: str, chat_id: str,
     )
 
 
+def _finalize_deterministic_queue_outcome(
+    outcome: dict, chat_id: str, out_meta: dict | None, log_prefix: str,
+    fallback_message: str,
+) -> str:
+    """Turn a _queue_approval_detailed() outcome into the ONE public reply
+    for a deterministic (non-Agent) queue-then-approve turn.
+
+    Single-Speaker structural guard (BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY,
+    02/09/2026): _queue_approval_detailed_impl() already sent the owner an
+    interactive "⏳ בקשת אישור..." message (tracked for edit-in-place on
+    approve/reject, via its inline-keyboard callback_data) BEFORE this
+    function is ever called. When the requester chat IS the owner chat
+    (the normal case for this single-owner bot), returning
+    outcome["message"] too would be a SECOND, untracked message — left
+    behind frozen forever once the first is edited on approve/reject. This
+    guard was originally written once, only for _queue_deterministic_
+    create_task() — then had to be independently rediscovered and
+    re-added for _queue_deterministic_create_deal() after a live
+    production incident, because that function's own docstring promising
+    to "mirror _queue_deterministic_create_task() exactly" was not enough
+    to prevent the gap. This function is now the ONE place the guard
+    lives; every _queue_deterministic_*() caller must route its outcome
+    through it — tools/audit_turn_coordinator_bypass.py's
+    DETERMINISTIC_QUEUE_DUPLICATE_REPLY_SUPPRESSION guard enforces that
+    structurally, not just by convention.
+
+    When the requester is genuinely NOT the owner (a different chat), the
+    reply is never suppressed — that requester still needs their own
+    confirmation that the request was queued, since only the owner sees
+    the interactive approval prompt.
+    """
+    contract_queued = bool(
+        outcome.get("created_this_turn") and outcome.get("contract_id")
+    )
+    if out_meta is not None and contract_queued:
+        out_meta["source_module"] = outcome.get("source_module") or "action_gateway"
+        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
+        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
+    logger.info(
+        "[%s] בעלות_coordinator=True agent_calls=0 action_tool=%s "
+        "created_this_turn=%s reply_owner=%s",
+        log_prefix, outcome.get("action_tool"), outcome.get("created_this_turn"),
+        outcome.get("reply_owner") if contract_queued else None,
+    )
+    owner_chat_id = (
+        os.environ.get("OWNER_TELEGRAM_ID", "") or
+        os.environ.get("ELIYAHU_CHAT_ID", "") or
+        os.environ.get("DIGEST_CHAT_ID", "")
+    )
+    if outcome.get("owner_notified") and str(owner_chat_id) == str(chat_id):
+        logger.info(
+            "[%s] duplicate_reply_suppressed=true "
+            "reason=owner_notification_already_sent",
+            log_prefix,
+        )
+        return ""
+    return outcome.get("message") or fallback_message
+
+
 def _queue_deterministic_create_task(
     title: str, chat_id: str, channel: str, user_text: str,
     identity, out_meta: dict | None = None, task_parse=None,
@@ -1113,31 +1172,10 @@ def _queue_deterministic_create_task(
         queue=_queue_task,
         identity=identity,
     )
-    _contract_queued = bool(
-        outcome.get("created_this_turn") and outcome.get("contract_id")
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicCreateTask",
+        "לא הצלחתי להכניס את המשימה לאישור.",
     )
-    if out_meta is not None and _contract_queued:
-        out_meta["source_module"] = "action_gateway"
-        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
-        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
-    logger.info(
-        "[DeterministicCreateTask] בעלות_coordinator=True agent_calls=0 "
-        "action_tool=%s created_this_turn=%s reply_owner=%s",
-        outcome.get("action_tool"), outcome.get("created_this_turn"),
-        outcome.get("reply_owner") if _contract_queued else None,
-    )
-    owner_chat_id = (
-        os.environ.get("OWNER_TELEGRAM_ID", "") or
-        os.environ.get("ELIYAHU_CHAT_ID", "") or
-        os.environ.get("DIGEST_CHAT_ID", "")
-    )
-    if outcome.get("owner_notified") and str(owner_chat_id) == str(chat_id):
-        logger.info(
-            "[DeterministicCreateTask] duplicate_reply_suppressed=true "
-            "reason=owner_notification_already_sent"
-        )
-        return ""
-    return outcome.get("message") or "לא הצלחתי להכניס את המשימה לאישור."
 
 
 def _queue_deterministic_create_deal(
@@ -1204,43 +1242,10 @@ def _queue_deterministic_create_deal(
         # tool_use replay.
         trusted_source="deterministic_create_deal",
     )
-    if out_meta is not None and outcome.get("created_this_turn"):
-        out_meta["source_module"] = "action_gateway"
-        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
-        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
-    logger.info(
-        "[DeterministicCreateDeal] בעלות_coordinator=True agent_calls=0 "
-        "action_tool=%s created_this_turn=%s",
-        outcome.get("action_tool"), outcome.get("created_this_turn"),
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicCreateDeal",
+        "לא הצלחתי להכניס את העסקה לאישור.",
     )
-    # BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY (regression, 02/09/2026): this
-    # deterministic route was built to "mirror _queue_deterministic_create_
-    # task() exactly" (see docstring above), but the mirroring missed this
-    # specific guard — the one that closed the same duplicate-message UX bug
-    # for Tasks. _queue_approval_detailed() above already sent the owner an
-    # interactive "⏳ בקשת אישור..." message with the approve/reject keyboard
-    # (bot.send_message(owner_chat_id, ...) inside _queue_approval_detailed_
-    # impl) BEFORE returning here. When the requester IS the owner (the
-    # normal case for this single-owner bot), returning outcome["message"]
-    # unconditionally sends a SECOND, plain-text "יש פעולה שממתינה לאישור: ..."
-    # reply into the same chat — and only the FIRST (interactive) message is
-    # tracked by the approve/reject callback for editing-in-place, so after
-    # approval the second message is left behind forever, still reading
-    # "ממתין לאישור" even though the action already completed. See
-    # _queue_deterministic_create_task()'s identical
-    # duplicate_reply_suppressed guard just above.
-    owner_chat_id = (
-        os.environ.get("OWNER_TELEGRAM_ID", "") or
-        os.environ.get("ELIYAHU_CHAT_ID", "") or
-        os.environ.get("DIGEST_CHAT_ID", "")
-    )
-    if outcome.get("owner_notified") and str(owner_chat_id) == str(chat_id):
-        logger.info(
-            "[DeterministicCreateDeal] duplicate_reply_suppressed=true "
-            "reason=owner_notification_already_sent"
-        )
-        return ""
-    return outcome.get("message") or "לא הצלחתי להכניס את העסקה לאישור."
 
 
 def _queue_deterministic_task_update(
@@ -1274,11 +1279,10 @@ def _queue_deterministic_task_update(
         ),
         identity=identity,
     )
-    if out_meta is not None and outcome.get("created_this_turn"):
-        out_meta["source_module"] = outcome.get("source_module") or "action_gateway"
-        out_meta["reply_owner"] = outcome.get("reply_owner") or "gateway"
-        out_meta["final_response_count"] = outcome.get("final_response_count", 1)
-    return outcome.get("message") or "לא הצלחתי להעביר את הפעולה לאישור."
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicTaskUpdate",
+        "לא הצלחתי להעביר את הפעולה לאישור.",
+    )
 
 
 # ══════════════════════════════════════════════════
