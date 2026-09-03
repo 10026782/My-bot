@@ -16,8 +16,8 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 03/09/2026
-**Truth Reset SHA at last update:** `d8a7b346aa61be36780c3d24b3069854cac014c7`
-(Commercial completion foundation merged; S2A live schema closed and verified)
+**Truth Reset SHA at last update:** `23ab957e75961c7b50f929e263eddd3f0d6632c8`
+(S2A merged; S2B narrow mutation primitives statically verified on PR branch)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -40,7 +40,7 @@ evidence and never override this map.
 | Cost / Agent-Last | ACTIVE | MERGED | YES | cost attribution lineage merged | shadow telemetry and enforcement decision | validate live cost and decide progression |
 | Architecture authority / execution boundaries | ACTIVE | MERGED | YES | static authority boundaries reconciled | deployed/runtime evidence | verify deployed-SHA authority |
 | No-new-architectural-debt | CLOSED | WIRED | NO | blocking guards established in CI | normal monitoring only | monitor |
-| Schema / Data Contracts | ACTIVE | MERGED + LIVE_SCHEMA_VERIFIED | YES | commercial completion foundation merged in PR #1187; S2A additive schema, including native Deal rollups and dependent formula, closed with unchanged record counts | repository S2A alignment remains on PR branch; S2B is a separate slice | merge S2A repository alignment, then proceed to separately gated S2B |
+| Schema / Data Contracts | ACTIVE | MERGED + LIVE_SCHEMA_VERIFIED + S2B STATIC_VERIFIED_ON_PR_BRANCH | YES | S2A is merged and live-schema verified; S2B adds only the universal Organization, Charge, and Charge-required actual-movement Payment primitives behind existing approval/dispatcher controls | S2B merge, deployment, live canary, completion-engine wiring, and reader/writer cutover are not established | review/merge S2B; keep completion engine and readers unwired |
 | Maintenance program | CLOSED | MERGED | YES | numbered audits closed; no owned static gaps | accepted deferred/runtime triggers | monitor triggers |
 | Test / CI hygiene | CLOSED | WIRED | NO | #8/#9 closure and CI enforcement | normal monitoring only | monitor |
 | Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |

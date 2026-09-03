@@ -386,6 +386,41 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "יצירת תשלום (Payment) חדש — דורש אישור",
     ),
+    # S2B narrow Commercial V2 primitives. Internal-only until a separately
+    # approved deterministic caller is wired; the Agent cannot select these.
+    ToolMeta(
+        name             = "crm_find_or_create_organization",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        model_exposed    = False,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "איתור או יצירת ארגון קנוני — פנימי ודורש אישור",
+    ),
+    ToolMeta(
+        name             = "crm_create_charge",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        model_exposed    = False,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "יצירת חיוב קנוני לעסקה — פנימי ודורש אישור",
+    ),
+    ToolMeta(
+        name             = "crm_create_charge_payment",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        model_exposed    = False,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "רישום תנועה כספית בפועל לחיוב — פנימי ודורש אישור",
+    ),
 
     # ── PR-0C — ActionGateway adapters for former event_bus custom actions ──
     # Internal-execution-only: not in tools/schemas.py's TOOL_SCHEMAS, so the

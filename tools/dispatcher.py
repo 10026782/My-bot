@@ -17,8 +17,9 @@ from .gmail_tools    import gmail_draft, gmail_send_draft, gmail_read
 from .sheets_tools   import sheets_append
 from .airtable_tools    import airtable_get, airtable_add, airtable_update, airtable_get_schema, search_lead, _tool_result
 from airtable_schema import (
-    DealStage, PaymentTermTrigger, PaymentTermCadence, VATRule,
-    Tables, DealFields, PaymentTermFields, PaymentFields, TaskFields,
+    ChargeFields, DealStage, OrganizationFields, PaymentTermTrigger,
+    PaymentTermCadence, VATRule, Tables, DealFields, PaymentTermFields,
+    PaymentFields, TaskFields,
 )
 from .airtable_read_adapter import AirtableReadError, list_records
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
@@ -157,6 +158,51 @@ _PAYMENT_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     PaymentFields.TRIGGER_EVIDENCE: ("trigger_evidence", None),
     PaymentFields.NOTES:        ("notes", None),
 }
+_ORGANIZATION_FIELD_MAP: dict[str, tuple[str, str | None]] = {
+    OrganizationFields.NAME: ("organization_name", None),
+}
+_CHARGE_FIELD_MAP: dict[str, tuple[str, str | None]] = {
+    ChargeFields.REFERENCE: ("reference", None),
+    ChargeFields.DEAL: ("deal_id", "single"),
+    ChargeFields.BILLING_TERM: ("billing_term_id", "single"),
+    ChargeFields.DIRECTION: ("direction", None),
+    ChargeFields.AMOUNT: ("amount", None),
+    ChargeFields.CURRENCY_CODE: ("currency", None),
+    ChargeFields.ORIGINAL_DUE_DATE: ("original_due_date", None),
+    ChargeFields.CURRENT_EXPECTED_DATE: ("current_expected_date", None),
+    ChargeFields.STATUS: ("status", None),
+    ChargeFields.COLLECTION_STATE: ("collection_state", None),
+    ChargeFields.BASE_AMOUNT: ("base_amount", None),
+    ChargeFields.RATE_PCT: ("rate_pct", None),
+    ChargeFields.QUANTITY: ("quantity", None),
+    ChargeFields.UNIT_RATE: ("unit_rate", None),
+    ChargeFields.VAT_RULE: ("vat_rule", None),
+    ChargeFields.VAT_AMOUNT: ("vat_amount", None),
+    ChargeFields.TRIGGER_EVIDENCE: ("trigger_evidence", None),
+    ChargeFields.ORIGINAL_TERMS_SNAPSHOT: ("original_terms_snapshot", None),
+    ChargeFields.PROMISED_PAYMENT_DATE: ("promised_payment_date", None),
+    ChargeFields.PROMISED_PAYMENT_AMOUNT: ("promised_payment_amount", None),
+    ChargeFields.DOCUMENT_REQUIREMENT: ("document_requirement", None),
+    ChargeFields.DOCUMENT_STATUS: ("document_status", None),
+    ChargeFields.NOTES: ("notes", None),
+}
+_PAYMENT_V2_FIELD_MAP: dict[str, tuple[str, str | None]] = {
+    PaymentFields.CHARGE: ("charge_id", "single"),
+    PaymentFields.DEAL_LINK: ("deal_id", "single"),
+    PaymentFields.DIRECTION: ("direction", None),
+    PaymentFields.AMOUNT: ("amount", None),
+    PaymentFields.CURRENCY: ("currency", None),
+    PaymentFields.PAID_AT: ("paid_at", None),
+    PaymentFields.STATUS: ("status", None),
+    PaymentFields.PAYMENT_TERM: ("payment_term_id", "single"),
+    PaymentFields.REF: ("reference", None),
+    PaymentFields.METHOD: ("method", None),
+    PaymentFields.COUNTERPARTY_CONTACT: ("counterparty_contact_id", "single"),
+    PaymentFields.COUNTERPARTY_ORGANIZATION: ("counterparty_organization_id", "single"),
+    PaymentFields.DOCUMENT_REQUIREMENT: ("document_requirement", None),
+    PaymentFields.DOCUMENT_STATUS: ("document_status", None),
+    PaymentFields.NOTES: ("notes", None),
+}
 # Keys the dispatcher itself injects into `fields` (see the _TENANT_AWARE
 # block in dispatch_tool()) — never user/agent-supplied, never mapped, and
 # never counted as an "unrecognized field" fail-closed trigger.
@@ -167,6 +213,10 @@ _PROTECTED_CRM_ALIASES: dict[str, str] = {
     "Deals": Tables.DEALS,
     "Payment Terms": Tables.PAYMENT_TERMS,
     "Payments": Tables.PAYMENTS,
+    "Charge": Tables.CHARGES,
+    "Charges": Tables.CHARGES,
+    "Organization": Tables.ORGANIZATIONS,
+    "Organizations": Tables.ORGANIZATIONS,
 }
 
 # BUG-CRM-BYPASS-UPDATE follow-up (owner rule, 02/09/2026): "airtable_update
@@ -233,7 +283,31 @@ _CRM_TABLE_ROUTING: dict[str, tuple[str, dict[str, tuple[str, str | None]], tupl
     Tables.DEALS:         ("crm_create_deal", _DEAL_FIELD_MAP, ("name", "domain", "owner_id")),
     Tables.PAYMENT_TERMS: ("crm_create_payment_term", _PAYMENT_TERM_FIELD_MAP, ("deal_id", "name", "calc_type")),
     Tables.PAYMENTS:      ("crm_create_payment", _PAYMENT_FIELD_MAP, ("amount", "domain", "owner_id")),
+    Tables.CHARGES:       (
+        "crm_create_charge", _CHARGE_FIELD_MAP,
+        ("deal_id", "direction", "amount", "currency", "status", "collection_state",
+         "vat_rule", "document_requirement", "document_status"),
+    ),
+    Tables.ORGANIZATIONS: (
+        "crm_find_or_create_organization", _ORGANIZATION_FIELD_MAP, ("organization_name",),
+    ),
 }
+
+_PAYMENT_V2_ROUTE = (
+    "crm_create_charge_payment", _PAYMENT_V2_FIELD_MAP,
+    ("charge_id", "deal_id", "direction", "amount", "currency", "paid_at", "status",
+     "document_requirement", "document_status"),
+)
+
+
+def _crm_create_route(table: str, fields: dict) -> tuple[str, dict, tuple[str, ...]] | None:
+    """Select legacy versus V2 Payment without changing the legacy contract."""
+    if table == Tables.PAYMENTS and (
+        PaymentFields.CHARGE in fields
+        or any(key in fields for key in set(_PAYMENT_V2_FIELD_MAP) - set(_PAYMENT_FIELD_MAP))
+    ):
+        return _PAYMENT_V2_ROUTE
+    return _CRM_TABLE_ROUTING.get(table)
 
 
 def _map_generic_fields_to_canonical(
@@ -266,6 +340,11 @@ def _map_generic_fields_to_canonical(
                 return {}, f"ערך לא תקין לשדה מקושר {key!r} — נדרש רשימה."
         kwargs[kwarg_name] = value
     return kwargs, ""
+
+
+def _unsupported_canonical_inputs(inputs: dict, allowed: frozenset[str]) -> list[str]:
+    """Return caller-controlled keys outside a dedicated writer contract."""
+    return sorted(set(inputs) - allowed - _GENERIC_WRITE_IGNORED_KEYS)
 
 
 def _sanitize_formula_value(value: str) -> str:
@@ -644,8 +723,12 @@ def dispatch_tool(
                     _message = f"❌ שם טבלת CRM לא מוכר או דו-משמעי: {table!r}."
                     audit_log_airtable("airtable_add", identity, {"table": table}, _message)
                     return _tool_result(ok=False, tool="airtable_add", user_message=_message)
-                if _resolved_table in _CRM_TABLE_ROUTING:
-                    _canonical_tool, _field_map, _required_kwargs = _CRM_TABLE_ROUTING[_resolved_table]
+                _create_route = (
+                    _crm_create_route(_resolved_table, fields)
+                    if _resolved_table else None
+                )
+                if _create_route:
+                    _canonical_tool, _field_map, _required_kwargs = _create_route
 
                     # BUG-CRM-BYPASS: airtable_add's own registry entry
                     # (roles_allowed=_INTERNAL, includes "employee") is
@@ -695,12 +778,18 @@ def dispatch_tool(
                                                 user_message=f"❌ {_owner_error}")
                         _mapped["owner_id"] = _owner_record_id
 
-                    if _resolved_table == Tables.DEALS:
+                    if _canonical_tool == "crm_create_deal":
                         from commercial_crm import create_deal as _crm_writer
-                    elif _resolved_table == Tables.PAYMENT_TERMS:
+                    elif _canonical_tool == "crm_create_payment_term":
                         from commercial_crm import create_payment_term as _crm_writer
-                    else:
+                    elif _canonical_tool == "crm_create_payment":
                         from commercial_crm import create_payment as _crm_writer
+                    elif _canonical_tool == "crm_find_or_create_organization":
+                        from commercial_crm import find_or_create_organization as _crm_writer
+                    elif _canonical_tool == "crm_create_charge":
+                        from commercial_crm import create_charge as _crm_writer
+                    else:
+                        from commercial_crm import create_charge_payment as _crm_writer
                     result = _crm_writer(source="agent", **_mapped)
                     audit_log_airtable(
                         "airtable_add", identity,
@@ -789,6 +878,20 @@ def dispatch_tool(
                         user_message=f"❌ שם טבלת CRM לא מוכר או דו-משמעי: {table!r}.",
                     )
                     audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                    return result
+
+                if _resolved_table in {Tables.CHARGES, Tables.ORGANIZATIONS}:
+                    result = _tool_result(
+                        ok=False, tool="airtable_update",
+                        user_message=(
+                            "❌ Direct updates are disabled for this commercial table; "
+                            "no approved canonical update primitive exists."
+                        ),
+                    )
+                    audit_log_airtable(
+                        "airtable_update", identity,
+                        {"table": table, "record_id": record_id}, result,
+                    )
                     return result
 
                 if _resolved_table in _CRM_TABLE_ROUTING:
@@ -1018,6 +1121,83 @@ def dispatch_tool(
                     source="agent",
                 )
                 audit_log_airtable("crm_create_payment", identity, inputs, result)
+                return result
+
+            # ── S2B — narrow Commercial V2 mutation primitives ──────────
+            case "crm_find_or_create_organization":
+                _allowed = frozenset({"organization_name"})
+                _unsupported = _unsupported_canonical_inputs(inputs, _allowed)
+                if _unsupported:
+                    return _tool_result(
+                        ok=False, tool=name,
+                        user_message=f"❌ Unsupported Organization input fields: {_unsupported!r}.",
+                    )
+                try:
+                    enforce_tenant_scope(name, identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable(name, identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool=name, user_message=str(e))
+                from commercial_crm import find_or_create_organization
+                result = find_or_create_organization(
+                    organization_name=inputs["organization_name"],
+                    source=trusted_source or "commercial_crm",
+                )
+                audit_log_airtable(name, identity, inputs, result)
+                return result
+
+            case "crm_create_charge":
+                _allowed = frozenset({
+                    "deal_id", "direction", "amount", "currency", "status",
+                    "collection_state", "vat_rule", "document_requirement",
+                    "document_status", "billing_term_id", "reference",
+                    "original_due_date", "current_expected_date", "base_amount",
+                    "rate_pct", "quantity", "unit_rate", "vat_amount",
+                    "trigger_evidence", "original_terms_snapshot",
+                    "promised_payment_date", "promised_payment_amount", "notes",
+                })
+                _unsupported = _unsupported_canonical_inputs(inputs, _allowed)
+                if _unsupported:
+                    return _tool_result(
+                        ok=False, tool=name,
+                        user_message=f"❌ Unsupported Charge input fields: {_unsupported!r}.",
+                    )
+                try:
+                    enforce_tenant_scope(name, identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable(name, identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool=name, user_message=str(e))
+                from commercial_crm import create_charge
+                result = create_charge(
+                    source=trusted_source or "commercial_crm",
+                    **{key: value for key, value in inputs.items() if key in _allowed},
+                )
+                audit_log_airtable(name, identity, inputs, result)
+                return result
+
+            case "crm_create_charge_payment":
+                _allowed = frozenset({
+                    "charge_id", "deal_id", "direction", "amount", "currency",
+                    "paid_at", "status", "document_requirement", "document_status",
+                    "payment_term_id", "reference", "method",
+                    "counterparty_contact_id", "counterparty_organization_id", "notes",
+                })
+                _unsupported = _unsupported_canonical_inputs(inputs, _allowed)
+                if _unsupported:
+                    return _tool_result(
+                        ok=False, tool=name,
+                        user_message=f"❌ Unsupported V2 Payment input fields: {_unsupported!r}.",
+                    )
+                try:
+                    enforce_tenant_scope(name, identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable(name, identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool=name, user_message=str(e))
+                from commercial_crm import create_charge_payment
+                result = create_charge_payment(
+                    source=trusted_source or "commercial_crm",
+                    **{key: value for key, value in inputs.items() if key in _allowed},
+                )
+                audit_log_airtable(name, identity, inputs, result)
                 return result
 
             # ── PR-0C — ActionGateway adapters (former event_bus custom actions) ──

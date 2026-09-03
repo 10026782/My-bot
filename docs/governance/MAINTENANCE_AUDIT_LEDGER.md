@@ -342,3 +342,12 @@ verified live and record counts were unchanged. S2A is closed at
 `LIVE_SCHEMA_VERIFIED + STATIC_VERIFIED_ON_BRANCH`. No writer/read switch,
 legacy Payment mutation, production routing, or S2B mutation primitive is part
 of this closure.
+
+## Commercial V2 S2B narrow mutation primitives — 03/09/2026
+
+`docs/evidence/COMMERCIAL_S2B_MUTATION_PRIMITIVES_20260903.md` records the
+owner-approved Organization, Charge, and Charge-required actual-movement Payment
+create primitives at `CODE_DONE + STATIC_VERIFIED` on the PR branch. The new
+authority is registered narrowly to three exact `commercial_crm` symbols and
+does not reopen the historical schema audits. No live record, schema, routing,
+reader, completion-engine, channel, scheduler, or legacy Payment state changed.

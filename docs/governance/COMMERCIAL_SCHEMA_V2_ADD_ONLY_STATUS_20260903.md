@@ -73,3 +73,19 @@ Evidence level at closure:
 - merge/deployment/runtime: not claimed by this S2A closure report.
 
 S2B remains a separate subsequent implementation slice.
+
+## S2B branch status
+
+S2B is implemented on `codex/commercial-v2-s2b-mutation-primitives` at
+`CODE_DONE + STATIC_VERIFIED`. It adds only the owner-approved universal
+Organization find-or-create primitive, Charge create primitive, and
+Charge-required actual-movement V2 Payment primitive. These are internal-only,
+approval-sensitive tools behind the existing ActionGateway and dispatcher
+protections. Protected generic creates redirect to the canonical primitives;
+generic updates to Charges and Organizations fail closed because no update
+primitive was approved.
+
+This is not a schema mutation or cutover. No live record was created, modified,
+or reinterpreted; no reader, completion-engine caller, production route,
+channel, scheduler, or Agent tool was switched. Merge, deployment, live canary,
+and runtime verification are not claimed.
