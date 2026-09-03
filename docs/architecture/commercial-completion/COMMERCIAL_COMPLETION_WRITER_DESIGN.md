@@ -45,7 +45,7 @@ existing TurnDecision → policy → ActionContract/ActionGateway chain.
 
 ## C. Field Completion Matrix
 
-The exact 241-row field matrix is in
+The exact 247-row field matrix is in
 [`FIELD_COMPLETION_MATRIX.csv`](FIELD_COMPLETION_MATRIX.csv). It includes every
 live field on all ten requested entities plus approved target fields that are not
 live. Each row records requiredness, conditional rule, input type, target and live
@@ -59,11 +59,11 @@ Important classifications:
   requested or manually written.
 - Allocation Snapshots are system-only; conversational completion is blocked.
 - Deal requires one explicit counterparty link: Contact or Organization. Lead is
-  optional. `Deal Type` remains validated free text because the live field is text
-  and no canonical select vocabulary has been approved.
-- Payment Term requires Deal. Fixed, percentage, per-unit, usage-based, and their
-  conditional inputs are deterministic. Tiered/custom and specific/scheduled due
-  rules fail closed because their detail-field contracts are absent.
+  optional. `Deal Type Code` is the additive canonical V2 select; legacy `Deal
+  Type` text remains untouched.
+- Payment Term requires Deal. Fixed, percentage, per-unit, usage-based, tiered,
+  and custom terms have explicit conditional inputs. Specific/scheduled due rules
+  require their dedicated deterministic date fields.
 - Charge requires Deal; Billing Term is optional for direct one-off Charges.
 - New V2 Payment requires Charge, positive amount, movement date, Direction, and
   Currency. Its status resolves deterministically to `received`; this contract is
@@ -75,10 +75,10 @@ Important classifications:
 | --- | --- | --- | --- | --- | --- | --- |
 | Lead | Deal | Origin Lead, name, domain, owner; existing Contact when explicit | Deal Stage = opportunity | counterparty if absent, Deal Type, Relationship Type, Currency, Commercial Status, Expected Value | notes; Lead itself remains optional | current Deal writer lacks V2 signature parity |
 | Direct | Deal | authenticated owner and source context when supplied | Deal Stage = opportunity | name, domain, counterparty, Deal Type, Relationship Type, Currency, Commercial Status, Expected Value | Origin Lead, notes | no Lead may be manufactured |
-| Deal | Payment Term | Deal; Direction/Currency when supplied by Deal context | name, once cadence, immediate trigger, immediate due rule, zero grace, draft status, VAT none | Calculation Type and its conditional values | limits, dates, notes | unsupported live enums; tier/custom detail fields; specific/scheduled due-date field |
-| Deal / Payment Term | Charge | Deal, optional Billing Term, Direction, Currency, due context | draft/not-due state, VAT none, document state; future terms snapshot | amount unless deterministically calculable | direct Charge may omit Billing Term; expected/promised fields | no Charge writer; Charges.Currency live type mismatch |
+| Deal | Payment Term | Deal; Direction/Currency when supplied by Deal context | name, once cadence, immediate trigger, immediate due rule, zero grace, draft status, VAT none | Calculation Type and its conditional values | limits, dates, notes | no production Payment Term V2 writer switch |
+| Deal / Payment Term | Charge | Deal, optional Billing Term, Direction, Currency, due context | draft/not-due state, VAT none, document state; future terms snapshot | amount unless deterministically calculable | direct Charge may omit Billing Term; expected/promised fields | no Charge mutation primitive |
 | Charge | Payment | Charge, Deal/Term, Direction, Currency, counterparty | status received; document state | amount and Paid At | method, reference, notes | current Payment writer permits Charge bypass and must not be reused for V2 |
-| Deal | Allocation Rule | Deal; optional Term/Charge | priority 0, draft status | beneficiary, allocation type, basis, conditional rate/fixed/unit value | dates, notes | custom type/basis lacks explicit detail field; Organization beneficiary not represented live |
+| Deal | Allocation Rule | Deal; optional Term/Charge | priority 0, draft status | Contact or Organization beneficiary, allocation type, basis, conditional rate/fixed/unit value | dates, notes | custom type/basis lacks explicit detail field |
 | Charge | Allocation Snapshot | Charge, Rule, beneficiary | basis, resolved amount, timestamp, snapshot | none | none | system-only; no immutable snapshot primitive exists |
 | Deal | Deal Economics | Deal | missing amount components default to zero; total cost/profit/margin/ROI derived | none beyond Deal | amount components, notes | Margin/ROI are writable live fields and need a deterministic derivation primitive |
 | Deal | nested Contact | source name/phone/email/company | none | Contact name and valid phone | email/company/role | must return through existing Contact gate |
@@ -145,29 +145,22 @@ record ID before resuming the parent Deal.
   verification command for this branch.
 - No runtime, deployment, or live-write verification is claimed.
 
-## I. Remaining gaps and decisions
+## I. S2A closure and remaining implementation slices
 
-1. Add the approved Payment Terms select options live for Calculation Type,
-   Calculation Basis, Trigger Type, and Cadence before those values can be written.
-2. Decide and add explicit fields for tier brackets and custom calculation rules;
-   do not store them as opaque Notes.
-3. Decide which exact field carries `specific_due_date` / scheduled due data on a
-   Payment Term.
-4. Resolve `Charges.Currency` with a native select-capable non-destructive path.
-5. Add Deal `Start Date`, `Total Charged`, `Total Collected`, and `Outstanding` as
-   approved native date/rollup/formula fields.
-6. Decide whether Deal Type remains free text or receives an approved canonical
-   select vocabulary.
-7. Decide whether Allocation beneficiaries may be Organizations. The live
-   Beneficiary link currently targets Contacts only.
-8. Define an Organization dedup key and narrow canonical create primitive.
-9. Define idempotency/immutability primitives for Charge and Allocation Snapshot.
-10. Define the V2 Payment primitive and migration/cutover guard without touching
-    or reinterpreting the legacy Payment row.
+S2A is closed at `LIVE_SCHEMA_VERIFIED + STATIC_VERIFIED_ON_BRANCH`: all
+approved additive native fields, including the Deal rollups and dependent
+formula, were directly read back as valid. Remaining work belongs to S2B or a
+later explicitly gated slice:
+
+1. Define an Organization dedup key and narrow canonical create primitive in S2B.
+2. Define idempotency/immutability primitives for Charge and Allocation Snapshot
+   in S2B.
+3. Define the V2 Payment primitive and migration/cutover guard without touching
+   or reinterpreting the legacy Payment row.
 
 ## J. Exact next implementation slice
 
-After owner/schema decisions 1–8 are closed, implement narrow, non-channel
+With S2A closed, the next separately gated slice may implement narrow, non-channel
 mutation primitives for Organization and Charge first. Extend protected generic
 write routing only after exact field parity tests pass. Then add a new V2 Payment
 primitive that requires Charge and records actual movement; keep the current

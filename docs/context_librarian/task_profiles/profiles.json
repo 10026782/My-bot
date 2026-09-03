@@ -122,7 +122,7 @@
       "optional_evidence": [],
       "conditional_optional_evidence": [],
       "excluded_areas": [],
-      "maximum_documents": 48,
+      "maximum_documents": 49,
       "maximum_approximate_token_budget": 14300,
       "mandatory_canonical_decisions": ["main_overrides_planning", "actioncontracts_authority", "no_new_source_of_truth", "shadow_not_active", "production_verification", "historical_evidence_precedence", "ux_no_internal_ids", "cross_layer_authority", "business_intent_and_planning_authority", "message_contract_envelope_authority"],
       "allowed_edge_types": ["depends_on", "calls", "proposes_to", "executes_via", "requires_approval_via", "source_of_truth_for", "must_not_own", "verified_by", "rendered_by", "supersedes", "conflicts_with", "governed_by", "blocked_by"],

@@ -266,7 +266,8 @@ class DealFields:
     DEAL_ECONOMICS_LINK = "Deal Economics"
     COUNTERPARTY_CONTACT = "Counterparty Contact"
     COUNTERPARTY_ORGANIZATION = "Counterparty Organization"
-    DEAL_TYPE       = "Deal Type"
+    DEAL_TYPE       = "Deal Type"       # legacy free-text compatibility field
+    DEAL_TYPE_CODE  = "Deal Type Code"  # canonical V2 select; writers not switched
     RELATIONSHIP_TYPE = "Relationship Type"
     START_DATE      = "Start Date"
     CURRENCY        = "Currency"
@@ -296,6 +297,14 @@ class PaymentTermCalcType:
     USAGE_BASED  = "usage_based"
     TIERED       = "tiered"
     CUSTOM       = "custom"
+
+
+class DealType:
+    ONE_OFF = "one_off"
+    RECURRING = "recurring"
+    COMMISSION = "commission"
+    SERVICE = "service"
+    OTHER = "other"
 
 
 class PaymentTermBasis:
@@ -345,14 +354,18 @@ class PaymentTermFields:
     retroactively change even if the Term is edited afterward."""
     NAME             = "Name"
     DEAL             = "Deal"                 # required — linked record → Deals
-    CALC_TYPE        = "Calculation Type"     # PaymentTermCalcType
+    CALC_TYPE        = "Calculation Type"     # legacy select; writers not switched
+    CALC_TYPE_CODE   = "Calculation Type Code"  # canonical PaymentTermCalcType
     FIXED_AMOUNT     = "Fixed Amount"
     RATE_PCT         = "Rate %"
-    CALC_BASIS       = "Calculation Basis"    # PaymentTermBasis
-    TRIGGER_TYPE     = "Trigger Type"         # PaymentTermTrigger
+    CALC_BASIS       = "Calculation Basis"    # legacy select; writers not switched
+    CALC_BASIS_CODE  = "Calculation Basis Code"  # canonical PaymentTermBasis
+    TRIGGER_TYPE     = "Trigger Type"         # legacy select; writers not switched
+    TRIGGER_TYPE_CODE = "Trigger Type Code"   # canonical PaymentTermTrigger
     TRIGGER_DATE     = "Trigger Date"
     TRIGGER_DELAY_DAYS = "Trigger Delay Days"
-    CADENCE          = "Cadence"              # PaymentTermCadence
+    CADENCE          = "Cadence"              # legacy select; writers not switched
+    CADENCE_CODE     = "Cadence Code"         # canonical PaymentTermCadence
     VAT_RULE         = "VAT Rule"             # VATRule
     START_DATE       = "Start Date"
     END_DATE         = "End Date"
@@ -369,6 +382,10 @@ class PaymentTermFields:
     STATUS           = "Status"
     NEXT_DUE_DATE    = "Next Due Date"
     CURRENCY         = "Currency"
+    TIER_CONFIGURATION = "Tier Configuration"
+    CUSTOM_CALCULATION_RULE = "Custom Calculation Rule"
+    SPECIFIC_DUE_DATE = "Specific Due Date"
+    SCHEDULE_ANCHOR_DATE = "Schedule Anchor Date"
 
 
 class Direction:
@@ -478,7 +495,8 @@ class ChargeFields:
     BILLING_TERM = "Billing Term"
     DIRECTION = "Direction"
     AMOUNT = "Amount"
-    CURRENCY = "Currency"
+    CURRENCY = "Currency"              # legacy text compatibility field
+    CURRENCY_CODE = "Currency Code"    # canonical V2 select; writers not switched
     ORIGINAL_DUE_DATE = "Original Due Date"
     CURRENT_EXPECTED_DATE = "Current Expected Date"
     STATUS = "Status"
@@ -506,6 +524,8 @@ class AllocationRuleFields:
     BILLING_TERM = "Billing Term"
     CHARGE = "Charge"
     BENEFICIARY = "Beneficiary"
+    BENEFICIARY_CONTACT = "Beneficiary"  # explicit person alias
+    BENEFICIARY_ORGANIZATION = "Beneficiary Organization"
     ALLOCATION_TYPE = "Allocation Type"
     ALLOCATION_BASIS = "Allocation Basis"
     RATE_PCT = "Rate %"
@@ -523,6 +543,8 @@ class AllocationSnapshotFields:
     CHARGE = "Charge"
     ALLOCATION_RULE = "Allocation Rule"
     BENEFICIARY = "Beneficiary"
+    BENEFICIARY_CONTACT = "Beneficiary"  # explicit person alias
+    BENEFICIARY_ORGANIZATION = "Beneficiary Organization"
     RESOLVED_AMOUNT = "Resolved Amount"
     BASIS_AMOUNT = "Basis Amount"
     RESOLVED_AT = "Resolved At"

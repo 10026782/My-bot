@@ -11,6 +11,7 @@ from airtable_schema import (
     CollectionState,
     CommercialStatus,
     Currency,
+    DealType,
     DealEconomicsFields,
     DealFields,
     Direction,
@@ -38,8 +39,24 @@ def test_v2_tables_and_live_field_constants_are_exact():
     assert PaymentFields.COUNTERPARTY_CONTACT == "Counterparty Contact"
     assert PaymentFields.COUNTERPARTY_ORGANIZATION == "Counterparty Organization"
     assert PaymentTermFields.CURRENCY == "Currency"
+    assert PaymentTermFields.CALC_TYPE_CODE == "Calculation Type Code"
+    assert PaymentTermFields.CALC_BASIS_CODE == "Calculation Basis Code"
+    assert PaymentTermFields.TRIGGER_TYPE_CODE == "Trigger Type Code"
+    assert PaymentTermFields.CADENCE_CODE == "Cadence Code"
+    assert PaymentTermFields.TIER_CONFIGURATION == "Tier Configuration"
+    assert PaymentTermFields.CUSTOM_CALCULATION_RULE == "Custom Calculation Rule"
+    assert PaymentTermFields.SPECIFIC_DUE_DATE == "Specific Due Date"
+    assert PaymentTermFields.SCHEDULE_ANCHOR_DATE == "Schedule Anchor Date"
     assert DealFields.COUNTERPARTY_CONTACT == "Counterparty Contact"
     assert DealFields.COUNTERPARTY_ORGANIZATION == "Counterparty Organization"
+    assert DealFields.DEAL_TYPE_CODE == "Deal Type Code"
+    assert DealFields.START_DATE == "Start Date"
+    assert DealFields.TOTAL_CHARGED == "Total Charged"
+    assert DealFields.TOTAL_COLLECTED == "Total Collected"
+    assert DealFields.OUTSTANDING == "Outstanding"
+    assert ChargeFields.CURRENCY_CODE == "Currency Code"
+    assert AllocationRuleFields.BENEFICIARY_ORGANIZATION == "Beneficiary Organization"
+    assert AllocationSnapshotFields.BENEFICIARY_ORGANIZATION == "Beneficiary Organization"
 
     for field_group in (
         ChargeFields,
@@ -55,6 +72,7 @@ def test_canonical_enums_have_no_surrounding_whitespace():
     enum_groups = (
         Direction,
         Currency,
+        DealType,
         PaymentTermCalcType,
         BillingTermStatus,
         ChargeStatus,
@@ -88,4 +106,3 @@ def test_allocation_rules_and_snapshots_are_separate_entities():
     assert AllocationRuleFields.REFERENCE != AllocationSnapshotFields.REFERENCE
     assert AllocationRuleFields.BENEFICIARY == AllocationSnapshotFields.BENEFICIARY
     assert AllocationSnapshotFields.RESOLVED_AMOUNT == "Resolved Amount"
-

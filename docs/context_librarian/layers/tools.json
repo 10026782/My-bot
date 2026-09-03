@@ -289,6 +289,12 @@
           "observed_on": "2026-07-23",
           "scope": "dated repository briefing of tool/evidence behavior; current production mode must be rechecked",
           "status": "stale_briefing"
+        },
+        {
+          "path": "docs/evidence/COMMERCIAL_SCHEMA_S2A_20260903.md",
+          "observed_on": "2026-09-03",
+          "scope": "direct live production Airtable schema and record-count verification for Commercial Schema V2 S2A",
+          "status": "production_verified"
         }
       ],
       "feature_flags": [

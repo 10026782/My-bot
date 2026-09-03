@@ -7,7 +7,11 @@ import pytest
 from airtable_schema import (
     CommercialStatus,
     Currency,
+    DealFields,
+    DealType,
     Direction,
+    DueRule,
+    PaymentTermFields,
     PaymentTermCalcType,
     RelationshipType,
 )
@@ -30,7 +34,7 @@ def _complete_deal(**overrides):
         "domain": "import",
         "owner": "recOwner1",
         "counterparty_contact": "recContact1",
-        "deal_type": "service agreement",
+        "deal_type": DealType.SERVICE,
         "relationship_type": RelationshipType.ONE_OFF,
         "currency": Currency.ILS,
         "commercial_status": CommercialStatus.PROSPECT,
@@ -43,7 +47,7 @@ def _complete_deal(**overrides):
 def test_deal_from_sparse_lead_asks_only_for_missing_deal_fields():
     writer = CommercialCompletionWriter(
         "deal",
-        current_values={"deal_type": "service"},
+        current_values={"deal_type": DealType.SERVICE},
         source_context={
             "name": "Lead-derived deal",
             "domain": "saas",
@@ -223,16 +227,85 @@ def test_missing_field_decisions_need_no_agent_or_callback():
     assert not hasattr(writer, "llm")
 
 
-def test_unsupported_custom_and_tiered_live_contracts_fail_closed():
-    for calculation in (PaymentTermCalcType.CUSTOM, PaymentTermCalcType.TIERED):
+@pytest.mark.parametrize(
+    ("calculation", "required_field"),
+    [
+        (PaymentTermCalcType.TIERED, "tier_configuration"),
+        (PaymentTermCalcType.CUSTOM, "custom_calculation_rule"),
+    ],
+)
+def test_tiered_and_custom_terms_require_their_approved_detail_field(
+    calculation, required_field
+):
+    writer = CommercialCompletionWriter(
+        "payment_term",
+        {"calculation_type": calculation, "calculation_basis": "deal_amount"},
+        source_context={"deal_id": "recDeal1", "direction": Direction.RECEIVABLE,
+                        "currency": Currency.ILS},
+    )
+    assert required_field in {field.field_name for field in writer.missing_fields()}
+
+
+@pytest.mark.parametrize(
+    ("due_rule", "required_field"),
+    [
+        (DueRule.SPECIFIC_DUE_DATE, "specific_due_date"),
+        (DueRule.SCHEDULED, "schedule_anchor_date"),
+        (DueRule.INSTALLMENTS, "schedule_anchor_date"),
+    ],
+)
+def test_due_rules_require_deterministic_date_inputs(due_rule, required_field):
+    writer = CommercialCompletionWriter(
+        "payment_term",
+        {"calculation_type": PaymentTermCalcType.FIXED, "fixed_amount": 100,
+         "due_rule": due_rule},
+        source_context={"deal_id": "recDeal1", "direction": Direction.RECEIVABLE,
+                        "currency": Currency.ILS},
+    )
+    assert required_field in {field.field_name for field in writer.missing_fields()}
+
+
+def test_completion_payload_uses_additive_canonical_fields_only():
+    deal = CommercialCompletionWriter("deal", _complete_deal()).complete_payload()
+    assert deal[DealFields.DEAL_TYPE_CODE] == DealType.SERVICE
+    assert DealFields.DEAL_TYPE not in deal
+
+    charge = CommercialCompletionWriter(
+        "charge", {"deal": "recDeal1", "direction": Direction.RECEIVABLE,
+                   "amount": 100, "currency": Currency.ILS}
+    ).complete_payload()
+    assert charge["Currency Code"] == Currency.ILS
+
+
+def test_payment_term_payload_uses_canonical_code_selects():
+    writer = CommercialCompletionWriter(
+        "payment_term",
+        {"calculation_type": PaymentTermCalcType.FIXED, "fixed_amount": 100},
+        source_context={"deal_id": "recDeal1", "direction": Direction.RECEIVABLE,
+                        "currency": Currency.ILS},
+    )
+    payload = writer.complete_payload()
+    assert payload[PaymentTermFields.CALC_TYPE_CODE] == PaymentTermCalcType.FIXED
+    assert payload[PaymentTermFields.CADENCE_CODE] == "once"
+    assert payload[PaymentTermFields.TRIGGER_TYPE_CODE] == "immediate"
+    assert PaymentTermFields.CALC_TYPE not in payload
+
+
+def test_allocation_rule_accepts_contact_or_organization_beneficiary():
+    common = {
+        "deal": "recDeal1",
+        "allocation_type": "percentage",
+        "allocation_basis": "gross_amount",
+        "rate_pct": 10,
+    }
+    for beneficiary in (
+        {"beneficiary_contact": "recContact1"},
+        {"beneficiary_organization": "recOrg1"},
+    ):
         writer = CommercialCompletionWriter(
-            "payment_term",
-            {"calculation_type": calculation},
-            source_context={"deal_id": "recDeal1", "direction": Direction.RECEIVABLE,
-                            "currency": Currency.ILS},
+            "allocation_rule", {**common, **beneficiary}
         )
-        with pytest.raises(CompletionBlockedError, match="detail-field"):
-            writer.missing_fields()
+        assert writer.is_complete()
 
 
 def test_existing_value_wins_over_inherited_and_default_value():
