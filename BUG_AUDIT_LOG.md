@@ -6938,3 +6938,21 @@ status here and from `BOSS_CURRENT_STATE.md` together.
   2. **שאילתת Airtable ישירה** (base `app4bcgoX7t0HUVnm`, לא הודעת הבוט): נוצרה **בדיוק רשומת עסקה אחת** בטבלת עסקאות (Deals), `recs4uu0IpTAad22y` ("גבי קניקובסקי", נוצרה 2026-09-02T16:37:51Z) — תואם בדיוק ל-`external_id` שבלוג — שדה **Origin Lead שלה מקושר בפועל** לרשומת הליד `rec67YjUdFVDlLesr` ("גבי קניקובסקי", domain=`recruitment`, טלפון `0525253545`, status `active`). שדה Domain בעסקה מציג `Recruitment` (casing חי של Airtable) — מאמת שה-slug הקנוני (`recruitment`) מהליד עבר נכון דרך לוגיקת ה-casing הקיימת (`resolve_live_select_value`) בלי טבלת תרגום שנייה. אין כפילות רשומות תואמות שם בטבלת העסקאות.
   3. **טרנסקריפט הטלגרם** שסיפק הבעלים — הודעה אחת בלבד, כצפוי.
 - **סטטוס:** ✅ VERIFIED IN PROD — merge + deploy + קנרית production חיה, מאומתת בלוג runtime + שאילתת Airtable ישירה + טרנסקריפט: `/dealfromlead` יוצר עסקה אחת עם Origin Lead מקושר נכון, `agent_calls=0`, `final_responses=1`, ללא הודעה כפולה.
+
+## F16 Media — Production canary closure — 03/09/2026
+
+**Deployed SHA:** `0f80122525c5bbc9e3b115a4f7c4e131ac47070b` on Render production.
+**Result:** **RUNTIME_VERIFIED** for the canonical basic Telegram F16 path.
+
+Owner-triggered Telegram canaries plus corresponding Render log inspection
+verified photo persistence through Drive and Airtable, voice-note STT, and the
+approved `media_save_to_memory` action. The canonical requirement was one real
+photo plus one real voice note; neither a `/media` command nor a UI button is
+part of the event-driven F16 intake contract. A repeated/forwarded photo was
+stored again under a new provider identity, which is consistent with F16-M5
+DEFERRED / ACCEPTED: content-hash deduplication is not required.
+
+Telegram `audio`, `video_note`, and storage of original voice-note bytes remain
+separate, unapproved capabilities; they do not reopen or block F16. Detailed
+timestamps, methods, scope, and results are recorded in
+`docs/evidence/F16_MEDIA_RUNTIME_CANARY_20260903.md`.
