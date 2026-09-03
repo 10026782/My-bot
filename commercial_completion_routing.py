@@ -238,6 +238,12 @@ class CommercialCompletionRouter:
         field = session.active.next_field()
         if field is None:
             return self._inspect(session)
+        # Compatibility for an already-canonical internal value supplied by
+        # trusted callers/tests. The UI never asks for or renders this form;
+        # human text still follows the resolver path below.
+        from commercial_completion import _RECORD_ID_RE
+        if isinstance(value, str) and _RECORD_ID_RE.fullmatch(value.strip()):
+            return self.answer(session, field.field_name, value.strip())
         if field.field_name == "counterparty_contact":
             choice = str(value or "").strip().casefold()
             if choice in {"ארגון", "organization", "company"}:
