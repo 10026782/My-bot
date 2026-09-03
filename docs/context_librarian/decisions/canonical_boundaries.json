@@ -811,8 +811,7 @@
       ],
       "test_paths": [
         "test_structured_command.py",
-        "test_draft_flow.py",
-        "test_draft_field_operations.py"
+        "test_draft_flow.py"
       ],
       "canonical_docs": [
         {
@@ -1225,10 +1224,12 @@
       },
       "owner": "commercial_crm",
       "code_paths": [
-        "commercial_completion_routing.py"
+        "commercial_completion_routing.py",
+        "commercial_completion_ux.py"
       ],
       "test_paths": [
-        "tests/test_commercial_completion_routing.py"
+        "tests/test_commercial_completion_routing.py",
+        "tests/test_commercial_completion_ux.py"
       ],
       "canonical_docs": [
         {

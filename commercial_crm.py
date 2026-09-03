@@ -213,6 +213,38 @@ def calculate_payment(
 # Writers
 # ══════════════════════════════════════════════════
 
+def lookup_human_reference(
+    entity: str, query: str, *, scope: str, identity=None, limit: int = 6,
+) -> list[dict]:
+    """Bounded exact-label lookup for the completion presentation adapter.
+
+    This is read-only and returns provider records only to the internal
+    resolver boundary.  User-facing code receives labels/choices, never IDs.
+    """
+    table_by_entity = {
+        "contact": Tables.CONTACTS, "organization": Tables.ORGANIZATIONS,
+        "deal": Tables.DEALS, "payment_term": Tables.PAYMENT_TERMS,
+        "charge": Tables.CHARGES,
+    }
+    field_by_entity = {
+        "contact": ContactFields.NAME, "organization": OrganizationFields.NAME,
+        "deal": DealFields.NAME, "payment_term": PaymentTermFields.NAME,
+        "charge": ChargeFields.REFERENCE,
+    }
+    table = table_by_entity.get(entity)
+    field_name = field_by_entity.get(entity)
+    if not table or not field_name or not scope or limit < 1:
+        return []
+    needle = " ".join(str(query or "").casefold().split())
+    records = list_records(table, max_records=limit + 1, fields=[field_name], paginate=False)
+    matches = []
+    for record in records:
+        fields = record.get("fields", {})
+        label = " ".join(str(fields.get(field_name, "")).casefold().split())
+        if label == needle:
+            matches.append(record)
+    return matches[:limit]
+
 def find_or_create_organization(
     organization_name: str,
     *,

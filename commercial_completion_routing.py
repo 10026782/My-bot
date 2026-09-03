@@ -51,6 +51,9 @@ class CompletionRoute:
     tool_inputs: Mapping[str, Any] | None = None
     queue_outcome: Any = None
     reason: str = ""
+    user_label: str = ""
+    prompt: str = ""
+    choices: tuple[Any, ...] = ()
 
 
 def serialize_completion_session(session: CompletionSession) -> dict[str, Any]:
@@ -206,6 +209,7 @@ class CommercialCompletionRouter:
             return CompletionRoute(
                 "CLARIFY", session.active.target_entity, session=session,
                 field_name=field.field_name, field_type=field.input_type,
+                **self._presentation(session.active.target_entity, field.field_name),
             )
         except (KeyError, TypeError, ValueError, CompletionBlockedError, CommercialRoutingError) as exc:
             return CompletionRoute("BLOCK", "commercial", reason=str(exc))
@@ -216,6 +220,109 @@ class CommercialCompletionRouter:
         except (ValueError, CompletionBlockedError) as exc:
             return CompletionRoute("BLOCK", session.active.target_entity, session=session, reason=str(exc))
 
+    def answer_human(
+        self,
+        session: CompletionSession,
+        value: Any,
+        *,
+        link_lookup: Callable[[str, str, int], Any] | None = None,
+        scope: str = "",
+    ) -> CompletionRoute:
+        """Accept a user-facing answer without weakening canonical validation.
+
+        Links are resolved by the injected bounded lookup and then passed to
+        the same ``answer`` method.  A caller may use this seam for Contact,
+        Organization, Deal, or Payment Term lookups; no storage identifier is
+        ever requested from the user.
+        """
+        field = session.active.next_field()
+        if field is None:
+            return self._inspect(session)
+        # Compatibility for an already-canonical internal value supplied by
+        # trusted callers/tests. The UI never asks for or renders this form;
+        # human text still follows the resolver path below.
+        from commercial_completion import _RECORD_ID_RE
+        if isinstance(value, str) and _RECORD_ID_RE.fullmatch(value.strip()):
+            return self.answer(session, field.field_name, value.strip())
+        if field.field_name == "counterparty_contact":
+            choice = str(value or "").strip().casefold()
+            if choice in {"ארגון", "organization", "company"}:
+                from dataclasses import replace
+                marked = replace(
+                    session.active,
+                    current_values={
+                        **dict(session.active.current_values),
+                        "_ux_counterparty_kind": "organization",
+                    },
+                )
+                from commercial_completion import _CompletionFrame
+                session = CompletionSession((_CompletionFrame(marked),))
+                return CompletionRoute(
+                    "CLARIFY", "deal", session=session,
+                    field_name=field.field_name, field_type=field.input_type,
+                    user_label="ארגון", prompt="מה שם הארגון?",
+                )
+            if choice in {"איש קשר", "contact", "person"}:
+                from dataclasses import replace
+                marked = replace(
+                    session.active,
+                    current_values={
+                        **dict(session.active.current_values),
+                        "_ux_counterparty_kind": "contact",
+                    },
+                )
+                from commercial_completion import _CompletionFrame
+                session = CompletionSession((_CompletionFrame(marked),))
+                return CompletionRoute(
+                    "CLARIFY", "deal", session=session,
+                    field_name=field.field_name, field_type=field.input_type,
+                    user_label="איש קשר", prompt="מה שם איש הקשר?",
+                )
+        if field.input_type.name != "LINK":
+            return self.answer(session, field.field_name, value)
+        if link_lookup is None or not scope:
+            return CompletionRoute(
+                "BLOCK", session.active.target_entity, session=session,
+                field_name=field.field_name,
+                reason="לא ניתן לזהות את הגורם לפי השם כרגע.",
+                **self._presentation(session.active.target_entity, field.field_name),
+            )
+        from commercial_completion_ux import resolve_human_link
+        entity = {
+            "counterparty_contact": "contact",
+            "counterparty_organization": "organization",
+            "origin_lead": "lead",
+            "owner": "owner",
+            "deal": "deal",
+            "billing_term": "payment_term",
+            "charge": "charge",
+        }.get(field.field_name, session.active.target_entity)
+        if field.field_name == "counterparty_contact":
+            entity = session.active.current_values.get("_ux_counterparty_kind", "contact")
+        resolution = resolve_human_link(
+            entity, str(value),
+            lambda query, _scope, limit: link_lookup(
+                query, f"{entity}:{scope}", limit
+            ),
+            scope=scope,
+            create_allowed=entity == "organization",
+        )
+        if resolution.status == "resolved":
+            target_field = (
+                "counterparty_organization"
+                if field.field_name == "counterparty_contact" and entity == "organization"
+                else field.field_name
+            )
+            return self.answer(session, target_field, resolution.canonical_value)
+        return CompletionRoute(
+            "CLARIFY" if resolution.choices else "BLOCK",
+            session.active.target_entity, session=session,
+            field_name=field.field_name, field_type=field.input_type,
+            choices=tuple(choice.label for choice in resolution.choices),
+            reason=resolution.reason,
+            **self._presentation(session.active.target_entity, field.field_name),
+        )
+
     def _inspect(self, session: CompletionSession) -> CompletionRoute:
         writer = session.active
         field = writer.next_field()
@@ -223,6 +330,7 @@ class CommercialCompletionRouter:
             return CompletionRoute(
                 "CLARIFY", writer.target_entity, session=session,
                 field_name=field.field_name, field_type=field.input_type,
+                **self._presentation(writer.target_entity, field.field_name),
             )
         try:
             payload = writer.complete_payload()
@@ -238,6 +346,21 @@ class CommercialCompletionRouter:
             tool_inputs=inputs, queue_outcome=result,
             reason="queued through existing ActionGateway boundary",
         )
+
+    @staticmethod
+    def _presentation(entity: str, field_name: str) -> dict[str, Any]:
+        from commercial_completion_ux import field_presentation
+        from commercial_completion import ENTITY_CONTRACTS
+
+        presentation = field_presentation(
+            entity, ENTITY_CONTRACTS[entity].field(field_name)
+        )
+        from commercial_completion_ux import render_prompt
+        return {
+            "user_label": presentation.user_label,
+            "prompt": render_prompt(presentation),
+            "choices": presentation.choices,
+        }
 
 
 __all__ = [

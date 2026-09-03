@@ -15,6 +15,15 @@ Economics remain foundation-only. ActionGateway/ActionContracts remain the
 approval and execution boundary, and the legacy Payment writer remains
 quarantined.
 
+## Shared presentation metadata
+
+Commercial UX uses the provider-neutral `core.draft_fields.FieldMetadata` shape
+for field keys, user-facing labels/prompts, input type, choices, and resolver
+metadata. Commercial ownership remains in `commercial_completion_ux.py`: it
+defines the Commercial labels, link-resolution semantics, and choice behavior.
+The generic `SET_FIELD`/`CLEAR_FIELD`/`MOVE_FIELD`/`SWAP_FIELDS` mechanics are
+not connected to `CompletionSession` by this change.
+
 **Date:** 03/09/2026  
 **Evidence level:** S2B `CODE_DONE + STATIC_VERIFIED` on PR branch
 **Runtime state:** unwired; no Airtable records created or modified  
@@ -239,3 +248,13 @@ or protect the canonical primitives.
 - Bundle estimate: 14,012 / 14,300 tokens, overflow 0; 48 / 48 document budget.
   The bundle is navigation metadata only and was not made a runtime or business
   source of truth.
+# S2D-R1 Human Completion UX
+
+`commercial_completion_ux.py` is a presentation and deterministic-resolution
+adapter over the canonical completion contracts. It maps field contracts to
+business-language prompts and finite-choice metadata, and accepts injected,
+bounded resolver lookups for human Contact/Organization/Deal/etc. input.
+Internal field keys and record references remain adapter/session data only;
+they are never rendered in completion responses. The adapter does not persist
+state, route requests, approve actions, or write Airtable, and it does not
+introduce a second completion state machine or writer.

@@ -101,8 +101,8 @@ def test_app_resumes_persisted_state_through_answer_without_agent_fallback():
     tree = ast.parse(source)
     run_agent = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "run_agent")
     assert "commercial_completion" in source
-    assert any(isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "answer" for n in ast.walk(run_agent))
-    assert "_completion_router.answer" in source
+    assert any(isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "answer_human" for n in ast.walk(run_agent))
+    assert "_completion_router.answer_human" in source
 
 
 def test_direct_and_lead_deal_paths_use_the_same_completion_entity():
