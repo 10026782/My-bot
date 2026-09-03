@@ -2320,3 +2320,12 @@ cross-track handoffs.
   remains correctly deferred until both exist. S2A is not closed; S2B has not
   started.
 - **Evidence:** `docs/evidence/COMMERCIAL_SCHEMA_S2A_20260903.md`.
+
+**Closure addendum:** the owner supplied the two native Deal rollups through an
+external schema-capable path. Direct independent readback confirmed `Total
+Charged` rolls up Deals.`Charges` → Charges.`Amount`, `Total Collected` rolls
+up Deals.`Charges` → Charges.`Total Paid`, and `Outstanding` is a valid formula
+over those two rollups. Final counts remain 5 Deals, 1 legacy Payment, and 0 in
+every V2 commercial table. S2A is `LIVE_SCHEMA_VERIFIED +
+STATIC_VERIFIED_ON_BRANCH`; no writer/read/routing switch occurred and S2B did
+not start.

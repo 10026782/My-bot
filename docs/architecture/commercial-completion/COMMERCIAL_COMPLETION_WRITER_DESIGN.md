@@ -145,20 +145,22 @@ record ID before resuming the parent Deal.
   verification command for this branch.
 - No runtime, deployment, or live-write verification is claimed.
 
-## I. Remaining gaps and decisions
+## I. S2A closure and remaining implementation slices
 
-1. Create and verify Deal `Total Charged` and `Total Collected` as native
-   rollups, then create the dependent `Outstanding` formula. The connector
-   available during S2A could not create rollups, so S2A remains open here.
-2. Define an Organization dedup key and narrow canonical create primitive in S2B.
-3. Define idempotency/immutability primitives for Charge and Allocation Snapshot
+S2A is closed at `LIVE_SCHEMA_VERIFIED + STATIC_VERIFIED_ON_BRANCH`: all
+approved additive native fields, including the Deal rollups and dependent
+formula, were directly read back as valid. Remaining work belongs to S2B or a
+later explicitly gated slice:
+
+1. Define an Organization dedup key and narrow canonical create primitive in S2B.
+2. Define idempotency/immutability primitives for Charge and Allocation Snapshot
    in S2B.
-4. Define the V2 Payment primitive and migration/cutover guard without touching
+3. Define the V2 Payment primitive and migration/cutover guard without touching
    or reinterpreting the legacy Payment row.
 
 ## J. Exact next implementation slice
 
-After the final S2A Deal aggregates are live and verified, implement narrow, non-channel
+With S2A closed, the next separately gated slice may implement narrow, non-channel
 mutation primitives for Organization and Charge first. Extend protected generic
 write routing only after exact field parity tests pass. Then add a new V2 Payment
 primitive that requires Charge and records actual movement; keep the current

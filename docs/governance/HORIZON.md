@@ -17,7 +17,7 @@ the closure PR that created it for the search that established this.
 
 **Last updated:** 03/09/2026
 **Truth Reset SHA at last update:** `d8a7b346aa61be36780c3d24b3069854cac014c7`
-(Commercial completion foundation merged; S2A live schema partially verified)
+(Commercial completion foundation merged; S2A live schema closed and verified)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -40,7 +40,7 @@ evidence and never override this map.
 | Cost / Agent-Last | ACTIVE | MERGED | YES | cost attribution lineage merged | shadow telemetry and enforcement decision | validate live cost and decide progression |
 | Architecture authority / execution boundaries | ACTIVE | MERGED | YES | static authority boundaries reconciled | deployed/runtime evidence | verify deployed-SHA authority |
 | No-new-architectural-debt | CLOSED | WIRED | NO | blocking guards established in CI | normal monitoring only | monitor |
-| Schema / Data Contracts | ACTIVE | MERGED + LIVE PARTIAL | YES | commercial completion foundation merged in PR #1187; thirteen S2A additive native fields live and verified with no record mutation | Deal `Total Charged` and `Total Collected` native rollups plus dependent `Outstanding`; S2B must wait | complete final native Deal aggregates and reverify live truth |
+| Schema / Data Contracts | ACTIVE | MERGED + LIVE_SCHEMA_VERIFIED | YES | commercial completion foundation merged in PR #1187; S2A additive schema, including native Deal rollups and dependent formula, closed with unchanged record counts | repository S2A alignment remains on PR branch; S2B is a separate slice | merge S2A repository alignment, then proceed to separately gated S2B |
 | Maintenance program | CLOSED | MERGED | YES | numbered audits closed; no owned static gaps | accepted deferred/runtime triggers | monitor triggers |
 | Test / CI hygiene | CLOSED | WIRED | NO | #8/#9 closure and CI enforcement | normal monitoring only | monitor |
 | Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |

@@ -2,7 +2,7 @@
 
 **Verified:** 03/09/2026 (Asia/Jerusalem)  
 **Truth source:** live Airtable schema in the main commercial base  
-**Status:** S2A IN PROGRESS — NATIVE DEAL ROLLUPS BLOCKED; WRITERS NOT SWITCHED
+**Status:** S2A CLOSED — SCHEMA V2 ADD-ONLY IMPLEMENTED — WRITERS NOT SWITCHED
 
 ## Live schema
 
@@ -45,9 +45,9 @@ Legacy `Payments` remains quarantined. No production writer or reader was
 switched, no BillingTerm-to-Charge scheduler was introduced, and no legacy
 Payment row was interpreted as an actual V2 Payment.
 
-Deal `Start Date` is live. `Total Charged` and `Total Collected` remain blocked
-on a native rollup-capable schema path; `Outstanding` is intentionally deferred
-until those rollup dependencies exist.
+Deal `Start Date` is live. `Total Charged` and `Total Collected` are valid native
+rollups through Deals.`Charges` to Charges.`Amount` and Charges.`Total Paid`,
+respectively. `Outstanding` is a valid dependent formula over those rollups.
 
 The approved expanded Payment Terms vocabularies are represented by additive
 canonical `Calculation Type Code`, `Calculation Basis Code`, `Trigger Type
@@ -57,15 +57,19 @@ are live. Deal Type is canonicalized in the additive `Deal Type Code` select.
 Allocation Rules and Snapshots now support Organization beneficiaries through
 parallel native links while retaining Contact beneficiaries.
 
-## S2A native blocker
+## S2A closure
 
-The current schema connector cannot create rollups. The remaining live steps
-must use a native rollup-capable path on Deals:
+Direct final readback confirms every approved S2A field and vocabulary is live
+with its native type and valid configuration. Record counts are unchanged and
+the legacy Payment remains quarantined. Repository constants, pure completion
+contracts, tests, matrices, and governance evidence are aligned on the S2A
+branch. No production writer, reader, dispatcher, routing, approval, or runtime
+execution path changed.
 
-1. `Total Charged`: roll up `Charges → Amount` with `SUM(values)`.
-2. `Total Collected`: roll up `Charges → Total Paid` with `SUM(values)`.
-3. Only then create `Outstanding` as
-   `{Total Charged} - IF({Total Collected}, {Total Collected}, 0)`.
+Evidence level at closure:
 
-Until live readback validates all three, S2A is not closed and S2B mutation
-primitives must not start.
+- live Airtable schema: `LIVE_SCHEMA_VERIFIED`;
+- repository implementation: `STATIC_VERIFIED_ON_BRANCH`;
+- merge/deployment/runtime: not claimed by this S2A closure report.
+
+S2B remains a separate subsequent implementation slice.
