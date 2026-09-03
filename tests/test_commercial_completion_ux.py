@@ -6,6 +6,7 @@ from commercial_completion_ux import (
     render_prompt,
     resolve_human_link,
 )
+from unittest.mock import patch
 
 
 def _contact(field_name="Name"):
@@ -19,6 +20,23 @@ def test_human_contact_name_resolves_without_exposing_id():
     assert result.status == "resolved"
     assert result.canonical_value == "recContact1"
     assert "recContact1" not in result.reason
+
+
+def test_production_lookup_human_reference_resolves_contact_name():
+    import commercial_crm
+
+    with patch(
+        "commercial_crm.list_records",
+        return_value=[
+            {"id": "recContact1", "fields": {"שם": "אבי חזן"}},
+        ],
+    ) as list_records:
+        records = commercial_crm.lookup_human_reference(
+            "contact", "אבי חזן", scope="owner-1", limit=6
+        )
+
+    assert records[0]["id"] == "recContact1"
+    list_records.assert_called_once()
 
 
 def test_ambiguous_contact_produces_human_choices_not_silent_selection():

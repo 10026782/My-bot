@@ -31,6 +31,7 @@ from airtable_schema import (
     ChargeFields,
     ChargeStatus,
     CollectionState,
+    ContactFields,
     Currency,
     DealFields,
     DealStage,
