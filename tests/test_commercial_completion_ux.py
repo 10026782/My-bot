@@ -52,6 +52,37 @@ def test_deal_counterparty_is_business_language_with_choices():
     assert "counterparty_contact" not in render_prompt(presentation)
 
 
+def test_counterparty_choice_selects_one_sibling_field_in_same_session():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    values = {
+        "name": "עסקת בדיקה", "domain": "import", "owner": "owner-1",
+        "deal_type": "service", "relationship_type": "one_off",
+        "currency": "ILS", "commercial_status": "prospect", "expected_value": 100,
+    }
+    first = router.start("deal", current_values=values)
+    selected = router.answer_human(first.session, "ארגון")
+    assert selected.outcome == "CLARIFY"
+    assert selected.prompt == "מה שם הארגון?"
+    resolved = router.answer_human(
+        selected.session, "Acme Ltd",
+        link_lookup=lambda query, scope, limit: [
+            {"record_id": "recOrg1", "fields": {"Organization Name": query}}
+        ],
+        scope="owner-1",
+    )
+    assert resolved.outcome == "TOOL"
+    assert resolved.tool_inputs["counterparty_organization_id"] == "recOrg1"
+    assert "counterparty_contact_id" not in resolved.tool_inputs
+
+
+def test_app_wires_human_answer_and_telegram_choice_controls():
+    from pathlib import Path
+    source = (Path(__file__).parents[1] / "app.py").read_text(encoding="utf-8")
+    assert "_completion_router.answer_human" in source
+    assert "commercial_completion:" in source
+    assert "InlineKeyboardButton" in source
+
+
 def test_human_link_answer_reuses_canonical_completion_session_and_payload():
     queued = []
     router = CommercialCompletionRouter(queue=lambda tool, payload: queued.append((tool, payload)))

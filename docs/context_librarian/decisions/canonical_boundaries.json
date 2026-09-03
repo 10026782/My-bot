@@ -1225,10 +1225,12 @@
       },
       "owner": "commercial_crm",
       "code_paths": [
-        "commercial_completion_routing.py"
+        "commercial_completion_routing.py",
+        "commercial_completion_ux.py"
       ],
       "test_paths": [
-        "tests/test_commercial_completion_routing.py"
+        "tests/test_commercial_completion_routing.py",
+        "tests/test_commercial_completion_ux.py"
       ],
       "canonical_docs": [
         {

@@ -778,7 +778,8 @@ def cmd_deal_from_lead(msg):
                 "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
             )
         if reply:
-            bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
+            bot.send_message(msg.chat.id, reply, parse_mode="Markdown",
+                             reply_markup=_completion_keyboard(result) if result.outcome == "CLARIFY" else None)
         logger.info(
             f"[LeadToDeal] /dealfromlead '{query}' → lead={lead_id} deal_name={name} "
             f"domain={domain} by {identity.display_name}"
@@ -4070,6 +4071,60 @@ def _capture_turn_outcome_episodic(identity, turn_evidence, tool_results_log: li
         )
 
 
+def _commercial_link_lookup(query: str, scope: str, limit: int, identity=None):
+    """Identity-scoped exact-name lookup adapter for human completion input."""
+    from airtable_schema import (
+        Tables, ContactFields, OrganizationFields, DealFields,
+        PaymentTermFields, ChargeFields,
+    )
+    from crm import _get
+    entity, _, identity_scope = str(scope or "").partition(":")
+    table_by_entity = {
+        "contact": Tables.CONTACTS,
+        "organization": Tables.ORGANIZATIONS,
+        "deal": Tables.DEALS,
+        "payment_term": Tables.PAYMENT_TERMS,
+        "charge": Tables.CHARGES,
+    }
+    field_by_entity = {
+        "contact": ContactFields.NAME,
+        "organization": OrganizationFields.NAME,
+        "deal": DealFields.NAME,
+        "payment_term": PaymentTermFields.NAME,
+        "charge": ChargeFields.REFERENCE,
+    }
+    table = table_by_entity.get(entity)
+    field_name = field_by_entity.get(entity)
+    if table is None:
+        return []
+    records = _get(table, identity=identity)
+    needle = " ".join(str(query or "").casefold().split())
+    matches = []
+    for record in records:
+        fields = record.get("fields", {}) if isinstance(record, dict) else {}
+        label = " ".join(str(fields.get(field_name, "")).casefold().split())
+        if label == needle:
+            matches.append(record)
+    return matches[:limit]
+
+
+def _completion_keyboard(result):
+    """Telegram presentation adapter for canonical completion choices."""
+    choices = tuple(
+        result if isinstance(result, (list, tuple))
+        else getattr(result, "choices", ()) or ()
+    )
+    if not choices:
+        return None
+    kb = telebot.types.InlineKeyboardMarkup()
+    kb.row(*[
+        telebot.types.InlineKeyboardButton(
+            str(choice), callback_data=f"commercial_completion:{choice}"
+        ) for choice in choices
+    ])
+    return kb
+
+
 def run_agent(
     user_text:           str,
     chat_id:             str,
@@ -4350,13 +4405,19 @@ def run_agent(
         if _restored.outcome == "BLOCK":
             _ls.clear_commercial_completion(chat_id)
             return _restored.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
-        _completion_result = _completion_router.answer(
-            _restored.session, _restored.field_name or "", user_text,
+        _completion_result = _completion_router.answer_human(
+            _restored.session, user_text,
+            link_lookup=lambda query, scope, limit: _commercial_link_lookup(
+                query, scope, limit, identity=identity,
+            ),
+            scope=identity.memory_key,
         )
         if _completion_result.outcome == "CLARIFY":
             _ls.set_commercial_completion(
                 chat_id, serialize_completion_session(_completion_result.session)
             )
+            if _out_meta is not None:
+                _out_meta["commercial_completion_choices"] = tuple(_completion_result.choices)
             return _completion_result.prompt or "נא להשלים את הפרט הבא."
         if _completion_result.outcome == "BLOCK":
             # Validation BLOCKs retain the unchanged session so the user can
@@ -4998,6 +5059,8 @@ def run_agent(
             _completion_sessions.set_commercial_completion(
                 chat_id, serialize_completion_session(_completion_result.session)
             )
+            if _out_meta is not None:
+                _out_meta["commercial_completion_choices"] = tuple(_completion_result.choices)
             return (
                 _completion_result.prompt or "נא להשלים את הפרט הבא."
             )
@@ -6622,6 +6685,20 @@ def _webhook_telegram_impl():
                 _handle_approval_callback(call)
             elif data.startswith(("lead_draft_approve:", "lead_draft_cancel:")):
                 _handle_lead_draft_callback(call)
+            elif data.startswith("commercial_completion:"):
+                answer = data.split(":", 1)[1]
+                callback_meta = {}
+                callback_reply = run_agent(
+                    answer, str(call.message.chat.id), channel="telegram",
+                    _out_meta=callback_meta,
+                )
+                if callback_reply:
+                    callback_kwargs = {}
+                    callback_choices = callback_meta.get("commercial_completion_choices")
+                    if callback_choices:
+                        callback_kwargs["reply_markup"] = _completion_keyboard(callback_choices)
+                    bot.send_message(str(call.message.chat.id), callback_reply, **callback_kwargs)
+                bot.answer_callback_query(call.id)
             else:
                 # העבר ל-pyTeleBot handlers (upd_domain:, upd_type:, weekly summary וכו')
                 bot.process_new_updates([update])
@@ -6784,6 +6861,9 @@ def _webhook_telegram_impl():
                 _draft_token = _reply_meta.get("lead_draft_callback_token")
                 if _draft_token:
                     _send_kwargs["reply_markup"] = _lead_draft_keyboard(_draft_token)
+                _completion_choices = _reply_meta.get("commercial_completion_choices")
+                if _completion_choices:
+                    _send_kwargs["reply_markup"] = _completion_keyboard(_completion_choices)
                 bot.send_message(reply_chat_id, reply, **_send_kwargs)
             except Exception as e:
                 logger.error(f"[Telegram] send error: {e}")

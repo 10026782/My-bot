@@ -238,6 +238,40 @@ class CommercialCompletionRouter:
         field = session.active.next_field()
         if field is None:
             return self._inspect(session)
+        if field.field_name == "counterparty_contact":
+            choice = str(value or "").strip().casefold()
+            if choice in {"ארגון", "organization", "company"}:
+                from dataclasses import replace
+                marked = replace(
+                    session.active,
+                    current_values={
+                        **dict(session.active.current_values),
+                        "_ux_counterparty_kind": "organization",
+                    },
+                )
+                from commercial_completion import _CompletionFrame
+                session = CompletionSession((_CompletionFrame(marked),))
+                return CompletionRoute(
+                    "CLARIFY", "deal", session=session,
+                    field_name=field.field_name, field_type=field.input_type,
+                    user_label="ארגון", prompt="מה שם הארגון?",
+                )
+            if choice in {"איש קשר", "contact", "person"}:
+                from dataclasses import replace
+                marked = replace(
+                    session.active,
+                    current_values={
+                        **dict(session.active.current_values),
+                        "_ux_counterparty_kind": "contact",
+                    },
+                )
+                from commercial_completion import _CompletionFrame
+                session = CompletionSession((_CompletionFrame(marked),))
+                return CompletionRoute(
+                    "CLARIFY", "deal", session=session,
+                    field_name=field.field_name, field_type=field.input_type,
+                    user_label="איש קשר", prompt="מה שם איש הקשר?",
+                )
         if field.input_type.name != "LINK":
             return self.answer(session, field.field_name, value)
         if link_lookup is None or not scope:
@@ -257,12 +291,23 @@ class CommercialCompletionRouter:
             "billing_term": "payment_term",
             "charge": "charge",
         }.get(field.field_name, session.active.target_entity)
+        if field.field_name == "counterparty_contact":
+            entity = session.active.current_values.get("_ux_counterparty_kind", "contact")
         resolution = resolve_human_link(
-            entity, str(value), link_lookup, scope=scope,
+            entity, str(value),
+            lambda query, _scope, limit: link_lookup(
+                query, f"{entity}:{scope}", limit
+            ),
+            scope=scope,
             create_allowed=entity == "organization",
         )
         if resolution.status == "resolved":
-            return self.answer(session, field.field_name, resolution.canonical_value)
+            target_field = (
+                "counterparty_organization"
+                if field.field_name == "counterparty_contact" and entity == "organization"
+                else field.field_name
+            )
+            return self.answer(session, target_field, resolution.canonical_value)
         return CompletionRoute(
             "CLARIFY" if resolution.choices else "BLOCK",
             session.active.target_entity, session=session,
