@@ -4335,6 +4335,8 @@ def run_agent(
     except Exception:
         _persisted_completion = None
     if _persisted_completion:
+        if _out_meta is not None:
+            _out_meta["source_module"] = "action_gateway"
         _completion_router = CommercialCompletionRouter(
             queue=lambda tool, payload: _queue_approval_detailed(
                 tool, payload, chat_id, channel, user_text,
@@ -4968,6 +4970,8 @@ def run_agent(
         "create_charge_payment": "payment",
     }
     if route.handler == Handler.TOOL and route.intent in _completion_entities:
+        if _out_meta is not None:
+            _out_meta["source_module"] = "action_gateway"
         from commercial_completion_routing import CommercialCompletionRouter
         _completion_router = CommercialCompletionRouter(
             queue=lambda tool, payload: _queue_approval_detailed(

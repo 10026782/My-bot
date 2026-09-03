@@ -190,6 +190,11 @@ with patch.object(app, "resolve_identity", return_value=_owner_e2e), \
          side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY",
      ):
     reply = app.run_agent(text, _owner_e2e.user_id, "telegram", _out_meta=metadata)
+    # S2C completion is intentionally multi-turn. Complete the contract-owned
+    # fields so this legacy bypass regression can continue to inspect the
+    # canonical crm_create_deal ActionContract.
+    for answer in ("recCONTACTCANARY0001", "service", "one_off", "ILS", "prospect", "100"):
+        reply = app.run_agent(answer, _owner_e2e.user_id, "telegram", _out_meta=metadata)
 
 chk("a real user_message came back (no crash, no silent no-op)", bool(reply))
 chk("Single Speaker: source_module=action_gateway", metadata.get("source_module") == "action_gateway")
