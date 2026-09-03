@@ -83,6 +83,21 @@ def test_app_wires_human_answer_and_telegram_choice_controls():
     assert "InlineKeyboardButton" in source
 
 
+def test_telegram_keyboard_contains_deterministic_choice_buttons():
+    import os
+    os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-s2d-test")
+    os.environ.setdefault("TELEGRAM_TOKEN", "123456789:s2d-test")
+    os.environ.setdefault("AIRTABLE_API_KEY", "pat-s2d-test")
+    os.environ.setdefault("AIRTABLE_BASE_ID", "appS2DTest")
+    import app
+
+    keyboard = app._completion_keyboard(("ILS", "USD", "EUR"))
+    button_labels = [button.text for row in keyboard.keyboard for button in row]
+    assert button_labels == ["ILS", "USD", "EUR"]
+    assert all(button.callback_data.startswith("commercial_completion:")
+               for row in keyboard.keyboard for button in row)
+
+
 def test_human_link_answer_reuses_canonical_completion_session_and_payload():
     queued = []
     router = CommercialCompletionRouter(queue=lambda tool, payload: queued.append((tool, payload)))

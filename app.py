@@ -4073,39 +4073,11 @@ def _capture_turn_outcome_episodic(identity, turn_evidence, tool_results_log: li
 
 def _commercial_link_lookup(query: str, scope: str, limit: int, identity=None):
     """Identity-scoped exact-name lookup adapter for human completion input."""
-    from airtable_schema import (
-        Tables, ContactFields, OrganizationFields, DealFields,
-        PaymentTermFields, ChargeFields,
-    )
-    from crm import _get
+    from commercial_crm import lookup_human_reference
     entity, _, identity_scope = str(scope or "").partition(":")
-    table_by_entity = {
-        "contact": Tables.CONTACTS,
-        "organization": Tables.ORGANIZATIONS,
-        "deal": Tables.DEALS,
-        "payment_term": Tables.PAYMENT_TERMS,
-        "charge": Tables.CHARGES,
-    }
-    field_by_entity = {
-        "contact": ContactFields.NAME,
-        "organization": OrganizationFields.NAME,
-        "deal": DealFields.NAME,
-        "payment_term": PaymentTermFields.NAME,
-        "charge": ChargeFields.REFERENCE,
-    }
-    table = table_by_entity.get(entity)
-    field_name = field_by_entity.get(entity)
-    if table is None:
-        return []
-    records = _get(table, identity=identity)
-    needle = " ".join(str(query or "").casefold().split())
-    matches = []
-    for record in records:
-        fields = record.get("fields", {}) if isinstance(record, dict) else {}
-        label = " ".join(str(fields.get(field_name, "")).casefold().split())
-        if label == needle:
-            matches.append(record)
-    return matches[:limit]
+    return lookup_human_reference(
+        entity, query, scope=identity_scope, identity=identity, limit=limit,
+    )
 
 
 def _completion_keyboard(result):
