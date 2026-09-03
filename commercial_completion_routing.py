@@ -53,6 +53,36 @@ class CompletionRoute:
     reason: str = ""
 
 
+def serialize_completion_session(session: CompletionSession) -> dict[str, Any]:
+    """Serialize pure completion state for the existing universal Session store."""
+    return {"frames": [
+        {
+            "target_entity": frame.writer.target_entity,
+            "current_values": dict(frame.writer.current_values),
+            "source_context": dict(frame.writer.source_context),
+            "identity": dict(frame.writer.identity),
+            "return_field": frame.return_field,
+        }
+        for frame in session.frames
+    ]}
+
+
+def deserialize_completion_session(state: Mapping[str, Any]) -> CompletionSession:
+    """Restore completion state without introducing a second persistence system."""
+    from commercial_completion import _CompletionFrame
+    frames = []
+    for raw in state.get("frames", []):
+        frames.append(_CompletionFrame(
+            CommercialCompletionWriter(
+                str(raw["target_entity"]), dict(raw.get("current_values") or {}),
+                dict(raw.get("source_context") or {}), dict(raw.get("identity") or {}),
+            ), raw.get("return_field"),
+        ))
+    if not frames:
+        raise CommercialRoutingError("persisted commercial completion state is empty")
+    return CompletionSession(tuple(frames))
+
+
 def _link_id(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         if len(value) != 1:
@@ -77,11 +107,23 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
         }
         optional = {
             DealFields.ORIGIN_LEAD: "origin_lead_id", DealFields.AMOUNT: "amount",
-            DealFields.STAGE: "stage", "Notes": "notes",
+            DealFields.STAGE: "stage", DealFields.NOTES: "notes",
+            DealFields.COUNTERPARTY_CONTACT: "counterparty_contact_id",
+            DealFields.COUNTERPARTY_ORGANIZATION: "counterparty_organization_id",
+            DealFields.DEAL_TYPE_CODE: "deal_type_code",
+            DealFields.RELATIONSHIP_TYPE: "relationship_type",
+            DealFields.CURRENCY: "currency",
+            DealFields.COMMERCIAL_STATUS: "commercial_status",
+            DealFields.START_DATE: "start_date",
         }
         for field_name, arg_name in optional.items():
             if field_name in p:
-                result[arg_name] = _link_id(p[field_name]) if field_name == "Origin Lead" else p[field_name]
+                result[arg_name] = (
+                    _link_id(p[field_name]) if field_name in {
+                        DealFields.ORIGIN_LEAD, DealFields.COUNTERPARTY_CONTACT,
+                        DealFields.COUNTERPARTY_ORGANIZATION,
+                    } else p[field_name]
+                )
         return result
     if entity == "payment_term":
         result = {
@@ -152,6 +194,12 @@ class CommercialCompletionRouter:
         )
         return self._inspect(CompletionSession.start(writer))
 
+    def restore(self, state: Mapping[str, Any]) -> CompletionRoute:
+        try:
+            return self._inspect(deserialize_completion_session(state))
+        except (KeyError, TypeError, ValueError, CommercialRoutingError) as exc:
+            return CompletionRoute("BLOCK", "commercial", reason=str(exc))
+
     def answer(self, session: CompletionSession, field_name: str, value: Any) -> CompletionRoute:
         try:
             return self._inspect(session.answer(field_name, value))
@@ -185,4 +233,5 @@ class CommercialCompletionRouter:
 __all__ = [
     "CommercialCompletionRouter", "CommercialRoutingError", "CompletionRoute",
     "MUTATION_TOOLS", "SUPPORTED_COMPLETION_ENTITIES",
+    "serialize_completion_session", "deserialize_completion_session",
 ]

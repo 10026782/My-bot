@@ -3,6 +3,7 @@
 from airtable_schema import CommercialStatus, Currency, DealType, Direction, RelationshipType
 from commercial_completion_routing import (
     CommercialCompletionRouter,
+    deserialize_completion_session, serialize_completion_session,
     MUTATION_TOOLS,
     SUPPORTED_COMPLETION_ENTITIES,
 )
@@ -72,3 +73,50 @@ def test_queue_receives_the_same_mapping_that_route_reports():
     result = router.start("organization", current_values={"organization_name": "Acme"})
     assert result.outcome == "TOOL"
     assert calls == [(result.tool_name, dict(result.tool_inputs))]
+
+
+def test_completion_state_round_trips_and_preserves_all_deal_fields():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("deal", current_values=_deal())
+    restored = router.restore(serialize_completion_session(first.session))
+    assert restored.field_name == first.field_name
+    payload = restored.session.active.complete_payload()
+    assert set(payload) >= {
+        "Counterparty Contact", "Deal Type Code", "Relationship Type",
+        "Currency", "Commercial Status", "סכום",
+    }
+    # The production adapter must hand every approved persisted contract field
+    # to crm_create_deal, with links represented as primitive IDs.
+    assert set(router._inspect(restored.session).tool_inputs) >= {
+        "counterparty_contact_id", "deal_type_code", "relationship_type",
+        "currency", "commercial_status", "amount",
+    }
+
+
+def test_app_resumes_persisted_state_through_answer_without_agent_fallback():
+    import ast
+    from pathlib import Path
+    app = Path(__file__).parents[1] / "app.py"
+    source = app.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    run_agent = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "run_agent")
+    assert "commercial_completion" in source
+    assert any(isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "answer" for n in ast.walk(run_agent))
+    assert "_completion_router.answer" in source
+
+
+def test_direct_and_lead_deal_paths_use_the_same_completion_entity():
+    from pathlib import Path
+    source = (Path(__file__).parents[1] / "app.py").read_text(encoding="utf-8")
+    assert '"create_deal": "deal"' in source
+    assert 'router.start(\n            "deal"' in source
+
+
+def test_app_adapter_names_every_approved_deal_v2_field():
+    from pathlib import Path
+    source = (Path(__file__).parents[1] / "commercial_completion_routing.py").read_text(encoding="utf-8")
+    for field in (
+        "counterparty_contact_id", "counterparty_organization_id", "deal_type_code",
+        "relationship_type", "currency", "commercial_status", "start_date",
+    ):
+        assert field in source

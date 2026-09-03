@@ -1062,7 +1062,16 @@ def dispatch_tool(
                     contact_ids=inputs.get("contact_ids"),
                     amount=inputs.get("amount"),
                     stage=inputs.get("stage", DealStage.OPPORTUNITY),
+                    priority=inputs.get("priority", ""),
+                    risk_level=inputs.get("risk_level", ""),
                     notes=inputs.get("notes", ""),
+                    counterparty_contact_id=inputs.get("counterparty_contact_id", ""),
+                    counterparty_organization_id=inputs.get("counterparty_organization_id", ""),
+                    deal_type_code=inputs.get("deal_type_code", ""),
+                    relationship_type=inputs.get("relationship_type", ""),
+                    currency=inputs.get("currency", ""),
+                    commercial_status=inputs.get("commercial_status", ""),
+                    start_date=inputs.get("start_date", ""),
                     source="agent",
                 )
                 audit_log_airtable("crm_create_deal", identity, inputs, result)

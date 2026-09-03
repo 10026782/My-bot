@@ -93,6 +93,7 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "pending_lead_preview":     None,   # ← C89: preview candidates awaiting confirmation (FEATURE_AUTO_CAPTURE=OFF)
         "last_prompted_contract":   None,   # ← BUG-115: last ActionContract whose approval prompt was shown, TTL 600s
         "lead_draft":               None,   # ← Phase 1 follow-up: Lead Draft Card in progress (fill/review/edit), TTL 1800s
+        "commercial_completion":    None,   # S2C: serialized completion state in universal Session JSON
     }
 
 
@@ -433,6 +434,30 @@ class PersistentSessionStore:
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
+    def set_commercial_completion(self, sender: str, state: dict) -> None:
+        """Persist S2C completion state in the canonical universal Session."""
+        session = self.get_or_create(sender)
+        session["commercial_completion"] = dict(state)
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_commercial_completion(self, sender: str) -> Optional[dict]:
+        """Return persisted S2C state, if a completion awaits an answer."""
+        session = self.get(sender)
+        if not session:
+            return None
+        state = session.get("commercial_completion")
+        return dict(state) if isinstance(state, dict) and state else None
+
+    def clear_commercial_completion(self, sender: str) -> None:
+        """Clear S2C state after terminal queue/block handling."""
+        session = self.get(sender)
+        if not session:
+            return
+        session["commercial_completion"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
     def set_last_prompted_contract(self, sender: str, contract_id: str, kind: str = "action_gateway") -> None:
         """BUG-115: רושם את ה-ActionContract שהצגתו-לאישור הוצגה הרגע למשתמש
         הזה, כדי שמילת אישור בודדת ("כן"/"מאשר") הבאה תיפתר מולו ישירות
@@ -518,6 +543,7 @@ class PersistentSessionStore:
                 "pending_lead_preview":     session.get("pending_lead_preview"),
                 "last_prompted_contract":   session.get("last_prompted_contract"),
                 "lead_draft":               session.get("lead_draft"),
+                "commercial_completion":    session.get("commercial_completion"),
             }
             fields = {
                 SF.SENDER_ID:    sender,
@@ -693,6 +719,7 @@ class PersistentSessionStore:
                 ("pending_lead_preview", None),
                 ("last_prompted_contract", None),
                 ("lead_draft", None),
+                ("commercial_completion", None),
             ):
                 session[key] = state.get(key, default)
             session["record_id"] = record_id

@@ -236,6 +236,15 @@ TOOL_SCHEMAS = [
                 "contact_ids":    {"type": "array", "items": {"type": "string"}, "description": "מזהי אנשי קשר מקושרים (rec...)"},
                 "amount":         {"type": "number", "description": "סכום העסקה"},
                 "stage":          {"type": "string", "description": "שלב העסקה (ברירת מחדל: הזדמנות)"},
+                "priority":       {"type": "string"},
+                "risk_level":     {"type": "string"},
+                "counterparty_contact_id": {"type": "string"},
+                "counterparty_organization_id": {"type": "string"},
+                "deal_type_code": {"type": "string"},
+                "relationship_type": {"type": "string"},
+                "currency":       {"type": "string"},
+                "commercial_status": {"type": "string"},
+                "start_date":     {"type": "string"},
                 "notes":          {"type": "string", "description": "הערות חופשיות"}
             },
             "required": ["name", "domain", "owner_id"]
