@@ -15,6 +15,15 @@ Economics remain foundation-only. ActionGateway/ActionContracts remain the
 approval and execution boundary, and the legacy Payment writer remains
 quarantined.
 
+## Shared presentation metadata
+
+Commercial UX uses the provider-neutral `core.draft_fields.FieldMetadata` shape
+for field keys, user-facing labels/prompts, input type, choices, and resolver
+metadata. Commercial ownership remains in `commercial_completion_ux.py`: it
+defines the Commercial labels, link-resolution semantics, and choice behavior.
+The generic `SET_FIELD`/`CLEAR_FIELD`/`MOVE_FIELD`/`SWAP_FIELDS` mechanics are
+not connected to `CompletionSession` by this change.
+
 **Date:** 03/09/2026  
 **Evidence level:** S2B `CODE_DONE + STATIC_VERIFIED` on PR branch
 **Runtime state:** unwired; no Airtable records created or modified  
