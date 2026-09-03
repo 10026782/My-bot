@@ -171,6 +171,18 @@ _TC_ROUTE_REGISTRY: dict[str, tuple[str, str]] = {
         "EXEMPT",
         "same as crm_create_payment_term — not yet migrated.",
     ),
+    "crm_create_charge": (
+        "EXEMPT",
+        "S2B narrow mutation primitive is intentionally not yet migrated to a "
+        "deterministic Turn Coordinator route; S2C completion wiring must add "
+        "the route before this exemption is removed.",
+    ),
+    "crm_create_charge_payment": (
+        "EXEMPT",
+        "S2B Charge-required V2 Payment primitive is intentionally not yet "
+        "migrated to a deterministic Turn Coordinator route; S2C completion "
+        "wiring must add the route before this exemption is removed.",
+    ),
 }
 
 # (file, function_name) -> documented reason a custom fingerprint_payload is
