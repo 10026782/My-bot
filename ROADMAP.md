@@ -1,6 +1,17 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 02/09/2026
+עודכן: 03/09/2026
+
+## Commercial Completion Writer foundation — 03/09/2026
+
+`CommercialCompletionWriter` has been designed and implemented as a pure,
+unwired deterministic foundation on branch
+`codex/commercial-completion-writer-foundation`. Evidence is `CODE_DONE /
+STATIC_VERIFIED ON BRANCH — NOT YET CURRENT`: field and flow matrices cover the
+approved Commercial Schema V2 entities, and focused tests pass. No production
+writer/reader, dispatcher route, channel adapter, scheduler, ActionGateway path,
+or Airtable record was changed. The exact design and blockers are tracked in
+[`COMMERCIAL_COMPLETION_WRITER_DESIGN.md`](docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md).
 
 ## Latest truth reconciliation — PR1152–1155
 
@@ -93,6 +104,7 @@ runtime-only item is represented here as static code work.
 | COST_AGENT_LAST | Cost / Agent-Last architecture | IN_PROGRESS | MERGED_STATIC — telemetry remains shadow | Validate live usage/cost and decide progression | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | ARCHITECTURE_AUTHORITY_BOUNDARIES | Architecture authority / execution boundaries | IN_PROGRESS | MERGED_STATIC — runtime evidence separate | Verify deployed-SHA authority | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | SCHEMA_DATA_CONTRACTS | Schema / Data Contracts | IN_PROGRESS | MERGED_STATIC + LIVE SCHEMA VERIFIED — Track 8/8B/8C static and live-schema reconciliation is complete; the three `commercial_crm` create tools are registered with policy/schema/dispatcher coverage by PR1153. Application runtime and canary are not established; first-class Deal/Payment TMA surface and raw-write ownership remain open. | Owner-approved Deal/Payment canary, TMA surface decision, and raw-write ownership decision; K10 naming-only fragmentation remains open | [`MAINTENANCE_AUDIT_LEDGER.md`](docs/governance/MAINTENANCE_AUDIT_LEDGER.md) |
+| COMMERCIAL_COMPLETION_WRITER | Canonical Commercial Completion Writer | IN_PROGRESS | CODE_DONE / STATIC_VERIFIED ON BRANCH — NOT YET CURRENT; pure contracts, missing-field algorithm, validation, nested completion, and matrices; no runtime wiring | Resolve documented live-schema/detail-field gaps, then add narrow Organization/Charge primitives in a separate reviewed slice | [`COMMERCIAL_COMPLETION_WRITER_DESIGN.md`](docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md) |
 | N17 | Context Librarian Follow-up Hardening & Verification Backlog | IN_PROGRESS | MERGED_STATIC — maintenance remains ongoing | Continue bounded reconciliation and owner-gated follow-ups | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | BOSS_CONTEXT_LIBRARIAN_PHASE_0 | BOSS Context Librarian | IN_PROGRESS | MERGED_STATIC — mandatory bootstrap/index layer | Continue bounded reconciliation and maintenance PRs | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | ROADMAP_CORE | ROADMAP current-state SSOT | IN_PROGRESS | MERGED_STATIC — registry cleanup is this program's current slice | Keep current-state view compact and reconciled | [`ROADMAP.md`](ROADMAP.md) |

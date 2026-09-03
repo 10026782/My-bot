@@ -1079,6 +1079,72 @@
         }
       },
       "last_observed_commit": "c358d741d4cb6fe11b73bcaf74e38e7fa39f3c92"
+    },
+    {
+      "id": "decision.commercial_completion_foundation",
+      "name": "Pure commercial completion and schema simulation foundation",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "Pure commercial field contracts, deterministic missing-field and next-field calculation, validation, and offline schema/commercial simulation support.",
+        "precedence": "This foundation is unwired and performs no I/O. Live Airtable schema, canonical commercial writers, dispatcher routing, ActionContracts approval authority, and production readers remain authoritative and unchanged. Production mutation authority may not be added to this node without a separate owner-classification decision."
+      },
+      "owner": "commercial_crm",
+      "code_paths": [
+        "commercial_completion.py",
+        "tools/commercial_model_simulation.py",
+        "docs/architecture/commercial-completion/FIELD_COMPLETION_MATRIX.csv"
+      ],
+      "test_paths": [
+        "tests/test_commercial_completion.py",
+        "tests/test_commercial_model_simulation.py",
+        "tests/test_commercial_schema_v2.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md",
+          "role": "design, field/flow contracts, integration boundaries, and deferred production-writer plan",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/COMMERCIAL_SCHEMA_V2_ADD_ONLY_STATUS_20260903.md",
+          "role": "schema-v2 add-only status and verified live-schema gap record",
+          "status": "active"
+        },
+        {
+          "path": "ROADMAP.md",
+          "role": "branch-level implementation and evidence-status navigation",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/WRITER_AUTHORITY_REGISTRY.md",
+          "role": "exact implementation-shape registration; records review but grants no runtime authority",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-03",
+      "last_verified_commit": "56c8d68d25f4ab25b6f0841bbf5f6cb0c8f20c8f",
+      "confidence": 0.95,
+      "notes": [
+        "Owner-approved registration for PR #1187 after the pre-merge Context Librarian gate reported NO_POLICY_MATCH for commercial_completion.py, docs/architecture/commercial-completion/FIELD_COMPLETION_MATRIX.csv, and tools/commercial_model_simulation.py.",
+        "Owner-approved scope: pure commercial completion foundation; field-contract and missing-field logic; schema/commercial simulation support; no Airtable I/O; no production writer authority; no routing ownership; no approval ownership; no writer/reader switch; no runtime execution authority.",
+        "The three paths are registered literally. This decision creates no wildcard policy and grants no automatic classification to future commercial completion files.",
+        "This node must not later be broadened to include production mutation authority without a separate owner-classification decision."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "commercial_completion_pure_foundation",
+          "authority": false,
+          "purpose": "pure deterministic completion contracts and offline schema/commercial simulation with no provider I/O or production wiring",
+          "runtime_consumed": false
+        }
+      },
+      "last_observed_commit": "56c8d68d25f4ab25b6f0841bbf5f6cb0c8f20c8f"
     }
   ],
   "edges": [

@@ -22,11 +22,11 @@ status semantics; this document does not re-audit or replace that audit.
 
 ### Contact
 
-**Contact = canonical Person / Organization identity.**
+**Contact = canonical person identity.**
 
-A Contact is the canonical relationship registry/rolodex entry for the person
-or organization itself. A Contact may exist without a Deal and without a
-Payment. A Contact is not a Deal and is not a financial stage.
+A Contact is the canonical relationship registry/rolodex entry for a person.
+A Contact may exist without a Deal and without a Payment. A Contact is not a
+Deal, an Organization, or a financial stage.
 
 Current code creates or reuses Contacts through the canonical deduplication gate
 `find_or_create_contact()` / `crm_add_contact()` ([`crm.py`](../crm.py:228)).
@@ -44,11 +44,11 @@ separate entities ([`BOSS_UNIFIED_MASTER_PLAN_v2.md`](../archive/BOSS_UNIFIED_MA
 
 ### Payment
 
-**Payment = transaction / financial obligation or receipt.**
+**Payment = actual monetary movement.**
 
-A Payment represents a payment, charge, or financial commitment. Its canonical
-business relationship is the Deal. Payment is not a lifecycle stage of a
-Contact.
+A V2 Payment records money that actually moved. A Charge records the obligation;
+the two concepts must not be collapsed. The single legacy Payment row remains
+quarantined and is not automatically reinterpreted.
 
 Current code creates Payments explicitly through `crm_add_payment()` and links
 them to a Deal when `deal_id` is supplied ([`crm.py`](../crm.py:417)). Deal
@@ -122,19 +122,29 @@ The absence of a Lead-to-Deal writer is therefore an optional traceability gap,
 not by itself a lifecycle bug. A future requirement for mandatory Lead
 provenance would require a new business decision.
 
-### Deal → Payment
+### Organization
 
-Deal → Payment is the canonical financial relationship.
+**Organization = canonical company / business identity.**
 
-Payment creation is explicit. Creating a Deal does not automatically create a
-Payment. The canonical conceptual path for identifying the person or
-organization associated with a Payment is:
+An Organization is distinct from a Contact. A Deal or Payment may link to a
+Counterparty Contact, a Counterparty Organization, or the appropriate explicit
+counterparty context. Organizations are created only when actually needed.
 
-`Payment → Deal → Contact`
+### Commercial V2 financial flow
 
-`Payment.Contact` is not currently a canonical business requirement. A direct
-Payment-to-Contact link would be a redundant denormalization unless a future
-decision establishes a separate payment-party concept.
+The approved commercial relationship is:
+
+`Deal → BillingTerm → Charge → Payment`
+
+A Deal may be created without a Lead. A Billing Term requires a Deal. A Charge
+requires a Deal and may omit Billing Term for a legitimate direct one-off
+charge. A new V2 Payment requires a Charge and represents actual movement only.
+Creating an upstream entity does not automatically create its downstream
+financial entities.
+
+Allocation Rules define prospective beneficiary resolution. Allocation
+Snapshots are immutable historical resolutions. Deal Economics is an extension
+for revenue, costs, profit, margin, and ROI; it is separate from billing.
 
 ## What must not be assumed
 
@@ -145,7 +155,7 @@ Without a new business decision, do not assume:
 - Every Deal must originate from a Lead.
 - Every Contact must originate from a Lead.
 - Every Deal automatically creates a Payment.
-- A Payment must directly link to a Contact.
+- A Payment counterparty can be inferred safely without an explicit contract.
 - Lead score automatically determines conversion.
 - Contact is equivalent to Deal.
 
