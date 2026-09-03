@@ -6513,6 +6513,16 @@ future closure must name the remediation commit/PR, static verification, and
 runtime requirement where applicable; resolved items must be removed from OPEN
 status here and from `BOSS_CURRENT_STATE.md` together.
 
+## F16 Media — Deployed Runtime Canary — VERIFIED SCOPE (03/09/2026)
+
+**Truth reset:** current `origin/main` at `3546ef319b8981b111e6fc5fe35c46a3014b4ec8`. The tested Render deployment was the live deployed SHA `0f80122525c5bbc9e3b115a4f7c4e131ac47070b`, deployment `dep-dab6heqd0e5s73dganh0`, with `FEATURE_MEDIA_UPLOAD=true` and `FEATURE_VOICE_NOTES=true` confirmed read-only from Render configuration. Evidence window: 03/09/2026, 22:30–23:12 Asia/Jerusalem, Render logs read-only.
+
+**Verified:** image persistence (Drive upload 200 and Media Files Airtable write/patch); ordinary video persistence (Drive upload 200 and Media Files Airtable write/patch); voice transcription (OpenAI transcription 200); approval request and approval lifecycle; approved `media_save_to_memory` execution with successful Business Memory write and completed ActionContract lifecycle. The observed “operation executed” response at 23:11 was backed by the Business Memory write, not inferred from message text.
+
+**Known deferred / not built:** Telegram `video_note` routing, Telegram `audio`/song routing, saving a voice note as a Drive file, and content-hash duplicate detection are not part of the currently verified F16 scope. F16-M5 remains **DEFERRED / ACCEPTED** by owner decision. Mini App and other unrelated product surfaces remain separate deferred/new capabilities and are not F16 runtime gaps.
+
+**Closure meaning:** F16 is runtime-verified for the capabilities built and enabled in the deployed scope. Any item above requires a new owner-approved implementation scope and its own canary; it does not reopen the verified F16 scope.
+
 ---
 
 ### BUG-TASK-01 — Task approval execution-proof fingerprint mismatch (R10 live bug report)
