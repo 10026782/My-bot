@@ -851,14 +851,19 @@ def set_draft_field(draft: dict, field_key: str, raw_value: str) -> tuple[bool, 
     """Validates + normalizes a raw reply into draft[field_key]. Returns
     (ok, error_message) — on failure the draft is left untouched and the
     caller must re-ask, never silently accept an invalid value."""
+    from core.draft_fields import FieldOperationError, set_field
+
     raw_value = (raw_value or "").strip()
 
     if field_key == "phone":
         from core.ingress_classifier import _normalize_phone, _PHONE_RE
         if not raw_value or not _PHONE_RE.fullmatch(raw_value.replace(" ", "")):
             return False, f"מספר טלפון לא תקין: {raw_value!r}. נסה שוב."
-        draft["phone"] = _normalize_phone(raw_value)
-        return True, ""
+        try:
+            set_field(draft, field_key, _normalize_phone(raw_value), LEAD_FIELD_METADATA)
+            return True, ""
+        except FieldOperationError as exc:
+            return False, str(exc)
 
     if field_key == "domain":
         canonical = resolve_domain_word(raw_value)
@@ -867,18 +872,27 @@ def set_draft_field(draft: dict, field_key: str, raw_value: str) -> tuple[bool, 
                 f"domain לא מוכר: {raw_value!r}. "
                 f"ערכים אפשריים: {', '.join(sorted(CANONICAL_LEAD_DOMAINS))}"
             )
-        draft["domain"] = canonical
-        return True, ""
+        try:
+            set_field(draft, field_key, canonical, LEAD_FIELD_METADATA)
+            return True, ""
+        except FieldOperationError as exc:
+            return False, str(exc)
 
     if field_key == "name":
         if not raw_value:
             return False, "שם ריק אינו תקין. מה שם הליד?"
-        draft["name"] = raw_value
-        return True, ""
+        try:
+            set_field(draft, field_key, raw_value, LEAD_FIELD_METADATA)
+            return True, ""
+        except FieldOperationError as exc:
+            return False, str(exc)
 
     # source / note — free text, no canonical vocabulary to enforce
-    draft[field_key] = raw_value
-    return True, ""
+    try:
+        set_field(draft, field_key, raw_value, LEAD_FIELD_METADATA)
+        return True, ""
+    except FieldOperationError as exc:
+        return False, str(exc)
 
 
 def render_lead_draft_card(draft: dict) -> str:
@@ -916,7 +930,7 @@ def _lead_display_items(draft: dict) -> list[str]:
             continue
         if key == "domain":
             value = _LEAD_DOMAIN_LABELS.get(value, value)
-        items.append(f"{DRAFT_FIELD_HE[key]}: {value}")
+        items.append(f"{LEAD_FIELD_METADATA[key].user_label}: {value}")
     status = {"new": "חדש"}.get(draft.get("status") or "new", draft.get("status") or "new")
     items.append(f"סטטוס: {status}")
     return items
@@ -987,12 +1001,41 @@ _DRAFT_FIELD_PROMPT_FULL_HE = {
     for key in DRAFT_FIELD_ORDER
 }
 
+
+def _resolve_lead_phone(value: str) -> str:
+    from core.ingress_classifier import _normalize_phone, _PHONE_RE
+    value = str(value or "").strip()
+    if not value or not _PHONE_RE.fullmatch(value.replace(" ", "")):
+        raise ValueError("מספר טלפון לא תקין")
+    return _normalize_phone(value)
+
+
+def _resolve_lead_domain(value: str) -> str:
+    resolved = resolve_domain_word(str(value or "").strip())
+    if not resolved:
+        raise ValueError("domain לא מוכר")
+    return resolved
+
+
+from core.draft_fields import FieldMetadata
+
+LEAD_FIELD_METADATA = {
+    "name": FieldMetadata("name", "שם", _DRAFT_FIELD_PROMPT_FULL_HE["name"]),
+    "phone": FieldMetadata("phone", "טלפון", _DRAFT_FIELD_PROMPT_FULL_HE["phone"], resolver=_resolve_lead_phone),
+    "domain": FieldMetadata(
+        "domain", "תחום", _DRAFT_FIELD_PROMPT_FULL_HE["domain"], input_type="single_select",
+        choices=tuple(sorted(CANONICAL_LEAD_DOMAINS)), resolver=_resolve_lead_domain,
+    ),
+    "source": FieldMetadata("source", "מקור", _DRAFT_FIELD_PROMPT_FULL_HE["source"]),
+    "note": FieldMetadata("note", "הערה", _DRAFT_FIELD_PROMPT_FULL_HE["note"]),
+}
+
 from core.draft_flow import DraftSpec as _DraftSpec  # noqa: E402
 
 LEAD_DRAFT_SPEC = _DraftSpec(
     required_fields=DRAFT_REQUIRED_FIELDS,
     optional_fields=("note",),
-    field_prompts=_DRAFT_FIELD_PROMPT_FULL_HE,
+    field_prompts={key: field.prompt for key, field in LEAD_FIELD_METADATA.items()},
     edit_labels=_DRAFT_EDIT_LABELS,
     set_field=set_draft_field,
     render=render_lead_draft_card,
