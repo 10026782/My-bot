@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 03/09/2026
+עודכן: 04/09/2026
 
 ## Commercial Completion Writer foundation — 03/09/2026
 
@@ -166,3 +166,10 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md).
 - [`PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md`](docs/audit/PROGRAM_DEPENDENCY_STATUS_DRIFT_AUDIT_20260828.md) — read-only drift audit and reconciliation evidence.
 - [`BUG_AUDIT_LOG.md`](BUG_AUDIT_LOG.md) — audit evidence and historical findings.
 - [`archive/ROADMAP_HISTORICAL_ARCHIVE_20260828.md`](archive/ROADMAP_HISTORICAL_ARCHIVE_20260828.md) — complete pre-cleanup ROADMAP snapshot, HISTORICAL only.
+
+### N18 shared field metadata reconciliation — 04/09/2026
+
+`core/draft_fields.py` provides the provider-neutral `FieldMetadata` shape and
+atomic field operations. The implementation is isolated in PR #1198, pending
+merge; Commercial UX consumes the metadata shape in PR #1196 while retaining
+ownership of commercial labels, link resolution, and choice semantics.

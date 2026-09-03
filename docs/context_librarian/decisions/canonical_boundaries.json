@@ -806,11 +806,13 @@
       "owner": "governance",
       "code_paths": [
         "core/structured_command.py",
-        "core/draft_flow.py"
+        "core/draft_flow.py",
+        "core/draft_fields.py"
       ],
       "test_paths": [
         "test_structured_command.py",
-        "test_draft_flow.py"
+        "test_draft_flow.py",
+        "test_draft_field_operations.py"
       ],
       "canonical_docs": [
         {
