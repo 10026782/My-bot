@@ -768,7 +768,7 @@ def cmd_deal_from_lead(msg):
             lead_sessions.set_commercial_completion(
                 str(msg.chat.id), serialize_completion_session(result.session)
             )
-            reply = f"נא להשלים את הפרט הבא: {result.field_name}."
+            reply = result.prompt or "נא להשלים את הפרט הבא."
         elif result.outcome == "BLOCK":
             reply = result.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
         else:
@@ -4357,7 +4357,7 @@ def run_agent(
             _ls.set_commercial_completion(
                 chat_id, serialize_completion_session(_completion_result.session)
             )
-            return f"נא להשלים את הפרט הבא: {_completion_result.field_name}."
+            return _completion_result.prompt or "נא להשלים את הפרט הבא."
         if _completion_result.outcome == "BLOCK":
             # Validation BLOCKs retain the unchanged session so the user can
             # correct the same field. Only restore corruption is cleared above.
@@ -4999,7 +4999,7 @@ def run_agent(
                 chat_id, serialize_completion_session(_completion_result.session)
             )
             return (
-                f"נא להשלים את הפרט הבא: {_completion_result.field_name}."
+                _completion_result.prompt or "נא להשלים את הפרט הבא."
             )
         if _completion_result.outcome == "BLOCK":
             return _completion_result.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
