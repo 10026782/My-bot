@@ -13,3 +13,5 @@ review metadata; it does not itself wire or activate a runtime surface.
 | `core/lead_service.py` | `public_renderer` | `render_lead_draft_message` | f52_lead_draft | `D-012/R4` |
 | `tools/whatsapp_adapter.py` | `contract_entry` | `message_contract` | f52_whatsapp_r7 | `D-012/R7.1` |
 | `core/approval_lifecycle_message_adapter.py` | `contract_entry` | `message_contract` | f52_approval_r8 | `D-012/R8.7-A` |
+| `commercial_completion_ux.py` | `public_renderer` | `render_prompt` | commercial_completion_ux | `S2D-R1` |
+| `commercial_completion_ux.py` | `public_renderer` | `render_counterparty_prompt` | commercial_completion_ux | `S2D-R1` |
