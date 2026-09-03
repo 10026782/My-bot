@@ -196,8 +196,18 @@ class CommercialCompletionRouter:
 
     def restore(self, state: Mapping[str, Any]) -> CompletionRoute:
         try:
-            return self._inspect(deserialize_completion_session(state))
-        except (KeyError, TypeError, ValueError, CommercialRoutingError) as exc:
+            session = deserialize_completion_session(state)
+            field = session.active.next_field()
+            if field is None:
+                return CompletionRoute(
+                    "BLOCK", session.active.target_entity, session=session,
+                    reason="persisted completion is already complete",
+                )
+            return CompletionRoute(
+                "CLARIFY", session.active.target_entity, session=session,
+                field_name=field.field_name, field_type=field.input_type,
+            )
+        except (KeyError, TypeError, ValueError, CompletionBlockedError, CommercialRoutingError) as exc:
             return CompletionRoute("BLOCK", "commercial", reason=str(exc))
 
     def answer(self, session: CompletionSession, field_name: str, value: Any) -> CompletionRoute:

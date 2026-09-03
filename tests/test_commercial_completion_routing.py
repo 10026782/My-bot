@@ -120,3 +120,34 @@ def test_app_adapter_names_every_approved_deal_v2_field():
         "relationship_type", "currency", "commercial_status", "start_date",
     ):
         assert field in source
+
+
+def test_direct_deal_does_not_inherit_current_lead_context():
+    from pathlib import Path
+    source = (Path(__file__).parents[1] / "app.py").read_text(encoding="utf-8")
+    direct_block = source.split('_completion_entities = {', 1)[1].split('# ── 3.6.', 1)[0]
+    assert '"origin_lead"' not in direct_block
+    assert "current_lead_record_id" not in direct_block
+
+
+def test_invalid_answer_keeps_same_completion_session_for_correction():
+    queued = []
+    router = CommercialCompletionRouter(queue=lambda tool, payload: queued.append((tool, payload)))
+    values = _deal()
+    values.pop("counterparty_contact")
+    first = router.start("deal", current_values=values)
+    invalid = router.answer(first.session, first.field_name, "not-a-valid-record")
+    assert invalid.outcome == "BLOCK"
+    assert invalid.session == first.session
+    corrected = router.answer(invalid.session, first.field_name, "recContact2")
+    assert corrected.outcome in {"CLARIFY", "TOOL"}
+
+
+def test_restore_is_side_effect_free():
+    calls = []
+    router = CommercialCompletionRouter(queue=lambda *args: calls.append(args))
+    first = router.start("organization", current_values={"organization_name": "Acme"})
+    calls.clear()
+    restored = router.restore(serialize_completion_session(first.session))
+    assert restored.outcome == "BLOCK"
+    assert calls == []

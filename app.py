@@ -4356,9 +4356,15 @@ def run_agent(
                 chat_id, serialize_completion_session(_completion_result.session)
             )
             return f"נא להשלים את הפרט הבא: {_completion_result.field_name}."
-        _ls.clear_commercial_completion(chat_id)
         if _completion_result.outcome == "BLOCK":
+            # Validation BLOCKs retain the unchanged session so the user can
+            # correct the same field. Only restore corruption is cleared above.
+            if _completion_result.session is not None:
+                _ls.set_commercial_completion(
+                    chat_id, serialize_completion_session(_completion_result.session)
+                )
             return _completion_result.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
+        _ls.clear_commercial_completion(chat_id)
         return _finalize_deterministic_queue_outcome(
             _completion_result.queue_outcome or {}, chat_id, _out_meta,
             "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
@@ -4977,9 +4983,6 @@ def run_agent(
             if not _deal_parse.certain:
                 return "לא בטוח שהבנתי את שם העסקה או את התחום."
             _current_values.update({"name": _deal_parse.name, "domain": _deal_parse.domain})
-            _current_values["origin_lead"] = (
-                (_session_snapshot or {}).get("current_lead_record_id", "")
-            )
         _completion_result = _completion_router.start(
             _completion_entities[route.intent],
             current_values=_current_values,
