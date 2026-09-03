@@ -6688,16 +6688,16 @@ def _webhook_telegram_impl():
             elif data.startswith("commercial_completion:"):
                 answer = data.split(":", 1)[1]
                 callback_meta = {}
-                callback_reply = run_agent(
+                callback_response = run_agent(
                     answer, str(call.message.chat.id), channel="telegram",
                     _out_meta=callback_meta,
                 )
-                if callback_reply:
+                if callback_response:
                     callback_kwargs = {}
                     callback_choices = callback_meta.get("commercial_completion_choices")
                     if callback_choices:
                         callback_kwargs["reply_markup"] = _completion_keyboard(callback_choices)
-                    bot.send_message(str(call.message.chat.id), callback_reply, **callback_kwargs)
+                    bot.send_message(str(call.message.chat.id), callback_response, **callback_kwargs)
                 bot.answer_callback_query(call.id)
             else:
                 # העבר ל-pyTeleBot handlers (upd_domain:, upd_type:, weekly summary וכו')
