@@ -528,6 +528,13 @@ def create_deal(
     priority: str = "",
     risk_level: str = "",
     notes: str = "",
+    counterparty_contact_id: str = "",
+    counterparty_organization_id: str = "",
+    deal_type_code: str = "",
+    relationship_type: str = "",
+    currency: str = "",
+    commercial_status: str = "",
+    start_date: str = "",
     source: str = "commercial_crm",
 ) -> dict:
     """Create a Deal. Domain-agnostic — no real-estate-only fields are required
@@ -577,6 +584,20 @@ def create_deal(
         fields[DealFields.RISK_LEVEL] = risk_level
     if notes:
         fields[DealFields.NOTES] = notes
+    if counterparty_contact_id:
+        fields[DealFields.COUNTERPARTY_CONTACT] = [counterparty_contact_id]
+    if counterparty_organization_id:
+        fields[DealFields.COUNTERPARTY_ORGANIZATION] = [counterparty_organization_id]
+    if deal_type_code:
+        fields[DealFields.DEAL_TYPE_CODE] = deal_type_code
+    if relationship_type:
+        fields[DealFields.RELATIONSHIP_TYPE] = relationship_type
+    if currency:
+        fields[DealFields.CURRENCY] = currency
+    if commercial_status:
+        fields[DealFields.COMMERCIAL_STATUS] = commercial_status
+    if start_date:
+        fields[DealFields.START_DATE] = start_date
 
     outcome = airtable_create(Tables.DEALS, fields, source=source, return_outcome=True)
     if outcome.status == "created":

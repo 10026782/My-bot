@@ -337,6 +337,34 @@ def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
     return DeterministicDealParse(name=name, domain=domain, matched=True)
 
 
+_COMMERCIAL_COMPLETION_PREFIXES = (
+    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:תנאי\s+תשלום|payment\s+term)", Intent.CREATE_PAYMENT_TERM),
+    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:ארגון|organization)", Intent.CREATE_ORGANIZATION),
+    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:חיוב|charge)", Intent.CREATE_CHARGE),
+    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:תשלום\s+לחיוב|charge\s+payment)", Intent.CREATE_CHARGE_PAYMENT),
+)
+
+
+@dataclass(frozen=True)
+class DeterministicCommercialCompletionParse:
+    intent: str | None = None
+    matched: bool = False
+    uncertain: bool = False
+
+    @property
+    def certain(self) -> bool:
+        return self.matched and not self.uncertain and self.intent is not None
+
+
+def parse_deterministic_commercial_completion(text: str) -> DeterministicCommercialCompletionParse:
+    """Recognize only explicit S2C entity prefixes; never infer an entity."""
+    normalized = _normalize_create_task_input(text)
+    for pattern, intent in _COMMERCIAL_COMPLETION_PREFIXES:
+        if re.match(r"^\s*" + pattern + r"(?:\s|:|$)", normalized, re.IGNORECASE):
+            return DeterministicCommercialCompletionParse(intent=intent, matched=True)
+    return DeterministicCommercialCompletionParse()
+
+
 def route_request(
     text:                str,
     channel_raw:         str,
@@ -426,6 +454,23 @@ def route_request(
     if (
         intent == Intent.CREATE_DEAL
         and _create_deal_parse.certain
+        and identity.role not in ("lead", "guest", "readonly")
+    ):
+        risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
+
+    _commercial_completion_intent = parse_deterministic_commercial_completion(text)
+    if (
+        _commercial_completion_intent.certain
+        and identity.role not in ("lead", "guest", "readonly")
+    ):
+        intent = _commercial_completion_intent.intent
+
+    if (
+        intent in (
+            Intent.CREATE_PAYMENT_TERM, Intent.CREATE_ORGANIZATION,
+            Intent.CREATE_CHARGE, Intent.CREATE_CHARGE_PAYMENT,
+        )
+        and _commercial_completion_intent.certain
         and identity.role not in ("lead", "guest", "readonly")
     ):
         risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
@@ -548,6 +593,15 @@ def route_request(
             "לא בטוח שהבנתי את שם העסקה או את התחום. נסח כך: "
             "\"פתח עסקה בשם X בתחום Y\"."
         )
+
+    elif intent in (
+        Intent.CREATE_PAYMENT_TERM, Intent.CREATE_ORGANIZATION,
+        Intent.CREATE_CHARGE, Intent.CREATE_CHARGE_PAYMENT,
+    ) and not _commercial_completion_intent.certain:
+        handler = Handler.CLARIFY
+        tool_allowed = False
+        needs_approval = False
+        response_override = "נא לנסח בקשה מסחרית מפורשת כדי להתחיל השלמה דטרמיניסטית."
 
     elif risk == Risk.NEEDS_APPROVAL and confidence < 0.85 and not restricted:
         handler           = Handler.CLARIFY

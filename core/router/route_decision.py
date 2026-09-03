@@ -55,6 +55,10 @@ class Intent:
     CLOSE_DEAL        = "close_deal"
     UPDATE_DEAL_STAGE = "update_deal_stage"
     CREATE_DEAL       = "create_deal"
+    CREATE_PAYMENT_TERM = "create_payment_term"
+    CREATE_ORGANIZATION = "create_organization"
+    CREATE_CHARGE     = "create_charge"
+    CREATE_CHARGE_PAYMENT = "create_charge_payment"
 
     # Tier 6 — Knowledge
     SEARCH_KNOWLEDGE  = "search_knowledge"
@@ -103,6 +107,8 @@ class Intent:
         CREATE_CONTACT, UPDATE_CONTACT, FIND_CONTACT, LIST_CONTACTS,
         CREATE_LEAD, UPDATE_LEAD, FIND_LEAD, QUALIFY_LEAD, CLOSE_DEAL, UPDATE_DEAL_STAGE,
         CREATE_DEAL,
+        CREATE_PAYMENT_TERM, CREATE_ORGANIZATION, CREATE_CHARGE,
+        CREATE_CHARGE_PAYMENT,
         SEARCH_KNOWLEDGE, READ_DOCUMENT, STORE_MEMORY, RETRIEVE_MEMORY,
         DRAFT_EMAIL, SEND_EMAIL, DRAFT_MESSAGE, SEND_MESSAGE,
         GENERATE_REPORT, FINANCIAL_REPORT, SALES_REPORT,

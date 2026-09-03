@@ -728,13 +728,10 @@ def cmd_deal_from_lead(msg):
     """/dealfromlead [שם/טלפון] — פותח עסקה (crm_create_deal) מליד קיים, עם
     Origin Lead מקושר (owner בלבד, דורש LEAD_TO_DEAL).
 
-    LEAD-TO-DEAL-ORIGIN-LINK (02/09/2026): אותו מסלול דטרמיניסטי בדיוק כמו
-    "צור עסקה בשם X בתחום Y" (Handler.TOOL, agent_calls=0, ה-Agent אף פעם
-    לא בוחר בין crm_create_deal ל-airtable_add) — רק ש-name/domain מגיעים
-    מרשומת הליד עצמה במקום מטקסט חופשי, ו-origin_lead_id מצורף. חיפוש
-    הליד עצמו (lead_conversion.resolve_lead_for_deal) לא מבצע שום כתיבה —
-    הכתיבה היחידה קורית דרך _queue_deterministic_create_deal(), אותה
-    פונקציה שהמסלול הטקסטואלי כבר משתמש בה."""
+    Resolve the Lead, then enter the same CommercialCompletionRouter as
+    Direct→Deal. Resolution is read-only; completion state is persisted in
+    the existing universal Session store.
+    """
     identity = resolve_identity("telegram", str(msg.from_user.id))
     if not identity or identity.role not in ("owner", "admin"):
         return
@@ -750,10 +747,36 @@ def cmd_deal_from_lead(msg):
             bot.send_message(msg.chat.id, err, parse_mode="Markdown")
             return
 
-        reply = _queue_deterministic_create_deal(
-            name, domain, str(msg.chat.id), "telegram", msg.text, identity,
-            origin_lead_id=lead_id,
+        from commercial_completion_routing import (
+            CommercialCompletionRouter, serialize_completion_session,
         )
+        from session_store import lead_sessions
+        router = CommercialCompletionRouter(queue=lambda tool, payload: _queue_approval_detailed(
+            tool, payload, str(msg.chat.id), "telegram", msg.text,
+            trusted_source="deterministic_commercial_completion",
+        ))
+        result = router.start(
+            "deal",
+            current_values={
+                "name": name, "domain": domain, "origin_lead": lead_id,
+                "owner": getattr(identity, "user_id", ""),
+            },
+            source_context={"domain": domain},
+            identity={"owner": getattr(identity, "user_id", "")},
+        )
+        if result.outcome == "CLARIFY":
+            lead_sessions.set_commercial_completion(
+                str(msg.chat.id), serialize_completion_session(result.session)
+            )
+            reply = f"נא להשלים את הפרט הבא: {result.field_name}."
+        elif result.outcome == "BLOCK":
+            reply = result.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
+        else:
+            lead_sessions.clear_commercial_completion(str(msg.chat.id))
+            reply = _finalize_deterministic_queue_outcome(
+                result.queue_outcome or {}, str(msg.chat.id), None,
+                "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
+            )
         if reply:
             bot.send_message(msg.chat.id, reply, parse_mode="Markdown")
         logger.info(
@@ -4299,6 +4322,56 @@ def run_agent(
     except Exception:
         _session_snapshot = None
 
+    # S2C: resume an in-progress commercial completion from the existing
+    # universal Session store.  A subsequent answer must never restart the
+    # writer or fall through to the Agent.
+    try:
+        from commercial_completion_routing import (
+            CommercialCompletionRouter, serialize_completion_session,
+        )
+        _persisted_completion = (
+            (_session_snapshot or {}).get("commercial_completion")
+        )
+    except Exception:
+        _persisted_completion = None
+    if _persisted_completion:
+        if _out_meta is not None:
+            _out_meta["source_module"] = "action_gateway"
+        _completion_router = CommercialCompletionRouter(
+            queue=lambda tool, payload: _queue_approval_detailed(
+                tool, payload, chat_id, channel, user_text,
+                trusted_source="deterministic_commercial_completion",
+            )
+        )
+        # The persisted field is contract-owned; restore() only inspects the
+        # session and therefore supplies the exact next field for answer().
+        # Re-run via the public answer() API with a single restored session.
+        _restored = _completion_router.restore(_persisted_completion)
+        if _restored.outcome == "BLOCK":
+            _ls.clear_commercial_completion(chat_id)
+            return _restored.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
+        _completion_result = _completion_router.answer(
+            _restored.session, _restored.field_name or "", user_text,
+        )
+        if _completion_result.outcome == "CLARIFY":
+            _ls.set_commercial_completion(
+                chat_id, serialize_completion_session(_completion_result.session)
+            )
+            return f"נא להשלים את הפרט הבא: {_completion_result.field_name}."
+        if _completion_result.outcome == "BLOCK":
+            # Validation BLOCKs retain the unchanged session so the user can
+            # correct the same field. Only restore corruption is cleared above.
+            if _completion_result.session is not None:
+                _ls.set_commercial_completion(
+                    chat_id, serialize_completion_session(_completion_result.session)
+                )
+            return _completion_result.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
+        _ls.clear_commercial_completion(chat_id)
+        return _finalize_deterministic_queue_outcome(
+            _completion_result.queue_outcome or {}, chat_id, _out_meta,
+            "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
+        )
+
     # ── 1.65. Establish the single per-turn live-contracts snapshot ──
     # Case C read-amplification fix. If the caller (webhook handler) already
     # fetched this for the ingress-gate check, reuse it (0 additional
@@ -4884,13 +4957,56 @@ def run_agent(
     # BUG-CRM-BYPASS follow-up: same Turn Coordinator short-circuit as
     # create_task above — the Agent must never choose between crm_create_deal
     # and generic airtable_add for a structured Deal-creation request.
-    if route.handler == Handler.TOOL and route.intent == "create_deal":
-        _deal_parse = parse_deterministic_create_deal(user_text)
-        if _deal_parse.certain:
-            return _queue_deterministic_create_deal(
-                _deal_parse.name, _deal_parse.domain, chat_id, channel, user_text,
-                identity, _out_meta,
+    # S2C: every recognized commercial completion intent stays deterministic.
+    # The router owns field/state orchestration; this adapter only renders the
+    # next contract-owned question or sends a complete payload to the same
+    # approval queue used by the existing deterministic writers.  No Agent
+    # fallback is permitted for these intents.
+    _completion_entities = {
+        "create_deal": "deal",
+        "create_payment_term": "payment_term",
+        "create_organization": "organization",
+        "create_charge": "charge",
+        "create_charge_payment": "payment",
+    }
+    if route.handler == Handler.TOOL and route.intent in _completion_entities:
+        if _out_meta is not None:
+            _out_meta["source_module"] = "action_gateway"
+        from commercial_completion_routing import CommercialCompletionRouter
+        _completion_router = CommercialCompletionRouter(
+            queue=lambda tool, payload: _queue_approval_detailed(
+                tool, payload, chat_id, channel, user_text,
+                trusted_source="deterministic_commercial_completion",
             )
+        )
+        _current_values = {
+            "owner": getattr(identity, "user_id", ""),
+        }
+        if route.intent == "create_deal":
+            _deal_parse = parse_deterministic_create_deal(user_text)
+            if not _deal_parse.certain:
+                return "לא בטוח שהבנתי את שם העסקה או את התחום."
+            _current_values.update({"name": _deal_parse.name, "domain": _deal_parse.domain})
+        _completion_result = _completion_router.start(
+            _completion_entities[route.intent],
+            current_values=_current_values,
+            source_context={"domain": resolved_route_domain},
+            identity={"owner": getattr(identity, "user_id", "")},
+        )
+        if _completion_result.outcome == "CLARIFY":
+            from session_store import lead_sessions as _completion_sessions
+            _completion_sessions.set_commercial_completion(
+                chat_id, serialize_completion_session(_completion_result.session)
+            )
+            return (
+                f"נא להשלים את הפרט הבא: {_completion_result.field_name}."
+            )
+        if _completion_result.outcome == "BLOCK":
+            return _completion_result.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
+        return _finalize_deterministic_queue_outcome(
+            _completion_result.queue_outcome or {}, chat_id, _out_meta,
+            "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
+        )
 
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
     # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.

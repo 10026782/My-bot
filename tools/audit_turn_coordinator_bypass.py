@@ -152,6 +152,8 @@ APP_PY = ROOT / "app.py"
 # add the route first, then register it here (or in the same change).
 _TC_PROTECTED_INTENTS: tuple[str, ...] = (
     "CREATE_TASK", "UPDATE_TASK", "COMPLETE_TASK", "CREATE_DEAL",
+    "CREATE_PAYMENT_TERM", "CREATE_ORGANIZATION", "CREATE_CHARGE",
+    "CREATE_CHARGE_PAYMENT",
 )
 
 # tool_name -> ("ROUTED", "Intent.X") | ("EXEMPT", "reason")
@@ -161,27 +163,17 @@ _TC_PROTECTED_INTENTS: tuple[str, ...] = (
 _TC_ROUTE_REGISTRY: dict[str, tuple[str, str]] = {
     "crm_create_deal": ("ROUTED", "CREATE_DEAL"),
     "crm_create_payment_term": (
-        "EXEMPT",
-        "not yet migrated to a deterministic route (scope decision "
-        "01/09/2026: Deal first) — tools/dispatcher.py's generic-write "
-        "interception (BUG-CRM-BYPASS) remains defense-in-depth; see "
-        "ROADMAP.md's Commercial CRM Owner SSOT remediation section.",
+        "ROUTED", "CREATE_PAYMENT_TERM",
     ),
     "crm_create_payment": (
         "EXEMPT",
-        "same as crm_create_payment_term — not yet migrated.",
+        "legacy Payment remains quarantined; S2C routes only charge-linked V2 Payment.",
     ),
     "crm_create_charge": (
-        "EXEMPT",
-        "S2B narrow mutation primitive is intentionally not yet migrated to a "
-        "deterministic Turn Coordinator route; S2C completion wiring must add "
-        "the route before this exemption is removed.",
+        "ROUTED", "CREATE_CHARGE",
     ),
     "crm_create_charge_payment": (
-        "EXEMPT",
-        "S2B Charge-required V2 Payment primitive is intentionally not yet "
-        "migrated to a deterministic Turn Coordinator route; S2C completion "
-        "wiring must add the route before this exemption is removed.",
+        "ROUTED", "CREATE_CHARGE_PAYMENT",
     ),
 }
 
