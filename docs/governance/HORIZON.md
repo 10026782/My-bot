@@ -16,8 +16,8 @@ management map; no canonical version of it existed before this entry — see
 the closure PR that created it for the search that established this.
 
 **Last updated:** 03/09/2026
-**Truth Reset SHA at last update:** `23ab957e75961c7b50f929e263eddd3f0d6632c8`
-(S2A merged; S2B narrow mutation primitives statically verified on PR branch)
+**Truth Reset SHA at last update:** `3546ef319b8981b111e6fc5fe35c46a3014b4ec8`
+(F16 runtime evidence recorded for deployed production SHA `0f801225`; unrelated capability gates remain separate)
 
 All SHA values inside the dated audit and remediation notes below are
 historical evidence references. They are not current-main claims; current
@@ -46,7 +46,7 @@ evidence and never override this map.
 | Security / permissions | CLOSED | WIRED | YES | static gaps closed; CI guard present | production reachability evidence | perform production verification |
 | Lead / CRM canonical flow | ACTIVE | MERGED | YES | shared write infrastructure and Lead consumer merged | end-to-end canary | run live canary |
 | Decision Hub | ACTIVE | STATIC COMPLETE | YES | Callback/record-scope remediation is statically verified: DH-CB-01–DH-CB-09 CLOSED / STATIC VERIFIED. Stage 0–1 and formula-safety fixes remain statically verified; DH-S1 CLOSED / STATIC VERIFIED; DH-S2 access-policy wording DOC/POLICY DRIFT — CLOSED; DH-S3 fail-closed reads STATIC VERIFIED; DH-S4 partial-persistence observability CLOSED / STATIC VERIFIED. Canonical access is shared-capability plus scoped-data authorization; protected CLI paths remain positive evidence; the full authorization layer is not claimed broken | runtime/deployment evidence remains NOT ESTABLISHED | pursue separately gated runtime evidence without broadening permissions |
-| Media | ACTIVE | MERGED + STATIC CLOSED | YES | gateway/probe and staging artifacts merged; F16-M1, M2, M3, M4, M6, M7 all statically verified and merged; F16-M5 DEFERRED / ACCEPTED by owner decision (content hash not a required F16 capability; may be reconsidered later only as a secondary fingerprint) | deployed-SHA Media canary / runtime verification — the only remaining gate | run the deployed-SHA Media canary |
+| Media | ACTIVE | RUNTIME_VERIFIED | NO (basic Telegram F16 path) | F16 static closure remains intact; production canary on deployed SHA `0f801225` verified photo → Drive/Airtable and voice → STT/approved memory action. Repeat/forward re-upload matches accepted provider-identity semantics; no content-hash dedup, `/media` command, or upload button is required. | normal monitoring; `audio`, `video_note`, and original voice-byte storage are separate unapproved capabilities | monitor |
 | Distribution / messaging | ACTIVE | MERGED | YES | canonical Marketing mapping exists | runtime gateway canary | run Marketing-map canary |
 | Command Center | ACTIVE | MERGED | YES | read-only API/UI and registry projection merged; `system_health` UNKNOWN-source bug already fixed (`3e10dbc`, 18/08/2026, predates this table's prior citation of it as open) | endpoint verification (deployed-SHA) | verify endpoint |
 | Contacts Brain | PLANNED | UNKNOWN | NO | partial resolver exists | full capability and owner decision | decide whether capability is wanted |
