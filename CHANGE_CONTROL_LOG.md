@@ -2329,3 +2329,21 @@ over those two rollups. Final counts remain 5 Deals, 1 legacy Payment, and 0 in
 every V2 commercial table. S2A is `LIVE_SCHEMA_VERIFIED +
 STATIC_VERIFIED_ON_BRANCH`; no writer/read/routing switch occurred and S2B did
 not start.
+
+### Commercial V2 S2B narrow mutation primitives — 03/09/2026
+
+- **Base:** merged S2A `origin/main`
+  `23ab957e75961c7b50f929e263eddd3f0d6632c8`.
+- **Change:** added exactly three owner-approved internal canonical primitives:
+  universal normalized-name Organization find-or-create, Deal-required Charge
+  create, and Charge-required actual-movement V2 Payment create.
+- **Controls:** existing identity/role/tenant policy, emergency stop,
+  ActionContract/ActionGateway approval and idempotency, exact execution proof,
+  structured evidence validation, dispatcher routing, and protected generic
+  table guards remain authoritative. The three tools are absent from Agent
+  schemas.
+- **Boundary:** no Airtable record/schema mutation, legacy Payment change,
+  completion-engine or reader wiring, route/channel/scheduler change, allocation
+  execution, deployment, or live canary.
+- **Evidence:** `CODE_DONE + STATIC_VERIFIED` on the PR branch; see
+  `docs/evidence/COMMERCIAL_S2B_MUTATION_PRIMITIVES_20260903.md`.

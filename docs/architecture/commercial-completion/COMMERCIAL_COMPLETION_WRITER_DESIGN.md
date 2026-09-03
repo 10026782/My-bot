@@ -1,9 +1,35 @@
 # Commercial Completion Writer — discovery, design, and pure foundation
 
 **Date:** 03/09/2026  
-**Evidence level:** STATIC VERIFIED  
+**Evidence level:** S2B `CODE_DONE + STATIC_VERIFIED` on PR branch
 **Runtime state:** unwired; no Airtable records created or modified  
 **Cross-Layer Impact:** FULL (design/shared-schema contract; no runtime activation)
+
+## S2B implementation addendum
+
+S2B adds exactly three internal, approval-sensitive production mutation
+primitives: `find_or_create_organization()`, `create_charge()`, and
+`create_charge_payment()`. The branch is based on merged S2A `origin/main`
+`23ab957e75961c7b50f929e263eddd3f0d6632c8`. The primitives are registered to
+`decision.commercial_v2_mutation_primitives`, use the existing Airtable gateway,
+and remain behind identity, role, tenant, emergency-stop, ActionContract,
+approval, idempotency, execution-proof, payload-parity, evidence, and protected
+generic-table dispatcher guards.
+
+Organization matching is exact after trim, internal-whitespace collapse, and
+case folding. Zero matches creates with the submitted display spelling, one
+match reuses, and multiple matches fail closed. Organizations remain universal:
+no Owner, tenant, user, or channel field was invented. Charge requires a valid
+Deal and optionally validates a Billing Term against that Deal. V2 Payment
+requires one Charge and rejects any Deal, Direction, Currency, or optional Term
+that does not match the Charge; only an actual `received` movement with `Paid At`
+can be created.
+
+No completion-engine caller, deterministic route, reader, channel, Mini App,
+scheduler, allocation writer, Contact writer, or Agent-facing schema was added.
+The legacy `create_payment()` function and the single legacy Payment record were
+not changed or reinterpreted. Live canary, deployment, merge, writer/read switch,
+and runtime verification remain outside this PR.
 
 ## A. Truth reset
 
@@ -35,7 +61,10 @@ domain conversion; Contacts use the deduplicating Contact gate.
 | Payment Term create | dedicated tool and protected generic-create redirect | `commercial_crm.create_payment_term()` | role policy, ActionContract/Gateway, emergency stop, calculation checks | Wrap later; only legacy enum/field subset |
 | Payment create | dedicated tool and protected generic-create redirect | `commercial_crm.create_payment()` | role policy, ActionContract/Gateway, emergency stop | Do not call for V2: permits no Charge and creates pending obligation-like rows |
 | Deal/Term/Payment update | generic update with protected-table role re-check and closed field map | generic Airtable update | ActionContract execution proof, allowlist, domain normalization | Keep until narrow update primitives exist |
-| Charge / Organization / Allocation / Economics create | none | none | none | New narrow primitives required in a later slice |
+| Organization create/reuse | protected generic redirect; dedicated internal tool | `commercial_crm.find_or_create_organization()` | normalized exact match, ambiguity fail-closed, Gateway/dispatcher controls | S2B implemented; no caller wired |
+| Charge create | protected generic redirect; dedicated internal tool | `commercial_crm.create_charge()` | Deal/Term relationship validation, closed fields, Gateway/dispatcher controls | S2B implemented; no caller wired |
+| V2 actual-movement Payment create | protected V2 generic redirect; dedicated internal tool | `commercial_crm.create_charge_payment()` | Charge-required relationship validation, closed fields, Gateway/dispatcher controls | S2B implemented; legacy writer remains quarantined |
+| Allocation / Economics create | none | none | none | New narrow primitives require a later slice |
 | Allocation Snapshot create | none | none | n/a | Must be system-generated, immutable, and non-conversational |
 
 ActionContracts remain the sole approval lifecycle authority. The completion
@@ -76,13 +105,13 @@ Important classifications:
 | Lead | Deal | Origin Lead, name, domain, owner; existing Contact when explicit | Deal Stage = opportunity | counterparty if absent, Deal Type, Relationship Type, Currency, Commercial Status, Expected Value | notes; Lead itself remains optional | current Deal writer lacks V2 signature parity |
 | Direct | Deal | authenticated owner and source context when supplied | Deal Stage = opportunity | name, domain, counterparty, Deal Type, Relationship Type, Currency, Commercial Status, Expected Value | Origin Lead, notes | no Lead may be manufactured |
 | Deal | Payment Term | Deal; Direction/Currency when supplied by Deal context | name, once cadence, immediate trigger, immediate due rule, zero grace, draft status, VAT none | Calculation Type and its conditional values | limits, dates, notes | no production Payment Term V2 writer switch |
-| Deal / Payment Term | Charge | Deal, optional Billing Term, Direction, Currency, due context | draft/not-due state, VAT none, document state; future terms snapshot | amount unless deterministically calculable | direct Charge may omit Billing Term; expected/promised fields | no Charge mutation primitive |
-| Charge | Payment | Charge, Deal/Term, Direction, Currency, counterparty | status received; document state | amount and Paid At | method, reference, notes | current Payment writer permits Charge bypass and must not be reused for V2 |
+| Deal / Payment Term | Charge | Deal, optional Billing Term, Direction, Currency, due context | draft/not-due state, VAT none, document state; future terms snapshot | amount unless deterministically calculable | direct Charge may omit Billing Term; expected/promised fields | primitive exists; completion caller remains unwired |
+| Charge | Payment | Charge, Deal/Term, Direction, Currency, counterparty | status received; document state | amount and Paid At | method, reference, notes | Charge-required primitive exists; completion caller remains unwired |
 | Deal | Allocation Rule | Deal; optional Term/Charge | priority 0, draft status | Contact or Organization beneficiary, allocation type, basis, conditional rate/fixed/unit value | dates, notes | custom type/basis lacks explicit detail field |
 | Charge | Allocation Snapshot | Charge, Rule, beneficiary | basis, resolved amount, timestamp, snapshot | none | none | system-only; no immutable snapshot primitive exists |
 | Deal | Deal Economics | Deal | missing amount components default to zero; total cost/profit/margin/ROI derived | none beyond Deal | amount components, notes | Margin/ROI are writable live fields and need a deterministic derivation primitive |
 | Deal | nested Contact | source name/phone/email/company | none | Contact name and valid phone | email/company/role | must return through existing Contact gate |
-| Deal | nested Organization | company name | none | Organization Name | none | no Organization dedup/writer primitive exists |
+| Deal | nested Organization | company name | none | Organization Name | none | primitive exists; nested completion caller remains unwired |
 
 ## E. Canonical architecture
 
@@ -121,7 +150,8 @@ record ID before resuming the parent Deal.
 | Contact gate | KEEP and WRAP | It is the canonical dedup/security boundary for nested Contact creation |
 | generic Airtable protected redirects | KEEP | They close role and validation bypasses; future maps must not broaden before primitive parity |
 | legacy `crm_add_deal` / `crm_add_payment` | KEEP quarantined | Historical domain-shaped paths are not revived as V2 writers |
-| new Charge/Organization/Allocation/Economics primitives | DEFER | Require separate reviewed write-contract slice |
+| new Organization/Charge/V2 Payment primitives | KEEP, internal and unwired | S2B narrow authority; no Agent or completion-engine caller |
+| new Allocation/Economics primitives | DEFER | Require separate reviewed write-contract slice |
 
 ## G. Minimal code implemented
 
@@ -145,29 +175,24 @@ record ID before resuming the parent Deal.
   verification command for this branch.
 - No runtime, deployment, or live-write verification is claimed.
 
-## I. S2A closure and remaining implementation slices
+## I. S2A/S2B closure state and remaining implementation slices
 
 S2A is closed at `LIVE_SCHEMA_VERIFIED + STATIC_VERIFIED_ON_BRANCH`: all
 approved additive native fields, including the Deal rollups and dependent
-formula, were directly read back as valid. Remaining work belongs to S2B or a
-later explicitly gated slice:
-
-1. Define an Organization dedup key and narrow canonical create primitive in S2B.
-2. Define idempotency/immutability primitives for Charge and Allocation Snapshot
-   in S2B.
-3. Define the V2 Payment primitive and migration/cutover guard without touching
-   or reinterpreting the legacy Payment row.
+formula, were directly read back as valid. S2B now implements the approved
+Organization, Charge, and Charge-required Payment primitives at `CODE_DONE +
+STATIC_VERIFIED` on the PR branch. Allocation Snapshot, Allocation Rule, Deal
+Economics, update primitives, completion integration, and reader/writer cutover
+remain separate explicitly gated work.
 
 ## J. Exact next implementation slice
 
-With S2A closed, the next separately gated slice may implement narrow, non-channel
-mutation primitives for Organization and Charge first. Extend protected generic
-write routing only after exact field parity tests pass. Then add a new V2 Payment
-primitive that requires Charge and records actual movement; keep the current
-Payment primitive available only for explicitly quarantined legacy callers until
-reader/writer cutover is separately approved. Wire the completion engine in a
-later PR through the existing deterministic route and ActionGateway; do not expose
-it directly as an unrestricted Airtable tool.
+After S2B review/merge, the next slice requires a separate owner decision. Valid
+candidates are a controlled deployment/live-canary plan or completion-engine
+integration through an approved deterministic caller and the existing
+ActionGateway. Reader/writer cutover, updates, allocations, economics, automatic
+Charge generation, and scheduler behavior remain outside S2B. The current
+Payment primitive stays quarantined for legacy callers.
 
 ## Cross-layer impact matrix
 
@@ -175,15 +200,17 @@ it directly as an unrestricted Airtable tool.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Core reasoning | no | none | none | none | unchanged | unchanged | no imports/callers from completion module |
 | Turn coordination/routing | no | none | none | none | existing deterministic Deal route unchanged | unchanged | `app.py` and router diff-free |
-| Tool/dispatcher contract | no runtime change | future complete payload only | none today | none | policy/registry unchanged | foundation raises typed errors | dispatcher/schema/registry diff-free |
+| Tool/dispatcher contract | yes, dormant internal cases | exact named primitive inputs | structured write evidence | only after approved execution proof | existing policy/Gateway controls retained | unknown fields and generic bypasses fail closed | focused dispatcher and bypass tests |
 | ActionContract/Gateway | no | none | none | none | remains sole lifecycle authority | unchanged | Gateway diff-free; no Gateway import |
 | Airtable schema vocabulary | yes, additive declarations | approved V2 field names/enums | constants | none | no identity/approval effect | unsupported live parity is documented and blocked | schema tests + live readback |
-| CRM mutation authority | no runtime change | none | none | none | current narrow writers preserved | legacy Payment conflict documented | `commercial_crm.py` diff-free |
+| CRM mutation authority | yes, three exact S2B symbols | closed Organization/Charge/Payment inputs | canonical Airtable fields | gateway write only after dispatcher proof | new decision node and writer registry | relationship and vocabulary failures are deterministic | 27 focused tests; legacy writer diff-preserved |
 | Channel UX | no | none | none | none | no reply ownership change | adapters not implemented | no Telegram/WhatsApp/TMA imports |
 | RP5/evidence | no | none | none | none | no success claim path | unchanged | no evidence imports or status rendering |
 
-No authority moved, no fallback/bypass changed, no dormant runtime code was
-activated, and no new cross-layer caller/callee edge was introduced.
+S2B grants only the three owner-approved symbol-level mutation authorities. No
+existing authority moved, no fallback was activated, no completion/channel
+caller was introduced, and generic bypass handling was narrowed to converge on
+or protect the canonical primitives.
 
 ## Context Librarian verification ledger
 

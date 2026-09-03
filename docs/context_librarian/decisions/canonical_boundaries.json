@@ -1145,6 +1145,70 @@
         }
       },
       "last_observed_commit": "56c8d68d25f4ab25b6f0841bbf5f6cb0c8f20c8f"
+    },
+    {
+      "id": "decision.commercial_v2_mutation_primitives",
+      "name": "Narrow Commercial V2 production mutation primitives",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "Canonical Organization normalized-name resolution and creation, canonical Charge creation, and Charge-required actual-movement V2 Payment creation through commercial_crm.",
+        "precedence": "Authority is limited to commercial_crm.find_or_create_organization, commercial_crm.create_charge, and commercial_crm.create_charge_payment. Existing identity, dispatcher, ActionGateway, ActionContract, approval, idempotency, execution-proof, payload-parity, writer-registry, and bypass guards remain authoritative. This node does not own routing, readers, Completion Engine wiring, channels, Mini App behavior, Agent authority, generic Airtable mutation, Contact creation, legacy Payment interpretation, automatic Charge generation, allocation execution, or scheduler behavior."
+      },
+      "owner": "commercial_crm",
+      "code_paths": [
+        "commercial_crm.py",
+        "tools/dispatcher.py",
+        "tool_registry.py",
+        "action_validator.py",
+        "core/anti_hallucination.py"
+      ],
+      "test_paths": [
+        "test_commercial_crm_dispatcher_wiring.py",
+        "test_bug_commercial_crm_dispatcher_bypass_closure.py",
+        "tests/test_commercial_v2_mutation_primitives.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/governance/WRITER_AUTHORITY_REGISTRY.md",
+          "role": "exact symbol-level writer authority registration",
+          "status": "active"
+        },
+        {
+          "path": "docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md",
+          "role": "commercial field contracts and production integration boundaries",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/COMMERCIAL_SCHEMA_V2_ADD_ONLY_STATUS_20260903.md",
+          "role": "live Commercial V2 schema and compatibility boundary",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-03",
+      "last_verified_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8",
+      "confidence": 0.95,
+      "notes": [
+        "Owner-approved S2B classification after the pre-implementation gate found no production writer node for Organization, Charge, or Charge-required V2 Payment.",
+        "Organization resolution uses trimmed, internal-whitespace-collapsed, case-insensitive normalized Organization Name matching: zero matches creates, one reuses, and more than one fails closed. Submitted display spelling is preserved on create; fuzzy and substring matching are forbidden.",
+        "Organizations remain universal/global entities. No Owner, tenant_id, user, or channel ownership field is invented; request identity and tenant context remain enforced and recorded by the existing ActionGateway and ActionContract boundary.",
+        "commercial_completion.py and decision.commercial_completion_foundation remain pure, unwired, and non-authoritative for production mutation.",
+        "No runtime, deployment, or live-mutation verification is claimed by this registration."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_AUTHORITY",
+          "role": "commercial_v2_narrow_mutation_primitives",
+          "authority": true,
+          "purpose": "three exact canonical production mutation primitives for Organization, Charge, and Charge-required actual-movement Payment",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
     }
   ],
   "edges": [
