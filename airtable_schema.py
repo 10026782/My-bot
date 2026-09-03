@@ -38,6 +38,11 @@ class Tables:
     EXPENSES        = "Expenses"
     PAYMENTS        = "Payments"
     PAYMENT_TERMS   = "Payment Terms"      # Canonical Deal/Payment Architecture track — created 30/08/2026 (app4bcgoX7t0HUVnm/tblyFWgrujJpTqkg5)
+    CHARGES         = "Charges"
+    ALLOCATION_RULES = "Allocation Rules"
+    ALLOCATION_SNAPSHOTS = "Allocation Snapshots"
+    DEAL_ECONOMICS  = "Deal Economics"
+    ORGANIZATIONS   = "Organizations"
     # קשרים ועסקאות
     CONTACTS        = "אנשי קשר (Contacts)"
     DEALS           = "עסקאות (Deals)"
@@ -218,6 +223,14 @@ class PaymentFields:
     TRIGGER_EVIDENCE = "Trigger Evidence"  # human-readable explanation of how the due date was derived
     PAID_AT         = "Paid At"          # set when Status moves to received — distinct from the due DATE
     OWNER           = "owner"            # lowercase, matches live field — business ownership metadata only, NOT beneficiary/payee (see docs/governance)
+    CHARGE          = "Charge"
+    DIRECTION       = "Direction"
+    CURRENCY        = "Currency"
+    METHOD          = "Method"
+    COUNTERPARTY_CONTACT = "Counterparty Contact"
+    COUNTERPARTY_ORGANIZATION = "Counterparty Organization"
+    DOCUMENT_REQUIREMENT = "Document Requirement"
+    DOCUMENT_STATUS = "Document Status"
 
 
 class ContactFields:
@@ -248,6 +261,19 @@ class DealFields:
     VENTURE_LINK    = "Ventures"
     PRIORITY        = "Priority"        # High|Medium|Low
     PAYMENT_TERMS_LINK = "Payment Terms"  # auto inverse of PaymentTermFields.DEAL — fldQCZO5rWVRJIaNG
+    CHARGES_LINK    = "Charges"
+    ALLOCATION_RULES_LINK = "Allocation Rules"
+    DEAL_ECONOMICS_LINK = "Deal Economics"
+    COUNTERPARTY_CONTACT = "Counterparty Contact"
+    COUNTERPARTY_ORGANIZATION = "Counterparty Organization"
+    DEAL_TYPE       = "Deal Type"
+    RELATIONSHIP_TYPE = "Relationship Type"
+    START_DATE      = "Start Date"
+    CURRENCY        = "Currency"
+    COMMERCIAL_STATUS = "Commercial Status"
+    TOTAL_CHARGED   = "Total Charged"
+    TOTAL_COLLECTED = "Total Collected"
+    OUTSTANDING     = "Outstanding"
     # backwards compat — crm.py uses these
     STATUS          = "שלב"
     PRICE           = "סכום"
@@ -266,6 +292,10 @@ class DealFields:
 class PaymentTermCalcType:
     FIXED       = "fixed"
     PERCENTAGE  = "percentage"
+    PER_UNIT     = "per_unit"
+    USAGE_BASED  = "usage_based"
+    TIERED       = "tiered"
+    CUSTOM       = "custom"
 
 
 class PaymentTermBasis:
@@ -274,6 +304,12 @@ class PaymentTermBasis:
     DEAL_AMOUNT     = "deal_amount"
     UNIT_COUNT      = "unit_count"
     CUSTOM_AMOUNT   = "custom_amount"
+    TRANSACTION_AMOUNT = "transaction_amount"
+    SALE_AMOUNT     = "sale_amount"
+    REVENUE         = "revenue"
+    COMMISSION_AMOUNT = "commission_amount"
+    SALARY_AMOUNT   = "salary_amount"
+    USAGE_QUANTITY  = "usage_quantity"
 
 
 class PaymentTermTrigger:
@@ -281,11 +317,18 @@ class PaymentTermTrigger:
     SPECIFIC_DATE   = "specific_date"
     AFTER_PERIOD    = "after_period"
     EVENT_BASED     = "event_based"
+    MANUAL          = "manual"
 
 
 class PaymentTermCadence:
     ONCE    = "once"
+    WEEKLY  = "weekly"
     MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    ANNUAL  = "annual"
+    INSTALLMENTS = "installments"
+    EVENT_BASED = "event_based"
+    ONGOING = "ongoing"
 
 
 class VATRule:
@@ -314,6 +357,197 @@ class PaymentTermFields:
     START_DATE       = "Start Date"
     END_DATE         = "End Date"
     NOTES            = "Notes"
+    DIRECTION        = "Direction"
+    UNIT_RATE        = "Unit Rate"
+    MINIMUM_AMOUNT   = "Minimum Amount"
+    MAXIMUM_AMOUNT   = "Maximum Amount"
+    INSTALLMENT_COUNT = "Installment Count"
+    TRIGGER_EVENT    = "Trigger Event"
+    DUE_RULE         = "Due Rule"
+    NET_DAYS         = "Net Days"
+    GRACE_PERIOD_DAYS = "Grace Period Days"
+    STATUS           = "Status"
+    NEXT_DUE_DATE    = "Next Due Date"
+    CURRENCY         = "Currency"
+
+
+class Direction:
+    RECEIVABLE = "receivable"
+    PAYABLE = "payable"
+    INTERNAL = "internal"
+
+
+class DueRule:
+    DUE_IMMEDIATELY = "due_immediately"
+    SPECIFIC_DUE_DATE = "specific_due_date"
+    NET_DAYS = "net_days"
+    SCHEDULED = "scheduled"
+    INSTALLMENTS = "installments"
+
+
+class BillingTermStatus:
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ENDED = "ended"
+    CANCELLED = "cancelled"
+
+
+class ChargeStatus:
+    DRAFT = "draft"
+    ISSUED = "issued"
+    DUE = "due"
+    OVERDUE = "overdue"
+    CANCELLED = "cancelled"
+    WRITTEN_OFF = "written_off"
+
+
+class CollectionState:
+    NOT_DUE = "not_due"
+    DUE = "due"
+    PARTIALLY_PAID = "partially_paid"
+    OVERDUE = "overdue"
+    PROMISE_TO_PAY = "promise_to_pay"
+    DATE_UNKNOWN = "date_unknown"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+    WRITTEN_OFF = "written_off"
+
+
+class RelationshipType:
+    ONE_OFF = "one_off"
+    ONGOING = "ongoing"
+    RECURRING_SERVICE = "recurring_service"
+    COMMISSION_RELATIONSHIP = "commission_relationship"
+    PARTNERSHIP = "partnership"
+    OTHER = "other"
+
+
+class CommercialStatus:
+    PROSPECT = "prospect"
+    ACTIVE = "active"
+    AT_RISK = "at_risk"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    WRITTEN_OFF = "written_off"
+
+
+class AllocationType:
+    PERCENTAGE = "percentage"
+    FIXED = "fixed"
+    PER_UNIT = "per_unit"
+    REMAINDER = "remainder"
+    CUSTOM = "custom"
+
+
+class AllocationBasis:
+    GROSS_AMOUNT = "gross_amount"
+    NET_AMOUNT = "net_amount"
+    PROFIT = "profit"
+    OUR_COMMISSION = "our_commission"
+    COLLECTED_AMOUNT = "collected_amount"
+    REMAINING_AMOUNT = "remaining_amount"
+    CUSTOM = "custom"
+
+
+class DocumentRequirement:
+    RECEIPT_REQUIRED = "receipt_required"
+    INVOICE_REQUIRED = "invoice_required"
+    EXPENSE_DOCUMENT_REQUIRED = "expense_document_required"
+    NONE = "none"
+
+
+class DocumentStatus:
+    NOT_REQUIRED = "not_required"
+    REQUIRED = "required"
+    REQUESTED = "requested"
+    ISSUED = "issued"
+    RECEIVED = "received"
+    STORED = "stored"
+
+
+class Currency:
+    ILS = "ILS"
+    USD = "USD"
+    EUR = "EUR"
+
+
+class ChargeFields:
+    REFERENCE = "Charge Reference"
+    DEAL = "Deal"
+    BILLING_TERM = "Billing Term"
+    DIRECTION = "Direction"
+    AMOUNT = "Amount"
+    CURRENCY = "Currency"
+    ORIGINAL_DUE_DATE = "Original Due Date"
+    CURRENT_EXPECTED_DATE = "Current Expected Date"
+    STATUS = "Status"
+    COLLECTION_STATE = "Collection State"
+    BASE_AMOUNT = "Base Amount"
+    RATE_PCT = "Rate %"
+    QUANTITY = "Quantity"
+    UNIT_RATE = "Unit Rate"
+    VAT_RULE = "VAT Rule"
+    VAT_AMOUNT = "VAT Amount"
+    TRIGGER_EVIDENCE = "Trigger Evidence"
+    ORIGINAL_TERMS_SNAPSHOT = "Original Terms Snapshot"
+    REMAINING_BALANCE = "Remaining Balance"
+    TOTAL_PAID = "Total Paid"
+    PROMISED_PAYMENT_DATE = "Promised Payment Date"
+    PROMISED_PAYMENT_AMOUNT = "Promised Payment Amount"
+    DOCUMENT_REQUIREMENT = "Document Requirement"
+    DOCUMENT_STATUS = "Document Status"
+    NOTES = "Notes"
+
+
+class AllocationRuleFields:
+    REFERENCE = "Allocation Rule Reference"
+    DEAL = "Deal"
+    BILLING_TERM = "Billing Term"
+    CHARGE = "Charge"
+    BENEFICIARY = "Beneficiary"
+    ALLOCATION_TYPE = "Allocation Type"
+    ALLOCATION_BASIS = "Allocation Basis"
+    RATE_PCT = "Rate %"
+    FIXED_AMOUNT = "Fixed Amount"
+    UNIT_RATE = "Unit Rate"
+    PRIORITY = "Priority / Order"
+    START_DATE = "Start Date"
+    END_DATE = "End Date"
+    STATUS = "Status"
+    NOTES = "Notes"
+
+
+class AllocationSnapshotFields:
+    REFERENCE = "Allocation Snapshot Reference"
+    CHARGE = "Charge"
+    ALLOCATION_RULE = "Allocation Rule"
+    BENEFICIARY = "Beneficiary"
+    RESOLVED_AMOUNT = "Resolved Amount"
+    BASIS_AMOUNT = "Basis Amount"
+    RESOLVED_AT = "Resolved At"
+    SNAPSHOT_DATA = "Snapshot Data / Notes"
+
+
+class DealEconomicsFields:
+    REFERENCE = "Deal Economics Reference"
+    DEAL = "Deal"
+    REVENUE = "Revenue"
+    PURCHASE_COST = "Purchase Cost"
+    DIRECT_COSTS = "Direct Costs"
+    FEES = "Fees"
+    SHIPPING = "Shipping"
+    TAXES_DUTIES = "Taxes / Duties"
+    OTHER_COSTS = "Other Costs"
+    TOTAL_COST = "Total Cost"
+    GROSS_PROFIT = "Gross Profit"
+    MARGIN_PCT = "Margin %"
+    ROI = "ROI"
+    NOTES = "Notes"
+
+
+class OrganizationFields:
+    NAME = "Organization Name"
 
 
 class VentureFields:
