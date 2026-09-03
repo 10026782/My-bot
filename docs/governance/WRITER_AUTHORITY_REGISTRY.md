@@ -11,3 +11,4 @@ that approved the implementation and its single owner.
 | `test_f52_g4_s1_lead_memory_writer.py` | `<module>` | `action_contracts` | `F52-G4-S1` |
 | `test_f52_g4_s4_interaction_task_writer.py` | `<module>` | `action_contracts` | `F52-G4-S4` |
 | `test_f52_g4_s5_weekly_quest_reset.py` | `<module>` | `action_contracts` | `F52-G4-S5` |
+| `commercial_completion.py` | `CommercialCompletionWriter` | commercial_crm | `decision.commercial_completion_foundation` |

@@ -1117,6 +1117,11 @@
           "path": "ROADMAP.md",
           "role": "branch-level implementation and evidence-status navigation",
           "status": "active"
+        },
+        {
+          "path": "docs/governance/WRITER_AUTHORITY_REGISTRY.md",
+          "role": "exact implementation-shape registration; records review but grants no runtime authority",
+          "status": "active"
         }
       ],
       "production_evidence": [],
