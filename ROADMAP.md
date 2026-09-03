@@ -167,6 +167,13 @@ Canonical source: [`HORIZON.md`](docs/governance/HORIZON.md).
 - [`BUG_AUDIT_LOG.md`](BUG_AUDIT_LOG.md) — audit evidence and historical findings.
 - [`archive/ROADMAP_HISTORICAL_ARCHIVE_20260828.md`](archive/ROADMAP_HISTORICAL_ARCHIVE_20260828.md) — complete pre-cleanup ROADMAP snapshot, HISTORICAL only.
 
+### Commercial human-link lookup incident — 04/09/2026
+
+Production reported a `NameError` on the Telegram human Contact-link path
+because `commercial_crm.lookup_human_reference()` referenced `ContactFields`
+without importing it. Follow-up PR #1199 adds the missing schema import and a
+regression test; merge, deployment, and runtime verification remain pending.
+
 ### N18 shared field metadata reconciliation — 04/09/2026
 
 `core/draft_fields.py` provides the provider-neutral `FieldMetadata` shape and
