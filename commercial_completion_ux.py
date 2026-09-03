@@ -13,21 +13,12 @@ import re
 from typing import Any, Callable, Iterable, Mapping
 
 from commercial_completion import ENTITY_CONTRACTS, FieldContract, InputType
+from core.draft_fields import FieldMetadata
 from core.router.entity_resolvers import _resolve_bounded_entity, resolve_contact, resolve_deal
 from core.router.ownership_contracts import ResolverResult
 
 
-@dataclass(frozen=True)
-class FieldPresentation:
-    """Presentation metadata; ``field_key`` is never rendered."""
-
-    field_key: str
-    user_label: str
-    prompt: str
-    input_type: InputType
-    resolver: str = ""
-    choices: tuple[Any, ...] = ()
-
+FieldPresentation = FieldMetadata
 
 @dataclass(frozen=True)
 class HumanChoice:
