@@ -2,7 +2,7 @@
 
 **Verified:** 03/09/2026 (Asia/Jerusalem)  
 **Truth source:** live Airtable schema in the main commercial base  
-**Status:** SCHEMA V2 ADD-ONLY IMPLEMENTED — WRITERS NOT SWITCHED
+**Status:** S2A IN PROGRESS — NATIVE DEAL ROLLUPS BLOCKED; WRITERS NOT SWITCHED
 
 ## Live schema
 
@@ -29,10 +29,9 @@ Organizations are canonical business entities distinct from person Contacts.
 ## Native-field verification
 
 - Currency vocabulary is exactly `ILS`, `USD`, `EUR` on the new currency selects.
-- Deals, Payment Terms, and Payments expose Currency as native single-selects.
-  The pre-existing Charges.Currency field remains single-line text for add-only
-  compatibility; code must validate it against the same vocabulary until a
-  non-destructive replacement is approved.
+- Deals, Payment Terms, Payments, and Charges expose canonical Currency as
+  native single-selects. The pre-existing Charges.Currency text field remains
+  untouched; V2 uses the additive `Currency Code` compatibility field.
 - Charges has native currency/date fields, a valid `Total Paid` rollup over
   Payments through `Charge`, and a valid `Remaining Balance` formula.
 - Deal Economics has valid `Total Cost` and `Gross Profit` formulas.
@@ -46,10 +45,27 @@ Legacy `Payments` remains quarantined. No production writer or reader was
 switched, no BillingTerm-to-Charge scheduler was introduced, and no legacy
 Payment row was interpreted as an actual V2 Payment.
 
-The Deal fields `Start Date`, `Total Charged`, `Total Collected`, and
-`Outstanding` are not live and require a follow-up native schema operation.
+Deal `Start Date` is live. `Total Charged` and `Total Collected` remain blocked
+on a native rollup-capable schema path; `Outstanding` is intentionally deferred
+until those rollup dependencies exist.
 
-The approved expanded Payment Terms vocabularies are not fully represented in
-the live select configurations: Calculation Type, Calculation Basis, Trigger
-Type, and Cadence still expose their legacy option subsets. Future V2 writers
-must remain blocked from unsupported options until those live options exist.
+The approved expanded Payment Terms vocabularies are represented by additive
+canonical `Calculation Type Code`, `Calculation Basis Code`, `Trigger Type
+Code`, and `Cadence Code` selects. Legacy select fields and their existing
+writers remain untouched. Tier/custom detail and deterministic due-date fields
+are live. Deal Type is canonicalized in the additive `Deal Type Code` select.
+Allocation Rules and Snapshots now support Organization beneficiaries through
+parallel native links while retaining Contact beneficiaries.
+
+## S2A native blocker
+
+The current schema connector cannot create rollups. The remaining live steps
+must use a native rollup-capable path on Deals:
+
+1. `Total Charged`: roll up `Charges → Amount` with `SUM(values)`.
+2. `Total Collected`: roll up `Charges → Total Paid` with `SUM(values)`.
+3. Only then create `Outstanding` as
+   `{Total Charged} - IF({Total Collected}, {Total Collected}, 0)`.
+
+Until live readback validates all three, S2A is not closed and S2B mutation
+primitives must not start.

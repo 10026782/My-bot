@@ -2301,3 +2301,22 @@ cross-track handoffs.
 - **Disposition:** `RUNTIME_VERIFIED`; Gateway cutover verification is closed.
   Remaining work is post-cutover soak/monitoring. Unrelated capability canaries
   and RP5 enforce activation remain separate.
+
+### Commercial Schema V2 S2A additive checkpoint — 03/09/2026
+
+- **Truth reset:** `origin/main` `d8a7b346aa61be36780c3d24b3069854cac014c7`
+  (PR #1187 merge), directly verified before work.
+- **Live schema:** thirteen approved compatibility-only native fields created
+  and read back across Payment Terms, Deals, Charges, Allocation Rules, and
+  Allocation Snapshots. No record was created or modified; counts remained
+  Deals 5, legacy Payments 1, and all V2 commercial tables 0.
+- **Static contract:** canonical `... Code` constants preserve all legacy
+  writer field names; completion logic now models approved Deal Type,
+  tier/custom details, deterministic due dates, Charges currency, and Contact
+  or Organization allocation beneficiaries. No production caller or route was
+  changed.
+- **Open blocker:** Deals `Total Charged` and `Total Collected` require native
+  rollups unavailable through the installed schema connector. `Outstanding`
+  remains correctly deferred until both exist. S2A is not closed; S2B has not
+  started.
+- **Evidence:** `docs/evidence/COMMERCIAL_SCHEMA_S2A_20260903.md`.

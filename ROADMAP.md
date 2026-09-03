@@ -4,11 +4,12 @@
 
 ## Commercial Completion Writer foundation — 03/09/2026
 
-`CommercialCompletionWriter` has been designed and implemented as a pure,
-unwired deterministic foundation on branch
-`codex/commercial-completion-writer-foundation`. Evidence is `CODE_DONE /
-STATIC_VERIFIED ON BRANCH — NOT YET CURRENT`: field and flow matrices cover the
-approved Commercial Schema V2 entities, and focused tests pass. No production
+`CommercialCompletionWriter` is merged on `origin/main` through PR #1187 as a
+pure, unwired deterministic foundation. S2A schema closure is now partially
+live and statically aligned on branch: thirteen additive canonical fields were
+created and verified without record mutation; the remaining two native Deal
+rollups and their dependent formula are blocked on a rollup-capable schema
+path. No production
 writer/reader, dispatcher route, channel adapter, scheduler, ActionGateway path,
 or Airtable record was changed. The exact design and blockers are tracked in
 [`COMMERCIAL_COMPLETION_WRITER_DESIGN.md`](docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md).
@@ -103,8 +104,8 @@ runtime-only item is represented here as static code work.
 | DECISION_HUB | Decision Hub | IN_PROGRESS | STATIC COMPLETE / RUNTIME NOT ESTABLISHED. DH-S1 formula safety CLOSED / STATIC VERIFIED; DH-S2 access-policy wording DOC/POLICY DRIFT — CLOSED; DH-S3 fail-closed reads STATIC VERIFIED; DH-S4 partial-persistence observability CLOSED / STATIC VERIFIED; DH-CB-01–DH-CB-09 CLOSED / STATIC VERIFIED with direct callback and scope regressions. Structured persistence outcomes prevent false full success; runtime/deployment is not claimed. | Pursue separately gated runtime evidence without broadening permissions | [`HORIZON.md`](docs/governance/HORIZON.md) |
 | COST_AGENT_LAST | Cost / Agent-Last architecture | IN_PROGRESS | MERGED_STATIC — telemetry remains shadow | Validate live usage/cost and decide progression | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | ARCHITECTURE_AUTHORITY_BOUNDARIES | Architecture authority / execution boundaries | IN_PROGRESS | MERGED_STATIC — runtime evidence separate | Verify deployed-SHA authority | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
-| SCHEMA_DATA_CONTRACTS | Schema / Data Contracts | IN_PROGRESS | MERGED_STATIC + LIVE SCHEMA VERIFIED — Track 8/8B/8C static and live-schema reconciliation is complete; the three `commercial_crm` create tools are registered with policy/schema/dispatcher coverage by PR1153. Application runtime and canary are not established; first-class Deal/Payment TMA surface and raw-write ownership remain open. | Owner-approved Deal/Payment canary, TMA surface decision, and raw-write ownership decision; K10 naming-only fragmentation remains open | [`MAINTENANCE_AUDIT_LEDGER.md`](docs/governance/MAINTENANCE_AUDIT_LEDGER.md) |
-| COMMERCIAL_COMPLETION_WRITER | Canonical Commercial Completion Writer | IN_PROGRESS | CODE_DONE / STATIC_VERIFIED ON BRANCH — NOT YET CURRENT; pure contracts, missing-field algorithm, validation, nested completion, and matrices; no runtime wiring | Resolve documented live-schema/detail-field gaps, then add narrow Organization/Charge primitives in a separate reviewed slice | [`COMMERCIAL_COMPLETION_WRITER_DESIGN.md`](docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md) |
+| SCHEMA_DATA_CONTRACTS | Schema / Data Contracts | IN_PROGRESS | MERGED_STATIC + LIVE SCHEMA PARTIALLY VERIFIED — Track 8/8B/8C remains complete; S2A added and verified thirteen compatibility-only native fields with no record changes. Two Deal rollups and dependent Outstanding formula remain absent. | Complete native Deal aggregates, verify live truth, then close S2A; no writer/read switch | [`COMMERCIAL_SCHEMA_V2_ADD_ONLY_STATUS_20260903.md`](docs/governance/COMMERCIAL_SCHEMA_V2_ADD_ONLY_STATUS_20260903.md) |
+| COMMERCIAL_COMPLETION_WRITER | Canonical Commercial Completion Writer | IN_PROGRESS | FOUNDATION MERGED (PR #1187); S2A CODE_DONE / STATIC_VERIFIED ON BRANCH with thirteen live additive fields; no runtime wiring | Supply a native rollup-capable path for the final Deal aggregates; only after S2A closure begin separately gated S2B primitives | [`COMMERCIAL_COMPLETION_WRITER_DESIGN.md`](docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md) |
 | N17 | Context Librarian Follow-up Hardening & Verification Backlog | IN_PROGRESS | MERGED_STATIC — maintenance remains ongoing | Continue bounded reconciliation and owner-gated follow-ups | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | BOSS_CONTEXT_LIBRARIAN_PHASE_0 | BOSS Context Librarian | IN_PROGRESS | MERGED_STATIC — mandatory bootstrap/index layer | Continue bounded reconciliation and maintenance PRs | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) |
 | ROADMAP_CORE | ROADMAP current-state SSOT | IN_PROGRESS | MERGED_STATIC — registry cleanup is this program's current slice | Keep current-state view compact and reconciled | [`ROADMAP.md`](ROADMAP.md) |

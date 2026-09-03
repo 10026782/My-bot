@@ -27,6 +27,7 @@ from airtable_schema import (
     CommercialStatus,
     ContactFields,
     Currency,
+    DealType,
     DealEconomicsFields,
     DealFields,
     DealStage,
@@ -221,6 +222,7 @@ _DIRECTIONS = _class_values(Direction)
 _CURRENCIES = _class_values(Currency)
 _RELATIONSHIPS = _class_values(RelationshipType)
 _COMMERCIAL_STATUSES = _class_values(CommercialStatus)
+_DEAL_TYPES = _class_values(DealType)
 _CALC_TYPES = _class_values(PaymentTermCalcType)
 _CALC_BASES = _class_values(PaymentTermBasis)
 _CADENCES = _class_values(PaymentTermCadence)
@@ -262,13 +264,13 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("origin_lead", DealFields.ORIGIN_LEAD, InputType.LINK, inherit=("lead_id", "origin_lead_id"), validation="record_id"),
         _f("counterparty_contact", DealFields.COUNTERPARTY_CONTACT, InputType.LINK, inherit=("contact_id", "counterparty_contact"), validation="record_id"),
         _f("counterparty_organization", DealFields.COUNTERPARTY_ORGANIZATION, InputType.LINK, inherit=("organization_id", "counterparty_organization"), validation="record_id"),
-        _f("deal_type", DealFields.DEAL_TYPE, InputType.TEXT, required=ALWAYS, example="service agreement", help_text="No approved select vocabulary exists; the live field is text."),
+        _f("deal_type", DealFields.DEAL_TYPE_CODE, InputType.SELECT, required=ALWAYS, choices=_DEAL_TYPES, example=DealType.SERVICE),
         _f("relationship_type", DealFields.RELATIONSHIP_TYPE, InputType.SELECT, required=ALWAYS, choices=_RELATIONSHIPS),
         _f("currency", DealFields.CURRENCY, InputType.SELECT, required=ALWAYS, choices=_CURRENCIES),
         _f("commercial_status", DealFields.COMMERCIAL_STATUS, InputType.SELECT, required=ALWAYS, choices=_COMMERCIAL_STATUSES),
         _f("expected_value", DealFields.AMOUNT, InputType.CURRENCY, required=ALWAYS, inherit=("expected_value", "amount"), validation="positive"),
         _f("stage", DealFields.STAGE, InputType.SELECT, choices=(DealStage.OPPORTUNITY, DealStage.NEGOTIATION, DealStage.CLOSED_WIN, DealStage.CLOSED_LOSS), default=DealStage.OPPORTUNITY),
-        _f("start_date", DealFields.START_DATE, InputType.DATE, persisted=False, help_text="Approved target field is not yet live."),
+        _f("start_date", DealFields.START_DATE, InputType.DATE),
         _f("notes", DealFields.NOTES, InputType.TEXT),
         _f("total_charged", DealFields.TOTAL_CHARGED, InputType.COMPUTED, manual=False, persisted=False),
         _f("total_collected", DealFields.TOTAL_COLLECTED, InputType.COMPUTED, manual=False, persisted=False),
@@ -278,20 +280,24 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("deal", PaymentTermFields.DEAL, InputType.LINK, required=ALWAYS, inherit=("deal_id", "deal"), validation="record_id"),
         _f("name", PaymentTermFields.NAME, InputType.TEXT, default="Payment Term"),
         _f("direction", PaymentTermFields.DIRECTION, InputType.SELECT, required=ALWAYS, inherit=("direction",), choices=_DIRECTIONS),
-        _f("calculation_type", PaymentTermFields.CALC_TYPE, InputType.SELECT, required=ALWAYS, choices=_CALC_TYPES),
+        _f("calculation_type", PaymentTermFields.CALC_TYPE_CODE, InputType.SELECT, required=ALWAYS, choices=_CALC_TYPES),
         _f("fixed_amount", PaymentTermFields.FIXED_AMOUNT, InputType.CURRENCY, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.FIXED,)),), validation="positive"),
-        _f("rate_pct", PaymentTermFields.RATE_PCT, InputType.PERCENT, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.PERCENTAGE, PaymentTermCalcType.TIERED)),), validation="positive_percent"),
-        _f("calculation_basis", PaymentTermFields.CALC_BASIS, InputType.SELECT, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.PERCENTAGE, PaymentTermCalcType.PER_UNIT, PaymentTermCalcType.USAGE_BASED, PaymentTermCalcType.TIERED, PaymentTermCalcType.CUSTOM)),), choices=_CALC_BASES),
+        _f("rate_pct", PaymentTermFields.RATE_PCT, InputType.PERCENT, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.PERCENTAGE,)),), validation="positive_percent"),
+        _f("calculation_basis", PaymentTermFields.CALC_BASIS_CODE, InputType.SELECT, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.PERCENTAGE, PaymentTermCalcType.PER_UNIT, PaymentTermCalcType.USAGE_BASED, PaymentTermCalcType.TIERED, PaymentTermCalcType.CUSTOM)),), choices=_CALC_BASES),
+        _f("tier_configuration", PaymentTermFields.TIER_CONFIGURATION, InputType.TEXT, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.TIERED,)),)),
+        _f("custom_calculation_rule", PaymentTermFields.CUSTOM_CALCULATION_RULE, InputType.TEXT, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.CUSTOM,)),)),
         _f("unit_rate", PaymentTermFields.UNIT_RATE, InputType.CURRENCY, required=CONDITIONAL, when=(Condition("calculation_type", (PaymentTermCalcType.PER_UNIT, PaymentTermCalcType.USAGE_BASED)),), validation="positive"),
         _f("minimum_amount", PaymentTermFields.MINIMUM_AMOUNT, InputType.CURRENCY, validation="non_negative"),
         _f("maximum_amount", PaymentTermFields.MAXIMUM_AMOUNT, InputType.CURRENCY, validation="non_negative"),
-        _f("cadence", PaymentTermFields.CADENCE, InputType.SELECT, choices=_CADENCES, default=PaymentTermCadence.ONCE),
+        _f("cadence", PaymentTermFields.CADENCE_CODE, InputType.SELECT, choices=_CADENCES, default=PaymentTermCadence.ONCE),
         _f("installment_count", PaymentTermFields.INSTALLMENT_COUNT, InputType.NUMBER, required=CONDITIONAL, when=(Condition("cadence", (PaymentTermCadence.INSTALLMENTS,)), Condition("due_rule", (DueRule.INSTALLMENTS,))), require_all_conditions=False, validation="positive_integer"),
-        _f("trigger_type", PaymentTermFields.TRIGGER_TYPE, InputType.SELECT, choices=_TRIGGERS, default=PaymentTermTrigger.IMMEDIATE),
+        _f("trigger_type", PaymentTermFields.TRIGGER_TYPE_CODE, InputType.SELECT, choices=_TRIGGERS, default=PaymentTermTrigger.IMMEDIATE),
         _f("trigger_date", PaymentTermFields.TRIGGER_DATE, InputType.DATE, required=CONDITIONAL, when=(Condition("trigger_type", (PaymentTermTrigger.SPECIFIC_DATE,)),)),
         _f("trigger_delay_days", PaymentTermFields.TRIGGER_DELAY_DAYS, InputType.NUMBER, required=CONDITIONAL, when=(Condition("trigger_type", (PaymentTermTrigger.AFTER_PERIOD,)),), validation="non_negative_integer"),
         _f("trigger_event", PaymentTermFields.TRIGGER_EVENT, InputType.TEXT, required=CONDITIONAL, when=(Condition("trigger_type", (PaymentTermTrigger.EVENT_BASED,)),)),
         _f("due_rule", PaymentTermFields.DUE_RULE, InputType.SELECT, choices=_DUE_RULES, default=DueRule.DUE_IMMEDIATELY),
+        _f("specific_due_date", PaymentTermFields.SPECIFIC_DUE_DATE, InputType.DATE, required=CONDITIONAL, when=(Condition("due_rule", (DueRule.SPECIFIC_DUE_DATE,)),)),
+        _f("schedule_anchor_date", PaymentTermFields.SCHEDULE_ANCHOR_DATE, InputType.DATE, required=CONDITIONAL, when=(Condition("due_rule", (DueRule.SCHEDULED, DueRule.INSTALLMENTS)),)),
         _f("net_days", PaymentTermFields.NET_DAYS, InputType.NUMBER, required=CONDITIONAL, when=(Condition("due_rule", (DueRule.NET_DAYS,)),), validation="non_negative_integer"),
         _f("grace_period_days", PaymentTermFields.GRACE_PERIOD_DAYS, InputType.NUMBER, default=0, validation="non_negative_integer"),
         _f("currency", PaymentTermFields.CURRENCY, InputType.SELECT, required=ALWAYS, inherit=("currency",), choices=_CURRENCIES),
@@ -301,10 +307,6 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("start_date", PaymentTermFields.START_DATE, InputType.DATE),
         _f("end_date", PaymentTermFields.END_DATE, InputType.DATE),
         _f("notes", PaymentTermFields.NOTES, InputType.TEXT),
-    ), unresolved_rules=(
-        "tiered has no live tier-break field contract",
-        "custom has no approved explicit custom-rule field",
-        "specific_due_date has no dedicated due-date field on Payment Terms",
     )),
     "charge": EntityContract("charge", (
         _f("reference", ChargeFields.REFERENCE, InputType.TEXT),
@@ -312,7 +314,7 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("billing_term", ChargeFields.BILLING_TERM, InputType.LINK, inherit=("payment_term_id", "billing_term"), validation="record_id"),
         _f("direction", ChargeFields.DIRECTION, InputType.SELECT, required=ALWAYS, inherit=("direction",), choices=_DIRECTIONS),
         _f("amount", ChargeFields.AMOUNT, InputType.CURRENCY, required=ALWAYS, validation="positive"),
-        _f("currency", ChargeFields.CURRENCY, InputType.SELECT, required=ALWAYS, inherit=("currency",), choices=_CURRENCIES),
+        _f("currency", ChargeFields.CURRENCY_CODE, InputType.SELECT, required=ALWAYS, inherit=("currency",), choices=_CURRENCIES),
         _f("original_due_date", ChargeFields.ORIGINAL_DUE_DATE, InputType.DATE, inherit=("original_due_date", "due_date")),
         _f("current_expected_date", ChargeFields.CURRENT_EXPECTED_DATE, InputType.DATE),
         _f("status", ChargeFields.STATUS, InputType.SELECT, choices=_CHARGE_STATUSES, default=ChargeStatus.DRAFT),
@@ -355,7 +357,8 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("deal", AllocationRuleFields.DEAL, InputType.LINK, required=ALWAYS, inherit=("deal_id", "deal"), validation="record_id"),
         _f("billing_term", AllocationRuleFields.BILLING_TERM, InputType.LINK, inherit=("payment_term_id", "billing_term"), validation="record_id"),
         _f("charge", AllocationRuleFields.CHARGE, InputType.LINK, inherit=("charge_id", "charge"), validation="record_id"),
-        _f("beneficiary", AllocationRuleFields.BENEFICIARY, InputType.LINK, required=ALWAYS, validation="record_id"),
+        _f("beneficiary_contact", AllocationRuleFields.BENEFICIARY_CONTACT, InputType.LINK, inherit=("beneficiary_contact", "contact_id"), validation="record_id"),
+        _f("beneficiary_organization", AllocationRuleFields.BENEFICIARY_ORGANIZATION, InputType.LINK, inherit=("beneficiary_organization", "organization_id"), validation="record_id"),
         _f("allocation_type", AllocationRuleFields.ALLOCATION_TYPE, InputType.SELECT, required=ALWAYS, choices=_ALLOCATION_TYPES),
         _f("allocation_basis", AllocationRuleFields.ALLOCATION_BASIS, InputType.SELECT, required=ALWAYS, choices=_ALLOCATION_BASES),
         _f("rate_pct", AllocationRuleFields.RATE_PCT, InputType.PERCENT, required=CONDITIONAL, when=(Condition("allocation_type", (AllocationType.PERCENTAGE,)),), validation="positive_percent"),
@@ -366,12 +369,13 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("end_date", AllocationRuleFields.END_DATE, InputType.DATE),
         _f("status", AllocationRuleFields.STATUS, InputType.SELECT, choices=_TERM_STATUSES, default=BillingTermStatus.DRAFT),
         _f("notes", AllocationRuleFields.NOTES, InputType.TEXT),
-    ), unresolved_rules=("custom allocation has no approved explicit custom-rule field",)),
+    ), one_of_required=(("beneficiary_contact", "beneficiary_organization"),), unresolved_rules=("custom allocation has no approved explicit custom-rule field",)),
     "allocation_snapshot": EntityContract("allocation_snapshot", (
         _f("reference", AllocationSnapshotFields.REFERENCE, InputType.COMPUTED, manual=False),
         _f("charge", AllocationSnapshotFields.CHARGE, InputType.COMPUTED, required=ALWAYS, derived=("charge",), manual=False),
         _f("allocation_rule", AllocationSnapshotFields.ALLOCATION_RULE, InputType.COMPUTED, required=ALWAYS, derived=("allocation_rule",), manual=False),
-        _f("beneficiary", AllocationSnapshotFields.BENEFICIARY, InputType.COMPUTED, required=ALWAYS, derived=("allocation_rule.beneficiary",), manual=False),
+        _f("beneficiary_contact", AllocationSnapshotFields.BENEFICIARY_CONTACT, InputType.COMPUTED, derived=("allocation_rule.beneficiary_contact",), manual=False),
+        _f("beneficiary_organization", AllocationSnapshotFields.BENEFICIARY_ORGANIZATION, InputType.COMPUTED, derived=("allocation_rule.beneficiary_organization",), manual=False),
         _f("resolved_amount", AllocationSnapshotFields.RESOLVED_AMOUNT, InputType.COMPUTED, required=ALWAYS, derived=("allocation_rule", "basis_amount"), manual=False),
         _f("basis_amount", AllocationSnapshotFields.BASIS_AMOUNT, InputType.COMPUTED, required=ALWAYS, derived=("charge", "allocation_basis"), manual=False),
         _f("resolved_at", AllocationSnapshotFields.RESOLVED_AT, InputType.COMPUTED, required=ALWAYS, derived=("clock",), manual=False),
@@ -522,17 +526,6 @@ class CommercialCompletionWriter:
     def _assert_supported(self, values: Mapping[str, Any]) -> None:
         """Fail closed for approved enums whose extra field contract is absent."""
 
-        if self.target_entity == "payment_term":
-            calculation = values.get("calculation_type")
-            if calculation in (PaymentTermCalcType.TIERED, PaymentTermCalcType.CUSTOM):
-                raise CompletionBlockedError(
-                    f"{calculation} has no approved explicit detail-field contract"
-                )
-            due_rule = values.get("due_rule")
-            if due_rule in (DueRule.SPECIFIC_DUE_DATE, DueRule.SCHEDULED):
-                raise CompletionBlockedError(
-                    f"{due_rule} has no approved writable due-date field contract"
-                )
         if self.target_entity == "allocation_rule":
             if values.get("allocation_type") == AllocationType.CUSTOM:
                 raise CompletionBlockedError(

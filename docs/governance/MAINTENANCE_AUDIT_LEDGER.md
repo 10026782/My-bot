@@ -331,3 +331,14 @@ already-broken-on-`main` approval/task-reconfirmation test unrelated to
 schema/Airtable and untouched by this Track. `origin/main`'s own recent CI
 runs are red for the same reason. Flagged for separate triage; not this
 Track's scope.
+
+## Commercial Schema V2 S2A checkpoint — 03/09/2026
+
+Direct live evidence in
+`docs/evidence/COMMERCIAL_SCHEMA_S2A_20260903.md` advances the commercial
+portion of #2/#3 without reopening their historical closed findings. Thirteen
+additive fields were verified live and record counts were unchanged. The
+current S2A remains `IN_PROGRESS`: two Deal rollups and their dependent formula
+are not live because the available schema connector does not support rollup
+creation. No writer/read switch, legacy Payment mutation, production routing,
+or S2B mutation primitive is part of this checkpoint.
