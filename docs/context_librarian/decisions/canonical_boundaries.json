@@ -1209,6 +1209,63 @@
         }
       },
       "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
+    },
+    {
+      "id": "decision.commercial_completion_routing",
+      "name": "Deterministic Commercial V2 completion routing",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "Production orchestration from recognized commercial completion intent through CommercialCompletionWriter to an approved narrow mutation primitive and the existing ActionGateway/ActionContract boundary.",
+        "precedence": "This node owns deterministic completion recognition, field prompting, nested completion, state resumption, and TOOL/CLARIFY/BLOCK routing only. It does not own Airtable writes, generic mutation, primitive implementation, ActionGateway or ActionContract authority, identity, Contact creation, readers, legacy Payment behavior, allocation, scheduling, reporting, or Agent decisions."
+      },
+      "owner": "commercial_crm",
+      "code_paths": [
+        "commercial_completion_routing.py"
+      ],
+      "test_paths": [
+        "tests/test_commercial_completion_routing.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/commercial-completion/COMMERCIAL_COMPLETION_WRITER_DESIGN.md",
+          "role": "completion contracts and integration boundary",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/WRITER_AUTHORITY_REGISTRY.md",
+          "role": "exact routing/authority registration",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/COMMERCIAL_SCHEMA_V2_ADD_ONLY_STATUS_20260903.md",
+          "role": "Commercial V2 compatibility boundary",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-03",
+      "last_verified_commit": "2b51f8e81d368a5c9d47fbac2abffb603e753485",
+      "confidence": 0.95,
+      "notes": [
+        "Owner-approved S2C classification: one production completion-routing authority, with foundation remaining pure and S2B remaining narrow mutation-only authority.",
+        "Supported S2C handoffs are Deal, Payment Term, Organization, Charge, and Charge-required V2 Payment. Allocation Rule, Allocation Snapshot, and Deal Economics remain foundation-only.",
+        "Recognized commercial write intents must never fall through to Agent field, writer, enum, parent, or approval decisions.",
+        "No live mutation, deployment, or runtime verification is claimed by this registration."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_AUTHORITY",
+          "role": "commercial_completion_deterministic_routing",
+          "authority": true,
+          "purpose": "production completion orchestration without direct persistence authority",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "2b51f8e81d368a5c9d47fbac2abffb603e753485"
     }
   ],
   "edges": [

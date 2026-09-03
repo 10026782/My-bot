@@ -4892,6 +4892,41 @@ def run_agent(
                 identity, _out_meta,
             )
 
+    # S2C: every recognized commercial completion intent stays deterministic.
+    # The router owns field/state orchestration; this adapter only renders the
+    # next contract-owned question or sends a complete payload to the same
+    # approval queue used by the existing deterministic writers.  No Agent
+    # fallback is permitted for these intents.
+    _completion_entities = {
+        "create_payment_term": "payment_term",
+        "create_organization": "organization",
+        "create_charge": "charge",
+        "create_charge_payment": "payment",
+    }
+    if route.handler == Handler.TOOL and route.intent in _completion_entities:
+        from commercial_completion_routing import CommercialCompletionRouter
+        _completion_router = CommercialCompletionRouter(
+            queue=lambda tool, payload: _queue_approval_detailed(
+                tool, payload, chat_id, channel, user_text,
+                trusted_source="deterministic_commercial_completion",
+            )
+        )
+        _completion_result = _completion_router.start(
+            _completion_entities[route.intent],
+            source_context={"domain": resolved_route_domain},
+            identity={"owner": getattr(identity, "user_id", "")},
+        )
+        if _completion_result.outcome == "CLARIFY":
+            return (
+                f"נא להשלים את הפרט הבא: {_completion_result.field_name}."
+            )
+        if _completion_result.outcome == "BLOCK":
+            return "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
+        return _finalize_deterministic_queue_outcome(
+            _completion_result.queue_outcome or {}, chat_id, _out_meta,
+            "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
+        )
+
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
     # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.
     # sender_identity (אליהו) נשמר קבוע; subject (הליד) מטופל בנפרד.

@@ -1,5 +1,20 @@
 # Commercial Completion Writer — discovery, design, and pure foundation
 
+## S2C routing boundary
+
+`commercial_completion_routing.py` is the owner-approved production
+orchestration adapter. It uses the single `CommercialCompletionWriter`
+contract and `CompletionSession`, and returns only `CLARIFY`, `TOOL`, or
+`BLOCK`. Complete payloads are translated by an explicit entity-to-primitive
+mapping and passed to the existing approval queue supplied by the caller; the
+router has no Airtable or generic mutation authority.
+
+The approved S2C targets are Deal, Payment Term, Organization, Charge, and
+Charge-required V2 Payment. Allocation Rule, Allocation Snapshot, and Deal
+Economics remain foundation-only. ActionGateway/ActionContracts remain the
+approval and execution boundary, and the legacy Payment writer remains
+quarantined.
+
 **Date:** 03/09/2026  
 **Evidence level:** S2B `CODE_DONE + STATIC_VERIFIED` on PR branch
 **Runtime state:** unwired; no Airtable records created or modified  

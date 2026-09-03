@@ -1,0 +1,188 @@
+"""Production orchestration for the Commercial V2 completion contracts.
+
+This module is deliberately an adapter around :mod:`commercial_completion`.
+It owns deterministic recognition/orchestration and hands a complete,
+validated payload to the existing approval queue.  It does not import an
+Airtable client, a generic mutation helper, or an ActionGateway implementation;
+the caller supplies the already-existing queue boundary.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping
+
+from commercial_completion import (
+    CompletionBlockedError,
+    CompletionSession,
+    CommercialCompletionWriter,
+    InputType,
+)
+from airtable_schema import ChargeFields, DealFields, OrganizationFields, PaymentFields, PaymentTermFields
+
+
+SUPPORTED_COMPLETION_ENTITIES = frozenset(
+    {"deal", "payment_term", "organization", "charge", "payment"}
+)
+
+MUTATION_TOOLS = {
+    "deal": "crm_create_deal",
+    "payment_term": "crm_create_payment_term",
+    "organization": "crm_find_or_create_organization",
+    "charge": "crm_create_charge",
+    "payment": "crm_create_charge_payment",
+}
+
+
+class CommercialRoutingError(ValueError):
+    """Fail-closed routing error."""
+
+
+@dataclass(frozen=True)
+class CompletionRoute:
+    """One deterministic result: clarify, tool handoff, or block."""
+
+    outcome: str
+    entity: str
+    session: CompletionSession | None = None
+    field_name: str | None = None
+    field_type: InputType | None = None
+    tool_name: str | None = None
+    tool_inputs: Mapping[str, Any] | None = None
+    queue_outcome: Any = None
+    reason: str = ""
+
+
+def _link_id(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        if len(value) != 1:
+            raise CommercialRoutingError("linked entity must resolve to one record")
+        value = value[0]
+    return str(value or "").strip()
+
+
+def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Translate one canonical completion payload to the exact primitive API.
+
+    The translation is explicit and lossless for the fields currently accepted
+    by the canonical primitives.  No field is inferred or silently discarded.
+    """
+    p = dict(payload)
+    if entity == "organization":
+        return {"display_name": p[OrganizationFields.NAME]}
+    if entity == "deal":
+        result = {
+            "name": p[DealFields.NAME], "domain": p[DealFields.DOMAIN],
+            "owner_id": _link_id(p[DealFields.OWNER]),
+        }
+        optional = {
+            DealFields.ORIGIN_LEAD: "origin_lead_id", DealFields.AMOUNT: "amount",
+            DealFields.STAGE: "stage", "Notes": "notes",
+        }
+        for field_name, arg_name in optional.items():
+            if field_name in p:
+                result[arg_name] = _link_id(p[field_name]) if field_name == "Origin Lead" else p[field_name]
+        return result
+    if entity == "payment_term":
+        result = {
+            "deal_id": _link_id(p[PaymentTermFields.DEAL]),
+            "name": p.get(PaymentTermFields.NAME, "Payment Term"),
+            "calc_type": p[PaymentTermFields.CALC_TYPE_CODE],
+        }
+        mapping = {
+            "Fixed Amount": "fixed_amount", "Rate %": "rate_pct",
+            "Calculation Basis Code": "calc_basis",
+            "Trigger Type Code": "trigger_type", "Trigger Date": "trigger_date",
+            "Cadence Code": "cadence", "VAT Rule": "vat_rule",
+            "Start Date": "start_date", "End Date": "end_date", "Notes": "notes",
+        }
+        result.update({arg: p[name] for name, arg in mapping.items() if name in p})
+        return result
+    if entity == "charge":
+        result = {
+            "deal_id": _link_id(p[ChargeFields.DEAL]), "direction": p[ChargeFields.DIRECTION],
+            "amount": p[ChargeFields.AMOUNT], "currency": p[ChargeFields.CURRENCY_CODE],
+            "status": p[ChargeFields.STATUS], "collection_state": p[ChargeFields.COLLECTION_STATE],
+            "vat_rule": p[ChargeFields.VAT_RULE],
+            "document_requirement": p[ChargeFields.DOCUMENT_REQUIREMENT],
+            "document_status": p[ChargeFields.DOCUMENT_STATUS],
+        }
+        mapping = {
+            "Billing Term": "billing_term_id", "Reference": "reference",
+            "Original Due Date": "original_due_date",
+            "Current Expected Date": "current_expected_date",
+            "Base Amount": "base_amount", "Rate %": "rate_pct",
+            "Quantity": "quantity", "Unit Rate": "unit_rate",
+            "VAT Amount": "vat_amount", "Promised Payment Date": "promised_payment_date",
+            "Promised Payment Amount": "promised_payment_amount", "Notes": "notes",
+        }
+        result.update({arg: _link_id(p[name]) if name == "Billing Term" else p[name] for name, arg in mapping.items() if name in p})
+        return result
+    if entity == "payment":
+        result = {
+            "charge_id": _link_id(p[PaymentFields.CHARGE]), "deal_id": _link_id(p[PaymentFields.DEAL_LINK]),
+            "direction": p[PaymentFields.DIRECTION], "amount": p[PaymentFields.AMOUNT],
+            "currency": p[PaymentFields.CURRENCY], "paid_at": p[PaymentFields.PAID_AT],
+            "status": p[PaymentFields.STATUS], "document_requirement": p[PaymentFields.DOCUMENT_REQUIREMENT],
+            "document_status": p[PaymentFields.DOCUMENT_STATUS],
+        }
+        mapping = {
+            "Payment Term": "payment_term_id", "Reference": "reference",
+            "Method": "method", "Counterparty Contact": "counterparty_contact_id",
+            "Counterparty Organization": "counterparty_organization_id", "Notes": "notes",
+        }
+        result.update({arg: _link_id(p[name]) if "Counterparty" in name or name == "Payment Term" else p[name] for name, arg in mapping.items() if name in p})
+        return result
+    raise CommercialRoutingError(f"unsupported commercial completion entity: {entity}")
+
+
+class CommercialCompletionRouter:
+    """Single production completion authority for the approved V2 entities."""
+
+    def __init__(self, *, queue: Callable[[str, dict[str, Any]], Any], contracts=None):
+        self._queue = queue
+        self._contracts = contracts
+
+    def start(self, entity: str, *, current_values=None, source_context=None, identity=None) -> CompletionRoute:
+        if entity not in SUPPORTED_COMPLETION_ENTITIES:
+            return CompletionRoute("BLOCK", entity, reason="commercial entity is not approved for S2C")
+        writer = CommercialCompletionWriter(
+            entity, current_values or {}, source_context or {}, identity or {},
+            contracts=self._contracts or CommercialCompletionWriter.__dataclass_fields__["contracts"].default_factory(),
+        )
+        return self._inspect(CompletionSession.start(writer))
+
+    def answer(self, session: CompletionSession, field_name: str, value: Any) -> CompletionRoute:
+        try:
+            return self._inspect(session.answer(field_name, value))
+        except (ValueError, CompletionBlockedError) as exc:
+            return CompletionRoute("BLOCK", session.active.target_entity, session=session, reason=str(exc))
+
+    def _inspect(self, session: CompletionSession) -> CompletionRoute:
+        writer = session.active
+        field = writer.next_field()
+        if field is not None:
+            return CompletionRoute(
+                "CLARIFY", writer.target_entity, session=session,
+                field_name=field.field_name, field_type=field.input_type,
+            )
+        try:
+            payload = writer.complete_payload()
+            tool = MUTATION_TOOLS[writer.target_entity]
+            # The exact dict is handed to the existing queue; it is never
+            # changed after this point, preserving Gateway fingerprint parity.
+            inputs = _primitive_inputs(writer.target_entity, payload)
+            result = self._queue(tool, inputs)
+        except (KeyError, ValueError, CompletionBlockedError) as exc:
+            return CompletionRoute("BLOCK", writer.target_entity, session=session, reason=str(exc))
+        return CompletionRoute(
+        "TOOL", writer.target_entity, session=session, tool_name=tool,
+            tool_inputs=inputs, queue_outcome=result,
+            reason="queued through existing ActionGateway boundary",
+        )
+
+
+__all__ = [
+    "CommercialCompletionRouter", "CommercialRoutingError", "CompletionRoute",
+    "MUTATION_TOOLS", "SUPPORTED_COMPLETION_ENTITIES",
+]
