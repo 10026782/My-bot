@@ -348,7 +348,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -790,7 +790,7 @@
         "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification.",
         "Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
-      "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -838,7 +838,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     },
     {
       "id": "decision.n18_terminal_turn_result",
@@ -884,7 +884,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     },
     {
       "id": "decision.provider_neutral_query_contract",
@@ -1078,7 +1078,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     },
     {
       "id": "decision.commercial_completion_foundation",
@@ -1144,7 +1144,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "56c8d68d25f4ab25b6f0841bbf5f6cb0c8f20c8f"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     },
     {
       "id": "decision.commercial_v2_mutation_primitives",
@@ -1208,7 +1208,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     },
     {
       "id": "decision.commercial_completion_routing",
@@ -1265,7 +1265,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "2b51f8e81d368a5c9d47fbac2abffb603e753485"
+      "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
     }
   ],
   "edges": [
