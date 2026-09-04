@@ -691,7 +691,8 @@
       "context_interrupted",
       "reconfirmation_required",
       "context_integrity_unknown",
-      "idempotency_key"
+      "idempotency_key",
+      "continuation_ref"
     ],
     "Emergency Stop Flags": [
       "Flag Name",
@@ -774,6 +775,6 @@
       "Payments"
     ]
   },
-  "fetched_at": "2026-08-30",
-  "note": "manually reconciled via Track 8C read-only Airtable MCP pass (list_tables_for_base); schema_audit.py --live not run (no AIRTABLE_API_KEY in this sandbox)"
+  "fetched_at": "2026-09-04",
+  "note": "manually reconciled via Track 8C read-only Airtable MCP pass (list_tables_for_base); schema_audit.py --live not run (no AIRTABLE_API_KEY in this sandbox). 04/09/2026: added ActionContracts.continuation_ref (DIAMOND PATH nested-entity approval continuation) after creating the live field via the Airtable MCP create_field tool and confirming it via list_tables_for_base."
 }
