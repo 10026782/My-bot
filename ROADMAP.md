@@ -260,17 +260,16 @@ detection/visibility, not an automated repair job; no such job exists to
 hook into safely without inventing new infrastructure, which was out of
 this fix's scope.
 
-Explicit scope boundary (documented in code): the in-process RAM cache
-(`self._store`) stays keyed by bare `sender`, not the composite key — most
-of `PersistentSessionStore`'s public methods (`get()`, `update_step()`,
-`set_commercial_completion()`, etc.) never receive `channel` at all, so
-giving the RAM layer the same isolation as the DB layer would mean adding a
-`channel` parameter to ~15 methods and updating every call site across
-`app.py` (dozens) — disproportionate to what caused the reported
-production duplicates (DB rows, not RAM collisions; the process restarts
-regularly via Render deploys). The DB layer — the thing that actually
-accumulates duplicate rows and survives restarts — is fully channel-scoped
-regardless of any RAM-layer edge case.
+Original scope boundary here claimed the in-process RAM cache staying keyed
+by bare `sender` (not the composite key) was safe because "the DB layer —
+the thing that actually accumulates duplicate rows and survives restarts —
+is fully channel-scoped regardless of any RAM-layer edge case." **That
+claim did not hold and is superseded the same day — see "RAM cache
+cross-channel isolation follow-up" below**: a WhatsApp and Telegram request
+sharing a raw sender-id string could still read/mutate each other's live
+session object in RAM before either write ever reached the (correctly
+DB-scoped) Sessions row — a scoped DB write does not help if the state it
+persists was already cross-channel contaminated in RAM first.
 
 Regression pack: `test_bug_session_dup_canonicalization.py` (14 tests —
 canonical key determinism, 0/1/>1-match write behavior, cross-channel
@@ -298,6 +297,74 @@ written to the production base directly) are tracked and executed
 separately per explicit owner decision — see the follow-up entries below.
 Merge, deployment, and runtime verification of this canonicalization fix
 remain pending.
+
+### RAM cache cross-channel isolation follow-up — 04/09/2026 (PR #1203 review)
+
+Review of PR #1203 (session canonicalization, above) required proving the
+in-process RAM cache had the same channel isolation as the DB layer before
+merge, not documenting it as a deferred edge case. Reproduced directly:
+`PersistentSessionStore._store` was keyed by bare `sender`, so a WhatsApp
+and a Telegram identity sharing a raw sender-id string (the same production
+shape as the 18-duplicate-row incident) could overwrite each other's RAM
+slot — a request on one channel could read or mutate the OTHER channel's
+live session object before the (correctly DB-scoped) write ever happened.
+
+Fix, in `session_store.py`: the RAM key now uses the same canonical shape
+as persistence — `_ram_key()` builds `_canonical_session_key(channel,
+sender)` whenever `channel` is known, resolved with a three-tier
+precedence (explicit argument → the current request's channel → the
+pre-existing implicit default `"whatsapp"` as the last resort, matching
+what this store's public API already defaulted to everywhere before this
+fix). `get_or_create()` (which already received `channel` explicitly)
+switched its own default from a hardcoded `"whatsapp"` to this same
+resolution, closing a related pre-existing gap where any lazy-create call
+site that omitted `channel` (most of them) mislabeled a brand-new
+Telegram-only sender's session as `channel="whatsapp"` from creation.
+
+Threading an explicit `channel` parameter through every one of this
+store's ~20 public methods and their ~60 call sites across `app.py` and
+`core/lead_candidate_handler.py` was considered and rejected as
+disproportionate — reviewed and confirmed instead that every real call
+site already runs downstream of exactly one channel-aware choke point per
+request (`run_agent()`, or a channel-fixed entry like the Telegram
+callback-query dispatcher / `cmd_decision.py`'s registered handlers, which
+never receive WhatsApp traffic, or `furniture_lead_funnel.py`, which is
+WhatsApp-only by its own module contract). `session_store.set_request_channel()`
+— a `contextvars.ContextVar`, thread-scoped so a reused worker thread never
+sees another thread's concurrent request — is now stamped once at each of
+those choke points (`run_agent()`, `_webhook_telegram_impl`,
+`_webhook_whatsapp_impl`, `webhook_meta_whatsapp` in `app.py`) and every
+method that only ever received `sender` reads it back transparently; zero
+change to any of the ~60 call sites' signatures or call shape. `get_all_active()`
+and LRU eviction sync were also fixed to recover the raw sender from the
+now-composite key rather than leaking it (as `"boss_hq:whatsapp:<sender>"`)
+into `interaction_engine.py` or writing it verbatim into `SF.SENDER_ID`.
+`_load_from_db()` (the RAM-cache-miss/cold-restart DB fallback) also
+gained the same optional channel scoping `_find_best_session_in_db()`
+already had, so a cold cache never restores the wrong channel's row for a
+cross-channel-shared sender-id either.
+
+Regression pack: `test_bug_session_dup_ram_isolation.py` (6 tests) —
+the exact required sequence (create Telegram session, create WhatsApp
+session for the same sender, mutate Telegram `commercial_completion`,
+assert WhatsApp unchanged, mutate WhatsApp state, assert Telegram
+unchanged, assert both DB writes carry their own `Session ID`), the same
+sequence in reverse creation order, `get()`/`get_or_create()` read-path
+isolation and object-identity checks, and the no-request-context fallback
+(proving `get_or_create()` and a later context-free `get()`/
+`get_commercial_completion()` resolve to the identical RAM slot — the
+literal regression this fix's first draft introduced and this suite
+caught before merge, fixed by making `"whatsapp"` the consistent
+last-resort default everywhere instead of only in `get_or_create()`).
+Existing suites re-verified unaffected: `session_store.py`'s own 54
+self-tests, `test_bug_session_dup_canonicalization.py` (14),
+`test_bug_s2c_cancel_escape.py` (18), `smoke_tests.py`, `test_integration.py`,
+and the `tests/` pytest pack (127). `tools/audit_dispatcher_bypass.py`'s
+baseline line numbers for `session_store.py`'s 4 pre-existing
+`tools.airtable_tools` imports were updated again to match this change's
+line shift (same imports, same precedent as the prior two shifts already
+recorded in that file). Merge, deployment, and runtime verification remain
+pending — this is `DIAMOND_PATH_STATIC_HARDENED`, not `RUNTIME_VERIFIED`.
 
 ### N18 shared field metadata reconciliation — 04/09/2026
 

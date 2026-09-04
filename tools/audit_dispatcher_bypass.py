@@ -110,15 +110,16 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("lead_capture.py", 211, "tools.airtable_tools"),
     ("lead_memory.py", 167, "tools.airtable_tools"),
     ("providers/airtable_shim.py", 17, "tools.airtable_tools"),
-    # Shifted by the BUG-SESSION-DUP canonicalization additions (04/09/2026:
-    # _canonical_session_key(), channel-scoped lookup/logging helpers) —
-    # same 4 existing import statements as before (_sync_to_db(),
+    # Shifted again by the BUG-SESSION-DUP-RAM additions (04/09/2026, PR
+    # #1203 review follow-up: set_request_channel()/_ram_key()/
+    # _strip_ram_key() and their docstrings/comment block) — same 4
+    # existing import statements as before (_sync_to_db(),
     # _find_best_session_in_db(), _load_from_db(), _delete_from_db()), not a
     # new bypass authority.
-    ("session_store.py", 578, "tools.airtable_tools"),
-    ("session_store.py", 736, "tools.airtable_tools"),
-    ("session_store.py", 769, "tools.airtable_tools"),
-    ("session_store.py", 832, "tools.airtable_tools"),
+    ("session_store.py", 676, "tools.airtable_tools"),
+    ("session_store.py", 834, "tools.airtable_tools"),
+    ("session_store.py", 875, "tools.airtable_tools"),
+    ("session_store.py", 937, "tools.airtable_tools"),
     ("tenant_provisioner.py", 160, "tools.airtable_tools"),
     ("tenant_provisioner.py", 225, "tools.airtable_tools"),
     ("tenant_provisioner.py", 252, "tools.airtable_tools"),
