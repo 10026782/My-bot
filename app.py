@@ -4176,6 +4176,16 @@ def run_agent(
     # ── 1. Identity ───────────────────────────────
     identity = resolve_identity(channel, chat_id)
     logger.info(f"[Identity] {identity}")
+
+    # BUG-SESSION-DUP-RAM: stamp the channel for every session_store RAM
+    # cache lookup made downstream in this turn (dozens of call sites that
+    # only ever pass `sender`, never `channel`) — see session_store.py's
+    # set_request_channel()/_ram_key() docstrings.
+    try:
+        from session_store import set_request_channel
+        set_request_channel(channel)
+    except ImportError:
+        pass
     if identity.role in (Role.READONLY, Role.GUEST):
         logger.warning(
             f"[Identity] LOW-PRIVILEGE request — "
@@ -6687,6 +6697,15 @@ def webhook_telegram():
 
 
 def _webhook_telegram_impl():
+    # BUG-SESSION-DUP-RAM: this covers every Telegram-only path reachable
+    # from here — callback-query dispatch below AND bot.process_new_updates()
+    # (cmd_decision.py's registered @bot.message_handler handlers included) —
+    # not just run_agent(), which also re-stamps "telegram" once it's reached.
+    try:
+        from session_store import set_request_channel
+        set_request_channel("telegram")
+    except ImportError:
+        pass
     if request.headers.get("content-type") != "application/json":
         abort(403)
     if not WEBHOOK_SECRET:
@@ -6955,6 +6974,13 @@ def webhook_whatsapp():
 
 
 def _webhook_whatsapp_impl():
+    # BUG-SESSION-DUP-RAM: covers furniture_lead_funnel.py + run_agent()
+    # below — see session_store.set_request_channel()'s docstring.
+    try:
+        from session_store import set_request_channel
+        set_request_channel("whatsapp")
+    except ImportError:
+        pass
     if not _validate_twilio_signature():
         return Response("Forbidden", status=403)
 
@@ -7205,6 +7231,12 @@ def webhook_meta_whatsapp():
         return "Forbidden", 403
 
     # ── POST ──────────────────────────────────────────────────────
+    # BUG-SESSION-DUP-RAM — see session_store.set_request_channel()'s docstring.
+    try:
+        from session_store import set_request_channel
+        set_request_channel("whatsapp")
+    except ImportError:
+        pass
     if _flag_enabled("EMERGENCY_STOP_WHATSAPP"):
         logger.warning("[Meta WhatsApp] EMERGENCY_STOP_WHATSAPP פעיל — מתעלם")
         return jsonify({"status": "stopped"}), 200

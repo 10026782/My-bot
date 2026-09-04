@@ -110,13 +110,16 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("lead_capture.py", 211, "tools.airtable_tools"),
     ("lead_memory.py", 167, "tools.airtable_tools"),
     ("providers/airtable_shim.py", 17, "tools.airtable_tools"),
-    ("session_store.py", 502, "tools.airtable_tools"),
-    ("session_store.py", 614, "tools.airtable_tools"),
-    ("session_store.py", 645, "tools.airtable_tools"),
-    # Shifted by the S2C universal-session completion-state additions; same
-    # existing _load_from_db() import, not a new bypass authority.
-    ("session_store.py", 672, "tools.airtable_tools"),
-    ("session_store.py", 705, "tools.airtable_tools"),
+    # Shifted again by the BUG-SESSION-DUP-RAM additions (04/09/2026, PR
+    # #1203 review follow-up: set_request_channel()/_ram_key()/
+    # _strip_ram_key() and their docstrings/comment block) — same 4
+    # existing import statements as before (_sync_to_db(),
+    # _find_best_session_in_db(), _load_from_db(), _delete_from_db()), not a
+    # new bypass authority.
+    ("session_store.py", 676, "tools.airtable_tools"),
+    ("session_store.py", 834, "tools.airtable_tools"),
+    ("session_store.py", 875, "tools.airtable_tools"),
+    ("session_store.py", 937, "tools.airtable_tools"),
     ("tenant_provisioner.py", 160, "tools.airtable_tools"),
     ("tenant_provisioner.py", 225, "tools.airtable_tools"),
     ("tenant_provisioner.py", 252, "tools.airtable_tools"),

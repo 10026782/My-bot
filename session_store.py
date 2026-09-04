@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import threading
@@ -34,6 +35,76 @@ from tools.airtable_gateway import escape_formula_value
 logger = logging.getLogger(__name__)
 
 _MAX_SESSIONS = 1000
+
+# BUG-SESSION-DUP (04/09/2026 owner decision — SESSION CANONICALIZATION):
+# single-tenant today (no live multi-tenant identity threads a real
+# tenant_id into session_store's public API) — this is a documented,
+# intentional placeholder so the canonical key format is already
+# "tenant:channel:sender" the day F08 multi-tenancy goes live, without a
+# migration. Never read as evidence multi-tenancy is active.
+_DEFAULT_TENANT = "boss_hq"
+
+
+def _canonical_session_key(channel: str, sender: str, tenant_id: str = _DEFAULT_TENANT) -> str:
+    """The deterministic composite uniqueness key for one Session row.
+
+    Persisted verbatim into SessionsFields.SESSION_ID — a field the schema
+    already defined but that no code ever wrote or read (confirmed by
+    audit, 04/09/2026). Format is stable and must never change without a
+    migration: "tenant:channel:sender". A WhatsApp and a Telegram identity
+    that happen to share the same raw sender-id string are different
+    people/conversations and must never resolve to the same key.
+    """
+    return f"{tenant_id}:{str(channel or 'unknown').strip()}:{_normalize_sender(sender)}"
+
+
+# BUG-SESSION-DUP-RAM (04/09/2026 — PR #1203 review follow-up):
+# the RAM cache (PersistentSessionStore._store) was found keyed by bare
+# sender only, even after the DB layer above was made channel-scoped — a
+# WhatsApp and a Telegram identity sharing the same raw sender-id string
+# could overwrite each other's RAM slot, so a later mutation on one
+# channel could read/patch the OTHER channel's session object (the DB
+# write would then correctly target that session's own Session ID, but
+# the STATE read/mutated to produce it was already cross-channel
+# contaminated). Reproduced and fixed by test_bug_session_dup_ram_isolation.py.
+#
+# Most of this store's ~20 public methods take only `sender` — no
+# `channel` — and are called from ~60 sites across app.py and
+# core/lead_candidate_handler.py. Threading `channel` through every one of
+# those signatures/call sites was rejected as disproportionate to the bug:
+# every real call site already runs downstream of exactly one channel-aware
+# choke point per request (run_agent(), or a Telegram-only entry like the
+# callback-query dispatcher / cmd_decision.py's registered handlers, which
+# never receives WhatsApp traffic at all) — so the channel for the current
+# request is always already known there, just not threaded further in.
+# `set_request_channel()` below stamps it once into a ContextVar at each of
+# those ~4 real entry points (see app.py: run_agent(), _webhook_telegram_impl,
+# _webhook_whatsapp_impl, webhook_meta_whatsapp) and every method in this
+# store that only receives `sender` reads it back via `_ram_key()` — zero
+# change to any of the ~60 call sites' signatures or call shape.
+#
+# ContextVar, not a plain module global: each Flask request thread reads
+# only what it itself set (or a stale value from a PRIOR request on a
+# reused worker thread — never another thread's CONCURRENT request), so
+# there is no cross-request race. A caller that never runs downstream of
+# one of the entry points above (a bare unit test calling this store
+# directly, e.g.) sees channel="" and `_ram_key()` falls back to "whatsapp"
+# — the same last-resort default this store's public API already used
+# everywhere before this fix (_new_session()'s and get_or_create()'s own
+# prior hardcoded default) — so a caller with genuinely no channel
+# information sees unchanged, single-implicit-channel behavior end to end.
+_current_request_channel: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_current_request_channel", default="",
+)
+
+
+def set_request_channel(channel: str) -> None:
+    """Stamp the channel for the current request/turn — call once, as early
+    as possible, at each real channel-aware entry point (see BUG-SESSION-DUP-RAM
+    above). Idempotent/safe to call more than once per request (e.g. both a
+    webhook handler and run_agent() call it) — later calls in the same
+    request are expected to report the same channel and simply re-set it."""
+    _current_request_channel.set(str(channel or "").strip())
 
 
 # ══════════════════════════════════════════════════
@@ -150,17 +221,54 @@ class PersistentSessionStore:
 
     # ── Read ──────────────────────────────────────
 
-    def get(self, sender: str) -> Optional[dict]:
+    def _ram_key(self, sender: str, channel: str = "") -> str:
+        """The RAM-cache slot for (sender, channel) — see BUG-SESSION-DUP-RAM.
+
+        `channel`, if given explicitly, always wins. Otherwise falls back to
+        whatever set_request_channel() stamped for the current request, and
+        "whatsapp" as the last resort — the exact same three-tier
+        precedence get_or_create() uses to pick the channel a brand-new
+        session is created with. Using ANY OTHER fallback here (e.g. the
+        bare sender, with no channel at all) would reintroduce this bug in
+        a subtler form: get_or_create() would create under a
+        channel-scoped key while a sibling read like get_commercial_completion()
+        (which calls self.get(sender) with no channel) computed a
+        DIFFERENT, unscoped key for the exact same session — a guaranteed
+        RAM miss on every read, not a cross-channel collision, but silently
+        wrong either way. Consistency between create and read is what
+        matters here, not the literal key shape."""
+        sender = _normalize_sender(sender)
+        resolved = str(channel or "").strip() or _current_request_channel.get() or "whatsapp"
+        return _canonical_session_key(resolved, sender)
+
+    @staticmethod
+    def _strip_ram_key(key: str, channel: str) -> str:
+        """Inverse of _ram_key() for a known channel — recovers the raw
+        sender from a composite RAM key for callers that only ever see the
+        key (get_all_active(), LRU eviction sync). A key that doesn't carry
+        this channel's prefix (e.g. `channel` unknown/absent) is returned
+        unchanged rather than mangled."""
+        channel = str(channel or "").strip()
+        if not channel:
+            return key
+        prefix = f"{_DEFAULT_TENANT}:{channel}:"
+        return key.removeprefix(prefix) if key.startswith(prefix) else key
+
+    def get(self, sender: str, channel: str = "") -> Optional[dict]:
         """מחזיר session מRAM. אם לא נמצא — מנסה מDB."""
         sender = _normalize_sender(sender)
-        if sender in self._store:
-            self._store.move_to_end(sender)
-            return self._store[sender]
+        key = self._ram_key(sender, channel)
+        if key in self._store:
+            self._store.move_to_end(key)
+            return self._store[key]
 
-        # נסה לטעון מAirtable (אחרי restart)
-        restored = self._load_from_db(sender)
+        # נסה לטעון מAirtable (אחרי restart) — channel-scoped when known,
+        # so a cold RAM cache never restores the wrong channel's row for a
+        # sender-id shared cross-channel (BUG-SESSION-DUP-RAM).
+        resolved_channel = str(channel or "").strip() or _current_request_channel.get()
+        restored = self._load_from_db(sender, channel=resolved_channel)
         if restored:
-            self._store[sender] = restored
+            self._store[key] = restored
             logger.info(f"[SessionStore] Restored session for {sender} from DB")
             return restored
 
@@ -170,21 +278,56 @@ class PersistentSessionStore:
         self,
         sender: str,
         domain: str = "real_estate",
-        channel: str = "whatsapp",
+        channel: str = "",
     ) -> dict:
-        """מחזיר קיים או יוצר חדש."""
+        """מחזיר קיים או יוצר חדש.
+
+        BUG-SESSION-DUP (04/09/2026, cross-channel isolation): a session
+        found for this sender on a DIFFERENT channel is never reused —
+        Telegram and WhatsApp identities that happen to share the same raw
+        sender-id string are different conversations. This is the one
+        place in the public API that actually receives `channel`, so it is
+        the enforcement point; see _canonical_session_key()'s docstring for
+        why the DB-layer lookup (_find_best_session_in_db) is the other.
+        BUG-SESSION-DUP-RAM extends this same isolation to the RAM cache
+        itself (see _ram_key()) — the channel-mismatch branch below is now
+        a defense-in-depth safety net rather than the primary guard: with a
+        channel-scoped RAM key, a different-channel session for this sender
+        simply lives in a different slot and is never returned by
+        self.get(sender, channel=channel) in the first place.
+
+        `channel` used to default to the literal "whatsapp" — every one of
+        this store's other public methods that lazily creates a session
+        (set_commercial_completion(), set_last_tool_result(), etc.) calls
+        `self.get_or_create(sender)` with no channel at all, so ANY of them
+        being the first touch for a brand-new Telegram sender silently
+        mislabeled that session "whatsapp" from creation. Default is now ""
+        — resolved from the current request's channel (set_request_channel())
+        first, "whatsapp" only as the last-resort fallback for a caller
+        with no request context at all (e.g. a direct unit test) — the
+        exact same precedence _ram_key() already uses, so a session's
+        `channel` field and its RAM slot never disagree.
+        """
         sender = _normalize_sender(sender)
-        existing = self.get(sender)
-        if existing:
+        channel = str(channel or "").strip() or _current_request_channel.get() or "whatsapp"
+        existing = self.get(sender, channel=channel)
+        if existing and existing.get("channel") == channel:
             return existing
+        if existing:
+            logger.warning(
+                "[SessionStore] SESSION_CROSS_CHANNEL_COLLISION sender=%s "
+                "existing_channel=%s requested_channel=%s -- not reusing",
+                sender, existing.get("channel"), channel,
+            )
         with self._create_lock:
             # Re-check under the lock — another thread may have created
             # (and synced) the session while we were waiting for it.
-            existing = self.get(sender)
-            if existing:
+            existing = self.get(sender, channel=channel)
+            if existing and existing.get("channel") == channel:
                 return existing
             session = _new_session(domain, channel)
-            self._store[sender] = session
+            key = self._ram_key(sender, channel)
+            self._store[key] = session
             self._evict_if_needed()
             self._sync_to_db(sender, session, is_new=True)
             return session
@@ -233,11 +376,15 @@ class PersistentSessionStore:
         sender: str,
         result: FileUploadResult,
         domain: str = "real_estate",
-        channel: str = "whatsapp",
+        channel: str = "",
     ) -> None:
         """
         שומר את הקובץ האחרון שהועלה — לשימוש ע"י "זה הנספח" וכד'.
         מ-C58 ואילך נכתב גם ל-Airtable (תוך State JSON, ראה FileUploadResult docstring).
+        BUG-SESSION-DUP-RAM: `channel` default changed from the literal
+        "whatsapp" to "" (get_or_create() below resolves it from the
+        current request's channel) — see get_or_create()'s docstring;
+        cmd_decision.py (Telegram-only) calls this without a channel arg.
         """
         session = self.get_or_create(sender, domain, channel)
         session["last_uploaded_file"] = asdict(result)
@@ -512,10 +659,11 @@ class PersistentSessionStore:
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
-    def delete(self, sender: str) -> None:
+    def delete(self, sender: str, channel: str = "") -> None:
         """מוחק session (איפוס)."""
         sender = _normalize_sender(sender)
-        session = self._store.pop(sender, None)
+        key = self._ram_key(sender, channel)
+        session = self._store.pop(key, None)
         if session and session.get("record_id"):
             self._delete_from_db(session["record_id"], session)
 
@@ -545,13 +693,22 @@ class PersistentSessionStore:
                 "lead_draft":               session.get("lead_draft"),
                 "commercial_completion":    session.get("commercial_completion"),
             }
+            session_channel = session.get("channel", "")
             fields = {
                 SF.SENDER_ID:    sender,
                 SF.CONTEXT_TYPE: session.get("context_type", "lead"),
-                SF.CHANNEL:      session.get("channel", ""),
+                SF.CHANNEL:      session_channel,
                 SF.STATE_JSON:   json.dumps(state, ensure_ascii=False),
                 SF.UPDATED_AT:   session.get("updated_at", _now_iso()),
                 SF.CREATED_AT:   session.get("created_at", _now_iso()),
+                # BUG-SESSION-DUP: SessionsFields.SESSION_ID was defined in
+                # the schema but never written by any code (confirmed by
+                # audit, 04/09/2026) — every create/update now stamps the
+                # deterministic tenant:channel:sender key onto the row, so a
+                # legacy row (written before this change) is recognizable by
+                # this field's absence, and heals to canonical the next time
+                # anything writes to it.
+                SF.SESSION_ID:   _canonical_session_key(session_channel, sender),
             }
 
             # קישורים אופציונליים — רק אם קיימים ב-session:
@@ -572,7 +729,12 @@ class PersistentSessionStore:
 
             # BUG-NEW-12: record_id ריק ≠ "session חדש" — _load_from_db אולי פספס.
             # בדיקה חיה לפני כל POST. אם נמצאה רשומה → תמיד PATCH, אפס POST.
-            existing_id, found_count, reason = self._find_best_session_in_db(sender)
+            # BUG-SESSION-DUP: channel-scoped — a same-sender row on another
+            # channel must never be found/reused/patched here (see
+            # _canonical_session_key()).
+            existing_id, found_count, reason = self._find_best_session_in_db(
+                sender, channel=session_channel,
+            )
             if existing_id:
                 session["record_id"] = existing_id
                 result = airtable_update(Tables.SESSIONS, existing_id, fields)
@@ -631,17 +793,48 @@ class PersistentSessionStore:
             return None
         return parsed
 
+    @staticmethod
+    def _lookup_formula(sender: str, channel: str = "") -> str:
+        """BUG-SESSION-DUP: channel-scoped when known — a same-sender row on
+        another channel must never match. Falls back to the original
+        Sender-ID-only formula when `channel` isn't supplied, exactly
+        preserving lookup behavior for legacy callers/records that predate
+        this fix (see _canonical_session_key()'s docstring)."""
+        safe_sender = escape_formula_value(sender)
+        if channel:
+            safe_channel = escape_formula_value(str(channel))
+            return f"AND({{{SF.SENDER_ID}}}='{safe_sender}', {{{SF.CHANNEL}}}='{safe_channel}')"
+        return f"{{{SF.SENDER_ID}}}='{safe_sender}'"
+
+    @staticmethod
+    def _log_duplicate_detected(sender: str, records: list[dict]) -> None:
+        """BUG-SESSION-DUP: a distinct, greppable signal for "more than one
+        row matched" — separate from the plain info/warning logs below so
+        an operator or future alerting job can find every occurrence
+        (`SESSION_DUPLICATE_DETECTED`) without parsing free text, and can
+        tell a same-channel legacy cluster apart from a genuine
+        cross-channel collision (`cross_channel=True`), which is the more
+        serious case _canonical_session_key() exists to prevent going
+        forward. This only logs — it does not delete or modify anything;
+        the one-time cleanup of a specific sender's stale rows is a
+        separate, explicit, human-confirmed operation."""
+        channels = {record_fields(r).get(SF.CHANNEL, "") for r in records}
+        logger.warning(
+            "[SessionStore] SESSION_DUPLICATE_DETECTED sender=%s count=%d "
+            "cross_channel=%s channels=%s",
+            sender, len(records), len(channels) > 1, sorted(channels),
+        )
+
     def _find_best_session_in_db(
-        self, sender: str
+        self, sender: str, channel: str = "",
     ) -> tuple[Optional[str], int, str]:
         """Select an existing Session from the structured Airtable response."""
         sender = _normalize_sender(sender)
         try:
             from tools.airtable_tools import airtable_get_records  # type: ignore
 
-            safe_sender = escape_formula_value(sender)
             raw_records = airtable_get_records(
-                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{safe_sender}'"
+                Tables.SESSIONS, self._lookup_formula(sender, channel)
             )
             records = self._validated_records(sender, raw_records)
             if records is None:
@@ -653,6 +846,8 @@ class PersistentSessionStore:
                     sender,
                 )
                 return None, 0, "no_records"
+            if len(records) > 1:
+                self._log_duplicate_detected(sender, records)
 
             selected = provider_record_id(_select_canonical_session_record(records), required=True)
             return selected, len(records), "patch_existing"
@@ -665,15 +860,22 @@ class PersistentSessionStore:
         record_id, _, _ = self._find_best_session_in_db(sender)
         return record_id
 
-    def _load_from_db(self, sender: str) -> Optional[dict]:
-        """Restore one Session from the structured Airtable response."""
+    def _load_from_db(self, sender: str, channel: str = "") -> Optional[dict]:
+        """Restore one Session from the structured Airtable response.
+
+        BUG-SESSION-DUP-RAM: channel-scoped when known, same as
+        _find_best_session_in_db() — without this, a cold RAM cache (first
+        touch, or after a restart) restoring via get() would fall back to
+        _select_canonical_session_record()'s Sender-ID-only "most recently
+        updated wins" rule, which can select the WRONG channel's row for a
+        sender-id shared cross-channel. `channel=""` (unknown) preserves the
+        original Sender-ID-only lookup for legacy/unscoped callers."""
         sender = _normalize_sender(sender)
         try:
             from tools.airtable_tools import airtable_get_records  # type: ignore
 
-            safe_sender = escape_formula_value(sender)
             raw_records = airtable_get_records(
-                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{safe_sender}'"
+                Tables.SESSIONS, self._lookup_formula(sender, channel)
             )
             records = self._validated_records(sender, raw_records)
             if records is None or not records:
@@ -682,6 +884,7 @@ class PersistentSessionStore:
             record = _select_canonical_session_record(records)
             record_id = provider_record_id(record, required=True)
             if len(records) > 1:
+                self._log_duplicate_detected(sender, records)
                 logger.warning(
                     "[SessionStore] load sender=%s found_count=%d -- using canonical (most recently updated): %s",
                     sender, len(records), record_id,
@@ -759,12 +962,19 @@ class PersistentSessionStore:
             # אם לא הסתיים — סמן כdrop-off לפני פינוי
             if not evicted.get("done"):
                 evicted["drop_off_step"] = evicted.get("step", 0)
-                self._sync_to_db(evicted_key, evicted)
+                # BUG-SESSION-DUP-RAM: evicted_key may be the composite RAM
+                # key (tenant:channel:sender) — _sync_to_db() writes its
+                # `sender` argument verbatim into SF.SENDER_ID, so it must
+                # be given the raw sender back, not the composite key.
+                evicted_sender = self._strip_ram_key(evicted_key, evicted.get("channel", ""))
+                self._sync_to_db(evicted_sender, evicted)
 
     def get_all_active(self) -> list[tuple[str, dict]]:
-        """כל הsessions הפעילים ב-RAM."""
+        """כל הsessions הפעילים ב-RAM. Returns the raw sender (not the
+        internal composite RAM key) for each — see _strip_ram_key()."""
         return [
-            (k, v) for k, v in self._store.items()
+            (self._strip_ram_key(k, v.get("channel", "")), v)
+            for k, v in self._store.items()
             if not v.get("done")
         ]
 
@@ -800,6 +1010,12 @@ def _run_tests() -> bool:
     sys.modules["tools.airtable_tools"] = at
 
     store = PersistentSessionStore(maxsize=5)
+
+    # BUG-SESSION-DUP-RAM: simulate what app.py's real entry points do
+    # (set_request_channel() at the top of each request/turn) — every
+    # sender exercised below except the explicit telegram/email probes is a
+    # whatsapp one, matching how the rest of this suite always has been.
+    set_request_channel("whatsapp")
 
     # ── get_or_create ─────────────────────────────
     s1 = store.get_or_create("w:001", "real_estate", "whatsapp")
@@ -837,14 +1053,15 @@ def _run_tests() -> bool:
 
     # ── delete ────────────────────────────────────
     store.get_or_create("w:del", "real_estate", "whatsapp")
-    store.delete("w:del")
-    chk("deleted from store",        store.get("w:del") is None)
+    store.delete("w:del", channel="whatsapp")
+    chk("deleted from store",        store.get("w:del", channel="whatsapp") is None)
 
     # ── LRU eviction ─────────────────────────────
     store2 = PersistentSessionStore(maxsize=3)
     for i in range(4):
         store2.get_or_create(f"w:{i}", "real_estate", "whatsapp")
-    chk("newest still there",        "w:3" in store2._store)
+    chk("newest still there",
+        store2._ram_key("w:3", "whatsapp") in store2._store)
 
     # ── get_all_active ────────────────────────────
     active = store.get_all_active()
