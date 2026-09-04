@@ -258,9 +258,17 @@ def deterministic_create_task_title(text: str) -> str | None:
 # existing risk-based route" behavior (Task's own gate is equally narrow —
 # see its own comment above route_request()'s wiring).
 _STRUCTURED_CREATE_DEAL_RE = re.compile(
+    # BUG-CRM-BYPASS-DEAL-DOMAIN-PREFIX (live production, 04/09/2026): the
+    # ב-prefix on "בתחום" used to be mandatory, so the owner's own natural
+    # phrasing -- "...שם X תחום Y" (no ב) -- silently missed this regex
+    # (matched=False) and CLARIFIED with a message that itself only offers
+    # the "בתחום" form, leaving no way to retype into something that would
+    # work. "ב?תחום" accepts both; this does not reopen BUG-CRM-BYPASS-
+    # DEAL-AGENT-FALLTHROUGH (canary #7, the English word "domain") -- that
+    # phrasing still fails to match and CLARIFIES, unaffected by this change.
     r"^\s*(?:פתח|תפתח|צור|תיצור|הוסף|תוסיף)\s+עסק(?:ה|ת)\s+"
-    r"(?:בשם\s+(?P<name_a>.+?)\s+בתחום\s+(?P<domain_a>.+?)"
-    r"|בתחום\s+(?P<domain_b>.+?)\s+בשם\s+(?P<name_b>.+?))"
+    r"(?:בשם\s+(?P<name_a>.+?)\s+ב?תחום\s+(?P<domain_a>.+?)"
+    r"|ב?תחום\s+(?P<domain_b>.+?)\s+בשם\s+(?P<name_b>.+?))"
     r"(?:\s+בבעלותי)?\s*$"
 )
 
