@@ -46,6 +46,16 @@ def chk(desc: str, cond: bool) -> None:
 
 
 def _seed_review_draft(chat_id: str) -> None:
+    """Simulates a draft already created by an earlier Telegram turn — that
+    turn would have gone through app.run_agent(), which stamps
+    session_store.set_request_channel("telegram") for its own duration
+    (BUG-SESSION-DUP-RAM). Setting it here too, before writing, keeps this
+    session-store call consistent with the channel-scoped RAM key
+    app.run_agent() below will look it up under — otherwise this write
+    (with no channel context) and that read (channel="telegram") would
+    resolve to different RAM slots and the seeded draft would look absent."""
+    from session_store import set_request_channel
+    set_request_channel("telegram")
     lead_sessions.set_lead_draft(chat_id, {
         "name": "דנה כהן", "phone": "0501112222", "domain": "recruitment",
         "source": "", "note": "", "channel": "telegram",
