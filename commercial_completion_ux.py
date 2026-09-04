@@ -230,10 +230,26 @@ def resolve_human_link(
             reason="מצאתי יותר מאפשרות אחת; נא לבחור לפי השם.",
             candidate_ids=candidate_ids,
         )
+    # BUG-2-ORGANIZATION-CREATE (interim, explicit hand-off — owner decision
+    # recorded 04/09/2026): the canonical Organization writer
+    # (crm_find_or_create_organization) requires async owner approval, so
+    # there is no existing way to hand this flow a freshly created
+    # organization's canonical reference within the same turn. Rather than a
+    # message that promises an inline create this flow cannot deliver, tell
+    # the user exactly how to create it through the separate, already-live
+    # canonical path (the "צור ארגון" completion intent), and that this
+    # exact question resumes and picks it up automatically once it exists —
+    # the completion session is preserved on BLOCK for exactly this retry.
+    # No approval-semantics change and no new session/approval bridge.
+    name = str(query).strip()
     return LinkResolution(
         "create" if create_allowed else "clarify",
-        reason=("לא מצאתי ארגון כזה; אפשר ליצור ארגון חדש." if create_allowed
-                else "לא מצאתי התאמה; נא לנסות שם אחר."),
+        reason=(
+            f'לא מצאתי ארגון בשם "{name}". ניתן ליצור אותו בנפרד: לשלוח '
+            f'"צור ארגון {name}", ולאחר שהארגון נוצר לחזור לכאן ולהשיב על '
+            "השאלה הזו שוב עם אותו שם — הוא ייבחר אוטומטית."
+            if create_allowed else "לא מצאתי התאמה; נא לנסות שם אחר."
+        ),
         create_allowed=create_allowed,
     )
 

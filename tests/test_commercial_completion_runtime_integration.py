@@ -128,6 +128,10 @@ def test_link_no_match():
 
 
 def test_link_create_allowed_no_match():
+    """BUG-2-ORGANIZATION-CREATE (interim): a no-match create-allowed answer
+    BLOCKs with an explicit, actionable hand-off to the separate canonical
+    "create organization" path — never a promise of an inline create this
+    flow cannot deliver, and never an internal tool/field name."""
     router, calls = _no_duplicate_queue_router()
     values = _deal_values()
     values.pop("counterparty_contact")
@@ -142,8 +146,44 @@ def test_link_create_allowed_no_match():
         link_lookup=lambda *_: [], scope="tenant1",
     )
     _assert_well_formed(route)
-    assert route.outcome in {"CLARIFY", "BLOCK"}
+    assert route.outcome == "BLOCK"
     assert calls == []
+    assert "צור ארגון" in route.reason
+    assert "חברה חדשה שלא קיימת בעמ" in route.reason
+    assert "crm_find_or_create_organization" not in route.reason
+    assert "organization_name" not in route.reason
+
+
+def test_link_create_allowed_no_match_then_resume_after_separate_creation():
+    """The full interim loop the BLOCK message promises: session stays
+    parked on the same field, and once the organization exists (simulated
+    here by the injected lookup finding it on the next attempt — exactly
+    what a real search would do after the separate "צור ארגון" completion
+    created it), resuming with the same name resolves automatically. No
+    session bridge, no approval-outcome plumbing — just the existing
+    BLOCK-preserves-session behavior plus a fresh search."""
+    router, calls = _no_duplicate_queue_router()
+    values = _deal_values()
+    values.pop("counterparty_contact")
+    first = router.start("deal", current_values=values)
+
+    org_pick = router.answer_human(first.session, "ארגון", link_lookup=None, scope="")
+    assert org_pick.outcome == "CLARIFY"
+
+    not_yet_created = router.answer_human(
+        org_pick.session, "חברה חדשה בעמ", link_lookup=lambda *_: [], scope="tenant1",
+    )
+    assert not_yet_created.outcome == "BLOCK"
+    assert not_yet_created.session is not None  # preserved for the retry
+
+    now_exists = lambda q, s, l: [{"id": "recNewOrg000001", "fields": {"Organization Name": q}}]
+    resumed = router.answer_human(
+        not_yet_created.session, "חברה חדשה בעמ", link_lookup=now_exists, scope="tenant1",
+    )
+    _assert_well_formed(resumed)
+    assert resumed.outcome == "TOOL"
+    assert resumed.tool_inputs["counterparty_organization_id"] == "recNewOrg000001"
+    assert len(calls) == 1  # exactly one queue submission for the whole loop
 
 
 def test_link_already_canonical_internal_value():
