@@ -35,6 +35,27 @@ logger = logging.getLogger(__name__)
 
 _MAX_SESSIONS = 1000
 
+# BUG-SESSION-DUP (04/09/2026 owner decision — SESSION CANONICALIZATION):
+# single-tenant today (no live multi-tenant identity threads a real
+# tenant_id into session_store's public API) — this is a documented,
+# intentional placeholder so the canonical key format is already
+# "tenant:channel:sender" the day F08 multi-tenancy goes live, without a
+# migration. Never read as evidence multi-tenancy is active.
+_DEFAULT_TENANT = "boss_hq"
+
+
+def _canonical_session_key(channel: str, sender: str, tenant_id: str = _DEFAULT_TENANT) -> str:
+    """The deterministic composite uniqueness key for one Session row.
+
+    Persisted verbatim into SessionsFields.SESSION_ID — a field the schema
+    already defined but that no code ever wrote or read (confirmed by
+    audit, 04/09/2026). Format is stable and must never change without a
+    migration: "tenant:channel:sender". A WhatsApp and a Telegram identity
+    that happen to share the same raw sender-id string are different
+    people/conversations and must never resolve to the same key.
+    """
+    return f"{tenant_id}:{str(channel or 'unknown').strip()}:{_normalize_sender(sender)}"
+
 
 # ══════════════════════════════════════════════════
 # BUG-106 — deterministic selection among duplicate Session rows
@@ -172,17 +193,46 @@ class PersistentSessionStore:
         domain: str = "real_estate",
         channel: str = "whatsapp",
     ) -> dict:
-        """מחזיר קיים או יוצר חדש."""
+        """מחזיר קיים או יוצר חדש.
+
+        BUG-SESSION-DUP (04/09/2026, cross-channel isolation): a session
+        found for this sender on a DIFFERENT channel is never reused —
+        Telegram and WhatsApp identities that happen to share the same raw
+        sender-id string are different conversations. This is the one
+        place in the public API that actually receives `channel`, so it is
+        the enforcement point; see _canonical_session_key()'s docstring for
+        why the DB-layer lookup (_find_best_session_in_db) is the other.
+        """
         sender = _normalize_sender(sender)
         existing = self.get(sender)
-        if existing:
+        if existing and existing.get("channel") == channel:
             return existing
+        if existing:
+            logger.warning(
+                "[SessionStore] SESSION_CROSS_CHANNEL_COLLISION sender=%s "
+                "existing_channel=%s requested_channel=%s -- not reusing",
+                sender, existing.get("channel"), channel,
+            )
         with self._create_lock:
             # Re-check under the lock — another thread may have created
             # (and synced) the session while we were waiting for it.
             existing = self.get(sender)
-            if existing:
+            if existing and existing.get("channel") == channel:
                 return existing
+            # Scope note: the RAM cache below is keyed by bare `sender`,
+            # not the composite channel key — a different-channel session
+            # for the same raw sender string overwrites this RAM slot
+            # rather than living alongside it. Threading `channel` through
+            # every one of this store's public methods (most of which,
+            # unlike this one, never receive it — get(), update_step(),
+            # set_commercial_completion(), etc.) to give the RAM layer the
+            # same isolation as the DB layer below would touch dozens of
+            # call sites across app.py; out of this fix's scope. The DB
+            # layer (the thing that actually accumulates duplicate rows,
+            # and survives process restarts) stays correct regardless —
+            # _find_best_session_in_db()/_sync_to_db() below are
+            # channel-scoped, so even repeated RAM eviction here can never
+            # create or patch the wrong channel's row.
             session = _new_session(domain, channel)
             self._store[sender] = session
             self._evict_if_needed()
@@ -545,13 +595,22 @@ class PersistentSessionStore:
                 "lead_draft":               session.get("lead_draft"),
                 "commercial_completion":    session.get("commercial_completion"),
             }
+            session_channel = session.get("channel", "")
             fields = {
                 SF.SENDER_ID:    sender,
                 SF.CONTEXT_TYPE: session.get("context_type", "lead"),
-                SF.CHANNEL:      session.get("channel", ""),
+                SF.CHANNEL:      session_channel,
                 SF.STATE_JSON:   json.dumps(state, ensure_ascii=False),
                 SF.UPDATED_AT:   session.get("updated_at", _now_iso()),
                 SF.CREATED_AT:   session.get("created_at", _now_iso()),
+                # BUG-SESSION-DUP: SessionsFields.SESSION_ID was defined in
+                # the schema but never written by any code (confirmed by
+                # audit, 04/09/2026) — every create/update now stamps the
+                # deterministic tenant:channel:sender key onto the row, so a
+                # legacy row (written before this change) is recognizable by
+                # this field's absence, and heals to canonical the next time
+                # anything writes to it.
+                SF.SESSION_ID:   _canonical_session_key(session_channel, sender),
             }
 
             # קישורים אופציונליים — רק אם קיימים ב-session:
@@ -572,7 +631,12 @@ class PersistentSessionStore:
 
             # BUG-NEW-12: record_id ריק ≠ "session חדש" — _load_from_db אולי פספס.
             # בדיקה חיה לפני כל POST. אם נמצאה רשומה → תמיד PATCH, אפס POST.
-            existing_id, found_count, reason = self._find_best_session_in_db(sender)
+            # BUG-SESSION-DUP: channel-scoped — a same-sender row on another
+            # channel must never be found/reused/patched here (see
+            # _canonical_session_key()).
+            existing_id, found_count, reason = self._find_best_session_in_db(
+                sender, channel=session_channel,
+            )
             if existing_id:
                 session["record_id"] = existing_id
                 result = airtable_update(Tables.SESSIONS, existing_id, fields)
@@ -631,17 +695,48 @@ class PersistentSessionStore:
             return None
         return parsed
 
+    @staticmethod
+    def _lookup_formula(sender: str, channel: str = "") -> str:
+        """BUG-SESSION-DUP: channel-scoped when known — a same-sender row on
+        another channel must never match. Falls back to the original
+        Sender-ID-only formula when `channel` isn't supplied, exactly
+        preserving lookup behavior for legacy callers/records that predate
+        this fix (see _canonical_session_key()'s docstring)."""
+        safe_sender = escape_formula_value(sender)
+        if channel:
+            safe_channel = escape_formula_value(str(channel))
+            return f"AND({{{SF.SENDER_ID}}}='{safe_sender}', {{{SF.CHANNEL}}}='{safe_channel}')"
+        return f"{{{SF.SENDER_ID}}}='{safe_sender}'"
+
+    @staticmethod
+    def _log_duplicate_detected(sender: str, records: list[dict]) -> None:
+        """BUG-SESSION-DUP: a distinct, greppable signal for "more than one
+        row matched" — separate from the plain info/warning logs below so
+        an operator or future alerting job can find every occurrence
+        (`SESSION_DUPLICATE_DETECTED`) without parsing free text, and can
+        tell a same-channel legacy cluster apart from a genuine
+        cross-channel collision (`cross_channel=True`), which is the more
+        serious case _canonical_session_key() exists to prevent going
+        forward. This only logs — it does not delete or modify anything;
+        the one-time cleanup of a specific sender's stale rows is a
+        separate, explicit, human-confirmed operation."""
+        channels = {record_fields(r).get(SF.CHANNEL, "") for r in records}
+        logger.warning(
+            "[SessionStore] SESSION_DUPLICATE_DETECTED sender=%s count=%d "
+            "cross_channel=%s channels=%s",
+            sender, len(records), len(channels) > 1, sorted(channels),
+        )
+
     def _find_best_session_in_db(
-        self, sender: str
+        self, sender: str, channel: str = "",
     ) -> tuple[Optional[str], int, str]:
         """Select an existing Session from the structured Airtable response."""
         sender = _normalize_sender(sender)
         try:
             from tools.airtable_tools import airtable_get_records  # type: ignore
 
-            safe_sender = escape_formula_value(sender)
             raw_records = airtable_get_records(
-                Tables.SESSIONS, f"{{{SF.SENDER_ID}}}='{safe_sender}'"
+                Tables.SESSIONS, self._lookup_formula(sender, channel)
             )
             records = self._validated_records(sender, raw_records)
             if records is None:
@@ -653,6 +748,8 @@ class PersistentSessionStore:
                     sender,
                 )
                 return None, 0, "no_records"
+            if len(records) > 1:
+                self._log_duplicate_detected(sender, records)
 
             selected = provider_record_id(_select_canonical_session_record(records), required=True)
             return selected, len(records), "patch_existing"
@@ -682,6 +779,7 @@ class PersistentSessionStore:
             record = _select_canonical_session_record(records)
             record_id = provider_record_id(record, required=True)
             if len(records) > 1:
+                self._log_duplicate_detected(sender, records)
                 logger.warning(
                     "[SessionStore] load sender=%s found_count=%d -- using canonical (most recently updated): %s",
                     sender, len(records), record_id,

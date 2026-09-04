@@ -223,8 +223,81 @@ reach `answer_human()`, and reply explicitly; one sanity case confirming a
 normal in-flow answer is unaffected). This bug pre-dates PR #1201 — the S2C
 resume block itself was not touched by that PR — but lives in the same
 subsystem and was only surfaced by the owner's post-deploy runtime
-verification of it. Merge, deployment, and runtime verification remain
-pending.
+verification of it. PR #1202 merged to `main` (`e56570e6`, 04/09/2026);
+deployment and runtime verification remain pending.
+
+### Session canonicalization — 04/09/2026 (owner-directed, production audit)
+
+The S2C incident above led to a wider audit: production's Sessions table had
+18 rows for one Sender ID (`7228089151`). Confirmed via direct read of the
+live table: 17 are historical debris (created 2026-06-25 to 2026-07-04,
+never touched since — the current write-path dedup, from prior fixes
+BUG-106/BUG-NEW-12, already stops new duplicates for the common case). One
+real, still-live gap found: 17 of the 18 are `Channel=whatsapp`, but one is
+`Channel=telegram` — the same raw Sender ID string used on both channels,
+and the live dedup lookup was Sender-ID-only with **no channel scoping**, so
+a WhatsApp and Telegram identity sharing a raw ID string were treated as the
+same session. `SessionsFields.SESSION_ID` ("Session ID") was also found to
+be schema-defined but never written or read by any code.
+
+Owner-decided fix, implemented in `session_store.py`:
+`_canonical_session_key()` composes the deterministic `tenant:channel:sender`
+key (tenant defaults to the constant `"boss_hq"` — single-tenant today, F08
+multi-tenancy will thread a real value through later) and is now stamped
+into `SessionsFields.SESSION_ID` on every create/update. `get_or_create()`
+never reuses a same-sender session on a different channel (cross-channel
+isolation at the one place `channel` is actually known). `_sync_to_db()` /
+`_find_best_session_in_db()` scope the Airtable lookup formula by
+`AND(Sender ID, Channel)` when channel is known, falling back to the
+original Sender-ID-only formula for legacy callers/rows (deterministic
+fallback, no migration required — a legacy row without `Session ID` still
+resolves correctly and heals forward the next time anything writes to it).
+Both the write-path and read-path duplicate-selection points now log a
+distinct, greppable `SESSION_DUPLICATE_DETECTED` signal (with
+`cross_channel=True/False`) instead of a plain info/warning line, so
+recurrence is visible rather than silently resolved forever — this is
+detection/visibility, not an automated repair job; no such job exists to
+hook into safely without inventing new infrastructure, which was out of
+this fix's scope.
+
+Explicit scope boundary (documented in code): the in-process RAM cache
+(`self._store`) stays keyed by bare `sender`, not the composite key — most
+of `PersistentSessionStore`'s public methods (`get()`, `update_step()`,
+`set_commercial_completion()`, etc.) never receive `channel` at all, so
+giving the RAM layer the same isolation as the DB layer would mean adding a
+`channel` parameter to ~15 methods and updating every call site across
+`app.py` (dozens) — disproportionate to what caused the reported
+production duplicates (DB rows, not RAM collisions; the process restarts
+regularly via Render deploys). The DB layer — the thing that actually
+accumulates duplicate rows and survives restarts — is fully channel-scoped
+regardless of any RAM-layer edge case.
+
+Regression pack: `test_bug_session_dup_canonicalization.py` (14 tests —
+canonical key determinism, 0/1/>1-match write behavior, cross-channel
+isolation at both the DB-lookup and `get_or_create()` layers, the
+greppable duplicate-detected log signal, stale-duplicate-cannot-win,
+legacy-row-without-Session-ID still resolves and heals forward, repeated
+writes / simulated restart / simulated concurrent writes never create a
+second row, and `commercial_completion` surviving a normal resume /
+being cleanly replaced by a new explicit one). Existing suites re-verified
+unaffected: `session_store.py`'s own 54 self-tests, `test_bug106_session_
+determinism.py` (7), `test_session_store_contract.py` (17 of 18 — the 18th,
+`test_raw_records_reader_follows_airtable_pagination`, fails identically on
+`origin/main` before this change; confirmed pre-existing and unrelated),
+`test_bug_s2c_cancel_escape.py` (18), the `tests/` pytest pack (127), and
+`smoke_tests.py`. `tools/audit_dispatcher_bypass.py`'s baseline line numbers
+for `session_store.py`'s 4 pre-existing `tools.airtable_tools` imports were
+updated to match this change's line shift (same imports, same precedent as
+the prior S2C-era shift already recorded in that file).
+
+**One-time cleanup of the 17 stale duplicate rows for sender
+`7228089151`** and **a separate, read-only audit of a much larger
+(492-row) Sessions table pollution pattern** (`bug111_*`/`chat_t2_*`/
+`boss_hq:*` Sender IDs matching automated test-script output, apparently
+written to the production base directly) are tracked and executed
+separately per explicit owner decision — see the follow-up entries below.
+Merge, deployment, and runtime verification of this canonicalization fix
+remain pending.
 
 ### N18 shared field metadata reconciliation — 04/09/2026
 

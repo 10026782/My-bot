@@ -110,13 +110,15 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("lead_capture.py", 211, "tools.airtable_tools"),
     ("lead_memory.py", 167, "tools.airtable_tools"),
     ("providers/airtable_shim.py", 17, "tools.airtable_tools"),
-    ("session_store.py", 502, "tools.airtable_tools"),
-    ("session_store.py", 614, "tools.airtable_tools"),
-    ("session_store.py", 645, "tools.airtable_tools"),
-    # Shifted by the S2C universal-session completion-state additions; same
-    # existing _load_from_db() import, not a new bypass authority.
-    ("session_store.py", 672, "tools.airtable_tools"),
-    ("session_store.py", 705, "tools.airtable_tools"),
+    # Shifted by the BUG-SESSION-DUP canonicalization additions (04/09/2026:
+    # _canonical_session_key(), channel-scoped lookup/logging helpers) —
+    # same 4 existing import statements as before (_sync_to_db(),
+    # _find_best_session_in_db(), _load_from_db(), _delete_from_db()), not a
+    # new bypass authority.
+    ("session_store.py", 578, "tools.airtable_tools"),
+    ("session_store.py", 736, "tools.airtable_tools"),
+    ("session_store.py", 769, "tools.airtable_tools"),
+    ("session_store.py", 832, "tools.airtable_tools"),
     ("tenant_provisioner.py", 160, "tools.airtable_tools"),
     ("tenant_provisioner.py", 225, "tools.airtable_tools"),
     ("tenant_provisioner.py", 252, "tools.airtable_tools"),
