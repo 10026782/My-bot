@@ -196,8 +196,35 @@ the Organization create path (`resolve_human_link()` returning
 unimplemented pending an owner decision, since the canonical
 `crm_find_or_create_organization` writer requires async owner approval and
 there is no existing mechanism to resume a paused `CompletionSession` once
-that approval executes; see PR #1201 for the tradeoff. Merge, deployment, and
-runtime verification remain pending.
+that approval executes; the BUG-2 create-allowed no-match message now hands
+the user to the separate, already-live `"צור ארגון <name>"` completion
+intent instead as an interim fix — see PR #1201 for the full tradeoff. PR
+#1201 merged to `main` (`18ffe1bf`, 04/09/2026); deployment and runtime
+verification remain pending.
+
+### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
+
+Production incident, reported live by the owner immediately after PR #1201
+deployed: a stale/abandoned Commercial Completion session parked mid-flow
+(e.g. a "who is this deal with?" prompt the owner never answered) silently
+swallowed every subsequent message forever, including brand-new, unrelated
+commands like "צור עסקה בשם ...". `app.py`'s S2C resume block
+unconditionally fed `user_text` into `CommercialCompletionRouter.
+answer_human()` as a literal answer to whatever field was pending, with no
+check for a cancel word and no way for a fresh command to be recognized as
+one — the owner was stuck getting "לא מצאתי התאמה; נא לנסות שם אחר." on
+every message, including the standard `_CANCEL_WORDS` (בטל/ביטול/לא/...)
+that every other confirm/cancel surface in the file already honors. Fixed
+by checking `_CANCEL_WORDS` first, before any `restore()`/`answer_human()`
+call, and clearing the persisted session with an explicit cancellation
+reply when matched. Regression test: `test_bug_s2c_cancel_escape.py`
+(18 assertions: 4 cancel words each verified to clear the session, never
+reach `answer_human()`, and reply explicitly; one sanity case confirming a
+normal in-flow answer is unaffected). This bug pre-dates PR #1201 — the S2C
+resume block itself was not touched by that PR — but lives in the same
+subsystem and was only surfaced by the owner's post-deploy runtime
+verification of it. Merge, deployment, and runtime verification remain
+pending.
 
 ### N18 shared field metadata reconciliation — 04/09/2026
 
