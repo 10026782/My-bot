@@ -366,6 +366,46 @@ line shift (same imports, same precedent as the prior two shifts already
 recorded in that file). Merge, deployment, and runtime verification remain
 pending — this is `DIAMOND_PATH_STATIC_HARDENED`, not `RUNTIME_VERIFIED`.
 
+### Create-Deal domain-prefix parsing gap — 04/09/2026 (production-reported)
+
+Production logs, pasted by the owner: two real attempts to open a Deal —
+`"צור עסקה בשם הבאת דוגמאות מסין תחום ייבוא"` and `"פתח עסקה בשם רכישת סיבים
+וקונקטורים תחום ייבוא"` — both got the same generic CLARIFY reply ("לא בטוח
+שהבנתי את שם העסקה או את התחום..."), with no way to retype into something
+that would work.
+
+Root cause: `core/router/router.py`'s `_STRUCTURED_CREATE_DEAL_RE` required
+the ב-prefix on "בתחום" (`"...שם X בתחום Y"`); the owner's own natural
+phrasing omits it (`"...שם X תחום Y"`, no ב). The regex simply didn't match
+(`matched=False`) — confirmed by direct reproduction with the exact
+production strings before making any change. Per the router's own
+BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH design (any non-certain
+`Intent.CREATE_DEAL` parse — matched or not — must CLARIFY, never fall
+through to `Handler.AGENT`), this is fail-safe rather than fail-silent, but
+the CLARIFY message itself only offers the "בתחום" form the owner had
+already (unknowingly) rejected, so the two attempts looped identically.
+
+Fix: `_STRUCTURED_CREATE_DEAL_RE` now accepts `ב?תחום` — both "בתחום" and
+bare "תחום" — in both name-then-domain and domain-then-name orderings.
+Does not reopen BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH's own canary #7 (the
+English word "domain" instead of the Hebrew word) — that phrasing still
+fails to match and CLARIFIES; only the Hebrew word's optional ב-prefix
+changed.
+
+Regression pack: `test_bug_crm_bypass_create_deal_deterministic_route.py`
+gained "canary #8" — both exact production strings now parse `.certain`
+with the correct name/domain and route to `Handler.TOOL`, plus an explicit
+re-check that canary #7 (the English-word case) is unaffected. Existing
+suites re-verified unaffected: the file's own full run (all prior
+assertions, including canaries #1–#7), `test_lead_to_deal_origin_link.py`,
+`test_bug_crm_deal_duplicate_approval_reply.py`, `core/router/test_router.py`
+(54/54), `smoke_tests.py`, the `tests/` pytest pack (127). Every governance
+audit (gateway/provider/model-call/dispatcher/turn-coordinator/
+writer-authority/renderer-contract/formula-escaping bypass) re-run clean,
+`new=0` throughout — this change touches only a regex literal and its test
+file, no new import/call-site surface. Merge, deployment, and runtime
+verification remain pending.
+
 ### N18 shared field metadata reconciliation — 04/09/2026
 
 `core/draft_fields.py` provides the provider-neutral `FieldMetadata` shape and

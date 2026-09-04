@@ -158,6 +158,33 @@ route_canary_7 = route_request("צור עסקה בשם בדיקת-קנרית 7 d
 chk("canary #7 now CLARIFIES instead of reaching Handler.AGENT",
     route_canary_7.handler == Handler.CLARIFY)
 
+# Canary #8 (live production, 04/09/2026): two real owner attempts —
+# "צור עסקה בשם הבאת דוגמאות מסין תחום ייבוא" and
+# "פתח עסקה בשם רכישת סיבים וקונקטורים תחום ייבוא" — both used the
+# owner's own natural phrasing, "...שם X תחום Y" with no ב-prefix on
+# "תחום". _STRUCTURED_CREATE_DEAL_RE required "בתחום" only, so both
+# calls silently missed the regex (matched=False) and CLARIFIED — even
+# though the CLARIFY message itself only offers the "בתחום" form, leaving
+# the owner stuck retyping the same rejected shape twice in a row.
+# BUG-CRM-BYPASS-DEAL-DOMAIN-PREFIX: "ב?תחום" now accepts both.
+_canary_8a = parse_deterministic_create_deal("צור עסקה בשם הבאת דוגמאות מסין תחום ייבוא")
+chk("canary #8a (no ב-prefix on תחום) now parses as certain",
+    _canary_8a.certain and _canary_8a.name == "הבאת דוגמאות מסין" and _canary_8a.domain == "import")
+
+_canary_8b = parse_deterministic_create_deal("פתח עסקה בשם רכישת סיבים וקונקטורים תחום ייבוא")
+chk("canary #8b (no ב-prefix on תחום) now parses as certain",
+    _canary_8b.certain and _canary_8b.name == "רכישת סיבים וקונקטורים" and _canary_8b.domain == "import")
+
+route_canary_8 = route_request("צור עסקה בשם הבאת דוגמאות מסין תחום ייבוא", "telegram", owner)
+chk("canary #8 now reaches Handler.TOOL instead of looping on Handler.CLARIFY",
+    route_canary_8.handler == Handler.TOOL)
+
+# BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH's own canary #7 (the English word
+# "domain") must still fail to match after widening ב?תחום — this fix is
+# about the Hebrew word's optional prefix, not about accepting new keywords.
+chk("canary #7 still does not match after the ב?תחום widening (no regression)",
+    not parse_deterministic_create_deal("צור עסקה בשם בדיקת-קנרית 7 domain import").matched)
+
 
 # ══════════════════════════════════════════════════════════════════
 print("\n── app._queue_deterministic_create_deal: role gate before queuing ──")
