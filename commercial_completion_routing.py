@@ -54,6 +54,14 @@ class CompletionRoute:
     user_label: str = ""
     prompt: str = ""
     choices: tuple[Any, ...] = ()
+    # Parallel to `choices` by index, when set: a short, callback_data-safe
+    # token per choice a channel adapter can put in callback_data instead of
+    # the (potentially long, non-unique) display label — see
+    # BUG-5-CALLBACK-TOKEN. Empty when the choices are already short/unique
+    # enough to send as-is (SELECT enum values, the fixed Contact/
+    # Organization picker) — a channel adapter falls back to the literal
+    # choice text in that case, unchanged from before this field existed.
+    choice_tokens: tuple[str, ...] = ()
 
 
 def serialize_completion_session(session: CompletionSession) -> dict[str, Any]:
@@ -218,7 +226,12 @@ class CommercialCompletionRouter:
         try:
             return self._inspect(session.answer(field_name, value))
         except (ValueError, CompletionBlockedError) as exc:
-            return CompletionRoute("BLOCK", session.active.target_entity, session=session, reason=str(exc))
+            return CompletionRoute(
+                "BLOCK", session.active.target_entity, session=session,
+                reason=self._validation_failure_message(
+                    session.active.target_entity, field_name, exc,
+                ),
+            )
 
     def answer_human(
         self,
@@ -244,6 +257,38 @@ class CommercialCompletionRouter:
         from commercial_completion import _RECORD_ID_RE
         if isinstance(value, str) and _RECORD_ID_RE.fullmatch(value.strip()):
             return self.answer(session, field.field_name, value.strip())
+        # BUG-5-CALLBACK-TOKEN: a prior CLARIFY on this same field may have
+        # persisted a token -> canonical-candidate map (see the resolver
+        # branch below). A token reply (typed or via a callback button)
+        # resolves directly to the exact candidate the user was shown —
+        # never a fresh free-text search, which cannot tell two candidates
+        # with an identical display label apart. The marker is single-use:
+        # it is cleared here whether or not the token is recognized, so a
+        # stale token can never resolve once the flow has moved on.
+        pending = session.active.current_values.get("_ux_pending_link_choice")
+        if isinstance(pending, Mapping) and pending.get("field") == field.field_name:
+            picked = dict(pending.get("tokens") or {}).get(str(value or "").strip())
+            from dataclasses import replace
+            from commercial_completion import _CompletionFrame
+            cleared = replace(
+                session.active,
+                current_values={
+                    key: val for key, val in session.active.current_values.items()
+                    if key != "_ux_pending_link_choice"
+                },
+            )
+            session = CompletionSession((_CompletionFrame(cleared),))
+            if picked:
+                target_field = (
+                    "counterparty_organization"
+                    if field.field_name == "counterparty_contact"
+                    and cleared.current_values.get("_ux_counterparty_kind") == "organization"
+                    else field.field_name
+                )
+                return self.answer(session, target_field, picked)
+            # Unrecognized token text falls through to the normal paths
+            # below (counterparty picker / free-text resolver search) with
+            # the stale marker already cleared.
         if field.field_name == "counterparty_contact":
             choice = str(value or "").strip().casefold()
             if choice in {"ארגון", "organization", "company"}:
@@ -314,13 +359,46 @@ class CommercialCompletionRouter:
                 else field.field_name
             )
             return self.answer(session, target_field, resolution.canonical_value)
+        # Single-owner merge: the resolver's own choices (when it found
+        # candidates to disambiguate) take priority over the field's static
+        # presentation choices; never pass both `choices=` and a
+        # `**presentation` that also carries `choices` into the same call —
+        # that is a duplicate-keyword TypeError, not a value conflict.
+        presentation = self._presentation(session.active.target_entity, field.field_name)
+        choice_tokens: tuple[str, ...] = ()
+        if resolution.choices:
+            presentation = {**presentation, "choices": tuple(choice.label for choice in resolution.choices)}
+            choice_tokens = tuple(choice.token for choice in resolution.choices)
+            # BUG-5-CALLBACK-TOKEN: persist token -> canonical candidate so a
+            # later reply (button click or typed token) resolves the exact
+            # candidate shown, without a fresh label search that can't
+            # distinguish two candidates sharing a display label.
+            if resolution.candidate_ids and len(resolution.candidate_ids) == len(resolution.choices):
+                from dataclasses import replace
+                pending_map = {
+                    choice.token: candidate_id
+                    for choice, candidate_id in zip(resolution.choices, resolution.candidate_ids)
+                    if candidate_id
+                }
+                if pending_map:
+                    marked = replace(
+                        session.active,
+                        current_values={
+                            **dict(session.active.current_values),
+                            "_ux_pending_link_choice": {
+                                "field": field.field_name, "tokens": pending_map,
+                            },
+                        },
+                    )
+                    from commercial_completion import _CompletionFrame
+                    session = CompletionSession((_CompletionFrame(marked),))
         return CompletionRoute(
             "CLARIFY" if resolution.choices else "BLOCK",
             session.active.target_entity, session=session,
             field_name=field.field_name, field_type=field.input_type,
-            choices=tuple(choice.label for choice in resolution.choices),
             reason=resolution.reason,
-            **self._presentation(session.active.target_entity, field.field_name),
+            choice_tokens=choice_tokens,
+            **presentation,
         )
 
     def _inspect(self, session: CompletionSession) -> CompletionRoute:
@@ -361,6 +439,29 @@ class CommercialCompletionRouter:
             "prompt": render_prompt(presentation),
             "choices": presentation.choices,
         }
+
+    @staticmethod
+    def _validation_failure_message(entity: str, field_name: str, exc: Exception) -> str:
+        """Business-safe BLOCK text for a rejected answer.
+
+        VALIDATION-TEXT: commercial_completion.validate_value() raises with
+        the internal field_name and (for SELECT) a Python repr of the raw
+        enum-code tuple — exactly right for logs/tests, never right to send
+        to a Hebrew business user verbatim. Canonical validation semantics
+        (which values are accepted) are untouched here; only how the
+        rejection is worded for a human changes.
+        """
+        from commercial_completion import ENTITY_CONTRACTS, UnknownFieldError
+        from commercial_completion_ux import field_presentation
+
+        try:
+            presentation = field_presentation(entity, ENTITY_CONTRACTS[entity].field(field_name))
+        except (KeyError, UnknownFieldError):
+            return "❌ הערך שהוזן לא תקין. נא לנסות שוב."
+        if presentation.choices:
+            options = " / ".join(str(choice) for choice in presentation.choices)
+            return f'❌ הערך שהוזן לא תקין עבור "{presentation.user_label}". אפשרויות: {options}'
+        return f'❌ הערך שהוזן לא תקין עבור "{presentation.user_label}". נא לנסות ערך אחר.'
 
 
 __all__ = [

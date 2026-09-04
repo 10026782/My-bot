@@ -778,8 +778,10 @@ def cmd_deal_from_lead(msg):
                 "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
             )
         if reply:
-            bot.send_message(msg.chat.id, reply, parse_mode="Markdown",
-                             reply_markup=_completion_keyboard(result) if result.outcome == "CLARIFY" else None)
+            _send_with_keyboard_fallback(
+                msg.chat.id, reply, parse_mode="Markdown",
+                reply_markup=_completion_keyboard(result) if result.outcome == "CLARIFY" else None,
+            )
         logger.info(
             f"[LeadToDeal] /dealfromlead '{query}' → lead={lead_id} deal_name={name} "
             f"domain={domain} by {identity.display_name}"
@@ -4080,21 +4082,63 @@ def _commercial_link_lookup(query: str, scope: str, limit: int, identity=None):
     )
 
 
-def _completion_keyboard(result):
-    """Telegram presentation adapter for canonical completion choices."""
+_COMPLETION_CALLBACK_PREFIX = "commercial_completion:"
+_TELEGRAM_CALLBACK_DATA_MAX_BYTES = 64
+
+
+def _completion_keyboard(result, tokens=None):
+    """Telegram presentation adapter for canonical completion choices.
+
+    BUG-5-CALLBACK-TOKEN: the button TEXT is always the full human label —
+    only callback_data is shortened. `tokens` (or `result.choice_tokens` when
+    `result` carries it) is a short, deterministic, per-choice id the router
+    persisted against the completion session; a callback reply with that
+    token resolves back to the exact candidate shown, even when two choices
+    share an identical label. Choices with no token (SELECT/static picker
+    text, always short/unique today) fall back to sending the literal choice
+    text, with a positional-index fallback if that text still would not fit
+    Telegram's callback_data byte limit — a keyboard must never be built
+    with a callback_data Telegram will reject.
+    """
     choices = tuple(
         result if isinstance(result, (list, tuple))
         else getattr(result, "choices", ()) or ()
     )
     if not choices:
         return None
+    choice_tokens = tokens
+    if not choice_tokens and not isinstance(result, (list, tuple)):
+        choice_tokens = getattr(result, "choice_tokens", ()) or ()
+    buttons = []
+    for index, choice in enumerate(choices):
+        token = (
+            str(choice_tokens[index])
+            if choice_tokens and index < len(choice_tokens) and choice_tokens[index]
+            else str(choice)
+        )
+        payload = f"{_COMPLETION_CALLBACK_PREFIX}{token}"
+        if len(payload.encode("utf-8")) > _TELEGRAM_CALLBACK_DATA_MAX_BYTES:
+            payload = f"{_COMPLETION_CALLBACK_PREFIX}{index + 1}"
+        buttons.append(
+            telebot.types.InlineKeyboardButton(str(choice), callback_data=payload)
+        )
     kb = telebot.types.InlineKeyboardMarkup()
-    kb.row(*[
-        telebot.types.InlineKeyboardButton(
-            str(choice), callback_data=f"commercial_completion:{choice}"
-        ) for choice in choices
-    ])
+    kb.row(*buttons)
     return kb
+
+
+def _send_with_keyboard_fallback(chat_id, text, reply_markup=None, **kwargs):
+    """Send `text`, degrading to a plain (no-keyboard) send if Telegram
+    rejects the keyboard itself — a completion prompt must still reach the
+    user even when its buttons could not be attached (BUG-5-CALLBACK-TOKEN);
+    losing the text too would leave a persisted CLARIFY session the user was
+    never shown."""
+    if reply_markup is not None:
+        try:
+            return bot.send_message(chat_id, text, reply_markup=reply_markup, **kwargs)
+        except telebot.apihelper.ApiTelegramException as e:
+            logger.error(f"[Telegram] keyboard send failed, retrying without keyboard: {e}")
+    return bot.send_message(chat_id, text, **kwargs)
 
 
 def run_agent(
@@ -4390,6 +4434,7 @@ def run_agent(
             )
             if _out_meta is not None:
                 _out_meta["commercial_completion_choices"] = tuple(_completion_result.choices)
+                _out_meta["commercial_completion_choice_tokens"] = tuple(_completion_result.choice_tokens)
             return _completion_result.prompt or "נא להשלים את הפרט הבא."
         if _completion_result.outcome == "BLOCK":
             # Validation BLOCKs retain the unchanged session so the user can
@@ -5033,6 +5078,7 @@ def run_agent(
             )
             if _out_meta is not None:
                 _out_meta["commercial_completion_choices"] = tuple(_completion_result.choices)
+                _out_meta["commercial_completion_choice_tokens"] = tuple(_completion_result.choice_tokens)
             return (
                 _completion_result.prompt or "נא להשלים את הפרט הבא."
             )
@@ -6668,8 +6714,13 @@ def _webhook_telegram_impl():
                     callback_kwargs = {}
                     callback_choices = callback_meta.get("commercial_completion_choices")
                     if callback_choices:
-                        callback_kwargs["reply_markup"] = _completion_keyboard(callback_choices)
-                    bot.send_message(str(call.message.chat.id), callback_response, **callback_kwargs)
+                        callback_kwargs["reply_markup"] = _completion_keyboard(
+                            callback_choices,
+                            callback_meta.get("commercial_completion_choice_tokens"),
+                        )
+                    _send_with_keyboard_fallback(
+                        str(call.message.chat.id), callback_response, **callback_kwargs,
+                    )
                 bot.answer_callback_query(call.id)
             else:
                 # העבר ל-pyTeleBot handlers (upd_domain:, upd_type:, weekly summary וכו')
@@ -6835,8 +6886,11 @@ def _webhook_telegram_impl():
                     _send_kwargs["reply_markup"] = _lead_draft_keyboard(_draft_token)
                 _completion_choices = _reply_meta.get("commercial_completion_choices")
                 if _completion_choices:
-                    _send_kwargs["reply_markup"] = _completion_keyboard(_completion_choices)
-                bot.send_message(reply_chat_id, reply, **_send_kwargs)
+                    _send_kwargs["reply_markup"] = _completion_keyboard(
+                        _completion_choices,
+                        _reply_meta.get("commercial_completion_choice_tokens"),
+                    )
+                _send_with_keyboard_fallback(reply_chat_id, reply, **_send_kwargs)
             except Exception as e:
                 logger.error(f"[Telegram] send error: {e}")
         return "", 200

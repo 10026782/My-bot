@@ -250,6 +250,20 @@ jobs:
             echo "::endgroup::"
           done
 
+      # BUG-CI-GAP-DIAMOND-PATH (04/09/2026): the loop above globs
+      # `test_*.py` at the repo root only — `for f in test_*.py` does not
+      # recurse into subdirectories, so every file under tests/ (the
+      # Commercial Completion / Diamond Path regression suite, including
+      # tests/test_commercial_completion_runtime_integration.py) has never
+      # actually run in CI. Local `python3 -m pytest tests/ -q` passing was
+      # the only evidence for that suite — exactly the same class of gap
+      # ("test file exists, CI never executes it") the comment above this
+      # step already documents for root-level files. Run it explicitly and
+      # block on it, the same as every other test step in this job.
+      - name: pytest commercial completion / Diamond Path regression pack
+        run: |
+          python -m pytest tests/ -m "not integration and not airtable and not live" -x --tb=short -q
+
       - name: TC10 isolated regression matrix (Turn Coordinator / ActionGateway)
         run: |
           python3 scripts/run_isolated_regression.py --repeat 2 \

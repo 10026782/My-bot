@@ -174,6 +174,31 @@ because `commercial_crm.lookup_human_reference()` referenced `ContactFields`
 without importing it. Follow-up PR #1199 adds the missing schema import and a
 regression test; merge, deployment, and runtime verification remain pending.
 
+### Diamond Path completion runtime audit follow-up — 04/09/2026
+
+A read-only mini-audit of Commercial Completion (human UX / router / session
+/ renderer / canonical handoff) found `CommercialCompletionRouter.answer_human()`
+raised `TypeError` on every non-trivial Contact/Organization resolution
+(ambiguous match, no match, create-allowed) — a duplicate `choices` keyword
+passed to `CompletionRoute(...)`. Fixing it surfaced adjacent gaps in the same
+flow: `commercial_crm.lookup_human_reference()` accepted `identity`/`scope`
+but never enforced them (unscoped Airtable read); Telegram `callback_data`
+embedded raw choice labels (unsafe for Telegram's 64-byte limit and unable to
+disambiguate duplicate labels); `field_presentation()`'s labels covered only
+the Deal entity, leaving Organization/Payment Term/Charge/Payment prompts
+generic; and an invalid SELECT answer's BLOCK reason leaked a raw internal
+field name and Python-repr enum tuple. PR #1201 fixes all of the above and
+adds a permanent runtime-integration regression pack
+(`tests/test_commercial_completion_runtime_integration.py`) covering the full
+LINK/SELECT/SCALAR/SESSION/COUNTERPARTY/OUTPUT branch matrix. One finding —
+the Organization create path (`resolve_human_link()` returning
+`status="create"` still resolves to `BLOCK`) — was intentionally left
+unimplemented pending an owner decision, since the canonical
+`crm_find_or_create_organization` writer requires async owner approval and
+there is no existing mechanism to resume a paused `CompletionSession` once
+that approval executes; see PR #1201 for the tradeoff. Merge, deployment, and
+runtime verification remain pending.
+
 ### N18 shared field metadata reconciliation — 04/09/2026
 
 `core/draft_fields.py` provides the provider-neutral `FieldMetadata` shape and
