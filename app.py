@@ -4406,6 +4406,23 @@ def run_agent(
     except Exception:
         _persisted_completion = None
     if _persisted_completion:
+        # BUG-S2C-NO-CANCEL-ESCAPE (04/09/2026, production-reported): this
+        # block used to force-feed every message into answer_human() as a
+        # literal answer to whatever field the persisted session was parked
+        # on — including a brand-new, unrelated command (e.g. "צור עסקה
+        # בשם ...") or an explicit cancel word. Neither could ever advance
+        # or clear the state: a fresh command just fails LINK resolution
+        # ("לא מצאתי התאמה") since it isn't a real name, and there was no
+        # escape hatch at all, so an abandoned/stale completion session
+        # silently swallowed every subsequent message forever. A bare
+        # cancel word (same _CANCEL_WORDS set every other confirm/cancel
+        # surface in this file already uses) now clears it explicitly,
+        # before any restore()/answer_human() call.
+        if user_text.strip().lower() in _CANCEL_WORDS:
+            _ls.clear_commercial_completion(chat_id)
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return "❌ הפעולה בוטלה. אפשר להתחיל מחדש בכל עת."
         if _out_meta is not None:
             _out_meta["source_module"] = "action_gateway"
         _completion_router = CommercialCompletionRouter(
