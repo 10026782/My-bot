@@ -5,6 +5,7 @@ from commercial_completion_routing import (
     CommercialCompletionRouter,
     deserialize_completion_session, serialize_completion_session,
     MUTATION_TOOLS,
+    NestedResumeOutcome,
     SUPPORTED_COMPLETION_ENTITIES,
 )
 
@@ -276,3 +277,129 @@ def test_answer_human_canonical_internal_value_returns_without_exception():
         first.session, "recAlreadyCanonical1", link_lookup=None, scope="",
     )
     assert result.outcome == "TOOL"
+
+
+# ── DIAMOND PATH: CommercialCompletionRouter.resume_nested() ───────────
+# Reload+correlate+fold — the pure-router half of the approval-callback
+# resume bridge (app.py's _resolve_diamond_path_continuation() is the other
+# half, exercised separately at that layer). Every case here mirrors a
+# distinct case in NestedResumeOutcome's own docstring.
+
+def _nested_capable_router():
+    calls = []
+
+    def queue(tool, payload, continuation=None):
+        calls.append((tool, payload, continuation))
+        return None
+
+    return CommercialCompletionRouter(queue=queue), calls
+
+
+def _queued_nested_contact():
+    """Drive a real "no match -> כן -> nested Contact complete -> queued"
+    sequence and return (state_dict, nonce) for the parked, nonce-stamped
+    session exactly as app.py would persist it via
+    serialize_completion_session()."""
+    router, calls = _nested_capable_router()
+    values = _deal_needing_counterparty()
+    first = router.start("deal", current_values=values)
+    offer = router.answer_human(
+        first.session, "יאיר ממן", link_lookup=lambda *_: [], scope="tenant1",
+    )
+    ask_phone = router.answer_human(offer.session, "כן", link_lookup=None, scope="")
+    queued = router.answer(ask_phone.session, "phone", "0501234567")
+    assert queued.outcome == "TOOL"
+    _, _, continuation = calls[0]
+    return serialize_completion_session(queued.session), continuation["nonce"]
+
+
+def test_resume_nested_folds_record_id_and_continues_inspection():
+    router, _ = _nested_capable_router()
+    state, nonce = _queued_nested_contact()
+
+    outcome = router.resume_nested(
+        state, expected_nested_entity="contact",
+        expected_return_field="counterparty_contact",
+        expected_nonce=nonce, canonical_record_id="recContactNEW001",
+    )
+    assert outcome.status == "resumed"
+    assert outcome.route.outcome == "TOOL"
+    assert outcome.route.tool_name == "crm_create_deal"
+    assert outcome.route.tool_inputs["counterparty_contact_id"] == "recContactNEW001"
+
+
+def test_resume_nested_mismatch_when_no_session_parked():
+    router, _ = _nested_capable_router()
+    flat_deal = router.start("deal", current_values=_deal()).session
+    state = serialize_completion_session(flat_deal)
+
+    outcome = router.resume_nested(
+        state, expected_nested_entity="contact",
+        expected_return_field="counterparty_contact",
+        expected_nonce="whatever", canonical_record_id="recX",
+    )
+    assert outcome.status == "mismatch"
+    assert outcome.route is None and outcome.session_to_abandon is None
+    assert outcome.reason
+
+
+def test_resume_nested_mismatch_on_wrong_nonce_never_touches_state():
+    router, _ = _nested_capable_router()
+    state, nonce = _queued_nested_contact()
+
+    outcome = router.resume_nested(
+        state, expected_nested_entity="contact",
+        expected_return_field="counterparty_contact",
+        expected_nonce=nonce + "-different", canonical_record_id="recContactNEW001",
+    )
+    assert outcome.status == "mismatch"
+    assert outcome.session_to_abandon is None  # fail-closed: nothing to clean up
+
+
+def test_resume_nested_mismatch_on_wrong_entity_or_return_field():
+    router, _ = _nested_capable_router()
+    state, nonce = _queued_nested_contact()
+
+    wrong_entity = router.resume_nested(
+        state, expected_nested_entity="organization",
+        expected_return_field="counterparty_contact",
+        expected_nonce=nonce, canonical_record_id="recX",
+    )
+    assert wrong_entity.status == "mismatch"
+
+    wrong_field = router.resume_nested(
+        state, expected_nested_entity="contact",
+        expected_return_field="counterparty_organization",
+        expected_nonce=nonce, canonical_record_id="recX",
+    )
+    assert wrong_field.status == "mismatch"
+
+
+def test_resume_nested_corrupted_when_no_evidence_record_id():
+    router, _ = _nested_capable_router()
+    state, nonce = _queued_nested_contact()
+
+    outcome = router.resume_nested(
+        state, expected_nested_entity="contact",
+        expected_return_field="counterparty_contact",
+        expected_nonce=nonce, canonical_record_id="",
+    )
+    assert outcome.status == "corrupted"
+    assert outcome.route is None
+    assert outcome.session_to_abandon is not None
+    # The correlated session is exactly the parked one -- abandoning it
+    # must return cleanly to the parent, still incomplete on the field.
+    abandoned = outcome.session_to_abandon.abandon_nested()
+    assert abandoned.active.target_entity == "deal"
+    assert len(abandoned.frames) == 1
+
+
+def test_resume_nested_never_raises_on_malformed_state():
+    router, _ = _nested_capable_router()
+    outcome = router.resume_nested(
+        {"frames": "not-a-list-of-frames"}, expected_nested_entity="contact",
+        expected_return_field="counterparty_contact",
+        expected_nonce="n", canonical_record_id="recX",
+    )
+    assert outcome.status == "mismatch"
+    assert outcome.reason

@@ -86,6 +86,33 @@ class CompletionRoute:
     choice_tokens: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class NestedResumeOutcome:
+    """Result of CommercialCompletionRouter.resume_nested() — see its own
+    docstring. Three shapes, deliberately never conflated (owner decision):
+
+      "resumed"   — the exact continuation this approval was minted for was
+                    found, folded, and inspection continued. `route` carries
+                    the next step (CLARIFY/TOOL/BLOCK) exactly like any other
+                    router call.
+      "mismatch"  — a DIFFERENT session now occupies this slot (or nothing is
+                    parked at all). Fail-closed: the caller must not touch
+                    session_store — the parked state, whatever it is, is not
+                    this call's to alter.
+      "corrupted" — this IS the exact continuation (nonce/shape correlated)
+                    but it could not actually be resumed (no evidence record
+                    id, or resume_parent() itself refused). The caller must
+                    actively clean it up: `session_to_abandon` is that same
+                    correlated session, ready for .abandon_nested() and
+                    persisting back — never left parked forever.
+    """
+
+    status: str
+    route: "CompletionRoute | None" = None
+    session_to_abandon: CompletionSession | None = None
+    reason: str = ""
+
+
 def serialize_completion_session(session: CompletionSession) -> dict[str, Any]:
     """Serialize pure completion state for the existing universal Session store."""
     return {"frames": [
@@ -257,6 +284,56 @@ class CommercialCompletionRouter:
             )
         except (KeyError, TypeError, ValueError, CompletionBlockedError, CommercialRoutingError) as exc:
             return CompletionRoute("BLOCK", "commercial", reason=str(exc))
+
+    def resume_nested(
+        self, state: Mapping[str, Any], *,
+        expected_nested_entity: str, expected_return_field: str,
+        expected_nonce: str, canonical_record_id: str,
+    ) -> NestedResumeOutcome:
+        """DIAMOND PATH: reload a parked nested CompletionSession after its
+        queued create was approved and executed, verify it is EXACTLY the
+        continuation this approval was minted for (nonce + shape
+        correlation — see ContinuationRef's own docstring), fold
+        canonical_record_id into the parent, and continue inspection.
+
+        Pure and self-contained: takes the persisted state dict plus the
+        expected identifiers (whatever the caller read off its
+        ContinuationRef) and returns a NestedResumeOutcome — no
+        session_store/chat_id/channel knowledge, mirroring every other
+        method on this class. See NestedResumeOutcome's own docstring for
+        the mismatch-vs-corrupted distinction this exists to make explicit.
+        """
+        try:
+            session = deserialize_completion_session(state)
+        except (KeyError, TypeError, ValueError, CompletionBlockedError, CommercialRoutingError) as exc:
+            return NestedResumeOutcome("mismatch", reason=str(exc))
+        if len(session.frames) < 2:
+            return NestedResumeOutcome("mismatch", reason="no nested frame parked in this session")
+        active = session.active
+        nonce = dict(active.current_values).get("_pending_approval_nonce")
+        return_field = session.frames[-1].return_field
+        if (
+            active.target_entity != expected_nested_entity
+            or return_field != expected_return_field
+            or nonce != expected_nonce
+        ):
+            return NestedResumeOutcome(
+                "mismatch", reason="continuation does not match the parked nested session",
+            )
+        if not canonical_record_id:
+            # This IS the exact continuation (nonce correlated), but no
+            # canonical record id could be extracted as evidence — there is
+            # nothing to fold, and per owner decision this must not be left
+            # parked forever.
+            return NestedResumeOutcome(
+                "corrupted", session_to_abandon=session,
+                reason="no canonical record id evidence for an otherwise-correlated continuation",
+            )
+        try:
+            resumed = session.resume_parent(canonical_record_id)
+        except CompletionBlockedError as exc:
+            return NestedResumeOutcome("corrupted", session_to_abandon=session, reason=str(exc))
+        return NestedResumeOutcome("resumed", route=self._inspect(resumed))
 
     def answer(self, session: CompletionSession, field_name: str, value: Any) -> CompletionRoute:
         try:

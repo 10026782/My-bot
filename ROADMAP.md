@@ -202,6 +202,66 @@ intent instead as an interim fix — see PR #1201 for the full tradeoff. PR
 #1201 merged to `main` (`18ffe1bf`, 04/09/2026); deployment and runtime
 verification remain pending.
 
+### DIAMOND PATH — nested-entity approval continuation — 04/09/2026 (production-reported)
+
+Closes the gap the entry above left open (the Organization create path, and
+the equivalent Contact case reported live in production — "עם מי העסקה?" →
+"איש קשר" → "יאיר ממן" → dead-ended on "לא מצאתי התאמה; נא לנסות שם אחר."
+with no path forward). Owner-directed design (three revisions before
+implementation; see `docs/architecture/commercial-completion/` for the full
+A–J contract) implements the full resume bridge instead of the prior
+interim hand-off: a LINK field with no match now offers
+`"לא מצאתי את <שם>. ליצור <איש קשר/ארגון> חדש? [כן] [לא]"`; confirming
+enters a nested `CompletionSession` (`begin_nested()`, deferred until after
+`"כן"` so declining needs zero rollback), completes it, and queues its
+create through the existing `ActionGateway`/approval flow — never a second
+writer (`crm_find_or_create_contact` reuses `crm.create_contact_from_fields()`
+internally, mirroring the existing `crm_find_or_create_organization`
+primitive; `"contact"` stays deliberately absent from
+`SUPPORTED_COMPLETION_ENTITIES`, reachable only via `begin_nested()`, so the
+existing standalone `CREATE_CONTACT` conversational flow is untouched).
+
+A typed, versioned `ContinuationRef` (`commercial_completion.py`) — never a
+free dict — travels on the `ActionContract` itself
+(`core/action_gateway.py`, `core/action_contract_repository.py`, plus a new
+`continuation_ref` field on the live `ActionContracts` Airtable table) from
+proposal through to the approval callback. A nonce minted when the nested
+completion is queued and embedded in its own frame is the actual resume
+correlation key: the approval callback (`app.py`'s
+`_resolve_diamond_path_continuation()`, `commercial_completion_routing.py`'s
+`CommercialCompletionRouter.resume_nested()`) distinguishes "a different
+session now occupies this slot" (nonce/shape mismatch → fail-closed,
+untouched, logged `CONTINUATION_STALE_OR_MISMATCH`) from "the same
+continuation, but now unresumable" (rejected, or no verified evidence
+record id → actively cleaned up via `abandon_nested()`, never left orphaned)
+from the real resume case (folds the canonical record id via
+`resume_parent()` and continues inspection — possibly auto-completing and
+re-queuing the parent Deal itself, through the same `queue()` boundary,
+never a second write path). The resumed prompt (or cleanup) is composed
+into the SAME single Telegram message the approval's own success/rejection
+text uses (`_deliver_callback_final()`'s existing Single-Speaker boundary,
+untouched) — never a second message. `session_store.py`'s
+`get_commercial_completion()`/`set_commercial_completion()`/
+`clear_commercial_completion()` gained an optional `channel` parameter so a
+Contact/Organization approved via the owner's Telegram inline keyboard
+correctly resumes a parent completion that started on a different channel
+(e.g. WhatsApp) rather than silently missing it (`BUG-SESSION-DUP-RAM`'s
+channel-scoping applied to this new cross-request read/write path).
+
+Regression coverage: `tests/test_commercial_completion.py` (`ContinuationRef`
+round-trip/never-guesses, `abandon_nested()`), `tests/test_commercial_completion_routing.py`
+(`resume_nested()` resumed/mismatch/corrupted branch matrix),
+`tests/test_commercial_completion_runtime_integration.py` (full pure-router
+lifecycle, both entities, confirm/decline/unrecognized-reply), `tests/test_commercial_v2_mutation_primitives.py`
+(`crm_find_or_create_contact`, including a source-inspection assertion that
+it never calls a second writer), and the new root-level
+`test_diamond_path_approval_continuation.py` exercising
+`_resolve_diamond_path_continuation()` itself (no-continuation, nothing-
+parked, nonce-mismatch, no-evidence-cleanup, resumed-to-CLARIFY,
+resumed-to-TOOL-requeues-parent). `CODE_DONE / STATIC_VERIFIED` on this
+branch — review, merge, deploy, and production runtime verification (per
+this repo's own "✅ = verified, not declared" rule) remain pending.
+
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
 Production incident, reported live by the owner immediately after PR #1201

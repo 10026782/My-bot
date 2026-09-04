@@ -260,7 +260,8 @@ def test_abandon_nested_does_not_require_the_child_to_be_complete():
 
 def test_continuation_ref_round_trips_through_dict():
     ref = ContinuationRef.for_commercial_completion(
-        session_key="boss_hq:telegram:7228089151",
+        session_key="7228089151",
+        channel="telegram",
         nested_entity="contact",
         return_field="counterparty_contact",
         nonce="abc123",
@@ -269,7 +270,7 @@ def test_continuation_ref_round_trips_through_dict():
     assert restored == ref
     assert ref.to_dict() == {
         "version": 1, "type": "commercial_completion",
-        "session_key": "boss_hq:telegram:7228089151",
+        "session_key": "7228089151", "channel": "telegram",
         "nested_entity": "contact", "return_field": "counterparty_contact",
         "nonce": "abc123",
     }
@@ -278,14 +279,16 @@ def test_continuation_ref_round_trips_through_dict():
 @pytest.mark.parametrize("raw", [
     None,
     {},
-    {"version": 2, "type": "commercial_completion", "session_key": "x",
+    {"version": 2, "type": "commercial_completion", "session_key": "x", "channel": "telegram",
      "nested_entity": "contact", "return_field": "counterparty_contact", "nonce": "n"},
-    {"version": 1, "type": "something_else", "session_key": "x",
+    {"version": 1, "type": "something_else", "session_key": "x", "channel": "telegram",
      "nested_entity": "contact", "return_field": "counterparty_contact", "nonce": "n"},
-    {"version": 1, "type": "commercial_completion", "session_key": "x",
+    {"version": 1, "type": "commercial_completion", "session_key": "x", "channel": "telegram",
      "nested_entity": "contact", "return_field": "counterparty_contact"},  # missing nonce
-    {"version": 1, "type": "commercial_completion", "session_key": "",
+    {"version": 1, "type": "commercial_completion", "session_key": "", "channel": "telegram",
      "nested_entity": "contact", "return_field": "counterparty_contact", "nonce": "n"},  # blank
+    {"version": 1, "type": "commercial_completion", "session_key": "x", "channel": "",
+     "nested_entity": "contact", "return_field": "counterparty_contact", "nonce": "n"},  # blank channel
     "not a dict",
 ])
 def test_continuation_ref_from_dict_never_guesses_a_malformed_shape(raw):

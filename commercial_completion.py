@@ -617,11 +617,25 @@ class ContinuationRef:
     explicit shape rather than a free dict on ActionContract, so a future
     field never silently drifts between the writer and reader side.
 
-    session_key: session_store's own canonical identity for the parked
-        session (the same tenant:channel:sender key PR #1203 already
-        stamps into SessionsFields.SESSION_ID) — computed once when the
-        nested entity's create is queued, stored verbatim, never
+    session_key: the exact identifier session_store.lead_sessions'
+        commercial-completion API (get_commercial_completion/
+        set_commercial_completion) expects as its `sender` argument — in
+        production today, the raw chat_id string the parent completion's
+        queue() callback already closes over, NOT session_store's internal
+        composite "tenant:channel:sender" key (that key is an
+        implementation detail computed inside PersistentSessionStore from
+        this same raw sender; passing the composite string here would
+        double-encode it and silently fail every lookup). Captured once
+        when the nested entity's create is queued, stored verbatim, never
         recomputed at resume time.
+    channel: the origin channel ("telegram"/"whatsapp") the parent
+        completion is running on — captured alongside session_key for the
+        same reason: PersistentSessionStore's RAM cache is channel-scoped
+        (BUG-SESSION-DUP-RAM), and the queued create's approval is always
+        resolved via the OWNER's Telegram inline keyboard regardless of
+        which channel the parent completion itself started on. Without
+        this, resuming a WhatsApp-originated parent from a Telegram
+        approval callback would silently look in the wrong channel's slot.
     nonce: minted fresh each time a nested completion is queued for
         approval and embedded in the nested frame's own current_values
         (key "_pending_approval_nonce") at the same moment. This is the
@@ -634,18 +648,21 @@ class ContinuationRef:
     version: int
     type: str
     session_key: str
+    channel: str
     nested_entity: str
     return_field: str
     nonce: str
 
     @classmethod
     def for_commercial_completion(
-        cls, *, session_key: str, nested_entity: str, return_field: str, nonce: str,
+        cls, *, session_key: str, channel: str, nested_entity: str,
+        return_field: str, nonce: str,
     ) -> "ContinuationRef":
         return cls(
             version=_CONTINUATION_REF_VERSION,
             type=_CONTINUATION_REF_TYPE_COMMERCIAL_COMPLETION,
             session_key=session_key,
+            channel=channel,
             nested_entity=nested_entity,
             return_field=return_field,
             nonce=nonce,
@@ -654,7 +671,8 @@ class ContinuationRef:
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version, "type": self.type,
-            "session_key": self.session_key, "nested_entity": self.nested_entity,
+            "session_key": self.session_key, "channel": self.channel,
+            "nested_entity": self.nested_entity,
             "return_field": self.return_field, "nonce": self.nonce,
         }
 
@@ -673,17 +691,18 @@ class ContinuationRef:
             return None
         try:
             session_key = str(raw["session_key"])
+            channel = str(raw["channel"])
             nested_entity = str(raw["nested_entity"])
             return_field = str(raw["return_field"])
             nonce = str(raw["nonce"])
         except KeyError:
             return None
-        if not (session_key and nested_entity and return_field and nonce):
+        if not (session_key and channel and nested_entity and return_field and nonce):
             return None
         return cls(
             version=_CONTINUATION_REF_VERSION,
             type=_CONTINUATION_REF_TYPE_COMMERCIAL_COMPLETION,
-            session_key=session_key, nested_entity=nested_entity,
+            session_key=session_key, channel=channel, nested_entity=nested_entity,
             return_field=return_field, nonce=nonce,
         )
 

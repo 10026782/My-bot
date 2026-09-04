@@ -751,9 +751,10 @@ def cmd_deal_from_lead(msg):
             CommercialCompletionRouter, serialize_completion_session,
         )
         from session_store import lead_sessions
-        router = CommercialCompletionRouter(queue=lambda tool, payload: _queue_approval_detailed(
+        router = CommercialCompletionRouter(queue=lambda tool, payload, continuation_hint=None: _queue_approval_detailed(
             tool, payload, str(msg.chat.id), "telegram", msg.text,
             trusted_source="deterministic_commercial_completion",
+            continuation_hint=continuation_hint,
         ))
         result = router.start(
             "deal",
@@ -1544,7 +1545,8 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
                              user_chat_id: str, channel: str, user_text: str = "",
                              fingerprint_payload: dict | None = None,
                              trusted_source: str = "agent",
-                             extra_note: str | None = None) -> dict:
+                             extra_note: str | None = None,
+                             continuation_hint: dict | None = None) -> dict:
     """
     Same behavior as _queue_approval() (see that docstring), but returns a
     structured outcome instead of just the model-facing message:
@@ -1625,6 +1627,15 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
     same fingerprint-mismatch class of bug fixed for the post-completion
     callback fallthrough (the button would fall through to a legacy dispatch
     of the wrong tool).
+
+    continuation_hint: DIAMOND PATH nested-entity approval continuation —
+    only ever passed by CommercialCompletionRouter's queue() callback when
+    the queued create is a nested Contact/Organization (len(session.frames)
+    > 1; see commercial_completion_routing.py's _inspect()). A dict with
+    "nested_entity"/"return_field"/"nonce" keys, translated below into a
+    typed ContinuationRef and attached to the ActionContract itself — never
+    a free dict on the contract, never a second persisted copy of session
+    state. None (the overwhelming common case) for every other call.
     """
     from core.action_gateway import CanonicalizationError
     try:
@@ -1633,6 +1644,7 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
             fingerprint_payload=fingerprint_payload,
             trusted_source=trusted_source,
             extra_note=extra_note,
+            continuation_hint=continuation_hint,
         )
     except CanonicalizationError as exc:
         # PR2 staging acceptance incident, 29/07/2026: resolve_canonical_call()
@@ -1741,11 +1753,27 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                                   user_chat_id: str, channel: str, user_text: str = "",
                                   fingerprint_payload: dict | None = None,
                                   trusted_source: str = "agent",
-                                  extra_note: str | None = None) -> dict:
+                                  extra_note: str | None = None,
+                                  continuation_hint: dict | None = None) -> dict:
     from core.action_gateway import resolve_canonical_call
     tool_name, tool_inputs = resolve_canonical_call(
         tool_name, tool_inputs, user_text
     )
+
+    # DIAMOND PATH nested-entity approval continuation — see
+    # _queue_approval_detailed()'s docstring. Built once, passed to
+    # propose_action() below (whichever mode branch runs), attached
+    # directly on the ActionContract it produces.
+    continuation_ref = None
+    if continuation_hint is not None:
+        from commercial_completion import ContinuationRef
+        continuation_ref = ContinuationRef.for_commercial_completion(
+            session_key=user_chat_id,
+            channel=channel,
+            nested_entity=continuation_hint.get("nested_entity", ""),
+            return_field=continuation_hint.get("return_field", ""),
+            nonce=continuation_hint.get("nonce", ""),
+        )
 
     from event_bus import bus, executed_action_cache, pending
     fp = executed_action_cache.compute(user_chat_id, tool_name, tool_inputs)
@@ -1803,6 +1831,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
             trusted_source=trusted_source,
             user_text=user_text,
             fingerprint_payload=fingerprint_payload,
+            continuation_ref=continuation_ref,
         )
         if not _gw_result.ok:
             logger.info(
@@ -2011,6 +2040,7 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                 trusted_source=trusted_source,
                 user_text=user_text,
                 fingerprint_payload=fingerprint_payload,
+                continuation_ref=continuation_ref,
             )
             if _gw_result.failure_code == "persistence_lookup_failed":
                 # Structurally provable clean: this failure happens on the
@@ -3233,6 +3263,114 @@ def _tc8_finish_contract(tc8_context, contract, *, failure: bool = False) -> Non
         logger.error("[TC8] unable to close coordination state", exc_info=True)
 
 
+def _resolve_diamond_path_continuation(contract, canonical_record_id: str) -> str | None:
+    """DIAMOND PATH nested-entity approval continuation — the ONE place
+    that reloads a parked parent CompletionSession after a nested Contact/
+    Organization create's approval resolves.
+
+    canonical_record_id: the evidence-extracted record id when this call is
+    for a SUCCESSFUL, verified execution — resumes the parent. Pass "" for
+    a rejected approval, or a successful execution with no verified
+    evidence — this correlates the same way but cleans the parked frame up
+    (abandon_nested()) instead of folding a value, per owner decision
+    (never leave an orphaned child frame parked forever).
+
+    Returns the extra text (if any) the caller should append to its ONE
+    Single-Speaker final message — None for the overwhelming common case
+    (this contract never carried a continuation_ref at all), for every
+    fail-closed mismatch (a different session now occupies the slot — see
+    NestedResumeOutcome's own docstring), and for the cleanup branch (the
+    original mutation-success/rejection message already covers it). Never
+    raises — every failure mode here degrades to "say nothing more," since
+    the mutation itself was already reported by the caller.
+    """
+    continuation_ref = getattr(contract, "continuation_ref", None)
+    if continuation_ref is None:
+        return None
+    contract_id = getattr(contract, "contract_id", "?")
+    try:
+        from session_store import lead_sessions
+        from commercial_completion_routing import (
+            CommercialCompletionRouter, serialize_completion_session,
+        )
+        state = lead_sessions.get_commercial_completion(
+            continuation_ref.session_key, channel=continuation_ref.channel,
+        )
+        if not state:
+            logger.info(
+                "[DiamondPath] CONTINUATION_STALE_OR_MISMATCH: no parked session "
+                "for contract=%s session_key=%s", contract_id, continuation_ref.session_key,
+            )
+            return None
+        router = CommercialCompletionRouter(
+            queue=lambda tool, payload, continuation_hint=None: _queue_approval_detailed(
+                tool, payload, continuation_ref.session_key, continuation_ref.channel, "",
+                trusted_source="deterministic_commercial_completion",
+                continuation_hint=continuation_hint,
+            )
+        )
+        outcome = router.resume_nested(
+            state,
+            expected_nested_entity=continuation_ref.nested_entity,
+            expected_return_field=continuation_ref.return_field,
+            expected_nonce=continuation_ref.nonce,
+            canonical_record_id=canonical_record_id,
+        )
+        if outcome.status == "mismatch":
+            logger.info(
+                "[DiamondPath] CONTINUATION_STALE_OR_MISMATCH: contract=%s "
+                "session_key=%s reason=%s",
+                contract_id, continuation_ref.session_key, outcome.reason,
+            )
+            return None
+        if outcome.status == "corrupted":
+            logger.warning(
+                "[DiamondPath] parked continuation corrupted or terminated, "
+                "cleaning up: contract=%s session_key=%s reason=%s",
+                contract_id, continuation_ref.session_key, outcome.reason,
+            )
+            abandoned = outcome.session_to_abandon.abandon_nested()
+            lead_sessions.set_commercial_completion(
+                continuation_ref.session_key, serialize_completion_session(abandoned),
+                channel=continuation_ref.channel,
+            )
+            return None
+
+        # outcome.status == "resumed"
+        route = outcome.route
+        if route.outcome == "CLARIFY":
+            lead_sessions.set_commercial_completion(
+                continuation_ref.session_key, serialize_completion_session(route.session),
+                channel=continuation_ref.channel,
+            )
+            return route.prompt or "נא להשלים את הפרט הבא."
+        if route.outcome == "BLOCK":
+            lead_sessions.clear_commercial_completion(
+                continuation_ref.session_key, channel=continuation_ref.channel,
+            )
+            return route.reason or None
+        # TOOL — the parent completion is now itself complete and was queued
+        # (recursively, through the SAME queue() bound above) for its own
+        # approval — never a second writer, never a duplicate final reply
+        # here: _queue_approval_detailed() already sent its own separate
+        # owner-facing approval prompt as a side effect of that queue() call,
+        # exactly like every other deterministic completion queue.
+        lead_sessions.clear_commercial_completion(
+            continuation_ref.session_key, channel=continuation_ref.channel,
+        )
+        return _finalize_deterministic_queue_outcome(
+            route.queue_outcome or {}, continuation_ref.session_key, None,
+            "DeterministicCommercialCompletion",
+            "לא הצלחתי להעביר את הפעולה לאישור.",
+        )
+    except Exception:
+        logger.error(
+            "[DiamondPath] continuation resolution failed unexpectedly: contract=%s",
+            contract_id, exc_info=True,
+        )
+        return None
+
+
 def _handle_approval_callback_impl(cq) -> None:
     """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
     from event_bus import bus
@@ -3384,6 +3522,13 @@ def _handle_approval_callback_impl(cq) -> None:
             if _age_seconds > _PENDING_APPROVAL_TTL:
                 _reject_stale_telegram_approval(cq, item, action_id, approver_chat_id)
                 return
+
+        # DIAMOND PATH nested-entity approval continuation: populated only
+        # on the tool-approval branch below, for a contract that actually
+        # carried a continuation_ref. None here covers every other branch
+        # (non-tool approvals never carry one) so it is always safe to
+        # reference at the single final-message composition point.
+        _diamond_resume_text = None
 
         if not tool_name:
             # Non-tool approval — emit {action}.confirmed event
@@ -3549,6 +3694,14 @@ def _handle_approval_callback_impl(cq) -> None:
                     _contract_after and _contract_after.status in ("completed", "executed")
                 )
                 fail_text   = result
+                if not exec_failed and _contract_after is not None:
+                    _diamond_record_id = (
+                        _gw_approval_result.evidence_ref
+                        if _gw_approval_result.evidence_status == "verified_write_success" else ""
+                    )
+                    _diamond_resume_text = _resolve_diamond_path_continuation(
+                        _contract_after, _diamond_record_id,
+                    )
             else:
                 # BUG-STALE-CALLBACK-FALLTHROUGH, unified regardless of
                 # FEATURE_ACTION_GATEWAY (STATIC-AUDIT-20260830 follow-up
@@ -3680,6 +3833,12 @@ def _handle_approval_callback_impl(cq) -> None:
         # When flag=OFF: wrap with legacy "✅ הפעולה בוצעה:" prefix for consistent UX.
         _gw_on = _flag_enabled("FEATURE_ACTION_GATEWAY")
         user_notify_text = result if _gw_on else f"✅ הפעולה בוצעה:\n{result}"
+        # DIAMOND PATH: the resumed parent-completion prompt (or its own
+        # queue outcome) is appended into this SAME message — Single-Speaker
+        # requires exactly one final response per callback resolution (see
+        # _deliver_callback_final()'s own docstring), never a second send.
+        if _diamond_resume_text:
+            user_notify_text = f"{user_notify_text}\n\n{_diamond_resume_text}"
         try:
             _deliver_callback_final(
                 cq, origin_channel=origin_channel,
@@ -3797,16 +3956,28 @@ def _handle_approval_callback_impl(cq) -> None:
             "🚫 Rejected: %s | %s | canonical_user=%s",
             action_id, label, _sanitize_id(canonical_user_id),
         )
+        # DIAMOND PATH: a rejected nested Contact/Organization create must
+        # never leave its parked parent CompletionSession holding an
+        # orphaned child frame — clean it up (abandon_nested()) the same
+        # way a corrupted/unresumable success does. canonical_record_id=""
+        # always takes the cleanup branch, never a fold — see
+        # _resolve_diamond_path_continuation()'s own docstring.
+        _reject_diamond_text = None
+        if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY") and _reject_after is not None:
+            _reject_diamond_text = _resolve_diamond_path_continuation(_reject_after, "")
         try:
+            _reject_text = (
+                _reject_reply if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY")
+                else "הפעולה בוטלה"
+            )
+            if _reject_diamond_text:
+                _reject_text = f"{_reject_text}\n\n{_reject_diamond_text}"
             _deliver_callback_final(
                 cq, origin_channel=origin_channel,
                 origin_chat_id=origin_chat_id,
                 canonical_user_id=canonical_user_id,
                 action_id=action_id, tool_name=tool_name,
-                text=(
-                    _reject_reply if tool_name and _flag_enabled("FEATURE_ACTION_GATEWAY")
-                    else "הפעולה בוטלה"
-                ),
+                text=_reject_text,
             )
         except Exception as e:
             logger.error("[Approval] final callback delivery failed: %s", e)
@@ -4436,9 +4607,10 @@ def run_agent(
         if _out_meta is not None:
             _out_meta["source_module"] = "action_gateway"
         _completion_router = CommercialCompletionRouter(
-            queue=lambda tool, payload: _queue_approval_detailed(
+            queue=lambda tool, payload, continuation_hint=None: _queue_approval_detailed(
                 tool, payload, chat_id, channel, user_text,
                 trusted_source="deterministic_commercial_completion",
+                continuation_hint=continuation_hint,
             )
         )
         # The persisted field is contract-owned; restore() only inspects the
@@ -5079,9 +5251,10 @@ def run_agent(
             _out_meta["source_module"] = "action_gateway"
         from commercial_completion_routing import CommercialCompletionRouter
         _completion_router = CommercialCompletionRouter(
-            queue=lambda tool, payload: _queue_approval_detailed(
+            queue=lambda tool, payload, continuation_hint=None: _queue_approval_detailed(
                 tool, payload, chat_id, channel, user_text,
                 trusted_source="deterministic_commercial_completion",
+                continuation_hint=continuation_hint,
             )
         )
         _current_values = {
