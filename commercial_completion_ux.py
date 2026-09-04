@@ -35,6 +35,13 @@ class LinkResolution:
     choices: tuple[HumanChoice, ...] = ()
     reason: str = ""
     create_allowed: bool = False
+    # Internal-only, parallel to `choices` by index: the canonical record
+    # reference each displayed HumanChoice would resolve to. Never rendered
+    # (nothing in this module puts it into prompt/reason text) — it exists
+    # so a caller can let a HumanChoice.token pick deterministically among
+    # candidates that happen to share an identical display label, instead of
+    # re-running a free-text search that can't tell them apart.
+    candidate_ids: tuple[str, ...] = ()
 
 
 _LABELS = {
@@ -51,7 +58,55 @@ _LABELS = {
     "expected_value": ("שווי צפוי", "מה השווי הצפוי?"),
     "stage": ("שלב", "באיזה שלב העסקה?"),
     "start_date": ("תאריך התחלה", "מה תאריך ההתחלה? (YYYY-MM-DD)"),
-    "notes": ("הערות", "יש הערות לעסקה?"),
+    "notes": ("הערות", "יש הערות?"),
+    # BUG-3-MISSING-PROMPTS: Organization / Payment Term / Charge / Payment
+    # fields — every manually-enterable field these 4 entities can ask about
+    # needs a real business-language label here, or field_presentation()
+    # falls back to the generic "פרט נוסף" / "נא להשלים את הפרט הבא." for
+    # every single one of them (verified: it did, for all but a handful of
+    # fields shared with Deal above).
+    "organization_name": ("שם הארגון", "מה שם הארגון?"),
+    "deal": ("עסקה", "לאיזו עסקה זה משויך?"),
+    "billing_term": ("תנאי תשלום", "לאיזה תנאי תשלום זה משויך?"),
+    "charge": ("חיוב", "לאיזה חיוב זה משויך?"),
+    "payment_term": ("תנאי תשלום", "לאיזה תנאי תשלום זה משויך?"),
+    "direction": ("כיוון תשלום", "זה תשלום שמתקבל או שמשולם?"),
+    "amount": ("סכום", "מה הסכום?"),
+    "calculation_type": ("שיטת חישוב", "איך מחשבים את הסכום?"),
+    "fixed_amount": ("סכום קבוע", "מה הסכום הקבוע?"),
+    "rate_pct": ("אחוז", "מה האחוז?"),
+    "calculation_basis": ("בסיס חישוב", "על בסיס מה מחשבים את הסכום?"),
+    "tier_configuration": ("הגדרת מדרגות", "מה הגדרת מדרגות המחיר?"),
+    "custom_calculation_rule": ("כלל חישוב מותאם", "מה כלל החישוב המותאם אישית?"),
+    "unit_rate": ("תעריף ליחידה", "מה התעריף ליחידה?"),
+    "minimum_amount": ("סכום מינימלי", "מה הסכום המינימלי?"),
+    "maximum_amount": ("סכום מקסימלי", "מה הסכום המקסימלי?"),
+    "cadence": ("תדירות", "מה תדירות התשלום?"),
+    "installment_count": ("מספר תשלומים", "לכמה תשלומים לחלק?"),
+    "trigger_type": ("סוג הפעלה", "מה מפעיל את התשלום?"),
+    "trigger_date": ("תאריך הפעלה", "באיזה תאריך זה מופעל?"),
+    "trigger_delay_days": ("ימי המתנה להפעלה", "כמה ימים להמתין לפני ההפעלה?"),
+    "trigger_event": ("אירוע מפעיל", "איזה אירוע מפעיל את זה?"),
+    "due_rule": ("כלל מועד תשלום", "איך נקבע מועד התשלום?"),
+    "specific_due_date": ("תאריך פירעון", "מה תאריך הפירעון?"),
+    "schedule_anchor_date": ("תאריך עוגן", "מה תאריך העוגן ללוח הזמנים?"),
+    "net_days": ("ימי אשראי", "כמה ימי אשראי (נטו)?"),
+    "grace_period_days": ("ימי חסד", "כמה ימי חסד יש?"),
+    "status": ("סטטוס", "מה הסטטוס?"),
+    "vat_rule": ("כלל מע\"מ", "איך מתייחסים למע\"מ?"),
+    "vat_amount": ("סכום מע\"מ", "מה סכום המע\"מ?"),
+    "end_date": ("תאריך סיום", "מה תאריך הסיום?"),
+    "reference": ("מספר אסמכתא", "מה מספר האסמכתא?"),
+    "base_amount": ("סכום בסיס", "מה סכום הבסיס לחישוב?"),
+    "original_due_date": ("תאריך פירעון מקורי", "מה תאריך הפירעון המקורי?"),
+    "current_expected_date": ("תאריך צפי נוכחי", "מה התאריך הצפוי הנוכחי לתשלום?"),
+    "collection_state": ("מצב גבייה", "מה מצב הגבייה?"),
+    "quantity": ("כמות", "מה הכמות?"),
+    "document_requirement": ("דרישת מסמך", "איזה מסמך נדרש?"),
+    "promised_payment_date": ("תאריך הבטחת תשלום", "מתי הובטח לשלם?"),
+    "promised_payment_amount": ("סכום הבטחת תשלום", "כמה הובטח לשלם?"),
+    "paid_at": ("תאריך תשלום", "באיזה תאריך שולם?"),
+    "method": ("אמצעי תשלום", "באיזה אמצעי שולם?"),
 }
 
 
@@ -159,15 +214,21 @@ def resolve_human_link(
         return LinkResolution(
             "clarify", choices=(choice,),
             reason="מצאתי התאמה אפשרית; נא לאשר את הבחירה.",
+            candidate_ids=(result.stable_reference,),
         )
     if result.match_count > 1:
         choices = tuple(
             HumanChoice(_display_label(record, entity=entity), str(index + 1))
             for index, record in enumerate(captured[:limit])
         )
+        candidate_ids = tuple(
+            str(record.get("record_id") or record.get("id") or "").strip()
+            for record in captured[:limit]
+        )
         return LinkResolution(
             "clarify", choices=choices,
             reason="מצאתי יותר מאפשרות אחת; נא לבחור לפי השם.",
+            candidate_ids=candidate_ids,
         )
     return LinkResolution(
         "create" if create_allowed else "clarify",

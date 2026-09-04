@@ -221,6 +221,17 @@ def lookup_human_reference(
 
     This is read-only and returns provider records only to the internal
     resolver boundary.  User-facing code receives labels/choices, never IDs.
+
+    Identity/domain scope is enforced through the same canonical gate every
+    other Airtable read uses — tools.airtable_security.enforce_tenant_scope,
+    called the same way tools/dispatcher.py calls it for "airtable_get" — so
+    a partner is restricted to their allowed_domains (or blocked outright for
+    tables that gate has no domain field for, e.g. Contacts), an external
+    client/supplier is restricted to their tenant_id, and an internal
+    owner/manager/employee passes through unfiltered exactly as it does for
+    every other read. Missing identity, an unresolvable scope, or a
+    TenantScopeViolation all fail closed to no results — never the full
+    table.
     """
     table_by_entity = {
         "contact": Tables.CONTACTS, "organization": Tables.ORGANIZATIONS,
@@ -234,10 +245,18 @@ def lookup_human_reference(
     }
     table = table_by_entity.get(entity)
     field_name = field_by_entity.get(entity)
-    if not table or not field_name or not scope or limit < 1:
+    if not table or not field_name or not scope or limit < 1 or identity is None:
+        return []
+    from tools.airtable_security import TenantScopeViolation, enforce_tenant_scope
+    try:
+        secured_params = enforce_tenant_scope("airtable_get", identity, {"table": table})
+    except TenantScopeViolation:
         return []
     needle = " ".join(str(query or "").casefold().split())
-    records = list_records(table, max_records=limit + 1, fields=[field_name], paginate=False)
+    records = list_records(
+        table, secured_params.get("filterByFormula", ""),
+        max_records=limit + 1, fields=[field_name], paginate=False,
+    )
     matches = []
     for record in records:
         fields = record.get("fields", {})

@@ -143,6 +143,25 @@ def test_invalid_answer_keeps_same_completion_session_for_correction():
     assert corrected.outcome in {"CLARIFY", "TOOL"}
 
 
+# ── VALIDATION-TEXT regression: an invalid SELECT answer must not leak the
+# internal field_name or a raw Python repr of the enum-code tuple into the
+# user-visible BLOCK reason.
+
+def test_invalid_select_answer_reason_is_business_safe():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    values = _deal()
+    values.pop("deal_type")
+    first = router.start("deal", current_values=values)
+    assert first.field_name == "deal_type"
+
+    blocked = router.answer(first.session, "deal_type", "not_a_real_deal_type")
+    assert blocked.outcome == "BLOCK"
+    assert "deal_type" not in blocked.reason
+    assert "(" not in blocked.reason and ")" not in blocked.reason
+    assert "'" not in blocked.reason
+    assert "סוג עסקה" in blocked.reason  # the business label, not the storage key
+
+
 def test_restore_is_side_effect_free():
     calls = []
     router = CommercialCompletionRouter(queue=lambda *args: calls.append(args))
@@ -151,3 +170,79 @@ def test_restore_is_side_effect_free():
     restored = router.restore(serialize_completion_session(first.session))
     assert restored.outcome == "BLOCK"
     assert calls == []
+
+
+# ── BUG 1 regression: answer_human() must never raise when constructing
+# CompletionRoute, whatever the resolver returns (unique/ambiguous/no-match/
+# create-allowed/canonical). The prior crash was a duplicate `choices`
+# keyword — explicit `choices=` plus `**_presentation(...)` which also
+# carries `choices` — raised unconditionally regardless of the values.
+
+def _deal_needing_counterparty():
+    values = _deal()
+    values.pop("counterparty_contact")
+    return values
+
+
+def test_answer_human_unique_match_returns_tool_without_exception():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("deal", current_values=_deal_needing_counterparty())
+
+    def lookup(query, scope, limit):
+        return [{"id": "recContactX", "fields": {"Name": query}}]
+
+    result = router.answer_human(
+        first.session, "Dana Cohen", link_lookup=lookup, scope="tenant1",
+    )
+    assert result.outcome == "TOOL"
+
+
+def test_answer_human_ambiguous_match_returns_clarify_without_exception():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("deal", current_values=_deal_needing_counterparty())
+
+    def lookup(query, scope, limit):
+        return [
+            {"id": "recA", "fields": {"Name": "Dana Cohen"}},
+            {"id": "recB", "fields": {"Name": "Dana Cohen 2"}},
+        ]
+
+    result = router.answer_human(
+        first.session, "Dana", link_lookup=lookup, scope="tenant1",
+    )
+    assert result.outcome == "CLARIFY"
+    assert result.choices == ("Dana Cohen", "Dana Cohen 2")
+
+
+def test_answer_human_no_match_returns_block_without_exception():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("deal", current_values=_deal_needing_counterparty())
+
+    result = router.answer_human(
+        first.session, "Nobody Here", link_lookup=lambda *_: [], scope="tenant1",
+    )
+    assert result.outcome == "BLOCK"
+    assert result.reason
+
+
+def test_answer_human_create_allowed_no_match_returns_without_exception():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("deal", current_values=_deal_needing_counterparty())
+    org_pick = router.answer_human(first.session, "ארגון", link_lookup=None, scope="")
+    assert org_pick.outcome == "CLARIFY"
+
+    result = router.answer_human(
+        org_pick.session, "New Org Ltd", link_lookup=lambda *_: [], scope="tenant1",
+    )
+    assert result.outcome in {"CLARIFY", "BLOCK"}
+    assert result.reason
+
+
+def test_answer_human_canonical_internal_value_returns_without_exception():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("deal", current_values=_deal_needing_counterparty())
+
+    result = router.answer_human(
+        first.session, "recAlreadyCanonical1", link_lookup=None, scope="",
+    )
+    assert result.outcome == "TOOL"
