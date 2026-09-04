@@ -19,11 +19,18 @@ def _deal():
 
 
 def test_supported_entities_have_one_canonical_primitive_each():
-    assert SUPPORTED_COMPLETION_ENTITIES == set(MUTATION_TOOLS)
+    # DIAMOND PATH nested-entity approval continuation: "contact" has a
+    # MUTATION_TOOLS primitive but is deliberately NOT a top-level
+    # SUPPORTED_COMPLETION_ENTITIES member — router.start("contact", ...)
+    # must keep failing closed; it is reachable only via begin_nested()
+    # from an active parent completion. Every other entity still has
+    # exactly one primitive each, symmetric in both sets.
+    assert SUPPORTED_COMPLETION_ENTITIES == set(MUTATION_TOOLS) - {"contact"}
+    assert "contact" not in SUPPORTED_COMPLETION_ENTITIES
     assert set(MUTATION_TOOLS.values()) == {
         "crm_create_deal", "crm_create_payment_term",
-        "crm_find_or_create_organization", "crm_create_charge",
-        "crm_create_charge_payment",
+        "crm_find_or_create_organization", "crm_find_or_create_contact",
+        "crm_create_charge", "crm_create_charge_payment",
     }
 
 
@@ -214,15 +221,38 @@ def test_answer_human_ambiguous_match_returns_clarify_without_exception():
     assert result.choices == ("Dana Cohen", "Dana Cohen 2")
 
 
-def test_answer_human_no_match_returns_block_without_exception():
+def test_answer_human_no_match_on_a_non_nested_link_returns_block_without_exception():
+    """DIAMOND PATH: owner is a LINK field but not in _NESTED_CREATE_ENTITIES
+    (only organization/contact offer confirm-to-create) — a no-match answer
+    here must still BLOCK exactly like before, proving the confirm-to-create
+    branch is scoped to those two entities and nothing else."""
     router = CommercialCompletionRouter(queue=lambda *_: None)
-    first = router.start("deal", current_values=_deal_needing_counterparty())
+    values = _deal()
+    values.pop("owner")
+    first = router.start("deal", current_values=values)
+    assert first.field_name == "owner"
 
     result = router.answer_human(
         first.session, "Nobody Here", link_lookup=lambda *_: [], scope="tenant1",
     )
     assert result.outcome == "BLOCK"
     assert result.reason
+
+
+def test_answer_human_contact_no_picker_choice_defaults_to_contact_create_offer():
+    """DIAMOND PATH parity: counterparty_contact with no prior "ארגון"/"איש
+    קשר" picker choice defaults to entity="contact" (unchanged default) —
+    which now ALSO offers confirm-to-create on no match, matching
+    organization's existing behavior rather than blocking."""
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("deal", current_values=_deal_needing_counterparty())
+
+    result = router.answer_human(
+        first.session, "Nobody Here", link_lookup=lambda *_: [], scope="tenant1",
+    )
+    assert result.outcome == "CLARIFY"
+    assert result.choices == ("כן", "לא")
+    assert "איש קשר" in result.reason
 
 
 def test_answer_human_create_allowed_no_match_returns_without_exception():

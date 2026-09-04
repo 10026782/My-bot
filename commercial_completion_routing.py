@@ -18,12 +18,22 @@ from commercial_completion import (
     CommercialCompletionWriter,
     InputType,
 )
-from airtable_schema import ChargeFields, DealFields, OrganizationFields, PaymentFields, PaymentTermFields
+from airtable_schema import (
+    ChargeFields, ContactFields, DealFields, OrganizationFields, PaymentFields, PaymentTermFields,
+)
 
 
 SUPPORTED_COMPLETION_ENTITIES = frozenset(
     {"deal", "payment_term", "organization", "charge", "payment"}
 )
+# DIAMOND PATH nested-entity approval continuation (owner decision):
+# "contact" is deliberately NOT in this set and must never be added to it —
+# router.start("contact", ...) must keep failing closed with BLOCK, exactly
+# like today. "Do NOT change existing standalone CREATE_CONTACT routing" /
+# "Nested Contact creation is entered only from an active parent
+# CommercialCompletionSession" — begin_nested() constructs a Contact
+# CommercialCompletionWriter directly and never consults this set, which is
+# what makes that the only entry point.
 
 MUTATION_TOOLS = {
     "deal": "crm_create_deal",
@@ -31,7 +41,19 @@ MUTATION_TOOLS = {
     "organization": "crm_find_or_create_organization",
     "charge": "crm_create_charge",
     "payment": "crm_create_charge_payment",
+    # DIAMOND PATH: nested-only, see the SUPPORTED_COMPLETION_ENTITIES note above.
+    "contact": "crm_find_or_create_contact",
 }
+
+# DIAMOND PATH nested-entity approval continuation: which entities offer
+# "no match -> ליצור X חדש?" at all (both now have a canonical find-or-create
+# writer + EntityContract), and each one's field_name for its own "name" —
+# these differ (organization's is "organization_name", not "name").
+_NESTED_CREATE_ENTITIES = frozenset({"organization", "contact"})
+_NESTED_CREATE_NAME_FIELD = {"organization": "organization_name", "contact": "name"}
+_CREATE_CONFIRM_WORDS = frozenset({"כן", "yes", "y", "אישור", "מאשר"})
+_CREATE_DECLINE_WORDS = frozenset({"לא", "no", "n", "ביטול", "בטל"})
+_CREATE_CONFIRM_CHOICES = ("כן", "לא")
 
 
 class CommercialRoutingError(ValueError):
@@ -171,6 +193,20 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
         }
         result.update({arg: _link_id(p[name]) if name == "Billing Term" else p[name] for name, arg in mapping.items() if name in p})
         return result
+    if entity == "contact":
+        # DIAMOND PATH nested-entity approval continuation: contact is never
+        # a SUPPORTED_COMPLETION_ENTITIES top-level entity (router.start()
+        # rejects it) — reachable only via begin_nested(), per owner
+        # decision "nested Contact creation is entered only from an active
+        # parent CompletionSession". Field names already match
+        # find_or_create_contact()'s kwargs 1:1, unlike organization/deal.
+        result = {"name": p[ContactFields.NAME], "phone": p[ContactFields.PHONE]}
+        optional = {
+            ContactFields.EMAIL: "email", ContactFields.COMPANY: "company",
+            ContactFields.ROLE_CATEGORY: "role_category",
+        }
+        result.update({arg: p[name] for name, arg in optional.items() if name in p})
+        return result
     if entity == "payment":
         result = {
             "charge_id": _link_id(p[PaymentFields.CHARGE]), "deal_id": _link_id(p[PaymentFields.DEAL_LINK]),
@@ -289,6 +325,67 @@ class CommercialCompletionRouter:
             # Unrecognized token text falls through to the normal paths
             # below (counterparty picker / free-text resolver search) with
             # the stale marker already cleared.
+        # DIAMOND PATH nested-entity approval continuation: a prior CLARIFY
+        # on this same field offered "ליצור X חדש?" — resolve the [כן]/[לא]
+        # reply here, before anything else gets a chance to reinterpret the
+        # value as a picker choice or a fresh name search. Mutually
+        # exclusive with the _ux_pending_link_choice marker above (that one
+        # is set only when resolve_human_link() found MULTIPLE matches;
+        # this one only when it found NONE) — never both at once for the
+        # same field. Marker is cleared unconditionally, same single-use
+        # discipline as the token marker above.
+        pending_create = session.active.current_values.get("_ux_pending_nested_create")
+        if isinstance(pending_create, Mapping) and pending_create.get("field") == field.field_name:
+            from dataclasses import replace
+            from commercial_completion import _CompletionFrame
+            cleared = replace(
+                session.active,
+                current_values={
+                    key: val for key, val in session.active.current_values.items()
+                    if key != "_ux_pending_nested_create"
+                },
+            )
+            cleared_session = CompletionSession((_CompletionFrame(cleared),))
+            choice = str(value or "").strip()
+            if choice in _CREATE_CONFIRM_WORDS:
+                nested_entity = str(pending_create.get("nested_entity") or "")
+                name_field = _NESTED_CREATE_NAME_FIELD.get(nested_entity)
+                if not name_field:
+                    return CompletionRoute(
+                        "BLOCK", cleared_session.active.target_entity, session=cleared_session,
+                        reason="לא ניתן להשלים את היצירה כרגע.",
+                    )
+                # Same counterparty_contact -> counterparty_organization
+                # redirect the "resolved" branch above already applies —
+                # field.field_name is the Deal field being ASKED about
+                # ("counterparty_contact" even when the answer identifies an
+                # Organization); the LINK it must ultimately fill differs.
+                return_field = (
+                    "counterparty_organization"
+                    if field.field_name == "counterparty_contact" and nested_entity == "organization"
+                    else field.field_name
+                )
+                nested = cleared_session.begin_nested(
+                    nested_entity, return_field=return_field,
+                    current_values={name_field: str(pending_create.get("candidate_name") or "")},
+                )
+                return self._inspect(nested)
+            if choice in _CREATE_DECLINE_WORDS:
+                return CompletionRoute(
+                    "CLARIFY", cleared_session.active.target_entity, session=cleared_session,
+                    field_name=field.field_name, field_type=field.input_type,
+                    **self._presentation(cleared_session.active.target_entity, field.field_name),
+                )
+            # Neither כן nor לא: re-render the exact same confirm question
+            # rather than silently reinterpreting free text as a new
+            # candidate name or dropping the pending decision — the marker
+            # (with its original prompt) stays in place, unmodified.
+            same_prompt = str(pending_create.get("prompt") or "")
+            return CompletionRoute(
+                "CLARIFY", session.active.target_entity, session=session,
+                field_name=field.field_name, field_type=field.input_type,
+                reason=same_prompt, prompt=same_prompt, choices=_CREATE_CONFIRM_CHOICES,
+            )
         if field.field_name == "counterparty_contact":
             choice = str(value or "").strip().casefold()
             if choice in {"ארגון", "organization", "company"}:
@@ -350,7 +447,7 @@ class CommercialCompletionRouter:
                 query, f"{entity}:{scope}", limit
             ),
             scope=scope,
-            create_allowed=entity == "organization",
+            create_allowed=entity in _NESTED_CREATE_ENTITIES,
         )
         if resolution.status == "resolved":
             target_field = (
@@ -359,6 +456,32 @@ class CommercialCompletionRouter:
                 else field.field_name
             )
             return self.answer(session, target_field, resolution.canonical_value)
+        if resolution.status == "create":
+            # DIAMOND PATH nested-entity approval continuation: mark the
+            # PARENT (still a single frame — begin_nested() is deliberately
+            # NOT called yet, per owner decision) with enough to either
+            # start the nested completion on "כן" or drop the offer
+            # untouched on "לא"/anything else, with zero rollback needed
+            # either way since no frame was ever pushed here.
+            from dataclasses import replace
+            from commercial_completion import _CompletionFrame
+            marked = replace(
+                session.active,
+                current_values={
+                    **dict(session.active.current_values),
+                    "_ux_pending_nested_create": {
+                        "field": field.field_name, "nested_entity": entity,
+                        "candidate_name": str(value).strip(), "prompt": resolution.reason,
+                    },
+                },
+            )
+            marked_session = CompletionSession((_CompletionFrame(marked),))
+            return CompletionRoute(
+                "CLARIFY", marked_session.active.target_entity, session=marked_session,
+                field_name=field.field_name, field_type=field.input_type,
+                reason=resolution.reason, prompt=resolution.reason,
+                choices=_CREATE_CONFIRM_CHOICES,
+            )
         # Single-owner merge: the resolver's own choices (when it found
         # candidates to disambiguate) take priority over the field's static
         # presentation choices; never pass both `choices=` and a
@@ -410,13 +533,47 @@ class CommercialCompletionRouter:
                 field_name=field.field_name, field_type=field.input_type,
                 **self._presentation(writer.target_entity, field.field_name),
             )
+        # DIAMOND PATH nested-entity approval continuation: a nested frame
+        # (len(session.frames) > 1) reaching completion here must be queued
+        # with enough info for the caller to build a ContinuationRef and
+        # resume the PARENT after approval — this module has no
+        # session_store/chat_id/channel knowledge (see module docstring),
+        # so it only mints the nonce (a pure operation) and embeds it into
+        # the same nested frame that gets persisted, then hands the caller
+        # everything else it cannot compute itself. The queue() callback's
+        # 3rd positional arg is entirely new and optional — every existing
+        # (root-only) call site/test passes a 2-arg callable and is
+        # unaffected: this branch is unreachable unless begin_nested() was
+        # called somewhere upstream in this exact session.
+        continuation_hint: dict[str, Any] | None = None
+        if len(session.frames) > 1:
+            import secrets
+            from dataclasses import replace
+            from commercial_completion import _CompletionFrame
+            nonce = secrets.token_hex(8)
+            marked_writer = replace(
+                writer,
+                current_values={**dict(writer.current_values), "_pending_approval_nonce": nonce},
+            )
+            frames = list(session.frames)
+            frames[-1] = replace(frames[-1], writer=marked_writer)
+            session = CompletionSession(tuple(frames))
+            writer = session.active
+            continuation_hint = {
+                "nested_entity": writer.target_entity,
+                "return_field": session.frames[-1].return_field,
+                "nonce": nonce,
+            }
         try:
             payload = writer.complete_payload()
             tool = MUTATION_TOOLS[writer.target_entity]
             # The exact dict is handed to the existing queue; it is never
             # changed after this point, preserving Gateway fingerprint parity.
             inputs = _primitive_inputs(writer.target_entity, payload)
-            result = self._queue(tool, inputs)
+            result = (
+                self._queue(tool, inputs, continuation_hint)
+                if continuation_hint is not None else self._queue(tool, inputs)
+            )
         except (KeyError, ValueError, CompletionBlockedError) as exc:
             return CompletionRoute("BLOCK", writer.target_entity, session=session, reason=str(exc))
         return CompletionRoute(
