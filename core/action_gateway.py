@@ -26,6 +26,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
+from commercial_completion import ContinuationRef
 from core.action_contract_repository import (
     ActionContractLookupError,
     ActionContractTransitionConflictError,
@@ -351,6 +352,17 @@ class ActionContract:
     # Airtable still provides no atomic compare-and-swap primitive. PostgreSQL
     # owns the genuinely atomic execution claim.
     version:                     int = 1
+    # DIAMOND PATH nested-entity approval continuation: set only when this
+    # contract's queued mutation is a NESTED completion (a Contact/
+    # Organization created mid-Deal-completion) whose approval should
+    # resume the parked parent CompletionSession afterward. None for every
+    # other contract — including a root-level commercial-completion write —
+    # which is the overwhelming majority; this field's absence is the
+    # common case, not the exception. Deliberately a small, typed, versioned
+    # pointer (see ContinuationRef's own docstring) — never a serialized
+    # copy of the CompletionSession itself, which stays owned by
+    # session_store alone.
+    continuation_ref:            ContinuationRef | None = None
 
 
 # ══════════════════════════════════════════════════
@@ -1641,6 +1653,7 @@ class ActionGateway:
         trusted_source: str = "agent",
         user_text: str = "",
         fingerprint_payload: dict | None = None,
+        continuation_ref: ContinuationRef | None = None,
     ) -> GatewayResult:
         """
         מציע פעולה חדשה ל-Gateway.
@@ -1895,6 +1908,7 @@ class ActionGateway:
             idempotency_key=hashlib.sha256(
                 f"{contract_id}:{fingerprint}".encode()
             ).hexdigest()[:32],
+            continuation_ref=continuation_ref,
         )
 
         if requires_approval:

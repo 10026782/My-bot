@@ -1196,6 +1196,12 @@ class ActionContractsFields:
       reconfirmation_required       checkbox
       context_integrity_unknown     checkbox
       idempotency_key               singleLineText
+      continuation_ref               multilineText   (JSON string; DIAMOND
+                                     PATH nested-entity approval continuation
+                                     — ContinuationRef.to_dict(), see
+                                     commercial_completion.py; absent/empty
+                                     for the overwhelming majority of
+                                     contracts, which are not nested)
     """
     CONTRACT_ID      = "contract_id"
     TENANT_ID        = "tenant_id"
@@ -1223,6 +1229,7 @@ class ActionContractsFields:
     RECONFIRMATION_REQUIRED   = "reconfirmation_required"
     CONTEXT_INTEGRITY_UNKNOWN = "context_integrity_unknown"
     IDEMPOTENCY_KEY           = "idempotency_key"  # frozen proposal key; execution wiring unchanged in 4B-1A
+    CONTINUATION_REF          = "continuation_ref"  # JSON string (ContinuationRef.to_dict()); absent for non-nested contracts
 
 
 class ActionContractStatus:

@@ -116,11 +116,16 @@ def _contract_to_fields(contract: "ActionContract") -> dict:
         ActionContractsFields.RECONFIRMATION_REQUIRED: contract.reconfirmation_required,
         ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN: contract.context_integrity_unknown,
         ActionContractsFields.IDEMPOTENCY_KEY: contract.idempotency_key,
+        ActionContractsFields.CONTINUATION_REF: (
+            json.dumps(contract.continuation_ref.to_dict(), ensure_ascii=False)
+            if contract.continuation_ref else ""
+        ),
     }
 
 
 def _record_to_contract(record: dict) -> "ActionContract":
     from core.action_gateway import ActionContract  # lazy: avoid circular import at module load
+    from commercial_completion import ContinuationRef
 
     f = record.get("fields", {})
 
@@ -132,6 +137,14 @@ def _record_to_contract(record: dict) -> "ActionContract":
         actor_allowed_domains = json.loads(f.get(ActionContractsFields.ACTOR_ALLOWED_DOMAINS) or "[]")
     except (TypeError, ValueError):
         actor_allowed_domains = []
+    # DIAMOND PATH continuation_ref — never guess: any malformed/absent JSON
+    # (including the common "not a nested contract" case) yields None, exactly
+    # like ContinuationRef.from_dict()'s own fail-closed contract.
+    try:
+        continuation_raw = json.loads(f.get(ActionContractsFields.CONTINUATION_REF) or "null")
+    except (TypeError, ValueError):
+        continuation_raw = None
+    continuation_ref = ContinuationRef.from_dict(continuation_raw) if isinstance(continuation_raw, dict) else None
 
     contract = ActionContract(
         contract_id=f.get(ActionContractsFields.CONTRACT_ID, ""),
@@ -159,6 +172,7 @@ def _record_to_contract(record: dict) -> "ActionContract":
         reconfirmation_required=bool(f.get(ActionContractsFields.RECONFIRMATION_REQUIRED, False)),
         context_integrity_unknown=bool(f.get(ActionContractsFields.CONTEXT_INTEGRITY_UNKNOWN, False)),
         idempotency_key=f.get(ActionContractsFields.IDEMPOTENCY_KEY, ""),
+        continuation_ref=continuation_ref,
     )
     contract.version = int(f.get(ActionContractsFields.VERSION) or 1)
     return contract
