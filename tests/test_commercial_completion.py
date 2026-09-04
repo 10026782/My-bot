@@ -19,6 +19,7 @@ from commercial_completion import (
     CompletionBlockedError,
     CompletionSession,
     CommercialCompletionWriter,
+    ContinuationRef,
     EntityContract,
     FieldContract,
     InputType,
@@ -218,6 +219,77 @@ def test_nested_identity_completion_returns_and_resumes_deal(
     resumed = session.resume_parent(record_id)
     assert resumed.active.resolved_values()[return_field] == record_id
     assert resumed.active.is_complete()
+
+
+def test_abandon_nested_returns_to_parent_untouched():
+    parent = CommercialCompletionWriter(
+        "deal", _complete_deal(counterparty_contact="")
+    )
+    root = CompletionSession.start(parent)
+    nested = root.begin_nested("contact", return_field="counterparty_contact")
+    abandoned = nested.answer("name", "Dana").abandon_nested()
+    assert abandoned.frames == root.frames
+    assert abandoned.active.target_entity == "deal"
+    # the LINK field was never touched — still missing, ready to be asked again
+    assert "counterparty_contact" in {f.field_name for f in abandoned.active.missing_fields()}
+
+
+def test_abandon_nested_without_a_nested_frame_blocks():
+    parent = CommercialCompletionWriter("deal", _complete_deal())
+    root = CompletionSession.start(parent)
+    with pytest.raises(CompletionBlockedError):
+        root.abandon_nested()
+
+
+def test_abandon_nested_does_not_require_the_child_to_be_complete():
+    """Unlike resume_parent(), abandoning a nested completion must work at
+    any point mid-flow (e.g. a rejected approval after the child WAS
+    completed and queued, but just as validly before it ever finished)."""
+    parent = CommercialCompletionWriter(
+        "deal", _complete_deal(counterparty_contact="")
+    )
+    nested = CompletionSession.start(parent).begin_nested(
+        "contact", return_field="counterparty_contact",
+    )
+    assert not nested.active.is_complete()
+    abandoned = nested.abandon_nested()
+    assert abandoned.active.target_entity == "deal"
+
+
+# ── ContinuationRef ────────────────────────────────────────────────────
+
+def test_continuation_ref_round_trips_through_dict():
+    ref = ContinuationRef.for_commercial_completion(
+        session_key="boss_hq:telegram:7228089151",
+        nested_entity="contact",
+        return_field="counterparty_contact",
+        nonce="abc123",
+    )
+    restored = ContinuationRef.from_dict(ref.to_dict())
+    assert restored == ref
+    assert ref.to_dict() == {
+        "version": 1, "type": "commercial_completion",
+        "session_key": "boss_hq:telegram:7228089151",
+        "nested_entity": "contact", "return_field": "counterparty_contact",
+        "nonce": "abc123",
+    }
+
+
+@pytest.mark.parametrize("raw", [
+    None,
+    {},
+    {"version": 2, "type": "commercial_completion", "session_key": "x",
+     "nested_entity": "contact", "return_field": "counterparty_contact", "nonce": "n"},
+    {"version": 1, "type": "something_else", "session_key": "x",
+     "nested_entity": "contact", "return_field": "counterparty_contact", "nonce": "n"},
+    {"version": 1, "type": "commercial_completion", "session_key": "x",
+     "nested_entity": "contact", "return_field": "counterparty_contact"},  # missing nonce
+    {"version": 1, "type": "commercial_completion", "session_key": "",
+     "nested_entity": "contact", "return_field": "counterparty_contact", "nonce": "n"},  # blank
+    "not a dict",
+])
+def test_continuation_ref_from_dict_never_guesses_a_malformed_shape(raw):
+    assert ContinuationRef.from_dict(raw) is None
 
 
 def test_missing_field_decisions_need_no_agent_or_callback():

@@ -1154,6 +1154,32 @@ def dispatch_tool(
                 audit_log_airtable(name, identity, inputs, result)
                 return result
 
+            case "crm_find_or_create_contact":
+                _allowed = frozenset({"name", "phone", "email", "company", "role_category"})
+                _unsupported = _unsupported_canonical_inputs(inputs, _allowed)
+                if _unsupported:
+                    return _tool_result(
+                        ok=False, tool=name,
+                        user_message=f"❌ Unsupported Contact input fields: {_unsupported!r}.",
+                    )
+                try:
+                    enforce_tenant_scope(name, identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable(name, identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool=name, user_message=str(e))
+                from commercial_crm import find_or_create_contact
+                result = find_or_create_contact(
+                    name=inputs.get("name", ""),
+                    phone=inputs.get("phone", ""),
+                    email=inputs.get("email", ""),
+                    company=inputs.get("company", ""),
+                    role_category=inputs.get("role_category", ""),
+                    identity=identity,
+                    source=trusted_source or "commercial_crm",
+                )
+                audit_log_airtable(name, identity, inputs, result)
+                return result
+
             case "crm_create_charge":
                 _allowed = frozenset({
                     "deal_id", "direction", "amount", "currency", "status",
