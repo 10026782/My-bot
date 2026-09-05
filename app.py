@@ -59,6 +59,7 @@ from config          import get_domain as _channel_domain
 from core.router     import (
     route_request, RouteDecision, Handler, deterministic_create_task_title,
     parse_deterministic_create_task, parse_deterministic_create_deal,
+    parse_deterministic_commercial_completion,
 )
 from core.router.deterministic_denial import check_deterministic_denial
 from core import create_execution_context, create_operation
@@ -4599,11 +4600,66 @@ def run_agent(
         # cancel word (same _CANCEL_WORDS set every other confirm/cancel
         # surface in this file already uses) now clears it explicitly,
         # before any restore()/answer_human() call.
-        if user_text.strip().lower() in _CANCEL_WORDS:
+        #
+        # BUG-S2C-DECLINE-SWALLOWED-BY-OUTER-CANCEL (05/09/2026, found while
+        # building the acceptance matrix for the fix above): DIAMOND PATH's
+        # confirm-to-create offer ("ליצור X חדש? [כן]/[לא]") has its OWN,
+        # deliberately narrower "לא" handling inside answer_human() — decline
+        # just this offer and re-ask the SAME field, keeping the rest of the
+        # Deal alive (commercial_completion_routing.py's own design). But
+        # "לא" is ALSO a member of this file's blanket _CANCEL_WORDS, so the
+        # unconditional check right below always intercepted it FIRST and
+        # cancelled the ENTIRE flow — making that inner decline branch
+        # unreachable dead code from this, the only real production entry
+        # point. Only while a nested-create confirm is genuinely pending
+        # (the persisted state's active frame carries the
+        # "_ux_pending_nested_create" marker) does a decline-shaped word
+        # (the same _CREATE_DECLINE_WORDS the router itself recognizes) skip
+        # this outer full-cancel branch and fall through to answer_human()
+        # instead, where the narrower, correct decline runs. Any OTHER
+        # cancel word ("בטל"/"עצור"/"cancel"/...) not in that set still
+        # cancels the whole flow exactly as before — unchanged for every
+        # other pending state, which never carries this marker at all.
+        from commercial_completion_routing import _CREATE_DECLINE_WORDS
+        _pending_nested_create_active = bool(
+            (_persisted_completion.get("frames") or [{}])[-1]
+            .get("current_values", {})
+            .get("_ux_pending_nested_create")
+        )
+        _is_nested_create_decline = (
+            _pending_nested_create_active
+            and user_text.strip().lower() in _CREATE_DECLINE_WORDS
+        )
+        if user_text.strip().lower() in _CANCEL_WORDS and not _is_nested_create_decline:
             _ls.clear_commercial_completion(chat_id)
             if _out_meta is not None:
                 _out_meta["source_module"] = "action_gateway"
             return "❌ הפעולה בוטלה. אפשר להתחיל מחדש בכל עת."
+        # BUG-S2C-STALE-SESSION-SWALLOWS-NEW-COMMAND (05/09/2026,
+        # production-reported): a bare cancel word above was the only
+        # escape this block ever had. A brand-new, well-formed command
+        # (e.g. "צור משימה בדיקת דגימות...", the exact "צור עסקה בשם ..."
+        # example named but left unhandled in the comment above) was still
+        # force-fed into answer_human() as a literal field answer — which
+        # can never match, and (since DIAMOND PATH's confirm-to-create) can
+        # now trap the user in a [כן]/[לא]-only loop with the stale
+        # session's own leftover text repeating verbatim every turn, no
+        # matter what they type. A message that deterministically parses as
+        # one of the same structured intents this exact function already
+        # special-cases below (create_task, create_deal, or one of the S2C
+        # completion entities) is unambiguously a NEW command, never a
+        # plausible answer to a pending field — clear the stale completion
+        # and fall through to normal routing this turn, exactly
+        # generalizing the cancel-word escape above to a second, precise
+        # (never heuristic/fuzzy) trigger.
+        if (
+            parse_deterministic_create_task(user_text).certain
+            or parse_deterministic_create_deal(user_text).certain
+            or parse_deterministic_commercial_completion(user_text).certain
+        ):
+            _ls.clear_commercial_completion(chat_id)
+            _persisted_completion = None
+    if _persisted_completion:
         if _out_meta is not None:
             _out_meta["source_module"] = "action_gateway"
         _completion_router = CommercialCompletionRouter(

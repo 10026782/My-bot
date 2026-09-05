@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 04/09/2026
+עודכן: 05/09/2026
 
 ## Commercial Completion Writer foundation — 03/09/2026
 
@@ -258,9 +258,53 @@ it never calls a second writer), and the new root-level
 `test_diamond_path_approval_continuation.py` exercising
 `_resolve_diamond_path_continuation()` itself (no-continuation, nothing-
 parked, nonce-mismatch, no-evidence-cleanup, resumed-to-CLARIFY,
-resumed-to-TOOL-requeues-parent). `CODE_DONE / STATIC_VERIFIED` on this
-branch — review, merge, deploy, and production runtime verification (per
-this repo's own "✅ = verified, not declared" rule) remain pending.
+resumed-to-TOOL-requeues-parent). PR #1205 merged to `main`
+(`9b776631`, 04/09/2026; post-merge symbol verification via `git fetch
+origin main` + grep of every changed symbol against `origin/main`,
+per this repo's post-merge protocol). `CODE_DONE / STATIC_VERIFIED` —
+deployment and production runtime verification remain pending.
+
+### S2C stale-session fresh-command escape — 05/09/2026 (production-reported)
+
+Production incident, reported live by the owner the day after PR #1205
+deployed: a stale/abandoned S2C session (parked from an earlier,
+unrelated Deal/Organization flow, from before this conversation) force-fed
+a brand-new, well-formed command — "צור משימה בדיקת דגימות לייבוא סיבים
+בתחום יבוא" — into `CommercialCompletionRouter.answer_human()` as a
+literal answer to whatever field it was parked on. The no-match then
+triggered DIAMOND PATH's own confirm-to-create offer ("ליצור איש קשר
+חדש?"), and because the follow-up reply wasn't כן/לא, `answer_human()`'s
+own designed behavior (re-render the identical pending confirm question
+on an unrecognized reply) repeated the SAME stale text verbatim on the
+next turn too — an inescapable loop, since neither message matched
+`_CANCEL_WORDS` either.
+
+Root cause predates DIAMOND PATH: `app.py`'s S2C resume block (`run_agent()`,
+section "1.7") runs before `_safe_route()`/create_task routing and
+force-feeds ANY non-cancel-word text into the parked session — the
+04/09/2026 `S2C completion cancel-escape hatch` entry below only closed
+this for an explicit cancel word, not a brand-new command; DIAMOND PATH's
+confirm-to-create simply turned the pre-existing trap into a loop with no
+escape at all instead of a per-turn dead-end BLOCK.
+
+Fix: generalizes the same escape hatch to a second, precise trigger — a
+message that deterministically parses as one of the same structured
+commands this exact function already special-cases below it
+(`create_task`, `create_deal`, or an S2C completion entity prefix, via the
+existing pure parsers `parse_deterministic_create_task`/
+`_create_deal`/`_commercial_completion` — the last one existed in
+`core/router/router.py` but was never re-exported from
+`core/router/__init__.py`, fixed here too) clears the stale completion and
+falls through to normal routing the same turn. No heuristic/fuzzy
+matching; `update_task`/`complete_task` and the general Agent-routed case
+are intentionally left out of scope (no equivalent standalone deterministic
+parser without a larger routing refactor). Regression:
+`test_bug_s2c_stale_session_fresh_command_escape.py`, driven against the
+exact reported message (9 assertions); `test_bug_s2c_cancel_escape.py` (18
+assertions) still passes unchanged. PR #1206, branch
+`fix/s2c-stale-session-fresh-command-escape`. `CODE_DONE / STATIC_VERIFIED`
+— review, merge, deploy, and production runtime verification remain
+pending.
 
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
