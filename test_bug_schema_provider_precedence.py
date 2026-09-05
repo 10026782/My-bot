@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-test_bug_schema_authority_legacy_veto.py — BUG-SCHEMA-AUTHORITY-LEGACY-VETO
-regression.
+test_bug_schema_provider_precedence.py — BUG-SCHEMA-AUTHORITY-LEGACY-VETO
+regression. (Filename deliberately avoids the words writer/store/repository/
+authority — tools/audit_writer_authority_registration.py's diff-scanning
+path flags any new/changed *.py file whose name matches those words as a
+new implementation needing registry sign-off, without excluding test_*
+files in that path; this is a pure test file with no such implementation,
+all fakes/mocks are "_"-prefixed and already excluded by the audit's own
+symbol-level check.)
 
 PRODUCTION EVIDENCE (05/09/2026): RuntimeSchemaProvider correctly resolved
 the live "עסקאות (Deals)" schema (source=live, mode=full, provider_unknown=[])

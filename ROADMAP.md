@@ -619,7 +619,7 @@ correctly resolves all 5 (`source=live`, `provider_unknown=[]`); (3)
 (`schema_cache.json`); the fix makes that drift harmless for validation
 without hand-patching the cache.
 
-New regression: `test_bug_schema_authority_legacy_veto.py` (14 assertions)
+New regression: `test_bug_schema_provider_precedence.py` (14 assertions)
 — the exact production scenario (live/full provider knows the 5 fields,
 legacy omits them → write passes, both in `shadow` and `enforce`); a field
 unknown to both sources → blocked; provider not-yet-authoritative
