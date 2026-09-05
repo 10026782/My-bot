@@ -287,10 +287,21 @@ def check_route_regressions() -> list[str]:
                 f"tool for this intent again."
             )
             continue
-        if "certain" not in tool_gates[name]:
+        # BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER (05/09/2026): CREATE_DEAL's
+        # gate deliberately checks .domain_resolved instead of .certain — a
+        # missing Deal Name alone must still reach Handler.TOOL and the
+        # Commercial Completion writer's own per-field CLARIFY, not a
+        # router-level generic message (see DeterministicDealParse's own
+        # docstring in core/router/router.py). Either flag is an accepted,
+        # equally-safe deterministic-parse gate; a literal-"certain"-only
+        # check would falsely flag this intentional, narrower-but-correct
+        # substitute as a regression. What this guard must still catch is a
+        # gate with NO deterministic-parse flag at all (e.g. reduced to a
+        # bare `intent == Intent.X`), which neither name would satisfy.
+        if not any(flag in tool_gates[name] for flag in ("certain", "domain_resolved")):
             failures.append(
                 f"Intent.{name}'s Handler.TOOL gate no longer checks a "
-                f"deterministic parse's .certain flag."
+                f"deterministic parse's .certain/.domain_resolved flag."
             )
         if name not in clarify_gates:
             failures.append(

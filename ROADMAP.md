@@ -300,11 +300,69 @@ matching; `update_task`/`complete_task` and the general Agent-routed case
 are intentionally left out of scope (no equivalent standalone deterministic
 parser without a larger routing refactor). Regression:
 `test_bug_s2c_stale_session_fresh_command_escape.py`, driven against the
-exact reported message (9 assertions); `test_bug_s2c_cancel_escape.py` (18
-assertions) still passes unchanged. PR #1206, branch
-`fix/s2c-stale-session-fresh-command-escape`. `CODE_DONE / STATIC_VERIFIED`
-— review, merge, deploy, and production runtime verification remain
-pending.
+exact reported message; `test_bug_s2c_cancel_escape.py` (18 assertions)
+still passes unchanged. Expanded further the same day into the full
+39-assertion acceptance matrix after the owner's own test-case request
+caught a SECOND bug in the same area: the confirm-to-create offer's "לא"
+decline was being intercepted by this same outer cancel-word check and
+cancelling the entire Deal flow instead of just declining the offer (the
+router's own narrower, already-correct decline design) — fixed by
+excluding `_CREATE_DECLINE_WORDS` from the outer cancel branch while a
+nested-create confirm is genuinely pending. PR #1206 merged to `main`
+(`8e60cbc6`, 05/09/2026; post-merge symbol verification via `git fetch
+origin main` + grep against `origin/main`, per this repo's post-merge
+protocol). `CODE_DONE / STATIC_VERIFIED` — deployment and production
+runtime verification remain pending.
+
+### CREATE_DEAL optional "בשם" name marker — 05/09/2026 (production-reported)
+
+Production report: "צור עסקה ניהול משרד גיוס בבורסה תחום גיוס" and "פתח
+עסקה ניהול משרד בתחום גיוס" — `route_request()` already classified both as
+`Intent.CREATE_DEAL` with domain=recruitment at 0.95 confidence, but
+`parse_deterministic_create_deal()`'s structured regex required the
+literal marker "בשם" before the Deal name in either field order; neither
+production message uses it, so the parser never matched at all
+(matched=False) and both CLARIFIED with a generic "not sure about the name
+or the domain" message — even though the domain was never in question.
+
+Owner directive: fix the extraction CONTRACT, not one more regex variant
+for "no בשם." Rewrote `parse_deterministic_create_deal()` from a single
+anchored fullmatch regex into an explicit strip-based algorithm: match the
+mandatory command prefix, locate and remove the domain clause (`ב?תחום
+<word>`, wherever it sits — field order is not fixed), strip an optional
+trailing self-ownership suffix and an optional bare "בשם" marker, and
+treat whatever text remains as the Deal Name — never a second phrasing-
+specific pattern again. A genuinely empty remainder (e.g. "צור עסקה בתחום
+יבוא", no name text anywhere) is now a distinct, real state — domain
+confidently resolved, name genuinely absent — rather than "unparseable."
+
+`DeterministicDealParse` gained a `domain_resolved` property (matched, not
+uncertain, domain present — independent of whether a name was also found)
+that both `route_request()`'s CREATE_DEAL gates and app.py's own
+create_deal handling now use instead of `certain` (which still requires
+both, unchanged, for callers needing the complete pair). Once the domain
+is confidently known, Handler.TOOL fires and the Commercial Completion
+writer starts with that domain already seeded — a missing Deal Name is
+asked for by the writer's own per-field CLARIFY ("מה שם העסקה?") exactly
+like any other missing field, never a router-level generic message and
+never a repeated domain question. The S2C stale-session escape hatch
+above (BUG-S2C-STALE-SESSION-SWALLOWS-NEW-COMMAND) was updated to the same
+`domain_resolved` gate for consistency.
+
+Every existing extraction invariant in
+`test_bug_crm_bypass_create_deal_deterministic_route.py` (order-
+independence, the self-ownership suffix, the named-owner-in-domain guard,
+the English-slug identity mapping, the unrecognized-domain fail-closed
+path, both live canaries) passes unchanged except the one assertion the
+new contract deliberately supersedes (a name-missing message used to
+assert "no structural match at all"; it now asserts "domain resolved,
+name genuinely missing" instead — updated in place, comment explains why).
+New regression: `test_bug_crm_bypass_deal_optional_name_marker.py` (20
+assertions) — the exact production strings, the four "בשם"-optional
+shapes named in the fix request, the missing-name end-to-end CLARIFY, and
+confirmation that the resolved domain is never re-asked. Branch
+`fix/deal-optional-name-marker`. `CODE_DONE / STATIC_VERIFIED` — review,
+merge, deploy, and production runtime verification remain pending.
 
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
