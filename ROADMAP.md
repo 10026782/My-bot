@@ -474,6 +474,100 @@ the first 7 default-order rows is still found via the SEARCH() formula;
 blank query fails closed. `CODE_DONE / STATIC_VERIFIED` — review, merge,
 deploy, and production runtime verification pending.
 
+### DIAMOND PATH parent orphaned on nested-child queue — 05/09/2026 (production-verified)
+
+Production report, "PRODUCTION VERIFIED" (owner): with both prior DIAMOND
+PATH fixes above live, a full nested Contact creation finally succeeded
+end to end — "אבי חזן" was created with phone 0547993438 — but the PARENT
+Deal ("ניהול משרד 3") that was waiting on it was never created at all. The
+nested child succeeded; the parent silently vanished, with zero further
+conversation, so the gap was invisible until someone checked whether the
+Deal actually existed.
+
+Root cause: `app.py`'s S2C resume block (the ONLY call site of
+`CommercialCompletionRouter.answer_human()`, inside `run_agent()`'s
+`_persisted_completion` branch) unconditionally called
+`_ls.clear_commercial_completion(chat_id)` on any non-CLARIFY/non-BLOCK
+("TOOL") outcome — with no check for whether that TOOL outcome was for the
+ROOT completion or for a NESTED child. `commercial_completion_routing.py`'s
+own `_inspect()` deliberately does NOT pop the completed nested frame when
+it queues it (it only marks it with a `_pending_approval_nonce` and keeps
+it in `session.frames`) — specifically so the PARENT frame underneath
+stays parked in `session_store` for `_resolve_diamond_path_continuation()`
+to resume once the nested child's OWN approval resolves. Clearing the
+completion in the S2C block — in the SAME turn the phone number was
+answered, before the owner had even tapped the Contact's approval button —
+wiped out the parked parent forever. When the Contact was later approved,
+`_resolve_diamond_path_continuation()`'s `get_commercial_completion()` call
+found nothing (already cleared), returned `None`, and the parent Deal was
+never resumed, queued, or created.
+
+No existing test caught this: every prior test either drove
+`_resolve_diamond_path_continuation()` against a hand-built "already
+correctly parked" state (bypassing the S2C block entirely — see
+`test_diamond_path_approval_continuation.py`), or drove the CREATE_CONFIRM
+precedence fix only as far as the CLARIFY-for-phone step, never actually
+reaching a nested TOOL/queued outcome through `app.py`'s real code (see
+`test_bug_diamond_create_confirm_precedence.py`).
+
+Fix: the S2C resume block now checks `len(_completion_result.session.
+frames) > 1` on a TOOL outcome — persists (never clears) when a nested
+continuation is still pending underneath, exactly like a CLARIFY session;
+only clears when the completed frame was genuinely the root's own. No
+change to Contact lookup/writer/session architecture, ActionGateway
+approval semantics, or `_resolve_diamond_path_continuation()` itself — this
+is continuation-to-parent promotion only, at the one site that was
+prematurely discarding it.
+
+New regression: `test_bug_diamond_parent_orphaned_on_nested_queue.py` (14
+assertions) — drives the REAL `app.py` S2C block through all three turns
+("כן" begins nested Contact → phone completes it and queues it, asserting
+the parent stays parked with both frames intact → the Contact's approval
+resolves via `_resolve_diamond_path_continuation()`, asserting the parent
+Deal is itself queued for approval through the same `queue()` boundary and
+the parked completion is *then* cleared). Also asserts: no duplicate
+Contact, no duplicate Deal, one final reply per turn, and the Agent is
+never invoked. Verified to fail (parent orphaned, next turn hits a
+`NameError` since nothing was ever persisted to resume) with the fix
+reverted, confirming the test catches the actual bug. `CODE_DONE /
+STATIC_VERIFIED` — review, merge, deploy, and production runtime
+verification pending.
+
+### DIAMOND PATH generic completion description — 05/09/2026 (production-reported)
+
+Production report (owner), on the very next turn after the parent-orphan
+fix above: after supplying a phone number to complete a DIAMOND PATH
+nested Contact creation, the completion message read `הפעולה הושלמה: הפעולה
+המבוקשת` ("The action was completed: the requested action") — a useless
+generic fallback. Owner's own words: "כשהוא מודיע מה הושלם עדיף שיודיע
+בדיוק מה הושלם ולא נצטרך לנחש" (when it announces what was completed,
+better it announce exactly what, so we don't have to guess).
+
+Root cause: `core/action_gateway.py`'s `_safe_contract_business_description()`
+maps only a small allowlist of tool names to a specific Hebrew business
+description — `crm_create_deal`'s own entry there already carries a
+comment noting this exact class of gap was fixed once before for
+`crm_create_payment_term`/`crm_create_payment`, but the four Commercial V2
+primitives added since (`crm_find_or_create_contact`,
+`crm_find_or_create_organization`, `crm_create_charge`,
+`crm_create_charge_payment`) were never backfilled, so all four still fell
+through to the generic fallback on every pending/completed/rejected
+approval message.
+
+Fix: added a specific description branch for each of the four tool names
+— Contact/Organization name when present, Charge/Charge-Payment amount
+when present — matching the existing style (business language, never a
+raw table/field name).
+
+New regression: `test_bug_diamond_completion_generic_description.py` (9
+assertions) — the exact production case (`crm_find_or_create_contact`
+names the Contact, in both `pending` and `completed` lifecycle states),
+the three sibling primitives, a blank-payload fallback to the entity label
+(never a raw field name), and confirmation that a genuinely unmapped tool
+name is unaffected (still the generic fallback). `CODE_DONE /
+STATIC_VERIFIED` — review, merge, deploy, and production runtime
+verification pending.
+
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
 Production incident, reported live by the owner immediately after PR #1201

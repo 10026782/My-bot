@@ -1313,6 +1313,25 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
     elif tool_name == "crm_create_payment":
         amount = payload.get("amount")
         description = "יצירת תשלום" + (f": {amount}" if amount not in (None, "") else "")
+    elif tool_name == "crm_find_or_create_contact":
+        # BUG-DIAMOND-GENERIC-COMPLETION-DESCRIPTION (production-reported,
+        # 05/09/2026): a DIAMOND PATH nested Contact create's own approval-
+        # lifecycle message ("הפעולה הושלמה: ...") fell through to the same
+        # generic "הפעולה המבוקשת" fallback crm_create_deal's fix above
+        # already closed for its own flat-kwargs shape — this primitive's
+        # payload ({"name":..., "phone":..., ...}) was simply never added
+        # when it was introduced.
+        contact_name = str(payload.get("name") or "").strip()
+        description = "איתור/יצירת איש קשר" + (f": {contact_name}" if contact_name else "")
+    elif tool_name == "crm_find_or_create_organization":
+        organization_name = str(payload.get("organization_name") or "").strip()
+        description = "איתור/יצירת ארגון" + (f": {organization_name}" if organization_name else "")
+    elif tool_name == "crm_create_charge":
+        amount = payload.get("amount")
+        description = "יצירת חיוב" + (f": {amount}" if amount not in (None, "") else "")
+    elif tool_name == "crm_create_charge_payment":
+        amount = payload.get("amount")
+        description = "רישום תשלום על חיוב" + (f": {amount}" if amount not in (None, "") else "")
     else:
         description = "הפעולה המבוקשת"
 
