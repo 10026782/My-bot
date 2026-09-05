@@ -533,6 +533,41 @@ reverted, confirming the test catches the actual bug. `CODE_DONE /
 STATIC_VERIFIED` — review, merge, deploy, and production runtime
 verification pending.
 
+### DIAMOND PATH generic completion description — 05/09/2026 (production-reported)
+
+Production report (owner), on the very next turn after the parent-orphan
+fix above: after supplying a phone number to complete a DIAMOND PATH
+nested Contact creation, the completion message read `הפעולה הושלמה: הפעולה
+המבוקשת` ("The action was completed: the requested action") — a useless
+generic fallback. Owner's own words: "כשהוא מודיע מה הושלם עדיף שיודיע
+בדיוק מה הושלם ולא נצטרך לנחש" (when it announces what was completed,
+better it announce exactly what, so we don't have to guess).
+
+Root cause: `core/action_gateway.py`'s `_safe_contract_business_description()`
+maps only a small allowlist of tool names to a specific Hebrew business
+description — `crm_create_deal`'s own entry there already carries a
+comment noting this exact class of gap was fixed once before for
+`crm_create_payment_term`/`crm_create_payment`, but the four Commercial V2
+primitives added since (`crm_find_or_create_contact`,
+`crm_find_or_create_organization`, `crm_create_charge`,
+`crm_create_charge_payment`) were never backfilled, so all four still fell
+through to the generic fallback on every pending/completed/rejected
+approval message.
+
+Fix: added a specific description branch for each of the four tool names
+— Contact/Organization name when present, Charge/Charge-Payment amount
+when present — matching the existing style (business language, never a
+raw table/field name).
+
+New regression: `test_bug_diamond_completion_generic_description.py` (9
+assertions) — the exact production case (`crm_find_or_create_contact`
+names the Contact, in both `pending` and `completed` lifecycle states),
+the three sibling primitives, a blank-payload fallback to the entity label
+(never a raw field name), and confirmation that a genuinely unmapped tool
+name is unaffected (still the generic fallback). `CODE_DONE /
+STATIC_VERIFIED` — review, merge, deploy, and production runtime
+verification pending.
+
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
 Production incident, reported live by the owner immediately after PR #1201
