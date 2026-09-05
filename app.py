@@ -4747,7 +4747,29 @@ def run_agent(
                     chat_id, serialize_completion_session(_completion_result.session)
                 )
             return _completion_result.reason or "לא ניתן להשלים את הפעולה בצורה בטוחה כרגע."
-        _ls.clear_commercial_completion(chat_id)
+        # outcome == "TOOL"
+        # BUG-DIAMOND-PARENT-ORPHANED-ON-NESTED-QUEUE (production-verified,
+        # 05/09/2026): a TOOL outcome here can mean two different things —
+        # the ROOT completion (e.g. the Deal itself) finished, or a NESTED
+        # child (e.g. a DIAMOND PATH confirm-to-create Contact) just
+        # finished and was queued for ITS OWN approval while the PARENT
+        # frame underneath is still incomplete (session.frames still has
+        # more than one entry — see commercial_completion_routing.py's
+        # _inspect(), which marks but never pops the completed nested frame
+        # for exactly this reason). Unconditionally clearing here — as this
+        # code used to — wiped out the parked parent before the nested
+        # child's approval callback ever ran, so
+        # _resolve_diamond_path_continuation() found nothing to resume once
+        # the Contact was approved: the child got created, the parent Deal
+        # never did, silently. Only clear when this was the ROOT's own
+        # completion; a pending nested continuation must stay parked for
+        # the approval callback to resume, exactly like a CLARIFY session.
+        if _completion_result.session is not None and len(_completion_result.session.frames) > 1:
+            _ls.set_commercial_completion(
+                chat_id, serialize_completion_session(_completion_result.session)
+            )
+        else:
+            _ls.clear_commercial_completion(chat_id)
         return _finalize_deterministic_queue_outcome(
             _completion_result.queue_outcome or {}, chat_id, _out_meta,
             "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
