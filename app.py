@@ -59,6 +59,7 @@ from config          import get_domain as _channel_domain
 from core.router     import (
     route_request, RouteDecision, Handler, deterministic_create_task_title,
     parse_deterministic_create_task, parse_deterministic_create_deal,
+    parse_deterministic_commercial_completion,
 )
 from core.router.deterministic_denial import check_deterministic_denial
 from core import create_execution_context, create_operation
@@ -4604,6 +4605,31 @@ def run_agent(
             if _out_meta is not None:
                 _out_meta["source_module"] = "action_gateway"
             return "❌ הפעולה בוטלה. אפשר להתחיל מחדש בכל עת."
+        # BUG-S2C-STALE-SESSION-SWALLOWS-NEW-COMMAND (05/09/2026,
+        # production-reported): a bare cancel word above was the only
+        # escape this block ever had. A brand-new, well-formed command
+        # (e.g. "צור משימה בדיקת דגימות...", the exact "צור עסקה בשם ..."
+        # example named but left unhandled in the comment above) was still
+        # force-fed into answer_human() as a literal field answer — which
+        # can never match, and (since DIAMOND PATH's confirm-to-create) can
+        # now trap the user in a [כן]/[לא]-only loop with the stale
+        # session's own leftover text repeating verbatim every turn, no
+        # matter what they type. A message that deterministically parses as
+        # one of the same structured intents this exact function already
+        # special-cases below (create_task, create_deal, or one of the S2C
+        # completion entities) is unambiguously a NEW command, never a
+        # plausible answer to a pending field — clear the stale completion
+        # and fall through to normal routing this turn, exactly
+        # generalizing the cancel-word escape above to a second, precise
+        # (never heuristic/fuzzy) trigger.
+        if (
+            parse_deterministic_create_task(user_text).certain
+            or parse_deterministic_create_deal(user_text).certain
+            or parse_deterministic_commercial_completion(user_text).certain
+        ):
+            _ls.clear_commercial_completion(chat_id)
+            _persisted_completion = None
+    if _persisted_completion:
         if _out_meta is not None:
             _out_meta["source_module"] = "action_gateway"
         _completion_router = CommercialCompletionRouter(
