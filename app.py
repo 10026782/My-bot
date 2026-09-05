@@ -4084,6 +4084,43 @@ def _action_result_to_a32_entry(result) -> "dict | None":
     }
 
 
+def _has_pending_nested_create_confirm(chat_id: str) -> bool:
+    """True while a DIAMOND PATH CREATE_CONFIRM offer ("ליצור X חדש?
+    [כן]/[לא]") is genuinely pending for this chat — i.e. the persisted
+    commercial_completion session's active frame still carries the
+    `_ux_pending_nested_create` marker set by
+    commercial_completion_routing.py's own resolve_human_link() "create"
+    branch.
+
+    BUG-DIAMOND-CREATE-CONFIRM-PRECEDENCE (05/09/2026, production-reported):
+    a bare "כן"/"לא" answering this state-local offer is also a member of
+    this file's blanket _CONFIRM_WORDS/_CANCEL_WORDS sets, and PR2's own
+    deterministic-approval fast path (_resolve_pr2_deterministic_approval,
+    called further below) intercepts EVERY bare confirm/cancel word before
+    the S2C block ever restores the persisted completion session — with no
+    live ActionGateway contract to route to, it answers the canonical
+    "אין פעולה שממתינה לאישור", and the offer (typed OR the inline button,
+    which itself replies with this same literal text via run_agent()) is
+    silently swallowed. Same self-fetching-Sessions-read pattern as
+    should_prefer_lead_draft() below (only invoked when the text is already
+    confirm/cancel-word shaped, so the common case stays at its existing
+    read count) — a genuinely pending nested-create confirm must win this
+    race exactly like a pending lead-draft review does, per the standing
+    invariant: state-local confirmation outranks global approval/cancel
+    semantics.
+    """
+    try:
+        from session_store import lead_sessions as _ls_pending_probe
+        state = _ls_pending_probe.get_commercial_completion(chat_id)
+    except Exception:
+        return False
+    if not state:
+        return False
+    frames = state.get("frames") or [{}]
+    last_frame = frames[-1] if frames else {}
+    return bool((last_frame or {}).get("current_values", {}).get("_ux_pending_nested_create"))
+
+
 def _resolve_pr2_deterministic_approval(
     *, user_text: str, identity, live_contracts: list, out_meta: dict | None,
 ) -> str | None:
@@ -4508,7 +4545,13 @@ def run_agent(
     _pr2_confirm_probe = user_text.strip().lower()
     if _pr2_confirm_probe in _CONFIRM_WORDS or _pr2_confirm_probe in _CANCEL_WORDS:
         from core.lead_candidate_handler import should_prefer_lead_draft as _prefer_draft_pr2
-        _prefer_draft_now = _prefer_draft_pr2(identity.memory_key, chat_id)
+        # BUG-DIAMOND-CREATE-CONFIRM-PRECEDENCE: a pending DIAMOND PATH
+        # CREATE_CONFIRM offer must win this same race a pending lead draft
+        # already does — see _has_pending_nested_create_confirm()'s docstring.
+        _prefer_draft_now = (
+            _prefer_draft_pr2(identity.memory_key, chat_id)
+            or _has_pending_nested_create_confirm(chat_id)
+        )
     else:
         _prefer_draft_now = False
     if not _snapshot_fetch_failed:
