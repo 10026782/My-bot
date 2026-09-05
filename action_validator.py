@@ -44,6 +44,7 @@ _REQUIRED: dict[str, list[str]] = {
     "crm_create_payment_term":   ["deal_id", "calc_type"],
     "crm_create_payment":        ["amount", "domain", "owner_id"],
     "crm_find_or_create_organization": ["organization_name"],
+    "crm_find_or_create_contact": ["name"],
     "crm_create_charge": [
         "deal_id", "direction", "amount", "currency", "status",
         "collection_state", "vat_rule", "document_requirement", "document_status",
@@ -90,7 +91,8 @@ _SENSITIVE_TOOLS = {
     "crm_add_contact", "crm_add_deal", "crm_add_payment",
     "crm_update_deal_status", "crm_mark_payment_paid",
     "crm_create_deal", "crm_create_payment_term", "crm_create_payment",
-    "crm_find_or_create_organization", "crm_create_charge", "crm_create_charge_payment",
+    "crm_find_or_create_organization", "crm_find_or_create_contact",
+    "crm_create_charge", "crm_create_charge_payment",
 }
 
 _ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?$")

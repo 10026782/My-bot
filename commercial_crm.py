@@ -49,7 +49,7 @@ from airtable_schema import (
     VATRule,
 )
 import crm
-from tools.airtable_gateway import airtable_create
+from tools.airtable_gateway import airtable_create, escape_formula_value
 from tools.airtable_read_adapter import get_record_fields, list_records
 from tools.airtable_tools import _tool_result
 
@@ -229,8 +229,9 @@ def lookup_human_reference(
     a partner is restricted to their allowed_domains (or blocked outright for
     tables that gate has no domain field for, e.g. Contacts), an external
     client/supplier is restricted to their tenant_id, and an internal
-    owner/manager/employee passes through unfiltered exactly as it does for
-    every other read. Missing identity, an unresolvable scope, or a
+    owner/manager/employee passes through with only the query's own SEARCH()
+    filter (no additional tenant/domain filter — same as every other internal
+    read). Missing identity, an unresolvable scope, a blank query, or a
     TenantScopeViolation all fail closed to no results — never the full
     table.
     """
@@ -246,14 +247,28 @@ def lookup_human_reference(
     }
     table = table_by_entity.get(entity)
     field_name = field_by_entity.get(entity)
-    if not table or not field_name or not scope or limit < 1 or identity is None:
+    needle = " ".join(str(query or "").casefold().split())
+    if not table or not field_name or not scope or limit < 1 or identity is None or not needle:
         return []
     from tools.airtable_security import TenantScopeViolation, enforce_tenant_scope
+    # BUG-DIAMOND-CONTACT-SEARCH-BOUNDED (production-reported, 05/09/2026):
+    # this used to send no query to Airtable at all — for an internal
+    # identity enforce_tenant_scope() applies no filter, so the call fetched
+    # only the first `limit + 1` records in default table order and matched
+    # client-side; a real contact past those first rows was invisible no
+    # matter how exact the name match was. A SEARCH() pre-filter (same
+    # combining mechanism every other enforce_tenant_scope() call site
+    # already relies on — AND'd with any tenant/domain filter, never
+    # replacing it) now makes the actual query constrain what Airtable
+    # returns; the client-side casefold/whitespace-normalized exact match
+    # below remains the authoritative disambiguator, unchanged.
+    search_formula = f"SEARCH('{escape_formula_value(needle)}', LOWER({{{field_name}}}))"
     try:
-        secured_params = enforce_tenant_scope("airtable_get", identity, {"table": table})
+        secured_params = enforce_tenant_scope(
+            "airtable_get", identity, {"table": table, "filterByFormula": search_formula},
+        )
     except TenantScopeViolation:
         return []
-    needle = " ".join(str(query or "").casefold().split())
     records = list_records(
         table, secured_params.get("filterByFormula", ""),
         max_records=limit + 1, fields=[field_name], paginate=False,
