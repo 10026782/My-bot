@@ -179,12 +179,48 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
     else:
         provider_unknown = _provider_unknown_fields(table, clean)
         if state == "shadow":
-            unknown = legacy_unknown
+            # BUG-SCHEMA-AUTHORITY-LEGACY-VETO (production-verified,
+            # 05/09/2026): legacy schema_cache.json is refreshed on its own
+            # separate cadence and can lag behind live Airtable schema
+            # changes. This branch used to set `unknown = legacy_unknown`
+            # unconditionally — so a stale legacy cache silently vetoed
+            # fields the live/cached-live RuntimeSchemaProvider had already
+            # fully verified exist (production: source=live mode=full
+            # provider_unknown=[], yet the write was blocked on 5 fields
+            # legacy_unknown flagged). The discrepancy WAS logged, but the
+            # "(not blocking — shadow state)" wording was misleading —
+            # legacy's own block still went through untouched.
+            #
+            # Fix: when RuntimeSchemaProvider is authoritative for this
+            # table (mode="full" AND source in "live"/"cached" — a fresh
+            # Meta API fetch or a still-valid last-good in-memory result),
+            # legacy may no longer independently veto a field the
+            # authoritative schema already confirmed exists — only fields
+            # BOTH sources fail to recognize are blocked (fail closed only
+            # when the authoritative schema can't establish the field
+            # either). When the provider is NOT yet authoritative for this
+            # table (name_only seed, or the PR3B.1 snapshot-archive tier —
+            # both lower-confidence fallbacks), the existing safe fallback
+            # is unchanged: legacy_unknown alone decides.
+            #
+            # This deliberately does NOT flip the other direction: shadow
+            # still never blocks a field solely because the provider
+            # rejects one that legacy allows (that stronger, riskier action
+            # stays reserved for "enforce" — see
+            # test_runtime_schema_provider.py's pre-existing
+            # _CONTRACT_MISSING_SCORE shadow/enforce contract, which this
+            # fix must not regress).
+            authoritative = _provider_table_authoritative(table)
+            if authoritative:
+                unknown = [u for u in legacy_unknown if u in provider_unknown]
+            else:
+                unknown = legacy_unknown
             if set(provider_unknown) != set(legacy_unknown):
                 logger.warning(
                     "[RuntimeSchemaProvider:SHADOW] discrepancy table=%s legacy_unknown=%s "
-                    "provider_unknown=%s (not blocking — shadow state)",
-                    table, legacy_unknown, provider_unknown,
+                    "provider_unknown=%s authoritative=%s (blocking only fields both "
+                    "sources fail to recognize)",
+                    table, legacy_unknown, provider_unknown, authoritative,
                 )
         else:  # "enforce"
             unknown = provider_unknown
@@ -228,6 +264,22 @@ def _provider_unknown_fields(table: str, fields: dict) -> list[str]:
     contract = get_provider().get_table_contract(table)
     known = contract["fields"].keys()
     return [k for k in fields if k not in known]
+
+
+def _provider_table_authoritative(table: str) -> bool:
+    """
+    True when RuntimeSchemaProvider's contract for `table` is confidently
+    resolved: mode="full" AND source in ("live", "cached") — tiers 1-2 of
+    the provider's fallback chain (a fresh Meta API fetch, or a still-valid
+    last-good in-memory result). source="snapshot"/"seed" (tiers 3-4,
+    degraded fallbacks reached only when live/cached both failed) are
+    deliberately excluded — those are lower-confidence than a genuinely
+    live/cached-live schema and must not gain veto power over the existing
+    safe (legacy-driven) fallback. See BUG-SCHEMA-AUTHORITY-LEGACY-VETO.
+    """
+    from core.runtime_schema_provider import get_provider
+    contract = get_provider().get_table_contract(table)
+    return contract["mode"] == "full" and contract["source"] in ("live", "cached")
 
 
 def _provider_invalid_select_values(table: str, fields: dict) -> dict[str, tuple[object, list[str]]]:
