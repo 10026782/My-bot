@@ -86,9 +86,23 @@ chk("explicit named owner -> uncertain, NEVER a corrupted domain field "
     _named_owner.matched and _named_owner.uncertain
     and _named_owner.name is None and _named_owner.domain is None)
 
-_missing_domain = parse_deterministic_create_deal("צור עסקה בתחום יבוא")
-chk("missing 'בשם' clause -> no structural match at all (falls through to normal routing)",
-    not _missing_domain.matched and not _missing_domain.certain)
+# BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER (05/09/2026): this used to
+# assert "no structural match at all" -- back when "בשם" was a mandatory
+# anchor, a message with no name at all didn't fit the fullmatch regex
+# either. Now that "בשם" is optional, this text ("צור עסקה בתחום יבוא", no
+# name text anywhere) genuinely is a domain-only Deal creation attempt:
+# domain resolves confidently, and the Deal Name is genuinely missing --
+# distinct from "unparseable" (matched=False) or "domain itself unresolved"
+# (uncertain=True). domain_resolved must be True so the Commercial
+# Completion writer starts with the known domain and asks for the Deal
+# Name next via its own per-field CLARIFY, never a router-level generic
+# "name or domain?" message.
+_missing_name = parse_deterministic_create_deal("צור עסקה בתחום יבוא")
+chk("Deal Name genuinely missing (no 'בשם' clause, nothing else in the "
+    "text) -> domain still resolves, name is None, not certain",
+    _missing_name.matched and not _missing_name.uncertain
+    and _missing_name.domain_resolved and not _missing_name.certain
+    and _missing_name.domain == "import" and _missing_name.name is None)
 
 _loose = parse_deterministic_create_deal("צריך לפתוח עסקה חדשה איתו")
 chk("loose/unstructured phrasing -> no match", not _loose.matched)

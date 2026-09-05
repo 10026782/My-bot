@@ -253,24 +253,38 @@ def deterministic_create_task_title(text: str) -> str | None:
 # generic-write interception layer instead of keeping the agent out of the
 # decision. Turn Coordinator already solved this for Task creation (see
 # _STRUCTURED_CREATE_TASK_RE above) — this mirrors that exact pattern
-# instead of inventing a new one: same anchored-fullmatch strictness, same
-# certain/uncertain split, same "unstructured phrasing falls through to the
-# existing risk-based route" behavior (Task's own gate is equally narrow —
-# see its own comment above route_request()'s wiring).
-_STRUCTURED_CREATE_DEAL_RE = re.compile(
-    # BUG-CRM-BYPASS-DEAL-DOMAIN-PREFIX (live production, 04/09/2026): the
-    # ב-prefix on "בתחום" used to be mandatory, so the owner's own natural
-    # phrasing -- "...שם X תחום Y" (no ב) -- silently missed this regex
-    # (matched=False) and CLARIFIED with a message that itself only offers
-    # the "בתחום" form, leaving no way to retype into something that would
-    # work. "ב?תחום" accepts both; this does not reopen BUG-CRM-BYPASS-
-    # DEAL-AGENT-FALLTHROUGH (canary #7, the English word "domain") -- that
-    # phrasing still fails to match and CLARIFIES, unaffected by this change.
+# instead of inventing a new one: same certain/uncertain split, same
+# "unstructured phrasing falls through to the existing risk-based route"
+# behavior (Task's own gate is equally narrow — see its own comment above
+# route_request()'s wiring).
+#
+# BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER (live production, 05/09/2026):
+# this used to be a single anchored fullmatch regex requiring the literal
+# marker "בשם" before the Deal name, in either field order ("...בשם X
+# בתחום Y" / "...בתחום Y בשם X"). Real owner phrasing regularly omits it
+# entirely ("צור עסקה X בתחום Y", "פתח עסקה X תחום Y") — every such message
+# still classified as Intent.CREATE_DEAL with high confidence and a
+# correctly resolved domain, but the structured parser simply didn't match
+# at all (matched=False) and CLARIFIED with a message that doesn't even
+# mention the real gap. One more regex variant for "בשם" specifically
+# optional would just be the next name in this same bug's history — fixed
+# instead by replacing the whole extraction with a strip-based contract:
+# match the mandatory command prefix, locate and remove the domain clause
+# (wherever it sits — field order is not fixed), remove an optional
+# trailing self-ownership suffix and an optional "בשם" marker if either is
+# present, and treat whatever text remains as the Deal Name — never a
+# second per-phrasing regex again.
+_CREATE_DEAL_PREFIX_RE = re.compile(
     r"^\s*(?:פתח|תפתח|צור|תיצור|הוסף|תוסיף)\s+עסק(?:ה|ת)\s+"
-    r"(?:בשם\s+(?P<name_a>.+?)\s+ב?תחום\s+(?P<domain_a>.+?)"
-    r"|ב?תחום\s+(?P<domain_b>.+?)\s+בשם\s+(?P<name_b>.+?))"
-    r"(?:\s+בבעלותי)?\s*$"
 )
+# BUG-CRM-BYPASS-DEAL-DOMAIN-PREFIX (live production, 04/09/2026): "ב?תחום"
+# accepts both "בתחום Y" and the owner's own natural "תחום Y" (no ב-prefix).
+# \S+ deliberately captures a single token — every canonical domain word in
+# this vocabulary (Hebrew or the English slug) is one token; a wider .+?
+# capture would risk swallowing part of the Deal Name instead.
+_DEAL_DOMAIN_CLAUSE_RE = re.compile(r"ב?תחום\s+(?P<domain_word>\S+)")
+_DEAL_TRAILING_SELF_OWNER_RE = re.compile(r"\s+בבעלותי\s*$")
+_DEAL_NAME_MARKER_RE = re.compile(r"(?:^|\s)בשם(?:\s|$)")
 
 
 @dataclass(frozen=True)
@@ -281,8 +295,24 @@ class DeterministicDealParse:
     uncertain: bool = False
 
     @property
+    def domain_resolved(self) -> bool:
+        """True once the domain half of this parse is confidently resolved,
+        independent of whether a Deal name was also found. The Commercial
+        Completion router's own per-field CLARIFY already asks for a
+        missing name exactly like it asks for any other missing Deal
+        field (deal_type, currency, ...) once the writer is started with
+        whatever WAS extracted — a missing name alone must never fall back
+        to a router-level generic message or, worse, Handler.AGENT, both
+        of which this property gates (see route_request()'s CREATE_DEAL
+        branches and app.py's own create_deal handling)."""
+        return self.matched and not self.uncertain and bool(self.domain)
+
+    @property
     def certain(self) -> bool:
-        return self.matched and not self.uncertain and bool(self.name) and bool(self.domain)
+        """Both name AND domain confidently extracted — used only where a
+        caller needs the complete pair in one shot (e.g. a fingerprint
+        basis); routing decisions use domain_resolved instead, see above."""
+        return self.domain_resolved and bool(self.name)
 
     # BUG-CRM-BYPASS-FINGERPRINT-PARITY (live production regression,
     # 01-02/09/2026): a business_identity() method used to live here,
@@ -309,23 +339,51 @@ class DeterministicDealParse:
 
 def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
     normalized = _normalize_create_task_input(text)  # generic reply/quote-wrapper stripping, not Task-specific
-    match = _STRUCTURED_CREATE_DEAL_RE.fullmatch(normalized)
-    if not match:
+    prefix_match = _CREATE_DEAL_PREFIX_RE.match(normalized)
+    if not prefix_match:
         return DeterministicDealParse()
-    name = (match.group("name_a") or match.group("name_b") or "").strip()
-    domain_raw = (match.group("domain_a") or match.group("domain_b") or "").strip()
-    if not name or not domain_raw:
+    rest = normalized[prefix_match.end():]
+
+    # A trailing self-ownership marker can sit after either the name or the
+    # domain clause depending on field order -- remove it once, up front,
+    # so the domain-clause/name-marker stripping below stays order-
+    # independent instead of needing to handle it in two places.
+    rest = _DEAL_TRAILING_SELF_OWNER_RE.sub("", rest)
+
+    domain_match = _DEAL_DOMAIN_CLAUSE_RE.search(rest)
+    if not domain_match:
+        # No domain clause anywhere in the text -- this doesn't fit the
+        # structured template closely enough to extract anything from;
+        # never guess a domain. (Canary #7, live production 02/09/2026:
+        # "...domain import" uses the English word "domain" instead of
+        # "תחום"/"בתחום" and must keep failing to match here, unchanged by
+        # this rewrite -- verified by its own regression test below.)
+        return DeterministicDealParse()
+    domain_raw = domain_match.group("domain_word")
+    # Remove the domain clause (marker + word) from the remaining text,
+    # regardless of where it sits -- "...בשם X בתחום Y" and "...בתחום Y
+    # בשם X" both occur in real owner phrasing (BUG-CRM-BYPASS follow-up's
+    # own "reversed field order" regression test).
+    remainder = (rest[:domain_match.start()] + " " + rest[domain_match.end():]).strip()
+
+    # "בשם" is an OPTIONAL marker, not a required structural anchor
+    # (BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER) -- strip a bare "בשם"
+    # token wherever it sits in what's left. Whatever remains after that is
+    # the Deal Name candidate, full stop -- never a second per-phrasing
+    # regex for "no בשם" specifically.
+    remainder = _DEAL_NAME_MARKER_RE.sub(" ", remainder, count=1)
+    remainder = " ".join(remainder.split())
+
+    # An explicit "בעלות <מישהו>" (a named owner other than the caller)
+    # isn't the literal self-ownership suffix "בבעלותי" already stripped
+    # above, so it survives into the remainder here -- without this guard
+    # it would silently become part of the Deal Name instead of being
+    # rejected. Resolving a named owner deterministically is out of scope
+    # (see business_identity()'s docstring above) -- fail to CLARIFY
+    # instead of writing a corrupted field.
+    if "בעלות" in remainder:
         return DeterministicDealParse(matched=True, uncertain=True)
-    # An explicit "בבעלות <מישהו>" (a named owner other than the caller)
-    # isn't the literal self-ownership suffix "בבעלותי" the regex expects,
-    # so it isn't stripped — without this guard it silently gets absorbed
-    # into whichever group's ".+?" reaches the end of string first (usually
-    # domain), corrupting that field instead of being rejected. Resolving a
-    # named owner deterministically is out of scope here (see
-    # business_identity()'s docstring) — fail to CLARIFY instead of writing
-    # a corrupted field.
-    if "בעלות" in name or "בעלות" in domain_raw:
-        return DeterministicDealParse(matched=True, uncertain=True)
+
     # BUG-CRM-BYPASS-DOMAIN-TRANSLATION (live production, 02/09/2026): this
     # used to write domain_raw (the literal Hebrew/English word the caller
     # typed, e.g. "יבוא") straight into crm_create_deal's payload. Airtable's
@@ -336,12 +394,24 @@ def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
     # table Leads already use (core.lead_service.resolve_domain_word / its
     # core.ingress_classifier._DOMAIN_HINT_CANONICAL table) -- one shared
     # vocabulary, never a second guess table. An unrecognized word fails to
-    # CLARIFY, exactly like a missing name/domain above -- never guessed,
+    # CLARIFY, exactly like a corrupted-name case above -- never guessed,
     # never written raw.
     from core.lead_service import resolve_domain_word
     domain = resolve_domain_word(domain_raw)
     if not domain:
         return DeterministicDealParse(matched=True, uncertain=True)
+
+    # A genuinely empty remainder (no "בשם" clause AND nothing else left
+    # after removing the domain clause, e.g. "צור עסקה בתחום יבוא") is a
+    # real, distinct case -- domain confidently resolved, Deal Name simply
+    # never supplied. domain_resolved is True here (matched, not uncertain,
+    # domain present) even though certain is False (name is None) -- the
+    # caller starts the Commercial Completion writer with the domain it
+    # already has and lets the writer's own per-field CLARIFY ask for the
+    # Deal Name next, exactly like any other missing field. Never a
+    # router-level generic "name or domain?" message when domain is
+    # actually known.
+    name = remainder or None
     return DeterministicDealParse(name=name, domain=domain, matched=True)
 
 
@@ -455,13 +525,17 @@ def route_request(
         risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
 
     # BUG-CRM-BYPASS follow-up: same deterministic gate, reused for Deal
-    # creation — see _STRUCTURED_CREATE_DEAL_RE's comment for why this
-    # exists. Structured requests are queued straight to crm_create_deal;
-    # the Agent is never given a choice of tool for this intent.
+    # creation — see parse_deterministic_create_deal()'s own comment for why
+    # this exists. Structured requests are queued straight to
+    # crm_create_deal; the Agent is never given a choice of tool for this
+    # intent. Gated on domain_resolved, not certain: a missing Deal Name
+    # alone must still reach Handler.TOOL and the Commercial Completion
+    # writer's own per-field CLARIFY, never a router-level generic message
+    # or Handler.AGENT (BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER).
     _create_deal_parse = parse_deterministic_create_deal(text)
     if (
         intent == Intent.CREATE_DEAL
-        and _create_deal_parse.certain
+        and _create_deal_parse.domain_resolved
         and identity.role not in ("lead", "guest", "readonly")
     ):
         risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
@@ -578,7 +652,7 @@ def route_request(
     # BUG-CRM-BYPASS-DEAL-AGENT-FALLTHROUGH (live production, 02/09/2026):
     # the condition below used to check only `.uncertain` (matched=True but
     # incomplete), so a message the intent_router still classified as
-    # create_deal but that didn't fit _STRUCTURED_CREATE_DEAL_RE at all
+    # create_deal but that didn't fit the structured template at all
     # (matched=False -- e.g. "domain X" instead of "בתחום X") fell through
     # this whole elif chain untouched and reached Handler.AGENT with normal,
     # unrestricted tool access. The agent then picked the generic
@@ -589,11 +663,15 @@ def route_request(
     # deterministic route, reopened via the one path that was never routed
     # at all. Per the standing architecture decision for this intent (the
     # system routes Deal creation deterministically; the Agent is never
-    # given a tool choice for it), ANY non-certain parse -- uncertain OR
-    # unmatched -- must CLARIFY, never fall through to the Agent. This does
-    # not touch Intent.CREATE_TASK's deliberately different design (broader
-    # task phrasings intentionally stay on the Agent path).
-    elif intent == Intent.CREATE_DEAL and not _create_deal_parse.certain:
+    # given a tool choice for it), ANY parse whose domain isn't confidently
+    # resolved -- uncertain OR unmatched -- must CLARIFY, never fall
+    # through to the Agent. Gated on domain_resolved (not certain): once
+    # domain IS known, a missing Deal Name alone already reached
+    # Handler.TOOL above and never lands here at all -- this branch is
+    # purely the "we can't even trust the domain" case. This does not touch
+    # Intent.CREATE_TASK's deliberately different design (broader task
+    # phrasings intentionally stay on the Agent path).
+    elif intent == Intent.CREATE_DEAL and not _create_deal_parse.domain_resolved:
         handler = Handler.CLARIFY
         tool_allowed = False
         needs_approval = False

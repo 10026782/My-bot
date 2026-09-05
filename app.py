@@ -4654,7 +4654,12 @@ def run_agent(
         # (never heuristic/fuzzy) trigger.
         if (
             parse_deterministic_create_task(user_text).certain
-            or parse_deterministic_create_deal(user_text).certain
+            # domain_resolved, not certain: a fresh "צור עסקה X בתחום Y"
+            # with no Deal Name at all is still unambiguously a NEW command
+            # (route_request() itself would send it to Handler.TOOL — see
+            # BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER), never a plausible
+            # answer to whatever field the stale session was parked on.
+            or parse_deterministic_create_deal(user_text).domain_resolved
             or parse_deterministic_commercial_completion(user_text).certain
         ):
             _ls.clear_commercial_completion(chat_id)
@@ -5317,10 +5322,23 @@ def run_agent(
             "owner": getattr(identity, "user_id", ""),
         }
         if route.intent == "create_deal":
+            # BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER (05/09/2026): gated
+            # on domain_resolved, not certain -- route_request() already
+            # only reaches Handler.TOOL for this intent once the domain is
+            # confidently resolved (see its own CREATE_DEAL branches), so
+            # this early return is purely the "domain itself is unresolved/
+            # ambiguous" case. A missing Deal Name alone must never repeat
+            # here: _current_values below omits "name" when it wasn't
+            # extracted, and the Commercial Completion writer's own
+            # per-field CLARIFY asks for it next, exactly like any other
+            # missing Deal field -- never a second "name or domain?"
+            # message once domain is already known.
             _deal_parse = parse_deterministic_create_deal(user_text)
-            if not _deal_parse.certain:
+            if not _deal_parse.domain_resolved:
                 return "לא בטוח שהבנתי את שם העסקה או את התחום."
-            _current_values.update({"name": _deal_parse.name, "domain": _deal_parse.domain})
+            _current_values["domain"] = _deal_parse.domain
+            if _deal_parse.name:
+                _current_values["name"] = _deal_parse.name
         _completion_result = _completion_router.start(
             _completion_entities[route.intent],
             current_values=_current_values,
