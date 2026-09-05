@@ -568,6 +568,73 @@ name is unaffected (still the generic fallback). `CODE_DONE /
 STATIC_VERIFIED` — review, merge, deploy, and production runtime
 verification pending.
 
+### Schema-validation authority: legacy cache could veto live/full RuntimeSchemaProvider — 05/09/2026 (production-verified)
+
+Production report (owner): a Deal create write on `עסקאות (Deals)` was
+blocked — 5 real, live fields (`Counterparty Contact`, `Deal Type Code`,
+`Relationship Type`, `Currency`, `Commercial Status`) reported as "not in
+schema_cache" — even though the same request's own logs showed
+`RuntimeSchemaProvider` had resolved the table with `source=live mode=full
+provider_unknown=[]`, i.e. the live schema fully recognized all 5 fields.
+
+Root cause: `tools/airtable_gateway.py`'s `validate_airtable_fields()`, in
+the (current production default) "shadow" `FEATURE_AIRTABLE_RUNTIME_SCHEMA_
+PROVIDER_STATE`, computed `unknown = legacy_unknown` unconditionally — so
+the separately-refreshed, stale `schema_cache.json` (confirmed by direct
+inspection: `fetched_at` 2026-09-04, genuinely missing all 5 fields — while
+`airtable_schema.py`'s `DealFields` constants and `commercial_crm.py`'s
+Deal field map already had all 5 correctly, so the drift was isolated to
+the cache snapshot) kept full veto power over fields the authoritative
+live/cached-live provider had already verified exist. The provider/legacy
+discrepancy WAS logged, but its "(not blocking — shadow state)" wording was
+misleading: legacy's own block still went through untouched — a schema-
+*authority* mismatch, not an Airtable live-schema mismatch.
+
+Fix: when `RuntimeSchemaProvider`'s contract for a table is authoritative
+(`mode="full"` AND `source` in `"live"`/`"cached"` — a fresh Meta API fetch
+or a still-valid last-good in-memory result), legacy `schema_cache.json` can
+no longer independently veto a field the authoritative schema already
+confirmed exists — only fields BOTH sources fail to recognize are now
+blocked (fail closed only when the authoritative schema can't establish the
+field either). When the provider is not yet authoritative for a table
+(`mode="name_only"` seed fallback, or the PR3B.1 snapshot-archive tier —
+both lower-confidence tiers), the existing safe fallback is unchanged:
+`legacy_unknown` alone decides, exactly as before this fix. `"off"` and
+`"enforce"` states, and the independent select-value validation gate, are
+untouched. Deliberately does **not** flip the other direction: "shadow"
+still never blocks solely because the provider rejects a field legacy
+allows — that stronger action stays reserved for "enforce" (preserves
+`test_runtime_schema_provider.py`'s pre-existing `_CONTRACT_MISSING_SCORE`
+shadow/enforce contract, re-run and confirmed unchanged).
+
+Read-only parity check (no Airtable mutation) across all 5 layers for the
+reported fields: (1) live Airtable schema — has all 5 (per the production
+`RuntimeSchemaProvider` log itself); (2) `RuntimeSchemaProvider` output —
+correctly resolves all 5 (`source=live`, `provider_unknown=[]`); (3)
+`schema_cache.json` — missing all 5 (confirmed by direct read, `fetched_at`
+2026-09-04); (4) `airtable_schema.py`'s `DealFields` constants — has all 5
+(`COUNTERPARTY_CONTACT`, `DEAL_TYPE_CODE`, `RELATIONSHIP_TYPE`, `CURRENCY`,
+`COMMERCIAL_STATUS`); (5) `commercial_crm.py`'s Deal field map — writes all
+5 via those constants. Drift is isolated entirely to layer 3
+(`schema_cache.json`); the fix makes that drift harmless for validation
+without hand-patching the cache.
+
+New regression: `test_bug_schema_provider_precedence.py` (14 assertions)
+— the exact production scenario (live/full provider knows the 5 fields,
+legacy omits them → write passes, both in `shadow` and `enforce`); a field
+unknown to both sources → blocked; provider not-yet-authoritative
+(`name_only` seed, and the `snapshot` tier specifically, which is
+deliberately excluded from authority) → existing fallback preserved; a
+combined stale-cache scenario (legacy missing real fields, legacy carrying
+a phantom field, one field unknown to both) → no false allow and no false
+block, including confirming the phantom-field case is NOT newly blocked in
+shadow. Verified to fail (7/14) with the fix reverted via `git stash`,
+confirming the test catches the actual bug; pre-existing
+`test_runtime_schema_provider.py` (75 assertions) and
+`test_select_value_validation.py` (18 assertions) re-run unchanged and
+green. `CODE_DONE / STATIC_VERIFIED` — review, merge, deploy, and
+production runtime verification pending.
+
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
 Production incident, reported live by the owner immediately after PR #1201
