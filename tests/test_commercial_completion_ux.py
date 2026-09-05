@@ -71,10 +71,16 @@ def test_lookup_human_reference_owner_sees_matching_record():
         )
 
     assert records[0]["id"] == "recDeal1"
-    # owner/internal identities pass through unfiltered (matches every other
-    # enforce_tenant_scope() call site), so no formula is forced onto the call.
+    # BUG-DIAMOND-CONTACT-SEARCH-BOUNDED regression: an owner/internal
+    # identity gets no *tenant* filter forced onto the call (matches every
+    # other enforce_tenant_scope() call site), but the query itself must
+    # still be sent to Airtable as a SEARCH() filter — the previous
+    # behavior of sending an unfiltered call and matching only the first
+    # `limit + 1` records client-side is exactly the production bug this
+    # covers (a real contact past the first few rows was never found).
     called_formula = list_records.call_args.args[1] if len(list_records.call_args.args) > 1 else ""
-    assert called_formula == ""
+    assert "SEARCH(" in called_formula
+    assert "עסקת בדיקה" in called_formula
 
 
 def test_lookup_human_reference_restricted_partner_domain_is_scoped():

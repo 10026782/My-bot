@@ -415,6 +415,65 @@ generic confirm/cancel handling is unaffected), and the fresh-command-
 supersedes-CREATE_CONFIRM case still holding. `CODE_DONE / STATIC_VERIFIED`
 — review, merge, deploy, and production runtime verification pending.
 
+### DIAMOND PATH create-contact approval execution + contact search — 05/09/2026 (production-reported)
+
+Production report (live Telegram transcript + Render logs, owner) on the
+very next step after the CREATE_CONFIRM fix above: Deal "ניהול משרד 2"
+parked on the counterparty question, "אבי חזן" not matched, offer to
+create accepted, phone supplied — then:
+
+```
+❌ אושר אך נכשל בביצוע
+לא הצלחתי להכין תיאור ברור לבקשה הזו. נא לנסח את הבקשה שוב.
+הפעולה לא הושלמה
+```
+
+The owner diagnosed both root causes directly from the log himself:
+
+**Bug 1 — "הכלי לא נרשם ככותב מורשה"**: the log shows `[ERROR]
+action_validator: Unknown tool blocked: crm_find_or_create_contact` even
+though the tool is registered in `tool_registry.py` and wired into
+`tools/dispatcher.py`'s dispatch switch — ActionGateway approves the
+contract, the atomic executor claims it, and `dispatch_tool()` then blocks
+it anyway because `action_validator.py`'s own independent `_REQUIRED`
+allowlist (checked before either of those) was never updated when
+`crm_find_or_create_contact` was added, so an *approved* action could never
+execute. Fix: added `"crm_find_or_create_contact": ["name"]` to
+`_REQUIRED` and to `_SENSITIVE_TOOLS`, matching
+`crm_find_or_create_organization`'s existing entry exactly.
+
+**Bug 2 — "המערכת לא באמת מחפשת באנשי קשר אלא רק 7 הראשונים"**: the log's
+own `GET .../Contacts?maxRecords=7&fields[]=שם` call shows
+`commercial_crm.lookup_human_reference()` never sent the query text to
+Airtable at all — for an internal/owner identity
+`tools.airtable_security.enforce_tenant_scope()` applies no filter, so the
+call fetched only the first `limit + 1` (= 7) records in default table
+order and matched the query client-side; a real contact anywhere past
+those first rows was invisible no matter how exact the name match was.
+Fix: build a `SEARCH()` pre-filter formula (escaped via the sanctioned
+`tools.airtable_gateway.escape_formula_value()`, confirmed by
+`tools/audit_formula_escaping_boundary.py` reporting zero new violations)
+from the query and pass it through `enforce_tenant_scope()` the same way
+every other call site's filter is combined — AND'd with tenant/domain
+scope, never replacing it — so the actual query now constrains what
+Airtable returns; the existing client-side casefold/whitespace-normalized
+exact match remains the authoritative disambiguator, unchanged. A blank/
+whitespace-only query now fails closed to no results instead of risking an
+unfiltered scan.
+
+Note: `commercial_crm.lookup_human_reference()`'s "an internal owner sees
+no formula at all" behavior was itself asserted by name in an existing
+test (`test_lookup_human_reference_owner_sees_matching_record`) — that
+assertion encoded this exact bug and was corrected as part of this fix to
+assert the query is present in the formula instead.
+
+New regression: `test_bug_diamond_contact_approval_and_search.py` (9
+assertions) — `crm_find_or_create_contact` allowed/presence-checked (not
+"unknown tool"); a simulated 10-Contact table where the target sits past
+the first 7 default-order rows is still found via the SEARCH() formula;
+blank query fails closed. `CODE_DONE / STATIC_VERIFIED` — review, merge,
+deploy, and production runtime verification pending.
+
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
 Production incident, reported live by the owner immediately after PR #1201
