@@ -76,6 +76,18 @@ _LABELS = {
     # every single one of them (verified: it did, for all but a handful of
     # fields shared with Deal above).
     "organization_name": ("שם הארגון", "מה שם הארגון?"),
+    # BUG-DIAMOND-CREATE-CONFIRM-PRECEDENCE follow-on: Contact's own
+    # manually-enterable fields (beyond "name", pre-filled by begin_nested()
+    # and never asked interactively along the only reachable path today —
+    # see commercial_completion_routing.py's DIAMOND PATH nested-entity
+    # continuation) fell back to the same generic "פרט נוסף" / "נא להשלים
+    # את הפרט הבא." fallback BUG-3-MISSING-PROMPTS already fixed for
+    # Organization/Payment Term/Charge/Payment — the CREATE_CONFIRM "כן"
+    # flow's very next question (phone) was affected in production.
+    "phone": ("טלפון", "מה מספר הטלפון?"),
+    "email": ("אימייל", "מה כתובת האימייל?"),
+    "company": ("חברה", "באיזו חברה?"),
+    "role_category": ("קטגוריית תפקיד", "מה קטגוריית התפקיד?"),
     "deal": ("עסקה", "לאיזו עסקה זה משויך?"),
     "billing_term": ("תנאי תשלום", "לאיזה תנאי תשלום זה משויך?"),
     "charge": ("חיוב", "לאיזה חיוב זה משויך?"),

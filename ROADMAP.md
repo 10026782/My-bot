@@ -360,9 +360,60 @@ name genuinely missing" instead — updated in place, comment explains why).
 New regression: `test_bug_crm_bypass_deal_optional_name_marker.py` (20
 assertions) — the exact production strings, the four "בשם"-optional
 shapes named in the fix request, the missing-name end-to-end CLARIFY, and
-confirmation that the resolved domain is never re-asked. Branch
-`fix/deal-optional-name-marker`. `CODE_DONE / STATIC_VERIFIED` — review,
-merge, deploy, and production runtime verification remain pending.
+confirmation that the resolved domain is never re-asked. PR #1207 merged
+to `main` (`75934532`, `CODE_DONE / STATIC_VERIFIED` — grep-confirmed
+against `origin/main`; production runtime verification via a live Render
+deploy hash remains outstanding, per this repo's own verification rule).
+
+### DIAMOND PATH CREATE_CONFIRM precedence — 05/09/2026 (production-reported)
+
+Production report (live Telegram transcript + Render logs, owner): a Deal
+parked on the counterparty question ("פתח עסקה בשם ניהול משרד בתחום
+גיוס" → "מה שם איש הקשר?" → "אבי חזן" → no match → "לא מצאתי את אבי חזן.
+ליצור איש קשר חדש?") — replying "כן" (typed, and the inline button, which
+sends the same text) got "אין פעולה שממתינה לאישור" instead of beginning
+the nested Contact creation.
+
+Root cause, confirmed directly against the production log's own
+`deterministic=True` marker: `app.py`'s PR2 fast path
+(`_resolve_pr2_deterministic_approval`) intercepts every bare "כן"/"לא"
+BEFORE the S2C block ever restores the persisted `commercial_completion`
+session — with no live ActionGateway contract to route to, it answers the
+canonical "no pending approval" reply. Gated only on
+`should_prefer_lead_draft()`, which has zero knowledge of DIAMOND PATH's
+own CREATE_CONFIRM state. Existing coverage
+(`test_bug_s2c_stale_session_fresh_command_escape.py`) never caught this
+because `FEATURE_ACTION_GATEWAY`/`FEATURE_DETERMINISTIC_APPROVAL_COST_CUTS`
+both default off in tests, so that resolver never even ran there —
+production has both on.
+
+Fix: `_has_pending_nested_create_confirm()` (`app.py`) — same self-
+fetching-Sessions-read pattern `should_prefer_lead_draft()` already uses —
+makes the PR2 fast path stand down while a nested-create CREATE_CONFIRM is
+genuinely pending (the persisted session's active frame still carries the
+`_ux_pending_nested_create` marker), so control falls through to the S2C
+block's own already-correct handling instead. Fixes both the typed
+fallback and the inline-button path (the "commercial_completion:" callback
+namespace already existed and already avoids generic yes/no callback_data —
+verified during this investigation, not changed).
+
+Follow-on gap surfaced while testing the fix end-to-end: once "כן" reaches
+`begin_nested()`, the next genuinely-missing Contact field (phone) rendered
+the generic "נא להשלים את הפרט הבא." fallback — Contact's own fields
+(phone/email/company/role_category) were never added to
+`commercial_completion_ux.py`'s `_LABELS` when BUG-3-MISSING-PROMPTS fixed
+this for Organization/Payment Term/Charge/Payment (contact is DIAMOND-PATH-
+nested-only, so it fell outside that pass's `SUPPORTED_COMPLETION_ENTITIES`
+scope). Added the four missing entries.
+
+New regression: `test_bug_diamond_create_confirm_precedence.py` — the
+exact production scenario for both "כן" (begins nested Contact, pre-filled
+name, asks for phone with a real label) and "לא" (declines locally, parent
+Deal stays alive, re-asks the counterparty field, never the "❌ הפעולה
+בוטלה" full-cancel text), a no-pending-completion control case (PR2's own
+generic confirm/cancel handling is unaffected), and the fresh-command-
+supersedes-CREATE_CONFIRM case still holding. `CODE_DONE / STATIC_VERIFIED`
+— review, merge, deploy, and production runtime verification pending.
 
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
