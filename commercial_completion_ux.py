@@ -20,6 +20,16 @@ from core.router.ownership_contracts import ResolverResult
 
 FieldPresentation = FieldMetadata
 
+# DIAMOND PATH nested-entity approval continuation: entities eligible for
+# the confirm-to-create flow when resolve_human_link() finds no match.
+# Only entities with a real canonical find-or-create writer and an
+# EntityContract belong here — never widen this to entities the nested-
+# completion bridge doesn't actually support yet.
+_NESTED_ENTITY_LABELS: dict[str, str] = {
+    "organization": "ארגון",
+    "contact": "איש קשר",
+}
+
 @dataclass(frozen=True)
 class HumanChoice:
     """A safe, display-only choice.  No stable record reference is exposed."""
@@ -230,27 +240,26 @@ def resolve_human_link(
             reason="מצאתי יותר מאפשרות אחת; נא לבחור לפי השם.",
             candidate_ids=candidate_ids,
         )
-    # BUG-2-ORGANIZATION-CREATE (interim, explicit hand-off — owner decision
-    # recorded 04/09/2026): the canonical Organization writer
-    # (crm_find_or_create_organization) requires async owner approval, so
-    # there is no existing way to hand this flow a freshly created
-    # organization's canonical reference within the same turn. Rather than a
-    # message that promises an inline create this flow cannot deliver, tell
-    # the user exactly how to create it through the separate, already-live
-    # canonical path (the "צור ארגון" completion intent), and that this
-    # exact question resumes and picks it up automatically once it exists —
-    # the completion session is preserved on BLOCK for exactly this retry.
-    # No approval-semantics change and no new session/approval bridge.
+    # DIAMOND PATH nested-entity approval continuation (04/09/2026):
+    # supersedes the earlier BUG-2-ORGANIZATION-CREATE interim hand-off
+    # ("send a separate 'צור ארגון X' command, then repeat this answer").
+    # That workaround existed only because there was no mechanism to resume
+    # THIS parent completion after an async approval — the nested-completion
+    # + ContinuationRef bridge (commercial_completion.py, commercial_completion_routing.py)
+    # is that mechanism now, so both Contact and Organization get a direct
+    # confirm-to-create prompt instead of a redirect to a separate command.
+    # The router (not this pure presentation layer) turns `status="create"`
+    # into the actual [כן]/[לא] CLARIFY route with a pending-create marker —
+    # this function only decides whether creation is offered at all and
+    # renders the human-facing question.
     name = str(query).strip()
+    if not create_allowed:
+        return LinkResolution("clarify", reason="לא מצאתי התאמה; נא לנסות שם אחר.")
+    label = _NESTED_ENTITY_LABELS.get(entity, entity)
     return LinkResolution(
-        "create" if create_allowed else "clarify",
-        reason=(
-            f'לא מצאתי ארגון בשם "{name}". ניתן ליצור אותו בנפרד: לשלוח '
-            f'"צור ארגון {name}", ולאחר שהארגון נוצר לחזור לכאן ולהשיב על '
-            "השאלה הזו שוב עם אותו שם — הוא ייבחר אוטומטית."
-            if create_allowed else "לא מצאתי התאמה; נא לנסות שם אחר."
-        ),
-        create_allowed=create_allowed,
+        "create",
+        reason=f'לא מצאתי את {name}. ליצור {label} חדש?',
+        create_allowed=True,
     )
 
 

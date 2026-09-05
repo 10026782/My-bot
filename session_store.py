@@ -581,24 +581,37 @@ class PersistentSessionStore:
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
-    def set_commercial_completion(self, sender: str, state: dict) -> None:
-        """Persist S2C completion state in the canonical universal Session."""
-        session = self.get_or_create(sender)
+    def set_commercial_completion(self, sender: str, state: dict, channel: str = "") -> None:
+        """Persist S2C completion state in the canonical universal Session.
+
+        `channel`, if given, is forwarded verbatim to get_or_create() so this
+        write lands in the correct channel-scoped slot (see _ram_key()'s own
+        docstring, BUG-SESSION-DUP-RAM) — required by the DIAMOND PATH nested-
+        entity resume path, which persists into a parent session from inside
+        a Telegram approval-callback request even when that parent completion
+        started on a different channel (e.g. WhatsApp). Defaults to "" (the
+        pre-existing contextvar-based behavior) for every other caller.
+        """
+        session = self.get_or_create(sender, channel=channel)
         session["commercial_completion"] = dict(state)
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
-    def get_commercial_completion(self, sender: str) -> Optional[dict]:
-        """Return persisted S2C state, if a completion awaits an answer."""
-        session = self.get(sender)
+    def get_commercial_completion(self, sender: str, channel: str = "") -> Optional[dict]:
+        """Return persisted S2C state, if a completion awaits an answer.
+
+        See set_commercial_completion()'s docstring for why `channel` exists."""
+        session = self.get(sender, channel=channel)
         if not session:
             return None
         state = session.get("commercial_completion")
         return dict(state) if isinstance(state, dict) and state else None
 
-    def clear_commercial_completion(self, sender: str) -> None:
-        """Clear S2C state after terminal queue/block handling."""
-        session = self.get(sender)
+    def clear_commercial_completion(self, sender: str, channel: str = "") -> None:
+        """Clear S2C state after terminal queue/block handling.
+
+        See set_commercial_completion()'s docstring for why `channel` exists."""
+        session = self.get(sender, channel=channel)
         if not session:
             return
         session["commercial_completion"] = None

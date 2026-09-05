@@ -21,6 +21,7 @@ INTERNAL_ONLY_TOOLS = frozenset({
     "tma_write",
     "external_execution.submit",
     "crm_find_or_create_organization",
+    "crm_find_or_create_contact",
     "crm_create_charge",
     "crm_create_charge_payment",
 })

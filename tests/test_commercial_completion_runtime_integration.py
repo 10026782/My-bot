@@ -113,7 +113,10 @@ def test_link_ambiguous_match():
     assert calls == []  # a clarification must never itself queue anything
 
 
-def test_link_no_match():
+def test_link_no_match_offers_confirm_to_create():
+    """DIAMOND PATH: counterparty_contact (defaulting to entity="contact")
+    no-match now offers confirm-to-create, matching organization — never a
+    bare BLOCK, and never queues anything before the user confirms."""
     router, calls = _no_duplicate_queue_router()
     values = _deal_values()
     values.pop("counterparty_contact")
@@ -123,46 +126,106 @@ def test_link_no_match():
         first.session, "Nobody Real", link_lookup=lambda *_: [], scope="tenant1",
     )
     _assert_well_formed(route)
-    assert route.outcome == "BLOCK"
+    assert route.outcome == "CLARIFY"
+    assert route.choices == ("כן", "לא")
     assert calls == []
 
 
-def test_link_create_allowed_no_match():
-    """BUG-2-ORGANIZATION-CREATE (interim): a no-match create-allowed answer
-    BLOCKs with an explicit, actionable hand-off to the separate canonical
-    "create organization" path — never a promise of an inline create this
-    flow cannot deliver, and never an internal tool/field name."""
+def test_link_no_match_on_non_nested_entity_still_blocks():
     router, calls = _no_duplicate_queue_router()
     values = _deal_values()
-    values.pop("counterparty_contact")
+    values.pop("owner")
     first = router.start("deal", current_values=values)
-
-    org_pick = router.answer_human(first.session, "ארגון", link_lookup=None, scope="")
-    _assert_well_formed(org_pick)
-    assert org_pick.outcome == "CLARIFY"
+    assert first.field_name == "owner"
 
     route = router.answer_human(
-        org_pick.session, "חברה חדשה שלא קיימת בעמ",
-        link_lookup=lambda *_: [], scope="tenant1",
+        first.session, "Nobody Real", link_lookup=lambda *_: [], scope="tenant1",
     )
     _assert_well_formed(route)
     assert route.outcome == "BLOCK"
     assert calls == []
-    assert "צור ארגון" in route.reason
-    assert "חברה חדשה שלא קיימת בעמ" in route.reason
-    assert "crm_find_or_create_organization" not in route.reason
-    assert "organization_name" not in route.reason
 
 
-def test_link_create_allowed_no_match_then_resume_after_separate_creation():
-    """The full interim loop the BLOCK message promises: session stays
-    parked on the same field, and once the organization exists (simulated
-    here by the injected lookup finding it on the next attempt — exactly
-    what a real search would do after the separate "צור ארגון" completion
-    created it), resuming with the same name resolves automatically. No
-    session bridge, no approval-outcome plumbing — just the existing
-    BLOCK-preserves-session behavior plus a fresh search."""
-    router, calls = _no_duplicate_queue_router()
+def _nested_capable_router():
+    """Like _no_duplicate_queue_router(), but the queue callable accepts the
+    optional 3rd continuation-hint arg _inspect() passes for a nested
+    completion — a plain 2-arg lambda would TypeError on that call."""
+    calls = []
+
+    def queue(tool, payload, continuation=None):
+        calls.append((tool, payload, continuation))
+        return None
+
+    router = CommercialCompletionRouter(queue=queue)
+    return router, calls
+
+
+def test_link_no_match_confirm_creates_nested_contact_and_resumes_parent():
+    """DIAMOND PATH full lifecycle, Contact: no match -> [כן]/[לא] confirm ->
+    כן -> begin_nested() -> ask remaining Contact fields -> nested complete
+    -> queued with a continuation hint (never before confirmation) ->
+    simulated approval (resume_parent) -> parent Deal completes and queues
+    its own final write. Exactly the sequence the owner's design review
+    specified, driven at the pure-router level (no app.py/session_store)."""
+    router, calls = _nested_capable_router()
+    values = _deal_values()
+    values.pop("counterparty_contact")
+    first = router.start("deal", current_values=values)
+
+    offer = router.answer_human(
+        first.session, "יאיר ממן", link_lookup=lambda *_: [], scope="tenant1",
+    )
+    _assert_well_formed(offer)
+    assert offer.outcome == "CLARIFY"
+    assert offer.choices == ("כן", "לא")
+    assert "יאיר ממן" in offer.reason and "איש קשר" in offer.reason
+    assert calls == []  # no queue submission before confirmation
+
+    ask_phone = router.answer_human(offer.session, "כן", link_lookup=None, scope="")
+    _assert_well_formed(ask_phone)
+    assert ask_phone.outcome == "CLARIFY"
+    assert ask_phone.entity == "contact"
+    assert ask_phone.field_name == "phone"
+    assert len(ask_phone.session.frames) == 2  # nested frame now exists
+    assert calls == []  # still not complete -- no queue submission yet
+
+    queued = router.answer(ask_phone.session, "phone", "0501234567")
+    _assert_well_formed(queued)
+    assert queued.outcome == "TOOL"
+    assert queued.tool_name == "crm_find_or_create_contact"
+    assert queued.tool_inputs == {"name": "יאיר ממן", "phone": "0501234567"}
+    assert len(calls) == 1
+    tool, payload, continuation = calls[0]
+    assert tool == "crm_find_or_create_contact" and payload == queued.tool_inputs
+    assert continuation == {
+        "nested_entity": "contact", "return_field": "counterparty_contact",
+        "nonce": continuation["nonce"],
+    }
+    assert continuation["nonce"]
+    assert len(queued.session.frames) == 2  # parked, not collapsed -- awaiting approval
+    assert queued.session.active.current_values["_pending_approval_nonce"] == continuation["nonce"]
+
+    # Simulate the approval callback's own resume step (Task: approval
+    # callback wiring) directly against the pure session API.
+    resumed = queued.session.resume_parent("recContactNEW001")
+    assert len(resumed.frames) == 1
+    assert resumed.active.resolved_values()["counterparty_contact"] == "recContactNEW001"
+
+    final = router._inspect(resumed)
+    _assert_well_formed(final)
+    assert final.outcome == "TOOL"
+    assert final.tool_name == "crm_create_deal"
+    assert final.tool_inputs["counterparty_contact_id"] == "recContactNEW001"
+    assert len(calls) == 2  # nested contact queued once, parent deal queued once
+    # the parent's own queue call is the plain 2-arg shape -- confirms
+    # non-nested queuing is completely unaffected by this feature.
+    assert calls[1][2] is None
+
+
+def test_link_no_match_confirm_creates_nested_organization_and_resumes_parent():
+    """Same lifecycle, Organization — proves the bridge is entity-agnostic,
+    not something that only happens to work for Contact."""
+    router, calls = _nested_capable_router()
     values = _deal_values()
     values.pop("counterparty_contact")
     first = router.start("deal", current_values=values)
@@ -170,20 +233,74 @@ def test_link_create_allowed_no_match_then_resume_after_separate_creation():
     org_pick = router.answer_human(first.session, "ארגון", link_lookup=None, scope="")
     assert org_pick.outcome == "CLARIFY"
 
-    not_yet_created = router.answer_human(
+    offer = router.answer_human(
         org_pick.session, "חברה חדשה בעמ", link_lookup=lambda *_: [], scope="tenant1",
     )
-    assert not_yet_created.outcome == "BLOCK"
-    assert not_yet_created.session is not None  # preserved for the retry
+    _assert_well_formed(offer)
+    assert offer.outcome == "CLARIFY"
+    assert offer.choices == ("כן", "לא")
+    assert "חברה חדשה בעמ" in offer.reason and "ארגון" in offer.reason
 
-    now_exists = lambda q, s, l: [{"id": "recNewOrg000001", "fields": {"Organization Name": q}}]
-    resumed = router.answer_human(
-        not_yet_created.session, "חברה חדשה בעמ", link_lookup=now_exists, scope="tenant1",
+    confirmed = router.answer_human(offer.session, "כן", link_lookup=None, scope="")
+    _assert_well_formed(confirmed)
+    # organization's only required field (organization_name) was already
+    # supplied as the candidate name -- nested completion is immediately
+    # complete, straight to TOOL, no further CLARIFY round-trip needed.
+    assert confirmed.outcome == "TOOL"
+    assert confirmed.tool_name == "crm_find_or_create_organization"
+    assert confirmed.tool_inputs == {"display_name": "חברה חדשה בעמ"}
+    assert len(calls) == 1
+    _, _, continuation = calls[0]
+    assert continuation["nested_entity"] == "organization"
+    assert continuation["return_field"] == "counterparty_organization"
+
+    resumed = confirmed.session.resume_parent("recNewOrg000001")
+    final = router._inspect(resumed)
+    assert final.outcome == "TOOL"
+    assert final.tool_name == "crm_create_deal"
+    assert final.tool_inputs["counterparty_organization_id"] == "recNewOrg000001"
+    assert len(calls) == 2
+
+
+def test_link_no_match_decline_keeps_parent_alive_no_nested_frame():
+    """[לא] must never push a nested frame at all — begin_nested() is
+    deliberately deferred to confirmation, so declining needs no rollback:
+    the parent is simply asked again for the same field."""
+    router, calls = _nested_capable_router()
+    values = _deal_values()
+    values.pop("counterparty_contact")
+    first = router.start("deal", current_values=values)
+
+    offer = router.answer_human(
+        first.session, "יאיר ממן", link_lookup=lambda *_: [], scope="tenant1",
     )
-    _assert_well_formed(resumed)
-    assert resumed.outcome == "TOOL"
-    assert resumed.tool_inputs["counterparty_organization_id"] == "recNewOrg000001"
-    assert len(calls) == 1  # exactly one queue submission for the whole loop
+    assert offer.outcome == "CLARIFY"
+
+    declined = router.answer_human(offer.session, "לא", link_lookup=None, scope="")
+    _assert_well_formed(declined)
+    assert declined.outcome == "CLARIFY"
+    assert declined.field_name == "counterparty_contact"
+    assert len(declined.session.frames) == 1  # never nested
+    assert "_ux_pending_nested_create" not in declined.session.active.current_values
+    assert calls == []
+
+
+def test_link_no_match_unrecognized_reply_re_renders_same_confirm_question():
+    router, calls = _nested_capable_router()
+    values = _deal_values()
+    values.pop("counterparty_contact")
+    first = router.start("deal", current_values=values)
+
+    offer = router.answer_human(
+        first.session, "יאיר ממן", link_lookup=lambda *_: [], scope="tenant1",
+    )
+    confused = router.answer_human(offer.session, "מה זה אומר", link_lookup=None, scope="")
+    _assert_well_formed(confused)
+    assert confused.outcome == "CLARIFY"
+    assert confused.choices == ("כן", "לא")
+    assert confused.reason == offer.reason  # exact same question, not reinterpreted
+    assert len(confused.session.frames) == 1
+    assert calls == []
 
 
 def test_link_already_canonical_internal_value():

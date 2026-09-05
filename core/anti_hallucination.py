@@ -174,6 +174,7 @@ _EVIDENCE_VALIDATORS: dict[str, Any] = {
     "crm_create_payment_term":  _validate_airtable_evidence,
     "crm_create_payment":       _validate_airtable_evidence,
     "crm_find_or_create_organization": _validate_airtable_evidence,
+    "crm_find_or_create_contact":      _validate_airtable_evidence,
     "crm_create_charge":         _validate_airtable_evidence,
     "crm_create_charge_payment": _validate_airtable_evidence,
     "media_save_to_memory":  _validate_media_memory_evidence,

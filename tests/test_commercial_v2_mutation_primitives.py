@@ -11,6 +11,7 @@ from airtable_schema import (
     ChargeFields,
     ChargeStatus,
     CollectionState,
+    ContactFields,
     Currency,
     Direction,
     DocumentRequirement,
@@ -156,6 +157,73 @@ def test_organization_contract_is_not_a_contact_or_generic_fields_api():
     assert "ContactFields" not in source
 
 
+# ── DIAMOND PATH nested-entity approval continuation: crm_find_or_create_contact ──
+
+def test_contact_reuses_existing_via_the_one_canonical_writer():
+    with patch.object(
+        commercial_crm.crm, "create_contact_from_fields",
+        return_value=SimpleNamespace(status="existing", record_id=CONTACT_ID, matches=(), error=""),
+    ) as writer:
+        result = commercial_crm.find_or_create_contact("Dana Cohen", phone="0501234567")
+    assert result["ok"] is True
+    assert result["external_id"] == CONTACT_ID
+    writer.assert_called_once()
+    fields_arg = writer.call_args.args[0]
+    assert fields_arg[ContactFields.NAME] == "Dana Cohen"
+    assert fields_arg[ContactFields.PHONE] == "0501234567"
+
+
+def test_contact_creates_when_no_match():
+    with patch.object(
+        commercial_crm.crm, "create_contact_from_fields",
+        return_value=SimpleNamespace(status="created", record_id=CONTACT_ID, matches=(), error=""),
+    ):
+        result = commercial_crm.find_or_create_contact(
+            "Dana Cohen", phone="0501234567", email="dana@x.com",
+            company="Acme", role_category="client",
+        )
+    assert result["ok"] is True
+    assert result["external_id"] == CONTACT_ID
+    assert result["user_message"] == "✅ איש הקשר נוצר"
+
+
+def test_contact_ambiguous_or_invalid_never_report_ok():
+    for status in ("ambiguous", "invalid_phone", "missing_name"):
+        with patch.object(
+            commercial_crm.crm, "create_contact_from_fields",
+            return_value=SimpleNamespace(status=status, record_id="", matches=(), error=""),
+        ):
+            result = commercial_crm.find_or_create_contact("Dana Cohen", phone="bad")
+        assert result["ok"] is False
+        assert result["external_id"] == ""
+
+
+def test_contact_outcome_unknown_fails_closed_with_its_own_message():
+    with patch.object(
+        commercial_crm.crm, "create_contact_from_fields",
+        return_value=SimpleNamespace(status="outcome_unknown", record_id="", matches=(), error="timeout"),
+    ):
+        result = commercial_crm.find_or_create_contact("Dana Cohen", phone="0501234567")
+    assert result["ok"] is False
+    assert "לא ידוע" in result["user_message"] or "אינה ידועה" in result["user_message"]
+
+
+def test_contact_empty_name_never_calls_the_writer():
+    with patch.object(commercial_crm.crm, "create_contact_from_fields") as writer:
+        result = commercial_crm.find_or_create_contact("   ")
+    assert result["ok"] is False
+    writer.assert_not_called()
+
+
+def test_contact_reuses_the_one_writer_no_second_implementation():
+    """Owner decision: 'reusing crm.create_contact_from_fields() internally
+    ... do not invent a second writer'."""
+    source = inspect.getsource(commercial_crm.find_or_create_contact)
+    assert "create_contact_from_fields" in source
+    assert "airtable_create(" not in source
+    assert "airtable_gateway" not in source
+
+
 def test_charge_writes_only_approved_canonical_fields_and_keeps_dates_distinct():
     with patch.object(commercial_crm, "get_record_fields", side_effect=_read_side_effect), patch.object(
         commercial_crm, "airtable_create", return_value=_created(CHARGE_ID)
@@ -279,6 +347,7 @@ def test_computed_or_unknown_fields_cannot_enter_writer_signatures():
 def test_tools_are_internal_approval_gated_and_absent_from_agent_schemas():
     names = {
         "crm_find_or_create_organization",
+        "crm_find_or_create_contact",
         "crm_create_charge",
         "crm_create_charge_payment",
     }
@@ -396,6 +465,7 @@ def test_generic_v2_payment_create_redirects_to_charge_required_writer():
     "tool_name, payload",
     [
         ("crm_find_or_create_organization", {"organization_name": "Acme"}),
+        ("crm_find_or_create_contact", {"name": "Dana Cohen", "phone": "0501234567"}),
         ("crm_create_charge", _charge_kwargs()),
         ("crm_create_charge_payment", _payment_kwargs()),
     ],
@@ -428,6 +498,8 @@ def test_action_gateway_deduplicates_each_business_action(tool_name, payload):
 @pytest.mark.parametrize(
     "tool_name, payload",
     [
+        ("crm_find_or_create_organization", {"organization_name": "Acme"}),
+        ("crm_find_or_create_contact", {"name": "Dana Cohen", "phone": "0501234567"}),
         ("crm_create_charge", _charge_kwargs()),
         ("crm_create_charge_payment", _payment_kwargs()),
     ],

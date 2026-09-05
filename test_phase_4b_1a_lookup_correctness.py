@@ -298,6 +298,7 @@ def test_actioncontracts_at_upsert_callers_explicitly_choose_strict_mode():
     contract.reconfirmation_required = False
     contract.context_integrity_unknown = False
     contract.idempotency_key = "idem-audit"
+    contract.continuation_ref = None
 
     with patch("core.action_contract_repository.at_upsert", return_value=True) as upsert:
         assert repository.save(contract) is True

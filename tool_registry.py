@@ -399,6 +399,20 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "איתור או יצירת ארגון קנוני — פנימי ודורש אישור",
     ),
+    # DIAMOND PATH nested-entity approval continuation: same shape as
+    # crm_find_or_create_organization above — internal-only, the deterministic
+    # S2C completion router is the sole caller, never Agent-selectable.
+    ToolMeta(
+        name             = "crm_find_or_create_contact",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        model_exposed    = False,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "איתור או יצירת איש קשר קנוני — פנימי ודורש אישור",
+    ),
     ToolMeta(
         name             = "crm_create_charge",
         roles_allowed    = _MANAGEMENT,

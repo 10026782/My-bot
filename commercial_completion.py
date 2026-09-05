@@ -604,6 +604,109 @@ class _CompletionFrame:
     return_field: str | None = None
 
 
+_CONTINUATION_REF_VERSION = 1
+_CONTINUATION_REF_TYPE_COMMERCIAL_COMPLETION = "commercial_completion"
+
+
+@dataclass(frozen=True)
+class ContinuationRef:
+    """Typed, versioned pointer from a queued approval (ActionContract) back
+    to the exact nested CompletionSession it will resume — never a
+    duplicate/serialized copy of the session itself (that stays owned by
+    session_store, the single source of truth). Deliberately a closed,
+    explicit shape rather than a free dict on ActionContract, so a future
+    field never silently drifts between the writer and reader side.
+
+    session_key: the exact identifier session_store.lead_sessions'
+        commercial-completion API (get_commercial_completion/
+        set_commercial_completion) expects as its `sender` argument — in
+        production today, the raw chat_id string the parent completion's
+        queue() callback already closes over, NOT session_store's internal
+        composite "tenant:channel:sender" key (that key is an
+        implementation detail computed inside PersistentSessionStore from
+        this same raw sender; passing the composite string here would
+        double-encode it and silently fail every lookup). Captured once
+        when the nested entity's create is queued, stored verbatim, never
+        recomputed at resume time.
+    channel: the origin channel ("telegram"/"whatsapp") the parent
+        completion is running on — captured alongside session_key for the
+        same reason: PersistentSessionStore's RAM cache is channel-scoped
+        (BUG-SESSION-DUP-RAM), and the queued create's approval is always
+        resolved via the OWNER's Telegram inline keyboard regardless of
+        which channel the parent completion itself started on. Without
+        this, resuming a WhatsApp-originated parent from a Telegram
+        approval callback would silently look in the wrong channel's slot.
+    nonce: minted fresh each time a nested completion is queued for
+        approval and embedded in the nested frame's own current_values
+        (key "_pending_approval_nonce") at the same moment. This is the
+        actual correlation key at resume time — matching
+        (nested_entity, return_field) alone only proves "a nested
+        completion of this shape is parked here", not "it's the one THIS
+        contract was queued for"; the nonce proves the latter.
+    """
+
+    version: int
+    type: str
+    session_key: str
+    channel: str
+    nested_entity: str
+    return_field: str
+    nonce: str
+
+    @classmethod
+    def for_commercial_completion(
+        cls, *, session_key: str, channel: str, nested_entity: str,
+        return_field: str, nonce: str,
+    ) -> "ContinuationRef":
+        return cls(
+            version=_CONTINUATION_REF_VERSION,
+            type=_CONTINUATION_REF_TYPE_COMMERCIAL_COMPLETION,
+            session_key=session_key,
+            channel=channel,
+            nested_entity=nested_entity,
+            return_field=return_field,
+            nonce=nonce,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version, "type": self.type,
+            "session_key": self.session_key, "channel": self.channel,
+            "nested_entity": self.nested_entity,
+            "return_field": self.return_field, "nonce": self.nonce,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any] | None) -> "ContinuationRef | None":
+        """Never guesses a shape: an absent/malformed/unrecognized-version
+        payload returns None (treated as "no continuation") rather than
+        raising or partially trusting it — a future version bump is safe
+        by construction, an old reader just stops recognizing it instead
+        of misinterpreting its fields."""
+        if not isinstance(raw, Mapping):
+            return None
+        if raw.get("version") != _CONTINUATION_REF_VERSION:
+            return None
+        if raw.get("type") != _CONTINUATION_REF_TYPE_COMMERCIAL_COMPLETION:
+            return None
+        try:
+            session_key = str(raw["session_key"])
+            channel = str(raw["channel"])
+            nested_entity = str(raw["nested_entity"])
+            return_field = str(raw["return_field"])
+            nonce = str(raw["nonce"])
+        except KeyError:
+            return None
+        if not (session_key and channel and nested_entity and return_field and nonce):
+            return None
+        return cls(
+            version=_CONTINUATION_REF_VERSION,
+            type=_CONTINUATION_REF_TYPE_COMMERCIAL_COMPLETION,
+            session_key=session_key, channel=channel, nested_entity=nested_entity,
+            return_field=return_field, nonce=nonce,
+        )
+
+
 @dataclass(frozen=True)
 class CompletionSession:
     """Pure stack for nested Contact/Organization completion and resumption."""
@@ -655,3 +758,21 @@ class CompletionSession:
             writer=frames[-1].writer.apply_answer(return_field or "", canonical_record_id),
         )
         return CompletionSession(tuple(frames))
+
+    def abandon_nested(self) -> "CompletionSession":
+        """Pop the active nested frame without folding any value into the
+        parent — the mirror image of resume_parent() for a nested
+        completion that will never produce a record: the approver rejected
+        the queued create, or a resumed approval proved (by continuation
+        nonce) to belong to a nested frame that is no longer live. The
+        parent frame is returned exactly as it was before begin_nested()
+        was called on it — no LINK field is touched, so the parent simply
+        goes back to being incomplete on that field, ready to be asked
+        again. Deliberately not needed on the pre-confirm decline path
+        ("לא" to "ליצור איש קשר חדש?") — begin_nested() is only called
+        after that confirmation, so declining before it never has a nested
+        frame to abandon in the first place.
+        """
+        if len(self.frames) < 2:
+            raise CompletionBlockedError("there is no nested completion to abandon")
+        return CompletionSession(self.frames[:-1])

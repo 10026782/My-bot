@@ -48,6 +48,7 @@ from airtable_schema import (
     Tables,
     VATRule,
 )
+import crm
 from tools.airtable_gateway import airtable_create
 from tools.airtable_read_adapter import get_record_fields, list_records
 from tools.airtable_tools import _tool_result
@@ -338,6 +339,65 @@ def find_or_create_organization(
             {OrganizationFields.NAME: display_name},
             source,
         )
+
+
+def find_or_create_contact(
+    name: str,
+    *,
+    phone: str = "",
+    email: str = "",
+    company: str = "",
+    role_category: str = "",
+    identity=None,
+    source: str = "commercial_crm",
+) -> dict:
+    """Resolve or create a canonical Contact for S2C nested completion.
+
+    Thin adapter over crm.create_contact_from_fields() — the one existing
+    Contact writer this repo has (dedup-aware: matches by normalized phone
+    before creating, per BUG-LEAD-03-class's ContactResult contract). No
+    second writer: this function only translates between the Commercial V2
+    primitive family's _tool_result() dict shape (matching
+    find_or_create_organization()'s contract, so tools/dispatcher.py and
+    core.anti_hallucination's evidence extraction handle it identically)
+    and crm.py's own ContactResult.
+    """
+    tool = "crm_find_or_create_contact"
+    if not str(name or "").strip():
+        return _tool_result(
+            ok=False, tool=tool,
+            user_message="❌ Contact name must be non-empty.",
+        )
+
+    fields = {ContactFields.NAME: name, ContactFields.PHONE: phone}
+    if email:
+        fields[ContactFields.EMAIL] = email
+    if company:
+        fields[ContactFields.COMPANY] = company
+    if role_category:
+        fields[ContactFields.ROLE_CATEGORY] = role_category
+
+    contact = crm.create_contact_from_fields(
+        fields, identity=identity, source=source,
+    )
+    evidence = {"record_id": contact.record_id, "table": Tables.CONTACTS}
+    if contact.matches:
+        evidence["matches"] = list(contact.matches)
+
+    if contact.status == "outcome_unknown":
+        return _tool_result(
+            ok=False, tool=tool, evidence=evidence,
+            user_message="⚠️ תוצאת יצירת איש הקשר אינה ידועה. אין לנסות שוב אוטומטית.",
+        )
+    if contact.status in ("created", "existing"):
+        return _tool_result(
+            ok=True, tool=tool, external_id=contact.record_id, evidence=evidence,
+            user_message="✅ איש הקשר נוצר" if contact.status == "created" else "✅ איש הקשר כבר קיים",
+        )
+    return _tool_result(
+        ok=False, tool=tool, evidence=evidence,
+        user_message=crm.describe_contact_failure(contact),
+    )
 
 
 def create_charge(

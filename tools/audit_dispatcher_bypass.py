@@ -159,6 +159,20 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
     # so this is not a reachable dispatcher bypass. Keep the exact call site
     # visible as ACCEPTED rather than hiding it in the legacy baseline.
     ("commercial_crm.py", 37, "tools.airtable_tools"),
+    # DIAMOND PATH nested-entity approval continuation: commercial_crm.py's
+    # own find_or_create_contact() (the S2B primitive tools/dispatcher.py's
+    # "crm_find_or_create_contact" case calls into, mirroring the already-
+    # registered crm_find_or_create_organization) reuses crm.py's existing
+    # create_contact_from_fields()/describe_contact_failure() as its one
+    # writer, per explicit owner decision — "reusing
+    # crm.create_contact_from_fields() internally... do not invent a second
+    # writer". Unlike the line-37 entry above, this call site IS dispatcher-
+    # reachable — it is the same architectural role commercial_crm.py's own
+    # find_or_create_organization() already plays (imports tools.airtable_tools
+    # at module scope, ACCEPTED above) for a sibling entity; identity/tenant
+    # enforcement happens in tools/dispatcher.py's case before this function
+    # is ever called, not here.
+    ("commercial_crm.py", 51, "crm"),
 })
 
 # Exact call sites verified sanctioned despite failing _is_allowed()'s
