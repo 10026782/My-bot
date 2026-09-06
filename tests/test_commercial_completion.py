@@ -390,3 +390,58 @@ def test_existing_value_wins_over_inherited_and_default_value():
         source_context={"currency": Currency.USD},
     )
     assert writer.resolved_values()["currency"] == Currency.EUR
+
+
+# ══════════════════════════════════════════════════════════════════
+# BUG-COMPLETION-NUMERIC-STRING-422 (production-verified, 06/09/2026):
+# a Deal create failed with Airtable 422 INVALID_VALUE_FOR_COLUMN on
+# "סכום" (DealFields.AMOUNT) after the owner answered the free-text
+# amount prompt with "100000" — validate_value() validated the string as
+# a valid number but apply_answer() stored the raw string itself, which
+# then reached Airtable as a JSON string instead of a JSON number.
+# ══════════════════════════════════════════════════════════════════
+
+def test_free_text_currency_answer_is_coerced_to_a_number_not_left_as_a_string():
+    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
+    answered = writer.apply_answer("expected_value", "100000")
+    assert answered.current_values["expected_value"] == 100000
+    assert isinstance(answered.current_values["expected_value"], float)
+    assert not isinstance(answered.current_values["expected_value"], str)
+
+
+def test_exact_production_reproduction_deal_amount_payload_is_numeric():
+    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
+    answered = writer.apply_answer("expected_value", "100000")
+    assert answered.is_complete()
+    payload = answered.complete_payload()
+    assert payload[DealFields.AMOUNT] == 100000
+    assert isinstance(payload[DealFields.AMOUNT], float)
+    assert not isinstance(payload[DealFields.AMOUNT], str)
+
+
+def test_free_text_integer_field_answer_is_coerced_to_int_not_float_or_string():
+    writer = CommercialCompletionWriter("allocation_rule", {})
+    answered = writer.apply_answer("priority", "7")
+    assert answered.current_values["priority"] == 7
+    assert isinstance(answered.current_values["priority"], int)
+    assert not isinstance(answered.current_values["priority"], (str, float))
+
+
+def test_numeric_answer_already_a_number_is_unaffected():
+    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
+    answered = writer.apply_answer("expected_value", 100000)
+    assert answered.current_values["expected_value"] == 100000
+    assert isinstance(answered.current_values["expected_value"], float)
+
+
+def test_non_numeric_free_text_still_rejected_before_any_coercion():
+    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
+    with pytest.raises(InvalidValueError):
+        writer.apply_answer("expected_value", "לא מספר")
+
+
+def test_select_and_link_answers_are_not_touched_by_numeric_coercion():
+    writer = CommercialCompletionWriter("deal", _complete_deal())
+    answered = writer.apply_answer("currency", Currency.USD)
+    assert answered.current_values["currency"] == Currency.USD
+    assert isinstance(answered.current_values["currency"], str)

@@ -635,6 +635,66 @@ confirming the test catches the actual bug; pre-existing
 green. `CODE_DONE / STATIC_VERIFIED` — review, merge, deploy, and
 production runtime verification pending.
 
+### Commercial Completion numeric free-text answers stored as strings — 06/09/2026 (production-verified)
+
+Production evidence, on the deployed schema-validation-authority fix
+(PR #1211, commit `4ab6dba9`): the previously-blocked Deal fields now
+passed schema validation exactly as intended (`RuntimeSchemaProvider:
+SHADOW discrepancy ... authoritative=True`, none of the 5 fields blocked),
+but the Deal create write still failed — this time with Airtable
+`422 INVALID_VALUE_FOR_COLUMN` on `"סכום"` (`DealFields.AMOUNT`): `Field
+"סכום" cannot accept the provided value`. The owner had answered the
+free-text amount prompt with `"100000"`. The user-facing error
+("❌ אושר אך נכשל בביצוע... לא הצלחתי להכין תיאור ברור לבקשה הזו") gave no
+hint of the real cause.
+
+Root cause: `commercial_completion.py`'s `validate_value()` calls
+`_number(value)` purely to VALIDATE a `NUMBER`/`CURRENCY`/`PERCENT`
+answer — it never returns the coerced number. `apply_answer()` then
+stored the ORIGINAL, un-coerced value into `current_values` — for a
+free-text reply routed straight from `app.py`'s S2C block
+(`answer_human(_restored.session, user_text, ...)`, `user_text` being the
+raw Telegram string), that is the raw digit string itself, never
+converted to a number anywhere in the pipeline. `resolved_values()`/
+`complete_payload()` then passed that string through unchanged into
+`commercial_crm.create_deal(amount=<str>)`, which wrote it straight into
+`fields[DealFields.AMOUNT]` — a JSON string sent to Airtable's
+Number/Currency column, which requires a JSON number and rejects a
+string with a 422. Same latent gap for every other `NUMBER`/`CURRENCY`/
+`PERCENT` field across Charge/Payment/PaymentTerm/AllocationRule
+completions, not just Deal amount — a canonical caller passing an
+already-numeric Python value happened to avoid it, but any free-text
+answer route did not.
+
+Fix: added `_coerce_value(contract, value)` in `commercial_completion.py`,
+called from `apply_answer()` immediately after `validate_value()`
+succeeds — for `NUMBER`/`CURRENCY`/`PERCENT` input types it returns
+`_number(value)` (a float), or `int(...)` when the field's validation is
+`positive_integer`/`non_negative_integer` (installment counts, day
+counts, priority — fields Airtable expects as whole numbers). Every other
+input type (`SELECT`/`LINK`/`TEXT`/`DATE`/...) is returned unchanged.
+Scope is limited to this one coercion step in the completion writer —
+no change to `ActionGateway` approval semantics, the schema-validation-
+authority fix from PR #1211, writer authority, or any other field's
+value.
+
+New regression tests in `tests/test_commercial_completion.py` (6 new,
+44 total in the file): the exact production reproduction (`"100000"`
+free-text answer on a Deal's `expected_value` → `complete_payload()`'s
+`DealFields.AMOUNT` is the float `100000.0`, never a string); a
+free-text integer-validated field (`allocation_rule`'s `priority`,
+`"7"` → `int(7)`); an already-numeric answer is unaffected (still
+coerced to the canonical type, not merely passed through); non-numeric
+free text is still rejected by `validate_value()` before any coercion
+runs; `SELECT`/`LINK` answers (e.g. `currency`) are untouched by the
+numeric coercion path. Verified to fail (4/6) with the fix reverted via
+`git stash`, confirming the tests catch the actual bug. Full CI-parity
+sweep re-run clean: `pytest tests/ -m "not integration and not airtable
+and not live"` (164 passed, was 158), `smoke_tests.py`,
+`status_sync_validator.py`, and the writer-authority/dispatcher-bypass
+governance audits (0 new violations). `CODE_DONE / STATIC_VERIFIED` —
+review, merge, deploy, and production runtime verification pending.
+
 ### S2C completion cancel-escape hatch — 04/09/2026 (production-reported)
 
 Production incident, reported live by the owner immediately after PR #1201
