@@ -108,14 +108,21 @@ with patch("commercial_crm.create_deal", return_value={"ok": True, "tool": "crm_
                                                          "external_id": "recDeal1", "evidence": {}, "user_message": "ok"}) as m:
     result = dispatch_tool(
         "crm_create_deal",
-        {"name": "עסקה חדשה", "domain": "real_estate", "owner_id": "recOwner1", "amount": 5000},
+        {
+            "name": "עסקה חדשה", "domain": "real_estate", "owner_id": "recOwner1",
+            "estimated_value_basis": "one_off", "estimated_value_range": "100k_300k",
+            "estimated_value_notes": "תלוי בהיקף",
+        },
         identity=owner, trusted_source="agent",
     )
     chk("crm_create_deal: dispatch returns the writer's dict verbatim", result.get("external_id") == "recDeal1")
     chk("crm_create_deal: name passed through", m.call_args.kwargs["name"] == "עסקה חדשה")
     chk("crm_create_deal: domain passed through", m.call_args.kwargs["domain"] == "real_estate")
     chk("crm_create_deal: owner_id passed through", m.call_args.kwargs["owner_id"] == "recOwner1")
-    chk("crm_create_deal: amount passed through", m.call_args.kwargs["amount"] == 5000)
+    chk("crm_create_deal: estimated_value_basis passed through", m.call_args.kwargs["estimated_value_basis"] == "one_off")
+    chk("crm_create_deal: estimated_value_range passed through", m.call_args.kwargs["estimated_value_range"] == "100k_300k")
+    chk("crm_create_deal: estimated_value_notes passed through", m.call_args.kwargs["estimated_value_notes"] == "תלוי בהיקף")
+    chk("crm_create_deal: 'amount' no longer forwarded (BUG-DIAMOND-EXPECTED-VALUE-RANGE)", "amount" not in m.call_args.kwargs)
     chk("crm_create_deal: source is always 'agent' from this path", m.call_args.kwargs["source"] == "agent")
 
 with patch("commercial_crm.create_payment_term", return_value={"ok": True, "tool": "crm_create_payment_term",

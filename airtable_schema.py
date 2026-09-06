@@ -272,6 +272,21 @@ class DealFields:
     START_DATE      = "Start Date"
     CURRENCY        = "Currency"
     COMMERCIAL_STATUS = "Commercial Status"
+    # BUG-DIAMOND-EXPECTED-VALUE-RANGE (06/09/2026, owner architecture
+    # correction): AMOUNT ("סכום") is a single scalar currency number — the
+    # wrong business contract for a Deal whose value is often only an
+    # estimate. These three fields are its canonical V2 replacement for the
+    # Commercial Completion enrichment flow; AMOUNT itself is untouched
+    # (still used by the separate, unwired legacy crm_add_deal() real-
+    # estate path — see crm.py / DealFields.PRICE) and no field is deleted.
+    # NOT YET LIVE IN AIRTABLE as of this commit — must be created there
+    # (single select / single select / long text) before this is
+    # functional; until then, writes naming them fail closed via the
+    # existing schema-authority gate (tools/airtable_gateway.py), never
+    # blocking or rolling back the Deal itself (they are enrichment-only).
+    ESTIMATED_VALUE_BASIS = "אופן הערכת שווי"
+    ESTIMATED_VALUE_RANGE = "טווח שווי משוער"
+    ESTIMATED_VALUE_NOTES = "הערות לשווי משוער"
     TOTAL_CHARGED   = "Total Charged"
     TOTAL_COLLECTED = "Total Collected"
     OUTSTANDING     = "Outstanding"
@@ -438,6 +453,25 @@ class RelationshipType:
     COMMISSION_RELATIONSHIP = "commission_relationship"
     PARTNERSHIP = "partnership"
     OTHER = "other"
+
+
+class EstimatedValueBasis:
+    """BUG-DIAMOND-EXPECTED-VALUE-RANGE: what an Estimated Value Range is
+    denominated in — never a raw currency amount."""
+    MONTHLY = "monthly"
+    TOTAL = "total"
+    ONE_OFF = "one_off"
+
+
+class EstimatedValueRange:
+    """BUG-DIAMOND-EXPECTED-VALUE-RANGE: a bucketed estimate, not an
+    arbitrary number — honest for a Deal whose value isn't known precisely."""
+    UNDER_10K = "under_10k"
+    RANGE_10K_100K = "10k_100k"
+    RANGE_100K_300K = "100k_300k"
+    RANGE_300K_1M = "300k_1m"
+    OVER_1M = "over_1m"
+    UNKNOWN = "unknown"
 
 
 class CommercialStatus:

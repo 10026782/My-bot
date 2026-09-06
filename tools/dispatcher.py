@@ -120,11 +120,33 @@ _DEAL_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     DealFields.ORIGIN_LEAD:   ("origin_lead_id", "single"),
     DealFields.CONTACTS_LINK: ("contact_ids", "list"),
     DealFields.VENTURE_LINK:  ("venture_id", "single"),
-    DealFields.AMOUNT:        ("amount", None),
     DealFields.STAGE:         ("stage", None),
     DealFields.PRIORITY:      ("priority", None),
     DealFields.RISK_LEVEL:    ("risk_level", None),
     DealFields.NOTES:         ("notes", None),
+    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: these four V2 fields
+    # are now collected as post-creation enrichment (commercial_completion.py)
+    # via a direct airtable_update() on an already-created Deal — they were
+    # never in this allowlist before (commercial_crm.create_deal() has
+    # always accepted them as optional kwargs; only the generic-write
+    # allowlist here never caught up), so a direct update carrying them was
+    # rejected as "not supported for direct update on this table."
+    DealFields.DEAL_TYPE_CODE:   ("deal_type_code", None),
+    DealFields.RELATIONSHIP_TYPE: ("relationship_type", None),
+    DealFields.CURRENCY:         ("currency", None),
+    DealFields.COMMERCIAL_STATUS: ("commercial_status", None),
+    # BUG-DIAMOND-EXPECTED-VALUE-RANGE: canonical replacement for
+    # DealFields.AMOUNT ("סכום") above, which is deliberately no longer in
+    # this allowlist — commercial_crm.create_deal() no longer accepts an
+    # `amount` kwarg at all (removed together with this), so a stale entry
+    # here would map to a kwarg the writer no longer has. "סכום" itself is
+    # untouched in Airtable and still used by the separate, unwired legacy
+    # crm_add_deal() real-estate path (see DealFields.PRICE) — this
+    # allowlist change only affects the generic airtable_add/airtable_update
+    # redirect for the "עסקאות (Deals)" table.
+    DealFields.ESTIMATED_VALUE_BASIS: ("estimated_value_basis", None),
+    DealFields.ESTIMATED_VALUE_RANGE: ("estimated_value_range", None),
+    DealFields.ESTIMATED_VALUE_NOTES: ("estimated_value_notes", None),
 }
 _PAYMENT_TERM_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     PaymentTermFields.DEAL:         ("deal_id", "single"),
@@ -1060,7 +1082,6 @@ def dispatch_tool(
                     owner_id=_owner_record_id,
                     origin_lead_id=inputs.get("origin_lead_id", ""),
                     contact_ids=inputs.get("contact_ids"),
-                    amount=inputs.get("amount"),
                     stage=inputs.get("stage", DealStage.OPPORTUNITY),
                     priority=inputs.get("priority", ""),
                     risk_level=inputs.get("risk_level", ""),
@@ -1072,6 +1093,11 @@ def dispatch_tool(
                     currency=inputs.get("currency", ""),
                     commercial_status=inputs.get("commercial_status", ""),
                     start_date=inputs.get("start_date", ""),
+                    # BUG-DIAMOND-EXPECTED-VALUE-RANGE: replaces the old
+                    # amount=inputs.get("amount") kwarg above.
+                    estimated_value_basis=inputs.get("estimated_value_basis", ""),
+                    estimated_value_range=inputs.get("estimated_value_range", ""),
+                    estimated_value_notes=inputs.get("estimated_value_notes", ""),
                     source="agent",
                 )
                 audit_log_airtable("crm_create_deal", identity, inputs, result)

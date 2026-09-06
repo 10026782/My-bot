@@ -991,6 +991,37 @@ class PersistentSessionStore:
             if not v.get("done")
         ]
 
+    def set_deal_enrichment_offer(self, sender: str, state: dict, channel: str = "") -> None:
+        """Persist a post-creation Deal enrichment offer/loop
+        (BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION) in its own
+        top-level key — deliberately separate from "commercial_completion"
+        (a real CompletionSession's serialized frames), so this never
+        risks being misread by the S2C restore()/answer_human() path that
+        key feeds, and vice versa. Same channel-scoped slot mechanics as
+        set_commercial_completion() — see its docstring."""
+        session = self.get_or_create(sender, channel=channel)
+        session["deal_enrichment_offer"] = dict(state)
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_deal_enrichment_offer(self, sender: str, channel: str = "") -> Optional[dict]:
+        """Return a parked Deal enrichment offer/loop, if one awaits an answer."""
+        session = self.get(sender, channel=channel)
+        if not session:
+            return None
+        state = session.get("deal_enrichment_offer")
+        return dict(state) if isinstance(state, dict) and state else None
+
+    def clear_deal_enrichment_offer(self, sender: str, channel: str = "") -> None:
+        """Clear a Deal enrichment offer/loop after it ends (declined,
+        completed, or abandoned) — never touches "commercial_completion"."""
+        session = self.get(sender, channel=channel)
+        if not session:
+            return
+        session["deal_enrichment_offer"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
 
 # ── Singleton ─────────────────────────────────────
 lead_sessions = PersistentSessionStore()

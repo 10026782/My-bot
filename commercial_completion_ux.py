@@ -54,6 +54,27 @@ class LinkResolution:
     candidate_ids: tuple[str, ...] = ()
 
 
+# BUG-DIAMOND-EXPECTED-VALUE-RANGE: business-language button labels for the
+# two Estimated Value select fields — the canonical enum values themselves
+# (e.g. "100k_300k") are internal-only and must never be shown to a user.
+# See field_presentation() (renders these as choices) and
+# resolve_estimated_value_choice() (maps a clicked/typed label back to its
+# canonical value) below.
+ESTIMATED_VALUE_BASIS_LABELS: dict[str, str] = {
+    "monthly": "חודשי",
+    "total": "סכום כולל",
+    "one_off": "חד-פעמי",
+}
+
+ESTIMATED_VALUE_RANGE_LABELS: dict[str, str] = {
+    "under_10k": "עד 10,000",
+    "10k_100k": "10,000–100,000",
+    "100k_300k": "100,000–300,000",
+    "300k_1m": "300,000–1,000,000",
+    "over_1m": "מעל 1,000,000",
+    "unknown": "עדיין לא ידוע",
+}
+
 _LABELS = {
     "name": ("שם העסקה", "מה שם העסקה?"),
     "domain": ("תחום", "באיזה תחום העסקה?"),
@@ -65,7 +86,17 @@ _LABELS = {
     "relationship_type": ("אופי הקשר", "מה אופי הקשר העסקי?"),
     "currency": ("מטבע", "באיזה מטבע העסקה?"),
     "commercial_status": ("סטטוס מסחרי", "מה הסטטוס המסחרי?"),
-    "expected_value": ("שווי צפוי", "מה השווי הצפוי?"),
+    # BUG-DIAMOND-EXPECTED-VALUE-RANGE: "expected_value" (a single scalar
+    # number) no longer exists as a Deal field — replaced by the three
+    # entries below. The "estimated_value_range" prompt here is only the
+    # generic fallback (used if a field-name lookup for it ever happens
+    # outside the enrichment loop, e.g. a generic BLOCK message) —
+    # app.py's _deal_enrichment_prompt() builds the real, basis-dependent
+    # question ("מה טווח השווי החודשי המשוער?" etc.), never the flat
+    # "מה השווי הצפוי?" this replaces.
+    "estimated_value_basis": ("אופן הערכת שווי", "מה הצפי מתאר?"),
+    "estimated_value_range": ("טווח שווי משוער", "מה טווח השווי המשוער?"),
+    "estimated_value_notes": ("הערות לשווי משוער", "יש הערות על השווי המשוער?"),
     "stage": ("שלב", "באיזה שלב העסקה?"),
     "start_date": ("תאריך התחלה", "מה תאריך ההתחלה? (YYYY-MM-DD)"),
     "notes": ("הערות", "יש הערות?"),
@@ -149,6 +180,10 @@ def field_presentation(entity: str, field: FieldContract) -> FieldPresentation:
     choices = tuple(field.choices)
     if field.field_name == "counterparty_contact":
         choices = ("איש קשר", "ארגון")
+    elif field.field_name == "estimated_value_basis":
+        choices = tuple(ESTIMATED_VALUE_BASIS_LABELS[c] for c in field.choices)
+    elif field.field_name == "estimated_value_range":
+        choices = tuple(ESTIMATED_VALUE_RANGE_LABELS[c] for c in field.choices)
     return FieldPresentation(
         field_key=field.field_name,
         user_label=label,
@@ -195,6 +230,28 @@ def _display_label(record: Mapping[str, Any], *, entity: str) -> str:
 
 def _normalized_label(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().casefold())
+
+
+def resolve_estimated_value_choice(field_name: str, raw_value: str) -> str | None:
+    """Map a clicked/typed Hebrew button label (or the raw canonical value
+    itself, for programmatic/test callers) back to its canonical enum
+    value for "estimated_value_basis"/"estimated_value_range". Never
+    invents a value — returns None on no match so the caller fails closed,
+    exactly like any other invalid SELECT answer. Fields other than these
+    two are returned unchanged (nothing to translate)."""
+    labels = {
+        "estimated_value_basis": ESTIMATED_VALUE_BASIS_LABELS,
+        "estimated_value_range": ESTIMATED_VALUE_RANGE_LABELS,
+    }.get(field_name)
+    if labels is None:
+        return raw_value
+    if raw_value in labels:
+        return raw_value
+    normalized = _normalized_label(raw_value)
+    for canonical, label in labels.items():
+        if _normalized_label(label) == normalized:
+            return canonical
+    return None
 
 
 def resolve_human_link(

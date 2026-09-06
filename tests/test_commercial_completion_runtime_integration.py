@@ -325,18 +325,32 @@ def test_link_already_canonical_internal_value():
 # SELECT
 # ══════════════════════════════════════════════════════════════════
 
-def _deal_needing_select_field(field_name):
-    values = _deal_values()
+# BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION (06/09/2026): Deal's own
+# deal_type/expected_value are no longer required=ALWAYS (they're
+# post-creation enrichment now — see commercial_completion.py), so they can
+# no longer be used here to force a CLARIFY on a specific field. "charge"'s
+# "direction" (SELECT) and "amount" (CURRENCY) are still ALWAYS-required
+# and exercise the exact same generic answer-mechanics these tests target.
+
+def _charge_values(**overrides):
+    values = {"deal": "recDeal0000000001", "direction": "receivable",
+              "amount": 100, "currency": "ILS"}
+    values.update(overrides)
+    return values
+
+
+def _charge_needing_field(field_name):
+    values = _charge_values()
     values.pop(field_name)
     router, calls = _no_duplicate_queue_router()
-    first = router.start("deal", current_values=values)
+    first = router.start("charge", current_values=values)
     assert first.field_name == field_name
     return router, calls, first
 
 
 def test_select_valid_button_choice():
-    router, calls, first = _deal_needing_select_field("deal_type")
-    route = router.answer(first.session, "deal_type", "service")
+    router, calls, first = _charge_needing_field("direction")
+    route = router.answer(first.session, "direction", "receivable")
     _assert_well_formed(route)
     assert route.outcome == "TOOL"
     assert len(calls) == 1
@@ -346,19 +360,19 @@ def test_select_valid_typed_choice():
     """Typed free text and a button click both go through the same answer()
     call with the literal choice value — parity is structural, not a
     separate code path to regress independently."""
-    router, calls, first = _deal_needing_select_field("deal_type")
-    route = router.answer(first.session, "deal_type", "service")
+    router, calls, first = _charge_needing_field("direction")
+    route = router.answer(first.session, "direction", "receivable")
     _assert_well_formed(route)
     assert route.outcome == "TOOL"
 
 
 def test_select_invalid_choice():
-    router, calls, first = _deal_needing_select_field("deal_type")
-    route = router.answer(first.session, "deal_type", "not_a_real_choice")
+    router, calls, first = _charge_needing_field("direction")
+    route = router.answer(first.session, "direction", "not_a_real_choice")
     _assert_well_formed(route)
     assert route.outcome == "BLOCK"
     assert calls == []
-    assert "deal_type" not in route.reason  # VALIDATION-TEXT: no storage key
+    assert "direction" not in route.reason  # VALIDATION-TEXT: no storage key
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -366,16 +380,16 @@ def test_select_invalid_choice():
 # ══════════════════════════════════════════════════════════════════
 
 def test_scalar_valid_value():
-    router, calls, first = _deal_needing_select_field("expected_value")
-    route = router.answer(first.session, "expected_value", 500)
+    router, calls, first = _charge_needing_field("amount")
+    route = router.answer(first.session, "amount", 500)
     _assert_well_formed(route)
     assert route.outcome == "TOOL"
     assert len(calls) == 1
 
 
 def test_scalar_invalid_value():
-    router, calls, first = _deal_needing_select_field("expected_value")
-    route = router.answer(first.session, "expected_value", -5)
+    router, calls, first = _charge_needing_field("amount")
+    route = router.answer(first.session, "amount", -5)
     _assert_well_formed(route)
     assert route.outcome == "BLOCK"
     assert calls == []
@@ -496,9 +510,12 @@ def test_counterparty_organization_path():
 # ══════════════════════════════════════════════════════════════════
 
 def test_output_clarify():
+    # deal_type is optional now (BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-
+    # CREATION) — drop a still business-required field (owner) instead to
+    # exercise the same CLARIFY-output-shape contract.
     router, calls = _no_duplicate_queue_router()
     values = _deal_values()
-    values.pop("deal_type")
+    values.pop("owner")
     route = router.start("deal", current_values=values)
     _assert_well_formed(route)
     assert route.outcome == "CLARIFY"

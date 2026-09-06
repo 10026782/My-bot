@@ -650,7 +650,6 @@ def create_deal(
     origin_lead_id: str = "",
     venture_id: str = "",
     contact_ids: list[str] | None = None,
-    amount: float | None = None,
     stage: str = DealStage.OPPORTUNITY,
     priority: str = "",
     risk_level: str = "",
@@ -662,6 +661,9 @@ def create_deal(
     currency: str = "",
     commercial_status: str = "",
     start_date: str = "",
+    estimated_value_basis: str = "",
+    estimated_value_range: str = "",
+    estimated_value_notes: str = "",
     source: str = "commercial_crm",
 ) -> dict:
     """Create a Deal. Domain-agnostic — no real-estate-only fields are required
@@ -703,8 +705,6 @@ def create_deal(
         fields[DealFields.VENTURE_LINK] = [venture_id]
     if contact_ids:
         fields[DealFields.CONTACTS_LINK] = list(contact_ids)
-    if amount is not None:
-        fields[DealFields.AMOUNT] = amount
     if priority:
         fields[DealFields.PRIORITY] = priority
     if risk_level:
@@ -725,6 +725,15 @@ def create_deal(
         fields[DealFields.COMMERCIAL_STATUS] = commercial_status
     if start_date:
         fields[DealFields.START_DATE] = start_date
+    # BUG-DIAMOND-EXPECTED-VALUE-RANGE: canonical replacement for the old
+    # scalar `amount` kwarg (removed above) — DealFields.AMOUNT/"סכום" is
+    # never written by this writer anymore.
+    if estimated_value_basis:
+        fields[DealFields.ESTIMATED_VALUE_BASIS] = estimated_value_basis
+    if estimated_value_range:
+        fields[DealFields.ESTIMATED_VALUE_RANGE] = estimated_value_range
+    if estimated_value_notes:
+        fields[DealFields.ESTIMATED_VALUE_NOTES] = estimated_value_notes
 
     outcome = airtable_create(Tables.DEALS, fields, source=source, return_outcome=True)
     if outcome.status == "created":

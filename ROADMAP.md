@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 05/09/2026
+עודכן: 06/09/2026
 
 ## Commercial Completion Writer foundation — 03/09/2026
 
@@ -634,6 +634,250 @@ confirming the test catches the actual bug; pre-existing
 `test_select_value_validation.py` (18 assertions) re-run unchanged and
 green. `CODE_DONE / STATIC_VERIFIED` — review, merge, deploy, and
 production runtime verification pending.
+
+### DIAMOND PATH optional V2 enrichment gated Deal creation — 06/09/2026 (owner architecture correction)
+
+Owner-directed architecture correction: the Deal completion flow had
+drifted into a mandatory full-record gate. Five Commercial V2 fields
+(`deal_type`, `relationship_type`, `currency`, `commercial_status`,
+`expected_value`) were marked `required=ALWAYS` in
+`commercial_completion.py`'s "deal" `EntityContract` — despite the
+canonical writer itself (`commercial_crm.create_deal()`) always treating
+every one of them as an optional kwarg (`if x: fields[...] = x`). This was
+a completion-CONTRACT-only over-restriction, never a real writer or
+Airtable-schema requirement — and it was the underlying reason the two
+most recent production 422s (schema-authority veto, PR #1211; numeric
+free-text coercion, PR #1212) were even reachable in the first place: the
+Deal completion flow insisted on collecting `expected_value`/etc. before
+creation, rather than treating them as skippable post-creation enrichment.
+
+Live production evidence (owner transcript, same day, on the still-deployed
+pre-fix build): "צור עסקה סיבים אופטיים בתחום ייבוא" → the bot asked for
+counterparty, then deal type, relationship type, currency, commercial
+status, and expected value — all before creating anything — and rejected
+two non-numeric amount phrasings ("מאות אלפי שקלים", "מאה $") before
+finally accepting "100000" and creating the Deal. Confirms this was a live,
+current-behavior gate, not a hypothetical.
+
+Core invariant restored: **required fields gate creation; optional fields
+enrich after creation.** A Deal now only gates on name/domain/owner/
+counterparty (business-required, unchanged) — the five V2 fields no
+longer block or appear before creation at all. Once `crm_create_deal`
+succeeds, the owner is offered post-creation enrichment for those same
+five fields; declining, an invalid answer, skipping a field, or abandoning
+mid-flow all leave the already-created Deal exactly as it is.
+
+Fix (required/optional reclassification): removed `required=ALWAYS` from
+all five fields in the "deal" `EntityContract` (`commercial_completion.py`)
+— they default to `RequiredMode.OPTIONAL`. No change to `commercial_crm.py`
+(the canonical writer needed no change — it already handled these as
+optional).
+
+Fix (post-creation enrichment offer + loop): after a `crm_create_deal`
+approval executes successfully, `app.py`'s callback handler now calls a
+new `_offer_deal_enrichment()`, which persists a fresh offer/loop marker
+in `session_store.py`'s new, independent `deal_enrichment_offer` session
+key (deliberately separate from `commercial_completion`'s real
+`CompletionSession` frames, so neither can misread the other) and appends
+the offer text to the SAME single callback reply (`_diamond_resume_text`'s
+own established pattern). The next inbound message is checked for this
+marker in `run_agent()`, ahead of the normal S2C check, and handled by a
+new `_handle_deal_enrichment_reply()`: כן/לא on the initial offer; then one
+field at a time, reusing `commercial_completion.py`'s own
+`ENTITY_CONTRACTS["deal"]`/`validate_value()`/`_coerce_value()` for
+identical validation/coercion semantics, with `CommercialCompletionRouter.
+_presentation()` for the same field prompts already used elsewhere. A
+"דלג"/skip word advances past a field without recording it; a cancel word
+ends the loop immediately. Every successfully validated field is
+accumulated (never written immediately) and submitted as ONE combined
+`airtable_update` call — through the exact same `_queue_approval_detailed()`
+boundary and owner-approval gate every other deterministic completion
+uses — only once the loop ends (all fields answered/skipped, or
+abandoned with at least one field already validated); abandoning with
+nothing yet collected queues nothing at all. Never a second Deal writer,
+never a bypassed approval, and the Deal write itself is never touched by
+any of this — enrichment is purely an additional, optional, best-effort
+`airtable_update` afterward. `tools/dispatcher.py`'s `_DEAL_FIELD_MAP`
+(the direct-update field allowlist shared with `airtable_add`'s
+create-redirect) is extended with the four V2 select fields it was
+missing — `commercial_crm.create_deal()` already accepted them as kwargs;
+only this allowlist had never caught up, so a direct update carrying them
+was previously rejected as unsupported.
+
+Updated pre-existing tests to reflect the corrected required/optional
+contract (they previously asserted the old, incorrect gating behavior):
+`tests/test_commercial_completion.py` (3),
+`tests/test_commercial_completion_routing.py` (2, one renamed to
+`test_optional_deal_fields_never_block_creation` plus a new
+`test_missing_business_required_field_still_clarifies_before_creation`),
+`tests/test_commercial_completion_runtime_integration.py` (6, switched
+their SELECT/SCALAR-mechanics fixtures from Deal's now-optional fields to
+`charge`'s still-required `direction`/`amount`, which exercise the exact
+same generic answer-handling code), and
+`test_diamond_path_approval_continuation.py` (consolidated two scenarios
+into one: resolving a nested Contact for a Deal missing only counterparty
+now completes the Deal in a single step, since counterparty was the last
+remaining business-required field — the old two-step CLARIFY-then-TOOL
+path is no longer reachable for Deal by design; the underlying
+`resume_nested()`/`_inspect()` CLARIFY branch is unchanged code, already
+covered generically at the router level).
+
+New regression: `test_bug_diamond_optional_enrichment_gates_creation.py`
+(42 assertions) driving `app._offer_deal_enrichment()`/
+`app._handle_deal_enrichment_reply()` directly — offer persistence and
+text; decline (no queue call, Deal untouched); accept (advances to the
+first field, nothing queued yet); an invalid Expected Value (field-level
+message naming the Deal already exists, same field re-asked, nothing
+queued); skipping a field; a full collection queuing exactly one
+`airtable_update` with every field correctly coerced (confirms
+`expected_value` lands as a real float, not the free-text string);
+abandoning mid-flow with partial progress (whatever was already validated
+is still queued, nothing further requested) and with nothing yet
+collected (no empty update queued); and exactly one final response string
+per call across every branch. Verified against a genuine gap: reverting
+the `app.py`/`session_store.py`/`tools/dispatcher.py` changes makes the
+very first assertion crash immediately (`AttributeError: ... does not have
+the attribute 'set_deal_enrichment_offer'`), confirming this exercises
+code that did not exist before this change.
+
+Full CI-equivalent sweep re-run clean: `pytest tests/ -m "not integration
+and not airtable and not live"` (165 passed), all Diamond Path/commercial
+CRM root-level `test_bug_*.py`/`test_commercial_crm.py`/
+`test_diamond_path_approval_continuation.py` scripts, `smoke_tests.py`,
+`compileall`, `status_sync_validator.py`, and the writer-authority/
+dispatcher-bypass/turn-coordinator/gateway-boundary governance audits (0
+new violations — one transient false positive from `audit_dispatcher_
+bypass.py` misreading a pure line-shift of a pre-existing, unrelated
+`tools.airtable_tools` import as new was resolved by relocating the three
+new `session_store.py` methods to the end of the class instead, avoiding
+the shift entirely, without touching the audit script itself).
+`CODE_DONE / STATIC_VERIFIED` — review, merge, deploy, and production
+runtime verification pending.
+
+### DIAMOND PATH — Expected Value replaced with Estimated Value Basis/Range/Notes — 06/09/2026 (owner architecture correction)
+
+Same-day follow-up correction, on the same branch/PR as the entry above:
+a single scalar "Expected Value" currency number is the wrong business
+contract for a Deal whose value is often only an estimate — it can't be
+represented honestly as one arbitrary number. Replaced with three fields:
+an Estimated Value Basis (`monthly`/`total`/`one_off`), a bucketed
+Estimated Value Range (`under_10k`/`10k_100k`/`100k_300k`/`300k_1m`/
+`over_1m`/`unknown`), and optional free-text Estimated Value Notes.
+
+**Investigation (performed before implementation, per owner instruction):**
+1. *Current live Deal field names/types*: `airtable_schema.py`'s
+   `DealFields` is the canonical reference; `schema_cache.json` (stale,
+   `fetched_at` 2026-09-04) confirms `"סכום"` exists as a currency-shaped
+   field on `עסקאות (Deals)`, alongside the already-live V2 fields from
+   PR #1211 (Counterparty Contact, Deal Type Code, Relationship Type,
+   Currency, Commercial Status).
+2. *Exact code paths writing "סכום"*: `commercial_crm.py`'s
+   `create_deal()` (the sole V2 Commercial Completion writer —
+   `if amount is not None: fields[DealFields.AMOUNT] = amount`),
+   `tools/dispatcher.py`'s `crm_create_deal` dispatch case
+   (`amount=inputs.get("amount")`) and `_DEAL_FIELD_MAP` (generic
+   `airtable_add`/`airtable_update` redirect allowlist), and
+   `commercial_completion_routing.py`'s airtable-field→kwarg map. Separately,
+   the legacy, unwired real-estate `crm.py` `crm_add_deal()` also writes
+   `DealFields.PRICE` (same `"סכום"` field) — confirmed reachable only from
+   a standalone verification script
+   (`scripts/verify_f15_staging.py`), not the live dispatcher/tool-registry
+   pipeline at all, so explicitly out of scope and left untouched.
+3. *Migration impact*: `daily_digest.py` reads `"סכום"` for the daily
+   report — a read-only dependency, left as-is per the owner's own
+   "read-only compatibility may remain" allowance; new V2-created Deals
+   simply won't populate it going forward (existing Deals' historical
+   values are unaffected and remain readable). `schema_intelligence.py`
+   has an independent, unrelated static field-shape reference for `"סכום"`
+   — not part of the V2 Commercial Completion flow, left untouched.
+4. *Files changed*: `airtable_schema.py` (new `EstimatedValueBasis`/
+   `EstimatedValueRange` enums + 3 new `DealFields` constants),
+   `commercial_completion.py` (field replacement + `derive_estimated_value_
+   basis()`), `commercial_completion_ux.py` (Hebrew choice-label maps +
+   `resolve_estimated_value_choice()`), `commercial_completion_routing.py`
+   (kwarg map), `commercial_crm.py` (`create_deal()` signature),
+   `tools/dispatcher.py` (dispatch call + `_DEAL_FIELD_MAP`), `app.py`
+   (enrichment loop: derivation skip + contextual prompts + label
+   resolution), plus the pre-existing tests referencing the removed
+   `expected_value` field.
+5. *Schema changes required*: three new Airtable fields on Deals —
+   `אופן הערכת שווי` (single select: monthly/total/one_off),
+   `טווח שווי משוער` (single select: the six range buckets), `הערות
+   לשווי משוער` (long text). **NOT YET LIVE IN AIRTABLE as of this
+   commit** — per the owner's own instruction, no Airtable mutation was
+   attempted from this session; these three fields must be created live
+   before this is functional. Until then, the existing schema-authority
+   gate (`tools/airtable_gateway.py`, PR #1211) fails closed on them
+   exactly like any other genuinely-unknown field — blocking only that
+   one accumulated enrichment `airtable_update`, never the Deal itself
+   (enrichment-only, exactly per the "must not be a creation blocker"
+   requirement). `"סכום"` itself is untouched and not deleted.
+6. *Tests to add*: see below.
+
+**Fix**: `commercial_completion.py`'s "deal" `EntityContract` no longer has
+an `expected_value` field — replaced with `estimated_value_basis`/
+`estimated_value_range`/`estimated_value_notes`, all optional (enrichment
+only, same as the four V2 fields from the entry above). A new
+`derive_estimated_value_basis(deal_type, relationship_type)` infers
+`monthly` from `deal_type="recurring"`/`relationship_type=
+"recurring_service"`, `one_off` from `deal_type="one_off"`/
+`relationship_type="one_off"`, and `None` (ask) otherwise — reused by
+`app.py`'s enrichment loop (`_advance_past_derivable_deal_fields()`, run
+on every advance: accept/skip/valid-answer, so basis can never be
+re-asked once derived or answered) rather than through
+`CommercialCompletionWriter`'s internal `ValueSource.DERIVED` machinery,
+which assumes a field-name-keyed data shape the enrichment loop's
+Airtable-field-keyed `collected` dict doesn't match. The range question's
+wording is contextual on the (derived or answered) basis
+(`_deal_enrichment_prompt()` in `app.py`) — never the flat, removed "מה
+השווי הצפוי?". Button labels are Hebrew
+(`commercial_completion_ux.py`'s `ESTIMATED_VALUE_BASIS_LABELS`/
+`ESTIMATED_VALUE_RANGE_LABELS`, rendered via the same `field_presentation()`
+special-casing pattern already used for `counterparty_contact`); a
+clicked/typed label resolves back to its canonical enum via
+`resolve_estimated_value_choice()` before validation — Airtable always
+receives the canonical value, never the Hebrew label or a raw record id.
+`commercial_crm.create_deal()`'s `amount` kwarg is removed entirely
+(confirmed unused by every caller except the V2 completion flow itself —
+the single-shot deterministic `_queue_deterministic_create_deal()` path
+never populated it); the writer gains `estimated_value_basis`/
+`estimated_value_range`/`estimated_value_notes` kwargs instead, writing
+only to the three new fields, never `"סכום"`.
+
+New regression: extended `test_bug_diamond_optional_enrichment_gates_
+creation.py` (59 assertions total) covering the required test scenarios —
+(A) a recurring Deal never gets asked for basis, only the monthly-worded
+range question; (B) a one-off Deal derives `one_off` and gets the
+one-off-worded range question; (C) an undeterminable Deal genuinely gets
+asked for basis once, then range, with Hebrew-label answer resolution
+proven directly; (D) selecting "100,000–300,000" stores canonical
+`100k_300k`; (E) selecting "עדיין לא ידוע" stores `unknown` and validates;
+(F) declining/skipping enrichment leaves the Deal valid; (G) an invalid
+basis/range answer gets a field-level correction message without touching
+the Deal, and abandoning mid-flow queues only what was already validated;
+(H) the legacy `"סכום"` field is asserted absent from every queued
+enrichment payload, including on abandonment; (I) basis is structurally
+unable to be re-asked once derived/removed, since every advance path goes
+through the same shared `_advance_past_derivable_deal_fields()` call.
+Updated pre-existing tests that referenced the removed `expected_value`
+field: `tests/test_commercial_completion.py` (4, switched to `charge`'s
+still-numeric `amount` field — same `_coerce_value()` mechanism, unaffected
+by this change), `tests/test_commercial_completion_routing.py` (2),
+`test_commercial_crm.py` (1, plus 4 new assertions for the three new
+fields and confirming `"סכום"` is never written).
+
+Full CI-equivalent sweep re-run clean: `pytest tests/ -m "not integration
+and not airtable and not live"` (165 passed), `test_commercial_crm.py`
+(111 passed, was 107), all other Diamond Path/commercial CRM root-level
+`test_bug_*.py` scripts, `smoke_tests.py`, `status_sync_validator.py`, and
+the writer-authority/dispatcher-bypass/turn-coordinator/gateway-boundary/
+formula-escaping/public-renderer governance audits (0 new violations).
+Verified against a genuine gap: reverting all seven changed source files
+makes the new test's first Case-A assertion crash immediately
+(`UnknownFieldError: 'deal' has no field 'estimated_value_basis'`).
+`CODE_DONE / STATIC_VERIFIED` — the three new Airtable fields are **not
+yet live**; review, merge, deploy, Airtable field creation, and production
+runtime verification all pending.
 
 ### Commercial Completion numeric free-text answers stored as strings — 06/09/2026 (production-verified)
 

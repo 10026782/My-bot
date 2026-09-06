@@ -52,12 +52,6 @@ def _deal_needing_counterparty():
     }
 
 
-def _deal_needing_counterparty_and_status():
-    values = _deal_needing_counterparty()
-    values.pop("commercial_status")
-    return values
-
-
 def _queued_nested_contact(deal_values):
     """Drive a real "no match -> כן -> nested Contact complete -> queued"
     sequence, exactly like the production transcript, and return
@@ -112,7 +106,7 @@ def run():
     check("nothing parked -> returns None", result is None)
     check("nothing parked -> never writes back", not mock_set.called and not mock_clear.called)
 
-    state, nonce = _queued_nested_contact(_deal_needing_counterparty_and_status())
+    state, nonce = _queued_nested_contact(_deal_needing_counterparty())
 
     # 3. Correlated session exists, but the contract's nonce doesn't match
     #    (a different/newer continuation now occupies this slot) -- must
@@ -150,30 +144,21 @@ def run():
         check("cleanup persists a session with the nested frame popped (1 frame)",
               len(written_state.get("frames", [])) == 1)
 
-    # 5. Correlated, real evidence record id, parent still needs another
-    #    field (CLARIFY) -- must persist the resumed session and surface
-    #    the next prompt as the ONE extra piece of text.
-    with patch("session_store.lead_sessions.get_commercial_completion", return_value=state), \
-         patch("session_store.lead_sessions.set_commercial_completion") as mock_set, \
-         patch("session_store.lead_sessions.clear_commercial_completion") as mock_clear, \
-         patch.object(app, "_queue_approval_detailed") as mock_queue_unused:
-        result = app._resolve_diamond_path_continuation(_contract(correlated_ref), "recContactNEW001")
-    check("resumed with evidence -> non-empty follow-up text", bool(result))
-    check("resumed with evidence -> persists the resumed session, never clears it",
-          mock_set.called and not mock_clear.called)
-    check("resumed to CLARIFY -> the parent's own approval is never queued yet",
-          not mock_queue_unused.called)
-
-    # 6. Same, but folding the record id completes the PARENT deal too --
-    #    it gets queued for its OWN approval through the SAME queue()
+    # 5. Correlated, real evidence record id -- folding it completes the
+    #    PARENT deal too (counterparty was the only remaining
+    #    business-required field once name/domain/owner were already
+    #    present -- see BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION,
+    #    which removed the old two-step CLARIFY-then-TOOL path here: V2
+    #    enrichment fields no longer gate creation, so resolving
+    #    counterparty is the LAST step, not the second-to-last). The
+    #    parent gets queued for its OWN approval through the SAME queue()
     #    boundary (never a second writer), and the parked completion is
-    #    cleared (terminal), not re-persisted.
-    complete_state, complete_nonce = _queued_nested_contact(_deal_needing_counterparty())
-    complete_ref = ContinuationRef.for_commercial_completion(
-        session_key="7228089151", channel="telegram",
-        nested_entity="contact", return_field="counterparty_contact", nonce=complete_nonce,
-    )
-    with patch("session_store.lead_sessions.get_commercial_completion", return_value=complete_state), \
+    #    cleared (terminal), not re-persisted. The generic "resume still
+    #    leaves the writer incomplete -> CLARIFY" branch inside
+    #    resume_nested() is unchanged code, shared with and already
+    #    covered by the router-level CLARIFY-vs-TOOL tests in
+    #    tests/test_commercial_completion_routing.py.
+    with patch("session_store.lead_sessions.get_commercial_completion", return_value=state), \
          patch("session_store.lead_sessions.set_commercial_completion") as mock_set, \
          patch("session_store.lead_sessions.clear_commercial_completion") as mock_clear, \
          patch.object(app, "_queue_approval_detailed", return_value={
@@ -181,7 +166,8 @@ def run():
              "ok": True, "terminal_outcome": None, "action_tool": "crm_create_deal",
              "created_this_turn": True, "owner_notified": True,
          }) as mock_queue:
-        result = app._resolve_diamond_path_continuation(_contract(complete_ref), "recContactNEW001")
+        result = app._resolve_diamond_path_continuation(_contract(correlated_ref), "recContactNEW001")
+    check("resumed with evidence -> non-empty follow-up text", bool(result))
     check("parent auto-completes -> the SAME queue() boundary is used for its own approval",
           mock_queue.called and mock_queue.call_args[0][0] == "crm_create_deal")
     check("parent auto-completes -> parked completion is cleared, not re-persisted",
