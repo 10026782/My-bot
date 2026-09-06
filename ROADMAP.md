@@ -1348,3 +1348,115 @@ verification remain pending.
 atomic field operations. The implementation is isolated in PR #1198, pending
 merge; Commercial UX consumes the metadata shape in PR #1196 while retaining
 ownership of commercial labels, link resolution, and choice semantics.
+
+### DIAMOND REMEDIATION D1 — unified approval continuation + durable enrichment — 06/09/2026 (owner-directed, from a final systemic Diamond-path audit)
+
+A full state-machine audit of the Deal Diamond path (creation + optional
+post-create enrichment) found that `_offer_deal_enrichment()` and
+`_resolve_diamond_path_continuation()` (nested Contact/Organization →
+parent Deal resume) were wired **exclusively** into
+`app.py::_handle_approval_callback_impl()` — the Telegram inline-button
+callback handler. The parallel typed-text confirmation path
+(`core.action_gateway.ActionGateway.route_confirmation_word()` →
+`_resolve_single_contract()` → `approve_with_lifecycle_result()`) executed
+the identical underlying write but had zero knowledge of either mechanism:
+a nested Contact/Organization approved by typed "כן" silently never
+resumed the parent Deal, and a root Deal approved by typed "כן" never
+offered enrichment. The same audit also found `deal_enrichment_offer`
+session state was RAM-only despite calling `_sync_to_db()` (the key was
+absent from that function's whitelist, from `_load_from_db()`'s restore
+whitelist, and from `_new_session()`'s default shape — lost on restart,
+LRU eviction, or a second worker process), and that
+`_apply_ingress_context_gate()` didn't exempt `"commercial_completion:"`
+callbacks from `mark_context_interrupted()`, the likely direct mechanism
+behind a reported "יש פעולה שממתינה לאישור..." reconfirmation-spam symptom.
+
+Fix (scoped to exactly these three items, per explicit owner instruction —
+schema rollout, Deal update writer architecture, domain alias drift, the
+dead `_queue_deterministic_create_deal()` builder, and the fresh-command
+enrichment escape hatch are deliberately out of scope, tracked separately):
+
+1. **Unified post-approval continuation.** New `app.py::DiamondContinuation
+   Outcome` (dataclass: `resume_text`, `enrichment_offer_text`,
+   `enrichment_offer_choices`) and `_apply_diamond_post_approval_
+   continuation(contract_after, lifecycle_result, *, origin_chat_id=None,
+   origin_channel=None)` — the ONE shared hook. Only continues when
+   `contract_after.status` is genuinely `completed`/`executed`; enrichment
+   additionally requires `lifecycle_result.evidence_status ==
+   "verified_write_success"` (unchanged gates from before, just centralized).
+   `_handle_approval_callback_impl()` now calls this hook instead of its
+   own inline duplicate. `core/action_gateway.py::_resolve_single_contract()`
+   (and `route_confirmation_word()`, which threads it through) gained an
+   additive `post_approval_hook` **dependency-injection** parameter —
+   deliberately NOT a direct `from app import ...`, even deferred: core/
+   action_gateway.py is a lower layer than app.py, and an unconditional
+   import there would force app.py's full module-level startup (including
+   `startup_validator.validate_startup()`, which calls `sys.exit(1)` — a
+   `SystemExit`, not caught by `except Exception`) onto every caller of
+   this method, including tests that deliberately exercise `ActionGateway`
+   in isolation from app.py. This was caught by the full CI-equivalent
+   suite during development (9 files failing) and fixed by switching to
+   injection; `app.py::_diamond_post_approval_hook()` is the thin 2-arg
+   adapter passed at all 3 of app.py's `route_confirmation_word()` call
+   sites. `post_approval_hook=None` (the default) is a complete no-op for
+   every other existing caller.
+2. **Durable `deal_enrichment_offer`.** Added to `session_store.py`'s
+   `_new_session()` default shape, `_sync_to_db()`'s field whitelist, and
+   `_load_from_db()`'s restore whitelist — the same 3 surfaces the sibling
+   `commercial_completion`/`lead_draft` keys already use, no new mechanism.
+3. **Ingress-gate exemption.** `_apply_ingress_context_gate()`'s callback
+   exemption tuple now also matches `_COMPLETION_CALLBACK_PREFIX`
+   (`"commercial_completion:"`) alongside the existing `approve:`/`reject:`/
+   `lead_draft_approve:`/`lead_draft_cancel:` prefixes — narrow, not a
+   blanket exemption for arbitrary callbacks.
+
+Governance fallout (mechanical, not a new bypass): `deal_enrichment_offer`'s
+durability fix added comment lines to `session_store.py`, shifting 4
+existing (already-baselined) deferred `tools.airtable_tools` imports by a
+few lines each — `tools/audit_dispatcher_bypass.py`'s hardcoded baseline
+line numbers updated (676→699, 834→860, 875→901, 937→966) to match, same
+4 import statements, not a new bypass authority.
+
+Tests: new `test_diamond_remediation_d1_unified_approval_continuation.py`
+(48 assertions) drives the REAL shared post-approval boundary from BOTH
+real ingress paths against a real, in-memory `ActionGateway`/
+`ExecutionLedger` — never by unit-testing the hook function in isolation
+alone. Covers: both ingress paths reach the identical hook for a root Deal
+approval (enrichment offered once, same text, same out_meta choices on
+both) and for a nested Contact approval (parent Deal resumed exactly once
+on both); rejected/failed/unverified approvals never continue; exactly-once
+across a repeated resolution attempt on the same contract; `deal_enrichment
+_offer` genuinely round-trips through a simulated process restart (fresh
+`PersistentSessionStore`, empty RAM, restored purely from the captured
+persisted Airtable row) and the restored state accepts the next real answer
+via the actual `_handle_deal_enrichment_reply()`; the `commercial_completion:`
+ingress exemption is narrow (unrelated callbacks still mark context
+interrupted; `approve:`/`reject:` remain exempt); an explicit AST-based
+regression guard that `core/action_gateway.py` contains no real `import app`
+statement (the exact class of bug the dependency-injection design avoids).
+
+CI: full local run — `smoke_tests.py`, `test_integration.py`, all 397
+`test_*.py` files (0 failures), and every `tools/audit_*.py` governance
+script (`dispatcher_bypass`, `turn_coordinator_bypass`, `gateway_bypass`,
+`model_call_boundary`, `provider_boundary`, `public_renderer_contract`,
+`writer_authority_registration`, `formula_escaping_boundary` all `new=0`;
+`result_parsing` warning-only, its 2 new occurrences are in
+`media_handler.py`/`startup_validator.py`, unrelated to this change).
+Merge, deploy, and production runtime verification remain pending.
+
+Residual Diamond-path items surfaced by the audit but explicitly deferred
+(not silently absorbed into this PR, per owner instruction): `route_
+disambiguation()`/`route_combined_word()` (ordinal/combined-word text
+confirmations, e.g. "2"/"כן 1") still call `approve_with_lifecycle_result()`
+directly and do not yet accept `post_approval_hook` — a structurally
+identical gap to the one this PR closes for the primary confirm-word path,
+narrower in practice (requires an existing disambiguation list or combined
+wording) but not yet unified; the still-open schema-rollout gap (3
+Estimated Value fields not yet live in Airtable); the Deal-update
+write-authority classification (generic `airtable_update` + governed field
+allowlist, not a dedicated writer — TEMPORARY GAP by design, tracked
+separately); domain-alias-table drift (`_DOMAIN_HINT_CANONICAL` vs.
+`domain_utils.BUSINESS_DOMAIN_ALIASES`); the dead
+`_queue_deterministic_create_deal()` builder and its CI guard verifying a
+function no longer on the live path; and the enrichment stage's missing
+fresh-command escape hatch (S2C already has one; enrichment does not).

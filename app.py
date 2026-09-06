@@ -3491,6 +3491,128 @@ def _offer_deal_enrichment(chat_id: str, channel: str, record_id: str) -> str:
     )
 
 
+from dataclasses import dataclass as _diamond_continuation_dataclass
+
+
+@_diamond_continuation_dataclass
+class DiamondContinuationOutcome:
+    """DIAMOND REMEDIATION D1 — structured result of the ONE shared
+    post-approval continuation hook (_apply_diamond_post_approval_
+    continuation), consumed identically by both approval ingress paths
+    (Telegram button callback and typed-text confirmation).
+
+    Deliberately presentation-free: each caller formats/delivers
+    `resume_text`/`enrichment_offer_text` itself (the callback path
+    composes one Telegram message and builds its own keyboard from
+    `enrichment_offer_choices`; the typed-confirmation path appends the
+    text to its own reply and threads `enrichment_offer_choices` through
+    out_meta["commercial_completion_choices"] — the SAME generic
+    keyboard-attach mechanism both the plain-text-reply webhook path and
+    the "commercial_completion:" callback branch already read for every
+    other completion prompt, see _deal_enrichment_prompt()'s docstring)."""
+    resume_text:               str | None = None
+    enrichment_offer_text:     str | None = None
+    enrichment_offer_choices:  tuple | None = None
+
+
+def _apply_diamond_post_approval_continuation(
+    contract_after, lifecycle_result,
+    *, origin_chat_id: str | None = None, origin_channel: str | None = None,
+) -> DiamondContinuationOutcome:
+    """DIAMOND REMEDIATION D1 — the ONE shared post-approval continuation
+    hook. Both approval ingress paths — the Telegram button callback
+    (_handle_approval_callback_impl) and typed-text confirmation
+    (core.action_gateway.ActionGateway.route_confirmation_word ->
+    _resolve_single_contract) — call this immediately after their own
+    approve_with_lifecycle_result() call succeeds, so a successful approval
+    drives the SAME downstream continuation regardless of how the user
+    answered. Before this, the nested-parent-resume and Deal-enrichment-
+    offer behavior lived exclusively inside the callback path; a typed
+    "כן"/"מאשר" approving the same contract executed the underlying write
+    but silently skipped both.
+
+    Consumes ONLY authoritative, already-verified lifecycle output — never
+    re-reads or infers whether the write probably succeeded:
+      - contract_after: the ActionContract re-fetched from the ledger AFTER
+        approve_with_lifecycle_result() returned — its real terminal
+        status, tool_name, continuation_ref.
+      - lifecycle_result: the ApprovalLifecycleResult approve_with_
+        lifecycle_result() itself returned for THIS call — evidence_ref/
+        evidence_status come from here, never fabricated or re-derived.
+
+    Only continues when contract_after genuinely reached a completed/
+    executed terminal state. A rejected, still-pending, failed, or
+    outcome-unknown contract yields an all-None outcome — no continuation,
+    no enrichment offer. This is what makes "rejected/failed approval does
+    not continue" hold structurally, not by caller discipline.
+
+    Exactly-once is inherited, not reimplemented here: both callers only
+    ever reach this function from the branch that itself just called
+    approve_with_lifecycle_result() on a contract TC8 (_tc8_claim_contract)
+    had exclusively claimed and that was still "pending" immediately before
+    that call. A contract already terminal from an earlier call never
+    re-enters that branch on either path (find_live_contracts() only
+    returns pending contracts; the callback path's own
+    BUG-STALE-CALLBACK-FALLTHROUGH guard short-circuits an already-terminal
+    contract before ever calling approve_with_lifecycle_result() again) —
+    so this hook cannot fire twice for the same successful approval.
+
+    Nested Diamond continuation (resuming a parked parent Deal after a
+    nested Contact/Organization approval) is delegated unchanged to
+    _resolve_diamond_path_continuation() — keyed entirely off
+    contract.continuation_ref, never off which ingress path called it, so
+    its own behavior is unchanged beyond now also being reachable from
+    typed confirmation.
+
+    Deal enrichment offer is delegated unchanged to _offer_deal_enrichment()
+    — same "crm_create_deal succeeded with verified evidence" gate as
+    before, evaluated identically regardless of ingress. origin_chat_id/
+    origin_channel decide only WHERE the offer is persisted/shown — never
+    whether it fires. Both default to None, in which case they are read
+    directly off contract_after itself (ActionContract.origin_chat_id/
+    origin_channel — the same values propose_action() stored when this
+    contract was first queued, and the authoritative single source of
+    truth for "where this approval originated," rather than a second copy
+    threaded separately through each caller). The callback path still
+    passes them explicitly (unchanged from before this remediation); the
+    typed-confirmation path's post_approval_hook adapter
+    (_diamond_post_approval_hook, below) omits them and relies on this
+    default.
+    """
+    outcome = DiamondContinuationOutcome()
+    if contract_after is None or contract_after.status not in ("completed", "executed"):
+        return outcome
+    if origin_chat_id is None:
+        origin_chat_id = getattr(contract_after, "origin_chat_id", "") or ""
+    if origin_channel is None:
+        origin_channel = getattr(contract_after, "origin_channel", "") or ""
+    record_id = (
+        lifecycle_result.evidence_ref
+        if lifecycle_result is not None
+        and lifecycle_result.evidence_status == "verified_write_success"
+        else ""
+    )
+    outcome.resume_text = _resolve_diamond_path_continuation(contract_after, record_id)
+    if contract_after.tool_name == "crm_create_deal" and record_id:
+        offer_text = _offer_deal_enrichment(origin_chat_id, origin_channel, record_id)
+        if offer_text:
+            outcome.enrichment_offer_text = offer_text
+            outcome.enrichment_offer_choices = ("כן", "לא")
+    return outcome
+
+
+def _diamond_post_approval_hook(contract_after, lifecycle_result) -> DiamondContinuationOutcome:
+    """DIAMOND REMEDIATION D1 — the exact 2-argument callable shape
+    core.action_gateway.ActionGateway.route_confirmation_word()'s
+    `post_approval_hook` dependency-injection parameter expects (see its
+    own docstring for why this is injected rather than imported: that
+    module must never import app.py, even deferred). A thin adapter over
+    _apply_diamond_post_approval_continuation() — origin_chat_id/
+    origin_channel are deliberately omitted here so that function derives
+    them from contract_after itself."""
+    return _apply_diamond_post_approval_continuation(contract_after, lifecycle_result)
+
+
 def _handle_deal_enrichment_reply(
     state: dict, chat_id: str, channel: str, user_text: str, out_meta: dict | None = None,
 ) -> str:
@@ -4002,26 +4124,27 @@ def _handle_approval_callback_impl(cq) -> None:
                 )
                 fail_text   = result
                 if not exec_failed and _contract_after is not None:
-                    _diamond_record_id = (
-                        _gw_approval_result.evidence_ref
-                        if _gw_approval_result.evidence_status == "verified_write_success" else ""
+                    # DIAMOND REMEDIATION D1: nested-parent-resume and
+                    # Deal-enrichment-offer now live in ONE shared
+                    # post-approval hook (_apply_diamond_post_approval_
+                    # continuation) — the SAME function typed-text
+                    # confirmation calls (core.action_gateway.ActionGateway.
+                    # route_confirmation_word -> _resolve_single_contract) —
+                    # so a successful approval drives the same downstream
+                    # continuation regardless of ingress. See that
+                    # function's own docstring for the exactly-once
+                    # reasoning and the completed/executed + verified-
+                    # evidence gates it preserves unchanged from before.
+                    _diamond_outcome = _apply_diamond_post_approval_continuation(
+                        _contract_after, _gw_approval_result,
+                        origin_chat_id=origin_chat_id, origin_channel=origin_channel,
                     )
-                    _diamond_resume_text = _resolve_diamond_path_continuation(
-                        _contract_after, _diamond_record_id,
-                    )
-                    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: the
-                    # Deal itself just finished creating (whether queued
-                    # directly, or as the auto-completed parent after a
-                    # nested Contact/Organization resume above) — offer to
-                    # collect the five optional V2 fields that no longer
-                    # gate creation, never blocking or rolling back this
-                    # already-valid Deal.
-                    if _contract_after.tool_name == "crm_create_deal" and _diamond_record_id:
-                        _enrichment_offer_text = _offer_deal_enrichment(
-                            origin_chat_id, origin_channel, _diamond_record_id,
+                    _diamond_resume_text = _diamond_outcome.resume_text
+                    _enrichment_offer_text = _diamond_outcome.enrichment_offer_text
+                    if _enrichment_offer_text and _diamond_outcome.enrichment_offer_choices:
+                        _enrichment_offer_keyboard = _completion_keyboard(
+                            _diamond_outcome.enrichment_offer_choices
                         )
-                        if _enrichment_offer_text:
-                            _enrichment_offer_keyboard = _completion_keyboard(("כן", "לא"))
             else:
                 # BUG-STALE-CALLBACK-FALLTHROUGH, unified regardless of
                 # FEATURE_ACTION_GATEWAY (STATIC-AUDIT-20260830 follow-up
@@ -4549,6 +4672,7 @@ def _resolve_pr2_deterministic_approval(
                 reply = gateway.route_confirmation_word(
                     identity.memory_key, approver_role=identity.role,
                     live_contracts=live_contracts, use_session_bookmark=False,
+                    out_meta=out_meta, post_approval_hook=_diamond_post_approval_hook,
                 )
             else:
                 # No live contract: the canonical no-pending response, no
@@ -5481,7 +5605,10 @@ def run_agent(
                             exc_info=True,
                         )
                         return "⏳ הפעולה כבר בטיפול או אינה זמינה."
-                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
+                _gw_reply = _gw_cw.route_confirmation_word(
+                    identity.memory_key, approver_role=identity.role, out_meta=_out_meta,
+                    post_approval_hook=_diamond_post_approval_hook,
+                )
                 if _tc8_context is not None:
                     _tc8_contract_after = _gw_cw.find_contract(
                         _live_confirmation_contracts[0].contract_id,
@@ -5518,7 +5645,10 @@ def run_agent(
             from feature_flags import is_enabled as _flag_cw
             if _flag_cw("FEATURE_ACTION_GATEWAY"):
                 # Stage B: Gateway הוא מקור האמת לאישור (אין contract חי -> "אין פעולה...")
-                _gw_reply = _gw_cw.route_confirmation_word(identity.memory_key, approver_role=identity.role)
+                _gw_reply = _gw_cw.route_confirmation_word(
+                    identity.memory_key, approver_role=identity.role, out_meta=_out_meta,
+                    post_approval_hook=_diamond_post_approval_hook,
+                )
                 logger.info(
                     "[ActionGateway] route_confirmation_word: user=%s reply=%.60s",
                     identity.memory_key, _gw_reply,
@@ -7344,8 +7474,23 @@ def _apply_ingress_context_gate(
         # context_interrupted here previously forced an unnecessary
         # reconfirmation prompt on the very contract (or an unrelated
         # sibling) the button press was itself trying to resolve.
+        #
+        # DIAMOND REMEDIATION D1: "commercial_completion:" is the same class
+        # of genuine, expected resolution event — a button reply to a live
+        # local completion/enrichment prompt (see _completion_keyboard()'s
+        # own docstring), not an unrelated inbound message arriving while a
+        # DIFFERENT ActionGateway contract happens to be pending. Marking
+        # context_interrupted for it previously forced an unnecessary
+        # reconfirmation on an unrelated live contract (the direct mechanism
+        # behind a reported "יש פעולה שממתינה לאישור..." loop) purely
+        # because the ingress gate had no knowledge of this callback prefix.
+        # Deliberately narrow — only these named prefixes are exempt, never
+        # an arbitrary/unknown callback.
         if event.kind == "callback" and (event.data or "").startswith(
-            ("approve:", "reject:", "lead_draft_approve:", "lead_draft_cancel:"),
+            (
+                "approve:", "reject:", "lead_draft_approve:", "lead_draft_cancel:",
+                _COMPLETION_CALLBACK_PREFIX,
+            ),
         ):
             return
         _gw.mark_context_interrupted(user)
