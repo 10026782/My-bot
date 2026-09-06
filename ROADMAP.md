@@ -1889,4 +1889,9 @@ change to any other `_primitive_inputs()` entity branch, no Organization
 lookup/dedup logic change.
 
 STATUS: 🟡 CODE DONE, NOT VERIFIED
-EVIDENCE: commit pending push (see git log after this entry is committed).
+EVIDENCE: commit b7172681 "Fix nested Organization create sending wrong
+param key (production bug)", pushed to
+origin/claude/diamond-path-runtime-audit-1olovk (git push -u origin
+claude/diamond-path-runtime-audit-1olovk → "new branch"). No Render
+deploy yet — this branch is not on main; the production canary from the
+pasted log has not been re-run against the fix.
