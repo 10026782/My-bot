@@ -175,6 +175,14 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
                                              #   key was silently dropped on write and never restored
                                              #   on read — the whole offer/loop was RAM-only and lost
                                              #   on restart, LRU eviction, or a second worker process.
+        "lead_deal_link":           None,   # ← LEAD-DEAL-ASSOCIATION Model B (/תקדםליד guided
+                                             #   flow): {"step": "awaiting_lead"|"awaiting_deal",
+                                             #   "lead_id": ..., "lead_name": ...} while a guided
+                                             #   /תקדםליד conversation awaits the next answer.
+                                             #   Own top-level key, same pattern as
+                                             #   deal_enrichment_offer above — independent of
+                                             #   "commercial_completion" so it can never be misread
+                                             #   by the S2C restore()/answer_human() path.
     }
 
 
@@ -718,6 +726,7 @@ class PersistentSessionStore:
                 # DIAMOND REMEDIATION D1: was missing here — see _new_session()'s
                 # comment on this same key for the full RAM-only-loss history.
                 "deal_enrichment_offer":    session.get("deal_enrichment_offer"),
+                "lead_deal_link":           session.get("lead_deal_link"),
             }
             session_channel = session.get("channel", "")
             fields = {
@@ -952,6 +961,7 @@ class PersistentSessionStore:
                 # DIAMOND REMEDIATION D1: was missing here — see _new_session()'s
                 # comment on this same key for the full RAM-only-loss history.
                 ("deal_enrichment_offer", None),
+                ("lead_deal_link", None),
             ):
                 session[key] = state.get(key, default)
             session["record_id"] = record_id
@@ -1035,6 +1045,48 @@ class PersistentSessionStore:
         if not session:
             return
         session["deal_enrichment_offer"] = None
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def set_lead_deal_link(self, sender: str, state: dict, channel: str = "") -> None:
+        """Persist /תקדםליד's guided-flow state (LEAD-DEAL-ASSOCIATION Model
+        B) — {"step": "awaiting_lead"|"awaiting_deal", ...}. Own top-level
+        key, same pattern as set_deal_enrichment_offer() above — never
+        confused with "commercial_completion"'s S2C frames. TTL-checked on
+        read (1800s, same as lead_draft/pending_lead_preview) so an
+        abandoned guided flow doesn't linger forever."""
+        import time as _time
+        session = self.get_or_create(sender, channel=channel)
+        state = dict(state)
+        state["set_at"] = _time.time()
+        session["lead_deal_link"] = state
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_lead_deal_link(self, sender: str, channel: str = "") -> Optional[dict]:
+        """Return the pending /תקדםליד guided-flow state if one awaits an
+        answer and hasn't expired (>1800s), else None (and clears an
+        expired one, same pattern as get_lead_draft())."""
+        import time as _time
+        session = self.get(sender, channel=channel)
+        if not session:
+            return None
+        state = session.get("lead_deal_link")
+        if not state:
+            return None
+        if _time.time() - state.get("set_at", 0) > 1800:
+            session["lead_deal_link"] = None
+            self._sync_to_db(sender, session)
+            return None
+        return dict(state)
+
+    def clear_lead_deal_link(self, sender: str, channel: str = "") -> None:
+        """Clear /תקדםליד's guided-flow state after it ends (completed,
+        cancelled, or superseded by a fresh command)."""
+        session = self.get(sender, channel=channel)
+        if not session:
+            return
+        session["lead_deal_link"] = None
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 

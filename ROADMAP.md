@@ -1980,3 +1980,93 @@ final report. No Render deploy yet, `Linked Leads` does not exist live in
 Airtable yet (owner action required), and no production canary has been
 run — writes will fail closed (dropped-field gate) against live Airtable
 until the field is created there.
+
+### LEAD-DEAL-ASSOCIATION Model B — /תקדםליד user-facing entry point — 06/09/2026 (owner-requested)
+
+Follow-up to the same-day `crm_link_lead_to_deal` primitive (merged, PR
+#1221): the owner created the live `Linked Leads` Airtable field, then
+asked how to verify it in production and, on learning no entry point
+existed yet, asked for one now rather than later. This entry adds the
+UX layer only — no change to `commercial_crm.link_lead_to_deal()`, the
+registry/validator/dispatcher wiring, or `Origin Lead`.
+
+What was added:
+- `lead_deal_link.py` (new) — resolve-only helpers: `parse_direct_link_text()`
+  (exact-structure parse of "קדם את `<ליד>` לעסקת `<עסקה>`"),
+  `is_promote_lead_trigger()` (bare "תקדם ליד" guided-flow start),
+  `resolve_lead_by_query()` (reuses `lead_conversion.py`'s shared Lead
+  lookup — no second search implementation), `resolve_deal_by_query()`
+  (reuses `commercial_crm.lookup_human_reference("deal", ...)`, the same
+  bounded, tenant-scoped lookup the Commercial Completion presentation
+  layer already uses for every other human-typed entity reference).
+- `session_store.py`: a new `lead_deal_link` session slot
+  (`set_lead_deal_link()`/`get_lead_deal_link()`/`clear_lead_deal_link()`,
+  1800s TTL), wired into `_new_session()`/`_sync_to_db()`/`_load_from_db()`
+  exactly like the existing `deal_enrichment_offer` slot — its own
+  top-level key, independent of `commercial_completion`'s S2C frames.
+- `app.py`: `/תקדםליד` Telegram command (owner-only, gated on new flag
+  `LEAD_DEAL_LINK`, default off) — bare form starts the guided flow
+  ("איזה ליד?" → "לאיזו עסקה?" → approval), an argument in the
+  "קדם את X לעסקת Y" shape resolves both in one shot.
+  `_queue_deterministic_link_lead_to_deal()` is the ONE function that
+  proposes `crm_link_lead_to_deal` (mirrors `_queue_deterministic_create_
+  deal()`'s enforce-then-queue-then-finalize shape exactly, same
+  BUG-CRM-BYPASS-FINGERPRINT-PARITY reasoning: no custom
+  fingerprint_payload, the real `{lead_id, deal_id}` dict is the only
+  representation). `_resolve_and_queue_lead_deal_link()` (one-shot NL
+  form) and `_handle_lead_deal_link_reply()` (guided-flow step handler)
+  both funnel into it — never a second writer path, never generic
+  `airtable_update`.
+- Precedence integration: a parked `lead_deal_link` guided-flow state is
+  checked at the same tier as the existing `deal_enrichment_offer`
+  pending-state block (own session key → cannot be misread as
+  `commercial_completion` S2C state, and is a complete no-op for every
+  chat that never ran `/תקדםליד`), with the same fresh-command escape
+  hatch (`_is_fresh_deterministic_command()`, extended with this file's
+  two new parsers) the Deal-enrichment offer and S2C completion blocks
+  already rely on — reused, not reimplemented, to avoid a third
+  independently-drifting copy of that precedence logic. The direct NL
+  form and bare trigger are checked once, immediately before the Router
+  runs, narrowly regex-gated so non-matching text is a complete no-op.
+
+Explicitly not built: no generic `update_deal()`/`airtable_update` path
+(still only `crm_link_lead_to_deal`); no Charges/Payments change; no new
+Participant/Placement entity; no change to `crm_link_lead_to_deal`'s own
+`model_exposed=False` registry posture (the tool itself still isn't
+Agent-selectable — this command is a deterministic, non-Agent caller,
+same relationship `/dealfromlead` has to `crm_create_deal`).
+
+Tests: `test_lead_deal_link_command.py` (new, 14 assertions, pytest-native)
+— parser unit tests (direct-form extraction, bare-trigger recognition);
+direct-form resolve+queue (happy path via the real `ActionGateway`
+propose→approve path, ambiguous Lead, ambiguous Deal — no contract
+proposed); guided-flow step transitions (awaiting_lead → awaiting_deal,
+awaiting_deal → queued+cleared, cancel word, exactly-one-reply-per-turn);
+and five more end-to-end tests against the real `ActionGateway`
+(`propose_action`/`approve`/`reject`, `commercial_crm.get_record_fields`/
+`airtable_patch` mocked at the Airtable boundary only): duplicate link is
+idempotent (one PATCH across two approved proposals for the same pair),
+domain mismatch surfaces failure without reaching the writer, a rejected
+approval never reaches the writer, a failed PATCH never reports success,
+and Origin Lead is never touched or overwritten across the full flow.
+Full regression sweep run clean: `smoke_tests.py`, `tests/` (165,
+pytest), `test_integration.py` (4/4), `core/router/test_router.py`
+(54/54), `action_validator.py` self-test, `session_store.py` self-test
+(54/54), every adjacent deterministic-routing/S2C/Diamond-precedence
+test file that touches the same pipeline area this change inserts into
+(`test_bug_diamond_enrichment_offer_precedence.py`,
+`test_bug_diamond_create_confirm_precedence.py`,
+`test_bug_s2c_cancel_escape.py`,
+`test_bug_s2c_stale_session_fresh_command_escape.py`,
+`test_bug_session_dup_ram_isolation.py`,
+`test_diamond_remediation_d1_unified_approval_continuation.py`, and
+others — all clean, zero regressions), `python3 -m compileall -q .`.
+One pre-existing, order-independent failure
+(`test_bug_crm_bypass_create_deal_deterministic_route.py`) was found and
+confirmed unrelated by reproducing it identically with this session's
+changes stashed, directly against `origin/main`.
+
+STATUS: 🟡 CODE DONE, NOT VERIFIED
+EVIDENCE: see `git log -1 --oneline` and the push output in this
+session's final report. No Render deploy yet; no live Telegram canary of
+`/תקדםליד` has been run.

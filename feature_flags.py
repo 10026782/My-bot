@@ -48,6 +48,14 @@ LEAD PIPELINE:
                                   בלבד ב-lead_conversion.resolve_lead_for_deal,
                                   הכתיבה עצמה עוברת אישור אינטראקטיבי רגיל
                                   דרך app.py's _queue_deterministic_create_deal)
+  LEAD_DEAL_LINK               - /תקדםליד: מקשר ליד קיים לעסקה קיימת
+                                  (LEAD-DEAL-ASSOCIATION Model B, שונה
+                                  מ-LEAD_TO_DEAL — לא יוצר עסקה, לא נוגע ב-
+                                  Origin Lead). owner בלבד; resolve בלבד
+                                  ב-lead_deal_link.py, הכתיבה היחידה
+                                  (crm_link_lead_to_deal) עוברת אישור
+                                  אינטראקטיבי רגיל דרך app.py's
+                                  _queue_deterministic_link_lead_to_deal)
 
 INFRA / DATA:
   COST_WATCHDOG_LIVE          - לוג שימוש + daily Sonnet limit (CORE_05)

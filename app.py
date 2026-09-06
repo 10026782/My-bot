@@ -793,6 +793,55 @@ def cmd_deal_from_lead(msg):
         bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
 
 
+@bot.message_handler(commands=["תקדםליד"])
+def cmd_promote_lead(msg):
+    """/תקדםליד — מקשר ליד קיים לעסקה קיימת (crm_link_lead_to_deal),
+    LEAD-DEAL-ASSOCIATION Model B. owner בלבד, דורש LEAD_DEAL_LINK. שונה
+    מ-/dealfromlead: אף פעם לא יוצר עסקה חדשה, אף פעם לא נוגע ב-Origin Lead.
+
+    בלי ארגומנטים: מתחיל flow מודרך (איזה ליד? → לאיזו עסקה?), שנמשך
+    בהודעות טקסט רגילות הבאות (ראה _handle_lead_deal_link_reply()).
+    עם ארגומנט בצורת "קדם את X לעסקת Y": resolve חד-פעמי לשני הצדדים.
+    """
+    identity = resolve_identity("telegram", str(msg.from_user.id))
+    if not identity or identity.role not in ("owner", "admin"):
+        return
+    if not _flag_enabled("LEAD_DEAL_LINK"):
+        bot.send_message(
+            msg.chat.id,
+            "⚠️ קידום ליד לעסקה כבוי. הפעל עם משתנה הסביבה LEAD_DEAL_LINK=true.",
+        )
+        return
+    try:
+        chat_id = str(msg.chat.id)
+        arg_text = msg.text.split(maxsplit=1)[1].strip() if len(msg.text.split()) > 1 else ""
+        from lead_deal_link import parse_direct_link_text
+
+        if arg_text:
+            direct = parse_direct_link_text(arg_text)
+            if direct is None:
+                bot.send_message(
+                    msg.chat.id,
+                    "שימוש: /תקדםליד קדם את <שם ליד> לעסקת <שם עסקה>\n"
+                    "או /תקדםליד בלי ארגומנטים כדי להתחיל תהליך מודרך.",
+                )
+                return
+            lead_query, deal_query = direct
+            reply = _resolve_and_queue_lead_deal_link(
+                lead_query, deal_query, chat_id, "telegram", msg.text, identity,
+            )
+        else:
+            from session_store import lead_sessions
+            lead_sessions.set_lead_deal_link(chat_id, {"step": "awaiting_lead"}, channel="telegram")
+            reply = "❓ איזה ליד?"
+
+        _send_with_keyboard_fallback(msg.chat.id, reply, parse_mode="Markdown")
+        logger.info(f"[LeadDealLink] /תקדםליד by {identity.display_name}")
+    except Exception as e:
+        logger.error(f"cmd_promote_lead error: {e}")
+        bot.send_message(msg.chat.id, f"❌ שגיאה: {e}")
+
+
 @bot.message_handler(commands=["quest"])
 def cmd_quest(msg):
     """/quest — Quest Log השבוע."""
@@ -1333,6 +1382,125 @@ def _queue_deterministic_create_deal(
         outcome, chat_id, out_meta, "DeterministicCreateDeal",
         "לא הצלחתי להכניס את העסקה לאישור.",
     )
+
+
+def _queue_deterministic_link_lead_to_deal(
+    lead_id: str, deal_id: str, chat_id: str, channel: str, user_text: str,
+    identity, out_meta: dict | None = None,
+) -> str:
+    """LEAD-DEAL-ASSOCIATION Model B — the ONE function that proposes
+    crm_link_lead_to_deal. Mirrors _queue_deterministic_create_deal() above
+    exactly (enforce() pre-check, then _queue_approval_detailed() with no
+    custom fingerprint_payload, then _finalize_deterministic_queue_outcome())
+    — same BUG-CRM-BYPASS-FINGERPRINT-PARITY reasoning applies: nothing here
+    is worth diverging from the real {"lead_id", "deal_id"} payload for, so
+    don't create a second representation of it. Never calls
+    crm_create_deal, never touches ORIGIN_LEAD, never uses generic
+    airtable_update — the payload keys are exactly what
+    commercial_crm.link_lead_to_deal() expects and tools/dispatcher.py's
+    "crm_link_lead_to_deal" case validates."""
+    try:
+        enforce("crm_link_lead_to_deal", identity)
+    except ToolDenied as exc:
+        logger.warning(
+            "[DeterministicLinkLeadToDeal] נדחה לפני queue role=%s reason=%s",
+            getattr(identity, "role", "unknown"), type(exc).__name__,
+        )
+        return str(exc)
+
+    outcome = _queue_approval_detailed(
+        "crm_link_lead_to_deal",
+        {"lead_id": lead_id, "deal_id": deal_id},
+        chat_id, channel, user_text,
+        trusted_source="deterministic_link_lead_to_deal",
+    )
+    return _finalize_deterministic_queue_outcome(
+        outcome, chat_id, out_meta, "DeterministicLinkLeadToDeal",
+        "לא הצלחתי להעביר את הקישור לאישור.",
+    )
+
+
+def _resolve_and_queue_lead_deal_link(
+    lead_query: str, deal_query: str, chat_id: str, channel: str,
+    user_text: str, identity, out_meta: dict | None = None,
+) -> str:
+    """One-shot resolve-both-then-queue path for the direct NL form
+    ("קדם את X לעסקת Y") — resolves the Lead and the Deal by name (read-
+    only, lead_deal_link.py), then hands off to
+    _queue_deterministic_link_lead_to_deal() exactly like the guided
+    flow's final step does. Never writes anything itself; a resolve
+    failure (not found / ambiguous) returns the error message and queues
+    nothing."""
+    from lead_deal_link import resolve_lead_by_query, resolve_deal_by_query
+    from tma_api import record_id as _record_id
+
+    lead, err = resolve_lead_by_query(lead_query)
+    if lead is None:
+        return err
+    deal, err = resolve_deal_by_query(deal_query, identity)
+    if deal is None:
+        return err
+
+    return _queue_deterministic_link_lead_to_deal(
+        _record_id(lead, required=True), _record_id(deal, required=True),
+        chat_id, channel, user_text, identity, out_meta=out_meta,
+    )
+
+
+def _handle_lead_deal_link_reply(
+    state: dict, chat_id: str, channel: str, user_text: str, identity,
+    out_meta: dict | None = None,
+) -> str:
+    """/תקדםליד's guided-flow step handler — the single place that advances
+    a parked lead_deal_link session (see session_store.py's
+    set_lead_deal_link()/get_lead_deal_link()).
+
+    Two steps only: "awaiting_lead" then "awaiting_deal". A resolve failure
+    (not found / ambiguous) keeps the SAME step parked and returns the
+    error, so the owner can simply retry with a more precise name — no
+    special retry-count bookkeeping, exactly like a normal Q&A. A bare
+    cancel word clears the state outright. The final resolve (Deal, on
+    "awaiting_deal") clears the state and hands off to
+    _queue_deterministic_link_lead_to_deal() — the ONE place that proposes
+    crm_link_lead_to_deal, never a second writer path here.
+    """
+    from session_store import lead_sessions
+    from lead_deal_link import resolve_lead_by_query, resolve_deal_by_query
+    from tma_api import record_fields as _record_fields, record_id as _record_id
+    from airtable_schema import LeadFields
+
+    if user_text.strip().lower() in _CANCEL_WORDS:
+        lead_sessions.clear_lead_deal_link(chat_id, channel=channel)
+        return "🚫 קידום הליד לעסקה בוטל."
+
+    step = state.get("step")
+    if step == "awaiting_lead":
+        lead, err = resolve_lead_by_query(user_text)
+        if lead is None:
+            return err
+        lead_name = _record_fields(lead).get(LeadFields.NAME, "")
+        lead_sessions.set_lead_deal_link(
+            chat_id,
+            {"step": "awaiting_deal", "lead_id": _record_id(lead, required=True),
+             "lead_name": lead_name},
+            channel=channel,
+        )
+        return f"❓ לאיזו עסקה לקדם את *{lead_name}*?"
+
+    if step == "awaiting_deal":
+        deal, err = resolve_deal_by_query(user_text, identity)
+        if deal is None:
+            return err
+        lead_id = state.get("lead_id", "")
+        lead_sessions.clear_lead_deal_link(chat_id, channel=channel)
+        return _queue_deterministic_link_lead_to_deal(
+            lead_id, _record_id(deal, required=True), chat_id, channel,
+            user_text, identity, out_meta=out_meta,
+        )
+
+    # Corrupted/unrecognized step — fail closed, never loop forever.
+    lead_sessions.clear_lead_deal_link(chat_id, channel=channel)
+    return "⚠️ קידום הליד לעסקה בוטל עקב מצב לא תקין. אפשר להתחיל מחדש עם /תקדםליד."
 
 
 def _queue_deterministic_task_update(
@@ -3456,10 +3624,13 @@ def _is_fresh_deterministic_command(user_text: str) -> bool:
     exact structural parse only, via the same parse_deterministic_* helpers
     route_request() itself would use to classify this text as a genuine new
     command."""
+    from lead_deal_link import parse_direct_link_text, is_promote_lead_trigger
     return bool(
         parse_deterministic_create_task(user_text).certain
         or parse_deterministic_create_deal(user_text).domain_resolved
         or parse_deterministic_commercial_completion(user_text).certain
+        or parse_direct_link_text(user_text) is not None
+        or is_promote_lead_trigger(user_text)
     )
 
 
@@ -5304,6 +5475,30 @@ def run_agent(
                 _deal_enrichment_offer, chat_id, channel, user_text, out_meta=_out_meta,
             )
 
+    # LEAD-DEAL-ASSOCIATION Model B: a parked /תקדםליד guided flow takes
+    # precedence over everything below, same tier/reasoning as the Deal
+    # enrichment offer above (own session key, independent of
+    # "commercial_completion" — see set_lead_deal_link()'s docstring). This
+    # block is a complete no-op for every chat that never ran /תקדםליד or
+    # the "תקדם ליד" trigger (lead_deal_link stays None), so it cannot
+    # affect any other flow's routing.
+    try:
+        _lead_deal_link_state = (_session_snapshot or {}).get("lead_deal_link")
+    except Exception:
+        _lead_deal_link_state = None
+    if _lead_deal_link_state:
+        if _is_fresh_deterministic_command(user_text):
+            from session_store import lead_sessions as _ls_ldl_fresh
+            _ls_ldl_fresh.clear_lead_deal_link(chat_id, channel=channel)
+            _lead_deal_link_state = None
+        else:
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return _handle_lead_deal_link_reply(
+                _lead_deal_link_state, chat_id, channel, user_text, identity,
+                out_meta=_out_meta,
+            )
+
     # S2C: resume an in-progress commercial completion from the existing
     # universal Session store.  A subsequent answer must never restart the
     # writer or fall through to the Agent.
@@ -6006,6 +6201,31 @@ def run_agent(
                 "[C94] %s envelope build/validate failed chat=%s error_type=%s",
                 channel, chat_id, type(exc).__name__,
             )
+
+    # ── 2.9. Lead-Deal Association (Model B) — deterministic pre-Router
+    # triggers ("קדם את X לעסקת Y" direct form, "תקדם ליד" guided-flow
+    # start). Both are narrow, anchored regexes (lead_deal_link.py) that
+    # no-op for any other text, so this cannot affect any other flow's
+    # routing — see _is_fresh_deterministic_command()'s own use of the same
+    # two functions for why a stale pending flow correctly yields to these.
+    if _flag_enabled("LEAD_DEAL_LINK") and identity.role in ("owner", "admin"):
+        from lead_deal_link import parse_direct_link_text, is_promote_lead_trigger
+        _direct_link = parse_direct_link_text(user_text)
+        if _direct_link is not None:
+            _lead_query, _deal_query = _direct_link
+            _link_reply = _resolve_and_queue_lead_deal_link(
+                _lead_query, _deal_query, chat_id, channel, user_text, identity,
+                out_meta=_out_meta,
+            )
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return _link_reply
+        if is_promote_lead_trigger(user_text):
+            from session_store import lead_sessions as _ls_ldl_start
+            _ls_ldl_start.set_lead_deal_link(chat_id, {"step": "awaiting_lead"}, channel=channel)
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return "❓ איזה ליד?"
 
     # ── 3. Router — CORE_02.6 Integration ────────
     route = _safe_route(user_text, channel, identity, domain_from_channel, envelope_id=envelope_id)
