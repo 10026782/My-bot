@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 05/09/2026
+עודכן: 06/09/2026
 
 ## Commercial Completion Writer foundation — 03/09/2026
 
@@ -634,6 +634,125 @@ confirming the test catches the actual bug; pre-existing
 `test_select_value_validation.py` (18 assertions) re-run unchanged and
 green. `CODE_DONE / STATIC_VERIFIED` — review, merge, deploy, and
 production runtime verification pending.
+
+### DIAMOND PATH optional V2 enrichment gated Deal creation — 06/09/2026 (owner architecture correction)
+
+Owner-directed architecture correction: the Deal completion flow had
+drifted into a mandatory full-record gate. Five Commercial V2 fields
+(`deal_type`, `relationship_type`, `currency`, `commercial_status`,
+`expected_value`) were marked `required=ALWAYS` in
+`commercial_completion.py`'s "deal" `EntityContract` — despite the
+canonical writer itself (`commercial_crm.create_deal()`) always treating
+every one of them as an optional kwarg (`if x: fields[...] = x`). This was
+a completion-CONTRACT-only over-restriction, never a real writer or
+Airtable-schema requirement — and it was the underlying reason the two
+most recent production 422s (schema-authority veto, PR #1211; numeric
+free-text coercion, PR #1212) were even reachable in the first place: the
+Deal completion flow insisted on collecting `expected_value`/etc. before
+creation, rather than treating them as skippable post-creation enrichment.
+
+Live production evidence (owner transcript, same day, on the still-deployed
+pre-fix build): "צור עסקה סיבים אופטיים בתחום ייבוא" → the bot asked for
+counterparty, then deal type, relationship type, currency, commercial
+status, and expected value — all before creating anything — and rejected
+two non-numeric amount phrasings ("מאות אלפי שקלים", "מאה $") before
+finally accepting "100000" and creating the Deal. Confirms this was a live,
+current-behavior gate, not a hypothetical.
+
+Core invariant restored: **required fields gate creation; optional fields
+enrich after creation.** A Deal now only gates on name/domain/owner/
+counterparty (business-required, unchanged) — the five V2 fields no
+longer block or appear before creation at all. Once `crm_create_deal`
+succeeds, the owner is offered post-creation enrichment for those same
+five fields; declining, an invalid answer, skipping a field, or abandoning
+mid-flow all leave the already-created Deal exactly as it is.
+
+Fix (required/optional reclassification): removed `required=ALWAYS` from
+all five fields in the "deal" `EntityContract` (`commercial_completion.py`)
+— they default to `RequiredMode.OPTIONAL`. No change to `commercial_crm.py`
+(the canonical writer needed no change — it already handled these as
+optional).
+
+Fix (post-creation enrichment offer + loop): after a `crm_create_deal`
+approval executes successfully, `app.py`'s callback handler now calls a
+new `_offer_deal_enrichment()`, which persists a fresh offer/loop marker
+in `session_store.py`'s new, independent `deal_enrichment_offer` session
+key (deliberately separate from `commercial_completion`'s real
+`CompletionSession` frames, so neither can misread the other) and appends
+the offer text to the SAME single callback reply (`_diamond_resume_text`'s
+own established pattern). The next inbound message is checked for this
+marker in `run_agent()`, ahead of the normal S2C check, and handled by a
+new `_handle_deal_enrichment_reply()`: כן/לא on the initial offer; then one
+field at a time, reusing `commercial_completion.py`'s own
+`ENTITY_CONTRACTS["deal"]`/`validate_value()`/`_coerce_value()` for
+identical validation/coercion semantics, with `CommercialCompletionRouter.
+_presentation()` for the same field prompts already used elsewhere. A
+"דלג"/skip word advances past a field without recording it; a cancel word
+ends the loop immediately. Every successfully validated field is
+accumulated (never written immediately) and submitted as ONE combined
+`airtable_update` call — through the exact same `_queue_approval_detailed()`
+boundary and owner-approval gate every other deterministic completion
+uses — only once the loop ends (all fields answered/skipped, or
+abandoned with at least one field already validated); abandoning with
+nothing yet collected queues nothing at all. Never a second Deal writer,
+never a bypassed approval, and the Deal write itself is never touched by
+any of this — enrichment is purely an additional, optional, best-effort
+`airtable_update` afterward. `tools/dispatcher.py`'s `_DEAL_FIELD_MAP`
+(the direct-update field allowlist shared with `airtable_add`'s
+create-redirect) is extended with the four V2 select fields it was
+missing — `commercial_crm.create_deal()` already accepted them as kwargs;
+only this allowlist had never caught up, so a direct update carrying them
+was previously rejected as unsupported.
+
+Updated pre-existing tests to reflect the corrected required/optional
+contract (they previously asserted the old, incorrect gating behavior):
+`tests/test_commercial_completion.py` (3),
+`tests/test_commercial_completion_routing.py` (2, one renamed to
+`test_optional_deal_fields_never_block_creation` plus a new
+`test_missing_business_required_field_still_clarifies_before_creation`),
+`tests/test_commercial_completion_runtime_integration.py` (6, switched
+their SELECT/SCALAR-mechanics fixtures from Deal's now-optional fields to
+`charge`'s still-required `direction`/`amount`, which exercise the exact
+same generic answer-handling code), and
+`test_diamond_path_approval_continuation.py` (consolidated two scenarios
+into one: resolving a nested Contact for a Deal missing only counterparty
+now completes the Deal in a single step, since counterparty was the last
+remaining business-required field — the old two-step CLARIFY-then-TOOL
+path is no longer reachable for Deal by design; the underlying
+`resume_nested()`/`_inspect()` CLARIFY branch is unchanged code, already
+covered generically at the router level).
+
+New regression: `test_bug_diamond_optional_enrichment_gates_creation.py`
+(42 assertions) driving `app._offer_deal_enrichment()`/
+`app._handle_deal_enrichment_reply()` directly — offer persistence and
+text; decline (no queue call, Deal untouched); accept (advances to the
+first field, nothing queued yet); an invalid Expected Value (field-level
+message naming the Deal already exists, same field re-asked, nothing
+queued); skipping a field; a full collection queuing exactly one
+`airtable_update` with every field correctly coerced (confirms
+`expected_value` lands as a real float, not the free-text string);
+abandoning mid-flow with partial progress (whatever was already validated
+is still queued, nothing further requested) and with nothing yet
+collected (no empty update queued); and exactly one final response string
+per call across every branch. Verified against a genuine gap: reverting
+the `app.py`/`session_store.py`/`tools/dispatcher.py` changes makes the
+very first assertion crash immediately (`AttributeError: ... does not have
+the attribute 'set_deal_enrichment_offer'`), confirming this exercises
+code that did not exist before this change.
+
+Full CI-equivalent sweep re-run clean: `pytest tests/ -m "not integration
+and not airtable and not live"` (165 passed), all Diamond Path/commercial
+CRM root-level `test_bug_*.py`/`test_commercial_crm.py`/
+`test_diamond_path_approval_continuation.py` scripts, `smoke_tests.py`,
+`compileall`, `status_sync_validator.py`, and the writer-authority/
+dispatcher-bypass/turn-coordinator/gateway-boundary governance audits (0
+new violations — one transient false positive from `audit_dispatcher_
+bypass.py` misreading a pure line-shift of a pre-existing, unrelated
+`tools.airtable_tools` import as new was resolved by relocating the three
+new `session_store.py` methods to the end of the class instead, avoiding
+the shift entirely, without touching the audit script itself).
+`CODE_DONE / STATIC_VERIFIED` — review, merge, deploy, and production
+runtime verification pending.
 
 ### Commercial Completion numeric free-text answers stored as strings — 06/09/2026 (production-verified)
 

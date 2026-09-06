@@ -35,28 +35,37 @@ def test_supported_entities_have_one_canonical_primitive_each():
     }
 
 
-def test_router_clarifies_only_next_missing_field_then_queues_complete_deal():
+def test_optional_deal_fields_never_block_creation():
+    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION (production-verified,
+    # 06/09/2026): deal_type/relationship_type/currency/commercial_status/
+    # expected_value are optional — dropping all five must queue
+    # crm_create_deal immediately, never a CLARIFY loop asking for them one
+    # at a time before the Deal can be created.
     queued = []
     router = CommercialCompletionRouter(queue=lambda tool, payload: queued.append((tool, payload)))
     values = _deal()
+    values.pop("deal_type")
     values.pop("relationship_type")
     values.pop("currency")
     values.pop("commercial_status")
-    first = router.start("deal", current_values=values, source_context={})
-    assert first.outcome == "CLARIFY"
-    assert first.field_name == "relationship_type"  # field order is contract-owned
-
-    session = first.session
-    for field, value in (
-        ("relationship_type", RelationshipType.ONE_OFF),
-        ("currency", Currency.ILS),
-        ("commercial_status", CommercialStatus.PROSPECT),
-    ):
-        result = router.answer(session, field, value)
-        session = result.session
+    values.pop("expected_value")
+    result = router.start("deal", current_values=values, source_context={})
     assert result.outcome == "TOOL"
     assert result.tool_name == "crm_create_deal"
     assert queued == [("crm_create_deal", result.tool_inputs)]
+
+
+def test_missing_business_required_field_still_clarifies_before_creation():
+    # The business-required set (name/domain/owner/counterparty) still
+    # gates creation — only the five optional V2 fields were declassified.
+    queued = []
+    router = CommercialCompletionRouter(queue=lambda tool, payload: queued.append((tool, payload)))
+    values = _deal()
+    values.pop("owner")
+    first = router.start("deal", current_values=values, source_context={})
+    assert first.outcome == "CLARIFY"
+    assert first.field_name == "owner"
+    assert queued == []
 
 
 def test_payment_is_charge_required_and_never_agent_fallback():
@@ -156,18 +165,22 @@ def test_invalid_answer_keeps_same_completion_session_for_correction():
 # user-visible BLOCK reason.
 
 def test_invalid_select_answer_reason_is_business_safe():
+    # "direction" is used here (not "deal_type") because Deal's own SELECT
+    # fields were declassified to optional by
+    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION — this regression is
+    # about the general BLOCK-reason-safety behavior for any required
+    # SELECT field, not specific to Deal.
     router = CommercialCompletionRouter(queue=lambda *_: None)
-    values = _deal()
-    values.pop("deal_type")
-    first = router.start("deal", current_values=values)
-    assert first.field_name == "deal_type"
+    values = {"deal": "recDeal1", "amount": 100, "currency": Currency.ILS}
+    first = router.start("charge", current_values=values)
+    assert first.field_name == "direction"
 
-    blocked = router.answer(first.session, "deal_type", "not_a_real_deal_type")
+    blocked = router.answer(first.session, "direction", "not_a_real_direction")
     assert blocked.outcome == "BLOCK"
-    assert "deal_type" not in blocked.reason
+    assert "direction" not in blocked.reason
     assert "(" not in blocked.reason and ")" not in blocked.reason
     assert "'" not in blocked.reason
-    assert "סוג עסקה" in blocked.reason  # the business label, not the storage key
+    assert "כיוון תשלום" in blocked.reason  # the business label, not the storage key
 
 
 def test_restore_is_side_effect_free():

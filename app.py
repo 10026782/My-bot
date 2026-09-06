@@ -3372,6 +3372,153 @@ def _resolve_diamond_path_continuation(contract, canonical_record_id: str) -> st
         return None
 
 
+# BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION (06/09/2026, owner
+# architecture correction): the Deal completion flow had become a
+# mandatory full-record gate — deal_type/relationship_type/currency/
+# commercial_status/expected_value were required=ALWAYS in
+# commercial_completion.py despite the canonical writer always treating
+# them as optional. Fixed there (required fields gate creation; optional
+# fields enrich after creation) — the two functions below implement the
+# "offer enrichment after creation" half: once crm_create_deal succeeds,
+# offer to collect these five fields, one at a time, writing them via the
+# SAME approval-gated airtable_update() tool already used everywhere else
+# (never a second Deal writer, never a bypassed approval). An optional
+# field's failure never fails or rolls back the already-created Deal —
+# every branch below either re-asks the same field or ends the flow
+# leaving the Deal exactly as it already is.
+_DEAL_ENRICHMENT_FIELDS: tuple[str, ...] = (
+    "deal_type", "relationship_type", "currency", "commercial_status", "expected_value",
+)
+_ENRICHMENT_SKIP_WORDS = frozenset({"דלג", "skip", "לדלג"})
+
+
+def _offer_deal_enrichment(chat_id: str, channel: str, record_id: str) -> str:
+    """Persist a fresh enrichment offer for a just-created Deal and return
+    the offer prompt text. Never raises — a failure to persist just means
+    the offer isn't followed up on next turn, never that the Deal write
+    itself is affected (this runs strictly after crm_create_deal already
+    succeeded)."""
+    try:
+        from session_store import lead_sessions
+        lead_sessions.set_deal_enrichment_offer(
+            chat_id,
+            {"stage": "offer", "record_id": record_id,
+             "remaining_fields": list(_DEAL_ENRICHMENT_FIELDS), "collected": {}},
+            channel=channel,
+        )
+    except Exception:
+        logger.warning("[DealEnrichment] failed to persist offer for record=%s", record_id, exc_info=True)
+        return ""
+    return (
+        "העסקה נוצרה בהצלחה. רוצה להשלים פרטים נוספים "
+        "(סוג עסקה, סוג קשר, מטבע, סטטוס מסחרי, שווי צפוי)? השב 'כן' או 'לא'."
+    )
+
+
+def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_text: str) -> str:
+    """Advance (or end) a parked post-creation Deal enrichment offer/loop.
+
+    Never touches the Deal itself except through one accumulated
+    airtable_update() call, queued through the exact same
+    _queue_approval_detailed() boundary every other deterministic
+    completion uses — never a second writer, never a bypassed approval.
+    Declining, an invalid field answer, or abandoning mid-flow all leave
+    the already-created Deal exactly as it is; only ever exactly one
+    final reply string is returned per call, matching every other S2C
+    turn in this file.
+    """
+    from session_store import lead_sessions
+    from airtable_schema import Tables
+    from commercial_completion import ENTITY_CONTRACTS, InvalidValueError, validate_value, _coerce_value
+    from commercial_completion_routing import (
+        CommercialCompletionRouter, _CREATE_CONFIRM_WORDS, _CREATE_DECLINE_WORDS,
+    )
+
+    record_id = state.get("record_id") or ""
+    stage = state.get("stage") or "offer"
+    remaining = list(state.get("remaining_fields") or [])
+    collected = dict(state.get("collected") or {})
+    choice = user_text.strip()
+    choice_fold = choice.casefold()
+
+    def _finish(final_text: str) -> str:
+        lead_sessions.clear_deal_enrichment_offer(chat_id, channel=channel)
+        if collected:
+            queue_result = _queue_approval_detailed(
+                "airtable_update",
+                {"table": Tables.DEALS, "record_id": record_id, "fields": collected},
+                chat_id, channel, user_text,
+                trusted_source="deterministic_commercial_completion",
+            )
+            queued_text = (queue_result or {}).get("message") or ""
+            if queued_text:
+                return f"{final_text}\n\n{queued_text}"
+        return final_text
+
+    if stage == "offer":
+        if choice_fold in _CREATE_DECLINE_WORDS or choice_fold in _CANCEL_WORDS:
+            return _finish("בסדר, העסקה נשארת כפי שנוצרה.")
+        if choice_fold in _CREATE_CONFIRM_WORDS:
+            if not remaining:
+                return _finish("אין פרטים נוספים להשלים — העסקה כבר מלאה.")
+            current = remaining[0]
+            lead_sessions.set_deal_enrichment_offer(
+                chat_id,
+                {"stage": "collecting", "record_id": record_id,
+                 "remaining_fields": remaining, "collected": collected},
+                channel=channel,
+            )
+            return CommercialCompletionRouter._presentation("deal", current)["prompt"]
+        # Unrecognized reply: re-render the exact same offer rather than
+        # silently reinterpreting free text or dropping the offer.
+        return (
+            "לא הבנתי. רוצה להשלים פרטים נוספים לעסקה שכבר נוצרה? השב 'כן' או 'לא'."
+        )
+
+    # stage == "collecting"
+    current = remaining[0] if remaining else None
+    if current is None:
+        return _finish("אין פרטים נוספים להשלים — העסקה כבר מלאה.")
+
+    if choice_fold in _CANCEL_WORDS:
+        return _finish("ההשלמה בוטלה. העסקה נשארת כפי שנוצרה.")
+
+    if choice_fold in _ENRICHMENT_SKIP_WORDS:
+        remaining = remaining[1:]
+        if not remaining:
+            return _finish("תודה! העסקה נשארת כפי שנוצרה.")
+        lead_sessions.set_deal_enrichment_offer(
+            chat_id,
+            {"stage": "collecting", "record_id": record_id,
+             "remaining_fields": remaining, "collected": collected},
+            channel=channel,
+        )
+        return CommercialCompletionRouter._presentation("deal", remaining[0])["prompt"]
+
+    contract = ENTITY_CONTRACTS["deal"].field(current)
+    try:
+        validate_value(contract, choice)
+    except InvalidValueError as exc:
+        field_label = CommercialCompletionRouter._presentation("deal", current)["user_label"] or current
+        safe_reason = CommercialCompletionRouter._validation_failure_message("deal", current, exc)
+        return (
+            f"לא הצלחתי לשמור את {field_label}. {safe_reason}\n"
+            "העסקה כבר נוצרה. אפשר להזין ערך אחר או לדלג."
+        )
+
+    collected[contract.airtable_field] = _coerce_value(contract, choice)
+    remaining = remaining[1:]
+    if not remaining:
+        return _finish("תודה! הפרטים הנוספים הועברו לאישור.")
+    lead_sessions.set_deal_enrichment_offer(
+        chat_id,
+        {"stage": "collecting", "record_id": record_id,
+         "remaining_fields": remaining, "collected": collected},
+        channel=channel,
+    )
+    return CommercialCompletionRouter._presentation("deal", remaining[0])["prompt"]
+
+
 def _handle_approval_callback_impl(cq) -> None:
     """מטפל בלחיצה על ✅/❌ של בקשת אישור."""
     from event_bus import bus
@@ -3530,6 +3677,12 @@ def _handle_approval_callback_impl(cq) -> None:
         # (non-tool approvals never carry one) so it is always safe to
         # reference at the single final-message composition point.
         _diamond_resume_text = None
+        # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: populated only
+        # when this exact approval was a crm_create_deal execution that
+        # succeeded — offers post-creation enrichment for the five V2
+        # fields that no longer gate creation itself. Same single-message
+        # composition point as _diamond_resume_text above.
+        _enrichment_offer_text = None
 
         if not tool_name:
             # Non-tool approval — emit {action}.confirmed event
@@ -3703,6 +3856,17 @@ def _handle_approval_callback_impl(cq) -> None:
                     _diamond_resume_text = _resolve_diamond_path_continuation(
                         _contract_after, _diamond_record_id,
                     )
+                    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: the
+                    # Deal itself just finished creating (whether queued
+                    # directly, or as the auto-completed parent after a
+                    # nested Contact/Organization resume above) — offer to
+                    # collect the five optional V2 fields that no longer
+                    # gate creation, never blocking or rolling back this
+                    # already-valid Deal.
+                    if _contract_after.tool_name == "crm_create_deal" and _diamond_record_id:
+                        _enrichment_offer_text = _offer_deal_enrichment(
+                            origin_chat_id, origin_channel, _diamond_record_id,
+                        )
             else:
                 # BUG-STALE-CALLBACK-FALLTHROUGH, unified regardless of
                 # FEATURE_ACTION_GATEWAY (STATIC-AUDIT-20260830 follow-up
@@ -3840,6 +4004,8 @@ def _handle_approval_callback_impl(cq) -> None:
         # _deliver_callback_final()'s own docstring), never a second send.
         if _diamond_resume_text:
             user_notify_text = f"{user_notify_text}\n\n{_diamond_resume_text}"
+        if _enrichment_offer_text:
+            user_notify_text = f"{user_notify_text}\n\n{_enrichment_offer_text}"
         try:
             _deliver_callback_final(
                 cq, origin_channel=origin_channel,
@@ -4617,6 +4783,22 @@ def run_agent(
         _session_snapshot = _ls.get(chat_id)
     except Exception:
         _session_snapshot = None
+
+    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: a parked post-creation
+    # Deal enrichment offer/loop takes precedence over everything below —
+    # it lives in its own session key (see set_deal_enrichment_offer()'s
+    # docstring for why), completely independent of "commercial_completion".
+    # A subsequent answer must never restart the offer or fall through to
+    # the Agent; the Deal itself was already created before this marker
+    # could ever exist, so nothing here can affect its validity.
+    try:
+        _deal_enrichment_offer = (_session_snapshot or {}).get("deal_enrichment_offer")
+    except Exception:
+        _deal_enrichment_offer = None
+    if _deal_enrichment_offer:
+        if _out_meta is not None:
+            _out_meta["source_module"] = "action_gateway"
+        return _handle_deal_enrichment_reply(_deal_enrichment_offer, chat_id, channel, user_text)
 
     # S2C: resume an in-progress commercial completion from the existing
     # universal Session store.  A subsequent answer must never restart the

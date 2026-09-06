@@ -46,6 +46,12 @@ def _complete_deal(**overrides):
 
 
 def test_deal_from_sparse_lead_asks_only_for_missing_deal_fields():
+    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: deal_type/
+    # relationship_type/currency/commercial_status/expected_value are no
+    # longer required=ALWAYS — only name/domain/owner/counterparty gate
+    # creation. A sparse lead context that resolves all of those via
+    # inheritance is immediately complete; nothing optional is asked
+    # before creation.
     writer = CommercialCompletionWriter(
         "deal",
         current_values={"deal_type": DealType.SERVICE},
@@ -58,11 +64,8 @@ def test_deal_from_sparse_lead_asks_only_for_missing_deal_fields():
             "lead_id": "recLead1",
         },
     )
-    assert [field.field_name for field in writer.missing_fields()] == [
-        "relationship_type",
-        "currency",
-        "commercial_status",
-    ]
+    assert writer.missing_fields() == ()
+    assert writer.is_complete()
 
 
 def test_deal_created_directly_does_not_require_lead():
@@ -181,11 +184,15 @@ def test_computed_formula_and_rollup_fields_are_never_requested():
 
 
 def test_completion_resumes_from_partial_progress():
-    writer = CommercialCompletionWriter("deal", _complete_deal(currency=""))
-    assert writer.next_field().field_name == "currency"
-    resumed = writer.apply_answer("currency", Currency.USD)
+    # currency is no longer a business-required field (see
+    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION) — use a still-required
+    # field (owner) to exercise the same resume-from-partial-progress
+    # mechanics.
+    writer = CommercialCompletionWriter("deal", _complete_deal(owner=""))
+    assert writer.next_field().field_name == "owner"
+    resumed = writer.apply_answer("owner", "recOwner2")
     assert resumed.is_complete()
-    assert resumed.complete_payload()["Currency"] == Currency.USD
+    assert resumed.complete_payload()["Owner"] == "recOwner2"
 
 
 def test_same_contract_supports_chat_and_multi_field_rendering():
@@ -296,8 +303,8 @@ def test_continuation_ref_from_dict_never_guesses_a_malformed_shape(raw):
 
 
 def test_missing_field_decisions_need_no_agent_or_callback():
-    writer = CommercialCompletionWriter("deal", _complete_deal(currency=""))
-    assert writer.next_field().field_name == "currency"
+    writer = CommercialCompletionWriter("deal", _complete_deal(owner=""))
+    assert writer.next_field().field_name == "owner"
     assert not hasattr(writer, "agent")
     assert not hasattr(writer, "llm")
 

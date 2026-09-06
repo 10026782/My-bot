@@ -125,6 +125,17 @@ _DEAL_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     DealFields.PRIORITY:      ("priority", None),
     DealFields.RISK_LEVEL:    ("risk_level", None),
     DealFields.NOTES:         ("notes", None),
+    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: these four V2 fields
+    # are now collected as post-creation enrichment (commercial_completion.py)
+    # via a direct airtable_update() on an already-created Deal — they were
+    # never in this allowlist before (commercial_crm.create_deal() has
+    # always accepted them as optional kwargs; only the generic-write
+    # allowlist here never caught up), so a direct update carrying them was
+    # rejected as "not supported for direct update on this table."
+    DealFields.DEAL_TYPE_CODE:   ("deal_type_code", None),
+    DealFields.RELATIONSHIP_TYPE: ("relationship_type", None),
+    DealFields.CURRENCY:         ("currency", None),
+    DealFields.COMMERCIAL_STATUS: ("commercial_status", None),
 }
 _PAYMENT_TERM_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     PaymentTermFields.DEAL:         ("deal_id", "single"),

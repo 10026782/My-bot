@@ -258,17 +258,29 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("organization_name", OrganizationFields.NAME, InputType.TEXT, required=ALWAYS, inherit=("organization_name", "company"), example="Acme Ltd"),
     )),
     "deal": EntityContract("deal", (
+        # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION (production-verified,
+        # 06/09/2026): deal_type/relationship_type/currency/commercial_status/
+        # expected_value used to be required=ALWAYS here, turning the Deal
+        # completion flow into a mandatory full-record gate — the canonical
+        # writer (commercial_crm.create_deal()) has always treated every one
+        # of these as optional kwargs (`if x: fields[...] = x`), so this was
+        # a completion-contract-only over-restriction, never a real writer/
+        # schema requirement. A Deal now only gates creation on name/domain/
+        # owner/counterparty (business-required); these five are collected
+        # as post-creation enrichment instead (see the "deal_enrichment"
+        # contract below and commercial_completion_routing.py's enrichment
+        # offer/loop) and never block or roll back the already-created Deal.
         _f("name", DealFields.NAME, InputType.TEXT, required=ALWAYS, inherit=("deal_name", "name"), example="Annual maintenance agreement"),
         _f("domain", DealFields.DOMAIN, InputType.TEXT, required=ALWAYS, inherit=("domain",)),
         _f("owner", DealFields.OWNER, InputType.LINK, required=ALWAYS, inherit=("owner", "owner_id"), validation="record_id"),
         _f("origin_lead", DealFields.ORIGIN_LEAD, InputType.LINK, inherit=("lead_id", "origin_lead_id"), validation="record_id"),
         _f("counterparty_contact", DealFields.COUNTERPARTY_CONTACT, InputType.LINK, inherit=("contact_id", "counterparty_contact"), validation="record_id"),
         _f("counterparty_organization", DealFields.COUNTERPARTY_ORGANIZATION, InputType.LINK, inherit=("organization_id", "counterparty_organization"), validation="record_id"),
-        _f("deal_type", DealFields.DEAL_TYPE_CODE, InputType.SELECT, required=ALWAYS, choices=_DEAL_TYPES, example=DealType.SERVICE),
-        _f("relationship_type", DealFields.RELATIONSHIP_TYPE, InputType.SELECT, required=ALWAYS, choices=_RELATIONSHIPS),
-        _f("currency", DealFields.CURRENCY, InputType.SELECT, required=ALWAYS, choices=_CURRENCIES),
-        _f("commercial_status", DealFields.COMMERCIAL_STATUS, InputType.SELECT, required=ALWAYS, choices=_COMMERCIAL_STATUSES),
-        _f("expected_value", DealFields.AMOUNT, InputType.CURRENCY, required=ALWAYS, inherit=("expected_value", "amount"), validation="positive"),
+        _f("deal_type", DealFields.DEAL_TYPE_CODE, InputType.SELECT, choices=_DEAL_TYPES, example=DealType.SERVICE),
+        _f("relationship_type", DealFields.RELATIONSHIP_TYPE, InputType.SELECT, choices=_RELATIONSHIPS),
+        _f("currency", DealFields.CURRENCY, InputType.SELECT, choices=_CURRENCIES),
+        _f("commercial_status", DealFields.COMMERCIAL_STATUS, InputType.SELECT, choices=_COMMERCIAL_STATUSES),
+        _f("expected_value", DealFields.AMOUNT, InputType.CURRENCY, inherit=("expected_value", "amount"), validation="positive"),
         _f("stage", DealFields.STAGE, InputType.SELECT, choices=(DealStage.OPPORTUNITY, DealStage.NEGOTIATION, DealStage.CLOSED_WIN, DealStage.CLOSED_LOSS), default=DealStage.OPPORTUNITY),
         _f("start_date", DealFields.START_DATE, InputType.DATE),
         _f("notes", DealFields.NOTES, InputType.TEXT),
