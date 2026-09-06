@@ -1895,3 +1895,88 @@ origin/claude/diamond-path-runtime-audit-1olovk (git push -u origin
 claude/diamond-path-runtime-audit-1olovk → "new branch"). No Render
 deploy yet — this branch is not on main; the production canary from the
 pasted log has not been re-run against the fix.
+
+### LEAD-DEAL-ASSOCIATION Model B — link an existing Lead to an existing Deal — 06/09/2026 (owner-requested feature)
+
+Preceded by an explicit read-only audit (same session) that found the
+system supported only Model A (Origin Lead — a single link, written once
+by `commercial_crm.create_deal()` at Deal-creation time) and had no path
+at all for Model B: associating a Lead that already exists with a Deal
+that already exists, without creating a new Deal and without treating the
+Lead as "converted." This entry implements Model B as its own narrow
+primitive, explicitly coexisting with Model A rather than replacing it.
+
+What was added:
+- `DealFields.LINKED_LEADS` (`airtable_schema.py`) — a new multi-value
+  linked-record field, distinct from `DealFields.ORIGIN_LEAD` (unchanged,
+  still single-slot, still written only by `create_deal()`). **NOT YET
+  LIVE IN AIRTABLE** — must be created there by the owner (Linked Record
+  → Leads, allow linking to multiple records) before this is functional
+  in production; until then, writes naming it fail closed via the
+  existing schema-authority gate (`tools/airtable_gateway.py`
+  normalize/validate — an unrecognized field is dropped and the whole
+  write is blocked, never a silent partial write).
+- `commercial_crm.link_lead_to_deal(lead_id, deal_id, *, source=...)` — the
+  one canonical writer. Verifies both records exist first; blocks the
+  link if both records have a non-empty domain and the domains differ
+  (Deal `Owner` is intentionally not compared — documented business
+  metadata, not an authorization boundary, and Lead `Owner` links to a
+  different table with no shared identity to compare it against);
+  idempotent (a Lead already present in Linked Leads is a no-op success,
+  no duplicate write); never calls the Deal creation path; never reads or
+  writes `ORIGIN_LEAD`; reports success only after a read-back confirms
+  the PATCH actually landed (a 200 response is treated as necessary, not
+  sufficient).
+- `crm_link_lead_to_deal` registered in `tool_registry.py`
+  (`requires_approval=True`, `high_risk=True`, `tenant_scoped=True`,
+  `blocked_by_emergency=True`, `model_exposed=False` — internal-only,
+  same shape as `crm_find_or_create_organization`/`_contact`, until a
+  separately-approved deterministic/UI caller is wired), a presence-check
+  entry in `action_validator.py`, and a dispatch case in
+  `tools/dispatcher.py` that enforces tenant scope before calling the
+  writer — the same three-gate shape (registry → validator → dispatcher)
+  every other canonical writer in this file goes through.
+
+Explicitly not built (per instruction, kept narrow): no generic
+`update_deal()` — this stays a single-purpose linking primitive, not a
+general Deal-field patcher; no Charges/Payments changes; no new
+Participant/Placement entity — Linked Leads is a plain multi-link field
+on the existing Deals table.
+
+Tests: `test_crm_link_lead_to_deal.py` (new, 18 assertions, pytest-native)
+— direct writer unit tests (invalid ids, Deal/Lead not found, domain
+mismatch blocks, matching/empty domain allows, idempotent on an
+already-linked Lead, idempotent across two stateful calls against one
+shared simulated record, PATCH failure surfaces as not-ok, a PATCH that
+reports success but whose read-back doesn't show the change surfaces as
+not-ok, never calls `airtable_create`, never touches `ORIGIN_LEAD`);
+registry/validator/dispatcher wiring tests (policy fields, presence
+check, direct `dispatch_tool()` without an approval proof is denied); one
+end-to-end test driving the real governed path (`core.action_gateway
+.action_gateway.propose_action()` → `app._handle_approval_callback_impl()`
+→ `tools.dispatcher.dispatch_tool()`, the exact path a real Telegram
+approval uses) with `commercial_crm.get_record_fields`/`airtable_patch`
+mocked at the Airtable boundary only, proving the contract reaches
+`completed`/`executed` and the writer patches exactly
+`{DealFields.LINKED_LEADS: [lead_id]}` on the correct Deal record. Full
+regression sweep run clean: every root `test_*.py` script (CI's set,
+including `test_commercial_crm.py` 111/111 and
+`test_lead_to_deal_origin_link.py` 11/11), `smoke_tests.py`,
+`action_validator.py`'s own self-test, `tests/` (165, pytest),
+`python3 -m compileall -q .`, `python3 -c "import app; import tma_api;
+import tools.dispatcher"` (exercises `tool_registry`'s model-exposed
+schema-coverage invariant at import time).
+
+Non-goals: no Agent/natural-language entry point and no Telegram command
+wired to this primitive yet (out of scope per instruction — this batch is
+the writer/registry/validator/dispatcher primitive itself, callable today
+only through `ActionGateway.propose_action()`, exactly like
+`crm_find_or_create_organization` before its own deterministic caller was
+wired); no change to Model A (Origin Lead) at all.
+
+STATUS: 🟡 CODE DONE, NOT VERIFIED
+EVIDENCE: see `git log -1 --oneline` and the push output in this session's
+final report. No Render deploy yet, `Linked Leads` does not exist live in
+Airtable yet (owner action required), and no production canary has been
+run — writes will fail closed (dropped-field gate) against live Airtable
+until the field is created there.

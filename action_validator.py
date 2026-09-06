@@ -45,6 +45,7 @@ _REQUIRED: dict[str, list[str]] = {
     "crm_create_payment":        ["amount", "domain", "owner_id"],
     "crm_find_or_create_organization": ["organization_name"],
     "crm_find_or_create_contact": ["name"],
+    "crm_link_lead_to_deal":     ["lead_id", "deal_id"],
     "crm_create_charge": [
         "deal_id", "direction", "amount", "currency", "status",
         "collection_state", "vat_rule", "document_requirement", "document_status",
@@ -84,6 +85,7 @@ _FIELD_QUESTIONS: dict[str, str] = {
     "key": "מה המפתח?", "value": "מה הערך?",
     "domain": "מה הדומיין העסקי?", "owner_id": "מי הבעלים? (מזהה record)",
     "deal_id": "לאיזו עסקה? (מזהה record)", "calc_type": "שיטת חישוב? (fixed/percentage)",
+    "lead_id": "איזה ליד? (מזהה record)",
 }
 
 _SENSITIVE_TOOLS = {
@@ -93,6 +95,7 @@ _SENSITIVE_TOOLS = {
     "crm_create_deal", "crm_create_payment_term", "crm_create_payment",
     "crm_find_or_create_organization", "crm_find_or_create_contact",
     "crm_create_charge", "crm_create_charge_payment",
+    "crm_link_lead_to_deal",
 }
 
 _ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?$")

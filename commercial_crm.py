@@ -38,6 +38,7 @@ from airtable_schema import (
     Direction,
     DocumentRequirement,
     DocumentStatus,
+    LeadFields,
     OrganizationFields,
     PaymentFields,
     PaymentStatus,
@@ -49,7 +50,7 @@ from airtable_schema import (
     VATRule,
 )
 import crm
-from tools.airtable_gateway import airtable_create, escape_formula_value
+from tools.airtable_gateway import airtable_create, airtable_patch, escape_formula_value
 from tools.airtable_read_adapter import get_record_fields, list_records
 from tools.airtable_tools import _tool_result
 
@@ -61,6 +62,7 @@ VAT_RATE = 0.18
 _RECORD_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ORGANIZATION_WRITE_LOCK = threading.RLock()
+_DEAL_LEAD_LINK_LOCK = threading.RLock()
 
 
 def _enum_values(namespace: type) -> frozenset[str]:
@@ -353,6 +355,107 @@ def find_or_create_organization(
             Tables.ORGANIZATIONS,
             {OrganizationFields.NAME: display_name},
             source,
+        )
+
+
+def link_lead_to_deal(
+    lead_id: str,
+    deal_id: str,
+    *,
+    source: str = "commercial_crm",
+) -> dict:
+    """Associate an existing Lead with an existing Deal — Model B (Lead <->
+    Deal association): a Lead as a linked participant/context record on a
+    Deal that already exists.
+
+    Distinct from Origin Lead (DealFields.ORIGIN_LEAD, written once by
+    create_deal() at Deal-creation time): this writer never creates a Deal
+    and never reads or writes ORIGIN_LEAD. It only appends lead_id to the
+    Deal's DealFields.LINKED_LEADS multi-link field. A Deal may accumulate
+    many Linked Leads; a Lead need not be a Deal's Origin Lead to be linked
+    to it, and a Deal may have both an Origin Lead and any number of
+    separately Linked Leads.
+
+    Idempotent: if lead_id is already present in the Deal's Linked Leads,
+    this is a no-op success — no duplicate write, no error — safe to call
+    repeatedly (natural-language retries, ActionContract redelivery).
+
+    Domain compatibility: when both records have a non-empty domain value,
+    they must match (case-insensitive) or the link is refused. Deal Owner
+    is intentionally not compared: DealFields.OWNER is documented business
+    metadata, not an authorization boundary (see module docstring), and
+    Lead.Owner links to a different table (Profile) with no shared identity
+    to compare it against — comparing them would assert a business rule
+    this codebase has never established.
+
+    Returns success only after a read-back confirms lead_id is actually
+    present in the Deal's Linked Leads — a 200 from the PATCH is treated as
+    necessary, not sufficient.
+    """
+    tool = "crm_link_lead_to_deal"
+
+    if not _valid_record_id(lead_id):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Lead record id is invalid.")
+    if not _valid_record_id(deal_id):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Deal record id is invalid.")
+
+    # The lock closes the in-process read/append race on the same Deal.
+    # Cross-process retries of one approved business action are additionally
+    # owned by ActionGateway's canonical fingerprint/idempotency contract —
+    # same division of responsibility as _ORGANIZATION_WRITE_LOCK above.
+    with _DEAL_LEAD_LINK_LOCK:
+        deal_fields, error = _read_fields(Tables.DEALS, deal_id, "Deal")
+        if error:
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+        lead_fields, error = _read_fields(Tables.LEADS, lead_id, "Lead")
+        if error:
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+
+        deal_domain = str(deal_fields.get(DealFields.DOMAIN, "") or "").strip().casefold()
+        lead_domain = str(lead_fields.get(LeadFields.DOMAIN, "") or "").strip().casefold()
+        if deal_domain and lead_domain and deal_domain != lead_domain:
+            return _tool_result(
+                ok=False, tool=tool,
+                evidence={"deal_id": deal_id, "lead_id": lead_id,
+                          "deal_domain": deal_domain, "lead_domain": lead_domain},
+                user_message="❌ הליד והעסקה שייכים לדומיינים עסקיים שונים; הקישור נדחה.",
+            )
+
+        current_links = _link_ids(deal_fields.get(DealFields.LINKED_LEADS))
+        if lead_id in current_links:
+            return _tool_result(
+                ok=True, tool=tool, external_id=deal_id,
+                evidence={"deal_id": deal_id, "lead_id": lead_id, "action": "already_linked"},
+                user_message="✅ הליד כבר מקושר לעסקה זו.",
+            )
+
+        updated_links = current_links + [lead_id]
+        patched = airtable_patch(
+            Tables.DEALS, deal_id, {DealFields.LINKED_LEADS: updated_links}, source=source,
+        )
+        if not patched:
+            return _tool_result(
+                ok=False, tool=tool,
+                evidence={"deal_id": deal_id, "lead_id": lead_id},
+                user_message="❌ קישור הליד לעסקה נכשל בכתיבה ל-Airtable.",
+            )
+
+        # A 200/ok PATCH response is necessary but not sufficient — read the
+        # Deal back and confirm lead_id is actually present before reporting
+        # success (same caution this repo's other airtable_patch() callers
+        # apply; see BUG_AUDIT_LOG.md's phase_4b read-back verification).
+        verify_fields, verify_error = _read_fields(Tables.DEALS, deal_id, "Deal")
+        if verify_error or lead_id not in _link_ids((verify_fields or {}).get(DealFields.LINKED_LEADS)):
+            return _tool_result(
+                ok=False, tool=tool,
+                evidence={"deal_id": deal_id, "lead_id": lead_id},
+                user_message="⚠️ הכתיבה בוצעה אך לא אומתה בקריאה חוזרת; אין לנסות שוב אוטומטית.",
+            )
+
+        return _tool_result(
+            ok=True, tool=tool, external_id=deal_id,
+            evidence={"deal_id": deal_id, "lead_id": lead_id, "action": "linked"},
+            user_message="✅ הליד קושר לעסקה.",
         )
 
 

@@ -413,6 +413,22 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "איתור או יצירת איש קשר קנוני — פנימי ודורש אישור",
     ),
+    # LEAD-DEAL-ASSOCIATION (Model B): link an EXISTING Lead to an EXISTING
+    # Deal (Deals.Linked Leads, distinct from the single-slot Origin Lead).
+    # Same shape as crm_find_or_create_organization/_contact above —
+    # internal-only until a separately approved deterministic/UI caller is
+    # wired, never Agent-selectable.
+    ToolMeta(
+        name             = "crm_link_lead_to_deal",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        model_exposed    = False,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "קישור ליד קיים לעסקה קיימת — פנימי ודורש אישור",
+    ),
     ToolMeta(
         name             = "crm_create_charge",
         roles_allowed    = _MANAGEMENT,

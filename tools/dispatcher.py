@@ -1242,6 +1242,32 @@ def dispatch_tool(
                 audit_log_airtable(name, identity, inputs, result)
                 return result
 
+            case "crm_link_lead_to_deal":
+                # LEAD-DEAL-ASSOCIATION (Model B): link an EXISTING Lead to
+                # an EXISTING Deal. Never creates a Deal, never touches
+                # Origin Lead — see commercial_crm.link_lead_to_deal()'s
+                # own docstring for the full contract.
+                _allowed = frozenset({"lead_id", "deal_id"})
+                _unsupported = _unsupported_canonical_inputs(inputs, _allowed)
+                if _unsupported:
+                    return _tool_result(
+                        ok=False, tool=name,
+                        user_message=f"❌ Unsupported input fields: {_unsupported!r}.",
+                    )
+                try:
+                    enforce_tenant_scope(name, identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable(name, identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool=name, user_message=str(e))
+                from commercial_crm import link_lead_to_deal
+                result = link_lead_to_deal(
+                    lead_id=inputs["lead_id"],
+                    deal_id=inputs["deal_id"],
+                    source=trusted_source or "commercial_crm",
+                )
+                audit_log_airtable(name, identity, inputs, result)
+                return result
+
             case "crm_create_charge":
                 _allowed = frozenset({
                     "deal_id", "direction", "amount", "currency", "status",
