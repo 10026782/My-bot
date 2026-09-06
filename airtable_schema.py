@@ -256,6 +256,20 @@ class DealFields:
     TASKS_LINK      = "משימות (Tasks)"
     PAYMENTS_LINK   = "תשלומים (Payments)"
     ORIGIN_LEAD     = "Origin Lead"     # linked record — fldoobGq4PS78C0Em
+    # LEAD-DEAL-ASSOCIATION (Model B, 06/09/2026) — distinct from ORIGIN_LEAD
+    # above (single link, written once by create_deal() and never touched
+    # again). LINKED_LEADS is a genuine multi-value link written/appended to
+    # by commercial_crm.link_lead_to_deal(): a Deal may accumulate many
+    # Linked Leads over time, independent of whether it has an Origin Lead.
+    # A Lead need not be an Origin Lead to be a Linked Lead. NOT YET LIVE IN
+    # AIRTABLE as of this commit — must be created there (Linked Record ->
+    # Leads, "allow linking to multiple records" enabled) before this is
+    # functional; until then, writes naming it fail closed via the existing
+    # schema-authority gate (tools/airtable_gateway.py normalize/validate —
+    # an unrecognized field is dropped and the write is blocked outright,
+    # never a silent partial write), and never touches ORIGIN_LEAD or
+    # blocks/rolls back the Deal itself.
+    LINKED_LEADS    = "Linked Leads"
     DOMAIN          = "Domain"          # canonical domain field — fldz3pTAHF3xWxG6f. "Select" (fld4xBgWxdB7fFitf) was a duplicate, now renamed "DEPRECATED - Select"
     OWNER           = "Owner"           # business ownership metadata only — NOT an authorization boundary (see docs/governance — internal per-record authorization is a known, deferred gap)
     VENTURE_LINK    = "Ventures"

@@ -22,6 +22,7 @@ EXPECTED_APPROVAL_TOOLS = frozenset({
     "crm_create_payment",
     "crm_find_or_create_organization",
     "crm_find_or_create_contact",
+    "crm_link_lead_to_deal",
     "crm_create_charge",
     "crm_create_charge_payment",
     "gmail_draft",
