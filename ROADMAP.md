@@ -1492,4 +1492,128 @@ design, tracked separately); domain-alias-table drift
 dead `_queue_deterministic_create_deal()` builder and its CI guard
 verifying a function no longer on the live path; and the enrichment
 stage's missing fresh-command escape hatch (S2C already has one;
-enrichment does not).
+enrichment does not — closed by DIAMOND REMEDIATION D2 below).
+
+### DIAMOND REMEDIATION D2 — input ownership + local-state recovery — 06/09/2026 (owner-directed, follow-up to D1)
+
+Closes the remaining Diamond input-ownership/local-state-recovery findings
+(C1-C8 + extras) named in the original systemic audit and explicitly left
+out of D1's scope. Current-main truth was re-verified by real tracing
+(not assumed from comments) before any edit — all 8 findings confirmed
+TRUE or PARTIAL-true, no delta from the audit brief. D1's post-approval
+architecture, Airtable schema, Deal writer architecture, and domain-alias
+work are explicitly untouched, per instruction.
+
+1. **Final ingress precedence, documented in code.** `run_agent()` now
+   carries an explicit precedence docblock (0. Telegram button/callback —
+   a separate code path, always independent; 1. active Deal enrichment;
+   2. active commercial_completion/nested-create-confirm; 3. legacy
+   `_pending_approvals` bucket + ActionGateway confirm/disambiguation/
+   combined-word routing; 4. a fresh deterministic command; 5. explicit
+   global cancel; 6. read-only recommendation fallback / full Agent loop).
+   "AN INPUT MAY HAVE AT MOST ONE VALID OWNER" is structural, not just
+   documented: local Diamond state retains ownership of a bare
+   כן/לא/דלג/בטל by design (matches the existing, unchanged architecture);
+   an explicit approval **callback** (button) always resolves independently,
+   since it never enters this text pipeline at all.
+2. **C1 — `maybe_recommend()` moved to last.** Previously called at the
+   very top of `run_agent()`, before any session/state was loaded — free
+   text intended for an active Deal-enrichment TEXT field (e.g.
+   `estimated_value_notes` containing a tool-catalog trigger phrase) could
+   be intercepted as a tool recommendation instead of stored as the field
+   answer. Moved to run immediately before the Router (── 2.6 ──), after
+   every higher-precedence local-state/approval check has had the chance
+   to claim the turn — a pure reordering, no logic changed, and still the
+   last-resort fallback it was designed to be.
+3. **C2 — pending-approval TTL housekeeping no longer starves.**
+   `_release_expired_pending_approvals(chat_id)` (previously called only
+   inside the ── 2.5. Pending Approval Gate ── block, which a parked
+   `deal_enrichment_offer`'s early return skipped entirely) now also runs
+   unconditionally at the very top of `run_agent()`, every turn, regardless
+   of which state ends up owning it.
+4. **C3 — frozen כן/לא/דלג/בטל semantics.** `_handle_deal_enrichment_reply()`
+   now documents and enforces one explicit table: OFFER — לא/דלג/בטל are
+   equivalent (decline the not-yet-started offer); SELECT — לא/בטל cancel
+   the whole remaining loop, דלג skips only the current field; TEXT — לא/דלג
+   mean "skip this field, no notes" (never cancel), while the narrower new
+   `_ENRICHMENT_FULL_CANCEL_WORDS` (בטל/ביטול/עצור/cancel) is the one
+   subset that still aborts the whole loop even at a TEXT field — previously
+   conflated with "skip," making a real cancel word inert once a TEXT field
+   was active.
+5. **C4 — fresh-command escape hatch for enrichment.** New
+   `_is_fresh_deterministic_command()` (the exact same deterministic
+   `parse_deterministic_create_task/create_deal/commercial_completion`
+   classifier `commercial_completion`'s own
+   `BUG-S2C-STALE-SESSION-SWALLOWS-NEW-COMMAND` fix already trusts —
+   extracted, not duplicated, and now called from both escape hatches) and
+   `_close_deal_enrichment_for_fresh_command()` (flushes any already-
+   collected optional field(s) via the same `airtable_update()` approval
+   queue every other enrichment write uses, then clears the parked state,
+   returning nothing — the fresh command's own routing result is the
+   turn's one reply, never a second message about the closure). Wired at
+   the `deal_enrichment_offer` check site: a genuine new command now closes
+   the loop and routes normally instead of being force-fed in as a literal
+   field answer or looping "לא הבנתי".
+6. **extra — "דלג" at OFFER now declines** (previously fell through to
+   "לא הבנתי," inconsistent with its skip-word status everywhere else in
+   the flow).
+7. **extra — global confirm synonyms work at OFFER.** The OFFER-stage
+   accept check now also matches `_CONFIRM_WORDS` (✅/ok/אוקי/בצע/קדימה/
+   אשר/מאשרת/...), not just the flow's own narrower `_CREATE_CONFIRM_WORDS`
+   — symmetric with decline, which already unioned `_CANCEL_WORDS` in.
+8. **C5/C8 — callback session identity.** The `"commercial_completion:"`
+   Telegram callback branch keyed `run_agent()`'s session-key argument by
+   `call.message.chat.id`; the text ingress path uses `sender_user_id`
+   (`call.from_user.id`). Identical in a private chat, but diverges in a
+   group — a session a user started by typing text (keyed by their own
+   user id) was unreachable by that same user's own button click, and two
+   different users clicking buttons in the same group could collide on one
+   shared session slot. Now keyed by `call.from_user.id`, matching text
+   ingress exactly and `_handle_approval_callback_impl`'s own
+   `approver_chat_id` (which already correctly used `from_user.id`, never
+   `message.chat.id` — D1's approve:/reject: path was never affected).
+   Reply delivery still targets `call.message.chat.id`, unchanged — session
+   identity and reply destination are independent concerns.
+9. **C6 — callback dedup.** The `"commercial_completion:"` callback had no
+   duplicate-delivery protection at all (unlike the text path's
+   `idempotency.is_duplicate()` and the `approve:`/`reject:` path's TC8
+   claim). Reuses the same `idempotency` store already trusted elsewhere in
+   this file, keyed off `call.id` (Telegram's own unique-per-delivery id) —
+   no new dedup subsystem.
+
+Non-goals honored (explicit owner instruction): no Airtable schema/field
+creation, no `crm_update_deal`, no `RuntimeSchemaProvider` policy change,
+no Estimated Value live-field fix, no domain-alias reconciliation, no
+deletion of `_queue_deterministic_create_deal()`, no Completion Metadata
+Registry redesign, no change to D1's post-approval architecture.
+
+Tests: new `test_diamond_remediation_d2_input_ownership_recovery.py` (40
+assertions) drives the real `_handle_deal_enrichment_reply()`, the real
+`run_agent()`, and the real `/telegram` Flask route (not isolated helper
+tests) — covers: the full כן/לא/דלג/בטל × OFFER/SELECT/TEXT matrix
+including every global confirm synonym; active TEXT enrichment beating
+`maybe_recommend()`; a fresh command escaping both OFFER- and TEXT-stage
+enrichment without being stored as the literal note; pending-approval TTL
+housekeeping running even when enrichment (not the Pending Approval Gate)
+owns the turn; an explicit approval callback resolving a real
+`ActionContract` while an enrichment offer is open for the same chat;
+ambiguous input (`"כן"` with both an open enrichment offer and a queued
+legacy approval) resolving exactly one owner; a group-chat callback
+finding the exact same session the sender's own text-created key holds
+(both a call-site spy proof and a genuine end-to-end proof); a redelivered
+callback_query invoking `run_agent()` exactly once; exactly one
+user-facing reply per handled callback turn.
+
+CI: local run — `smoke_tests.py`, `test_integration.py`,
+`tools/audit_dispatcher_bypass.py` (`new=0`), `py_compile` on every
+changed file, all 65 pre-existing test files referencing the touched
+symbols (`deal_enrichment_offer`, `_pending_approvals`, `maybe_recommend`,
+`commercial_completion`, the `route_*` resolvers, `webhook_telegram`,
+`idempotency`) — 0 failures. Merge, deploy, and production runtime
+verification remain pending.
+
+Residual Diamond-path items still explicitly deferred (unchanged from
+D1's list, not touched by D2): the Estimated Value schema-rollout gap; the
+Deal-update write-authority classification (generic `airtable_update` +
+governed allowlist, TEMPORARY GAP by design); domain-alias-table drift;
+the dead `_queue_deterministic_create_deal()` builder.
