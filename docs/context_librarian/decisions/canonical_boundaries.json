@@ -1269,6 +1269,41 @@
         }
       },
       "last_observed_commit": "8a068d3278199d6e19c6126aaad6d1879f1863b8"
+    },
+    {
+      "id": "decision.lead_deal_association_resolver",
+      "name": "lead_deal_link.py is a resolve-only helper for LEAD-DEAL-ASSOCIATION Model B, not a writer or authority",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "resolve-only helpers (Lead/Deal lookup by name or phone, deterministic NL trigger parsing for /תקדםליד) feeding app.py's _queue_deterministic_link_lead_to_deal(), the sole caller that proposes crm_link_lead_to_deal through ActionGateway",
+        "precedence": "carries no authority over any catalog layer; commercial_crm.link_lead_to_deal() (the registered crm_link_lead_to_deal writer -- tool_registry.py-gated, requires_approval=True) remains the sole writer for Deals.Linked Leads. This module never calls tools/airtable_gateway.py or tools/dispatcher.py directly -- it only resolves record references via already-registered read helpers (lead_conversion.py's shared Lead lookup, commercial_crm.lookup_human_reference)."
+      },
+      "owner": "governance",
+      "code_paths": [
+        "lead_deal_link.py"
+      ],
+      "test_paths": [
+        "test_lead_deal_link_command.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "ROADMAP.md",
+          "role": "LEAD-DEAL-ASSOCIATION Model B — /תקדםליד user-facing entry point",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-06",
+      "last_verified_commit": "902f723f6a1a4e22221ad496de61e1e15630217d",
+      "confidence": 0.9,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #1222 (block_reason=NO_POLICY_MATCH): lead_deal_link.py is a new runtime source with no existing catalog node or policy_registry.json entry to match. Owner explicitly reviewed and chose CREATE NEW NODE over attaching it to decision.canonical_lead_write_service (rejected: that node is specifically Lead creation/update authority, and lead_deal_link.py never writes a Lead).",
+        "Read-only by construction: resolve_lead_by_query()/resolve_deal_by_query() only ever call existing read-only lookups (lead_conversion._resolve_single_lead_by_query, commercial_crm.lookup_human_reference); parse_direct_link_text()/is_promote_lead_trigger() are pure regex parsers with no I/O. The only write in the whole flow (crm_link_lead_to_deal) lives in commercial_crm.py and is invoked exclusively by app.py's _queue_deterministic_link_lead_to_deal() through the real ActionGateway -- this module never calls it directly."
+      ]
     }
   ],
   "edges": [
