@@ -3411,6 +3411,72 @@ _DEAL_ENRICHMENT_FIELDS: tuple[str, ...] = (
 )
 _ENRICHMENT_SKIP_WORDS = frozenset({"דלג", "skip", "לדלג"})
 
+# DIAMOND REMEDIATION D2 (בטל vs לא): "לא"/"דוחה"/"no"/"n"/"❌" answer a
+# yes/no-SHAPED prompt (decline just that one thing — the offer itself at
+# OFFER stage, or "no notes" for a TEXT field) and never mean "abort the
+# whole enrichment flow." Only this narrower subset genuinely means "stop
+# everything" regardless of which field is active — kept separate from the
+# broader _CANCEL_WORDS (module-level, shared with every other confirm/
+# cancel surface in this file) specifically so a TEXT field's "no answer"
+# semantics can be told apart from a real abort. See
+# _handle_deal_enrichment_reply()'s docstring for the full semantics table.
+_ENRICHMENT_FULL_CANCEL_WORDS = frozenset({"בטל", "ביטול", "עצור", "cancel"})
+
+
+def _is_fresh_deterministic_command(user_text: str) -> bool:
+    """DIAMOND REMEDIATION D2 — the SAME deterministic classifier boundary
+    BUG-S2C-STALE-SESSION-SWALLOWS-NEW-COMMAND already trusts to detect a
+    brand-new, well-formed business command arriving while a stale
+    commercial_completion session is parked (see that block further below
+    in this file). Reused verbatim here, rather than re-implemented, so a
+    parked Deal enrichment offer/loop gets the identical escape hatch and
+    the two can never silently drift apart. No fuzzy/AI intent detection —
+    exact structural parse only, via the same parse_deterministic_* helpers
+    route_request() itself would use to classify this text as a genuine new
+    command."""
+    return bool(
+        parse_deterministic_create_task(user_text).certain
+        or parse_deterministic_create_deal(user_text).domain_resolved
+        or parse_deterministic_commercial_completion(user_text).certain
+    )
+
+
+def _close_deal_enrichment_for_fresh_command(
+    chat_id: str, channel: str, state: dict, user_text: str,
+) -> None:
+    """DIAMOND REMEDIATION D2 (fresh-command escape, mirrors
+    commercial_completion's own BUG-S2C-STALE-SESSION-SWALLOWS-NEW-COMMAND
+    fix): closes a parked Deal enrichment offer/loop the same way
+    _handle_deal_enrichment_reply()'s own _finish() does — flush any
+    already-collected optional field(s) via the same airtable_update()
+    approval queue every other enrichment write uses, then clear the parked
+    state — but deliberately returns nothing. The turn's ONE user-facing
+    response is the fresh command's own routing result (run normally right
+    after this call returns), never a second message about the enrichment
+    closure itself. A failure to queue already-collected fields is logged
+    only and never blocks the fresh command from routing — the same "an
+    optional field's failure never rolls back the already-created Deal"
+    guarantee _handle_deal_enrichment_reply() gives applies here too."""
+    from session_store import lead_sessions
+    from airtable_schema import Tables
+    lead_sessions.clear_deal_enrichment_offer(chat_id, channel=channel)
+    collected = dict(state.get("collected") or {})
+    if not collected:
+        return
+    record_id = state.get("record_id") or ""
+    try:
+        _queue_approval_detailed(
+            "airtable_update",
+            {"table": Tables.DEALS, "record_id": record_id, "fields": collected},
+            chat_id, channel, user_text,
+            trusted_source="deterministic_commercial_completion",
+        )
+    except Exception:
+        logger.warning(
+            "[DealEnrichment] failed to flush collected fields on fresh-command "
+            "escape for record=%s", record_id, exc_info=True,
+        )
+
 
 def _advance_past_derivable_deal_fields(remaining: list, collected: dict) -> tuple[list, dict]:
     """BUG-DIAMOND-EXPECTED-VALUE-RANGE: never ask "estimated_value_basis"
@@ -3635,6 +3701,31 @@ def _handle_deal_enrichment_reply(
     callback handler) reads these unchanged, so every finite-choice
     enrichment prompt gets real inline buttons, the same infra, no new
     callback prefix.
+
+    DIAMOND REMEDIATION D2 — frozen כן/לא/דלג/בטל semantics, one token never
+    silently meaning two different scopes within the same stage:
+
+      Stage       | כן              | לא                | דלג             | בטל
+      ------------|-----------------|--------------------|-----------------|------------------
+      OFFER       | enter loop      | decline enrichment | decline (=לא)   | decline (=לא)
+      SELECT      | (a real choice) | cancel WHOLE loop  | skip this field | cancel WHOLE loop
+      TEXT        | (stored as text)| skip this field    | skip this field | cancel WHOLE loop
+
+      - "כן"/"לא" also accept every global confirm/cancel synonym (✅/ok/
+        אוקי/בצע/קדימה/... via _CONFIRM_WORDS, already-union'd via
+        _CANCEL_WORDS for decline) — never a second, narrower duplicated
+        word list a user can dead-end against.
+      - At OFFER, לא/דלג/בטל are deliberately equivalent (nothing has
+        started yet, so "skip" and "cancel" both just mean "don't enter the
+        loop") — the 3-way split only matters once collection is under way.
+      - At a SELECT field, לא is not a valid field value (the field isn't
+        yes/no-shaped) so it — like בטל — cancels the remaining loop;
+        only דלג skips just the current field.
+      - At a TEXT field (estimated_value_notes, prompted as a yes/no-shaped
+        question), לא/דלג both mean "skip just this field, no notes" —
+        _ENRICHMENT_FULL_CANCEL_WORDS (בטל/ביטול/עצור/cancel) is the
+        narrower subset that still aborts the whole loop; any other free
+        text is stored as the literal note.
     """
     from session_store import lead_sessions
     from airtable_schema import Tables
@@ -3710,9 +3801,21 @@ def _handle_deal_enrichment_reply(
         return prompt_text
 
     if stage == "offer":
-        if choice_fold in _CREATE_DECLINE_WORDS or choice_fold in _CANCEL_WORDS:
+        # D2 semantics table (docstring above): לא/דלג/בטל are equivalent
+        # at OFFER — nothing has started yet, so all three simply mean
+        # "don't enter the loop."
+        if (
+            choice_fold in _CREATE_DECLINE_WORDS
+            or choice_fold in _CANCEL_WORDS
+            or choice_fold in _ENRICHMENT_SKIP_WORDS
+        ):
             return _finish("בסדר, העסקה נשארת כפי שנוצרה.")
-        if choice_fold in _CREATE_CONFIRM_WORDS:
+        # D2 (confirmation-synonym normalization): also accepts every
+        # global confirm synonym (✅/ok/אוקי/בצע/קדימה/...), not just this
+        # flow's own narrower _CREATE_CONFIRM_WORDS — a user must never hit
+        # a dead end here merely for using a synonym that works everywhere
+        # else in the bot.
+        if choice_fold in _CREATE_CONFIRM_WORDS or choice_fold in _CONFIRM_WORDS:
             if not remaining:
                 return _finish("אין פרטים נוספים להשלים — העסקה כבר מלאה.")
             return _persist_and_ask(remaining, collected)
@@ -3741,6 +3844,13 @@ def _handle_deal_enrichment_reply(
     # level down, to a single field's own answer rather than the whole
     # turn. Any other free text is stored as the literal note.
     if contract.input_type == InputType.TEXT:
+        # D2 semantics table: בטל (unlike לא/דלג) still aborts the WHOLE
+        # loop even at a TEXT field — previously conflated with the
+        # "skip just this field" branch below, which meant a real cancel
+        # word could never actually cancel anything once a TEXT field was
+        # active. Checked first, narrower than _CANCEL_WORDS.
+        if choice_fold in _ENRICHMENT_FULL_CANCEL_WORDS:
+            return _finish("ההשלמה בוטלה. העסקה נשארת כפי שנוצרה.")
         if choice_fold in _CANCEL_WORDS or choice_fold in _ENRICHMENT_SKIP_WORDS:
             return _persist_and_ask(remaining[1:], collected)
         collected[contract.airtable_field] = choice
@@ -4878,17 +4988,52 @@ def run_agent(
             f"msg='{user_text[:60]}'"
         )
 
-    # Read-only discovery path: recommendations come only from the canonical
-    # external-tool catalog; no upload, execution, approval, or new source of truth.
+    # ══════════════════════════════════════════════════════════════════
+    # DIAMOND REMEDIATION D2 — final ingress precedence for run_agent()'s
+    # text pipeline (one input, at most one valid owner):
+    #
+    #   0. Telegram button/callback ingress (a fully separate code path —
+    #      _handle_approval_callback_impl / the "commercial_completion:"
+    #      callback branch — never reaches this function's text branches
+    #      at all, so it always resolves independently of anything below).
+    #   1. Active local Deal enrichment state (deal_enrichment_offer) —
+    #      UNLESS the text is a fresh deterministic command (escape hatch,
+    #      below), in which case it closes/flushes and falls through.
+    #   2. Active local commercial_completion / nested-create-confirm state
+    #      — same fresh-command escape hatch.
+    #   3. The legacy _pending_approvals bucket (── 2.5. Pending Approval
+    #      Gate ──, below) and ActionGateway confirm/disambiguation/combined-
+    #      word routing (── 2.55. ──).
+    #   4. A fresh deterministic business command (Router/deterministic
+    #      create-task/create-deal/S2C dispatch, further below).
+    #   5. Explicit global cancel (_CANCEL_WORDS, handled inside 2.5/2.55).
+    #   6. Read-only recommendation fallback (maybe_recommend) / full Agent
+    #      tool loop — LAST resort, checked only once nothing above claimed
+    #      the turn (see its new call site, ── 2.6 ── below).
+    #
+    # TTL/release housekeeping for the legacy pending-approval bucket runs
+    # unconditionally right here (next line), regardless of which of the
+    # above ends up owning the turn — previously it only ran inside step 3,
+    # which an early return from step 1/2 skipped entirely, indefinitely
+    # starving that chat's TTL cleanup for as long as local state stayed
+    # open.
+    # ══════════════════════════════════════════════════════════════════
+
+    # DIAMOND REMEDIATION D2 (C1/precedence): pending-approval TTL/release
+    # housekeeping must run every turn regardless of which state ends up
+    # owning it — moved here, unconditional, before ANY early-return branch
+    # (deal enrichment, commercial_completion, maybe_recommend, etc.) can
+    # short-circuit the turn. Previously this only ran inside the ── 2.5.
+    # Pending Approval Gate ── block below, which a parked enrichment/
+    # completion state's own early return skips entirely — meaning stale
+    # pending approvals for that chat never expired for as long as the
+    # local state stayed open. Idempotent (a no-op once already released),
+    # so the original call at ── 2.5. ── stays as a harmless second pass.
     try:
-        from business_tool_registry import maybe_recommend
-        _tool_recommendation = maybe_recommend(user_text)
+        with _pending_approvals_lock:
+            _release_expired_pending_approvals(chat_id)
     except Exception:
-        _tool_recommendation = None
-    if _tool_recommendation:
-        if _out_meta is not None:
-            _out_meta["source_module"] = "business_tool_registry"
-        return _tool_recommendation
+        logger.warning("[PendingApproval] early TTL housekeeping failed (non-blocking)", exc_info=True)
 
     # PR2 קובע את ה-snapshot הקנוני של ActionContracts לפני כל עבודת lead
     # capture, Session, Router, Business Memory, או Agent. מסלולים ישנים
@@ -5110,11 +5255,27 @@ def run_agent(
     except Exception:
         _deal_enrichment_offer = None
     if _deal_enrichment_offer:
-        if _out_meta is not None:
-            _out_meta["source_module"] = "action_gateway"
-        return _handle_deal_enrichment_reply(
-            _deal_enrichment_offer, chat_id, channel, user_text, out_meta=_out_meta,
-        )
+        # DIAMOND REMEDIATION D2 (C4 — fresh-command escape for enrichment):
+        # mirrors the S2C completion block's own BUG-S2C-STALE-SESSION-
+        # SWALLOWS-NEW-COMMAND fix (below). Before this, ANY text while an
+        # enrichment offer/loop was parked — including a brand-new,
+        # unambiguous command like "צור משימה ..." — was force-fed into
+        # _handle_deal_enrichment_reply() as a literal field answer: stored
+        # verbatim for a TEXT field, or rejected with a BLOCK for a SELECT
+        # field, either way trapping the user. A message that deterministically
+        # parses as a genuine new command is unambiguously not a plausible
+        # field answer — close the enrichment state (flushing whatever was
+        # already collected, never silently dropped) and fall through to
+        # normal routing this same turn, exactly like the S2C escape does.
+        if _is_fresh_deterministic_command(user_text):
+            _close_deal_enrichment_for_fresh_command(chat_id, channel, _deal_enrichment_offer, user_text)
+            _deal_enrichment_offer = None
+        else:
+            if _out_meta is not None:
+                _out_meta["source_module"] = "action_gateway"
+            return _handle_deal_enrichment_reply(
+                _deal_enrichment_offer, chat_id, channel, user_text, out_meta=_out_meta,
+            )
 
     # S2C: resume an in-progress commercial completion from the existing
     # universal Session store.  A subsequent answer must never restart the
@@ -5193,16 +5354,11 @@ def run_agent(
         # and fall through to normal routing this turn, exactly
         # generalizing the cancel-word escape above to a second, precise
         # (never heuristic/fuzzy) trigger.
-        if (
-            parse_deterministic_create_task(user_text).certain
-            # domain_resolved, not certain: a fresh "צור עסקה X בתחום Y"
-            # with no Deal Name at all is still unambiguously a NEW command
-            # (route_request() itself would send it to Handler.TOOL — see
-            # BUG-CRM-BYPASS-DEAL-OPTIONAL-NAME-MARKER), never a plausible
-            # answer to whatever field the stale session was parked on.
-            or parse_deterministic_create_deal(user_text).domain_resolved
-            or parse_deterministic_commercial_completion(user_text).certain
-        ):
+        # DIAMOND REMEDIATION D2: reuses _is_fresh_deterministic_command(),
+        # the SAME classifier now also shared with the Deal enrichment
+        # escape hatch above — was a locally-duplicated 3-line OR here;
+        # kept as one function so the two escape hatches cannot drift apart.
+        if _is_fresh_deterministic_command(user_text):
             _ls.clear_commercial_completion(chat_id)
             _persisted_completion = None
     if _persisted_completion:
@@ -5764,6 +5920,30 @@ def run_agent(
                 if _out_meta is not None:
                     _out_meta["source_module"] = "action_gateway"
                 return _t2_cancel_reply
+
+    # DIAMOND REMEDIATION D2 (C1 — "local text must be owned before
+    # recommendation fallback"): read-only tool-catalog recommendations are
+    # the LAST-resort fallback, never a first-class interceptor — moved here
+    # from the very top of run_agent(), where it used to run before ANY
+    # session/state was even loaded and could steal free text intended for
+    # an active Deal enrichment field (e.g. estimated_value_notes containing
+    # "אני צריך..."), a pending nested-create confirm, an active
+    # commercial_completion field, or a pending approval. By this point in
+    # the turn, every one of those higher-precedence local-state owners has
+    # already had the chance to claim the turn and return; reaching here
+    # means none of them did, so a tool-catalog match is the correct
+    # fallback, never a race. Recommendations still come only from the
+    # canonical external-tool catalog; no upload, execution, approval, or
+    # new source of truth.
+    try:
+        from business_tool_registry import maybe_recommend
+        _tool_recommendation = maybe_recommend(user_text)
+    except Exception:
+        _tool_recommendation = None
+    if _tool_recommendation:
+        if _out_meta is not None:
+            _out_meta["source_module"] = "business_tool_registry"
+        return _tool_recommendation
 
     # ── 2.6. Context Pronoun Resolution (C60) ────────
     # "תעלה לדסישנס"/"זה הנספח" וכד' — לפני intent detection, כדי שה-Router
@@ -7574,23 +7754,57 @@ def _webhook_telegram_impl():
                 _handle_lead_draft_callback(call)
             elif data.startswith("commercial_completion:"):
                 answer = data.split(":", 1)[1]
-                callback_meta = {}
-                callback_response = run_agent(
-                    answer, str(call.message.chat.id), channel="telegram",
-                    _out_meta=callback_meta,
-                )
-                if callback_response:
-                    callback_kwargs = {}
-                    callback_choices = callback_meta.get("commercial_completion_choices")
-                    if callback_choices:
-                        callback_kwargs["reply_markup"] = _completion_keyboard(
-                            callback_choices,
-                            callback_meta.get("commercial_completion_choice_tokens"),
-                        )
-                    _send_with_keyboard_fallback(
-                        str(call.message.chat.id), callback_response, **callback_kwargs,
+                # DIAMOND REMEDIATION D2 (C8 — callback session identity):
+                # the session key used to store/read deal_enrichment_offer/
+                # commercial_completion state must be the SENDER
+                # (call.from_user.id) — the exact same identity the text
+                # ingress path uses (sender_user_id, see the webhook
+                # message handler below). Previously this passed
+                # call.message.chat.id instead: identical to sender in a
+                # private chat, but the shared GROUP chat id in a group —
+                # so a session a user started by typing text (keyed by
+                # their own user id) was unreachable by that same user's
+                # own button click, and two different users clicking
+                # buttons in the same group would collide on one shared
+                # session slot. Also matches _handle_approval_callback_impl's
+                # own approver_chat_id, which already correctly uses
+                # cq.from_user.id, not cq.message.chat.id (D1's approve:/
+                # reject: path was never affected by this).
+                # Reply DELIVERY still targets call.message.chat.id below,
+                # unchanged — session identity and reply destination are
+                # independent concerns.
+                #
+                # DIAMOND REMEDIATION D2 (C6 — callback dedup): a
+                # redelivered callback_query (Telegram retry) or a fast
+                # double-tap must never double-advance this session or
+                # double-queue an approval. Reuses the SAME idempotency
+                # store already trusted for the text ingress path
+                # (guards/idempotency.py) rather than inventing a second
+                # dedup subsystem — keyed off call.id, Telegram's own
+                # unique-per-delivery identifier for this callback event.
+                _cc_sender_id = str(call.from_user.id)
+                if idempotency.is_duplicate(
+                    "telegram", _cc_sender_id, f"commercial_completion_cb:{call.id}",
+                ):
+                    bot.answer_callback_query(call.id, "♻️ הבקשה הזו כבר טופלה.")
+                else:
+                    callback_meta = {}
+                    callback_response = run_agent(
+                        answer, _cc_sender_id, channel="telegram",
+                        _out_meta=callback_meta,
                     )
-                bot.answer_callback_query(call.id)
+                    if callback_response:
+                        callback_kwargs = {}
+                        callback_choices = callback_meta.get("commercial_completion_choices")
+                        if callback_choices:
+                            callback_kwargs["reply_markup"] = _completion_keyboard(
+                                callback_choices,
+                                callback_meta.get("commercial_completion_choice_tokens"),
+                            )
+                        _send_with_keyboard_fallback(
+                            str(call.message.chat.id), callback_response, **callback_kwargs,
+                        )
+                    bot.answer_callback_query(call.id)
             else:
                 # העבר ל-pyTeleBot handlers (upd_domain:, upd_type:, weekly summary וכו')
                 bot.process_new_updates([update])
