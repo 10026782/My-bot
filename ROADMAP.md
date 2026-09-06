@@ -932,6 +932,152 @@ the writer-authority-registration/dispatcher-bypass governance audits
 (0 new violations). `CODE_DONE / STATIC_VERIFIED` — review, merge, deploy,
 and production runtime verification pending.
 
+### DIAMOND PATH enrichment runtime bug sweep (7 items) — 06/09/2026 (owner bug sweep)
+
+Owner-driven end-to-end runtime sweep of a full production enrichment loop
+transcript (same day as the enrichment-offer precedence fix's merge), which
+surfaced 7 distinct issues, each investigated and root-caused against the
+current tree before any change:
+
+1. **No real buttons.** Every finite-choice enrichment prompt (and the
+   initial כן/לא offer) rendered only "אפשרויות: X / Y / Z" text — the main
+   (non-enrichment) completion flow already attaches real Telegram inline
+   buttons via `out_meta["commercial_completion_choices"]`, but
+   `_handle_deal_enrichment_reply()`/`_deal_enrichment_prompt()` never
+   populated it, and `_offer_deal_enrichment()`'s own offer text is
+   delivered through `_deliver_callback_final()` (an edit of the original
+   approval message), a completely different path with no keyboard support
+   at all.
+2. **No input normalization.** A typed answer like `"Ils"` (currency) or
+   `"עד 10000"` (the range field's Hebrew label without its thousands-comma)
+   was rejected outright — `resolve_estimated_value_choice()` did exact
+   (post-whitespace-only-normalization) matching, and the other 4 SELECT
+   fields (deal_type/relationship_type/currency/commercial_status) had no
+   normalization layer at all.
+3. **"לא" answering the notes question cancelled everything.** The notes
+   field's own prompt ("יש הערות על השווי המשוער?") is itself a yes/no
+   question, but `stage == "collecting"`'s blanket `_CANCEL_WORDS` check ran
+   before any field-local interpretation — "לא" meaning "no notes" was
+   indistinguishable from a global cancel-the-whole-loop signal.
+4. **Duplicate/contradictory final message.** `_finish()` hand-composed its
+   reply as `final_text + "\n\n" + queue_result["message"]` — but
+   `_queue_approval_detailed()` already sends the owner a proactive,
+   interactive "⏳ בקשת אישור..." message as a side effect when it
+   successfully queues a new contract. In the normal single-owner case
+   (requester chat == owner chat, true here), this produced the exact
+   reported "יש פעולה שממתינה לאישור / ההשלמה בוטלה / יש פעולה שממתינה
+   לאישור" sequence — two overlapping deliveries of the same pending-
+   approval text, one of them wrapped in self-contradictory "cancelled"
+   wording.
+5. **Ambiguous input must never silently resolve.** A design constraint on
+   item 2's fix, not an independently reproducible bug in the pre-fix code
+   (which could only ever exact-match, never substring-match) — verified by
+   reading `resolve_estimated_value_choice()`'s actual body. Baked into the
+   fix as a hard invariant: normalization is exact-match-only after
+   stripping harmless formatting noise, never fuzzy/substring; a garbled or
+   multi-choice-containing answer therefore always fails to match anything
+   and falls through to the existing safe BLOCK-and-reprompt path.
+6. **"תחום כללי" failed to parse a Deal at all.** Traced to
+   `core/router/router.py`'s `parse_deterministic_create_deal()`, which
+   canonicalizes the domain word via `core.lead_service.resolve_domain_word()`
+   → `core/ingress_classifier.py`'s `_DOMAIN_HINT_CANONICAL` table — a
+   *different* table from `domain_utils.py`'s `BUSINESS_DOMAIN_ALIASES`
+   (which already had `"כללי"`). `_DOMAIN_HINT_CANONICAL` — the one Deal
+   creation actually consults — never had a `"general"`/`"כללי"` entry at
+   all, unlike every other domain.
+7. **Deal update authority — investigation only, no code change.**
+   `commercial_crm.py` has no `update_deal()`-style writer (only
+   `create_deal()`); `crm.py`'s `crm_update_deal_status()` is a narrow,
+   status-only updater on the separate legacy real-estate path, not
+   applicable. `tools/dispatcher.py`'s `airtable_update` case already
+   redirects `Tables.DEALS` through `_CRM_TABLE_ROUTING`/`_DEAL_FIELD_MAP`
+   (the same closed allowlist `create_deal()`'s own redirect uses),
+   re-checks `enforce("crm_create_deal", identity)`, and canonicalizes a
+   Domain field edit through the same shared `resolve_domain_word()` —
+   this is `BUG-CRM-BYPASS-UPDATE` (pre-existing, already covered by
+   `test_bug_crm_bypass_airtable_update.py`), and it **is** the governed,
+   canonical Deal-update authority (the same generic-write redirect
+   `Intent.UPDATE_DEAL_STAGE` already relies on). The enrichment loop's
+   `airtable_update` on `Tables.DEALS` was already using it correctly — no
+   second writer introduced, matching the explicit "do not invent a second
+   writer" instruction.
+
+**Fixes:**
+- `app.py`: `_deal_enrichment_prompt()` now returns `(text, choices)`;
+  `_handle_deal_enrichment_reply()` gained an `out_meta` parameter and
+  populates the existing `commercial_completion_choices`/
+  `commercial_completion_choice_tokens` keys on every field-prompt/offer-
+  reprompt return — the pre-existing generic keyboard-attach logic (both
+  the plain-text reply path and the `"commercial_completion:"` callback
+  handler) picks these up unchanged, so no new callback prefix was added.
+  `_deliver_callback_final()` gained an optional `reply_markup` parameter
+  (default `None`, fully backward compatible with every other call site)
+  for the offer's own כן/לא buttons.
+- `commercial_completion_ux.py`: `resolve_estimated_value_choice()`'s
+  internal normalization now strips thousands-commas and leading/trailing
+  wrapper punctuation (never an internal character — the "–" range
+  separator is never touched) in addition to case/whitespace; a new
+  `resolve_select_answer(raw_value, choices)` does the same normalized
+  matching directly against a field's own canonical choices, for the 4
+  fields with no separate Hebrew label layer. Both exact-match-only.
+- `app.py`'s `_handle_deal_enrichment_reply()`: a `InputType.TEXT` field's
+  own cancel/skip words now mean "leave this optional field empty" (checked
+  before the blanket `_CANCEL_WORDS` branch) — the same state-local-
+  outranks-global precedence invariant already used for a pending
+  CREATE_CONFIRM, applied one level down to a single field's own answer.
+- `app.py`'s `_finish()`: now routes its queue outcome through the existing
+  shared `_finalize_deterministic_queue_outcome()` helper — the same one
+  every `_queue_deterministic_*()` function already uses for exactly this
+  class of bug (`BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY`) — instead of hand-
+  composing `final_text + queued_text`.
+- `core/ingress_classifier.py`: added `"כללי"`/`"general"` to
+  `_DOMAIN_HINT_CANONICAL` — the one shared vocabulary table, no
+  parser-local special case.
+
+**Tests:** new `test_bug_diamond_enrichment_runtime_sweep.py` (50
+assertions) covering all 7 items: `_deal_enrichment_prompt()`'s
+`(text, choices)` return and `out_meta` population for both a mid-loop
+field and the offer re-prompt; `_deliver_callback_final()` forwarding a
+given `reply_markup`; normalized `"Ils"`/`"ils"`/`" ILS "`/`"ils/"` and
+`"עד 10000"`/`"עד 10000/"`/`"/עד 10000"` resolving correctly end-to-end
+through `_handle_deal_enrichment_reply()`, plus direct unit coverage of
+`resolve_select_answer()`/`resolve_estimated_value_choice()`; a garbled
+combined range answer (`"/עד 10000עדיין לא ידוע"`, including a multi-line
+variant) never resolving to any choice; "לא" and "בטל" answering the notes
+question both finishing/queuing without cancellation wording (while a
+genuine cancel word on a SELECT field still cancels normally, and genuine
+free text is still stored verbatim); the self-chat (owner==requester) case
+returning `""` (fully suppressed, Gateway already notified) versus a
+different-requester-chat case still getting exactly the Gateway's own
+message, never a duplicate; declining with nothing collected still
+returning plain text (queue never called); `"...תחום כללי"` now parsing to
+`domain="general"`, `matched=True`, `certain=True` (with `"...תחום יבוא"`
+proven unaffected); and a static guard asserting every enrichment field
+stays present in `_DEAL_FIELD_MAP`/`_CRM_TABLE_ROUTING`.
+
+Verified against a genuine gap: reverting all three changed source files
+(`git stash -- app.py commercial_completion_ux.py core/ingress_classifier.py`)
+crashes the new test file immediately at import
+(`ImportError: cannot import name 'resolve_select_answer'`).
+
+Full CI-equivalent sweep re-run clean: `pytest tests/ -m "not integration
+and not airtable and not live"` (165 passed), `smoke_tests.py`,
+`test_bug_diamond_enrichment_offer_precedence.py` (15),
+`test_bug_diamond_optional_enrichment_gates_creation.py` (59),
+`test_bug_diamond_create_confirm_precedence.py` (19),
+`test_bug_diamond_parent_orphaned_on_nested_queue.py` (14),
+`test_bug_s2c_stale_session_fresh_command_escape.py` (39),
+`test_diamond_path_approval_continuation.py` (12),
+`test_commercial_crm_dispatcher_wiring.py` (43),
+`test_bug_commercial_crm_dispatcher_bypass_closure.py`,
+`test_bug_crm_bypass_create_deal_deterministic_route.py`,
+`test_bug_crm_bypass_airtable_update.py`, `test_lead_service_phase1.py`
+(109), `core/router/test_router.py` (54), `test_commercial_crm.py` (111),
+and the writer-authority-registration/dispatcher-bypass governance audits
+(0 new violations). `CODE_DONE / STATIC_VERIFIED` — review, merge, deploy,
+and production runtime verification (re-running the exact reported
+transcript) pending.
+
 ### Commercial Completion numeric free-text answers stored as strings — 06/09/2026 (production-verified)
 
 Production evidence, on the deployed schema-validation-authority fix

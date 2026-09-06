@@ -232,6 +232,30 @@ def _normalized_label(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().casefold())
 
 
+# BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP (06/09/2026, owner bug sweep, item 2):
+# a typed SELECT-field answer must tolerate harmless formatting noise a
+# human naturally types — different case ("Ils" for "ILS"), a stray
+# leading/trailing "/", or a missing thousands-comma ("עד 10000" for the
+# Hebrew label "עד 10,000") — without ever fuzzy/substring-matching. This
+# is deliberately narrower than _normalized_label() above (used for
+# Contact/Organization NAME matching in resolve_human_link() below): it
+# also strips commas and a small set of leading/trailing wrapper
+# punctuation, which would be wrong for a person/company name (e.g.
+# "Cohen, Inc." must stay distinct from "Cohen Inc"). It must never strip
+# an internal character that is part of a label's actual content — in
+# particular the "–" range separator inside "10,000–100,000" — so only
+# LEADING/TRAILING punctuation is stripped, never anything mid-string.
+_SELECT_ANSWER_WRAPPER_RE = re.compile(r"^[/\\.!?;:]+|[/\\.!?;:]+$")
+
+
+def _normalize_select_answer(value: Any) -> str:
+    text = str(value or "").strip()
+    text = text.replace(",", "")
+    text = re.sub(r"\s+", " ", text)
+    text = _SELECT_ANSWER_WRAPPER_RE.sub("", text)
+    return text.strip().casefold()
+
+
 def resolve_estimated_value_choice(field_name: str, raw_value: str) -> str | None:
     """Map a clicked/typed Hebrew button label (or the raw canonical value
     itself, for programmatic/test callers) back to its canonical enum
@@ -247,11 +271,35 @@ def resolve_estimated_value_choice(field_name: str, raw_value: str) -> str | Non
         return raw_value
     if raw_value in labels:
         return raw_value
-    normalized = _normalized_label(raw_value)
+    normalized = _normalize_select_answer(raw_value)
     for canonical, label in labels.items():
-        if _normalized_label(label) == normalized:
+        if _normalize_select_answer(label) == normalized:
             return canonical
     return None
+
+
+def resolve_select_answer(raw_value: str, choices: tuple[str, ...]) -> str | None:
+    """Case/whitespace/comma/wrapper-punctuation-insensitive match of a
+    typed answer against a SELECT field's own canonical choice values
+    directly — for fields with no separate Hebrew label layer (deal_type,
+    relationship_type, currency, commercial_status: the canonical value
+    itself, e.g. "ILS"/"one_off", is what is shown and typed). "Ils"/
+    "ils "/"ILS" all resolve to the canonical "ILS".
+
+    Exact match only, after normalization — never fuzzy/substring. If
+    normalization makes the input match more than one distinct choice
+    (should not happen for this bot's own small enum vocabularies, but
+    guards against any future overlapping pair), returns None rather than
+    silently picking one, exactly like a zero-match — the caller's normal
+    invalid-value rejection applies either way, so a garbled or genuinely
+    ambiguous answer is always rejected, never guessed."""
+    if raw_value in choices:
+        return raw_value
+    normalized = _normalize_select_answer(raw_value)
+    if not normalized:
+        return None
+    matches = [c for c in choices if _normalize_select_answer(c) == normalized]
+    return matches[0] if len(matches) == 1 else None
 
 
 def resolve_human_link(
