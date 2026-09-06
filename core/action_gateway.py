@@ -163,6 +163,12 @@ APPROVAL_POLICY_SELF_CONFIRM = "self_confirm"
 
 _LEAD_CAPTURE_TABLE = "Leads"
 _TASK_CREATION_TABLE = "Tasks"
+# DIAMOND — BUSINESS FIELDS MIGRATION: same hardcoded-literal style as the
+# two constants above (never an eager top-level `from airtable_schema
+# import Tables` here) — Tables.DEALS's actual value, used by both
+# description-builder functions below to give Deal airtable_add/
+# airtable_update its own business-summary branch.
+_DEALS_TABLE_NAME = "עסקאות (Deals)"
 _INTERACTION_LOG_TABLE = "Interaction Log"
 _QUESTS_TABLE = "Quests"
 
@@ -1165,6 +1171,19 @@ def _describe_contract_for_reconfirmation(contract: ActionContract) -> str:
         verb = "יצירת משימה" if contract.tool_name == "airtable_add" else "עדכון משימה"
         return f"{verb}: {preview}" if preview else verb
     if contract.tool_name in ("airtable_add", "airtable_update"):
+        # DIAMOND — BUSINESS FIELDS MIGRATION §7/§8 (06/09/2026):
+        # _first_field_preview() below picks ONE raw field value with no
+        # business meaning at all ("עדכון רשומה: recurring" production
+        # bug) — deliberately generic/table-agnostic for every other
+        # table, same as Leads/Tasks above get their own richer verb, this
+        # is the Diamond-only branch: a full per-field, label-aware
+        # summary via the ONE shared builder commercial_completion_ux.py
+        # already exposes to app.py's pending-approval prompt too.
+        if payload.get("table") == _DEALS_TABLE_NAME:
+            from commercial_completion_ux import deal_field_business_summary
+            summary = deal_field_business_summary(payload.get("fields") or {})
+            verb = "פתיחת עסקה" if contract.tool_name == "airtable_add" else "עדכון פרטי עסקה"
+            return f"{verb}: {summary}" if summary else verb
         preview = _first_field_preview(payload.get("fields") or {})
         verb = "הוספת רשומה" if contract.tool_name == "airtable_add" else "עדכון רשומה"
         return f"{verb}: {preview}" if preview else verb
@@ -1285,7 +1304,21 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
     fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
     preview = _first_field_preview(fields)
 
-    if tool_name in ("airtable_add", "airtable_update"):
+    if tool_name in ("airtable_add", "airtable_update") and table == _DEALS_TABLE_NAME:
+        # DIAMOND — BUSINESS FIELDS MIGRATION §6/§7/§8 (06/09/2026,
+        # production-reported): "הפעולה הושלמה: עדכון רשומה: recurring" —
+        # `preview` above (_first_field_preview) picks ONE raw field value
+        # with no business meaning. Diamond-only branch: the same shared,
+        # per-field, label-aware summary builder used by the pending-
+        # approval prompt (app.py's _describe_tool_call()) — one source of
+        # truth, never duplicated between prompt/button/typed-fallback/
+        # final-summary.
+        from commercial_completion_ux import deal_field_business_summary
+        summary = deal_field_business_summary(fields)
+        description = "פתיחת עסקה" if tool_name == "airtable_add" else "עדכון פרטי עסקה"
+        if summary:
+            description += f":\n{summary}"
+    elif tool_name in ("airtable_add", "airtable_update"):
         description = "הוספת רשומה" if tool_name == "airtable_add" else "עדכון רשומה"
         if preview:
             description += f": {preview}"

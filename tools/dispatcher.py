@@ -133,6 +133,13 @@ _DEAL_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     # rejected as "not supported for direct update on this table."
     DealFields.DEAL_TYPE_CODE:   ("deal_type_code", None),
     DealFields.RELATIONSHIP_TYPE: ("relationship_type", None),
+    # DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026): canonical
+    # replacement for the two entries above (see DealFields.
+    # BUSINESS_DEAL_TYPE's own comment in airtable_schema.py) — the old
+    # entries stay in this allowlist for compatibility, never removed.
+    DealFields.BUSINESS_DEAL_TYPE: ("business_deal_type", None),
+    DealFields.RELATIONSHIP_ROLE:  ("relationship_role", None),
+    DealFields.ENGAGEMENT_DURATION: ("engagement_duration", None),
     DealFields.CURRENCY:         ("currency", None),
     DealFields.COMMERCIAL_STATUS: ("commercial_status", None),
     # BUG-DIAMOND-EXPECTED-VALUE-RANGE: canonical replacement for

@@ -21,6 +21,7 @@ from airtable_schema import (
     AllocationSnapshotFields,
     AllocationType,
     BillingTermStatus,
+    BusinessDealType,
     ChargeFields,
     ChargeStatus,
     CollectionState,
@@ -35,6 +36,7 @@ from airtable_schema import (
     DocumentRequirement,
     DocumentStatus,
     DueRule,
+    EngagementDuration,
     EstimatedValueBasis,
     EstimatedValueRange,
     LeadFields,
@@ -46,6 +48,7 @@ from airtable_schema import (
     PaymentTermCalcType,
     PaymentTermFields,
     PaymentTermTrigger,
+    RelationshipRole,
     RelationshipType,
     VATRule,
 )
@@ -225,6 +228,9 @@ _CURRENCIES = _class_values(Currency)
 _RELATIONSHIPS = _class_values(RelationshipType)
 _COMMERCIAL_STATUSES = _class_values(CommercialStatus)
 _DEAL_TYPES = _class_values(DealType)
+_BUSINESS_DEAL_TYPES = _class_values(BusinessDealType)
+_RELATIONSHIP_ROLES = _class_values(RelationshipRole)
+_ENGAGEMENT_DURATIONS = _class_values(EngagementDuration)
 _ESTIMATED_VALUE_BASES = _class_values(EstimatedValueBasis)
 _ESTIMATED_VALUE_RANGES = _class_values(EstimatedValueRange)
 _CALC_TYPES = _class_values(PaymentTermCalcType)
@@ -280,8 +286,20 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("origin_lead", DealFields.ORIGIN_LEAD, InputType.LINK, inherit=("lead_id", "origin_lead_id"), validation="record_id"),
         _f("counterparty_contact", DealFields.COUNTERPARTY_CONTACT, InputType.LINK, inherit=("contact_id", "counterparty_contact"), validation="record_id"),
         _f("counterparty_organization", DealFields.COUNTERPARTY_ORGANIZATION, InputType.LINK, inherit=("organization_id", "counterparty_organization"), validation="record_id"),
+        # DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026): "deal_type"/
+        # "relationship_type" (compat only, see DealFields.DEAL_TYPE_CODE's
+        # own comment) stay registered here — no read path requires it, but
+        # nothing forces their removal either — while no longer being asked
+        # about by the Diamond enrichment flow (app.py's
+        # _DEAL_ENRICHMENT_FIELDS no longer names them). The three fields
+        # below are the canonical replacement, each exactly one business
+        # dimension; their choices ARE the live Hebrew business language
+        # itself (see BusinessDealType/RelationshipRole/EngagementDuration).
         _f("deal_type", DealFields.DEAL_TYPE_CODE, InputType.SELECT, choices=_DEAL_TYPES, example=DealType.SERVICE),
         _f("relationship_type", DealFields.RELATIONSHIP_TYPE, InputType.SELECT, choices=_RELATIONSHIPS),
+        _f("business_deal_type", DealFields.BUSINESS_DEAL_TYPE, InputType.SELECT, choices=_BUSINESS_DEAL_TYPES, example=BusinessDealType.SERVICE),
+        _f("relationship_role", DealFields.RELATIONSHIP_ROLE, InputType.SELECT, choices=_RELATIONSHIP_ROLES),
+        _f("engagement_duration", DealFields.ENGAGEMENT_DURATION, InputType.SELECT, choices=_ENGAGEMENT_DURATIONS),
         _f("currency", DealFields.CURRENCY, InputType.SELECT, choices=_CURRENCIES),
         _f("commercial_status", DealFields.COMMERCIAL_STATUS, InputType.SELECT, choices=_COMMERCIAL_STATUSES),
         # BUG-DIAMOND-EXPECTED-VALUE-RANGE (06/09/2026, owner architecture
@@ -536,20 +554,28 @@ def _derive_document_status(values: Mapping[str, Any]) -> Any:
     return None
 
 
-def derive_estimated_value_basis(deal_type: str, relationship_type: str) -> str | None:
-    """BUG-DIAMOND-EXPECTED-VALUE-RANGE: infer Estimated Value Basis from
-    Deal semantics already known (deal_type/relationship_type) instead of
-    asking a redundant question. Public (not a private _DERIVERS entry)
-    because the caller — app.py's Deal enrichment loop — collects fields
-    outside CommercialCompletionWriter's own current_values/resolved_values
+def derive_estimated_value_basis(engagement_duration: str) -> str | None:
+    """BUG-DIAMOND-EXPECTED-VALUE-RANGE, updated by DIAMOND — BUSINESS
+    FIELDS MIGRATION: infer Estimated Value Basis from a Deal's own
+    engagement_duration answer instead of asking a redundant question.
+    Public (not a private _DERIVERS entry) because the caller — app.py's
+    Deal enrichment loop — collects fields outside
+    CommercialCompletionWriter's own current_values/resolved_values
     machinery (they're keyed by Airtable field name for the eventual
     airtable_update payload, not by internal field_name), so it calls this
-    directly rather than through the ValueSource.DERIVED path. Returns None
-    (ask the user) when neither signal is confidently recurring or
-    one-off — never guesses "total"."""
-    if deal_type == DealType.RECURRING or relationship_type == RelationshipType.RECURRING_SERVICE:
+    directly rather than through the ValueSource.DERIVED path.
+
+    engagement_duration (EngagementDuration.ONGOING/ONE_OFF) is now the
+    single, precise signal for this — previously this derived from BOTH
+    deal_type (one_off/recurring, among others) AND relationship_type
+    (one_off/recurring_service, among others) as two independent proxies
+    for the same underlying "how long" question; engagement_duration IS
+    that question directly, with no second signal needed. Returns None
+    (ask the user) when duration hasn't been answered yet — never guesses
+    "total"."""
+    if engagement_duration == EngagementDuration.ONGOING:
         return EstimatedValueBasis.MONTHLY
-    if deal_type == DealType.ONE_OFF or relationship_type == RelationshipType.ONE_OFF:
+    if engagement_duration == EngagementDuration.ONE_OFF:
         return EstimatedValueBasis.ONE_OFF
     return None
 

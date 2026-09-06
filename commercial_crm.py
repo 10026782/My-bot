@@ -658,6 +658,14 @@ def create_deal(
     counterparty_organization_id: str = "",
     deal_type_code: str = "",
     relationship_type: str = "",
+    # DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026): canonical
+    # replacement for the two kwargs above (see DealFields.
+    # BUSINESS_DEAL_TYPE's own comment) — deal_type_code/relationship_type
+    # stay accepted for compatibility, never removed, but the Diamond
+    # enrichment flow no longer passes them.
+    business_deal_type: str = "",
+    relationship_role: str = "",
+    engagement_duration: str = "",
     currency: str = "",
     commercial_status: str = "",
     start_date: str = "",
@@ -719,6 +727,14 @@ def create_deal(
         fields[DealFields.DEAL_TYPE_CODE] = deal_type_code
     if relationship_type:
         fields[DealFields.RELATIONSHIP_TYPE] = relationship_type
+    # DIAMOND — BUSINESS FIELDS MIGRATION: canonical replacement for the
+    # two writes above (see DealFields.BUSINESS_DEAL_TYPE's own comment).
+    if business_deal_type:
+        fields[DealFields.BUSINESS_DEAL_TYPE] = business_deal_type
+    if relationship_role:
+        fields[DealFields.RELATIONSHIP_ROLE] = relationship_role
+    if engagement_duration:
+        fields[DealFields.ENGAGEMENT_DURATION] = engagement_duration
     if currency:
         fields[DealFields.CURRENCY] = currency
     if commercial_status:
