@@ -171,8 +171,15 @@ def run() -> bool:
          patch("core.runtime_schema_provider.resolve_live_select_value", return_value="Import") as resolve:
         result = ccrm.create_deal("Canary Deal", "import", "recOwner1")
         table, fields = create.call_args.args[0], create.call_args.args[1]
+        # DIAMOND D3 FINAL: resolve_live_select_value() is now the exclusive
+        # select-value resolver for EVERY Deal select field (not just Domain
+        # — see create_deal()'s post-build resolution pass), so this is no
+        # longer necessarily the LAST call (e.g. Stage's default value also
+        # goes through it) — check it was called with Domain's args at some
+        # point, not that it was the most recent call.
         chk("create_deal: resolve_live_select_value called with the canonical slug",
-            resolve.call_args.args == (Tables.DEALS, DealFields.DOMAIN, "import"))
+            (Tables.DEALS, DealFields.DOMAIN, "import") in
+            [c.args for c in resolve.call_args_list])
         chk("create_deal: the LIVE resolved value is written, not the raw canonical slug",
             fields[DealFields.DOMAIN] == "Import")
         chk("create_deal: succeeds once the live value resolves", result["ok"] is True)

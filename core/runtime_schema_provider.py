@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -295,6 +296,18 @@ def get_provider() -> RuntimeSchemaProvider:
     return _provider
 
 
+def _select_match_key(value: str) -> str:
+    """DIAMOND D3 FINAL (hardened matching key for resolve_live_select_value):
+    case-fold, collapse any run of whitespace AND/OR underscores down to a
+    single space, then trim. Matching-only -- never returned as a value
+    itself; the exact live choice string is always what callers get back.
+    Deliberately NOT fuzzy: no substring/edit-distance/semantic matching,
+    only separator-and-case normalization, so "real_estate"/"REAL_ESTATE"/
+    "real estate"/" Real Estate " all collapse to the same key as the live
+    "Real Estate" choice, but "realestate" (no separator at all) does not."""
+    return re.sub(r"[\s_]+", " ", value.strip()).casefold()
+
+
 def resolve_live_select_value(table: str, field: str, canonical_value: str) -> str | None:
     """
     BUG-CRM-BYPASS-DOMAIN-SELECT-CASING (02/09/2026): closes the layer
@@ -326,19 +339,36 @@ def resolve_live_select_value(table: str, field: str, canonical_value: str) -> s
     not fixed here since it's a separate write path with its own callers
     to verify; flagged for the same treatment separately).
 
+    DIAMOND D3 FINAL (06/09/2026, owner-directed hardening): the original
+    matching (case-fold + strip only) missed "real_estate" -- a canonical
+    slug -- against a live choice "Real Estate", since underscore and space
+    were never treated as equivalent separators. Matching now goes through
+    _select_match_key() above: case, leading/trailing whitespace, repeated
+    whitespace, AND underscore<->space are all treated as equivalent.
+    Still deliberately NOT fuzzy: no substring/edit-distance/semantic
+    matching, and no business-specific alias table belongs here -- that
+    stays upstream in the business canonicalizer (e.g. domain_utils.py /
+    core.lead_service.resolve_domain_word()), which must keep producing a
+    business-canonical slug, never an Airtable-specific label. If more than
+    one live choice normalizes to the same key (a genuinely ambiguous live
+    schema), this fails closed to None exactly like a zero-match case --
+    it never guesses which one was meant.
+
     Returns:
       - `canonical_value` unchanged if it already matches a live choice
         exactly, or if the field can't be safely checked yet (contract
         mode isn't "full", the field isn't a select type, or it has no
         configured choices) -- never risk a false rewrite from a
         name_only seed contract.
-      - the exact live choice string (correct casing/spacing) when
-        `canonical_value` matches one case-insensitively.
+      - the exact live choice string (correct casing/spacing/separator)
+        when `canonical_value` matches exactly one live choice under
+        _select_match_key() normalization.
       - None when the contract IS full, the field IS a select with real
-        choices, and `canonical_value` matches none of them even
-        case-insensitively -- callers must treat that as a genuine
-        unknown value (fail closed), never invent or silently write it:
-        Airtable itself already refuses to auto-create a new option.
+        choices, and `canonical_value` matches none of them (or matches
+        more than one, ambiguously) even after normalization -- callers
+        must treat that as a genuine unknown value (fail closed), never
+        invent or silently write it: Airtable itself already refuses to
+        auto-create a new option.
     """
     if not canonical_value:
         return canonical_value
@@ -350,8 +380,8 @@ def resolve_live_select_value(table: str, field: str, canonical_value: str) -> s
         return canonical_value
     if canonical_value in info["choices"]:
         return canonical_value
-    lowered = canonical_value.strip().casefold()
-    for choice in info["choices"]:
-        if choice.strip().casefold() == lowered:
-            return choice
+    target = _select_match_key(canonical_value)
+    matches = {choice for choice in info["choices"] if _select_match_key(choice) == target}
+    if len(matches) == 1:
+        return next(iter(matches))
     return None

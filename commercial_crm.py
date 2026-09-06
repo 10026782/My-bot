@@ -735,6 +735,28 @@ def create_deal(
     if estimated_value_notes:
         fields[DealFields.ESTIMATED_VALUE_NOTES] = estimated_value_notes
 
+    # DIAMOND D3 FINAL (06/09/2026): resolve_live_select_value() is now the
+    # EXCLUSIVE live-select storage resolver for the Diamond Deal path —
+    # every remaining select-type field above (Stage/Priority/Risk Level/
+    # Deal Type Code/Relationship Type/Currency/Commercial Status/the two
+    # Estimated Value selects) was previously written as its raw canonical
+    # enum value with no live-schema check at all (only Domain, above, went
+    # through the resolver). It happened to work because those enums were
+    # authored to already match Airtable's configured option strings
+    # verbatim — but that was never verified at write time, unlike Domain.
+    # Same fail-closed contract as Domain: a field whose live choice can't
+    # be resolved blocks the whole create, never partially written.
+    for _field_name, _raw_value in list(fields.items()):
+        if _field_name == DealFields.DOMAIN or not isinstance(_raw_value, str):
+            continue  # Domain already resolved above; non-select fields are untouched no-ops anyway
+        _resolved = resolve_live_select_value(Tables.DEALS, _field_name, _raw_value)
+        if _resolved is None:
+            return _tool_result(
+                ok=False, tool="crm_create_deal",
+                user_message=f"❌ ערך לא מוכר בטבלת העסקאות: שדה {_field_name!r} ={_raw_value!r}.",
+            )
+        fields[_field_name] = _resolved
+
     outcome = airtable_create(Tables.DEALS, fields, source=source, return_outcome=True)
     if outcome.status == "created":
         rec_id = outcome.record.get("id", "")

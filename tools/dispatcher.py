@@ -971,6 +971,35 @@ def dispatch_tool(
                             return result
                         fields[_domain_field] = _live_domain
 
+                    # DIAMOND D3 FINAL (06/09/2026): resolve_live_select_value()
+                    # is now the EXCLUSIVE live-select storage resolver for the
+                    # Diamond Deal path — Domain (above) was the only field this
+                    # generic update redirect ever resolved; every other Deal
+                    # select field (Stage/Priority/Risk Level/Deal Type Code/
+                    # Relationship Type/Currency/Commercial Status/the two
+                    # Estimated Value selects — this is also how the Deal
+                    # enrichment flow's collected answers reach Airtable, since
+                    # they all funnel through this same airtable_update case)
+                    # was written as its raw value with no live-schema check at
+                    # all. Scoped strictly to Deals — Payments/other
+                    # _CRM_TABLE_ROUTING tables are untouched, unrelated
+                    # normalization tracks. Same fail-closed contract as Domain:
+                    # any field that can't be resolved blocks the whole update.
+                    if _resolved_table == Tables.DEALS:
+                        from core.runtime_schema_provider import resolve_live_select_value as _resolve_select
+                        for _field_name, _raw_value in list(fields.items()):
+                            if _field_name == _domain_field or not isinstance(_raw_value, str):
+                                continue  # Domain already resolved above; non-select fields are untouched no-ops anyway
+                            _resolved_value = _resolve_select(_resolved_table, _field_name, _raw_value)
+                            if _resolved_value is None:
+                                result = _tool_result(
+                                    ok=False, tool="airtable_update",
+                                    user_message=f"❌ ערך לא מוכר בטבלת העסקאות: שדה {_field_name!r} ={_raw_value!r}.",
+                                )
+                                audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                                return result
+                            fields[_field_name] = _resolved_value
+
                     result = airtable_update(_resolved_table, record_id, fields)
                     audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                     return result
