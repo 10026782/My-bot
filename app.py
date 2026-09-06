@@ -3387,9 +3387,64 @@ def _resolve_diamond_path_continuation(contract, canonical_record_id: str) -> st
 # every branch below either re-asks the same field or ends the flow
 # leaving the Deal exactly as it already is.
 _DEAL_ENRICHMENT_FIELDS: tuple[str, ...] = (
-    "deal_type", "relationship_type", "currency", "commercial_status", "expected_value",
+    "deal_type", "relationship_type", "currency", "commercial_status",
+    # BUG-DIAMOND-EXPECTED-VALUE-RANGE (06/09/2026, owner architecture
+    # correction): a single scalar "expected_value" number is the wrong
+    # business contract for a Deal whose value is often only an estimate —
+    # replaced with a basis + a bucketed range + optional notes. Order
+    # matters: deal_type/relationship_type (above) are answered first, so
+    # by the time this loop reaches "estimated_value_basis" it can derive
+    # the basis from them (see _advance_past_derivable_deal_fields()) and
+    # skip asking a redundant question.
+    "estimated_value_basis", "estimated_value_range", "estimated_value_notes",
 )
 _ENRICHMENT_SKIP_WORDS = frozenset({"דלג", "skip", "לדלג"})
+
+
+def _advance_past_derivable_deal_fields(remaining: list, collected: dict) -> tuple[list, dict]:
+    """BUG-DIAMOND-EXPECTED-VALUE-RANGE: never ask "estimated_value_basis"
+    when the Deal's own already-collected deal_type/relationship_type
+    already establish it (reuses commercial_completion.
+    derive_estimated_value_basis() — the SAME derivation rule, not a
+    duplicate). `collected` is keyed by Airtable field name (it doubles as
+    the eventual airtable_update payload), so this reads it that way
+    rather than going through CommercialCompletionWriter's internal
+    field-name-keyed resolved_values()/ValueSource.DERIVED machinery,
+    which assumes a different data shape."""
+    from airtable_schema import DealFields
+    from commercial_completion import derive_estimated_value_basis
+    remaining = list(remaining)
+    collected = dict(collected)
+    while remaining and remaining[0] == "estimated_value_basis":
+        derived = derive_estimated_value_basis(
+            collected.get(DealFields.DEAL_TYPE_CODE, ""),
+            collected.get(DealFields.RELATIONSHIP_TYPE, ""),
+        )
+        if derived is None:
+            break
+        collected[DealFields.ESTIMATED_VALUE_BASIS] = derived
+        remaining = remaining[1:]
+    return remaining, collected
+
+
+def _deal_enrichment_prompt(field_name: str, collected: dict) -> str:
+    """BUG-DIAMOND-EXPECTED-VALUE-RANGE: "estimated_value_range" gets a
+    contextual prompt naming what the range is denominated in (never the
+    flat, removed "מה השווי הצפוי?") — every other field keeps the generic
+    presentation-driven prompt, unchanged."""
+    from commercial_completion_routing import CommercialCompletionRouter
+    if field_name != "estimated_value_range":
+        return CommercialCompletionRouter._presentation("deal", field_name)["prompt"]
+    from airtable_schema import DealFields, EstimatedValueBasis
+    basis = collected.get(DealFields.ESTIMATED_VALUE_BASIS)
+    base_prompt = {
+        EstimatedValueBasis.MONTHLY: "מה טווח השווי החודשי המשוער?",
+        EstimatedValueBasis.TOTAL: "מה טווח השווי הכולל המשוער?",
+        EstimatedValueBasis.ONE_OFF: "מה טווח השווי המשוער של העסקה החד-פעמית?",
+    }.get(basis, "מה טווח השווי המשוער?")
+    presentation = CommercialCompletionRouter._presentation("deal", field_name)
+    options = " / ".join(presentation["choices"])
+    return f"{base_prompt}\nאפשרויות: {options}" if options else base_prompt
 
 
 def _offer_deal_enrichment(chat_id: str, channel: str, record_id: str) -> str:
@@ -3411,7 +3466,7 @@ def _offer_deal_enrichment(chat_id: str, channel: str, record_id: str) -> str:
         return ""
     return (
         "העסקה נוצרה בהצלחה. רוצה להשלים פרטים נוספים "
-        "(סוג עסקה, סוג קשר, מטבע, סטטוס מסחרי, שווי צפוי)? השב 'כן' או 'לא'."
+        "(סוג עסקה, סוג קשר, מטבע, סטטוס מסחרי, הערכת שווי)? השב 'כן' או 'לא'."
     )
 
 
@@ -3433,6 +3488,7 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
     from commercial_completion_routing import (
         CommercialCompletionRouter, _CREATE_CONFIRM_WORDS, _CREATE_DECLINE_WORDS,
     )
+    from commercial_completion_ux import resolve_estimated_value_choice
 
     record_id = state.get("record_id") or ""
     stage = state.get("stage") or "offer"
@@ -3455,20 +3511,32 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
                 return f"{final_text}\n\n{queued_text}"
         return final_text
 
+    def _persist_and_ask(remaining_fields: list, collected_fields: dict) -> str:
+        """Skip any auto-derivable field(s), then either ask the next real
+        field or finish if none remain — the single path every advance
+        (accept/skip/valid-answer) below goes through, so the derivation
+        skip can never be missed on one branch and applied on another."""
+        remaining_fields, collected_fields = _advance_past_derivable_deal_fields(
+            remaining_fields, collected_fields,
+        )
+        if not remaining_fields:
+            return _finish("תודה! הפרטים הנוספים הועברו לאישור." if collected_fields else
+                            "תודה! העסקה נשארת כפי שנוצרה.")
+        lead_sessions.set_deal_enrichment_offer(
+            chat_id,
+            {"stage": "collecting", "record_id": record_id,
+             "remaining_fields": remaining_fields, "collected": collected_fields},
+            channel=channel,
+        )
+        return _deal_enrichment_prompt(remaining_fields[0], collected_fields)
+
     if stage == "offer":
         if choice_fold in _CREATE_DECLINE_WORDS or choice_fold in _CANCEL_WORDS:
             return _finish("בסדר, העסקה נשארת כפי שנוצרה.")
         if choice_fold in _CREATE_CONFIRM_WORDS:
             if not remaining:
                 return _finish("אין פרטים נוספים להשלים — העסקה כבר מלאה.")
-            current = remaining[0]
-            lead_sessions.set_deal_enrichment_offer(
-                chat_id,
-                {"stage": "collecting", "record_id": record_id,
-                 "remaining_fields": remaining, "collected": collected},
-                channel=channel,
-            )
-            return CommercialCompletionRouter._presentation("deal", current)["prompt"]
+            return _persist_and_ask(remaining, collected)
         # Unrecognized reply: re-render the exact same offer rather than
         # silently reinterpreting free text or dropping the offer.
         return (
@@ -3484,20 +3552,21 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
         return _finish("ההשלמה בוטלה. העסקה נשארת כפי שנוצרה.")
 
     if choice_fold in _ENRICHMENT_SKIP_WORDS:
-        remaining = remaining[1:]
-        if not remaining:
-            return _finish("תודה! העסקה נשארת כפי שנוצרה.")
-        lead_sessions.set_deal_enrichment_offer(
-            chat_id,
-            {"stage": "collecting", "record_id": record_id,
-             "remaining_fields": remaining, "collected": collected},
-            channel=channel,
-        )
-        return CommercialCompletionRouter._presentation("deal", remaining[0])["prompt"]
+        return _persist_and_ask(remaining[1:], collected)
+
+    # BUG-DIAMOND-EXPECTED-VALUE-RANGE: a clicked/typed Hebrew button label
+    # ("עד 10,000", "חודשי", ...) must resolve to its canonical enum value
+    # before validate_value() — choices there are canonical, never Hebrew.
+    # A raw canonical value (trusted callers/tests) passes through
+    # unchanged; no match at all falls through to the ORIGINAL text so
+    # validate_value() still rejects it with the normal, business-safe
+    # "must be one of <Hebrew choices>" message — never silently accepted.
+    lookup_choice = resolve_estimated_value_choice(current, choice)
+    validated_choice = lookup_choice if lookup_choice is not None else choice
 
     contract = ENTITY_CONTRACTS["deal"].field(current)
     try:
-        validate_value(contract, choice)
+        validate_value(contract, validated_choice)
     except InvalidValueError as exc:
         field_label = CommercialCompletionRouter._presentation("deal", current)["user_label"] or current
         safe_reason = CommercialCompletionRouter._validation_failure_message("deal", current, exc)
@@ -3506,17 +3575,8 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
             "העסקה כבר נוצרה. אפשר להזין ערך אחר או לדלג."
         )
 
-    collected[contract.airtable_field] = _coerce_value(contract, choice)
-    remaining = remaining[1:]
-    if not remaining:
-        return _finish("תודה! הפרטים הנוספים הועברו לאישור.")
-    lead_sessions.set_deal_enrichment_offer(
-        chat_id,
-        {"stage": "collecting", "record_id": record_id,
-         "remaining_fields": remaining, "collected": collected},
-        channel=channel,
-    )
-    return CommercialCompletionRouter._presentation("deal", remaining[0])["prompt"]
+    collected[contract.airtable_field] = _coerce_value(contract, validated_choice)
+    return _persist_and_ask(remaining[1:], collected)
 
 
 def _handle_approval_callback_impl(cq) -> None:

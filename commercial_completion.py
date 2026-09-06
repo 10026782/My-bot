@@ -35,6 +35,8 @@ from airtable_schema import (
     DocumentRequirement,
     DocumentStatus,
     DueRule,
+    EstimatedValueBasis,
+    EstimatedValueRange,
     LeadFields,
     OrganizationFields,
     PaymentFields,
@@ -223,6 +225,8 @@ _CURRENCIES = _class_values(Currency)
 _RELATIONSHIPS = _class_values(RelationshipType)
 _COMMERCIAL_STATUSES = _class_values(CommercialStatus)
 _DEAL_TYPES = _class_values(DealType)
+_ESTIMATED_VALUE_BASES = _class_values(EstimatedValueBasis)
+_ESTIMATED_VALUE_RANGES = _class_values(EstimatedValueRange)
 _CALC_TYPES = _class_values(PaymentTermCalcType)
 _CALC_BASES = _class_values(PaymentTermBasis)
 _CADENCES = _class_values(PaymentTermCadence)
@@ -280,7 +284,19 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("relationship_type", DealFields.RELATIONSHIP_TYPE, InputType.SELECT, choices=_RELATIONSHIPS),
         _f("currency", DealFields.CURRENCY, InputType.SELECT, choices=_CURRENCIES),
         _f("commercial_status", DealFields.COMMERCIAL_STATUS, InputType.SELECT, choices=_COMMERCIAL_STATUSES),
-        _f("expected_value", DealFields.AMOUNT, InputType.CURRENCY, inherit=("expected_value", "amount"), validation="positive"),
+        # BUG-DIAMOND-EXPECTED-VALUE-RANGE (06/09/2026, owner architecture
+        # correction): a single scalar currency number is the wrong
+        # business contract for a Deal whose value is often only an
+        # estimate. Replaced with a basis (what the range is denominated
+        # in) + a bucketed range (never an arbitrary number) + optional
+        # free-text notes. Never written by commercial_crm.create_deal()
+        # (DealFields.AMOUNT/"סכום" is untouched, still used only by the
+        # separate, unwired legacy crm_add_deal() real-estate path) — all
+        # three fields are collected as post-creation enrichment only, same
+        # as the other four V2 fields above.
+        _f("estimated_value_basis", DealFields.ESTIMATED_VALUE_BASIS, InputType.SELECT, choices=_ESTIMATED_VALUE_BASES),
+        _f("estimated_value_range", DealFields.ESTIMATED_VALUE_RANGE, InputType.SELECT, choices=_ESTIMATED_VALUE_RANGES),
+        _f("estimated_value_notes", DealFields.ESTIMATED_VALUE_NOTES, InputType.TEXT),
         _f("stage", DealFields.STAGE, InputType.SELECT, choices=(DealStage.OPPORTUNITY, DealStage.NEGOTIATION, DealStage.CLOSED_WIN, DealStage.CLOSED_LOSS), default=DealStage.OPPORTUNITY),
         _f("start_date", DealFields.START_DATE, InputType.DATE),
         _f("notes", DealFields.NOTES, InputType.TEXT),
@@ -517,6 +533,24 @@ def _derive_document_status(values: Mapping[str, Any]) -> Any:
         return DocumentStatus.NOT_REQUIRED
     if requirement in _DOCUMENT_REQUIREMENTS:
         return DocumentStatus.REQUIRED
+    return None
+
+
+def derive_estimated_value_basis(deal_type: str, relationship_type: str) -> str | None:
+    """BUG-DIAMOND-EXPECTED-VALUE-RANGE: infer Estimated Value Basis from
+    Deal semantics already known (deal_type/relationship_type) instead of
+    asking a redundant question. Public (not a private _DERIVERS entry)
+    because the caller — app.py's Deal enrichment loop — collects fields
+    outside CommercialCompletionWriter's own current_values/resolved_values
+    machinery (they're keyed by Airtable field name for the eventual
+    airtable_update payload, not by internal field_name), so it calls this
+    directly rather than through the ValueSource.DERIVED path. Returns None
+    (ask the user) when neither signal is confidently recurring or
+    one-off — never guesses "total"."""
+    if deal_type == DealType.RECURRING or relationship_type == RelationshipType.RECURRING_SERVICE:
+        return EstimatedValueBasis.MONTHLY
+    if deal_type == DealType.ONE_OFF or relationship_type == RelationshipType.ONE_OFF:
+        return EstimatedValueBasis.ONE_OFF
     return None
 
 

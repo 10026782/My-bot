@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from airtable_schema import (
+    ChargeFields,
     CommercialStatus,
     Currency,
     DealFields,
@@ -39,7 +40,6 @@ def _complete_deal(**overrides):
         "relationship_type": RelationshipType.ONE_OFF,
         "currency": Currency.ILS,
         "commercial_status": CommercialStatus.PROSPECT,
-        "expected_value": 1000,
     }
     values.update(overrides)
     return values
@@ -406,24 +406,36 @@ def test_existing_value_wins_over_inherited_and_default_value():
 # amount prompt with "100000" — validate_value() validated the string as
 # a valid number but apply_answer() stored the raw string itself, which
 # then reached Airtable as a JSON string instead of a JSON number.
+#
+# Deal's own "expected_value" field no longer exists (replaced by
+# BUG-DIAMOND-EXPECTED-VALUE-RANGE with a basis + bucketed range, neither
+# of which is a free-typed number) — these tests now exercise the exact
+# same _coerce_value() mechanism via "charge"'s still-numeric CURRENCY
+# field "amount", which is unaffected by that change.
 # ══════════════════════════════════════════════════════════════════
 
+def _charge_values(**overrides):
+    values = {"deal": "recDeal1", "direction": Direction.RECEIVABLE, "currency": Currency.ILS}
+    values.update(overrides)
+    return values
+
+
 def test_free_text_currency_answer_is_coerced_to_a_number_not_left_as_a_string():
-    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
-    answered = writer.apply_answer("expected_value", "100000")
-    assert answered.current_values["expected_value"] == 100000
-    assert isinstance(answered.current_values["expected_value"], float)
-    assert not isinstance(answered.current_values["expected_value"], str)
+    writer = CommercialCompletionWriter("charge", _charge_values())
+    answered = writer.apply_answer("amount", "100000")
+    assert answered.current_values["amount"] == 100000
+    assert isinstance(answered.current_values["amount"], float)
+    assert not isinstance(answered.current_values["amount"], str)
 
 
 def test_exact_production_reproduction_deal_amount_payload_is_numeric():
-    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
-    answered = writer.apply_answer("expected_value", "100000")
+    writer = CommercialCompletionWriter("charge", _charge_values())
+    answered = writer.apply_answer("amount", "100000")
     assert answered.is_complete()
     payload = answered.complete_payload()
-    assert payload[DealFields.AMOUNT] == 100000
-    assert isinstance(payload[DealFields.AMOUNT], float)
-    assert not isinstance(payload[DealFields.AMOUNT], str)
+    assert payload[ChargeFields.AMOUNT] == 100000
+    assert isinstance(payload[ChargeFields.AMOUNT], float)
+    assert not isinstance(payload[ChargeFields.AMOUNT], str)
 
 
 def test_free_text_integer_field_answer_is_coerced_to_int_not_float_or_string():
@@ -435,16 +447,16 @@ def test_free_text_integer_field_answer_is_coerced_to_int_not_float_or_string():
 
 
 def test_numeric_answer_already_a_number_is_unaffected():
-    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
-    answered = writer.apply_answer("expected_value", 100000)
-    assert answered.current_values["expected_value"] == 100000
-    assert isinstance(answered.current_values["expected_value"], float)
+    writer = CommercialCompletionWriter("charge", _charge_values())
+    answered = writer.apply_answer("amount", 100000)
+    assert answered.current_values["amount"] == 100000
+    assert isinstance(answered.current_values["amount"], float)
 
 
 def test_non_numeric_free_text_still_rejected_before_any_coercion():
-    writer = CommercialCompletionWriter("deal", _complete_deal(expected_value=None))
+    writer = CommercialCompletionWriter("charge", _charge_values())
     with pytest.raises(InvalidValueError):
-        writer.apply_answer("expected_value", "לא מספר")
+        writer.apply_answer("amount", "לא מספר")
 
 
 def test_select_and_link_answers_are_not_touched_by_numeric_coercion():

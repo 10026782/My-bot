@@ -128,7 +128,11 @@ def run() -> bool:
         result = ccrm.create_deal(
             "New Deal", "saas", "recOwner1",
             origin_lead_id="recLead1", venture_id="recVenture1",
-            contact_ids=["recContact1"], amount=5000,
+            contact_ids=["recContact1"],
+            # BUG-DIAMOND-EXPECTED-VALUE-RANGE: replaces the removed
+            # scalar `amount` kwarg.
+            estimated_value_basis="monthly", estimated_value_range="100k_300k",
+            estimated_value_notes="תלוי בהיקף העבודה בפועל",
         )
         table, fields = create.call_args.args[0], create.call_args.args[1]
         chk("create_deal: ok=True on success", result["ok"] is True)
@@ -142,6 +146,14 @@ def run() -> bool:
         chk("create_deal: never writes Address (real-estate-only)", DealFields.ADDRESS not in fields)
         chk("create_deal: never writes Funding Cost (real-estate-only)", DealFields.FUNDING_COST not in fields)
         chk("create_deal: never writes Roi (real-estate-only)", DealFields.ROI not in fields)
+        chk("create_deal: Estimated Value Basis written",
+            fields[DealFields.ESTIMATED_VALUE_BASIS] == "monthly")
+        chk("create_deal: Estimated Value Range written",
+            fields[DealFields.ESTIMATED_VALUE_RANGE] == "100k_300k")
+        chk("create_deal: Estimated Value Notes written",
+            fields[DealFields.ESTIMATED_VALUE_NOTES] == "תלוי בהיקף העבודה בפועל")
+        chk("create_deal: BUG-DIAMOND-EXPECTED-VALUE-RANGE — legacy 'סכום' never written",
+            DealFields.AMOUNT not in fields)
 
     with patch("commercial_crm.airtable_create", return_value=AirtableCreateOutcome("failed", error="422")):
         result = ccrm.create_deal("Name", "general", "recOwner")

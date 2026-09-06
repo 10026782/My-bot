@@ -1,6 +1,9 @@
 """S2C deterministic completion routing contract tests."""
 
-from airtable_schema import CommercialStatus, Currency, DealType, Direction, RelationshipType
+from airtable_schema import (
+    CommercialStatus, Currency, DealType, Direction, EstimatedValueBasis,
+    EstimatedValueRange, RelationshipType,
+)
 from commercial_completion_routing import (
     CommercialCompletionRouter,
     deserialize_completion_session, serialize_completion_session,
@@ -15,7 +18,12 @@ def _deal():
         "name": "Deal", "domain": "import", "owner": "recOwner1",
         "counterparty_contact": "recContact1", "deal_type": DealType.SERVICE,
         "relationship_type": RelationshipType.ONE_OFF, "currency": Currency.ILS,
-        "commercial_status": CommercialStatus.PROSPECT, "expected_value": 100,
+        "commercial_status": CommercialStatus.PROSPECT,
+        # BUG-DIAMOND-EXPECTED-VALUE-RANGE: replaces the old "expected_value"
+        # scalar field.
+        "estimated_value_basis": EstimatedValueBasis.ONE_OFF,
+        "estimated_value_range": EstimatedValueRange.RANGE_100K_300K,
+        "estimated_value_notes": "תלוי בהיקף העבודה בפועל",
     }
 
 
@@ -38,9 +46,9 @@ def test_supported_entities_have_one_canonical_primitive_each():
 def test_optional_deal_fields_never_block_creation():
     # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION (production-verified,
     # 06/09/2026): deal_type/relationship_type/currency/commercial_status/
-    # expected_value are optional — dropping all five must queue
-    # crm_create_deal immediately, never a CLARIFY loop asking for them one
-    # at a time before the Deal can be created.
+    # estimated value fields are optional — dropping all of them must
+    # queue crm_create_deal immediately, never a CLARIFY loop asking for
+    # them one at a time before the Deal can be created.
     queued = []
     router = CommercialCompletionRouter(queue=lambda tool, payload: queued.append((tool, payload)))
     values = _deal()
@@ -48,7 +56,9 @@ def test_optional_deal_fields_never_block_creation():
     values.pop("relationship_type")
     values.pop("currency")
     values.pop("commercial_status")
-    values.pop("expected_value")
+    values.pop("estimated_value_basis")
+    values.pop("estimated_value_range")
+    values.pop("estimated_value_notes")
     result = router.start("deal", current_values=values, source_context={})
     assert result.outcome == "TOOL"
     assert result.tool_name == "crm_create_deal"
@@ -100,14 +110,18 @@ def test_completion_state_round_trips_and_preserves_all_deal_fields():
     payload = restored.session.active.complete_payload()
     assert set(payload) >= {
         "Counterparty Contact", "Deal Type Code", "Relationship Type",
-        "Currency", "Commercial Status", "סכום",
+        "Currency", "Commercial Status",
+        "אופן הערכת שווי", "טווח שווי משוער", "הערות לשווי משוער",
     }
+    assert "סכום" not in payload  # BUG-DIAMOND-EXPECTED-VALUE-RANGE: never written
     # The production adapter must hand every approved persisted contract field
     # to crm_create_deal, with links represented as primitive IDs.
     assert set(router._inspect(restored.session).tool_inputs) >= {
         "counterparty_contact_id", "deal_type_code", "relationship_type",
-        "currency", "commercial_status", "amount",
+        "currency", "commercial_status",
+        "estimated_value_basis", "estimated_value_range", "estimated_value_notes",
     }
+    assert "amount" not in router._inspect(restored.session).tool_inputs
 
 
 def test_app_resumes_persisted_state_through_answer_without_agent_fallback():

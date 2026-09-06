@@ -166,7 +166,7 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
             "owner_id": _link_id(p[DealFields.OWNER]),
         }
         optional = {
-            DealFields.ORIGIN_LEAD: "origin_lead_id", DealFields.AMOUNT: "amount",
+            DealFields.ORIGIN_LEAD: "origin_lead_id",
             DealFields.STAGE: "stage", DealFields.NOTES: "notes",
             DealFields.COUNTERPARTY_CONTACT: "counterparty_contact_id",
             DealFields.COUNTERPARTY_ORGANIZATION: "counterparty_organization_id",
@@ -175,6 +175,11 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
             DealFields.CURRENCY: "currency",
             DealFields.COMMERCIAL_STATUS: "commercial_status",
             DealFields.START_DATE: "start_date",
+            # BUG-DIAMOND-EXPECTED-VALUE-RANGE: replaces DealFields.AMOUNT
+            # ("סכום" / "amount") here — never written by this flow anymore.
+            DealFields.ESTIMATED_VALUE_BASIS: "estimated_value_basis",
+            DealFields.ESTIMATED_VALUE_RANGE: "estimated_value_range",
+            DealFields.ESTIMATED_VALUE_NOTES: "estimated_value_notes",
         }
         for field_name, arg_name in optional.items():
             if field_name in p:
