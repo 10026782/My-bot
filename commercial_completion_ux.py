@@ -75,6 +75,22 @@ ESTIMATED_VALUE_RANGE_LABELS: dict[str, str] = {
     "unknown": "עדיין לא ידוע",
 }
 
+# DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026): Commercial Status'
+# stored value is unchanged (canonical English enum, prospect/active/
+# at_risk/completed/cancelled/written_off — no lifecycle/schema change in
+# this migration) — this is DISPLAY-ONLY, the same pattern as the two
+# Estimated Value label dicts above: field_presentation() shows these
+# Hebrew labels as the offered choices, resolve_estimated_value_choice()
+# (below) maps a clicked/typed label back to the stored canonical value.
+COMMERCIAL_STATUS_LABELS: dict[str, str] = {
+    "prospect": "פוטנציאלית",
+    "active": "פעילה",
+    "at_risk": "דורשת טיפול / בסיכון",
+    "completed": "הושלמה",
+    "cancelled": "בוטלה",
+    "written_off": "נסגרה ללא מימוש",
+}
+
 _LABELS = {
     "name": ("שם העסקה", "מה שם העסקה?"),
     "domain": ("תחום", "באיזה תחום העסקה?"),
@@ -84,6 +100,12 @@ _LABELS = {
     "counterparty_organization": ("ארגון", "עם מי העסקה?"),
     "deal_type": ("סוג עסקה", "מה סוג העסקה?"),
     "relationship_type": ("אופי הקשר", "מה אופי הקשר העסקי?"),
+    # DIAMOND — BUSINESS FIELDS MIGRATION: canonical replacement for the
+    # two entries above (no longer asked in the Diamond enrichment flow —
+    # see DealFields.BUSINESS_DEAL_TYPE's own comment).
+    "business_deal_type": ("סוג עסקה", "מה סוג העסקה?"),
+    "relationship_role": ("אופי הקשר", "מה אופי הקשר העסקי?"),
+    "engagement_duration": ("משך התקשרות", "מה משך ההתקשרות?"),
     "currency": ("מטבע", "באיזה מטבע העסקה?"),
     "commercial_status": ("סטטוס מסחרי", "מה הסטטוס המסחרי?"),
     # BUG-DIAMOND-EXPECTED-VALUE-RANGE: "expected_value" (a single scalar
@@ -184,6 +206,10 @@ def field_presentation(entity: str, field: FieldContract) -> FieldPresentation:
         choices = tuple(ESTIMATED_VALUE_BASIS_LABELS[c] for c in field.choices)
     elif field.field_name == "estimated_value_range":
         choices = tuple(ESTIMATED_VALUE_RANGE_LABELS[c] for c in field.choices)
+    elif field.field_name == "commercial_status":
+        # DIAMOND — BUSINESS FIELDS MIGRATION §5: display-only translation —
+        # the stored canonical value is untouched (see COMMERCIAL_STATUS_LABELS).
+        choices = tuple(COMMERCIAL_STATUS_LABELS[c] for c in field.choices)
     return FieldPresentation(
         field_key=field.field_name,
         user_label=label,
@@ -259,13 +285,18 @@ def _normalize_select_answer(value: Any) -> str:
 def resolve_estimated_value_choice(field_name: str, raw_value: str) -> str | None:
     """Map a clicked/typed Hebrew button label (or the raw canonical value
     itself, for programmatic/test callers) back to its canonical enum
-    value for "estimated_value_basis"/"estimated_value_range". Never
-    invents a value — returns None on no match so the caller fails closed,
-    exactly like any other invalid SELECT answer. Fields other than these
-    two are returned unchanged (nothing to translate)."""
+    value for "estimated_value_basis"/"estimated_value_range"/
+    "commercial_status" — every Diamond field with a separate Hebrew
+    display-label layer (one shared registry per DIAMOND — BUSINESS FIELDS
+    MIGRATION §10: never a second, duplicated label map). Never invents a
+    value — returns None on no match so the caller fails closed, exactly
+    like any other invalid SELECT answer. Fields other than these three are
+    returned unchanged (nothing to translate — their stored value already
+    IS the displayed choice)."""
     labels = {
         "estimated_value_basis": ESTIMATED_VALUE_BASIS_LABELS,
         "estimated_value_range": ESTIMATED_VALUE_RANGE_LABELS,
+        "commercial_status": COMMERCIAL_STATUS_LABELS,
     }.get(field_name)
     if labels is None:
         return raw_value
@@ -300,6 +331,80 @@ def resolve_select_answer(raw_value: str, choices: tuple[str, ...]) -> str | Non
         return None
     matches = [c for c in choices if _normalize_select_answer(c) == normalized]
     return matches[0] if len(matches) == 1 else None
+
+
+# DIAMOND — BUSINESS FIELDS MIGRATION §7/§8 (06/09/2026): "עדכון רשומה:
+# recurring" production bug — the generic approval-lifecycle description
+# (core/action_gateway.py's _first_field_preview()) picks ONE raw field
+# value out of the airtable_update payload with no business meaning at
+# all, for every table that writer touches (Leads/Tasks/generic). That
+# function is deliberately generic/table-agnostic and must stay that way
+# (no system-wide normalization consolidation here) — this is the
+# Diamond-only replacement: one shared, per-field, label-aware summary
+# builder, called from BOTH the pending-approval prompt (app.py's
+# _describe_tool_call()) and the completion message
+# (core/action_gateway.py's Deals-specific branches) so both surfaces
+# read from the exact same source of truth, never independently
+# duplicated.
+_DEAL_AIRTABLE_FIELD_TO_CONTRACT: dict[str, FieldContract] | None = None
+
+
+def _deal_airtable_field_index() -> dict[str, FieldContract]:
+    global _DEAL_AIRTABLE_FIELD_TO_CONTRACT
+    if _DEAL_AIRTABLE_FIELD_TO_CONTRACT is None:
+        _DEAL_AIRTABLE_FIELD_TO_CONTRACT = {
+            contract.airtable_field: contract
+            for contract in ENTITY_CONTRACTS["deal"].fields
+        }
+    return _DEAL_AIRTABLE_FIELD_TO_CONTRACT
+
+
+def deal_field_business_summary(fields: Mapping[str, Any]) -> str:
+    """One verified mutation -> one clear, per-field business-readable
+    summary line — never a raw internal enum token (DIAMOND — BUSINESS
+    FIELDS MIGRATION §7/§8). `fields` is Airtable-field-name-keyed, the
+    exact shape both the Deal enrichment flow's `collected` dict and
+    commercial_crm.create_deal()'s own `fields` dict already use — no
+    caller needs to reshape anything to call this.
+
+    Derived strictly from the verified field set actually being written
+    (the caller's own `fields` dict) plus this module's own label
+    registry — never from dict ordering, argument order, or a "first
+    field" heuristic. A field this module has no Deal contract entry for
+    (e.g. a raw linked-record id list, or a field with no completion-flow
+    field_name) is silently skipped — this is a business-readable
+    highlight list, not a full field-by-field diff, and never claims a
+    field was updated that wasn't actually present in `fields`."""
+    index = _deal_airtable_field_index()
+    lines: list[str] = []
+    for airtable_field, raw_value in fields.items():
+        contract = index.get(airtable_field)
+        if contract is None or not raw_value or isinstance(raw_value, (list, tuple, dict)):
+            continue
+        if contract.field_name in ("deal_type", "relationship_type"):
+            # DIAMOND — BUSINESS FIELDS MIGRATION: these two are compat-only
+            # (see DealFields.DEAL_TYPE_CODE's own comment) — no longer part
+            # of the current business model this summary represents, and
+            # their raw values are internal English enum tokens with no
+            # Hebrew display-label mapping, so they are never shown here
+            # rather than leaking one verbatim.
+            continue
+        presentation = field_presentation("deal", contract)
+        display = str(raw_value)
+        # `fields` values are the already-CANONICAL stored values (exactly
+        # what was/will be written to Airtable) — the label dicts map
+        # canonical -> Hebrew display, the same direction field_presentation()
+        # uses for the offered choices, never resolve_estimated_value_choice()
+        # (that maps the OTHER direction: a clicked/typed label back to
+        # canonical, for validating an incoming answer, not for display).
+        if contract.field_name == "commercial_status":
+            display = COMMERCIAL_STATUS_LABELS.get(str(raw_value), display)
+        elif contract.field_name == "estimated_value_basis":
+            display = ESTIMATED_VALUE_BASIS_LABELS.get(str(raw_value), display)
+        elif contract.field_name == "estimated_value_range":
+            display = ESTIMATED_VALUE_RANGE_LABELS.get(str(raw_value), display)
+        lines.append(f"• {presentation.user_label}: {display}")
+    return "\n".join(lines)
 
 
 def resolve_human_link(
@@ -384,4 +489,7 @@ __all__ = [
     "FieldPresentation", "HumanChoice", "LinkResolution",
     "field_presentation", "presentation_for", "render_prompt",
     "render_counterparty_prompt", "resolve_human_link",
+    "deal_field_business_summary", "resolve_estimated_value_choice",
+    "resolve_select_answer", "COMMERCIAL_STATUS_LABELS",
+    "ESTIMATED_VALUE_BASIS_LABELS", "ESTIMATED_VALUE_RANGE_LABELS",
 ]

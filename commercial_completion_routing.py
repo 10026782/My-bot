@@ -172,6 +172,13 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
             DealFields.COUNTERPARTY_ORGANIZATION: "counterparty_organization_id",
             DealFields.DEAL_TYPE_CODE: "deal_type_code",
             DealFields.RELATIONSHIP_TYPE: "relationship_type",
+            # DIAMOND — BUSINESS FIELDS MIGRATION: canonical replacement for
+            # the two entries above (see DealFields.BUSINESS_DEAL_TYPE's own
+            # comment) — the two old entries stay mapped for compatibility,
+            # never removed.
+            DealFields.BUSINESS_DEAL_TYPE: "business_deal_type",
+            DealFields.RELATIONSHIP_ROLE: "relationship_role",
+            DealFields.ENGAGEMENT_DURATION: "engagement_duration",
             DealFields.CURRENCY: "currency",
             DealFields.COMMERCIAL_STATUS: "commercial_status",
             DealFields.START_DATE: "start_date",

@@ -50,7 +50,7 @@ import app  # noqa: E402  (env vars above must be set before import)
 import emergency_stop_test_support  # noqa: E402
 emergency_stop_test_support.configure_all_clear_emergency_stop()
 
-from airtable_schema import DealFields, Tables  # noqa: E402
+from airtable_schema import DealFields, EngagementDuration, Tables  # noqa: E402
 
 passed = failed = 0
 
@@ -65,8 +65,13 @@ def check(label: str, condition: bool) -> None:
         failed += 1
 
 
+# DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026): "deal_type"/
+# "relationship_type" replaced by "business_deal_type"/"relationship_role"/
+# "engagement_duration" in the enrichment offer/loop — see
+# DealFields.BUSINESS_DEAL_TYPE's own comment in airtable_schema.py.
 _ALL_FIELDS = [
-    "deal_type", "relationship_type", "currency", "commercial_status",
+    "business_deal_type", "relationship_role", "engagement_duration",
+    "currency", "commercial_status",
     "estimated_value_basis", "estimated_value_range", "estimated_value_notes",
 ]
 
@@ -88,7 +93,7 @@ if mock_set.called:
     _, written_state = mock_set.call_args[0]
     check("persisted state carries the record_id", written_state["record_id"] == "recDealNEW00001")
     check("persisted state starts at stage=offer", written_state["stage"] == "offer")
-    check("persisted state lists all seven optional fields",
+    check("persisted state lists all eight optional fields",
           written_state["remaining_fields"] == _ALL_FIELDS)
     check("persisted state starts with nothing collected", written_state["collected"] == {})
 
@@ -122,19 +127,19 @@ if mock_set.called:
 
 
 # ══════════════════════════════════════════════════════════════════
-print("\n── Case A: recurring Deal already establishes monthly -> basis never asked ──")
+print("\n── Case A: ongoing Deal already establishes monthly -> basis never asked ──")
 
 _recurring_state = {
     "stage": "collecting", "record_id": "recDealNEW00001",
     # "commercial_status" sits in front of "estimated_value_basis" here,
-    # matching the real _DEAL_ENRICHMENT_FIELDS order — deal_type is
-    # already known (collected), so skipping commercial_status is what
+    # matching the real _DEAL_ENRICHMENT_FIELDS order — engagement_duration
+    # is already known (collected), so skipping commercial_status is what
     # advances the loop INTO basis, which is exactly the moment
     # _advance_past_derivable_deal_fields() must fire (it only ever runs
     # when about to ask the NEXT field, never when the user is answering
     # basis directly — that would be an explicit skip, not a derivation).
     "remaining_fields": ["commercial_status", "estimated_value_basis", "estimated_value_range", "estimated_value_notes"],
-    "collected": {"Deal Type Code": "recurring"},
+    "collected": {DealFields.ENGAGEMENT_DURATION: EngagementDuration.ONGOING},
 }
 
 with patch("session_store.lead_sessions.set_deal_enrichment_offer") as mock_set, \
@@ -161,7 +166,7 @@ print("\n── Case B: one-off Deal -> derives one_off, asks one-off range word
 _one_off_state = {
     "stage": "collecting", "record_id": "recDealNEW00001",
     "remaining_fields": ["commercial_status", "estimated_value_basis", "estimated_value_range", "estimated_value_notes"],
-    "collected": {"Relationship Type": "one_off"},
+    "collected": {DealFields.ENGAGEMENT_DURATION: EngagementDuration.ONE_OFF},
 }
 
 with patch("session_store.lead_sessions.set_deal_enrichment_offer") as mock_set:
@@ -170,7 +175,7 @@ check("B: derives one_off and asks the one-off-specific range wording",
       "חד-פעמית" in result)
 if mock_set.called:
     _, state_after = mock_set.call_args[0]
-    check("B: basis derived from relationship_type alone",
+    check("B: basis derived from engagement_duration alone",
           state_after["collected"].get(DealFields.ESTIMATED_VALUE_BASIS) == "one_off")
 
 

@@ -267,8 +267,16 @@ class DealFields:
     COUNTERPARTY_CONTACT = "Counterparty Contact"
     COUNTERPARTY_ORGANIZATION = "Counterparty Organization"
     DEAL_TYPE       = "Deal Type"       # legacy free-text compatibility field
-    DEAL_TYPE_CODE  = "Deal Type Code"  # canonical V2 select; writers not switched
-    RELATIONSHIP_TYPE = "Relationship Type"
+    # DIAMOND — BUSINESS FIELDS MIGRATION: DEAL_TYPE_CODE/RELATIONSHIP_TYPE
+    # kept for compatibility only (no read path depends on them) — no
+    # longer the Diamond enrichment flow's primary authority; see
+    # BUSINESS_DEAL_TYPE/RELATIONSHIP_ROLE/ENGAGEMENT_DURATION below and
+    # BusinessDealType/RelationshipRole/EngagementDuration's own docstring.
+    DEAL_TYPE_CODE  = "Deal Type Code"  # compat only — superseded by BUSINESS_DEAL_TYPE
+    RELATIONSHIP_TYPE = "Relationship Type"  # compat only — superseded by RELATIONSHIP_ROLE
+    BUSINESS_DEAL_TYPE  = "סוג העסקה העסקי"
+    RELATIONSHIP_ROLE   = "אופי הקשר העסקי"
+    ENGAGEMENT_DURATION = "משך ההתקשרות"
     START_DATE      = "Start Date"
     CURRENCY        = "Currency"
     COMMERCIAL_STATUS = "Commercial Status"
@@ -453,6 +461,42 @@ class RelationshipType:
     COMMISSION_RELATIONSHIP = "commission_relationship"
     PARTNERSHIP = "partnership"
     OTHER = "other"
+
+
+# DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026, owner architecture
+# correction): DealType/RelationshipType (above) mixed several distinct
+# business dimensions into two fields (deal shape, engagement duration,
+# and relationship role were all folded together) — "one_off"/"recurring"
+# answered "how long" while "commission"/"service" answered "what kind",
+# with no single field representing exactly one business question. These
+# three fields are the canonical V2 replacement, each representing exactly
+# one dimension; the live values ARE the Hebrew business language itself
+# (no separate internal-slug/display-label layer needed, same pattern
+# DealStage already uses). DealType/RelationshipType and their live
+# Airtable fields are untouched and still exist for compatibility — no
+# current read path depends on them — but are no longer asked about in
+# the Diamond enrichment flow; these three are now that flow's canonical
+# fields. See DealFields.BUSINESS_DEAL_TYPE/RELATIONSHIP_ROLE/
+# ENGAGEMENT_DURATION.
+class BusinessDealType:
+    SERVICE = "שירות"
+    SALE = "מכירה"
+    COMMISSION = "עמלה / תיווך"
+    PARTNERSHIP = "שותפות"
+    OTHER = "אחר"
+
+
+class RelationshipRole:
+    CUSTOMER = "לקוח"
+    SUPPLIER = "ספק"
+    PARTNER = "שותף"
+    REFERRER = "מפנה / מתווך"
+    OTHER = "אחר"
+
+
+class EngagementDuration:
+    ONE_OFF = "חד-פעמית"
+    ONGOING = "מתמשכת"
 
 
 class EstimatedValueBasis:

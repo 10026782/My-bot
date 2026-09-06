@@ -1719,3 +1719,123 @@ the audit sandbox (no credentials available there); `cmd_update.py`'s
 independent, duplicate underscore-aware resolver was left as-is, a candidate
 for a later normalization-consolidation track, not required for Diamond.
 Deployment and live production runtime verification remain pending.
+
+### DIAMOND — business fields migration + user-facing summary fix — 06/09/2026 (owner-directed, follow-up to D3)
+
+Moved the Deal Diamond enrichment flow onto three new live Airtable business
+fields (owner-created, verified live before any code change) and fixed a
+production-reported UX defect in the final completion message.
+
+1. **New business fields, each exactly one dimension.** The old
+   `Deal Type Code`/`Relationship Type` model mixed several business
+   dimensions into two fields ("one_off"/"recurring" answered duration,
+   "commission"/"service" answered kind, with no clean split). Three new
+   live fields replace them for the Diamond flow: `סוג העסקה העסקי`
+   (`BusinessDealType`: שירות/מכירה/עמלה / תיווך/שותפות/אחר), `אופי הקשר
+   העסקי` (`RelationshipRole`: לקוח/ספק/שותף/מפנה / מתווך/אחר), `משך
+   ההתקשרות` (`EngagementDuration`: חד-פעמית/מתמשכת) — added to
+   `airtable_schema.py`, `commercial_completion.py`'s `ENTITY_CONTRACTS["deal"]`,
+   `commercial_completion_ux.py`'s label registry, `commercial_crm.create_deal()`,
+   `commercial_completion_routing.py`'s primitive-input mapping, and
+   `tools/dispatcher.py`'s `_DEAL_FIELD_MAP` allowlist. Their live values
+   ARE the Hebrew business language itself (same pattern `DealStage`
+   already uses) — no separate internal-slug/display-label translation
+   layer needed for these three specifically.
+2. **Old fields preserved, not primary authority.** `DEAL_TYPE_CODE`/
+   `RELATIONSHIP_TYPE` and their live Airtable fields are untouched and
+   still accepted by every writer/allowlist (confirmed no current read
+   path depends on them) — but `app.py`'s `_DEAL_ENRICHMENT_FIELDS` no
+   longer asks about them; the three new fields are now that flow's
+   canonical business-dimension fields.
+3. **`derive_estimated_value_basis()` updated to the new signal.**
+   Previously derived the Estimated Value Basis auto-skip from BOTH
+   `deal_type` and `relationship_type` as independent duration proxies;
+   now reads `engagement_duration` alone — a single, precise signal for
+   the same "how long" question, since duration IS that question
+   directly.
+4. **Commercial Status — display-only translation.** New
+   `COMMERCIAL_STATUS_LABELS` dict in `commercial_completion_ux.py`
+   (prospect→פוטנציאלית, active→פעילה, at_risk→דורשת טיפול / בסיכון,
+   completed→הושלמה, cancelled→בוטלה, written_off→נסגרה ללא מימוש).
+   `field_presentation()` now shows these Hebrew labels as the offered
+   choices; `resolve_estimated_value_choice()`'s existing label-registry
+   pattern (already used for the two Estimated Value fields) is extended
+   to cover Commercial Status too — one shared registry, not a duplicate.
+   Stored canonical value and lifecycle semantics are completely
+   unchanged.
+5. **Root-caused and fixed the "עדכון רשומה: recurring" defect.** A
+   production canary showed the final Deal-enrichment completion message
+   leaking a raw internal enum token instead of a business summary.
+   Traced to `core/action_gateway.py`'s `_first_field_preview()` — a
+   deliberately generic, table-agnostic helper (used for every
+   `airtable_add`/`airtable_update` contract) that picks ONE raw field
+   value with no business meaning at all; correct for its intended scope
+   (Leads/Tasks already get their own dedicated, richer branches beside
+   it — this is the same pattern, not a redesign of the shared helper or
+   of ActionGateway). Added a Diamond-only branch, keyed on
+   `Tables.DEALS`, to both `_describe_contract_for_reconfirmation()` (the
+   pending-approval description) and `_safe_contract_business_description()`
+   (the completion message) — both now call ONE new shared builder,
+   `commercial_completion_ux.deal_field_business_summary()`, which
+   renders every field actually present in the verified payload as
+   `• <business label>: <business value>` (translating Commercial
+   Status/Estimated Value Basis/Estimated Value Range through their label
+   registries, skipping the old compat-only `deal_type`/`relationship_type`
+   fields rather than showing their untranslated raw enum, and silently
+   skipping any field with no Deal contract entry — a highlight list, not
+   a full diff). `app.py`'s `_describe_tool_call()` (the pending-approval
+   prompt's OWN separate description surface) gets the identical
+   Deals-only branch, calling the exact same shared builder — one source
+   of truth across prompt, button, typed-fallback, and final-summary, per
+   instruction. The summary is derived strictly from the verified
+   `fields` dict actually being written — never dict ordering, argument
+   order, or a "first field" heuristic.
+
+Non-goals honored throughout: no old Airtable fields deleted, no
+system-wide normalization consolidation, no `cmd_update.py` refactor, no
+`domain_utils.py` removal, no `crm_update_deal`, no ActionGateway redesign,
+no RuntimeSchemaProvider architecture change, no Commercial Status
+lifecycle/schema change, no `at_risk` alert automation.
+
+Tests: `test_diamond_business_fields_migration.py` (new, 35 assertions —
+business-language field presentation; a real `_handle_deal_enrichment_reply()`
+walk writing to all three new fields with no obsolete-enum leak; "לא" at
+the final optional step completing cleanly without storing the literal
+word; `deal_field_business_summary()` unit coverage proving no raw enum
+ever appears and only actually-present fields are shown; and — the closest
+reproduction of the exact production scenario — a real multi-field Deal
+update proposed and approved through the genuine `ActionGateway`→approval→
+`dispatch_tool` path, with the REAL `build_approval_lifecycle_result()`
+completion message and `_describe_contract_for_reconfirmation()` pending
+message both asserted to contain zero raw enum tokens and a full
+business-readable multi-field summary). One pre-existing test file
+(`test_bug_diamond_optional_enrichment_gates_creation.py`) updated for the
+new 8-field enrichment list and the new `engagement_duration`-based
+derivation signal (Cases A/B reseeded accordingly) — 59 assertions, all
+passing. Full regression sweep run clean: `test_runtime_schema_provider.py`
+(75), `test_select_value_validation.py` (18), `test_airtable_gateway.py`
+(37), `test_bug_diamond_enrichment_runtime_sweep.py` (50),
+`test_bug_diamond_completion_generic_description.py` (9),
+`test_bug_diamond_enrichment_offer_precedence.py` (15),
+`test_commercial_crm.py` (111), `test_commercial_crm_dispatcher_wiring.py`
+(43), `test_diamond_remediation_d2_input_ownership_recovery.py` (40),
+`test_diamond_d3_final_select_resolver.py` (22),
+`test_check_airtable_schema_runtime.py` (44), `test_schema_snapshot.py`
+(40), `test_business_memory_domain_lookup.py` (25),
+`test_bug123_approval_rendering_fail_closed.py` (20),
+`test_bug161_agent_no_reconfirmation_promise.py` (7),
+`test_bug162_gateway_reply_owner_on_generic_block.py` (57),
+`test_bug_approval_callback_hardening.py` (41),
+`test_bug_crm_bypass_create_deal_deterministic_route.py`,
+`test_f52_status_reply_reconciliation.py` (51),
+`test_pr1_single_speaker_approval_ux.py` (15, pytest),
+`test_preview_content_fix.py` (34), `test_tc7_rp5_gateway_execution_shadow.py`
+(85), `smoke_tests.py`, `test_integration.py`, `core/router/test_router.py`,
+`tests/` (165, pytest), `py_compile` on every changed file — all clean.
+
+Residual gaps: the compat-only `deal_type`/`relationship_type` fields have
+no automated migration path for any existing Deal records that already
+carry values there (out of scope — no read path needs it today); Commercial
+Status's `at_risk` next-action/alert behavior is explicitly deferred, per
+instruction; deployment and live production runtime verification (a real
+Telegram canary through the actual enrichment flow) remain pending.

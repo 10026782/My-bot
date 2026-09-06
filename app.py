@@ -1441,11 +1441,26 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         fields = inputs.get("fields")
         if not table or not isinstance(fields, dict) or not fields:
             return _APPROVAL_DESCRIPTION_FALLBACK
+        from airtable_schema import Tables
+        from core.action_gateway import is_task_table
+        icon = "➕" if tool_name == "airtable_add" else "✏️"
+        # DIAMOND — BUSINESS FIELDS MIGRATION §7/§8 (06/09/2026): the
+        # generic per-field dump below (_format_field_value) shows raw
+        # internal enum tokens/field names verbatim — fine for
+        # system/infra tables, but never right for a Diamond Deal, where
+        # every SELECT field has a real business label and (for a few
+        # fields) a separate Hebrew display value. Diamond-only branch,
+        # reusing the SAME shared summary builder the completion message
+        # uses (core/action_gateway.py) — one source of truth, never a
+        # second per-field formatter.
+        if table == Tables.DEALS:
+            from commercial_completion_ux import deal_field_business_summary
+            summary = deal_field_business_summary(fields)
+            header = "פתיחת עסקה" if tool_name == "airtable_add" else "עדכון פרטי עסקה"
+            return f"{icon} {header}:\n{summary}" if summary else f"{icon} {header}"
         fields_preview = "\n".join(
             f"  • {k}: {_format_field_value(k, v)}" for k, v in fields.items()
         )
-        from core.action_gateway import is_task_table
-        icon = "➕" if tool_name == "airtable_add" else "✏️"
         if is_task_table(table):
             header = "יצירת משימה" if tool_name == "airtable_add" else "עדכון משימה"
         else:
@@ -3398,15 +3413,22 @@ def _resolve_diamond_path_continuation(contract, canonical_record_id: str) -> st
 # every branch below either re-asks the same field or ends the flow
 # leaving the Deal exactly as it already is.
 _DEAL_ENRICHMENT_FIELDS: tuple[str, ...] = (
-    "deal_type", "relationship_type", "currency", "commercial_status",
+    # DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026, owner architecture
+    # correction): "deal_type"/"relationship_type" mixed several distinct
+    # business dimensions into two fields — replaced by three fields, each
+    # representing exactly one dimension (see DealFields.BUSINESS_DEAL_TYPE's
+    # own comment; the old fields are compat-only now, no longer asked
+    # about here).
+    "business_deal_type", "relationship_role", "engagement_duration",
+    "currency", "commercial_status",
     # BUG-DIAMOND-EXPECTED-VALUE-RANGE (06/09/2026, owner architecture
     # correction): a single scalar "expected_value" number is the wrong
     # business contract for a Deal whose value is often only an estimate —
     # replaced with a basis + a bucketed range + optional notes. Order
-    # matters: deal_type/relationship_type (above) are answered first, so
-    # by the time this loop reaches "estimated_value_basis" it can derive
-    # the basis from them (see _advance_past_derivable_deal_fields()) and
-    # skip asking a redundant question.
+    # matters: engagement_duration (above) is answered first, so by the
+    # time this loop reaches "estimated_value_basis" it can derive the
+    # basis from it (see _advance_past_derivable_deal_fields()) and skip
+    # asking a redundant question.
     "estimated_value_basis", "estimated_value_range", "estimated_value_notes",
 )
 _ENRICHMENT_SKIP_WORDS = frozenset({"דלג", "skip", "לדלג"})
@@ -3479,23 +3501,23 @@ def _close_deal_enrichment_for_fresh_command(
 
 
 def _advance_past_derivable_deal_fields(remaining: list, collected: dict) -> tuple[list, dict]:
-    """BUG-DIAMOND-EXPECTED-VALUE-RANGE: never ask "estimated_value_basis"
-    when the Deal's own already-collected deal_type/relationship_type
-    already establish it (reuses commercial_completion.
-    derive_estimated_value_basis() — the SAME derivation rule, not a
-    duplicate). `collected` is keyed by Airtable field name (it doubles as
-    the eventual airtable_update payload), so this reads it that way
-    rather than going through CommercialCompletionWriter's internal
-    field-name-keyed resolved_values()/ValueSource.DERIVED machinery,
-    which assumes a different data shape."""
+    """BUG-DIAMOND-EXPECTED-VALUE-RANGE, updated by DIAMOND — BUSINESS
+    FIELDS MIGRATION: never ask "estimated_value_basis" when the Deal's
+    own already-collected engagement_duration already establishes it
+    (reuses commercial_completion.derive_estimated_value_basis() — the
+    SAME derivation rule, not a duplicate). `collected` is keyed by
+    Airtable field name (it doubles as the eventual airtable_update
+    payload), so this reads it that way rather than going through
+    CommercialCompletionWriter's internal field-name-keyed
+    resolved_values()/ValueSource.DERIVED machinery, which assumes a
+    different data shape."""
     from airtable_schema import DealFields
     from commercial_completion import derive_estimated_value_basis
     remaining = list(remaining)
     collected = dict(collected)
     while remaining and remaining[0] == "estimated_value_basis":
         derived = derive_estimated_value_basis(
-            collected.get(DealFields.DEAL_TYPE_CODE, ""),
-            collected.get(DealFields.RELATIONSHIP_TYPE, ""),
+            collected.get(DealFields.ENGAGEMENT_DURATION, ""),
         )
         if derived is None:
             break
@@ -3553,7 +3575,8 @@ def _offer_deal_enrichment(chat_id: str, channel: str, record_id: str) -> str:
         return ""
     return (
         "העסקה נוצרה בהצלחה. רוצה להשלים פרטים נוספים "
-        "(סוג עסקה, סוג קשר, מטבע, סטטוס מסחרי, הערכת שווי)? השב 'כן' או 'לא'."
+        "(סוג עסקה, אופי קשר, משך התקשרות, מטבע, סטטוס מסחרי, הערכת שווי)? "
+        "השב 'כן' או 'לא'."
     )
 
 
@@ -3863,20 +3886,24 @@ def _handle_deal_enrichment_reply(
         return _persist_and_ask(remaining[1:], collected)
 
     # BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP, item 2 (normalized SELECT
-    # input): a clicked/typed answer must tolerate harmless formatting
-    # noise (case, surrounding whitespace, a stray leading/trailing "/",
-    # a missing thousands-comma) without ever fuzzy/substring-matching —
-    # exact match only, after normalization. estimated_value_basis/range
-    # go through their documented Hebrew-label map first (resolve_
-    # estimated_value_choice); every other SELECT field (deal_type,
-    # relationship_type, currency, commercial_status) has no separate
-    # label layer, so it matches directly against its own canonical
-    # choices via resolve_select_answer. No match at all (including a
-    # genuinely ambiguous/garbled answer that normalizes to more than one
-    # choice) falls through to the ORIGINAL text, so validate_value()
-    # still rejects it with the normal "must be one of <choices>" BLOCK —
-    # never silently accepted, never a value invented or guessed.
-    if current in ("estimated_value_basis", "estimated_value_range"):
+    # input), updated by DIAMOND — BUSINESS FIELDS MIGRATION §5: a
+    # clicked/typed answer must tolerate harmless formatting noise (case,
+    # surrounding whitespace, a stray leading/trailing "/", a missing
+    # thousands-comma) without ever fuzzy/substring-matching — exact match
+    # only, after normalization. estimated_value_basis/estimated_value_range/
+    # commercial_status go through their documented Hebrew-label map first
+    # (resolve_estimated_value_choice) since Commercial Status is now
+    # display-translated the same way; every other SELECT field (deal_type,
+    # relationship_type, business_deal_type, relationship_role,
+    # engagement_duration, currency) has no separate label layer — its
+    # stored value already IS the displayed choice — so it matches directly
+    # against its own canonical choices via resolve_select_answer. No match
+    # at all (including a genuinely ambiguous/garbled answer that
+    # normalizes to more than one choice) falls through to the ORIGINAL
+    # text, so validate_value() still rejects it with the normal "must be
+    # one of <choices>" BLOCK — never silently accepted, never a value
+    # invented or guessed.
+    if current in ("estimated_value_basis", "estimated_value_range", "commercial_status"):
         lookup_choice = resolve_estimated_value_choice(current, choice)
     else:
         lookup_choice = resolve_select_answer(choice, contract.choices)
