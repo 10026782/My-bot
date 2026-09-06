@@ -248,7 +248,11 @@ def test_link_no_match_confirm_creates_nested_organization_and_resumes_parent():
     # complete, straight to TOOL, no further CLARIFY round-trip needed.
     assert confirmed.outcome == "TOOL"
     assert confirmed.tool_name == "crm_find_or_create_organization"
-    assert confirmed.tool_inputs == {"display_name": "חברה חדשה בעמ"}
+    # BUG-ORGANIZATION-CREATE-PARAM-MISMATCH: this used to assert
+    # {"display_name": ...} -- matching the bug, not the actual
+    # crm_find_or_create_organization/action_validator.py contract, which
+    # is keyed on "organization_name".
+    assert confirmed.tool_inputs == {"organization_name": "חברה חדשה בעמ"}
     assert len(calls) == 1
     _, _, continuation = calls[0]
     assert continuation["nested_entity"] == "organization"
