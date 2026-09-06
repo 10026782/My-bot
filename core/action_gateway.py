@@ -2295,6 +2295,7 @@ class ActionGateway:
 
     def _resolve_single_contract(
         self, contract: "ActionContract", approver_role: str, canonical_user_id: str,
+        *, out_meta: dict | None = None, post_approval_hook=None,
     ) -> tuple[str, bool]:
         """Single-contract resolution logic shared by both the "only one live
         contract" case and the BUG-115 bookmark-hit case below — same
@@ -2344,14 +2345,74 @@ class ActionGateway:
             approver=canonical_user_id,
             approver_role=approver_role,
         )
-        return self._render_approval_lifecycle_reply(
+        message = self._render_approval_lifecycle_reply(
             result, result.safe_user_message,
-        ), True
+        )
+        message = self._apply_diamond_post_approval_hook(
+            contract.contract_id, result, message,
+            post_approval_hook=post_approval_hook, out_meta=out_meta,
+            log_context="typed-confirmation path",
+        )
+        return message, True
+
+    def _apply_diamond_post_approval_hook(
+        self, contract_id: str, lifecycle_result, message: str,
+        *, post_approval_hook, out_meta: dict | None, log_context: str,
+    ) -> str:
+        """DIAMOND REMEDIATION D1 — shared tail every text-based approval
+        resolver (`_resolve_single_contract`, `route_disambiguation`,
+        `route_combined_word`) calls immediately after its own
+        `approve_with_lifecycle_result()`, so a successful approval drives
+        the same downstream continuation (nested-parent-resume / Deal-
+        enrichment-offer) regardless of which of the three resolved it —
+        exactly like the Telegram button-callback path
+        (`_handle_approval_callback_impl` -> app.py's
+        `_apply_diamond_post_approval_continuation`).
+
+        Dependency-injected, not imported: core/action_gateway.py is a
+        lower layer than app.py (the Flask entrypoint imports THIS module
+        at load time, not the reverse) — an unconditional `from app import
+        ...` here, even deferred, forces app.py's full module-level
+        startup (Flask app, bot init, startup_validator.validate_startup())
+        to run the first time ANY approval resolves through this method,
+        including in tests that deliberately exercise ActionGateway in
+        isolation from app.py and never set the env vars that startup
+        requires — startup_validator calls sys.exit(1) on missing critical
+        vars, which is a SystemExit (not an Exception), so it is NOT
+        swallowed by a surrounding try/except and kills the whole process.
+        post_approval_hook keeps this module import-free of app.py
+        entirely: None (the default, every pre-existing caller) is a
+        complete no-op — the shared hook simply is not reached. app.py's
+        own call sites pass it explicitly.
+        """
+        if post_approval_hook is None:
+            return message
+        try:
+            contract_after = self._ledger.find_by_id(contract_id)
+            diamond_outcome = post_approval_hook(contract_after, lifecycle_result)
+        except Exception:
+            logger.warning(
+                "[ActionGateway] Diamond post-approval continuation hook "
+                "failed for contract=%s (%s)",
+                contract_id, log_context, exc_info=True,
+            )
+            diamond_outcome = None
+        if diamond_outcome is not None:
+            if diamond_outcome.resume_text:
+                message = f"{message}\n\n{diamond_outcome.resume_text}"
+            if diamond_outcome.enrichment_offer_text:
+                message = f"{message}\n\n{diamond_outcome.enrichment_offer_text}"
+                if out_meta is not None and diamond_outcome.enrichment_offer_choices:
+                    out_meta["commercial_completion_choices"] = diamond_outcome.enrichment_offer_choices
+                    out_meta["commercial_completion_choice_tokens"] = None
+        return message
 
     def route_confirmation_word(
         self, canonical_user_id: str, approver_role: str = "", *,
         live_contracts: list["ActionContract"] | None = None,
         use_session_bookmark: bool = True,
+        out_meta: dict | None = None,
+        post_approval_hook=None,
     ) -> str:
         """
         מיירט מילת אישור חופשית (כמו "מאשר") לפני שמגיעה ל-Agent.
@@ -2369,6 +2430,33 @@ class ActionGateway:
         bookmark חסר/פג-תוקף/לא-חי/משתמש-אחר נופל להתנהגות הקיימת (ספירה
         לפי כמות). ראה docs/architecture/action-gateway/
         BUG-115_CONFIRMATION_ROUTING_HIJACK_AUDIT.md.
+
+        out_meta (DIAMOND REMEDIATION D1): optional, additive, default None
+        — unchanged for every existing caller that doesn't pass it. When
+        given, threaded into _resolve_single_contract() so the ONE shared
+        post-approval continuation hook (see `post_approval_hook` below)
+        can populate out_meta["commercial_completion_choices"] for a Deal
+        enrichment offer, exactly like every other completion prompt in
+        this codebase already does — this is what lets the typed-text
+        confirmation path attach the same real inline buttons the Telegram
+        button-callback path already gets.
+
+        post_approval_hook (DIAMOND REMEDIATION D1): optional, additive,
+        default None — unchanged (a no-op) for every existing caller that
+        doesn't pass it. When given, a callable `(contract_after,
+        lifecycle_result) -> DiamondContinuationOutcome | None` invoked
+        immediately after THIS call's own approve_with_lifecycle_result()
+        succeeds — see _resolve_single_contract()'s own comment for why
+        this is dependency-injected rather than imported directly (this
+        module must never import app.py, even deferred: it would force
+        app.py's full startup — including startup_validator, which can
+        sys.exit() — onto every caller of this method, including tests
+        that deliberately exercise ActionGateway without app.py at all).
+        app.py's own call sites pass its
+        _apply_diamond_post_approval_continuation here so a successful
+        approval drives the same nested-parent-resume/Deal-enrichment-offer
+        continuation regardless of whether the user answered by button or
+        by typed text.
         """
         _bookmark = None
         if use_session_bookmark:
@@ -2385,7 +2473,8 @@ class ActionGateway:
                 and _bookmarked.canonical_user_id == canonical_user_id
             ):
                 message, terminal = self._resolve_single_contract(
-                    _bookmarked, approver_role, canonical_user_id,
+                    _bookmarked, approver_role, canonical_user_id, out_meta=out_meta,
+                    post_approval_hook=post_approval_hook,
                 )
                 if terminal:
                     try:
@@ -2409,7 +2498,10 @@ class ActionGateway:
             # history replay.
             return self.describe_superseded_reason(canonical_user_id) or self.describe_no_pending_reason(canonical_user_id)
         if len(live) == 1:
-            message, _terminal = self._resolve_single_contract(live[0], approver_role, canonical_user_id)
+            message, _terminal = self._resolve_single_contract(
+                live[0], approver_role, canonical_user_id, out_meta=out_meta,
+                post_approval_hook=post_approval_hook,
+            )
             return message
         # יותר מאחת — מציג רשימה ממוספרת + שומר disambiguation state
         with self._disambiguation_lock:
@@ -3038,13 +3130,24 @@ class ActionGateway:
             return ("cancel", idx)
         return None
 
-    def route_disambiguation(self, canonical_user_id: str, text: str, approver_role: str = "") -> str | None:
+    def route_disambiguation(
+        self, canonical_user_id: str, text: str, approver_role: str = "",
+        *, out_meta: dict | None = None, post_approval_hook=None,
+    ) -> str | None:
         """
         מיירט בחירת סדרתי ("הראשונה", "2", ...) אחרי שה-Gateway הציג רשימה.
         מחזיר None אם המשתמש אינו במצב disambiguation — ממשיך ל-Agent.
         מחזיר תשובה ישירה אם הבחירה חוקית.
 
         approver_role: BUG-074 — ראה route_confirmation_word / approve().
+
+        out_meta / post_approval_hook (DIAMOND REMEDIATION D1): same
+        additive, default-None contract as route_confirmation_word()'s —
+        see _apply_diamond_post_approval_hook()'s own docstring. This
+        resolver can approve a Diamond Deal/nested-entity contract exactly
+        like route_confirmation_word() can (a plain ordinal answering a
+        numbered list route_confirmation_word() itself showed), so it must
+        drive the same shared continuation.
         """
         with self._disambiguation_lock:
             pending_list = self._disambiguation.get(canonical_user_id)
@@ -3097,6 +3200,11 @@ class ActionGateway:
         # rejected (already decided above, unconditionally, before this fix).
         if rejected_siblings:
             result += _sibling_auto_cancel_disclosure(rejected_siblings)
+        result = self._apply_diamond_post_approval_hook(
+            contract.contract_id, lifecycle_result, result,
+            post_approval_hook=post_approval_hook, out_meta=out_meta,
+            log_context="disambiguation path",
+        )
         return result
 
     # ── BUG-070 gap #1 — route_combined_word ────────────────────────
@@ -3104,13 +3212,24 @@ class ActionGateway:
     # בלי לדרוש קודם שהמשתמש יראה את הרשימה הממוספרת (route_confirmation_word)
     # ובלי להמתין למצב disambiguation קיים — פועל ישירות מול contracts חיים.
 
-    def route_combined_word(self, canonical_user_id: str, text: str, approver_role: str = "") -> str | None:
+    def route_combined_word(
+        self, canonical_user_id: str, text: str, approver_role: str = "",
+        *, out_meta: dict | None = None, post_approval_hook=None,
+    ) -> str | None:
         """
         מיירט "<מילת אישור/ביטול> <סדרתי>" (כמו "כן 1"/"אשר 3"/"לא 2").
         מחזיר None אם הטקסט לא תואם את התבנית, או שאין contracts חיים —
         ממשיך לזרימה הקיימת/ל-Agent. אחרת מחזיר תשובה ישירה.
 
         approver_role: BUG-074 — ראה route_confirmation_word / approve().
+
+        out_meta / post_approval_hook (DIAMOND REMEDIATION D1): same
+        additive, default-None contract as route_confirmation_word()'s —
+        see _apply_diamond_post_approval_hook()'s own docstring. Unlike
+        route_disambiguation(), this resolver needs no pre-existing
+        disambiguation state and works against a SOLE live contract too
+        (e.g. "כן 1" answering the only pending Deal approval) — it must
+        drive the same shared continuation just as much.
         """
         parsed = self._parse_combined(text)
         if parsed is None:
@@ -3159,6 +3278,11 @@ class ActionGateway:
             # identical disclosure for the full rationale.
             if rejected_siblings:
                 result += _sibling_auto_cancel_disclosure(rejected_siblings)
+            result = self._apply_diamond_post_approval_hook(
+                contract.contract_id, lifecycle_result, result,
+                post_approval_hook=post_approval_hook, out_meta=out_meta,
+                log_context="combined-word path",
+            )
             return result
 
         # action == "cancel" — דוחה רק את הפריט שנבחר, לא נוגע בשאר הממתינים

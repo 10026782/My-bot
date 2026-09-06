@@ -165,6 +165,16 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
         "last_prompted_contract":   None,   # ← BUG-115: last ActionContract whose approval prompt was shown, TTL 600s
         "lead_draft":               None,   # ← Phase 1 follow-up: Lead Draft Card in progress (fill/review/edit), TTL 1800s
         "commercial_completion":    None,   # S2C: serialized completion state in universal Session JSON
+        "deal_enrichment_offer":    None,   # ← DIAMOND REMEDIATION D1: parked post-creation Deal
+                                             #   enrichment offer/loop (set_deal_enrichment_offer()),
+                                             #   deliberately separate from "commercial_completion" —
+                                             #   see that method's own docstring. Previously absent
+                                             #   from this default shape (and from _sync_to_db()'s and
+                                             #   _load_from_db()'s whitelists below), so despite
+                                             #   set_deal_enrichment_offer() calling _sync_to_db(), the
+                                             #   key was silently dropped on write and never restored
+                                             #   on read — the whole offer/loop was RAM-only and lost
+                                             #   on restart, LRU eviction, or a second worker process.
     }
 
 
@@ -705,6 +715,9 @@ class PersistentSessionStore:
                 "last_prompted_contract":   session.get("last_prompted_contract"),
                 "lead_draft":               session.get("lead_draft"),
                 "commercial_completion":    session.get("commercial_completion"),
+                # DIAMOND REMEDIATION D1: was missing here — see _new_session()'s
+                # comment on this same key for the full RAM-only-loss history.
+                "deal_enrichment_offer":    session.get("deal_enrichment_offer"),
             }
             session_channel = session.get("channel", "")
             fields = {
@@ -936,6 +949,9 @@ class PersistentSessionStore:
                 ("last_prompted_contract", None),
                 ("lead_draft", None),
                 ("commercial_completion", None),
+                # DIAMOND REMEDIATION D1: was missing here — see _new_session()'s
+                # comment on this same key for the full RAM-only-loss history.
+                ("deal_enrichment_offer", None),
             ):
                 session[key] = state.get(key, default)
             session["record_id"] = record_id
