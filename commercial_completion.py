@@ -467,6 +467,38 @@ def validate_value(contract: FieldContract, value: Any) -> None:
         raise InvalidValueError("invalid record id")
 
 
+def _coerce_value(contract: FieldContract, value: Any) -> Any:
+    """
+    BUG-COMPLETION-NUMERIC-STRING-422 (production-verified, 06/09/2026): a
+    Deal create failed with Airtable 422 INVALID_VALUE_FOR_COLUMN on "סכום"
+    (DealFields.AMOUNT) after the owner answered the free-text amount
+    prompt with "100000". Root cause: validate_value() above calls
+    _number(value) purely to VALIDATE a NUMBER/CURRENCY/PERCENT answer —
+    it never returns the coerced number — so apply_answer() stored the
+    original, un-coerced value (the raw user-text digit string) straight
+    into current_values. That string then flowed unchanged through
+    resolved_values()/complete_payload() into the Airtable writer, which
+    sent it to a Number/Currency column as a JSON string; Airtable's API
+    requires a JSON number there and rejects a string with a 422.
+
+    Coerce here, once validate_value() has already proven the value is a
+    valid number, so every persisted/resolved value for a NUMBER/CURRENCY/
+    PERCENT field is the correctly-typed Python number — never the raw
+    input text — regardless of caller (free-text answer_human(), a direct
+    canonical answer(), or a test fixture passing an int/float already).
+    "_integer" validations coerce to int (matching what those Airtable
+    fields — installment counts, day counts, priority — actually expect);
+    everything else stays float, matching crm_create_deal()'s own
+    `amount: float | None` signature.
+    """
+    if contract.input_type in (InputType.NUMBER, InputType.CURRENCY, InputType.PERCENT):
+        number = _number(value)
+        if contract.validation in ("positive_integer", "non_negative_integer"):
+            return int(number)
+        return number
+    return value
+
+
 def _derive_document_status(values: Mapping[str, Any]) -> Any:
     requirement = values.get("document_requirement")
     if requirement == DocumentRequirement.NONE:
@@ -578,7 +610,7 @@ class CommercialCompletionWriter:
         contract = self.contract.field(field_name)
         validate_value(contract, value)
         values = dict(self.current_values)
-        values[field_name] = value
+        values[field_name] = _coerce_value(contract, value)
         return replace(self, current_values=values)
 
     def is_complete(self) -> bool:
