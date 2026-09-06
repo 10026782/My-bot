@@ -159,7 +159,17 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
     """
     p = dict(payload)
     if entity == "organization":
-        return {"display_name": p[OrganizationFields.NAME]}
+        # BUG-ORGANIZATION-CREATE-PARAM-MISMATCH (production-reported,
+        # 06/09/2026): this sent {"display_name": ...} into
+        # tool_inputs, but commercial_crm.find_or_create_organization()'s
+        # actual parameter (and action_validator.py's/tools/dispatcher.py's
+        # crm_find_or_create_organization allowlist, both keyed on
+        # "organization_name") is organization_name -- the mismatch made
+        # every nested-create-confirmed Organization fail closed at
+        # action_validator's presence check ("missing ['organization_name']")
+        # immediately after the owner answered "כן", with no way to
+        # recover short of retyping the whole request.
+        return {"organization_name": p[OrganizationFields.NAME]}
     if entity == "deal":
         result = {
             "name": p[DealFields.NAME], "domain": p[DealFields.DOMAIN],

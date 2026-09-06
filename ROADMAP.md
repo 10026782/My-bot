@@ -1839,3 +1839,59 @@ carry values there (out of scope — no read path needs it today); Commercial
 Status's `at_risk` next-action/alert behavior is explicitly deferred, per
 instruction; deployment and live production runtime verification (a real
 Telegram canary through the actual enrichment flow) remain pending.
+
+### BUG-ORGANIZATION-CREATE-PARAM-MISMATCH — nested Organization create failed closed after "כן" — 06/09/2026 (production-reported)
+
+Discovered from a pasted Render production log immediately after PR #1219
+went live: creating a Deal ("מרכז גולה", domain=finance) with an
+Organization counterparty ("Goola") not found, confirming "כן" to create
+it, failed with `action_validator: ActionBlocked (presence):
+crm_find_or_create_organization missing ['organization_name']`, surfacing
+to the owner as "❌ אושר אך נכשל בביצוע" with no recovery short of
+retyping the whole request. Confirmed unrelated to PR #1219/D3/business-
+fields work (no shared code path; the bug pre-dates this session's changes
+to the Diamond path).
+
+Root cause: `commercial_completion_routing.py`'s `_primitive_inputs()`
+translated a confirmed nested-Organization-create payload to
+`{"display_name": <name>}`, but the actual writer contract —
+`commercial_crm.find_or_create_organization(organization_name: str, ...)`,
+`action_validator.py`'s presence-check allowlist, and
+`tools/dispatcher.py`'s `crm_find_or_create_organization` dispatch case —
+all require the key `organization_name`. Every confirmed nested
+Organization create failed the presence check immediately after approval,
+regardless of role or tenant.
+
+Fix: one-line key correction in `_primitive_inputs()` (`entity ==
+"organization"` branch) from `display_name` to `organization_name`, with
+an inline comment naming the bug and the real contract it now matches.
+
+Tests: `test_bug_organization_create_param_mismatch.py` (new) — Part 1
+asserts `_primitive_inputs("organization", ...)` produces exactly
+`{"organization_name": ...}` and never the old `display_name` key; Part 2
+drives the real governed path end to end (`core.action_gateway.action_gateway
+.propose_action()` → `app._handle_approval_callback_impl()` →
+`tools.dispatcher.dispatch_tool()`, the exact production route) with
+`commercial_crm.list_records`/`airtable_create` mocked at the Airtable
+boundary only, proving the corrected payload is accepted and the writer is
+actually reached, and separately proving the OLD buggy `display_name`
+shape still correctly fails closed (confirms the fix routes around the
+presence check, not weakens it) — 6 assertions, all passing. One
+pre-existing test that had codified the bug,
+`tests/test_commercial_completion_runtime_integration.py` (line ~251),
+corrected to assert `organization_name` instead of `display_name`. Full
+regression sweep run clean: every root `test_*.py` script (CI's set),
+`smoke_tests.py`, `test_integration.py`, `core/router/test_router.py`,
+`tests/` (165, pytest), `py_compile` on every changed file.
+
+Non-goals: no ActionGateway/dispatcher/action_validator redesign, no
+change to any other `_primitive_inputs()` entity branch, no Organization
+lookup/dedup logic change.
+
+STATUS: 🟡 CODE DONE, NOT VERIFIED
+EVIDENCE: commit b7172681 "Fix nested Organization create sending wrong
+param key (production bug)", pushed to
+origin/claude/diamond-path-runtime-audit-1olovk (git push -u origin
+claude/diamond-path-runtime-audit-1olovk → "new branch"). No Render
+deploy yet — this branch is not on main; the production canary from the
+pasted log has not been re-run against the fix.
