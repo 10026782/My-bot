@@ -3160,8 +3160,17 @@ def _deliver_callback_final(
     action_id: str,
     tool_name: str,
     text: str,
+    reply_markup=None,
 ) -> int:
-    """Deliver one persistent final response for a Telegram callback."""
+    """Deliver one persistent final response for a Telegram callback.
+
+    `reply_markup` (BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP, item 1): optional
+    inline keyboard attached to the edited/sent message — None (the
+    default, and every pre-existing call site) is fully backward
+    compatible. Used by the post-Deal-creation enrichment offer's own
+    כן/לא buttons, since that first message is delivered through this
+    function rather than the generic out_meta-driven keyboard attachment
+    every later enrichment prompt uses."""
     from core.approval_turn_metrics import begin, end, record_final_response
     _callback_metrics, _callback_token = begin()
     # פתרון ה-callback עשוי לבצע חיפושי lifecycle/replay, אך נשאר מוגבל
@@ -3190,14 +3199,16 @@ def _deliver_callback_final(
                 bot.edit_message_reply_markup(
                     cq.message.chat.id, cq.message.message_id, reply_markup=None,
                 )
-                bot.send_message(origin_chat_id, text)
+                bot.send_message(origin_chat_id, text, reply_markup=reply_markup)
                 return _metric_return(1)
-            bot.edit_message_text(text, cq.message.chat.id, cq.message.message_id)
+            bot.edit_message_text(
+                text, cq.message.chat.id, cq.message.message_id, reply_markup=reply_markup,
+            )
             if (
                 not _flag_enabled("FEATURE_SINGLE_SPEAKER_APPROVAL_UX")
                 and str(origin_chat_id) != callback_chat_id
             ):
-                bot.send_message(origin_chat_id, text)
+                bot.send_message(origin_chat_id, text, reply_markup=reply_markup)
                 return _metric_return(2)
             return _metric_return(1)
 
@@ -3427,14 +3438,22 @@ def _advance_past_derivable_deal_fields(remaining: list, collected: dict) -> tup
     return remaining, collected
 
 
-def _deal_enrichment_prompt(field_name: str, collected: dict) -> str:
+def _deal_enrichment_prompt(field_name: str, collected: dict) -> tuple[str, tuple]:
     """BUG-DIAMOND-EXPECTED-VALUE-RANGE: "estimated_value_range" gets a
     contextual prompt naming what the range is denominated in (never the
     flat, removed "מה השווי הצפוי?") — every other field keeps the generic
-    presentation-driven prompt, unchanged."""
+    presentation-driven prompt, unchanged.
+
+    Returns (prompt_text, choices) — BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP,
+    item 1: the text keeps the existing "אפשרויות: ..." fallback listing
+    unchanged (still shown if a keyboard can't be attached), while `choices`
+    lets the caller also attach real inline buttons via the same
+    out_meta["commercial_completion_choices"] mechanism the main
+    (non-enrichment) completion flow already uses."""
     from commercial_completion_routing import CommercialCompletionRouter
     if field_name != "estimated_value_range":
-        return CommercialCompletionRouter._presentation("deal", field_name)["prompt"]
+        presentation = CommercialCompletionRouter._presentation("deal", field_name)
+        return presentation["prompt"], tuple(presentation["choices"])
     from airtable_schema import DealFields, EstimatedValueBasis
     basis = collected.get(DealFields.ESTIMATED_VALUE_BASIS)
     base_prompt = {
@@ -3443,8 +3462,10 @@ def _deal_enrichment_prompt(field_name: str, collected: dict) -> str:
         EstimatedValueBasis.ONE_OFF: "מה טווח השווי המשוער של העסקה החד-פעמית?",
     }.get(basis, "מה טווח השווי המשוער?")
     presentation = CommercialCompletionRouter._presentation("deal", field_name)
-    options = " / ".join(presentation["choices"])
-    return f"{base_prompt}\nאפשרויות: {options}" if options else base_prompt
+    choices = tuple(presentation["choices"])
+    options = " / ".join(choices)
+    text = f"{base_prompt}\nאפשרויות: {options}" if options else base_prompt
+    return text, choices
 
 
 def _offer_deal_enrichment(chat_id: str, channel: str, record_id: str) -> str:
@@ -3470,7 +3491,9 @@ def _offer_deal_enrichment(chat_id: str, channel: str, record_id: str) -> str:
     )
 
 
-def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_text: str) -> str:
+def _handle_deal_enrichment_reply(
+    state: dict, chat_id: str, channel: str, user_text: str, out_meta: dict | None = None,
+) -> str:
     """Advance (or end) a parked post-creation Deal enrichment offer/loop.
 
     Never touches the Deal itself except through one accumulated
@@ -3481,14 +3504,25 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
     the already-created Deal exactly as it is; only ever exactly one
     final reply string is returned per call, matching every other S2C
     turn in this file.
+
+    `out_meta` (BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP, item 1): when given,
+    populated with the SAME "commercial_completion_choices"/
+    "commercial_completion_choice_tokens" keys the main (non-enrichment)
+    completion flow already uses — the existing generic keyboard-attach
+    logic (both the plain-text reply path and the "commercial_completion:"
+    callback handler) reads these unchanged, so every finite-choice
+    enrichment prompt gets real inline buttons, the same infra, no new
+    callback prefix.
     """
     from session_store import lead_sessions
     from airtable_schema import Tables
-    from commercial_completion import ENTITY_CONTRACTS, InvalidValueError, validate_value, _coerce_value
+    from commercial_completion import (
+        ENTITY_CONTRACTS, InputType, InvalidValueError, validate_value, _coerce_value,
+    )
     from commercial_completion_routing import (
         CommercialCompletionRouter, _CREATE_CONFIRM_WORDS, _CREATE_DECLINE_WORDS,
     )
-    from commercial_completion_ux import resolve_estimated_value_choice
+    from commercial_completion_ux import resolve_estimated_value_choice, resolve_select_answer
 
     record_id = state.get("record_id") or ""
     stage = state.get("stage") or "offer"
@@ -3497,19 +3531,40 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
     choice = user_text.strip()
     choice_fold = choice.casefold()
 
+    def _set_choices(choices: tuple) -> None:
+        if out_meta is not None and choices:
+            out_meta["commercial_completion_choices"] = tuple(choices)
+            out_meta["commercial_completion_choice_tokens"] = None
+
     def _finish(final_text: str) -> str:
         lead_sessions.clear_deal_enrichment_offer(chat_id, channel=channel)
-        if collected:
-            queue_result = _queue_approval_detailed(
-                "airtable_update",
-                {"table": Tables.DEALS, "record_id": record_id, "fields": collected},
-                chat_id, channel, user_text,
-                trusted_source="deterministic_commercial_completion",
-            )
-            queued_text = (queue_result or {}).get("message") or ""
-            if queued_text:
-                return f"{final_text}\n\n{queued_text}"
-        return final_text
+        if not collected:
+            return final_text
+        queue_outcome = _queue_approval_detailed(
+            "airtable_update",
+            {"table": Tables.DEALS, "record_id": record_id, "fields": collected},
+            chat_id, channel, user_text,
+            trusted_source="deterministic_commercial_completion",
+        )
+        # BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP, item 4 ("one answer, one
+        # owner"): _queue_approval_detailed() already proactively sends the
+        # owner an interactive "⏳ בקשת אישור..." message as a side effect
+        # when it successfully queues a NEW contract (bot.send_message()
+        # inside _queue_approval_detailed_impl()) — re-embedding its
+        # outcome["message"] here too would be a SECOND, untracked message
+        # to the same chat (the normal single-owner case), on top of
+        # `final_text` itself ("תודה!"/"בוטלה"), which then reads as
+        # self-contradictory. _finalize_deterministic_queue_outcome() is
+        # the ONE shared helper every other deterministic queue-then-approve
+        # turn in this file routes through for exactly this reason (see its
+        # own docstring, BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY) — when it
+        # detects the owner was already notified in this same chat, the
+        # completion layer's own reply (including `final_text`) is
+        # correctly suppressed entirely, leaving exactly one message: the
+        # Gateway's own approval prompt.
+        return _finalize_deterministic_queue_outcome(
+            queue_outcome, chat_id, out_meta, "DealEnrichment", final_text,
+        )
 
     def _persist_and_ask(remaining_fields: list, collected_fields: dict) -> str:
         """Skip any auto-derivable field(s), then either ask the next real
@@ -3528,7 +3583,9 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
              "remaining_fields": remaining_fields, "collected": collected_fields},
             channel=channel,
         )
-        return _deal_enrichment_prompt(remaining_fields[0], collected_fields)
+        prompt_text, choices = _deal_enrichment_prompt(remaining_fields[0], collected_fields)
+        _set_choices(choices)
+        return prompt_text
 
     if stage == "offer":
         if choice_fold in _CREATE_DECLINE_WORDS or choice_fold in _CANCEL_WORDS:
@@ -3539,6 +3596,7 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
             return _persist_and_ask(remaining, collected)
         # Unrecognized reply: re-render the exact same offer rather than
         # silently reinterpreting free text or dropping the offer.
+        _set_choices(("כן", "לא"))
         return (
             "לא הבנתי. רוצה להשלים פרטים נוספים לעסקה שכבר נוצרה? השב 'כן' או 'לא'."
         )
@@ -3548,28 +3606,56 @@ def _handle_deal_enrichment_reply(state: dict, chat_id: str, channel: str, user_
     if current is None:
         return _finish("אין פרטים נוספים להשלים — העסקה כבר מלאה.")
 
+    contract = ENTITY_CONTRACTS["deal"].field(current)
+
+    # BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP, item 3 ("local 'לא' must own
+    # the notes question"): estimated_value_notes is free text, prompted as
+    # a yes/no-shaped question ("יש הערות על השווי המשוער?") — a decline
+    # word answering IT means "no notes for this optional field," never
+    # "cancel the whole enrichment." State-local field semantics outrank
+    # the blanket cross-field _CANCEL_WORDS set here, the same precedence
+    # invariant already used for a pending nested-create CREATE_CONFIRM
+    # (see _has_pending_nested_create_confirm()'s docstring) — applied one
+    # level down, to a single field's own answer rather than the whole
+    # turn. Any other free text is stored as the literal note.
+    if contract.input_type == InputType.TEXT:
+        if choice_fold in _CANCEL_WORDS or choice_fold in _ENRICHMENT_SKIP_WORDS:
+            return _persist_and_ask(remaining[1:], collected)
+        collected[contract.airtable_field] = choice
+        return _persist_and_ask(remaining[1:], collected)
+
     if choice_fold in _CANCEL_WORDS:
         return _finish("ההשלמה בוטלה. העסקה נשארת כפי שנוצרה.")
 
     if choice_fold in _ENRICHMENT_SKIP_WORDS:
         return _persist_and_ask(remaining[1:], collected)
 
-    # BUG-DIAMOND-EXPECTED-VALUE-RANGE: a clicked/typed Hebrew button label
-    # ("עד 10,000", "חודשי", ...) must resolve to its canonical enum value
-    # before validate_value() — choices there are canonical, never Hebrew.
-    # A raw canonical value (trusted callers/tests) passes through
-    # unchanged; no match at all falls through to the ORIGINAL text so
-    # validate_value() still rejects it with the normal, business-safe
-    # "must be one of <Hebrew choices>" message — never silently accepted.
-    lookup_choice = resolve_estimated_value_choice(current, choice)
+    # BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP, item 2 (normalized SELECT
+    # input): a clicked/typed answer must tolerate harmless formatting
+    # noise (case, surrounding whitespace, a stray leading/trailing "/",
+    # a missing thousands-comma) without ever fuzzy/substring-matching —
+    # exact match only, after normalization. estimated_value_basis/range
+    # go through their documented Hebrew-label map first (resolve_
+    # estimated_value_choice); every other SELECT field (deal_type,
+    # relationship_type, currency, commercial_status) has no separate
+    # label layer, so it matches directly against its own canonical
+    # choices via resolve_select_answer. No match at all (including a
+    # genuinely ambiguous/garbled answer that normalizes to more than one
+    # choice) falls through to the ORIGINAL text, so validate_value()
+    # still rejects it with the normal "must be one of <choices>" BLOCK —
+    # never silently accepted, never a value invented or guessed.
+    if current in ("estimated_value_basis", "estimated_value_range"):
+        lookup_choice = resolve_estimated_value_choice(current, choice)
+    else:
+        lookup_choice = resolve_select_answer(choice, contract.choices)
     validated_choice = lookup_choice if lookup_choice is not None else choice
 
-    contract = ENTITY_CONTRACTS["deal"].field(current)
     try:
         validate_value(contract, validated_choice)
     except InvalidValueError as exc:
         field_label = CommercialCompletionRouter._presentation("deal", current)["user_label"] or current
         safe_reason = CommercialCompletionRouter._validation_failure_message("deal", current, exc)
+        _set_choices(tuple(CommercialCompletionRouter._presentation("deal", current)["choices"]))
         return (
             f"לא הצלחתי לשמור את {field_label}. {safe_reason}\n"
             "העסקה כבר נוצרה. אפשר להזין ערך אחר או לדלג."
@@ -3743,6 +3829,13 @@ def _handle_approval_callback_impl(cq) -> None:
         # fields that no longer gate creation itself. Same single-message
         # composition point as _diamond_resume_text above.
         _enrichment_offer_text = None
+        # BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP, item 1: real כן/לא inline
+        # buttons for the offer above — this specific message is delivered
+        # through _deliver_callback_final() (an edit of the original
+        # approval message), not the generic out_meta-driven keyboard
+        # attachment every later enrichment prompt uses, so the keyboard is
+        # built directly here instead.
+        _enrichment_offer_keyboard = None
 
         if not tool_name:
             # Non-tool approval — emit {action}.confirmed event
@@ -3927,6 +4020,8 @@ def _handle_approval_callback_impl(cq) -> None:
                         _enrichment_offer_text = _offer_deal_enrichment(
                             origin_chat_id, origin_channel, _diamond_record_id,
                         )
+                        if _enrichment_offer_text:
+                            _enrichment_offer_keyboard = _completion_keyboard(("כן", "לא"))
             else:
                 # BUG-STALE-CALLBACK-FALLTHROUGH, unified regardless of
                 # FEATURE_ACTION_GATEWAY (STATIC-AUDIT-20260830 follow-up
@@ -4074,6 +4169,7 @@ def _handle_approval_callback_impl(cq) -> None:
                 action_id=action_id,
                 tool_name=tool_name or item.get("action", ""),
                 text=user_notify_text,
+                reply_markup=_enrichment_offer_keyboard,
             )
         except Exception as e:
             logger.error("[Approval] final callback delivery failed: %s", e)
@@ -4892,7 +4988,9 @@ def run_agent(
     if _deal_enrichment_offer:
         if _out_meta is not None:
             _out_meta["source_module"] = "action_gateway"
-        return _handle_deal_enrichment_reply(_deal_enrichment_offer, chat_id, channel, user_text)
+        return _handle_deal_enrichment_reply(
+            _deal_enrichment_offer, chat_id, channel, user_text, out_meta=_out_meta,
+        )
 
     # S2C: resume an in-progress commercial completion from the existing
     # universal Session store.  A subsequent answer must never restart the

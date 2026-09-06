@@ -705,6 +705,16 @@ _DOMAIN_HINT_CANONICAL = {
     "פיננסי":   "finance",
     "finance":  "finance",
     "saas":     "saas",
+    # BUG-DIAMOND-ENRICHMENT-RUNTIME-SWEEP (06/09/2026, owner bug sweep,
+    # item 6): "כללי" was already a recognized Domain alias in
+    # domain_utils.py's separate BUSINESS_DOMAIN_ALIASES table, but this
+    # is the actual table parse_deterministic_create_deal() consults (via
+    # core.lead_service.resolve_domain_word()) — its absence here, not
+    # there, is why "...בתחום כללי" failed to parse a Deal while every
+    # other domain word worked. One shared vocabulary; no parser-local
+    # special case added.
+    "כללי":     "general",
+    "general":  "general",
 }
 
 
