@@ -4347,6 +4347,36 @@ def _has_pending_nested_create_confirm(chat_id: str) -> bool:
     return bool((last_frame or {}).get("current_values", {}).get("_ux_pending_nested_create"))
 
 
+def _has_pending_deal_enrichment_offer(chat_id: str) -> bool:
+    """True while a parked post-creation Deal enrichment offer/loop
+    (_offer_deal_enrichment()/_handle_deal_enrichment_reply()) is genuinely
+    pending for this chat.
+
+    BUG-DIAMOND-ENRICHMENT-OFFER-PRECEDENCE (06/09/2026, production-reported,
+    same day as the enrichment offer's own PR): identical failure mode to
+    _has_pending_nested_create_confirm() above — a bare "כן"/"לא" answering
+    this state-local offer is also a member of this file's blanket
+    _CONFIRM_WORDS/_CANCEL_WORDS sets, and PR2's own deterministic-approval
+    fast path (_resolve_pr2_deterministic_approval, called further below)
+    intercepts EVERY bare confirm/cancel word before run_agent()'s own
+    deal_enrichment_offer check (further below, deliberately ahead of the
+    S2C block) is ever reached — with no live ActionGateway contract to
+    route to, it answers the canonical "אין פעולה שממתינה לאישור" and the
+    offer is silently swallowed. This offer is never itself a live
+    ActionContract (it lives in its own session_store key, independent of
+    commercial_completion/S2C — see set_deal_enrichment_offer()'s
+    docstring), so unlike a nested-create confirm it cannot fall through to
+    a Tier-1 ActionGateway contract match later either — this precedence
+    check is the only thing standing between it and that swallow. Same
+    state-local-outranks-global invariant as the nested-create case.
+    """
+    try:
+        from session_store import lead_sessions as _ls_pending_probe
+        return bool(_ls_pending_probe.get_deal_enrichment_offer(chat_id))
+    except Exception:
+        return False
+
+
 def _resolve_pr2_deterministic_approval(
     *, user_text: str, identity, live_contracts: list, out_meta: dict | None,
 ) -> str | None:
@@ -4774,9 +4804,13 @@ def run_agent(
         # BUG-DIAMOND-CREATE-CONFIRM-PRECEDENCE: a pending DIAMOND PATH
         # CREATE_CONFIRM offer must win this same race a pending lead draft
         # already does — see _has_pending_nested_create_confirm()'s docstring.
+        # BUG-DIAMOND-ENRICHMENT-OFFER-PRECEDENCE: same race, for a pending
+        # post-creation Deal enrichment offer/loop — see
+        # _has_pending_deal_enrichment_offer()'s docstring.
         _prefer_draft_now = (
             _prefer_draft_pr2(identity.memory_key, chat_id)
             or _has_pending_nested_create_confirm(chat_id)
+            or _has_pending_deal_enrichment_offer(chat_id)
         )
     else:
         _prefer_draft_now = False

@@ -879,6 +879,59 @@ makes the new test's first Case-A assertion crash immediately
 yet live**; review, merge, deploy, Airtable field creation, and production
 runtime verification all pending.
 
+### DIAMOND PATH enrichment-offer precedence — 06/09/2026 (production-reported)
+
+Production report (live Telegram transcript, owner), same day as the
+enrichment-offer feature's own merge (PR #1213): a Deal created
+successfully and offered post-creation enrichment ("רוצה להשלים פרטים
+נוספים... ? השב 'כן' או 'לא'.") — replying "כן" got "אין פעולה שממתינה
+לאישור" instead of beginning the field-by-field enrichment loop.
+
+Root cause: the identical failure mode as the CREATE_CONFIRM precedence bug
+above, one level up. `app.py`'s `run_agent()` already had a correctly
+placed, dedicated check for a parked `deal_enrichment_offer` (right after
+the Session snapshot fetch, deliberately ahead of the S2C block) — but
+PR2's own earlier, unconditional bare-"כן"/"לא" fast path
+(`_resolve_pr2_deterministic_approval`) runs first and was gated only on
+`should_prefer_lead_draft()`/`_has_pending_nested_create_confirm()`,
+neither of which has any knowledge of `deal_enrichment_offer`. With no live
+ActionGateway contract to route to (the offer is deliberately its own
+session_store key, never an ActionContract — see
+`set_deal_enrichment_offer()`'s docstring), it answers the canonical
+no-pending reply and the offer is silently swallowed — for both the
+initial כן/לא and a later cancel word mid-loop. Existing coverage
+(`test_bug_diamond_optional_enrichment_gates_creation.py`) never caught
+this because it calls `app._handle_deal_enrichment_reply()` directly,
+bypassing `run_agent()`'s outer routing entirely — that handler was always
+correct; only the routing layer in front of it was broken.
+
+Fix: `_has_pending_deal_enrichment_offer()` (`app.py`) — same self-
+fetching-Sessions-read pattern as `_has_pending_nested_create_confirm()` —
+added to the same `_prefer_draft_now` OR-chain, so PR2's fast path stands
+down while a Deal enrichment offer/loop is genuinely pending and control
+reaches `run_agent()`'s own (already correct) `deal_enrichment_offer`
+check instead.
+
+New regression: `test_bug_diamond_enrichment_offer_precedence.py` —
+reproduces the exact production case ("כן" against the initial offer
+advances to the collecting stage and asks the first field, never the
+no-pending reply, never the Agent), "לא" against the initial offer
+(declines and clears, Deal untouched), a cancel word mid-loop (collecting
+stage), and a no-pending-offer control case proving PR2's own generic
+confirm/cancel handling is unaffected. Verified against a genuine gap:
+reverting the fix (`git stash -- app.py`) makes 5 of the 15 assertions
+fail immediately, reproducing the exact reported symptom
+("אין פעולה שממתינה לאישור"). Full CI-equivalent sweep re-run clean:
+`pytest tests/ -m "not integration and not airtable and not live"` (165
+passed), `test_bug_diamond_create_confirm_precedence.py` (19),
+`test_bug_diamond_optional_enrichment_gates_creation.py` (59),
+`test_bug_diamond_parent_orphaned_on_nested_queue.py` (14),
+`test_bug_s2c_stale_session_fresh_command_escape.py` (39),
+`test_diamond_path_approval_continuation.py` (12), `smoke_tests.py`, and
+the writer-authority-registration/dispatcher-bypass governance audits
+(0 new violations). `CODE_DONE / STATIC_VERIFIED` — review, merge, deploy,
+and production runtime verification pending.
+
 ### Commercial Completion numeric free-text answers stored as strings — 06/09/2026 (production-verified)
 
 Production evidence, on the deployed schema-validation-authority fix
