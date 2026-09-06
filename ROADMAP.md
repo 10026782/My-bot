@@ -1418,15 +1418,15 @@ line numbers updated (676→699, 834→860, 875→901, 937→966) to match, same
 4 import statements, not a new bypass authority.
 
 Tests: new `test_diamond_remediation_d1_unified_approval_continuation.py`
-(48 assertions) drives the REAL shared post-approval boundary from BOTH
-real ingress paths against a real, in-memory `ActionGateway`/
-`ExecutionLedger` — never by unit-testing the hook function in isolation
-alone. Covers: both ingress paths reach the identical hook for a root Deal
-approval (enrichment offered once, same text, same out_meta choices on
-both) and for a nested Contact approval (parent Deal resumed exactly once
-on both); rejected/failed/unverified approvals never continue; exactly-once
-across a repeated resolution attempt on the same contract; `deal_enrichment
-_offer` genuinely round-trips through a simulated process restart (fresh
+(60 assertions) drives the REAL shared post-approval boundary from all
+ingress paths against a real, in-memory `ActionGateway`/`ExecutionLedger`
+— never by unit-testing the hook function in isolation alone. Covers: all
+ingress paths reach the identical hook for a root Deal approval
+(enrichment offered once, same text, same out_meta choices) and for a
+nested Contact approval (parent Deal resumed exactly once); rejected/
+failed/unverified approvals never continue; exactly-once across a repeated
+resolution attempt on the same contract; `deal_enrichment_offer` genuinely
+round-trips through a simulated process restart (fresh
 `PersistentSessionStore`, empty RAM, restored purely from the captured
 persisted Airtable row) and the restored state accepts the next real answer
 via the actual `_handle_deal_enrichment_reply()`; the `commercial_completion:`
@@ -1435,28 +1435,61 @@ interrupted; `approve:`/`reject:` remain exempt); an explicit AST-based
 regression guard that `core/action_gateway.py` contains no real `import app`
 statement (the exact class of bug the dependency-injection design avoids).
 
+**D1 PRE-MERGE INVARIANT GATE follow-up (06/09/2026, same day, owner-
+directed, before merge):** the residual item noted below at first commit
+(`route_disambiguation()`/`route_combined_word()` — ordinal/combined-word
+text confirmations, e.g. "2"/"כן 1") was re-investigated under an explicit
+verify-before-implementing gate rather than left deferred. Traced (not
+assumed from comments) and PROVEN with two direct probes against the
+pre-fix committed code: `route_combined_word("כן 1")` fully approved and
+**executed** a SOLE live `crm_create_deal` contract with zero tool_name
+filtering — no disambiguation precondition needed at all, since this
+resolver accepts a combined word against as few as one live contract — with
+0 enrichment-offer calls; `route_disambiguation("2")` fully approved and
+**executed** a nested `crm_find_or_create_contact` contract (seeded via two
+genuinely coexisting live contracts — an agent-sourced `gmail_send_draft` +
+a deterministic-sourced nested Contact; `BUG-122`'s one-live-mutation gate
+only fires for `trusted_source=="agent"` proposals, so this combination is
+really reachable, not an artificial test setup) with 0 parent-Deal-resume
+calls. **Classification: A — SUPPORTED DIAMOND APPROVAL INGRESS.**
+
+Fix: same `post_approval_hook`/`out_meta` dependency-injection pattern as
+`route_confirmation_word()`, extracted into one shared private helper
+(`ActionGateway._apply_diamond_post_approval_hook()`) all three resolvers
+(`_resolve_single_contract`, `route_disambiguation`, `route_combined_word`)
+now call identically after their own `approve_with_lifecycle_result()` —
+avoiding a third/fourth copy of the same try/except+text-append+out_meta
+block. `app.py`'s two call sites (inside `run_agent()`, the "כן 1" combined-
+word check and the "2" disambiguation check) now pass
+`post_approval_hook=_diamond_post_approval_hook, out_meta=_out_meta`,
+identical to the three `route_confirmation_word()` call sites. Both probes
+re-run against the fixed code confirm closure: 1 enrichment-offer call, 1
+parent-resume call, correct text appended to the reply in both cases.
+12 new permanent regression assertions added to the same test file
+(Part 7) — including one full end-to-end proof (no mocked continuation
+function) that `route_disambiguation("1")` genuinely resumes and queues a
+real parked parent Deal, mirroring Part 3's button/typed-text pair for
+this third ingress mode.
+
 CI: full local run — `smoke_tests.py`, `test_integration.py`, all 397
 `test_*.py` files (0 failures), and every `tools/audit_*.py` governance
 script (`dispatcher_bypass`, `turn_coordinator_bypass`, `gateway_bypass`,
 `model_call_boundary`, `provider_boundary`, `public_renderer_contract`,
 `writer_authority_registration`, `formula_escaping_boundary` all `new=0`;
 `result_parsing` warning-only, its 2 new occurrences are in
-`media_handler.py`/`startup_validator.py`, unrelated to this change).
-Merge, deploy, and production runtime verification remain pending.
+`media_handler.py`/`startup_validator.py`, unrelated to this change) — all
+re-run clean after the gate follow-up too. Merge, deploy, and production
+runtime verification remain pending.
 
-Residual Diamond-path items surfaced by the audit but explicitly deferred
-(not silently absorbed into this PR, per owner instruction): `route_
-disambiguation()`/`route_combined_word()` (ordinal/combined-word text
-confirmations, e.g. "2"/"כן 1") still call `approve_with_lifecycle_result()`
-directly and do not yet accept `post_approval_hook` — a structurally
-identical gap to the one this PR closes for the primary confirm-word path,
-narrower in practice (requires an existing disambiguation list or combined
-wording) but not yet unified; the still-open schema-rollout gap (3
-Estimated Value fields not yet live in Airtable); the Deal-update
-write-authority classification (generic `airtable_update` + governed field
-allowlist, not a dedicated writer — TEMPORARY GAP by design, tracked
-separately); domain-alias-table drift (`_DOMAIN_HINT_CANONICAL` vs.
-`domain_utils.BUSINESS_DOMAIN_ALIASES`); the dead
-`_queue_deterministic_create_deal()` builder and its CI guard verifying a
-function no longer on the live path; and the enrichment stage's missing
-fresh-command escape hatch (S2C already has one; enrichment does not).
+Residual Diamond-path items still explicitly deferred (not silently
+absorbed into this PR, per owner instruction — the disambiguation/
+combined-word gap above is now closed, no longer residual): the still-open
+schema-rollout gap (3 Estimated Value fields not yet live in Airtable);
+the Deal-update write-authority classification (generic `airtable_update`
++ governed field allowlist, not a dedicated writer — TEMPORARY GAP by
+design, tracked separately); domain-alias-table drift
+(`_DOMAIN_HINT_CANONICAL` vs. `domain_utils.BUSINESS_DOMAIN_ALIASES`); the
+dead `_queue_deterministic_create_deal()` builder and its CI guard
+verifying a function no longer on the live path; and the enrichment
+stage's missing fresh-command escape hatch (S2C already has one;
+enrichment does not).

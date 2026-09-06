@@ -5436,6 +5436,7 @@ def run_agent(
         from core.action_gateway import action_gateway as _gw_combined
         _combined_reply = _gw_combined.route_combined_word(
             identity.memory_key, _stripped, approver_role=identity.role,
+            out_meta=_out_meta, post_approval_hook=_diamond_post_approval_hook,
         )
         if _combined_reply is not None:
             logger.info(
@@ -5453,6 +5454,7 @@ def run_agent(
             from core.action_gateway import action_gateway as _gw_disambig
             _disambig_reply = _gw_disambig.route_disambiguation(
                 identity.memory_key, _stripped, approver_role=identity.role,
+                out_meta=_out_meta, post_approval_hook=_diamond_post_approval_hook,
             )
             if _disambig_reply is not None:
                 logger.info(

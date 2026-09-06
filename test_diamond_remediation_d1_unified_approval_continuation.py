@@ -747,6 +747,186 @@ chk("regression: approve:/reject: callbacks remain exempt (unchanged)", not _mar
 
 
 # ══════════════════════════════════════════════════════════════════
+# Part 7 — D1 PRE-MERGE INVARIANT GATE: route_disambiguation()/
+# route_combined_word() are ALSO Diamond approval ingress paths (ordinal/
+# combined-word text confirmations, e.g. "2"/"כן 1") — traced and PROVEN
+# (not assumed from comments) to be able to approve the exact same
+# crm_create_deal/crm_find_or_create_contact contract types
+# route_confirmation_word() handles, via the identical approve_with_
+# lifecycle_result() call, with zero tool_name filtering. Before this
+# part's fix, neither accepted a post_approval_hook at all, so a user
+# answering "כן 1" instead of a bare "כן" (works with just ONE live
+# contract — no disambiguation precondition needed) or "2" after
+# route_confirmation_word() itself showed a numbered list, silently
+# bypassed the shared Diamond continuation exactly like the pre-D1 typed-
+# confirmation gap this whole file regression-tests elsewhere.
+# ══════════════════════════════════════════════════════════════════
+print("\n── Part 7: route_combined_word()/route_disambiguation() are Diamond ingress too ──")
+
+# 7a. route_combined_word("כן 1") approving a SOLE live crm_create_deal
+# contract — no multi-contract precondition needed at all.
+combined_user = "d1-combined-deal"
+combined_contract_id = _propose_deal(combined_user, "עסקת כן-1")
+combined_record_id = _rec(501)
+_offer_calls_combined_nohook = []
+_offer_calls_combined_hooked = []
+
+with patch("tools.dispatcher.dispatch_tool",
+           side_effect=lambda *a, **k: _airtable_ok("crm_create_deal", combined_record_id)), \
+     patch("session_store.lead_sessions.get_commercial_completion", return_value=None), \
+     patch("session_store.lead_sessions.set_deal_enrichment_offer",
+           side_effect=lambda *a, **k: _offer_calls_combined_nohook.append(1)):
+    # Without post_approval_hook (the default) — must stay a pure no-op,
+    # exactly like every pre-existing caller of this method before D1.
+    no_hook_reply = _real_gw.route_combined_word(
+        f"boss_hq:{combined_user}", "כן 1", approver_role=Role.OWNER,
+    )
+chk("route_combined_word without post_approval_hook still approves "
+    "(additive param, zero behavior change for pre-existing callers)",
+    bool(no_hook_reply) and "בוצע" in no_hook_reply or "הושלמה" in no_hook_reply)
+chk("route_combined_word without post_approval_hook: no enrichment offer "
+    "(confirms the bypass is real, not just theoretical)",
+    len(_offer_calls_combined_nohook) == 0)
+
+combined_contract_after_nohook = _real_gw._ledger.find_by_id(combined_contract_id)
+chk("route_combined_word without the hook still fully executed the contract "
+    "(the write itself was never in question — only the continuation)",
+    combined_contract_after_nohook is not None
+    and combined_contract_after_nohook.status in ("completed", "executed"))
+
+combined_user2 = "d1-combined-deal-2"
+combined_contract_id2 = _propose_deal(combined_user2, "עסקת כן-1 מתוקנת")
+combined_record_id2 = _rec(502)
+with patch("tools.dispatcher.dispatch_tool",
+           side_effect=lambda *a, **k: _airtable_ok("crm_create_deal", combined_record_id2)), \
+     patch("session_store.lead_sessions.get_commercial_completion", return_value=None), \
+     patch("session_store.lead_sessions.set_deal_enrichment_offer",
+           side_effect=lambda *a, **k: _offer_calls_combined_hooked.append(1)):
+    hooked_reply = _real_gw.route_combined_word(
+        f"boss_hq:{combined_user2}", "כן 1", approver_role=Role.OWNER,
+        post_approval_hook=app._diamond_post_approval_hook,
+    )
+chk("THE FIX: route_combined_word('כן 1') WITH the hook offers enrichment "
+    "for a sole live Deal contract, exactly once",
+    len(_offer_calls_combined_hooked) == 1)
+chk("THE FIX: the reply includes the enrichment offer text",
+    "רוצה להשלים פרטים נוספים" in hooked_reply)
+
+# 7b. route_disambiguation("2") approving a NESTED crm_find_or_create_contact
+# among 2 live contracts (an agent-sourced gmail_send_draft + a
+# deterministic-sourced nested Contact — BUG-122's one-live-mutation gate
+# only fires for trusted_source=="agent" proposals, so this exact
+# combination is genuinely reachable, not an artificial test setup).
+def _seed_two_live_contracts(user_id: str, contact_record_hint: int):
+    r_other = _real_gw.propose_action(
+        tenant_id="boss_hq", canonical_user_id=f"boss_hq:{user_id}",
+        tool_name="gmail_send_draft", tool_inputs={"to": "a@b.com"},
+        origin_channel="telegram", origin_chat_id=user_id,
+        requires_approval=True, identity=_identity(user_id), trusted_source="agent",
+    )
+    r_contact = _real_gw.propose_action(
+        tenant_id="boss_hq", canonical_user_id=f"boss_hq:{user_id}",
+        tool_name="crm_find_or_create_contact",
+        tool_inputs={"name": f"איש קשר {contact_record_hint}", "phone": "0501112222"},
+        origin_channel="telegram", origin_chat_id=user_id, requires_approval=True,
+        identity=_identity(user_id), trusted_source="deterministic_commercial_completion",
+    )
+    assert r_other.ok and r_contact.ok, "BUG-122 setup precondition failed — see trace notes"
+    live = _real_gw.find_live_contracts(f"boss_hq:{user_id}")
+    with _real_gw._disambiguation_lock:
+        _real_gw._disambiguation[f"boss_hq:{user_id}"] = list(live)
+    idx = next(i for i, c in enumerate(live) if c.tool_name == "crm_find_or_create_contact") + 1
+    return r_contact.contract_id, idx
+
+
+disambig_user_nohook = "d1-disambig-nohook"
+disambig_contract_id_nohook, disambig_idx_nohook = _seed_two_live_contracts(disambig_user_nohook, 601)
+_resume_calls_disambig_nohook = []
+with patch("tools.dispatcher.dispatch_tool",
+           side_effect=lambda *a, **k: _airtable_ok("crm_find_or_create_contact", _rec(601))), \
+     patch.object(app, "_resolve_diamond_path_continuation",
+                  side_effect=lambda *a, **k: _resume_calls_disambig_nohook.append(1) or "resumed"):
+    _real_gw.route_disambiguation(
+        f"boss_hq:{disambig_user_nohook}", str(disambig_idx_nohook), approver_role=Role.OWNER,
+    )
+chk("route_disambiguation without post_approval_hook: no parent-Deal resume "
+    "(confirms the nested-continuation bypass is real)",
+    len(_resume_calls_disambig_nohook) == 0)
+disambig_contract_after = _real_gw._ledger.find_by_id(disambig_contract_id_nohook)
+chk("route_disambiguation without the hook still fully executed the nested contact",
+    disambig_contract_after is not None
+    and disambig_contract_after.status in ("completed", "executed"))
+
+disambig_user_hooked = "d1-disambig-hooked"
+disambig_contract_id_hooked, disambig_idx_hooked = _seed_two_live_contracts(disambig_user_hooked, 602)
+_resume_calls_disambig_hooked = []
+with patch("tools.dispatcher.dispatch_tool",
+           side_effect=lambda *a, **k: _airtable_ok("crm_find_or_create_contact", _rec(602))), \
+     patch.object(app, "_resolve_diamond_path_continuation",
+                  side_effect=lambda *a, **k: _resume_calls_disambig_hooked.append(1) or "ההורה חודש!"):
+    hooked_disambig_reply = _real_gw.route_disambiguation(
+        f"boss_hq:{disambig_user_hooked}", str(disambig_idx_hooked), approver_role=Role.OWNER,
+        post_approval_hook=app._diamond_post_approval_hook,
+    )
+chk("THE FIX: route_disambiguation('2') WITH the hook resumes the parent "
+    "Deal exactly once", len(_resume_calls_disambig_hooked) == 1)
+chk("THE FIX: the reply includes the resume text",
+    "ההורה חודש!" in hooked_disambig_reply)
+
+# 7c. End-to-end (no mocked _resolve_diamond_path_continuation this time):
+# route_disambiguation("2") on a genuinely parked nested-Contact state
+# actually resumes and queues the real parent Deal — the same proof shape
+# as Part 3's button/typed-text pair, for this third ingress mode.
+disambig_e2e_user = "d1-disambig-e2e"
+e2e_parked_state, e2e_hint = _build_parked_nested_contact_state(
+    "עסקה מקושרת-disambiguation", disambig_e2e_user,
+)
+e2e_contract_id = _real_gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id=f"boss_hq:{disambig_e2e_user}",
+    tool_name="crm_find_or_create_contact",
+    tool_inputs={"name": "איש קשר חדש 3", "phone": "0500000003"},
+    origin_channel="telegram", origin_chat_id=disambig_e2e_user,
+    requires_approval=True, identity=_identity(disambig_e2e_user), trusted_source="agent",
+    continuation_ref=ContinuationRef.for_commercial_completion(
+        session_key=disambig_e2e_user, channel="telegram",
+        nested_entity=e2e_hint["nested_entity"], return_field=e2e_hint["return_field"],
+        nonce=e2e_hint["nonce"],
+    ),
+).contract_id
+with _real_gw._disambiguation_lock:
+    _real_gw._disambiguation[f"boss_hq:{disambig_e2e_user}"] = [
+        _real_gw._ledger.find_by_id(e2e_contract_id),
+    ]
+_e2e_deal_queue_calls = []
+
+
+def _e2e_queue_mock_deal(tool, payload, chat_id, channel, user_text, trusted_source="agent", **_):
+    _e2e_deal_queue_calls.append((tool, payload))
+    return {"message": "⏳ בקשת אישור נשלחה (עסקה)", "contract_id": "contractParentD1Disambig",
+            "ok": True, "terminal_outcome": None, "action_tool": "crm_create_deal",
+            "created_this_turn": True, "owner_notified": True}
+
+
+with patch("tools.dispatcher.dispatch_tool",
+           side_effect=lambda *a, **k: _airtable_ok("crm_find_or_create_contact", _rec(603))), \
+     patch("session_store.lead_sessions.get_commercial_completion", return_value=e2e_parked_state), \
+     patch("session_store.lead_sessions.set_commercial_completion"), \
+     patch("session_store.lead_sessions.clear_commercial_completion") as _e2e_clear_cc, \
+     patch.object(app, "_queue_approval_detailed", _e2e_queue_mock_deal):
+    _e2e_reply = _real_gw.route_disambiguation(
+        f"boss_hq:{disambig_e2e_user}", "1", approver_role=Role.OWNER,
+        post_approval_hook=app._diamond_post_approval_hook,
+    )
+chk("END-TO-END: route_disambiguation('1') genuinely resumes and queues "
+    "the REAL parent Deal (no mocked continuation function this time)",
+    len(_e2e_deal_queue_calls) == 1 and _e2e_deal_queue_calls[0][0] == "crm_create_deal")
+chk("END-TO-END: the parked parent completion is cleared once safely queued",
+    _e2e_clear_cc.called)
+chk("END-TO-END: the reply reports the resumed parent Deal",
+    "בקשת אישור נשלחה" in _e2e_reply)
+
+
+# ══════════════════════════════════════════════════════════════════
 print()
 print("=" * 60)
 print(f"DIAMOND-REMEDIATION-D1 regression: {passed} passed, {failed} failed")
