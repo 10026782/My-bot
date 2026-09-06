@@ -1617,3 +1617,105 @@ D1's list, not touched by D2): the Estimated Value schema-rollout gap; the
 Deal-update write-authority classification (generic `airtable_update` +
 governed allowlist, TEMPORARY GAP by design); domain-alias-table drift;
 the dead `_queue_deterministic_create_deal()` builder.
+
+### DIAMOND D3 — schema certification, live parity migration, and select-resolver hardening — 06/09/2026 (owner-directed, follow-up to D1/D2)
+
+Closed the Estimated Value schema-rollout gap D1/D2 explicitly deferred, plus a
+previously-undiscovered live Domain-value drift found during the certification
+audit — in four stages: (1) read-only discovery, (2) live Airtable migration,
+(3) live post-migration canaries, (4) the code-side normalization fix those
+canaries proved was still needed.
+
+1. **Discovery (read-only).** Audited every Deal field across code constants
+   (`airtable_schema.DealFields`), completion metadata, the writer, the
+   dispatcher allowlist, `schema_cache.json`, `RuntimeSchemaProvider`, and
+   live Airtable (via the Airtable MCP connection). Found: the three
+   Estimated Value fields (`אופן הערכת שווי`/`טווח שווי משוער`/`הערות לשווי
+   משוער`) were fully wired in code but not yet live in Airtable — CODE
+   AHEAD OF LIVE, exactly as D1/D2's own comments already flagged; a
+   previously-undocumented Domain drift — live `Domain` had `"Real Estate "`
+   (trailing space) and no `Media`/`Finance` options, so 3 of 7 canonical
+   business domains failed to create/update a Deal at all;
+   `schema_cache.json` (the legacy fallback seed) was 14+ live fields
+   behind — a real cold-start/outage risk whenever `RuntimeSchemaProvider`
+   drops below `shadow`; SPEC A1 (`tools/airtable_gateway.py`) is
+   confirmed genuinely atomic — one unrecognized field blocks an entire
+   batched write, not just that field.
+2. **Live migration.** Created the three Estimated Value fields on the live
+   Deals table (exact type/choices match to code). Separately, once the
+   owner manually normalized the live `Domain` select (trailing space
+   removed from "Real Estate", `Media`/`Finance` added — the Airtable MCP
+   tool surface available has no way to rename/add select choices on an
+   *existing* field, only to create new fields, so this one step needed a
+   manual Airtable UI edit), re-verified live: 7 correct choices, prior
+   option id preserved (a true rename, not a delete+recreate — no data
+   loss).
+3. **Live canaries proved a real, code-level gap.** Governed-path canaries
+   (real `ActionGateway`→approval→`dispatch_tool` flow, `RuntimeSchemaProvider`
+   fed genuine live-fetched schema) showed `media`/`finance` now resolve and
+   reach the writer correctly, but `real_estate` still failed:
+   `resolve_live_select_value()`'s matching only normalized case and
+   whitespace, never underscore-vs-space — `"real_estate"` (the codebase's
+   own canonical slug format, from `core.lead_service.resolve_domain_word()`)
+   never matched live `"Real Estate"`. Traced why: the function's own
+   original regression test asserted `"real estate"` (space-separated) as
+   its example input, not the underscore-separated slug format every other
+   layer of the domain vocabulary actually produces — a format-contract gap
+   between adjacent layers, invisible to either layer's own unit tests. A
+   sibling module (`cmd_update.py`, a different table) had already
+   independently solved the identical underscore/space problem — confirming
+   duplicated, not consolidated, normalization logic across the codebase
+   (out of scope to consolidate here; flagged for a separate track).
+4. **Fix — `resolve_live_select_value()` hardened, made exclusive for
+   Diamond.** `core/runtime_schema_provider.py`'s matching now goes through
+   a new `_select_match_key()` (case-fold + collapse any run of whitespace
+   **and/or underscores** to one space) instead of case/whitespace-only —
+   `"real_estate"`/`"REAL_ESTATE"`/`"real estate"`/`" Real Estate "` all now
+   resolve to live `"Real Estate"`. Still deliberately not fuzzy — no
+   substring/edit-distance/alias matching; a value matching more than one
+   live choice after normalization fails closed to `None`, same as zero
+   matches, never guesses. Business-canonicalization (word→slug) stays
+   entirely upstream, untouched, per instruction. `commercial_crm.create_deal()`
+   and the generic Deal-update redirect in `tools/dispatcher.py` (scoped
+   strictly to `Tables.DEALS` — Payments' own Domain-only resolution is
+   untouched, a different table/track) now route **every** select-type Deal
+   field through this one resolver, not just Domain — closing the gap where
+   six other Deal select fields (Deal Type Code/Relationship Type/Currency/
+   Commercial Status/the two Estimated Value selects) were written raw with
+   no live-schema check at all, working only because those enums happened to
+   already match Airtable's configured option strings verbatim. Since Deal
+   enrichment's collected answers flow through this same generic update
+   redirect (unchanged, no `app.py`/`commercial_completion.py` edits needed),
+   enrichment writes inherit the same resolver coverage automatically.
+
+Non-goals honored throughout: no RuntimeSchemaProvider policy change, no
+schema-authority redesign, no `crm_update_deal`, no D1/D2 logic touched, no
+Payment/Lead/Task normalization consolidated, no `cmd_update.py`/`domain_utils.py`
+refactor, no system-wide governance guard.
+
+Tests: `test_diamond_d3_final_select_resolver.py` (new, 22 assertions —
+isolated resolver-matching unit tests A-I plus real end-to-end Diamond
+create/update/enrichment-shaped/fail-closed proofs J-M via the real
+`ActionGateway`→approval→`dispatch_tool` path). Full regression sweep run
+clean: `test_runtime_schema_provider.py` (75, includes the original
+BUG-CRM-BYPASS-DOMAIN-SELECT-CASING invariant, unregressed),
+`test_diamond_remediation_d2_input_ownership_recovery.py` (40),
+`test_select_value_validation.py` (18), `test_airtable_gateway.py` (37),
+`test_bug_diamond_optional_enrichment_gates_creation.py` (59),
+`test_bug_diamond_enrichment_runtime_sweep.py` (50), `test_commercial_crm.py`
+(111 — one pre-existing assertion updated to check `resolve_live_select_value`
+was called with Domain's args at some point rather than assuming it was the
+last call, now that every Deal select field routes through it),
+`test_commercial_crm_dispatcher_wiring.py` (43), `test_check_airtable_schema_runtime.py`
+(44), `test_schema_snapshot.py` (40), `test_business_memory_domain_lookup.py`
+(25), `smoke_tests.py`, `test_integration.py`, `core/router/test_router.py`,
+`py_compile` on every changed file — all clean.
+
+Residual items: `schema_cache.json` still doesn't know the newly-live fields
+(unchanged, out of scope — matters only if `RuntimeSchemaProvider` ever drops
+to `off` or a non-authoritative fallback tier); the bot's own literal
+outbound HTTP write with real production credentials was not exercised from
+the audit sandbox (no credentials available there); `cmd_update.py`'s
+independent, duplicate underscore-aware resolver was left as-is, a candidate
+for a later normalization-consolidation track, not required for Diamond.
+Deployment and live production runtime verification remain pending.
