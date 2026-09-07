@@ -25,6 +25,7 @@ INTERNAL_ONLY_TOOLS = frozenset({
     "crm_link_lead_to_deal",
     "crm_create_charge",
     "crm_create_charge_payment",
+    "crm_create_charge_from_term",
 })
 
 

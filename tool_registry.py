@@ -393,6 +393,7 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         requires_approval= True,
         blocked_by_emergency=True,
         high_risk        = True,
+        model_exposed    = False,
         availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "יצירת Charge מתנאי חיוב קיים — דורש אישור",
     ),
