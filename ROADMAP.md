@@ -1,6 +1,16 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 06/09/2026
+עודכן: 08/09/2026
+
+## Payment Term → Charge materialization — 08/09/2026
+
+PR #1223 adds the governed static path `crm_create_charge_from_term`:
+existing Deal + Payment Term + linked Lead → one idempotent Charge, with
+calculation snapshots and verified Airtable read-back. The tool is registered
+through ActionGateway, requires approval, and never creates a Payment or
+mutates the Term/Origin Lead. This is `CODE_DONE + STATIC_VERIFIED` only;
+live `Charges → Lead` schema creation, merge, deployment, and runtime canary
+remain open.
 
 ## Commercial Completion Writer foundation — 03/09/2026
 
