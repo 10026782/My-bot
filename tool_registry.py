@@ -386,6 +386,17 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "יצירת תשלום (Payment) חדש — דורש אישור",
     ),
+    ToolMeta(
+        name             = "crm_create_charge_from_term",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        model_exposed    = False,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "יצירת Charge מתנאי חיוב קיים — דורש אישור",
+    ),
     # S2B narrow Commercial V2 primitives. Internal-only until a separately
     # approved deterministic caller is wired; the Agent cannot select these.
     ToolMeta(

@@ -175,6 +175,12 @@ _TC_ROUTE_REGISTRY: dict[str, tuple[str, str]] = {
     "crm_create_charge_payment": (
         "ROUTED", "CREATE_CHARGE_PAYMENT",
     ),
+    "crm_create_charge_from_term": (
+        "EXEMPT",
+        "internal Term-to-Charge materialization has no user-facing intent; "
+        "keep it hidden from Agent tool choice until a dedicated deterministic "
+        "route can collect the existing Deal, Term, and Lead IDs.",
+    ),
 }
 
 # (file, function_name) -> documented reason a custom fingerprint_payload is

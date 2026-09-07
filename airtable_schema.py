@@ -585,6 +585,8 @@ class ChargeFields:
     REFERENCE = "Charge Reference"
     DEAL = "Deal"
     BILLING_TERM = "Billing Term"
+    LEAD = "Lead"
+    LEAD = "Lead"
     DIRECTION = "Direction"
     AMOUNT = "Amount"
     CURRENCY = "Currency"              # legacy text compatibility field
@@ -753,6 +755,7 @@ class LeadFields:
     NEXT_FOLLOWUP   = "Next Followup" # ISO date of next scheduled followup
     OWNER           = "Owner"         # multipleRecordLinks -> Tables.PROFILE (NOT plain text; verified via Airtable MCP 2026-08-19). Never written from the TMA today (see tma_api.create_lead_task).
     NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none — NOTE: live Airtable options are actually "Call Back/Send Details/Follow Up/Waiting Response/Create Deal/Convert Contact/Schedule Meeting /Closed Won/Closed Lost" (verified via Airtable MCP 2026-06-17) — this field is not currently written from the TMA, so the mismatch is latent, not active
+    DEAL_LINK       = "עסקאות (Deals)"
     EXTERNAL_ID     = "external_id"   # gmail:<msg_id> — idempotency key מדויק (F06)
     SENDER_ID       = "sender_id"     # email address / phone — dedup by sender (F06)
 
