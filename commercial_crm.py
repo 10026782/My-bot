@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 from datetime import date
+import json
 import math
 import re
 import threading
@@ -51,7 +52,7 @@ from airtable_schema import (
 )
 import crm
 from tools.airtable_gateway import airtable_create, airtable_patch, escape_formula_value
-from tools.airtable_read_adapter import get_record_fields, list_records
+from tools.airtable_read_adapter import get_record, get_record_fields, list_records
 from tools.airtable_tools import _tool_result
 
 # Israel VAT rate used by the VATRule.ADD/INCLUDED calculation branches.
@@ -543,6 +544,7 @@ def create_charge(
     promised_payment_date: str = "",
     promised_payment_amount: float | None = None,
     notes: str = "",
+    lead_id: str = "",
     source: str = "commercial_crm",
 ) -> dict:
     """Create one canonical Charge; Deal is mandatory, Billing Term optional."""
@@ -622,6 +624,7 @@ def create_charge(
     }
     optional_fields = (
         (ChargeFields.BILLING_TERM, [billing_term_id] if billing_term_id else None),
+        (ChargeFields.LEAD, [lead_id] if lead_id else None),
         (ChargeFields.REFERENCE, reference),
         (ChargeFields.ORIGINAL_DUE_DATE, original_due_date),
         (ChargeFields.CURRENT_EXPECTED_DATE, current_expected_date),
@@ -643,6 +646,108 @@ def create_charge(
     # Total Paid, Remaining Balance, reverse links, formulas, and rollups are
     # intentionally absent: no parameter can inject them.
     return _write_result(tool, Tables.CHARGES, fields, source)
+
+
+def crm_create_charge_from_term(
+    payment_term_id: str,
+    deal_id: str,
+    lead_id: str,
+    *,
+    basis_value: float | None = None,
+    tenant_id: str = "",
+    source: str = "commercial_crm",
+) -> dict:
+    """Materialize one verified Charge from one existing Term/Deal/Lead."""
+    tool = "crm_create_charge_from_term"
+    deal_fields, error = _read_fields(Tables.DEALS, deal_id, "Deal")
+    if error:
+        return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+    term_fields, error = _read_fields(Tables.PAYMENT_TERMS, payment_term_id, "Payment Term")
+    if error:
+        return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+    lead_fields, error = _read_fields(Tables.LEADS, lead_id, "Lead")
+    if error:
+        return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+    if deal_id not in _link_ids(term_fields.get(PaymentTermFields.DEAL)):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Payment Term does not belong to the supplied Deal.")
+    if deal_id not in _link_ids(lead_fields.get(LeadFields.DEAL_LINK)):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Lead is not linked to the supplied Deal.")
+
+    deal_domain = deal_fields.get(DealFields.DOMAIN, "")
+    lead_domain = lead_fields.get(LeadFields.DOMAIN, "")
+    if deal_domain and lead_domain and deal_domain != lead_domain:
+        return _tool_result(ok=False, tool=tool, user_message="❌ Deal and Lead domains do not match.")
+    if tenant_id and any(fields.get(LeadFields.TENANT_ID, "") not in ("", tenant_id) for fields in (deal_fields, lead_fields)):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Deal/Lead tenant does not match the request.")
+
+    calc_type = term_fields.get(PaymentTermFields.CALC_TYPE_CODE) or term_fields.get(PaymentTermFields.CALC_TYPE, "")
+    vat_rule = term_fields.get(PaymentTermFields.VAT_RULE, VATRule.NONE)
+    if calc_type == PaymentTermCalcType.FIXED:
+        calculation = calculate_payment(calc_type, fixed_amount=term_fields.get(PaymentTermFields.FIXED_AMOUNT), vat_rule=vat_rule)
+    elif calc_type == PaymentTermCalcType.PERCENTAGE:
+        if basis_value is None:
+            return _tool_result(ok=False, tool=tool, user_message="❌ Percentage Payment Term requires basis_value.")
+        calculation = calculate_payment(calc_type, rate_pct=term_fields.get(PaymentTermFields.RATE_PCT), basis_value=basis_value, vat_rule=vat_rule)
+    else:
+        return _tool_result(ok=False, tool=tool, user_message=f"❌ Unsupported Payment Term calculation type: {calc_type!r}.")
+
+    occurrence = {
+        "trigger_type": term_fields.get(PaymentTermFields.TRIGGER_TYPE_CODE) or term_fields.get(PaymentTermFields.TRIGGER_TYPE, ""),
+        "trigger_date": term_fields.get(PaymentTermFields.TRIGGER_DATE, ""),
+        "trigger_delay_days": term_fields.get(PaymentTermFields.TRIGGER_DELAY_DAYS, ""),
+        "trigger_event": term_fields.get(PaymentTermFields.TRIGGER_EVENT, ""),
+    }
+    reference = json.dumps({"deal_id": deal_id, "payment_term_id": payment_term_id, "lead_id": lead_id, "occurrence": occurrence}, sort_keys=True, separators=(",", ":"))
+    snapshot = json.dumps({"reference": reference, "calculation": calculation, "calc_type": calc_type, "calc_basis": term_fields.get(PaymentTermFields.CALC_BASIS_CODE) or term_fields.get(PaymentTermFields.CALC_BASIS, ""), "rate_pct": term_fields.get(PaymentTermFields.RATE_PCT), "vat_rule": vat_rule}, sort_keys=True, separators=(",", ":"))
+
+    # ponytail: process lock + deterministic reference; use a provider-side
+    # unique constraint when Airtable supports one for cross-worker races.
+    with _DEAL_LEAD_LINK_LOCK:
+        try:
+            existing = list_records(Tables.CHARGES, max_records=None, paginate=True, fields=[ChargeFields.REFERENCE])
+        except Exception:
+            return _tool_result(ok=False, tool=tool, user_message="❌ Could not verify Charge idempotency.")
+        if any(record.get("fields", {}).get(ChargeFields.REFERENCE) == reference for record in existing):
+            record = next(record for record in existing if record.get("fields", {}).get(ChargeFields.REFERENCE) == reference)
+            return _tool_result(ok=True, tool=tool, external_id=record.get("id", ""), evidence={"record_id": record.get("id", ""), "idempotent": True}, user_message="✅ Charge already exists; duplicate creation prevented.")
+        result = create_charge(
+            deal_id=deal_id,
+            direction=term_fields.get(PaymentTermFields.DIRECTION, Direction.RECEIVABLE),
+            amount=calculation["total_amount"],
+            currency=term_fields.get(PaymentTermFields.CURRENCY, Currency.ILS),
+            status=ChargeStatus.DRAFT,
+            collection_state=CollectionState.NOT_DUE,
+            vat_rule=vat_rule,
+            document_requirement=DocumentRequirement.NONE,
+            document_status=DocumentStatus.NOT_REQUIRED,
+            billing_term_id=payment_term_id,
+            lead_id=lead_id,
+            reference=reference,
+            original_due_date=term_fields.get(PaymentTermFields.TRIGGER_DATE, ""),
+            base_amount=calculation["base_amount"],
+            rate_pct=term_fields.get(PaymentTermFields.RATE_PCT),
+            vat_amount=calculation["vat_amount"],
+            trigger_evidence=json.dumps(occurrence, sort_keys=True),
+            original_terms_snapshot=snapshot,
+            notes=term_fields.get(PaymentTermFields.NOTES, ""),
+            source=source,
+        )
+    if not result.get("ok"):
+        return _tool_result(ok=False, tool=tool, evidence=result.get("evidence", {}), user_message=result.get("user_message", "❌ Charge creation failed."))
+    record_id = result.get("external_id", "")
+    try:
+        fields = get_record(Tables.CHARGES, record_id).get("fields", {})
+    except Exception:
+        return _tool_result(ok=False, tool=tool, external_id=record_id, evidence={"record_id": record_id, "read_back": "failed"}, user_message="❌ Charge created but verified read-back failed.")
+    if (
+        deal_id not in _link_ids(fields.get(ChargeFields.DEAL))
+        or payment_term_id not in _link_ids(fields.get(ChargeFields.BILLING_TERM))
+        or lead_id not in _link_ids(fields.get(ChargeFields.LEAD))
+        or fields.get(ChargeFields.REFERENCE) != reference
+        or fields.get(ChargeFields.AMOUNT) != calculation["total_amount"]
+    ):
+        return _tool_result(ok=False, tool=tool, external_id=record_id, evidence={"record_id": record_id, "read_back": "mismatch"}, user_message="❌ Verified Charge read-back does not match the requested materialization.")
+    return _tool_result(ok=True, tool=tool, external_id=record_id, evidence={"record_id": record_id, "table": Tables.CHARGES, "read_back": True}, user_message="✅ Charge created and verified.")
 
 
 def create_charge_payment(

@@ -297,6 +297,20 @@ TOOL_SCHEMAS = [
             "required": ["amount", "domain", "owner_id"]
         }
     },
+    {
+        "name": "crm_create_charge_from_term",
+        "description": "יצירת Charge יחיד מתנאי חיוב קיים, לעסקה וליד מקושרים — דורש אישור.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "payment_term_id": {"type": "string", "description": "מזהה תנאי החיוב (rec...)"},
+                "deal_id": {"type": "string", "description": "מזהה העסקה (rec...)"},
+                "lead_id": {"type": "string", "description": "מזהה הליד המקור (rec...)"},
+                "basis_value": {"type": "number", "description": "בסיס החישוב, חובה לכלל באחוזים"},
+            },
+            "required": ["payment_term_id", "deal_id", "lead_id"],
+        },
+    },
 ]
 
 # ══════════════════════════════════════════════════

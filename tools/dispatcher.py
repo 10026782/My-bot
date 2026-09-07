@@ -1194,6 +1194,24 @@ def dispatch_tool(
                 audit_log_airtable("crm_create_payment", identity, inputs, result)
                 return result
 
+            case "crm_create_charge_from_term":
+                try:
+                    enforce_tenant_scope(name, identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable(name, identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool=name, user_message=str(e))
+                from commercial_crm import crm_create_charge_from_term
+                result = crm_create_charge_from_term(
+                    payment_term_id=inputs["payment_term_id"],
+                    deal_id=inputs["deal_id"],
+                    lead_id=inputs["lead_id"],
+                    basis_value=inputs.get("basis_value"),
+                    tenant_id=getattr(identity, "tenant_id", ""),
+                    source="agent",
+                )
+                audit_log_airtable(name, identity, inputs, result)
+                return result
+
             # ── S2B — narrow Commercial V2 mutation primitives ──────────
             case "crm_find_or_create_organization":
                 _allowed = frozenset({"organization_name"})
