@@ -348,7 +348,7 @@
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
         "Scope is deliberately narrow to cross_layer_architecture's mandatory_canonical_decisions, not every profile — a single-layer task does not need the full business/planning chain as a hard gate."
       ],
-      "last_observed_commit": "b1ff42ed48d393577b2569d3950786075d5d5946"
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     },
     {
       "id": "decision.message_contract_envelope_authority",
@@ -790,7 +790,7 @@
         "Registered for the WhatsApp-only Phase 3 cutover: core/whatsapp_lead_cutover.py resolves the configured service-account owner_user_id and constructs LeadPayload, while create_lead() remains the sole Lead writer and Owner/Profile authority. The legacy writer remains present behind the flag-off rollback path; runtime status requires deploy plus E2E verification.",
         "Registered for the Email, Furniture, and Voice Phase 3 cutovers: core/noninteractive_lead_cutovers.py is supporting orchestration only; source-account mappings provide owner_user_id, and create_lead() remains the sole Lead writer and Owner/Profile authority."
       ],
-      "last_observed_commit": "b1ff42ed48d393577b2569d3950786075d5d5946"
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     },
     {
       "id": "decision.n18_shared_write_primitives",
@@ -839,7 +839,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "b1ff42ed48d393577b2569d3950786075d5d5946"
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     },
     {
       "id": "decision.n18_terminal_turn_result",
@@ -885,7 +885,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "b1ff42ed48d393577b2569d3950786075d5d5946"
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     },
     {
       "id": "decision.provider_neutral_query_contract",
@@ -1079,7 +1079,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "b1ff42ed48d393577b2569d3950786075d5d5946"
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     },
     {
       "id": "decision.commercial_completion_foundation",
@@ -1145,7 +1145,7 @@
           "runtime_consumed": false
         }
       },
-      "last_observed_commit": "b1ff42ed48d393577b2569d3950786075d5d5946"
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     },
     {
       "id": "decision.commercial_v2_mutation_primitives",
@@ -1209,7 +1209,7 @@
           "runtime_consumed": true
         }
       },
-      "last_observed_commit": "b1ff42ed48d393577b2569d3950786075d5d5946"
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     },
     {
       "id": "decision.commercial_completion_routing",
@@ -1303,7 +1303,8 @@
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #1222 (block_reason=NO_POLICY_MATCH): lead_deal_link.py is a new runtime source with no existing catalog node or policy_registry.json entry to match. Owner explicitly reviewed and chose CREATE NEW NODE over attaching it to decision.canonical_lead_write_service (rejected: that node is specifically Lead creation/update authority, and lead_deal_link.py never writes a Lead).",
         "Read-only by construction: resolve_lead_by_query()/resolve_deal_by_query() only ever call existing read-only lookups (lead_conversion._resolve_single_lead_by_query, commercial_crm.lookup_human_reference); parse_direct_link_text()/is_promote_lead_trigger() are pure regex parsers with no I/O. The only write in the whole flow (crm_link_lead_to_deal) lives in commercial_crm.py and is invoked exclusively by app.py's _queue_deterministic_link_lead_to_deal() through the real ActionGateway -- this module never calls it directly."
-      ]
+      ],
+      "last_observed_commit": "e16337c01f60cb6c02a0c8f340592a02f95eb078"
     }
   ],
   "edges": [
