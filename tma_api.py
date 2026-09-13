@@ -196,6 +196,11 @@ def _preflight_venture(venture_id=None):
     return "", 204
 
 
+@tma_api.route("/api/tasks/<task_id>", methods=["OPTIONS"])
+def _preflight_task(task_id=None):
+    return "", 204
+
+
 @tma_api.route("/api/game/status", methods=["OPTIONS"])
 def _preflight_game_status():
     return "", 204
@@ -464,6 +469,7 @@ ACTION_RISK = {
     "tma_set_lead_outcome":   "Medium",
     "tma_create_lead_task":   "Low",
     "tma_create_followup":    "Low",
+    "tma_update_task_status": "Low",
 }
 _DEFAULT_RISK = "High"
 
@@ -2924,6 +2930,65 @@ def owner_my_work(identity):
         "upcoming": result["upcoming"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }), 200
+
+
+# MY-WORK-1 remediation — canonical Task-status mutation. Frontend-facing
+# contract is deliberately narrow ({"status": "done"} only) to match the
+# single "mark done" action My Work-1 needs; anything else is a future
+# screen's scope, not this one's.
+_TASK_STATUS_ALIASES = {"done": TaskStatus.DONE}
+
+
+@tma_api.route("/api/tasks/<task_id>", methods=["PATCH"])
+@require_tma_auth
+def update_task_status(task_id, identity):
+    """Canonical Task-status write path for My Work-1 ("סמן כבוצע").
+
+    Owner-only, same as GET /api/owner/my-work, and — critically — knowing a
+    Task record ID is never sufficient by itself: the caller must also be
+    the Task's owner under the exact same ownership rule the read path uses
+    (_process_owner_tasks: an explicit Owner link must include the caller's
+    own Profile record; an unowned Task defaults to the sole owner). Goes
+    through the same ActionGateway pipeline as every other TMA business
+    write (_queue_or_owner_execute) — no parallel writer.
+    """
+    if not identity.is_owner:
+        return jsonify({"error": "forbidden"}), 403
+
+    data = request.get_json(force=True) or {}
+    requested_status = str(data.get("status") or "").strip().lower()
+    new_status = _TASK_STATUS_ALIASES.get(requested_status)
+    if not new_status:
+        return jsonify({
+            "error": "unsupported status",
+            "valid": sorted(_TASK_STATUS_ALIASES),
+        }), 400
+
+    task_rec = _at_get_record(Tables.TASKS, task_id)
+    if not task_rec:
+        return jsonify({"error": "task not found"}), 404
+
+    profile_record_id = _resolve_profile_record_id(identity.user_id)
+    owner_links = relation_refs(record_fields(task_rec).get(TaskFields.OWNER, []))
+    if owner_links and profile_record_id not in owner_links:
+        # Task belongs to a different owner -- knowing the record ID is not
+        # authorization. Fail closed rather than trusting the caller.
+        return jsonify({"error": "forbidden"}), 403
+
+    _, response, status = _queue_or_owner_execute(
+        "tma_update_task_status",
+        {
+            "op": "patch",
+            "table": Tables.TASKS,
+            "record_id": task_id,
+            "fields": {TaskFields.STATUS: new_status},
+            "audit_action": "task_status_update",
+            "audit_details": f"{task_id} -> {new_status}",
+        },
+        identity,
+        f"Update task status: {task_id} -> {new_status}",
+    )
+    return jsonify(response), status
 
 
 @tma_api.route("/api/approvals", methods=["GET"])

@@ -716,6 +716,344 @@ def test_route_get_lead_detail_no_owner_returns_empty_string():
         tma_api._at_list = orig_at_list
 
 
+# ══════════════════════════════════════════════════════════════════
+# MY-WORK-1 remediation: PATCH /api/tasks/<id> — canonical Task-status
+# mutation. Same ActionGateway pipeline as create_lead_task/create_venture
+# (_queue_or_owner_execute), so these tests mock at the same seam
+# (_queue_tma_write_approval / _claim_and_execute_approval) as
+# test_create_lead_task_defaults_owner_to_creator_when_lead_has_none above,
+# rather than re-testing ActionGateway internals already covered elsewhere.
+# ══════════════════════════════════════════════════════════════════
+
+def test_route_patch_task_status_authorized_owner_marks_own_task_done():
+    """Owner mutating their own Task: 200, and the write reaches the
+    canonical gateway with the correct table/record_id/canonical status
+    value (TaskStatus.DONE, not the frontend-facing 'done' alias)."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_queue = tma_api._queue_tma_write_approval
+    orig_claim_execute = tma_api._claim_and_execute_approval
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_get_record = lambda table, rid: create_test_task(
+        record_id=rid, owner_record_ids=(OWNER_RECORD_ID,), status=TaskStatus.PENDING,
+    )
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: [
+        {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}
+    ]
+
+    posted = []
+    tma_api._queue_tma_write_approval, tma_api._claim_and_execute_approval = _fake_owner_autoapprove_gateway(posted)
+
+    try:
+        r = client.patch("/api/tasks/rec_001", json={"status": "done"}, headers=_HDR)
+        assert r.status_code == 200
+        assert len(posted) == 1
+        table, fields = posted[0]
+        assert table == Tables.TASKS
+        assert fields[TaskFields.STATUS] == TaskStatus.DONE
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._queue_tma_write_approval = orig_queue
+        tma_api._claim_and_execute_approval = orig_claim_execute
+        owner_resolution.list_records = orig_list_records
+
+
+def test_route_patch_task_status_unauthorized_owner_cannot_mutate_other_owner_task():
+    """Owner A must not be able to mark Owner B's Task done merely by
+    knowing its record ID -- authorization is per-Task-owner, not just
+    role. The gateway must never even be invoked."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_queue = tma_api._queue_tma_write_approval
+    orig_claim_execute = tma_api._claim_and_execute_approval
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    # Task belongs to a DIFFERENT owner (OTHER_OWNER_RECORD_ID), not the caller.
+    tma_api._at_get_record = lambda table, rid: create_test_task(
+        record_id=rid, owner_record_ids=(OTHER_OWNER_RECORD_ID,), status=TaskStatus.PENDING,
+    )
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: [
+        {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}
+    ]
+
+    posted = []
+    tma_api._queue_tma_write_approval, tma_api._claim_and_execute_approval = _fake_owner_autoapprove_gateway(posted)
+
+    try:
+        r = client.patch("/api/tasks/rec_other", json={"status": "done"}, headers=_HDR)
+        assert r.status_code == 403
+        assert posted == [], "gateway must never be called for an unauthorized mutation"
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._queue_tma_write_approval = orig_queue
+        tma_api._claim_and_execute_approval = orig_claim_execute
+        owner_resolution.list_records = orig_list_records
+
+
+def test_route_patch_task_status_unowned_task_may_be_marked_done_by_sole_owner():
+    """Consistent with My Work visibility: a Task with no Owner link at all
+    defaults to the sole requesting owner, for mutation as well as read."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_queue = tma_api._queue_tma_write_approval
+    orig_claim_execute = tma_api._claim_and_execute_approval
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_get_record = lambda table, rid: create_test_task(
+        record_id=rid, owner_record_ids=(), status=TaskStatus.PENDING,
+    )
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: [
+        {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}
+    ]
+
+    posted = []
+    tma_api._queue_tma_write_approval, tma_api._claim_and_execute_approval = _fake_owner_autoapprove_gateway(posted)
+
+    try:
+        r = client.patch("/api/tasks/rec_unowned", json={"status": "done"}, headers=_HDR)
+        assert r.status_code == 200
+        assert len(posted) == 1
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._queue_tma_write_approval = orig_queue
+        tma_api._claim_and_execute_approval = orig_claim_execute
+        owner_resolution.list_records = orig_list_records
+
+
+def test_route_patch_task_status_nonexistent_task_returns_404():
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_queue = tma_api._queue_tma_write_approval
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_get_record = lambda table, rid: None
+
+    called = []
+    tma_api._queue_tma_write_approval = lambda *a, **kw: called.append(1) or ("", {}, 202)
+
+    try:
+        r = client.patch("/api/tasks/rec_missing", json={"status": "done"}, headers=_HDR)
+        assert r.status_code == 404
+        assert called == [], "gateway must never be called for a nonexistent task"
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._queue_tma_write_approval = orig_queue
+
+
+def test_route_patch_task_status_unauthenticated_request_fails():
+    """No X-Telegram-Init-Data header at all -> 401, before any route logic."""
+    client = _make_client()
+    r = client.patch("/api/tasks/rec_001", json={"status": "done"})
+    assert r.status_code == 401
+
+
+def test_route_patch_task_status_invalid_initdata_fails():
+    orig_validate = tma_api._validate_initdata
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: None  # HMAC check fails
+    try:
+        r = client.patch("/api/tasks/rec_001", json={"status": "done"}, headers=_HDR)
+        assert r.status_code == 401
+    finally:
+        tma_api._validate_initdata = orig_validate
+
+
+def test_route_patch_task_status_non_owner_role_returns_403():
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "222222"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="partner", role=Role.PARTNER)
+
+    try:
+        r = client.patch("/api/tasks/rec_001", json={"status": "done"}, headers=_HDR)
+        assert r.status_code == 403
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+
+
+def test_route_patch_task_status_invalid_status_returns_400():
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+
+    called = []
+    tma_api._at_get_record = lambda table, rid: called.append(1) or None
+
+    try:
+        r = client.patch("/api/tasks/rec_001", json={"status": "archived"}, headers=_HDR)
+        assert r.status_code == 400
+        assert called == [], "status must be validated before touching Airtable at all"
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+
+
+def test_route_patch_task_status_missing_status_returns_400():
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+
+    try:
+        r = client.patch("/api/tasks/rec_001", json={}, headers=_HDR)
+        assert r.status_code == 400
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+
+
+def test_route_patch_task_status_backend_write_failure_does_not_report_success():
+    """The ActionGateway execution itself fails (e.g. the Airtable PATCH
+    failed) -- the route must surface the failure, never a 2xx/'executed'
+    response. Truth-gate: no persistence confirmation, no success claim."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_queue = tma_api._queue_tma_write_approval
+    orig_claim_execute = tma_api._claim_and_execute_approval
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    tma_api._at_get_record = lambda table, rid: create_test_task(
+        record_id=rid, owner_record_ids=(OWNER_RECORD_ID,), status=TaskStatus.PENDING,
+    )
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: [
+        {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}
+    ]
+
+    def fake_queue(action, payload, identity, label):
+        return "fake_approval_2", {
+            "status": "pending_approval", "approval_id": "fake_approval_2", "contract_id": "fake_contract_2",
+        }, 202
+
+    def fake_claim_execute(approval_id, identity):
+        # Mirrors a real Airtable-patch failure surfaced by tools.approval_actions.tma_write:
+        # ok=False, no execution_result -- _queue_or_owner_execute must relay this as a
+        # failure, not synthesize a success.
+        return {"ok": False, "error": "execution failed", "status_code": 500}
+
+    tma_api._queue_tma_write_approval = fake_queue
+    tma_api._claim_and_execute_approval = fake_claim_execute
+
+    try:
+        r = client.patch("/api/tasks/rec_001", json={"status": "done"}, headers=_HDR)
+        body = r.get_json()
+        assert r.status_code == 500
+        assert body.get("ok") is not True
+        assert body.get("status") != "executed"
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._queue_tma_write_approval = orig_queue
+        tma_api._claim_and_execute_approval = orig_claim_execute
+        owner_resolution.list_records = orig_list_records
+
+
+def test_task_marked_done_no_longer_returned_by_my_work_read():
+    """End-to-end server-side closure proof: PATCH a Task to done, then
+    GET /api/owner/my-work against the (now-persisted) updated record --
+    the Task must be absent, per the existing done-task exclusion rule."""
+    orig_validate = tma_api._validate_initdata
+    orig_resolve = tma_api.resolve_identity
+    orig_get_record = tma_api._at_get_record
+    orig_queue = tma_api._queue_tma_write_approval
+    orig_claim_execute = tma_api._claim_and_execute_approval
+    orig_at_list = tma_api._at_list
+    import core.owner_resolution as owner_resolution
+    orig_list_records = owner_resolution.list_records
+
+    client = _make_client()
+    tma_api._validate_initdata = lambda s: {"id": "999999"}
+    tma_api.resolve_identity = lambda ch, tid: create_test_identity(user_id="eliyahu", role=Role.OWNER)
+    owner_resolution.list_records = lambda table, formula="", max_records=50, paginate=True: [
+        {"id": OWNER_RECORD_ID, "fields": {ProfileFields.NAME: "Eliyahu"}}
+    ]
+
+    # Shared mutable "persisted" store, mutated by the fake execution below --
+    # simulates the real Airtable row actually changing underneath the PATCH.
+    store = {
+        "rec_001": create_test_task(record_id="rec_001", owner_record_ids=(OWNER_RECORD_ID,), status=TaskStatus.PENDING),
+    }
+    tma_api._at_get_record = lambda table, rid: store.get(rid)
+    tma_api._at_list = lambda table, formula="", max_records=50, strict=False: list(store.values())
+
+    def fake_queue(action, payload, identity, label):
+        return "fake_approval_3", {
+            "status": "pending_approval", "approval_id": "fake_approval_3", "contract_id": "fake_contract_3",
+        }, 202
+
+    def fake_claim_execute(approval_id, identity):
+        # Simulate the real write: tools.approval_actions.tma_write() applying
+        # the PATCH to the (fake) persisted Airtable record.
+        store["rec_001"]["fields"][TaskFields.STATUS] = TaskStatus.DONE
+        return {
+            "ok": True, "status_code": 200, "new_status": "approved",
+            "action_label": "test", "ctx_id": "", "bus_synced": False,
+            "execution_result": {"message": "✅", "contract_status": "executed"},
+        }
+
+    tma_api._queue_tma_write_approval = fake_queue
+    tma_api._claim_and_execute_approval = fake_claim_execute
+
+    try:
+        patch_resp = client.patch("/api/tasks/rec_001", json={"status": "done"}, headers=_HDR)
+        assert patch_resp.status_code == 200
+
+        my_work_resp = client.get("/api/owner/my-work", headers=_HDR)
+        body = my_work_resp.get_json()
+        stable_keys = [t["stable_key"] for t in body["immediate"] + body["upcoming"]]
+        assert "rec_001" not in stable_keys
+    finally:
+        tma_api._validate_initdata = orig_validate
+        tma_api.resolve_identity = orig_resolve
+        tma_api._at_get_record = orig_get_record
+        tma_api._queue_tma_write_approval = orig_queue
+        tma_api._claim_and_execute_approval = orig_claim_execute
+        tma_api._at_list = orig_at_list
+        owner_resolution.list_records = orig_list_records
+
+
 if __name__ == "__main__":
     import subprocess
     subprocess.run(["python3", "-m", "pytest", __file__, "-v"], check=True)
