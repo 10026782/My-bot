@@ -25,6 +25,35 @@ exercised against live Airtable/Render. No other My Work-1 scope item
 (Leads/Ventures/Approvals aggregation, Manager/Partner view, Task Detail,
 bulk actions) is touched.
 
+## Payment Term → Charge routing fix (BUG-CHARGE-TERM-BYPASS) — 13/09/2026
+
+Production canary: a term-based Charge request ("עמלת פוסידון — 10%...",
+basis 23,418.15) was queued as the generic `crm_create_charge` with the raw
+basis mapped straight onto `amount`, bypassing the `crm_create_charge_from_term`
+writer PR #1223 (below) had already added but never wired into the
+deterministic completion router. Root cause: `commercial_completion_routing.py`
+had no completion entity for a term-based Charge (only the generic `"charge"`
+contract, which asks for a raw Amount/Currency and never resolves a Payment
+Term), and `core/router/router.py` had only one `Intent.CREATE_CHARGE` for
+both manual and term-based requests. Fixed on this branch (PR #1225): new
+`Intent.CREATE_CHARGE_FROM_TERM` (the default for a bare charge command; the
+generic/manual intent now requires an explicit manual/direct qualifier), a
+new `"charge_from_term"` completion entity (Deal + Payment Term mandatory,
+Lead optional, asks for a calculation basis only when the resolved Term's
+own calc type needs one, never Amount/Currency), and a read-only Term-context
+resolution step in `commercial_completion_routing.py` that fails closed
+(never falls back to the generic tool) if the Term can't be read or belongs
+to a different Deal. Also fixed a separate pre-existing defect surfaced
+while tracing this: `core/router/router.py`'s low-confidence CLARIFY
+fallback was silently reversing every S2C commercial-completion intent's
+`Handler.TOOL` decision back to `CLARIFY` (the generic keyword classifier has
+no pattern at all for Payment Term/Organization/Charge/ChargePayment
+phrasing), making the whole completion family other than Deal/Task
+unreachable from a live text message before this fix. `CODE_DONE +
+STATIC_VERIFIED` (57/57 router table tests, 44 new/updated completion-router
+and writer tests, full existing suite green); not yet merged, deployed, or
+runtime-canary-verified.
+
 ## Payment Term → Charge materialization — 08/09/2026
 
 PR #1223 adds the governed static path `crm_create_charge_from_term`:

@@ -1362,6 +1362,9 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
     elif tool_name == "crm_create_charge":
         amount = payload.get("amount")
         description = "יצירת חיוב" + (f": {amount}" if amount not in (None, "") else "")
+    elif tool_name == "crm_create_charge_from_term":
+        basis_value = payload.get("basis_value")
+        description = "יצירת חיוב מתנאי תשלום" + (f": בסיס {basis_value}" if basis_value not in (None, "") else "")
     elif tool_name == "crm_create_charge_payment":
         amount = payload.get("amount")
         description = "רישום תשלום על חיוב" + (f": {amount}" if amount not in (None, "") else "")
