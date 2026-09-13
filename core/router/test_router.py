@@ -174,6 +174,26 @@ TESTS = [
         "צור עסקה בשם רכישת ציוד בתחום יבוא",
         "telegram", "lead", "", Intent.CREATE_DEAL, RouterDomain.IMPORT, Handler.AGENT,
     ),
+
+    # ── BUG-CHARGE-TERM-BYPASS: "צור חיוב" alone must resolve against an
+    # existing Payment Term (crm_create_charge_from_term) — the generic/
+    # manual writer (crm_create_charge) is reachable ONLY via an explicit
+    # "ידני"/"ישיר"/"manual"/"direct" qualifier. ─────────────────────────
+    (
+        "CREATE_CHARGE bare phrase → term-based intent by default",
+        "צור חיוב",
+        "telegram", "owner", "", Intent.CREATE_CHARGE_FROM_TERM, RouterDomain.GENERAL, Handler.TOOL,
+    ),
+    (
+        "CREATE_CHARGE with explicit manual qualifier → generic/manual intent",
+        "צור חיוב ידני",
+        "telegram", "owner", "", Intent.CREATE_CHARGE, RouterDomain.GENERAL, Handler.TOOL,
+    ),
+    (
+        "CREATE_CHARGE with explicit direct/English qualifier → generic/manual intent",
+        "תוסיף charge direct",
+        "telegram", "owner", "", Intent.CREATE_CHARGE, RouterDomain.GENERAL, Handler.TOOL,
+    ),
 ]
 
 

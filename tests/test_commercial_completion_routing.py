@@ -1,8 +1,10 @@
 """S2C deterministic completion routing contract tests."""
 
+from unittest.mock import patch
+
 from airtable_schema import (
     CommercialStatus, Currency, DealType, Direction, EstimatedValueBasis,
-    EstimatedValueRange, RelationshipType,
+    EstimatedValueRange, PaymentTermCalcType, PaymentTermFields, RelationshipType,
 )
 from commercial_completion_routing import (
     CommercialCompletionRouter,
@@ -39,7 +41,7 @@ def test_supported_entities_have_one_canonical_primitive_each():
     assert set(MUTATION_TOOLS.values()) == {
         "crm_create_deal", "crm_create_payment_term",
         "crm_find_or_create_organization", "crm_find_or_create_contact",
-        "crm_create_charge", "crm_create_charge_payment",
+        "crm_create_charge", "crm_create_charge_from_term", "crm_create_charge_payment",
     }
 
 
@@ -430,3 +432,122 @@ def test_resume_nested_never_raises_on_malformed_state():
     )
     assert outcome.status == "mismatch"
     assert outcome.reason
+
+
+# ── BUG-CHARGE-TERM-BYPASS regression: a Charge request based on an existing
+# Payment Term must route only through "charge_from_term" -> crm_create_
+# charge_from_term, never through the generic "charge" entity's raw
+# amount/currency questions. See commercial_completion.py's "charge_from_term"
+# EntityContract and commercial_completion_routing.py's
+# _apply_charge_from_term_context() for the mechanism under test.
+
+DEAL_ID = "rec" + "A1" * 7          # 17-char canonical record id shape
+TERM_ID = "rec" + "B2" * 7
+OTHER_DEAL_ID = "rec" + "C3" * 7
+LEAD_ID = "rec" + "D4" * 7
+
+
+def _term_fields(calc_type=PaymentTermCalcType.PERCENTAGE, deal_id=DEAL_ID):
+    return {
+        PaymentTermFields.DEAL: [deal_id],
+        PaymentTermFields.CALC_TYPE_CODE: calc_type,
+        PaymentTermFields.RATE_PCT: 10,
+        PaymentTermFields.CURRENCY: Currency.ILS,
+    }
+
+
+def _start_charge_from_term(*, deal_id=DEAL_ID, term_id=TERM_ID, lead_id=None):
+    queued = []
+    router = CommercialCompletionRouter(
+        queue=lambda tool, payload, continuation_hint=None: queued.append((tool, payload))
+    )
+    values = {"deal": deal_id, "billing_term": term_id}
+    if lead_id:
+        values["lead"] = lead_id
+    result = router.start("charge_from_term", current_values=values)
+    return router, result, queued
+
+
+def test_charge_from_term_percentage_term_asks_basis_not_amount():
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=_term_fields()):
+        _, result, queued = _start_charge_from_term()
+    assert result.outcome == "CLARIFY"
+    assert result.field_name == "basis_value"
+    assert result.prompt == "מה בסיס החישוב לעמלה?"
+    assert "מה הסכום" not in result.prompt
+    assert queued == []
+
+
+def test_charge_from_term_fixed_term_never_asks_for_a_basis():
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=_term_fields(calc_type=PaymentTermCalcType.FIXED)):
+        _, result, queued = _start_charge_from_term()
+    assert result.outcome == "TOOL"
+    assert result.tool_name == "crm_create_charge_from_term"
+    assert "basis_value" not in result.tool_inputs
+    assert queued and queued[0][0] == "crm_create_charge_from_term"
+
+
+def test_charge_from_term_entity_never_has_a_currency_field():
+    # The Term already carries its own Currency — crm_create_charge_from_term
+    # reads it directly from the resolved Term, never from the user, so the
+    # completion contract must not even declare a "currency" field to ask.
+    from commercial_completion import ENTITY_CONTRACTS
+    field_names = {f.field_name for f in ENTITY_CONTRACTS["charge_from_term"].fields}
+    assert "currency" not in field_names
+    assert "amount" not in field_names
+
+
+def test_charge_from_term_unresolved_term_fails_closed_never_falls_back():
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=None):
+        _, result, queued = _start_charge_from_term()
+    assert result.outcome == "BLOCK"
+    assert queued == []
+
+
+def test_charge_from_term_unreadable_term_fails_closed():
+    with patch("tools.airtable_read_adapter.get_record_fields", side_effect=RuntimeError("boom")):
+        _, result, queued = _start_charge_from_term()
+    assert result.outcome == "BLOCK"
+    assert queued == []
+
+
+def test_charge_from_term_belonging_to_another_deal_is_rejected():
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=_term_fields(deal_id=OTHER_DEAL_ID)):
+        _, result, queued = _start_charge_from_term(deal_id=DEAL_ID)
+    assert result.outcome == "BLOCK"
+    assert queued == []
+
+
+def test_charge_from_term_basis_value_is_never_mapped_to_amount():
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=_term_fields()):
+        router, result, queued = _start_charge_from_term()
+        assert result.outcome == "CLARIFY" and result.field_name == "basis_value"
+        final = router.answer(result.session, "basis_value", 23418.15)
+    assert final.outcome == "TOOL"
+    assert final.tool_name == "crm_create_charge_from_term"
+    assert final.tool_inputs["basis_value"] == 23418.15
+    assert "amount" not in final.tool_inputs
+    assert queued and queued[0][0] == "crm_create_charge_from_term"
+    assert queued[0][1]["basis_value"] == 23418.15
+    assert "amount" not in queued[0][1]
+
+
+def test_charge_from_term_optional_lead_omitted_when_absent():
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=_term_fields(calc_type=PaymentTermCalcType.FIXED)):
+        _, result, _ = _start_charge_from_term()
+    assert result.outcome == "TOOL"
+    assert "lead_id" not in result.tool_inputs
+
+
+def test_charge_from_term_optional_lead_included_when_supplied():
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=_term_fields(calc_type=PaymentTermCalcType.FIXED)):
+        _, result, _ = _start_charge_from_term(lead_id=LEAD_ID)
+    assert result.outcome == "TOOL"
+    assert result.tool_inputs.get("lead_id") == LEAD_ID
+
+
+def test_charge_from_term_deal_and_billing_term_are_mandatory():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    result = router.start("charge_from_term", current_values={})
+    assert result.outcome == "CLARIFY"
+    assert result.field_name == "deal"

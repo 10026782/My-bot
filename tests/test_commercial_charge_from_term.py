@@ -69,6 +69,41 @@ def test_provider_and_readback_failures_are_not_success():
     assert not mismatch["ok"]
 
 
+def test_optional_lead_omitted_does_not_block_creation():
+    # BUG-CHARGE-TERM-BYPASS invariant #9: Lead is optional for this writer —
+    # an absent lead_id must never be treated as an invalid/missing Lead
+    # record, must never block creation, and must never fail the read-back
+    # verification (which only asserts Lead linkage when one was supplied).
+    data = {
+        (Tables.DEALS, DEAL): {"Domain": "saas"},
+        (Tables.PAYMENT_TERMS, TERM): {
+            PaymentTermFields.DEAL: [DEAL], PaymentTermFields.CALC_TYPE: "fixed",
+            PaymentTermFields.FIXED_AMOUNT: 100, PaymentTermFields.VAT_RULE: "none",
+        },
+    }
+    charge_result = {"ok": True, "external_id": "C", "evidence": {}}
+
+    def get_fields(table, record_id):
+        return data[(table, record_id)]
+
+    def readback():
+        fields = {
+            ChargeFields.DEAL: [DEAL], ChargeFields.BILLING_TERM: [TERM],
+            ChargeFields.REFERENCE: create.call_args.kwargs["reference"],
+            ChargeFields.AMOUNT: create.call_args.kwargs["amount"],
+        }
+        return {"id": "C", "fields": fields}
+
+    with patch.object(crm, "get_record_fields", side_effect=get_fields), \
+         patch.object(crm, "list_records", return_value=[]), \
+         patch.object(crm, "create_charge", return_value=charge_result) as create, \
+         patch.object(crm, "get_record", side_effect=lambda *_: readback()):
+        result = crm.crm_create_charge_from_term(TERM, DEAL, "")
+
+    assert result["ok"]
+    assert create.call_args.kwargs["lead_id"] == ""
+
+
 def test_action_gateway_approval_reaches_dispatcher():
     ledger = ExecutionLedger()
     gateway = ActionGateway(ledger=ledger)

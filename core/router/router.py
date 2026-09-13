@@ -418,7 +418,16 @@ def parse_deterministic_create_deal(text: str) -> DeterministicDealParse:
 _COMMERCIAL_COMPLETION_PREFIXES = (
     (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:תנאי\s+תשלום|payment\s+term)", Intent.CREATE_PAYMENT_TERM),
     (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:ארגון|organization)", Intent.CREATE_ORGANIZATION),
-    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:חיוב|charge)", Intent.CREATE_CHARGE),
+    # BUG-CHARGE-TERM-BYPASS (production-reported): "צור חיוב" alone must
+    # resolve against an existing Payment Term — the ONLY safe default,
+    # never the generic/manual writer, which asks for a raw amount and can
+    # silently treat a calculation basis as the final Charge. The manual/
+    # direct path is reachable only via an EXPLICIT qualifier ("ידני"/
+    # "ישיר"/"manual"/"direct") and must therefore be matched first, since
+    # both regexes would otherwise match a manual-qualified message and
+    # list order decides which Intent wins.
+    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:חיוב|charge)\s+(?:ידני|ישיר|manual|direct)\b", Intent.CREATE_CHARGE),
+    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:חיוב|charge)", Intent.CREATE_CHARGE_FROM_TERM),
     (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:תשלום\s+לחיוב|charge\s+payment)", Intent.CREATE_CHARGE_PAYMENT),
 )
 
@@ -550,12 +559,28 @@ def route_request(
     if (
         intent in (
             Intent.CREATE_PAYMENT_TERM, Intent.CREATE_ORGANIZATION,
-            Intent.CREATE_CHARGE, Intent.CREATE_CHARGE_PAYMENT,
+            Intent.CREATE_CHARGE, Intent.CREATE_CHARGE_FROM_TERM,
+            Intent.CREATE_CHARGE_PAYMENT,
         )
         and _commercial_completion_intent.certain
         and identity.role not in ("lead", "guest", "readonly")
     ):
         risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
+        # BUG-CHARGE-TERM-BYPASS audit finding: intent_router.detect_intent()
+        # has NO pattern at all for any of these five S2C entity phrases
+        # (unlike CREATE_TASK/CREATE_DEAL, which the generic classifier
+        # already recognizes on its own) — `confidence` above is therefore
+        # always 0.0 for the anchored S2C prefix that just won this
+        # deterministic override. Left unrefreshed, the later
+        # "risk == NEEDS_APPROVAL and confidence < 0.85" edge-case gate
+        # (below) silently reverses this Handler.TOOL decision back to
+        # Handler.CLARIFY on every single call — i.e. this whole deterministic
+        # completion family (Payment Term/Organization/Charge/Charge-from-
+        # Term/ChargePayment) was unreachable from a live text message before
+        # this fix, regardless of which entity/tool it targets. The anchored
+        # regex match IS the confidence signal for this deterministic path;
+        # it needs no corroboration from the generic keyword classifier.
+        confidence = 1.0
 
     # 4b. Capture Policy (Stage 3 / C89 integration) — observability only.
     # Gate is identity.is_internal alone, with NO intent filter — this must
@@ -682,7 +707,8 @@ def route_request(
 
     elif intent in (
         Intent.CREATE_PAYMENT_TERM, Intent.CREATE_ORGANIZATION,
-        Intent.CREATE_CHARGE, Intent.CREATE_CHARGE_PAYMENT,
+        Intent.CREATE_CHARGE, Intent.CREATE_CHARGE_FROM_TERM,
+        Intent.CREATE_CHARGE_PAYMENT,
     ) and not _commercial_completion_intent.certain:
         handler = Handler.CLARIFY
         tool_allowed = False

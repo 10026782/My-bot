@@ -2,14 +2,23 @@
 
 This module is deliberately an adapter around :mod:`commercial_completion`.
 It owns deterministic recognition/orchestration and hands a complete,
-validated payload to the existing approval queue.  It does not import an
-Airtable client, a generic mutation helper, or an ActionGateway implementation;
-the caller supplies the already-existing queue boundary.
+validated payload to the existing approval queue.  It does not import a
+generic mutation helper or an ActionGateway implementation; the caller
+supplies the already-existing queue boundary.
+
+BUG-CHARGE-TERM-BYPASS exception: the "charge_from_term" entity's own
+Conditional field ("basis_value" is required only for a Term whose
+calculation type actually needs one) depends on the LIVE Payment Term record,
+which no user answer ever carries directly. `_apply_charge_from_term_context`
+below is therefore a narrow, deliberate, read-only exception to "does not
+import an Airtable client" — scoped to exactly one field, never a write, and
+never a substitute for the writer's own re-verification at execution time.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping
 
 from commercial_completion import (
@@ -20,11 +29,12 @@ from commercial_completion import (
 )
 from airtable_schema import (
     ChargeFields, ContactFields, DealFields, OrganizationFields, PaymentFields, PaymentTermFields,
+    Tables,
 )
 
 
 SUPPORTED_COMPLETION_ENTITIES = frozenset(
-    {"deal", "payment_term", "organization", "charge", "payment"}
+    {"deal", "payment_term", "organization", "charge", "charge_from_term", "payment"}
 )
 # DIAMOND PATH nested-entity approval continuation (owner decision):
 # "contact" is deliberately NOT in this set and must never be added to it —
@@ -40,6 +50,11 @@ MUTATION_TOOLS = {
     "payment_term": "crm_create_payment_term",
     "organization": "crm_find_or_create_organization",
     "charge": "crm_create_charge",
+    # BUG-CHARGE-TERM-BYPASS: the ONLY tool a term-based Charge intent may
+    # ever be queued against — see "charge_from_term"'s own EntityContract
+    # docstring in commercial_completion.py for why it is a distinct entity
+    # from "charge" above, never a variant of it.
+    "charge_from_term": "crm_create_charge_from_term",
     "payment": "crm_create_charge_payment",
     # DIAMOND PATH: nested-only, see the SUPPORTED_COMPLETION_ENTITIES note above.
     "contact": "crm_find_or_create_contact",
@@ -151,6 +166,65 @@ def _link_id(value: Any) -> str:
     return str(value or "").strip()
 
 
+_TERM_RECORD_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
+
+
+def _contains_record_id(value: Any, record_id: str) -> bool:
+    if isinstance(value, (list, tuple)):
+        return any(str(item).strip() == record_id for item in value)
+    return str(value or "").strip() == record_id
+
+
+def _apply_charge_from_term_context(session: CompletionSession):
+    """BUG-CHARGE-TERM-BYPASS: once "billing_term" resolves to a real Payment
+    Term record id, read that Term (read-only, best-effort) to learn its
+    calculation type — the only way "basis_value"'s Conditional requirement
+    can ever be evaluated (a Fixed Term is never asked for one; percentage/
+    per_unit/usage_based/tiered/custom Terms are). Also rejects, fail-closed,
+    a Term that does not belong to the already-resolved Deal, and fails
+    closed (never silently falls through to the generic "charge" entity) if
+    the Term cannot be read at all. Returns the session unchanged for every
+    other entity, and a no-op if the context was already injected once.
+    """
+    writer = session.active
+    if writer.target_entity != "charge_from_term":
+        return session
+    current = dict(writer.current_values)
+    term_id = str(current.get("billing_term") or "").strip()
+    if not term_id or current.get("term_calc_type") is not None:
+        return session
+    if not _TERM_RECORD_ID_RE.fullmatch(term_id):
+        return CompletionRoute(
+            "BLOCK", "charge_from_term", session=session,
+            reason="לא ניתן היה לזהות את תנאי התשלום (Payment Term). נא לזהות תנאי תשלום קיים ותקין.",
+        )
+    try:
+        from tools.airtable_read_adapter import get_record_fields
+        term_fields = get_record_fields(Tables.PAYMENT_TERMS, term_id)
+    except Exception:
+        term_fields = None
+    if not term_fields:
+        return CompletionRoute(
+            "BLOCK", "charge_from_term", session=session,
+            reason="לא ניתן היה לאמת את תנאי התשלום שנבחר. נא לזהות תנאי תשלום קיים ותקין.",
+        )
+    deal_id = str(current.get("deal") or "").strip()
+    if deal_id and not _contains_record_id(term_fields.get(PaymentTermFields.DEAL), deal_id):
+        return CompletionRoute(
+            "BLOCK", "charge_from_term", session=session,
+            reason="תנאי התשלום שצוין שייך לעסקה אחרת ולא לעסקה הנוכחית; לא ניתן להשתמש בו כאן.",
+        )
+    calc_type = (
+        term_fields.get(PaymentTermFields.CALC_TYPE_CODE)
+        or term_fields.get(PaymentTermFields.CALC_TYPE, "")
+    )
+    from commercial_completion import _CompletionFrame
+    new_writer = replace(writer, current_values={**current, "term_calc_type": calc_type})
+    frames = list(session.frames)
+    frames[-1] = replace(frames[-1], writer=new_writer)
+    return CompletionSession(tuple(frames))
+
+
 def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Translate one canonical completion payload to the exact primitive API.
 
@@ -241,6 +315,23 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
             "Promised Payment Amount": "promised_payment_amount", "Notes": "notes",
         }
         result.update({arg: _link_id(p[name]) if name == "Billing Term" else p[name] for name, arg in mapping.items() if name in p})
+        return result
+    if entity == "charge_from_term":
+        # BUG-CHARGE-TERM-BYPASS: "basis_value" (a calculation INPUT) is
+        # passed through by its own name, on its own key — never renamed to
+        # "amount", and never mixed with the Term-derived Direction/Currency/
+        # VAT/Amount that crm_create_charge_from_term computes itself from
+        # the resolved Term. "lead_id" is genuinely optional here (per-
+        # business decision: Lead attribution only when supplied) — omitted
+        # entirely rather than sent as an empty string when absent.
+        result = {
+            "deal_id": _link_id(p["deal_id"]),
+            "payment_term_id": _link_id(p["payment_term_id"]),
+        }
+        if p.get("lead_id"):
+            result["lead_id"] = _link_id(p["lead_id"])
+        if "basis_value" in p:
+            result["basis_value"] = p["basis_value"]
         return result
     if entity == "contact":
         # DIAMOND PATH nested-entity approval continuation: contact is never
@@ -533,6 +624,7 @@ class CommercialCompletionRouter:
             "counterparty_contact": "contact",
             "counterparty_organization": "organization",
             "origin_lead": "lead",
+            "lead": "lead",
             "owner": "owner",
             "deal": "deal",
             "billing_term": "payment_term",
@@ -624,6 +716,10 @@ class CommercialCompletionRouter:
         )
 
     def _inspect(self, session: CompletionSession) -> CompletionRoute:
+        contextualized = _apply_charge_from_term_context(session)
+        if isinstance(contextualized, CompletionRoute):
+            return contextualized
+        session = contextualized
         writer = session.active
         field = writer.next_field()
         if field is not None:

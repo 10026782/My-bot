@@ -147,6 +147,14 @@ _LABELS = {
     "payment_term": ("תנאי תשלום", "לאיזה תנאי תשלום זה משויך?"),
     "direction": ("כיוון תשלום", "זה תשלום שמתקבל או שמשולם?"),
     "amount": ("סכום", "מה הסכום?"),
+    # BUG-CHARGE-TERM-BYPASS: the term-based Charge completion ("charge_from_
+    # term") asks about the CALCULATION BASIS, never the final amount — the
+    # final amount is always computed from the resolved Payment Term's own
+    # rate/basis, never typed by the user. Deliberately distinct wording from
+    # "amount" above (kept for the separate, explicitly-manual "charge"
+    # entity) so the two flows can never be confused for one another.
+    "basis_value": ("בסיס חישוב", "מה בסיס החישוב לעמלה?"),
+    "lead": ("ליד", "לאיזה ליד זה משויך? (אופציונלי)"),
     "calculation_type": ("שיטת חישוב", "איך מחשבים את הסכום?"),
     "fixed_amount": ("סכום קבוע", "מה הסכום הקבוע?"),
     "rate_pct": ("אחוז", "מה האחוז?"),
