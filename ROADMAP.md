@@ -2,6 +2,29 @@
 
 עודכן: 13/09/2026
 
+## My Work-1 — canonical Task status mutation — 13/09/2026
+
+PR #1226 closes the single release blocker found by the My Work-1 closure
+audit on this branch: no Task-status write path existed anywhere in the
+stack (`GET /api/owner/my-work` was read-only; no `PATCH /api/tasks/<id>`
+or equivalent existed). Adds exactly that one endpoint, scoped to My
+Work-1's minimum need (mark a Task done), reusing the existing
+ActionGateway write pipeline (`_queue_or_owner_execute` /
+`tools.approval_actions.tma_write`) rather than a parallel writer.
+Authorization is per-Task-owner (Profile-linked `Owner`, same rule the
+read path already uses), not merely role-based — a Task record ID alone
+is never sufficient. `MyWork.tsx` gets one "סמן כבוצע" button per card,
+refetching from the server on confirmed success and never claiming
+success before persistence. 11 new backend tests cover authorization,
+ownership isolation, the 404/400/401/403 paths, write-failure
+truth-gating, and a full mark-done → `GET /api/owner/my-work` exclusion
+proof; all pass locally alongside the pre-existing suite (39/39), plus
+`smoke_tests.py` and a clean frontend `tsc && vite build`. This is
+`CODE_DONE + STATIC_VERIFIED` only — not yet merged, deployed, or
+exercised against live Airtable/Render. No other My Work-1 scope item
+(Leads/Ventures/Approvals aggregation, Manager/Partner view, Task Detail,
+bulk actions) is touched.
+
 ## Payment Term → Charge routing fix (BUG-CHARGE-TERM-BYPASS) — 13/09/2026
 
 Production canary: a term-based Charge request ("עמלת פוסידון — 10%...",

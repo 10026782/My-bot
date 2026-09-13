@@ -214,6 +214,15 @@ export async function fetchMyWork(): Promise<MyWorkResponse> {
   return r.json() as Promise<MyWorkResponse>;
 }
 
+export async function updateTaskStatus(taskId: string, status: "done"): Promise<void> {
+  const r = await fetch(`${BASE}/api/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!r.ok) await throwApiError(r, `Task update failed (${r.status})`);
+}
+
 export async function emergencyStop(action: string): Promise<void> {
   const r = await fetch(`${BASE}/api/health/emergency`, {
     method: "POST",

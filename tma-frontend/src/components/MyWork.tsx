@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { fetchMyWork } from "../api";
-import type { MyWorkResponse } from "../types";
+import { fetchMyWork, updateTaskStatus } from "../api";
+import type { MyWorkResponse, TaskWorkItem } from "../types";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 
@@ -13,23 +13,46 @@ type State =
   | { status: "ok"; data: MyWorkResponse }
   | { status: "error"; code?: number; message: string };
 
-function TaskCard({ title, description, dueDate, domain, overdue }: { title: string; description: string; dueDate: string | null; domain: string; overdue: boolean }) {
+function TaskCard({
+  task,
+  isUpdating,
+  errorMessage,
+  onMarkDone,
+}: {
+  task: TaskWorkItem;
+  isUpdating: boolean;
+  errorMessage?: string;
+  onMarkDone: () => void;
+}) {
   return (
     <div className="bg-white rounded-lg shadow-sm p-4 mb-3">
       <div className="flex items-start gap-2 mb-2">
-        {overdue && (
+        {task.overdue && (
           <span className="inline-block bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded">דחוף</span>
         )}
-        {domain && (
-          <span className="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">{domain}</span>
+        {task.domain && (
+          <span className="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">{task.domain}</span>
         )}
       </div>
-      <h3 className="text-base font-semibold text-gray-900 mb-1">{title}</h3>
-      {description && (
-        <p className="text-sm text-gray-600 mb-2 line-clamp-2">{description}</p>
+      <h3 className="text-base font-semibold text-gray-900 mb-1">{task.title}</h3>
+      {task.description && (
+        <p className="text-sm text-gray-600 mb-2 line-clamp-2">{task.description}</p>
       )}
-      {dueDate && (
-        <p className="text-xs text-gray-400">📅 {dueDate}</p>
+      {task.due_date && (
+        <p className="text-xs text-gray-400 mb-2">📅 {task.due_date}</p>
+      )}
+      {task.actionable && (
+        <button
+          type="button"
+          onClick={onMarkDone}
+          disabled={isUpdating}
+          className="w-full mt-1 py-2 rounded-md bg-green-50 text-green-700 text-sm font-semibold active:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isUpdating ? "מעדכן…" : "✓ סמן כבוצע"}
+        </button>
+      )}
+      {errorMessage && (
+        <p className="text-xs text-red-600 mt-2">⚠️ {errorMessage}</p>
       )}
     </div>
   );
@@ -37,8 +60,10 @@ function TaskCard({ title, description, dueDate, domain, overdue }: { title: str
 
 export function MyWork({ onBack }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [updatingKey, setUpdatingKey] = useState<string | null>(null);
+  const [taskErrors, setTaskErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => {
+  const load = () => {
     fetchMyWork()
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => {
@@ -49,7 +74,33 @@ export function MyWork({ onBack }: Props) {
           message: error.message,
         });
       });
+  };
+
+  useEffect(() => {
+    load();
   }, []);
+
+  const handleMarkDone = (task: { stable_key: string }) => {
+    if (updatingKey) return; // one in-flight mutation at a time — prevents duplicate clicks
+    setUpdatingKey(task.stable_key);
+    setTaskErrors((prev) => {
+      const { [task.stable_key]: _drop, ...rest } = prev;
+      return rest;
+    });
+    updateTaskStatus(task.stable_key, "done")
+      .then(() => {
+        // Backend confirmed persistence — refetch from source of truth
+        // rather than optimistically editing local state.
+        setUpdatingKey(null);
+        load();
+      })
+      .catch((e: unknown) => {
+        const error = e as Error;
+        setUpdatingKey(null);
+        // Keep the task visible; surface the failure, never claim success.
+        setTaskErrors((prev) => ({ ...prev, [task.stable_key]: error.message || "העדכון נכשל" }));
+      });
+  };
 
   if (state.status === "loading") {
     return (
@@ -101,11 +152,10 @@ export function MyWork({ onBack }: Props) {
           {data.immediate.map((task) => (
             <TaskCard
               key={task.stable_key}
-              title={task.title}
-              description={task.description}
-              dueDate={task.due_date}
-              domain={task.domain}
-              overdue={task.overdue}
+              task={task}
+              isUpdating={updatingKey === task.stable_key}
+              errorMessage={taskErrors[task.stable_key]}
+              onMarkDone={() => handleMarkDone(task)}
             />
           ))}
         </div>
@@ -118,11 +168,10 @@ export function MyWork({ onBack }: Props) {
           {data.upcoming.map((task) => (
             <TaskCard
               key={task.stable_key}
-              title={task.title}
-              description={task.description}
-              dueDate={task.due_date}
-              domain={task.domain}
-              overdue={task.overdue}
+              task={task}
+              isUpdating={updatingKey === task.stable_key}
+              errorMessage={taskErrors[task.stable_key]}
+              onMarkDone={() => handleMarkDone(task)}
             />
           ))}
         </div>
