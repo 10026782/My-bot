@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable, Iterable, Mapping
 
+from airtable_schema import ChargeFields, ContactFields, DealFields, OrganizationFields, PaymentTermFields
 from commercial_completion import ENTITY_CONTRACTS, FieldContract, InputType
 from core.draft_fields import FieldMetadata
 from core.router.entity_resolvers import _resolve_bounded_entity, resolve_contact, resolve_deal
@@ -142,7 +143,12 @@ _LABELS = {
     "company": ("חברה", "באיזו חברה?"),
     "role_category": ("קטגוריית תפקיד", "מה קטגוריית התפקיד?"),
     "deal": ("עסקה", "לאיזו עסקה זה משויך?"),
-    "billing_term": ("תנאי תשלום", "לאיזה תנאי תשלום זה משויך?"),
+    # BUG-CHARGE-TERM-BYPASS follow-up (production-reported): "לאיזה תנאי
+    # תשלום זה משויך?" read as asking which existing Charge/Payment Term
+    # *record* a new one should be linked/merged under — semantically wrong
+    # for what this field actually is (picking which Billing Term's
+    # calculation rule to charge against).
+    "billing_term": ("תנאי חיוב", "באיזה תנאי חיוב להשתמש?"),
     "charge": ("חיוב", "לאיזה חיוב זה משויך?"),
     "payment_term": ("תנאי תשלום", "לאיזה תנאי תשלום זה משויך?"),
     "direction": ("כיוון תשלום", "זה תשלום שמתקבל או שמשולם?"),
@@ -247,13 +253,43 @@ def render_counterparty_prompt() -> str:
     return "עם מי העסקה? אפשר לבחור: איש קשר / ארגון."
 
 
+# BUG-CHARGE-TERM-BYPASS follow-up (production-reported): this used to have
+# no entry at all for "deal"/"payment_term"/"charge" — only "contact" had its
+# own branch, and everything else fell into the "organization" candidates
+# tuple ("Organization Name"/"Full Name"/"שם"/"Company"), none of which is
+# DealFields.NAME ("שם העסקה") or PaymentTermFields.NAME ("Name" — distinct
+# from the literal string "Name" match already covered by contact's "שם"
+# alias, but PaymentTermFields.NAME's actual value coincides with the English
+# word "Name" itself, which was never one of the checked keys either). Every
+# Deal/Payment Term candidate therefore fell straight through to the last
+# resort and rendered as a bare "בחירה" button with no visible information —
+# and since this same label is compared against the user's typed query to
+# decide whether a unique match auto-binds, a Deal/Payment Term could never
+# auto-resolve either, no matter how exactly the user named it. Keyed
+# per-entity exactly like commercial_crm.lookup_human_reference()'s own
+# field_by_entity, so the label always reflects the actual field that was
+# searched and returned.
+_ENTITY_PRIMARY_FIELD: dict[str, str] = {
+    "contact": ContactFields.NAME,
+    "organization": OrganizationFields.NAME,
+    "deal": DealFields.NAME,
+    "payment_term": PaymentTermFields.NAME,
+    "charge": ChargeFields.REFERENCE,
+}
+
+
 def _display_label(record: Mapping[str, Any], *, entity: str) -> str:
     fields = record.get("fields") if isinstance(record.get("fields"), Mapping) else record
     if not isinstance(fields, Mapping):
         return "בחירה"
+    primary_field = _ENTITY_PRIMARY_FIELD.get(entity)
+    if primary_field:
+        value = fields.get(primary_field)
+        if value:
+            return str(value)
     candidates = (
-        ("Name", "שם") if entity == "contact" else ("Organization Name", "שם הארגון"),
-        ("Full Name", "שם מלא"), ("שם", "שם"), ("Company", "חברה"),
+        ("Organization Name", "שם הארגון"), ("Full Name", "שם מלא"),
+        ("Name", "שם"), ("שם", "שם"), ("Company", "חברה"),
     )
     for key, _ in candidates:
         value = fields.get(key)

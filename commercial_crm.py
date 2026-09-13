@@ -220,6 +220,7 @@ def calculate_payment(
 
 def lookup_human_reference(
     entity: str, query: str, *, scope: str, identity=None, limit: int = 6,
+    deal_id: str = "",
 ) -> list[dict]:
     """Bounded exact-label lookup for the completion presentation adapter.
 
@@ -237,6 +238,14 @@ def lookup_human_reference(
     read). Missing identity, an unresolvable scope, a blank query, or a
     TenantScopeViolation all fail closed to no results — never the full
     table.
+
+    ``deal_id`` (BUG-CHARGE-TERM-BYPASS follow-up, production-reported):
+    scopes a "payment_term" lookup to Payment Terms actually linked to that
+    Deal, ignored for every other entity. Without it, a same-named Payment
+    Term belonging to a DIFFERENT Deal could resolve or appear as a
+    disambiguation choice — confusing at best (the confirmed cross-Deal
+    write guard in crm_create_charge_from_term() already blocks the write,
+    but only after presenting the wrong Term as if it were a real option).
     """
     table_by_entity = {
         "contact": Tables.CONTACTS, "organization": Tables.ORGANIZATIONS,
@@ -272,16 +281,21 @@ def lookup_human_reference(
         )
     except TenantScopeViolation:
         return []
+    scoped_to_deal = entity == "payment_term" and bool(deal_id)
+    fetch_fields = [field_name, PaymentTermFields.DEAL] if scoped_to_deal else [field_name]
     records = list_records(
         table, secured_params.get("filterByFormula", ""),
-        max_records=limit + 1, fields=[field_name], paginate=False,
+        max_records=limit + 1, fields=fetch_fields, paginate=False,
     )
     matches = []
     for record in records:
         fields = record.get("fields", {})
         label = " ".join(str(fields.get(field_name, "")).casefold().split())
-        if label == needle:
-            matches.append(record)
+        if label != needle:
+            continue
+        if scoped_to_deal and deal_id not in _link_ids(fields.get(PaymentTermFields.DEAL)):
+            continue
+        matches.append(record)
     return matches[:limit]
 
 def find_or_create_organization(

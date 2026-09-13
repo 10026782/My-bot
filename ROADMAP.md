@@ -2,6 +2,33 @@
 
 עודכן: 13/09/2026
 
+## Payment Term → Charge routing: UX/resolution follow-up (BUG-CHARGE-TERM-BYPASS) — 13/09/2026
+
+Live canary after the routing fix above (PR #1225) exposed three follow-on
+defects in the same `charge_from_term` completion flow, all traced to one
+root cause: `commercial_completion_ux.py::_display_label()` had no entry for
+"deal"/"payment_term" at all — every candidate fell through to a hardcoded
+`"בחירה"` ("choice") placeholder with no visible name. Since that same label
+is compared against the user's typed text to decide whether a unique match
+auto-binds, a Deal or Payment Term could never auto-resolve on an exact
+match either, and any disambiguation choice rendered as a blank generic
+button. Fixed by keying `_display_label()` per entity exactly like
+`commercial_crm.lookup_human_reference()`'s own `field_by_entity` (Deal →
+`DealFields.NAME`, Payment Term → `PaymentTermFields.NAME`). Also: the
+`billing_term` prompt ("לאיזה תנאי תשלום זה משויך?", which read as "which
+existing record is this merged into") is now "באיזה תנאי חיוב להשתמש?"; and
+`lookup_human_reference()` gained an optional `deal_id` scope for
+`payment_term` lookups (threaded from the already-resolved Deal via
+`commercial_completion_routing.py::answer_human()` through a `"\x1f"`-suffixed
+scope string, parsed back out in `app.py::_commercial_link_lookup()`) so a
+same-named Term belonging to a different Deal is never offered as a
+disambiguation candidate. End-to-end verified: Deal name → auto-resolved,
+Payment Term name → auto-resolved, only "מה בסיס החישוב לעמלה?" is asked —
+matching the target canary flow exactly. 16 new tests
+(`tests/test_commercial_completion_ux.py`, `tests/test_commercial_completion_routing.py`);
+full existing suite (191 pytest + all standalone scripts) green. Not yet
+merged, deployed, or runtime-canary-verified.
+
 ## My Work-1 — canonical Task status mutation — 13/09/2026
 
 PR #1226 closes the single release blocker found by the My Work-1 closure
