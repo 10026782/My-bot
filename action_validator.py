@@ -43,7 +43,10 @@ _REQUIRED: dict[str, list[str]] = {
     "crm_create_deal":           ["name", "domain", "owner_id"],
     "crm_create_payment_term":   ["deal_id", "calc_type"],
     "crm_create_payment":        ["amount", "domain", "owner_id"],
-    "crm_create_charge_from_term": ["payment_term_id", "deal_id", "lead_id"],
+    # lead_id is deliberately absent: Lead attribution is optional for this
+    # tool (BUG-CHARGE-TERM-BYPASS invariant #9) — Deal and Payment Term
+    # are the only mandatory parents.
+    "crm_create_charge_from_term": ["payment_term_id", "deal_id"],
     "crm_find_or_create_organization": ["organization_name"],
     "crm_find_or_create_contact": ["name"],
     "crm_link_lead_to_deal":     ["lead_id", "deal_id"],

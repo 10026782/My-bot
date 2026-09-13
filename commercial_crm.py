@@ -651,13 +651,18 @@ def create_charge(
 def crm_create_charge_from_term(
     payment_term_id: str,
     deal_id: str,
-    lead_id: str,
+    lead_id: str = "",
     *,
     basis_value: float | None = None,
     tenant_id: str = "",
     source: str = "commercial_crm",
 ) -> dict:
-    """Materialize one verified Charge from one existing Term/Deal/Lead."""
+    """Materialize one verified Charge from one existing Term/Deal, with an
+    optional Lead. Deal and Payment Term are always mandatory; Lead
+    attribution is applied only when the caller actually supplies one — an
+    empty lead_id is never treated as an invalid record, never blocks
+    creation, and simply leaves ChargeFields.LEAD unset (see create_charge()'s
+    own optional_fields handling)."""
     tool = "crm_create_charge_from_term"
     deal_fields, error = _read_fields(Tables.DEALS, deal_id, "Deal")
     if error:
@@ -665,19 +670,22 @@ def crm_create_charge_from_term(
     term_fields, error = _read_fields(Tables.PAYMENT_TERMS, payment_term_id, "Payment Term")
     if error:
         return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
-    lead_fields, error = _read_fields(Tables.LEADS, lead_id, "Lead")
-    if error:
-        return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+    lead_fields = None
+    if lead_id:
+        lead_fields, error = _read_fields(Tables.LEADS, lead_id, "Lead")
+        if error:
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
     if deal_id not in _link_ids(term_fields.get(PaymentTermFields.DEAL)):
         return _tool_result(ok=False, tool=tool, user_message="❌ Payment Term does not belong to the supplied Deal.")
-    if deal_id not in _link_ids(lead_fields.get(LeadFields.DEAL_LINK)):
+    if lead_fields is not None and deal_id not in _link_ids(lead_fields.get(LeadFields.DEAL_LINK)):
         return _tool_result(ok=False, tool=tool, user_message="❌ Lead is not linked to the supplied Deal.")
 
     deal_domain = deal_fields.get(DealFields.DOMAIN, "")
-    lead_domain = lead_fields.get(LeadFields.DOMAIN, "")
+    lead_domain = lead_fields.get(LeadFields.DOMAIN, "") if lead_fields is not None else ""
     if deal_domain and lead_domain and deal_domain != lead_domain:
         return _tool_result(ok=False, tool=tool, user_message="❌ Deal and Lead domains do not match.")
-    if tenant_id and any(fields.get(LeadFields.TENANT_ID, "") not in ("", tenant_id) for fields in (deal_fields, lead_fields)):
+    _tenant_scoped_fields = (deal_fields,) + ((lead_fields,) if lead_fields is not None else ())
+    if tenant_id and any(fields.get(LeadFields.TENANT_ID, "") not in ("", tenant_id) for fields in _tenant_scoped_fields):
         return _tool_result(ok=False, tool=tool, user_message="❌ Deal/Lead tenant does not match the request.")
 
     calc_type = term_fields.get(PaymentTermFields.CALC_TYPE_CODE) or term_fields.get(PaymentTermFields.CALC_TYPE, "")
@@ -742,12 +750,67 @@ def crm_create_charge_from_term(
     if (
         deal_id not in _link_ids(fields.get(ChargeFields.DEAL))
         or payment_term_id not in _link_ids(fields.get(ChargeFields.BILLING_TERM))
-        or lead_id not in _link_ids(fields.get(ChargeFields.LEAD))
+        or (lead_id and lead_id not in _link_ids(fields.get(ChargeFields.LEAD)))
         or fields.get(ChargeFields.REFERENCE) != reference
         or fields.get(ChargeFields.AMOUNT) != calculation["total_amount"]
     ):
         return _tool_result(ok=False, tool=tool, external_id=record_id, evidence={"record_id": record_id, "read_back": "mismatch"}, user_message="❌ Verified Charge read-back does not match the requested materialization.")
     return _tool_result(ok=True, tool=tool, external_id=record_id, evidence={"record_id": record_id, "table": Tables.CHARGES, "read_back": True}, user_message="✅ Charge created and verified.")
+
+
+def describe_charge_from_term_preview(
+    payment_term_id: str, deal_id: str, basis_value: float | None = None,
+) -> str:
+    """Read-only Hebrew preview text for a PENDING crm_create_charge_from_term
+    approval — Deal / Billing Term / Base Amount / Rate / Calculated Charge,
+    so a mistake (wrong Term, wrong basis) is visible before the owner
+    approves it, not only after the write.
+
+    Uses the exact same calculate_payment() the writer itself calls at
+    execution time, with the same inputs the approval payload actually
+    carries — never a separate/approximate calculation that could drift from
+    what gets written. Returns "" (never raises) on any failure to read the
+    Deal/Term or compute the calculation; callers fall back to a generic
+    approval description rather than showing a partially-built preview.
+    """
+    if not _valid_record_id(deal_id) or not _valid_record_id(payment_term_id):
+        return ""
+    try:
+        deal_fields = get_record_fields(Tables.DEALS, deal_id)
+        term_fields = get_record_fields(Tables.PAYMENT_TERMS, payment_term_id)
+    except Exception:
+        return ""
+    if not deal_fields or not term_fields:
+        return ""
+    calc_type = term_fields.get(PaymentTermFields.CALC_TYPE_CODE) or term_fields.get(PaymentTermFields.CALC_TYPE, "")
+    vat_rule = term_fields.get(PaymentTermFields.VAT_RULE, VATRule.NONE)
+    try:
+        if calc_type == PaymentTermCalcType.FIXED:
+            calculation = calculate_payment(calc_type, fixed_amount=term_fields.get(PaymentTermFields.FIXED_AMOUNT), vat_rule=vat_rule)
+        elif calc_type == PaymentTermCalcType.PERCENTAGE:
+            if basis_value is None:
+                return ""
+            calculation = calculate_payment(calc_type, rate_pct=term_fields.get(PaymentTermFields.RATE_PCT), basis_value=basis_value, vat_rule=vat_rule)
+        else:
+            return ""
+    except (ValueError, TypeError):
+        return ""
+
+    deal_name = str(deal_fields.get(DealFields.NAME, "") or "").strip()
+    term_name = str(term_fields.get(PaymentTermFields.NAME, "") or "").strip()
+    currency = term_fields.get(PaymentTermFields.CURRENCY, Currency.ILS)
+    lines = []
+    if deal_name:
+        lines.append(f"עסקה: {deal_name}")
+    if term_name:
+        lines.append(f"תנאי תשלום: {term_name}")
+    if calc_type == PaymentTermCalcType.PERCENTAGE:
+        lines.append(f"סכום בסיס: {calculation['base_amount']:,.2f}")
+        rate_pct = term_fields.get(PaymentTermFields.RATE_PCT)
+        if rate_pct is not None:
+            lines.append(f"אחוז: {rate_pct}%")
+    lines.append(f"חיוב מחושב: {calculation['total_amount']:,.2f} {currency}")
+    return "\n".join(lines)
 
 
 def create_charge_payment(

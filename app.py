@@ -1642,6 +1642,20 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         if not sheet:
             return _APPROVAL_DESCRIPTION_FALLBACK
         return f"📊 כתוב ל-{sheet}"
+    if tool_name == "crm_create_charge_from_term":
+        # BUG-CHARGE-TERM-BYPASS fix requirement #8: the pending-approval
+        # text must show enough business context to catch a mistake BEFORE
+        # approval — Deal / Billing Term / Base Amount / Rate / Calculated
+        # Charge — never just the raw basis_value the user typed (which is
+        # NOT the Charge amount; see commercial_crm.describe_charge_from_
+        # term_preview()'s own docstring). Fails closed to a bare header
+        # (never a fabricated number) if the Deal/Term can't be read here.
+        from commercial_crm import describe_charge_from_term_preview
+        preview = describe_charge_from_term_preview(
+            inputs.get("payment_term_id", ""), inputs.get("deal_id", ""), inputs.get("basis_value"),
+        )
+        header = "💳 יצירת חיוב מתנאי תשלום"
+        return f"{header}:\n{preview}" if preview else header
     # Unknown/uncovered tool — never leak the raw tool_name or an inputs
     # dict repr (could contain internal keys/ids) into user-facing text.
     return _APPROVAL_DESCRIPTION_FALLBACK
@@ -6303,6 +6317,13 @@ def run_agent(
         "create_payment_term": "payment_term",
         "create_organization": "organization",
         "create_charge": "charge",
+        # BUG-CHARGE-TERM-BYPASS: the ONLY entity a term-based Charge intent
+        # may ever start — never the generic "charge" entity above, which
+        # asks for a raw Amount and can silently treat a calculation basis as
+        # the final Charge. router.py's Intent classification already keeps
+        # these two intents mutually exclusive (an explicit "ידני"/"ישיר"
+        # qualifier is required for the generic "create_charge" intent).
+        "create_charge_from_term": "charge_from_term",
         "create_charge_payment": "payment",
     }
     if route.handler == Handler.TOOL and route.intent in _completion_entities:

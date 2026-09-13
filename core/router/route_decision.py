@@ -58,6 +58,13 @@ class Intent:
     CREATE_PAYMENT_TERM = "create_payment_term"
     CREATE_ORGANIZATION = "create_organization"
     CREATE_CHARGE     = "create_charge"
+    # BUG-CHARGE-TERM-BYPASS (production-reported): a Charge request that
+    # resolves against an existing Payment Term must never be indistinguishable
+    # from a manual/direct Charge — each carries its own Intent so the
+    # completion router (commercial_completion_routing.py) and PA-01's
+    # contract-tool policy (risk_router._CONTRACT_REQUIRED_INTENT_TO_TOOL) can
+    # enforce, per intent, which single tool its ActionContract must target.
+    CREATE_CHARGE_FROM_TERM = "create_charge_from_term"
     CREATE_CHARGE_PAYMENT = "create_charge_payment"
 
     # Tier 6 — Knowledge
@@ -108,7 +115,7 @@ class Intent:
         CREATE_LEAD, UPDATE_LEAD, FIND_LEAD, QUALIFY_LEAD, CLOSE_DEAL, UPDATE_DEAL_STAGE,
         CREATE_DEAL,
         CREATE_PAYMENT_TERM, CREATE_ORGANIZATION, CREATE_CHARGE,
-        CREATE_CHARGE_PAYMENT,
+        CREATE_CHARGE_FROM_TERM, CREATE_CHARGE_PAYMENT,
         SEARCH_KNOWLEDGE, READ_DOCUMENT, STORE_MEMORY, RETRIEVE_MEMORY,
         DRAFT_EMAIL, SEND_EMAIL, DRAFT_MESSAGE, SEND_MESSAGE,
         GENERATE_REPORT, FINANCIAL_REPORT, SALES_REPORT,

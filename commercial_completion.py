@@ -381,6 +381,41 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("document_status", ChargeFields.DOCUMENT_STATUS, InputType.SELECT, choices=_DOCUMENT_STATUSES, derived=("document_requirement",), manual=False),
         _f("notes", ChargeFields.NOTES, InputType.TEXT),
     )),
+    # BUG-CHARGE-TERM-BYPASS (production-reported): a Charge based on an
+    # existing Payment Term is a DISTINCT completion contract from the plain
+    # "charge" entity above — it never asks for Amount or Currency (both are
+    # computed from the resolved Term by commercial_crm.crm_create_charge_
+    # from_term(), never supplied by the user) and it makes the Term itself
+    # mandatory rather than an afterthought. "basis_value" is required only
+    # when the resolved Term's own calculation type actually needs a basis
+    # (percentage/per_unit/usage_based/tiered/custom) — a Fixed Term is never
+    # asked for one. That requiredness depends on the LIVE Payment Term
+    # record (not just user-supplied values), which this pure module cannot
+    # read; "term_calc_type" is therefore never asked from a human (manual=
+    # False) — commercial_completion_routing.py's router injects it into
+    # current_values right after "billing_term" resolves to a real record,
+    # the same EXISTING-value channel every other field's "current_values"
+    # answer flows through. Never persisted (it is not an Airtable field
+    # of the Charge itself) and never computed here.
+    "charge_from_term": EntityContract("charge_from_term", (
+        _f("deal", "deal_id", InputType.LINK, required=ALWAYS, inherit=("deal_id", "deal"), validation="record_id"),
+        _f("billing_term", "payment_term_id", InputType.LINK, required=ALWAYS, inherit=("payment_term_id", "billing_term"), validation="record_id"),
+        _f("lead", "lead_id", InputType.LINK, inherit=("lead_id", "origin_lead_id", "lead"), validation="record_id"),
+        _f(
+            "basis_value", "basis_value", InputType.CURRENCY, required=CONDITIONAL,
+            when=(Condition("term_calc_type", (
+                PaymentTermCalcType.PERCENTAGE, PaymentTermCalcType.PER_UNIT,
+                PaymentTermCalcType.USAGE_BASED, PaymentTermCalcType.TIERED,
+                PaymentTermCalcType.CUSTOM,
+            )),),
+            validation="positive",
+        ),
+        _f("term_calc_type", "_term_calc_type", InputType.TEXT, manual=False, persisted=False),
+    ), unresolved_rules=(
+        "Amount/Currency/Direction/VAT are computed from the resolved Payment "
+        "Term by crm_create_charge_from_term — never asked here and never "
+        "part of this entity's payload.",
+    )),
     "payment": EntityContract("payment", (
         _f("charge", PaymentFields.CHARGE, InputType.LINK, required=ALWAYS, inherit=("charge_id", "charge"), validation="record_id"),
         _f("amount", PaymentFields.AMOUNT, InputType.CURRENCY, required=ALWAYS, validation="positive"),

@@ -1204,7 +1204,7 @@ def dispatch_tool(
                 result = crm_create_charge_from_term(
                     payment_term_id=inputs["payment_term_id"],
                     deal_id=inputs["deal_id"],
-                    lead_id=inputs["lead_id"],
+                    lead_id=inputs.get("lead_id", ""),
                     basis_value=inputs.get("basis_value"),
                     tenant_id=getattr(identity, "tenant_id", ""),
                     source="agent",
