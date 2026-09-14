@@ -667,7 +667,7 @@ def _run_post_write_enrichment(identity, payload: LeadPayload, record_id: str, a
             if _flags("LEAD_SCORING"):
                 from lead_capture import _score_inbound_message
                 from tools.airtable_gateway import airtable_patch as _gw_patch
-                score, _, _ = _score_inbound_message(payload.summary or payload.name, identity)
+                score, _ = _score_inbound_message(payload.summary or payload.name, identity)
                 _gw_patch("Leads", record_id, {LeadFields.SCORE: score}, source="lead_service_scoring")
         except Exception as exc:
             logger.warning("[LeadService] scoring failed: %s", exc)
