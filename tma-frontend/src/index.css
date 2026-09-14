@@ -268,6 +268,26 @@
   box-shadow: var(--boss-shadow-interactive);
 }
 
+.boss-button--danger-strong {
+  color: var(--boss-color-primary-text);
+  background: var(--boss-color-danger);
+  box-shadow: var(--boss-shadow-high);
+}
+
+.boss-button--danger {
+  color: var(--boss-color-danger);
+  background: var(--boss-color-danger-surface);
+  border: 1px solid var(--boss-color-danger-border);
+  box-shadow: var(--boss-shadow-interactive);
+}
+
+.boss-button--success {
+  color: var(--boss-color-success);
+  background: var(--boss-color-success-surface);
+  border: 1px solid var(--boss-color-success-border);
+  box-shadow: var(--boss-shadow-interactive);
+}
+
 .boss-bubble--action:active,
 .boss-bubble--selectable:active {
   transform: translateY(1px);
@@ -2846,4 +2866,185 @@
   .personal-mode-asset-card__title-row {
     flex-wrap: wrap;
   }
+}
+
+/* System Health — mirrors the command-center-screen scoping/overflow-guard pattern. */
+
+.system-health-screen .boss-page-header__title-row {
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.system-health-screen .boss-page-header__body,
+.system-health-screen .boss-page-header__copy,
+.system-health-screen .boss-page-title,
+.system-health-screen .boss-page-subtitle {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  unicode-bidi: plaintext;
+}
+
+.system-health-screen,
+.system-health-screen .ventures-shell,
+.system-health-screen .boss-page-header,
+.system-health-screen .system-health-stack {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.system-health-screen {
+  overflow-x: hidden;
+}
+
+.system-health-stack {
+  display: grid;
+  gap: var(--boss-space-3);
+  padding-bottom: var(--boss-space-8);
+}
+
+.system-health-section-heading {
+  margin: 0 0 var(--boss-space-3);
+  color: var(--boss-color-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.system-health-banner {
+  padding: var(--boss-space-4);
+  border: 1px solid var(--boss-color-border);
+  border-radius: var(--boss-radius-section);
+  background: var(--boss-color-surface);
+}
+
+.system-health-banner--success {
+  border-color: var(--boss-color-success-border);
+  background: var(--boss-color-success-surface);
+}
+
+.system-health-banner--danger {
+  border-color: var(--boss-color-danger-border);
+  background: var(--boss-color-danger-surface);
+}
+
+.system-health-banner--warning {
+  border-color: var(--boss-color-warning-border);
+  background: var(--boss-color-warning-surface);
+}
+
+.system-health-banner__title {
+  margin: 0;
+  color: var(--boss-color-text);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.system-health-banner__title--small {
+  margin-bottom: var(--boss-space-3);
+  font-size: 14px;
+}
+
+.system-health-banner--success .system-health-banner__title {
+  color: var(--boss-color-success);
+}
+
+.system-health-banner--danger .system-health-banner__title {
+  color: var(--boss-color-danger);
+}
+
+.system-health-banner--warning .system-health-banner__title {
+  color: var(--boss-color-warning);
+}
+
+.system-health-banner__meta {
+  margin: 2px 0 0;
+  color: var(--boss-color-text-muted);
+  font-size: 12px;
+}
+
+.system-health-banner__meta--emphasis {
+  margin: 0;
+  color: var(--boss-color-warning);
+  font-weight: 600;
+}
+
+.system-health-service-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--boss-space-2) 0;
+  border-bottom: 1px solid var(--boss-color-border);
+}
+
+.system-health-service-row:last-child {
+  border-bottom: 0;
+}
+
+.system-health-service-name {
+  color: var(--boss-color-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.system-health-service-value {
+  display: flex;
+  align-items: center;
+  gap: var(--boss-space-1);
+}
+
+.system-health-service-label {
+  color: var(--boss-color-text-muted);
+  font-size: 12px;
+}
+
+.system-health-flag-list {
+  display: grid;
+  gap: var(--boss-space-2);
+}
+
+.system-health-flag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--boss-space-2);
+}
+
+.system-health-flag-label {
+  margin: 0;
+  color: var(--boss-color-danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.system-health-flag-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--boss-space-2);
+}
+
+.system-health-actions {
+  display: grid;
+  gap: var(--boss-space-2);
+}
+
+.system-health-confirm-row {
+  display: flex;
+  gap: var(--boss-space-2);
+}
+
+.system-health-confirm-row .boss-button,
+.system-health-full-button {
+  width: 100%;
+}
+
+.system-health-confirm-row .boss-button {
+  flex: 1;
 }
