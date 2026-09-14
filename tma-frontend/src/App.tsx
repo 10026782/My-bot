@@ -15,6 +15,8 @@ import { OwnerControlCenter } from "./components/OwnerControlCenter";
 import { Ventures } from "./components/Ventures";
 import { MarketingStatus } from "./components/MarketingStatus";
 import { MyWork } from "./components/MyWork";
+import { PageHeader } from "./components/ui/PageHeader";
+import { ScreenState } from "./components/ui/ScreenState";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
 
 type HubState =
@@ -156,32 +158,39 @@ export default function App() {
   // ── Hub loading / error ─────────────────────────────────────────
   if (hub.status === "loading") {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <main className="ventures-screen hub-screen">
+        <div className="ventures-shell">
+          <PageHeader eyebrow="BOSS" title="Projects Hub" />
+          <ScreenState state="loading" title="טוען את הסקירה" message="אוסף את התמונה העדכנית…" />
+        </div>
+      </main>
     );
   }
 
   if (hub.status === "error") {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-6 text-center">
-        <p className="text-gray-600">טעינה נכשלה</p>
-        <p className="text-xs text-gray-400">{hub.message}</p>
-        <button
-          onClick={loadHub}
-          className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium"
-        >
-          נסה שוב
-        </button>
-        {/* Projects Hub is owner-only — Manager/Partner land here on a 403.
-            Give them a direct path to the one screen they DO have access to. */}
-        <button
-          onClick={() => setLeadsOpen(true)}
-          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium"
-        >
-          🧲 לידים
-        </button>
-      </div>
+      <main className="ventures-screen hub-screen">
+        <div className="ventures-shell">
+          <PageHeader eyebrow="BOSS" title="Projects Hub" />
+          <ScreenState
+            state="error"
+            title="טעינה נכשלה"
+            message={hub.message}
+            action={
+              <div className="hub-error-actions">
+                <button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={loadHub}>
+                  נסה שוב
+                </button>
+                {/* Projects Hub is owner-only — Manager/Partner land here on a 403.
+                    Give them a direct path to the one screen they DO have access to. */}
+                <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={() => setLeadsOpen(true)}>
+                  🧲 לידים
+                </button>
+              </div>
+            }
+          />
+        </div>
+      </main>
     );
   }
 
@@ -190,56 +199,54 @@ export default function App() {
   const canShowOwnerControl = authRole ? authRole === "owner" : true;
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-8">
-      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-black text-gray-900">BOSS</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Projects Hub</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setLeadsOpen(true)}      className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="לידים">🧲</button>
-          <button onClick={() => setApprovalsOpen(true)}  className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="אישורים">✅</button>
-          <button onClick={() => setFinanceOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פינאנס">💰</button>
-          <button onClick={() => setPersonalOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="נכסים">🏠</button>
-          <button onClick={() => setActivityOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פעילות">📋</button>
-          <button onClick={() => setDigestOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="Daily Digest">📊</button>
-          <button onClick={() => setCheckinOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="צ'ק-אין יומי">✅</button>
-          <button onClick={() => setGameOpen(true)}      className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="גיים">🎮</button>
+    <main className="ventures-screen hub-screen">
+      <div className="ventures-shell">
+        <PageHeader eyebrow="BOSS" title="Projects Hub" />
+
+        <div className="hub-quick-actions" role="toolbar" aria-label="ניווט מהיר">
+          <button type="button" onClick={() => setLeadsOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="לידים">🧲</button>
+          <button type="button" onClick={() => setApprovalsOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="אישורים">✅</button>
+          <button type="button" onClick={() => setFinanceOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="פינאנס">💰</button>
+          <button type="button" onClick={() => setPersonalOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="נכסים">🏠</button>
+          <button type="button" onClick={() => setActivityOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="פעילות">📋</button>
+          <button type="button" onClick={() => setDigestOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="Daily Digest">📊</button>
+          <button type="button" onClick={() => setCheckinOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="צ'ק-אין יומי">✅</button>
+          <button type="button" onClick={() => setGameOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="גיים">🎮</button>
           {canShowOwnerControl && (
-            <button onClick={() => setOwnerControlOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-900 text-white active:bg-gray-700 text-[10px] font-black" aria-label="מרכז השליטה">מרכז</button>
+            <button type="button" onClick={() => setOwnerControlOpen(true)} className="hub-quick-action hub-quick-action--strong boss-bubble--action" aria-label="מרכז השליטה">מרכז</button>
           )}
           {canShowOwnerControl && (
-            <button onClick={() => setVenturesOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="Ventures">🔭</button>
+            <button type="button" onClick={() => setVenturesOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="Ventures">🔭</button>
           )}
           {canShowOwnerControl && (
-            <button onClick={() => setMyWorkOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="העבודה שלי">✓</button>
+            <button type="button" onClick={() => setMyWorkOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="העבודה שלי">✓</button>
           )}
-          <button onClick={() => setHealthOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="בריאות מערכת">⚙️</button>
-          <button onClick={() => setMarketingOpen(true)} className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="שיווק">📣</button>
+          <button type="button" onClick={() => setHealthOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="בריאות מערכת">⚙️</button>
+          <button type="button" onClick={() => setMarketingOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="שיווק">📣</button>
+        </div>
+
+        <div className="hub-stack">
+          <GlobalKpis kpis={data.global_kpis} />
+
+          {data.exceptions.length > 0 && (
+            <div className="hub-exceptions">
+              {data.exceptions.map((ex, i) => (
+                <p key={i}>{ex}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="hub-projects-grid">
+            {data.projects.map((card) => (
+              <ProjectCard
+                key={card.id}
+                card={card}
+                onClick={() => setSelected(card)}
+              />
+            ))}
+          </div>
         </div>
       </div>
-
-      <div className="mb-4">
-        <GlobalKpis kpis={data.global_kpis} />
-      </div>
-
-      {data.exceptions.length > 0 && (
-        <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded-xl p-3">
-          {data.exceptions.map((ex, i) => (
-            <p key={i} className="text-sm text-red-700">{ex}</p>
-          ))}
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 px-4">
-        {data.projects.map((card) => (
-          <ProjectCard
-            key={card.id}
-            card={card}
-            onClick={() => setSelected(card)}
-          />
-        ))}
-      </div>
-    </div>
+    </main>
   );
 }
