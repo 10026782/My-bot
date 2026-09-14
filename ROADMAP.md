@@ -2,6 +2,56 @@
 
 עודכן: 14/09/2026
 
+## PIPELINE-1 Blocker #3 — temperature/scoring fragmentation unified — 14/09/2026
+
+Discovery audit found 6 disconnected Score→Temperature implementations with
+mutually inconsistent thresholds. Investigation found two real clusters:
+`score_display.py` (5-tier, 20/40/60/80 breakpoints) already matched the
+live Airtable `טמפרטורה` formula field exactly; `daily_digest.py`'s live
+morning-digest tier label and `lead_capture.py`'s tier computation both used
+a separate, mutually-consistent-with-each-other 25/50/70 scale. Per an
+explicit owner decision (asked in-conversation, all three recommended
+options taken): `score_display.py::get_temperature()` is now the app's
+single canonical Score→Temperature derivation — no Airtable schema edit
+needed, since it already agreed with the live formula field.
+
+- `daily_digest.py::_tier_label()` now delegates to `score_display.
+  get_temperature()` instead of re-deriving its own 25/50/70 scale.
+  `_hot_leads()`'s listing cutoff and `_lead_temperature_counts()`'s summary
+  bucket both moved from `Score>=50` to `Score>=60` (the canonical HOT-tier
+  lower bound) — a real, deliberate change to what the owner sees in the
+  08:00 morning digest, per their own answer to the cutoff question asked.
+- `lead_capture.py`'s tier computation (inline in `_score_inbound_message()`
+  plus the standalone `tier_from_score()`) was dead code — every call site
+  discarded the tier value (`score, _, _ = _score_inbound_message(...)`),
+  and `tier_from_score()` had zero real importers despite its own docstring
+  claiming `lead_qualifier.py` used it. Removed rather than migrated;
+  `_score_inbound_message()`'s return signature shrank from
+  `(score, tier, why_score)` to `(score, why_score)`, with its one real
+  caller (`core/lead_service.py`) updated to match.
+- `tma_api.py`'s Lead Pipeline screen (`_pipeline_temperature()`, PIPELINE-1
+  remediation item 1) keeps its own simpler 3-bucket <25/25-59/>=60 scale —
+  a separate, explicit, already-shipped product decision, not re-derived
+  from the 20/40/60/80 scale. Documented in both modules' comments as a
+  deliberate exception, not overlooked fragmentation, so it doesn't drift
+  back into unexamined inconsistency.
+- The live Airtable `טמפרטורה` formula field is untouched (per the owner's
+  answer) — no edit needed, since it already matches the new canonical
+  20/40/60/80 breakpoints.
+
+New/updated tests: `test_daily_digest_scoring_summary.py` (8/8, including 2
+new tests for `_tier_label()`'s delegation and `_hot_leads()`'s new cutoff);
+existing bands re-verified at the new 20/60 boundaries. `score_display.py`'s
+own self-test suite unaffected (module behavior unchanged, only its header
+comment). Full-repo `compileall` clean; `smoke_tests.py`,
+`test_lead_service_phase1.py` (109/109),
+`test_f52_g3_s7_structured_lead_capture.py` (5/5), and PIPELINE-1's own
+`test_pipeline1_closure_remediation.py` (33/33, confirming `_pipeline_
+temperature()` is behaviorally unchanged) all re-verified green.
+`CODE_DONE + STATIC_VERIFIED` only — not yet merged, deployed, or exercised
+against live Airtable/Render; the morning digest's new hot-lead cutoff has
+not been observed against real production lead data.
+
 ## PIPELINE-1 closure — locked remediation scope (7 items) — 14/09/2026
 
 Closes the PIPELINE-1 discovery audit's locked remediation scope for the

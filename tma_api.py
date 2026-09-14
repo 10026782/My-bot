@@ -1508,16 +1508,23 @@ def _build_formula(
 # Pipeline screen (O2/O3) only. Score (Leads.Score) is the sole source;
 # every Pipeline temperature/color value is derived here, once, instead of
 # each of get_leads()/get_lead()/the frontend recomputing its own 70/40
-# split. Deliberately scoped to Pipeline — does NOT touch or replace
-# score_display.py, lead_capture.py's two tier copies, daily_digest.py, or
-# the live Airtable "טמפרטורה" formula field (a 5-tier <=20/40/60/80 scale);
-# those remain separate pre-existing implementations, tracked as their own
-# cleanup debt in the PIPELINE-1 discovery report, not touched here.
+# split.
+#
+# PIPELINE-1 Blocker #3 remediation (14/09/2026): the rest of the app's
+# score→temperature fragmentation (score_display.py, lead_capture.py,
+# daily_digest.py) was unified onto score_display.py::get_temperature() — a
+# 20/40/60/80 5-tier scale matching the live Airtable "טמפרטורה" formula
+# field. This screen's simpler 3-bucket <25/25-59/>=60 scale was kept as a
+# deliberate, explicit product decision for the Pipeline UI specifically
+# (not re-derived from the 5-tier scale) — see the conversation record for
+# that PR. If this divergence is ever revisited, change it here deliberately
+# rather than letting it drift back into unexamined fragmentation.
 _PIPELINE_HOT_MIN  = 60   # score >= 60  -> חם מאוד (very hot)
 _PIPELINE_WARM_MIN = 25   # score >= 25  -> חם (warm); below -> קר (cold)
 
 def _pipeline_temperature(score: int) -> tuple[str, str]:
-    """(hebrew_label, color) for the Lead Pipeline screen only."""
+    """(hebrew_label, color) for the Lead Pipeline screen only — intentionally
+    not score_display.get_temperature(); see module comment above."""
     if score >= _PIPELINE_HOT_MIN:
         return "חם מאוד", "red"
     if score >= _PIPELINE_WARM_MIN:
