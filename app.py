@@ -60,6 +60,7 @@ from core.router     import (
     route_request, RouteDecision, Handler, deterministic_create_task_title,
     parse_deterministic_create_task, parse_deterministic_create_deal,
     parse_deterministic_commercial_completion,
+    parse_deterministic_charge_context,
 )
 from core.router.deterministic_denial import check_deterministic_denial
 from core import create_execution_context, create_operation
@@ -5098,6 +5099,47 @@ def _commercial_link_lookup(query: str, scope: str, limit: int, identity=None):
     )
 
 
+def _prefill_charge_context(router, result, identity):
+    """BUG-CHARGE-TERM-BYPASS follow-up #2 (live production): a Deal/Payment
+    Term/Lead already named in the ORIGINAL message that started a
+    term-based Charge completion (see parse_deterministic_charge_context())
+    must be applied to every question the router asks next, for as long as
+    this message already answered it -- never surfaced as a fresh free-text
+    question that discards what the user already said.
+
+    Reads the "_charge_context_refs" marker this module seeds once into the
+    session's own current_values at start() (see the "create_charge_from_term"
+    branch below) -- not a separate app.py-local variable -- so this same
+    call, made again after any later answer_human() (e.g. once the user
+    resolves an ambiguous Deal by hand), still picks up a still-unconsumed
+    Term/Lead reference from the SAME original message. A no-op for every
+    other entity/session, which never has this marker.
+
+    Every extracted reference is resolved through the exact same bounded
+    resolve_human_link() lookup a typed reply goes through -- a wrong or
+    unmatched extraction simply fails to resolve and this loop stops,
+    falling back to asking the normal question exactly like before this
+    existed, never a silent wrong bind. The `seen` guard stops a field that
+    comes back as the same still-unresolved CLARIFY from being retried
+    forever.
+    """
+    seen = set()
+    while result.outcome == "CLARIFY" and result.session is not None:
+        refs = dict(result.session.active.current_values.get("_charge_context_refs") or {})
+        ref_text = refs.get(result.field_name)
+        if not ref_text or result.field_name in seen:
+            break
+        seen.add(result.field_name)
+        result = router.answer_human(
+            result.session, ref_text,
+            link_lookup=lambda query, scope, limit: _commercial_link_lookup(
+                query, scope, limit, identity=identity,
+            ),
+            scope=identity.memory_key,
+        )
+    return result
+
+
 _COMPLETION_CALLBACK_PREFIX = "commercial_completion:"
 _TELEGRAM_CALLBACK_DATA_MAX_BYTES = 64
 
@@ -5630,6 +5672,13 @@ def run_agent(
             ),
             scope=identity.memory_key,
         )
+        # BUG-CHARGE-TERM-BYPASS follow-up #2 (secondary issue): a Term/Lead
+        # reference extracted from the ORIGINAL message that started this
+        # session (e.g. the Deal needed disambiguation first) may still be
+        # unconsumed — apply it now instead of asking a blank question for
+        # it. A no-op for every session without the "_charge_context_refs"
+        # marker (every entity other than charge_from_term).
+        _completion_result = _prefill_charge_context(_completion_router, _completion_result, identity)
         if _completion_result.outcome == "CLARIFY":
             _ls.set_commercial_completion(
                 chat_id, serialize_completion_session(_completion_result.session)
@@ -6367,12 +6416,33 @@ def run_agent(
             _current_values["domain"] = _deal_parse.domain
             if _deal_parse.name:
                 _current_values["name"] = _deal_parse.name
+        if route.intent == "create_charge_from_term":
+            # BUG-CHARGE-TERM-BYPASS follow-up #2 (live production): the
+            # SAME message that triggered this intent often already names
+            # the Deal/Term/Lead ("צור חיוב לעסקה X לפי תנאי Y עבור Z") —
+            # seed them once into current_values so _prefill_charge_context()
+            # below (and, on a later turn, the persisted-session continuation
+            # path) can resolve each one through the real resolver instead
+            # of asking a blank free-text question for information the user
+            # already gave.
+            _charge_ctx = parse_deterministic_charge_context(user_text)
+            _charge_refs = {}
+            if _charge_ctx.deal_ref:
+                _charge_refs["deal"] = _charge_ctx.deal_ref
+            if _charge_ctx.term_ref:
+                _charge_refs["billing_term"] = _charge_ctx.term_ref
+            if _charge_ctx.lead_ref:
+                _charge_refs["lead"] = _charge_ctx.lead_ref
+            if _charge_refs:
+                _current_values["_charge_context_refs"] = _charge_refs
         _completion_result = _completion_router.start(
             _completion_entities[route.intent],
             current_values=_current_values,
             source_context={"domain": resolved_route_domain},
             identity={"owner": getattr(identity, "user_id", "")},
         )
+        if route.intent == "create_charge_from_term":
+            _completion_result = _prefill_charge_context(_completion_router, _completion_result, identity)
         if _completion_result.outcome == "CLARIFY":
             from session_store import lead_sessions as _completion_sessions
             _completion_sessions.set_commercial_completion(
