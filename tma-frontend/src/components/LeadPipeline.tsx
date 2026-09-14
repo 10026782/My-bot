@@ -5,7 +5,9 @@ import { LeadCard } from "./LeadCard";
 import { LeadDetail } from "./LeadDetail";
 
 interface Props {
-  project: ProjectCard;
+  // null = direct "All Leads" entry point (PIPELINE-1 remediation item 5),
+  // not scoped to a single Projects Hub card.
+  project: ProjectCard | null;
   onBack: () => void;
   authRole?: string | null;
 }
@@ -18,12 +20,25 @@ type State =
 export function LeadPipeline({ project, onBack, authRole }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [selectedLead, setSelectedLead] = useState<LeadSummary | null>(null);
+  const [view, setView] = useState<string>("active");
+  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [domainFilter, setDomainFilter] = useState<string>("");
+
+  const baseDomain = project?.domain ?? "";
+  const showDomainFilter = authRole === "owner" || authRole === "manager";
 
   useEffect(() => {
-    fetchLeads(project.domain)
+    setState({ status: "loading" });
+    fetchLeads(baseDomain, { view, search })
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
-  }, [project.domain]);
+  }, [baseDomain, view, search]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   if (selectedLead) {
     return (
@@ -34,6 +49,13 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
       />
     );
   }
+
+  const data = state.status === "ok" ? state.data : null;
+  // Domain filter only makes sense when the screen isn't already scoped to
+  // one Projects Hub project — the direct "All Leads" entry point.
+  const visibleLeads = data
+    ? (!baseDomain && domainFilter ? data.leads.filter((l) => l.domain === domainFilter) : data.leads)
+    : [];
 
   return (
     <div className="min-h-screen bg-gray-100 pb-8">
@@ -48,12 +70,51 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
         </button>
         <div>
           <h1 className="text-lg font-black text-gray-900">
-            {project.emoji} {project.name}
+            {project ? `${project.emoji} ${project.name}` : "🧲 לידים"}
           </h1>
           <p className="text-xs text-gray-400">
-            {state.status === "ok" ? `${state.data.count} לידים` : "Lead Pipeline"}
+            {data ? `${visibleLeads.length} לידים` : "Lead Pipeline"}
           </p>
         </div>
+      </div>
+
+      <div className="px-4 mb-3 flex flex-col gap-2">
+        <input
+          type="text"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="חיפוש לפי שם או טלפון..."
+          className="bg-white rounded-xl px-3 py-2 text-sm outline-none shadow-sm placeholder-gray-400"
+        />
+
+        {data && (
+          <div className="flex gap-2 overflow-x-auto">
+            {Object.entries(data.available_views).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setView(key)}
+                className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full font-medium ${
+                  view === key ? "bg-blue-500 text-white" : "bg-white text-gray-600 shadow-sm"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {data && !baseDomain && showDomainFilter && data.available_domains.length > 0 && (
+          <select
+            value={domainFilter}
+            onChange={(e) => setDomainFilter(e.target.value)}
+            className="bg-white rounded-xl px-3 py-2 text-sm outline-none shadow-sm"
+          >
+            <option value="">כל הדומיינים</option>
+            {data.available_domains.map((d) => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {state.status === "loading" && (
@@ -68,12 +129,18 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
         </div>
       )}
 
-      {state.status === "ok" && (
+      {data && data.has_more && (
+        <div className="mx-4 mb-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+          יש יותר לידים ממה שמוצג כאן — צמצם/י עם חיפוש או פילטר דומיין.
+        </div>
+      )}
+
+      {data && (
         <div className="flex flex-col gap-2 px-4">
-          {state.data.leads.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm pt-8">אין לידים לפרויקט זה</p>
+          {visibleLeads.length === 0 ? (
+            <p className="text-center text-gray-400 text-sm pt-8">אין לידים להצגה</p>
           ) : (
-            state.data.leads.map((lead) => (
+            visibleLeads.map((lead) => (
               <LeadCard
                 key={lead.id}
                 lead={lead}

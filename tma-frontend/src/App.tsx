@@ -37,6 +37,7 @@ export default function App() {
   const [venturesOpen, setVenturesOpen] = useState(false);
   const [marketingOpen, setMarketingOpen] = useState(false);
   const [myWorkOpen, setMyWorkOpen] = useState(false);
+  const [leadsOpen, setLeadsOpen] = useState(false);
   const [authRole, setAuthRole] = useState<string | null>(null);
 
   function loadHub() {
@@ -57,6 +58,23 @@ export default function App() {
       })
       .catch(() => setAuthRole(null));
   }, []);
+
+  // ── Lead Pipeline — direct entry point ──────────────────────────
+  // PIPELINE-1 remediation item 5: Owner/Manager/Partner all need a direct
+  // frontend path to the Lead Pipeline that does not require going through
+  // the owner-only Projects Hub (GET /api/projects is owner-only — Manager
+  // and Partner get a 403 on it and previously had no other way in).
+  // Reuses the same LeadPipeline component with project=null ("all leads
+  // this identity can see") — no second Pipeline screen created.
+  if (leadsOpen) {
+    return (
+      <LeadPipeline
+        project={null}
+        onBack={() => setLeadsOpen(false)}
+        authRole={authRole}
+      />
+    );
+  }
 
   // ── My Work ──────────────────────────────────────────────────────
   if (myWorkOpen) {
@@ -155,6 +173,14 @@ export default function App() {
         >
           נסה שוב
         </button>
+        {/* Projects Hub is owner-only — Manager/Partner land here on a 403.
+            Give them a direct path to the one screen they DO have access to. */}
+        <button
+          onClick={() => setLeadsOpen(true)}
+          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium"
+        >
+          🧲 לידים
+        </button>
       </div>
     );
   }
@@ -171,6 +197,7 @@ export default function App() {
           <p className="text-xs text-gray-400 mt-0.5">Projects Hub</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setLeadsOpen(true)}      className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="לידים">🧲</button>
           <button onClick={() => setApprovalsOpen(true)}  className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="אישורים">✅</button>
           <button onClick={() => setFinanceOpen(true)}    className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="פינאנס">💰</button>
           <button onClick={() => setPersonalOpen(true)}   className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 text-lg" aria-label="נכסים">🏠</button>

@@ -252,12 +252,17 @@ def record_id(record: dict, *, required: bool = False):
 
 
 def _at_list(table: str, formula: str = "", max_records: int = 50,
-             strict: bool = False, measurement_label: str | None = None) -> list:
+             strict: bool = False, measurement_label: str | None = None,
+             paginate: bool = False) -> list:
     """
     Direct Airtable REST call → list[{id, fields}].
     strict=False (default): returns [] on any error (legacy behavior).
     strict=True:  raises AirtableError on non-200 so callers can return
                   a proper error response instead of silently showing zero.
+    paginate=True: follow Airtable's offset pages until max_records is hit
+                  or the result set is exhausted, instead of returning only
+                  the first page (PIPELINE-1 remediation item 7 — no silent
+                  truncation for callers that opt in).
     """
     started = time.monotonic() if measurement_label else None
 
@@ -281,7 +286,7 @@ def _at_list(table: str, formula: str = "", max_records: int = 50,
             table,
             formula,
             max_records=max_records,
-            paginate=False,
+            paginate=paginate,
             timeout=10,
         )
         emit_measurement(len(records), True)
@@ -1357,7 +1362,10 @@ SCREEN_CONFIGS: dict[str, dict] = {
                 "label": "הכל",
             },
         },
-        "default_max_records": 100,
+        # PIPELINE-1 remediation item 7: no longer a silent truncation point —
+        # get_leads() fetches with paginate=True up to this cap and reports
+        # has_more honestly if the (unrealistic, at current scale) cap is hit.
+        "default_max_records": 1000,
     },
 
     # O0 Projects Hub — ספירת לידים פעילים לכרטיס פרויקט
@@ -1496,17 +1504,69 @@ def _build_formula(
 # WEEK 1 — O2 Lead Pipeline + O3 Lead Card
 # ══════════════════════════════════════════════════════════════════
 
+# PIPELINE-1 remediation item 1 — Score → Temperature SSOT for the Lead
+# Pipeline screen (O2/O3) only. Score (Leads.Score) is the sole source;
+# every Pipeline temperature/color value is derived here, once, instead of
+# each of get_leads()/get_lead()/the frontend recomputing its own 70/40
+# split. Deliberately scoped to Pipeline — does NOT touch or replace
+# score_display.py, lead_capture.py's two tier copies, daily_digest.py, or
+# the live Airtable "טמפרטורה" formula field (a 5-tier <=20/40/60/80 scale);
+# those remain separate pre-existing implementations, tracked as their own
+# cleanup debt in the PIPELINE-1 discovery report, not touched here.
+_PIPELINE_HOT_MIN  = 60   # score >= 60  -> חם מאוד (very hot)
+_PIPELINE_WARM_MIN = 25   # score >= 25  -> חם (warm); below -> קר (cold)
+
+def _pipeline_temperature(score: int) -> tuple[str, str]:
+    """(hebrew_label, color) for the Lead Pipeline screen only."""
+    if score >= _PIPELINE_HOT_MIN:
+        return "חם מאוד", "red"
+    if score >= _PIPELINE_WARM_MIN:
+        return "חם", "yellow"
+    return "קר", "blue"
+
+
+# PIPELINE-1 remediation item 4 — Leads."Next Action" live Airtable
+# singleSelect options (verified via Airtable MCP get_table_schema against
+# the production base, field fldWt6lcf7uf8X6uj) mapped to Hebrew display
+# labels. Keyed by the STRIPPED option text (patch_lead's _clean_select_value
+# always strips incoming values); "Schedule Meeting" carries a trailing
+# space in Airtable's own config, preserved as the write-back value on the
+# right so a stripped client value round-trips to the exact stored option.
+_LEAD_NEXT_ACTION_OPTIONS: dict[str, tuple[str, str]] = {
+    "Call Back":        ("Call Back", "להתקשר בחזרה"),
+    "Send Details":     ("Send Details", "לשלוח פרטים"),
+    "Follow Up":        ("Follow Up", "פולואפ"),
+    "Waiting Response": ("Waiting Response", "ממתין לתגובה"),
+    "Create Deal":      ("Create Deal", "ליצור עסקה"),
+    "Convert Contact":  ("Convert Contact", "להמיר לאיש קשר"),
+    "Schedule Meeting": ("Schedule Meeting ", "לתאם פגישה"),
+    "Closed Won":       ("Closed Won", "נסגר בהצלחה"),
+    "Closed Lost":      ("Closed Lost", "נסגר – הפסד"),
+    "ליד חדש":          ("ליד חדש", "ליד חדש"),
+}
+
+def _next_action_label(raw_value: str) -> str:
+    opt = _LEAD_NEXT_ACTION_OPTIONS.get((raw_value or "").strip())
+    return opt[1] if opt else raw_value
+
+
 def _fmt_lead_summary(rec: dict) -> dict:
     f     = record_fields(rec)
     score = int(f.get(LeadFields.SCORE, 0) or 0)
+    temperature, score_color = _pipeline_temperature(score)
+    next_step = f.get(LeadFields.NEXT_STEP, "")
     return {
-        "id":     record_id(rec, required=True),
-        "name":   f.get("Name", ""),
-        "phone":  f.get("phone", ""),
-        "status": f.get("status", ""),
-        "score":  score,
-        "domain": f.get("domain", ""),
-        "source": f.get("source", ""),
+        "id":               record_id(rec, required=True),
+        "name":             f.get(LeadFields.NAME, ""),
+        "phone":            f.get(LeadFields.PHONE, ""),
+        "status":           f.get(LeadFields.STATUS, ""),
+        "score":            score,
+        "score_color":      score_color,
+        "temperature":      temperature,
+        "domain":           f.get(LeadFields.DOMAIN, ""),
+        "source":           f.get(LeadFields.SOURCE, ""),
+        "next_step":        next_step,
+        "next_step_label":  _next_action_label(next_step) if next_step else "",
     }
 
 
@@ -1535,6 +1595,7 @@ def get_leads(identity):
     """O2 — Lead Pipeline. Owner + Manager (all) + Partner (own domains).
     Accepts: ?domain=real_estate OR ?project_slug=blueview (resolves via ProjectsHub)
              ?view=active|monitoring|all  (default: active)
+             ?search=<substring of name or phone>
     """
     allowed = {Role.OWNER, Role.MANAGER, Role.PARTNER}
     if identity.role not in allowed:
@@ -1566,6 +1627,8 @@ def get_leads(identity):
         if hub:
             domain_q = record_fields(hub[0]).get("domain", "")
 
+    search_q = request.args.get("search", "").strip()[:120]
+
     # Screen config — lead_pipeline
     screen = SCREEN_CONFIGS["lead_pipeline"]
     view_q = request.args.get("view", screen["default_view"])
@@ -1573,16 +1636,50 @@ def get_leads(identity):
         view_q = screen["default_view"]
     view_cfg = screen["views"][view_q]
 
+    # PIPELINE-1 remediation items 6+7: the formula only restricts by
+    # identity (Partner domain scope) + view status — domain/search filtering
+    # happens in Python below so (a) available_domains reflects the
+    # identity's FULL scope, not just whichever domain is currently selected,
+    # and (b) fetching is paginate=True (fetch-all, no silent 100-record
+    # truncation) with an honest has_more flag if the safety cap is ever hit.
     formula = _build_formula(
         entity="Lead",
-        domain=domain_q,
         identity=identity,
         include_statuses=view_cfg.get("include_statuses"),
         exclude_statuses=view_cfg.get("exclude_statuses"),
         raw_formula=view_cfg.get("raw_formula", ""),
     )
 
-    records = _at_list("Leads", formula, max_records=screen["default_max_records"])
+    fetch_cap = screen["default_max_records"]
+    records = _at_list("Leads", formula, max_records=fetch_cap, paginate=True)
+    has_more = len(records) >= fetch_cap
+
+    # Domain filter picker (item 6) — Owner/Manager only; Partner is already
+    # implicitly restricted to its own allowed_domains via identity above.
+    available_domains: list[str] = []
+    if identity.role != Role.PARTNER:
+        available_domains = sorted({
+            d for d in (record_fields(r).get(LeadFields.DOMAIN, "") for r in records) if d
+        })
+
+    if domain_q:
+        records = [r for r in records if record_fields(r).get(LeadFields.DOMAIN, "") == domain_q]
+
+    if search_q:
+        needle = search_q.lower()
+        def _matches_search(r: dict) -> bool:
+            f = record_fields(r)
+            return (
+                needle in str(f.get(LeadFields.NAME, "")).lower()
+                or needle in str(f.get(LeadFields.PHONE, "")).lower()
+            )
+        records = [r for r in records if _matches_search(r)]
+
+    # Deterministic default sort: Score descending, tie-break by created_at
+    # descending. list.sort() is stable, so sorting created_at first then
+    # Score gives "Score desc, ties broken by newest first" in one pass.
+    records.sort(key=lambda r: record_fields(r).get(LeadFields.CREATED_AT, "") or "", reverse=True)
+    records.sort(key=lambda r: int(record_fields(r).get(LeadFields.SCORE, 0) or 0), reverse=True)
 
     return jsonify({
         "view": view_q,
@@ -1590,6 +1687,8 @@ def get_leads(identity):
             k: v.get("label", k)
             for k, v in screen["views"].items()
         },
+        "available_domains": available_domains,
+        "has_more": has_more,
         "count": len(records),
         "leads": [_fmt_lead_summary(r) for r in records],
     })
@@ -1781,8 +1880,10 @@ def get_lead(lead_id, identity):
             "timestamp": timestamp,
         })
 
-    score       = int(f.get(LeadFields.SCORE, 0) or 0)
-    score_color = "red" if score >= 70 else ("yellow" if score >= 40 else "blue")
+    score = int(f.get(LeadFields.SCORE, 0) or 0)
+    # PIPELINE-1 remediation item 1 — canonical Pipeline temperature (see
+    # _pipeline_temperature docstring); replaces the old local 70/40 split.
+    temperature, score_color = _pipeline_temperature(score)
 
     # Owner is a multipleRecordLinks field -> list of Profile record IDs,
     # not a display string (see _resolve_profile_record_id). Resolve to
@@ -1790,17 +1891,28 @@ def get_lead(lead_id, identity):
     owner_links = relation_refs(f.get(LeadFields.OWNER, []))
     owner_display = ", ".join(_resolve_profile_display_names(owner_links)) if owner_links else ""
 
+    next_step = f.get(LeadFields.NEXT_STEP, "")
+
     payload = {
-        "id":            record_id(rec, required=True),
-        "name":          f.get(LeadFields.NAME, ""),
-        "phone":         f.get(LeadFields.PHONE, ""),
-        "domain":        f.get(LeadFields.DOMAIN, ""),
-        "status":        f.get(LeadFields.STATUS, ""),
-        "score":         score,
-        "score_color":   score_color,
-        "source":        f.get(LeadFields.SOURCE, ""),
-        "summary":       f.get(LeadFields.SUMMARY, ""),
-        "next_step":     f.get(LeadFields.NEXT_STEP, ""),
+        "id":                record_id(rec, required=True),
+        "name":              f.get(LeadFields.NAME, ""),
+        "phone":             f.get(LeadFields.PHONE, ""),
+        "domain":            f.get(LeadFields.DOMAIN, ""),
+        "status":            f.get(LeadFields.STATUS, ""),
+        "score":             score,
+        "score_color":       score_color,
+        "temperature":       temperature,
+        "source":            f.get(LeadFields.SOURCE, ""),
+        "summary":           f.get(LeadFields.SUMMARY, ""),
+        "next_step":         next_step,
+        # PIPELINE-1 remediation item 4 — Hebrew label for the raw stored
+        # value + the live Airtable option list, so the frontend renders a
+        # real editable picker instead of hardcoding (and drifting from) the
+        # option set itself.
+        "next_step_label":   _next_action_label(next_step) if next_step else "",
+        "next_step_options": [
+            {"value": key, "label": label} for key, (_, label) in _LEAD_NEXT_ACTION_OPTIONS.items()
+        ],
         "created_at":    f.get(LeadFields.CREATED_AT, ""),
         "timeline":      timeline,
         "tier":          f.get(LeadFields.TIER, ""),
@@ -1821,7 +1933,15 @@ def get_lead(lead_id, identity):
 @tma_api.route("/api/leads/<lead_id>/status", methods=["PATCH"])
 @require_tma_auth
 def update_lead_status(lead_id, identity):
-    """Update lead status. Owner + Manager only."""
+    """Update lead status. Owner + Manager only.
+
+    PIPELINE-1 remediation item 3 — unified onto the same ActionGateway
+    execution path as PATCH /api/leads/<id> (_queue_or_owner_execute):
+    Owner auto-executes, Manager is queued for approval. Previously this
+    endpoint called _queue_tma_write_approval() directly, which meant even
+    the Owner had to manually approve their own status change afterward —
+    a different write semantics than every other lead-mutation endpoint.
+    """
     if identity.role not in {Role.OWNER, Role.MANAGER}:
         return jsonify({"error": "forbidden"}), 403
 
@@ -1832,7 +1952,7 @@ def update_lead_status(lead_id, identity):
     if new_status not in LeadStatus.ALL:
         return jsonify({"error": "invalid status", "valid": sorted(LeadStatus.ALL)}), 400
 
-    _, response, status = _queue_tma_write_approval(
+    _, response, status = _queue_or_owner_execute(
         "tma_update_lead_status",
         {
             "op": "patch",
@@ -1923,6 +2043,12 @@ def patch_lead(lead_id, identity):
         if k in fields:
             fields[k] = _clean_select_value(fields[k])
 
+    # PIPELINE-1 remediation item 2 — score override is Owner-only, enforced
+    # server-side. Manager reaches this same route for status/outcome/next
+    # step edits, but must never be able to move the Score field through it.
+    if LeadFields.SCORE in fields and not identity.is_owner:
+        return jsonify({"error": "forbidden — score override is owner-only"}), 403
+
     if LeadFields.STATUS in fields:
         if fields[LeadFields.STATUS] not in LeadStatus.ALL:
             return jsonify({"error": "invalid status", "valid": sorted(LeadStatus.ALL)}), 400
@@ -1931,6 +2057,17 @@ def patch_lead(lead_id, identity):
         if outcome_value is None:
             return jsonify({"error": "invalid outcome", "valid": sorted(LeadOutcome.BY_KEY)}), 400
         fields[LeadFields.OUTCOME] = outcome_value
+    if LeadFields.NEXT_STEP in fields:
+        # PIPELINE-1 remediation item 4 — validate against the live Airtable
+        # option set (already stripped by the _LEAD_SELECT_FIELDS loop above)
+        # and write back the exact stored value (see _LEAD_NEXT_ACTION_OPTIONS).
+        next_action_opt = _LEAD_NEXT_ACTION_OPTIONS.get(fields[LeadFields.NEXT_STEP])
+        if next_action_opt is None:
+            return jsonify({
+                "error": "invalid next_step",
+                "valid": sorted(_LEAD_NEXT_ACTION_OPTIONS),
+            }), 400
+        fields[LeadFields.NEXT_STEP] = next_action_opt[0]
 
     if not fields or all(v == "" for v in fields.values()):
         return jsonify({"error": "no editable fields provided"}), 400

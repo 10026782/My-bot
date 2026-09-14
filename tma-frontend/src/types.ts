@@ -54,11 +54,19 @@ export interface LeadSummary {
   phone: string;
   status: string;
   score: number;
+  score_color: "red" | "yellow" | "blue";
+  temperature: string;
   domain: string;
   source: string;
+  next_step: string;
+  next_step_label: string;
 }
 
 export interface LeadsResponse {
+  view: string;
+  available_views: Record<string, string>;
+  available_domains: string[];
+  has_more: boolean;
   count: number;
   leads: LeadSummary[];
 }
@@ -159,6 +167,11 @@ export interface ActivityResponse {
   entries: ActivityEntry[];
 }
 
+export interface NextActionOption {
+  value: string;
+  label: string;
+}
+
 export interface LeadDetail {
   id: string;
   name: string;
@@ -167,9 +180,12 @@ export interface LeadDetail {
   status: string;
   score: number;
   score_color: "red" | "yellow" | "blue";
+  temperature: string;
   source: string;
   summary: string;
   next_step: string;
+  next_step_label: string;
+  next_step_options: NextActionOption[];
   created_at: string;
   timeline: TimelineEntry[];
   tier?: string;

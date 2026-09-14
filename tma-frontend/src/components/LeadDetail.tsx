@@ -55,18 +55,6 @@ const STAGE_LABELS: Record<WorkflowStage, string> = {
   closed: "Closed / Archived",
 };
 
-const NEXT_ACTION_LABELS: Record<string, string> = {
-  call_now: "להתקשר עכשיו",
-  call_today: "להתקשר היום",
-  schedule_this_week: "לתאם השבוע",
-  send_details: "לשלוח פרטים",
-  follow_up: "פולואפ",
-  waiting_response: "ממתין לתגובה",
-  create_deal: "ליצור עסקה",
-  archive: "לארכב",
-  none: "אין פעולה מומלצת",
-};
-
 const TERMINAL_STATUSES = new Set(["done", "archived", "lost", "duplicate", "not_relevant"]);
 const TERMINAL_OUTCOMES = new Set(OUTCOMES.filter((o) => o.terminal).map((o) => o.key));
 
@@ -90,7 +78,7 @@ function isTerminalLead(data: TLeadDetail, outcome: string) {
 function deriveStage(data: TLeadDetail, outcome: string): WorkflowStage {
   if (isTerminalLead(data, outcome)) return "closed";
   if (outcome === "meeting_scheduled") return "task";
-  if ((data.next_step ?? "") === "create_deal") return "task";
+  if ((data.next_step ?? "") === "Create Deal") return "task";
   if ((data.status ?? "").toLowerCase() === "high_confidence" || data.score >= 70) return "qualified";
   if (outcome === "needs_followup" || Boolean(data.next_followup)) return "followup";
   return "new";
@@ -132,6 +120,8 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [scoreInput, setScoreInput] = useState("");
   const [scoreDirty, setScoreDirty] = useState(false);
+  const [nextActionBusy, setNextActionBusy] = useState(false);
+  const [nextActionPending, setNextActionPending] = useState(false);
 
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
@@ -266,6 +256,33 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
+  // PIPELINE-1 remediation item 4 — Next Action is now a real write through
+  // the canonical PATCH route: UI -> patchLead -> ActionGateway
+  // (executed for Owner / pending_approval for Manager) -> refetch. A
+  // pending_approval result must NEVER be shown as if it already applied.
+  async function handleNextActionChange(value: string) {
+    if (nextActionBusy) return;
+    setNextActionBusy(true);
+    try {
+      const result = await patchLead(lead.id, { next_step: value });
+      if (result.status === "executed") {
+        const fresh = await fetchLead(lead.id);
+        setState({ status: "ok", data: fresh });
+        setNextActionPending(false);
+        showToast("ok", `Next Action עודכן: ${fresh.next_step_label || fresh.next_step}`);
+      } else if (result.status === "pending_approval") {
+        setNextActionPending(true);
+        showToast("ok", "הבקשה נשלחה לאישור — טרם בוצעה");
+      } else {
+        showToast("err", "עדכון Next Action לא הושלם");
+      }
+    } catch (e) {
+      showToast("err", formatError(e, "עדכון Next Action נכשל"));
+    } finally {
+      setNextActionBusy(false);
+    }
+  }
+
   async function handleCreateTask() {
     if (taskBusy || !taskTitle.trim()) return;
     setTaskBusy(true);
@@ -279,7 +296,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
       setTaskDue("");
       setTaskNotes("");
       setTaskOpen(false);
-      updateLoadedData({ next_step: "create_deal" });
+      updateLoadedData({ next_step: "Create Deal", next_step_label: "ליצור עסקה" });
       showToast("ok", "משימה נוצרה");
     } catch (e) {
       showToast("err", formatError(e, "יצירת המשימה נכשלה"));
@@ -320,7 +337,6 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
   const data = state.status === "ok" ? state.data : null;
   const stage = data ? deriveStage(data, currentOutcome) : "new";
   const terminal = data ? isTerminalLead(data, currentOutcome) : false;
-  const nextAction = data?.next_step ? NEXT_ACTION_LABELS[data.next_step] ?? data.next_step : "אין פעולה מומלצת";
   const ownerText = readableOwner(data?.owner);
   const historyCount = data?.timeline?.length ?? 0;
   const pbClass = terminal ? "pb-28" : taskOpen ? "pb-80" : aiOpen ? "pb-60" : "pb-52";
@@ -399,8 +415,26 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
           </div>
 
           <div className="bg-white rounded-xl shadow-sm p-4">
-            <SectionHeader title="המלצת מערכת" sub="Next Action מוצג כהמלצה בלבד, לא כבחירה ידנית" />
-            <p className="text-sm font-semibold text-gray-800">{nextAction}</p>
+            <SectionHeader
+              title="Next Action"
+              sub={nextActionPending ? "הבקשה נשלחה לאישור — טרם בוצעה" : "הפעולה הבאה לליד — נשמר דרך אותו מסלול אישורים כמו שאר עדכוני הליד"}
+            />
+            {data.next_step_options?.length ? (
+              <select
+                value={data.next_step || ""}
+                onChange={(e) => handleNextActionChange(e.target.value)}
+                disabled={nextActionBusy}
+                className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none disabled:opacity-50"
+              >
+                <option value="" disabled>בחר/י פעולה הבאה</option>
+                {data.next_step_options.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-sm font-semibold text-gray-800">{data.next_step_label || "אין פעולה מומלצת"}</p>
+            )}
+            {nextActionPending && <p className="text-xs text-amber-600 mt-1">ממתין לאישור Owner — הערך עדיין לא נכנס לתוקף</p>}
             {data.next_followup && <p className="text-xs text-gray-400 mt-1">פולואפ הבא: {data.next_followup}</p>}
           </div>
 
