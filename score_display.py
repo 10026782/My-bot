@@ -1,6 +1,15 @@
 # score_display.py — Lead Temperature Display System
 # סולם 5 דרגות: COLD → WARM → HOT → VERY HOT → BOILING
 # ציון 0-100 פנימי, תצוגה ויזואלית לחלוטין.
+#
+# get_temperature() is the app's single canonical Score→Temperature
+# derivation (PIPELINE-1 Blocker #3 remediation, 14/09/2026) — its 20/40/60/80
+# breakpoints match the live Airtable "טמפרטורה" formula field exactly.
+# daily_digest.py and lead_capture.py previously each re-derived their own
+# (mutually inconsistent) tier scale; those are now removed/delegate here.
+# The one deliberate, documented exception is tma_api.py's Lead Pipeline
+# screen (`_pipeline_temperature()`), which uses its own simpler 3-bucket
+# scale per an explicit product decision — see that function's docstring.
 
 from __future__ import annotations
 
