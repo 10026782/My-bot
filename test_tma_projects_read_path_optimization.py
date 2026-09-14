@@ -90,7 +90,8 @@ class _CountingAirtable:
         self.leads_cap = leads_cap
         self.calls: list[tuple] = []  # (table, formula, max_records)
 
-    def __call__(self, table, formula="", max_records=50, strict=False):
+    def __call__(self, table, formula="", max_records=50, strict=False,
+                 measurement_label=None, paginate=False):
         self.calls.append((table, formula, max_records))
         if "Payments" in table or "תשלומים" in table:
             return []  # would 403 in real life; must never be called at all in the new path

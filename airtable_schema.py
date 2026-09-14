@@ -754,7 +754,7 @@ class LeadFields:
     OUTCOME         = "Business Outcome"  # singleSelect — see LeadOutcome below for exact option strings (some have a trailing space baked into the Airtable config)
     NEXT_FOLLOWUP   = "Next Followup" # ISO date of next scheduled followup
     OWNER           = "Owner"         # multipleRecordLinks -> Tables.PROFILE (NOT plain text; verified via Airtable MCP 2026-08-19). Never written from the TMA today (see tma_api.create_lead_task).
-    NEXT_STEP       = "Next Action"   # call_now|call_today|schedule_this_week|send_details|follow_up|waiting_response|create_deal|archive|none — NOTE: live Airtable options are actually "Call Back/Send Details/Follow Up/Waiting Response/Create Deal/Convert Contact/Schedule Meeting /Closed Won/Closed Lost" (verified via Airtable MCP 2026-06-17) — this field is not currently written from the TMA, so the mismatch is latent, not active
+    NEXT_STEP       = "Next Action"   # singleSelect — live Airtable options: "Call Back/Send Details/Follow Up/Waiting Response/Create Deal/Convert Contact/Schedule Meeting /Closed Won/Closed Lost/ליד חדש" (verified via Airtable MCP 2026-06-17; "Schedule Meeting " carries a trailing space in Airtable's own config). Written from the TMA as of PIPELINE-1 remediation item 4 — see tma_api.py::_LEAD_NEXT_ACTION_OPTIONS, the single canonical value/label map used by both the read (GET /api/leads/<id>) and write (PATCH /api/leads/<id>) paths.
     DEAL_LINK       = "עסקאות (Deals)"
     EXTERNAL_ID     = "external_id"   # gmail:<msg_id> — idempotency key מדויק (F06)
     SENDER_ID       = "sender_id"     # email address / phone — dedup by sender (F06)

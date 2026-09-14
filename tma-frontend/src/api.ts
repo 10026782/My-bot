@@ -69,8 +69,16 @@ export async function fetchDashboard(slug: string): Promise<DashboardResponse> {
   return r.json() as Promise<DashboardResponse>;
 }
 
-export async function fetchLeads(domain: string): Promise<LeadsResponse> {
-  const r = await fetch(`${BASE}/api/leads?domain=${encodeURIComponent(domain)}`, { headers: authHeaders() });
+export async function fetchLeads(
+  domain: string,
+  opts?: { view?: string; search?: string },
+): Promise<LeadsResponse> {
+  const params = new URLSearchParams();
+  if (domain) params.set("domain", domain);
+  if (opts?.view) params.set("view", opts.view);
+  if (opts?.search) params.set("search", opts.search);
+  const qs = params.toString();
+  const r = await fetch(`${BASE}/api/leads${qs ? `?${qs}` : ""}`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);
   return r.json() as Promise<LeadsResponse>;
 }
@@ -294,6 +302,16 @@ export async function saveGameCheckin(
   return r.json();
 }
 
+/** Mirrors the ActionGateway response shape from _queue_or_owner_execute:
+ * status "executed" (200) means the write already happened — callers should
+ * refetch to show the true persisted state. status "pending_approval" (202)
+ * means a Manager's request is queued — callers must NOT optimistically
+ * show the change as live (PIPELINE-1 remediation item 4 — no false success). */
+export interface PatchLeadResult {
+  status: "executed" | "pending_approval" | string;
+  [key: string]: unknown;
+}
+
 export async function patchLead(
   leadId: string,
   fields: Partial<{
@@ -304,13 +322,14 @@ export async function patchLead(
     owner: string[];      // Airtable multipleRecordLinks — must be array of record IDs
     next_step: string;
   }>,
-): Promise<void> {
+): Promise<PatchLeadResult> {
   const r = await fetch(`${BASE}/api/leads/${encodeURIComponent(leadId)}`, {
     method: "PATCH",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(fields),
   });
   if (!r.ok) await throwApiError(r, `Lead update failed (${r.status})`);
+  return r.json() as Promise<PatchLeadResult>;
 }
 
 export async function setLeadOutcome(leadId: string, outcome: string): Promise<void> {

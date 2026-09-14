@@ -2,6 +2,69 @@
 
 עודכן: 14/09/2026
 
+## PIPELINE-1 closure — locked remediation scope (7 items) — 14/09/2026
+
+Closes the PIPELINE-1 discovery audit's locked remediation scope for the
+Lead Pipeline TMA screen (O2/O3), on top of PR #1228's Blocker #1 fix. Each
+item is scoped to the Pipeline screen only — no global scoring/Airtable
+cleanup, no `/convert`/Lead→Contact/Lead→Deal/TMA-lead-creation/owner-
+reassignment/Voice-IVR work, no Pipeline-2. Full detail, tests, and verdict
+in the PIPELINE-1 REMEDIATION REPORT delivered in-conversation; summary:
+
+1. **Score/Temperature SSOT** — new `tma_api.py::_pipeline_temperature()`
+   (score<25 קר, 25-59 חם, >=60 חם מאוד) is the single derivation point for
+   both `GET /api/leads` and `GET /api/leads/<id>`; removed the local 70/40
+   `score_color` split from both the backend and `LeadCard.tsx`. The other 5
+   pre-existing scoring/temperature implementations (score_display.py,
+   lead_capture.py x2, daily_digest.py, the live Airtable "טמפרטורה" formula)
+   are untouched — tracked as separate cleanup debt.
+2. **Score override authorization** — `patch_lead()` now rejects (403) a
+   Score field from any non-Owner role server-side, before the ActionGateway
+   is ever reached.
+3. **Status write unification** — `PATCH /api/leads/<id>/status` now calls
+   `_queue_or_owner_execute()` (same as `PATCH /api/leads/<id>`) instead of
+   calling `_queue_tma_write_approval()` directly; Owner auto-executes on
+   both, Manager is queued on both — one write semantics, not two.
+4. **Next Action real write** — `LeadFields.NEXT_STEP`'s write path now
+   validates against the live Airtable singleSelect options (verified via
+   Airtable MCP against the production base — "Call Back/Send
+   Details/Follow Up/Waiting Response/Create Deal/Convert Contact/Schedule
+   Meeting /Closed Won/Closed Lost/ליד חדש"), not the stale pre-fix
+   snake_case keys that never matched live data. `LeadDetail.tsx` gained a
+   real picker: PATCH → check `executed` vs `pending_approval` → refetch on
+   executed, honest "pending approval" state otherwise (no false success).
+5. **Pipeline reachability** — Owner/Manager/Partner now have a direct
+   frontend entry point to the (one, unchanged) `LeadPipeline` component
+   that does not require `GET /api/projects` (owner-only) to succeed first.
+6. **Operational presentation** — `GET /api/leads` gained `?search=`
+   (name/phone substring), a wired `?view=`, an `available_domains` picker
+   for Owner/Manager, and a deterministic default sort (Score desc, tie-
+   break created_at desc); `next_step_label`/`temperature` now render in the
+   list card.
+7. **100-record cap** — `get_leads()` now fetches with `paginate=True` up to
+   a 1000-record safety cap (`_at_list()` gained a `paginate` passthrough)
+   instead of silently truncating at 100; an honest `has_more` flag covers
+   the (unrealistic at current scale) case of hitting that cap.
+
+New regression coverage: `test_pipeline1_closure_remediation.py` (33/33).
+Existing suites re-verified green after this change:
+`test_pipeline1_partner_domain_failclosed.py` (8/8),
+`test_c05c07_finding3_single_write_path.py` (36/36),
+`test_tma_projects_read_path_optimization.py` (32/32, required a test-fixture
+fix — `_CountingAirtable.__call__` needed a `paginate` kwarg after
+`_at_list()`'s signature grew one), `test_bug104_tma_lead_event_bridge.py`
+(55/55), `test_bug104_leads_reasoning_projection.py` (102/102),
+`test_bug104_phase1_1_contract_hardening.py` (57/57),
+`test_c84_tma_approval_ttl.py` (44/44),
+`test_phase_4b2_approvals_projection.py` (68/68),
+`test_phase_4b2_wiring.py` (86/86), `test_pr0c0_tma_approval_truthfulness.py`
+(22/22), `test_my_work_end_to_end.py` (39/39 via pytest), `smoke_tests.py`,
+and a clean full-repo `compileall` + `tma-frontend` `npm run build`
+(tsc + vite, no errors). This is `CODE_DONE + STATIC_VERIFIED` only — not
+yet merged, deployed, or exercised against live Airtable/Render; the
+frontend changes are verified by typecheck/build only, not a running
+browser session.
+
 ## Payment Term → Charge routing: original-message slot extraction (BUG-CHARGE-TERM-BYPASS follow-up #2) — 14/09/2026
 
 Live canary on commit `4a1b099` (already containing PR #1227's label/auto-bind
