@@ -2,6 +2,91 @@
 
 עודכן: 14/09/2026
 
+## PIPELINE-1 — CLOSED — VERIFIED — 14/09/2026
+
+Final closure report for the Lead Pipeline TMA screen discovery/gap audit
+and its remediation. Covers the 7-item locked closure scope (PR #1230) and
+the original discovery report's 6 numbered blockers.
+
+### 7-item locked closure scope (PR #1230, merged `563993f`)
+
+All 7 ✅ closed: (1) Score/Temperature SSOT scoped to Pipeline only
+(`tma_api.py::_pipeline_temperature()`, <25/25-59/≥60); (2) Score override
+Owner-only, server-enforced (`patch_lead()` 403s on `LeadFields.SCORE` for
+non-owner); (3) Status write unification (`/status` and
+`PATCH /api/leads/<id>` both route through `_queue_or_owner_execute()`);
+(4) Next Action real write with no false success (validated against live
+Airtable options, written via ActionGateway, frontend distinguishes
+`executed`/`pending_approval`); (5) Pipeline reachability — direct "🧲
+לידים" entry point in `App.tsx` (`project: null`), not gated by the
+owner-only Projects Hub; (6) operational presentation — search, `view=`
+wiring, domain filter, deterministic sort, temperature, Next Action in the
+list (`LeadPipeline.tsx`/`LeadCard.tsx`); (7) no silent 100-record
+truncation — `paginate=True` fetch with an honest `has_more` banner.
+
+### Original discovery report — Blockers #1–#6
+
+- **#1 Partner fail-open in `GET /api/leads`** — ✅ CLOSED (PR #1228,
+  merged `10897f6`; explicit deny when `identity.allowed_domains` is
+  empty instead of falling through unrestricted).
+- **#2 Pipeline never calls `enforce_tenant_scope()`** — 🟡 FUNCTIONALLY
+  CLOSED, not literally. `get_leads()` restricts by identity inside
+  `_build_formula()` plus the Blocker #1 fail-closed guard; `get_lead()`
+  checks `identity.can_access_domain()` before returning data. Same
+  security property `tools/airtable_security.py::enforce_tenant_scope()`
+  provides, via a different code path — not a call to the shared helper
+  itself. Recorded honestly rather than claimed as literally closed.
+- **#3 Temperature/scoring fragmentation (6 disconnected implementations)**
+  — ✅ CLOSED (PR #1231, merged `3b26c98`). Investigation found the real
+  structure was two internally-consistent clusters plus dead code, not six
+  independent ones. `score_display.py::get_temperature()` is now the
+  app-wide canonical Score→Temperature SSOT (20/40/60/80, matching the
+  live Airtable `טמפרטורה` formula field); `daily_digest.py` delegates to
+  it (hot-lead cutoff moved 50→60); `lead_capture.py`'s separate
+  25/50/70 tier scale was dead code and was removed. Pipeline's own
+  simpler 3-bucket scale (item 1 above) is kept as a documented, deliberate
+  exception — owner-confirmed, not touched.
+- **#4 Next Action field has no writer** — ✅ CLOSED, same fix as closure
+  item 4 above.
+- **#5 Deals.Linked Leads not live in Airtable** — field verified live
+  directly against production Airtable (Airtable MCP schema read,
+  `fld54uQ7hg5cu2dp8`, distinct from `Origin Lead`'s
+  `fldoobGq4PS78C0Em`); `commercial_crm.link_lead_to_deal()` writer +
+  registry/validator/dispatcher wiring + the `/תקדםליד` Telegram entry
+  point are merged to `main` (`d52ac95`, `902f723`). Wiring this into the
+  Pipeline/Lead Detail screen is explicitly **DEFERRED TO CRM-1** per an
+  owner scope correction (see below) — not a PIPELINE-1 blocker.
+- **#6 Lead→Contact conversion broken for most real leads** — explicitly
+  **DEFERRED TO CRM-1** per the same owner scope correction; not
+  investigated further under PIPELINE-1, not treated as a blocker.
+
+### Scope correction — CRM-1 deferral (owner decision, 14/09/2026)
+
+Mid-closure, a request to add Diamond Path / "golden writer"
+(`commercial_crm.py`'s Deal/Contact/Organization/PaymentTerm/Payment
+primitives) UI and Create-Lead/Create-Deal/Create-Payment buttons to the
+TMA was raised, then explicitly corrected by the owner to a locked
+boundary: **Pipeline/Lead Detail owns the Lead lifecycle only** (list,
+status, score/temperature, Next Action, tasks, history, and eventually
+thin handoff actions like "Convert to Contact"/"Create Deal"/"Link to
+Existing Deal" that call the canonical writers without duplicating CRM
+logic). Full Contact/Organization CRUD, Deal management, Payment/Payment
+Term UI, Diamond Path's multi-turn resolution flow, and TMA Lead creation
+are explicitly out of PIPELINE-1 and belong to a future, separately
+scoped **CRM-1 / Commercial CRM** discovery track — not opened yet, no
+code written for it. PIPELINE-1 closes without them by explicit owner
+decision.
+
+### Verdict
+
+**PIPELINE-1 — CLOSED — VERIFIED.**
+
+STATUS: ✅ VERIFIED IN PROD (main)
+EVIDENCE: `git merge-base --is-ancestor 563993f origin/main` → true;
+`git merge-base --is-ancestor 3b26c98 origin/main` → true;
+`git merge-base --is-ancestor 10897f6 origin/main` → true;
+`origin/main` HEAD at time of writing: `d457465`.
+
 ## Payment Term → Charge routing: root cause of the execution failure found — global "none" sentinel rule collided with a legitimate VAT Rule choice (BUG-CHARGE-TERM-BYPASS follow-up #4) — 14/09/2026
 
 Follow-up #3's open question — the exact cause of the generic "❌ אושר אך
