@@ -93,17 +93,24 @@ LINKED_RECORD_FIELDS: dict[str, set[str]] = {
 # Fields the agent should never write — security layer
 _ALWAYS_FORBIDDEN: frozenset[str] = frozenset({"tenant", "owner_id", "user_id", "chat_id"})
 
-# BUG-CHARGE-VAT-NONE-SENTINEL (live canary, 14/09/2026): the literal string
-# "none" is a genuine Airtable singleSelect choice for these fields
-# (VATRule.NONE = "none" — Payments/Payment Terms/Charges' "VAT Rule" field
-# has real choices none/add/included, confirmed live against schema
-# fldGdHsIJgilQzYyq and fldj7Yv1IidQvTYLx), not a UI placeholder. The
-# sentinel-"none"-drop rule below is otherwise correct (e.g. Leads' "status"
-# field) but was global across every field/table, so it silently dropped
-# crm_create_charge_from_term's required VAT Rule value, tripping the SPEC A1
-# atomic fail-closed guard and producing a reason-less "❌ אושר אך נכשל
-# בביצוע" with no HTTP request ever attempted.
-_SENTINEL_NONE_EXEMPT_FIELDS: frozenset[str] = frozenset({"VAT Rule"})
+# BUG-CHARGE-VAT-NONE-SENTINEL (live canary, 14/09/2026; extended 14/09/2026
+# post-deploy after prod hit the same bug on a second field): the literal
+# string "none" is a genuine Airtable singleSelect choice for these fields —
+# VATRule.NONE = "none" (Payments/Payment Terms/Charges' "VAT Rule" field,
+# choices none/add/included) and DocumentRequirement.NONE = "none"
+# (Payments/Charges' "Document Requirement" field, choices
+# receipt_required/invoice_required/expense_document_required/none) — both
+# confirmed live against the Meta API schema (fldRiHY31yWFuYYJ5/
+# fldj7Yv1IidQvTYLx for VAT Rule; fldRpYybbv4twn81N/fldfR0REoNJzbajOz for
+# Document Requirement), not UI placeholders. The sentinel-"none"-drop rule
+# below is otherwise correct (e.g. Leads' "status" field) but was global
+# across every field/table, so it silently dropped crm_create_charge_from_term's
+# required values, tripping the SPEC A1 atomic fail-closed guard and
+# producing a reason-less "❌ אושר אך נכשל בביצוע" with no HTTP request ever
+# attempted. airtable_schema.py has exactly two classes with a real "none"
+# member (grepped: `"none"` only appears in VATRule and DocumentRequirement) —
+# any future one must be added here too.
+_SENTINEL_NONE_EXEMPT_FIELDS: frozenset[str] = frozenset({"VAT Rule", "Document Requirement"})
 
 # PR2 rev.2 — Airtable Meta API field type strings for select fields.
 # Same two literal values already used independently by tools/schema_governance.py.
