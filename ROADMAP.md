@@ -2,6 +2,47 @@
 
 עודכן: 14/09/2026
 
+## Payment Term → Charge routing: Rate % Airtable-fraction fix + idempotency-check scalability (BUG-CHARGE-TERM-BYPASS follow-up #3) — 14/09/2026
+
+First real end-to-end approval click on `crm_create_charge_from_term` (after
+follow-ups #1/#2 made the flow reachable and auto-resolving) surfaced two
+issues in commit `4a1b099`+ follow-ups: (1) a Payment Term named "...10%..."
+calculated a 21.00 ILS Charge on a 21,000 basis — exactly 100x too small,
+with the approval preview itself showing "אחוז: 0.1%" — and (2) the
+approval then failed to execute with a generic "❌ אושר אך נכשל בביצוע /
+הפעולה לא הושלמה" (no specific reason). Root cause of (1): Airtable's
+Percent-format field type always returns/accepts the STORED FRACTION via
+its API (0.1 for a UI-displayed "10%"), never percentage points — a fixed,
+documented Airtable platform behavior. `PaymentTermFields.RATE_PCT` is such
+a field, but `calculate_payment()`'s own contract (and every other
+convention in this codebase — the completion UI's 0-100 validation, the
+Agent tool schema's "אחוז" description) is percentage POINTS. Fixed with
+`commercial_crm._percent_points_from_airtable()`/`_airtable_percent_from_points()`,
+applied at both read boundaries (`crm_create_charge_from_term()`,
+`describe_charge_from_term_preview()`) and the write boundary
+(`create_payment_term()`, so a NEW Term created through this flow doesn't
+get the inverse bug — stored as "1000%"). The Charge's own Rate % snapshot
+field stays the raw Airtable-native value, unchanged, so it round-trips
+correctly. For (2): investigated but could not be pinned down definitively
+without a production log line — the generic failure message intentionally
+redacts specifics. Found and fixed one concrete, previously-unexercised
+scalability risk in the same code path that is a strong candidate
+explanation: the duplicate-Reference idempotency check fetched the
+**entire** Charges table unbounded/paginated on every call — replaced with
+a targeted exact-match `filterByFormula` query (the same bounded-search
+pattern `lookup_human_reference()` already uses), capped at 1 record. This
+is a real fix regardless of whether it was the specific cause of this one
+failure. 3 new/updated tests locking in the percent conversion (including
+the exact live canary numbers: 21,000 basis × 10% = 2,100.00 ILS) plus the
+idempotency-query shape; full existing suite (203 pytest + every standalone
+script + smoke tests + governance guard) green. **Needs owner confirmation
+before merge**: this fix assumes `PaymentTermFields.RATE_PCT` (and by
+extension `ChargeFields.RATE_PCT`) is configured as an Airtable
+Percent-format field in the live base, not a plain Number field — please
+confirm in Airtable's field settings, since getting this backwards would
+be a financial-calculation regression in the other direction. Not yet
+merged, deployed, or runtime-canary-re-verified.
+
 ## PIPELINE-1 closure — locked remediation scope (7 items) — 14/09/2026
 
 Closes the PIPELINE-1 discovery audit's locked remediation scope for the

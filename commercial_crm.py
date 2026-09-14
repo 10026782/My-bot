@@ -214,6 +214,39 @@ def calculate_payment(
     }
 
 
+# BUG-CHARGE-TERM-BYPASS live canary (production-reported): a Payment Term
+# named "...10%..." calculated a Charge of 21.00 ILS on a 21,000 basis —
+# exactly a 100x-too-small result, and the approval preview itself showed
+# "אחוז: 0.1%" instead of "10%". Airtable's Percent-format field type
+# always returns/accepts the STORED FRACTION via its API (0.1 for a
+# UI-displayed "10%"), never the percentage-points number a human reads off
+# the cell — this is a fixed, documented Airtable platform behavior, not
+# base-specific configuration. Every OTHER convention in this codebase
+# (calculate_payment()'s own contract above, the completion UI's
+# "positive_percent" 0-100 validation, and the Agent tool schema's "אחוז"
+# description) is percentage POINTS (10 for 10%) -- so PaymentTermFields.
+# RATE_PCT (an Airtable Percent-format field) must be converted exactly
+# once, at this single read/write boundary, rather than leaving every
+# caller to remember the x100/÷100 factor itself.
+def _percent_points_from_airtable(raw_value: object) -> float:
+    """Airtable Percent-field API value (fraction, e.g. 0.1) -> percentage
+    points (10) -- for calculation/display. Never call this on a value that
+    did not just come straight off a live Airtable record."""
+    try:
+        return float(raw_value or 0) * 100
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _airtable_percent_from_points(points: float) -> float:
+    """Percentage points (10, already validated 0-100 by the completion
+    contract) -> the Airtable Percent-field API value (fraction, 0.1) --
+    for writing PaymentTermFields.RATE_PCT. The inverse of
+    _percent_points_from_airtable(), kept as its own named function so a
+    reader never has to infer the direction from a bare "/ 100"."""
+    return float(points) / 100
+
+
 # ══════════════════════════════════════════════════
 # Writers
 # ══════════════════════════════════════════════════
@@ -709,7 +742,11 @@ def crm_create_charge_from_term(
     elif calc_type == PaymentTermCalcType.PERCENTAGE:
         if basis_value is None:
             return _tool_result(ok=False, tool=tool, user_message="❌ Percentage Payment Term requires basis_value.")
-        calculation = calculate_payment(calc_type, rate_pct=term_fields.get(PaymentTermFields.RATE_PCT), basis_value=basis_value, vat_rule=vat_rule)
+        calculation = calculate_payment(
+            calc_type,
+            rate_pct=_percent_points_from_airtable(term_fields.get(PaymentTermFields.RATE_PCT)),
+            basis_value=basis_value, vat_rule=vat_rule,
+        )
     else:
         return _tool_result(ok=False, tool=tool, user_message=f"❌ Unsupported Payment Term calculation type: {calc_type!r}.")
 
@@ -724,13 +761,29 @@ def crm_create_charge_from_term(
 
     # ponytail: process lock + deterministic reference; use a provider-side
     # unique constraint when Airtable supports one for cross-worker races.
+    #
+    # BUG-CHARGE-TERM-BYPASS live canary follow-up: this used to fetch the
+    # ENTIRE Charges table (max_records=None, paginate=True, no formula) and
+    # filter client-side for the one matching Reference — an unbounded,
+    # ever-growing full-table paginated scan on every single call, never
+    # exercised against a real-sized table before the first live approval
+    # click. A targeted exact-match filterByFormula (the same mechanism
+    # lookup_human_reference() already uses for bounded search) turns this
+    # into one small, fast, Airtable-side-filtered request regardless of how
+    # many Charges already exist — Reference is a deterministic
+    # {deal_id, payment_term_id, lead_id, occurrence} key, so at most one
+    # record can ever match.
     with _DEAL_LEAD_LINK_LOCK:
         try:
-            existing = list_records(Tables.CHARGES, max_records=None, paginate=True, fields=[ChargeFields.REFERENCE])
+            existing = list_records(
+                Tables.CHARGES,
+                f"{{{ChargeFields.REFERENCE}}}='{escape_formula_value(reference)}'",
+                max_records=1, fields=[ChargeFields.REFERENCE], paginate=False,
+            )
         except Exception:
             return _tool_result(ok=False, tool=tool, user_message="❌ Could not verify Charge idempotency.")
-        if any(record.get("fields", {}).get(ChargeFields.REFERENCE) == reference for record in existing):
-            record = next(record for record in existing if record.get("fields", {}).get(ChargeFields.REFERENCE) == reference)
+        if existing:
+            record = existing[0]
             return _tool_result(ok=True, tool=tool, external_id=record.get("id", ""), evidence={"record_id": record.get("id", ""), "idempotent": True}, user_message="✅ Charge already exists; duplicate creation prevented.")
         result = create_charge(
             deal_id=deal_id,
@@ -804,7 +857,11 @@ def describe_charge_from_term_preview(
         elif calc_type == PaymentTermCalcType.PERCENTAGE:
             if basis_value is None:
                 return ""
-            calculation = calculate_payment(calc_type, rate_pct=term_fields.get(PaymentTermFields.RATE_PCT), basis_value=basis_value, vat_rule=vat_rule)
+            calculation = calculate_payment(
+                calc_type,
+                rate_pct=_percent_points_from_airtable(term_fields.get(PaymentTermFields.RATE_PCT)),
+                basis_value=basis_value, vat_rule=vat_rule,
+            )
         else:
             return ""
     except (ValueError, TypeError):
@@ -820,9 +877,10 @@ def describe_charge_from_term_preview(
         lines.append(f"תנאי תשלום: {term_name}")
     if calc_type == PaymentTermCalcType.PERCENTAGE:
         lines.append(f"סכום בסיס: {calculation['base_amount']:,.2f}")
-        rate_pct = term_fields.get(PaymentTermFields.RATE_PCT)
-        if rate_pct is not None:
-            lines.append(f"אחוז: {rate_pct}%")
+        raw_rate = term_fields.get(PaymentTermFields.RATE_PCT)
+        if raw_rate is not None:
+            rate_points = _percent_points_from_airtable(raw_rate)
+            lines.append(f"אחוז: {rate_points:g}%")
     lines.append(f"חיוב מחושב: {calculation['total_amount']:,.2f} {currency}")
     return "\n".join(lines)
 
@@ -1125,7 +1183,14 @@ def create_payment_term(
     if fixed_amount is not None:
         fields[PaymentTermFields.FIXED_AMOUNT] = fixed_amount
     if rate_pct is not None:
-        fields[PaymentTermFields.RATE_PCT] = rate_pct
+        # BUG-CHARGE-TERM-BYPASS live canary companion fix: rate_pct here is
+        # percentage POINTS (10 for 10%, already validated 0-100 by the
+        # completion contract / Agent tool schema — see
+        # _percent_points_from_airtable()'s own comment for the full
+        # Airtable Percent-field API convention this converts between).
+        # Writing it raw would store "10" into a Percent-format field,
+        # which Airtable would then display as "1000%".
+        fields[PaymentTermFields.RATE_PCT] = _airtable_percent_from_points(rate_pct)
     if calc_basis:
         fields[PaymentTermFields.CALC_BASIS] = calc_basis
     if trigger_date:
