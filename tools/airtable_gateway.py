@@ -93,6 +93,18 @@ LINKED_RECORD_FIELDS: dict[str, set[str]] = {
 # Fields the agent should never write — security layer
 _ALWAYS_FORBIDDEN: frozenset[str] = frozenset({"tenant", "owner_id", "user_id", "chat_id"})
 
+# BUG-CHARGE-VAT-NONE-SENTINEL (live canary, 14/09/2026): the literal string
+# "none" is a genuine Airtable singleSelect choice for these fields
+# (VATRule.NONE = "none" — Payments/Payment Terms/Charges' "VAT Rule" field
+# has real choices none/add/included, confirmed live against schema
+# fldGdHsIJgilQzYyq and fldj7Yv1IidQvTYLx), not a UI placeholder. The
+# sentinel-"none"-drop rule below is otherwise correct (e.g. Leads' "status"
+# field) but was global across every field/table, so it silently dropped
+# crm_create_charge_from_term's required VAT Rule value, tripping the SPEC A1
+# atomic fail-closed guard and producing a reason-less "❌ אושר אך נכשל
+# בביצוע" with no HTTP request ever attempted.
+_SENTINEL_NONE_EXEMPT_FIELDS: frozenset[str] = frozenset({"VAT Rule"})
+
 # PR2 rev.2 — Airtable Meta API field type strings for select fields.
 # Same two literal values already used independently by tools/schema_governance.py.
 _SELECT_FIELD_TYPES: frozenset[str] = frozenset({"singleSelect", "multipleSelects"})
@@ -136,7 +148,9 @@ def validate_airtable_fields(table: str, fields: dict) -> tuple[dict, list[str]]
             continue
 
         # 3. sentinel "none" — UI placeholder, not a valid Airtable select value
-        if isinstance(v, str) and v.strip() == "none":
+        #    (except fields where "none" is itself a real choice — see
+        #    _SENTINEL_NONE_EXEMPT_FIELDS / BUG-CHARGE-VAT-NONE-SENTINEL)
+        if isinstance(v, str) and v.strip() == "none" and k not in _SENTINEL_NONE_EXEMPT_FIELDS:
             errors.append(f"sentinel 'none' value for field '{k}'")
             continue
 
