@@ -3,6 +3,8 @@ import { fetchMyWork, updateTaskStatus } from "../api";
 import type { MyWorkResponse, TaskWorkItem } from "../types";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
+import { StatusBadge } from "./ui/StatusBadge";
+import { Surface } from "./ui/Surface";
 
 interface Props {
   onBack: () => void;
@@ -25,35 +27,25 @@ function TaskCard({
   onMarkDone: () => void;
 }) {
   return (
-    <div className="bg-white rounded-lg shadow-sm p-4 mb-3">
-      <div className="flex items-start gap-2 mb-2">
-        {task.overdue && (
-          <span className="inline-block bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded">דחוף</span>
-        )}
-        {task.domain && (
-          <span className="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">{task.domain}</span>
-        )}
+    <div className={`my-work-card${task.overdue ? " my-work-card--overdue" : ""}`}>
+      <div className="my-work-card__topline">
+        {task.overdue && <StatusBadge tone="danger">דחוף</StatusBadge>}
+        {task.domain && <StatusBadge tone="neutral">{task.domain}</StatusBadge>}
       </div>
-      <h3 className="text-base font-semibold text-gray-900 mb-1">{task.title}</h3>
-      {task.description && (
-        <p className="text-sm text-gray-600 mb-2 line-clamp-2">{task.description}</p>
-      )}
-      {task.due_date && (
-        <p className="text-xs text-gray-400 mb-2">📅 {task.due_date}</p>
-      )}
+      <h3>{task.title}</h3>
+      {task.description && <p>{task.description}</p>}
+      {task.due_date && <p className="my-work-card__due">📅 {task.due_date}</p>}
       {task.actionable && (
         <button
           type="button"
           onClick={onMarkDone}
           disabled={isUpdating}
-          className="w-full mt-1 py-2 rounded-md bg-green-50 text-green-700 text-sm font-semibold active:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="boss-button boss-button--quiet boss-bubble--action my-work-card__action"
         >
           {isUpdating ? "מעדכן…" : "✓ סמן כבוצע"}
         </button>
       )}
-      {errorMessage && (
-        <p className="text-xs text-red-600 mt-2">⚠️ {errorMessage}</p>
-      )}
+      {errorMessage && <p className="my-work-card__error">⚠️ {errorMessage}</p>}
     </div>
   );
 }
@@ -64,6 +56,7 @@ export function MyWork({ onBack }: Props) {
   const [taskErrors, setTaskErrors] = useState<Record<string, string>>({});
 
   const load = () => {
+    setState({ status: "loading" });
     fetchMyWork()
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => {
@@ -104,86 +97,109 @@ export function MyWork({ onBack }: Props) {
 
   if (state.status === "loading") {
     return (
-      <div className="min-h-screen bg-gray-100">
-        <PageHeader onBack={onBack} title="העבודה שלי" />
-        <ScreenState state="loading" title="טוען..." message="אוסף את המשימות שלך…" />
-      </div>
+      <main className="ventures-screen my-work-screen">
+        <div className="ventures-shell">
+          <PageHeader onBack={onBack} title="העבודה שלי" eyebrow="BOSS" />
+          <ScreenState state="loading" title="טוען את המשימות שלך" message="אוסף את התמונה העדכנית…" />
+        </div>
+      </main>
     );
   }
 
   if (state.status === "error") {
     const forbidden = state.code === 401 || state.code === 403;
     return (
-      <div className="min-h-screen bg-gray-100">
-        <PageHeader onBack={onBack} title="העבודה שלי" />
-        <ScreenState
-          state="error"
-          title={forbidden ? "אין הרשאה" : "לא הצלחנו לטעון"}
-          message={forbidden ? "זה זמין לבעלים בלבד." : "אפשר לנסות שוב בעוד רגע."}
-        />
-      </div>
+      <main className="ventures-screen my-work-screen">
+        <div className="ventures-shell">
+          <PageHeader onBack={onBack} title="העבודה שלי" eyebrow="BOSS" />
+          <ScreenState
+            state="error"
+            title={forbidden ? "אין הרשאה" : "לא הצלחנו לטעון"}
+            message={forbidden ? "זה זמין לבעלים בלבד." : "אפשר לנסות שוב בעוד רגע."}
+            action={
+              !forbidden && (
+                <button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={load}>
+                  נסו שוב
+                </button>
+              )
+            }
+          />
+        </div>
+      </main>
     );
   }
 
   const { data } = state;
   const immediateCount = data.immediate.length;
   const upcomingCount = data.upcoming.length;
+  const isEmpty = immediateCount === 0 && upcomingCount === 0;
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-8">
-      <PageHeader onBack={onBack} title="העבודה שלי" subtitle={`${immediateCount} דחוף • ${upcomingCount} בהמשך`} />
+    <main className="ventures-screen my-work-screen">
+      <div className="ventures-shell">
+        <PageHeader
+          onBack={onBack}
+          title="העבודה שלי"
+          eyebrow="BOSS"
+          subtitle={`${immediateCount} דחוף • ${upcomingCount} בהמשך`}
+          action={
+            <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={load}>
+              רענון
+            </button>
+          }
+        />
 
-      {/* Summary */}
-      <div className="grid grid-cols-2 gap-3 px-4 mb-4">
-        <div className="bg-white rounded-lg p-4 text-center">
-          <div className="text-2xl font-black text-red-600">{immediateCount}</div>
-          <div className="text-xs text-gray-600 mt-1">לטיפול עכשיו</div>
-        </div>
-        <div className="bg-white rounded-lg p-4 text-center">
-          <div className="text-2xl font-black text-blue-600">{upcomingCount}</div>
-          <div className="text-xs text-gray-600 mt-1">בהמשך</div>
+        <div className="my-work-stack">
+          <div className="my-work-summary">
+            <Surface className="my-work-stat">
+              <p className="my-work-stat__value my-work-stat__value--urgent">{immediateCount}</p>
+              <p className="my-work-stat__label">לטיפול עכשיו</p>
+            </Surface>
+            <Surface className="my-work-stat">
+              <p className="my-work-stat__value my-work-stat__value--upcoming">{upcomingCount}</p>
+              <p className="my-work-stat__label">בהמשך</p>
+            </Surface>
+          </div>
+
+          {isEmpty && (
+            <ScreenState state="empty" title="אין משימות לעכשיו" message="אתה צלול! ✨" />
+          )}
+
+          {immediateCount > 0 && (
+            <section className="my-work-section" aria-labelledby="my-work-immediate-heading">
+              <h2 id="my-work-immediate-heading" className="my-work-section__heading">לטיפול עכשיו</h2>
+              <div className="my-work-list">
+                {data.immediate.map((task) => (
+                  <TaskCard
+                    key={task.stable_key}
+                    task={task}
+                    isUpdating={updatingKey === task.stable_key}
+                    errorMessage={taskErrors[task.stable_key]}
+                    onMarkDone={() => handleMarkDone(task)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {upcomingCount > 0 && (
+            <section className="my-work-section" aria-labelledby="my-work-upcoming-heading">
+              <h2 id="my-work-upcoming-heading" className="my-work-section__heading">בהמשך</h2>
+              <div className="my-work-list">
+                {data.upcoming.map((task) => (
+                  <TaskCard
+                    key={task.stable_key}
+                    task={task}
+                    isUpdating={updatingKey === task.stable_key}
+                    errorMessage={taskErrors[task.stable_key]}
+                    onMarkDone={() => handleMarkDone(task)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       </div>
-
-      {/* Immediate Tasks */}
-      {immediateCount > 0 && (
-        <div className="px-4 mb-6">
-          <h2 className="text-sm font-bold text-gray-900 mb-3">לטיפול עכשיו</h2>
-          {data.immediate.map((task) => (
-            <TaskCard
-              key={task.stable_key}
-              task={task}
-              isUpdating={updatingKey === task.stable_key}
-              errorMessage={taskErrors[task.stable_key]}
-              onMarkDone={() => handleMarkDone(task)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Upcoming Tasks */}
-      {upcomingCount > 0 && (
-        <div className="px-4 mb-6">
-          <h2 className="text-sm font-bold text-gray-900 mb-3">בהמשך</h2>
-          {data.upcoming.map((task) => (
-            <TaskCard
-              key={task.stable_key}
-              task={task}
-              isUpdating={updatingKey === task.stable_key}
-              errorMessage={taskErrors[task.stable_key]}
-              onMarkDone={() => handleMarkDone(task)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Empty State */}
-      {immediateCount === 0 && upcomingCount === 0 && (
-        <div className="px-4 mt-8 text-center">
-          <p className="text-gray-400 text-sm">אין משימות לעכשיו</p>
-          <p className="text-gray-300 text-xs mt-2">אתה צלול! ✨</p>
-        </div>
-      )}
-    </div>
+    </main>
   );
 }
