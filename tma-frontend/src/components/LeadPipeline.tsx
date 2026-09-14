@@ -3,6 +3,8 @@ import { fetchLeads } from "../api";
 import type { LeadsResponse, ProjectCard, LeadSummary } from "../types";
 import { LeadCard } from "./LeadCard";
 import { LeadDetail } from "./LeadDetail";
+import { PageHeader } from "./ui/PageHeader";
+import { ScreenState } from "./ui/ScreenState";
 
 interface Props {
   // null = direct "All Leads" entry point (PIPELINE-1 remediation item 5),
@@ -28,11 +30,16 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   const baseDomain = project?.domain ?? "";
   const showDomainFilter = authRole === "owner" || authRole === "manager";
 
-  useEffect(() => {
+  const load = () => {
     setState({ status: "loading" });
     fetchLeads(baseDomain, { view, search })
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseDomain, view, search]);
 
   useEffect(() => {
@@ -58,98 +65,98 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
     : [];
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-8">
-      {/* Header */}
-      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center gap-3">
-        <button
-          onClick={onBack}
-          className="text-blue-500 text-xl font-medium leading-none"
-          aria-label="חזרה"
-        >
-          ←
-        </button>
-        <div>
-          <h1 className="text-lg font-black text-gray-900">
-            {project ? `${project.emoji} ${project.name}` : "🧲 לידים"}
-          </h1>
-          <p className="text-xs text-gray-400">
-            {data ? `${visibleLeads.length} לידים` : "Lead Pipeline"}
-          </p>
-        </div>
-      </div>
-
-      <div className="px-4 mb-3 flex flex-col gap-2">
-        <input
-          type="text"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="חיפוש לפי שם או טלפון..."
-          className="bg-white rounded-xl px-3 py-2 text-sm outline-none shadow-sm placeholder-gray-400"
+    <main className="ventures-screen lead-pipeline-screen">
+      <div className="ventures-shell">
+        <PageHeader
+          onBack={onBack}
+          eyebrow="BOSS"
+          title={project ? `${project.emoji} ${project.name}` : "לידים"}
+          subtitle={data ? `${visibleLeads.length} לידים` : "Lead Pipeline"}
+          action={
+            <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={load}>
+              רענון
+            </button>
+          }
         />
 
-        {data && (
-          <div className="flex gap-2 overflow-x-auto">
-            {Object.entries(data.available_views).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setView(key)}
-                className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full font-medium ${
-                  view === key ? "bg-blue-500 text-white" : "bg-white text-gray-600 shadow-sm"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="lead-pipeline-controls">
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="חיפוש לפי שם או טלפון..."
+            className="boss-input"
+            aria-label="חיפוש לידים"
+          />
 
-        {data && !baseDomain && showDomainFilter && data.available_domains.length > 0 && (
-          <select
-            value={domainFilter}
-            onChange={(e) => setDomainFilter(e.target.value)}
-            className="bg-white rounded-xl px-3 py-2 text-sm outline-none shadow-sm"
-          >
-            <option value="">כל הדומיינים</option>
-            {data.available_domains.map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
-        )}
-      </div>
+          {data && (
+            <div className="ventures-action-row" role="tablist" aria-label="תצוגות">
+              {Object.entries(data.available_views).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === key}
+                  aria-pressed={view === key}
+                  onClick={() => setView(key)}
+                  className="ventures-choice boss-bubble--selectable"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
 
-      {state.status === "loading" && (
-        <div className="flex justify-center pt-16">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-
-      {state.status === "error" && (
-        <div className="mx-4 mt-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-          {state.message}
-        </div>
-      )}
-
-      {data && data.has_more && (
-        <div className="mx-4 mb-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
-          יש יותר לידים ממה שמוצג כאן — צמצם/י עם חיפוש או פילטר דומיין.
-        </div>
-      )}
-
-      {data && (
-        <div className="flex flex-col gap-2 px-4">
-          {visibleLeads.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm pt-8">אין לידים להצגה</p>
-          ) : (
-            visibleLeads.map((lead) => (
-              <LeadCard
-                key={lead.id}
-                lead={lead}
-                onClick={() => setSelectedLead(lead)}
-              />
-            ))
+          {data && !baseDomain && showDomainFilter && data.available_domains.length > 0 && (
+            <select
+              value={domainFilter}
+              onChange={(e) => setDomainFilter(e.target.value)}
+              className="boss-select"
+              aria-label="סינון לפי דומיין"
+            >
+              <option value="">כל הדומיינים</option>
+              {data.available_domains.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
           )}
         </div>
-      )}
-    </div>
+
+        {state.status === "loading" && (
+          <ScreenState state="loading" title="טוען לידים" message="אוסף את הרשימה העדכנית…" />
+        )}
+
+        {state.status === "error" && (
+          <ScreenState
+            state="error"
+            title="לא הצלחנו לטעון"
+            message={state.message}
+            action={
+              <button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={load}>
+                נסו שוב
+              </button>
+            }
+          />
+        )}
+
+        {data && data.has_more && (
+          <p className="lead-pipeline-banner">
+            יש יותר לידים ממה שמוצג כאן — צמצם/י עם חיפוש או פילטר דומיין.
+          </p>
+        )}
+
+        {data && (
+          visibleLeads.length === 0 ? (
+            <ScreenState state="empty" title="אין לידים להצגה" message="נסו לשנות תצוגה, חיפוש או פילטר." />
+          ) : (
+            <div className="lead-pipeline-list">
+              {visibleLeads.map((lead) => (
+                <LeadCard key={lead.id} lead={lead} onClick={() => setSelectedLead(lead)} />
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </main>
   );
 }
