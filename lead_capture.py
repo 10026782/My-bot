@@ -29,7 +29,7 @@ def _is_junk_inbound_text(text: str) -> bool:
     return False
 
 
-def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[str]]:
+def _score_inbound_message(message: str, identity=None) -> tuple[int, list[str]]:
     text = (message or "").lower()
     score = 0
     why_score: list[str] = []
@@ -56,7 +56,7 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
         score += 20
         why_score.append("project:+20")
     if any(term in text for term in price_terms):
-        score += 25  # הועלה מ-15 ל-25 כדי שביטוי מחיר בודד יספיק לסף WARM (25) — תיקון לבאג: "כמה עולה?" → score=15 → COLD
+        score += 25  # הועלה מ-15 ל-25 — תיקון לבאג: ביטוי מחיר בודד ("כמה עולה?") היה מקבל ציון נמוך מדי
         why_score.append("price_intent:+25")
     if any(term in text for term in budget_terms) or re.search(r"\b\d{4,}\b", text):
         score += 25
@@ -77,31 +77,13 @@ def _score_inbound_message(message: str, identity=None) -> tuple[int, str, list[
 
     score = min(score, 100)
 
-    if score >= 70:
-        tier = "ULTRA_HOT"   # רותח — מיושר עם formula field (4 טיירים)
-    elif score >= 50:
-        tier = "HOT"         # לוהט
-    elif score >= 25:
-        tier = "WARM"        # חם
-    else:
-        tier = "COLD"        # קר
-
-    return score, tier, why_score
-
-
-def tier_from_score(score: int) -> str:
-    """
-    Public export — imported by lead_qualifier.py.
-    Thresholds: ULTRA_HOT≥70, HOT≥50, WARM≥25, COLD<25.
-    Aligned with _score_inbound_message tier logic above.
-    """
-    if score >= 70:
-        return "ULTRA_HOT"
-    if score >= 50:
-        return "HOT"
-    if score >= 25:
-        return "WARM"
-    return "COLD"
+    # PIPELINE-1 Blocker #3 remediation: this function used to also compute a
+    # local ULTRA_HOT/HOT/WARM/COLD tier (25/50/70 thresholds) — one of the
+    # app's disconnected duplicate temperature scales, and dead output: every
+    # call site discarded it (`score, _, _ = _score_inbound_message(...)`).
+    # score_display.py::get_temperature() is now the single canonical
+    # Score→Temperature derivation; removed here rather than duplicated.
+    return score, why_score
 
 
 def capture_lead_event(

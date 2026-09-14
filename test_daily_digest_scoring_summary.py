@@ -10,8 +10,32 @@ def _lead(score):
     return {"fields": {LeadFields.SCORE: score}}
 
 
+# ══════════════════════════════════════════════════════════════════
+# PIPELINE-1 Blocker #3 — _tier_label() now delegates to score_display.py's
+# canonical get_temperature() instead of a locally re-derived 25/50/70 scale.
+# ══════════════════════════════════════════════════════════════════
+
+def test_tier_label_delegates_to_canonical_score_display():
+    import score_display
+    for score in (0, 20, 21, 40, 41, 60, 61, 80, 81, 100):
+        expected_emoji, expected_label, _ = score_display.get_temperature(score)
+        assert daily_digest._tier_label(score) == f"{expected_emoji} {expected_label}"
+
+
+def test_hot_leads_uses_canonical_hot_tier_cutoff():
+    errors = []
+    with patch.object(daily_digest, "_fetch", return_value=[]) as fetch:
+        daily_digest._hot_leads(errors)
+
+    formula = fetch.call_args.args[1]
+    assert "60" in str(formula), "expected the Score>=60 canonical HOT cutoff in the fetch formula"
+    assert errors == []
+
+
 def test_temperature_counts_use_canonical_score_bands():
-    records = [_lead(100), _lead(70), _lead(50), _lead(49), _lead(25), _lead(24), _lead(0)]
+    # PIPELINE-1 Blocker #3: bands are now 20/60 (score_display.py's canonical
+    # 20/40/60/80 scale), not the old locally re-derived 25/50 split.
+    records = [_lead(100), _lead(70), _lead(60), _lead(59), _lead(20), _lead(19), _lead(0)]
 
     assert daily_digest._lead_temperature_counts(records) == (3, 2, 2)
 
@@ -28,7 +52,8 @@ def test_summary_requests_all_leads_and_formats_counts():
         result = daily_digest._leads_scoring_summary(errors)
 
     fetch.assert_called_once_with("Leads", "", max_rec=0)
-    assert result == '📊 *לידים:* 🔥 2 HOT | 🌤️ 1 WARM | ❄️ 1 COLD | סה"כ 4'
+    # PIPELINE-1 Blocker #3: 80>=60 HOT, 55/30 in [20,60) WARM, 10<20 COLD.
+    assert result == '📊 *לידים:* 🔥 1 HOT | 🌤️ 2 WARM | ❄️ 1 COLD | סה"כ 4'
     assert errors == []
 
 

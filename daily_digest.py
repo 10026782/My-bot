@@ -57,25 +57,24 @@ def _fmt(iso: str) -> str:
 
 def _tier_label(score: int) -> str:
     """
-    Score → tier label, באותם ספים כמו lead_capture._score_inbound_message.
-    ה-tier מחושב כאן בזיכרון מתוך Score בלבד, לא נקרא ממקור הנתונים.
+    Score → tier label. Delegates to score_display.get_temperature(), the
+    app's single canonical Score→Temperature derivation (20/40/60/80 —
+    matches the live Airtable "טמפרטורה" formula field) — PIPELINE-1
+    Blocker #3 remediation. No longer a locally re-derived 25/50/70 scale.
     """
-    if score >= 70:
-        return "🔥 רותח"
-    if score >= 50:
-        return "🌶️ לוהט"
-    if score >= 25:
-        return "🌤️ חם"
-    return "❄️ קר"
+    from score_display import get_temperature
+    emoji, label, _ = get_temperature(score)
+    return f"{emoji} {label}"
 
 
 def _hot_leads(errors: list, identity=None) -> str:
-    """🔥 לידים חמים — Score>=50 (סף HOT/ULTRA_HOT) או status legacy='hot'"""
+    """🔥 לידים חמים — Score>=60 (canonical HOT-tier lower bound, see
+    score_display.py) או status legacy='hot'"""
     try:
         records = _fetch(
             "Leads",
             any_of(
-                greater_or_equal("Score", 50),
+                greater_or_equal("Score", 60),
                 equals("status", "hot"),
                 equals("status", "Hot"),
                 equals("status", "HOT"),
@@ -239,7 +238,10 @@ def _upcoming_payments(errors: list, identity=None) -> str:
 
 
 def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
-    """מחזיר ספירות HOT/WARM/COLD לפי טווחי ציון הלידים הקנוניים."""
+    """מחזיר ספירות HOT/WARM/COLD — Score>=60 HOT (same cutoff as _hot_leads()'s
+    listing above), 20<=Score<60 WARM, Score<20 COLD. Boundaries drawn from
+    score_display.py's canonical 20/40/60/80 Score→Temperature scale
+    (PIPELINE-1 Blocker #3 remediation — was a separate 25/50/70 scale)."""
     hot = warm = cold = 0
     for record in records:
         raw_score = record_fields(record).get(LeadFields.SCORE, 0)
@@ -247,9 +249,9 @@ def _lead_temperature_counts(records: list) -> tuple[int, int, int]:
             score = int(raw_score or 0)
         except (TypeError, ValueError):
             score = 0
-        if score >= 50:  # HOT ו-ULTRA_HOT נכללים באותה קטגוריית סיכום.
+        if score >= 60:   # HOT + VERY HOT + BOILING collapsed into one summary bucket.
             hot += 1
-        elif score >= 25:
+        elif score >= 20:
             warm += 1
         else:
             cold += 1
