@@ -2,6 +2,60 @@
 
 עודכן: 14/09/2026
 
+## Payment Term → Charge routing: same "none" sentinel bug hit prod again on a second field — Document Requirement — plus a stale Payments schema cache found and fixed (BUG-CHARGE-TERM-BYPASS follow-up #5) — 14/09/2026
+
+Follow-up #4's fix (exempting `VAT Rule` from the sentinel-"none"-drop rule)
+was merged and deployed (commit `d457465`), but the owner then hit the
+identical `❌ אושר אך נכשל בביצוע` failure again in production, this time
+with `fields dropped, write blocked: ['Document Requirement']` in the log —
+the same SPEC A1 atomic fail-closed guard, tripped by the same sentinel
+rule, on a different field. `DocumentRequirement.NONE = "none"` is, like
+`VATRule.NONE`, a genuine Airtable `singleSelect` choice — confirmed live
+via the Airtable MCP `get_table_schema` call against the "בסיס עיקרי" base:
+`Payments."Document Requirement"` (`fldRpYybbv4twn81N`) and
+`Charges."Document Requirement"` (`fldfR0REoNJzbajOz`) both have real
+choices `receipt_required`/`invoice_required`/`expense_document_required`/`none`.
+`crm_create_charge_from_term()`'s downstream `create_charge()` writes
+`Document Requirement` as a required field defaulting to
+`DocumentRequirement.NONE`, so it was silently dropped exactly like `VAT
+Rule` was. `airtable_schema.py` has exactly two classes with a real "none"
+member (`VATRule`, `DocumentRequirement` — grepped to confirm no others
+exist), so this closes the sentinel-field gap completely for now.
+
+Fix: extended `_SENTINEL_NONE_EXEMPT_FIELDS` in `tools/airtable_gateway.py`
+to `{"VAT Rule", "Document Requirement"}`. Two new regression tests added to
+`test_airtable_gateway.py` mirroring the VAT Rule ones (`validate_airtable_fields`
+survival on `Charges`/`Payments`, plus a T4c SPEC A1 write-path test proving
+`httpx.post` is actually called for a Charge with both fields set to
+`"none"`).
+
+While writing that regression test, a **second, independent** bug was
+found: `validate_airtable_fields("Payments", {"Document Requirement": ...})`
+was dropped as an "unknown field" regardless of its value — not a sentinel
+issue, but `schema_cache.json`'s `Payments` table entry being stale (last
+manually reconciled 04/09/2026). Diffed the cached field list against a
+fresh live pull (Airtable MCP `list_tables_for_base` + `get_table_schema`,
+no `AIRTABLE_API_KEY` available in this sandbox, same precedent as the
+04/09/2026 reconciliation note already in the file) and found 8 missing
+fields: `Charge`, `Direction`, `Currency`, `Method`, `Counterparty Contact`,
+`Counterparty Organization`, `Document Requirement`, `Document Status` — the
+entire "V2 Payment" write path used by `crm_create_charge_payment()`. Every
+one of these fields was being silently dropped by the legacy unknown-field
+guard on **every** V2 Payment write, regardless of value, meaning
+`crm_create_charge_payment()` had likely never successfully written to
+Airtable since this V2 shape was introduced. `Charges` table was diffed too
+and found fully in sync (no drift). Fixed by updating `schema_cache.json`'s
+`Payments` entry with the 8 missing field names, sourced from the live MCP
+pull.
+
+Test/verification evidence: `test_airtable_gateway.py` 45/45 (2 new
+validate-survival checks + T4c SPEC A1 write-path test), full `tests/`
+203/203 (incl. `test_commercial_charge_from_term.py`,
+`test_commercial_completion_routing.py`, `test_commercial_completion_ux.py`,
+`test_charge_context_extraction.py`, `test_commercial_v2_mutation_primitives.py`),
+`test_pa01_phantom_approval_enforcement.py` 108/108, `smoke_tests.py`,
+`python3 -m compileall -q .` — all green. Not yet merged/deployed/runtime-verified.
+
 ## PIPELINE-1 — CLOSED — VERIFIED — 14/09/2026
 
 Final closure report for the Lead Pipeline TMA screen discovery/gap audit
