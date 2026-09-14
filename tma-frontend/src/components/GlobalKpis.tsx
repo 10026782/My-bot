@@ -1,25 +1,20 @@
 import type { GlobalKpis as TGlobalKpis } from "../types";
+import { Surface } from "./ui/Surface";
 
-function KpiPill({ label, value }: { label: string; value: string }) {
+function KpiStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col items-center bg-white rounded-xl px-3 py-2 shadow-sm min-w-[72px]">
-      <span className="text-base font-bold text-gray-800">{value}</span>
-      <span className="text-[10px] text-gray-400 text-center leading-tight mt-0.5">{label}</span>
-    </div>
+    <Surface variant="subtle" padding="compact" className="hub-kpi-stat">
+      <p className="hub-kpi-stat__value">{value}</p>
+      <p className="hub-kpi-stat__label">{label}</p>
+    </Surface>
   );
 }
 
 export function GlobalKpis({ kpis }: { kpis: TGlobalKpis }) {
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1 px-4">
-      <KpiPill
-        label="משימות באיחור"
-        value={String(kpis.overdue_tasks)}
-      />
-      <KpiPill
-        label="לידים חמים בפרויקטים פעילים"
-        value={String(kpis.hot_leads_count)}
-      />
+    <div className="hub-kpi-row">
+      <KpiStat label="משימות באיחור" value={String(kpis.overdue_tasks)} />
+      <KpiStat label="לידים חמים בפרויקטים פעילים" value={String(kpis.hot_leads_count)} />
     </div>
   );
 }
