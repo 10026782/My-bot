@@ -65,6 +65,44 @@ yet merged, deployed, or exercised against live Airtable/Render; the
 frontend changes are verified by typecheck/build only, not a running
 browser session.
 
+## Payment Term → Charge routing: original-message slot extraction (BUG-CHARGE-TERM-BYPASS follow-up #2) — 14/09/2026
+
+Live canary on commit `4a1b099` (already containing PR #1227's label/auto-bind
+fix) showed the Deal/Payment Term still never auto-resolving from a single
+message like "צור חיוב לעסקה קבלנים דרך עמי מערכות לפי תנאי עמלת פוסידון —
+10%... עבור מאור אבוחצירה" — the bot asked "לאיזו עסקה זה משויך?" from
+scratch, and after the user retyped just the Deal, asked "באיזה תנאי חיוב
+להשתמש?" again even though the Term was already named in the same original
+message. Root cause: PR #1227 fixed label rendering and exact-match
+auto-bind *once a field is being resolved*, but `app.py`'s
+`"create_charge_from_term"` branch never extracted anything from the
+triggering message itself — `_current_values` started as bare
+`{"owner": ...}`, so `commercial_completion_routing.py`'s completion
+session always began with every LINK field empty, discarding whatever the
+Deal/Term/Lead names in the rest of the message said. Fixed with a new
+`core/router/router.py::parse_deterministic_charge_context()` (best-effort
+marker-based extraction: "לעסקה"/"בעסקה" → Deal, "לפי תנאי"/"לפי"/"בתנאי" →
+Payment Term, "עבור" → Lead) seeded once into the session's own
+`current_values` as an internal `"_charge_context_refs"` marker, and a new
+`app.py::_prefill_charge_context()` that resolves each one through the
+exact same bounded `resolve_human_link()` lookup a typed reply already
+goes through — never a new resolution path, never a silent bind — for as
+long as the router's next question is one the original message already
+answered. Wired at both entry points (the initial `start()` and the
+persisted-session `answer_human()` continuation), so a Term named in the
+original message still auto-resolves even after the Deal needed manual
+disambiguation first. An unmatched/wrong extraction simply falls back to
+asking the normal question, exactly as before this existed — fail-safe by
+construction. Verified end-to-end against the exact live canary text: Deal
+and Payment Term both auto-resolve, leaving only "מה בסיס החישוב לעמלה?".
+Known scope cut: the extracted Lead reference is captured but not yet
+auto-bound, since "lead" is an optional field the router never surfaces as
+a CLARIFY target to hang the chase off of — left for a follow-up rather
+than widening this fix's blast radius. 8 new tests
+(`tests/test_charge_context_extraction.py`); full existing suite (199
+pytest + every standalone script + smoke tests + governance guard) green.
+Not yet merged, deployed, or runtime-canary-verified.
+
 ## PIPELINE-1 discovery — GET /api/leads Partner fail-open fix — 14/09/2026
 
 PR #1228 closes "blocker #1" found by a read-only PIPELINE-1 discovery audit

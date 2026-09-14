@@ -452,6 +452,55 @@ def parse_deterministic_commercial_completion(text: str) -> DeterministicCommerc
     return DeterministicCommercialCompletionParse()
 
 
+@dataclass(frozen=True)
+class ChargeContextParse:
+    """Best-effort Deal/Payment Term/Lead references pulled out of the same
+    message that triggered a term-based Charge intent — see
+    parse_deterministic_charge_context()'s own docstring."""
+    deal_ref: str | None = None
+    term_ref: str | None = None
+    lead_ref: str | None = None
+
+
+# BUG-CHARGE-TERM-BYPASS follow-up #2 (live production, e.g. "צור חיוב לעסקה
+# קבלנים דרך עמי מערכות לפי תנאי עמלת פוסידון — 10%... עבור מאור אבוחצירה"):
+# a marker word, then everything up to the NEXT recognized marker (or end of
+# string) is that marker's reference text. Deliberately loose and ORDER-
+# INDEPENDENT (matches are collected wherever they appear, not assumed to
+# come in a fixed sequence) — this is a hint for what to try resolving
+# first, never an authority: every extracted reference is still resolved
+# through the exact same bounded resolve_human_link() lookup a typed reply
+# goes through, so a wrong/partial extraction just fails to match and falls
+# back to asking the normal question, exactly like before this parser
+# existed — never a silent wrong bind.
+_CHARGE_CONTEXT_MARKER_RE = re.compile(
+    r"(?P<deal>לעסקה|בעסקה)"
+    r"|(?P<term>לפי\s+תנאי(?:\s+ה?חיוב)?|לפי\s+ה?תנאי|בתנאי|על\s+פי\s+תנאי|לפי)"
+    r"|(?P<lead>עבור\s+ה?ליד|עבור)"
+)
+
+
+def parse_deterministic_charge_context(text: str) -> ChargeContextParse:
+    """Extract Deal/Payment Term/Lead reference text already present in the
+    ORIGINAL message that started a term-based Charge completion — so it
+    can be handed straight to the resolver instead of being silently
+    dropped once the deterministic completion session takes over and only
+    ever sees one field's answer at a time.
+    """
+    normalized = _normalize_create_task_input(text)
+    matches = list(_CHARGE_CONTEXT_MARKER_RE.finditer(normalized))
+    refs: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        kind = match.lastgroup
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized)
+        value = normalized[match.end():end].strip(" \t-–—,:")
+        if value and kind not in refs:
+            refs[kind] = value
+    return ChargeContextParse(
+        deal_ref=refs.get("deal"), term_ref=refs.get("term"), lead_ref=refs.get("lead"),
+    )
+
+
 def route_request(
     text:                str,
     channel_raw:         str,

@@ -8,6 +8,8 @@ from .router         import (
     DeterministicDealParse,
     parse_deterministic_commercial_completion,
     DeterministicCommercialCompletionParse,
+    parse_deterministic_charge_context,
+    ChargeContextParse,
 )
 from .route_decision import RouteDecision, Intent, RouterDomain, Risk, Handler
 from .channel_router import Channel
@@ -57,6 +59,8 @@ __all__ = [
     "DeterministicDealParse",
     "parse_deterministic_commercial_completion",
     "DeterministicCommercialCompletionParse",
+    "parse_deterministic_charge_context",
+    "ChargeContextParse",
     "RouteDecision", "Intent", "RouterDomain", "Risk", "Handler",
     "Channel",
     "IntentOwnershipDecision", "CanonicalActionProposal", "ResolverResult",
