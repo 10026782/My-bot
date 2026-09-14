@@ -249,7 +249,15 @@
       "VAT Amount",
       "Trigger Evidence",
       "Paid At",
-      "Notes"
+      "Notes",
+      "Charge",
+      "Direction",
+      "Currency",
+      "Method",
+      "Counterparty Contact",
+      "Counterparty Organization",
+      "Document Requirement",
+      "Document Status"
     ],
     "למידות ותובנות (Learnings & Insights)": [
       "כותרת התובנה",
@@ -830,5 +838,5 @@
     ]
   },
   "fetched_at": "2026-09-04",
-  "note": "manually reconciled via Track 8C read-only Airtable MCP pass (list_tables_for_base); schema_audit.py --live not run (no AIRTABLE_API_KEY in this sandbox). 04/09/2026: added ActionContracts.continuation_ref (DIAMOND PATH nested-entity approval continuation) after creating the live field via the Airtable MCP create_field tool and confirming it via list_tables_for_base."
+  "note": "manually reconciled via Track 8C read-only Airtable MCP pass (list_tables_for_base); schema_audit.py --live not run (no AIRTABLE_API_KEY in this sandbox). 04/09/2026: added ActionContracts.continuation_ref (DIAMOND PATH nested-entity approval continuation) after creating the live field via the Airtable MCP create_field tool and confirming it via list_tables_for_base. 14/09/2026 (BUG-CHARGE-VAT-NONE-SENTINEL follow-up): reconciled 'Payments' table via live Airtable MCP list_tables_for_base + get_table_schema (no AIRTABLE_API_KEY in this sandbox) — added 8 fields missing since the 04/09 fetch (Charge, Direction, Currency, Method, Counterparty Contact, Counterparty Organization, Document Requirement, Document Status), the V2 Payment write path used by crm_create_charge_payment(). Every one of these was silently dropped as 'unknown field' by the legacy unknown-field guard, tripping SPEC A1 on every V2 Payment write regardless of value — a second instance of the same failure class as the sentinel bug, caught by a regression test while fixing it."
 }

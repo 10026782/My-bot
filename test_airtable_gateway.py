@@ -107,6 +107,17 @@ chk('"VAT Rule"="none" survives validate (real choice, not a sentinel)', clean.g
 clean, errs = validate_airtable_fields("Payment Terms", {"VAT Rule": "none"})
 chk('Payment Terms "VAT Rule"="none" survives validate too', clean.get("VAT Rule") == "none" and not errs)
 
+# BUG-CHARGE-VAT-NONE-SENTINEL, extended 14/09/2026 (hit live in prod after
+# the VAT Rule fix deployed): "Document Requirement" is exempt too —
+# DocumentRequirement.NONE = "none" is a real Airtable choice
+# (Payments/Charges' "Document Requirement" singleSelect has genuine choices
+# receipt_required/invoice_required/expense_document_required/none),
+# confirmed live against schema fldRpYybbv4twn81N / fldfR0REoNJzbajOz.
+clean, errs = validate_airtable_fields("Charges", {"Document Requirement": "none"})
+chk('"Document Requirement"="none" survives validate (real choice, not a sentinel)', clean.get("Document Requirement") == "none" and not errs)
+clean, errs = validate_airtable_fields("Payments", {"Document Requirement": "none"})
+chk('Payments "Document Requirement"="none" survives validate too', clean.get("Document Requirement") == "none" and not errs)
+
 # Forbidden field
 clean, errs = validate_airtable_fields("Leads", {"owner_id": "123"})
 chk('forbidden field "owner_id" rejected', "owner_id" not in clean)
@@ -322,6 +333,30 @@ with patch("tools.airtable_gateway.httpx.post", side_effect=fake_post_t4b) as _t
     rec = airtable_create("Charges", {"Amount": 2100.0, "VAT Rule": "none"}, source="commercial_crm")
     chk("T4b: Charge write with VAT Rule='none' is NOT blocked (real choice, not sentinel)", rec is not None)
     chk("T4b: httpx.post was actually called (write reached the provider)", _t4b_post.called)
+
+
+# T4c (BUG-CHARGE-VAT-NONE-SENTINEL, extended 14/09/2026) — a Charge-shaped
+# payload with both "VAT Rule": "none" AND "Document Requirement": "none"
+# must NOT trip SPEC A1's atomic fail-closed guard; httpx.post must actually
+# be called. This reproduces the exact live production failure hit after the
+# VAT Rule-only fix deployed (crm_create_charge_from_term producing a Charge
+# whose Document Requirement default is also "none").
+def fake_post_t4c(url, *, headers, json, timeout):
+    resp = MagicMock()
+    resp.status_code = 201
+    resp.json.return_value = {"id": "recNEWCHARGE02", "fields": json.get("fields", {})}
+    return resp
+
+
+with patch("tools.airtable_gateway.httpx.post", side_effect=fake_post_t4c) as _t4c_post, \
+     patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
+    rec = airtable_create(
+        "Charges",
+        {"Amount": 2100.0, "VAT Rule": "none", "Document Requirement": "none"},
+        source="commercial_crm",
+    )
+    chk("T4c: Charge write with VAT Rule='none' AND Document Requirement='none' is NOT blocked", rec is not None)
+    chk("T4c: httpx.post was actually called (write reached the provider)", _t4c_post.called)
 
 
 # T5 — fully valid payload → unchanged behavior (success, httpx called)
