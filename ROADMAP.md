@@ -2,6 +2,29 @@
 
 עודכן: 14/09/2026
 
+## BUG-CHARGE-TERM-BYPASS — CLOSED — RUNTIME VERIFIED — 14/09/2026
+
+Follow-up #5 (below) merged as `20c2b1b` and deployed. Eli re-ran the exact
+live canary in Telegram (Deal "קבלנים דרך עמי מערכות", Term "עמלת פוסידון —
+10% לאחר קיזוז רכישת ציוד שחור", basis this time 23,200): BOSS replied
+`הפעולה הושלמה: יצירת חיוב מתנאי תשלום: בסיס 23200.0` — no execution
+failure.
+
+Verified directly against live Airtable (not just the bot's own reply
+text): a new `Charges` record (`rechMhZmNrd9dIWWZ`) was created at
+`2026-09-14T13:38:21Z`, 3 minutes after the merge, linked to the correct
+Deal (`rec7p1eZ6u0Yg1Rk7`) and Payment Term (`recnoz5NeUwlVeGYj`), with
+**both previously-blocked fields present**: `VAT Rule = "none"` and
+`Document Requirement = "none"` — proving both the follow-up #4 and
+follow-up #5 sentinel-exemption fixes are live in production, not just
+merged. Calculation correct: `base_amount = 23200.0`, `rate_pct = 0.1`,
+`calculated_amount = total_amount = 2320.0`.
+
+STATUS: ✅ VERIFIED IN PROD (live canary + direct Airtable read)
+EVIDENCE: merge commit `20c2b1b`; live Charges record `rechMhZmNrd9dIWWZ`
+(base `app4bcgoX7t0HUVnm`), created `2026-09-14T13:38:21Z`, fields
+confirmed via Airtable MCP `search_records`.
+
 ## Payment Term → Charge routing: same "none" sentinel bug hit prod again on a second field — Document Requirement — plus a stale Payments schema cache found and fixed (BUG-CHARGE-TERM-BYPASS follow-up #5) — 14/09/2026
 
 Follow-up #4's fix (exempting `VAT Rule` from the sentinel-"none"-drop rule)
