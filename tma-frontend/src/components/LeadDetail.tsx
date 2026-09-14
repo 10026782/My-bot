@@ -8,6 +8,9 @@ import {
   setLeadOutcome,
 } from "../api";
 import type { LeadDetail as TLeadDetail, LeadSummary } from "../types";
+import { PageHeader } from "./ui/PageHeader";
+import { ScreenState } from "./ui/ScreenState";
+import { Surface } from "./ui/Surface";
 
 interface Props {
   lead: LeadSummary;
@@ -30,10 +33,10 @@ interface OutcomeOption {
   terminal: boolean;
 }
 
-const SCORE_BG: Record<string, string> = {
-  red: "bg-red-500",
-  yellow: "bg-yellow-400",
-  blue: "bg-blue-400",
+const SCORE_CHIP_CLASS: Record<string, string> = {
+  red: "lead-detail-score-chip--red",
+  yellow: "lead-detail-score-chip--yellow",
+  blue: "lead-detail-score-chip--blue",
 };
 
 const OUTCOMES: OutcomeOption[] = [
@@ -55,14 +58,16 @@ const STAGE_LABELS: Record<WorkflowStage, string> = {
   closed: "Closed / Archived",
 };
 
+const STAGES: WorkflowStage[] = ["new", "followup", "qualified", "task", "closed"];
+
 const TERMINAL_STATUSES = new Set(["done", "archived", "lost", "duplicate", "not_relevant"]);
 const TERMINAL_OUTCOMES = new Set(OUTCOMES.filter((o) => o.terminal).map((o) => o.key));
 
 function SectionHeader({ title, sub }: { title: string; sub?: string }) {
   return (
-    <div className="mb-3">
-      <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">{title}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    <div className="lead-detail-section-header">
+      <p className="boss-eyebrow">{title}</p>
+      {sub && <p className="lead-detail-section-sub">{sub}</p>}
     </div>
   );
 }
@@ -105,6 +110,14 @@ function formatError(e: unknown, fallback: string) {
   return fallback;
 }
 
+function ScoreChip({ score, color, size }: { score: number; color: string; size: "sm" | "lg" }) {
+  return (
+    <div className={`lead-detail-score-chip lead-detail-score-chip--${size} ${SCORE_CHIP_CLASS[color] ?? ""}`}>
+      {score}
+    </div>
+  );
+}
+
 export function LeadDetail({ lead, onBack, authRole }: Props) {
   const isOwner = authRole === "owner";
 
@@ -138,7 +151,8 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
   const [aiBusy, setAiBusy] = useState(false);
   const aiInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  const load = () => {
+    setState({ status: "loading" });
     fetchLead(lead.id)
       .then((data) => {
         setState({ status: "ok", data });
@@ -147,6 +161,11 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
         setScoreInput(String(data.score));
       })
       .catch((e: unknown) => setState({ status: "error", message: formatError(e, "טעינת הליד נכשלה") }));
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id]);
 
   useEffect(() => {
@@ -334,87 +353,97 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
-  const data = state.status === "ok" ? state.data : null;
-  const stage = data ? deriveStage(data, currentOutcome) : "new";
-  const terminal = data ? isTerminalLead(data, currentOutcome) : false;
-  const ownerText = readableOwner(data?.owner);
-  const historyCount = data?.timeline?.length ?? 0;
-  const pbClass = terminal ? "pb-28" : taskOpen ? "pb-80" : aiOpen ? "pb-60" : "pb-52";
+  if (state.status === "loading") {
+    return (
+      <main className="ventures-screen lead-detail-screen">
+        <div className="ventures-shell">
+          <PageHeader onBack={onBack} eyebrow="BOSS" title={lead.name || "ליד ללא שם"} subtitle="CRM Workflow" />
+          <ScreenState state="loading" title="טוען את פרטי הליד" message="אוסף את ההיסטוריה העדכנית…" />
+        </div>
+      </main>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <main className="ventures-screen lead-detail-screen">
+        <div className="ventures-shell">
+          <PageHeader onBack={onBack} eyebrow="BOSS" title={lead.name || "ליד ללא שם"} subtitle="CRM Workflow" />
+          <ScreenState
+            state="error"
+            title="לא הצלחנו לטעון"
+            message={state.message}
+            action={
+              <button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={load}>
+                נסו שוב
+              </button>
+            }
+          />
+        </div>
+      </main>
+    );
+  }
+
+  const data = state.data;
+  const stage = deriveStage(data, currentOutcome);
+  const terminal = isTerminalLead(data, currentOutcome);
+  const ownerText = readableOwner(data.owner);
+  const historyCount = data.timeline?.length ?? 0;
+  const shellPaddingBottom = terminal ? 112 : taskOpen ? 320 : aiOpen ? 240 : 208;
 
   return (
-    <div className={`min-h-screen bg-gray-100 ${pbClass}`} dir="rtl">
-      <div className="bg-white px-4 pt-5 pb-4 mb-3 shadow-sm flex items-center gap-3">
-        <button onClick={onBack} className="text-blue-500 text-xl font-medium leading-none" aria-label="חזרה">
-          ←
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-black text-gray-900 truncate">{lead.name || "ליד ללא שם"}</h1>
-          <p className="text-xs text-gray-400">CRM Workflow</p>
-        </div>
-        {data && (
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-black text-lg flex-shrink-0 ${SCORE_BG[data.score_color] ?? "bg-gray-400"}`}>
-            {data.score}
-          </div>
-        )}
-      </div>
-
+    <main className="ventures-screen lead-detail-screen">
       {toast && (
-        <div className={`fixed top-4 left-4 right-4 z-50 rounded-xl px-4 py-3 text-sm font-medium shadow-lg text-center ${toast.type === "ok" ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}>
+        <p className={`ventures-toast${toast.type === "err" ? " ventures-toast--error" : ""}`} role="status">
           {toast.text}
-        </div>
+        </p>
       )}
 
-      {state.status === "loading" && (
-        <div className="flex justify-center pt-16">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
+      <div className="ventures-shell" style={{ paddingBottom: shellPaddingBottom }}>
+        <PageHeader
+          onBack={onBack}
+          eyebrow="BOSS"
+          title={lead.name || "ליד ללא שם"}
+          subtitle="CRM Workflow"
+          action={<ScoreChip score={data.score} color={data.score_color} size="sm" />}
+        />
 
-      {state.status === "error" && (
-        <div className="mx-4 mt-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-          {state.message}
-        </div>
-      )}
-
-      {data && (
-        <div className="flex flex-col gap-3 px-4">
-          <div className="bg-white rounded-xl shadow-sm p-4">
-            <div className="flex items-start gap-3">
-              <div className={`w-14 h-14 rounded-full flex items-center justify-center text-white font-black text-lg flex-shrink-0 ${SCORE_BG[data.score_color] ?? "bg-gray-400"}`}>
-                {data.score}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-gray-400">שלב נוכחי</p>
-                <h2 className="text-xl font-black text-gray-900">{STAGE_LABELS[stage]}</h2>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {data.tier && <span className="text-xs px-2 py-1 bg-orange-50 text-orange-600 rounded-full font-medium">Tier: {data.tier}</span>}
-                  <span className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-full font-medium">{outcomeLabel(currentOutcome)}</span>
-                  {data.status && <span className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-full">טכני: {data.status}</span>}
+        <div className="lead-detail-stack">
+          <Surface className="lead-detail-stage-card">
+            <div className="lead-detail-stage-card__top">
+              <ScoreChip score={data.score} color={data.score_color} size="lg" />
+              <div className="lead-detail-stage-card__body">
+                <p className="lead-detail-hint">שלב נוכחי</p>
+                <h2 className="lead-detail-stage-title">{STAGE_LABELS[stage]}</h2>
+                <div className="lead-detail-meta-row">
+                  {data.tier && <span className="boss-status-badge boss-status-badge--warning">Tier: {data.tier}</span>}
+                  <span className="boss-status-badge boss-status-badge--info">{outcomeLabel(currentOutcome)}</span>
+                  {data.status && <span className="boss-status-badge boss-status-badge--neutral">טכני: {data.status}</span>}
                 </div>
               </div>
             </div>
-            <div className="mt-4 grid grid-cols-5 gap-1 text-center text-[10px] font-bold text-gray-400">
-              {(["new", "followup", "qualified", "task", "closed"] as WorkflowStage[]).map((s) => (
-                <div key={s} className={`rounded-full py-1 ${s === stage ? "bg-blue-500 text-white" : "bg-gray-100"}`}>
+            <div className="lead-detail-stage-rail">
+              {STAGES.map((s) => (
+                <div key={s} className={`lead-detail-stage-rail__item${s === stage ? " lead-detail-stage-rail__item--active" : ""}`}>
                   {STAGE_LABELS[s]}
                 </div>
               ))}
             </div>
-          </div>
+          </Surface>
 
-          <div className="bg-white rounded-xl shadow-sm p-3 flex flex-wrap gap-2 items-center">
-            {data.domain && <span className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-full font-medium">{data.domain}</span>}
-            {data.source && <span className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-full">מקור: {data.source}</span>}
-            {ownerText && <span className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-full">אחראי: {ownerText}</span>}
+          <Surface padding="compact" className="lead-detail-meta-row">
+            {data.domain && <span className="boss-status-badge boss-status-badge--info">{data.domain}</span>}
+            {data.source && <span className="boss-status-badge boss-status-badge--neutral">מקור: {data.source}</span>}
+            {ownerText && <span className="boss-status-badge boss-status-badge--neutral">אחראי: {ownerText}</span>}
             {data.phone && (
-              <a href={`tel:${data.phone}`} className="text-xs px-2 py-1 bg-green-50 text-green-600 rounded-full font-medium" dir="ltr">
+              <a href={`tel:${data.phone}`} className="boss-status-badge boss-status-badge--success" dir="ltr">
                 {data.phone}
               </a>
             )}
-            {data.created_at && <span className="text-xs text-gray-400 mr-auto">{data.created_at.slice(0, 10)}</span>}
-          </div>
+            {data.created_at && <span className="lead-detail-meta-row__date">{data.created_at.slice(0, 10)}</span>}
+          </Surface>
 
-          <div className="bg-white rounded-xl shadow-sm p-4">
+          <Surface>
             <SectionHeader
               title="Next Action"
               sub={nextActionPending ? "הבקשה נשלחה לאישור — טרם בוצעה" : "הפעולה הבאה לליד — נשמר דרך אותו מסלול אישורים כמו שאר עדכוני הליד"}
@@ -424,7 +453,7 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                 value={data.next_step || ""}
                 onChange={(e) => handleNextActionChange(e.target.value)}
                 disabled={nextActionBusy}
-                className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none disabled:opacity-50"
+                className="boss-select"
               >
                 <option value="" disabled>בחר/י פעולה הבאה</option>
                 {data.next_step_options.map((opt) => (
@@ -432,17 +461,17 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                 ))}
               </select>
             ) : (
-              <p className="text-sm font-semibold text-gray-800">{data.next_step_label || "אין פעולה מומלצת"}</p>
+              <p className="lead-detail-plain-text">{data.next_step_label || "אין פעולה מומלצת"}</p>
             )}
-            {nextActionPending && <p className="text-xs text-amber-600 mt-1">ממתין לאישור Owner — הערך עדיין לא נכנס לתוקף</p>}
-            {data.next_followup && <p className="text-xs text-gray-400 mt-1">פולואפ הבא: {data.next_followup}</p>}
-          </div>
+            {nextActionPending && <p className="lead-detail-pending-note">ממתין לאישור Owner — הערך עדיין לא נכנס לתוקף</p>}
+            {data.next_followup && <p className="lead-detail-hint">פולואפ הבא: {data.next_followup}</p>}
+          </Surface>
 
           {!terminal && (
-            <div className="bg-white rounded-xl shadow-sm p-4">
+            <Surface>
               <SectionHeader title="הפעולה הבאה" sub="זרימה אחת: New → Followup → Qualified → Task/Meeting → Closed" />
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
+              <div className="lead-detail-progress-stack">
+                <div className="lead-detail-followup-row">
                   <input
                     type="date"
                     value={nextFollowup}
@@ -450,146 +479,154 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                       setNextFollowup(e.target.value);
                       setScheduleDirty(true);
                     }}
-                    className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none"
+                    className="boss-input"
                   />
                   <button
+                    type="button"
                     onClick={handleSetFollowup}
                     disabled={saving || (!scheduleDirty && currentOutcome === "needs_followup")}
-                    className="bg-amber-500 text-white rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-40 active:opacity-80"
+                    className="boss-button boss-button--quiet boss-bubble--action"
                   >
                     פולואפ
                   </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={handleMarkQualified} disabled={saving} className="bg-blue-500 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40 active:opacity-80">
+                <div className="lead-detail-action-grid">
+                  <button type="button" onClick={handleMarkQualified} disabled={saving} className="boss-button boss-button--primary boss-bubble--action">
                     סמן כמתאים
                   </button>
-                  <button onClick={handleMeetingBooked} disabled={saving} className="bg-violet-500 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40 active:opacity-80">
+                  <button type="button" onClick={handleMeetingBooked} disabled={saving} className="boss-button boss-button--primary boss-bubble--action">
                     פגישה נקבעה
                   </button>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setTaskOpen((o) => !o)}
-                  className={`w-full rounded-xl py-2.5 text-sm font-semibold active:opacity-80 ${taskOpen ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-700"}`}
+                  aria-pressed={taskOpen}
+                  className={`boss-button boss-bubble--action lead-detail-full-button ${taskOpen ? "boss-button--primary" : "boss-button--quiet"}`}
                 >
                   {taskOpen ? "סגור יצירת משימה" : "צור משימה"}
                 </button>
               </div>
 
               {taskOpen && (
-                <div className="mt-3 flex flex-col gap-2 bg-gray-50 rounded-xl p-3 border border-gray-200">
+                <Surface variant="subtle" padding="compact" className="lead-detail-task-form">
                   <input
                     type="text"
                     value={taskTitle}
                     onChange={(e) => setTaskTitle(e.target.value)}
                     placeholder="כותרת משימה *"
-                    className="bg-white rounded-lg px-3 py-2 text-sm outline-none border border-gray-200"
+                    className="boss-input"
                     autoFocus
                   />
-                  <div className="flex gap-2">
+                  <div className="lead-detail-task-form-row">
                     <input
                       type="date"
                       value={taskDue}
                       onChange={(e) => setTaskDue(e.target.value)}
-                      className="flex-1 bg-white rounded-lg px-3 py-2 text-sm outline-none border border-gray-200"
+                      className="boss-input"
                     />
                     <input
                       type="text"
                       value={taskNotes}
                       onChange={(e) => setTaskNotes(e.target.value)}
                       placeholder="הערות"
-                      className="flex-1 bg-white rounded-lg px-3 py-2 text-sm outline-none border border-gray-200"
+                      className="boss-input"
                     />
                   </div>
                   <button
+                    type="button"
                     onClick={handleCreateTask}
                     disabled={taskBusy || !taskTitle.trim()}
-                    className="w-full bg-indigo-500 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-40 active:opacity-80"
+                    className="boss-button boss-button--primary boss-bubble--action lead-detail-full-button"
                   >
                     {taskBusy ? "יוצר..." : "צור משימה"}
                   </button>
-                </div>
+                </Surface>
               )}
-            </div>
+            </Surface>
           )}
 
           {terminal && (
-            <div className="bg-white rounded-xl shadow-sm p-4">
+            <Surface>
               <SectionHeader title="ליד סגור" sub="פעולות מכירה מוסתרות כדי למנוע מצב סותר" />
-              <p className="text-sm text-gray-700">הליד נמצא בסטטוס סופי: {outcomeLabel(currentOutcome)}.</p>
-              <div className="grid grid-cols-2 gap-2 mt-3">
+              <p className="lead-detail-plain-text">הליד נמצא בסטטוס סופי: {outcomeLabel(currentOutcome)}.</p>
+              <div className="lead-detail-action-grid">
                 <button
+                  type="button"
                   onClick={() => historyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  className="bg-gray-100 text-gray-700 rounded-xl py-2.5 text-sm font-semibold active:opacity-80"
+                  className="boss-button boss-button--quiet boss-bubble--action"
                 >
                   הצג היסטוריה
                 </button>
                 {isOwner && (
-                  <button onClick={handleReopen} disabled={saving} className="bg-blue-500 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40 active:opacity-80">
+                  <button type="button" onClick={handleReopen} disabled={saving} className="boss-button boss-button--primary boss-bubble--action">
                     פתח מחדש
                   </button>
                 )}
               </div>
-            </div>
+            </Surface>
           )}
 
           {!terminal && (
-            <div className="bg-white rounded-xl shadow-sm p-4">
+            <Surface>
               <SectionHeader title="סגירת ליד" sub="Business Outcome הוא מקור האמת העסקי" />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="lead-detail-outcome-row">
                 {OUTCOMES.filter((o) => o.terminal).map((opt) => (
                   <button
                     key={opt.key}
+                    type="button"
                     onClick={() => handleOutcome(opt.key)}
                     disabled={saving}
-                    className="text-xs py-2 px-3 rounded-lg font-medium text-right bg-gray-100 text-gray-700 active:bg-gray-200 disabled:opacity-50"
+                    className="ventures-choice boss-bubble--selectable"
                   >
                     {opt.label}
                   </button>
                 ))}
               </div>
-            </div>
+            </Surface>
           )}
 
           {data.summary && (
-            <div className="bg-white rounded-xl shadow-sm p-4">
-              <p className="text-xs text-gray-400 mb-1">סיכום</p>
-              <p className="text-sm text-gray-800 leading-relaxed">{data.summary}</p>
-            </div>
+            <Surface>
+              <p className="lead-detail-hint">סיכום</p>
+              <p className="lead-detail-summary-text">{data.summary}</p>
+            </Surface>
           )}
 
           {aiAnswer && (
-            <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
-              <p className="text-xs text-purple-400 mb-1">BOSS AI</p>
-              <p className="text-sm text-purple-900 leading-relaxed whitespace-pre-wrap">{aiAnswer}</p>
+            <div className="lead-detail-ai-panel">
+              <p className="lead-detail-ai-panel__label">BOSS AI</p>
+              <p className="lead-detail-ai-panel__text">{aiAnswer}</p>
             </div>
           )}
 
-          <div ref={historyRef} className="bg-white rounded-xl shadow-sm p-4">
-            <p className="text-xs text-gray-400 mb-3">היסטוריה</p>
-            {historyCount === 0 ? (
-              <p className="text-sm text-gray-500">אין היסטוריה להצגה.</p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {data.timeline.map((entry, i) => (
-                  <div key={i} className="flex gap-2 text-sm">
-                    {entry.channel && <span className="text-gray-400 flex-shrink-0">[{readableHistory(entry.channel)}]</span>}
-                    <span className="text-gray-700">{readableHistory(entry.summary)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+          <div ref={historyRef}>
+            <Surface>
+              <p className="lead-detail-hint" style={{ marginBottom: "var(--boss-space-3)" }}>היסטוריה</p>
+              {historyCount === 0 ? (
+                <p className="lead-detail-plain-text">אין היסטוריה להצגה.</p>
+              ) : (
+                <div className="lead-detail-timeline">
+                  {data.timeline.map((entry, i) => (
+                    <div key={i} className="lead-detail-timeline__row">
+                      {entry.channel && <span className="lead-detail-timeline__channel">[{readableHistory(entry.channel)}]</span>}
+                      <span className="lead-detail-timeline__text">{readableHistory(entry.summary)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Surface>
           </div>
 
           {isOwner && (
-            <div className="bg-white rounded-xl shadow-sm p-4">
-              <button onClick={() => setAdvancedOpen((o) => !o)} className="w-full text-right text-sm font-bold text-gray-700">
+            <Surface>
+              <button type="button" onClick={() => setAdvancedOpen((o) => !o)} className="lead-detail-advanced-toggle">
                 Advanced
               </button>
               {advancedOpen && (
-                <div className="mt-3 flex gap-2 items-end">
-                  <div className="flex-1">
-                    <label className="text-xs text-gray-400 block mb-1">Score override (0-100)</label>
+                <div className="lead-detail-advanced-body">
+                  <div>
+                    <label className="lead-detail-advanced-label">Score override (0-100)</label>
                     <input
                       type="number"
                       min={0}
@@ -599,84 +636,84 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                         setScoreInput(e.target.value);
                         setScoreDirty(true);
                       }}
-                      className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none"
+                      className="boss-input"
                     />
-                    <p className="text-xs text-gray-400 mt-1">Tier הוא read-only ומחושב אוטומטית.</p>
+                    <p className="lead-detail-advanced-hint">Tier הוא read-only ומחושב אוטומטית.</p>
                   </div>
-                  <button onClick={handleSaveScore} disabled={saving || !scoreDirty} className="bg-blue-500 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-80">
+                  <button type="button" onClick={handleSaveScore} disabled={saving || !scoreDirty} className="boss-button boss-button--primary boss-bubble--action">
                     שמור
                   </button>
                 </div>
               )}
-            </div>
+            </Surface>
           )}
         </div>
-      )}
+      </div>
 
-      {data && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 pt-2.5 pb-4 flex flex-col gap-2 shadow-xl" dir="rtl">
-          {terminal ? (
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => historyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="bg-gray-100 text-gray-700 rounded-xl py-2.5 text-sm font-semibold active:opacity-80">
-                היסטוריה
+      <div className="lead-detail-footer">
+        {terminal ? (
+          <div className="lead-detail-footer-actions">
+            <button type="button" onClick={() => historyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="boss-button boss-button--quiet boss-bubble--action">
+              היסטוריה
+            </button>
+            {isOwner && (
+              <button type="button" onClick={handleReopen} disabled={saving} className="boss-button boss-button--primary boss-bubble--action">
+                פתח מחדש
               </button>
-              {isOwner && (
-                <button onClick={handleReopen} disabled={saving} className="bg-blue-500 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-40 active:opacity-80">
-                  פתח מחדש
-                </button>
-              )}
+            )}
+          </div>
+        ) : (
+          <>
+            <p className="lead-detail-footer__hint">
+              <strong>הערה</strong>
+              <span> · </span>
+              נרשמת כהיסטוריה בלבד, לא משנה סטטוס
+            </p>
+            <div className="lead-detail-footer-row">
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleFollowupNote()}
+                placeholder="כתוב הערה..."
+                className="boss-input"
+              />
+              <button type="button" onClick={handleFollowupNote} disabled={noteBusy || !note.trim()} className="boss-button boss-button--quiet boss-bubble--action">
+                {noteBusy ? "..." : "שלח"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiOpen((o) => !o);
+                  setAiAnswer(null);
+                }}
+                aria-pressed={aiOpen}
+                className="boss-button boss-button--quiet boss-bubble--action"
+                aria-label="Ask AI"
+              >
+                AI
+              </button>
             </div>
-          ) : (
-            <>
-              <p className="text-xs text-gray-400">
-                <span className="font-semibold text-gray-500">הערה</span>
-                <span className="text-gray-300 mx-1">·</span>
-                נרשמת כהיסטוריה בלבד, לא משנה סטטוס
-              </p>
-              <div className="flex gap-2">
+            {aiOpen && (
+              <div className="lead-detail-footer-row">
                 <input
+                  ref={aiInputRef}
                   type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleFollowupNote()}
-                  placeholder="כתוב הערה..."
-                  className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none placeholder-gray-400"
+                  value={aiQuestion}
+                  onChange={(e) => setAiQuestion(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAskAI()}
+                  placeholder="שאל שאלה על הליד..."
+                  className="boss-input"
+                  disabled={aiBusy}
                 />
-                <button onClick={handleFollowupNote} disabled={noteBusy || !note.trim()} className="bg-gray-700 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70">
-                  {noteBusy ? "..." : "שלח"}
-                </button>
-                <button
-                  onClick={() => {
-                    setAiOpen((o) => !o);
-                    setAiAnswer(null);
-                  }}
-                  className={`rounded-xl px-3 py-2 text-sm font-medium transition-colors ${aiOpen ? "bg-purple-500 text-white" : "bg-gray-100 text-gray-600 active:bg-gray-200"}`}
-                  aria-label="Ask AI"
-                >
-                  AI
+                <button type="button" onClick={handleAskAI} disabled={aiBusy || !aiQuestion.trim()} className="boss-button boss-button--primary boss-bubble--action">
+                  {aiBusy ? "..." : "שאל"}
                 </button>
               </div>
-              {aiOpen && (
-                <div className="flex gap-2">
-                  <input
-                    ref={aiInputRef}
-                    type="text"
-                    value={aiQuestion}
-                    onChange={(e) => setAiQuestion(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAskAI()}
-                    placeholder="שאל שאלה על הליד..."
-                    className="flex-1 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 text-sm outline-none placeholder-purple-300"
-                    disabled={aiBusy}
-                  />
-                  <button onClick={handleAskAI} disabled={aiBusy || !aiQuestion.trim()} className="bg-purple-500 text-white rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-40 active:opacity-70 min-w-[52px]">
-                    {aiBusy ? "..." : "שאל"}
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
+            )}
+          </>
+        )}
+      </div>
+    </main>
   );
 }
