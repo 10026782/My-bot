@@ -1540,6 +1540,17 @@ def get_leads(identity):
     if identity.role not in allowed:
         return jsonify({"error": "forbidden"}), 403
 
+    # Fail-closed guard (PIPELINE-1 discovery blocker #1): _build_formula's
+    # Partner domain restriction only ever *adds* a filter when
+    # identity.allowed_domains is non-empty — a Partner with no configured
+    # domains (identity.allowed_domains defaults to [], e.g. an incomplete
+    # identity-map entry) would otherwise fall through with NO domain
+    # restriction at all and see every domain's leads. Deny explicitly
+    # instead, matching the fail-closed pattern tools/airtable_security.py's
+    # enforce_tenant_scope() already uses for the identical case.
+    if identity.role == Role.PARTNER and not getattr(identity, "allowed_domains", None):
+        return jsonify({"error": "forbidden — no domain scope configured for this partner"}), 403
+
     domain_q = request.args.get("domain", "")
     domain_q, err = _safe_formula_param(domain_q, "domain")
     if err:

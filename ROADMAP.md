@@ -1,6 +1,29 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 13/09/2026
+עודכן: 14/09/2026
+
+## PIPELINE-1 discovery — GET /api/leads Partner fail-open fix — 14/09/2026
+
+PR #1228 closes "blocker #1" found by a read-only PIPELINE-1 discovery audit
+of the Lead Pipeline TMA screen: `GET /api/leads`'s Partner domain-scope
+filter (`tma_api.py::_build_formula`) only ever *added* a restriction when
+`identity.allowed_domains` was non-empty — a Partner with an empty/
+misconfigured `allowed_domains` (the `Identity` dataclass default) fell
+through with no domain restriction at all and could read every domain's
+leads. `get_leads()` now denies (403) before building any formula or
+touching Airtable in that case, matching the fail-closed pattern
+`tools/airtable_security.py::enforce_tenant_scope()` already uses for the
+identical case elsewhere in the codebase. This exact code path had zero
+prior test coverage; new `test_pipeline1_partner_domain_failclosed.py`
+(8/8) closes that gap. Existing Lead/TMA suites unaffected locally
+(`test_bug104_tma_lead_event_bridge.py` 55/55,
+`test_bug104_leads_reasoning_projection.py` 102/102,
+`test_tma_projects_read_path_optimization.py` 32/32), plus `smoke_tests.py`
+and a clean `compileall`/import check. This is `CODE_DONE + STATIC_VERIFIED`
+only — not yet merged, deployed, or exercised against live Airtable/Render.
+The remaining PIPELINE-1 discovery findings (temperature/scoring
+fragmentation, the owner-only Projects-Hub reachability gap, the divergent
+status-write endpoints, etc.) are explicitly out of scope for this PR.
 
 ## Payment Term → Charge routing: UX/resolution follow-up (BUG-CHARGE-TERM-BYPASS) — 13/09/2026
 
