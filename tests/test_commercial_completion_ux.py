@@ -168,6 +168,150 @@ def test_lookup_human_reference_fails_closed_external_without_tenant():
     list_records.assert_not_called()
 
 
+# ── BUG-CHARGE-TERM-BYPASS follow-up regression: _display_label() had no
+# entry for "deal"/"payment_term" at all (only "contact"/"organization" were
+# covered), so every Deal/Payment Term candidate rendered as a bare "בחירה"
+# button with no visible name — and since that same label is compared
+# against the user's typed query to decide auto-bind, a Deal/Payment Term
+# could never auto-resolve on an exact unique match either.
+
+def test_deal_unique_match_resolves_automatically_when_label_matches_query():
+    def lookup(query, scope, limit):
+        return [{"id": "recDeal1", "fields": {"שם העסקה": query}}]
+
+    result = resolve_human_link(
+        "deal", "קבלנים דרך עמי מערכות", lookup, scope="owner-1",
+    )
+    assert result.status == "resolved"
+    assert result.canonical_value == "recDeal1"
+
+
+def test_deal_ambiguous_matches_show_real_deal_names_not_a_generic_choice():
+    def lookup(query, scope, limit):
+        return [
+            {"id": "recDealA", "fields": {"שם העסקה": "קבלנים דרך עמי מערכות א"}},
+            {"id": "recDealB", "fields": {"שם העסקה": "קבלנים דרך עמי מערכות ב"}},
+        ]
+
+    result = resolve_human_link("deal", "קבלנים דרך עמי מערכות", lookup, scope="owner-1")
+    assert result.status == "clarify"
+    assert [choice.label for choice in result.choices] == [
+        "קבלנים דרך עמי מערכות א", "קבלנים דרך עמי מערכות ב",
+    ]
+    assert all("בחירה" != choice.label for choice in result.choices)
+
+
+def test_payment_term_unique_match_resolves_automatically():
+    def lookup(query, scope, limit):
+        return [{"id": "recTerm1", "fields": {"Name": query}}]
+
+    result = resolve_human_link(
+        "payment_term", "עמלת פוסידון — 10% לאחר קיזוז רכישת ציוד שחור",
+        lookup, scope="owner-1",
+    )
+    assert result.status == "resolved"
+    assert result.canonical_value == "recTerm1"
+
+
+def test_payment_term_ambiguous_matches_show_real_term_names():
+    def lookup(query, scope, limit):
+        return [
+            {"id": "recTermA", "fields": {"Name": "עמלת פוסידון"}},
+            {"id": "recTermB", "fields": {"Name": "עמלת פוסידון 2"}},
+        ]
+
+    result = resolve_human_link("payment_term", "עמלת פוסידון", lookup, scope="owner-1")
+    assert result.status == "clarify"
+    assert [choice.label for choice in result.choices] == ["עמלת פוסידון", "עמלת פוסידון 2"]
+    assert all("בחירה" != choice.label for choice in result.choices)
+
+
+def test_lookup_human_reference_payment_term_scoped_to_deal_excludes_other_deal():
+    import commercial_crm
+    from airtable_schema import PaymentTermFields
+
+    with patch("commercial_crm.list_records", return_value=[
+        {"id": "recTermOther", "fields": {
+            "Name": "עמלת פוסידון", PaymentTermFields.DEAL: ["recOtherDeal"],
+        }},
+    ]) as list_records:
+        records = commercial_crm.lookup_human_reference(
+            "payment_term", "עמלת פוסידון", scope="owner-1",
+            identity=_owner_identity(), limit=6, deal_id="recTargetDeal",
+        )
+
+    assert records == []
+    list_records.assert_called_once()
+
+
+def test_lookup_human_reference_payment_term_scoped_to_deal_keeps_matching_deal():
+    import commercial_crm
+    from airtable_schema import PaymentTermFields
+
+    with patch("commercial_crm.list_records", return_value=[
+        {"id": "recTermMatch", "fields": {
+            "Name": "עמלת פוסידון", PaymentTermFields.DEAL: ["recTargetDeal"],
+        }},
+    ]):
+        records = commercial_crm.lookup_human_reference(
+            "payment_term", "עמלת פוסידון", scope="owner-1",
+            identity=_owner_identity(), limit=6, deal_id="recTargetDeal",
+        )
+
+    assert [r["id"] for r in records] == ["recTermMatch"]
+
+
+def test_lookup_human_reference_payment_term_without_deal_id_is_unscoped():
+    """No behavior change for every existing caller that never passes deal_id."""
+    import commercial_crm
+    from airtable_schema import PaymentTermFields
+
+    with patch("commercial_crm.list_records", return_value=[
+        {"id": "recTermAny", "fields": {
+            "Name": "עמלת פוסידון", PaymentTermFields.DEAL: ["recSomeDeal"],
+        }},
+    ]):
+        records = commercial_crm.lookup_human_reference(
+            "payment_term", "עמלת פוסידון", scope="owner-1",
+            identity=_owner_identity(), limit=6,
+        )
+
+    assert [r["id"] for r in records] == ["recTermAny"]
+
+
+def test_app_commercial_link_lookup_parses_deal_scoped_suffix():
+    app = _app()
+    captured = {}
+
+    def fake_lookup(entity, query, *, scope, identity, limit, deal_id=""):
+        captured.update(entity=entity, scope=scope, deal_id=deal_id)
+        return []
+
+    with patch("commercial_crm.lookup_human_reference", side_effect=fake_lookup):
+        app._commercial_link_lookup(
+            "עמלת פוסידון", "payment_term:tenant:user\x1frecDeal123", 5, identity=None,
+        )
+    assert captured == {"entity": "payment_term", "scope": "tenant:user", "deal_id": "recDeal123"}
+
+
+def test_app_commercial_link_lookup_without_deal_suffix_is_unaffected():
+    app = _app()
+    captured = {}
+
+    def fake_lookup(entity, query, *, scope, identity, limit, deal_id=""):
+        captured.update(entity=entity, scope=scope, deal_id=deal_id)
+        return []
+
+    with patch("commercial_crm.lookup_human_reference", side_effect=fake_lookup):
+        app._commercial_link_lookup("Acme", "organization:tenant:user", 5, identity=None)
+    assert captured == {"entity": "organization", "scope": "tenant:user", "deal_id": ""}
+
+
+def test_billing_term_prompt_is_specific_not_the_generic_charge_term_wording():
+    presentation = presentation_for("charge_from_term", "billing_term")
+    assert presentation.prompt == "באיזה תנאי חיוב להשתמש?"
+
+
 def test_ambiguous_contact_produces_human_choices_not_silent_selection():
     def lookup(query, scope, limit):
         return [

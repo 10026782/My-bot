@@ -546,6 +546,39 @@ def test_charge_from_term_optional_lead_included_when_supplied():
     assert result.tool_inputs.get("lead_id") == LEAD_ID
 
 
+def test_charge_from_term_billing_term_lookup_is_scoped_to_resolved_deal():
+    """BUG-CHARGE-TERM-BYPASS follow-up: once "deal" resolves, the Payment
+    Term lookup callback must receive that deal_id (via the scope string's
+    "\x1f<deal_id>" suffix) so a same-named Term belonging to another Deal
+    is never offered as a candidate."""
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    captured_scopes = []
+
+    def deal_lookup(query, scope, limit):
+        captured_scopes.append(scope)
+        return [{"id": DEAL_ID, "fields": {"שם העסקה": query}}]
+
+    first = router.start("charge_from_term", current_values={})
+    deal_answer = router.answer_human(
+        first.session, "קבלנים דרך עמי מערכות",
+        link_lookup=deal_lookup, scope="tenant1",
+    )
+    assert deal_answer.field_name == "billing_term"
+    assert captured_scopes == ["deal:tenant1"]  # no deal_id suffix while resolving "deal" itself
+
+    def term_lookup(query, scope, limit):
+        captured_scopes.append(scope)
+        return [{"id": TERM_ID, "fields": {"Name": query}}]
+
+    with patch("tools.airtable_read_adapter.get_record_fields", return_value=_term_fields()):
+        term_answer = router.answer_human(
+            deal_answer.session, "עמלת פוסידון",
+            link_lookup=term_lookup, scope="tenant1",
+        )
+    assert term_answer.outcome == "CLARIFY" and term_answer.field_name == "basis_value"
+    assert captured_scopes[-1] == f"payment_term:tenant1\x1f{DEAL_ID}"
+
+
 def test_charge_from_term_deal_and_billing_term_are_mandatory():
     router = CommercialCompletionRouter(queue=lambda *_: None)
     result = router.start("charge_from_term", current_values={})

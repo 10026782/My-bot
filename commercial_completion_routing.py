@@ -632,10 +632,24 @@ class CommercialCompletionRouter:
         }.get(field.field_name, session.active.target_entity)
         if field.field_name == "counterparty_contact":
             entity = session.active.current_values.get("_ux_counterparty_kind", "contact")
+        # BUG-CHARGE-TERM-BYPASS follow-up: once "deal" is already resolved,
+        # a Payment Term lookup must be scoped to Terms actually linked to
+        # that Deal — never resolved/disambiguated against same-named Terms
+        # belonging to a different Deal. "\x1f" (never legitimate in an
+        # entity name or an identity scope string like "tenant:user") keeps
+        # this optional suffix unambiguous to parse back out on the other
+        # side (app.py's _commercial_link_lookup) without touching the
+        # link_lookup callable's existing 3-arg (query, scope, limit)
+        # contract every caller already implements.
+        _deal_scope_suffix = ""
+        if field.field_name == "billing_term":
+            _resolved_deal_id = str(session.active.current_values.get("deal") or "").strip()
+            if _resolved_deal_id:
+                _deal_scope_suffix = f"\x1f{_resolved_deal_id}"
         resolution = resolve_human_link(
             entity, str(value),
             lambda query, _scope, limit: link_lookup(
-                query, f"{entity}:{scope}", limit
+                query, f"{entity}:{scope}{_deal_scope_suffix}", limit
             ),
             scope=scope,
             create_allowed=entity in _NESTED_CREATE_ENTITIES,

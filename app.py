@@ -5081,11 +5081,20 @@ def _capture_turn_outcome_episodic(identity, turn_evidence, tool_results_log: li
 
 
 def _commercial_link_lookup(query: str, scope: str, limit: int, identity=None):
-    """Identity-scoped exact-name lookup adapter for human completion input."""
+    """Identity-scoped exact-name lookup adapter for human completion input.
+
+    BUG-CHARGE-TERM-BYPASS follow-up: commercial_completion_routing.py's
+    answer_human() may append an optional "\x1f<deal_id>" suffix (only when
+    resolving "billing_term" against an already-resolved Deal) — split it
+    back out here rather than widen this function's own 3-arg contract
+    every existing caller/test already relies on.
+    """
     from commercial_crm import lookup_human_reference
-    entity, _, identity_scope = str(scope or "").partition(":")
+    entity, _, rest = str(scope or "").partition(":")
+    identity_scope, _, deal_id = rest.partition("\x1f")
     return lookup_human_reference(
         entity, query, scope=identity_scope, identity=identity, limit=limit,
+        deal_id=deal_id,
     )
 
 
