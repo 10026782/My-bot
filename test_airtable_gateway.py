@@ -95,6 +95,18 @@ chk('writable "tier" passes validate', "tier" in clean)
 clean, errs = validate_airtable_fields("Leads", {"status": "none"})
 chk('"none" sentinel dropped', "status" not in clean)
 
+# BUG-CHARGE-VAT-NONE-SENTINEL (live canary, 14/09/2026): "VAT Rule" is
+# exempt from the sentinel-"none"-drop rule — VATRule.NONE = "none" is a
+# real Airtable choice (Payments/Payment Terms/Charges all have a genuine
+# none/add/included "VAT Rule" singleSelect), not a UI placeholder. Before
+# this fix, writing a Charge from a Payment Term whose VAT Rule is "none"
+# silently dropped the (required) field and blocked the entire write via
+# the SPEC A1 atomic fail-closed guard, with no error message surfaced.
+clean, errs = validate_airtable_fields("Charges", {"VAT Rule": "none"})
+chk('"VAT Rule"="none" survives validate (real choice, not a sentinel)', clean.get("VAT Rule") == "none" and not errs)
+clean, errs = validate_airtable_fields("Payment Terms", {"VAT Rule": "none"})
+chk('Payment Terms "VAT Rule"="none" survives validate too', clean.get("VAT Rule") == "none" and not errs)
+
 # Forbidden field
 clean, errs = validate_airtable_fields("Leads", {"owner_id": "123"})
 chk('forbidden field "owner_id" rejected', "owner_id" not in clean)
@@ -291,6 +303,25 @@ with patch("tools.airtable_gateway.httpx.patch", side_effect=_never_called_patch
      patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
     ok = airtable_patch("Leads", "recABC123", {"Score": 80, "טמפרטורה": "HOT"}, source="tma")
     chk("T4: read-only field mixed with valid field → blocked (False)", ok is False)
+
+
+# T4b (BUG-CHARGE-VAT-NONE-SENTINEL) — a Charge-shaped payload with a
+# required "VAT Rule": "none" field must NOT trip SPEC A1's atomic
+# fail-closed guard; httpx.post must actually be called. This is the exact
+# live-canary write crm_create_charge_from_term() performs for a Payment
+# Term whose VAT Rule is "none".
+def fake_post_t4b(url, *, headers, json, timeout):
+    resp = MagicMock()
+    resp.status_code = 201
+    resp.json.return_value = {"id": "recNEWCHARGE01", "fields": json.get("fields", {})}
+    return resp
+
+
+with patch("tools.airtable_gateway.httpx.post", side_effect=fake_post_t4b) as _t4b_post, \
+     patch("tools.airtable_gateway._at_base", return_value="appFAKE"):
+    rec = airtable_create("Charges", {"Amount": 2100.0, "VAT Rule": "none"}, source="commercial_crm")
+    chk("T4b: Charge write with VAT Rule='none' is NOT blocked (real choice, not sentinel)", rec is not None)
+    chk("T4b: httpx.post was actually called (write reached the provider)", _t4b_post.called)
 
 
 # T5 — fully valid payload → unchanged behavior (success, httpx called)

@@ -2,6 +2,51 @@
 
 עודכן: 14/09/2026
 
+## Payment Term → Charge routing: root cause of the execution failure found — global "none" sentinel rule collided with a legitimate VAT Rule choice (BUG-CHARGE-TERM-BYPASS follow-up #4) — 14/09/2026
+
+Follow-up #3's open question — the exact cause of the generic "❌ אושר אך
+נכשל בביצוע" execution failure — is now resolved, and the Rate %
+Percent-fraction fix from follow-up #3 is confirmed against live data.
+Verified directly against the live "בסיס עיקרי" base
+(`app4bcgoX7t0HUVnm`) via the Airtable MCP connection (owner-confirmed
+available): the "Payment Terms" table's `Rate %` field
+(`fldanlZM3cHSXf346`) is genuinely an Airtable `percent`-type field, and
+the live "עמלת פוסידון — 10%..." record stores exactly `0.1` — matching
+follow-up #3's fix precisely. No revert needed.
+
+Root cause of the execution failure, found from the production log line
+`core.action_gateway_atomic_executor: Execution failed (explicit): ...
+error=❌ יצירת הרשומה נכשלה: בדוק את חוזה השדות.`: `tools/airtable_gateway.py
+validate_airtable_fields()`'s sentinel-drop rule (`v.strip() == "none"` →
+treated as a UI placeholder, silently dropped) is global across every
+field/table, but `VATRule.NONE = "none"` is a real, meaningful Airtable
+`singleSelect` choice on the `VAT Rule` field shared by the `Payments`,
+`Payment Terms`, and `Charges` tables (confirmed live: choices
+`none`/`add`/`included` on both `Payment Terms.VAT Rule` and
+`Charges.VAT Rule`). `create_charge()` always sets `ChargeFields.VAT_RULE`
+as a required (non-optional) field, so for any Payment Term whose VAT Rule
+is "none" (the live canary's own Term included), the field was dropped,
+tripping the SPEC A1 atomic fail-closed guard — the entire write was
+blocked **before any HTTP request was attempted**, and `airtable_create()`
+returned a reason-less `outcome("failed")`, which is exactly the generic
+message the owner saw. Confirmed independently: zero `Charges` records are
+linked to that Payment Term in the live base — no orphan/partial write, the
+call failed pre-POST.
+
+Fix: `_SENTINEL_NONE_EXEMPT_FIELDS` in `tools/airtable_gateway.py` scopes
+the sentinel-"none" rule away from the `VAT Rule` field specifically
+(the existing `Leads.status` "none"-placeholder case is unaffected and
+still covered by its original test). Regression tests added to
+`test_airtable_gateway.py`: `VAT Rule="none"` now survives
+`validate_airtable_fields()` for both `Charges` and `Payment Terms`, and a
+new SPEC A1 end-to-end case (T4b) proves a Charge-shaped payload with
+`VAT Rule="none"` actually reaches `httpx.post` instead of being blocked.
+Full suite green (41/41 gateway tests including the 2 new + T4b, 88/88
+charge-term tests, 108/108 PA-01, 203/203 pytest, all standalone scripts,
+smoke tests, compileall). Not yet merged, deployed, or
+runtime-canary-re-verified — the live canary retry (same Deal/Term/basis)
+is still needed to confirm the full flow end-to-end in production.
+
 ## Payment Term → Charge routing: Rate % Airtable-fraction fix + idempotency-check scalability (BUG-CHARGE-TERM-BYPASS follow-up #3) — 14/09/2026
 
 First real end-to-end approval click on `crm_create_charge_from_term` (after
