@@ -1022,7 +1022,15 @@ def _freshness(
             for path in changed
             if any(_matches_tracked_path(path, tracked) for tracked in node["test_paths"])
         )
-        doc_paths = [ref["path"] for ref in node["canonical_docs"]]
+        # Mirrors _current_docs()'s historical/superseded exclusion (see its
+        # comment above) — a superseded doc is excluded from the bundle
+        # everywhere else, so its real git history must not leak back in
+        # here via the Freshness section either.
+        doc_paths = [
+            ref["path"]
+            for ref in node["canonical_docs"]
+            if ref.get("status") not in DEFAULT_EXCLUDED_STATUSES
+        ]
         doc_changes = sorted(
             path
             for path in changed
