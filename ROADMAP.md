@@ -1,6 +1,73 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 14/09/2026
+עודכן: 15/09/2026
+
+## Leads table temperature-column cleanup — 15/09/2026 (owner decision)
+
+Following PIPELINE-1 Blocker #3 (score/temperature SSOT unification), the
+owner asked which of the live Airtable `Leads` table's Score-derived
+columns were redundant enough to delete outright — not for a code/cost
+reason (all were harmless, Airtable-computed, display-only formula
+fields) but because 8 near-identical temperature/priority columns made
+the table unreadable to a human in the Airtable UI.
+
+**Investigated (Airtable MCP, live schema read):** 7 Score-derived
+columns existed — `tier` (manual singleSelect, `fld4eC2mEYrviL3oP`,
+0 records populated, no intentional writer, already documented as
+dead-in-practice) plus 6 formula fields matching `score_display.py`'s
+canonical 20/40/60/80 breakpoints: `טמפרטורה`, `אימוג'י טמפרטורה`,
+`מד ציון`, `עדיפות`, `תצוגת ליד` (a composite concatenating the first
+three), `Suggested Followup`. Confirmed zero Airtable Views/Interfaces
+depend on any of them (one plain Grid view, zero Interfaces in the whole
+base) — safe to delete with no UI breakage.
+
+**Deleted by the owner directly in Airtable (manual — no delete-field
+tool exists in the connected Airtable MCP server):** `tier`, `טמפרטורה`,
+`אימוג'י טמפרטורה`, `מד ציון`, and `תצוגת ליד` (this last one was
+originally recommended as the one composite field to *keep* — deleting
+its 3 dependencies first broke its formula, `"isValid": false`, so it was
+deleted too rather than repaired). **Kept:** `Score` (source of truth),
+`עדיפות` (Priority — a distinct concept, urgency/timing, not
+temperature), `Suggested Followup` (a distinct concept — recommended
+action). Net: 8 columns → 3, zero information genuinely lost (nothing
+kept ever duplicated another kept field), zero code impact (none of the
+5 deleted fields was read by any live code path).
+
+**Code updated to match:**
+- `airtable_schema.py` — `LeadFields.TIER` constant removed (only two
+  real call sites existed: `tma_api.py::get_lead()`'s dead `"tier"`
+  passthrough and `core/router/lead_builders.py`'s
+  `_LEAD_WRITE_FIELDS` allowlist — both removed too, closing a real
+  stale-allowlist risk: without this, a future lead-create write
+  including `tier` would have passed local validation and only failed
+  at Airtable with an unknown-field error). `FIELD_MAP[Tables.LEADS]`'s
+  `"tier"` description entry removed.
+- `tools/airtable_gateway.py::READ_ONLY_FIELDS["Leads"]` — left the
+  now-deleted field names in place (same no-op-safe idiom already used
+  there for `updated_at`/`Updated At`), comment updated to say which
+  entries are now fully gone from the live schema vs. still live.
+- `tma_api.py`, `daily_digest.py`, `score_display.py` — comments that
+  claimed the 20/40/60/80 breakpoints "match the live Airtable
+  'טמפרטורה' formula field" updated to past tense (field no longer
+  exists; `score_display.py::get_temperature()` is now the sole
+  surviving source of these breakpoints, not a mirror of a live field).
+- `tma-frontend/src/components/LeadDetail.tsx` / `types.ts` — removed
+  the dead `tier` badge/type (API never sent a populated value — 0
+  records — so this never rendered in production; now the API doesn't
+  send the key at all).
+- `docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md`
+  — addendum note added; the original audit body is left as the
+  historical pre-deletion record, not rewritten.
+
+Full regression run clean: `test_airtable_gateway.py` (41/41),
+`smoke_tests.py`, `test_pipeline1_closure_remediation.py` (33/33),
+`test_daily_digest_scoring_summary.py` + `core/router/test_router.py`
+(pytest, 8/8), `core/router/test_router.py` direct (57/57),
+`python3 -m compileall -q .`, frontend `tsc --noEmit` + `vite build`
+clean, `tools/status_sync_validator.py` passed.
+
+STATUS: ✅ VERIFIED IN PROD (Airtable schema change is live; code change
+pending push)
 
 ## BUG-CHARGE-TERM-BYPASS — CLOSED — RUNTIME VERIFIED — 14/09/2026
 

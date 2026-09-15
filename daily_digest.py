@@ -58,9 +58,11 @@ def _fmt(iso: str) -> str:
 def _tier_label(score: int) -> str:
     """
     Score → tier label. Delegates to score_display.get_temperature(), the
-    app's single canonical Score→Temperature derivation (20/40/60/80 —
-    matches the live Airtable "טמפרטורה" formula field) — PIPELINE-1
-    Blocker #3 remediation. No longer a locally re-derived 25/50/70 scale.
+    app's single canonical Score→Temperature derivation (20/40/60/80,
+    originally matching the live Airtable "טמפרטורה" formula field before
+    that field was deleted 15/09/2026 as redundant display clutter) —
+    PIPELINE-1 Blocker #3 remediation. No longer a locally re-derived
+    25/50/70 scale.
     """
     from score_display import get_temperature
     emoji, label, _ = get_temperature(score)

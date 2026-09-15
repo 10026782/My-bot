@@ -4,7 +4,10 @@
 #
 # get_temperature() is the app's single canonical Score→Temperature
 # derivation (PIPELINE-1 Blocker #3 remediation, 14/09/2026) — its 20/40/60/80
-# breakpoints match the live Airtable "טמפרטורה" formula field exactly.
+# breakpoints originally matched the live Airtable "טמפרטורה" formula field
+# exactly (that field was deleted from Airtable on 15/09/2026 as redundant
+# display clutter alongside its formula siblings and the dead "tier"
+# singleSelect — this module is now the sole source of these breakpoints).
 # daily_digest.py and lead_capture.py previously each re-derived their own
 # (mutually inconsistent) tier scale; those are now removed/delegate here.
 # The one deliberate, documented exception is tma_api.py's Lead Pipeline

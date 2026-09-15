@@ -1513,8 +1513,11 @@ def _build_formula(
 # PIPELINE-1 Blocker #3 remediation (14/09/2026): the rest of the app's
 # score→temperature fragmentation (score_display.py, lead_capture.py,
 # daily_digest.py) was unified onto score_display.py::get_temperature() — a
-# 20/40/60/80 5-tier scale matching the live Airtable "טמפרטורה" formula
-# field. This screen's simpler 3-bucket <25/25-59/>=60 scale was kept as a
+# 20/40/60/80 5-tier scale that originally matched the live Airtable
+# "טמפרטורה" formula field (that field, plus its display-only siblings, was
+# deleted from Airtable on 15/09/2026 as redundant clutter — score_display.py
+# is the sole surviving source for these breakpoints now). This screen's
+# simpler 3-bucket <25/25-59/>=60 scale was kept as a
 # deliberate, explicit product decision for the Pipeline UI specifically
 # (not re-derived from the 5-tier scale) — see the conversation record for
 # that PR. If this divergence is ever revisited, change it here deliberately
@@ -1922,7 +1925,6 @@ def get_lead(lead_id, identity):
         ],
         "created_at":    f.get(LeadFields.CREATED_AT, ""),
         "timeline":      timeline,
-        "tier":          f.get(LeadFields.TIER, ""),
         "outcome":       f.get(LeadFields.OUTCOME, ""),
         "next_followup": f.get(LeadFields.NEXT_FOLLOWUP, ""),
         "owner":         owner_display,

@@ -740,7 +740,11 @@ class LeadFields:
     PHONE           = "phone"
     STATUS          = "status"
     SCORE           = "Score"        # raw numeric — Airtable field "Score" (capital S); written by lead_memory/lead_capture
-    TIER            = "tier"         # singleSelect — real, writable field (verified via Airtable MCP, not a formula/read-only). Values: קר/חם/לוהט/רותח/ליד חדש. Currently 0/39 live records populated and no code path writes it intentionally — treat as dead-in-practice, not canonical for reasoning, pending an owner decision to remove it (see docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md §7C and the Canonical Leads Schema v1 proposal).
+    # TIER removed 15/09/2026 — the live Airtable "tier" singleSelect (dead-in-
+    # practice, 0 records populated, no intentional writer) was deleted by the
+    # owner as part of the score_display.py SSOT cleanup (PIPELINE-1 Blocker
+    # #3 follow-up). See docs/architecture/bug-104/PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md
+    # for the pre-deletion audit. Do not reintroduce this constant.
     NOTES           = "notes"        # multilineText — written only by voice_adapter.py (IVR), read by core/leads_reasoning_projection.py
     SUMMARY         = "summary"
     ANSWERS         = "answers"
@@ -1461,7 +1465,6 @@ FIELD_MAP = {
         "phone":         "טלפון",
         "status":        "new | qualified | hot | cold",
         "Score":         "ציון מספרי",
-        "tier":          "HOT | WARM | COLD",
         "summary":       "תקציר",
         "answers":       "תשובות/פרטים",
         "source":        "מקור",

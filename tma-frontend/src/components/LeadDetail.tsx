@@ -416,7 +416,6 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                 <p className="lead-detail-hint">שלב נוכחי</p>
                 <h2 className="lead-detail-stage-title">{STAGE_LABELS[stage]}</h2>
                 <div className="lead-detail-meta-row">
-                  {data.tier && <span className="boss-status-badge boss-status-badge--warning">Tier: {data.tier}</span>}
                   <span className="boss-status-badge boss-status-badge--info">{outcomeLabel(currentOutcome)}</span>
                   {data.status && <span className="boss-status-badge boss-status-badge--neutral">טכני: {data.status}</span>}
                 </div>

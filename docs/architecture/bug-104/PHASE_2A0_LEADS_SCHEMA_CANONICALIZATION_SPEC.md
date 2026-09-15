@@ -8,6 +8,10 @@
 
 ---
 
+**עדכון 15/09/2026 (PIPELINE-1 Blocker #3 follow-up — owner decision):** בניגוד ל-§14 ("No-Change-Now List") ו-§16 (מוצע לשקול רק "אחרי שבוע-שבועיים"), ה-owner מחק בפועל מ-Airtable החי, ידנית, את `tier` (#6), `טמפרטורה` (#7), `אימוג'י טמפרטורה` (#8) ו-`מד ציון` (#9) — לא `עדיפות`/`תצוגת ליד`/`Suggested Followup`/שדות ה-`Domain*`, שנשארו כפי שהם. הסיבה: לא עלות-קוד, אלא קריאוּת הטבלה ל-עין אנושית ב-Airtable UI (יותר מדי עמודות כמעט-זהות). הקוד עודכן בהתאם (`airtable_schema.py::LeadFields.TIER` הוסר, `FIELD_MAP`/`_LEAD_WRITE_FIELDS`/`get_lead()`'s `tier` passthrough הוסרו, `tools/airtable_gateway.py::READ_ONLY_FIELDS` תועד כ-no-op-safe לשדות שנמחקו). §4/§7/§10/§12 למטה משקפים את המצב *לפני* המחיקה — לתמונת המצב הנוכחית ראו `ROADMAP.md`'s "Leads table temperature-column cleanup — 15/09/2026" entry.
+
+---
+
 ## 1. Problem Statement
 
 טבלת `Leads` צברה **39 שדות חיים**, מתוכם 16 קשורים ישירות למצב/ציון/עדיפות של ליד — אך הם נכתבו/נוצרו בכמה גלים לא-מתואמים: שדה `status` ידני, שדה `Score` ידני, שדה `tier` ידני-לכאורה (אך ריק לגמרי בפועל), שרשרת שדות **formula** שמחושבים אוטומטית מתוך `Score` (טמפרטורה/אימוג'י/מד ציון/עדיפות/תצוגת ליד/Suggested Followup), ושרשרת שדות **Domain\* חדשה** (`Domain category`/`Domain risk assessment`/`Domain summary`) שמתבררת כשימוש שגוי-מיסודו של Airtable AI Field על השדה `domain` (ראה §7).
