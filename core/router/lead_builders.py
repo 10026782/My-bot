@@ -41,7 +41,6 @@ _LEAD_WRITE_FIELDS = frozenset({
     LeadFields.PHONE,
     LeadFields.STATUS,
     LeadFields.SCORE,
-    LeadFields.TIER,
     LeadFields.SUMMARY,
     LeadFields.SOURCE,
     LeadFields.CHANNEL,

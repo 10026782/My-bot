@@ -100,15 +100,6 @@ export async function askAI(contextId: string, question: string): Promise<string
   return data.answer;
 }
 
-export async function updateLeadStatus(leadId: string, status: string): Promise<void> {
-  const r = await fetch(`${BASE}/api/leads/${encodeURIComponent(leadId)}/status`, {
-    method: "PATCH",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ status }),
-  });
-  if (!r.ok) throw new Error(`API ${r.status}`);
-}
-
 export async function createFollowup(leadId: string, note: string): Promise<void> {
   const r = await fetch(`${BASE}/api/followup`, {
     method: "POST",

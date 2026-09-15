@@ -188,7 +188,6 @@ export interface LeadDetail {
   next_step_options: NextActionOption[];
   created_at: string;
   timeline: TimelineEntry[];
-  tier?: string;
   outcome?: string;
   next_followup?: string;
   owner?: string | string[];  // Airtable multipleRecordLinks returns string[]

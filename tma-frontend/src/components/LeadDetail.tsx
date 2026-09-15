@@ -243,8 +243,10 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     if (saving) return;
     setSaving(true);
     try {
+      // setLeadOutcome("open") already syncs status -> "active" server-side
+      // (tma_api.py::_OUTCOME_STATUS_MAP) — a second patchLead({status})
+      // call here was a redundant round-trip writing the same field twice.
       await setLeadOutcome(lead.id, "open");
-      await patchLead(lead.id, { status: "active" });
       setCurrentOutcome("open");
       updateLoadedData({ outcome: "open", status: "active" });
       showToast("ok", "הליד נפתח מחדש");
@@ -416,7 +418,6 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
                 <p className="lead-detail-hint">שלב נוכחי</p>
                 <h2 className="lead-detail-stage-title">{STAGE_LABELS[stage]}</h2>
                 <div className="lead-detail-meta-row">
-                  {data.tier && <span className="boss-status-badge boss-status-badge--warning">Tier: {data.tier}</span>}
                   <span className="boss-status-badge boss-status-badge--info">{outcomeLabel(currentOutcome)}</span>
                   {data.status && <span className="boss-status-badge boss-status-badge--neutral">טכני: {data.status}</span>}
                 </div>
