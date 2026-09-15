@@ -747,7 +747,10 @@ class LeadFields:
     # for the pre-deletion audit. Do not reintroduce this constant.
     NOTES           = "notes"        # multilineText — written only by voice_adapter.py (IVR), read by core/leads_reasoning_projection.py
     SUMMARY         = "summary"
-    ANSWERS         = "answers"
+    # ANSWERS removed 15/09/2026 — the live Airtable "answers" multilineText
+    # field was write-only (core/lead_service.py wrote it, nothing ever read
+    # it back) and was deleted by the owner as part of the same Leads schema
+    # cleanup as TIER above. Do not reintroduce this constant.
     SOURCE          = "source"
     CHANNEL         = "channel"
     CREATED_AT      = "created_at"
@@ -1466,7 +1469,6 @@ FIELD_MAP = {
         "status":        "new | qualified | hot | cold",
         "Score":         "ציון מספרי",
         "summary":       "תקציר",
-        "answers":       "תשובות/פרטים",
         "source":        "מקור",
         "channel":       "ערוץ",
         "created_at":    "תאריך יצירה",

@@ -173,7 +173,6 @@ class LeadPayload:
     tenant_id: str = "boss_hq"
     memory_key: str = ""
     external_id: str = ""
-    answers: str = ""
 
     # ── Campaign attribution — distinct from `source` (technical origin) ──
     # accepted, not yet written — no live Airtable column exists for any of
@@ -345,8 +344,6 @@ def build_lead_fields(payload: LeadPayload, owner_record_id: Optional[str], memo
     }
     if payload.external_id:
         fields[LeadFields.EXTERNAL_ID] = payload.external_id
-    if payload.answers:
-        fields[LeadFields.ANSWERS] = payload.answers
     if owner_record_id:
         fields[LeadFields.OWNER] = [owner_record_id]
     return fields
@@ -495,8 +492,6 @@ def create_lead(
             }
             if payload.external_id:
                 patch_fields[LeadFields.EXTERNAL_ID] = payload.external_id
-            if payload.answers:
-                patch_fields[LeadFields.ANSWERS] = payload.answers
             if owner_record_id:
                 patch_fields[LeadFields.OWNER] = [owner_record_id]
             ok_patch = airtable_patch("Leads", existing_id, patch_fields, source=source_module)

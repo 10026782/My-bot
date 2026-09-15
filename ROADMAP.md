@@ -2,6 +2,46 @@
 
 עודכן: 15/09/2026
 
+## Leads `answers` field deleted — 15/09/2026 (owner decision, follow-up)
+
+Follow-up to a direct owner question comparing the `notes`/`summary`/
+`answers` field family: investigation found `summary` is the primary,
+broadly-written text field (read by the TMA and the reasoning engine's
+lowest-priority fallback) and `notes` is a real, narrower Voice-IVR
+transcript field (read as the reasoning engine's *mid*-priority
+fallback, above `summary`) — genuinely distinct roles, not duplicates.
+`answers`, however, was write-only: `core/lead_service.py` wrote it at
+lead creation/patch time but **zero code anywhere ever read it back**.
+The owner deleted the Airtable field on that finding.
+
+**Code updated to match:**
+- `airtable_schema.py::LeadFields.ANSWERS` constant removed (the
+  `LeadSessionsFields.ANSWERS` constant on the unrelated `LeadSessions`
+  table is untouched — same table-name collision pattern as `TIER`
+  earlier in this track). `FIELD_MAP[Tables.LEADS]`'s `"answers"` entry
+  removed.
+- `core/lead_service.py::LeadPayload` — the `answers: str = ""` field
+  removed along with both of `build_lead_fields()`'s conditional writes
+  (`if payload.answers: fields[LeadFields.ANSWERS] = payload.answers`,
+  create and patch paths).
+- `core/noninteractive_lead_cutovers.py::create_furniture_inbound_lead()`
+  — the only real caller that ever populated `LeadPayload.answers=` —
+  had already folded the same content into `summary` one line above
+  (`summary=f"{summary}\n{answers}"[:500]`), so the separate `answers=`
+  kwarg was pure redundant duplication even before the field's deletion.
+  Removed; the function's own `answers` parameter is untouched (still
+  feeds `summary`).
+- `schema_intelligence.py`'s `/schema`-command Leads hint dict — dropped
+  `"answers"`, and also `"tier"` (a stale entry missed in the earlier
+  `tier` cleanup round — same doc-drift pattern, caught now).
+
+Full regression clean: `test_lead_service_phase1.py` (109/109),
+`test_noninteractive_lead_cutovers.py` (4/4), `test_furniture_lead_funnel.py`
+(22/22), `test_inbound_handler.py` (8/8), plus 35 more passing across
+`test_whatsapp_lead_cutover.py`/`test_c02_c04_*`/`test_f52_g*`/
+`test_audit3_finding1_lead_memory_update_only.py`, `smoke_tests.py`,
+`python3 -m compileall -q .`, `status_sync_validator.py`.
+
 ## Leads table Domain* fields deleted — 15/09/2026 (owner decision, follow-up)
 
 Owner deleted the last 3 candidates from the Leads schema cleanup:

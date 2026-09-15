@@ -41,7 +41,7 @@ def create_furniture_inbound_lead(sender: str, destination: str, name: str, summ
         name=name or sender, phone=sender, domain="import", owner_user_id=owner_user_id,
         source="twilio_whatsapp_furniture_funnel", channel="whatsapp",
         summary=f"{summary}\n{answers}"[:500], status=status, score=score,
-        memory_key=f"boss_hq:{sender}", answers=answers,
+        memory_key=f"boss_hq:{sender}",
         tenant_id=getattr(identity, "tenant_id", "boss_hq") or "boss_hq",
     ), source_module="furniture_funnel_canonical", existing_id=existing_id or None)
 
