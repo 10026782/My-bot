@@ -14,6 +14,29 @@ interface Props {
   authRole?: string | null;
 }
 
+// LeadStatus (airtable_schema.py) — Hebrew labels for the status filter
+// dropdown. Keep in sync with LeadStatus.ALL; a value missing here still
+// renders (falls back to the raw key) rather than disappearing.
+const STATUS_LABELS: Record<string, string> = {
+  new: "חדש",
+  waiting_call: "ממתין לשיחה",
+  waiting_response: "ממתין לתגובה",
+  high_confidence: "בטחון גבוה",
+  active: "פעיל",
+  done: "הושלם",
+  archived: "בארכיון",
+  lost: "אבוד",
+  duplicate: "כפילות",
+  not_relevant: "לא רלוונטי",
+};
+
+const DATE_RANGE_OPTIONS: { key: string; label: string }[] = [
+  { key: "all", label: "הכל" },
+  { key: "today", label: "היום" },
+  { key: "week", label: "השבוע" },
+  { key: "month", label: "החודש" },
+];
+
 type State =
   | { status: "loading" }
   | { status: "ok"; data: LeadsResponse }
@@ -26,13 +49,16 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [domainFilter, setDomainFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [sourceFilter, setSourceFilter] = useState<string>("");
+  const [dateRange, setDateRange] = useState<string>("all");
 
   const baseDomain = project?.domain ?? "";
   const showDomainFilter = authRole === "owner" || authRole === "manager";
 
   const load = () => {
     setState({ status: "loading" });
-    fetchLeads(baseDomain, { view, search })
+    fetchLeads(baseDomain, { view, search, status: statusFilter, source: sourceFilter, date_range: dateRange })
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
   };
@@ -40,7 +66,7 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseDomain, view, search]);
+  }, [baseDomain, view, search, statusFilter, sourceFilter, dateRange]);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -84,7 +110,7 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="חיפוש לפי שם או טלפון..."
+            placeholder="חיפוש לפי שם, טלפון, תקציר או Next Action..."
             className="boss-input"
             aria-label="חיפוש לידים"
           />
@@ -107,6 +133,34 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
             </div>
           )}
 
+          <div className="ventures-action-row" role="tablist" aria-label="טווח תאריכים">
+            {DATE_RANGE_OPTIONS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={dateRange === key}
+                aria-pressed={dateRange === key}
+                onClick={() => setDateRange(key)}
+                className="ventures-choice boss-bubble--selectable"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="boss-select"
+            aria-label="סינון לפי סטטוס"
+          >
+            <option value="">כל הסטטוסים</option>
+            {Object.entries(STATUS_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+
           {data && !baseDomain && showDomainFilter && data.available_domains.length > 0 && (
             <select
               value={domainFilter}
@@ -117,6 +171,20 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
               <option value="">כל הדומיינים</option>
               {data.available_domains.map((d) => (
                 <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          )}
+
+          {data && data.available_sources.length > 0 && (
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="boss-select"
+              aria-label="סינון לפי מקור"
+            >
+              <option value="">כל המקורות</option>
+              {data.available_sources.map((s) => (
+                <option key={s} value={s}>{s}</option>
               ))}
             </select>
           )}

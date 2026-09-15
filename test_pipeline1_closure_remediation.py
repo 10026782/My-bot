@@ -269,6 +269,120 @@ finally:
     tma_api._at_list = _orig_at_list
 
 
+# ══════════════════════════════════════════════════════════════════
+# [8] Filter/search expansion follow-up (owner-directed, 15/09/2026):
+# search over summary/next_step, a specific-status filter alongside the
+# view, a source filter, and a relative date_range filter over Airtable's
+# native createdTime (Leads.created_at itself has no writer anywhere and
+# is always empty — confirmed by grep before building this).
+# ══════════════════════════════════════════════════════════════════
+print("\n[8] Filter/search expansion — status/source/date_range + summary/next_step search")
+
+from datetime import datetime, timedelta, timezone
+
+_now = datetime.now(timezone.utc)
+
+
+def _iso(dt) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _filter_fixture_at_list(table, formula="", max_records=None, strict=False,
+                             measurement_label=None, paginate=False):
+    return [
+        {
+            "id": "recA", "createdTime": _iso(_now - timedelta(hours=1)),
+            "fields": {
+                "Name": "Alice Cohen", "phone": "0501111111", "status": "active",
+                "Score": 70, "domain": "real_estate", "source": "telegram",
+                "summary": "מחפשת דירת 3 חדרים בצפון", "Next Action": "Schedule Meeting ",
+            },
+        },
+        {
+            "id": "recB", "createdTime": _iso(_now - timedelta(days=10)),
+            "fields": {
+                "Name": "Bob Levi", "phone": "0502222222", "status": "lost",
+                "Score": 10, "domain": "media", "source": "whatsapp",
+                "summary": "לא מעוניין יותר", "Next Action": "Closed Lost",
+            },
+        },
+        {
+            # Same Score as recA (70) on purpose — the sort tie-break test
+            # below needs two same-score records to prove createdTime (not
+            # the dead created_at field) actually breaks the tie.
+            "id": "recC", "createdTime": _iso(_now - timedelta(days=45)),
+            "fields": {
+                "Name": "Chen Mizrahi", "phone": "0503333333", "status": "active",
+                "Score": 70, "domain": "real_estate", "source": "telegram",
+                "summary": "מעוניין בהשקעה", "Next Action": "Follow Up",
+            },
+        },
+    ]
+
+
+tma_api._at_list = _filter_fixture_at_list
+try:
+    tma_api.resolve_identity = lambda ch, tid: _identity(Role.OWNER)
+
+    # search now also matches summary + Next Action, not just name/phone
+    r = client.get("/api/leads?view=all&search=" + "השקע", headers=_HDR)
+    body = r.get_json()
+    chk("search matches summary text", [l["id"] for l in body["leads"]] == ["recC"])
+
+    r = client.get("/api/leads?view=all&search=" + "Schedule", headers=_HDR)
+    body = r.get_json()
+    chk("search matches Next Action text", [l["id"] for l in body["leads"]] == ["recA"])
+
+    # status filter — specific value, alongside (narrower than) the view
+    r = client.get("/api/leads?view=all&status=lost", headers=_HDR)
+    body = r.get_json()
+    chk("status filter narrows to the exact status", [l["id"] for l in body["leads"]] == ["recB"])
+
+    r = client.get("/api/leads?view=all&status=not_a_real_status", headers=_HDR)
+    body = r.get_json()
+    chk("unknown status value is ignored, not an error",
+        r.status_code == 200 and sorted(l["id"] for l in body["leads"]) == ["recA", "recB", "recC"])
+
+    # source filter + available_sources reflects the full view, not the filtered set
+    r = client.get("/api/leads?view=all&source=whatsapp", headers=_HDR)
+    body = r.get_json()
+    chk("source filter narrows to the exact source", [l["id"] for l in body["leads"]] == ["recB"])
+    chk("available_sources reflects the full scope, not just the filtered source",
+        sorted(body["available_sources"]) == ["telegram", "whatsapp"])
+
+    # date_range — relative presets against createdTime, not the dead created_at field
+    r = client.get("/api/leads?view=all&date_range=today", headers=_HDR)
+    body = r.get_json()
+    chk("date_range=today keeps only records created today", [l["id"] for l in body["leads"]] == ["recA"])
+
+    r = client.get("/api/leads?view=all&date_range=week", headers=_HDR)
+    body = r.get_json()
+    chk("date_range=week excludes both the 10-day and 45-day-old records",
+        [l["id"] for l in body["leads"]] == ["recA"])
+
+    r = client.get("/api/leads?view=all&date_range=month", headers=_HDR)
+    body = r.get_json()
+    chk("date_range=month includes all three (45 days > 30 is still excluded)",
+        sorted(l["id"] for l in body["leads"]) == ["recA", "recB"])
+
+    r = client.get("/api/leads?view=all", headers=_HDR)
+    body = r.get_json()
+    chk("date_range defaults to all — every record included",
+        sorted(l["id"] for l in body["leads"]) == ["recA", "recB", "recC"])
+    chk("response echoes the active status/source/date_range filters",
+        body["status"] == "" and body["source"] == "" and body["date_range"] == "all")
+
+    # sort tie-break now actually uses createdTime (previously a no-op — the
+    # dead created_at field made every tie-break key an equal empty string)
+    r = client.get("/api/leads?view=all&status=active", headers=_HDR)
+    body = r.get_json()
+    chk("score-tied records break ties by newest createdTime first",
+        [l["id"] for l in body["leads"]] == ["recA", "recC"])
+finally:
+    tma_api.resolve_identity = _orig_resolve
+    tma_api._at_list = _orig_at_list
+
+
 print(f"\n{'=' * 60}")
 print(f"PIPELINE-1 closure remediation: {_passed}/{_passed + _failed} passed")
 if _failed:

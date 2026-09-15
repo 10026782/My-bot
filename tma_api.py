@@ -1605,7 +1605,12 @@ def get_leads(identity):
     """O2 — Lead Pipeline. Owner + Manager (all) + Partner (own domains).
     Accepts: ?domain=real_estate OR ?project_slug=blueview (resolves via ProjectsHub)
              ?view=active|monitoring|all  (default: active)
-             ?search=<substring of name or phone>
+             ?search=<substring of name/phone/summary/next action>
+             ?status=<exact LeadStatus value — narrows further within the view>
+             ?source=<exact Lead.source value>
+             ?date_range=today|week|month|all  (default: all; filters on Airtable's
+             native createdTime — Leads.created_at itself has no writer anywhere
+             in the codebase and is always empty, so it cannot be used for this)
     """
     allowed = {Role.OWNER, Role.MANAGER, Role.PARTNER}
     if identity.role not in allowed:
@@ -1639,6 +1644,16 @@ def get_leads(identity):
 
     search_q = request.args.get("search", "").strip()[:120]
 
+    status_q = request.args.get("status", "").strip()
+    if status_q and status_q not in LeadStatus.ALL:
+        status_q = ""  # unknown value — ignore, same leniency as view_q below
+
+    source_q = request.args.get("source", "").strip()[:120]
+
+    date_range_q = request.args.get("date_range", "all")
+    if date_range_q not in ("today", "week", "month", "all"):
+        date_range_q = "all"
+
     # Screen config — lead_pipeline
     screen = SCREEN_CONFIGS["lead_pipeline"]
     view_q = request.args.get("view", screen["default_view"])
@@ -1664,16 +1679,43 @@ def get_leads(identity):
     records = _at_list("Leads", formula, max_records=fetch_cap, paginate=True)
     has_more = len(records) >= fetch_cap
 
-    # Domain filter picker (item 6) — Owner/Manager only; Partner is already
-    # implicitly restricted to its own allowed_domains via identity above.
+    # Domain/source filter pickers (item 6) — computed from the full
+    # view+identity-scoped set, before domain/status/source/search narrow it
+    # further, so the dropdowns always reflect everything selectable in this
+    # view, not just what's left after the currently active filters.
     available_domains: list[str] = []
     if identity.role != Role.PARTNER:
         available_domains = sorted({
             d for d in (record_fields(r).get(LeadFields.DOMAIN, "") for r in records) if d
         })
+    available_sources = sorted({
+        s for s in (record_fields(r).get(LeadFields.SOURCE, "") for r in records) if s
+    })
 
     if domain_q:
         records = [r for r in records if record_fields(r).get(LeadFields.DOMAIN, "") == domain_q]
+
+    if status_q:
+        records = [r for r in records if record_fields(r).get(LeadFields.STATUS, "") == status_q]
+
+    if source_q:
+        records = [r for r in records if record_fields(r).get(LeadFields.SOURCE, "") == source_q]
+
+    if date_range_q != "all":
+        cutoff_days = {"today": 0, "week": 7, "month": 30}[date_range_q]
+        now = datetime.now(timezone.utc)
+        cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0) if cutoff_days == 0 else now - timedelta(days=cutoff_days)
+
+        def _created_since(r: dict) -> bool:
+            raw = r.get("createdTime", "")
+            if not raw:
+                return False
+            try:
+                created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                return False
+            return created >= cutoff
+        records = [r for r in records if _created_since(r)]
 
     if search_q:
         needle = search_q.lower()
@@ -1682,13 +1724,18 @@ def get_leads(identity):
             return (
                 needle in str(f.get(LeadFields.NAME, "")).lower()
                 or needle in str(f.get(LeadFields.PHONE, "")).lower()
+                or needle in str(f.get(LeadFields.SUMMARY, "")).lower()
+                or needle in str(f.get(LeadFields.NEXT_STEP, "")).lower()
             )
         records = [r for r in records if _matches_search(r)]
 
-    # Deterministic default sort: Score descending, tie-break by created_at
-    # descending. list.sort() is stable, so sorting created_at first then
-    # Score gives "Score desc, ties broken by newest first" in one pass.
-    records.sort(key=lambda r: record_fields(r).get(LeadFields.CREATED_AT, "") or "", reverse=True)
+    # Deterministic default sort: Score descending, tie-break by creation time
+    # descending. list.sort() is stable, so sorting by creation time first
+    # then Score gives "Score desc, ties broken by newest first" in one pass.
+    # Uses Airtable's native createdTime, not Leads.created_at (see docstring
+    # above — that field has no writer anywhere and is always empty, which
+    # silently made this tie-break a no-op until now).
+    records.sort(key=lambda r: r.get("createdTime", "") or "", reverse=True)
     records.sort(key=lambda r: int(record_fields(r).get(LeadFields.SCORE, 0) or 0), reverse=True)
 
     return jsonify({
@@ -1698,6 +1745,10 @@ def get_leads(identity):
             for k, v in screen["views"].items()
         },
         "available_domains": available_domains,
+        "available_sources": available_sources,
+        "status": status_q,
+        "source": source_q,
+        "date_range": date_range_q,
         "has_more": has_more,
         "count": len(records),
         "leads": [_fmt_lead_summary(r) for r in records],

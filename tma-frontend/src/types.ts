@@ -66,6 +66,10 @@ export interface LeadsResponse {
   view: string;
   available_views: Record<string, string>;
   available_domains: string[];
+  available_sources: string[];
+  status: string;
+  source: string;
+  date_range: string;
   has_more: boolean;
   count: number;
   leads: LeadSummary[];

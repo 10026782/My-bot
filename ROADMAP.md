@@ -2,6 +2,71 @@
 
 עודכן: 15/09/2026
 
+## Lead Pipeline — expanded filters (keyword search + status + source + date range) — 15/09/2026 (owner-directed)
+
+Owner asked to compare Pipeline's and Projects Hub's filtering and add
+more options. Investigation found Projects Hub (`GET /api/projects`) has
+**zero filtering** today (no search/view/status param at all — just
+renders every project card) — left untouched per explicit owner decision
+("להשאיר כרגע"), this entry is Pipeline-only.
+
+Pipeline (`GET /api/leads`) previously had 3 filters: search (substring
+on `Name`+`phone` only), a `view` preset (`active`/`monitoring`/`all` —
+3 coarse status buckets), and a domain dropdown. Added, per explicit
+owner decisions on each:
+
+- **Search expanded** to also match `summary` and `Next Action` (`next_step`),
+  not just name/phone.
+- **Status filter** — a new `?status=<LeadStatus value>` param, additive
+  alongside (narrower than) the existing `view` buckets rather than
+  replacing them; unknown values are ignored (same leniency as `view`).
+- **Source filter** — a new `?source=<value>` param + `available_sources`
+  in the response (same "reflects the full view scope before narrowing"
+  pattern already used for `available_domains`).
+- **Date range filter** — a new `?date_range=today|week|month|all` param
+  (default `all`), a relative preset rather than a date-picker per owner
+  choice.
+
+**Side finding while building the date filter:** `LeadFields.CREATED_AT`
+(`Leads.created_at`, a plain text field) has **zero writers anywhere in
+the codebase** — confirmed by grep before relying on it. The existing
+Score-descending sort's tie-break already silently no-opped on this dead
+field (every record read back `""`, so the tie-break never actually broke
+a tie). Both the new date filter and the pre-existing sort tie-break now
+use Airtable's native `createdTime` instead, which is always populated —
+this incidentally fixes that latent tie-break bug, not just adds the new
+filter.
+
+All new/changed filters are applied server-side in Python against the
+already view+identity-scoped, `paginate=True`-fetched record set — same
+approach the existing domain filter and search already use, not a new
+formula-injection surface (`_safe_formula_param` still guards only
+`domain`/`project_slug`, which do reach the Airtable formula; the new
+params never do).
+
+**Frontend (`LeadPipeline.tsx`):** status dropdown (local `STATUS_LABELS`
+Hebrew map, 10 values — falls back to the raw key if a value is ever
+missing there), a source dropdown (populated from `available_sources`,
+same pattern as the domain dropdown), and a date-range segmented control
+(today/week/month/all, same tab style as the existing view control). All
+three go through the server round-trip (added to `fetchLeads()`'s params
+and the `useEffect` deps), matching how `search`/`view` already work —
+not client-side filtering like the existing `domainFilter` state, so
+`available_sources`/results stay correct even when the view's fetch is
+large.
+
+Tests: new `[8]` section in `test_pipeline1_closure_remediation.py` (12
+new checks, 45/45 total) covering expanded search, status/source
+narrowing with `available_*` staying full-scope, all 4 `date_range`
+values against a 3-record fixture spanning 1 hour/10 days/45 days old,
+default-`all` behavior, response echo of active filters, and the
+createdTime tie-break fix specifically (two same-score fixture records,
+proven to sort newest-first). Full regression clean: `smoke_tests.py`,
+`python3 -m compileall -q .`, frontend `tsc --noEmit` + `vite build`,
+`status_sync_validator.py`.
+
+STATUS: 🟡 CODE DONE, STATIC_VERIFIED — not yet merged/deployed/runtime-canaried
+
 ## Leads `answers` field deleted — 15/09/2026 (owner decision, follow-up)
 
 Follow-up to a direct owner question comparing the `notes`/`summary`/
