@@ -243,8 +243,10 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     if (saving) return;
     setSaving(true);
     try {
+      // setLeadOutcome("open") already syncs status -> "active" server-side
+      // (tma_api.py::_OUTCOME_STATUS_MAP) — a second patchLead({status})
+      // call here was a redundant round-trip writing the same field twice.
       await setLeadOutcome(lead.id, "open");
-      await patchLead(lead.id, { status: "active" });
       setCurrentOutcome("open");
       updateLoadedData({ outcome: "open", status: "active" });
       showToast("ok", "הליד נפתח מחדש");

@@ -1979,7 +1979,7 @@ def update_lead_status(lead_id, identity):
 
 # שדות עריכה מורשים ב-PATCH /api/leads/<id>
 _LEAD_EDITABLE = {
-    LeadFields.STATUS, LeadFields.SCORE,  # tier is real/writable but deliberately excluded — see _LEAD_IGNORED_PATCH_FIELDS
+    LeadFields.STATUS, LeadFields.SCORE,
     "Score", LeadFields.OUTCOME, "Next Followup", LeadFields.OWNER, LeadFields.NEXT_STEP,
 }
 _LEAD_FIELD_ALIASES = {

@@ -65,17 +65,19 @@ class AirtableCreateOutcome:
 # Writing a formula field causes a 422 from Airtable.
 READ_ONLY_FIELDS: dict[str, set[str]] = {
     "Leads": {
-        # טמפרטורה / אימוג'י טמפרטורה / מד ציון / תצוגת ליד were deleted from
-        # the live table 15/09/2026 as redundant display clutter (owner
-        # decision, PIPELINE-1 Blocker #3 follow-up); kept here as no-op-safe
-        # guards, same idiom as updated_at/created_at below — a write attempt
-        # against a now-nonexistent field name is simply rejected early.
+        # טמפרטורה / אימוג'י טמפרטורה / מד ציון / תצוגת ליד / עדיפות /
+        # Suggested Followup were all deleted from the live table 15/09/2026
+        # as redundant, zero-code-consumer display clutter (owner decision,
+        # PIPELINE-1 Blocker #3 follow-up); kept here as no-op-safe guards,
+        # same idiom as updated_at/created_at below — a write attempt against
+        # a now-nonexistent field name is simply rejected early rather than
+        # reaching Airtable.
         "טמפרטורה",                                        # formula: lead temperature (Hebrew) — deleted from Airtable
-        "אימוג'י טמפרטורה", "מד ציון", "עדיפות",          # formula: display helpers (עדיפות still live)
-        "תצוגת ליד", "המלצת מעקב",                        # formula: computed display (תצוגת ליד deleted from Airtable)
+        "אימוג'י טמפרטורה", "מד ציון", "עדיפות",          # formula: display helpers — all deleted from Airtable
+        "תצוגת ליד", "המלצת מעקב",                        # formula: computed display — deleted from Airtable
         "updated_at", "Updated At",                        # non-existent in schema — no-op safe
         "created_at", "Created At",                        # createdTime — Airtable fills automatically
-        "Suggested Follwup", "Suggested Followup",         # formula (typo fixed 2026-06-15, keep both)
+        "Suggested Follwup", "Suggested Followup",         # formula (typo fixed 2026-06-15, keep both) — deleted from Airtable 15/09/2026
     },
     "Assets": {
         "Equity", "My Equity",                             # formula fields — Airtable auto-calculates

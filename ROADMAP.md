@@ -2,6 +2,59 @@
 
 עודכן: 15/09/2026
 
+## Leads status/outcome/next-action write-path cleanup — 15/09/2026 (owner decision, follow-up)
+
+Follow-up to the temperature-column cleanup below: the owner also deleted
+`עדיפות` and `Suggested Followup` (the two remaining Score-derived formula
+fields, confirmed zero code readers each — same investigation method as
+`tier`/`טמפרטורה`) directly from the live Leads table, and asked whether
+`status`, `Business Outcome`, and `Next Action` — the three fields that
+looked like "the same role" from a glance at the Pipeline UI — could be
+unified into one.
+
+**Investigated and answered, not just implemented:** the three fields are
+*not* interchangeable. `status` (10 values) carries operational
+granularity (`waiting_call`/`waiting_response`/`high_confidence`/`new`)
+`Business Outcome` (9 values) has no equivalent for; `Business Outcome`
+adds a business-decision framing (`meeting_scheduled`) `status` alone
+doesn't distinguish; `Next Action` is a different kind of fact entirely —
+a prescribed action, not a state — a lead can be `status=active` and
+`next_step=Schedule Meeting` simultaneously. Merging the Airtable fields
+would be a lossy product change (drops the Pipeline's `monitoring` view
+distinction, or the outcome-driven stage UI in `LeadDetail.tsx`), so it
+was **not** done. What *was* a genuine bug: two live paths writing
+`status` with no coordination.
+
+**Fixed (code only, no further Airtable schema change):**
+- `LeadDetail.tsx::handleReopen()` called `setLeadOutcome(id, "open")`
+  *and then* `patchLead(id, { status: "active" })` — two round-trips for
+  one fact. `set_lead_outcome()`'s backend already syncs
+  `status -> LeadStatus.ACTIVE` for `outcome="open"` via
+  `_OUTCOME_STATUS_MAP`; the second call was pure redundancy. Removed —
+  optimistic local state (`updateLoadedData`) is unchanged, only the
+  wasted network call is gone.
+- `api.ts::updateLeadStatus()` — the frontend wrapper for the standalone
+  `PATCH /api/leads/<id>/status` route — had zero callers anywhere in the
+  TMA (every real status write already goes through the generic
+  `patchLead()`/`PATCH /api/leads/<id>`). Removed as dead frontend code.
+  The backend `/status` route itself (`tma_api.py::update_lead_status()`)
+  was deliberately **left in place** — it's covered by
+  `test_pipeline1_closure_remediation.py`'s PIPELINE-1 item-3 regression
+  test (proving `/status` and `PATCH` share one execution path), so
+  deleting it would undo a previously-closed, tested guarantee rather
+  than clean up dead code; it's redundant-but-harmless API surface, not a
+  bug.
+- `tma_api.py::_LEAD_EDITABLE`'s comment still said "tier is real/writable
+  but deliberately excluded" — stale since `tier` no longer exists at
+  all. Removed.
+- `tools/airtable_gateway.py::READ_ONLY_FIELDS["Leads"]` comments updated
+  to note `עדיפות`/`Suggested Followup` are now also deleted from
+  Airtable (entries themselves kept, same no-op-safe idiom as before).
+
+Full regression clean: `test_airtable_gateway.py` (45/45),
+`test_pipeline1_closure_remediation.py` (33/33), `smoke_tests.py`,
+`python3 -m compileall -q .`, frontend `tsc && vite build` clean.
+
 ## Leads table temperature-column cleanup — 15/09/2026 (owner decision)
 
 Following PIPELINE-1 Blocker #3 (score/temperature SSOT unification), the
