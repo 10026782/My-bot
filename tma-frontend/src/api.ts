@@ -71,12 +71,20 @@ export async function fetchDashboard(slug: string): Promise<DashboardResponse> {
 
 export async function fetchLeads(
   domain: string,
-  opts?: { view?: string; search?: string },
+  opts?: {
+    view?: string; search?: string; status?: string; source?: string;
+    next_action?: string; temperature?: string; date_range?: string;
+  },
 ): Promise<LeadsResponse> {
   const params = new URLSearchParams();
   if (domain) params.set("domain", domain);
   if (opts?.view) params.set("view", opts.view);
   if (opts?.search) params.set("search", opts.search);
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.source) params.set("source", opts.source);
+  if (opts?.next_action) params.set("next_action", opts.next_action);
+  if (opts?.temperature) params.set("temperature", opts.temperature);
+  if (opts?.date_range && opts.date_range !== "all") params.set("date_range", opts.date_range);
   const qs = params.toString();
   const r = await fetch(`${BASE}/api/leads${qs ? `?${qs}` : ""}`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`API ${r.status}`);

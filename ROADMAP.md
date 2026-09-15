@@ -2,6 +2,138 @@
 
 עודכן: 15/09/2026
 
+## Lead Pipeline — search-as-business-context + chips/advanced-filter UI — 15/09/2026 (owner-directed, follow-up)
+
+Follow-up to the filter entry directly below this one (same day). Owner
+gave detailed UX feedback: the search bar should search the lead's whole
+business context (not just name/phone), multi-word queries should be an
+AND of independent substrings (not one exact phrase), the screen should
+have a few common one-tap filter chips instead of a wall of buttons, and
+an advanced panel behind a "⚙️ סינון" toggle for everything else — with
+search and every filter combining, never replacing each other.
+
+**Two scope boundaries locked explicitly (owner decision) before building:**
+- **No keyword→filter inference.** Typing `new`/`חדש` or `לחזור` into the
+  search box does *not* become `?status=new`/`?next_action=Call Back` —
+  that would need a Hebrew/English synonym dictionary and add fragility
+  for something imprecise. The chips + advanced panel already give the
+  same outcome reliably (one click, no dictionary guess). Verified with a
+  dedicated regression test (`לחזור` matches nothing despite a fixture
+  record whose Next Action is literally `Call Back`).
+- **Filtering stays server-side in Python**, not pushed into the Airtable
+  formula (`AND(SEARCH(...))`) despite the table growing over time as
+  converted/archived leads accumulate — the existing `view` mechanism
+  already formula-filters to the *active* bucket by default before
+  fetching (excludes archived/lost/duplicate/not_relevant), which is the
+  actual scale safety valve here; revisit the formula-pushdown only if
+  that stops being enough at real scale, not preemptively (and it would
+  touch `_build_formula()`'s formula-injection-guarded surface, see
+  `test_bugdh03_04_formula_injection.py`).
+
+**Backend (`GET /api/leads`):**
+- `search` now matches an AND of space-separated words (case-insensitive
+  substrings, any field, not necessarily the same field or an exact
+  phrase) across name, phone, summary, **notes**, source, domain, status,
+  Next Action (raw value *and* Hebrew label), and **Business Outcome** —
+  up from name/phone/summary/next_step.
+- New `?next_action=` filter (keys into the existing
+  `_LEAD_NEXT_ACTION_OPTIONS`) and `?temperature=` filter (`קר`/`חם`/`חם
+  מאוד`, the same `_pipeline_temperature()` values already shown per lead).
+- Response now also returns `next_action_options` (the full canonical
+  {value,label} set, for the frontend's advanced-filter dropdown — same
+  pattern `get_lead()` already uses for its own Next Action picker) plus
+  echoes of the active `next_action`/`temperature` filters.
+
+**Frontend (`LeadPipeline.tsx`):** placeholder changed to "חיפוש בלידים"
+(from "חיפוש לפי שם או טלפון..."). Row 1 is now the 3 view buttons +
+2 quick chips (`חדשים` → `status=new`, `לחזור אליהם` → `next_action=Call
+Back`) + a `⚙️ סינון (N)` toggle (N = active advanced-filter count) that
+reveals a panel with Status/Next Action/Source/Domain/Temperature
+dropdowns and the date-range control (moved out of the always-visible
+row from the prior entry, into this panel, per the owner's proposed
+screen structure). Projects Hub is untouched — still zero filtering,
+per the owner's explicit "leave it for now" from the prior round.
+
+Tests: new `[9]` section in `test_pipeline1_closure_remediation.py` (11
+new checks, 56/56 total) — AND-of-words across fields (not exact phrase,
+not same-field-only, real AND not OR), notes/Business Outcome in the
+haystack, the "no inference" guarantee, next_action/temperature filters,
+and `next_action_options`. Full regression clean: `smoke_tests.py`,
+`python3 -m compileall -q .`, frontend `tsc --noEmit` + `vite build`,
+`status_sync_validator.py`.
+
+**Not done, honestly:** no live in-browser check — this sandbox has no
+Airtable/Telegram credentials to run `app.py` (hard-fails at startup
+without them per `startup_validator.py`), so only type-check + build +
+backend test coverage verify this, not an actual rendered screen.
+
+STATUS: 🟡 CODE DONE, STATIC_VERIFIED — not yet merged/deployed/runtime-canaried, no live UI walkthrough done
+
+## Lead Pipeline — expanded filters (keyword search + status + source + date range) — 15/09/2026 (owner-directed)
+
+Owner asked to compare Pipeline's and Projects Hub's filtering and add
+more options. Investigation found Projects Hub (`GET /api/projects`) has
+**zero filtering** today (no search/view/status param at all — just
+renders every project card) — left untouched per explicit owner decision
+("להשאיר כרגע"), this entry is Pipeline-only.
+
+Pipeline (`GET /api/leads`) previously had 3 filters: search (substring
+on `Name`+`phone` only), a `view` preset (`active`/`monitoring`/`all` —
+3 coarse status buckets), and a domain dropdown. Added, per explicit
+owner decisions on each:
+
+- **Search expanded** to also match `summary` and `Next Action` (`next_step`),
+  not just name/phone.
+- **Status filter** — a new `?status=<LeadStatus value>` param, additive
+  alongside (narrower than) the existing `view` buckets rather than
+  replacing them; unknown values are ignored (same leniency as `view`).
+- **Source filter** — a new `?source=<value>` param + `available_sources`
+  in the response (same "reflects the full view scope before narrowing"
+  pattern already used for `available_domains`).
+- **Date range filter** — a new `?date_range=today|week|month|all` param
+  (default `all`), a relative preset rather than a date-picker per owner
+  choice.
+
+**Side finding while building the date filter:** `LeadFields.CREATED_AT`
+(`Leads.created_at`, a plain text field) has **zero writers anywhere in
+the codebase** — confirmed by grep before relying on it. The existing
+Score-descending sort's tie-break already silently no-opped on this dead
+field (every record read back `""`, so the tie-break never actually broke
+a tie). Both the new date filter and the pre-existing sort tie-break now
+use Airtable's native `createdTime` instead, which is always populated —
+this incidentally fixes that latent tie-break bug, not just adds the new
+filter.
+
+All new/changed filters are applied server-side in Python against the
+already view+identity-scoped, `paginate=True`-fetched record set — same
+approach the existing domain filter and search already use, not a new
+formula-injection surface (`_safe_formula_param` still guards only
+`domain`/`project_slug`, which do reach the Airtable formula; the new
+params never do).
+
+**Frontend (`LeadPipeline.tsx`):** status dropdown (local `STATUS_LABELS`
+Hebrew map, 10 values — falls back to the raw key if a value is ever
+missing there), a source dropdown (populated from `available_sources`,
+same pattern as the domain dropdown), and a date-range segmented control
+(today/week/month/all, same tab style as the existing view control). All
+three go through the server round-trip (added to `fetchLeads()`'s params
+and the `useEffect` deps), matching how `search`/`view` already work —
+not client-side filtering like the existing `domainFilter` state, so
+`available_sources`/results stay correct even when the view's fetch is
+large.
+
+Tests: new `[8]` section in `test_pipeline1_closure_remediation.py` (12
+new checks, 45/45 total) covering expanded search, status/source
+narrowing with `available_*` staying full-scope, all 4 `date_range`
+values against a 3-record fixture spanning 1 hour/10 days/45 days old,
+default-`all` behavior, response echo of active filters, and the
+createdTime tie-break fix specifically (two same-score fixture records,
+proven to sort newest-first). Full regression clean: `smoke_tests.py`,
+`python3 -m compileall -q .`, frontend `tsc --noEmit` + `vite build`,
+`status_sync_validator.py`.
+
+STATUS: 🟡 CODE DONE, STATIC_VERIFIED — not yet merged/deployed/runtime-canaried
+
 ## Leads `answers` field deleted — 15/09/2026 (owner decision, follow-up)
 
 Follow-up to a direct owner question comparing the `notes`/`summary`/
