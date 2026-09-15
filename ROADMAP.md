@@ -2,6 +2,31 @@
 
 עודכן: 15/09/2026
 
+## Leads table Domain* fields deleted — 15/09/2026 (owner decision, follow-up)
+
+Owner deleted the last 3 candidates from the Leads schema cleanup:
+`Domain category`, `Domain risk assessment`, `Domain summary` — the
+misapplied-Airtable-AI-feature trio documented in
+`PHASE_2A0_LEADS_SCHEMA_CANONICALIZATION_SPEC.md` (`Domain summary` was
+an `aiText` field that interpreted the internal business-domain slug
+`domain` — `general`/`saas`/`real_estate`/etc. — as if it were a website
+domain name; `Domain category`/`Domain risk assessment` carried matching
+placeholder values on the same ~10-record seed batch). Confirmed **zero
+code references anywhere** — these three never had a `LeadFields`
+constant (unlike `tier`), so no runtime code change was needed; the only
+touch is the `PHASE_2A0` spec's addendum, updated to record all 9
+deleted fields together (not just the first 4).
+
+Also asked directly: is anything left in the "Next Followup family"
+(`Next Action`/`Next Followup`/`Business Outcome`) to delete? No — all
+three are live, distinct, and necessary (see the entry below this one for
+the full investigation); that family is closed.
+
+**Leads table field count so far this track: 10 fields deleted** —
+`tier`, `טמפרטורה`, `אימוג'י טמפרטורה`, `מד ציון`, `תצוגת ליד`, `עדיפות`,
+`Suggested Followup` (7, first cleanup round) plus `Domain category`,
+`Domain risk assessment`, `Domain summary` (3, this round).
+
 ## Leads status/outcome/next-action write-path cleanup — 15/09/2026 (owner decision, follow-up)
 
 Follow-up to the temperature-column cleanup below: the owner also deleted
