@@ -67,8 +67,11 @@ export interface LeadsResponse {
   available_views: Record<string, string>;
   available_domains: string[];
   available_sources: string[];
+  next_action_options: NextActionOption[];
   status: string;
   source: string;
+  next_action: string;
+  temperature: string;
   date_range: string;
   has_more: boolean;
   count: number;

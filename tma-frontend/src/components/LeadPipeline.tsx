@@ -30,6 +30,8 @@ const STATUS_LABELS: Record<string, string> = {
   not_relevant: "לא רלוונטי",
 };
 
+const TEMPERATURE_OPTIONS = ["קר", "חם", "חם מאוד"];
+
 const DATE_RANGE_OPTIONS: { key: string; label: string }[] = [
   { key: "all", label: "הכל" },
   { key: "today", label: "היום" },
@@ -51,14 +53,22 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   const [domainFilter, setDomainFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [sourceFilter, setSourceFilter] = useState<string>("");
+  const [nextActionFilter, setNextActionFilter] = useState<string>("");
+  const [temperatureFilter, setTemperatureFilter] = useState<string>("");
   const [dateRange, setDateRange] = useState<string>("all");
+  const [showFilters, setShowFilters] = useState(false);
 
   const baseDomain = project?.domain ?? "";
   const showDomainFilter = authRole === "owner" || authRole === "manager";
+  const activeAdvancedCount = [domainFilter, sourceFilter, nextActionFilter, temperatureFilter, dateRange !== "all" ? dateRange : ""]
+    .filter(Boolean).length;
 
   const load = () => {
     setState({ status: "loading" });
-    fetchLeads(baseDomain, { view, search, status: statusFilter, source: sourceFilter, date_range: dateRange })
+    fetchLeads(baseDomain, {
+      view, search, status: statusFilter, source: sourceFilter,
+      next_action: nextActionFilter, temperature: temperatureFilter, date_range: dateRange,
+    })
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
   };
@@ -66,7 +76,7 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseDomain, view, search, statusFilter, sourceFilter, dateRange]);
+  }, [baseDomain, view, search, statusFilter, sourceFilter, nextActionFilter, temperatureFilter, dateRange]);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -110,13 +120,18 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="חיפוש לפי שם, טלפון, תקציר או Next Action..."
+            placeholder="חיפוש בלידים..."
             className="boss-input"
-            aria-label="חיפוש לידים"
+            aria-label="חיפוש בלידים"
           />
 
+          {/* Row 1: the view buckets (formula-filtered, cheap) + a couple of
+              the most common quick filters as one-tap chips, ending with a
+              toggle into the full advanced panel — not a wall of buttons
+              (owner decision, 15/09/2026). Search and every filter below
+              combine (AND), they never replace each other. */}
           {data && (
-            <div className="ventures-action-row" role="tablist" aria-label="תצוגות">
+            <div className="ventures-action-row" role="tablist" aria-label="תצוגות וסינון מהיר">
               {Object.entries(data.available_views).map(([key, label]) => (
                 <button
                   key={key}
@@ -130,63 +145,121 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
                   {label}
                 </button>
               ))}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={statusFilter === "new"}
+                aria-pressed={statusFilter === "new"}
+                onClick={() => setStatusFilter(statusFilter === "new" ? "" : "new")}
+                className="ventures-choice boss-bubble--selectable"
+              >
+                חדשים
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={nextActionFilter === "Call Back"}
+                aria-pressed={nextActionFilter === "Call Back"}
+                onClick={() => setNextActionFilter(nextActionFilter === "Call Back" ? "" : "Call Back")}
+                className="ventures-choice boss-bubble--selectable"
+              >
+                לחזור אליהם
+              </button>
+              <button
+                type="button"
+                aria-pressed={showFilters}
+                onClick={() => setShowFilters((v) => !v)}
+                className="ventures-choice boss-bubble--selectable"
+              >
+                ⚙️ סינון{activeAdvancedCount > 0 ? ` (${activeAdvancedCount})` : ""}
+              </button>
             </div>
           )}
 
-          <div className="ventures-action-row" role="tablist" aria-label="טווח תאריכים">
-            {DATE_RANGE_OPTIONS.map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={dateRange === key}
-                aria-pressed={dateRange === key}
-                onClick={() => setDateRange(key)}
-                className="ventures-choice boss-bubble--selectable"
+          {showFilters && (
+            <div className="lead-pipeline-advanced-filters">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="boss-select"
+                aria-label="סינון לפי סטטוס"
               >
-                {label}
-              </button>
-            ))}
-          </div>
+                <option value="">כל הסטטוסים</option>
+                {Object.entries(STATUS_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="boss-select"
-            aria-label="סינון לפי סטטוס"
-          >
-            <option value="">כל הסטטוסים</option>
-            {Object.entries(STATUS_LABELS).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
+              {data && data.next_action_options.length > 0 && (
+                <select
+                  value={nextActionFilter}
+                  onChange={(e) => setNextActionFilter(e.target.value)}
+                  className="boss-select"
+                  aria-label="סינון לפי Next Action"
+                >
+                  <option value="">כל הפעולות</option>
+                  {data.next_action_options.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              )}
 
-          {data && !baseDomain && showDomainFilter && data.available_domains.length > 0 && (
-            <select
-              value={domainFilter}
-              onChange={(e) => setDomainFilter(e.target.value)}
-              className="boss-select"
-              aria-label="סינון לפי דומיין"
-            >
-              <option value="">כל הדומיינים</option>
-              {data.available_domains.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          )}
+              {data && data.available_sources.length > 0 && (
+                <select
+                  value={sourceFilter}
+                  onChange={(e) => setSourceFilter(e.target.value)}
+                  className="boss-select"
+                  aria-label="סינון לפי מקור"
+                >
+                  <option value="">כל המקורות</option>
+                  {data.available_sources.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              )}
 
-          {data && data.available_sources.length > 0 && (
-            <select
-              value={sourceFilter}
-              onChange={(e) => setSourceFilter(e.target.value)}
-              className="boss-select"
-              aria-label="סינון לפי מקור"
-            >
-              <option value="">כל המקורות</option>
-              {data.available_sources.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+              {data && !baseDomain && showDomainFilter && data.available_domains.length > 0 && (
+                <select
+                  value={domainFilter}
+                  onChange={(e) => setDomainFilter(e.target.value)}
+                  className="boss-select"
+                  aria-label="סינון לפי דומיין"
+                >
+                  <option value="">כל הדומיינים</option>
+                  {data.available_domains.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              )}
+
+              <select
+                value={temperatureFilter}
+                onChange={(e) => setTemperatureFilter(e.target.value)}
+                className="boss-select"
+                aria-label="סינון לפי טמפרטורה"
+              >
+                <option value="">כל הטמפרטורות</option>
+                {TEMPERATURE_OPTIONS.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+
+              <div className="ventures-action-row" role="tablist" aria-label="טווח תאריכים">
+                {DATE_RANGE_OPTIONS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={dateRange === key}
+                    aria-pressed={dateRange === key}
+                    onClick={() => setDateRange(key)}
+                    className="ventures-choice boss-bubble--selectable"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
@@ -209,7 +282,7 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
 
         {data && data.has_more && (
           <p className="lead-pipeline-banner">
-            יש יותר לידים ממה שמוצג כאן — צמצם/י עם חיפוש או פילטר דומיין.
+            יש יותר לידים ממה שמוצג כאן — צמצם/י עם חיפוש או פילטר.
           </p>
         )}
 

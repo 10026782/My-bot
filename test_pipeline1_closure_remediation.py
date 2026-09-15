@@ -383,6 +383,110 @@ finally:
     tma_api._at_list = _orig_at_list
 
 
+# ══════════════════════════════════════════════════════════════════
+# [9] Search-as-business-context follow-up (owner-directed, 15/09/2026):
+# AND-of-words across the whole record (not one literal phrase, not
+# same-field-only), plus notes/Business Outcome in the haystack, plus the
+# new next_action/temperature filters and next_action_options in the
+# response. Explicitly NOT covered: no keyword->filter inference (typing
+# "new"/"לחזור" in ?search= must never act like ?status=/?next_action=) —
+# owner decision to skip that, verified below too.
+# ══════════════════════════════════════════════════════════════════
+print("\n[9] Search-as-business-context — AND-of-words, notes/outcome, next_action/temperature filters")
+
+
+def _context_fixture_at_list(table, formula="", max_records=None, strict=False,
+                              measurement_label=None, paginate=False):
+    return [
+        {
+            "id": "recD", "createdTime": "2026-09-15T00:00:00.000Z",
+            "fields": {
+                "Name": "David Ohana", "phone": "0504444444", "status": "new",
+                "Score": 15, "domain": "recruitment", "source": "רשימת קבלני סלקום - דרום",
+                "summary": "קבלן עם ניסיון באזור הדרום בסלקום. צריך לפנות אליו.",
+                "Next Action": "Call Back",
+            },
+        },
+        {
+            "id": "recE", "createdTime": "2026-09-15T00:00:00.000Z",
+            "fields": {
+                "Name": "Eli Sharon", "phone": "0505555555", "status": "active",
+                "Score": 65, "domain": "saas", "source": "facebook",
+                "summary": "מעוניין בחבילת פרימיום", "notes": "התקשר, ביקש הצעת מחיר בקול",
+                "Next Action": "Send Details", "Business Outcome": "meeting_scheduled",
+            },
+        },
+    ]
+
+
+tma_api._at_list = _context_fixture_at_list
+try:
+    tma_api.resolve_identity = lambda ch, tid: _identity(Role.OWNER)
+
+    # AND of words, cross-field (not one literal phrase, not same-field-only)
+    # — "קבלני" only appears in source, "דרום" appears in both source and
+    # summary; the match must not require both words in the same field.
+    r = client.get("/api/leads?view=all&search=" + "קבלני דרום", headers=_HDR)
+    body = r.get_json()
+    chk("multi-word search is an AND across fields, not an exact phrase",
+        [l["id"] for l in body["leads"]] == ["recD"])
+
+    r = client.get("/api/leads?view=all&search=" + "דרום סלקום", headers=_HDR)
+    body = r.get_json()
+    chk("word order doesn't matter", [l["id"] for l in body["leads"]] == ["recD"])
+
+    r = client.get("/api/leads?view=all&search=" + "דרום facebook", headers=_HDR)
+    body = r.get_json()
+    chk("a word that only matches a different record excludes it (real AND, not OR)",
+        body["leads"] == [])
+
+    # notes + Business Outcome are now part of the haystack too
+    r = client.get("/api/leads?view=all&search=" + "הצעת מחיר", headers=_HDR)
+    body = r.get_json()
+    chk("search matches the notes field", [l["id"] for l in body["leads"]] == ["recE"])
+
+    r = client.get("/api/leads?view=all&search=" + "meeting_scheduled", headers=_HDR)
+    body = r.get_json()
+    chk("search matches Business Outcome", [l["id"] for l in body["leads"]] == ["recE"])
+
+    # explicitly no keyword->filter inference — recD's Next Action is
+    # literally "Call Back" (label "להתקשר בחזרה"), but "לחזור" is not a
+    # literal substring of either — proves search never infers a
+    # next_action filter from natural-language phrasing (owner decision).
+    r = client.get("/api/leads?view=all&search=" + "לחזור", headers=_HDR)
+    body = r.get_json()
+    chk("typing 'לחזור' does NOT infer next_action=Call Back (literal match only)",
+        body["leads"] == [])
+
+    # next_action filter
+    r = client.get("/api/leads?view=all&next_action=Call Back", headers=_HDR)
+    body = r.get_json()
+    chk("next_action filter narrows to the exact action", [l["id"] for l in body["leads"]] == ["recD"])
+
+    r = client.get("/api/leads?view=all&next_action=not_a_real_action", headers=_HDR)
+    body = r.get_json()
+    chk("unknown next_action value is ignored, not an error",
+        r.status_code == 200 and sorted(l["id"] for l in body["leads"]) == ["recD", "recE"])
+
+    # temperature filter (Score-derived, same helper the response already uses)
+    r = client.get("/api/leads?view=all&temperature=" + "קר", headers=_HDR)
+    body = r.get_json()
+    chk("temperature=קר matches the low-score record", [l["id"] for l in body["leads"]] == ["recD"])
+
+    r = client.get("/api/leads?view=all&temperature=" + "חם מאוד", headers=_HDR)
+    body = r.get_json()
+    chk("temperature=חם מאוד matches the Score=65 record", [l["id"] for l in body["leads"]] == ["recE"])
+
+    # next_action_options exposed for the frontend's advanced-filter picker
+    r = client.get("/api/leads?view=all", headers=_HDR)
+    body = r.get_json()
+    chk("next_action_options is the full canonical option set",
+        {o["value"] for o in body["next_action_options"]} == set(tma_api._LEAD_NEXT_ACTION_OPTIONS))
+finally:
+    tma_api.resolve_identity = _orig_resolve
+    tma_api._at_list = _orig_at_list
+
+
 print(f"\n{'=' * 60}")
 print(f"PIPELINE-1 closure remediation: {_passed}/{_passed + _failed} passed")
 if _failed:

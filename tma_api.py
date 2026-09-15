@@ -1605,12 +1605,26 @@ def get_leads(identity):
     """O2 — Lead Pipeline. Owner + Manager (all) + Partner (own domains).
     Accepts: ?domain=real_estate OR ?project_slug=blueview (resolves via ProjectsHub)
              ?view=active|monitoring|all  (default: active)
-             ?search=<substring of name/phone/summary/next action>
+             ?search=<space-separated words, ANDed — matches name/phone/
+             summary/notes/source/domain/status/Next Action (raw+label)/
+             Business Outcome. Substring matching only, deliberately no
+             keyword->filter inference (e.g. "new" typed here does not
+             become a status filter) — use the dedicated params below for
+             that; owner decision, 15/09/2026>
              ?status=<exact LeadStatus value — narrows further within the view>
+             ?next_action=<key into _LEAD_NEXT_ACTION_OPTIONS>
+             ?temperature=<קר|חם|חם מאוד — matches _pipeline_temperature(Score)>
              ?source=<exact Lead.source value>
              ?date_range=today|week|month|all  (default: all; filters on Airtable's
              native createdTime — Leads.created_at itself has no writer anywhere
              in the codebase and is always empty, so it cannot be used for this)
+
+    All filters are applied server-side in Python against the already
+    view+identity-scoped, paginate=True-fetched record set (owner decision,
+    15/09/2026: the "active" view's own formula-level status exclusion is
+    the scale safety valve as the table grows post-conversion, not a
+    per-filter Airtable formula rewrite — revisit only if this stops being
+    true at real scale).
     """
     allowed = {Role.OWNER, Role.MANAGER, Role.PARTNER}
     if identity.role not in allowed:
@@ -1649,6 +1663,14 @@ def get_leads(identity):
         status_q = ""  # unknown value — ignore, same leniency as view_q below
 
     source_q = request.args.get("source", "").strip()[:120]
+
+    next_action_q = request.args.get("next_action", "").strip()
+    next_action_opt = _LEAD_NEXT_ACTION_OPTIONS.get(next_action_q)
+    next_action_q = next_action_opt[0] if next_action_opt else ""
+
+    temperature_q = request.args.get("temperature", "").strip()
+    if temperature_q not in ("קר", "חם", "חם מאוד"):
+        temperature_q = ""
 
     date_range_q = request.args.get("date_range", "all")
     if date_range_q not in ("today", "week", "month", "all"):
@@ -1701,6 +1723,12 @@ def get_leads(identity):
     if source_q:
         records = [r for r in records if record_fields(r).get(LeadFields.SOURCE, "") == source_q]
 
+    if next_action_q:
+        records = [r for r in records if record_fields(r).get(LeadFields.NEXT_STEP, "") == next_action_q]
+
+    if temperature_q:
+        records = [r for r in records if _pipeline_temperature(int(record_fields(r).get(LeadFields.SCORE, 0) or 0))[0] == temperature_q]
+
     if date_range_q != "all":
         cutoff_days = {"today": 0, "week": 7, "month": 30}[date_range_q]
         now = datetime.now(timezone.utc)
@@ -1718,16 +1746,27 @@ def get_leads(identity):
         records = [r for r in records if _created_since(r)]
 
     if search_q:
-        needle = search_q.lower()
-        def _matches_search(r: dict) -> bool:
+        # Owner decision, 15/09/2026: search the lead's whole business
+        # context, not just name/phone — and treat multiple words as an AND
+        # of independent substrings (any field, not necessarily the same
+        # field or an exact phrase), not one literal phrase match. Zero
+        # keyword->filter inference (e.g. typing "new" here never becomes a
+        # status filter) — that's what the dedicated params above are for.
+        terms = [t for t in search_q.lower().split() if t]
+
+        def _haystack(r: dict) -> str:
             f = record_fields(r)
-            return (
-                needle in str(f.get(LeadFields.NAME, "")).lower()
-                or needle in str(f.get(LeadFields.PHONE, "")).lower()
-                or needle in str(f.get(LeadFields.SUMMARY, "")).lower()
-                or needle in str(f.get(LeadFields.NEXT_STEP, "")).lower()
-            )
-        records = [r for r in records if _matches_search(r)]
+            next_step_raw = str(f.get(LeadFields.NEXT_STEP, ""))
+            parts = [
+                f.get(LeadFields.NAME, ""), f.get(LeadFields.PHONE, ""),
+                f.get(LeadFields.SUMMARY, ""), f.get(LeadFields.NOTES, ""),
+                f.get(LeadFields.SOURCE, ""), f.get(LeadFields.DOMAIN, ""),
+                f.get(LeadFields.STATUS, ""), next_step_raw,
+                _next_action_label(next_step_raw), f.get(LeadFields.OUTCOME, ""),
+            ]
+            return " ".join(str(p) for p in parts).lower()
+
+        records = [r for r in records if all(t in _haystack(r) for t in terms)]
 
     # Deterministic default sort: Score descending, tie-break by creation time
     # descending. list.sort() is stable, so sorting by creation time first
@@ -1746,8 +1785,13 @@ def get_leads(identity):
         },
         "available_domains": available_domains,
         "available_sources": available_sources,
+        "next_action_options": [
+            {"value": key, "label": label} for key, (_, label) in _LEAD_NEXT_ACTION_OPTIONS.items()
+        ],
         "status": status_q,
         "source": source_q,
+        "next_action": next_action_q,
+        "temperature": temperature_q,
         "date_range": date_range_q,
         "has_more": has_more,
         "count": len(records),
