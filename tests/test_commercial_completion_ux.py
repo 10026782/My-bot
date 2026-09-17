@@ -331,6 +331,35 @@ def test_lookup_human_reference_charge_resolves_via_partial_payment_term_name():
     assert [r["id"] for r in records] == ["recCharge1"]
 
 
+def test_lookup_human_reference_charge_charges_query_searches_linked_name_not_id():
+    # BUG-CHARGE-RESOLVER-FORMULA-USES-RECORD-ID (production-reported,
+    # 17/09/2026, live Render log): the Charges-table filterByFormula must
+    # SEARCH() the matched Payment Term's own NAME text, never its record
+    # id -- inside an Airtable formula, ARRAYJOIN() on a linked-record field
+    # exposes the linked records' primary-field text, not their id, so a
+    # SEARCH() for the id can never match any real Charge. The mocked
+    # side_effect above would pass even with the old, broken id-based
+    # formula (mocks don't care what formula they were called with) -- this
+    # test is the one that actually catches that class of regression.
+    import commercial_crm
+
+    with patch("commercial_crm.list_records", side_effect=[
+        [{"id": "recTerm1", "fields": {
+            "Name": "עמלת פוסידון — 10% לאחר קיזוז רכישת ציוד שחור",
+        }}],
+        [{"id": "recCharge1", "fields": {"Billing Term": ["recTerm1"]}}],
+        [],
+    ]) as mock_list_records:
+        commercial_crm.lookup_human_reference(
+            "charge", "עמלת פוסידון", scope="owner-1", identity=_owner_identity(), limit=6,
+        )
+
+    charges_call = mock_list_records.call_args_list[1]
+    formula = charges_call.args[1]
+    assert "עמלת פוסידון — 10% לאחר קיזוז רכישת ציוד שחור" in formula
+    assert "recTerm1" not in formula
+
+
 def test_lookup_human_reference_direct_entity_lookup_stays_exact_by_default():
     # The `exact=False` mode is reserved for _lookup_charge_by_linked_names()'s
     # own internal calls -- a direct entity lookup (no `exact` argument
