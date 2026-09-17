@@ -1,13 +1,15 @@
 """Focused Phase 2 tests for the single recruitment ActionGateway writer."""
 
+from copy import deepcopy
 from unittest.mock import Mock
 
 import pytest
 
 import recruitment_crm as writer
 from identity import Identity
-from core.action_gateway import ActionGateway
-from tools.dispatcher import dispatch_tool
+from core.action_gateway import ActionGateway, ExecutionLedger
+from core.dispatcher_outcome import DispatcherOutcome
+from tools.dispatcher import _validate_execution_proof, dispatch_tool
 from airtable_schema import (
     Direction,
     MonthlyCalculationBatchFields as BF,
@@ -190,6 +192,82 @@ def test_direct_dispatch_without_actiongateway_proof_is_rejected(monkeypatch):
     assert response["ok"] is False
     assert "approved ActionContract" in response["user_message"]
     execute.assert_not_called()
+
+
+def test_recruitment_write_fingerprint_parity_rejects_nested_payload_tampering():
+    gateway = ActionGateway(ledger=ExecutionLedger())
+    identity = Identity("recruitment-owner", "owner")
+    action = {
+        "operation": "create_assignment",
+        "payload": {
+            "reference": "WA-fingerprint", "contact_id": "contact1", "organization_id": "org1",
+            "status": "active", "start_date": "2026-08-01",
+        },
+    }
+    proposed = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write", tool_inputs=action,
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, trusted_source="recruitment",
+    )
+    assert proposed.ok
+    contract = gateway.find_contract(proposed.contract_id)
+    context = {
+        "contract_id": contract.contract_id, "approved_by": identity.memory_key,
+        "tool_name": contract.tool_name, "tenant_id": contract.tenant_id,
+        "canonical_user_id": contract.canonical_user_id,
+        "business_action_fingerprint": contract.business_action_fingerprint, "status": "approved",
+    }
+    assert _validate_execution_proof("recruitment_write", contract.normalized_payload,
+                                    identity, context, "recruitment") is None
+
+    changed_operation = deepcopy(contract.normalized_payload)
+    changed_operation["operation"] = "create_canonical_batch"
+    changed_nested = deepcopy(contract.normalized_payload)
+    changed_nested["payload"]["organization_id"] = "org2"
+    added_nested = deepcopy(contract.normalized_payload)
+    added_nested["payload"]["notes"] = "after approval"
+    removed_nested = deepcopy(contract.normalized_payload)
+    del removed_nested["payload"]["start_date"]
+    for tampered in (changed_operation, changed_nested, added_nested, removed_nested):
+        assert _validate_execution_proof("recruitment_write", tampered, identity, context,
+                                        "recruitment") == (
+            "approval-sensitive execution proof does not match the action payload."
+        )
+
+
+def test_uncertain_create_propagates_outcome_unknown_not_a_retryable_failure(monkeypatch):
+    monkeypatch.setattr(writer, "_linked", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(writer, "_by_reference", lambda *_args: [])
+    uncertain = Mock(status="outcome_unknown", error="timeout")
+    uncertain.record = None
+    monkeypatch.setattr(writer, "airtable_create", Mock(return_value=uncertain))
+    response = writer.execute_recruitment_write("create_assignment", {
+        "reference": "WA-unknown", "contact_id": "contact1", "organization_id": "org1",
+        "status": "active", "start_date": "2026-08-01",
+    }, actor_role="owner")
+    assert isinstance(response, DispatcherOutcome)
+    assert response.is_outcome_unknown()
+    assert response.raw_response["evidence"]["status"] == "outcome_unknown"
+
+
+def test_actiongateway_keeps_uncertain_recruitment_create_outcome_unknown():
+    unknown = DispatcherOutcome(
+        "outcome_unknown", "⚠️ תוצאת הכתיבה אינה ידועה. אין לנסות שוב אוטומטית.",
+        error="timeout", raw_response={"ok": False, "tool": "recruitment_write"},
+    )
+    gateway = ActionGateway(ledger=ExecutionLedger(), tool_executor=lambda *_args, **_kwargs: unknown)
+    identity = Identity("recruitment-unknown-owner", "owner")
+    proposed = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write",
+        tool_inputs={"operation": "create_assignment", "payload": {"reference": "WA-unknown"}},
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, trusted_source="recruitment",
+    )
+    assert proposed.ok
+    gateway.approve(proposed.contract_id, approver=identity.memory_key, approver_role="owner")
+    assert gateway.find_contract(proposed.contract_id).status == "outcome_unknown"
 
 
 @pytest.mark.parametrize("tool,inputs", [

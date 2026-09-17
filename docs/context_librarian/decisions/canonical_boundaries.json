@@ -1365,6 +1365,7 @@
       "owner": "recruitment",
       "code_paths": [
         "recruitment_crm.py",
+        "core/tool_result.py",
         "tools/dispatcher.py",
         "tool_registry.py",
         "action_validator.py",

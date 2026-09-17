@@ -33,9 +33,10 @@ from core.recruitment_contracts import (
     validate_closed_update,
     validate_result,
 )
+from core.dispatcher_outcome import DispatcherOutcome
+from core.tool_result import tool_result
 from tools.airtable_gateway import airtable_create, airtable_patch, escape_formula_value
 from tools.airtable_read_adapter import get_record, get_record_fields, list_records
-from tools.airtable_tools import _tool_result
 
 
 TOOL = "recruitment_write"
@@ -56,14 +57,14 @@ _BATCH_TRANSITIONS = {
 
 
 def _ok(record_id: str, operation: str, *, idempotent: bool = False) -> dict:
-    return _tool_result(ok=True, tool=TOOL, external_id=record_id,
-                        evidence={"record_id": record_id, "operation": operation,
-                                  "idempotent": idempotent},
-                        user_message="✅ פעולת הגיוס נשמרה.")
+    return tool_result(ok=True, tool=TOOL, external_id=record_id,
+                       evidence={"record_id": record_id, "operation": operation,
+                                 "idempotent": idempotent},
+                       user_message="✅ פעולת הגיוס נשמרה.")
 
 
 def _fail(message: str) -> dict:
-    return _tool_result(ok=False, tool=TOOL, user_message=f"❌ {message}")
+    return tool_result(ok=False, tool=TOOL, user_message=f"❌ {message}")
 
 
 def _unsupported(payload: dict[str, Any], allowed: set[str]) -> dict | None:
@@ -88,7 +89,7 @@ def _linked(table: str, field: str, record_id: str, fields: list[str]) -> list[d
 
 
 def _create(table: str, fields: dict[str, Any], reference_field: str,
-            operation: str, source: str) -> dict:
+            operation: str, source: str) -> dict | DispatcherOutcome:
     existing = _by_reference(table, reference_field, str(fields[reference_field]))
     if len(existing) > 1:
         return _fail("duplicate reference already exists; manual review required")
@@ -99,6 +100,15 @@ def _create(table: str, fields: dict[str, Any], reference_field: str,
             return _fail("reference already exists with different data")
         return _ok(record_id, operation, idempotent=True)
     outcome = airtable_create(table, fields, source=source, return_outcome=True)
+    if outcome.status == "outcome_unknown":
+        raw = tool_result(
+            ok=False, tool=TOOL,
+            evidence={"table": table, "status": outcome.status, "operation": operation},
+            user_message="⚠️ תוצאת הכתיבה אינה ידועה. אין לנסות שוב אוטומטית.",
+        )
+        return DispatcherOutcome(
+            "outcome_unknown", raw["user_message"], error=outcome.error, raw_response=raw,
+        )
     if outcome.status != "created":
         return _fail(outcome.error or "Airtable write failed")
     return _ok(outcome.record.get("id", ""), operation)
@@ -195,10 +205,12 @@ def _close_batch(record_id: str, actor_role: str, source: str) -> dict:
 
 
 def execute_recruitment_write(operation: str, payload: dict[str, Any], *,
-                              actor_role: str, source: str = "recruitment") -> dict:
+                              actor_role: str, source: str = "recruitment") -> dict | DispatcherOutcome:
     """Execute one validated mutation after dispatcher execution-proof checks."""
     try:
-        with _LOCK:  # ponytail: process lock; provider uniqueness is unavailable in Airtable.
+        # ponytail: this serializes one Python process only. Deployment must prove one
+        # writer instance, or add durable natural-key serialization before financial use.
+        with _LOCK:
             if operation == "create_assignment":
                 if error := _unsupported(payload, {"reference", "contact_id", "organization_id", "status",
                                                    "start_date", "end_date", "work_type_role", "region", "notes"}):

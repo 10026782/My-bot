@@ -15,6 +15,10 @@ EVIDENCE: focused Phase 1/2 writer, schema, and registry tests (29/29),
 Turn Coordinator and writer-authority audits, compile, and `git diff --check` pass.
 DEFERRED: UI, Telegram, Excel ingestion, batch automation, migration/backfill,
 and a user-facing deterministic route.
+RUNTIME BLOCKER: process-local duplicate protection is not durable across
+instances. No current deployment evidence proves a single Render instance;
+do not run a real financial batch until that evidence exists or durable
+natural-key serialization is approved and implemented.
 
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 
