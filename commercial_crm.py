@@ -378,9 +378,27 @@ def _lookup_charge_by_linked_names(needle: str, *, scope: str, identity, limit: 
     confirm rather than silently binding, and multiple substring matches
     become an ordinary disambiguation list, exactly like today's ">1 exact
     match" case.
+
+    BUG-CHARGE-RESOLVER-FORMULA-USES-RECORD-ID (production-reported,
+    17/09/2026, live Render log): the very next live canary after the fix
+    above still failed. Root cause confirmed from the actual Airtable HTTP
+    calls in the log -- the Payment Term search DID resolve
+    "עמלת פוסידון" to recnoz5NeUwlVeGYj (proven by the very next request
+    using that id), but the Charges query built
+    ``SEARCH('recnoz5NeUwlVeGYj', ARRAYJOIN({Billing Term}))`` -- and inside
+    an Airtable formula, a linked-record field evaluates to its linked
+    records' PRIMARY FIELD text, never their record id (no precedent for
+    this pattern existed anywhere else in the codebase; every other
+    ARRAYJOIN()/SEARCH() use here searches real field text -- see
+    tools/airtable_read_adapter.py's own FIND(value, ARRAYJOIN(...))).  The
+    id string never appears in that joined text, so the formula could never
+    match, for any Charge. Fixed by searching for the matched Payment
+    Term's/Deal's own NAME text instead of its id -- the same text
+    ARRAYJOIN() actually exposes.
     """
     from tools.airtable_security import TenantScopeViolation, enforce_tenant_scope
 
+    link_name_field = {"payment_term": PaymentTermFields.NAME, "deal": DealFields.NAME}
     seen_ids: set[str] = set()
     matched_charges: list[dict] = []
     for link_entity, charge_link_field in (
@@ -392,15 +410,21 @@ def _lookup_charge_by_linked_names(needle: str, *, scope: str, identity, limit: 
         )
         if not link_matches:
             continue
-        link_ids = [record["id"] for record in link_matches]
-        id_formula = "OR(" + ",".join(
-            f"SEARCH('{escape_formula_value(rid)}', ARRAYJOIN({{{charge_link_field}}}))"
-            for rid in link_ids
+        name_field = link_name_field[link_entity]
+        link_names = sorted({
+            " ".join(str(record.get("fields", {}).get(name_field, "")).split())
+            for record in link_matches
+        } - {""})
+        if not link_names:
+            continue
+        name_formula = "OR(" + ",".join(
+            f"SEARCH('{escape_formula_value(name)}', ARRAYJOIN({{{charge_link_field}}}))"
+            for name in link_names
         ) + ")"
         try:
             secured_params = enforce_tenant_scope(
                 "airtable_get", identity,
-                {"table": Tables.CHARGES, "filterByFormula": id_formula},
+                {"table": Tables.CHARGES, "filterByFormula": name_formula},
             )
         except TenantScopeViolation:
             continue
