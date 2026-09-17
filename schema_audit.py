@@ -49,6 +49,9 @@ TABLE_CLASS_MAP = {
     schema.Tables.PROFILE:           schema.ProfileFields,
     schema.Tables.ROADMAP_TASKS:     schema.RoadmapTaskFields,
     schema.Tables.VENTURES:          schema.VentureFields,
+    schema.Tables.WORKER_ASSIGNMENTS: schema.WorkerAssignmentFields,
+    schema.Tables.MONTHLY_CALCULATION_BATCHES: schema.MonthlyCalculationBatchFields,
+    schema.Tables.WORKER_MONTHLY_RESULTS: schema.WorkerMonthlyResultFields,
 }
 
 

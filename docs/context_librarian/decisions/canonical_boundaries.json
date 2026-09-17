@@ -1304,6 +1304,52 @@
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #1222 (block_reason=NO_POLICY_MATCH): lead_deal_link.py is a new runtime source with no existing catalog node or policy_registry.json entry to match. Owner explicitly reviewed and chose CREATE NEW NODE over attaching it to decision.canonical_lead_write_service (rejected: that node is specifically Lead creation/update authority, and lead_deal_link.py never writes a Lead).",
         "Read-only by construction: resolve_lead_by_query()/resolve_deal_by_query() only ever call existing read-only lookups (lead_conversion._resolve_single_lead_by_query, commercial_crm.lookup_human_reference); parse_direct_link_text()/is_promote_lead_trigger() are pure regex parsers with no I/O. The only write in the whole flow (crm_link_lead_to_deal) lives in commercial_crm.py and is invoked exclusively by app.py's _queue_deterministic_link_lead_to_deal() through the real ActionGateway -- this module never calls it directly."
       ]
+    },
+    {
+      "id": "decision.recruitment_worker_data_model_phase1",
+      "name": "Pure recruitment worker data model Phase 1 contracts",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "Typed read/write field contracts and deterministic validation for Worker Assignments, Monthly Calculation Batches, and Worker Monthly Results.",
+        "precedence": "This Phase 1 module is unwired and performs no I/O. Live Airtable schema, ActionGateway mutation authority, canonical Airtable writers, and production routing remain authoritative and unchanged. Runtime integration requires separate owner approval."
+      },
+      "owner": "recruitment",
+      "code_paths": [
+        "core/recruitment_contracts.py"
+      ],
+      "test_paths": [
+        "test_recruitment_contracts.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "ROADMAP.md",
+          "role": "Phase 1 scope, evidence level, and Phase 2 approval boundary",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-17",
+      "last_verified_commit": "d35b1149c8a093785a4997701b96ccb710481698",
+      "confidence": 0.95,
+      "notes": [
+        "Owner-approved registration for PR #1244 after the pre-merge Context Librarian gate reported NO_POLICY_MATCH for core/recruitment_contracts.py; the owner explicitly requested fixing CI after approving Phase 1 and opening the PR.",
+        "Registered literally as a pure supporting source: no Airtable I/O, writer, dispatcher route, ActionGateway bypass, migration, UI, Excel parsing, automation, monthly calculation execution, or runtime wiring.",
+        "This node must not be broadened to production mutation or routing authority without separate owner approval."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "recruitment_worker_data_model_phase1",
+          "authority": false,
+          "purpose": "pure typed recruitment record contracts and deterministic invariant validation with no provider I/O or runtime wiring",
+          "runtime_consumed": false
+        }
+      },
+      "last_observed_commit": "d35b1149c8a093785a4997701b96ccb710481698"
     }
   ],
   "edges": [

@@ -2,6 +2,18 @@
 
 עודכן: 17/09/2026
 
+## RECRUITMENT WORKER DATA MODEL — PHASE 1 STATIC INTEGRATION — 17/09/2026
+
+Approved Airtable tables `Worker Assignments`, `Monthly Calculation Batches`,
+and `Worker Monthly Results` are registered with their live table/field IDs.
+Pure typed read/write contracts and locked-invariant validators are implemented;
+they add no writer, dispatcher route, migration, backfill, UI, or runtime flow.
+
+STATUS: 🟡 CODE_DONE, STATIC_VERIFIED — merge pending; no deployment or runtime claim.
+EVIDENCE: `test_recruitment_contracts.py` + `test_schema_governance.py` (10/10),
+focused compile and `git diff --check` pass.
+NEXT: owner approval before any Phase 2 runtime integration.
+
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 
 PR #1242 (deployed as `ca47a9f`) merged; owner immediately re-ran the exact
