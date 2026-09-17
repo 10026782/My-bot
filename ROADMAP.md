@@ -1,6 +1,60 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 15/09/2026
+עודכן: 17/09/2026
+
+## BUG-CHARGE-PAYMENT-INTENT-GAP + 4 related bugs — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242)
+
+Owner ran a live production canary for "register a payment on a charge via
+natural language" (`רשום תשלום ... על החיוב ...`). It failed three separate
+ways in sequence as each layer was fixed; root-caused one at a time against
+the exact failing Telegram transcripts (never trusted the bot's own reply
+text — cross-checked Render logs and live Airtable at each step):
+
+1. **`core/router/router.py`** — the `CREATE_CHARGE_PAYMENT` intent regex only
+   matched `<verb> תשלום לחיוב`; the natural phrasing `רשום תשלום ... על
+   החיוב ...` never matched at all, so the message fell through to the
+   general Agent, which cannot call `crm_create_charge_payment`
+   (`model_exposed=False`) and instead attempted a doomed generic
+   `airtable_add` with invented field names. Widened to accept
+   רשום/תרשום/רישום plus `תשלום ... על ה?חיוב`.
+2. **`commercial_crm.py`** — `lookup_human_reference("charge", ...)` searched
+   `Charge Reference`, a machine-generated JSON blob, never natural text — so
+   no Charge could ever resolve by a human reference. New
+   `_lookup_charge_by_linked_names()` resolves via the linked Payment Term's
+   Name, falling back to the linked Deal's Name (confirmed live against the
+   real Charge `rechMhZmNrd9dIWWZ` and its linked Term/Deal).
+3. **`commercial_completion.py`** — the `paid_at` DATE field rejected the
+   natural Israeli `DD/MM/YYYY`/`DD-MM-YYYY` formats, ISO-only. Now accepts
+   both, always storing canonical ISO (same validate/coerce split as
+   `BUG-COMPLETION-NUMERIC-STRING-422`).
+4. **`commercial_completion.py`** — the "payment" entity's `deal` field was
+   missing `required=ALWAYS` even though `crm_create_charge_payment()`
+   requires `deal_id` unconditionally, so an unanswered field was silently
+   absent from `current_values` and finalization raised a bare
+   `KeyError('deal_id')`.
+5. **`commercial_completion_routing.py`** — two internal strings leaked
+   verbatim to the user: a hardcoded English "already complete" BLOCK reason,
+   and `reason=str(exc)` on the finalize exception catch (surfacing Python's
+   bare `'deal_id'` repr). Both replaced with business-safe Hebrew fallback
+   text.
+
+18 new regression tests across `core/router/test_router.py`,
+`tests/test_commercial_completion.py`, `tests/test_commercial_completion_ux.py`,
+`tests/test_commercial_completion_routing.py`, each pinned to the exact
+phrasing/values from the live canary transcripts. Full local regression
+clean (router 59/59, completion 50/50, routing 39/39, ux 37/37, `pytest
+tests/` 214/214, `smoke_tests.py`, `test_integration.py` 4/4,
+`python3 -m compileall -q .`, every root `test_*.py` script — one
+pre-existing, unrelated shallow-clone `test_pilot_preflight.py` failure
+reproduces identically with these changes stashed).
+
+STATUS: 🟡 CODE DONE, STATIC_VERIFIED — merged pending; not yet deployed or
+runtime-verified.
+EVIDENCE: commit `e355711` on branch `claude/roadmap-open-items-7sfdt6`,
+PR https://github.com/10026782/My-bot/pull/1242.
+NEXT: merge → deploy → owner re-runs the exact failing canary
+(`רשום תשלום של 2320 על החיוב מעמלת פוסידון בשיטת מזומן`) clean end-to-end;
+close this entry as RUNTIME VERIFIED only after that live re-check.
 
 ## Lead Pipeline — search-as-business-context + chips/advanced-filter UI — 15/09/2026 (owner-directed, follow-up)
 

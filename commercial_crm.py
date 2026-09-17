@@ -295,6 +295,17 @@ def lookup_human_reference(
     needle = " ".join(str(query or "").casefold().split())
     if not table or not field_name or not scope or limit < 1 or identity is None or not needle:
         return []
+    # BUG-CHARGE-RESOLVER-NO-HUMAN-NAME (production-reported, 17/09/2026): a
+    # Charge has no human-readable name of its own -- ChargeFields.REFERENCE
+    # is a machine-generated JSON blob (deal_id/payment_term_id/trigger
+    # metadata), never natural text a person would type. Searching it
+    # directly can never match a human reference like "the charge from the
+    # Poseidon commission term", for ANY Charge, not just this one -- so
+    # "charge" resolves via its linked Payment Term's Name (and, as a
+    # fallback, its linked Deal's Name) instead, exact-label, same semantics
+    # as every other entity here -- never a second, looser matching rule.
+    if entity == "charge":
+        return _lookup_charge_by_linked_names(needle, scope=scope, identity=identity, limit=limit)
     from tools.airtable_security import TenantScopeViolation, enforce_tenant_scope
     # BUG-DIAMOND-CONTACT-SEARCH-BOUNDED (production-reported, 05/09/2026):
     # this used to send no query to Airtable at all — for an internal
@@ -330,6 +341,56 @@ def lookup_human_reference(
             continue
         matches.append(record)
     return matches[:limit]
+
+
+def _lookup_charge_by_linked_names(needle: str, *, scope: str, identity, limit: int) -> list[dict]:
+    """Resolve a Charge through its linked Payment Term or Deal Name.
+
+    Reuses lookup_human_reference() itself for the Payment Term/Deal
+    exact-label match (never a second, independently-drifting matching
+    rule), then finds Charges actually linked to whichever record(s) that
+    returned -- Billing Term first (the more specific link), Deal as a
+    fallback so a Charge can still resolve when its Term happens to share a
+    name with another. Read-only, same tenant-scoped Airtable boundary as
+    every other branch of lookup_human_reference().
+    """
+    from tools.airtable_security import TenantScopeViolation, enforce_tenant_scope
+
+    seen_ids: set[str] = set()
+    matched_charges: list[dict] = []
+    for link_entity, charge_link_field in (
+        ("payment_term", ChargeFields.BILLING_TERM),
+        ("deal", ChargeFields.DEAL),
+    ):
+        link_matches = lookup_human_reference(
+            link_entity, needle, scope=scope, identity=identity, limit=limit,
+        )
+        if not link_matches:
+            continue
+        link_ids = [record["id"] for record in link_matches]
+        id_formula = "OR(" + ",".join(
+            f"SEARCH('{escape_formula_value(rid)}', ARRAYJOIN({{{charge_link_field}}}))"
+            for rid in link_ids
+        ) + ")"
+        try:
+            secured_params = enforce_tenant_scope(
+                "airtable_get", identity,
+                {"table": Tables.CHARGES, "filterByFormula": id_formula},
+            )
+        except TenantScopeViolation:
+            continue
+        records = list_records(
+            Tables.CHARGES, secured_params.get("filterByFormula", ""),
+            max_records=limit + 1, fields=[charge_link_field], paginate=False,
+        )
+        for record in records:
+            if record["id"] not in seen_ids:
+                seen_ids.add(record["id"])
+                matched_charges.append(record)
+        if len(matched_charges) >= limit:
+            break
+    return matched_charges[:limit]
+
 
 def find_or_create_organization(
     organization_name: str,

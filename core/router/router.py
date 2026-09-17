@@ -428,7 +428,21 @@ _COMMERCIAL_COMPLETION_PREFIXES = (
     # list order decides which Intent wins.
     (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:חיוב|charge)\s+(?:ידני|ישיר|manual|direct)\b", Intent.CREATE_CHARGE),
     (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:חיוב|charge)", Intent.CREATE_CHARGE_FROM_TERM),
-    (r"(?:צור|תיצור|הוסף|תוסיף)\s+(?:תשלום\s+לחיוב|charge\s+payment)", Intent.CREATE_CHARGE_PAYMENT),
+    # BUG-CHARGE-PAYMENT-INTENT-GAP (production-reported, 17/09/2026): the
+    # original pattern only recognized "<verb> תשלום לחיוב" -- a natural
+    # phrasing like "רשום תשלום ... על החיוב ..." (register a payment ... on
+    # the charge ...) never matched at all, so the message fell through to
+    # the general Agent, which then attempted a generic airtable_add with
+    # invented field names (crm_create_charge_payment is model_exposed=False
+    # and unreachable from there) and failed closed on an unknown-field
+    # block. "רשום/תרשום/רישום" added to the verb list; the object clause
+    # now also accepts "תשלום ... על ה?חיוב" (bounded gap, never an
+    # unrelated later sentence) alongside the original "תשלום לחיוב".
+    (
+        r"(?:צור|תיצור|הוסף|תוסיף|רשום|תרשום|רישום)\s+תשלום"
+        r"(?:\s+(?:לחיוב|charge\s+payment)|.{0,25}?\bעל\s+ה?חיוב\b)",
+        Intent.CREATE_CHARGE_PAYMENT,
+    ),
 )
 
 

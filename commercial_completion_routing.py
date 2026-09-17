@@ -386,9 +386,20 @@ class CommercialCompletionRouter:
             session = deserialize_completion_session(state)
             field = session.active.next_field()
             if field is None:
+                # BUG-COMPLETION-STALE-BLOCK-LEAK (production-reported,
+                # 17/09/2026): this reason string used to be the literal
+                # English "persisted completion is already complete",
+                # returned verbatim as the user-facing reply -- never
+                # translated, and this path was also the dead end a
+                # finalize-time crash (see the KeyError catch below) left a
+                # persisted session in: "complete" per next_field() but
+                # never actually queued. A restored session genuinely
+                # reaching this point (all fields answered, still pending
+                # finalization) is now an unusual-but-real state, worded in
+                # Hebrew instead of leaking an internal status string.
                 return CompletionRoute(
                     "BLOCK", session.active.target_entity, session=session,
-                    reason="persisted completion is already complete",
+                    reason="הבקשה כבר הושלמה קודם; אין צורך לענות שוב. אם לא בוצעה, נא להתחיל בקשה חדשה.",
                 )
             return CompletionRoute(
                 "CLARIFY", session.active.target_entity, session=session,
@@ -784,7 +795,20 @@ class CommercialCompletionRouter:
                 if continuation_hint is not None else self._queue(tool, inputs)
             )
         except (KeyError, ValueError, CompletionBlockedError) as exc:
-            return CompletionRoute("BLOCK", writer.target_entity, session=session, reason=str(exc))
+            # BUG-COMPLETION-STALE-BLOCK-LEAK (production-reported,
+            # 17/09/2026): reason=str(exc) used to send the raw exception
+            # text straight to the user -- for a KeyError this is Python's
+            # bare repr of the missing key (e.g. "'deal_id'"), which reads
+            # exactly like a cryptic follow-up question instead of an
+            # error. Same BUG-123-FU principle app.py already applies to
+            # tool-call descriptions: never a raw internal repr in
+            # user-facing text -- fail closed with one business-safe
+            # message instead. The real exception is still on `exc` for
+            # logs/callers that need it; only the user-facing text changes.
+            return CompletionRoute(
+                "BLOCK", writer.target_entity, session=session,
+                reason="לא ניתן להשלים את הפעולה כרגע. נא לבדוק את הפרטים ולנסות שוב.",
+            )
         return CompletionRoute(
         "TOOL", writer.target_entity, session=session, tool_name=tool,
             tool_inputs=inputs, queue_outcome=result,

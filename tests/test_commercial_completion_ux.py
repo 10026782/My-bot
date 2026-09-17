@@ -279,6 +279,62 @@ def test_lookup_human_reference_payment_term_without_deal_id_is_unscoped():
     assert [r["id"] for r in records] == ["recTermAny"]
 
 
+# ── BUG-CHARGE-RESOLVER-NO-HUMAN-NAME (production-reported, 17/09/2026):
+# a Charge has no human-readable name of its own -- ChargeFields.REFERENCE
+# is a machine-generated JSON blob -- so searching it directly could never
+# match a human reference like "the charge from the Poseidon commission
+# term", for ANY Charge. "charge" now resolves via its linked Payment
+# Term's Name (falling back to its linked Deal's Name), never a second,
+# looser matching rule than every other entity here.
+
+def test_lookup_human_reference_charge_resolves_via_linked_payment_term_name():
+    import commercial_crm
+
+    with patch("commercial_crm.list_records", side_effect=[
+        # 1) payment_term name search (delegated to lookup_human_reference itself)
+        [{"id": "recTerm1", "fields": {"Name": "עמלת פוסידון"}}],
+        # 2) Charges linked to that Payment Term
+        [{"id": "recCharge1", "fields": {"Billing Term": ["recTerm1"]}}],
+        # 3) deal name search — never reached if payment_term already
+        #    satisfied `limit`, but here limit=6 so both branches run;
+        #    no deal matches this needle.
+        [],
+    ]) as list_records:
+        records = commercial_crm.lookup_human_reference(
+            "charge", "עמלת פוסידון", scope="owner-1", identity=_owner_identity(), limit=6,
+        )
+
+    assert [r["id"] for r in records] == ["recCharge1"]
+    assert list_records.call_count == 3
+
+
+def test_lookup_human_reference_charge_falls_back_to_linked_deal_name():
+    import commercial_crm
+
+    with patch("commercial_crm.list_records", side_effect=[
+        [],  # no matching Payment Term
+        [{"id": "recDeal1", "fields": {"שם העסקה": "קבלנים דרך עמי מערכות"}}],
+        [{"id": "recCharge1", "fields": {"Deal": ["recDeal1"]}}],
+    ]):
+        records = commercial_crm.lookup_human_reference(
+            "charge", "קבלנים דרך עמי מערכות", scope="owner-1",
+            identity=_owner_identity(), limit=6,
+        )
+
+    assert [r["id"] for r in records] == ["recCharge1"]
+
+
+def test_lookup_human_reference_charge_no_match_returns_empty():
+    import commercial_crm
+
+    with patch("commercial_crm.list_records", side_effect=[[], []]):
+        records = commercial_crm.lookup_human_reference(
+            "charge", "לא קיים", scope="owner-1", identity=_owner_identity(), limit=6,
+        )
+
+    assert records == []
+
+
 def test_app_commercial_link_lookup_parses_deal_scoped_suffix():
     app = _app()
     captured = {}

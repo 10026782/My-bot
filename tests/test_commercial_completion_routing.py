@@ -209,6 +209,44 @@ def test_restore_is_side_effect_free():
     assert calls == []
 
 
+# ── BUG-COMPLETION-STALE-BLOCK-LEAK (production-reported, 17/09/2026): the
+# "already complete" BLOCK used to carry the literal, untranslated English
+# reason "persisted completion is already complete" straight to the user.
+# Never a raw internal status string in user-facing text — Hebrew business
+# wording instead, same principle app.py's _describe_tool_call() already
+# applies to tool-call descriptions.
+
+def test_restore_already_complete_reason_is_hebrew_not_raw_internal_string():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    first = router.start("organization", current_values={"organization_name": "Acme"})
+    restored = router.restore(serialize_completion_session(first.session))
+    assert restored.outcome == "BLOCK"
+    assert restored.reason != "persisted completion is already complete"
+    assert "persisted" not in restored.reason
+    assert "complete" not in restored.reason  # no leftover raw English token
+    assert any("֐" <= ch <= "׿" for ch in restored.reason)  # contains Hebrew
+
+
+# ── Same bug family: a KeyError/ValueError/CompletionBlockedError raised
+# while finalizing a completion used to reach the user as reason=str(exc) —
+# for a KeyError that is Python's bare repr of the missing key (e.g.
+# "'deal_id'"), read exactly like a cryptic follow-up question. Fail closed
+# with one business-safe message instead, whatever the internal exception
+# actually was.
+
+def test_finalize_exception_never_leaks_raw_exception_text():
+    router = CommercialCompletionRouter(queue=lambda *_: None)
+    with patch(
+        "commercial_completion_routing._primitive_inputs",
+        side_effect=KeyError("deal_id"),
+    ):
+        result = router.start("organization", current_values={"organization_name": "Acme"})
+    assert result.outcome == "BLOCK"
+    assert "deal_id" not in result.reason
+    assert "KeyError" not in result.reason
+    assert any("֐" <= ch <= "׿" for ch in result.reason)  # contains Hebrew
+
+
 # ── BUG 1 regression: answer_human() must never raise when constructing
 # CompletionRoute, whatever the resolver returns (unique/ambiguous/no-match/
 # create-allowed/canonical). The prior crash was a duplicate `choices`
