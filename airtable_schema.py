@@ -43,6 +43,9 @@ class Tables:
     ALLOCATION_SNAPSHOTS = "Allocation Snapshots"
     DEAL_ECONOMICS  = "Deal Economics"
     ORGANIZATIONS   = "Organizations"
+    WORKER_ASSIGNMENTS = "Worker Assignments"
+    MONTHLY_CALCULATION_BATCHES = "Monthly Calculation Batches"
+    WORKER_MONTHLY_RESULTS = "Worker Monthly Results"
     # קשרים ועסקאות
     CONTACTS        = "אנשי קשר (Contacts)"
     DEALS           = "עסקאות (Deals)"
@@ -664,6 +667,141 @@ class DealEconomicsFields:
 
 class OrganizationFields:
     NAME = "Organization Name"
+
+class TableIds:
+    """Live Airtable IDs for tables whose integration depends on stable IDs."""
+
+    WORKER_ASSIGNMENTS = "tblCGYKsbFSXiVSBG"
+    MONTHLY_CALCULATION_BATCHES = "tblR3H5BTZeHi2gYq"
+    WORKER_MONTHLY_RESULTS = "tblFetHIZuK9hAtDN"
+
+
+class WorkerAssignmentFields:
+    REFERENCE = "Assignment Reference"
+    CONTACT = "Contact"
+    ORGANIZATION = "Organization"
+    STATUS = "Status"
+    START_DATE = "Start Date"
+    END_DATE = "End Date"
+    WORK_TYPE_ROLE = "Work Type / Role"
+    REGION = "Region"
+    NOTES = "Notes"
+    CREATED_AT = "Created At"
+    UPDATED_AT = "Updated At"
+    MONTHLY_RESULTS = "Worker Monthly Results"
+
+
+class WorkerAssignmentFieldIds:
+    REFERENCE = "fldYZ1rg6MZNnYkum"
+    CONTACT = "fldCVcKtJYHu2YOeo"
+    ORGANIZATION = "fldrGNLgzHIN1uT3l"
+    STATUS = "fldO081NBjq4pxpxY"
+    START_DATE = "fldkvepUyD99jIyYJ"
+    END_DATE = "fldFLJqhTNV86u7uy"
+    WORK_TYPE_ROLE = "fldAB9W1EMsYJzX43"
+    REGION = "fldyo3mZReuIS6AHc"
+    NOTES = "fldrTG0kawak2pRSM"
+    CREATED_AT = "flda2n9aOXsaPJgws"
+    UPDATED_AT = "fldXT3bKQXCpoK2tv"
+    MONTHLY_RESULTS = "fldGyfYGUIKWDU6xi"
+
+
+class MonthlyCalculationBatchFields:
+    REFERENCE = "Batch Reference"
+    ORGANIZATION = "Organization"
+    MONTH = "Month"
+    BATCH_TYPE = "Batch Type"
+    ORIGINAL_CLOSED_BATCH = "Original Closed Batch"
+    INCOMING_PAYMENT = "Incoming Payment"
+    SOURCE_FILES = "Source Files"
+    SOURCE_REFERENCE = "Source Reference"
+    STATUS = "Status"
+    PROCESSED_AT = "Processed At"
+    VARIANCE_NOTE = "Variance Note"
+    NOTES = "Notes"
+    CREATED_AT = "Created At"
+    ADJUSTMENTS = "From field: Original Closed Batch"
+    MONTHLY_RESULTS = "Worker Monthly Results"
+
+
+class MonthlyCalculationBatchFieldIds:
+    REFERENCE = "fldSyjQNviidClMdV"
+    ORGANIZATION = "fldhuIlwmkzq6XL8w"
+    MONTH = "fldpjkeTmUZYMxuJh"
+    BATCH_TYPE = "fldRT4MfStlKNLekS"
+    ORIGINAL_CLOSED_BATCH = "fldB6XYs54PHEQyHO"
+    INCOMING_PAYMENT = "fldOTxJ0o1g6xiZxB"
+    SOURCE_FILES = "fldo5nIbJOoV7KUUc"
+    SOURCE_REFERENCE = "fld0fLUpgZkBcvmF2"
+    STATUS = "fldj3fsVIXlzmXN9c"
+    PROCESSED_AT = "fldM5opUb0UaCyFrg"
+    VARIANCE_NOTE = "fld1rm9bk4YNvQbKh"
+    NOTES = "fldWrYrNe2uINuMqj"
+    CREATED_AT = "fldquWk4i0n47VvAq"
+    ADJUSTMENTS = "fldqMPrb06GyC9Rhe"
+    MONTHLY_RESULTS = "fld1oMjOEBsVLaUSW"
+
+
+class WorkerMonthlyResultFields:
+    REFERENCE = "Result Reference"
+    BATCH = "Batch"
+    WORKER_ASSIGNMENT = "Worker Assignment"
+    ATTRIBUTED_REVENUE = "Attributed Revenue"
+    WORKER_DUE = "Worker Due"
+    POSEIDON_RETAINED = "Poseidon Retained"
+    ALLOCATION_RULE = "Allocation Rule"
+    ALLOCATION_SNAPSHOT = "Allocation Snapshot"
+    CALCULATION_NOTES = "Calculation Notes"
+    PAYOUT_STATUS = "Payout Status"
+    OUTGOING_PAYMENT = "Outgoing Payment"
+    REVIEW_NOTES = "Review Notes"
+    CREATED_AT = "Created At"
+    UPDATED_AT = "Updated At"
+
+
+class WorkerMonthlyResultFieldIds:
+    REFERENCE = "fldUF3HBAqABhf8Zg"
+    BATCH = "fldwDKs66zsVbmbPn"
+    WORKER_ASSIGNMENT = "fldUaGmfoZDAn29NH"
+    ATTRIBUTED_REVENUE = "fldykECBT3QS0LJI5"
+    WORKER_DUE = "fldrk5uQVLjWa9hFq"
+    POSEIDON_RETAINED = "fldJceACNOtsDAWKY"
+    ALLOCATION_RULE = "fldHEES5BByrd2cDS"
+    ALLOCATION_SNAPSHOT = "fldnuOJCmT9UNuq5W"
+    CALCULATION_NOTES = "fld0mivrXCMGBISTj"
+    PAYOUT_STATUS = "fldAVl6KExoxCCoSH"
+    OUTGOING_PAYMENT = "fldCstsI2xHIQmQx6"
+    REVIEW_NOTES = "fldHrVk3DHBdlrcOL"
+    CREATED_AT = "fldxeGRS9F9L0i4uy"
+    UPDATED_AT = "fldsA9DIBc92g3sG2"
+
+
+class WorkerAssignmentStatus:
+    TRAINING = "training"
+    WAITING_START = "waiting_start"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ENDED = "ended"
+
+
+class MonthlyCalculationBatchType:
+    CANONICAL = "canonical"
+    ADJUSTMENT = "adjustment"
+
+
+class MonthlyCalculationBatchStatus:
+    RECEIVED = "received"
+    PROCESSING = "processing"
+    REVIEWED = "reviewed"
+    CLOSED = "closed"
+
+
+class WorkerPayoutStatus:
+    PENDING = "pending"
+    PARTIAL = "partial"
+    PAID = "paid"
+    HOLD = "hold"
+
 
 
 class VentureFields:
