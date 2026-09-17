@@ -208,8 +208,8 @@ def execute_recruitment_write(operation: str, payload: dict[str, Any], *,
                               actor_role: str, source: str = "recruitment") -> dict | DispatcherOutcome:
     """Execute one validated mutation after dispatcher execution-proof checks."""
     try:
-        # ponytail: this serializes one Python process only. Deployment must prove one
-        # writer instance, or add durable natural-key serialization before financial use.
+        # The ActionGateway claim owns cross-instance create uniqueness. This lock
+        # only keeps read/validate/update sequences orderly within this process.
         with _LOCK:
             if operation == "create_assignment":
                 if error := _unsupported(payload, {"reference", "contact_id", "organization_id", "status",
@@ -251,9 +251,11 @@ def execute_recruitment_write(operation: str, payload: dict[str, Any], *,
                 return _patch(Tables.WORKER_ASSIGNMENTS, record_id, write.to_airtable_fields(), operation, source)
 
             if operation in {"create_canonical_batch", "create_adjustment_batch"}:
-                if error := _unsupported(payload, {"reference", "organization_id", "month",
-                                                   "original_closed_batch_id", "incoming_payment_id",
-                                                   "source_file_ids", "source_reference", "variance_note", "notes"}):
+                allowed = {"reference", "organization_id", "month", "original_closed_batch_id",
+                           "incoming_payment_id", "source_file_ids", "source_reference", "variance_note", "notes"}
+                if operation == "create_adjustment_batch":
+                    allowed.add("adjustment_sequence")
+                if error := _unsupported(payload, allowed):
                     return error
                 batch_type = BT.CANONICAL if operation == "create_canonical_batch" else BT.ADJUSTMENT
                 candidate = _batch_write(payload, batch_type)

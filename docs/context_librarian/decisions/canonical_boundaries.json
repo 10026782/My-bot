@@ -1314,7 +1314,7 @@
       "source_of_truth": {
         "is_authority": false,
         "scope": "Typed read/write field contracts and deterministic validation for Worker Assignments, Monthly Calculation Batches, and Worker Monthly Results.",
-        "precedence": "This Phase 1 module is unwired and performs no I/O. Live Airtable schema, ActionGateway mutation authority, canonical Airtable writers, and production routing remain authoritative and unchanged. Runtime integration requires separate owner approval."
+        "precedence": "This pure module performs no I/O. Live Airtable schema, ActionGateway mutation authority, canonical Airtable writers, and production routing remain authoritative. Phase 2 consumes its validation and natural-key helpers under separately approved runtime authority."
       },
       "owner": "recruitment",
       "code_paths": [
@@ -1337,7 +1337,7 @@
       "confidence": 0.95,
       "notes": [
         "Owner-approved registration for PR #1244 after the pre-merge Context Librarian gate reported NO_POLICY_MATCH for core/recruitment_contracts.py; the owner explicitly requested fixing CI after approving Phase 1 and opening the PR.",
-        "Registered literally as a pure supporting source: no Airtable I/O, writer, dispatcher route, ActionGateway bypass, migration, UI, Excel parsing, automation, monthly calculation execution, or runtime wiring.",
+        "Registered as a pure supporting source: no Airtable I/O, writer, dispatcher route, ActionGateway bypass, migration, UI, Excel parsing, or automation. Phase 2 may consume its deterministic natural-key helper, but the module itself remains side-effect free.",
         "This node must not be broadened to production mutation or routing authority without separate owner approval."
       ],
       "extensions": {
@@ -1345,8 +1345,8 @@
           "classification": "REGISTER_SUPPORTING",
           "role": "recruitment_worker_data_model_phase1",
           "authority": false,
-          "purpose": "pure typed recruitment record contracts and deterministic invariant validation with no provider I/O or runtime wiring",
-          "runtime_consumed": false
+          "purpose": "pure typed recruitment record contracts and deterministic invariant validation with no provider I/O",
+          "runtime_consumed": true
         }
       },
       "last_observed_commit": "d35b1149c8a093785a4997701b96ccb710481698"
@@ -1366,6 +1366,8 @@
       "code_paths": [
         "recruitment_crm.py",
         "core/tool_result.py",
+        "core/action_gateway.py",
+        "core/action_gateway_atomic_executor.py",
         "tools/dispatcher.py",
         "tool_registry.py",
         "action_validator.py",
@@ -1373,7 +1375,8 @@
       ],
       "test_paths": [
         "test_recruitment_writers.py",
-        "test_recruitment_contracts.py"
+        "test_recruitment_contracts.py",
+        "test_phase_4b0_1b_concurrency_regression.py"
       ],
       "canonical_docs": [
         {
@@ -1395,7 +1398,8 @@
       "notes": [
         "Owner explicitly approved Phase 2 runtime writers after Phase 1 merged.",
         "The action is internal-only and has no model schema, UI, Telegram, Excel ingestion, automation, migration, or backfill route.",
-        "All mutations require an approved ActionContract execution proof and use the existing Airtable gateway primitives; direct provider writes and parallel writer paths are prohibited."
+        "All mutations require an approved ActionContract execution proof and use the existing Airtable gateway primitives; direct provider writes and parallel writer paths are prohibited.",
+        "Create operations use the existing PostgreSQL action_execution_claims idempotency-key uniqueness primitive with deterministic recruitment natural keys. The write fails closed before Airtable when atomic claims are disabled or unavailable."
       ],
       "extensions": {
         "context_librarian.registration": {

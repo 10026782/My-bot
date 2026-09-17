@@ -236,6 +236,38 @@ def test_recruitment_write_fingerprint_parity_rejects_nested_payload_tampering()
         )
 
 
+@pytest.mark.parametrize(("action", "natural_key"), [
+    ({"operation": "create_assignment", "payload": {
+        "reference": "WA-durable", "contact_id": "contact1", "organization_id": "org1",
+        "status": "active", "start_date": "2026-08-01",
+    }}, "WA:contact1:org1:2026-08-01"),
+    ({"operation": "create_canonical_batch", "payload": {
+        "reference": "MCB-durable", "organization_id": "org1", "month": "2026-08-01",
+    }}, "MCB:org1:2026-08"),
+    ({"operation": "create_adjustment_batch", "payload": {
+        "reference": "ADJ-durable", "organization_id": "org1", "month": "2026-08-01",
+        "original_closed_batch_id": BATCH_ID, "adjustment_sequence": 1,
+    }}, f"MCB-ADJ:{BATCH_ID}:1"),
+    ({"operation": "create_result", "payload": {
+        "reference": "WMR-durable", "batch_id": BATCH_ID, "assignment_id": ASSIGNMENT_ID,
+        "attributed_revenue": "100", "worker_due": "40",
+    }}, f"WMR:{BATCH_ID}:{ASSIGNMENT_ID}"),
+])
+def test_independent_recruitment_contexts_get_the_same_durable_natural_key(action, natural_key):
+    first = ActionGateway(ledger=ExecutionLedger())
+    second = ActionGateway(ledger=ExecutionLedger())
+    identity = Identity("recruitment-owner", "owner")
+    for gateway in (first, second):
+        proposed = gateway.propose_action(
+            tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+            tool_name="recruitment_write", tool_inputs=action,
+            origin_channel="telegram", origin_chat_id=identity.user_id,
+            requires_approval=True, identity=identity, trusted_source="recruitment",
+        )
+        assert proposed.ok
+        assert gateway.find_contract(proposed.contract_id).idempotency_key == natural_key
+
+
 def test_uncertain_create_propagates_outcome_unknown_not_a_retryable_failure(monkeypatch):
     monkeypatch.setattr(writer, "_linked", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(writer, "_by_reference", lambda *_args: [])
@@ -251,23 +283,54 @@ def test_uncertain_create_propagates_outcome_unknown_not_a_retryable_failure(mon
     assert response.raw_response["evidence"]["status"] == "outcome_unknown"
 
 
-def test_actiongateway_keeps_uncertain_recruitment_create_outcome_unknown():
+def test_actiongateway_keeps_uncertain_recruitment_create_outcome_unknown(monkeypatch):
+    from core.atomic_claim_repository import AtomicExecutionClaim, ClaimAcquisitionResult
+
+    monkeypatch.setattr("feature_flags.is_enabled", lambda name: name == "FEATURE_ATOMIC_CLAIMS")
+    monkeypatch.setattr("core.atomic_claim_repository.claim_contract_execution", lambda **_kwargs:
+                        ClaimAcquisitionResult("acquired", AtomicExecutionClaim(
+                            "contract", "owner", "execution", 0, "WA:contact1:org1:2026-08-01")))
+    monkeypatch.setattr("core.atomic_claim_repository.update_claim_status", lambda *_args, **_kwargs: True)
     unknown = DispatcherOutcome(
         "outcome_unknown", "⚠️ תוצאת הכתיבה אינה ידועה. אין לנסות שוב אוטומטית.",
         error="timeout", raw_response={"ok": False, "tool": "recruitment_write"},
     )
     gateway = ActionGateway(ledger=ExecutionLedger(), tool_executor=lambda *_args, **_kwargs: unknown)
-    identity = Identity("recruitment-unknown-owner", "owner")
+    identity = Identity("recruitment-unknown-owner", "owner", external_id="recruitment-unknown-owner")
     proposed = gateway.propose_action(
         tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
         tool_name="recruitment_write",
-        tool_inputs={"operation": "create_assignment", "payload": {"reference": "WA-unknown"}},
+        tool_inputs={"operation": "create_assignment", "payload": {
+            "reference": "WA-unknown", "contact_id": "contact1", "organization_id": "org1",
+            "start_date": "2026-08-01",
+        }},
         origin_channel="telegram", origin_chat_id=identity.user_id,
         requires_approval=True, identity=identity, trusted_source="recruitment",
     )
     assert proposed.ok
     gateway.approve(proposed.contract_id, approver=identity.memory_key, approver_role="owner")
     assert gateway.find_contract(proposed.contract_id).status == "outcome_unknown"
+
+
+def test_recruitment_create_never_falls_back_without_atomic_claims(monkeypatch):
+    monkeypatch.setattr("feature_flags.is_enabled", lambda _name: False)
+    execute = Mock()
+    gateway = ActionGateway(ledger=ExecutionLedger(), tool_executor=execute)
+    identity = Identity("recruitment-claim-owner", "owner", external_id="recruitment-claim-owner")
+    proposed = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write",
+        tool_inputs={"operation": "create_assignment", "payload": {
+            "reference": "WA-claim", "contact_id": "contact1", "organization_id": "org1",
+            "status": "active", "start_date": "2026-08-01",
+        }},
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, trusted_source="recruitment",
+    )
+    assert proposed.ok
+    gateway.approve(proposed.contract_id, approver=identity.memory_key, approver_role="owner")
+    execute.assert_not_called()
+    assert gateway.find_contract(proposed.contract_id).status == "approved"
 
 
 @pytest.mark.parametrize("tool,inputs", [

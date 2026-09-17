@@ -15,10 +15,10 @@ EVIDENCE: focused Phase 1/2 writer, schema, and registry tests (29/29),
 Turn Coordinator and writer-authority audits, compile, and `git diff --check` pass.
 DEFERRED: UI, Telegram, Excel ingestion, batch automation, migration/backfill,
 and a user-facing deterministic route.
-RUNTIME BLOCKER: process-local duplicate protection is not durable across
-instances. No current deployment evidence proves a single Render instance;
-do not run a real financial batch until that evidence exists or durable
-natural-key serialization is approved and implemented.
+DURABLE UNIQUENESS: recruitment creates require the existing PostgreSQL atomic
+claim before Airtable dispatch, keyed by their natural key. Static verification
+is complete; a real financial batch remains blocked pending deployment evidence
+that the atomic-claim flag and PostgreSQL migration are live and healthy.
 
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 

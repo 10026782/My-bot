@@ -243,6 +243,36 @@ def test_different_contracts_same_idempotency_key():
     cleanup_test_contracts(contract_a, contract_b)
 
 
+def test_recruitment_natural_keys_are_unique_across_independent_contracts():
+    """The existing PostgreSQL primitive must reject a second contract per natural key."""
+    from core.atomic_claim_repository import claim_contract_execution
+
+    natural_keys = (
+        "WA:contact-race:org-race:2026-08-01",
+        "MCB:org-race:2026-08",
+        "MCB-ADJ:batch-race:1",
+        "WMR:batch-race:assignment-race",
+    )
+    for index, natural_key in enumerate(natural_keys):
+        contract_a = f"test-recruitment-race-{index}-a"
+        contract_b = f"test-recruitment-race-{index}-b"
+        cleanup_test_contracts(contract_a, contract_b)
+        barrier = threading.Barrier(2)
+
+        def attempt(contract_id: str):
+            barrier.wait()
+            return claim_contract_execution(contract_id, "recruitment-owner", natural_key).result
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(attempt, contract_id)
+                       for contract_id in (contract_a, contract_b)]
+            results = [future.result() for future in futures]
+
+        chk(f"{natural_key}: exactly one contract acquired", results.count("acquired") == 1)
+        chk(f"{natural_key}: duplicate contract conflicted", results.count("idempotency_conflict") == 1)
+        cleanup_test_contracts(contract_a, contract_b)
+
+
 # ══════════════════════════════════════════════════════════════════
 # Test 4: Idempotent re-runs (same contracts, same database)
 # ══════════════════════════════════════════════════════════════════
@@ -395,6 +425,8 @@ if __name__ == "__main__":
     test_same_contract_different_idempotency_keys()
     print()
     test_different_contracts_same_idempotency_key()
+    print()
+    test_recruitment_natural_keys_are_unique_across_independent_contracts()
     print()
     test_idempotent_reruns()
 

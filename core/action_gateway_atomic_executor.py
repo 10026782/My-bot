@@ -24,6 +24,7 @@ def execute_with_atomic_claim(
     identity,
     executor_fn,
     idempotency_key: Optional[str] = None,
+    require_claim: bool = False,
 ) -> tuple[bool, Any, Optional[str]]:
     """
     Execute a tool with atomic claim coordination.
@@ -53,8 +54,11 @@ def execute_with_atomic_claim(
     """
     from feature_flags import is_enabled
 
-    # If flag is OFF, execute normally (backward compatible)
+    # If flag is OFF, execute normally except for a writer that explicitly
+    # requires PostgreSQL ownership before it may reach its provider.
     if not is_enabled("FEATURE_ATOMIC_CLAIMS"):
+        if require_claim:
+            return (False, None, "PostgreSQL atomic claims are required for this write")
         logger.debug(f"FEATURE_ATOMIC_CLAIMS disabled — executing without claim: {contract_id}")
         try:
             result = executor_fn(tool_name, tool_inputs, contract_id=contract_id, identity=identity)
