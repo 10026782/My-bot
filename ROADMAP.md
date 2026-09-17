@@ -2,6 +2,51 @@
 
 עודכן: 17/09/2026
 
+## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
+
+PR #1242 (deployed as `ca47a9f`) merged; owner immediately re-ran the exact
+canary live. The intent-routing and deal-crash fixes worked (no more
+generic-write failure, no more raw `'deal_id'` leak), but the Charge
+resolver added in that PR still failed: typing the natural short reference
+`עמלת פוסידון` against the real stored Payment Term Name (`עמלת פוסידון —
+10% לאחר קיזוז רכישת ציוד שחור`) returned `לא מצאתי התאמה; נא לנסות שם
+אחר.` — the fix's own `_lookup_charge_by_linked_names()` reused
+`lookup_human_reference()`'s exact-label match, and no real user was ever
+going to type that whole compound label.
+
+Fix: `lookup_human_reference()` gained an `exact: bool = True` parameter
+(every direct entity lookup keeps its existing exact-match guarantee,
+default unchanged); `_lookup_charge_by_linked_names()` alone now calls it
+with `exact=False`. Verified safe against `commercial_completion_ux.py`'s
+own `resolve_human_link()`, which already treats a single non-exact match
+as "clarify, confirm this one" rather than silently accepting it, and
+multiple substring matches as an ordinary disambiguation list — the same
+paths any other multi-match case already takes; nothing new to build there.
+2 new regression tests (partial-name resolves via the Charge path; a direct
+`payment_term` lookup with no `exact` argument stays exact-match-only).
+
+Separately observed in the same canary and NOT fixed here (noted, not
+acted on without owner direction): (1) the Agent independently declined to
+retry the payment action on its own initiative, citing the BUG-149
+no-repeat-failed-action memory guard from the pre-deploy failed attempts —
+expected, conservative behavior, not a code defect; (2) the deterministic
+completion flow still asks "לאיזה חיוב זה משויך?" from scratch instead of
+extracting the charge reference already present in the original message,
+the same original-message slot-extraction gap noted as deferred after
+BUG-CHARGE-TERM-BYPASS (`_prefill_charge_context()`/
+`parse_deterministic_charge_context()` are currently wired only for
+`create_charge_from_term`, not `create_charge_payment`) — a real UX
+improvement, but a new scope decision, not part of this bug list.
+
+STATUS: 🟡 CODE DONE, STATIC_VERIFIED — merged pending; not yet deployed or
+runtime-verified.
+EVIDENCE: commit on branch `claude/roadmap-open-items-7sfdt6` (restarted
+from `main` after PR #1242 merged as `ca47a9f`), tests/
+test_commercial_completion_ux.py 41/41, full `pytest tests/` 216/216,
+`smoke_tests.py`, `python3 -m compileall -q .`.
+NEXT: merge → deploy → owner re-runs the same canary a third time; close
+as RUNTIME VERIFIED only after that live re-check.
+
 ## BUG-CHARGE-PAYMENT-INTENT-GAP + 4 related bugs — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242)
 
 Owner ran a live production canary for "register a payment on a charge via

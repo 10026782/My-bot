@@ -308,6 +308,48 @@ def test_lookup_human_reference_charge_resolves_via_linked_payment_term_name():
     assert list_records.call_count == 3
 
 
+def test_lookup_human_reference_charge_resolves_via_partial_payment_term_name():
+    # BUG-CHARGE-RESOLVER-PARTIAL-NAME (production-reported, 17/09/2026): the
+    # real stored Payment Term Name is a long compound label ("עמלת פוסידון
+    # — 10% לאחר קיזוז רכישת ציוד שחור"); a live canary typing just the
+    # recognizable prefix "עמלת פוסידון" got "לא מצאתי התאמה" under
+    # exact-label matching. The inner lookup must accept this as a
+    # substring match now.
+    import commercial_crm
+
+    with patch("commercial_crm.list_records", side_effect=[
+        [{"id": "recTerm1", "fields": {
+            "Name": "עמלת פוסידון — 10% לאחר קיזוז רכישת ציוד שחור",
+        }}],
+        [{"id": "recCharge1", "fields": {"Billing Term": ["recTerm1"]}}],
+        [],  # deal name search — no deal matches this needle
+    ]):
+        records = commercial_crm.lookup_human_reference(
+            "charge", "עמלת פוסידון", scope="owner-1", identity=_owner_identity(), limit=6,
+        )
+
+    assert [r["id"] for r in records] == ["recCharge1"]
+
+
+def test_lookup_human_reference_direct_entity_lookup_stays_exact_by_default():
+    # The `exact=False` mode is reserved for _lookup_charge_by_linked_names()'s
+    # own internal calls -- a direct entity lookup (no `exact` argument
+    # passed, matching every real call site outside commercial_crm.py) must
+    # keep requiring an exact label match, unaffected by the above.
+    import commercial_crm
+
+    with patch("commercial_crm.list_records", return_value=[
+        {"id": "recTerm1", "fields": {
+            "Name": "עמלת פוסידון — 10% לאחר קיזוז רכישת ציוד שחור",
+        }},
+    ]):
+        records = commercial_crm.lookup_human_reference(
+            "payment_term", "עמלת פוסידון", scope="owner-1", identity=_owner_identity(), limit=6,
+        )
+
+    assert records == []
+
+
 def test_lookup_human_reference_charge_falls_back_to_linked_deal_name():
     import commercial_crm
 
