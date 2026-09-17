@@ -27,6 +27,39 @@ class RecruitmentValidationError(ValueError):
     pass
 
 
+def recruitment_create_natural_key(action: Mapping[str, object]) -> str | None:
+    """Return the durable idempotency key for one recruitment create action."""
+    operation = str(action.get("operation", ""))
+    if operation not in {"create_assignment", "create_canonical_batch", "create_adjustment_batch", "create_result"}:
+        return None
+    payload = action.get("payload")
+    if not isinstance(payload, Mapping):
+        raise RecruitmentValidationError("recruitment create requires a payload object")
+
+    def required(name: str) -> str:
+        value = str(payload.get(name, ""))
+        if not value:
+            raise RecruitmentValidationError(f"recruitment create requires {name}")
+        return value
+
+    if operation == "create_assignment":
+        return f"WA:{required('contact_id')}:{required('organization_id')}:{date.fromisoformat(required('start_date')).isoformat()}"
+    if operation == "create_canonical_batch":
+        month = date.fromisoformat(required("month"))
+        if month.day != 1:
+            raise RecruitmentValidationError("batch month must be the first day of the month")
+        return f"MCB:{required('organization_id')}:{month.strftime('%Y-%m')}"
+    if operation == "create_adjustment_batch":
+        try:
+            sequence = int(required("adjustment_sequence"))
+        except ValueError as exc:
+            raise RecruitmentValidationError("adjustment_sequence must be a positive integer") from exc
+        if sequence < 1:
+            raise RecruitmentValidationError("adjustment_sequence must be a positive integer")
+        return f"MCB-ADJ:{required('original_closed_batch_id')}:{sequence}"
+    return f"WMR:{required('batch_id')}:{required('assignment_id')}"
+
+
 def _one_link(value: object) -> str:
     return str(value[0]) if isinstance(value, list) and value else ""
 

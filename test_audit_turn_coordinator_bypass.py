@@ -224,6 +224,9 @@ _LIVE_UPDATE_CASE_SNIPPET = '''
                 record_id = inputs["record_id"]
                 fields    = dict(inputs["fields"])
 
+                if blocked := _block_generic_recruitment_write("airtable_update", table, identity):
+                    return blocked
+
                 try:
                     enforce_leads_write_gate("airtable_update", {"table": table}, source=_write_source)
                 except LeadsDirectWriteBlocked as e:

@@ -1796,6 +1796,16 @@ class ActionGateway:
             fingerprint_basis.get("table")
         ):
             fingerprint_basis = _canonical_task_payload(fingerprint_basis)
+        recruitment_natural_key = ""
+        if tool_name == "recruitment_write":
+            from core.recruitment_contracts import RecruitmentValidationError, recruitment_create_natural_key
+            try:
+                recruitment_natural_key = recruitment_create_natural_key(normalized) or ""
+            except (RecruitmentValidationError, ValueError) as exc:
+                return GatewayResult(
+                    ok=False, reason=str(exc), user_message=f"❌ {exc}",
+                    failure_code="invalid_recruitment_natural_key",
+                )
         fingerprint = self.compute_business_fingerprint(
             tenant_id, canonical_user_id, tool_name, fingerprint_basis
         )
@@ -1960,7 +1970,7 @@ class ActionGateway:
             actor_allowed_domains=list(getattr(identity, "allowed_domains", None) or []),
             approval_policy=approval_policy,
             trusted_source=trusted_source,
-            idempotency_key=hashlib.sha256(
+            idempotency_key=recruitment_natural_key or hashlib.sha256(
                 f"{contract_id}:{fingerprint}".encode()
             ).hexdigest()[:32],
             continuation_ref=continuation_ref,
@@ -3709,7 +3719,7 @@ class ActionGateway:
             return text
 
         # Phase 4B0 atomic claim gate (if flag enabled)
-        if is_enabled("FEATURE_ATOMIC_CLAIMS"):
+        if is_enabled("FEATURE_ATOMIC_CLAIMS") or contract.tool_name == "recruitment_write":
             from core.action_gateway_atomic_executor import execute_with_atomic_claim
             from identity import Identity
             import hashlib
@@ -3752,10 +3762,11 @@ class ActionGateway:
                     )
                 return _finish("❌ שגיאת זהות: לא ניתן לאמת את הזהות של המבקש. פנה לתמיכה טכנית.")
 
-            # Deterministic idempotency key: hash(contract_id + approved_by)
-            # Same contract + same approver → same key → ALREADY_CLAIMED on retry
+            # Recruitment creates bind the owner claim to their natural key,
+            # not a per-contract key. Other tools preserve their legacy key.
             idem_seed = f"{contract.contract_id}:{contract.approved_by or contract.actor_user_id}"
-            idempotency_key = hashlib.sha256(idem_seed.encode()).hexdigest()[:16]
+            idempotency_key = (contract.idempotency_key if contract.tool_name == "recruitment_write"
+                               else hashlib.sha256(idem_seed.encode()).hexdigest()[:16])
 
             # Gate dispatcher behind atomic claim acquisition
             try:
@@ -3767,6 +3778,7 @@ class ActionGateway:
                     identity=identity,  # Frozen contract identity
                     executor_fn=self._tool_executor,
                     idempotency_key=idempotency_key,
+                    require_claim=contract.tool_name == "recruitment_write",
                 )
 
                 if not success:
