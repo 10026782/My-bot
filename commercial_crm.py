@@ -253,7 +253,7 @@ def _airtable_percent_from_points(points: float) -> float:
 
 def lookup_human_reference(
     entity: str, query: str, *, scope: str, identity=None, limit: int = 6,
-    deal_id: str = "",
+    deal_id: str = "", exact: bool = True,
 ) -> list[dict]:
     """Bounded exact-label lookup for the completion presentation adapter.
 
@@ -279,6 +279,19 @@ def lookup_human_reference(
     disambiguation choice — confusing at best (the confirmed cross-Deal
     write guard in crm_create_charge_from_term() already blocks the write,
     but only after presenting the wrong Term as if it were a real option).
+
+    ``exact`` (BUG-CHARGE-RESOLVER-PARTIAL-NAME, production-reported,
+    17/09/2026): default True keeps every direct entity lookup exact-label,
+    unchanged. False is reserved for _lookup_charge_by_linked_names()'s own
+    internal calls only — a Payment Term/Deal Name is a long descriptive
+    label ("עמלת פוסידון — 10% לאחר קיזוז רכישת ציוד שחור") a person will
+    reasonably type only the recognizable prefix of, unlike a short Contact/
+    Organization/Deal name where exact-match is the correct bar. This never
+    weakens a direct caller's own guarantee: commercial_completion_ux.py's
+    resolve_human_link() already treats a non-exact single match as
+    "clarify, confirm this one" rather than silently accepting it, and
+    multiple substring matches surface as an ordinary disambiguation list —
+    the same paths every other multi-match case already takes.
     """
     table_by_entity = {
         "contact": Tables.CONTACTS, "organization": Tables.ORGANIZATIONS,
@@ -302,8 +315,9 @@ def lookup_human_reference(
     # directly can never match a human reference like "the charge from the
     # Poseidon commission term", for ANY Charge, not just this one -- so
     # "charge" resolves via its linked Payment Term's Name (and, as a
-    # fallback, its linked Deal's Name) instead, exact-label, same semantics
-    # as every other entity here -- never a second, looser matching rule.
+    # fallback, its linked Deal's Name) instead. See _lookup_charge_by_linked_
+    # names() for why that inner lookup runs with exact=False (BUG-CHARGE-
+    # RESOLVER-PARTIAL-NAME) -- direct entity lookups below are unaffected.
     if entity == "charge":
         return _lookup_charge_by_linked_names(needle, scope=scope, identity=identity, limit=limit)
     from tools.airtable_security import TenantScopeViolation, enforce_tenant_scope
@@ -335,7 +349,7 @@ def lookup_human_reference(
     for record in records:
         fields = record.get("fields", {})
         label = " ".join(str(fields.get(field_name, "")).casefold().split())
-        if label != needle:
+        if (label != needle) if exact else (needle not in label):
             continue
         if scoped_to_deal and deal_id not in _link_ids(fields.get(PaymentTermFields.DEAL)):
             continue
@@ -346,13 +360,24 @@ def lookup_human_reference(
 def _lookup_charge_by_linked_names(needle: str, *, scope: str, identity, limit: int) -> list[dict]:
     """Resolve a Charge through its linked Payment Term or Deal Name.
 
-    Reuses lookup_human_reference() itself for the Payment Term/Deal
-    exact-label match (never a second, independently-drifting matching
-    rule), then finds Charges actually linked to whichever record(s) that
-    returned -- Billing Term first (the more specific link), Deal as a
-    fallback so a Charge can still resolve when its Term happens to share a
-    name with another. Read-only, same tenant-scoped Airtable boundary as
-    every other branch of lookup_human_reference().
+    Reuses lookup_human_reference() itself for the Payment Term/Deal match
+    (never a second, independently-drifting matching rule), then finds
+    Charges actually linked to whichever record(s) that returned -- Billing
+    Term first (the more specific link), Deal as a fallback so a Charge can
+    still resolve when its Term happens to share a name with another.
+    Read-only, same tenant-scoped Airtable boundary as every other branch of
+    lookup_human_reference().
+
+    BUG-CHARGE-RESOLVER-PARTIAL-NAME (production-reported, 17/09/2026): the
+    inner lookup runs with exact=False. A live canary typing the natural
+    short reference "עמלת פוסידון" against the real stored Payment Term
+    Name "עמלת פוסידון — 10% לאחר קיזוז רכישת ציוד שחור" got "לא מצאתי
+    התאמה" under exact-label matching -- no real user was ever going to type
+    that whole compound label. See lookup_human_reference()'s own docstring
+    for why this is safe: a non-exact single match still asks the user to
+    confirm rather than silently binding, and multiple substring matches
+    become an ordinary disambiguation list, exactly like today's ">1 exact
+    match" case.
     """
     from tools.airtable_security import TenantScopeViolation, enforce_tenant_scope
 
@@ -363,7 +388,7 @@ def _lookup_charge_by_linked_names(needle: str, *, scope: str, identity, limit: 
         ("deal", ChargeFields.DEAL),
     ):
         link_matches = lookup_human_reference(
-            link_entity, needle, scope=scope, identity=identity, limit=limit,
+            link_entity, needle, scope=scope, identity=identity, limit=limit, exact=False,
         )
         if not link_matches:
             continue
