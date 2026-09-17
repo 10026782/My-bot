@@ -2,6 +2,45 @@
 
 עודכן: 17/09/2026
 
+## BUG-CHARGE-RESOLVER-FORMULA-USES-RECORD-ID — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1243 follow-up)
+
+PR #1243 (deployed as `623a6dd`) merged; owner re-ran the exact canary a
+third time — same result, `לא מצאתי התאמה; נא לנסות שם אחר.` Root-caused
+this time from the actual Render log for the request (not guesswork): the
+Payment Term search *did* resolve `עמלת פוסידון` to `recnoz5NeUwlVeGYj`
+(proven by the very next HTTP call using that id as input), but the
+Charges query built from it —
+`SEARCH('recnoz5NeUwlVeGYj', ARRAYJOIN({Billing Term}))` — could never
+match anything: inside an Airtable formula, a linked-record field
+evaluates to its linked records' **primary field text**, never their
+record id. No precedent for searching a linked field by id existed
+anywhere else in the codebase (grepped `ARRAYJOIN({` — every other use
+searches real field text, e.g. `tools/airtable_read_adapter.py`'s
+`FIND(value, ARRAYJOIN(...))`); this was a formula-design mistake in
+PR #1242, invisible to that PR's own tests because they mock
+`list_records` directly and never exercise real Airtable formula
+semantics — mocks don't care what formula they were called with.
+
+Fix: `_lookup_charge_by_linked_names()` now builds the Charges-table
+`SEARCH()` formula from the matched Payment Term's/Deal's own **Name**
+text (already available on the records `lookup_human_reference()` already
+fetched), never their record id. New regression test asserts the actual
+formula string content (`"...Name text..." in formula` and
+`"recTerm1" not in formula`) — the existing mocked-side-effect tests would
+have passed either way, so this is the one that actually catches this bug
+class.
+
+STATUS: 🟡 CODE DONE, STATIC_VERIFIED — merged pending; not yet deployed or
+runtime-verified.
+EVIDENCE: branch `claude/roadmap-open-items-7sfdt6` (restarted from `main`
+after #1243 merged as `623a6dd`); root-caused directly from the owner's own
+Render log excerpt for the exact failing request (18:01:38, two
+`httpx GET` calls: `Payment%20Terms?filterByFormula=SEARCH(...)` then
+`Charges?filterByFormula=OR(SEARCH('recnoz5NeUwlVeGYj',...))`); `pytest
+tests/` 217/217, `smoke_tests.py`, `python3 -m compileall -q .`.
+NEXT: merge → deploy → owner re-runs the same canary a fourth time; close
+as RUNTIME VERIFIED only after that live re-check.
+
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 
 PR #1242 (deployed as `ca47a9f`) merged; owner immediately re-ran the exact
