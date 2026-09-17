@@ -2,17 +2,19 @@
 
 עודכן: 17/09/2026
 
-## RECRUITMENT WORKER DATA MODEL — PHASE 1 STATIC INTEGRATION — 17/09/2026
+## RECRUITMENT WORKER DATA MODEL — PHASE 2 ACTIONGATEWAY WRITERS — 17/09/2026
 
-Approved Airtable tables `Worker Assignments`, `Monthly Calculation Batches`,
-and `Worker Monthly Results` are registered with their live table/field IDs.
-Pure typed read/write contracts and locked-invariant validators are implemented;
-they add no writer, dispatcher route, migration, backfill, UI, or runtime flow.
+One internal `recruitment_write` action now owns create/update/end operations
+for Worker Assignments, canonical/adjustment Batch creation and validated close,
+and open-Batch Result creation/update/payout tracking. It is internal-only,
+approval-sensitive, and callable only through ActionGateway execution proof.
+The writer reuses the approved Phase 1 contracts and existing Airtable gateway.
 
-STATUS: 🟡 CODE_DONE, STATIC_VERIFIED — merge pending; no deployment or runtime claim.
-EVIDENCE: `test_recruitment_contracts.py` + `test_schema_governance.py` (10/10),
-focused compile and `git diff --check` pass.
-NEXT: owner approval before any Phase 2 runtime integration.
+STATUS: 🟡 CODE_DONE, STATIC_VERIFIED — merge pending; no deployment, wiring, or runtime claim.
+EVIDENCE: focused Phase 1/2 writer, schema, and registry tests (29/29),
+Turn Coordinator and writer-authority audits, compile, and `git diff --check` pass.
+DEFERRED: UI, Telegram, Excel ingestion, batch automation, migration/backfill,
+and a user-facing deterministic route.
 
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 

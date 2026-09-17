@@ -1350,6 +1350,62 @@
         }
       },
       "last_observed_commit": "d35b1149c8a093785a4997701b96ccb710481698"
+    },
+    {
+      "id": "decision.recruitment_worker_data_model_phase2",
+      "name": "Recruitment worker data model Phase 2 mutation boundary",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "canonical_contract",
+      "source_of_truth": {
+        "is_authority": true,
+        "scope": "Canonical runtime writes for Worker Assignments, Monthly Calculation Batches, and Worker Monthly Results through the internal recruitment_write ActionGateway action.",
+        "precedence": "recruitment_crm.execute_recruitment_write is the sole entity writer; ActionGateway approval and dispatcher execution proof remain authoritative for whether it may execute. Phase 1 contracts remain authoritative for record validation semantics."
+      },
+      "owner": "recruitment",
+      "code_paths": [
+        "recruitment_crm.py",
+        "tools/dispatcher.py",
+        "tool_registry.py",
+        "action_validator.py",
+        "core/anti_hallucination.py"
+      ],
+      "test_paths": [
+        "test_recruitment_writers.py",
+        "test_recruitment_contracts.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "ROADMAP.md",
+          "role": "Phase 2 scope and static evidence level",
+          "status": "active"
+        },
+        {
+          "path": "docs/governance/WRITER_AUTHORITY_REGISTRY.md",
+          "role": "Single-writer ownership registration",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-17",
+      "last_verified_commit": "818b3912c04d4d514eeedbbc5d96e5296b8e92d4",
+      "confidence": 0.95,
+      "notes": [
+        "Owner explicitly approved Phase 2 runtime writers after Phase 1 merged.",
+        "The action is internal-only and has no model schema, UI, Telegram, Excel ingestion, automation, migration, or backfill route.",
+        "All mutations require an approved ActionContract execution proof and use the existing Airtable gateway primitives; direct provider writes and parallel writer paths are prohibited."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_AUTHORITY",
+          "role": "recruitment_worker_data_model_phase2",
+          "authority": true,
+          "purpose": "single ActionGateway-governed recruitment mutation boundary",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "818b3912c04d4d514eeedbbc5d96e5296b8e92d4"
     }
   ],
   "edges": [
