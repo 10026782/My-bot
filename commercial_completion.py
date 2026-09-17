@@ -425,7 +425,19 @@ ENTITY_CONTRACTS: dict[str, EntityContract] = {
         _f("status", PaymentFields.STATUS, InputType.SELECT, choices=(PaymentStatus.RECEIVED,), default=PaymentStatus.RECEIVED, manual=False),
         _f("reference", PaymentFields.REF, InputType.TEXT),
         _f("method", PaymentFields.METHOD, InputType.TEXT),
-        _f("deal", PaymentFields.DEAL_LINK, InputType.LINK, inherit=("deal_id", "deal"), validation="record_id"),
+        # BUG-COMPLETION-PAYMENT-DEAL-CRASH (production-reported, 17/09/2026):
+        # this was missing required=ALWAYS even though crm_create_charge_payment()
+        # requires deal_id unconditionally (and cross-checks it against the
+        # Charge's own Deal) -- so an optional "deal" the user never answered
+        # was silently absent from current_values, and _primitive_inputs()'s
+        # unconditional p[PaymentFields.DEAL_LINK] then raised a bare
+        # KeyError('deal_id') at finalization that leaked verbatim to the
+        # user as if it were the next question (see the BLOCK-path fix in
+        # commercial_completion_routing.py). Marking it ALWAYS makes the
+        # router ask it as a normal CLARIFY (it already has a real Hebrew
+        # label, "לאיזו עסקה זה משויך?") before finalization is ever
+        # attempted, instead of crashing there.
+        _f("deal", PaymentFields.DEAL_LINK, InputType.LINK, required=ALWAYS, inherit=("deal_id", "deal"), validation="record_id"),
         _f("payment_term", PaymentFields.PAYMENT_TERM, InputType.LINK, inherit=("payment_term_id", "billing_term"), validation="record_id"),
         _f("counterparty_contact", PaymentFields.COUNTERPARTY_CONTACT, InputType.LINK, inherit=("counterparty_contact", "contact_id"), validation="record_id"),
         _f("counterparty_organization", PaymentFields.COUNTERPARTY_ORGANIZATION, InputType.LINK, inherit=("counterparty_organization", "organization_id"), validation="record_id"),
@@ -497,13 +509,41 @@ def _number(value: Any) -> float:
     return result
 
 
+_DATE_ANSWER_FORMATS = ("%d/%m/%Y", "%d-%m-%Y")
+
+
+def _normalize_date_answer(value: str) -> str:
+    """Parse a plain-DATE completion answer to its canonical ISO string.
+
+    BUG-COMPLETION-DATE-FORMAT (production-reported, 17/09/2026): a Hebrew-
+    speaking user naturally types a date as DD/MM/YYYY (e.g. 17/09/2026) --
+    the everyday Israeli written form -- not ISO YYYY-MM-DD, and
+    date.fromisoformat() rejected it outright with no fallback, blocking a
+    real payment canary on the very field ("תאריך תשלום") most likely to be
+    answered this way. Accepts DD/MM/YYYY and DD-MM-YYYY in addition to
+    strict ISO; raises ValueError for anything matching neither, exactly
+    like the strict-ISO-only check this replaces, for _validate_date() to
+    convert to its existing InvalidValueError.
+    """
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        pass
+    for fmt in _DATE_ANSWER_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError(f"date value {value!r} matches neither YYYY-MM-DD nor DD/MM/YYYY")
+
+
 def _validate_date(value: Any, *, with_time: bool = False) -> None:
     if not isinstance(value, str):
         raise InvalidValueError("date values must use ISO text")
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00")) if with_time else date.fromisoformat(value)
+        datetime.fromisoformat(value.replace("Z", "+00:00")) if with_time else _normalize_date_answer(value)
     except ValueError as exc:
-        expected = "ISO datetime" if with_time else "YYYY-MM-DD"
+        expected = "ISO datetime" if with_time else "YYYY-MM-DD (or DD/MM/YYYY)"
         raise InvalidValueError(f"value must be {expected}") from exc
 
 
@@ -577,6 +617,13 @@ def _coerce_value(contract: FieldContract, value: Any) -> Any:
         if contract.validation in ("positive_integer", "non_negative_integer"):
             return int(number)
         return number
+    if contract.input_type == InputType.DATE:
+        # Same reasoning as BUG-COMPLETION-NUMERIC-STRING-422 above: validate
+        # only proves the answer is A valid date, in whichever accepted
+        # shape (see _normalize_date_answer) -- it never returns the
+        # canonical form, so without this the raw "17/09/2026" text would
+        # flow unchanged into the Airtable date column instead of ISO.
+        return _normalize_date_answer(str(value))
     return value
 
 

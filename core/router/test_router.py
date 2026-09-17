@@ -194,6 +194,21 @@ TESTS = [
         "תוסיף charge direct",
         "telegram", "owner", "", Intent.CREATE_CHARGE, RouterDomain.GENERAL, Handler.TOOL,
     ),
+    # BUG-CHARGE-PAYMENT-INTENT-GAP (production-reported, 17/09/2026): the
+    # original regex only recognized "<verb> תשלום לחיוב" -- a natural
+    # "רשום תשלום ... על החיוב ..." phrasing fell through entirely to the
+    # general Agent, which cannot call crm_create_charge_payment
+    # (model_exposed=False) and improvised a doomed generic airtable_add.
+    (
+        "CREATE_CHARGE_PAYMENT original 'תשלום לחיוב' phrasing still matches",
+        "הוסף תשלום לחיוב מעמלת פוסידון על סך 2320 במזומן",
+        "telegram", "owner", "", Intent.CREATE_CHARGE_PAYMENT, RouterDomain.FINANCE, Handler.TOOL,
+    ),
+    (
+        "CREATE_CHARGE_PAYMENT natural 'רשום ... על החיוב' phrasing now matches",
+        "רשום תשלום של 2320 על החיוב מעמלת פוסידון בשיטת מזומן",
+        "telegram", "owner", "", Intent.CREATE_CHARGE_PAYMENT, RouterDomain.FINANCE, Handler.TOOL,
+    ),
 ]
 
 

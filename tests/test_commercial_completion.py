@@ -172,6 +172,66 @@ def test_payment_cannot_build_payload_without_charge():
         writer.complete_payload()
 
 
+# ── BUG-COMPLETION-PAYMENT-DEAL-CRASH (production-reported, 17/09/2026):
+# "deal" was missing required=ALWAYS even though crm_create_charge_payment()
+# requires deal_id unconditionally -- an optional "deal" the user never
+# answered was silently absent from current_values, and
+# _primitive_inputs()'s unconditional lookup then raised a bare
+# KeyError('deal_id') that leaked verbatim to the user. Mirrors
+# test_payment_requires_charge()/test_payment_cannot_build_payload_without_charge()
+# above exactly, for the same guarantee on "deal".
+
+def test_payment_requires_deal():
+    writer = CommercialCompletionWriter(
+        "payment",
+        {"charge": "recCharge1", "amount": 100, "paid_at": "2026-09-03",
+         "direction": Direction.RECEIVABLE, "currency": Currency.ILS},
+    )
+    assert writer.next_field().field_name == "deal"
+
+
+def test_payment_cannot_build_payload_without_deal():
+    writer = CommercialCompletionWriter(
+        "payment",
+        {"charge": "recCharge1", "amount": 100, "paid_at": "2026-09-03",
+         "direction": Direction.RECEIVABLE, "currency": Currency.ILS},
+    )
+    with pytest.raises(CompletionBlockedError, match="deal"):
+        writer.complete_payload()
+
+
+# ── BUG-COMPLETION-DATE-FORMAT (production-reported, 17/09/2026): a
+# Hebrew-speaking user naturally types DD/MM/YYYY (e.g. 17/09/2026), not
+# ISO YYYY-MM-DD -- date.fromisoformat() rejected it outright with no
+# fallback. Accepts DD/MM/YYYY and DD-MM-YYYY in addition to strict ISO,
+# and always stores the canonical ISO form regardless of which shape the
+# user typed (same "validate proves it's valid, coerce stores the
+# canonical form" split as the numeric-string fix this mirrors).
+
+def test_payment_paid_at_accepts_israeli_date_format():
+    writer = CommercialCompletionWriter("payment", {})
+    writer = writer.apply_answer("paid_at", "17/09/2026")
+    assert writer.current_values["paid_at"] == "2026-09-17"
+
+
+def test_payment_paid_at_accepts_dash_separated_israeli_date_format():
+    writer = CommercialCompletionWriter("payment", {})
+    writer = writer.apply_answer("paid_at", "17-09-2026")
+    assert writer.current_values["paid_at"] == "2026-09-17"
+
+
+def test_payment_paid_at_still_accepts_iso_format():
+    writer = CommercialCompletionWriter("payment", {})
+    writer = writer.apply_answer("paid_at", "2026-09-17")
+    assert writer.current_values["paid_at"] == "2026-09-17"
+
+
+def test_payment_paid_at_rejects_unrecognized_format():
+    writer = CommercialCompletionWriter("payment", {})
+    with pytest.raises(InvalidValueError):
+        writer.apply_answer("paid_at", "2026/09/17")
+
+
 def test_computed_formula_and_rollup_fields_are_never_requested():
     writer = CommercialCompletionWriter(
         "charge", {"deal": "recDeal1", "direction": Direction.RECEIVABLE,
