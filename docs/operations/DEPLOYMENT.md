@@ -93,6 +93,10 @@ SETUP_WEBHOOK=1 python3 app.py
 
 **Live verification (2026-08-28):** the three corrections above, plus `FEATURE_ATOMIC_CLAIMS=true` and `DATABASE_URL` both being set in production (PostgreSQL is **required** today, not staging-only), were confirmed via a read-only `GET /v1/services` / `GET /v1/services/{id}/env-vars` call against the Render API (service `srv-d80ehsf7f7vs73cq5rn0`, plan `starter`, region `virginia`). No Render configuration was changed to obtain this. Full detail: `docs/operations/ORACLE_MIGRATION_M0.md`.
 
+For current environment checks, run `python3 scripts/render_env_verify.py --service-id <srv-id>`.
+It prints only allowlisted feature-flag states and secret presence; never print raw
+`/env-vars` API output.
+
 **Environment Variables:** הוסף את המשתנים מ-`.env.example` ב-Render Dashboard → Environment. For atomic claims (staging only), also set:
 ```
 FEATURE_ATOMIC_CLAIMS=true

@@ -37,8 +37,8 @@ TC8 claim, כל ה-fail-closed branches בנתיב ה-callback) **הוא בדי�
 ```bash
 curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
   "https://api.render.com/v1/services/srv-d80ehsf7f7vs73cq5rn0/deploys?limit=1"
-curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
-  "https://api.render.com/v1/services/srv-d80ehsf7f7vs73cq5rn0/env-vars?limit=100"
+python3 scripts/render_env_verify.py \
+  --service-id srv-d80ehsf7f7vs73cq5rn0
 ```
 (אותו דבר עם `srv-d99uq63eo5us73967cj0` ל-staging.)
 

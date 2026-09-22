@@ -109,8 +109,8 @@ never turned on in that environment.
 
 **Result:**
 ```yaml
-- required_evidence: Render API `GET /v1/services/{id}/env-vars` dump of the deployed
-  environment variables (not code default, not .env.example).
+- required_evidence: redacted output from `scripts/render_env_verify.py` against the
+  deployed environment (not code default, not .env.example); never dump `/env-vars`.
 - why_required: (see above)
 - environment: production (RENDER_SERVICE_PRODUCTION) AND staging
   (RENDER_SERVICE_STAGING) — see redaction note above for alias meanings
