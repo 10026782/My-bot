@@ -2,6 +2,8 @@
 
 **Mode:** READ ONLY / DESIGN AUTHORITY. No code, schema, or runtime change was made while producing this document.
 
+**Owner decision freeze (PR #1248, 2026-09-22):** the 5 items originally raised in §30 as open owner decisions were resolved by explicit owner instruction and are applied throughout this document (draft cardinality approved as one-per-entity-kind-per-sender; Deal-first phase ordering approved, superseding this document's original Contact-first recommendation; a canonical Payment update/correction boundary is now required, not optional; Decision/Marketing/BusinessUpdate migration is deferred but not architecturally excluded; `FEATURE_ATOMIC_CLAIMS` production-verification is now an explicit rollout gate from Phase 2 onward). Final Verdict is now `CONTRACT_FROZEN_READY_FOR_IMPLEMENTATION`. See §30 for the full resolution record and §27 for the reordered migration plan.
+
 **Truth Reset SHA:** `origin/main` = `7afe3db6516ab4a1da70121df1a3ab8f6d6c03e1` (2026-09-22, tip at time of writing — merge of `codex/recruitment-worker-model-phase2`).
 
 **Deviation from the literal truth-reset procedure, and why:** this session's local checkout (`0f80122`, 264 commits behind `origin/main`) has extensive **uncommitted working-tree changes from a concurrent session** touching exactly this area (`core/draft_fields.py`, `commercial_crm.py`, `airtable_schema.py`, `tool_registry.py`, `tools/dispatcher.py`, `tools/airtable_security.py`, a new `docs/governance/COMMERCIAL_SCHEMA_V2_ADD_ONLY_STATUS_20260903.md`, `tools/commercial_model_simulation.py`, `tests/`). Per `AGENTS.md`'s SHARED CHECKOUT protocol, this document does **not** run `git switch`/`git pull` on the shared working tree — every file below was read with `git show origin/main:<path>`, never from the dirty working tree. `git status --short` was recorded for the record and is reproduced at the end of this section; none of it was touched.
@@ -147,7 +149,9 @@ The envelope below **wraps** `CommercialCompletionWriter`'s existing shape (`tar
 - Duplicate-record handling: `_select_canonical_session_record()` picks the most-recently-updated row when a lookup returns more than one Airtable row for the same sender; logged (`SESSION_DUPLICATE_DETECTED`) but never auto-merged.
 - Cleanup: LRU eviction from RAM only; the Airtable row is marked (`done=True, deleted=True` inside the JSON), never actually deleted.
 
-**Decision, per the task's own instruction not to invent a new table for cleanliness:** reuse Sessions exactly as scoped above. `draft_id` is a computed label, not a new index; BusinessDraft explicitly **does not** promise arbitrary-cardinality concurrent drafts per user per entity kind — that would require a real schema change (an indexed sub-structure) this document does not authorize. If the owner wants that capability, it is Owner Decision #1 in §30, not a default.
+**Decision, per the task's own instruction not to invent a new table for cleanliness:** reuse Sessions exactly as scoped above. `draft_id` is a computed label, not a new index; BusinessDraft explicitly **does not** promise arbitrary-cardinality concurrent drafts per user per entity kind — that would require a real schema change (an indexed sub-structure) this document does not authorize.
+
+**Owner Decision #1 — RESOLVED (PR #1248 freeze, 2026-09-22): APPROVED.** One draft per entity-kind per sender is the frozen v1 cardinality. Arbitrary concurrent same-entity drafts (e.g. two Deals in flight for the same user at once) are explicitly deferred, not designed for, in this program.
 
 ---
 
@@ -297,7 +301,7 @@ Field sets below are the live `ENTITY_CONTRACTS`/`airtable_schema.py` definition
 
 **Payment Term** — required: `deal`, `direction`, `calculation_type`, plus conditional fields keyed off `calculation_type`/`cadence`/`trigger_type`/`due_rule` (fixed_amount, rate_pct, calculation_basis, tier_configuration, custom_calculation_rule, unit_rate, installment_count, trigger_date/delay/event, specific_due_date, schedule_anchor_date, net_days), required `currency`. Optional: minimum/maximum amount, grace_period_days, vat_rule, start/end date, notes. Computed: `next_due_date`. Create: `crm_create_payment_term`. Update: **missing**.
 
-**Payment** — required: `charge`, `amount`, `paid_at`, `direction`, `currency`, `deal` (made `ALWAYS` after `BUG-COMPLETION-PAYMENT-DEAL-CRASH`, 17/09/2026). Optional: `payment_term`, `counterparty_contact`/`organization`, `reference`, `method`, document requirement/status, notes. Create: `crm_create_charge_payment` (V2, preferred) or legacy `create_payment` (quarantined). Update: **missing, and likely N/A** — see §16/§17 (payments are typically business-immutable once received).
+**Payment** — required: `charge`, `amount`, `paid_at`, `direction`, `currency`, `deal` (made `ALWAYS` after `BUG-COMPLETION-PAYMENT-DEAL-CRASH`, 17/09/2026). Optional: `payment_term`, `counterparty_contact`/`organization`, `reference`, `method`, document requirement/status, notes. Create: `crm_create_charge_payment` (V2, preferred) or legacy `create_payment` (quarantined). Update: **missing — required** (Owner Decision #3, RESOLVED: a canonical update/correction boundary is required; see §16/§17). Do not ship Payment CREATE-only.
 
 **Contact** — required: `name`, `phone`. Optional: `email`, `company`, `role_category`. Create: `find_or_create_contact`. Update: `crm.update_contact` — **the one fully symmetric entity today.**
 
@@ -315,12 +319,12 @@ Field sets below are the live `ENTITY_CONTRACTS`/`airtable_schema.py` definition
 | Payment Term | SUPPORTED | **MISSING** | same |
 | Charge | SUPPORTED | **MISSING** | `docs/evidence/COMMERCIAL_S2B_MUTATION_PRIMITIVES_20260903.md` states explicitly: "generic updates to Charges... fail closed because no update primitive was approved" — already fail-closed by design, good starting posture |
 | Organization | SUPPORTED (find-or-create absorbs the common reuse case) | **MISSING** (no rename/field update) | one-field schema today; low urgency |
-| Payment | SUPPORTED | **MISSING, likely N/A** | business question, not technical (§30) |
+| Payment | SUPPORTED | **MISSING — REQUIRED** (Owner Decision #3, RESOLVED: APPROVED) | a canonical Payment update/correction boundary is required; Payment CREATE must not remain canonical while UPDATE/correction stays generic |
 | Contact | SUPPORTED | SUPPORTED | fully symmetric |
 | Lead | SUPPORTED | SUPPORTED | symmetric at writer level, no draft UX on update |
 | Task | SUPPORTED (5 redundant paths) | SUPPORTED (redundant paths) | **NOT_CANONICAL** — no single writer owns either; blocks BusinessDraft participation per the task's own hard rule and governing decision N |
 
-**Exact update writers still required before adapter implementation:** `update_deal()`, `update_payment_term()`, and (if the owner decides Payment ever needs correction, §30) an update path for Payment. `update_organization()` is optional/deferrable. Contact and Lead need nothing further. Task needs one canonical `create_task()`/`update_task()` pair, replacing the 5 fragmented paths — but that decision belongs to the still-open `TASKS_DEADLINES_ROADMAP_TASKS` track, not to this document.
+**Exact update writers still required before adapter implementation:** `update_deal()`, `update_payment_term()`, and a canonical update/correction boundary for Payment (Owner Decision #3, RESOLVED — required, not deferrable). `update_organization()` is optional/deferrable. Contact and Lead need nothing further. Task needs one canonical `create_task()`/`update_task()` pair, replacing the 5 fragmented paths — but that decision belongs to the still-open `TASKS_DEADLINES_ROADMAP_TASKS` track, not to this document.
 
 ---
 
@@ -333,7 +337,7 @@ Field sets below are the live `ENTITY_CONTRACTS`/`airtable_schema.py` definition
 | Payment | `EntityContract["payment"]` / `["charge_from_term"]` | same | `crm_create_charge_payment` / `crm_create_charge_from_term` | `commercial_crm.create_charge_payment()` / `create_charge_from_term()` | live production canary, 17/09/2026 (5 bugs found and fixed same day) |
 | Contact | `EntityContract["contact"]` | same | `crm_find_or_create_contact` | `commercial_crm.find_or_create_contact()` → `crm.create_contact_from_fields()` | DIAMOND PATH nested-create canary (production transcripts in `test_diamond_path_approval_continuation.py`, `test_bug_diamond_contact_approval_and_search.py`) |
 
-**Update writer gaps to close first:** `update_deal()`, `update_payment_term()` — both block `UPDATE_SUPPORTED` classification and must land before a Deal/Payment Term adapter can honestly claim update capability. No Lead migration precedes this path's proof, matching governing decision M — and the proof (Deal/Payment canaries above) already exists, ahead of this document.
+**Update writer gaps to close first:** `update_deal()`, `update_payment_term()`, and a canonical Payment update/correction boundary (Owner Decision #3, RESOLVED — required) — all three block `UPDATE_SUPPORTED` classification and must land before their adapters can honestly claim update capability. No Lead migration precedes this path's proof, matching governing decision M — and the proof (Deal/Payment canaries above) already exists, ahead of this document.
 
 ---
 
@@ -412,7 +416,9 @@ No raw enum/internal exception leakage anywhere in this table — this is alread
 - **TMA double submit:** `_queue_or_owner_execute()`'s fail-closed-to-503-unless-both-flags-live posture already prevents a silent double-write; no RAM-only fallback exists.
 - **Batch double confirm:** new — apply the same one-live-mutation policy per batch-id (or per item, per §19's design).
 - **Writer-level dedup:** `commercial_crm.py`'s own deterministic `Reference`-formula matching (e.g. `create_charge_from_term`) — reuse, don't duplicate.
-- **Deepest layer — important operational note:** `core/action_gateway_atomic_executor.py`'s PostgreSQL atomic-claim mechanism, the strongest concurrency guarantee in the stack, has its own file-header statement: **"Staging only... flag is OFF in production."** BusinessDraft's confirm-time concurrency guarantee is therefore currently *weaker in production than in staging*, independent of anything this document proposes. This is Owner Decision #5 in §30, not something BusinessDraft's design can silently assume away.
+- **Deepest layer — important operational note:** `core/action_gateway_atomic_executor.py`'s PostgreSQL atomic-claim mechanism, the strongest concurrency guarantee in the stack, has its own file-header statement: **"Staging only... flag is OFF in production."** BusinessDraft's confirm-time concurrency guarantee is therefore currently *weaker in production than in staging*, independent of anything this document proposes.
+
+**Owner Decision #5 — RESOLVED (PR #1248 freeze, 2026-09-22).** Phase 0/1 static implementation (closing update-writer gaps, extracting/wrapping the core modules) may proceed independently of `FEATURE_ATOMIC_CLAIMS`'s production state — neither depends on the strongest concurrency guarantee being live. But **production BusinessDraft write canary / rollout (Phase 2 onward, any real confirm-time writes) is gated on `FEATURE_ATOMIC_CLAIMS` being enabled and runtime-verified in production**, not merely staging-verified. This gate must be checked before any Phase 2+ production canary, not assumed satisfied.
 
 `ActionGateway`'s atomic-claim behavior is preserved unmodified; BusinessDraft introduces no competing execution-ownership mechanism, per the task's hard rule.
 
@@ -452,19 +458,24 @@ Structured result type: generalize `CompletionRoute`'s existing shape (`outcome`
 
 ## Migration Plan
 
-Adjusted from the task's template where evidence justifies it (each deviation called out explicitly):
+**Owner Decision #2 — RESOLVED (PR #1248 freeze, 2026-09-22): APPROVED, Deal first.** This document's earlier Contact-first recommendation (cheapest-pilot reasoning) is superseded by explicit owner instruction. Commercial CRM / Golden Writer remains the implementation anchor; Contact is **not** reordered ahead of Deal. The frozen first implementation sequence is:
 
-- **PHASE 0** — Close `update_deal()`/`update_payment_term()` gaps (§16/§17). Decide Payment's update need (Owner Decision #3).
-- **PHASE 1** — Extract/generalize the BusinessDraft core by **wrapping**, not rewriting, `commercial_completion.py`/`CompletionSession`/`draft_flow.py`/`draft_fields.py` — a new thin envelope module (e.g. `core/business_draft.py`) composes the three proven modules rather than replacing any of them, preserving their existing production canaries.
-- **PHASE 2** — Sessions-backed persistence using the `draft_id = tenant:channel:sender:entity_type` scheme frozen in §4 (pending Owner Decision #1 on whether arbitrary-cardinality concurrent drafts are actually wanted).
-- **PHASE 3 — deviation from the task's suggested order:** start with **Contact**, not Deal. Contact already has full CREATE+UPDATE symmetry and the smallest field surface — it is the cheapest possible pilot to prove the generic envelope + review-card + edit-contract pattern before spending that proof on Deal's much larger schema. Flagged as Owner Decision #2 in §30 since the task's own template assumed Deal-first for a possibly real business-urgency reason this document cannot see from code.
-- **PHASE 4** — Deal adapter: add the missing `READY_FOR_REVIEW` step (§8/§29's largest single UX gap), generalize `deal_field_business_summary()` into the shared review card, close `update_deal()`.
-- **PHASE 5** — Payment Term + Payment adapters (Payment's update need per Owner Decision #3).
+- **PHASE 0** — Close canonical commercial UPDATE authority gaps: `update_deal()`, `update_payment_term()`, and a canonical Payment update/correction boundary (Owner Decision #3, RESOLVED — required, see §16/§17). All three must land before their adapters can honestly claim update capability.
+- **PHASE 1** — Generalize/wrap the existing proven primitives: `commercial_completion.py`, `commercial_completion_routing.py`, `commercial_completion_ux.py`, `core/draft_flow.py`, `core/draft_fields.py` — a new thin envelope module (e.g. `core/business_draft.py`) composes these rather than replacing any of them, preserving their existing production canaries.
+- **PHASE 2** — Sessions-backed BusinessDraft persistence, v1 cardinality: one draft per entity-kind per sender (Owner Decision #1, RESOLVED — see §4). Arbitrary concurrent same-entity drafts remain deferred, not built.
+- **PHASE 3** — Deal adapter + review/edit UX: add the missing `READY_FOR_REVIEW` step (§8/§29's largest single UX gap), generalize `deal_field_business_summary()` into the shared review card, consume the `update_deal()` writer closed in Phase 0.
+- **PHASE 4** — PaymentTerm + Payment adapters, consuming the `update_payment_term()` and Payment update/correction writers closed in Phase 0.
+- **PHASE 5** — Contact adapter. Full CREATE+UPDATE symmetry already exists at the writer level; this phase is adapter/UX wrapping only, now sequenced after Deal/Payment per Owner Decision #2 rather than as the first pilot.
 - **PHASE 6** — Lead migration (§18), only after Phases 3–5 prove the core, per governing decision M.
-- **PHASE 7** — Task canonical writer + adapter — **hard external dependency** on `TASKS_DEADLINES_ROADMAP_TASKS` closing; not schedulable by this program alone.
+- **PHASE 7** — Task canonical writer + adapter, after canonical Task authority closes — **hard external dependency** on `TASKS_DEADLINES_ROADMAP_TASKS` closing; not schedulable by this program alone.
+
+Continuing beyond the frozen first sequence (unchanged in substance from the prior draft, renumbered):
+
 - **PHASE 8** — TMA draft/review UI build-out. Corrected framing: this is **not** a "generic write retirement" (TMA already routes every write through `ActionGateway` correctly) — it is building the missing review screen in front of an already-correct write path.
 - **PHASE 9** — Batch unification (§19), after Lead migration (Phase 6) since Lead is the only entity with real batch precedent today.
 - **PHASE 10** — Remove legacy pending stores (`event_bus.PendingActionsStore`'s remaining callers, `app.py::_pending_approvals`, `lead_draft`/`pending_lead_preview`/`last_lead_candidate_batch`) only after runtime proof, using the exact blast-radius lists in §18.
+
+**Production rollout gate (Owner Decision #5, RESOLVED, §23):** Phase 0/1 static implementation may proceed independently of `FEATURE_ATOMIC_CLAIMS`. Any production BusinessDraft write canary from Phase 2 onward is gated on `FEATURE_ATOMIC_CLAIMS` being enabled and runtime-verified in production, not merely staging-verified.
 
 ---
 
@@ -482,7 +493,7 @@ Adjusted from the task's template where evidence justifies it (each deviation ca
 | TMA Approvals projection (`/api/approvals`) | KEEP_ADAPTER | stays the post-proposal approval list; BusinessDraft adds a separate *pre-confirm* review screen, does not replace this |
 | commercial legacy update paths | N/A | none exist yet to retire — when Phase 0 creates them, they start as `KEEP_CORE` |
 | Voice fallback (`voice_adapter.py::_save_voice_lead`) | HISTORICAL_ONLY / out of scope | never asked the user anything — not a draft/review mechanism; already tracked separately under N18/TR-22 |
-| `cmd_update.py`/`cmd_decision.py`/`cmd_marketing.py` `_pending` state | **OUT_OF_SCOPE** | already `draft_flow.py`-based and structurally compatible, but Decision/Marketing/BusinessUpdate are separately-owned entities per `WRITER_AUTHORITY_REGISTRY.md` — this document does not have standing to schedule their retirement or migration; flagging their in-memory (restart-losable) persistence for owner awareness only |
+| `cmd_update.py`/`cmd_decision.py`/`cmd_marketing.py` `_pending` state | **DEFERRED_FROM_INITIAL_MIGRATION** (Owner Decision #4, RESOLVED) | already `draft_flow.py`-based and structurally compatible; Decision/Marketing/BusinessUpdate are separately-owned entities per `WRITER_AUTHORITY_REGISTRY.md` and are not scheduled in this program's phases — but they are **not architecturally excluded**. BusinessDraft core (§27 Phases 1–2) must remain compatible with a later migration of these domains; nothing in this freeze may close that door. |
 
 ---
 
@@ -501,18 +512,18 @@ Ranked by evidenced impact, not speculation:
 
 ## Remaining Owner Decisions
 
-Only genuine, code-unresolvable items:
+All 5 items below were resolved by explicit owner instruction on 2026-09-22 (PR #1248 freeze). Original questions are preserved for record; resolutions are authoritative and supersede this document's earlier recommendations where they differed.
 
-1. **Draft cardinality:** is "one draft per entity-kind per sender" (the scoping this document freezes, §4) an acceptable permanent limit, or does the owner want true arbitrary-cardinality concurrent drafts (e.g. two Deals in flight for the same user at once)? Current Sessions schema structurally supports only the former without a real schema change this document does not authorize.
-2. **Phase ordering:** this document recommends Contact before Deal as the first adapter (cheapest pilot, §27 Phase 3) — a deviation from the task's own template order. Is Deal-first a fixed business requirement (e.g. revenue urgency) the code cannot reveal, or is the cheaper-pilot reordering acceptable?
-3. **Does Payment ever need an UPDATE writer?** Purely a bookkeeping-policy question (are received payments ever corrected/reversed in this business, or is a correction always a new negative-direction Payment?) — no code evidence either way.
-4. **Are `cmd_decision`/`cmd_marketing`/`cmd_update`'s in-memory, restart-losable draft states intentionally excluded from this program**, or should Decision/Marketing/BusinessUpdate's own owners be asked whether they want Sessions-backed persistence too? This document treats them as out of scope (§28) but flags the exclusion for confirmation rather than silently deciding it.
-5. **`FEATURE_ATOMIC_CLAIMS` is off in production today** (§23) — the strongest concurrency guarantee in the confirm path is currently staging-only. Should this be resolved before, or independently of, BusinessDraft's rollout? Not a BusinessDraft design question, but BusinessDraft's confirm-time safety claims are only as strong as this flag's production state.
+1. **Draft cardinality — RESOLVED: APPROVED.** "One draft per entity-kind per sender" (§4) is the frozen v1 limit. Arbitrary-cardinality concurrent drafts (e.g. two Deals in flight for the same user at once) are explicitly deferred, not built in this program.
+2. **Phase ordering — RESOLVED: APPROVED, Deal first.** This document's original Contact-first recommendation (cheapest-pilot reasoning, §27) is superseded. Commercial CRM / Golden Writer remains the implementation anchor; Contact is not reordered ahead of Deal. See the revised §27 sequence.
+3. **Payment UPDATE writer — RESOLVED: APPROVED, required.** A canonical Payment update/correction boundary must be built. Payment CREATE must not remain canonical while UPDATE/correction stays generic — this closes what was previously an open bookkeeping-policy question. See §16/§17/§27 Phase 0.
+4. **Decision/Marketing/BusinessUpdate scope — RESOLVED: DEFERRED FROM INITIAL MIGRATION, NOT ARCHITECTURALLY EXCLUDED.** These remain out of this program's scheduled phases, but BusinessDraft core (§27 Phases 1–2) must remain compatible with a later migration of these domains — nothing in Phase 1's envelope design may close that door. See §28.
+5. **`FEATURE_ATOMIC_CLAIMS` production gate — RESOLVED.** Phase 0/1 static implementation may proceed independently of the flag's production state. Production BusinessDraft write canary / rollout (Phase 2 onward) is gated on `FEATURE_ATOMIC_CLAIMS` being enabled and runtime-verified in production, not staging-verified. See §23.
 
 ---
 
 ## Final Verdict
 
-**OWNER_DECISIONS_STILL_REQUIRED**
+**CONTRACT_FROZEN_READY_FOR_IMPLEMENTATION**
 
-This does not block starting Phase 0 (closing `update_deal()`/`update_payment_term()` gaps) or Phase 1 (extracting/wrapping the already-proven core modules) — neither depends on the 5 open decisions above. Only Phase 2's exact draft-cardinality scope and Phase 3's entity ordering are genuinely gated on Owner Decisions #1 and #2.
+All 5 owner decisions above are resolved as of 2026-09-22 (PR #1248). Phase 0 (closing `update_deal()`/`update_payment_term()`/Payment update-boundary gaps) and Phase 1 (extracting/wrapping the already-proven core modules) may begin immediately. Phase 2's draft-cardinality scope and Phase 3's Deal-first ordering are no longer open questions — both are frozen per Owner Decisions #1 and #2. Any production write canary from Phase 2 onward remains gated on `FEATURE_ATOMIC_CLAIMS` being enabled and runtime-verified in production (Owner Decision #5).
