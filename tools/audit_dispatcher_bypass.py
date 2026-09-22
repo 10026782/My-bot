@@ -110,16 +110,23 @@ BASELINE: frozenset[tuple[str, int, str]] = frozenset({
     ("lead_capture.py", 211, "tools.airtable_tools"),
     ("lead_memory.py", 167, "tools.airtable_tools"),
     ("providers/airtable_shim.py", 17, "tools.airtable_tools"),
-    # Shifted again by DIAMOND REMEDIATION D1's deal_enrichment_offer
-    # durability fix (06/09/2026: added the key to _new_session()'s default
-    # shape, _sync_to_db()'s whitelist, and _load_from_db()'s restore
-    # whitelist, each with an explanatory comment block) — same 4 existing
-    # import statements as before (_sync_to_db(), _find_best_session_in_db(),
-    # _load_from_db(), _delete_from_db()), not a new bypass authority.
-    ("session_store.py", 699, "tools.airtable_tools"),
-    ("session_store.py", 860, "tools.airtable_tools"),
-    ("session_store.py", 901, "tools.airtable_tools"),
-    ("session_store.py", 966, "tools.airtable_tools"),
+    # Shifted again by BUSINESSDRAFT PHASE 2's business_drafts durability
+    # fix (22/09/2026: added the key to _new_session()'s default shape,
+    # _sync_to_db()'s whitelist, and _load_from_db()'s restore whitelist,
+    # same pattern as the DIAMOND REMEDIATION D1 rebase this comment
+    # previously described) — same 4 existing import statements as before
+    # (_sync_to_db(), _find_best_session_in_db(), _load_from_db(),
+    # _delete_from_db()), not a new bypass authority. Re-verified by exact
+    # line, not nearest-neighbor, since two of the four baseline entries
+    # (previously 860/901) had drifted close enough together that the
+    # nearest-line heuristic below paired both with the same live import
+    # and left the fourth (_load_from_db(), now line 926) with no match at
+    # all -- exact re-sync avoids relying on that heuristic recovering on
+    # its own after this kind of shift.
+    ("session_store.py", 722, "tools.airtable_tools"),
+    ("session_store.py", 885, "tools.airtable_tools"),
+    ("session_store.py", 926, "tools.airtable_tools"),
+    ("session_store.py", 993, "tools.airtable_tools"),
     ("tenant_provisioner.py", 160, "tools.airtable_tools"),
     ("tenant_provisioner.py", 225, "tools.airtable_tools"),
     ("tenant_provisioner.py", 252, "tools.airtable_tools"),
