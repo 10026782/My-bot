@@ -1480,6 +1480,19 @@ _DEAL_UPDATE_SCALAR_FIELDS: dict[str, str] = {
 }
 
 
+# DEAL-UPDATE-STAGE-ALIAS (22/09/2026): DealStage.NEGOTIATION's canonical
+# stored value is "במשא ומתן" — the leading "ב" is part of the Airtable
+# select option itself, not just a sentence-level preposition. Live agent
+# extraction from phrasing like "...לשלב במשא ומתן" reproducibly dropped it
+# (returned "משא ומתן"), which then failed the closed valid_stages check
+# below. A narrow, closed alias -> canonical mapping (never a fuzzy/partial
+# match) absorbs exactly this one known variant; the value actually
+# persisted to Airtable is still always the exact canonical string.
+_DEAL_STAGE_ALIASES: dict[str, str] = {
+    "משא ומתן": DealStage.NEGOTIATION,
+}
+
+
 def update_deal(
     record_id: str,
     fields: dict[str, Any],
@@ -1538,9 +1551,10 @@ def update_deal(
 
     if "stage" in fields:
         valid_stages = (DealStage.OPPORTUNITY, DealStage.NEGOTIATION, DealStage.CLOSED_WIN, DealStage.CLOSED_LOSS)
-        if fields["stage"] not in valid_stages:
+        stage_value = _DEAL_STAGE_ALIASES.get(fields["stage"], fields["stage"])
+        if stage_value not in valid_stages:
             return _tool_result(ok=False, tool=tool, user_message=f"❌ שלב עסקה לא תקין: {fields['stage']!r}.")
-        updates[DealFields.STAGE] = fields["stage"]
+        updates[DealFields.STAGE] = stage_value
 
     for kwarg, field_name in _DEAL_UPDATE_LINK_FIELDS.items():
         if kwarg not in fields:

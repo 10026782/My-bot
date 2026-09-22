@@ -120,7 +120,10 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "airtable_update",
-        "description": "עדכון רשומה קיימת ב-Airtable",
+        "description": (
+            "עדכון רשומה קיימת ב-Airtable (טבלאות כלליות). "
+            "לעדכון עסקה (Deal) קיימת יש להשתמש תמיד ב-crm_update_deal, לא בכלי זה."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -300,7 +303,12 @@ TOOL_SCHEMAS = [
     {
         "name": "crm_update_deal",
         "description": (
-            "עדכון עסקה (Deal) קיימת — שינוי שלב/בעלים/דומיין/שדות עסקיים. "
+            "עדכון עסקה (Deal) קיימת — שינוי שלב/בעלים/דומיין/הערות/שדות עסקיים. "
+            "השתמש בכלי זה (ולעולם לא ב-airtable_update) בכל בקשה לעדכון עסקה קיימת — "
+            "'תעדכן/תשנה את שלב העסקה X ל-Y', 'תוסיף הערה לעסקה X', "
+            "'תעדכן את הבעלים/הדומיין של עסקה X'. "
+            "אם יש רק שם עסקה (ולא record_id), אתר קודם את הרשומה (airtable_get) "
+            "וקרא לכלי זה עם ה-record_id שנמצא. "
             "רק שדות שסופקו בפועל משתנים; שדות שלא סופקו נשארים ללא שינוי. "
             "לא ניתן לשנות Origin Lead או שדות מחושבים (Total Charged/Collected/Outstanding)."
         ),
@@ -311,7 +319,11 @@ TOOL_SCHEMAS = [
                 "name":           {"type": "string", "description": "שם העסקה"},
                 "domain":         {"type": "string", "description": "דומיין עסקי"},
                 "owner_id":       {"type": "string", "description": "מזהה record של הבעלים העסקי (rec...)"},
-                "stage":          {"type": "string", "description": "שלב העסקה"},
+                "stage": {
+                    "type": "string",
+                    "description": "שלב העסקה — ערך מדויק מהרשימה בלבד (שים לב ל-'ב' בתחילת 'במשא ומתן')",
+                    "enum": ["הזדמנות", "במשא ומתן", "סגור-ניצחון", "סגור-הפסד"],
+                },
                 "priority":       {"type": "string"},
                 "risk_level":     {"type": "string"},
                 "counterparty_contact_id": {"type": "string"},
