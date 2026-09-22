@@ -29,6 +29,15 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from airtable_schema import SessionsFields as SF, Tables
+from core.business_draft import (
+    BusinessDraft,
+    BusinessDraftError,
+    DraftConflictError,
+    DraftIdentityMismatchError,
+    DraftState,
+    deserialize_business_draft,
+    serialize_business_draft,
+)
 from tma_api import record_fields, record_id as provider_record_id, relation_payload
 from tools.airtable_gateway import escape_formula_value
 
@@ -183,6 +192,12 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
                                              #   deal_enrichment_offer above — independent of
                                              #   "commercial_completion" so it can never be misread
                                              #   by the S2C restore()/answer_human() path.
+        "business_drafts":          {},    # ← BUSINESSDRAFT PHASE 2: one canonical namespace,
+                                             #   {entity_type: serialize_business_draft(...)} — a
+                                             #   nested dict, not a new top-level key per entity
+                                             #   kind (frozen v1 cardinality: one draft per
+                                             #   tenant+channel+sender+entity_type). See
+                                             #   save_business_draft()/load_business_draft() below.
     }
 
 
@@ -727,6 +742,7 @@ class PersistentSessionStore:
                 # comment on this same key for the full RAM-only-loss history.
                 "deal_enrichment_offer":    session.get("deal_enrichment_offer"),
                 "lead_deal_link":           session.get("lead_deal_link"),
+                "business_drafts":          session.get("business_drafts", {}),
             }
             session_channel = session.get("channel", "")
             fields = {
@@ -962,6 +978,7 @@ class PersistentSessionStore:
                 # comment on this same key for the full RAM-only-loss history.
                 ("deal_enrichment_offer", None),
                 ("lead_deal_link", None),
+                ("business_drafts", {}),
             ):
                 session[key] = state.get(key, default)
             session["record_id"] = record_id
@@ -1089,6 +1106,172 @@ class PersistentSessionStore:
         session["lead_deal_link"] = None
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
+
+    # ── BusinessDraft persistence (BUSINESSDRAFT PHASE 2) ──────────
+    #
+    # One canonical namespace ("business_drafts": {entity_type: serialized})
+    # inside the same universal Session row — no new Airtable table, no new
+    # session key per entity kind. Frozen v1 cardinality (owner decision,
+    # docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md): one
+    # draft per tenant+channel+sender+entity_type. `channel`/`sender` scoping
+    # is already enforced by which session row this reads/writes (same
+    # mechanism every other set_X/get_X method above relies on); tenant_id/
+    # actor_user_id/source_channel are re-checked against the stored draft's
+    # own binding on every load (see load_business_draft) so a draft is
+    # never resolvable by draft_id/entity_type alone.
+
+    def _business_draft_raw(self, sender: str, entity_type: str, channel: str = "") -> Optional[dict]:
+        session = self.get(sender, channel=channel)
+        if not session:
+            return None
+        drafts = session.get("business_drafts")
+        raw = drafts.get(entity_type) if isinstance(drafts, dict) else None
+        return raw if isinstance(raw, dict) else None
+
+    def _write_business_draft_slot(self, sender: str, entity_type: str, data: dict, channel: str = "") -> None:
+        session = self.get_or_create(sender, channel=channel)
+        drafts = dict(session.get("business_drafts") or {})
+        drafts[entity_type] = data
+        session["business_drafts"] = drafts
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def save_business_draft(
+        self, sender: str, draft: BusinessDraft, *, expected_version: int, channel: str = "",
+    ) -> BusinessDraft:
+        """Compare-and-swap save. `expected_version` is the `idempotency_key`
+        the caller loaded before mutating — required requirement 6's
+        "load N -> mutate -> save only if stored version still N -> N+1".
+        The persistence layer, not the in-memory draft object, is
+        authoritative for the stored version: it always stamps
+        `expected_version + 1` onto what gets written, regardless of
+        whatever `draft.idempotency_key` happens to carry in (Phase 1's own
+        mutation methods bump it inconsistently — field edits do, plain
+        lifecycle transitions like begin_edit()/cancel() don't; decoupling
+        here keeps CAS correctness independent of that Phase-1 detail
+        without touching core/business_draft.py).
+
+        Raises DraftConflictError on a stale `expected_version` and
+        DraftIdentityMismatchError if `draft`'s own tenant/actor/channel
+        binding doesn't match an existing stored row for this slot.
+        """
+        sender = _normalize_sender(sender)
+        entity_type = draft.entity_type
+        existing_raw = self._business_draft_raw(sender, entity_type, channel)
+        existing_version = int(existing_raw["idempotency_key"]) if existing_raw else 0
+        if existing_version != expected_version:
+            raise DraftConflictError(
+                f"business draft conflict: entity_type={entity_type!r} "
+                f"expected_version={expected_version} actual_version={existing_version}"
+            )
+        if existing_raw is not None and (
+            existing_raw.get("tenant_id") != draft.tenant_id
+            or existing_raw.get("actor_user_id") != draft.actor_user_id
+            or existing_raw.get("source_channel") != draft.source_channel
+        ):
+            raise DraftIdentityMismatchError(f"business draft binding mismatch: entity_type={entity_type!r}")
+
+        data = serialize_business_draft(draft)
+        data["idempotency_key"] = existing_version + 1
+        self._write_business_draft_slot(sender, entity_type, data, channel)
+        return deserialize_business_draft(data)
+
+    def create_business_draft(self, sender: str, draft: BusinessDraft, *, channel: str = "") -> BusinessDraft:
+        """First save for a fresh draft (from `core.business_draft.create_draft()`).
+
+        A second CREATE for the same entity_type silently replaces the first
+        — matching this store's existing lead_draft/pending_lead_preview
+        precedent (frozen v1: "one slot per draft kind", not last-write-wins
+        being a bug). The one guard: never replace a CONFIRMED draft, which
+        may still be mid-handoff to an ActionContract (Phase 3) — that one
+        case returns DRAFT_CONFLICT instead of silently discarding it.
+        """
+        entity_type = draft.entity_type
+        existing_raw = self._business_draft_raw(sender, entity_type, channel)
+        if existing_raw is not None and existing_raw.get("lifecycle_state") == DraftState.CONFIRMED.value:
+            raise DraftConflictError(
+                f"a CONFIRMED {entity_type} draft is still pending execution -- cannot start a new one"
+            )
+        expected_version = int(existing_raw["idempotency_key"]) if existing_raw else 0
+        return self.save_business_draft(sender, draft, expected_version=expected_version, channel=channel)
+
+    def load_business_draft(
+        self, sender: str, entity_type: str, *,
+        tenant_id: str, actor_user_id: str, source_channel: str, channel: str = "",
+    ) -> Optional[BusinessDraft]:
+        """Returns None only when no draft exists for this slot (or the
+        stored payload is corrupt -- fails closed, logged). Raises
+        DraftIdentityMismatchError -- never returns None -- when a draft
+        exists but its binding doesn't match the caller's identity, per
+        requirement 4: "No draft access by draft_id alone."
+
+        Lazy TTL cleanup: an expired-but-still-mutable draft is flipped to
+        EXPIRED and persisted here, then returned in that state (not None)
+        so the caller can render "your draft expired" rather than seeing
+        this look identical to "never existed". Terminal drafts (CONFIRMED/
+        CANCELLED/FAILED/already EXPIRED) are returned unchanged regardless
+        of TTL -- expiry never resurrects or reprocesses a terminal draft.
+        """
+        sender = _normalize_sender(sender)
+        raw = self._business_draft_raw(sender, entity_type, channel)
+        if raw is None:
+            return None
+        try:
+            draft = deserialize_business_draft(raw)
+        except BusinessDraftError as exc:
+            logger.error(
+                "[SessionStore] malformed business draft sender=%s entity_type=%s: %s", sender, entity_type, exc,
+            )
+            return None
+
+        if (
+            draft.tenant_id != tenant_id
+            or draft.actor_user_id != actor_user_id
+            or draft.source_channel != source_channel
+        ):
+            raise DraftIdentityMismatchError(f"business draft binding mismatch: entity_type={entity_type!r}")
+
+        _TERMINAL = (DraftState.CONFIRMED, DraftState.CANCELLED, DraftState.FAILED, DraftState.EXPIRED)
+        if draft.lifecycle_state not in _TERMINAL and draft.is_expired():
+            expired = draft.expire()
+            self._write_business_draft_slot(sender, entity_type, serialize_business_draft(expired), channel)
+            return expired
+        return draft
+
+    def delete_business_draft(self, sender: str, entity_type: str, *, channel: str = "") -> None:
+        sender = _normalize_sender(sender)
+        session = self.get(sender, channel=channel)
+        if not session:
+            return
+        drafts = dict(session.get("business_drafts") or {})
+        if entity_type not in drafts:
+            return
+        drafts.pop(entity_type, None)
+        session["business_drafts"] = drafts
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def list_business_drafts_for_session(self, sender: str, *, channel: str = "") -> dict[str, BusinessDraft]:
+        """Every draft (any entity_type, any lifecycle state) in this one
+        session row -- no cross-session/cross-sender listing exists or is
+        intended (see the module docstring above)."""
+        sender = _normalize_sender(sender)
+        session = self.get(sender, channel=channel)
+        drafts = session.get("business_drafts") if session else None
+        if not isinstance(drafts, dict):
+            return {}
+        result: dict[str, BusinessDraft] = {}
+        for entity_type, raw in drafts.items():
+            if not isinstance(raw, dict):
+                continue
+            try:
+                result[entity_type] = deserialize_business_draft(raw)
+            except BusinessDraftError as exc:
+                logger.error(
+                    "[SessionStore] malformed business draft in list sender=%s entity_type=%s: %s",
+                    sender, entity_type, exc,
+                )
+        return result
 
 
 # ── Singleton ─────────────────────────────────────

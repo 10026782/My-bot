@@ -54,6 +54,19 @@ class UnsupportedOperationError(BusinessDraftError):
     """The entity/operation pair has no canonical writer or field mapping yet."""
 
 
+class DraftConflictError(BusinessDraftError):
+    """PHASE 2: optimistic-concurrency CAS failure — the stored draft's
+    version no longer matches what the caller loaded (someone else saved
+    in between)."""
+
+
+class DraftIdentityMismatchError(BusinessDraftError):
+    """PHASE 2: a load/save was attempted with a (tenant_id, actor_user_id,
+    source_channel) that doesn't match the persisted draft's own binding.
+    Raised rather than returned as None so a binding violation is never
+    silently indistinguishable from "no draft exists"."""
+
+
 class DraftOperation(str, Enum):
     CREATE = "CREATE"
     UPDATE = "UPDATE"
@@ -538,6 +551,107 @@ def create_draft(
     return draft if not draft.is_complete() else replace(draft, lifecycle_state=DraftState.READY_FOR_REVIEW)
 
 
+# ══════════════════════════════════════════════════
+# PHASE 2 — serialization contract (Sessions persistence)
+# ══════════════════════════════════════════════════
+# Pure data-shape translation only — no I/O, no Sessions/Airtable knowledge.
+# session_store.py owns storage; this owns "what a BusinessDraft looks like
+# as JSON". `contracts` is deliberately never serialized: it's a live code
+# registry (ENTITY_CONTRACTS), not draft data — round-tripping it would
+# leak a stale copy of code-owned schema into storage.
+
+_SNAPSHOT_FIELDS = (
+    "draft_id", "entity_type", "tenant_id", "actor_role", "actor_user_id",
+    "actor_display_name", "actor_domain_id", "actor_external_id", "tool_name", "confirmed_at",
+)
+
+
+def _serialize_snapshot(snapshot: ConfirmedSnapshot) -> dict[str, Any]:
+    data = {name: getattr(snapshot, name) for name in _SNAPSHOT_FIELDS}
+    data["operation"] = snapshot.operation.value
+    data["tool_inputs"] = dict(snapshot.tool_inputs)
+    return data
+
+
+def _deserialize_snapshot(data: Mapping[str, Any]) -> ConfirmedSnapshot:
+    try:
+        return ConfirmedSnapshot(
+            **{name: str(data[name]) if name != "confirmed_at" else float(data[name]) for name in _SNAPSHOT_FIELDS},
+            operation=DraftOperation(data["operation"]),
+            tool_inputs=MappingProxyType(dict(data.get("tool_inputs") or {})),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BusinessDraftError(f"malformed ConfirmedSnapshot payload: {exc}") from exc
+
+
+def serialize_business_draft(draft: BusinessDraft) -> dict[str, Any]:
+    """Deterministic, JSON-safe dict for the exact shape ``deserialize_business_draft``
+    accepts back. See PHASE 2 module note above for what is intentionally left out."""
+    return {
+        "draft_id": draft.draft_id,
+        "entity_type": draft.entity_type,
+        "operation": draft.operation.value,
+        "tenant_id": draft.tenant_id,
+        "actor_role": draft.actor_role,
+        "actor_user_id": draft.actor_user_id,
+        "source_channel": draft.source_channel,
+        "lifecycle_state": draft.lifecycle_state.value,
+        "created_at": draft.created_at,
+        "updated_at": draft.updated_at,
+        "expires_at": draft.expires_at,
+        "fields": dict(draft.fields),
+        "source_context": dict(draft.source_context),
+        "identity": dict(draft.identity),
+        "original_fields": dict(draft.original_fields) if draft.original_fields is not None else None,
+        "actor_display_name": draft.actor_display_name,
+        "actor_domain_id": draft.actor_domain_id,
+        "actor_external_id": draft.actor_external_id,
+        "idempotency_key": draft.idempotency_key,
+        "snapshot": _serialize_snapshot(draft.snapshot) if draft.snapshot is not None else None,
+    }
+
+
+def deserialize_business_draft(
+    data: Mapping[str, Any], *, contracts: Mapping[str, EntityContract] | None = None,
+) -> BusinessDraft:
+    """Inverse of :func:`serialize_business_draft`. Fails closed
+    (``BusinessDraftError``) on any missing/malformed/unknown-enum field —
+    never returns a partially-reconstructed draft."""
+    contracts = contracts or ENTITY_CONTRACTS
+    try:
+        entity_type = str(data["entity_type"])
+        if entity_type not in contracts:
+            raise BusinessDraftError(f"unknown entity_type: {entity_type!r}")
+        snapshot_raw = data.get("snapshot")
+        return BusinessDraft(
+            draft_id=str(data["draft_id"]),
+            entity_type=entity_type,
+            operation=DraftOperation(data["operation"]),
+            tenant_id=str(data["tenant_id"]),
+            actor_role=str(data["actor_role"]),
+            actor_user_id=str(data["actor_user_id"]),
+            source_channel=str(data["source_channel"]),
+            lifecycle_state=DraftState(data["lifecycle_state"]),
+            created_at=float(data["created_at"]),
+            updated_at=float(data["updated_at"]),
+            expires_at=float(data["expires_at"]),
+            fields=dict(data.get("fields") or {}),
+            source_context=dict(data.get("source_context") or {}),
+            identity=dict(data.get("identity") or {}),
+            original_fields=dict(data["original_fields"]) if data.get("original_fields") is not None else None,
+            actor_display_name=str(data.get("actor_display_name") or ""),
+            actor_domain_id=str(data.get("actor_domain_id") or ""),
+            actor_external_id=str(data.get("actor_external_id") or ""),
+            idempotency_key=int(data["idempotency_key"]),
+            contracts=contracts,
+            snapshot=_deserialize_snapshot(snapshot_raw) if snapshot_raw else None,
+        )
+    except BusinessDraftError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BusinessDraftError(f"malformed BusinessDraft payload: {exc}") from exc
+
+
 def demo() -> None:
     draft = create_draft(
         entity_type="deal", operation=DraftOperation.CREATE, tenant_id="t1",
@@ -558,6 +672,17 @@ def demo() -> None:
         raise AssertionError("confirmed draft must not be mutable")
     except BusinessDraftError:
         pass
+
+    roundtripped = deserialize_business_draft(serialize_business_draft(confirmed))
+    assert roundtripped.lifecycle_state is DraftState.CONFIRMED
+    assert roundtripped.snapshot.tool_inputs == snapshot.tool_inputs
+    assert roundtripped.fields == confirmed.fields
+    try:
+        deserialize_business_draft({"entity_type": "deal"})
+        raise AssertionError("malformed payload must fail closed")
+    except BusinessDraftError:
+        pass
+
     print("core/business_draft.py: all demo() assertions passed")
 
 
