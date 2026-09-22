@@ -623,7 +623,45 @@ Covered by new `test_deal_update_routing.py` (18/18) plus a clean re-run of
 `smoke_tests.py`, `core/router/test_router.py` (59/59), and
 `test_a32_enforcement.py` (6/6).
 
-Status: `STATIC_VERIFIED`, PR #1257 open against `origin/main`, not yet
-merged, not deployed, not runtime-verified. A single controlled live Deal
-UPDATE canary against the existing canary Deal record is the required next
-step once merged and deployed — not claimed here.
+**Status: `RUNTIME_VERIFIED`.** PR #1257 merged to `origin/main` (merge
+commit `58bb29c67815b002c18edc5971f6d47b770002de`) and deployed to Render
+production (`dep-dapg7s60tbcc73aq3rd0`, live 2026-09-22T22:42:06Z). A single
+controlled live Deal UPDATE canary was then run through ordinary Telegram
+conversation against the existing canary Deal
+(`recVzDG1i34J086ao`) — message `עדכן את שלב העסקה "בדיקה קנרית שלב 3 מול
+אבי חזן" לשלב במשא ומתן` — and confirmed the full chain on production:
+
+- `[ToolAvailability] tool=crm_update_deal available=true` — the tool is now
+  actually offered to the agent (previously absent).
+- The agent resolved the Deal by name via `airtable_get`, then called
+  `crm_update_deal` directly with `{'record_id': 'recVzDG1i34J086ao', 'stage':
+  'במשא ומתן'}` — the exact canonical value, extracted correctly on the
+  model's own first attempt (the new `stage` `enum` did its job; the
+  alias-normalization safety net wasn't even needed this run).
+  `airtable_update` was never called.
+- ActionContract `7ebc5b45-76e9-4905-8ab8-b7f9ce13ed5e`
+  (fingerprint `8ab2316b2496`) proposed for `tool=crm_update_deal`, approved,
+  and executed: `[TC7A][ExecutionEvidence] result=success verified=True`.
+- Golden Writer (`commercial_crm.update_deal()`) patched
+  `עסקאות (Deals)/recVzDG1i34J086ao` (`keys=['שלב'] ok=True`).
+- Airtable re-read confirmed שלב = `"במשא ומתן"` on the live record.
+- Sessions re-read confirmed `"business_drafts": {}` — the draft slot was
+  created, confirmed, and cleaned within the same turn.
+
+Retry/fingerprint stability and malformed/nonexistent-`record_id`
+fail-closed behavior were not re-exercised in this same live canary (kept to
+exactly one live write, per the runtime task's own instruction) — both were
+already covered statically by `test_deal_update_routing.py` (18/18,
+unaffected by this diff's scope for the latter; the fingerprint computation
+itself is untouched code, already shown deterministic across two earlier
+live pre-fix turns with byte-identical input).
+
+Deal CREATE and Deal UPDATE are now both `RUNTIME_VERIFIED` end-to-end on
+production. Payment Term and Payment UPDATE remain `STATIC_VERIFIED` only
+(Phase 0, above) — no live canary has been run for those two entities.
+
+**Flagged, not fixed here:** the live canary's confirmation text read
+`"הפעולה הושלמה: הפעולה המבוקשת"` (literally "the requested action") instead
+of naming what actually changed — an approval-confirmation message
+formatting gap, unrelated to and untouched by this remediation's scope. Real
+UX issue, tracked for a separate fix.
