@@ -66,7 +66,15 @@ _CONTRACT_REQUIRED_INTENT_TO_TOOL: dict[str, str] = {
     Intent.UPDATE_CONTACT:    "airtable_update",
     Intent.CREATE_LEAD:       "airtable_add",
     Intent.UPDATE_LEAD:       "airtable_update",
-    Intent.UPDATE_DEAL_STAGE: "airtable_update",
+    # DEAL-UPDATE-ROUTING-FIX (22/09/2026): was "airtable_update" — stale
+    # since BusinessDraft Phase 0/3 introduced crm_update_deal as the
+    # canonical Deal-update tool. Left stale, this entry both (a) let the
+    # agent's only *offered* tool for stage updates stay the generic one
+    # (see context.py's _ROLE_TOOLS fix) and (b) would have made PA-01's
+    # Phantom Approval Prompt gate (app.py, _pa01_contract_created_for_
+    # expected_tool()) reject a legitimate crm_update_deal execution as
+    # "no contract for the expected tool" once PA-01 enforcement is non-off.
+    Intent.UPDATE_DEAL_STAGE: "crm_update_deal",
     Intent.CREATE_DEAL:       "crm_create_deal",
     Intent.CREATE_PAYMENT_TERM: "crm_create_payment_term",
     Intent.CREATE_ORGANIZATION: "crm_find_or_create_organization",

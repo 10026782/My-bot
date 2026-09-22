@@ -575,3 +575,55 @@ All 5 items below were resolved by explicit owner instruction on 2026-09-22 (PR 
 **CONTRACT_FROZEN_READY_FOR_IMPLEMENTATION**
 
 All 5 owner decisions above are resolved as of 2026-09-22 (PR #1248). Phase 0 (closing `update_deal()`/`update_payment_term()`/Payment update-boundary gaps) merged to `origin/main` (PR #1249). Phase 1 (`core/business_draft.py` generalizing/wrapping the already-proven core modules — `commercial_completion.py`, `commercial_completion_routing.py`, `core/draft_fields.py`) is **MERGED_STATIC** (PR #1251, merge commit `ff52386b7bda54f0d975083a9111dd813241ad66`). Phase 2 (Sessions-backed persistence — `save_business_draft`/`load_business_draft`/`delete_business_draft`/`list_business_drafts_for_session`/`create_business_draft` on `session_store.py`, plus `serialize_business_draft`/`deserialize_business_draft` on `core/business_draft.py`) is **PHASE2_STATIC_COMPLETE** as of 2026-09-22 — code done, full regression green (see the Phase 2 status paragraph above for exact counts), pending PR merge. Phase 3 (Deal adapter + review/edit UX, consuming this persistence layer) may begin once Phase 2 merges. Phase 2's persisted shape/identity-binding/TTL/concurrency contracts are documented above, not re-litigated here. Any production write canary from Phase 2 onward remains gated on `FEATURE_ATOMIC_CLAIMS` being enabled and runtime-verified in production (Owner Decision #5) — Phase 2's static implementation itself makes no production claim.
+
+---
+
+## Phase 3 Post-Merge Remediation — Deal UPDATE Routing (2026-09-22)
+
+Phase 3 (this document's Phase 3 section above) merged via PR #1254. A runtime
+canary through the live production Telegram bot then verified the Deal
+CREATE leg end-to-end (BusinessDraft CREATE → ConfirmedSnapshot →
+ActionContract → Golden Writer → canonical Deal record → session cleanup —
+all confirmed via live Render logs and a live Airtable read) but found the
+Deal UPDATE leg unreachable from ordinary conversation: three live attempts
+to update the canary Deal (a notes edit, two stage edits) all fell through
+to the generic `airtable_get` → `airtable_update` path instead of
+`crm_update_deal`, so `app.py::_run_deal_business_draft()` was never
+entered.
+
+**Root cause:** `crm_update_deal` was registered and `_MANAGEMENT`-authorized
+in `tool_registry.py` since Phase 0 (above), but `context.py`'s per-role
+`_ROLE_TOOLS` exposure set — the literal `tools=` list sent to the Anthropic
+API — never included it. The agent could never select a tool it was never
+offered. Deal CREATE never hit this gap because it reaches `crm_create_deal`
+through a separate deterministic parser
+(`app.py::_queue_deterministic_create_deal()`, zero agent tool-choice calls),
+not free tool selection. A companion gap: `core/router/risk_router.py`'s
+PA-01 single-policy-source mapping still pointed
+`Intent.UPDATE_DEAL_STAGE` at the pre-Phase-0 `"airtable_update"`, which
+would have made the Phantom Approval Prompt gate reject a legitimate
+`crm_update_deal` execution once PA-01 enforcement is non-off. A separately
+reported regression in the same canary: `DealStage.NEGOTIATION`'s canonical
+value `"במשא ומתן"` was reproducibly extracted as `"משא ומתן"` (leading `ב`
+dropped) and rejected by `update_deal()`'s closed stage validation.
+
+**Fix (PR #1257, narrow, Deal-update-routing-only):** `crm_update_deal`
+exposed to Owner/Partner/Manager in `context.py` (`crm_create_deal`
+deliberately left unexposed — CREATE's deterministic path is unchanged);
+PA-01's `Intent.UPDATE_DEAL_STAGE` mapping corrected to `crm_update_deal`;
+`crm_update_deal`'s tool description strengthened with explicit trigger
+phrasing (mirroring `crm_create_deal`'s own pattern) and an exact `enum` of
+the 4 canonical `DealStage` values; a single narrow, closed alias
+(`"משא ומתן" → "במשא ומתן"`) added to `update_deal()`'s stage validation —
+every other stage value, and the value actually persisted, unchanged. The
+existing `airtable_update` → Deals redirect (the "known, accepted,
+out-of-scope gap" noted in the Phase 3 section above) is untouched and still
+works standalone. No schema change, no new writer, no change to Deal CREATE.
+Covered by new `test_deal_update_routing.py` (18/18) plus a clean re-run of
+`smoke_tests.py`, `core/router/test_router.py` (59/59), and
+`test_a32_enforcement.py` (6/6).
+
+Status: `STATIC_VERIFIED`, PR #1257 open against `origin/main`, not yet
+merged, not deployed, not runtime-verified. A single controlled live Deal
+UPDATE canary against the existing canary Deal record is the required next
+step once merged and deployed — not claimed here.

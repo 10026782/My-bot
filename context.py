@@ -50,6 +50,19 @@ _ROLE_TOOLS: dict[str, set[str]] = {
         "gmail_draft", "gmail_send_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update", "airtable_get_schema",
+        # DEAL-UPDATE-ROUTING-FIX (22/09/2026): crm_update_deal existed as a
+        # registered, _MANAGEMENT-authorized tool (tool_registry.py) since
+        # BusinessDraft Phase 0, but was never added to this exposure set —
+        # the agent could never actually select it, so every conversational
+        # Deal-update request fell through to the generic airtable_update
+        # (which still works, via tools/dispatcher.py's own redirect to the
+        # same commercial_crm.update_deal() writer, but skips the
+        # BusinessDraft draft/confirm layer entirely). crm_create_deal is
+        # deliberately NOT added here — Deal creation already reaches its
+        # canonical tool through a separate deterministic parser
+        # (app.py's _queue_deterministic_create_deal(), agent_calls=0) and
+        # is out of this fix's scope.
+        "crm_update_deal",
     },
     Role.PARTNER: {
         "search_drive", "read_drive_file",
@@ -57,12 +70,14 @@ _ROLE_TOOLS: dict[str, set[str]] = {
         "gmail_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update",
+        "crm_update_deal",
     },
     Role.MANAGER: {
         "search_drive", "read_drive_file",
         "calendar_get_events", "calendar_create_event",
         "gmail_draft", "gmail_read",
         "airtable_get", "airtable_add", "airtable_update",
+        "crm_update_deal",
     },
     Role.EMPLOYEE: {
         "calendar_get_events",
