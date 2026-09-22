@@ -1418,6 +1418,52 @@
         }
       },
       "last_observed_commit": "818b3912c04d4d514eeedbbc5d96e5296b8e92d4"
+    },
+    {
+      "id": "decision.businessdraft_core_envelope",
+      "name": "BusinessDraft core envelope (Phase 1 core generalization)",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "generic, entity-agnostic pre-confirm draft envelope (lifecycle state, SET_FIELD/CLEAR_FIELD/MOVE_FIELD/SWAP_FIELDS edit operations, CREATE/UPDATE confirm-to-snapshot boundary) wrapping the existing commercial completion primitives",
+        "precedence": "carries no business authority of its own -- field semantics, validation, required-field rules, and canonical create/update tool selection remain owned by commercial_completion.py's ENTITY_CONTRACTS and commercial_crm.py's Golden Writers; this module only ever reads/mutates a CommercialCompletionWriter handed to it by the caller, no I/O, no Airtable write, no ActionContract mutation, no Sessions persistence (Phase 2 scope)"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "core/business_draft.py"
+      ],
+      "test_paths": [
+        "test_business_draft_core.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md",
+          "role": "BusinessDraft Phase 1 -- core generalization (Final BusinessDraft Object / Final Lifecycle / Final Edit Contract / Entity Adapter Contract)",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-09-22",
+      "last_verified_commit": "7c53c4dc44434928bcaa99ea7f365025ffc3e59d",
+      "confidence": 0.75,
+      "notes": [
+        "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that introduces core/business_draft.py -- the module had no existing catalog owner. Same classification and reasoning as decision.n18_shared_write_primitives (core/draft_flow.py / core/structured_command.py): REGISTER_SUPPORTING, not a new authority node -- this module is a direct continuation of that same N18 write-interaction-primitive generalization, one layer up (wrapping CommercialCompletionWriter's validation/completion contract rather than a plain dict).",
+        "Authorization trail: docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md is itself an owner-authorized architecture decision (merged via PR #1248, Final Verdict CONTRACT_FROZEN_READY_FOR_IMPLEMENTATION) explicitly commissioning this Phase 1 generalization step; Phase 0 (PR #1249, merged) closed the canonical UPDATE writer gaps this module's UPDATE-operation support depends on.",
+        "Confidence 0.75 (below decision.n18_shared_write_primitives' 0.9): this is the first consumer of the BusinessDraft envelope shape (Deal/Payment Term/Payment CREATE+UPDATE exercised in test_business_draft_core.py), not yet merged to origin/main, and not yet wired into any live caller (Phase 1 is core-only, per the freeze doc's own migration plan -- Phase 3+ migrates real entities/UX onto it)."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "shared_write_interaction_primitive",
+          "authority": false,
+          "purpose": "generic pre-confirm draft envelope reused across future entity CREATE/UPDATE draft flows; no business authority, no I/O",
+          "runtime_consumed": false
+        }
+      },
+      "last_observed_commit": "7c53c4dc44434928bcaa99ea7f365025ffc3e59d"
     }
   ],
   "edges": [
