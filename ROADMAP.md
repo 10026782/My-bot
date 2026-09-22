@@ -49,20 +49,26 @@ and open-Batch Result creation/update/payout tracking. It is internal-only,
 approval-sensitive, and callable only through ActionGateway execution proof.
 The writer reuses the approved Phase 1 contracts and existing Airtable gateway.
 
-STATUS: 🟡 CODE_DONE, STATIC_VERIFIED — merge pending; no deployment, wiring, or runtime claim.
+STATUS: 🟡 STATIC_VERIFIED overall; the Worker Assignment failed-claim recovery
+path is RUNTIME_VERIFIED in Render commit `958ea246045bd119bde50f4602d393978f0cea25`.
 EVIDENCE: focused Phase 1/2 writer, schema, and registry tests (29/29),
-Turn Coordinator and writer-authority audits, compile, and `git diff --check` pass.
+Turn Coordinator and writer-authority audits, compile, and `git diff --check`
+passed before merge. On 22/09/2026, the approved recovery of failed-before-
+dispatch contract `3a5103ca-4cae-43ff-9c43-cac76b3d5afb` completed as ActionContract
+`64f10c3f-06ca-4929-a7a1-2a1c935190ff`; a direct read then found exactly one
+Worker Assignment `recj18WZGVNRj3X18`, matching the approved Contact,
+Organization, `ended` status, and start/end date `2026-09-22`.
 DEFERRED: UI, Telegram, Excel ingestion, batch automation, migration/backfill,
 and a user-facing deterministic route.
 DURABLE UNIQUENESS: recruitment creates require the existing PostgreSQL atomic
 claim before Airtable dispatch, keyed by their natural key. Static verification
-is complete; a real financial batch remains blocked pending deployment evidence
-that the atomic-claim flag and PostgreSQL migration are live and healthy.
+is complete; the Worker Assignment recovery canary is runtime-verified. A real
+financial batch remains out of scope for this verification.
 RECOVERY REMEDIATION: a claim that is `failed` before dispatch may be replaced
 only after an approved recovery contract proves the exact recruitment payload
 and an Airtable absence check; the original claim is retained as superseded.
-`outcome_unknown` remains unrecoverable. STATUS: 🟡 CODE_DONE,
-STATIC_VERIFIED — PR #1250 is not merged, deployed, or runtime-verified.
+`outcome_unknown` remains unrecoverable. RUNTIME EVIDENCE covers only the
+failed-before-dispatch recovery plus Airtable absence proof.
 
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 
