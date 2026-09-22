@@ -34,6 +34,19 @@ import app  # noqa: E402
 from core.action_gateway import action_gateway as _real_gw  # noqa: E402
 from core.router.router import parse_deterministic_create_deal  # noqa: E402
 from identity import Identity, Role  # noqa: E402
+from tools import dispatcher as _dispatcher_module  # noqa: E402
+
+# BUSINESSDRAFT PHASE 3 (Deal Golden Path): crm_create_deal proposals now
+# canonicalize Owner through _resolve_authenticated_crm_owner() at PROPOSAL
+# time (app.py's _run_deal_business_draft()), not only at dispatch time as
+# before -- so every deterministic-route call in this file needs the same
+# Profile-resolution mock test_phase0_commercial_crm_update_authority.py /
+# test_bug_crm_bypass_create_deal_deterministic_route.py already use for
+# dispatch-time owner resolution.
+_resolve_owner = patch.object(
+    _dispatcher_module._owner_resolution, "resolve_profile_record_id", return_value="recPROFILE0000001",
+)
+_resolve_owner.start()
 
 passed = failed = 0
 
@@ -62,6 +75,7 @@ user_id1 = "req_deal_dup_1"
 mock_bot1 = MagicMock()  # no side_effect -- owner notification "send" succeeds
 
 with patch.object(app, "bot", mock_bot1), \
+     patch.object(app, "resolve_identity", return_value=_owner_identity(user_id1)), \
      patch.dict(os.environ, {"OWNER_TELEGRAM_ID": user_id1}, clear=False), \
      patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
     out_meta1: dict = {}
@@ -69,6 +83,10 @@ with patch.object(app, "bot", mock_bot1), \
         "בדיקת-קנרית 11", "import", user_id1, "telegram",
         "צור עסקה בשם בדיקת-קנרית 11 בתחום Import",
         _owner_identity(user_id1), out_meta1,
+        # BusinessDraft Phase 3: ENTITY_CONTRACTS["deal"] requires a
+        # counterparty -- this test isn't about that requirement, so supply
+        # one directly rather than changing what's under test.
+        counterparty_contact_id="recCONTACTDUPREPLY1",
     )
 
 chk("the interactive owner-notification send was attempted exactly once",
@@ -96,12 +114,13 @@ owner_id2 = "owner_deal_dup_2"
 mock_bot2 = MagicMock()
 
 with patch.object(app, "bot", mock_bot2), \
+     patch.object(app, "resolve_identity", return_value=_owner_identity(user_id2)), \
      patch.dict(os.environ, {"OWNER_TELEGRAM_ID": owner_id2}, clear=False), \
      patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
     reply2 = app._queue_deterministic_create_deal(
         "בדיקת-קנרית 12", "import", user_id2, "telegram",
         "צור עסקה בשם בדיקת-קנרית 12 בתחום Import",
-        _owner_identity(user_id2),
+        _owner_identity(user_id2), counterparty_contact_id="recCONTACTDUPREPLY2",
     )
 
 chk("owner notification was still sent to the (different) owner chat",
@@ -123,12 +142,13 @@ _deal_parse3 = parse_deterministic_create_deal(
 assert _deal_parse3.certain
 
 with patch.object(app, "bot", mock_bot3), \
+     patch.object(app, "resolve_identity", return_value=_owner_identity(user_id3)), \
      patch.dict(os.environ, {"OWNER_TELEGRAM_ID": user_id3}, clear=False), \
      patch("feature_flags.is_enabled", side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY"):
     reply3 = app._queue_deterministic_create_deal(
         _deal_parse3.name, _deal_parse3.domain, user_id3, "telegram",
         "צור עסקה בשם בדיקת-קנרית 11 בתחום Import",
-        _owner_identity(user_id3),
+        _owner_identity(user_id3), counterparty_contact_id="recCONTACTDUPREPLY3",
     )
 
 chk("real canary text, real parser output, owner-as-requester -> the "
@@ -143,5 +163,6 @@ chk("exactly one message reached Telegram for this turn (the interactive "
 print()
 print("=" * 50)
 print(f"BUG-CRM-BYPASS-DEAL-DUPLICATE-REPLY tests: {passed} passed, {failed} failed")
+_resolve_owner.stop()
 if failed:
     raise SystemExit(1)

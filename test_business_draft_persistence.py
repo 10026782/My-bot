@@ -253,6 +253,43 @@ chk("replace overwrites fields", second.fields.get("name") == "Second Deal")
 only_one = store9.list_business_drafts_for_session("s:replace", channel=CHANNEL)
 chk("still exactly one draft for that entity_type", list(only_one.keys()) == ["deal"])
 
+print("\n[PHASE 3] CAS version reflects the STORED version, not the in-memory edit-bump count")
+store10 = PersistentSessionStore(maxsize=10)
+draft10 = _deal_draft("s:cas")
+# Multiple in-memory edits BEFORE any persistence call -- each set_field()
+# bumps idempotency_key locally; storage hasn't been touched yet. This is
+# exactly the "build entirely in memory first, persist once" sequencing
+# app.py's _run_deal_business_draft() uses.
+draft10 = draft10.set_field("name", "Acme")
+draft10 = draft10.set_field("domain", "import")
+draft10 = draft10.set_field("owner", "recOWNER0000001")
+draft10 = draft10.set_field("counterparty_contact", "recCONTACT00001")
+chk("in-memory edits bumped idempotency_key well past 1", draft10.idempotency_key > 1)
+
+persisted10 = store10.create_business_draft("s:cas", draft10, channel=CHANNEL)
+chk(
+    "first persist stamps version 1 regardless of how many in-memory edits preceded it",
+    persisted10.idempotency_key == 1,
+)
+
+confirmed10, snapshot10 = persisted10.confirm()
+stored_confirmed10 = store10.save_business_draft(
+    "s:cas", confirmed10, expected_version=persisted10.idempotency_key, channel=CHANNEL,
+)
+chk("READY -> CONFIRMED persist increments exactly one stored version (1 -> 2)", stored_confirmed10.idempotency_key == 2)
+
+reload10 = store10.load_business_draft(
+    "s:cas", "deal", tenant_id=TENANT, actor_user_id="recOWNER0000001", source_channel=CHANNEL, channel=CHANNEL,
+)
+chk("an independent reload agrees with the returned stored object (both at version 2)", reload10.idempotency_key == 2)
+chk(
+    "ownership context built from the returned stored_confirmed matches the reload "
+    "(the bug this regression catches: building it from the pre-save object would "
+    "record version 1 while storage/reload are already at 2)",
+    reload10.idempotency_key == stored_confirmed10.idempotency_key
+    and reload10.snapshot.confirmed_at == stored_confirmed10.snapshot.confirmed_at,
+)
+
 print(f"\n{'=' * 40}")
 print(f"BusinessDraft Persistence Tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

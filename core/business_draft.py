@@ -148,6 +148,138 @@ _UPDATE_FIELD_MAP: dict[str, dict[str, str]] = {
 _UPDATE_LINK_FIELDS = frozenset({"counterparty_contact", "counterparty_organization"})
 
 
+# ══════════════════════════════════════════════════
+# PHASE 3 — Deal primitive-kwarg <-> completion-field-name translation.
+# Pure, no I/O. Used by app.py's single Deal seam inside
+# _queue_approval_detailed_impl() -- see the Phase 3 plan and
+# docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md.
+# ══════════════════════════════════════════════════
+
+# CREATE accepts one field UPDATE deliberately excludes (origin_lead_id is
+# immutable after creation, per commercial_crm.py's own comment) -- derived
+# from _UPDATE_FIELD_MAP, not hand-duplicated, so the 18 shared fields can't
+# drift apart between the two maps.
+_CREATE_FIELD_MAP: dict[str, dict[str, str]] = {
+    "deal": {**_UPDATE_FIELD_MAP["deal"], "origin_lead": "origin_lead_id"},
+}
+
+# Primitive kwargs each Golden Writer legally accepts but that have no
+# ENTITY_CONTRACTS["deal"] field-contract equivalent -- verified
+# independently against commercial_crm.create_deal()'s/update_deal()'s
+# actual signatures (not assumed equal just because they happen to match).
+# These pass straight through the BusinessDraft seam unvalidated, exactly as
+# they do today.
+_CREATE_PASSTHROUGH: dict[str, frozenset[str]] = {
+    "deal": frozenset({"venture_id", "contact_ids", "priority", "risk_level"}),
+}
+_UPDATE_PASSTHROUGH: dict[str, frozenset[str]] = {
+    "deal": frozenset({"venture_id", "contact_ids", "priority", "risk_level"}),
+}
+
+# The Deal "owner" completion field is handled separately by the caller
+# (canonicalized through the existing authenticated-owner resolver before
+# BusinessDraft field validation -- tools/dispatcher.py's
+# _resolve_authenticated_crm_owner()), never through these generic maps.
+_OWNER_PRIMITIVE_KEY: dict[str, str] = {"deal": "owner_id"}
+
+
+def _invert_field_map(mapping: Mapping[str, str]) -> dict[str, str]:
+    return {primitive: field_name for field_name, primitive in mapping.items()}
+
+
+def _split_primitive_inputs(
+    field_map: Mapping[str, str],
+    passthrough_keys: frozenset[str],
+    owner_key: str | None,
+    primitive_inputs: Mapping[str, Any],
+) -> tuple[dict[str, Any], frozenset[str], dict[str, Any]]:
+    """Shared splitter for CREATE/UPDATE. Returns ``(mapped_fields,
+    unrecognized_keys, passthrough_kwargs)`` -- ``passthrough_kwargs`` is a
+    dict of the RAW primitive key/value pairs (never re-keyed into
+    completion field_name space), so a caller merging it back never risks
+    the namespace collision that comparing a primitive key against a
+    completion-field-name-keyed dict would create (e.g. primitive
+    ``"owner_id"`` vs. completion ``"owner"`` never legitimately share a
+    key, but some fields, like ``"name"``/``"domain"``/``"stage"``, happen
+    to be spelled identically in both spaces -- returning the primitive
+    dict directly sidesteps that ambiguity entirely).
+    """
+    reverse = _invert_field_map(field_map)
+    mapped: dict[str, Any] = {}
+    unrecognized: set[str] = set()
+    passthrough_kwargs: dict[str, Any] = {}
+    for key, value in primitive_inputs.items():
+        if key == owner_key:
+            continue
+        if key in reverse:
+            mapped[reverse[key]] = value
+        elif key in passthrough_keys:
+            passthrough_kwargs[key] = value
+        else:
+            unrecognized.add(key)
+    return mapped, frozenset(unrecognized), passthrough_kwargs
+
+
+def fields_from_primitive_create(
+    entity_type: str, primitive_inputs: Mapping[str, Any]
+) -> tuple[dict[str, Any], frozenset[str], dict[str, Any]]:
+    """Primitive kwarg space -> completion field_name space, for CREATE.
+
+    Returns ``(mapped_fields, unrecognized_keys, passthrough_kwargs)``.
+    ``unrecognized_keys`` is never silently dropped by this function -- the
+    caller must fail closed on a non-empty result (e.g. the confirmed
+    ``tools/schemas.py`` "amount" drift for ``crm_create_deal``, which
+    ``commercial_crm.create_deal()`` has never accepted). The owner
+    primitive key is excluded from all three outputs -- it is resolved and
+    inserted by the caller separately.
+    """
+    return _split_primitive_inputs(
+        _CREATE_FIELD_MAP.get(entity_type, {}),
+        _CREATE_PASSTHROUGH.get(entity_type, frozenset()),
+        _OWNER_PRIMITIVE_KEY.get(entity_type),
+        primitive_inputs,
+    )
+
+
+def fields_from_primitive_update(
+    entity_type: str, primitive_inputs: Mapping[str, Any]
+) -> tuple[dict[str, Any], frozenset[str], dict[str, Any]]:
+    """Primitive kwarg space -> completion field_name space, for UPDATE.
+
+    Same contract as :func:`fields_from_primitive_create`. ``record_id`` is
+    always treated as passthrough (it is not a completion field -- see
+    :meth:`BusinessDraft.confirm`'s UPDATE branch, which never produces it).
+    """
+    return _split_primitive_inputs(
+        _UPDATE_FIELD_MAP.get(entity_type, {}),
+        _UPDATE_PASSTHROUGH.get(entity_type, frozenset()) | {"record_id"},
+        _OWNER_PRIMITIVE_KEY.get(entity_type),
+        primitive_inputs,
+    )
+
+
+def fields_from_airtable_record(entity_type: str, raw_fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Airtable ``airtable_field``-keyed live record -> completion
+    ``field_name`` space, matching what ``BusinessDraft.fields``/
+    ``original_fields`` expect. Every ``InputType.LINK`` field is unwrapped
+    via ``_link_id()`` (Airtable's ``[record_id]`` list shape -> a bare
+    scalar id) generically, by ``input_type`` -- never via an output-side-
+    only allowlist like ``_UPDATE_LINK_FIELDS``, which governs a narrower,
+    differently-scoped concern (which fields ``build_update_payload()``
+    re-wraps on the way *out*).
+    """
+    contract = ENTITY_CONTRACTS[entity_type]
+    result: dict[str, Any] = {}
+    for fc in contract.fields:
+        if fc.airtable_field not in raw_fields:
+            continue
+        value = raw_fields[fc.airtable_field]
+        if fc.input_type == InputType.LINK:
+            value = _link_id(value)
+        result[fc.field_name] = value
+    return result
+
+
 @runtime_checkable
 class EntityAdapter(Protocol):
     """Smallest stable seam between BusinessDraft and an entity's own field
