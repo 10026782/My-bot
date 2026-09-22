@@ -46,6 +46,7 @@ STATUS_EXECUTING = "executing"  # claim acquired, execution in progress
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_OUTCOME_UNKNOWN = "outcome_unknown"
+STATUS_SUPERSEDED = "superseded"
 
 ExecutionOutcome = Literal["completed", "failed", "outcome_unknown"]
 ClaimResult = Literal[
@@ -143,6 +144,7 @@ def claim_contract_execution(
     contract_id: str,
     claimant_id: str,
     idempotency_key: Optional[str] = None,
+    recovery_of_contract_id: Optional[str] = None,
 ) -> ClaimAcquisitionResult:
     """
     Attempt to claim ownership of a contract for execution.
@@ -296,6 +298,39 @@ def claim_contract_execution(
 
             if idempotency_conflict is not None:
                 existing_contract_id, existing_idem_key = idempotency_conflict
+                if recovery_of_contract_id and existing_contract_id == recovery_of_contract_id:
+                    cur.execute(
+                        "SELECT status FROM action_execution_claims WHERE contract_id = %s FOR UPDATE;",
+                        (existing_contract_id,),
+                    )
+                    row = cur.fetchone()
+                    if row and row[0] == STATUS_FAILED:
+                        cur.execute(
+                            """
+                            UPDATE action_execution_claims
+                            SET status = %s, original_idempotency_key = idempotency_key,
+                                superseded_by_contract_id = %s, idempotency_key = %s,
+                                completed_at = %s
+                            WHERE contract_id = %s AND status = %s AND idempotency_key = %s;
+                            """,
+                            (STATUS_SUPERSEDED, contract_id, f"superseded:{existing_contract_id}",
+                             time.time(), existing_contract_id, STATUS_FAILED, idempotency_key),
+                        )
+                        if cur.rowcount == 1:
+                            cur.execute(
+                                """
+                                INSERT INTO action_execution_claims
+                                (contract_id, claimant_id, execution_id, status, claimed_at, idempotency_key)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                                RETURNING contract_id;
+                                """,
+                                (contract_id, claimant_id, execution_id, STATUS_EXECUTING, claimed_at, idempotency_key),
+                            )
+                            if cur.fetchone() is not None:
+                                conn.commit()
+                                return ClaimAcquisitionResult("acquired", AtomicExecutionClaim(
+                                    contract_id, claimant_id, execution_id, claimed_at, idempotency_key))
+                    conn.rollback()
                 # idempotency_key exists but under a DIFFERENT contract — identity/session mismatch (fail-closed)
                 logger.error(
                     f"IDEMPOTENCY CONFLICT (fail-closed): "

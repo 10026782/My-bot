@@ -25,6 +25,7 @@ def execute_with_atomic_claim(
     executor_fn,
     idempotency_key: Optional[str] = None,
     require_claim: bool = False,
+    recovery_of_contract_id: Optional[str] = None,
 ) -> tuple[bool, Any, Optional[str]]:
     """
     Execute a tool with atomic claim coordination.
@@ -74,6 +75,7 @@ def execute_with_atomic_claim(
         contract_id=contract_id,
         claimant_id=canonical_user_id,
         idempotency_key=idempotency_key,
+        recovery_of_contract_id=recovery_of_contract_id,
     )
 
     if result.is_disabled():
