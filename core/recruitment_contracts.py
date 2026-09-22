@@ -275,8 +275,6 @@ def validate_result(candidate: WorkerMonthlyResultWrite,
         raise RecruitmentValidationError("only one result is allowed per batch and assignment")
     if candidate.assignment_id != assignment.record_id or candidate.batch_id != batch.record_id:
         raise RecruitmentValidationError("result links do not match supplied assignment and batch")
-    if assignment.organization_id != batch.organization_id:
-        raise RecruitmentValidationError("assignment and batch organizations must match")
     month_end = date(batch.month.year, batch.month.month, monthrange(batch.month.year, batch.month.month)[1])
     if assignment.start_date > month_end or (assignment.end_date and assignment.end_date < batch.month):
         raise RecruitmentValidationError("result month is outside the assignment period")

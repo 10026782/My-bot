@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 22/09/2026
+עודכן: 23/09/2026
 
 ## BUG-CHARGE-RESOLVER-FORMULA-USES-RECORD-ID — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1243 follow-up)
 
@@ -80,6 +80,19 @@ only after an approved recovery contract proves the exact recruitment payload
 and an Airtable absence check; the original claim is retained as superseded.
 `outcome_unknown` remains unrecoverable. RUNTIME EVIDENCE covers only the
 failed-before-dispatch recovery plus Airtable absence proof.
+
+### Organization-role semantics correction — CODE_DONE, STATIC_VERIFIED — 23/09/2026 (PR #1259)
+
+Worker Assignment Organization and Monthly Calculation Batch Organization have
+distinct meanings: the former is the worker's employer relationship (Poseidon),
+while the latter is the direct work/payment provider (for example, עמי מערכות).
+`validate_result` no longer requires those organizations to be equal. It still
+requires valid Assignment/Batch links, Assignment coverage of the Batch month,
+and unique Batch + Assignment Results. Incoming Payment Counterparty Organization
+must still equal Batch Organization. Focused contract/writer tests (34 passed),
+compile, dispatcher-bypass audit (`new=0`), and diff check passed on the PR.
+No schema or other writer-path change is included. This correction is not yet
+merged, deployed, or runtime-verified; do not resume reconciliation automatically.
 
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 
