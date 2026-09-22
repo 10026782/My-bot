@@ -130,10 +130,16 @@ _UPDATE_FIELD_MAP: dict[str, dict[str, str]] = {
         "estimated_value_range": "estimated_value_range",
         "estimated_value_notes": "estimated_value_notes",
     },
+    # PHASE 4 audit: update_payment_term() also accepts "trigger_delay_days"
+    # (commercial_crm.py's _PAYMENT_TERM_UPDATE_ALLOWED, and
+    # tools/schemas.py's crm_update_payment_term input_schema exposes it) --
+    # this was missing here even though it's a live, agent-reachable UPDATE
+    # field. Added below rather than left to fail closed as "unrecognized".
     "payment_term": {
         "name": "name", "calculation_type": "calc_type", "fixed_amount": "fixed_amount",
         "rate_pct": "rate_pct", "calculation_basis": "calc_basis",
         "trigger_type": "trigger_type", "trigger_date": "trigger_date",
+        "trigger_delay_days": "trigger_delay_days",
         "cadence": "cadence", "vat_rule": "vat_rule", "start_date": "start_date",
         "end_date": "end_date", "notes": "notes",
     },
@@ -159,6 +165,24 @@ _UPDATE_LINK_FIELDS = frozenset({"counterparty_contact", "counterparty_organizat
 # immutable after creation, per commercial_crm.py's own comment) -- derived
 # from _UPDATE_FIELD_MAP, not hand-duplicated, so the 18 shared fields can't
 # drift apart between the two maps.
+#
+# PHASE 4 -- neither "payment_term" nor "payment" has a CREATE entry here.
+# Both were audited and found blocked by pre-existing, Phase-4-independent
+# drift (see the Phase 4 report for the full trace):
+#   - "payment_term": ENTITY_CONTRACTS["payment_term"]'s "direction" and
+#     "currency" fields are required=ALWAYS, but crm_create_payment_term's
+#     tool schema has no way to supply either one, and create_payment_term()
+#     never reads/persists PaymentTermFields.DIRECTION or ...CURRENCY at
+#     all -- missing_fields() would therefore never clear, so a CREATE
+#     draft built from this seam could never reach CONFIRMED. Wiring CREATE
+#     through BusinessDraft here would regress an already-working
+#     dispatcher path (dispatch_tool()'s existing "crm_create_payment_term"
+#     case calls create_payment_term() directly today, with no such block)
+#     into one that always fails closed -- not attempted.
+#   - "payment": ENTITY_CONTRACTS["payment"]/MUTATION_TOOLS["payment"]
+#     already canonically bind CREATE to crm_create_charge_payment (a
+#     different, incompatible writer shape) -- crm_create_payment is not
+#     fronted by this seam.
 _CREATE_FIELD_MAP: dict[str, dict[str, str]] = {
     "deal": {**_UPDATE_FIELD_MAP["deal"], "origin_lead": "origin_lead_id"},
 }
