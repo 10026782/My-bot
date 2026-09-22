@@ -997,9 +997,12 @@
         ".github/workflows/deploy-oracle.yml",
         "scripts/oracle/backup_postgres.sh",
         "scripts/oracle/restore_postgres.sh",
-        "scripts/oracle/healthcheck_alert.sh"
+        "scripts/oracle/healthcheck_alert.sh",
+        "scripts/render_env_verify.py"
       ],
-      "test_paths": [],
+      "test_paths": [
+        "test_render_env_verify.py"
+      ],
       "canonical_docs": [
         {
           "path": "docs/operations/ORACLE_MIGRATION_M0.md",
@@ -1015,6 +1018,7 @@
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #1095: all 8 files were new sources with no matching policy_registry.json entry (block_reason NO_POLICY_MATCH), classified REVIEW_REQUIRED/'new source with unknown role' by classify_new_sources() purely because none of Dockerfile/.yml/.sh/.example extensions match its .py/.md/image buckets.",
         "OWNER DECISION: the owner explicitly approved these 8 files as intentional, canonical Oracle infrastructure/deployment sources belonging to the Oracle migration infrastructure boundary introduced by M0 -- not accidental architecture drift. Registered directly into this node's code_paths (exact literal paths, no glob) rather than as a policy_registry.json entry: this resolves the current 8 named files without granting reusable auto-approval to any future file merely for living under scripts/oracle/ or matching *.oracle.* -- a genuinely new 9th file in this area still falls through to OWNER_DECISION_REQUIRED, unchanged, per the owner's explicit instruction not to introduce wildcard approval for arbitrary future infrastructure files.",
+        "OWNER DECISION (2026-09-22): scripts/render_env_verify.py and test_render_env_verify.py are exact-file, read-only Render credential-verification artifacts. The script permits only an allowlisted redacted summary and never prints raw /env-vars responses or secret values; it has no application import path, mutation capability, or business authority. They are registered exactly here, not by a wildcard policy, so any future Render utility remains REVIEW_REQUIRED.",
         "Role sub-classification within this single boundary (owner-specified, 2026-08-28): container/runtime definition (Dockerfile, docker-compose.oracle.yml); network/TLS infrastructure (Caddyfile.oracle); environment contract/template (.env.oracle.example -- explicitly not a secrets file, no real credentials permitted); deployment automation (.github/workflows/deploy-oracle.yml -- intentionally manual/gated until Oracle runtime exists); operations/disaster recovery (scripts/oracle/backup_postgres.sh, restore_postgres.sh, healthcheck_alert.sh).",
         "No production Oracle deployment exists as of this registration -- no VM provisioned, no DNS/domain pointed, no secret populated beyond local test dummies. This node makes no production-deployment-state claim; see docs/operations/ORACLE_MIGRATION_M0.md for what was and wasn't verified (live Render API evidence for the Render side; local Docker build/run/restart/backup-restore verification for these files, explicitly NOT ARM64 runtime-verified -- this sandbox has no QEMU/binfmt emulation)."
       ],
