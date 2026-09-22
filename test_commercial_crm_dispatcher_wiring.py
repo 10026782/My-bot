@@ -178,5 +178,10 @@ for name, inputs in (
 print(f"\n{'='*40}")
 print(f"commercial_crm dispatcher wiring: {passed} passed, {failed} failed")
 
+# The script's dispatcher mocks are needed only for checks above; pytest may
+# collect further modules in the same process, so release them explicitly.
+_no_execution_proof_gate.stop()
+_no_emergency_stop.stop()
+
 if __name__ == "__main__":
     exit(0 if failed == 0 else 1)

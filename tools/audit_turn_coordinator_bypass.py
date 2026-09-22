@@ -181,6 +181,11 @@ _TC_ROUTE_REGISTRY: dict[str, tuple[str, str]] = {
         "keep it hidden from Agent tool choice until a dedicated deterministic "
         "route can collect the existing Deal, Term, and Lead IDs.",
     ),
+    "recruitment_write": (
+        "EXEMPT",
+        "owner-approved Phase 2 backend writer is deliberately internal-only; no UI, Telegram, "
+        "or model route exists until a separately approved deterministic recruitment flow is added.",
+    ),
 }
 
 # (file, function_name) -> documented reason a custom fingerprint_payload is
@@ -210,6 +215,10 @@ _FINGERPRINT_DIVERGENCE_REGISTRY: dict[tuple[str, str], str] = {
 # flags, ...) -- must NEVER be added here, since airtable_update writing
 # those directly is the intended, allowed behavior.
 _PROTECTED_BUSINESS_TABLE_UPDATE_REGISTRY: dict[str, str] = {
+    "_block_generic_recruitment_write": (
+        "Worker Assignments/Monthly Calculation Batches/Worker Monthly Results: "
+        "generic updates are blocked; recruitment_write is the sole canonical writer."
+    ),
     "enforce_leads_write_gate": (
         "Leads: blocked outright via enforce_leads_write_gate() -- no "
         "canonical update writer exists or is needed; Lead edits happen "

@@ -19,7 +19,7 @@ from .airtable_tools    import airtable_get, airtable_add, airtable_update, airt
 from airtable_schema import (
     ChargeFields, DealStage, OrganizationFields, PaymentTermTrigger,
     PaymentTermCadence, VATRule, Tables, DealFields, PaymentTermFields,
-    PaymentFields, TaskFields,
+    PaymentFields, TableIds, TaskFields,
 )
 from .airtable_read_adapter import AirtableReadError, list_records
 from .airtable_security import TenantScopeViolation, LeadsDirectWriteBlocked, audit_log_airtable, enforce_tenant_scope, enforce_leads_write_gate
@@ -65,6 +65,20 @@ _ALIAS_MAP: dict[str, str] = {
     "Deals":    "עסקאות (Deals)",
     "Expenses": "הוצאות (Expenses)",
 }
+
+_RECRUITMENT_WRITER_ONLY_TABLES = frozenset({
+    Tables.WORKER_ASSIGNMENTS, Tables.MONTHLY_CALCULATION_BATCHES,
+    Tables.WORKER_MONTHLY_RESULTS, TableIds.WORKER_ASSIGNMENTS,
+    TableIds.MONTHLY_CALCULATION_BATCHES, TableIds.WORKER_MONTHLY_RESULTS,
+})
+
+
+def _block_generic_recruitment_write(tool: str, table: str, identity) -> dict | None:
+    if table not in _RECRUITMENT_WRITER_ONLY_TABLES:
+        return None
+    message = "recruitment tables may only be mutated through recruitment_write"
+    audit_log_airtable(tool, identity, {"table": table}, f"blocked: {message}")
+    return _tool_result(ok=False, tool=tool, user_message=f"❌ {message}")
 
 
 # ══════════════════════════════════════════════════
@@ -619,6 +633,9 @@ def dispatch_tool(
                 table  = inputs["table"]
                 fields = dict(inputs["fields"])
 
+                if blocked := _block_generic_recruitment_write("airtable_add", table, identity):
+                    return blocked
+
                 # BUG-B FIX: חסום כתיבה ישירה ל-Leads מה-Agent.
                 # Lead creation מותרת רק דרך capture_inbound_lead().
                 # BUG-091: source נגזר אך ורק מ-trusted_source (פרמטר Python
@@ -834,6 +851,9 @@ def dispatch_tool(
                 table     = inputs["table"]
                 record_id = inputs["record_id"]
                 fields    = dict(inputs["fields"])
+
+                if blocked := _block_generic_recruitment_write("airtable_update", table, identity):
+                    return blocked
 
                 # BUG-B FIX: חסום עדכון ישיר ל-Leads מה-Agent
                 # BUG-091: ראה הערה מקבילה ב-airtable_add — trusted_source
@@ -1339,6 +1359,22 @@ def dispatch_tool(
                     **{key: value for key, value in inputs.items() if key in _allowed},
                 )
                 audit_log_airtable(name, identity, inputs, result)
+                return result
+
+            case "recruitment_write":
+                try:
+                    enforce_tenant_scope(name, identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable(name, identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool=name, user_message=str(e))
+                from recruitment_crm import execute_recruitment_write
+                result = execute_recruitment_write(
+                    operation=inputs["operation"],
+                    payload=inputs.get("payload", {}),
+                    actor_role=identity.role,
+                    source=trusted_source or "recruitment",
+                )
+                audit_log_airtable("recruitment_write", identity, inputs, result)
                 return result
 
             # ── PR-0C — ActionGateway adapters (former event_bus custom actions) ──

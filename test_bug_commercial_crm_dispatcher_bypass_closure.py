@@ -365,6 +365,10 @@ print()
 print("=" * 50)
 print("BUG-CRM-BYPASS (Commercial CRM dispatcher bypass closure) tests: PASS")
 
+# This module runs assertion-style checks at import.  Do not leak its global
+# emergency-stop patch into a later pytest module (including recruitment tests).
+_no_emergency_stop.stop()
+
 
 def test_crm_dispatcher_bypass_closure_completed() -> None:
     """Expose the module-level security assertions to pytest collection."""

@@ -36,6 +36,8 @@ EXPECTED_APPROVAL_TOOLS = frozenset({
     # Phase 4B-2 wiring — TMA write-through-approval adapter
     "tma_write",
     "external_execution.submit",
+    # Recruitment worker-data-model Phase 2 internal mutation boundary.
+    "recruitment_write",
 })
 
 

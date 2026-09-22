@@ -23,6 +23,7 @@ from core.recruitment_contracts import (
     WorkerAssignmentWrite,
     WorkerMonthlyResultRead,
     WorkerMonthlyResultWrite,
+    recruitment_create_natural_key,
     validate_assignment,
     validate_batch,
     validate_closed_update,
@@ -57,6 +58,31 @@ def test_write_contracts_never_write_derived_retained_amount():
     write = WorkerMonthlyResultWrite("WMR", "batch1", "wa1", Decimal("100"), Decimal("40"))
     assert write.poseidon_retained == Decimal("60")
     assert RF.POSEIDON_RETAINED not in write.to_airtable_fields()
+
+
+@pytest.mark.parametrize(("action", "expected"), [
+    ({"operation": "create_assignment", "payload": {
+        "contact_id": "contact1", "organization_id": "org1", "start_date": "2026-08-01",
+    }}, "WA:contact1:org1:2026-08-01"),
+    ({"operation": "create_canonical_batch", "payload": {
+        "organization_id": "org1", "month": "2026-08-01",
+    }}, "MCB:org1:2026-08"),
+    ({"operation": "create_adjustment_batch", "payload": {
+        "original_closed_batch_id": "batch1", "adjustment_sequence": "2",
+    }}, "MCB-ADJ:batch1:2"),
+    ({"operation": "create_result", "payload": {
+        "batch_id": "batch1", "assignment_id": "assignment1",
+    }}, "WMR:batch1:assignment1"),
+])
+def test_recruitment_create_natural_keys_are_deterministic(action, expected):
+    assert recruitment_create_natural_key(action) == expected
+
+
+def test_adjustment_natural_key_requires_a_positive_sequence():
+    with pytest.raises(RecruitmentValidationError, match="adjustment_sequence"):
+        recruitment_create_natural_key({"operation": "create_adjustment_batch", "payload": {
+            "original_closed_batch_id": "batch1",
+        }})
 
 
 def test_assignment_rejects_duplicate_active_contact_and_organization():
