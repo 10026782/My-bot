@@ -1301,6 +1301,7 @@ def _queue_deterministic_create_task(
 def _queue_deterministic_create_deal(
     name: str, domain: str, chat_id: str, channel: str, user_text: str,
     identity, out_meta: dict | None = None, origin_lead_id: str = "",
+    counterparty_contact_id: str = "", counterparty_organization_id: str = "",
 ) -> str:
     """מתזמן בקשת יצירת עסקה מלאה בלי להפעיל את הסוכן.
 
@@ -1326,6 +1327,17 @@ def _queue_deterministic_create_deal(
     tools/audit_turn_coordinator_bypass.py's
     CRM_CREATE_DEAL_SINGLE_PAYLOAD_BUILDER guard enforces there is exactly
     one such call site in this file.
+
+    counterparty_contact_id / counterparty_organization_id (BUSINESSDRAFT
+    PHASE 3, 22/09/2026): optional, default "" — the free-text trigger this
+    function serves never extracts a counterparty, so this preserves exact
+    prior behavior when neither is supplied. Added because
+    ENTITY_CONTRACTS["deal"] (and, as of Phase 3, the BusinessDraft seam
+    every crm_create_deal proposal now passes through) requires one of the
+    two — a caller that has already resolved a counterparty (there is none
+    today; this is a currently-unused extension point, matching
+    origin_lead_id's own precedent above) can supply it here instead of
+    building a second payload dict.
 
     BUG-CRM-BYPASS-OWNER-PRESENCE (live production regression, 01/09/2026):
     owner_id was originally left out of the payload entirely, on the
@@ -1368,6 +1380,10 @@ def _queue_deterministic_create_deal(
     deal_inputs = {"name": name, "domain": domain, "owner_id": owner_self_reference}
     if origin_lead_id:
         deal_inputs["origin_lead_id"] = origin_lead_id
+    if counterparty_contact_id:
+        deal_inputs["counterparty_contact_id"] = counterparty_contact_id
+    if counterparty_organization_id:
+        deal_inputs["counterparty_organization_id"] = counterparty_organization_id
 
     outcome = _queue_approval_detailed(
         "crm_create_deal",
@@ -1948,17 +1964,312 @@ def _approval_callback_data(
     return payload
 
 
+class _DealDraftOutcome:
+    """Internal result of :func:`_run_deal_business_draft` -- not a public
+    API, never returned outside app.py."""
+    __slots__ = ("blocked", "response", "tool_inputs", "draft_ctx")
+
+    def __init__(self, *, blocked: bool, response: dict | None = None,
+                 tool_inputs: dict | None = None, draft_ctx: tuple | None = None):
+        self.blocked = blocked
+        self.response = response
+        self.tool_inputs = tool_inputs
+        self.draft_ctx = draft_ctx
+
+
+def _deal_blocked_response(tool_name: str, message: str) -> dict:
+    """Same early-exit dict shape every other branch of
+    _queue_approval_detailed_impl_body already returns -- no new response
+    contract."""
+    return {
+        "message": message, "contract_id": None, "ok": False,
+        "terminal_outcome": "APPROVAL_QUEUE_ERROR",
+        "action_tool": tool_name, "created_this_turn": False,
+    }
+
+
+_DEAL_EMPTY_VALUES = (None, "", [], ())
+
+
+def _run_deal_business_draft(tool_name: str, tool_inputs: dict, identity, channel: str, user_chat_id: str) -> "_DealDraftOutcome":
+    """BusinessDraft Phase 3 (Deal Golden Path) -- the single seam body for
+    `crm_create_deal`/`crm_update_deal`, called once from inside
+    `_queue_approval_detailed_impl` before any dedup/fingerprint layer or
+    `ActionGateway.propose_action()` sees the payload. See
+    docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md and the
+    Phase 3 implementation plan for the full design rationale -- summary:
+
+      intent -> BusinessDraft CREATE/UPDATE -> Sessions persistence (CAS)
+      -> explicit confirm() -> ConfirmedSnapshot -> (this function returns;
+      the unchanged ActionGateway/approval/dispatcher/Golden-Writer chain
+      takes over from here, exactly as it already does for every other tool)
+
+    Never a second writer, never a second validator: field validation
+    reuses core.business_draft.BusinessDraft/CommercialEntityAdapter
+    (itself a thin wrapper over commercial_completion.py's existing
+    FieldContract machinery); the final write is still, unconditionally,
+    commercial_crm.create_deal()/update_deal().
+    """
+    from core.business_draft import (
+        BusinessDraftError, DraftConflictError, DraftOperation,
+        create_draft, fields_from_airtable_record,
+        fields_from_primitive_create, fields_from_primitive_update,
+    )
+    from commercial_crm import _valid_record_id
+    from tool_registry import enforce, ToolDenied
+    from tools.dispatcher import _resolve_authenticated_crm_owner
+    from tools.airtable_read_adapter import get_record_fields
+    from airtable_schema import Tables
+    from core.lead_service import resolve_domain_word
+    from session_store import lead_sessions
+
+    entity_type = "deal"
+    operation = DraftOperation.CREATE if tool_name == "crm_create_deal" else DraftOperation.UPDATE
+
+    # 1. Authorization first, before any read. The dedicated dispatcher
+    # case re-checks this again at dispatch time (defense in depth,
+    # unchanged) -- this is the same existing gate, just proven earlier.
+    try:
+        enforce(tool_name, identity)
+    except ToolDenied as exc:
+        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(tool_name, f"❌ {exc}"))
+
+    # 2. Owner canonicalization -- operation-sensitive. CREATE always
+    # resolves (owner_id is required by the existing primitive contract).
+    # UPDATE resolves ONLY if owner_id was actually supplied -- calling the
+    # resolver unconditionally would manufacture an Owner change the caller
+    # never asked for, since the resolver treats an absent requested owner
+    # as "use the authenticated actor's own Profile".
+    raw_owner = tool_inputs.get("owner_id")
+    resolved_owner: str | None = None
+    if operation is DraftOperation.CREATE or raw_owner not in _DEAL_EMPTY_VALUES:
+        resolved_owner, owner_error = _resolve_authenticated_crm_owner(identity, raw_owner)
+        if owner_error:
+            return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(tool_name, f"❌ {owner_error}"))
+
+    # 3. Split remaining primitive inputs into (completion-field-name-keyed
+    # mapped fields, unrecognized keys, raw primitive passthrough kwargs).
+    if operation is DraftOperation.CREATE:
+        mapped, unrecognized, passthrough_kwargs = fields_from_primitive_create(entity_type, tool_inputs)
+    else:
+        mapped, unrecognized, passthrough_kwargs = fields_from_primitive_update(entity_type, tool_inputs)
+    if unrecognized:
+        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+            tool_name, "❌ שדות לא נתמכים ב-" + tool_name + ": " + ", ".join(sorted(unrecognized)),
+        ))
+
+    original_fields: dict | None = None
+    if operation is DraftOperation.UPDATE:
+        # 4. UPDATE target identity -- fail closed, never guess, never
+        # fuzzy-resolve.
+        record_id = tool_inputs.get("record_id")
+        if not _valid_record_id(record_id):
+            return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+                tool_name, "❌ עדכון עסקה דורש מזהה רשומה (record_id) תקין.",
+            ))
+        # 5. Pre-read the current Deal to build original_fields. Same
+        # reader commercial_crm.py already uses identically for this
+        # purpose (commercial_crm.py:956). Authorization for this read is
+        # the enforce() call above -- crm_update_deal's roles are already
+        # treated as internal for Airtable-scope purposes, matching the
+        # dedicated dispatcher case's own policy; no new tenant-filtered
+        # reader is introduced here.
+        try:
+            raw = get_record_fields(Tables.DEALS, record_id)
+        except Exception as exc:
+            logger.warning(
+                "[BusinessDraft/Deal] get_record_fields failed record_id=%s: %s",
+                _sanitize_id(str(record_id)), exc,
+            )
+            raw = None
+        if not raw:
+            return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+                tool_name, "❌ לא נמצאה עסקה עם מזהה הרשומה שסופק.",
+            ))
+        original_fields = fields_from_airtable_record(entity_type, raw)
+        # Normalize the live Domain select value (e.g. "Import") into the
+        # same business-canonical representation ("import") BusinessDraft
+        # edits use -- otherwise an unchanged Domain looks like a delta.
+        # Reuses the existing canonicalizer; no new mapping table.
+        if original_fields.get("domain"):
+            canonical_domain = resolve_domain_word(str(original_fields["domain"]))
+            if canonical_domain:
+                original_fields["domain"] = canonical_domain
+
+        # 6. UPDATE empty-value handling: an explicitly-supplied empty
+        # value on a MAPPED field has no canonical BusinessDraft "explicit
+        # clear" representation yet (build_update_payload()'s delta logic
+        # can only express "changed to a new value") -- fail closed rather
+        # than silently treat it as "unchanged" (which would silently drop
+        # the caller's requested clear) or as "omit" (same problem).
+        cleared_fields = sorted(
+            name for name, value in mapped.items() if value in _DEAL_EMPTY_VALUES
+        )
+        if cleared_fields:
+            return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+                tool_name,
+                "❌ ניקוי מפורש (ערך ריק) של שדה עדיין לא נתמך במסלול הזה: "
+                + ", ".join(cleared_fields),
+            ))
+    else:
+        # CREATE: empty optional values are simply omitted -- there is no
+        # existing value to "clear".
+        mapped = {k: v for k, v in mapped.items() if v not in _DEAL_EMPTY_VALUES}
+
+    if resolved_owner is not None:
+        mapped["owner"] = resolved_owner
+
+    # 7. Build entirely in memory first -- every .set_field() call reuses
+    # CommercialEntityAdapter/FieldContract.validate_value(), never a
+    # second validator. Persist only ONCE the draft is fully populated.
+    # .set_field() can raise either core.business_draft.BusinessDraftError
+    # (BusinessDraft's own guards) or commercial_completion.CompletionError
+    # (the underlying field-contract validation it wraps, e.g.
+    # InvalidValueError/UnknownFieldError) -- both are genuine field
+    # validation failures and must fail closed the same way, never bubble
+    # up as an unhandled exception (which would be misclassified by the
+    # outer _queue_approval_detailed() catch as an ambiguous/orphaned
+    # failure instead of a clean, specific validation error).
+    from commercial_completion import CompletionError
+    try:
+        draft = create_draft(
+            entity_type=entity_type, operation=operation, tenant_id=identity.tenant_id,
+            actor_role=identity.role, actor_user_id=identity.memory_key,
+            source_channel=channel, sender=user_chat_id, original_fields=original_fields,
+        )
+        for field_name, value in mapped.items():
+            draft = draft.set_field(field_name, value)
+    except (BusinessDraftError, CompletionError) as exc:
+        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(tool_name, f"❌ {exc}"))
+
+    try:
+        persisted_draft = lead_sessions.create_business_draft(user_chat_id, draft, channel=channel)
+    except DraftConflictError:
+        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+            tool_name, "⏳ יש כבר טיוטת עסקה ממתינה לביצוע עבורך. יש לפתור אותה קודם.",
+        ))
+
+    # 8. Confirm + persist CONFIRMED via the REAL CAS transition -- use the
+    # object Sessions actually returns (stored_confirmed), never the
+    # pre-save confirmed_draft/pre-confirm persisted_draft, for anything
+    # downstream (cleanup ownership below depends on this being exact).
+    # (confirm() itself raises BusinessDraftError -- caught below -- if an
+    # UPDATE's delta payload is empty; no separate pre-check needed.)
+    try:
+        confirmed_draft, snapshot = persisted_draft.confirm()
+    except BusinessDraftError as exc:
+        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(tool_name, f"❌ {exc}"))
+
+    stored_confirmed = lead_sessions.save_business_draft(
+        user_chat_id, confirmed_draft, expected_version=persisted_draft.idempotency_key, channel=channel,
+    )
+
+    # 9. Merge the verified-safe raw primitive passthrough kwargs on top of
+    # the adapter-derived canonical payload -- never compared across the
+    # primitive/completion-field-name namespaces (see
+    # core.business_draft._split_primitive_inputs()'s own docstring for
+    # why that comparison would be unsafe).
+    final_tool_inputs = {**passthrough_kwargs, **stored_confirmed.snapshot.tool_inputs}
+
+    draft_ctx = (
+        user_chat_id, entity_type, stored_confirmed.idempotency_key,
+        stored_confirmed.snapshot.confirmed_at, identity,
+    )
+    return _DealDraftOutcome(blocked=False, tool_inputs=final_tool_inputs, draft_ctx=draft_ctx)
+
+
+def _finalize_deal_draft_cleanup(draft_ctx: tuple, result: dict, channel: str) -> None:
+    """BusinessDraft Phase 3 -- delete the CONFIRMED Deal draft THIS attempt
+    created, but only once `_queue_approval_detailed_impl_body`'s own final
+    PUBLIC outcome is determinate (never depends on an internal
+    ActionGateway `failure_code`, which isn't reliably present at this
+    level), and only if the stored slot still matches exactly what this
+    attempt wrote -- never touches a draft this attempt doesn't own (e.g.
+    an unrelated pre-existing CONFIRMED slot). Best-effort: any failure
+    here just leaves the slot in place, surfacing as a fail-closed
+    DraftConflictError on the next attempt rather than silent data loss.
+    """
+    sender, entity_type, idempotency_key, confirmed_at, identity = draft_ctx
+    if result.get("terminal_outcome") == "APPROVAL_QUEUE_ORPHANED":
+        return  # acknowledgement-uncertain -- retain as a fail-closed retry guard
+
+    from session_store import lead_sessions
+    try:
+        stored = lead_sessions.load_business_draft(
+            sender, entity_type, tenant_id=identity.tenant_id,
+            actor_user_id=identity.memory_key, source_channel=channel, channel=channel,
+        )
+        if (
+            stored is not None
+            and stored.idempotency_key == idempotency_key
+            and stored.snapshot is not None
+            and stored.snapshot.confirmed_at == confirmed_at
+        ):
+            lead_sessions.delete_business_draft(sender, entity_type, channel=channel)
+    except Exception as exc:
+        logger.warning(
+            "[BusinessDraft/Deal] cleanup failed sender=%s entity_type=%s: %s",
+            _sanitize_id(sender), entity_type, exc,
+        )
+
+
 def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
                                   user_chat_id: str, channel: str, user_text: str = "",
                                   fingerprint_payload: dict | None = None,
                                   trusted_source: str = "agent",
                                   extra_note: str | None = None,
                                   continuation_hint: dict | None = None) -> dict:
+    """BusinessDraft Phase 3 (Deal Golden Path) seam — see
+    docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md and the
+    Phase 3 plan. This is the SINGLE universal choke point every Deal
+    mutation proposal converges on (deterministic completion router, raw
+    Agent tool_use loop, and the dead _queue_deterministic_create_deal()) —
+    so it is the one place a `crm_create_deal`/`crm_update_deal` proposal is
+    routed through a persisted, confirmed BusinessDraft before ANY dedup/
+    fingerprint layer or ActionGateway.propose_action() sees its payload.
+    Every other tool's behavior is byte-for-byte unchanged; `identity` is
+    resolved one step earlier than before (a pure, tool-independent lookup)
+    purely so the Deal hook below can use it.
+    """
     from core.action_gateway import resolve_canonical_call
     tool_name, tool_inputs = resolve_canonical_call(
         tool_name, tool_inputs, user_text
     )
+    identity = resolve_identity(channel, user_chat_id)
 
+    _deal_draft_ctx = None
+    if tool_name in ("crm_create_deal", "crm_update_deal"):
+        _deal_result = _run_deal_business_draft(
+            tool_name, tool_inputs, identity, channel, user_chat_id
+        )
+        if _deal_result.blocked:
+            return _deal_result.response
+        tool_inputs = _deal_result.tool_inputs
+        # BUG-CRM-BYPASS-FINGERPRINT-PARITY precedent: never let a stale
+        # caller-supplied fingerprint_payload diverge from the canonical
+        # tool_inputs ActionGateway is about to fingerprint and dispatch.
+        fingerprint_payload = None
+        _deal_draft_ctx = _deal_result.draft_ctx
+
+    result = _queue_approval_detailed_impl_body(
+        tool_name, tool_inputs, user_chat_id, channel, user_text,
+        fingerprint_payload, trusted_source, extra_note, continuation_hint,
+        identity,
+    )
+
+    if _deal_draft_ctx is not None:
+        _finalize_deal_draft_cleanup(_deal_draft_ctx, result, channel)
+
+    return result
+
+
+def _queue_approval_detailed_impl_body(tool_name: str, tool_inputs: dict,
+                                  user_chat_id: str, channel: str, user_text: str = "",
+                                  fingerprint_payload: dict | None = None,
+                                  trusted_source: str = "agent",
+                                  extra_note: str | None = None,
+                                  continuation_hint: dict | None = None,
+                                  identity: "Identity | None" = None) -> dict:
     # DIAMOND PATH nested-entity approval continuation — see
     # _queue_approval_detailed()'s docstring. Built once, passed to
     # propose_action() below (whichever mode branch runs), attached
@@ -1987,7 +2298,6 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
         }
 
     # Stage A: canonical dedup — אותה זהות עסקית מ-channel שני
-    identity = resolve_identity(channel, user_chat_id)
     existing = bus.find_pending_by_business_fingerprint(
         canonical_user_id=identity.memory_key,
         tool_name=tool_name,

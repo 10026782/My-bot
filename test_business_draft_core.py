@@ -237,6 +237,77 @@ except UnsupportedOperationError:
     print("  PASS: build_update_payload fails closed for an entity with no canonical UPDATE writer")
 
 
+# ══════════════════════════════════════════════════
+# PHASE 3 — Deal primitive <-> completion-field-name translation helpers
+# ══════════════════════════════════════════════════
+
+from commercial_completion import ENTITY_CONTRACTS  # noqa: E402
+from core.business_draft import (  # noqa: E402
+    _CREATE_FIELD_MAP,
+    _UPDATE_FIELD_MAP,
+    fields_from_airtable_record,
+    fields_from_primitive_create,
+    fields_from_primitive_update,
+)
+
+print("\n[PHASE 3] fields_from_primitive_create / fields_from_primitive_update round-trips")
+for field_name, primitive in _UPDATE_FIELD_MAP["deal"].items():
+    chk(
+        _CREATE_FIELD_MAP["deal"][field_name] == primitive,
+        f"CREATE map agrees with UPDATE map for shared field {field_name!r}",
+    )
+
+_create_probe = {
+    "name": "Acme", "domain": "import", "owner_id": "recOWNER0000001",
+    "origin_lead_id": "recLEAD0000001", "stage": "opportunity",
+    "venture_id": "recVENTURE001", "contact_ids": ["recC1"], "priority": "high",
+    "risk_level": "low", "amount": 500,
+}
+mapped, unrecognized, passthrough = fields_from_primitive_create("deal", _create_probe)
+chk(mapped.get("name") == "Acme" and mapped.get("domain") == "import", "CREATE: business fields mapped")
+chk(mapped.get("origin_lead") == "recLEAD0000001", "CREATE: origin_lead_id -> origin_lead (CREATE-only field)")
+chk("owner_id" not in mapped and "owner" not in mapped, "CREATE: owner key excluded (caller handles separately)")
+chk(unrecognized == frozenset({"amount"}), "CREATE: confirmed tools/schemas.py 'amount' drift is unrecognized, not silently dropped")
+chk(
+    passthrough == {"venture_id": "recVENTURE001", "contact_ids": ["recC1"], "priority": "high", "risk_level": "low"},
+    "CREATE: exactly the 4 independently-verified passthrough kwargs pass through raw",
+)
+
+_update_probe = {
+    "record_id": "recDEAL0000001", "stage": "won", "owner_id": "recOWNER0000002",
+    "venture_id": "recVENTURE002", "priority": "low",
+}
+mapped_u, unrecognized_u, passthrough_u = fields_from_primitive_update("deal", _update_probe)
+chk(mapped_u == {"stage": "won"}, "UPDATE: only the mapped business field is returned")
+chk(unrecognized_u == frozenset(), "UPDATE: no unrecognized keys for a legal payload")
+chk(
+    passthrough_u == {"record_id": "recDEAL0000001", "venture_id": "recVENTURE002", "priority": "low"},
+    "UPDATE: record_id + the 2 supplied passthrough kwargs pass through raw, owner_id excluded",
+)
+
+mapped_bad, unrecognized_bad, _ = fields_from_primitive_update("deal", {"record_id": "r1", "bogus_field": 1})
+chk(unrecognized_bad == frozenset({"bogus_field"}), "UPDATE: a genuinely unmapped key is reported, never silently dropped")
+
+print("\n[PHASE 3] fields_from_airtable_record")
+_raw_record = {
+    "Deal Name": "Acme", "Domain": "Import", "Owner": ["recOWNER0000001"],
+    "Counterparty (Contact)": ["recCONTACT00001"], "Stage": "opportunity",
+}
+_deal_contract = ENTITY_CONTRACTS["deal"]
+_airtable_field_by_name = {fc.field_name: fc.airtable_field for fc in _deal_contract.fields}
+_raw_by_airtable_field = {
+    _airtable_field_by_name["name"]: "Acme",
+    _airtable_field_by_name["domain"]: "Import",
+    _airtable_field_by_name["owner"]: ["recOWNER0000001"],
+    _airtable_field_by_name["counterparty_contact"]: ["recCONTACT00001"],
+    _airtable_field_by_name["stage"]: "opportunity",
+}
+result = fields_from_airtable_record("deal", _raw_by_airtable_field)
+chk(result["name"] == "Acme", "airtable record: scalar field passes through")
+chk(result["owner"] == "recOWNER0000001", "airtable record: LINK field unwrapped from Airtable's [id] list to a bare scalar")
+chk(result["counterparty_contact"] == "recCONTACT00001", "airtable record: second LINK field also unwrapped generically by input_type, not a hardcoded list")
+
+
 def test_business_draft_core_completed() -> None:
     """pytest entry point — this module's body already ran and asserted everything above."""
 

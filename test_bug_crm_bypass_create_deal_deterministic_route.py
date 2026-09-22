@@ -216,16 +216,28 @@ chk("employee/lead denied before any ActionGateway proposal is attempted",
 # ══════════════════════════════════════════════════════════════════
 print("\n── end-to-end: structured Deal creation never calls the Agent ──")
 
+from tools import dispatcher as _dispatcher_module  # noqa: E402
+
 metadata: dict = {}
 _owner_e2e = _owner(user_id="owner-deterministic-create-deal-e2e")
 text = "צור עסקה בשם רכישת ציוד תעשייתי בתחום יבוא"
 
+# BUSINESSDRAFT PHASE 3 (Deal Golden Path): crm_create_deal proposals now
+# route through core/business_draft.py BEFORE ActionGateway.propose_action()
+# — see _run_deal_business_draft() in app.py. Owner canonicalization
+# (tools/dispatcher.py's _resolve_authenticated_crm_owner()) now runs at
+# PROPOSAL time as part of that seam, not only at dispatch time as before
+# -- so this end-to-end proposal path needs the same Profile-resolution
+# mock the later "full execution path" block below already uses for
+# dispatch time, applied here too.
 with patch.object(app, "resolve_identity", return_value=_owner_e2e), \
      patch.object(app.rate_limiter, "is_allowed", return_value=True), \
      patch.object(
          app.client.messages, "create",
          side_effect=AssertionError("structured create-deal must not call the Agent"),
      ), \
+     patch.object(_dispatcher_module._owner_resolution, "resolve_profile_record_id",
+                   return_value="recPROFILE0000001"), \
      patch(
          "feature_flags.is_enabled",
          side_effect=lambda name: name == "FEATURE_ACTION_GATEWAY",
@@ -250,11 +262,14 @@ deal_contracts = [
 chk("exactly one pending crm_create_deal contract was created — the "
     "dedicated canonical tool, never generic airtable_add",
     len(deal_contracts) == 1 and deal_contracts[0].status == "pending")
-chk("owner_id in the dispatched payload is the caller's own raw identity "
-    "self-reference (never a fabricated/guessed record id) — dispatcher's "
-    "own _resolve_authenticated_crm_owner() turns this into a real Profile "
-    "record ID at execution time",
-    deal_contracts[0].normalized_payload.get("owner_id") == _owner_e2e.user_id)
+chk("owner_id in the dispatched payload is the CANONICAL RESOLVED Profile "
+    "record id (BusinessDraft Phase 3: owner is now canonicalized through "
+    "_resolve_authenticated_crm_owner() at PROPOSAL time, before the "
+    "ActionContract is even created — never a fabricated/guessed id, and "
+    "no longer the raw self-reference this assertion checked pre-Phase-3; "
+    "dispatcher's own _resolve_authenticated_crm_owner() at execution time "
+    "now simply passes an already-canonical rec... id through unchanged)",
+    deal_contracts[0].normalized_payload.get("owner_id") == "recPROFILE0000001")
 
 # BUG-CRM-BYPASS-FINGERPRINT-PARITY (live production regression,
 # 01-02/09/2026): the assertion this replaces only checked that
