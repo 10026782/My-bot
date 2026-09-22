@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 17/09/2026
+עודכן: 22/09/2026
 
 ## BUG-CHARGE-RESOLVER-FORMULA-USES-RECORD-ID — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1243 follow-up)
 
@@ -58,6 +58,11 @@ DURABLE UNIQUENESS: recruitment creates require the existing PostgreSQL atomic
 claim before Airtable dispatch, keyed by their natural key. Static verification
 is complete; a real financial batch remains blocked pending deployment evidence
 that the atomic-claim flag and PostgreSQL migration are live and healthy.
+RECOVERY REMEDIATION: a claim that is `failed` before dispatch may be replaced
+only after an approved recovery contract proves the exact recruitment payload
+and an Airtable absence check; the original claim is retained as superseded.
+`outcome_unknown` remains unrecoverable. STATUS: 🟡 CODE_DONE,
+STATIC_VERIFIED — PR #1250 is not merged, deployed, or runtime-verified.
 
 ## BUG-CHARGE-RESOLVER-PARTIAL-NAME — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242 follow-up)
 
