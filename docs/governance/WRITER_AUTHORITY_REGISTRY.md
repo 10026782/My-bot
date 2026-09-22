@@ -18,3 +18,4 @@ that approved the implementation and its single owner.
 | `commercial_crm.py` | `create_charge_payment` | commercial_crm | `decision.commercial_v2_mutation_primitives` |
 | `recruitment_crm.py` | `execute_recruitment_write` | recruitment | `decision.recruitment_worker_data_model_phase2` |
 | `test_recruitment_writers.py` | `<module>` | recruitment | `decision.recruitment_worker_data_model_phase2` |
+| `test_phase0_commercial_crm_update_authority.py` | `<module>` | commercial_crm | `decision.phase0_commercial_crm_update_authority` |

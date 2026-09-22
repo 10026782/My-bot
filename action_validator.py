@@ -44,6 +44,14 @@ _REQUIRED: dict[str, list[str]] = {
     "crm_create_deal":           ["name", "domain", "owner_id"],
     "crm_create_payment_term":   ["deal_id", "calc_type"],
     "crm_create_payment":        ["amount", "domain", "owner_id"],
+    # Phase 0 — canonical UPDATE writers (BusinessDraft Commercial CRM
+    # Canonical Update Authority). record_id is the only universally
+    # required param; which OTHER fields are meaningful/allowed is the
+    # canonical writer's own closed allowlist (commercial_crm.py), not
+    # duplicated here.
+    "crm_update_deal":           ["record_id"],
+    "crm_update_payment_term":   ["record_id"],
+    "crm_update_payment":        ["record_id"],
     # lead_id is deliberately absent: Lead attribution is optional for this
     # tool (BUG-CHARGE-TERM-BYPASS invariant #9) — Deal and Payment Term
     # are the only mandatory parents.
@@ -102,6 +110,7 @@ _SENSITIVE_TOOLS = {
     "crm_find_or_create_organization", "crm_find_or_create_contact",
     "crm_create_charge", "crm_create_charge_payment",
     "crm_link_lead_to_deal",
+    "crm_update_deal", "crm_update_payment_term", "crm_update_payment",
 }
 
 _ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?$")
@@ -110,6 +119,7 @@ _EMAIL_RE        = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TOOLS_WITH_RECORD_ID = {
     "airtable_update", "crm_update_last_contact",
     "crm_update_deal_status", "crm_mark_payment_paid",
+    "crm_update_deal", "crm_update_payment_term", "crm_update_payment",
 }
 
 MAX_FUNDING_PCT = 9.0

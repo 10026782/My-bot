@@ -14,17 +14,31 @@ Terms/Payments — a raw airtable_update(table="Deals"/"Payments"/
 with no role re-check narrower than airtable_update's own (wider) grant,
 no field allowlist, and no domain canonicalization on a Domain field edit.
 
-Unlike Contacts, there is no general canonical "update_deal()"-style writer
-to redirect to, and Intent.UPDATE_DEAL_STAGE legitimately relies on this
-same generic airtable_update today (core/router/risk_router.py's
-contract-required-tool mapping) -- so the fix cannot simply block these
-tables outright. Instead it reuses the SAME closed field maps the create
-path already validates against (_DEAL_FIELD_MAP/_PAYMENT_TERM_FIELD_MAP/
-_PAYMENT_FIELD_MAP), re-checks the canonical tool's role authority the same
-way airtable_add's redirect does, and canonicalizes a Domain field edit
-through core.lead_service.resolve_domain_word() -- the same shared resolver
-Leads and (as of BUG-CRM-BYPASS-DOMAIN-TRANSLATION) the deterministic Deal
-parser already use.
+Originally there was no general canonical "update_deal()"-style writer to
+redirect to, and Intent.UPDATE_DEAL_STAGE legitimately relied on this same
+generic airtable_update (core/router/risk_router.py's contract-required-tool
+mapping) -- so the initial fix could not simply block these tables outright.
+It reused the SAME closed field maps the create path already validates
+against (_DEAL_FIELD_MAP/_PAYMENT_TERM_FIELD_MAP/_PAYMENT_FIELD_MAP),
+re-checked the canonical tool's role authority the same way airtable_add's
+redirect does, and canonicalized a Domain field edit through
+core.lead_service.resolve_domain_word() -- the same shared resolver Leads
+and (as of BUG-CRM-BYPASS-DOMAIN-TRANSLATION) the deterministic Deal parser
+already use, before falling through to a raw airtable_update() write.
+
+UPDATE (Phase 0 — BusinessDraft Commercial CRM Canonical Update Authority,
+docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md §16/§17):
+commercial_crm.py now has real update_deal()/update_payment_term()/
+update_payment() canonical writers (mirroring create_deal()/
+create_payment_term()/create_payment()). This generic airtable_update
+redirect for Deals/Payment Terms/Payments now calls THOSE writers instead
+of the raw generic write -- field-map validation, role re-check, and Domain
+canonicalization all still happen first, exactly as before, but the actual
+single Airtable mutation is now performed by the canonical writer (via
+commercial_crm.airtable_patch), not by tools.dispatcher.airtable_update.
+Tasks (no canonical writer exists for Tasks in Phase 0) are unaffected and
+still go through the plain field-allowlist + generic airtable_update path
+below.
 
 Follow-up (owner rule, 02/09/2026): "airtable_update may only write system/
 infrastructure data directly; business records must be blocked or
@@ -56,6 +70,7 @@ os.environ["FEATURE_ACTION_CONTRACT_PERSISTENCE"] = "false"
 
 import tools.dispatcher as dispatcher_module  # noqa: E402
 from tools.dispatcher import dispatch_tool  # noqa: E402
+import commercial_crm  # noqa: E402
 from airtable_schema import Tables, DealFields, PaymentFields, DealStage, TaskFields  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 
@@ -87,80 +102,89 @@ def _dispatch(name, inputs, identity, execution_context=None):
 
 
 # ══════════════════════════════════════════════════════════════════
-print("── legitimate use: Intent.UPDATE_DEAL_STAGE's own field passes through ──")
+print("── legitimate use: Intent.UPDATE_DEAL_STAGE now redirects to the canonical writer ──")
 
-with patch.object(dispatcher_module, "airtable_update", return_value={
-    "ok": True, "tool": "airtable_update", "external_id": "recDEAL01",
-    "evidence": {"record_id": "recDEAL01"}, "user_message": "✅",
-}) as mock_generic_update:
+with patch.object(dispatcher_module, "airtable_update") as mock_generic_update, \
+     patch.object(commercial_crm, "get_record_fields", return_value={}), \
+     patch.object(commercial_crm, "airtable_patch", return_value=True) as mock_canonical_patch:
     result = _dispatch("airtable_update", {
-        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "table": Tables.DEALS, "record_id": "recDEAL00000000A1",
         "fields": {DealFields.STAGE: DealStage.CLOSED_WIN},
     }, owner)
-chk("Deal stage update: still reaches the generic writer (no writer to redirect to)",
-    mock_generic_update.call_count == 1)
+chk("Deal stage update: the generic writer is NEVER called (Phase 0 redirect)",
+    mock_generic_update.call_count == 0)
+chk("Deal stage update: reaches the canonical update_deal() writer's single Airtable mutation",
+    mock_canonical_patch.call_count == 1)
 chk("Deal stage update: table/record_id/fields forwarded unchanged",
-    mock_generic_update.call_args.args == (Tables.DEALS, "recDEAL01", {DealFields.STAGE: DealStage.CLOSED_WIN}))
+    mock_canonical_patch.call_args.args == (Tables.DEALS, "recDEAL00000000A1", {DealFields.STAGE: DealStage.CLOSED_WIN}))
 chk("Deal stage update: result passed through", result.get("ok") is True)
 
 
 # ══════════════════════════════════════════════════════════════════
 print("\n── domain canonicalization: raw Hebrew word rejected, canonical slug written ──")
+# Payment's Domain field is legacy-only (create_payment(), not the V2
+# crm_create_charge_payment() writer) -- Phase 0's update_payment()
+# deliberately does not extend the quarantined legacy writer's surface, so
+# the Payment-domain assertions below now expect a clean "unsupported
+# field" fail-closed instead of domain-word canonicalization.
 
-with patch.object(dispatcher_module, "airtable_update", return_value={
-    "ok": True, "tool": "airtable_update", "external_id": "recDEAL01",
-    "evidence": {}, "user_message": "✅",
-}) as mock_update_raw:
+with patch.object(dispatcher_module, "airtable_update") as mock_generic_raw, \
+     patch.object(commercial_crm, "get_record_fields", return_value={}), \
+     patch.object(commercial_crm, "airtable_patch", return_value=True) as mock_update_raw:
     result_raw_domain = _dispatch("airtable_update", {
-        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "table": Tables.DEALS, "record_id": "recDEAL00000000A1",
         "fields": {DealFields.DOMAIN: "יבוא"},
     }, owner)
+chk("Deal domain update: never reaches the generic writer", mock_generic_raw.call_count == 0)
 chk("Deal domain update: raw Hebrew word never reaches Airtable directly unmapped",
     mock_update_raw.call_args.args[2][DealFields.DOMAIN] == "import")
 chk("Deal domain update: succeeds once canonicalized", result_raw_domain.get("ok") is True)
 
-with patch.object(dispatcher_module, "airtable_update") as mock_update_bad:
+with patch.object(dispatcher_module, "airtable_update") as mock_update_bad, \
+     patch.object(commercial_crm, "airtable_patch") as mock_canonical_bad:
     result_bad_domain = _dispatch("airtable_update", {
-        "table": Tables.PAYMENTS, "record_id": "recPAY01",
+        "table": Tables.PAYMENTS, "record_id": "recPAY000000000A1",
         "fields": {PaymentFields.DOMAIN: "שטויות"},
     }, owner)
-chk("Payment domain update: unrecognized word fails closed (ok=False)",
+chk("Payment domain update: legacy-only field fails closed (ok=False) — update_payment() doesn't support it",
     result_bad_domain.get("ok") is False)
-chk("Payment domain update: unrecognized word never reaches Airtable",
-    mock_update_bad.call_count == 0)
+chk("Payment domain update: never reaches Airtable, generic or canonical",
+    mock_update_bad.call_count == 0 and mock_canonical_bad.call_count == 0)
 
 
 # ══════════════════════════════════════════════════════════════════
 print("\n── BUG-CRM-BYPASS-DOMAIN-SELECT-CASING: canonical slug -> live Airtable value ──")
-# Same fix as commercial_crm.py's create_deal()/create_payment() (this
-# update path has no canonical writer to redirect to, so the mapping
-# happens directly in the dispatcher instead).
+# Same fix as commercial_crm.py's create_deal()/create_payment() — the
+# canonical update_deal() writer now owns the slug -> live-Airtable-value
+# mapping itself (Phase 0), the dispatcher only gets free text to the slug.
 
-with patch.object(dispatcher_module, "airtable_update", return_value={
-    "ok": True, "tool": "airtable_update", "external_id": "recDEAL01",
-    "evidence": {}, "user_message": "✅",
-}) as mock_update_live, \
+with patch.object(dispatcher_module, "airtable_update") as mock_generic_live, \
+     patch.object(commercial_crm, "get_record_fields", return_value={}), \
+     patch.object(commercial_crm, "airtable_patch", return_value=True) as mock_update_live, \
      patch("core.runtime_schema_provider.resolve_live_select_value", return_value="Import") as resolve:
     result_live_domain = _dispatch("airtable_update", {
-        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "table": Tables.DEALS, "record_id": "recDEAL00000000A1",
         "fields": {DealFields.DOMAIN: "Import"},
     }, owner)
+chk("Deal domain update: never reaches the generic writer", mock_generic_live.call_count == 0)
 chk("Deal domain update: resolve_live_select_value called with the canonical slug",
     resolve.call_args.args == (Tables.DEALS, DealFields.DOMAIN, "import"))
 chk("Deal domain update: the LIVE resolved value is written, not the raw canonical slug",
     mock_update_live.call_args.args[2][DealFields.DOMAIN] == "Import")
 chk("Deal domain update: succeeds once the live value resolves", result_live_domain.get("ok") is True)
 
-with patch.object(dispatcher_module, "airtable_update") as mock_update_unresolvable, \
+with patch.object(dispatcher_module, "airtable_update") as mock_generic_unresolvable, \
+     patch.object(commercial_crm, "get_record_fields", return_value={}), \
+     patch.object(commercial_crm, "airtable_patch") as mock_update_unresolvable, \
      patch("core.runtime_schema_provider.resolve_live_select_value", return_value=None):
     result_unresolvable = _dispatch("airtable_update", {
-        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "table": Tables.DEALS, "record_id": "recDEAL00000000A1",
         "fields": {DealFields.DOMAIN: "import"},
     }, owner)
 chk("Deal domain update: a value resolve_live_select_value can't match fails closed",
     result_unresolvable.get("ok") is False)
 chk("Deal domain update: never reaches Airtable when the live value can't be resolved",
-    mock_update_unresolvable.call_count == 0)
+    mock_update_unresolvable.call_count == 0 and mock_generic_unresolvable.call_count == 0)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -168,7 +192,7 @@ print("\n── field allowlist: unmappable field fails closed — no silent fie
 
 with patch.object(dispatcher_module, "airtable_update") as mock_update_unmapped:
     result_bad_field = _dispatch("airtable_update", {
-        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "table": Tables.DEALS, "record_id": "recDEAL00000000A1",
         "fields": {"שדה_לא_קיים_בכלל": "value that must never be silently written"},
     }, owner)
 chk("Deal update: unrecognized field -> fail closed (ok=False)", result_bad_field.get("ok") is False)
@@ -193,7 +217,7 @@ print("\n── role gate: employee denied before the writer is ever reached ─
 # widening of airtable_update's role set, mirroring the create path exactly.
 with patch.object(dispatcher_module, "airtable_update") as mock_update_denied:
     result_employee = _dispatch("airtable_update", {
-        "table": Tables.DEALS, "record_id": "recDEAL01",
+        "table": Tables.DEALS, "record_id": "recDEAL00000000A1",
         "fields": {DealFields.STAGE: DealStage.CLOSED_WIN},
     }, employee)
 chk("Deal update: employee denied (plain-string access-denied message)",
@@ -206,18 +230,18 @@ chk("Deal update: employee denial never reaches the writer at all",
 print("\n── protected aliases resolve the same way as the create path ──")
 
 for alias in ("Deals", " deals ", "DEALS", Tables.DEALS):
-    with patch.object(dispatcher_module, "airtable_update", return_value={
-        "ok": True, "tool": "airtable_update", "external_id": "recDEAL01",
-        "evidence": {}, "user_message": "✅",
-    }) as m_writer:
+    with patch.object(dispatcher_module, "airtable_update") as m_generic_alias, \
+         patch.object(commercial_crm, "get_record_fields", return_value={}), \
+         patch.object(commercial_crm, "airtable_patch", return_value=True) as m_writer:
         _dispatch("airtable_update", {
-            "table": alias, "record_id": "recDEAL01", "fields": {DealFields.STAGE: DealStage.CLOSED_WIN},
+            "table": alias, "record_id": "recDEAL00000000A1", "fields": {DealFields.STAGE: DealStage.CLOSED_WIN},
         }, owner)
-    chk(f"Deal alias {alias!r}: resolves to the protected table's field map", m_writer.call_count == 1)
+    chk(f"Deal alias {alias!r}: resolves to the protected table's canonical writer", m_writer.call_count == 1)
+    chk(f"Deal alias {alias!r}: never falls through to the generic writer", m_generic_alias.call_count == 0)
 
 with patch.object(dispatcher_module, "airtable_update") as m_bad_alias:
     result_bad_alias = _dispatch("airtable_update", {
-        "table": "DealsXYZ", "record_id": "recDEAL01", "fields": {},
+        "table": "DealsXYZ", "record_id": "recDEAL00000000A1", "fields": {},
     }, owner)
 chk("Non-protected table name: passes through as a normal (non-CRM) update",
     m_bad_alias.call_count == 1)

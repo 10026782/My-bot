@@ -944,90 +944,87 @@ def dispatch_tool(
                     return result
 
                 if _resolved_table in _CRM_TABLE_ROUTING:
-                    _canonical_tool, _field_map, _ = _CRM_TABLE_ROUTING[_resolved_table]
+                    # Phase 0 (BusinessDraft Commercial CRM Canonical Update
+                    # Authority): this used to validate against the CREATE
+                    # field map and then fall through to a raw
+                    # airtable_update() write at the bottom — no canonical
+                    # writer FUNCTION backed it, only field-name/role
+                    # checks. Now it redirects to the same canonical
+                    # update_deal()/update_payment_term()/update_payment()
+                    # commercial_crm.py writer the dedicated crm_update_*
+                    # tools call (see those cases above) — there is exactly
+                    # one writer per entity for both entry points, never two
+                    # independently-validated paths.
+                    _, _field_map, _ = _CRM_TABLE_ROUTING[_resolved_table]
+                    _canonical_update_tool = {
+                        Tables.DEALS: "crm_update_deal",
+                        Tables.PAYMENT_TERMS: "crm_update_payment_term",
+                        Tables.PAYMENTS: "crm_update_payment",
+                    }[_resolved_table]
                     try:
-                        enforce(_canonical_tool, identity)
+                        enforce(_canonical_update_tool, identity)
                     except ToolDenied as e:
                         logger.warning(
                             "[Dispatcher] airtable_update->%s redirect denied | role=%s | %s",
-                            _canonical_tool, getattr(identity, "role", "unknown"), e,
+                            _canonical_update_tool, getattr(identity, "role", "unknown"), e,
                         )
                         result = _tool_result(ok=False, tool="airtable_update", user_message=f"❌ גישה נחסמה: {e}")
                         audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                         return result
 
-                    _unsupported = sorted(set(fields) - set(_field_map) - _GENERIC_WRITE_IGNORED_KEYS)
-                    if _unsupported:
-                        result = _tool_result(
-                            ok=False, tool="airtable_update",
-                            user_message=f"❌ שדה לא נתמך בעדכון ישיר לטבלה זו: {_unsupported!r}.",
-                        )
+                    # The CREATE field map still gates which raw Airtable
+                    # column names are even recognized (fails closed on any
+                    # unmapped column before the writer is ever called).
+                    # This is intentionally the WIDER of two independent
+                    # fail-closed layers: the canonical writer applies its
+                    # OWN, narrower update allowlist next (e.g. Origin Lead
+                    # is a recognized CREATE column but not an update-writer
+                    # kwarg — rejected there, not here).
+                    _mapped, _map_error = _map_generic_fields_to_canonical(fields, _field_map)
+                    if _map_error:
+                        result = _tool_result(ok=False, tool="airtable_update", user_message=f"❌ {_map_error}")
                         audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                         return result
 
-                    _domain_field = {
-                        Tables.DEALS: DealFields.DOMAIN, Tables.PAYMENTS: PaymentFields.DOMAIN,
-                    }.get(_resolved_table)
-                    if _domain_field and _domain_field in fields:
+                    if _resolved_table == Tables.DEALS and "domain" in _mapped:
+                        # Free-text/Hebrew-word normalization ahead of the
+                        # canonical writer's own slug->live-value mapping —
+                        # this generic path (unlike the dedicated
+                        # crm_update_deal tool, which expects the canonical
+                        # slug directly) is also how the Deal enrichment
+                        # flow's collected natural-language answers reach
+                        # Airtable. BUG-CRM-BYPASS-DOMAIN-SELECT-CASING: the
+                        # writer itself still does slug -> live Airtable
+                        # value mapping (e.g. "import" -> "Import") — this
+                        # step only gets from free text to the slug.
                         from core.lead_service import resolve_domain_word
-                        _canonical_domain = resolve_domain_word(str(fields[_domain_field]))
+                        _canonical_domain = resolve_domain_word(str(_mapped["domain"]))
                         if not _canonical_domain:
                             result = _tool_result(
                                 ok=False, tool="airtable_update",
-                                user_message=f"❌ תחום לא מוכר: {fields[_domain_field]!r}.",
+                                user_message=f"❌ תחום לא מוכר: {_mapped['domain']!r}.",
                             )
                             audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                             return result
-                        # BUG-CRM-BYPASS-DOMAIN-SELECT-CASING: the canonical
-                        # slug above (e.g. "import") still isn't what
-                        # Airtable's live Domain select expects (e.g.
-                        # "Import") — see commercial_crm.py's create_deal()/
-                        # create_payment() for the full USER LANGUAGE ->
-                        # BUSINESS CANONICAL -> AIRTABLE LIVE VALUE contract
-                        # this mirrors. This update path has no canonical
-                        # writer to redirect to, so the mapping happens here
-                        # directly instead.
-                        from core.runtime_schema_provider import resolve_live_select_value
-                        _live_domain = resolve_live_select_value(_resolved_table, _domain_field, _canonical_domain)
-                        if _live_domain is None:
-                            result = _tool_result(
-                                ok=False, tool="airtable_update",
-                                user_message=f"❌ תחום לא מוכר: {fields[_domain_field]!r}.",
-                            )
-                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
-                            return result
-                        fields[_domain_field] = _live_domain
+                        _mapped["domain"] = _canonical_domain
 
-                    # DIAMOND D3 FINAL (06/09/2026): resolve_live_select_value()
-                    # is now the EXCLUSIVE live-select storage resolver for the
-                    # Diamond Deal path — Domain (above) was the only field this
-                    # generic update redirect ever resolved; every other Deal
-                    # select field (Stage/Priority/Risk Level/Deal Type Code/
-                    # Relationship Type/Currency/Commercial Status/the two
-                    # Estimated Value selects — this is also how the Deal
-                    # enrichment flow's collected answers reach Airtable, since
-                    # they all funnel through this same airtable_update case)
-                    # was written as its raw value with no live-schema check at
-                    # all. Scoped strictly to Deals — Payments/other
-                    # _CRM_TABLE_ROUTING tables are untouched, unrelated
-                    # normalization tracks. Same fail-closed contract as Domain:
-                    # any field that can't be resolved blocks the whole update.
+                    if "owner_id" in _mapped:
+                        _owner_record_id, _owner_error = _resolve_authenticated_crm_owner(
+                            identity, _mapped.get("owner_id")
+                        )
+                        if _owner_error:
+                            result = _tool_result(ok=False, tool="airtable_update", user_message=f"❌ {_owner_error}")
+                            audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
+                            return result
+                        _mapped["owner_id"] = _owner_record_id
+
                     if _resolved_table == Tables.DEALS:
-                        from core.runtime_schema_provider import resolve_live_select_value as _resolve_select
-                        for _field_name, _raw_value in list(fields.items()):
-                            if _field_name == _domain_field or not isinstance(_raw_value, str):
-                                continue  # Domain already resolved above; non-select fields are untouched no-ops anyway
-                            _resolved_value = _resolve_select(_resolved_table, _field_name, _raw_value)
-                            if _resolved_value is None:
-                                result = _tool_result(
-                                    ok=False, tool="airtable_update",
-                                    user_message=f"❌ ערך לא מוכר בטבלת העסקאות: שדה {_field_name!r} ={_raw_value!r}.",
-                                )
-                                audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
-                                return result
-                            fields[_field_name] = _resolved_value
-
-                    result = airtable_update(_resolved_table, record_id, fields)
+                        from commercial_crm import update_deal as _crm_updater
+                    elif _resolved_table == Tables.PAYMENT_TERMS:
+                        from commercial_crm import update_payment_term as _crm_updater
+                    else:
+                        from commercial_crm import update_payment as _crm_updater
+                    result = _crm_updater(record_id, _mapped, source="agent")
                     audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                     return result
 
@@ -1212,6 +1209,64 @@ def dispatch_tool(
                     source="agent",
                 )
                 audit_log_airtable("crm_create_payment", identity, inputs, result)
+                return result
+
+            # ── Phase 0 — canonical UPDATE authority closure ────────────
+            # Mirrors the CREATE cases immediately above: enforce_tenant_
+            # scope() re-check, owner resolution where applicable, then
+            # delegate entirely to the canonical commercial_crm.py update
+            # writer, which owns its own closed field allowlist and
+            # validation (see commercial_crm.py's "Canonical UPDATE
+            # writers" section for why the allowlist lives there, not
+            # duplicated here).
+            case "crm_update_deal":
+                try:
+                    enforce_tenant_scope("crm_update_deal", identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable("crm_update_deal", identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool="crm_update_deal", user_message=str(e))
+
+                record_id = inputs.get("record_id", "")
+                _update_fields = {k: v for k, v in inputs.items() if k != "record_id"}
+                if "owner_id" in _update_fields:
+                    _owner_record_id, _owner_error = _resolve_authenticated_crm_owner(
+                        identity, _update_fields.get("owner_id")
+                    )
+                    if _owner_error:
+                        return _tool_result(ok=False, tool="crm_update_deal",
+                                            user_message=f"❌ {_owner_error}")
+                    _update_fields["owner_id"] = _owner_record_id
+                from commercial_crm import update_deal
+                result = update_deal(record_id, _update_fields, source="agent")
+                audit_log_airtable("crm_update_deal", identity, inputs, result)
+                return result
+
+            case "crm_update_payment_term":
+                try:
+                    enforce_tenant_scope("crm_update_payment_term", identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable("crm_update_payment_term", identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool="crm_update_payment_term", user_message=str(e))
+
+                record_id = inputs.get("record_id", "")
+                _update_fields = {k: v for k, v in inputs.items() if k != "record_id"}
+                from commercial_crm import update_payment_term
+                result = update_payment_term(record_id, _update_fields, source="agent")
+                audit_log_airtable("crm_update_payment_term", identity, inputs, result)
+                return result
+
+            case "crm_update_payment":
+                try:
+                    enforce_tenant_scope("crm_update_payment", identity, inputs)
+                except TenantScopeViolation as e:
+                    audit_log_airtable("crm_update_payment", identity, inputs, f"blocked: {e}")
+                    return _tool_result(ok=False, tool="crm_update_payment", user_message=str(e))
+
+                record_id = inputs.get("record_id", "")
+                _update_fields = {k: v for k, v in inputs.items() if k != "record_id"}
+                from commercial_crm import update_payment
+                result = update_payment(record_id, _update_fields, source="agent")
+                audit_log_airtable("crm_update_payment", identity, inputs, result)
                 return result
 
             case "crm_create_charge_from_term":

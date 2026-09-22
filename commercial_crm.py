@@ -1421,3 +1421,416 @@ def create_payment(
         evidence={"table": Tables.PAYMENTS, "status": outcome.status},
         user_message=f"❌ יצירת תשלום נכשלה: {outcome.error or 'בדוק שמות שדות.'}",
     )
+
+
+# ══════════════════════════════════════════════════
+# Canonical UPDATE writers — Phase 0 (BusinessDraft Commercial CRM Canonical
+# Update Authority, docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md
+# §16/§17/§27 Phase 0).
+#
+# Each writer below is the ONLY approved way to mutate an existing Deal /
+# Payment Term / Payment. Every function takes `fields` as a dict keyed by
+# the SAME kwarg names the matching create_*() writer above accepts — never
+# raw Airtable column names — against an explicit, closed allowlist that
+# fails closed on any key it doesn't recognize. Only keys actually present
+# in `fields` are changed; an omitted key is left untouched (partial-update
+# semantics, matching crm.update_contact()/core.lead_service.
+# update_lead_fields()'s existing fields-dict precedent, not create_*()'s
+# fully-named-kwargs-with-required-positionals shape, since "touch only
+# what changed" is the whole point of an update).
+# ══════════════════════════════════════════════════
+
+_DEAL_UPDATE_ALLOWED: frozenset[str] = frozenset({
+    "name", "domain", "owner_id", "stage", "priority", "risk_level", "notes",
+    "counterparty_contact_id", "counterparty_organization_id", "venture_id",
+    "contact_ids", "deal_type_code", "relationship_type", "business_deal_type",
+    "relationship_role", "engagement_duration", "currency", "commercial_status",
+    "start_date", "estimated_value_basis", "estimated_value_range",
+    "estimated_value_notes",
+})
+# Deliberately excluded, immutable after creation: origin_lead_id (Deal-
+# Fields.ORIGIN_LEAD's own docstring: "written once by create_deal() ...
+# and never touched again" — LEAD-DEAL-ASSOCIATION's LINKED_LEADS is the
+# correct path for any further Lead association, via the dedicated
+# link_lead_to_deal() writer, never a bare field overwrite here) and the
+# rollup/computed fields (TOTAL_CHARGED/TOTAL_COLLECTED/OUTSTANDING) and
+# auto-inverse link fields (TASKS_LINK/PAYMENTS_LINK/PAYMENT_TERMS_LINK/
+# CHARGES_LINK/ALLOCATION_RULES_LINK/DEAL_ECONOMICS_LINK), none of which
+# are ever caller-writable.
+_DEAL_UPDATE_LINK_FIELDS: dict[str, str] = {
+    "counterparty_contact_id": DealFields.COUNTERPARTY_CONTACT,
+    "counterparty_organization_id": DealFields.COUNTERPARTY_ORGANIZATION,
+    "venture_id": DealFields.VENTURE_LINK,
+}
+_DEAL_UPDATE_SCALAR_FIELDS: dict[str, str] = {
+    "priority": DealFields.PRIORITY,
+    "risk_level": DealFields.RISK_LEVEL,
+    "notes": DealFields.NOTES,
+    "deal_type_code": DealFields.DEAL_TYPE_CODE,
+    "relationship_type": DealFields.RELATIONSHIP_TYPE,
+    "business_deal_type": DealFields.BUSINESS_DEAL_TYPE,
+    "relationship_role": DealFields.RELATIONSHIP_ROLE,
+    "engagement_duration": DealFields.ENGAGEMENT_DURATION,
+    "currency": DealFields.CURRENCY,
+    "commercial_status": DealFields.COMMERCIAL_STATUS,
+    "start_date": DealFields.START_DATE,
+    "estimated_value_basis": DealFields.ESTIMATED_VALUE_BASIS,
+    "estimated_value_range": DealFields.ESTIMATED_VALUE_RANGE,
+    "estimated_value_notes": DealFields.ESTIMATED_VALUE_NOTES,
+}
+
+
+def update_deal(
+    record_id: str,
+    fields: dict[str, Any],
+    *,
+    source: str = "commercial_crm",
+) -> dict:
+    """Update an existing Deal through the canonical Deal boundary.
+
+    `fields` keys are create_deal()'s own kwarg names. Unsupported keys
+    fail the whole update closed (never silently dropped); an empty
+    `fields` (nothing to change) is also rejected rather than performing a
+    silent no-op write.
+    """
+    tool = "crm_update_deal"
+    if not _valid_record_id(record_id):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Deal record id is invalid.")
+    if not isinstance(fields, dict) or not fields:
+        return _tool_result(ok=False, tool=tool, user_message="❌ לא סופקו שדות לעדכון.")
+
+    unknown = sorted(set(fields) - _DEAL_UPDATE_ALLOWED)
+    if unknown:
+        return _tool_result(
+            ok=False, tool=tool,
+            user_message=f"❌ שדה לא נתמך בעדכון עסקה: {unknown!r}.",
+        )
+
+    # No pre-read of the current Deal here, deliberately: none of Deal's
+    # update fields have cross-field validation that depends on current
+    # state (unlike update_payment_term()'s calc_type/fixed_amount/rate_pct
+    # invariant below), so a pre-read would only add a redundant existence
+    # check — airtable_patch() below already fails closed (ok=False) if
+    # record_id doesn't resolve, the same failure mode the pre-existing
+    # generic airtable_update() path already had.
+    updates: dict[str, Any] = {}
+
+    if "name" in fields:
+        name = str(fields["name"] or "").strip()
+        if not name:
+            return _tool_result(ok=False, tool=tool, user_message="❌ שם עסקה חסר.")
+        updates[DealFields.NAME] = name
+
+    if "domain" in fields:
+        from core.runtime_schema_provider import resolve_live_select_value
+        domain_value = resolve_live_select_value(Tables.DEALS, DealFields.DOMAIN, fields["domain"])
+        if domain_value is None:
+            return _tool_result(
+                ok=False, tool=tool,
+                user_message=f"❌ תחום לא מוכר בטבלת העסקאות: {fields['domain']!r}.",
+            )
+        updates[DealFields.DOMAIN] = domain_value
+
+    if "owner_id" in fields:
+        if not _valid_record_id(fields["owner_id"]):
+            return _tool_result(ok=False, tool=tool, user_message="❌ owner_id אינו record id תקין.")
+        updates[DealFields.OWNER] = [fields["owner_id"]]
+
+    if "stage" in fields:
+        valid_stages = (DealStage.OPPORTUNITY, DealStage.NEGOTIATION, DealStage.CLOSED_WIN, DealStage.CLOSED_LOSS)
+        if fields["stage"] not in valid_stages:
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ שלב עסקה לא תקין: {fields['stage']!r}.")
+        updates[DealFields.STAGE] = fields["stage"]
+
+    for kwarg, field_name in _DEAL_UPDATE_LINK_FIELDS.items():
+        if kwarg not in fields:
+            continue
+        value = fields[kwarg]
+        if not value:
+            updates[field_name] = []
+            continue
+        if not _valid_record_id(value):
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {kwarg} אינו record id תקין.")
+        updates[field_name] = [value]
+
+    if "contact_ids" in fields:
+        contact_ids = fields["contact_ids"] or []
+        if not isinstance(contact_ids, list) or not all(_valid_record_id(c) for c in contact_ids):
+            return _tool_result(ok=False, tool=tool, user_message="❌ contact_ids אינו תקין.")
+        updates[DealFields.CONTACTS_LINK] = list(contact_ids)
+
+    for kwarg, field_name in _DEAL_UPDATE_SCALAR_FIELDS.items():
+        if kwarg in fields:
+            updates[field_name] = fields[kwarg]
+
+    if DealFields.START_DATE in updates and updates[DealFields.START_DATE] and not _valid_iso_date(updates[DealFields.START_DATE]):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Start Date must be YYYY-MM-DD.")
+
+    if not updates:
+        return _tool_result(ok=False, tool=tool, user_message="❌ לא סופקו שדות לעדכון.")
+
+    # Live-select resolution for every select-type field being changed —
+    # mirrors create_deal()'s own DIAMOND D3 FINAL resolver loop exactly, so
+    # an update can never write a value the live Airtable select doesn't
+    # actually have configured.
+    from core.runtime_schema_provider import resolve_live_select_value
+    for field_name, raw_value in list(updates.items()):
+        if field_name == DealFields.DOMAIN or not isinstance(raw_value, str):
+            continue
+        resolved = resolve_live_select_value(Tables.DEALS, field_name, raw_value)
+        if resolved is None:
+            return _tool_result(
+                ok=False, tool=tool,
+                user_message=f"❌ ערך לא מוכר בטבלת העסקאות: שדה {field_name!r} ={raw_value!r}.",
+            )
+        updates[field_name] = resolved
+
+    patched = airtable_patch(Tables.DEALS, record_id, updates, source=source)
+    if not patched:
+        return _tool_result(ok=False, tool=tool, user_message="❌ עדכון העסקה נכשל בכתיבה ל-Airtable.")
+    return _tool_result(
+        ok=True, tool=tool, external_id=record_id,
+        evidence={"record_id": record_id, "table": Tables.DEALS, "updated_fields": sorted(updates.keys())},
+        user_message="✅ העסקה עודכנה.",
+    )
+
+
+_PAYMENT_TERM_UPDATE_ALLOWED: frozenset[str] = frozenset({
+    "name", "calc_type", "fixed_amount", "rate_pct", "calc_basis",
+    "trigger_type", "trigger_date", "trigger_delay_days", "cadence",
+    "vat_rule", "start_date", "end_date", "notes",
+})
+# Deliberately excluded, immutable after creation: deal_id — a Payment
+# Term's Deal association is foundational to every Charge already
+# materialized from it (crm_create_charge_from_term() cross-checks the
+# supplied Deal against the Term's own DEAL link on every future
+# materialization); repointing it after the fact would silently orphan or
+# misattribute prior/future Charges with no code path that re-validates
+# them. Same immutability reasoning as Deal.ORIGIN_LEAD above.
+
+
+def update_payment_term(
+    record_id: str,
+    fields: dict[str, Any],
+    *,
+    source: str = "commercial_crm",
+) -> dict:
+    """Update an existing Payment Term through the canonical boundary.
+
+    `fields` keys are create_payment_term()'s own kwarg names. A partial
+    update is re-validated against the CURRENT record merged with the
+    proposed change — calc_type/fixed_amount/(rate_pct+calc_basis) must
+    remain internally consistent after the update, the same invariant
+    create_payment_term() enforces at creation time, even when the caller
+    only touches one of those fields.
+    """
+    tool = "crm_update_payment_term"
+    if not _valid_record_id(record_id):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Payment Term record id is invalid.")
+    if not isinstance(fields, dict) or not fields:
+        return _tool_result(ok=False, tool=tool, user_message="❌ לא סופקו שדות לעדכון.")
+
+    unknown = sorted(set(fields) - _PAYMENT_TERM_UPDATE_ALLOWED)
+    if unknown:
+        return _tool_result(
+            ok=False, tool=tool,
+            user_message=f"❌ שדה לא נתמך בעדכון Payment Term: {unknown!r}.",
+        )
+
+    current_fields, error = _read_fields(Tables.PAYMENT_TERMS, record_id, "Payment Term")
+    if error:
+        return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+
+    effective_calc_type = fields.get(
+        "calc_type",
+        current_fields.get(PaymentTermFields.CALC_TYPE_CODE) or current_fields.get(PaymentTermFields.CALC_TYPE, ""),
+    )
+    if effective_calc_type not in (PaymentTermCalcType.FIXED, PaymentTermCalcType.PERCENTAGE):
+        return _tool_result(ok=False, tool=tool, user_message=f"❌ calculation type לא תקין: {effective_calc_type!r}")
+
+    effective_fixed_amount = fields.get("fixed_amount", current_fields.get(PaymentTermFields.FIXED_AMOUNT))
+    effective_calc_basis = fields.get(
+        "calc_basis",
+        current_fields.get(PaymentTermFields.CALC_BASIS_CODE) or current_fields.get(PaymentTermFields.CALC_BASIS, ""),
+    )
+    effective_rate_pct_present = "rate_pct" in fields or current_fields.get(PaymentTermFields.RATE_PCT) is not None
+
+    if effective_calc_type == PaymentTermCalcType.FIXED and not effective_fixed_amount:
+        return _tool_result(ok=False, tool=tool, user_message="❌ calculation type=fixed דורש fixed_amount.")
+    if effective_calc_type == PaymentTermCalcType.PERCENTAGE and (not effective_rate_pct_present or not effective_calc_basis):
+        return _tool_result(ok=False, tool=tool, user_message="❌ calculation type=percentage דורש rate_pct + calc_basis.")
+
+    updates: dict[str, Any] = {}
+    if "name" in fields:
+        updates[PaymentTermFields.NAME] = (fields["name"] or "").strip() or "Payment Term"
+    if "calc_type" in fields:
+        updates[PaymentTermFields.CALC_TYPE] = fields["calc_type"]
+    if "fixed_amount" in fields:
+        updates[PaymentTermFields.FIXED_AMOUNT] = fields["fixed_amount"]
+    if "rate_pct" in fields:
+        # Same Airtable Percent-field API conversion create_payment_term()
+        # applies — see _airtable_percent_from_points()'s own docstring.
+        updates[PaymentTermFields.RATE_PCT] = _airtable_percent_from_points(fields["rate_pct"])
+    if "calc_basis" in fields:
+        updates[PaymentTermFields.CALC_BASIS] = fields["calc_basis"]
+    if "trigger_type" in fields:
+        updates[PaymentTermFields.TRIGGER_TYPE] = fields["trigger_type"]
+    if "trigger_date" in fields:
+        updates[PaymentTermFields.TRIGGER_DATE] = fields["trigger_date"]
+    if "trigger_delay_days" in fields:
+        updates[PaymentTermFields.TRIGGER_DELAY_DAYS] = fields["trigger_delay_days"]
+    if "cadence" in fields:
+        updates[PaymentTermFields.CADENCE] = fields["cadence"]
+    if "vat_rule" in fields:
+        updates[PaymentTermFields.VAT_RULE] = fields["vat_rule"]
+    if "start_date" in fields:
+        updates[PaymentTermFields.START_DATE] = fields["start_date"]
+    if "end_date" in fields:
+        updates[PaymentTermFields.END_DATE] = fields["end_date"]
+    if "notes" in fields:
+        updates[PaymentTermFields.NOTES] = fields["notes"]
+
+    for label, value in (
+        ("Trigger Date", updates.get(PaymentTermFields.TRIGGER_DATE)),
+        ("Start Date", updates.get(PaymentTermFields.START_DATE)),
+        ("End Date", updates.get(PaymentTermFields.END_DATE)),
+    ):
+        if value and not _valid_iso_date(value):
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {label} must be YYYY-MM-DD.")
+
+    if not updates:
+        return _tool_result(ok=False, tool=tool, user_message="❌ לא סופקו שדות לעדכון.")
+
+    patched = airtable_patch(Tables.PAYMENT_TERMS, record_id, updates, source=source)
+    if not patched:
+        return _tool_result(ok=False, tool=tool, user_message="❌ עדכון Payment Term נכשל בכתיבה ל-Airtable.")
+    return _tool_result(
+        ok=True, tool=tool, external_id=record_id,
+        evidence={"record_id": record_id, "table": Tables.PAYMENT_TERMS, "updated_fields": sorted(updates.keys())},
+        user_message="✅ Payment Term עודכן.",
+    )
+
+
+# Payment correction/update boundary (Owner Decision #3, RESOLVED —
+# docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md §16/§17):
+# a canonical Payment update/correction boundary is REQUIRED; Payment
+# CREATE must not remain canonical while UPDATE/correction stays generic.
+#
+# Model actually supported by current repo evidence: DIRECT_UPDATE for
+# non-financial metadata only. No append-only/reversal primitive (a
+# dedicated correction/reversal table or a "supersedes" link) exists
+# anywhere in this codebase today, so this writer does not invent one.
+# What the existing code already establishes, unambiguously, is that a
+# recorded financial fact is a frozen snapshot, never silently rewritten —
+# see calculate_payment()'s own docstring ("written as plain values, never
+# formulas, so editing the Term afterward cannot change a Payment already
+# created from it") and create_charge_payment()'s hard validation that
+# amount/direction/currency must match the linked Charge exactly at
+# creation time. Extending that same immutability to amount/currency/
+# direction/paid_at/charge/deal/status here — rather than allowing them to
+# drift out of sync with the Charge they were created against — is the
+# conservative reading of "an update/correction boundary is required",
+# not an invented new policy. A genuine amount/direction correction is a
+# new, separate (typically offsetting) Payment; that creation primitive
+# is out of Phase 0's scope (see the Required Output's "Remaining Gaps").
+_PAYMENT_UPDATE_FINANCIAL_FIELDS: frozenset[str] = frozenset({
+    "amount", "currency", "direction", "paid_at", "charge_id", "deal_id", "status",
+})
+_PAYMENT_UPDATE_ALLOWED: frozenset[str] = frozenset({
+    "reference", "method", "counterparty_contact_id", "counterparty_organization_id",
+    "notes", "document_requirement", "document_status",
+})
+
+
+def update_payment(
+    record_id: str,
+    fields: dict[str, Any],
+    *,
+    source: str = "commercial_crm",
+) -> dict:
+    """Canonical Payment update/correction boundary — see the module-level
+    comment immediately above for the correction model this implements and
+    why. Financial fields are rejected outright, not silently ignored."""
+    tool = "crm_update_payment"
+    if not _valid_record_id(record_id):
+        return _tool_result(ok=False, tool=tool, user_message="❌ Payment record id is invalid.")
+    if not isinstance(fields, dict) or not fields:
+        return _tool_result(ok=False, tool=tool, user_message="❌ לא סופקו שדות לעדכון.")
+
+    financial_requested = sorted(set(fields) & _PAYMENT_UPDATE_FINANCIAL_FIELDS)
+    if financial_requested:
+        return _tool_result(
+            ok=False, tool=tool,
+            user_message=(
+                "❌ לא ניתן לשנות שדות פיננסיים בתשלום קיים "
+                f"({financial_requested!r}) — יש ליצור תשלום מקזז/מתקן חדש."
+            ),
+        )
+
+    unknown = sorted(set(fields) - _PAYMENT_UPDATE_ALLOWED)
+    if unknown:
+        return _tool_result(
+            ok=False, tool=tool,
+            user_message=f"❌ שדה לא נתמך בעדכון תשלום: {unknown!r}.",
+        )
+
+    # Only read current state when actually needed to merge-validate the
+    # Document Requirement/Status pair (exactly one of the two supplied) —
+    # mirrors update_deal()'s reasoning: a pre-read that nothing else needs
+    # is a redundant existence check, not a real validation dependency.
+    current_fields: dict[str, Any] = {}
+    if ("document_requirement" in fields) != ("document_status" in fields):
+        current_fields, error = _read_fields(Tables.PAYMENTS, record_id, "Payment")
+        if error:
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {error}")
+
+    updates: dict[str, Any] = {}
+    if "reference" in fields:
+        updates[PaymentFields.REF] = fields["reference"]
+    if "method" in fields:
+        updates[PaymentFields.METHOD] = fields["method"]
+    if "notes" in fields:
+        updates[PaymentFields.NOTES] = fields["notes"]
+
+    for kwarg, field_name, link_table in (
+        ("counterparty_contact_id", PaymentFields.COUNTERPARTY_CONTACT, Tables.CONTACTS),
+        ("counterparty_organization_id", PaymentFields.COUNTERPARTY_ORGANIZATION, Tables.ORGANIZATIONS),
+    ):
+        if kwarg not in fields:
+            continue
+        value = fields[kwarg]
+        if not value:
+            updates[field_name] = []
+            continue
+        if not _valid_record_id(value):
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {kwarg} אינו record id תקין.")
+        _, link_error = _read_fields(link_table, value, kwarg)
+        if link_error:
+            return _tool_result(ok=False, tool=tool, user_message=f"❌ {link_error}")
+        updates[field_name] = [value]
+
+    if "document_requirement" in fields or "document_status" in fields:
+        effective_requirement = fields.get("document_requirement", current_fields.get(PaymentFields.DOCUMENT_REQUIREMENT))
+        effective_status = fields.get("document_status", current_fields.get(PaymentFields.DOCUMENT_STATUS))
+        if effective_requirement not in _DOCUMENT_REQUIREMENTS:
+            return _tool_result(ok=False, tool=tool, user_message="❌ Document Requirement is invalid.")
+        if effective_status not in _DOCUMENT_STATUSES:
+            return _tool_result(ok=False, tool=tool, user_message="❌ Document Status is invalid.")
+        if (effective_requirement == DocumentRequirement.NONE) != (effective_status == DocumentStatus.NOT_REQUIRED):
+            return _tool_result(ok=False, tool=tool, user_message="❌ Document Status conflicts with Document Requirement.")
+        if "document_requirement" in fields:
+            updates[PaymentFields.DOCUMENT_REQUIREMENT] = effective_requirement
+        if "document_status" in fields:
+            updates[PaymentFields.DOCUMENT_STATUS] = effective_status
+
+    if not updates:
+        return _tool_result(ok=False, tool=tool, user_message="❌ לא סופקו שדות לעדכון.")
+
+    patched = airtable_patch(Tables.PAYMENTS, record_id, updates, source=source)
+    if not patched:
+        return _tool_result(ok=False, tool=tool, user_message="❌ עדכון התשלום נכשל בכתיבה ל-Airtable.")
+    return _tool_result(
+        ok=True, tool=tool, external_id=record_id,
+        evidence={"record_id": record_id, "table": Tables.PAYMENTS, "updated_fields": sorted(updates.keys())},
+        user_message="✅ התשלום עודכן.",
+    )

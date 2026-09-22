@@ -26,6 +26,10 @@ EXPECTED_APPROVAL_TOOLS = frozenset({
     "crm_create_charge",
     "crm_create_charge_from_term",
     "crm_create_charge_payment",
+    # Phase 0 — canonical Commercial CRM UPDATE authority (Deal/Payment Term/Payment)
+    "crm_update_deal",
+    "crm_update_payment_term",
+    "crm_update_payment",
     "gmail_draft",
     "gmail_send_draft",
     "sheets_append",
