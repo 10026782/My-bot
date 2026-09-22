@@ -1372,6 +1372,7 @@
         "core/tool_result.py",
         "core/action_gateway.py",
         "core/action_gateway_atomic_executor.py",
+        "core/migrations/006_failed_claim_recovery.sql",
         "tools/dispatcher.py",
         "tool_registry.py",
         "action_validator.py",
@@ -1380,7 +1381,8 @@
       "test_paths": [
         "test_recruitment_writers.py",
         "test_recruitment_contracts.py",
-        "test_phase_4b0_1b_concurrency_regression.py"
+        "test_phase_4b0_1b_concurrency_regression.py",
+        "test_phase_4b0_1b_concurrency_regression_mock.py"
       ],
       "canonical_docs": [
         {
@@ -1403,7 +1405,8 @@
         "Owner explicitly approved Phase 2 runtime writers after Phase 1 merged.",
         "The action is internal-only and has no model schema, UI, Telegram, Excel ingestion, automation, migration, or backfill route.",
         "All mutations require an approved ActionContract execution proof and use the existing Airtable gateway primitives; direct provider writes and parallel writer paths are prohibited.",
-        "Create operations use the existing PostgreSQL action_execution_claims idempotency-key uniqueness primitive with deterministic recruitment natural keys. The write fails closed before Airtable when atomic claims are disabled or unavailable."
+        "Create operations use the existing PostgreSQL action_execution_claims idempotency-key uniqueness primitive with deterministic recruitment natural keys. The write fails closed before Airtable when atomic claims are disabled or unavailable.",
+        "OWNER DECISION (2026-09-22): core/migrations/006_failed_claim_recovery.sql and test_phase_4b0_1b_concurrency_regression_mock.py are exact-file artifacts for owner-approved recovery of a recruitment create only after a failed claim and Airtable absence proof; outcome_unknown remains unrecoverable; no wildcard policy."
       ],
       "extensions": {
         "context_librarian.registration": {

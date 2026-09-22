@@ -1709,6 +1709,7 @@ class ActionGateway:
         user_text: str = "",
         fingerprint_payload: dict | None = None,
         continuation_ref: ContinuationRef | None = None,
+        recovery_of_contract_id: str = "",
     ) -> GatewayResult:
         """
         מציע פעולה חדשה ל-Gateway.
@@ -1806,6 +1807,23 @@ class ActionGateway:
                     ok=False, reason=str(exc), user_message=f"❌ {exc}",
                     failure_code="invalid_recruitment_natural_key",
                 )
+            if recovery_of_contract_id:
+                prior = self._ledger.find_by_id(recovery_of_contract_id)
+                if (not prior or prior.status != "failed" or
+                        prior.tool_name != tool_name or
+                        prior.normalized_payload != normalized or
+                        prior.idempotency_key != recruitment_natural_key):
+                    return GatewayResult(ok=False, reason="invalid failed recruitment recovery",
+                                         user_message="❌ שחזור פעולה נכשלת אינו תקין.",
+                                         failure_code="invalid_recruitment_recovery")
+                from recruitment_crm import recovery_absence_proof
+                if not recovery_absence_proof(normalized.get("operation", ""), normalized.get("payload", {})):
+                    return GatewayResult(ok=False, reason="recovery target exists or cannot be verified absent",
+                                         user_message="❌ לא ניתן לשחזר: יעד הכתיבה קיים או שלא אומת כחסר.",
+                                         failure_code="recruitment_recovery_absence_unproven")
+                # The original key remains in the failed claim; execution parses this
+                # lineage marker and atomically supersedes only that failed claim.
+                recruitment_natural_key = f"{recruitment_natural_key}|recovery:{recovery_of_contract_id}"
         fingerprint = self.compute_business_fingerprint(
             tenant_id, canonical_user_id, tool_name, fingerprint_basis
         )
@@ -3767,10 +3785,15 @@ class ActionGateway:
             idem_seed = f"{contract.contract_id}:{contract.approved_by or contract.actor_user_id}"
             idempotency_key = (contract.idempotency_key if contract.tool_name == "recruitment_write"
                                else hashlib.sha256(idem_seed.encode()).hexdigest()[:16])
+            recovery_of_contract_id = None
+            if contract.tool_name == "recruitment_write" and "|recovery:" in idempotency_key:
+                idempotency_key, recovery_of_contract_id = idempotency_key.rsplit("|recovery:", 1)
 
             # Gate dispatcher behind atomic claim acquisition
             try:
                 claim_kwargs = {}
+                if recovery_of_contract_id:
+                    claim_kwargs["recovery_of_contract_id"] = recovery_of_contract_id
                 if contract.tool_name == "recruitment_write":
                     claim_kwargs["require_claim"] = True
                 success, result, error = execute_with_atomic_claim(

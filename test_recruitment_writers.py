@@ -268,6 +268,66 @@ def test_independent_recruitment_contexts_get_the_same_durable_natural_key(actio
         assert gateway.find_contract(proposed.contract_id).idempotency_key == natural_key
 
 
+def test_failed_recruitment_create_can_get_one_proven_recovery_lineage(monkeypatch):
+    gateway = ActionGateway(ledger=ExecutionLedger())
+    identity = Identity("recovery-owner", "owner")
+    action = {"operation": "create_assignment", "payload": {
+        "reference": "WA-recovery", "contact_id": "contact1", "organization_id": "org1",
+        "status": "ended", "start_date": "2026-08-01", "end_date": "2026-08-01",
+    }}
+    first = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write", tool_inputs=action,
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, trusted_source="recruitment",
+    )
+    gateway.find_contract(first.contract_id).status = "failed"
+    monkeypatch.setattr(writer, "recovery_absence_proof", lambda *_args: True)
+    recovery = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write", tool_inputs=action,
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, trusted_source="operator_recruitment_recovery",
+        recovery_of_contract_id=first.contract_id,
+    )
+    assert recovery.ok
+    assert gateway.find_contract(recovery.contract_id).idempotency_key.endswith(
+        f"|recovery:{first.contract_id}")
+
+
+def test_recruitment_recovery_rejects_outcome_unknown_or_unproven_absence(monkeypatch):
+    gateway = ActionGateway(ledger=ExecutionLedger())
+    identity = Identity("recovery-owner", "owner")
+    action = {"operation": "create_assignment", "payload": {
+        "reference": "WA-recovery-unknown", "contact_id": "contact1", "organization_id": "org1",
+        "status": "ended", "start_date": "2026-08-01", "end_date": "2026-08-01",
+    }}
+    first = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write", tool_inputs=action,
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, trusted_source="recruitment",
+    )
+    gateway.find_contract(first.contract_id).status = "outcome_unknown"
+    monkeypatch.setattr(writer, "recovery_absence_proof", lambda *_args: True)
+    blocked_unknown = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write", tool_inputs=action,
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, recovery_of_contract_id=first.contract_id,
+    )
+    assert not blocked_unknown.ok
+    gateway.find_contract(first.contract_id).status = "failed"
+    monkeypatch.setattr(writer, "recovery_absence_proof", lambda *_args: False)
+    blocked_absence = gateway.propose_action(
+        tenant_id=identity.tenant_id, canonical_user_id=identity.memory_key,
+        tool_name="recruitment_write", tool_inputs=action,
+        origin_channel="telegram", origin_chat_id=identity.user_id,
+        requires_approval=True, identity=identity, recovery_of_contract_id=first.contract_id,
+    )
+    assert not blocked_absence.ok
+
+
 def test_uncertain_create_propagates_outcome_unknown_not_a_retryable_failure(monkeypatch):
     monkeypatch.setattr(writer, "_linked", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(writer, "_by_reference", lambda *_args: [])

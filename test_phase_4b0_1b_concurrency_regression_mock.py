@@ -167,6 +167,35 @@ def test_mock_diff_contracts_same_idem():
         chk("Scenario C: contract B IDEMPOTENCY_CONFLICT", result_b.is_idempotency_conflict())
 
 
+def test_mock_failed_claim_recovery_is_atomic_and_unknown_is_not():
+    """Only the named failed claim may yield its key to one recovery claim."""
+    from core.atomic_claim_repository import claim_contract_execution
+
+    with patch('core.database.get_conn') as mock_get_conn:
+        conn, cursor = MagicMock(), MagicMock()
+        mock_get_conn.return_value = conn
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        cursor.fetchone.side_effect = [None, ("failed",), ("recovery",)]
+        cursor.fetchall.return_value = [("failed", "WA:one")]
+        cursor.rowcount = 1
+        recovered = claim_contract_execution(
+            "recovery", "owner", "WA:one", recovery_of_contract_id="failed")
+        chk("failed claim recovery atomically acquires the replacement", recovered.is_acquired())
+        chk("failed claim recovery commits once", conn.commit.call_count == 1)
+
+    with patch('core.database.get_conn') as mock_get_conn:
+        conn, cursor = MagicMock(), MagicMock()
+        mock_get_conn.return_value = conn
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        cursor.fetchone.side_effect = [None, ("outcome_unknown",)]
+        cursor.fetchall.return_value = [("unknown", "WA:one")]
+        blocked = claim_contract_execution(
+            "recovery", "owner", "WA:one", recovery_of_contract_id="unknown")
+        chk("outcome_unknown cannot be recovered", blocked.is_idempotency_conflict())
+
+
 # ══════════════════════════════════════════════════════════════════
 # Test 4: Different contracts + different idempotency_keys (independent)
 # ══════════════════════════════════════════════════════════════════
@@ -311,6 +340,8 @@ if __name__ == "__main__":
     test_mock_same_contract_diff_idem()
     print()
     test_mock_diff_contracts_same_idem()
+    print()
+    test_mock_failed_claim_recovery_is_atomic_and_unknown_is_not()
     print()
     test_mock_diff_contracts_diff_idem()
     print()

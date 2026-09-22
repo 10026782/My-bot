@@ -83,6 +83,24 @@ def _by_reference(table: str, field: str, reference: str) -> list[dict]:
                         max_records=2, fields=[field], paginate=False)
 
 
+def recovery_absence_proof(operation: str, payload: dict[str, Any]) -> bool:
+    """Fail closed unless a failed recruitment create left no target row."""
+    targets = {
+        "create_assignment": (Tables.WORKER_ASSIGNMENTS, AF.REFERENCE),
+        "create_canonical_batch": (Tables.MONTHLY_CALCULATION_BATCHES, BF.REFERENCE),
+        "create_adjustment_batch": (Tables.MONTHLY_CALCULATION_BATCHES, BF.REFERENCE),
+        "create_result": (Tables.WORKER_MONTHLY_RESULTS, RF.REFERENCE),
+    }
+    target = targets.get(operation)
+    reference = str(payload.get("reference", ""))
+    if not target or not reference:
+        return False
+    try:
+        return not _by_reference(*target, reference)
+    except Exception:
+        return False
+
+
 def _linked(table: str, field: str, record_id: str, fields: list[str]) -> list[dict]:
     return list_records(table, f"FIND('{escape_formula_value(record_id)}', ARRAYJOIN({{{field}}}))",
                         max_records=None, fields=fields, paginate=True)
