@@ -297,6 +297,92 @@ TOOL_SCHEMAS = [
             "required": ["amount", "domain", "owner_id"]
         }
     },
+    {
+        "name": "crm_update_deal",
+        "description": (
+            "עדכון עסקה (Deal) קיימת — שינוי שלב/בעלים/דומיין/שדות עסקיים. "
+            "רק שדות שסופקו בפועל משתנים; שדות שלא סופקו נשארים ללא שינוי. "
+            "לא ניתן לשנות Origin Lead או שדות מחושבים (Total Charged/Collected/Outstanding)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id":      {"type": "string", "description": "מזהה העסקה לעדכון (rec...) — חובה"},
+                "name":           {"type": "string", "description": "שם העסקה"},
+                "domain":         {"type": "string", "description": "דומיין עסקי"},
+                "owner_id":       {"type": "string", "description": "מזהה record של הבעלים העסקי (rec...)"},
+                "stage":          {"type": "string", "description": "שלב העסקה"},
+                "priority":       {"type": "string"},
+                "risk_level":     {"type": "string"},
+                "counterparty_contact_id": {"type": "string"},
+                "counterparty_organization_id": {"type": "string"},
+                "venture_id":     {"type": "string"},
+                "contact_ids":    {"type": "array", "items": {"type": "string"}},
+                "deal_type_code": {"type": "string"},
+                "relationship_type": {"type": "string"},
+                "business_deal_type": {"type": "string"},
+                "relationship_role": {"type": "string"},
+                "engagement_duration": {"type": "string"},
+                "currency":       {"type": "string"},
+                "commercial_status": {"type": "string"},
+                "start_date":     {"type": "string"},
+                "estimated_value_basis": {"type": "string"},
+                "estimated_value_range": {"type": "string"},
+                "estimated_value_notes": {"type": "string"},
+                "notes":          {"type": "string", "description": "הערות חופשיות"}
+            },
+            "required": ["record_id"]
+        }
+    },
+    {
+        "name": "crm_update_payment_term",
+        "description": (
+            "עדכון תנאי תשלום (Payment Term) קיים. רק שדות שסופקו בפועל משתנים. "
+            "לא ניתן לשנות את העסקה (deal_id) שאליה תנאי התשלום מקושר."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id":    {"type": "string", "description": "מזהה תנאי התשלום לעדכון (rec...) — חובה"},
+                "name":         {"type": "string", "description": "שם תנאי התשלום"},
+                "calc_type":    {"type": "string", "enum": ["fixed", "percentage"], "description": "שיטת חישוב"},
+                "fixed_amount": {"type": "number"},
+                "rate_pct":     {"type": "number"},
+                "calc_basis":   {"type": "string"},
+                "trigger_type": {"type": "string", "enum": ["immediate", "specific_date", "after_period", "event_based"]},
+                "trigger_date": {"type": "string"},
+                "trigger_delay_days": {"type": "integer"},
+                "cadence":      {"type": "string", "enum": ["once", "monthly"]},
+                "vat_rule":     {"type": "string", "enum": ["none", "add", "included"]},
+                "start_date":   {"type": "string"},
+                "end_date":     {"type": "string"},
+                "notes":        {"type": "string", "description": "הערות חופשיות"}
+            },
+            "required": ["record_id"]
+        }
+    },
+    {
+        "name": "crm_update_payment",
+        "description": (
+            "עדכון/תיקון שדות לא-פיננסיים בתשלום (Payment) קיים — reference/method/"
+            "notes/צד נגדי/סטטוס מסמך. לא ניתן לשנות amount/currency/direction/"
+            "paid_at/charge/deal/status דרך כלי זה — תיקון פיננסי דורש תשלום מקזז חדש."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_id":  {"type": "string", "description": "מזהה התשלום לעדכון (rec...) — חובה"},
+                "reference":  {"type": "string"},
+                "method":     {"type": "string"},
+                "counterparty_contact_id": {"type": "string"},
+                "counterparty_organization_id": {"type": "string"},
+                "document_requirement": {"type": "string"},
+                "document_status": {"type": "string"},
+                "notes":      {"type": "string", "description": "הערות חופשיות"}
+            },
+            "required": ["record_id"]
+        }
+    },
 ]
 
 # ══════════════════════════════════════════════════

@@ -386,6 +386,41 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         availability_check = _AIRTABLE_AVAILABILITY,
         description_he   = "יצירת תשלום (Payment) חדש — דורש אישור",
     ),
+    # Phase 0 — canonical UPDATE authority closure (BusinessDraft Commercial
+    # CRM Canonical Update Authority). Role/approval/risk posture matches
+    # each entity's own CREATE tool exactly — never weaker — per the Phase 0
+    # task's explicit requirement ("role enforcement must be no weaker than
+    # current create tools").
+    ToolMeta(
+        name             = "crm_update_deal",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "עדכון עסקה (Deal) קיימת — דורש אישור",
+    ),
+    ToolMeta(
+        name             = "crm_update_payment_term",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "עדכון תנאי תשלום (Payment Term) קיים — דורש אישור",
+    ),
+    ToolMeta(
+        name             = "crm_update_payment",
+        roles_allowed    = _MANAGEMENT,
+        tenant_scoped    = True,
+        requires_approval= True,
+        blocked_by_emergency=True,
+        high_risk        = True,
+        availability_check = _AIRTABLE_AVAILABILITY,
+        description_he   = "עדכון/תיקון שדות לא-פיננסיים בתשלום (Payment) קיים — דורש אישור",
+    ),
     ToolMeta(
         name             = "crm_create_charge_from_term",
         roles_allowed    = _MANAGEMENT,
