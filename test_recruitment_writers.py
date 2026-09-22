@@ -58,9 +58,13 @@ def created(record_id):
     return outcome
 
 
-def test_happy_path_creates_result_without_writing_derived_retained(monkeypatch):
-    monkeypatch.setattr(writer, "_assignment", lambda _id: (writer.WorkerAssignmentRead.from_airtable(assignment()), assignment()["fields"]))
-    monkeypatch.setattr(writer, "_batch", lambda _id: (writer.MonthlyCalculationBatchRead.from_airtable(batch()), batch()["fields"]))
+def test_result_allows_poseidon_assignment_and_provider_batch_without_writing_derived_retained(monkeypatch):
+    assignment_record = assignment(organization="Poseidon")
+    batch_record = batch(organization="עמי מערכות")
+    monkeypatch.setattr(writer, "_assignment", lambda _id: (
+        writer.WorkerAssignmentRead.from_airtable(assignment_record), assignment_record["fields"]))
+    monkeypatch.setattr(writer, "_batch", lambda _id: (
+        writer.MonthlyCalculationBatchRead.from_airtable(batch_record), batch_record["fields"]))
     monkeypatch.setattr(writer, "_linked", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(writer, "_by_reference", lambda *_args: [])
     create = Mock(return_value=created(RESULT_ID))
@@ -89,12 +93,8 @@ def test_duplicate_active_assignment_is_rejected(monkeypatch):
     create.assert_not_called()
 
 
-@pytest.mark.parametrize("organization,start,error", [
-    ("org2", "2026-01-01", "organizations must match"),
-    ("org1", "2026-09-01", "outside the assignment period"),
-])
-def test_result_rejects_wrong_organization_or_date(monkeypatch, organization, start, error):
-    assignment_record = assignment(organization=organization, start=start)
+def test_result_rejects_assignment_outside_batch_month(monkeypatch):
+    assignment_record = assignment(organization="Poseidon", start="2026-09-01")
     monkeypatch.setattr(writer, "_assignment", lambda _id: (
         writer.WorkerAssignmentRead.from_airtable(assignment_record), assignment_record["fields"]))
     monkeypatch.setattr(writer, "_batch", lambda _id: (
@@ -105,7 +105,22 @@ def test_result_rejects_wrong_organization_or_date(monkeypatch, organization, st
         "attributed_revenue": 100, "worker_due": 40,
     }, actor_role="owner")
     assert response["ok"] is False
-    assert error in response["user_message"]
+    assert "outside the assignment period" in response["user_message"]
+
+
+def test_result_rejects_missing_assignment_without_creating(monkeypatch):
+    monkeypatch.setattr(writer, "_assignment", lambda _id: (_ for _ in ()).throw(KeyError("missing assignment")))
+    create = Mock()
+    monkeypatch.setattr(writer, "airtable_create", create)
+
+    response = writer.execute_recruitment_write("create_result", {
+        "reference": "R-missing", "batch_id": BATCH_ID, "assignment_id": ASSIGNMENT_ID,
+        "attributed_revenue": 100, "worker_due": 40,
+    }, actor_role="owner")
+
+    assert response["ok"] is False
+    assert "missing assignment" in response["user_message"]
+    create.assert_not_called()
 
 
 def test_closed_batch_blocks_result_financial_mutation(monkeypatch):
@@ -179,6 +194,26 @@ def test_close_validates_reconciliation_and_incoming_payment(monkeypatch):
                                                 actor_role="owner")
     assert response["ok"] is True
     patch.assert_called_once()
+
+
+def test_batch_rejects_payment_from_a_different_organization(monkeypatch):
+    current = batch(organization="עמי מערכות", status="received")
+    monkeypatch.setattr(writer, "_batch", lambda _id: (
+        writer.MonthlyCalculationBatchRead.from_airtable(current), current["fields"]))
+    monkeypatch.setattr(writer, "get_record_fields", lambda *_args: {
+        PaymentFields.DIRECTION: Direction.RECEIVABLE,
+        PaymentFields.COUNTERPARTY_ORGANIZATION: ["Poseidon"],
+    })
+    patch = Mock(return_value=True)
+    monkeypatch.setattr(writer, "airtable_patch", patch)
+
+    response = writer.execute_recruitment_write("update_batch", {
+        "record_id": BATCH_ID, "incoming_payment_id": PAYMENT_ID,
+    }, actor_role="owner")
+
+    assert response["ok"] is False
+    assert "incoming payment organization must match the batch" in response["user_message"]
+    patch.assert_not_called()
 
 
 def test_direct_dispatch_without_actiongateway_proof_is_rejected(monkeypatch):

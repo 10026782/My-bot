@@ -108,12 +108,17 @@ def test_batch_requires_unique_canonical_or_closed_original_for_adjustment():
             "batch1", "MCB", "org1", date(2026, 7, 1), "canonical", "closed"))
 
 
-def test_result_enforces_identity_organization_period_uniqueness_and_snapshot():
+def test_result_enforces_identity_period_uniqueness_and_snapshot():
     candidate = WorkerMonthlyResultWrite("WMR2", "batch1", "wa1", Decimal("100"), Decimal("40"))
     with pytest.raises(RecruitmentValidationError, match="only one result"):
         validate_result(candidate, [result()], assignment(), batch())
-    with pytest.raises(RecruitmentValidationError, match="organizations must match"):
-        validate_result(candidate, [], assignment(organization="org2"), batch())
+
+    # A worker is employed by Poseidon; the batch is from the work/payment provider.
+    validate_result(candidate, [], assignment(organization="Poseidon"),
+                    batch(organization="עמי מערכות"))
+    with pytest.raises(RecruitmentValidationError, match="links do not match"):
+        validate_result(WorkerMonthlyResultWrite("WMR2", "batch1", "other", Decimal("100"), Decimal("40")),
+                        [], assignment(), batch())
     with pytest.raises(RecruitmentValidationError, match="outside"):
         validate_result(candidate, [], assignment(start=date(2026, 9, 1)), batch())
     with pytest.raises(RecruitmentValidationError, match="snapshot is required"):
