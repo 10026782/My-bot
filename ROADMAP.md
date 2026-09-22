@@ -49,8 +49,8 @@ and open-Batch Result creation/update/payout tracking. It is internal-only,
 approval-sensitive, and callable only through ActionGateway execution proof.
 The writer reuses the approved Phase 1 contracts and existing Airtable gateway.
 
-STATUS: 🟡 STATIC_VERIFIED overall; the Worker Assignment failed-claim recovery
-path is RUNTIME_VERIFIED in Render commit `958ea246045bd119bde50f4602d393978f0cea25`.
+STATUS: 🟢 PHASE 2 CORE WRITERS — RUNTIME_VERIFIED in Render commit
+`958ea246045bd119bde50f4602d393978f0cea25`.
 EVIDENCE: focused Phase 1/2 writer, schema, and registry tests (29/29),
 Turn Coordinator and writer-authority audits, compile, and `git diff --check`
 passed before merge. On 22/09/2026, the approved recovery of failed-before-
@@ -58,11 +58,22 @@ dispatch contract `3a5103ca-4cae-43ff-9c43-cac76b3d5afb` completed as ActionCont
 `64f10c3f-06ca-4929-a7a1-2a1c935190ff`; a direct read then found exactly one
 Worker Assignment `recj18WZGVNRj3X18`, matching the approved Contact,
 Organization, `ended` status, and start/end date `2026-09-22`.
-DEFERRED: UI, Telegram, Excel ingestion, batch automation, migration/backfill,
-and a user-facing deterministic route.
+At `2026-09-22T15:41:59+03:00`, operator-supplied Render evidence recorded:
+the canonical Batch canary ActionContract `92166ef2-df6a-42c6-9d89-6e8b0506ece8`
+and atomic claim both `completed`, creating exactly one Batch
+`recBr8TYZrPqAcGhu` with natural key `MCB:recYLuitaDmLhEid7:2026-09`, matching
+Organization `recYLuitaDmLhEid7`, Month `2026-09-01`, Batch Type `canonical`,
+and Status `received`; and the Monthly Result canary ActionContract
+`7f4f81ef-3f98-40b4-a4ec-218b7136b237` and atomic claim both `completed`,
+creating exactly one Result `recEhwcCEUdPj7PJN` with natural key
+`WMR:recBr8TYZrPqAcGhu:recj18WZGVNRj3X18`, linked to that Batch and Worker
+Assignment `recj18WZGVNRj3X18`, with Attributed Revenue `1000`, Worker Due
+`800`, Poseidon Retained `200`, and Payout Status `pending`.
+DEFERRED: UI, Telegram, Excel ingestion (explicitly not started), batch
+automation, migration/backfill, and a user-facing deterministic route.
 DURABLE UNIQUENESS: recruitment creates require the existing PostgreSQL atomic
-claim before Airtable dispatch, keyed by their natural key. Static verification
-is complete; the Worker Assignment recovery canary is runtime-verified. A real
+claim before Airtable dispatch, keyed by their natural key. Worker Assignment,
+canonical Batch, and Monthly Result canaries are runtime-verified; a real
 financial batch remains out of scope for this verification.
 RECOVERY REMEDIATION: a claim that is `failed` before dispatch may be replaced
 only after an approved recovery contract proves the exact recruitment payload
