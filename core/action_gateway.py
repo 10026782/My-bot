@@ -3770,6 +3770,9 @@ class ActionGateway:
 
             # Gate dispatcher behind atomic claim acquisition
             try:
+                claim_kwargs = {}
+                if contract.tool_name == "recruitment_write":
+                    claim_kwargs["require_claim"] = True
                 success, result, error = execute_with_atomic_claim(
                     contract_id=contract.contract_id,
                     canonical_user_id=contract.approved_by or contract.actor_user_id,
@@ -3778,7 +3781,7 @@ class ActionGateway:
                     identity=identity,  # Frozen contract identity
                     executor_fn=self._tool_executor,
                     idempotency_key=idempotency_key,
-                    require_claim=contract.tool_name == "recruitment_write",
+                    **claim_kwargs,
                 )
 
                 if not success:
