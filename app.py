@@ -7040,15 +7040,29 @@ def run_agent(
             parse_deterministic_commercial_update, resolve_deterministic_update_record,
         )
         _cu_parse = parse_deterministic_commercial_update(user_text)
+        _entity_label_he = {"deal": "עסקה", "payment_term": "תנאי תשלום", "payment": "תשלום"}
         if not _cu_parse.matched or _cu_parse.entity != _UPDATE_FIELD_INTENT_TO_ENTITY[route.intent]:
             # Structural re-parse disagreed with the router's own decision
-            # (should not happen — same function, same input) — fail closed
-            # to the normal Agent pipeline rather than guess.
-            pass
+            # (should not happen — same function, same input). This is NOT
+            # a "fall through to Agent" case — router.py only ever assigns
+            # Handler.TOOL for these three intents after its own call to
+            # this exact parser already recognized the message (REQUIRED
+            # INVARIANT: a recognizable protected commercial UPDATE never
+            # reaches Handler.AGENT merely because parsing was incomplete).
+            # A mismatch here means something changed between the two calls
+            # (never expected) — fail closed to a deterministic clarify
+            # rather than silently proceed on disagreeing state.
+            return "לא הצלחתי לוודא את פרטי בקשת העדכון. נא לנסח מחדש."
+        elif _cu_parse.grammar_incomplete:
+            _entity_label = _entity_label_he[_cu_parse.entity]
+            return (
+                f"זיהיתי בקשת עדכון ל{_entity_label} אך לא הצלחתי לנתח אותה במדויק. "
+                f"נא לנסח כך: \"עדכן ב{_entity_label} <שם/מזהה> את <שדה> ל-<ערך>\"."
+            )
         elif _cu_parse.unknown_field:
             return "איזה שדה תרצה לעדכן?"
         elif _cu_parse.missing_record_ref:
-            _entity_label = {"deal": "עסקה", "payment_term": "תנאי תשלום", "payment": "תשלום"}[_cu_parse.entity]
+            _entity_label = _entity_label_he[_cu_parse.entity]
             return f"לאיזה {_entity_label} להתייחס? אפשר לציין שם, מזהה רשומה, או שזו הרשומה שיצרנו עכשיו."
         else:
             _resolve_status, _record_id, _clarify_msg = resolve_deterministic_update_record(
@@ -7065,13 +7079,14 @@ def run_agent(
                     _cu_outcome, chat_id, _out_meta,
                     "DeterministicCommercialUpdate", "לא הצלחתי להעביר את העדכון לאישור.",
                 )
-            if _resolve_status == "clarify":
-                return _clarify_msg or "לא הצלחתי לזהות את הרשומה לעדכון."
-            # "unsupported" — this entity/record-reference shape has no
-            # deterministic resolver yet (documented Phase 4C boundary,
-            # e.g. Payment has no human-typed-name lookup). Falls through
-            # to the normal Agent pipeline unchanged, never a CLARIFY for a
-            # genuinely out-of-scope shape.
+            # Every other resolve_deterministic_update_record() status is
+            # "clarify" — including an entity/kind with no deterministic
+            # resolver at all (e.g. Payment by typed name). There is no
+            # third "fall through to Agent" branch: the REQUIRED INVARIANT
+            # is that a recognizable protected commercial UPDATE never
+            # reaches Handler.AGENT merely because record resolution was
+            # incomplete or unsupported.
+            return _clarify_msg or "לא הצלחתי לזהות את הרשומה לעדכון."
 
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
     # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.

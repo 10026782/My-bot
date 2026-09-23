@@ -650,17 +650,21 @@ def route_request(
     # "עדכן/שנה <entity>[ <reference>] את <field> ל-<value>" (or the
     # field-first live-incident variant) short-circuits straight to
     # Handler.TOOL, never leaving tool selection OR record selection to the
-    # Agent for this class of message. Gated on `matched` (structural
-    # recognition), not `certain` — an unresolved field or missing record
-    # reference still reaches Handler.TOOL and is resolved into a
-    # deterministic CLARIFY downstream (app.py), never silently handed to
-    # the Agent just because one sub-part was ambiguous (mirrors CREATE_DEAL's
-    # own domain_resolved-not-certain gating above).
+    # Agent for this class of message. Gated on `matched`, not `certain` —
+    # `matched` is True for BOTH a full strict-grammar recognition (possibly
+    # with an unresolved field or missing record reference) AND the narrow
+    # commercial-update GUARD firing on a clear update-verb + protected-
+    # entity message the strict grammar couldn't fully parse. Either way,
+    # Handler.TOOL is assigned and app.py's dispatch block resolves it into
+    # a deterministic UPDATE or a deterministic CLARIFY — REQUIRED INVARIANT:
+    # a recognizable protected commercial UPDATE (Deal/Payment Term/Payment)
+    # must never reach Handler.AGENT merely because parsing or record
+    # resolution was incomplete (mirrors CREATE_DEAL's own domain_resolved-
+    # not-certain gating above, taken one step further).
     from core.deterministic_commercial_update import parse_deterministic_commercial_update
     _commercial_update_parse = parse_deterministic_commercial_update(text)
     if (
         _commercial_update_parse.matched
-        and not _commercial_update_parse.unsupported_shape
         and identity.role not in ("lead", "guest", "readonly")
     ):
         intent = {

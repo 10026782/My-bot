@@ -193,7 +193,7 @@ class DeterministicCommercialUpdateParse:
     uncertain: bool = False
     unknown_field: bool = False
     missing_record_ref: bool = False
-    unsupported_shape: bool = False
+    grammar_incomplete: bool = False
 
     @property
     def certain(self) -> bool:
@@ -204,15 +204,65 @@ class DeterministicCommercialUpdateParse:
         return CANONICAL_UPDATE_TOOL_BY_ENTITY.get(self.entity) if self.entity else None
 
 
+# ══════════════════════════════════════════════════
+# Commercial-update GUARD — the required invariant: "once a request is
+# recognizably a commercial UPDATE for Deal/Payment Term/Payment, the model
+# must not regain authority to choose the record or tool." The two strict
+# Patterns above only recognize a small closed set of well-formed phrasings.
+# Anything that clearly carries an update/change verb AND names exactly one
+# protected commercial entity, but doesn't fit either strict pattern (field
+# before entity, colon/equals syntax, a reference with no field/value at
+# all, ...), must still be OWNED here and deterministically CLARIFIED —
+# never silently handed to the Agent because parsing came up short.
+#
+# Deliberately narrow: not a second parser, not an NLP classifier. It reuses
+# the exact same bounded verb/entity vocabulary the strict patterns already
+# use, with two differences from them: (1) it searches anywhere in the text
+# rather than anchoring to a fixed shape, so word order doesn't matter, and
+# (2) it requires the entity mention to be bare or ב/ל-prefixed (never a
+# bare "ה"-prefixed mention alone, e.g. "העסקה") — a deliberate precision
+# cut so an unrelated sentence that merely refers back to "the deal" (e.g.
+# "תעדכן אותי כשהעסקה תיסגר" — "let me know when the deal closes") doesn't
+# trip the guard just because it happens to share a word with an update
+# verb. If more than one distinct entity type is mentioned, or none, the
+# guard does not fire — that is a genuinely unclear message, out of this
+# narrow guard's scope, not a case it should force a decision on.
+# ══════════════════════════════════════════════════
+
+_GUARD_VERB_RE = re.compile(rf"(?<![א-ת]){_VERB}(?![א-ת])", re.IGNORECASE)
+_GUARD_ENTITY_RE = re.compile(rf"(?<![א-ת])(?:ב|ל)?{_ENTITY_ALT_RE}(?![א-ת])", re.IGNORECASE)
+
+
+def _guard_entity(text: str) -> Optional[str]:
+    found = set()
+    for m in _GUARD_ENTITY_RE.finditer(text):
+        key = _entity_key(re.sub(r"^(?:ב|ל)", "", m.group(0)))
+        if key:
+            found.add(key)
+    if len(found) == 1:
+        return next(iter(found))
+    return None
+
+
 def parse_deterministic_commercial_update(text: str) -> DeterministicCommercialUpdateParse:
-    """Recognize only the two explicit closed shapes above. Never infers,
-    never partially matches — a message that doesn't structurally fit
-    either pattern returns matched=False and the caller must fall through
-    to the normal Agent pipeline unchanged."""
+    """Recognize the two explicit closed shapes above, falling back to the
+    narrow commercial-update GUARD when a message clearly names an update
+    verb and exactly one protected commercial entity but doesn't fit either
+    strict shape. A message with neither signal returns matched=False and
+    the caller must fall through to the normal Agent pipeline unchanged —
+    but a message the guard recognizes is ALWAYS matched=True, never a
+    silent fall-through, per the Phase 4C invariant: recognizable protected
+    commercial UPDATE -> deterministic UPDATE / CLARIFY / FAIL_CLOSED,
+    never Handler.AGENT because parsing was incomplete."""
     raw = str(text or "")
     match = _PATTERN_A.match(raw) or _PATTERN_B.match(raw)
     if not match:
-        return DeterministicCommercialUpdateParse()
+        guard_entity = _guard_entity(raw) if _GUARD_VERB_RE.search(raw) else None
+        if guard_entity is None:
+            return DeterministicCommercialUpdateParse()
+        return DeterministicCommercialUpdateParse(
+            entity=guard_entity, matched=True, uncertain=True, grammar_incomplete=True,
+        )
 
     entity = _entity_key(match.group("entity"))
     if entity is None:
@@ -243,19 +293,6 @@ def parse_deterministic_commercial_update(text: str) -> DeterministicCommercialU
         record_ref_kind = "name"
         missing_ref = False
 
-    # Payment has no deterministic human-typed-name resolver anywhere in
-    # this codebase (commercial_crm.lookup_human_reference has no "payment"
-    # entity — a Payment has no Name-like field). Recognizing this specific
-    # shape as `matched` would force Handler.TOOL (router.py) with nothing
-    # able to consume it, stranding the turn. Marked explicitly unsupported
-    # here — documented Phase 4C boundary, item 15 — so router.py's gate
-    # (matched and not unsupported_shape) correctly leaves this exact
-    # combination on the normal Agent pipeline, unchanged, rather than
-    # forcing a deterministic dead end. Every OTHER entity/kind combination
-    # this parser recognizes has a real resolver in resolve_deterministic_
-    # update_record() below.
-    unsupported = entity == ENTITY_PAYMENT and record_ref_kind == "name"
-
     return DeterministicCommercialUpdateParse(
         entity=entity,
         field=field_key,
@@ -267,7 +304,6 @@ def parse_deterministic_commercial_update(text: str) -> DeterministicCommercialU
         uncertain=(field_key is None or missing_ref),
         unknown_field=(field_key is None),
         missing_record_ref=missing_ref,
-        unsupported_shape=unsupported,
     )
 
 
@@ -283,15 +319,20 @@ def parse_deterministic_commercial_update(text: str) -> DeterministicCommercialU
 #   4. otherwise CLARIFY — never a fuzzy guess, never "first result"
 #
 # Returns (status, record_id_or_none, message_or_none):
-#   status == "resolved"    -> record_id is the one to use
-#   status == "clarify"     -> message is the deterministic clarification
-#   status == "unsupported" -> this entity/kind combination has no
-#                               deterministic resolver yet (documented
-#                               Phase 4C boundary — e.g. Payment has no
-#                               human-typed-name lookup in this codebase);
-#                               caller must fall through to the Agent, not
-#                               clarify, since this is an out-of-scope
-#                               shape, not an ambiguous one.
+#   status == "resolved" -> record_id is the one to use
+#   status == "clarify"  -> message is the deterministic clarification —
+#                            this is ALSO the terminal status for an
+#                            entity/kind combination with no deterministic
+#                            resolver at all (documented Phase 4C boundary —
+#                            e.g. Payment has no human-typed-name lookup in
+#                            this codebase). The absence of a resolver is a
+#                            UX limitation, not permission to delegate
+#                            entity resolution back to the model: the
+#                            REQUIRED invariant is that a recognizable
+#                            protected commercial UPDATE never reaches
+#                            Handler.AGENT merely because parsing or record
+#                            resolution was incomplete, so there is no
+#                            third "fall through to Agent" status here.
 # ══════════════════════════════════════════════════
 
 _ENTITY_LABEL_HE: dict[str, str] = {
@@ -336,7 +377,11 @@ def resolve_deterministic_update_record(
 
     if record_ref_kind == "name":
         if entity not in _NAME_LOOKUP_SUPPORTED_ENTITIES:
-            return "unsupported", None, None
+            return (
+                "clarify", None,
+                f"לא ניתן לזהות בוודאות את ה{label} לפי השם הזה.\n"
+                f"אפשר לציין מזהה {label}, או לומר \"ה{label} שיצרנו עכשיו\".",
+            )
         from commercial_crm import lookup_human_reference
         matches = lookup_human_reference(
             entity, record_ref_text, scope=str(getattr(identity, "user_id", "") or ""),

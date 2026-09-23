@@ -177,12 +177,17 @@ def test_15_name_lookup_zero_matches_clarifies():
     _check("15", status == "clarify" and rid is None, (status, rid, msg))
 
 
-def test_16_payment_name_lookup_is_unsupported_not_clarify():
+def test_16_payment_name_lookup_has_no_resolver_deterministic_clarify():
+    """REQUIRED INVARIANT: the absence of a Payment typed-name resolver is a
+    UX limitation, not permission to fall through to the Agent — this must
+    terminate as a deterministic clarification, never a third 'unsupported/
+    fall through' status."""
     status, rid, msg = resolve_deterministic_update_record(
         "payment", "name", "התשלום של יוני", identity=Identity(user_id="u1", role=Role.OWNER),
         chat_id="c", channel="telegram",
     )
-    _check("16", status == "unsupported" and rid is None and msg is None, (status, rid, msg))
+    _check("16a", status == "clarify" and rid is None, (status, rid, msg))
+    _check("16b", "תשלום" in msg and "שיצרנו עכשיו" in msg, msg)
 
 
 def test_17_recent_marker_resolves_when_present():
@@ -402,48 +407,118 @@ def test_31_missing_record_reference_clarifies_zero_agent_zero_contract():
     _check("31c", isinstance(reply, str) and reply, reply)
 
 
-def test_32_payment_by_name_falls_through_to_agent():
-    """Documented Phase 4C boundary: Payment has no deterministic
-    human-typed-name resolver (commercial_crm.lookup_human_reference has no
-    "payment" entity). parse_deterministic_commercial_update() marks this
-    exact shape unsupported_shape=True, so router.py's own gate never
-    assigns Handler.TOOL for it in the first place (verified below via the
-    REAL route_request(), not a hand-built RouteDecision) — it must fall
-    through to the Agent pipeline unchanged, reaching build_context(),
-    rather than being silently dropped or fail-closed clarified as if it
-    were merely ambiguous."""
+def test_32_payment_typed_name_is_deterministic_clarify_never_agent():
+    """REQUIRED INVARIANT (blocker closure): Payment has no deterministic
+    human-typed-name resolver, but that is a UX limitation, not permission
+    to delegate record resolution back to the model. This exact shape must
+    be owned by the deterministic commercial-update handler end to end:
+    agent_calls=0, zero ActionContract, zero write, deterministic clarify
+    text naming a record id or "the record we just created" as the way
+    forward — never a fall-through to Agent tool selection."""
     identity = Identity(user_id="e2e32", role=Role.OWNER, tenant_id="t1", domain_id="general")
-    _text = "תעדכן בתשלום התשלום של יוני את ההערות ל-בדיקה"
+    _text = 'תעדכן בתשלום "תשלום ינואר" את ההערות ל-X'
     _parse = P(_text)
-    _check("32-pre[unsupported_shape]", _parse.matched and _parse.unsupported_shape, repr(_parse))
+    _check("32-pre[matched]", _parse.matched and _parse.entity == "payment", repr(_parse))
     route = route_request(text=_text, channel_raw="telegram", identity=identity, domain_from_channel="general")
-    _check("32-pre[handler]", route.handler != Handler.TOOL, (route.handler, route.intent))
-    fake_ctx = AgentContext(
-        system_prompt="test", allowed_tools=[], memory_key="e2e32", max_tokens=500,
-        model="claude-haiku-test", identity_label="owner",
+    _check("32-pre[handler]", route.handler == Handler.TOOL and route.intent == Intent.UPDATE_PAYMENT_FIELD,
+           (route.handler, route.intent))
+
+    reply, queue_mock, build_ctx = _e2e(_text, Intent.UPDATE_PAYMENT_FIELD)
+    _check("32a", build_ctx.call_count == 0, "build_context() called — agent_calls != 0")
+    _check("32b", queue_mock.call_count == 0, "an ActionContract was created for an unresolvable Payment name")
+    _check("32c", isinstance(reply, str) and "תשלום" in reply and "שיצרנו עכשיו" in reply, reply)
+
+
+def test_32b_guard_field_before_entity_deterministic_clarify():
+    """Spec example: 'עדכן את הסטטוס של עסקה X ל-Y' — clear update verb +
+    Deal, but field-before-entity ordering the strict grammar doesn't
+    parse. Must be owned deterministically (guard), never delegated."""
+    _text = "עדכן את הסטטוס של עסקה X ל-Y"
+    identity = Identity(user_id="e2e32b", role=Role.OWNER, tenant_id="t1", domain_id="general")
+    route = route_request(text=_text, channel_raw="telegram", identity=identity, domain_from_channel="general")
+    _check("32b-pre", route.handler == Handler.TOOL and route.intent == Intent.UPDATE_DEAL_FIELD,
+           (route.handler, route.intent))
+    reply, queue_mock, build_ctx = _e2e(_text, Intent.UPDATE_DEAL_FIELD)
+    _check("32b-a", build_ctx.call_count == 0, "build_context() called")
+    _check("32b-b", queue_mock.call_count == 0, "ActionContract created from an unparseable shape")
+    _check("32b-c", isinstance(reply, str) and reply, reply)
+
+
+def test_32c_guard_colon_equals_syntax_deterministic_clarify():
+    """Spec example: 'שנה בתשלום X: הערות = Y' — colon/equals syntax the
+    strict grammar doesn't parse, must still be owned deterministically."""
+    _text = "שנה בתשלום X: הערות = Y"
+    identity = Identity(user_id="e2e32c", role=Role.OWNER, tenant_id="t1", domain_id="general")
+    route = route_request(text=_text, channel_raw="telegram", identity=identity, domain_from_channel="general")
+    _check("32c-pre", route.handler == Handler.TOOL and route.intent == Intent.UPDATE_PAYMENT_FIELD,
+           (route.handler, route.intent))
+    reply, queue_mock, build_ctx = _e2e(_text, Intent.UPDATE_PAYMENT_FIELD)
+    _check("32c-a", build_ctx.call_count == 0, "build_context() called")
+    _check("32c-b", queue_mock.call_count == 0, "ActionContract created from an unparseable shape")
+    _check("32c-c", isinstance(reply, str) and reply, reply)
+
+
+def test_32d_guard_reference_only_no_field_value_deterministic_clarify():
+    """Spec example: 'תעדכן את תנאי התשלום X' — no field/value at all."""
+    _text = "תעדכן את תנאי התשלום X"
+    identity = Identity(user_id="e2e32d", role=Role.OWNER, tenant_id="t1", domain_id="general")
+    route = route_request(text=_text, channel_raw="telegram", identity=identity, domain_from_channel="general")
+    _check("32d-pre", route.handler == Handler.TOOL and route.intent == Intent.UPDATE_PAYMENT_TERM_FIELD,
+           (route.handler, route.intent))
+    reply, queue_mock, build_ctx = _e2e(_text, Intent.UPDATE_PAYMENT_TERM_FIELD)
+    _check("32d-a", build_ctx.call_count == 0, "build_context() called")
+    _check("32d-b", queue_mock.call_count == 0, "ActionContract created from an unparseable shape")
+    _check("32d-c", isinstance(reply, str) and reply, reply)
+
+
+def test_32e_guard_field_before_entity_with_colon_deterministic_clarify():
+    """Spec example: 'עדכן את ההערות של תנאי התשלום האחרון: X'."""
+    _text = "עדכן את ההערות של תנאי התשלום האחרון: X"
+    identity = Identity(user_id="e2e32e", role=Role.OWNER, tenant_id="t1", domain_id="general")
+    route = route_request(text=_text, channel_raw="telegram", identity=identity, domain_from_channel="general")
+    _check("32e-pre", route.handler == Handler.TOOL and route.intent == Intent.UPDATE_PAYMENT_TERM_FIELD,
+           (route.handler, route.intent))
+    reply, queue_mock, build_ctx = _e2e(_text, Intent.UPDATE_PAYMENT_TERM_FIELD)
+    _check("32e-a", build_ctx.call_count == 0, "build_context() called")
+    _check("32e-b", queue_mock.call_count == 0, "ActionContract created from an unparseable shape")
+    _check("32e-c", isinstance(reply, str) and reply, reply)
+
+
+def test_32f_guard_deal_colon_equals_deterministic_clarify():
+    """Spec example: 'שנה בעסקה X: הערות = Y'."""
+    _text = "שנה בעסקה X: הערות = Y"
+    identity = Identity(user_id="e2e32f", role=Role.OWNER, tenant_id="t1", domain_id="general")
+    route = route_request(text=_text, channel_raw="telegram", identity=identity, domain_from_channel="general")
+    _check("32f-pre", route.handler == Handler.TOOL and route.intent == Intent.UPDATE_DEAL_FIELD,
+           (route.handler, route.intent))
+    reply, queue_mock, build_ctx = _e2e(_text, Intent.UPDATE_DEAL_FIELD)
+    _check("32f-a", build_ctx.call_count == 0, "build_context() called")
+    _check("32f-b", queue_mock.call_count == 0, "ActionContract created from an unparseable shape")
+    _check("32f-c", isinstance(reply, str) and reply, reply)
+
+
+def test_32g_guard_does_not_fire_on_readonly_question():
+    """Explicit negative control: a read-only question naming both entities
+    ('מה תנאי התשלום בעסקה X?') must remain on its existing path — the
+    guard requires an update/change verb, which this text has none of."""
+    r = P("מה תנאי התשלום בעסקה X?")
+    _check("32g-a", not r.matched, repr(r))
+    identity = Identity(user_id="e2e32g", role=Role.OWNER, tenant_id="t1", domain_id="general")
+    route = route_request(
+        text="מה תנאי התשלום בעסקה X?", channel_raw="telegram",
+        identity=identity, domain_from_channel="general",
     )
-    reached_build_context = {"called": False}
+    _check("32g-b", route.intent not in (Intent.UPDATE_DEAL_FIELD, Intent.UPDATE_PAYMENT_TERM_FIELD, Intent.UPDATE_PAYMENT_FIELD),
+           route.intent)
 
-    def _bc(*a, **kw):
-        reached_build_context["called"] = True
-        return fake_ctx
 
-    def _fake_anthropic_response(text):
-        from types import SimpleNamespace
-        return SimpleNamespace(
-            content=[SimpleNamespace(type="text", text=text)],
-            usage=SimpleNamespace(input_tokens=10, output_tokens=10),
-        )
-
-    with patch.object(app, "resolve_identity", return_value=identity), \
-         patch.object(app, "_safe_route", return_value=route), \
-         patch.object(app, "build_context", side_effect=_bc), \
-         patch.object(app.client.messages, "create",
-                       return_value=_fake_anthropic_response("בסדר.")):
-        app.run_agent(
-            "תעדכן בתשלום התשלום של יוני את ההערות ל-בדיקה", "e2e32", channel="telegram",
-        )
-    _check("32", reached_build_context["called"], "unsupported Payment-by-name shape did not fall through to Agent")
+def test_32h_guard_does_not_fire_on_unrelated_mention():
+    """Explicit negative control: a sentence that happens to share a verb
+    token with 'תעדכן' but isn't a bare/ב/ל-prefixed entity mention (the
+    entity appears only as a bare 'ה'-prefixed back-reference) must not
+    trip the guard."""
+    r = P("תעדכן אותי כשהעסקה תיסגר")
+    _check("32h", not r.matched, repr(r))
 
 
 # ══════════════════════════════════════════════════
@@ -460,9 +535,26 @@ def test_34_noncommercial_router_flows_unaffected():
     for text, expected_intent in (
         ("צור משימה: לקנות חלב", Intent.CREATE_TASK),
         ("קבע פגישה מחר ב-10", Intent.CREATE_EVENT),
+        ("עדכן איש קשר X", Intent.UPDATE_CONTACT),  # entity outside Phase 4C's {deal,payment_term,payment}
+        ("עדכן ליד X", Intent.UPDATE_LEAD),
     ):
         route = route_request(text=text, channel_raw="telegram", identity=identity, domain_from_channel="general")
         _check(f"34[{expected_intent}]", route.intent == expected_intent, (text, route.intent))
+
+
+def test_35_general_discussion_mentioning_payment_unaffected():
+    """Spec requirement: 'General discussion mentioning a payment must
+    remain unchanged.'"""
+    identity = _owner_identity()
+    for text in (
+        "אני חושב שכדאי לבדוק את התשלום הזה",
+        "מתי בדרך כלל אנחנו מקבלים תשלום מלקוחות?",
+        "התשלום שקיבלנו מאתמול נראה תקין",
+    ):
+        r = P(text)
+        _check(f"35a[{text}]", not r.matched, repr(r))
+        route = route_request(text=text, channel_raw="telegram", identity=identity, domain_from_channel="general")
+        _check(f"35b[{text}]", route.intent != Intent.UPDATE_PAYMENT_FIELD, (text, route.intent))
 
 
 # ══════════════════════════════════════════════════
