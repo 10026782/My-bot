@@ -30,6 +30,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import types
 from unittest.mock import patch
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-phase4b-generic-test")
@@ -468,6 +469,41 @@ chk("UX parity: reconfirmation/lifecycle description shows the same business sum
     g["contract"] is not None
     and _generic_summary in _describe_contract_for_reconfirmation(g["contract"])
     and "crm_update_deal" not in _describe_contract_for_reconfirmation(g["contract"]))
+
+
+# UX parity follow-up (live production, 23/09/2026): crm_update_payment_term
+# and crm_update_payment had no pending-approval/completion/reconfirmation
+# branch at all -- a real generic Payment Terms update fell through to the
+# "לא הצלחתי להכין תיאור ברור..." fallback in production the first time
+# this became live-reachable. crm_create_payment_term/crm_create_payment
+# never had a pending-approval branch either (pre-existing, not introduced
+# by Phase 4B, fixed alongside since it's the same root cause/same file).
+from core.action_gateway import _safe_contract_business_description, _describe_contract_for_reconfirmation
+
+_APPROVAL_DESCRIPTION_FALLBACK = "לא הצלחתי להכין תיאור ברור לבקשה הזו. נא לנסח את הבקשה שוב."
+_GENERIC_COMPLETION_FALLBACK = "הפעולה המבוקשת"
+
+for _tool, _payload, _entity_he in [
+    ("crm_update_payment_term", {"record_id": _TERM_ID, "notes": "בדיקת קנוני 4B"}, "תנאי תשלום"),
+    ("crm_update_payment", {"record_id": _PAY_ID, "notes": "בדיקה"}, "תשלום"),
+    ("crm_create_payment_term", {"deal_id": _DEAL_ID, "calc_type": "fixed", "direction": "receivable",
+                                 "currency": "ILS", "fixed_amount": 1000, "name": "Term X"}, "תנאי תשלום"),
+    ("crm_create_payment", {"charge_id": _rid("CHG", 51), "amount": 500}, "תשלום"),
+]:
+    _label = app._describe_tool_call(_tool, _payload)
+    chk(f"UX parity — {_tool}: pending-approval label is never the generic fallback",
+        _APPROVAL_DESCRIPTION_FALLBACK not in _label)
+    chk(f"UX parity — {_tool}: pending-approval label names the entity ({_entity_he})",
+        _entity_he in _label)
+    _contract = types.SimpleNamespace(tool_name=_tool, normalized_payload=_payload, contract_id="p4b-ux-cid")
+    _completion = _safe_contract_business_description(_contract)
+    _reconfirm = _describe_contract_for_reconfirmation(_contract)
+    chk(f"UX parity — {_tool}: completion message is never the generic '{_GENERIC_COMPLETION_FALLBACK}' fallback",
+        _completion != _GENERIC_COMPLETION_FALLBACK)
+    chk(f"UX parity — {_tool}: reconfirmation text is never the generic fallback either",
+        _reconfirm != _GENERIC_COMPLETION_FALLBACK)
+    chk(f"UX parity — {_tool}: completion message names the entity ({_entity_he})",
+        _entity_he in _completion)
 
 
 # ══════════════════════════════════════════════════
