@@ -528,11 +528,35 @@ def resolve_canonical_tool(
             tool_hint, _CANONICAL_TOOL_DEFAULT,
         )
         return _CANONICAL_TOOL_DEFAULT
-    return tool_hint
+    # BusinessDraft Phase 4B: a generic airtable_add/airtable_update on a
+    # BusinessDraft-covered commercial table resolves to its dedicated crm_*
+    # tool. Tool-name-only view (never raises) for callers that need the
+    # canonical label without the payload -- resolve_canonical_call() below
+    # is the authoritative, fail-closed tool+payload boundary.
+    from core.commercial_generic_canonicalization import (
+        CommercialCanonicalizationError as _CommercialError,
+        canonicalize_generic_commercial_call,
+    )
+    try:
+        commercial = canonicalize_generic_commercial_call(tool_hint, tool_inputs)
+    except _CommercialError:
+        return tool_hint
+    return commercial[0] if commercial is not None else tool_hint
 
 
 class CanonicalizationError(ValueError):
     """A tool override could not produce a safe payload for its new tool."""
+
+
+class CommercialCanonicalizationError(CanonicalizationError):
+    """BusinessDraft Phase 4B: a generic call on a covered commercial table
+    (Deals/Payment Terms/Payments) cannot be represented losslessly as its
+    dedicated canonical tool. Raised before any BusinessDraft, fingerprint or
+    ActionContract exists; ``user_message`` is safe user-facing text."""
+
+    def __init__(self, reason: str, user_message: str):
+        super().__init__(reason)
+        self.user_message = user_message
 
 
 def _sheets_payload_to_airtable(tool_inputs: dict) -> dict:
@@ -645,9 +669,26 @@ def resolve_canonical_call(
     tool_inputs: dict,
     user_text: str = "",
 ) -> tuple[str, dict]:
-    """Resolve the canonical tool and its matching payload atomically."""
+    """Resolve the canonical tool and its matching payload atomically.
+
+    BusinessDraft Phase 4B: after the Sheets/Drive override, a generic
+    airtable_add/airtable_update naming a BusinessDraft-covered commercial
+    table (Deals/Payment Terms/Payments) is translated -- through the single
+    mapping authority in core/commercial_generic_canonicalization.py -- into
+    its dedicated crm_* tool and primitive writer-space payload, so the
+    caller's BusinessDraft seam, dedup fingerprint and ActionContract all see
+    the canonical call, never the generic one. Fails closed
+    (CommercialCanonicalizationError) when that is not losslessly possible,
+    including a generic Payments CREATE shaped for the legacy flat writer.
+    Idempotent: a dedicated tool (and every non-commercial generic call) is
+    returned unchanged, so ActionGateway.propose_action() re-running this on
+    an already-canonical call is a no-op.
+    """
     payload = dict(tool_inputs or {})
-    resolved_tool = resolve_canonical_tool(tool_hint, payload, user_text)
+    if tool_hint in ("sheets_append", "drive_upload", "drive_create"):
+        resolved_tool = resolve_canonical_tool(tool_hint, payload, user_text)
+    else:
+        resolved_tool = tool_hint
     if tool_hint == "sheets_append" and resolved_tool == _CANONICAL_TOOL_DEFAULT:
         payload = _sheets_payload_to_airtable(payload)
     elif (
@@ -657,6 +698,17 @@ def resolve_canonical_call(
         raise CanonicalizationError(
             f"cannot canonicalize {tool_hint} payload to airtable_add"
         )
+
+    from core.commercial_generic_canonicalization import (
+        CommercialCanonicalizationError as _CommercialError,
+        canonicalize_generic_commercial_call,
+    )
+    try:
+        commercial = canonicalize_generic_commercial_call(resolved_tool, payload)
+    except _CommercialError as exc:
+        raise CommercialCanonicalizationError(str(exc), exc.user_message) from None
+    if commercial is not None:
+        resolved_tool, payload = commercial
     return resolved_tool, payload
 
 
@@ -1331,6 +1383,17 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
         description = "כתיבה לגיליון" + (f": {table}" if table else "")
     elif tool_name in ("send_followup", "send_recovery"):
         description = "שליחת הודעת המשך"
+    elif tool_name == "crm_update_deal":
+        # BusinessDraft Phase 4B: the Deal enrichment flow's generic Deals
+        # update is now canonicalized into crm_update_deal before its
+        # contract exists — same label-aware summary the generic Deals
+        # branch above shows, via the inverse of the one shared field map.
+        from commercial_completion_ux import deal_field_business_summary
+        from core.commercial_generic_canonicalization import deal_payload_as_airtable_fields
+        summary = deal_field_business_summary(deal_payload_as_airtable_fields(payload))
+        description = "עדכון פרטי עסקה"
+        if summary:
+            description += f":\n{summary}"
     elif tool_name == "crm_create_deal":
         # BUG-CRM-BYPASS follow-up (live observation, 02/09/2026): crm_create_deal's
         # payload is flat kwargs ({"name":..., "domain":...}), not the

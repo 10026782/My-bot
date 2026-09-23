@@ -328,6 +328,15 @@ _tamper_result = _gw.propose_action(
 )
 assert _tamper_result.ok, f"setup: propose_action failed unexpectedly: {_tamper_result.reason}"
 _tamper_contract = _gw.find_contract(_tamper_result.contract_id)
+# BusinessDraft Phase 4B: ActionGateway's own resolve_canonical_call() now
+# canonicalizes a generic Deals airtable_add BEFORE the contract is minted —
+# the contract carries the dedicated tool + primitive payload, never the
+# generic identity. The tamper check below runs in that canonical space.
+chk("Phase 4B: a generic Deals airtable_add proposal is minted as crm_create_deal, "
+    "never as an airtable_add ActionContract",
+    _tamper_contract.tool_name == "crm_create_deal"
+    and _tamper_contract.normalized_payload.get("name") == "עסקה מקורית"
+    and "table" not in _tamper_contract.normalized_payload)
 
 _tamper_execution_context = {
     "contract_id": _tamper_contract.contract_id,
@@ -342,19 +351,16 @@ _tamper_execution_context = {
 # recomputes the fingerprint from the payload ACTUALLY being dispatched.
 # Untampered payload must validate...
 _untampered_proof_error = _validate_execution_proof(
-    "airtable_add", _tamper_contract.normalized_payload, owner,
+    _tamper_contract.tool_name, _tamper_contract.normalized_payload, owner,
     _tamper_execution_context, "agent",
 )
 chk("tamper-check setup: the untampered, approved payload validates cleanly",
     _untampered_proof_error is None)
 
 # ...but a payload altered after approval (different Deal name) must not.
-_tampered_payload = {"table": Tables.DEALS, "fields": {
-    DealFields.NAME: "עסקה אחרת לגמרי", DealFields.DOMAIN: "finance",
-    DealFields.OWNER: ["recOWNER000000001"],
-}}
+_tampered_payload = {**_tamper_contract.normalized_payload, "name": "עסקה אחרת לגמרי"}
 _tampered_proof_error = _validate_execution_proof(
-    "airtable_add", _tampered_payload, owner, _tamper_execution_context, "agent",
+    _tamper_contract.tool_name, _tampered_payload, owner, _tamper_execution_context, "agent",
 )
 chk("tampered post-approval payload: execution proof REJECTS (fail closed), "
     "same mechanism as every other requires_approval tool",

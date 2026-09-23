@@ -84,185 +84,39 @@ def _block_generic_recruitment_write(tool: str, table: str, identity) -> dict | 
 # ══════════════════════════════════════════════════
 # Commercial CRM write-boundary closure (Deals/Payment Terms/Payments)
 #
-# Contacts already has this: the generic "airtable_add" case below
-# redirects any raw write to the Contacts table into
-# crm.create_contact_from_fields() (the canonical writer), so no caller can
-# reach that table without its dedup/validation gate — see that block
-# further down. Deals/Payment Terms/Payments had NO equivalent redirect:
-# a raw airtable_add call to those tables fell straight through to the
-# generic `airtable_add(table, fields)` write at the bottom of this case,
-# skipping commercial_crm.py's required-field/calc_type/VAT validation
-# entirely. Worse, "airtable_add"'s own registry role set (_INTERNAL,
-# tool_registry.py) includes "employee", while crm_create_deal/
-# crm_create_payment_term/crm_create_payment are _MANAGEMENT-only — so an
-# employee identity, explicitly denied crm_create_deal by enforce(), could
-# still reach the same business mutation through this generic tool. Found
-# during the R10 write-path golden-writer audit, 01/09/2026.
+# The generic-column -> canonical-kwarg field maps, protected-table alias
+# resolution, CREATE routing (incl. legacy-vs-V2 Payment shape selection)
+# and link unwrapping moved to core/commercial_generic_canonicalization.py in
+# BusinessDraft Phase 4B -- ONE mapping authority shared by this module's
+# execution-time redirect below and core.action_gateway.
+# resolve_canonical_call()'s pre-proposal canonicalization. Re-bound here
+# under their historical private names so the redirect code is unchanged.
 #
-# Fix mirrors the Contacts pattern exactly: recognize the protected table,
-# map the generic Airtable field names onto the canonical writer's own
-# keyword arguments, and call that writer — never reimplementing its
-# validation. Two things Contacts' block didn't need to add explicitly:
-#   1. An enforce("crm_create_X", identity) re-check, closing the wider-
-#      role-reaches-narrower-tool gap above (Contacts creation has no
-#      _MANAGEMENT-only canonical tool to under-cut, so it never needed
-#      this).
-#   2. A closed field map (_DEAL_FIELD_MAP / _PAYMENT_TERM_FIELD_MAP /
-#      _PAYMENT_FIELD_MAP below) that FAILS CLOSED on any field name it
-#      doesn't recognize — a raw airtable_add payload uses real Airtable
-#      column names (DealFields.NAME etc.), not the canonical writer's own
-#      parameter names, so a mapping step is required; an unmapped field
-#      must never be silently dropped.
-#
-# Each map's exact key set matches the fields tools/dispatcher.py's own
-# "crm_create_deal"/"crm_create_payment_term"/"crm_create_payment" cases
-# already forward from the dedicated tool's `inputs` (see those cases
-# further down). Every optional parameter supported by the canonical writer is
-# represented here as well, so this route cannot reject or silently lose a
-# valid payload.
-#
-# Map value = (canonical kwarg name, link mode):
-#   None     -> scalar, passed through as-is
-#   "single" -> linked-record field; Airtable gives a 1-element list or a
-#               bare record-id string, the writer wants a bare string
-#   "list"   -> linked-record field where the writer itself wants a list
-#               (currently only Deal.contact_ids)
-_DEAL_FIELD_MAP: dict[str, tuple[str, str | None]] = {
-    DealFields.NAME:          ("name", None),
-    DealFields.DOMAIN:        ("domain", None),
-    DealFields.OWNER:         ("owner_id", "single"),
-    DealFields.ORIGIN_LEAD:   ("origin_lead_id", "single"),
-    DealFields.CONTACTS_LINK: ("contact_ids", "list"),
-    DealFields.VENTURE_LINK:  ("venture_id", "single"),
-    DealFields.STAGE:         ("stage", None),
-    DealFields.PRIORITY:      ("priority", None),
-    DealFields.RISK_LEVEL:    ("risk_level", None),
-    DealFields.NOTES:         ("notes", None),
-    # BUG-DIAMOND-OPTIONAL-ENRICHMENT-GATES-CREATION: these four V2 fields
-    # are now collected as post-creation enrichment (commercial_completion.py)
-    # via a direct airtable_update() on an already-created Deal — they were
-    # never in this allowlist before (commercial_crm.create_deal() has
-    # always accepted them as optional kwargs; only the generic-write
-    # allowlist here never caught up), so a direct update carrying them was
-    # rejected as "not supported for direct update on this table."
-    DealFields.DEAL_TYPE_CODE:   ("deal_type_code", None),
-    DealFields.RELATIONSHIP_TYPE: ("relationship_type", None),
-    # DIAMOND — BUSINESS FIELDS MIGRATION (06/09/2026): canonical
-    # replacement for the two entries above (see DealFields.
-    # BUSINESS_DEAL_TYPE's own comment in airtable_schema.py) — the old
-    # entries stay in this allowlist for compatibility, never removed.
-    DealFields.BUSINESS_DEAL_TYPE: ("business_deal_type", None),
-    DealFields.RELATIONSHIP_ROLE:  ("relationship_role", None),
-    DealFields.ENGAGEMENT_DURATION: ("engagement_duration", None),
-    DealFields.CURRENCY:         ("currency", None),
-    DealFields.COMMERCIAL_STATUS: ("commercial_status", None),
-    # BUG-DIAMOND-EXPECTED-VALUE-RANGE: canonical replacement for
-    # DealFields.AMOUNT ("סכום") above, which is deliberately no longer in
-    # this allowlist — commercial_crm.create_deal() no longer accepts an
-    # `amount` kwarg at all (removed together with this), so a stale entry
-    # here would map to a kwarg the writer no longer has. "סכום" itself is
-    # untouched in Airtable and still used by the separate, unwired legacy
-    # crm_add_deal() real-estate path (see DealFields.PRICE) — this
-    # allowlist change only affects the generic airtable_add/airtable_update
-    # redirect for the "עסקאות (Deals)" table.
-    DealFields.ESTIMATED_VALUE_BASIS: ("estimated_value_basis", None),
-    DealFields.ESTIMATED_VALUE_RANGE: ("estimated_value_range", None),
-    DealFields.ESTIMATED_VALUE_NOTES: ("estimated_value_notes", None),
-}
-_PAYMENT_TERM_FIELD_MAP: dict[str, tuple[str, str | None]] = {
-    PaymentTermFields.DEAL:         ("deal_id", "single"),
-    PaymentTermFields.NAME:         ("name", None),
-    PaymentTermFields.CALC_TYPE:    ("calc_type", None),
-    PaymentTermFields.DIRECTION:    ("direction", None),
-    PaymentTermFields.CURRENCY:     ("currency", None),
-    PaymentTermFields.FIXED_AMOUNT: ("fixed_amount", None),
-    PaymentTermFields.RATE_PCT:     ("rate_pct", None),
-    PaymentTermFields.CALC_BASIS:   ("calc_basis", None),
-    PaymentTermFields.TRIGGER_TYPE: ("trigger_type", None),
-    PaymentTermFields.TRIGGER_DATE: ("trigger_date", None),
-    PaymentTermFields.TRIGGER_DELAY_DAYS: ("trigger_delay_days", None),
-    PaymentTermFields.CADENCE:      ("cadence", None),
-    PaymentTermFields.VAT_RULE:     ("vat_rule", None),
-    PaymentTermFields.START_DATE:   ("start_date", None),
-    PaymentTermFields.END_DATE:     ("end_date", None),
-    PaymentTermFields.NOTES:        ("notes", None),
-}
-_PAYMENT_FIELD_MAP: dict[str, tuple[str, str | None]] = {
-    PaymentFields.AMOUNT:       ("amount", None),
-    PaymentFields.DOMAIN:       ("domain", None),
-    PaymentFields.OWNER:        ("owner_id", "single"),
-    PaymentFields.DEAL_LINK:    ("deal_id", "single"),
-    PaymentFields.PAYMENT_TERM: ("payment_term_id", "single"),
-    PaymentFields.ORIGIN_LEAD:  ("origin_lead_id", "single"),
-    PaymentFields.REF:          ("reference", None),
-    PaymentFields.DATE:         ("due_date", None),
-    PaymentFields.BASE_AMOUNT:  ("base_amount", None),
-    PaymentFields.RATE_PCT:     ("rate_pct", None),
-    PaymentFields.VAT_RULE:     ("vat_rule", None),
-    PaymentFields.VAT_AMOUNT:   ("vat_amount", None),
-    PaymentFields.TRIGGER_EVIDENCE: ("trigger_evidence", None),
-    PaymentFields.NOTES:        ("notes", None),
-}
-_ORGANIZATION_FIELD_MAP: dict[str, tuple[str, str | None]] = {
-    OrganizationFields.NAME: ("organization_name", None),
-}
-_CHARGE_FIELD_MAP: dict[str, tuple[str, str | None]] = {
-    ChargeFields.REFERENCE: ("reference", None),
-    ChargeFields.DEAL: ("deal_id", "single"),
-    ChargeFields.BILLING_TERM: ("billing_term_id", "single"),
-    ChargeFields.DIRECTION: ("direction", None),
-    ChargeFields.AMOUNT: ("amount", None),
-    ChargeFields.CURRENCY_CODE: ("currency", None),
-    ChargeFields.ORIGINAL_DUE_DATE: ("original_due_date", None),
-    ChargeFields.CURRENT_EXPECTED_DATE: ("current_expected_date", None),
-    ChargeFields.STATUS: ("status", None),
-    ChargeFields.COLLECTION_STATE: ("collection_state", None),
-    ChargeFields.BASE_AMOUNT: ("base_amount", None),
-    ChargeFields.RATE_PCT: ("rate_pct", None),
-    ChargeFields.QUANTITY: ("quantity", None),
-    ChargeFields.UNIT_RATE: ("unit_rate", None),
-    ChargeFields.VAT_RULE: ("vat_rule", None),
-    ChargeFields.VAT_AMOUNT: ("vat_amount", None),
-    ChargeFields.TRIGGER_EVIDENCE: ("trigger_evidence", None),
-    ChargeFields.ORIGINAL_TERMS_SNAPSHOT: ("original_terms_snapshot", None),
-    ChargeFields.PROMISED_PAYMENT_DATE: ("promised_payment_date", None),
-    ChargeFields.PROMISED_PAYMENT_AMOUNT: ("promised_payment_amount", None),
-    ChargeFields.DOCUMENT_REQUIREMENT: ("document_requirement", None),
-    ChargeFields.DOCUMENT_STATUS: ("document_status", None),
-    ChargeFields.NOTES: ("notes", None),
-}
-_PAYMENT_V2_FIELD_MAP: dict[str, tuple[str, str | None]] = {
-    PaymentFields.CHARGE: ("charge_id", "single"),
-    PaymentFields.DEAL_LINK: ("deal_id", "single"),
-    PaymentFields.DIRECTION: ("direction", None),
-    PaymentFields.AMOUNT: ("amount", None),
-    PaymentFields.CURRENCY: ("currency", None),
-    PaymentFields.PAID_AT: ("paid_at", None),
-    PaymentFields.STATUS: ("status", None),
-    PaymentFields.PAYMENT_TERM: ("payment_term_id", "single"),
-    PaymentFields.REF: ("reference", None),
-    PaymentFields.METHOD: ("method", None),
-    PaymentFields.COUNTERPARTY_CONTACT: ("counterparty_contact_id", "single"),
-    PaymentFields.COUNTERPARTY_ORGANIZATION: ("counterparty_organization_id", "single"),
-    PaymentFields.DOCUMENT_REQUIREMENT: ("document_requirement", None),
-    PaymentFields.DOCUMENT_STATUS: ("document_status", None),
-    PaymentFields.NOTES: ("notes", None),
-}
-# Keys the dispatcher itself injects into `fields` (see the _TENANT_AWARE
-# block in dispatch_tool()) — never user/agent-supplied, never mapped, and
-# never counted as an "unrecognized field" fail-closed trigger.
-_GENERIC_WRITE_IGNORED_KEYS: frozenset[str] = frozenset({"tenant_id"})
-
-_PROTECTED_CRM_ALIASES: dict[str, str] = {
-    "עסקאות (Deals)": Tables.DEALS,
-    "Deals": Tables.DEALS,
-    "Payment Terms": Tables.PAYMENT_TERMS,
-    "Payments": Tables.PAYMENTS,
-    "Charge": Tables.CHARGES,
-    "Charges": Tables.CHARGES,
-    "Organization": Tables.ORGANIZATIONS,
-    "Organizations": Tables.ORGANIZATIONS,
-}
+# PHASE 4B: for Deals/Payment Terms/Payments the generic redirects in the
+# "airtable_add"/"airtable_update" cases are now an EXECUTION FALLBACK ONLY
+# -- every new generic proposal is canonicalized to the dedicated crm_*
+# tool (and so enters the BusinessDraft seam) before any ActionContract is
+# minted. The redirect is kept for ActionContracts approved under a generic
+# tool identity before Phase 4B; it is NOT BusinessDraft-fronted. Each
+# redirect still re-checks the narrower dedicated tool's role authority
+# (BUG-CRM-BYPASS) and never reimplements the writer's validation.
+from core.commercial_generic_canonicalization import (  # noqa: E402
+    CHARGE_FIELD_MAP as _CHARGE_FIELD_MAP,
+    CRM_TABLE_ROUTING as _CRM_TABLE_ROUTING,
+    DEAL_FIELD_MAP as _DEAL_FIELD_MAP,
+    GENERIC_WRITE_IGNORED_KEYS as _GENERIC_WRITE_IGNORED_KEYS,
+    ORGANIZATION_FIELD_MAP as _ORGANIZATION_FIELD_MAP,
+    PAYMENT_FIELD_MAP as _PAYMENT_FIELD_MAP,
+    PAYMENT_TERM_FIELD_MAP as _PAYMENT_TERM_FIELD_MAP,
+    PAYMENT_V2_FIELD_MAP as _PAYMENT_V2_FIELD_MAP,
+    PAYMENT_V2_ROUTE as _PAYMENT_V2_ROUTE,
+    PROTECTED_CRM_ALIASES as _PROTECTED_CRM_ALIASES,
+    crm_create_route as _crm_create_route,
+    crm_update_field_map as _crm_update_field_map,
+    map_generic_fields_to_canonical as _map_generic_fields_to_canonical,
+    normalize_table_name as _normalize_table_name,
+    resolve_protected_crm_table as _resolve_protected_crm_table,
+)
 
 # BUG-CRM-BYPASS-UPDATE follow-up (owner rule, 02/09/2026): "airtable_update
 # is for system/infrastructure data only; business records must be blocked
@@ -302,89 +156,6 @@ def _resolve_authenticated_crm_owner(identity, requested_owner: object) -> tuple
     if not record_id:
         return None, f"No Profile record found for canonical identity {user_id!r}."
     return record_id, ""
-
-
-def _normalize_table_name(table: str) -> str:
-    return re.sub(r"\s+", " ", str(table).strip()).casefold()
-
-
-def _resolve_protected_crm_table(table: str) -> tuple[str | None, bool]:
-    """Resolve known aliases; flag protected-looking unknown aliases."""
-    normalized = _normalize_table_name(table)
-    for alias, canonical in _PROTECTED_CRM_ALIASES.items():
-        if normalized == _normalize_table_name(alias):
-            return canonical, False
-    compact = re.sub(r"[^\w]+", "", normalized, flags=re.UNICODE)
-    protected_compact = {
-        re.sub(r"[^\w]+", "", _normalize_table_name(alias), flags=re.UNICODE)
-        for alias in _PROTECTED_CRM_ALIASES
-    }
-    return None, compact in protected_compact
-
-# table -> (dedicated tool name to authority-check, its field map, its
-# required-kwarg names that have no Python default and must never be
-# omitted from the call).
-_CRM_TABLE_ROUTING: dict[str, tuple[str, dict[str, tuple[str, str | None]], tuple[str, ...]]] = {
-    Tables.DEALS:         ("crm_create_deal", _DEAL_FIELD_MAP, ("name", "domain", "owner_id")),
-    Tables.PAYMENT_TERMS: ("crm_create_payment_term", _PAYMENT_TERM_FIELD_MAP, ("deal_id", "name", "calc_type", "direction", "currency")),
-    Tables.PAYMENTS:      ("crm_create_payment", _PAYMENT_FIELD_MAP, ("amount", "domain", "owner_id")),
-    Tables.CHARGES:       (
-        "crm_create_charge", _CHARGE_FIELD_MAP,
-        ("deal_id", "direction", "amount", "currency", "status", "collection_state",
-         "vat_rule", "document_requirement", "document_status"),
-    ),
-    Tables.ORGANIZATIONS: (
-        "crm_find_or_create_organization", _ORGANIZATION_FIELD_MAP, ("organization_name",),
-    ),
-}
-
-_PAYMENT_V2_ROUTE = (
-    "crm_create_charge_payment", _PAYMENT_V2_FIELD_MAP,
-    ("charge_id", "deal_id", "direction", "amount", "currency", "paid_at", "status",
-     "document_requirement", "document_status"),
-)
-
-
-def _crm_create_route(table: str, fields: dict) -> tuple[str, dict, tuple[str, ...]] | None:
-    """Select legacy versus V2 Payment without changing the legacy contract."""
-    if table == Tables.PAYMENTS and (
-        PaymentFields.CHARGE in fields
-        or any(key in fields for key in set(_PAYMENT_V2_FIELD_MAP) - set(_PAYMENT_FIELD_MAP))
-    ):
-        return _PAYMENT_V2_ROUTE
-    return _CRM_TABLE_ROUTING.get(table)
-
-
-def _map_generic_fields_to_canonical(
-    fields: dict, field_map: dict[str, tuple[str, str | None]],
-) -> tuple[dict, str]:
-    """Maps a raw airtable_add `fields` dict onto a canonical writer's own
-    kwargs using an explicit, closed field_map. Returns (kwargs, error) —
-    error is non-empty (and kwargs is {}) the moment any field can't be
-    represented, so a caller never silently drops part of what was asked
-    for. Never inspects field VALUES for business validity (empty name,
-    bad calc_type, amount<=0, ...) — that stays the canonical writer's job."""
-    kwargs: dict = {}
-    for key, value in fields.items():
-        if key in _GENERIC_WRITE_IGNORED_KEYS:
-            continue
-        if key not in field_map:
-            return {}, f"שדה לא נתמך בכתיבה ישירה לטבלה זו: {key!r}."
-        kwarg_name, link_mode = field_map[key]
-        if link_mode == "single":
-            if isinstance(value, list):
-                if len(value) != 1:
-                    return {}, f"ערך לא תקין לשדה מקושר {key!r} — נדרש בדיוק ערך אחד."
-                value = value[0]
-            elif not isinstance(value, str):
-                return {}, f"ערך לא תקין לשדה מקושר {key!r}."
-        elif link_mode == "list":
-            if isinstance(value, str):
-                value = [value]
-            elif not isinstance(value, list):
-                return {}, f"ערך לא תקין לשדה מקושר {key!r} — נדרש רשימה."
-        kwargs[kwarg_name] = value
-    return kwargs, ""
 
 
 def _unsupported_canonical_inputs(inputs: dict, allowed: frozenset[str]) -> list[str]:
@@ -957,7 +728,7 @@ def dispatch_tool(
                     # tools call (see those cases above) — there is exactly
                     # one writer per entity for both entry points, never two
                     # independently-validated paths.
-                    _, _field_map, _ = _CRM_TABLE_ROUTING[_resolved_table]
+                    _field_map = _crm_update_field_map(_resolved_table)
                     _canonical_update_tool = {
                         Tables.DEALS: "crm_update_deal",
                         Tables.PAYMENT_TERMS: "crm_update_payment_term",

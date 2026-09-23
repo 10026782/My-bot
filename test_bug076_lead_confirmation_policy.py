@@ -168,7 +168,10 @@ def _exec2(tool_name, tool_inputs, contract_id):
 gw2 = _make_gw(_exec2)
 r2 = gw2.propose_action(
     tenant_id="boss_hq", canonical_user_id=employee.memory_key,
-    tool_name="airtable_add", tool_inputs={"table": "Deals", "fields": {"Name": "Big Deal"}},
+    # Non-commercial, non-lead table: BusinessDraft Phase 4B canonicalizes a
+    # generic Deals write into crm_create_deal (and fails closed on the
+    # non-Deals "Name" column) before any contract exists.
+    tool_name="airtable_add", tool_inputs={"table": "Interaction Log", "fields": {"Name": "Big Deal"}},
     origin_channel="telegram", origin_chat_id=employee.external_id,
     requires_approval=True, identity=employee,
 )
