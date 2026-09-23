@@ -323,8 +323,7 @@
         "Permission, availability, dispatch, approval, and evidence validation are separate boundaries.",
         "Unknown or ambiguous tool identity must fail closed.",
         "A display string is never execution evidence.",
-        "Registration-only pass (BusinessDraft Phase 4B, PR #1262): core/commercial_generic_canonicalization.py -- the generic-Airtable -> canonical-commercial-tool mapping extracted verbatim from tools/dispatcher.py (which re-binds the same objects), also used by core.action_gateway.resolve_canonical_call(). No I/O, no identity, no new authority. test_business_draft_phase4b_generic_bypass.py added alongside.",
-        "Registration-only pass (BusinessDraft Phase 4C): core/deterministic_commercial_update.py -- bounded-grammar recognition + record-reference classification for commercial UPDATE text; field allowlists imported from commercial_crm.py (no duplicate), resolution I/O reuses commercial_crm.lookup_human_reference and a new session_store.py marker. Feeds the existing app.py Handler.TOOL -> _queue_approval_detailed() -> BusinessDraft -> ActionGateway chain unchanged. test_business_draft_phase4c_deterministic_update.py added alongside."
+        "Registration-only pass (BusinessDraft Phase 4B, PR #1262): core/commercial_generic_canonicalization.py -- the generic-Airtable -> canonical-commercial-tool mapping extracted verbatim from tools/dispatcher.py (which re-binds the same objects), also used by core.action_gateway.resolve_canonical_call(). No I/O, no identity, no new authority. test_business_draft_phase4b_generic_bypass.py added alongside."
       ],
       "extensions": {
         "boss.layer_aliases": [
