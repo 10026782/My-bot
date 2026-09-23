@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import commercial_crm as crm
-from airtable_schema import ChargeFields, LeadFields, PaymentTermFields, Tables
+from airtable_schema import ChargeFields, Currency, Direction, LeadFields, PaymentTermFields, Tables
 from identity import Identity, Role
 from core.action_gateway import ActionGateway, ExecutionLedger, _make_dispatch_executor
 
@@ -179,7 +179,8 @@ def test_create_payment_term_writes_the_airtable_percent_fraction_not_raw_points
         airtable_create.return_value.status = "created"
         airtable_create.return_value.record = {"id": "recNewTerm000001"}
         crm.create_payment_term(
-            DEAL, "New Term", "percentage", rate_pct=10, calc_basis="deal_amount",
+            DEAL, "New Term", "percentage", Direction.RECEIVABLE, Currency.ILS,
+            rate_pct=10, calc_basis="deal_amount",
         )
     written_fields = airtable_create.call_args.args[1]
     assert written_fields[PaymentTermFields.RATE_PCT] == 0.1

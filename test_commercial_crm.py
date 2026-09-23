@@ -17,7 +17,9 @@ from unittest.mock import patch
 
 import commercial_crm as ccrm
 from airtable_schema import (
+    Currency,
     DealFields,
+    Direction,
     PaymentFields,
     PaymentTermCalcType,
     PaymentTermFields,
@@ -42,6 +44,7 @@ _WRITER_FIELDS: dict[str, list[str]] = {
     ],
     Tables.PAYMENT_TERMS: [
         PaymentTermFields.NAME, PaymentTermFields.DEAL, PaymentTermFields.CALC_TYPE,
+        PaymentTermFields.DIRECTION, PaymentTermFields.CURRENCY,
         PaymentTermFields.TRIGGER_TYPE, PaymentTermFields.CADENCE, PaymentTermFields.VAT_RULE,
         PaymentTermFields.FIXED_AMOUNT, PaymentTermFields.RATE_PCT, PaymentTermFields.CALC_BASIS,
         PaymentTermFields.TRIGGER_DATE, PaymentTermFields.TRIGGER_DELAY_DAYS,
@@ -193,25 +196,46 @@ def run() -> bool:
     # ── create_payment_term ──────────────────────────────────────────
 
     with patch("commercial_crm.airtable_create") as create:
-        result = ccrm.create_payment_term("", "Term", PaymentTermCalcType.FIXED, fixed_amount=100)
+        result = ccrm.create_payment_term(
+            "", "Term", PaymentTermCalcType.FIXED, Direction.RECEIVABLE, Currency.ILS, fixed_amount=100,
+        )
         chk("create_payment_term: missing deal_id blocked", result["ok"] is False)
         chk("create_payment_term: no write on missing deal_id", not create.called)
 
     with patch("commercial_crm.airtable_create") as create:
-        result = ccrm.create_payment_term("recDeal1", "Term", PaymentTermCalcType.FIXED)
+        result = ccrm.create_payment_term(
+            "recDeal1", "Term", PaymentTermCalcType.FIXED, Direction.RECEIVABLE, Currency.ILS,
+        )
         chk("create_payment_term: fixed type requires fixed_amount", result["ok"] is False)
         chk("create_payment_term: no write on missing fixed_amount", not create.called)
 
     with patch("commercial_crm.airtable_create") as create:
         result = ccrm.create_payment_term(
-            "recDeal1", "Term", PaymentTermCalcType.PERCENTAGE, rate_pct=15,
+            "recDeal1", "Term", PaymentTermCalcType.PERCENTAGE, Direction.RECEIVABLE, Currency.ILS,
+            rate_pct=15,
         )  # missing calc_basis
         chk("create_payment_term: percentage type requires calc_basis", result["ok"] is False)
         chk("create_payment_term: no write on missing calc_basis", not create.called)
 
+    with patch("commercial_crm.airtable_create") as create:
+        result = ccrm.create_payment_term(
+            "recDeal1", "Term", PaymentTermCalcType.FIXED, "bogus_direction", Currency.ILS,
+            fixed_amount=100,
+        )
+        chk("create_payment_term: invalid direction blocked", result["ok"] is False)
+        chk("create_payment_term: no write on invalid direction", not create.called)
+
+    with patch("commercial_crm.airtable_create") as create:
+        result = ccrm.create_payment_term(
+            "recDeal1", "Term", PaymentTermCalcType.FIXED, Direction.RECEIVABLE, "bogus_currency",
+            fixed_amount=100,
+        )
+        chk("create_payment_term: invalid currency blocked", result["ok"] is False)
+        chk("create_payment_term: no write on invalid currency", not create.called)
+
     with patch("commercial_crm.airtable_create", return_value=_created("recTERM1")) as create:
         result = ccrm.create_payment_term(
-            "recDeal1", "Commission", PaymentTermCalcType.PERCENTAGE,
+            "recDeal1", "Commission", PaymentTermCalcType.PERCENTAGE, Direction.RECEIVABLE, Currency.ILS,
             rate_pct=15, calc_basis="deal_amount",
         )
         table, fields = create.call_args.args[0], create.call_args.args[1]
@@ -219,6 +243,8 @@ def run() -> bool:
         chk("create_payment_term: external_id == created record id", result["external_id"] == "recTERM1")
         chk("create_payment_term: writes to Tables.PAYMENT_TERMS", table == Tables.PAYMENT_TERMS)
         chk("create_payment_term: child writes Deal link (provenance)", fields[PaymentTermFields.DEAL] == ["recDeal1"])
+        chk("create_payment_term: writes Direction", fields[PaymentTermFields.DIRECTION] == Direction.RECEIVABLE)
+        chk("create_payment_term: writes Currency", fields[PaymentTermFields.CURRENCY] == Currency.ILS)
 
     # ── create_payment ───────────────────────────────────────────────
 

@@ -1245,6 +1245,8 @@ def create_payment_term(
     deal_id: str,
     name: str,
     calc_type: str,
+    direction: str,
+    currency: str,
     *,
     fixed_amount: float | None = None,
     rate_pct: float | None = None,
@@ -1260,7 +1262,15 @@ def create_payment_term(
     source: str = "commercial_crm",
 ) -> dict:
     """Create a Payment Term attached to an existing Deal. A Payment Term is
-    never created standalone — deal_id is required."""
+    never created standalone — deal_id is required.
+
+    direction/currency (BUG-PAYMENTTERM-CREATE-DIRECTION-CURRENCY,
+    Phase 4A): ENTITY_CONTRACTS["payment_term"] has always required both as
+    business fields, but this writer never accepted or persisted either one
+    -- the completion flow asked the user for both and then silently
+    discarded the answers before ever reaching here. Now required, closing
+    that drift at the canonical writer itself, not a second validator.
+    """
     if not deal_id:
         return _tool_result(
             ok=False, tool="crm_create_payment_term",
@@ -1281,11 +1291,23 @@ def create_payment_term(
             ok=False, tool="crm_create_payment_term",
             user_message="❌ calculation type=percentage דורש rate_pct + calc_basis.",
         )
+    if direction not in _DIRECTIONS:
+        return _tool_result(
+            ok=False, tool="crm_create_payment_term",
+            user_message=f"❌ Direction לא תקין: {direction!r}",
+        )
+    if currency not in _CURRENCIES:
+        return _tool_result(
+            ok=False, tool="crm_create_payment_term",
+            user_message=f"❌ Currency לא תקין: {currency!r}",
+        )
 
     fields: dict[str, Any] = {
         PaymentTermFields.NAME: (name or "").strip() or "Payment Term",
         PaymentTermFields.DEAL: [deal_id],
         PaymentTermFields.CALC_TYPE: calc_type,
+        PaymentTermFields.DIRECTION: direction,
+        PaymentTermFields.CURRENCY: currency,
         PaymentTermFields.TRIGGER_TYPE: trigger_type,
         PaymentTermFields.CADENCE: cadence,
         PaymentTermFields.VAT_RULE: vat_rule,

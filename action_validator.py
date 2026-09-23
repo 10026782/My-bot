@@ -42,7 +42,7 @@ _REQUIRED: dict[str, list[str]] = {
     "crm_overdue_payments":      [],
     # commercial_crm.py — canonical Deal/PaymentTerm/Payment writers
     "crm_create_deal":           ["name", "domain", "owner_id"],
-    "crm_create_payment_term":   ["deal_id", "calc_type"],
+    "crm_create_payment_term":   ["deal_id", "calc_type", "direction", "currency"],
     "crm_create_payment":        ["amount", "domain", "owner_id"],
     # Phase 0 — canonical UPDATE writers (BusinessDraft Commercial CRM
     # Canonical Update Authority). record_id is the only universally
@@ -98,6 +98,7 @@ _FIELD_QUESTIONS: dict[str, str] = {
     "key": "מה המפתח?", "value": "מה הערך?",
     "domain": "מה הדומיין העסקי?", "owner_id": "מי הבעלים? (מזהה record)",
     "deal_id": "לאיזו עסקה? (מזהה record)", "calc_type": "שיטת חישוב? (fixed/percentage)",
+    "direction": "מה כיוון התשלום? (receivable/payable/internal)", "currency": "מה המטבע? (ILS/USD/EUR)",
     "lead_id": "איזה ליד? (מזהה record)",
 }
 

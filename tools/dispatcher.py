@@ -173,6 +173,8 @@ _PAYMENT_TERM_FIELD_MAP: dict[str, tuple[str, str | None]] = {
     PaymentTermFields.DEAL:         ("deal_id", "single"),
     PaymentTermFields.NAME:         ("name", None),
     PaymentTermFields.CALC_TYPE:    ("calc_type", None),
+    PaymentTermFields.DIRECTION:    ("direction", None),
+    PaymentTermFields.CURRENCY:     ("currency", None),
     PaymentTermFields.FIXED_AMOUNT: ("fixed_amount", None),
     PaymentTermFields.RATE_PCT:     ("rate_pct", None),
     PaymentTermFields.CALC_BASIS:   ("calc_basis", None),
@@ -324,7 +326,7 @@ def _resolve_protected_crm_table(table: str) -> tuple[str | None, bool]:
 # omitted from the call).
 _CRM_TABLE_ROUTING: dict[str, tuple[str, dict[str, tuple[str, str | None]], tuple[str, ...]]] = {
     Tables.DEALS:         ("crm_create_deal", _DEAL_FIELD_MAP, ("name", "domain", "owner_id")),
-    Tables.PAYMENT_TERMS: ("crm_create_payment_term", _PAYMENT_TERM_FIELD_MAP, ("deal_id", "name", "calc_type")),
+    Tables.PAYMENT_TERMS: ("crm_create_payment_term", _PAYMENT_TERM_FIELD_MAP, ("deal_id", "name", "calc_type", "direction", "currency")),
     Tables.PAYMENTS:      ("crm_create_payment", _PAYMENT_FIELD_MAP, ("amount", "domain", "owner_id")),
     Tables.CHARGES:       (
         "crm_create_charge", _CHARGE_FIELD_MAP,
@@ -1168,13 +1170,18 @@ def dispatch_tool(
                     deal_id=inputs["deal_id"],
                     name=inputs.get("name", ""),
                     calc_type=inputs["calc_type"],
+                    direction=inputs.get("direction", ""),
+                    currency=inputs.get("currency", ""),
                     fixed_amount=inputs.get("fixed_amount"),
                     rate_pct=inputs.get("rate_pct"),
                     calc_basis=inputs.get("calc_basis", ""),
                     trigger_type=inputs.get("trigger_type", PaymentTermTrigger.IMMEDIATE),
                     trigger_date=inputs.get("trigger_date", ""),
+                    trigger_delay_days=inputs.get("trigger_delay_days"),
                     cadence=inputs.get("cadence", PaymentTermCadence.ONCE),
                     vat_rule=inputs.get("vat_rule", VATRule.NONE),
+                    start_date=inputs.get("start_date", ""),
+                    end_date=inputs.get("end_date", ""),
                     notes=inputs.get("notes", ""),
                     source="agent",
                 )

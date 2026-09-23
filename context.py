@@ -62,7 +62,23 @@ _ROLE_TOOLS: dict[str, set[str]] = {
         # canonical tool through a separate deterministic parser
         # (app.py's _queue_deterministic_create_deal(), agent_calls=0) and
         # is out of this fix's scope.
-        "crm_update_deal",
+        #
+        # PHASE4A-ROUTING-CLOSURE (23/09/2026): the identical reachability
+        # defect Deal UPDATE had before the fix above -- crm_update_payment_term/
+        # crm_update_payment are registered, _MANAGEMENT-authorized, BusinessDraft-
+        # fronted tools (Phase 4A) but were never added here, so the agent could
+        # never actually select them; every conversational Payment Term/Payment
+        # update request fell through to the generic airtable_update (which
+        # still works via tools/dispatcher.py's own redirect to the same
+        # commercial_crm.update_payment_term()/update_payment() writers, but
+        # skips the BusinessDraft draft/confirm layer -- see
+        # PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING). CREATE tools
+        # (crm_create_payment_term/crm_create_charge_payment) are deliberately
+        # NOT added here, same reasoning as crm_create_deal above: PaymentTerm/
+        # Payment CREATE already reach their canonical tool through the
+        # deterministic CommercialCompletionRouter path (commercial_completion_
+        # routing.MUTATION_TOOLS), not free model tool-selection.
+        "crm_update_deal", "crm_update_payment_term", "crm_update_payment",
     },
     Role.PARTNER: {
         "search_drive", "read_drive_file",
@@ -70,14 +86,14 @@ _ROLE_TOOLS: dict[str, set[str]] = {
         "gmail_draft", "gmail_read",
         "sheets_append",
         "airtable_get", "airtable_add", "airtable_update",
-        "crm_update_deal",
+        "crm_update_deal", "crm_update_payment_term", "crm_update_payment",
     },
     Role.MANAGER: {
         "search_drive", "read_drive_file",
         "calendar_get_events", "calendar_create_event",
         "gmail_draft", "gmail_read",
         "airtable_get", "airtable_add", "airtable_update",
-        "crm_update_deal",
+        "crm_update_deal", "crm_update_payment_term", "crm_update_payment",
     },
     Role.EMPLOYEE: {
         "calendar_get_events",

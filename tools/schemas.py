@@ -265,16 +265,21 @@ TOOL_SCHEMAS = [
                 "deal_id":      {"type": "string", "description": "מזהה העסקה (rec...) — חובה"},
                 "name":         {"type": "string", "description": "שם תנאי התשלום"},
                 "calc_type":    {"type": "string", "enum": ["fixed", "percentage"], "description": "שיטת חישוב"},
+                "direction":    {"type": "string", "enum": ["receivable", "payable", "internal"], "description": "כיוון התשלום (נכנס/יוצא) — חובה"},
+                "currency":     {"type": "string", "enum": ["ILS", "USD", "EUR"], "description": "מטבע — חובה"},
                 "fixed_amount": {"type": "number", "description": "סכום קבוע — חובה כש-calc_type=fixed"},
                 "rate_pct":     {"type": "number", "description": "אחוז — חובה כש-calc_type=percentage"},
                 "calc_basis":   {"type": "string", "description": "בסיס לחישוב אחוז (deal_amount/monthly_salary/first_salary) — חובה כש-calc_type=percentage"},
                 "trigger_type": {"type": "string", "enum": ["immediate", "specific_date", "after_period", "event_based"], "description": "מתי התשלום מופעל"},
                 "trigger_date": {"type": "string", "description": "תאריך הפעלה, אם trigger_type=specific_date"},
+                "trigger_delay_days": {"type": "integer", "description": "מספר ימי המתנה, אם trigger_type=after_period"},
                 "cadence":      {"type": "string", "enum": ["once", "monthly"], "description": "תדירות"},
                 "vat_rule":     {"type": "string", "enum": ["none", "add", "included"], "description": "טיפול במע\"מ"},
+                "start_date":   {"type": "string", "description": "תאריך תחילה (YYYY-MM-DD)"},
+                "end_date":     {"type": "string", "description": "תאריך סיום (YYYY-MM-DD)"},
                 "notes":        {"type": "string", "description": "הערות חופשיות"}
             },
-            "required": ["deal_id", "calc_type"]
+            "required": ["deal_id", "calc_type", "direction", "currency"]
         }
     },
     {

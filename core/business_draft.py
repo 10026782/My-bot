@@ -130,10 +130,16 @@ _UPDATE_FIELD_MAP: dict[str, dict[str, str]] = {
         "estimated_value_range": "estimated_value_range",
         "estimated_value_notes": "estimated_value_notes",
     },
+    # PHASE 4 audit: update_payment_term() also accepts "trigger_delay_days"
+    # (commercial_crm.py's _PAYMENT_TERM_UPDATE_ALLOWED, and
+    # tools/schemas.py's crm_update_payment_term input_schema exposes it) --
+    # this was missing here even though it's a live, agent-reachable UPDATE
+    # field. Added below rather than left to fail closed as "unrecognized".
     "payment_term": {
         "name": "name", "calculation_type": "calc_type", "fixed_amount": "fixed_amount",
         "rate_pct": "rate_pct", "calculation_basis": "calc_basis",
         "trigger_type": "trigger_type", "trigger_date": "trigger_date",
+        "trigger_delay_days": "trigger_delay_days",
         "cadence": "cadence", "vat_rule": "vat_rule", "start_date": "start_date",
         "end_date": "end_date", "notes": "notes",
     },
@@ -159,8 +165,48 @@ _UPDATE_LINK_FIELDS = frozenset({"counterparty_contact", "counterparty_organizat
 # immutable after creation, per commercial_crm.py's own comment) -- derived
 # from _UPDATE_FIELD_MAP, not hand-duplicated, so the 18 shared fields can't
 # drift apart between the two maps.
+#
+# PHASE 4A -- "payment_term" and "payment" CREATE entries, added once the
+# pre-existing drift blocking them (see git history / the Phase 4 report for
+# the original trace) was closed at its root:
+#   - "payment_term": ENTITY_CONTRACTS["payment_term"]'s "direction"/
+#     "currency" fields are required=ALWAYS. create_payment_term() now
+#     accepts and persists both (PaymentTermFields.DIRECTION/CURRENCY), the
+#     tool schema exposes them, and commercial_completion_routing.
+#     _primitive_inputs()'s payment_term branch forwards them (and
+#     "trigger_delay_days", found missing by the same audit) instead of
+#     silently discarding them. Owner architecture decision: direction/
+#     currency stay required business fields -- the writer was extended to
+#     match the contract, not the other way around.
+#   - "payment": bound to crm_create_charge_payment (MUTATION_TOOLS
+#     ["payment"]'s existing canonical CREATE target, the V2 Golden Writer),
+#     never to the separately-classified legacy crm_create_payment -- see
+#     ENTITY_CONTRACTS["payment"]'s own "unresolved_rules" note. The
+#     mapping below is the exact inverse of commercial_completion_routing.
+#     _primitive_inputs()'s "payment" branch (which already produces
+#     crm_create_charge_payment's precise kwarg set) -- computed/derived
+#     fields ("status", "document_status"; both manual_entry_allowed=False)
+#     are intentionally absent, same convention as Deal's own computed
+#     fields above.
 _CREATE_FIELD_MAP: dict[str, dict[str, str]] = {
     "deal": {**_UPDATE_FIELD_MAP["deal"], "origin_lead": "origin_lead_id"},
+    "payment_term": {
+        "deal": "deal_id", "name": "name", "calculation_type": "calc_type",
+        "direction": "direction", "currency": "currency",
+        "fixed_amount": "fixed_amount", "rate_pct": "rate_pct",
+        "calculation_basis": "calc_basis", "trigger_type": "trigger_type",
+        "trigger_date": "trigger_date", "trigger_delay_days": "trigger_delay_days",
+        "cadence": "cadence", "vat_rule": "vat_rule",
+        "start_date": "start_date", "end_date": "end_date", "notes": "notes",
+    },
+    "payment": {
+        "charge": "charge_id", "deal": "deal_id", "direction": "direction",
+        "amount": "amount", "currency": "currency", "paid_at": "paid_at",
+        "document_requirement": "document_requirement",
+        "payment_term": "payment_term_id", "reference": "reference",
+        "method": "method", "counterparty_contact": "counterparty_contact_id",
+        "counterparty_organization": "counterparty_organization_id", "notes": "notes",
+    },
 }
 
 # Primitive kwargs each Golden Writer legally accepts but that have no
