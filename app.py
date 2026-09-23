@@ -4415,6 +4415,25 @@ def _apply_diamond_post_approval_continuation(
         if offer_text:
             outcome.enrichment_offer_text = offer_text
             outcome.enrichment_offer_choices = ("כן", "לא")
+    # Phase 4C — stamp "the record we just created" for any commercial CREATE
+    # (Deal/Payment Term/Payment), not just Deal, so a follow-up deterministic
+    # UPDATE referencing "שיצרנו עכשיו"/"האחרון" can resolve it. Uses the same
+    # verified-evidence record_id computed above — never a guess.
+    _last_create_entity = {
+        "crm_create_deal": "deal",
+        "crm_create_payment_term": "payment_term",
+        "crm_create_charge_payment": "payment",
+    }.get(contract_after.tool_name)
+    if _last_create_entity and record_id:
+        try:
+            from session_store import lead_sessions as _lc_sessions
+            _lc_sessions.set_last_commercial_create(
+                origin_chat_id, _last_create_entity, record_id, channel=origin_channel,
+            )
+        except Exception:
+            logger.warning(
+                "[Phase4C] failed to stamp last_commercial_create entity=%s", _last_create_entity, exc_info=True,
+            )
     return outcome
 
 
@@ -7002,6 +7021,57 @@ def run_agent(
             _completion_result.queue_outcome or {}, chat_id, _out_meta,
             "DeterministicCommercialCompletion", "לא הצלחתי להעביר את הפעולה לאישור.",
         )
+
+    # Phase 4C — Deterministic Commercial UPDATE Routing. Same Turn
+    # Coordinator short-circuit as the CREATE flows above: a structurally-
+    # recognized commercial-field UPDATE ("עדכן בעסקה X את הסטטוס ל-Y") must
+    # never leave the Agent to choose airtable_update/crm_update_* AND a
+    # record by itself. router.py's override only assigns Handler.TOOL for
+    # these three intents once its own bounded grammar match already fired
+    # (parse_deterministic_commercial_update), so re-parsing here just
+    # recovers the same structured fields, never re-decides recognition.
+    _UPDATE_FIELD_INTENT_TO_ENTITY = {
+        "update_deal_field": "deal",
+        "update_payment_term_field": "payment_term",
+        "update_payment_field": "payment",
+    }
+    if route.handler == Handler.TOOL and route.intent in _UPDATE_FIELD_INTENT_TO_ENTITY:
+        from core.deterministic_commercial_update import (
+            parse_deterministic_commercial_update, resolve_deterministic_update_record,
+        )
+        _cu_parse = parse_deterministic_commercial_update(user_text)
+        if not _cu_parse.matched or _cu_parse.entity != _UPDATE_FIELD_INTENT_TO_ENTITY[route.intent]:
+            # Structural re-parse disagreed with the router's own decision
+            # (should not happen — same function, same input) — fail closed
+            # to the normal Agent pipeline rather than guess.
+            pass
+        elif _cu_parse.unknown_field:
+            return "איזה שדה תרצה לעדכן?"
+        elif _cu_parse.missing_record_ref:
+            _entity_label = {"deal": "עסקה", "payment_term": "תנאי תשלום", "payment": "תשלום"}[_cu_parse.entity]
+            return f"לאיזה {_entity_label} להתייחס? אפשר לציין שם, מזהה רשומה, או שזו הרשומה שיצרנו עכשיו."
+        else:
+            _resolve_status, _record_id, _clarify_msg = resolve_deterministic_update_record(
+                _cu_parse.entity, _cu_parse.record_ref_kind, _cu_parse.record_ref_text,
+                identity=identity, chat_id=chat_id, channel=channel,
+            )
+            if _resolve_status == "resolved":
+                _cu_outcome = _queue_approval_detailed(
+                    _cu_parse.tool_name, {"record_id": _record_id, _cu_parse.field: _cu_parse.value},
+                    chat_id, channel, user_text,
+                    trusted_source="deterministic_commercial_update",
+                )
+                return _finalize_deterministic_queue_outcome(
+                    _cu_outcome, chat_id, _out_meta,
+                    "DeterministicCommercialUpdate", "לא הצלחתי להעביר את העדכון לאישור.",
+                )
+            if _resolve_status == "clarify":
+                return _clarify_msg or "לא הצלחתי לזהות את הרשומה לעדכון."
+            # "unsupported" — this entity/record-reference shape has no
+            # deterministic resolver yet (documented Phase 4C boundary,
+            # e.g. Payment has no human-typed-name lookup). Falls through
+            # to the normal Agent pipeline unchanged, never a CLARIFY for a
+            # genuinely out-of-scope shape.
 
     # ── 3.6. LeadCandidate Handler (Section 4B / BUG-NEW-10) ──────
     # בעל הבית מכתיב ליד ("משה יצחקוב 050... תשמור") — short-circuit לפני agent.

@@ -645,6 +645,32 @@ def route_request(
         # it needs no corroboration from the generic keyword classifier.
         confidence = 1.0
 
+    # Phase 4C — Deterministic Commercial UPDATE Routing. Same deterministic
+    # override shape as CREATE_DEAL/S2C above: a structurally-recognized
+    # "עדכן/שנה <entity>[ <reference>] את <field> ל-<value>" (or the
+    # field-first live-incident variant) short-circuits straight to
+    # Handler.TOOL, never leaving tool selection OR record selection to the
+    # Agent for this class of message. Gated on `matched` (structural
+    # recognition), not `certain` — an unresolved field or missing record
+    # reference still reaches Handler.TOOL and is resolved into a
+    # deterministic CLARIFY downstream (app.py), never silently handed to
+    # the Agent just because one sub-part was ambiguous (mirrors CREATE_DEAL's
+    # own domain_resolved-not-certain gating above).
+    from core.deterministic_commercial_update import parse_deterministic_commercial_update
+    _commercial_update_parse = parse_deterministic_commercial_update(text)
+    if (
+        _commercial_update_parse.matched
+        and not _commercial_update_parse.unsupported_shape
+        and identity.role not in ("lead", "guest", "readonly")
+    ):
+        intent = {
+            "deal": Intent.UPDATE_DEAL_FIELD,
+            "payment_term": Intent.UPDATE_PAYMENT_TERM_FIELD,
+            "payment": Intent.UPDATE_PAYMENT_FIELD,
+        }[_commercial_update_parse.entity]
+        risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
+        confidence = 1.0
+
     # 4b. Capture Policy (Stage 3 / C89 integration) — observability only.
     # Gate is identity.is_internal alone, with NO intent filter — this must
     # match app.py's real invocation condition for handle_lead_candidate()
