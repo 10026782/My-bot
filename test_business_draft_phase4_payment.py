@@ -155,9 +155,15 @@ _schema_names = {s["name"] for s in TOOL_SCHEMAS}
 for _tool in ("crm_create_payment_term", "crm_create_payment", "crm_update_payment_term", "crm_update_payment"):
     _meta = _REGISTRY.get(_tool)
     chk(f"{_tool} is registered in tool_registry", _meta is not None)
-    chk(f"{_tool} is model_exposed (agent-reachable, same posture as crm_create_deal)", bool(_meta and _meta.model_exposed))
+    chk(
+        f"{_tool} carries model_exposed=True registry metadata -- NECESSARY but NOT SUFFICIENT "
+        "for live Agent reachability; see the real context._filter_tools() checks below for the "
+        "actual literal tool set (this is the exact class of gap Phase 3's crm_update_deal fix "
+        "closed, and Phase 4A's own report originally overclaimed reachability the same way)",
+        bool(_meta and _meta.model_exposed),
+    )
     chk(f"{_tool} is _MANAGEMENT-scoped (role posture unchanged by Phase 4)", bool(_meta and _meta.roles_allowed == {"owner", "partner", "manager"}))
-    chk(f"{_tool} has a live TOOL_SCHEMAS entry (reachable by the agent's tool_use loop)", _tool in _schema_names)
+    chk(f"{_tool} has a live TOOL_SCHEMAS entry (a precondition for exposure, not exposure itself)", _tool in _schema_names)
 
 _charge_payment_meta = _REGISTRY.get("crm_create_charge_payment")
 chk("crm_create_charge_payment is registered in tool_registry", _charge_payment_meta is not None)
@@ -173,6 +179,141 @@ chk(
 chk(
     "crm_create_charge_payment has no TOOL_SCHEMAS entry (never offered to the Agent tool_use loop)",
     "crm_create_charge_payment" not in _schema_names,
+)
+
+
+# ══════════════════════════════════════════════════
+print("\n[ROUTING/REACHABILITY — REAL context._filter_tools()] the actual literal tool set offered to the model")
+# ══════════════════════════════════════════════════
+# PHASE4A-ROUTING-CLOSURE: ToolMeta.model_exposed=True (checked above) is
+# registry metadata only. context.py's _ROLE_TOOLS + _filter_tools() is the
+# ACTUAL intersection with TOOL_SCHEMAS that becomes the Agent's literal
+# tool_use menu -- this is the exact mechanism Phase 3's crm_update_deal fix
+# targeted, and the exact mechanism this file's own [ROUTING/REACHABILITY]
+# section above failed to check before this fix.
+
+import context as _context_module  # noqa: E402
+
+_MANAGEMENT_ROLES = (Role.OWNER, Role.PARTNER, Role.MANAGER)
+_NON_MANAGEMENT_ROLES = (Role.EMPLOYEE, Role.LEAD, Role.GUEST, Role.READONLY)
+
+
+def _offered_tool_names(role: str) -> set[str]:
+    return {s["name"] for s in _context_module._filter_tools(role)}
+
+
+for _role in _MANAGEMENT_ROLES:
+    _offered = _offered_tool_names(_role)
+    chk(f"crm_update_payment_term IS in the real offered tool set for role={_role}", "crm_update_payment_term" in _offered)
+    chk(f"crm_update_payment IS in the real offered tool set for role={_role}", "crm_update_payment" in _offered)
+
+for _role in _NON_MANAGEMENT_ROLES:
+    _offered = _offered_tool_names(_role)
+    chk(f"crm_update_payment_term is ABSENT from the offered tool set for non-management role={_role}", "crm_update_payment_term" not in _offered)
+    chk(f"crm_update_payment is ABSENT from the offered tool set for non-management role={_role}", "crm_update_payment" not in _offered)
+
+# CREATE tools are deliberately NEVER added to _ROLE_TOOLS for ANY role --
+# same precedent as crm_create_deal (already absent, unchanged by Phase 4A).
+# Their canonical CREATE path is the deterministic CommercialCompletionRouter
+# route (core/router/router.py's parse_deterministic_commercial_completion()
+# -> Handler.TOOL -> commercial_completion_routing.MUTATION_TOOLS), which
+# never depends on the model freely selecting a tool_use call.
+for _role in _MANAGEMENT_ROLES + _NON_MANAGEMENT_ROLES:
+    _offered = _offered_tool_names(_role)
+    chk(f"crm_create_deal remains absent from the offered tool set for role={_role} (existing Phase 3 precedent, unchanged)", "crm_create_deal" not in _offered)
+    chk(f"crm_create_payment_term is absent from the offered tool set for role={_role} (owned by the deterministic router route, not free tool-selection)", "crm_create_payment_term" not in _offered)
+    chk(f"crm_create_charge_payment is absent from the offered tool set for role={_role} (model_exposed=False, and owned by the deterministic router route)", "crm_create_charge_payment" not in _offered)
+
+# LEGACY crm_create_payment: report its DIRECT exposure and its INDIRECT
+# (generic airtable_add) reachability as two separate, non-conflated facts.
+for _role in _MANAGEMENT_ROLES:
+    _offered = _offered_tool_names(_role)
+    chk(
+        f"crm_create_payment (LEGACY) is NOT directly offered to the model for role={_role} -- "
+        "registered/model_exposed=True metadata in tool_registry, but not present in the literal "
+        "Agent tool set (context._ROLE_TOOLS never lists it, for any role)",
+        "crm_create_payment" not in _offered,
+    )
+    chk(
+        f"airtable_add IS directly offered to the model for role={_role} (the indirect reachability "
+        "path for legacy crm_create_payment -- see the PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING "
+        "section below)",
+        "airtable_add" in _offered,
+    )
+
+
+# ══════════════════════════════════════════════════
+print("\n[DETERMINISTIC CREATE ROUTING] Router Intent -> CommercialCompletionRouter -> MUTATION_TOOLS -> BusinessDraft seam")
+# ══════════════════════════════════════════════════
+# Static proof of the full chain for both CREATE tools, entirely independent
+# of context._ROLE_TOOLS / model tool-selection:
+#   Router Intent (deterministic regex match, core/router/router.py) ->
+#   Handler.TOOL (never Handler.AGENT -- see core/router/test_router.py's own
+#   "CREATE_PAYMENT_TERM .. reaches Handler.TOOL deterministically" and the
+#   two existing CREATE_CHARGE_PAYMENT cases) ->
+#   app.py's _completion_entities[route.intent] -> entity_type ->
+#   CommercialCompletionRouter(entity_type).start() ->
+#   MUTATION_TOOLS[entity_type] (finalize) -> canonical tool_name ->
+#   app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL[tool_name] -> BusinessDraft seam
+# (app.py's own `_completion_entities` dict is a local literal inside
+# run_agent(), not a module attribute -- its two relevant entries,
+# "create_payment_term": "payment_term" and "create_charge_payment":
+# "payment", are pinned by source-text assertion below so a rename/removal
+# fails this test loudly instead of silently drifting.)
+
+from core.router.route_decision import Intent as _RouterIntent  # noqa: E402
+from core.router import risk_router as _risk_router_module  # noqa: E402
+
+chk(
+    "Router Intent.CREATE_PAYMENT_TERM == 'create_payment_term' "
+    "(app.py's _completion_entities key space -- Intent is a plain str constant class, not an Enum)",
+    _RouterIntent.CREATE_PAYMENT_TERM == "create_payment_term",
+)
+chk(
+    "Router Intent.CREATE_CHARGE_PAYMENT == 'create_charge_payment' "
+    "(app.py's _completion_entities key space)",
+    _RouterIntent.CREATE_CHARGE_PAYMENT == "create_charge_payment",
+)
+chk(
+    "risk_router's PA-01 policy table maps CREATE_PAYMENT_TERM -> crm_create_payment_term "
+    "(single policy source, cross-checked against MUTATION_TOOLS below)",
+    _risk_router_module._CONTRACT_REQUIRED_INTENT_TO_TOOL.get(_RouterIntent.CREATE_PAYMENT_TERM) == "crm_create_payment_term",
+)
+chk(
+    "risk_router's PA-01 policy table maps CREATE_CHARGE_PAYMENT -> crm_create_charge_payment "
+    "(single policy source, cross-checked against MUTATION_TOOLS below)",
+    _risk_router_module._CONTRACT_REQUIRED_INTENT_TO_TOOL.get(_RouterIntent.CREATE_CHARGE_PAYMENT) == "crm_create_charge_payment",
+)
+chk(
+    "CommercialCompletionRouter's own canonical binding: MUTATION_TOOLS['payment_term'] == crm_create_payment_term",
+    _MUTATION_TOOLS.get("payment_term") == "crm_create_payment_term",
+)
+chk(
+    "CommercialCompletionRouter's own canonical binding: MUTATION_TOOLS['payment'] == crm_create_charge_payment "
+    "(never the legacy crm_create_payment)",
+    _MUTATION_TOOLS.get("payment") == "crm_create_charge_payment",
+)
+
+import inspect as _inspect_module  # noqa: E402
+_app_source = _inspect_module.getsource(app)
+chk(
+    "app.py's _completion_entities dict maps intent 'create_payment_term' -> entity 'payment_term' "
+    "(source-pinned since this dict is a local literal, not a module attribute)",
+    '"create_payment_term": "payment_term"' in _app_source,
+)
+chk(
+    "app.py's _completion_entities dict maps intent 'create_charge_payment' -> entity 'payment' "
+    "(source-pinned since this dict is a local literal, not a module attribute)",
+    '"create_charge_payment": "payment"' in _app_source,
+)
+chk(
+    "the full chain closes: entity 'payment_term' -> BusinessDraft seam via _COMMERCIAL_DRAFT_ENTITY_FOR_TOOL",
+    app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL.get("crm_create_payment_term") == "payment_term",
+)
+chk(
+    "the full chain closes: entity 'payment' -> BusinessDraft seam via _COMMERCIAL_DRAFT_ENTITY_FOR_TOOL "
+    "(never routes to the legacy crm_create_payment)",
+    app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL.get("crm_create_charge_payment") == "payment",
 )
 
 
@@ -755,7 +896,7 @@ _clear(sender, "payment")
 
 
 # ══════════════════════════════════════════════════
-print("\n[GENERIC airtable_update BYPASS] classified, pre-existing gap -- same as Deal, not newly introduced")
+print("\n[PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING] classified, pre-existing gap -- same as Deal, not newly introduced -- covers BOTH airtable_add (CREATE) and airtable_update (UPDATE)")
 # ══════════════════════════════════════════════════
 
 from tools import dispatcher as _dispatcher_module  # noqa: E402
@@ -775,10 +916,39 @@ chk(
     "airtable_update-on-'Payment Terms' still reaches commercial_crm.update_payment_term() directly, "
     "bypassing the Phase 4 BusinessDraft hook entirely -- this is the SAME generic-redirect gap "
     "Phase 3 documented and accepted as Deal-only out-of-scope; it is confirmed (not silently left "
-    "unclassified) to also apply to Payment Term/Payment, and closing it is reported as a Phase 4 "
-    "blocker (it would require touching the shared _queue_approval_detailed_impl choke point that "
-    "also fronts the runtime-verified Deal path)",
+    "unclassified) to also apply to Payment Term/Payment, and closing it is reported as "
+    "PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING (it would require touching the shared "
+    "_queue_approval_detailed_impl choke point that also fronts the runtime-verified Deal path)",
     mock_update_term.call_count == 1,
+)
+
+from airtable_schema import PaymentFields as _PF  # noqa: E402
+
+with patch("commercial_crm.create_payment", return_value={"ok": True, "tool": "crm_create_payment", "external_id": "recPAY0000LEGACY", "evidence": {}, "user_message": "ok"}) as mock_create_payment_legacy, \
+     patch.object(_dispatcher_module, "_validate_execution_proof", return_value=None), \
+     patch.object(_dispatcher_module._ff, "is_enabled", return_value=False):
+    from tools.dispatcher import dispatch_tool as _dispatch_tool_legacy_pay
+    _dispatch_tool_legacy_pay(
+        "airtable_add",
+        {
+            "table": "Payments",
+            # Deliberately a shape with NO Charge-only V2 field present, so
+            # tools/dispatcher.py's own _crm_create_route() disambiguator
+            # picks the legacy route (_CRM_TABLE_ROUTING), never _PAYMENT_V2_ROUTE.
+            "fields": {_PF.AMOUNT: 300, _PF.DOMAIN: "general", _PF.OWNER: "recOwnerLegacy001"},
+        },
+        identity=_owner_identity("payment-legacy-create-redirect"),
+        trusted_source="agent",
+        execution_context={"contract_id": "phase4a-legacy-payment-create-redirect-regression"},
+    )
+chk(
+    "GENERIC airtable_add on 'Payments' with a legacy-shaped (Charge-less) fields dict IS indirectly "
+    "reachable to the legacy crm_create_payment() writer via _crm_create_route()'s own field-shape "
+    "disambiguation -- confirming the earlier [ROUTING/REACHABILITY] finding that crm_create_payment, "
+    "while absent from context._ROLE_TOOLS, remains reachable indirectly through airtable_add (which "
+    "IS offered) -- this is the CREATE-side half of PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING, "
+    "not a Phase 4A regression (this routing logic predates Phase 4A and is unmodified by it)",
+    mock_create_payment_legacy.call_count == 1,
 )
 
 from airtable_schema import PaymentTermFields as _PTF  # noqa: E402

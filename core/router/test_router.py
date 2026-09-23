@@ -209,6 +209,18 @@ TESTS = [
         "רשום תשלום של 2320 על החיוב מעמלת פוסידון בשיטת מזומן",
         "telegram", "owner", "", Intent.CREATE_CHARGE_PAYMENT, RouterDomain.FINANCE, Handler.TOOL,
     ),
+    # PHASE4A-ROUTING-CLOSURE: CREATE_PAYMENT_TERM's own deterministic
+    # Handler.TOOL reachability had no router-level regression test at all
+    # before this -- crm_create_payment_term is model_exposed=False-adjacent
+    # in practice (never offered via context._ROLE_TOOLS, same as
+    # crm_create_charge_payment above), so this is the only proof that the
+    # phrase actually reaches Handler.TOOL / CommercialCompletionRouter
+    # deterministically rather than falling through to the general Agent.
+    (
+        "CREATE_PAYMENT_TERM 'צור תנאי תשלום' phrasing reaches Handler.TOOL deterministically",
+        "צור תנאי תשלום",
+        "telegram", "owner", "", Intent.CREATE_PAYMENT_TERM, RouterDomain.FINANCE, Handler.TOOL,
+    ),
 ]
 
 
