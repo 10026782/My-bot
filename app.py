@@ -1663,6 +1663,32 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         from core.commercial_generic_canonicalization import deal_payload_as_airtable_fields
         summary = deal_field_business_summary(deal_payload_as_airtable_fields(inputs))
         return f"✏️ עדכון פרטי עסקה:\n{summary}" if summary else "✏️ עדכון פרטי עסקה"
+    if tool_name in ("crm_create_payment_term", "crm_update_payment_term", "crm_create_payment", "crm_update_payment"):
+        # BusinessDraft Phase 4B follow-up (live observation, 23/09/2026): none
+        # of these four had a pending-approval label here at all -- every one
+        # fell through to _APPROVAL_DESCRIPTION_FALLBACK ("לא הצלחתי להכין
+        # תיאור ברור..."), which reads as a failure even though a real
+        # approval is pending. crm_create_payment_term/crm_create_payment
+        # already had this gap pre-Phase-4B (reachable via
+        # CommercialCompletionRouter); crm_update_payment_term/crm_update_payment
+        # became newly reachable in production the moment a generic Payment
+        # Terms/Payments update started canonicalizing here. Same minimal
+        # first-field-preview convention core.action_gateway's completion-
+        # message fix for the same four tools uses -- one shared helper,
+        # not a second summary system.
+        from core.action_gateway import _first_field_preview
+        if tool_name == "crm_create_payment_term":
+            verb, preview = "➕ הוספת תנאי תשלום", str(inputs.get("name") or "").strip()
+        elif tool_name == "crm_update_payment_term":
+            verb, preview = "✏️ עדכון תנאי תשלום", ""
+        elif tool_name == "crm_create_payment":
+            amount = inputs.get("amount")
+            verb, preview = "➕ יצירת תשלום", (str(amount) if amount not in (None, "") else "")
+        else:
+            verb, preview = "✏️ עדכון תשלום", ""
+        if not preview:
+            preview = _first_field_preview(inputs)
+        return f"{verb}: {preview}" if preview else verb
     if tool_name == "sheets_append":
         sheet = inputs.get("sheet_name")
         if not sheet:

@@ -1409,6 +1409,23 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
     elif tool_name == "crm_create_payment":
         amount = payload.get("amount")
         description = "יצירת תשלום" + (f": {amount}" if amount not in (None, "") else "")
+    elif tool_name == "crm_update_payment_term":
+        # BusinessDraft Phase 4B follow-up (live observation, 23/09/2026): a
+        # generic Payment Terms update now canonicalizes to this tool before
+        # any contract exists (same seam as crm_update_deal above), but this
+        # branch was missing -- the completion/reconfirmation text fell
+        # through to the generic "הפעולה המבוקשת" fallback the very first
+        # time this became reachable in production. No entity-specific
+        # per-field summary exists for Payment Term (unlike Deal's DIAMOND
+        # summary) -- reuses the same minimal first-field preview the
+        # generic airtable_update branch above already gives every other
+        # table, which is never worse than what a raw generic update showed.
+        preview = _first_field_preview(payload)
+        description = "עדכון תנאי תשלום" + (f": {preview}" if preview else "")
+    elif tool_name == "crm_update_payment":
+        # Same gap, same fix, for Payment UPDATE -- see crm_update_payment_term above.
+        preview = _first_field_preview(payload)
+        description = "עדכון תשלום" + (f": {preview}" if preview else "")
     elif tool_name == "crm_find_or_create_contact":
         # BUG-DIAMOND-GENERIC-COMPLETION-DESCRIPTION (production-reported,
         # 05/09/2026): a DIAMOND PATH nested Contact create's own approval-
