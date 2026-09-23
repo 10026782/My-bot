@@ -282,15 +282,27 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
                 )
         return result
     if entity == "payment_term":
+        # BUG-PAYMENTTERM-CREATE-DIRECTION-CURRENCY (Phase 4A): "direction"/
+        # "currency" are required=ALWAYS on ENTITY_CONTRACTS["payment_term"]
+        # -- the completion flow already collects them -- but were missing
+        # from this translation, so they were silently discarded before
+        # ever reaching create_payment_term(). Now required here too,
+        # matching the writer's own new required kwargs exactly.
         result = {
             "deal_id": _link_id(p[PaymentTermFields.DEAL]),
             "name": p.get(PaymentTermFields.NAME, "Payment Term"),
             "calc_type": p[PaymentTermFields.CALC_TYPE_CODE],
+            "direction": p[PaymentTermFields.DIRECTION],
+            "currency": p[PaymentTermFields.CURRENCY],
         }
         mapping = {
             "Fixed Amount": "fixed_amount", "Rate %": "rate_pct",
             "Calculation Basis Code": "calc_basis",
             "Trigger Type Code": "trigger_type", "Trigger Date": "trigger_date",
+            # BUG-PAYMENTTERM-CREATE-TRIGGER-DELAY-DAYS (Phase 4A): same
+            # silent-discard drift as direction/currency above --
+            # create_payment_term() has always accepted trigger_delay_days.
+            "Trigger Delay Days": "trigger_delay_days",
             "Cadence Code": "cadence", "VAT Rule": "vat_rule",
             "Start Date": "start_date", "End Date": "end_date", "Notes": "notes",
         }
@@ -355,8 +367,16 @@ def _primitive_inputs(entity: str, payload: Mapping[str, Any]) -> dict[str, Any]
             "status": p[PaymentFields.STATUS], "document_requirement": p[PaymentFields.DOCUMENT_REQUIREMENT],
             "document_status": p[PaymentFields.DOCUMENT_STATUS],
         }
+        # BUG-PAYMENT-CREATE-REFERENCE (Phase 4A): PaymentFields.REF's actual
+        # value is "reference" (lowercase, unlike its Method/Notes/Payment
+        # Term siblings' Title-Case Airtable names) -- this mapping used the
+        # literal "Reference" (Title Case) as the lookup key, which never
+        # matched `p`'s real key, so a user-supplied Reference was silently
+        # discarded before ever reaching crm_create_charge_payment(), same
+        # silent-discard class as the payment_term direction/currency/
+        # trigger_delay_days drift above.
         mapping = {
-            "Payment Term": "payment_term_id", "Reference": "reference",
+            "Payment Term": "payment_term_id", PaymentFields.REF: "reference",
             "Method": "method", "Counterparty Contact": "counterparty_contact_id",
             "Counterparty Organization": "counterparty_organization_id", "Notes": "notes",
         }

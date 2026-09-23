@@ -129,13 +129,18 @@ with patch("commercial_crm.create_payment_term", return_value={"ok": True, "tool
                                                                  "external_id": "recTerm1", "evidence": {}, "user_message": "ok"}) as m:
     dispatch_tool(
         "crm_create_payment_term",
-        {"deal_id": "recDeal1", "calc_type": "percentage", "rate_pct": 5, "calc_basis": "deal_amount"},
+        {
+            "deal_id": "recDeal1", "calc_type": "percentage", "rate_pct": 5, "calc_basis": "deal_amount",
+            "direction": "receivable", "currency": "ILS",
+        },
         identity=owner, trusted_source="agent",
     )
     chk("crm_create_payment_term: deal_id passed through", m.call_args.kwargs["deal_id"] == "recDeal1")
     chk("crm_create_payment_term: calc_type passed through", m.call_args.kwargs["calc_type"] == "percentage")
     chk("crm_create_payment_term: rate_pct passed through", m.call_args.kwargs["rate_pct"] == 5)
     chk("crm_create_payment_term: calc_basis passed through", m.call_args.kwargs["calc_basis"] == "deal_amount")
+    chk("crm_create_payment_term: direction passed through", m.call_args.kwargs["direction"] == "receivable")
+    chk("crm_create_payment_term: currency passed through", m.call_args.kwargs["currency"] == "ILS")
 
 with patch("commercial_crm.create_payment", return_value={"ok": True, "tool": "crm_create_payment",
                                                             "external_id": "recPay1", "evidence": {}, "user_message": "ok"}) as m:

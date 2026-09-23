@@ -166,25 +166,47 @@ _UPDATE_LINK_FIELDS = frozenset({"counterparty_contact", "counterparty_organizat
 # from _UPDATE_FIELD_MAP, not hand-duplicated, so the 18 shared fields can't
 # drift apart between the two maps.
 #
-# PHASE 4 -- neither "payment_term" nor "payment" has a CREATE entry here.
-# Both were audited and found blocked by pre-existing, Phase-4-independent
-# drift (see the Phase 4 report for the full trace):
-#   - "payment_term": ENTITY_CONTRACTS["payment_term"]'s "direction" and
-#     "currency" fields are required=ALWAYS, but crm_create_payment_term's
-#     tool schema has no way to supply either one, and create_payment_term()
-#     never reads/persists PaymentTermFields.DIRECTION or ...CURRENCY at
-#     all -- missing_fields() would therefore never clear, so a CREATE
-#     draft built from this seam could never reach CONFIRMED. Wiring CREATE
-#     through BusinessDraft here would regress an already-working
-#     dispatcher path (dispatch_tool()'s existing "crm_create_payment_term"
-#     case calls create_payment_term() directly today, with no such block)
-#     into one that always fails closed -- not attempted.
-#   - "payment": ENTITY_CONTRACTS["payment"]/MUTATION_TOOLS["payment"]
-#     already canonically bind CREATE to crm_create_charge_payment (a
-#     different, incompatible writer shape) -- crm_create_payment is not
-#     fronted by this seam.
+# PHASE 4A -- "payment_term" and "payment" CREATE entries, added once the
+# pre-existing drift blocking them (see git history / the Phase 4 report for
+# the original trace) was closed at its root:
+#   - "payment_term": ENTITY_CONTRACTS["payment_term"]'s "direction"/
+#     "currency" fields are required=ALWAYS. create_payment_term() now
+#     accepts and persists both (PaymentTermFields.DIRECTION/CURRENCY), the
+#     tool schema exposes them, and commercial_completion_routing.
+#     _primitive_inputs()'s payment_term branch forwards them (and
+#     "trigger_delay_days", found missing by the same audit) instead of
+#     silently discarding them. Owner architecture decision: direction/
+#     currency stay required business fields -- the writer was extended to
+#     match the contract, not the other way around.
+#   - "payment": bound to crm_create_charge_payment (MUTATION_TOOLS
+#     ["payment"]'s existing canonical CREATE target, the V2 Golden Writer),
+#     never to the separately-classified legacy crm_create_payment -- see
+#     ENTITY_CONTRACTS["payment"]'s own "unresolved_rules" note. The
+#     mapping below is the exact inverse of commercial_completion_routing.
+#     _primitive_inputs()'s "payment" branch (which already produces
+#     crm_create_charge_payment's precise kwarg set) -- computed/derived
+#     fields ("status", "document_status"; both manual_entry_allowed=False)
+#     are intentionally absent, same convention as Deal's own computed
+#     fields above.
 _CREATE_FIELD_MAP: dict[str, dict[str, str]] = {
     "deal": {**_UPDATE_FIELD_MAP["deal"], "origin_lead": "origin_lead_id"},
+    "payment_term": {
+        "deal": "deal_id", "name": "name", "calculation_type": "calc_type",
+        "direction": "direction", "currency": "currency",
+        "fixed_amount": "fixed_amount", "rate_pct": "rate_pct",
+        "calculation_basis": "calc_basis", "trigger_type": "trigger_type",
+        "trigger_date": "trigger_date", "trigger_delay_days": "trigger_delay_days",
+        "cadence": "cadence", "vat_rule": "vat_rule",
+        "start_date": "start_date", "end_date": "end_date", "notes": "notes",
+    },
+    "payment": {
+        "charge": "charge_id", "deal": "deal_id", "direction": "direction",
+        "amount": "amount", "currency": "currency", "paid_at": "paid_at",
+        "document_requirement": "document_requirement",
+        "payment_term": "payment_term_id", "reference": "reference",
+        "method": "method", "counterparty_contact": "counterparty_contact_id",
+        "counterparty_organization": "counterparty_organization_id", "notes": "notes",
+    },
 }
 
 # Primitive kwargs each Golden Writer legally accepts but that have no

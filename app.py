@@ -2213,35 +2213,45 @@ def _finalize_deal_draft_cleanup(draft_ctx: tuple, result: dict, channel: str) -
         )
 
 
-def _run_commercial_draft(entity_type: str, tool_name: str, tool_inputs: dict, identity, channel: str, user_chat_id: str) -> "_DealDraftOutcome":
-    """BUSINESSDRAFT PHASE 4 (PaymentTerm/Payment) -- the seam body for
-    `crm_update_payment_term`/`crm_update_payment`, called once from inside
-    `_queue_approval_detailed_impl` before any dedup/fingerprint layer or
-    `ActionGateway.propose_action()` sees the payload. Mirrors
-    `_run_deal_business_draft`'s Phase 3 UPDATE shape exactly (BusinessDraft
-    UPDATE -> Sessions persistence (CAS) -> confirm() -> ConfirmedSnapshot)
-    -- kept as a SEPARATE function rather than a generalized Deal helper so
-    the runtime-verified Deal path is never touched by this change. Neither
-    Payment Term nor Payment has an owner field or a Domain select field, so
-    this omits Deal's owner-resolution and domain-canonicalization steps
-    entirely (they do not apply here).
+_COMMERCIAL_DRAFT_CREATE_TOOLS = frozenset({"crm_create_payment_term", "crm_create_charge_payment"})
 
-    UPDATE-only, deliberately -- see the Phase 4 report for why neither
-    CREATE tool is wired to this seam:
-      - `crm_create_payment_term`: ENTITY_CONTRACTS["payment_term"]'s
-        "direction"/"currency" fields are required=ALWAYS but
-        create_payment_term() never accepts or persists either one and the
-        tool schema has no way to supply them -- a CREATE draft here could
-        never reach CONFIRMED, which would regress the dispatcher's
-        existing, working "crm_create_payment_term" case into an
-        always-fails one.
-      - `crm_create_payment`: ENTITY_CONTRACTS["payment"]/
-        MUTATION_TOOLS["payment"] already canonically bind CREATE to
-        crm_create_charge_payment (a different, incompatible writer shape).
+
+def _run_commercial_draft(entity_type: str, tool_name: str, tool_inputs: dict, identity, channel: str, user_chat_id: str) -> "_DealDraftOutcome":
+    """BUSINESSDRAFT PHASE 4A (PaymentTerm/Payment) -- the seam body for
+    `crm_create_payment_term`/`crm_update_payment_term`/
+    `crm_create_charge_payment`/`crm_update_payment`, called once from
+    inside `_queue_approval_detailed_impl` before any dedup/fingerprint
+    layer or `ActionGateway.propose_action()` sees the payload. Mirrors
+    `_run_deal_business_draft`'s Phase 3 CREATE+UPDATE shape exactly
+    (BusinessDraft CREATE/UPDATE -> Sessions persistence (CAS) -> confirm()
+    -> ConfirmedSnapshot) -- kept as a SEPARATE function rather than a
+    generalized Deal helper so the runtime-verified Deal path is never
+    touched by this change. Neither Payment Term nor Payment has an owner
+    field or a Domain select field, so this omits Deal's owner-resolution
+    and domain-canonicalization steps entirely (they do not apply here).
+
+    `crm_create_charge_payment` is `model_exposed=False` -- it is never
+    called directly by the Agent tool_use loop. It reaches this seam only
+    via CommercialCompletionRouter's `_inspect()`/finalize step (its own
+    `self._queue(tool, inputs)` callback resolves to `_queue_approval_
+    detailed`, which always calls `_queue_approval_detailed_impl` --
+    unconditionally, regardless of whether the call originated from a model
+    tool_use event or from the completion router's own internal finalize).
+    That is the exact same route Deal CREATE already takes today
+    (MUTATION_TOOLS["deal"] == "crm_create_deal", also model-exposed and
+    also DIAMOND-reachable) -- this is not a new pattern, just the second
+    entity to use it. `crm_create_payment` (the legacy, flat writer) is
+    deliberately absent from `_COMMERCIAL_DRAFT_CREATE_TOOLS` below and
+    from `commercial_completion_routing.MUTATION_TOOLS` -- it is a
+    separately-classified legacy/compatibility surface, untouched, never
+    the BusinessDraft "payment" CREATE binding (see
+    ENTITY_CONTRACTS["payment"]'s own "unresolved_rules" note and
+    test_business_draft_phase4_payment.py's routing-reachability checks).
     """
     from core.business_draft import (
         BusinessDraftError, DraftConflictError, DraftOperation,
-        create_draft, fields_from_airtable_record, fields_from_primitive_update,
+        create_draft, fields_from_airtable_record,
+        fields_from_primitive_create, fields_from_primitive_update,
     )
     from commercial_crm import _valid_record_id
     from tool_registry import enforce, ToolDenied
@@ -2251,7 +2261,7 @@ def _run_commercial_draft(entity_type: str, tool_name: str, tool_inputs: dict, i
     from commercial_completion import CompletionError
 
     _commercial_draft_tables = {"payment_term": Tables.PAYMENT_TERMS, "payment": Tables.PAYMENTS}
-    operation = DraftOperation.UPDATE
+    operation = DraftOperation.CREATE if tool_name in _COMMERCIAL_DRAFT_CREATE_TOOLS else DraftOperation.UPDATE
 
     # 1. Authorization first, before any read -- same role gate the
     # dedicated dispatcher case re-checks at dispatch time (defense in
@@ -2263,54 +2273,63 @@ def _run_commercial_draft(entity_type: str, tool_name: str, tool_inputs: dict, i
 
     # 2. Split primitive inputs into (mapped completion fields, unrecognized
     # keys, raw passthrough kwargs). Neither entity has any passthrough
-    # kwargs today (every Golden-Writer-accepted UPDATE key has a completion
-    # field equivalent) -- passthrough_kwargs is always empty here, kept
-    # only for shape parity with the Deal seam / a future entry.
-    mapped, unrecognized, passthrough_kwargs = fields_from_primitive_update(entity_type, tool_inputs)
+    # kwargs today (every Golden-Writer-accepted CREATE/UPDATE key has a
+    # completion field equivalent) -- passthrough_kwargs is always empty
+    # here, kept only for shape parity with the Deal seam / a future entry.
+    if operation is DraftOperation.CREATE:
+        mapped, unrecognized, passthrough_kwargs = fields_from_primitive_create(entity_type, tool_inputs)
+    else:
+        mapped, unrecognized, passthrough_kwargs = fields_from_primitive_update(entity_type, tool_inputs)
     if unrecognized:
         return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
             tool_name, "❌ שדות לא נתמכים ב-" + tool_name + ": " + ", ".join(sorted(unrecognized)),
         ))
 
-    # 3. UPDATE target identity -- fail closed, never guess.
-    record_id = tool_inputs.get("record_id")
-    if not _valid_record_id(record_id):
-        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
-            tool_name, "❌ עדכון דורש מזהה רשומה (record_id) תקין.",
-        ))
-    # 4. Pre-read the current record to build original_fields. Same reader
-    # Deal's seam uses; authorization for this read is the enforce() role
-    # check above (matches Deal's existing posture exactly -- tenant scope
-    # is re-checked at actual dispatch time by the dedicated
-    # crm_update_payment_term/crm_update_payment dispatcher case, same as
-    # Deal's crm_update_deal case).
-    table = _commercial_draft_tables[entity_type]
-    try:
-        raw = get_record_fields(table, record_id)
-    except Exception as exc:
-        logger.warning(
-            "[BusinessDraft/%s] get_record_fields failed record_id=%s: %s",
-            entity_type, _sanitize_id(str(record_id)), exc,
-        )
-        raw = None
-    if not raw:
-        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
-            tool_name, "❌ לא נמצאה רשומה עם מזהה הרשומה שסופק.",
-        ))
-    original_fields = fields_from_airtable_record(entity_type, raw)
+    original_fields: dict | None = None
+    if operation is DraftOperation.UPDATE:
+        # 3. UPDATE target identity -- fail closed, never guess.
+        record_id = tool_inputs.get("record_id")
+        if not _valid_record_id(record_id):
+            return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+                tool_name, "❌ עדכון דורש מזהה רשומה (record_id) תקין.",
+            ))
+        # 4. Pre-read the current record to build original_fields. Same
+        # reader Deal's seam uses; authorization for this read is the
+        # enforce() role check above (matches Deal's existing posture
+        # exactly -- tenant scope is re-checked at actual dispatch time by
+        # the dedicated crm_update_payment_term/crm_update_payment
+        # dispatcher case, same as Deal's crm_update_deal case).
+        table = _commercial_draft_tables[entity_type]
+        try:
+            raw = get_record_fields(table, record_id)
+        except Exception as exc:
+            logger.warning(
+                "[BusinessDraft/%s] get_record_fields failed record_id=%s: %s",
+                entity_type, _sanitize_id(str(record_id)), exc,
+            )
+            raw = None
+        if not raw:
+            return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+                tool_name, "❌ לא נמצאה רשומה עם מזהה הרשומה שסופק.",
+            ))
+        original_fields = fields_from_airtable_record(entity_type, raw)
 
-    # 5. UPDATE empty-value handling: same fail-closed boundary as Deal's
-    # seam -- an explicit clear on a mapped field has no canonical
-    # BusinessDraft representation yet.
-    cleared_fields = sorted(
-        name for name, value in mapped.items() if value in _DEAL_EMPTY_VALUES
-    )
-    if cleared_fields:
-        return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
-            tool_name,
-            "❌ ניקוי מפורש (ערך ריק) של שדה עדיין לא נתמך במסלול הזה: "
-            + ", ".join(cleared_fields),
-        ))
+        # 5. UPDATE empty-value handling: same fail-closed boundary as
+        # Deal's seam -- an explicit clear on a mapped field has no
+        # canonical BusinessDraft representation yet.
+        cleared_fields = sorted(
+            name for name, value in mapped.items() if value in _DEAL_EMPTY_VALUES
+        )
+        if cleared_fields:
+            return _DealDraftOutcome(blocked=True, response=_deal_blocked_response(
+                tool_name,
+                "❌ ניקוי מפורש (ערך ריק) של שדה עדיין לא נתמך במסלול הזה: "
+                + ", ".join(cleared_fields),
+            ))
+    else:
+        # CREATE: empty optional values are simply omitted -- there is no
+        # existing value to "clear" (same as Deal's CREATE branch).
+        mapped = {k: v for k, v in mapped.items() if v not in _DEAL_EMPTY_VALUES}
 
     # 6. Build entirely in memory first -- .set_field() reuses
     # CommercialEntityAdapter/FieldContract.validate_value(), never a second
@@ -2355,9 +2374,14 @@ def _run_commercial_draft(entity_type: str, tool_name: str, tool_inputs: dict, i
     return _DealDraftOutcome(blocked=False, tool_inputs=final_tool_inputs, draft_ctx=draft_ctx)
 
 
-_COMMERCIAL_DRAFT_TOOLS = ("crm_update_payment_term", "crm_update_payment")
+_COMMERCIAL_DRAFT_TOOLS = (
+    "crm_create_payment_term", "crm_update_payment_term",
+    "crm_create_charge_payment", "crm_update_payment",
+)
 _COMMERCIAL_DRAFT_ENTITY_FOR_TOOL = {
+    "crm_create_payment_term": "payment_term",
     "crm_update_payment_term": "payment_term",
+    "crm_create_charge_payment": "payment",
     "crm_update_payment": "payment",
 }
 

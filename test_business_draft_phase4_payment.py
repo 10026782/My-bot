@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""BUSINESSDRAFT PHASE 4 — Payment Term / Payment UPDATE.
+"""BUSINESSDRAFT PHASE 4A — Payment Term CREATE+UPDATE / Payment CREATE+UPDATE.
 
 Standalone assert-based script (repo convention:
 `python3 test_business_draft_phase4_payment.py`), structured after
 test_business_draft_deal_golden_path.py's Phase 3 precedent.
 
-Scope: `crm_update_payment_term` and `crm_update_payment` only.
-`crm_create_payment_term` and `crm_create_payment` are NOT wired to
-BusinessDraft in Phase 4 -- see core/business_draft.py's `_CREATE_FIELD_MAP`
-comment and app.py's `_run_commercial_draft` docstring for the two
-independent, pre-existing blockers this file's routing section proves are
-classified, not silently missing.
+Scope: `crm_create_payment_term`/`crm_update_payment_term` and
+`crm_create_charge_payment`/`crm_update_payment`. `crm_create_payment` (the
+legacy, flat Payment writer) is deliberately NEVER wired to BusinessDraft --
+see core/business_draft.py's `_CREATE_FIELD_MAP` comment and
+app.py's `_run_commercial_draft` docstring; the [ROUTING/REACHABILITY]
+section below proves that absence, not incidentally.
 """
 
 from __future__ import annotations
@@ -116,24 +116,39 @@ print("\n[ROUTING/REACHABILITY] classification of all 4 canonical tools is expli
 # ══════════════════════════════════════════════════
 
 chk(
+    "crm_create_payment_term is wired into the BusinessDraft seam",
+    app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL.get("crm_create_payment_term") == "payment_term"
+    and "crm_create_payment_term" in app._COMMERCIAL_DRAFT_CREATE_TOOLS
+    and "payment_term" in _CREATE_FIELD_MAP,
+)
+chk(
     "crm_update_payment_term is wired into the BusinessDraft seam",
     app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL.get("crm_update_payment_term") == "payment_term",
+)
+chk(
+    "crm_create_charge_payment (the V2 Golden Writer, MUTATION_TOOLS['payment']'s existing "
+    "canonical CREATE target) is wired into the BusinessDraft seam as entity 'payment'",
+    app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL.get("crm_create_charge_payment") == "payment"
+    and "crm_create_charge_payment" in app._COMMERCIAL_DRAFT_CREATE_TOOLS
+    and "payment" in _CREATE_FIELD_MAP,
 )
 chk(
     "crm_update_payment is wired into the BusinessDraft seam",
     app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL.get("crm_update_payment") == "payment",
 )
 chk(
-    "crm_create_payment_term is explicitly NOT wired (classified blocker: dead required "
-    "direction/currency fields would always fail closed) -- absence is proven, not incidental",
-    "crm_create_payment_term" not in app._COMMERCIAL_DRAFT_TOOLS
-    and "crm_create_payment_term" not in _CREATE_FIELD_MAP,
-)
-chk(
-    "crm_create_payment is explicitly NOT wired (classified blocker: entity_type 'payment' "
-    "CREATE is already canonically bound to crm_create_charge_payment)",
+    "crm_create_payment (the LEGACY, flat Payment writer) is explicitly NOT wired -- it is a "
+    "separately-classified legacy/compatibility surface, never the BusinessDraft 'payment' CREATE "
+    "binding -- absence is proven, not incidental",
     "crm_create_payment" not in app._COMMERCIAL_DRAFT_TOOLS
-    and "payment" not in _CREATE_FIELD_MAP,
+    and "crm_create_payment" not in app._COMMERCIAL_DRAFT_ENTITY_FOR_TOOL
+    and "crm_create_payment" not in app._COMMERCIAL_DRAFT_CREATE_TOOLS,
+)
+from commercial_completion_routing import MUTATION_TOOLS as _MUTATION_TOOLS  # noqa: E402
+chk(
+    "MUTATION_TOOLS['payment'] is crm_create_charge_payment, never the legacy crm_create_payment "
+    "(the completion router's own canonical CREATE binding -- unchanged by Phase 4A)",
+    _MUTATION_TOOLS.get("payment") == "crm_create_charge_payment",
 )
 
 _schema_names = {s["name"] for s in TOOL_SCHEMAS}
@@ -143,6 +158,170 @@ for _tool in ("crm_create_payment_term", "crm_create_payment", "crm_update_payme
     chk(f"{_tool} is model_exposed (agent-reachable, same posture as crm_create_deal)", bool(_meta and _meta.model_exposed))
     chk(f"{_tool} is _MANAGEMENT-scoped (role posture unchanged by Phase 4)", bool(_meta and _meta.roles_allowed == {"owner", "partner", "manager"}))
     chk(f"{_tool} has a live TOOL_SCHEMAS entry (reachable by the agent's tool_use loop)", _tool in _schema_names)
+
+_charge_payment_meta = _REGISTRY.get("crm_create_charge_payment")
+chk("crm_create_charge_payment is registered in tool_registry", _charge_payment_meta is not None)
+chk(
+    "crm_create_charge_payment is model_exposed=False (internal-only -- reachable solely via "
+    "CommercialCompletionRouter's own finalize step, never a direct Agent tool_use call)",
+    bool(_charge_payment_meta and _charge_payment_meta.model_exposed is False),
+)
+chk(
+    "crm_create_charge_payment is _MANAGEMENT-scoped",
+    bool(_charge_payment_meta and _charge_payment_meta.roles_allowed == {"owner", "partner", "manager"}),
+)
+chk(
+    "crm_create_charge_payment has no TOOL_SCHEMAS entry (never offered to the Agent tool_use loop)",
+    "crm_create_charge_payment" not in _schema_names,
+)
+
+
+# ══════════════════════════════════════════════════
+print("\n[PAYMENT TERM CREATE] direction/currency required+persisted, drift-fix parity, conditional requirements intact")
+# ══════════════════════════════════════════════════
+
+sender = "term-create-valid-full"
+identity = _owner_identity(sender)
+result_tc1 = _run(
+    "crm_create_payment_term", "payment_term",
+    {
+        "deal_id": _rid("DEALTC", 1), "name": "Full Term", "calc_type": "fixed",
+        "direction": "receivable", "currency": "ILS", "fixed_amount": 1000,
+        "trigger_type": "after_period", "trigger_delay_days": 5,
+        "cadence": "once", "vat_rule": "none",
+        "start_date": "2026-01-01", "end_date": "2026-12-31", "notes": "כל השדות",
+    },
+    identity, sender,
+)
+chk("CREATE with every mappable field supplied is not blocked", not result_tc1.blocked)
+chk("CREATE: deal_id passed through", result_tc1.tool_inputs.get("deal_id") == _rid("DEALTC", 1))
+chk("CREATE: calc_type passed through", result_tc1.tool_inputs.get("calc_type") == "fixed")
+chk("CREATE: direction required field is persisted in tool_inputs (was silently discarded pre-Phase-4A)", result_tc1.tool_inputs.get("direction") == "receivable")
+chk("CREATE: currency required field is persisted in tool_inputs (was silently discarded pre-Phase-4A)", result_tc1.tool_inputs.get("currency") == "ILS")
+chk("CREATE: trigger_delay_days is persisted (drift-fix parity with UPDATE)", result_tc1.tool_inputs.get("trigger_delay_days") == 5)
+chk("CREATE: start_date passed through", result_tc1.tool_inputs.get("start_date") == "2026-01-01")
+chk("CREATE: end_date passed through", result_tc1.tool_inputs.get("end_date") == "2026-12-31")
+chk("CREATE: canonical tool_name is crm_create_payment_term", not result_tc1.blocked)
+_clear(sender, "payment_term")
+
+sender = "term-create-missing-direction"
+identity = _owner_identity(sender)
+result_tc2 = _run(
+    "crm_create_payment_term", "payment_term",
+    {"deal_id": _rid("DEALTC", 2), "calc_type": "fixed", "currency": "ILS", "fixed_amount": 1000},
+    identity, sender,
+)
+chk("CREATE missing direction fails closed before proposal (never reaches CONFIRMED)", result_tc2.blocked)
+_clear(sender, "payment_term")
+
+sender = "term-create-missing-currency"
+identity = _owner_identity(sender)
+result_tc3 = _run(
+    "crm_create_payment_term", "payment_term",
+    {"deal_id": _rid("DEALTC", 3), "calc_type": "fixed", "direction": "receivable", "fixed_amount": 1000},
+    identity, sender,
+)
+chk("CREATE missing currency fails closed before proposal (never reaches CONFIRMED)", result_tc3.blocked)
+_clear(sender, "payment_term")
+
+sender = "term-create-conditional-requirements-intact"
+identity = _owner_identity(sender)
+result_tc4 = _run(
+    "crm_create_payment_term", "payment_term",
+    {"deal_id": _rid("DEALTC", 4), "calc_type": "percentage", "direction": "receivable", "currency": "ILS"},
+    identity, sender,
+)  # missing rate_pct/calc_basis, both CONDITIONAL on calc_type=percentage
+chk(
+    "CREATE: calc_type=percentage's CONDITIONAL rate_pct/calc_basis requirement remains intact "
+    "(not weakened by adding direction/currency)",
+    result_tc4.blocked,
+)
+_clear(sender, "payment_term")
+
+sender = "term-create-percentage-complete"
+identity = _owner_identity(sender)
+result_tc5 = _run(
+    "crm_create_payment_term", "payment_term",
+    {
+        "deal_id": _rid("DEALTC", 5), "calc_type": "percentage", "direction": "payable",
+        "currency": "USD", "rate_pct": 10, "calc_basis": "deal_amount",
+    },
+    identity, sender,
+)
+chk("CREATE: calc_type=percentage with rate_pct+calc_basis+direction+currency confirms", not result_tc5.blocked)
+_clear(sender, "payment_term")
+
+sender = "term-create-invalid-direction-value"
+identity = _owner_identity(sender)
+result_tc6 = _run(
+    "crm_create_payment_term", "payment_term",
+    {"deal_id": _rid("DEALTC", 6), "calc_type": "fixed", "direction": "not_a_real_direction",
+     "currency": "ILS", "fixed_amount": 1000},
+    identity, sender,
+)
+chk(
+    "CREATE with an invalid direction value fails closed via the shared FieldContract validator "
+    "(no second validator)",
+    result_tc6.blocked,
+)
+_clear(sender, "payment_term")
+
+sender = "term-create-unrecognized-field"
+identity = _owner_identity(sender)
+result_tc7 = _run(
+    "crm_create_payment_term", "payment_term",
+    {
+        "deal_id": _rid("DEALTC", 7), "calc_type": "fixed", "direction": "receivable",
+        "currency": "ILS", "fixed_amount": 1000, "minimum_amount": 100,
+    },
+    identity, sender,
+)
+chk(
+    "CREATE: a real ENTITY_CONTRACTS field with no create_payment_term() kwarg (minimum_amount) "
+    "fails closed rather than being silently discarded",
+    result_tc7.blocked,
+)
+_clear(sender, "payment_term")
+
+sender = "term-create-retry-stability"
+identity = _owner_identity(sender)
+_create_payload = {
+    "deal_id": _rid("DEALTC", 8), "calc_type": "fixed", "direction": "receivable",
+    "currency": "ILS", "fixed_amount": 2500,
+}
+result_tc8a = _run("crm_create_payment_term", "payment_term", _create_payload, identity, sender)
+_clear(sender, "payment_term")
+result_tc8b = _run("crm_create_payment_term", "payment_term", _create_payload, identity, sender)
+_clear(sender, "payment_term")
+chk(
+    "retrying an identical confirmed CREATE produces byte-identical tool_inputs (fingerprint stability)",
+    not result_tc8a.blocked and not result_tc8b.blocked and result_tc8a.tool_inputs == result_tc8b.tool_inputs,
+)
+
+sender = "term-create-unauthorized"
+identity = _lead_identity(sender)
+result_tc9 = _run(
+    "crm_create_payment_term", "payment_term",
+    {"deal_id": _rid("DEALTC", 9), "calc_type": "fixed", "direction": "receivable", "currency": "ILS", "fixed_amount": 1000},
+    identity, sender,
+)
+chk("CREATE from an unauthorized role fails closed", result_tc9.blocked)
+_clear(sender, "payment_term")
+
+sender = "term-create-e2e-sessions-cas"
+identity = _owner_identity(sender)
+_clear(sender, "payment_term")
+result_tc10 = _run(
+    "crm_create_payment_term", "payment_term",
+    {"deal_id": _rid("DEALTC", 10), "calc_type": "fixed", "direction": "receivable", "currency": "ILS", "fixed_amount": 999},
+    identity, sender,
+)
+chk("CREATE: Sessions/CAS lifecycle exercised -- draft_ctx returned for a real persisted+confirmed draft", not result_tc10.blocked and result_tc10.draft_ctx is not None)
+stored_tc10 = lead_sessions.load_business_draft(
+    sender, "payment_term", tenant_id=identity.tenant_id, actor_user_id=identity.memory_key, source_channel=_CHANNEL, channel=_CHANNEL,
+)
+chk("CREATE: the CONFIRMED draft is actually retrievable from real Sessions persistence", stored_tc10 is not None and stored_tc10.lifecycle_state.value == "CONFIRMED")
+_clear(sender, "payment_term")
 
 
 # ══════════════════════════════════════════════════
@@ -246,6 +425,89 @@ chk(
     result_u9.blocked,
 )
 _clear(sender, "payment_term")
+
+
+# ══════════════════════════════════════════════════
+print("\n[PAYMENT CREATE] confirms into crm_create_charge_payment (the V2 Golden Writer), never the legacy writer")
+# ══════════════════════════════════════════════════
+
+_PAYMENT_CREATE_FULL = {
+    "charge_id": _rid("CHG", 1), "deal_id": _rid("DEALPC", 1), "direction": "receivable",
+    "amount": 500, "currency": "ILS", "paid_at": "2026-01-01",
+}
+
+sender = "payment-create-valid-full"
+identity = _owner_identity(sender)
+result_pc1 = _run("crm_create_charge_payment", "payment", dict(_PAYMENT_CREATE_FULL), identity, sender)
+chk("Payment CREATE with every required V2 field confirms", not result_pc1.blocked)
+chk("Payment CREATE: charge_id passed through", result_pc1.tool_inputs.get("charge_id") == _rid("CHG", 1))
+chk("Payment CREATE: deal_id passed through", result_pc1.tool_inputs.get("deal_id") == _rid("DEALPC", 1))
+chk("Payment CREATE: amount passed through", result_pc1.tool_inputs.get("amount") == 500)
+chk("Payment CREATE: status auto-resolves via DEFAULT (never asked, manual_entry_allowed=False)", result_pc1.tool_inputs.get("status") == "received")
+chk("Payment CREATE: document_requirement auto-resolves via DEFAULT", "document_requirement" in result_pc1.tool_inputs)
+chk("Payment CREATE: document_status auto-resolves via DERIVED (manual_entry_allowed=False)", "document_status" in result_pc1.tool_inputs)
+_clear(sender, "payment")
+
+for _missing_field in ("charge_id", "deal_id", "amount", "direction", "currency", "paid_at"):
+    sender = f"payment-create-missing-{_missing_field}"
+    identity = _owner_identity(sender)
+    _payload = {k: v for k, v in _PAYMENT_CREATE_FULL.items() if k != _missing_field}
+    result_missing = _run("crm_create_charge_payment", "payment", _payload, identity, sender)
+    chk(
+        f"Payment CREATE: required V2 field '{_missing_field}' stays required "
+        "(missing it fails closed, never reaches CONFIRMED)",
+        result_missing.blocked,
+    )
+    _clear(sender, "payment")
+
+sender = "payment-create-with-optionals"
+identity = _owner_identity(sender)
+result_pc2 = _run(
+    "crm_create_charge_payment", "payment",
+    {**_PAYMENT_CREATE_FULL, "payment_term_id": _rid("TERMPC", 1), "reference": "REF-PC", "method": "wire", "notes": "תשלום ראשון"},
+    identity, sender,
+)
+chk("Payment CREATE: optional payment_term_id/reference/method/notes all pass through", not result_pc2.blocked)
+chk("Payment CREATE: payment_term_id mapped to payment_term_id kwarg", result_pc2.tool_inputs.get("payment_term_id") == _rid("TERMPC", 1))
+chk("Payment CREATE: reference passed through", result_pc2.tool_inputs.get("reference") == "REF-PC")
+_clear(sender, "payment")
+
+sender = "payment-create-unrecognized-field"
+identity = _owner_identity(sender)
+result_pc3 = _run(
+    "crm_create_charge_payment", "payment",
+    {**_PAYMENT_CREATE_FULL, "origin_lead_id": _rid("LEADPC", 1)},
+    identity, sender,
+)
+chk(
+    "Payment CREATE: a field with no ENTITY_CONTRACTS['payment']/_CREATE_FIELD_MAP entry "
+    "(origin_lead_id -- Payment has no Lead attribution field) fails closed, never silently dropped",
+    result_pc3.blocked,
+)
+_clear(sender, "payment")
+
+sender = "payment-create-unauthorized"
+identity = _lead_identity(sender)
+result_pc4 = _run("crm_create_charge_payment", "payment", dict(_PAYMENT_CREATE_FULL), identity, sender)
+chk("Payment CREATE from an unauthorized role fails closed", result_pc4.blocked)
+_clear(sender, "payment")
+
+sender = "payment-create-not-legacy-writer"
+identity = _owner_identity(sender)
+_clear(sender, "payment")
+result_pc5 = _run("crm_create_charge_payment", "payment", dict(_PAYMENT_CREATE_FULL), identity, sender)
+chk(
+    "Payment CREATE confirms with tool_name crm_create_charge_payment, never the legacy crm_create_payment",
+    not result_pc5.blocked,
+)
+_stored_pc5 = lead_sessions.load_business_draft(
+    sender, "payment", tenant_id=identity.tenant_id, actor_user_id=identity.memory_key, source_channel=_CHANNEL, channel=_CHANNEL,
+)
+chk(
+    "the CONFIRMED draft's own snapshot.tool_name is exactly crm_create_charge_payment",
+    _stored_pc5 is not None and _stored_pc5.snapshot is not None and _stored_pc5.snapshot.tool_name == "crm_create_charge_payment",
+)
+_clear(sender, "payment")
 
 
 # ══════════════════════════════════════════════════
@@ -416,6 +678,81 @@ chk(
 )
 _clear(sender, "payment_term")
 
+sender = "term-e2e-create-fingerprint"
+identity = _owner_identity(sender)
+_clear(sender, "payment_term")
+
+_captured_create = {}
+
+
+def _spy_propose_create(*a, **kw):
+    result = _real_propose(*a, **kw)
+    _captured_create["tool_inputs"] = kw.get("tool_inputs")
+    _captured_create["fingerprint_payload"] = kw.get("fingerprint_payload")
+    _captured_create["contract_id"] = result.contract_id
+    return result
+
+
+with patch.object(action_gateway, "propose_action", side_effect=_spy_propose_create), \
+     patch.object(app, "resolve_identity", return_value=identity):
+    outcome_create = app._queue_approval_detailed(
+        "crm_create_payment_term",
+        {"deal_id": _rid("DEALE2E", 1), "calc_type": "fixed", "direction": "receivable", "currency": "ILS", "fixed_amount": 8000},
+        sender, _CHANNEL,
+    )
+
+chk("end-to-end CREATE through _queue_approval_detailed succeeds", outcome_create.get("ok") is True)
+chk(
+    "CREATE: fingerprint_payload is forced to None so ActionGateway fingerprints the actual canonical tool_inputs",
+    _captured_create.get("fingerprint_payload") is None,
+)
+contract_create = action_gateway._ledger.find_by_id(_captured_create["contract_id"]) if _captured_create.get("contract_id") else None
+chk(
+    "CREATE: stored business_action_fingerprint matches one recomputed from the actual dispatched tool_inputs",
+    contract_create is not None and contract_create.business_action_fingerprint == action_gateway.compute_business_fingerprint(
+        contract_create.tenant_id, contract_create.canonical_user_id, contract_create.tool_name, contract_create.normalized_payload,
+    ),
+)
+chk(
+    "CREATE: the CONFIRMED draft was actually cleaned up after a successful, complete handoff",
+    lead_sessions.load_business_draft(
+        sender, "payment_term", tenant_id=identity.tenant_id, actor_user_id=identity.memory_key, source_channel=_CHANNEL, channel=_CHANNEL,
+    ) is None,
+)
+_clear(sender, "payment_term")
+
+sender = "payment-e2e-create-fingerprint"
+identity = _owner_identity(sender)
+_clear(sender, "payment")
+
+_captured_pay_create = {}
+
+
+def _spy_propose_pay_create(*a, **kw):
+    result = _real_propose(*a, **kw)
+    _captured_pay_create["tool_inputs"] = kw.get("tool_inputs")
+    _captured_pay_create["fingerprint_payload"] = kw.get("fingerprint_payload")
+    _captured_pay_create["contract_id"] = result.contract_id
+    return result
+
+
+with patch.object(action_gateway, "propose_action", side_effect=_spy_propose_pay_create), \
+     patch.object(app, "resolve_identity", return_value=identity):
+    outcome_pay_create = app._queue_approval_detailed(
+        "crm_create_charge_payment", dict(_PAYMENT_CREATE_FULL), sender, _CHANNEL,
+    )
+
+chk("end-to-end Payment CREATE through _queue_approval_detailed succeeds", outcome_pay_create.get("ok") is True)
+contract_pay_create = (
+    action_gateway._ledger.find_by_id(_captured_pay_create["contract_id"]) if _captured_pay_create.get("contract_id") else None
+)
+chk(
+    "end-to-end Payment CREATE: the queued ActionContract's tool_name is crm_create_charge_payment, "
+    "never the legacy crm_create_payment",
+    contract_pay_create is not None and contract_pay_create.tool_name == "crm_create_charge_payment",
+)
+_clear(sender, "payment")
+
 
 # ══════════════════════════════════════════════════
 print("\n[GENERIC airtable_update BYPASS] classified, pre-existing gap -- same as Deal, not newly introduced")
@@ -444,8 +781,48 @@ chk(
     mock_update_term.call_count == 1,
 )
 
+from airtable_schema import PaymentTermFields as _PTF  # noqa: E402
+
+with patch("commercial_crm.create_payment_term", return_value={"ok": True, "tool": "crm_create_payment_term", "external_id": "recTERM0000010", "evidence": {}, "user_message": "ok"}) as mock_create_term, \
+     patch.object(_dispatcher_module, "airtable_add") as mock_generic_add, \
+     patch.object(_dispatcher_module, "_validate_execution_proof", return_value=None), \
+     patch.object(_dispatcher_module._ff, "is_enabled", return_value=False):
+    from tools.dispatcher import dispatch_tool as _dispatch_tool2
+    _dispatch_tool2(
+        "airtable_add",
+        {
+            "table": "Payment Terms",
+            "fields": {
+                # NOTE: the generic-redirect field map (tools/dispatcher.py's
+                # _PAYMENT_TERM_FIELD_MAP) keys off the raw Airtable field
+                # names (PaymentTermFields.*), a DIFFERENT namespace from
+                # ENTITY_CONTRACTS' airtable_field (e.g. "Calculation Type"
+                # here vs. the completion contract's "Calculation Type
+                # Code") -- _TERM_AIRTABLE_FIELD is deliberately not reused.
+                _PTF.DEAL: ["recDEAL00000002"],
+                _PTF.CALC_TYPE: "fixed",
+                _PTF.DIRECTION: "receivable",
+                _PTF.CURRENCY: "ILS",
+                _PTF.FIXED_AMOUNT: 8000,
+            },
+        },
+        identity=_owner_identity("term-legacy-create-redirect"),
+        trusted_source="agent",
+        execution_context={"contract_id": "phase4a-legacy-create-redirect-regression"},
+    )
+chk(
+    "GENERIC airtable_add CREATE-side redirect for 'Payment Terms' still works with the new "
+    "required direction/currency writer kwargs (compatibility preserved, not broken by Phase 4A) "
+    "-- this CREATE-side bypass is separate from the airtable_update UPDATE-side bypass above, "
+    "and was already pre-existing/accepted before Phase 4A",
+    mock_create_term.call_count == 1
+    and mock_generic_add.call_count == 0
+    and mock_create_term.call_args.kwargs.get("direction") == "receivable"
+    and mock_create_term.call_args.kwargs.get("currency") == "ILS",
+)
+
 
 print(f"\n{'=' * 60}")
-print(f"BusinessDraft Phase 4 (Payment Term / Payment UPDATE) tests: {passed} passed, {failed} failed")
+print(f"BusinessDraft Phase 4A (Payment Term CREATE+UPDATE / Payment CREATE+UPDATE) tests: {passed} passed, {failed} failed")
 import sys  # noqa: E402
 sys.exit(0 if failed == 0 else 1)
