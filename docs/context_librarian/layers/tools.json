@@ -251,7 +251,8 @@
         "core/anti_hallucination.py",
         "core/dispatcher_outcome.py",
         "core/last_tool_result_shadow.py",
-        "core/commercial_generic_canonicalization.py"
+        "core/commercial_generic_canonicalization.py",
+        "core/deterministic_commercial_update.py"
       ],
       "test_paths": [
         "test_tool_registry_invariants.py",
@@ -261,7 +262,8 @@
         "test_a32_enforcement.py",
         "test_action_gateway.py",
         "test_last_tool_result_shadow.py",
-        "test_business_draft_phase4b_generic_bypass.py"
+        "test_business_draft_phase4b_generic_bypass.py",
+        "test_business_draft_phase4c_deterministic_update.py"
       ],
       "canonical_docs": [
         {

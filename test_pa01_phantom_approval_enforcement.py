@@ -1693,8 +1693,12 @@ chk("memory.add('assistant', ...) receives the replaced Phantom fallback, never 
 
 from core.router.risk_router import _NORMAL_INTENTS  # noqa: E402
 
-chk("_CONTRACT_REQUIRED_INTENT_TO_TOOL has the 16 approved entries",
-    len(_CONTRACT_REQUIRED_INTENT_TO_TOOL) == 16)
+# Phase 4C added 3 entries (update_deal_field/update_payment_term_field/
+# update_payment_field -> crm_update_deal/crm_update_payment_term/
+# crm_update_payment) for the new deterministic commercial UPDATE routing —
+# 16 -> 19 approved entries.
+chk("_CONTRACT_REQUIRED_INTENT_TO_TOOL has the 19 approved entries",
+    len(_CONTRACT_REQUIRED_INTENT_TO_TOOL) == 19)
 chk("_CONTRACT_REQUIRED_INTENT_TO_TOOL is a subset of _NORMAL_INTENTS",
     set(_CONTRACT_REQUIRED_INTENT_TO_TOOL) <= _NORMAL_INTENTS)
 

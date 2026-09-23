@@ -1065,6 +1065,58 @@ class PersistentSessionStore:
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
+    def set_last_commercial_create(self, sender: str, entity: str, record_id: str, channel: str = "") -> None:
+        """Phase 4C — stamp "the record we just created" for `entity`
+        (deal/payment_term/payment) in this chat's session, so a follow-up
+        deterministic UPDATE referencing "שיצרנו עכשיו"/"האחרון" can resolve
+        it without a name search or Agent involvement. Own top-level key
+        (`last_commercial_create`), keyed by entity, deliberately separate
+        from `deal_enrichment_offer`/`commercial_completion` — same
+        separation reasoning as set_deal_enrichment_offer()'s own docstring.
+        Never raises — a failure to persist only means a later "שיצרנו עכשיו"
+        reference falls to CLARIFY instead of resolving, never that the
+        CREATE write itself is affected (this always runs strictly after
+        the create already succeeded)."""
+        try:
+            session = self.get_or_create(sender, channel=channel)
+            markers = session.get("last_commercial_create")
+            if not isinstance(markers, dict):
+                markers = {}
+            markers[entity] = {"record_id": record_id, "created_at": _now_iso()}
+            session["last_commercial_create"] = markers
+            session["updated_at"] = _now_iso()
+            self._sync_to_db(sender, session)
+        except Exception:
+            logger.warning(
+                "[SessionStore] failed to stamp last_commercial_create entity=%s record=%s",
+                entity, record_id, exc_info=True,
+            )
+
+    def get_last_commercial_create(self, sender: str, entity: str, channel: str = "") -> Optional[dict]:
+        """Return {"record_id": ..., "age_seconds": ...} for the most
+        recently created `entity` record in this chat's session, or None.
+        `age_seconds` is computed here (not stored) so a stale marker from a
+        much earlier session is never mistaken for "just now" purely because
+        it's still the most recent entry on record."""
+        session = self.get(sender, channel=channel)
+        if not session:
+            return None
+        markers = session.get("last_commercial_create")
+        if not isinstance(markers, dict):
+            return None
+        marker = markers.get(entity)
+        if not isinstance(marker, dict) or not marker.get("record_id"):
+            return None
+        age_seconds = None
+        created_at = marker.get("created_at")
+        if isinstance(created_at, str) and created_at:
+            try:
+                created_dt = datetime.fromisoformat(created_at)
+                age_seconds = (datetime.now(tz=timezone.utc) - created_dt).total_seconds()
+            except ValueError:
+                age_seconds = None
+        return {"record_id": marker["record_id"], "age_seconds": age_seconds}
+
     def set_lead_deal_link(self, sender: str, state: dict, channel: str = "") -> None:
         """Persist /תקדםליד's guided-flow state (LEAD-DEAL-ASSOCIATION Model
         B) — {"step": "awaiting_lead"|"awaiting_deal", ...}. Own top-level

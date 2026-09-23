@@ -645,6 +645,36 @@ def route_request(
         # it needs no corroboration from the generic keyword classifier.
         confidence = 1.0
 
+    # Phase 4C — Deterministic Commercial UPDATE Routing. Same deterministic
+    # override shape as CREATE_DEAL/S2C above: a structurally-recognized
+    # "עדכן/שנה <entity>[ <reference>] את <field> ל-<value>" (or the
+    # field-first live-incident variant) short-circuits straight to
+    # Handler.TOOL, never leaving tool selection OR record selection to the
+    # Agent for this class of message. Gated on `matched`, not `certain` —
+    # `matched` is True for BOTH a full strict-grammar recognition (possibly
+    # with an unresolved field or missing record reference) AND the narrow
+    # commercial-update GUARD firing on a clear update-verb + protected-
+    # entity message the strict grammar couldn't fully parse. Either way,
+    # Handler.TOOL is assigned and app.py's dispatch block resolves it into
+    # a deterministic UPDATE or a deterministic CLARIFY — REQUIRED INVARIANT:
+    # a recognizable protected commercial UPDATE (Deal/Payment Term/Payment)
+    # must never reach Handler.AGENT merely because parsing or record
+    # resolution was incomplete (mirrors CREATE_DEAL's own domain_resolved-
+    # not-certain gating above, taken one step further).
+    from core.deterministic_commercial_update import parse_deterministic_commercial_update
+    _commercial_update_parse = parse_deterministic_commercial_update(text)
+    if (
+        _commercial_update_parse.matched
+        and identity.role not in ("lead", "guest", "readonly")
+    ):
+        intent = {
+            "deal": Intent.UPDATE_DEAL_FIELD,
+            "payment_term": Intent.UPDATE_PAYMENT_TERM_FIELD,
+            "payment": Intent.UPDATE_PAYMENT_FIELD,
+        }[_commercial_update_parse.entity]
+        risk, handler, needs_approval = Risk.NEEDS_APPROVAL, Handler.TOOL, True
+        confidence = 1.0
+
     # 4b. Capture Policy (Stage 3 / C89 integration) — observability only.
     # Gate is identity.is_internal alone, with NO intent filter — this must
     # match app.py's real invocation condition for handle_lead_candidate()

@@ -67,6 +67,14 @@ class Intent:
     CREATE_CHARGE_FROM_TERM = "create_charge_from_term"
     CREATE_CHARGE_PAYMENT = "create_charge_payment"
 
+    # Phase 4C — Deterministic Commercial UPDATE Routing. Each intent below
+    # is assigned only when core.deterministic_commercial_update's bounded
+    # grammar structurally recognizes the message (see router.py's override
+    # block) — never by intent_router.py's generic keyword table alone.
+    UPDATE_DEAL_FIELD = "update_deal_field"
+    UPDATE_PAYMENT_TERM_FIELD = "update_payment_term_field"
+    UPDATE_PAYMENT_FIELD = "update_payment_field"
+
     # Tier 6 — Knowledge
     SEARCH_KNOWLEDGE  = "search_knowledge"
     READ_DOCUMENT     = "read_document"
@@ -116,6 +124,7 @@ class Intent:
         CREATE_DEAL,
         CREATE_PAYMENT_TERM, CREATE_ORGANIZATION, CREATE_CHARGE,
         CREATE_CHARGE_FROM_TERM, CREATE_CHARGE_PAYMENT,
+        UPDATE_DEAL_FIELD, UPDATE_PAYMENT_TERM_FIELD, UPDATE_PAYMENT_FIELD,
         SEARCH_KNOWLEDGE, READ_DOCUMENT, STORE_MEMORY, RETRIEVE_MEMORY,
         DRAFT_EMAIL, SEND_EMAIL, DRAFT_MESSAGE, SEND_MESSAGE,
         GENERATE_REPORT, FINANCIAL_REPORT, SALES_REPORT,

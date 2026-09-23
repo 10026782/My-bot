@@ -45,6 +45,7 @@ _NORMAL_INTENTS = {
     Intent.QUALIFY_LEAD, Intent.UPDATE_DEAL_STAGE, Intent.CREATE_DEAL,
     Intent.CREATE_PAYMENT_TERM, Intent.CREATE_ORGANIZATION,
     Intent.CREATE_CHARGE, Intent.CREATE_CHARGE_FROM_TERM, Intent.CREATE_CHARGE_PAYMENT,
+    Intent.UPDATE_DEAL_FIELD, Intent.UPDATE_PAYMENT_TERM_FIELD, Intent.UPDATE_PAYMENT_FIELD,
     Intent.DRAFT_EMAIL, Intent.DRAFT_MESSAGE,
     Intent.STORE_MEMORY,
 }
@@ -81,6 +82,10 @@ _CONTRACT_REQUIRED_INTENT_TO_TOOL: dict[str, str] = {
     Intent.CREATE_CHARGE: "crm_create_charge",
     Intent.CREATE_CHARGE_FROM_TERM: "crm_create_charge_from_term",
     Intent.CREATE_CHARGE_PAYMENT: "crm_create_charge_payment",
+    # Phase 4C — Deterministic Commercial UPDATE Routing.
+    Intent.UPDATE_DEAL_FIELD: "crm_update_deal",
+    Intent.UPDATE_PAYMENT_TERM_FIELD: "crm_update_payment_term",
+    Intent.UPDATE_PAYMENT_FIELD: "crm_update_payment",
 }
 assert set(_CONTRACT_REQUIRED_INTENT_TO_TOOL) <= _NORMAL_INTENTS
 _NON_CONTRACT_NORMAL_INTENTS = _NORMAL_INTENTS - set(_CONTRACT_REQUIRED_INTENT_TO_TOOL)
