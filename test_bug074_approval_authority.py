@@ -16,8 +16,12 @@
 # BUG-076 (later, separate policy decision) carves out a narrow self-confirm
 # exception for SAFE lead-capture writes specifically — see
 # test_bug076_lead_confirmation_policy.py. The scenarios here intentionally
-# use a NON-lead-capture tool (table="Deals") so they keep testing the
-# general/strict rule, unaffected by that carve-out.
+# use a NON-lead-capture tool (table="Interaction Log") so they keep testing
+# the general/strict rule, unaffected by that carve-out. (Formerly
+# table="Deals"; BusinessDraft Phase 4B now canonicalizes a generic Deals
+# write into crm_create_deal before any contract exists — and fails closed on
+# the non-Deals "Name" column — so a non-commercial table keeps this test on
+# its original generic-mutation subject.)
 
 import sys
 
@@ -70,11 +74,11 @@ employee = _identity(Role.EMPLOYEE, "emp1")
 
 r = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=employee.memory_key,
-    tool_name="airtable_add", tool_inputs={"table": "Deals", "fields": {"Name": "Test"}},
+    tool_name="airtable_add", tool_inputs={"table": "Interaction Log", "fields": {"Name": "Test"}},
     origin_channel="telegram", origin_chat_id=employee.external_id,
     requires_approval=True, identity=employee,
 )
-chk("propose_action ok for employee-requested airtable_add (Deals, not lead-capture)", r.ok)
+chk("propose_action ok for employee-requested airtable_add (Interaction Log, not lead-capture)", r.ok)
 
 reply = gw.route_confirmation_word(employee.memory_key, approver_role=employee.role)
 chk("BUG-074: employee self-confirm is denied", "⛔" in reply and "בעלים" in reply)

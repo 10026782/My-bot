@@ -1892,8 +1892,13 @@ def _queue_approval_detailed(tool_name: str, tool_inputs: dict,
             _canonical_tool_name = _resolve_for_canon_error(tool_name, tool_inputs, user_text)
         except Exception:
             _canonical_tool_name = tool_name
+        # BusinessDraft Phase 4B: a generic call on Deals/Payment Terms/
+        # Payments that can't be represented as its dedicated commercial tool
+        # (incl. a legacy-shaped Payment CREATE) carries its own specific,
+        # user-safe reason -- same verified "no contract exists" outcome.
+        _commercial_message = getattr(exc, "user_message", None)
         return {
-            "message": (
+            "message": _commercial_message or (
                 "❌ לא הצלחתי להמיר את הבקשה הזו לפעולת Airtable תקינה. "
                 "נסה לנסח מחדש את הבקשה (למשל בלי לציין Sheets), או פנה "
                 "למנהל המערכת אם זה חוזר על עצמו."
@@ -2403,6 +2408,13 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     Every other tool's behavior is byte-for-byte unchanged; `identity` is
     resolved one step earlier than before (a pure, tool-independent lookup)
     purely so the Deal hook below can use it.
+
+    BusinessDraft Phase 4B: resolve_canonical_call() below also turns a
+    generic airtable_add/airtable_update on Deals/Payment Terms/Payments into
+    its dedicated crm_* tool + primitive payload (or fails closed with
+    CommercialCanonicalizationError), so a generic commercial request enters
+    the SAME Deal / PaymentTerm / Payment seams below -- there is no separate
+    generic draft lifecycle, and the generic origin is irrelevant from here on.
     """
     from core.action_gateway import resolve_canonical_call
     tool_name, tool_inputs = resolve_canonical_call(

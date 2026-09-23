@@ -235,9 +235,9 @@ for _role in _MANAGEMENT_ROLES:
         "crm_create_payment" not in _offered,
     )
     chk(
-        f"airtable_add IS directly offered to the model for role={_role} (the indirect reachability "
-        "path for legacy crm_create_payment -- see the PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING "
-        "section below)",
+        f"airtable_add IS directly offered to the model for role={_role} (formerly the indirect "
+        "reachability path for legacy crm_create_payment -- closed for NEW proposals by Phase 4B, see "
+        "the dispatcher-fallback section below and test_business_draft_phase4b_generic_bypass.py)",
         "airtable_add" in _offered,
     )
 
@@ -896,7 +896,7 @@ _clear(sender, "payment")
 
 
 # ══════════════════════════════════════════════════
-print("\n[PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING] classified, pre-existing gap -- same as Deal, not newly introduced -- covers BOTH airtable_add (CREATE) and airtable_update (UPDATE)")
+print("\n[DISPATCHER EXECUTION FALLBACK] generic airtable_add/airtable_update redirects -- CLOSED for new proposals by Phase 4B (test_business_draft_phase4b_generic_bypass.py); kept only to execute pre-4B generic-identity contracts")
 # ══════════════════════════════════════════════════
 
 from tools import dispatcher as _dispatcher_module  # noqa: E402
@@ -913,12 +913,10 @@ with patch("commercial_crm.update_payment_term", return_value={"ok": True, "tool
         execution_context={"contract_id": "phase4-legacy-redirect-regression"},
     )
 chk(
-    "airtable_update-on-'Payment Terms' still reaches commercial_crm.update_payment_term() directly, "
-    "bypassing the Phase 4 BusinessDraft hook entirely -- this is the SAME generic-redirect gap "
-    "Phase 3 documented and accepted as Deal-only out-of-scope; it is confirmed (not silently left "
-    "unclassified) to also apply to Payment Term/Payment, and closing it is reported as "
-    "PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING (it would require touching the shared "
-    "_queue_approval_detailed_impl choke point that also fronts the runtime-verified Deal path)",
+    "DISPATCHER FALLBACK: an already-approved generic airtable_update-on-'Payment Terms' contract "
+    "(frozen generic tool identity, minted before Phase 4B) still executes into "
+    "commercial_crm.update_payment_term() -- this redirect is NOT BusinessDraft-fronted; Phase 4B "
+    "canonicalizes every NEW generic proposal before ActionContract creation instead",
     mock_update_term.call_count == 1,
 )
 
@@ -942,12 +940,9 @@ with patch("commercial_crm.create_payment", return_value={"ok": True, "tool": "c
         execution_context={"contract_id": "phase4a-legacy-payment-create-redirect-regression"},
     )
 chk(
-    "GENERIC airtable_add on 'Payments' with a legacy-shaped (Charge-less) fields dict IS indirectly "
-    "reachable to the legacy crm_create_payment() writer via _crm_create_route()'s own field-shape "
-    "disambiguation -- confirming the earlier [ROUTING/REACHABILITY] finding that crm_create_payment, "
-    "while absent from context._ROLE_TOOLS, remains reachable indirectly through airtable_add (which "
-    "IS offered) -- this is the CREATE-side half of PHASE4B_SHARED_COMMERCIAL_GENERIC_BYPASS_PENDING, "
-    "not a Phase 4A regression (this routing logic predates Phase 4A and is unmodified by it)",
+    "DISPATCHER FALLBACK: an already-approved pre-4B generic airtable_add contract on 'Payments' with "
+    "a legacy-shaped (Charge-less) fields dict still executes into crm_create_payment() via "
+    "_crm_create_route() -- a NEW such proposal now fails closed before any ActionContract (Phase 4B)",
     mock_create_payment_legacy.call_count == 1,
 )
 
@@ -983,8 +978,8 @@ with patch("commercial_crm.create_payment_term", return_value={"ok": True, "tool
 chk(
     "GENERIC airtable_add CREATE-side redirect for 'Payment Terms' still works with the new "
     "required direction/currency writer kwargs (compatibility preserved, not broken by Phase 4A) "
-    "-- this CREATE-side bypass is separate from the airtable_update UPDATE-side bypass above, "
-    "and was already pre-existing/accepted before Phase 4A",
+    "-- DISPATCHER FALLBACK for pre-4B generic-identity contracts only; new generic proposals are "
+    "canonicalized to crm_create_payment_term before ActionContract creation (Phase 4B)",
     mock_create_term.call_count == 1
     and mock_generic_add.call_count == 0
     and mock_create_term.call_args.kwargs.get("direction") == "receivable"
