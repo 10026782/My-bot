@@ -250,7 +250,8 @@
         "tools/ci_change_classifier.py",
         "core/anti_hallucination.py",
         "core/dispatcher_outcome.py",
-        "core/last_tool_result_shadow.py"
+        "core/last_tool_result_shadow.py",
+        "core/commercial_generic_canonicalization.py"
       ],
       "test_paths": [
         "test_tool_registry_invariants.py",
@@ -259,7 +260,8 @@
         "test_c53a.py",
         "test_a32_enforcement.py",
         "test_action_gateway.py",
-        "test_last_tool_result_shadow.py"
+        "test_last_tool_result_shadow.py",
+        "test_business_draft_phase4b_generic_bypass.py"
       ],
       "canonical_docs": [
         {
@@ -318,7 +320,8 @@
         "CI-only path classifier used by .github/workflows/ci.yml; it is not imported by app.py, tools/dispatcher.py, or any production execution path and does not define tool identity or authority.",
         "Permission, availability, dispatch, approval, and evidence validation are separate boundaries.",
         "Unknown or ambiguous tool identity must fail closed.",
-        "A display string is never execution evidence."
+        "A display string is never execution evidence.",
+        "Registration-only pass (BusinessDraft Phase 4B, PR #1262): core/commercial_generic_canonicalization.py -- the single pure mapping/canonicalization authority (generic Airtable column <-> canonical commercial-tool kwarg maps, protected-table alias resolution, legacy-vs-V2 Payment routing, link unwrapping) extracted verbatim from tools/dispatcher.py, which re-binds the same objects under their historical private names for its own execution-time redirect. No Airtable I/O, no identity, no new authority -- this is tools/dispatcher.py's own pre-existing tool-identity/dispatch authority, relocated to a shared module. Also consumed by core.action_gateway.resolve_canonical_call() (layer.approvals) for pre-proposal canonicalization; dual-registered here as its primary (tool-identity/mapping) home. test_business_draft_phase4b_generic_bypass.py added alongside for the same reason (proves the shared mapping plus both consumers) -- also dual-registered under layer.approvals."
       ],
       "extensions": {
         "boss.layer_aliases": [
