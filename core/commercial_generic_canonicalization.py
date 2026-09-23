@@ -448,3 +448,15 @@ def canonicalize_generic_commercial_call(
             "לא צוינו שדות ליצירה.",
         )
     return canonical_tool, mapped
+
+
+def deal_payload_as_airtable_fields(payload: Mapping[str, Any]) -> dict:
+    """Primitive Deal writer kwargs (crm_create_deal/crm_update_deal
+    payload) -> the Airtable-column-keyed shape
+    commercial_completion_ux.deal_field_business_summary() reads — the exact
+    inverse of DEAL_FIELD_MAP, never a second mapping. Presentation-only:
+    lets a canonical Deal contract show the same business-readable summary
+    the generic Deals path showed before Phase 4B. Unknown keys (record_id,
+    passthrough kwargs without a column) are skipped."""
+    inverse = {kwarg: column for column, (kwarg, _mode) in DEAL_FIELD_MAP.items()}
+    return {inverse[key]: value for key, value in (payload or {}).items() if key in inverse}

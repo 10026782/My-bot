@@ -1654,6 +1654,15 @@ def _describe_tool_call(tool_name: str, inputs: dict) -> str:
         # מוצג בטקסט הפונה למשתמש (BUG-123-FU requirement 3). השדות
         # המשתנים הם התוכן העסקי המשמעותי כאן.
         return f"{icon} {header}:\n{fields_preview}"
+    if tool_name == "crm_update_deal":
+        # BusinessDraft Phase 4B: a generic Deals update (incl. the Deal
+        # enrichment flow) is canonicalized into crm_update_deal before
+        # queuing — keep the same label-aware Deal summary the generic
+        # Deals branch above shows, via the inverse of the shared field map.
+        from commercial_completion_ux import deal_field_business_summary
+        from core.commercial_generic_canonicalization import deal_payload_as_airtable_fields
+        summary = deal_field_business_summary(deal_payload_as_airtable_fields(inputs))
+        return f"✏️ עדכון פרטי עסקה:\n{summary}" if summary else "✏️ עדכון פרטי עסקה"
     if tool_name == "sheets_append":
         sheet = inputs.get("sheet_name")
         if not sheet:

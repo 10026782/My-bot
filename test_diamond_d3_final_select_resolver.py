@@ -359,12 +359,23 @@ chk("M. crm_create_deal with an invalid select value is blocked before any write
     _contract is not None and _contract.status == "failed" and not any(c["method"] == "POST" for c in _calls))
 
 _reset_airtable_circuit_breaker()
-_contract, _calls = _dispatch_via_approval(
-    "airtable_update",
-    {"table": Tables.DEALS, "record_id": REC_ID, "fields": {DealFields.DOMAIN: "not_a_real_domain"}},
-)
-chk("M. airtable_update with an invalid Domain value is blocked before any write",
-    _contract is not None and _contract.status == "failed" and not any(c["method"] == "PATCH" for c in _calls))
+# BusinessDraft Phase 4B: a generic Deals airtable_update is canonicalized
+# into crm_update_deal BEFORE any contract exists, and an unrecognized Domain
+# word now fails closed right there (CommercialCanonicalizationError) —
+# earlier and stronger than the previous dispatch-time block: no contract,
+# so nothing can ever be approved or written.
+from core.action_gateway import CommercialCanonicalizationError  # noqa: E402
+_captured_calls.clear()
+try:
+    _dispatch_via_approval(
+        "airtable_update",
+        {"table": Tables.DEALS, "record_id": REC_ID, "fields": {DealFields.DOMAIN: "not_a_real_domain"}},
+    )
+    _invalid_domain_blocked = False
+except CommercialCanonicalizationError:
+    _invalid_domain_blocked = True
+chk("M. airtable_update with an invalid Domain value is blocked before any contract or write",
+    _invalid_domain_blocked and not any(c["method"] == "PATCH" for c in _captured_calls))
 
 
 # ══════════════════════════════════════════════════════════════════

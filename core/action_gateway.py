@@ -1383,6 +1383,17 @@ def _safe_contract_business_description(contract: ActionContract | None) -> str:
         description = "כתיבה לגיליון" + (f": {table}" if table else "")
     elif tool_name in ("send_followup", "send_recovery"):
         description = "שליחת הודעת המשך"
+    elif tool_name == "crm_update_deal":
+        # BusinessDraft Phase 4B: the Deal enrichment flow's generic Deals
+        # update is now canonicalized into crm_update_deal before its
+        # contract exists — same label-aware summary the generic Deals
+        # branch above shows, via the inverse of the one shared field map.
+        from commercial_completion_ux import deal_field_business_summary
+        from core.commercial_generic_canonicalization import deal_payload_as_airtable_fields
+        summary = deal_field_business_summary(deal_payload_as_airtable_fields(payload))
+        description = "עדכון פרטי עסקה"
+        if summary:
+            description += f":\n{summary}"
     elif tool_name == "crm_create_deal":
         # BUG-CRM-BYPASS follow-up (live observation, 02/09/2026): crm_create_deal's
         # payload is flat kwargs ({"name":..., "domain":...}), not the

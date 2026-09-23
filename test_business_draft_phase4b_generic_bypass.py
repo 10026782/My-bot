@@ -451,6 +451,25 @@ chk("Payment UPDATE financial immutability stays frozen: a generic amount edit f
     g["outcome"].get("ok") is False and not g["propose"])
 
 
+# UX parity: the canonical crm_update_deal contract keeps the same
+# label-aware Deal summary the generic Deals path showed (Deal enrichment).
+from commercial_completion_ux import deal_field_business_summary  # noqa: E402
+from core.action_gateway import _describe_contract_for_reconfirmation  # noqa: E402
+
+_enrich_fields = {DealFields.BUSINESS_DEAL_TYPE: "שירות", DealFields.ENGAGEMENT_DURATION: "מתמשכת"}
+g = _queue("airtable_update", {"table": "Deals", "record_id": _rid("DEAL", 14), "fields": dict(_enrich_fields)},
+           "p4b-deal-enrich-ux", record=_CURRENT_DEAL)
+_generic_summary = deal_field_business_summary(_enrich_fields)
+chk("UX parity: enrichment-shaped generic Deals update is minted as crm_update_deal",
+    g["contract"] is not None and g["contract"].tool_name == "crm_update_deal")
+chk("UX parity: the approval prompt shows the same business summary the generic Deals path showed",
+    bool(_generic_summary) and _generic_summary in app._describe_tool_call("crm_update_deal", _proposed(g)[1]))
+chk("UX parity: reconfirmation/lifecycle description shows the same business summary, no raw tool name",
+    g["contract"] is not None
+    and _generic_summary in _describe_contract_for_reconfirmation(g["contract"])
+    and "crm_update_deal" not in _describe_contract_for_reconfirmation(g["contract"]))
+
+
 # ══════════════════════════════════════════════════
 print("\n[E2E CREATE] generic airtable_add → dedicated tool → BusinessDraft; invariants enforced")
 # ══════════════════════════════════════════════════
