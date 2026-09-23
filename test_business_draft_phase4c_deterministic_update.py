@@ -557,6 +557,39 @@ def test_35_general_discussion_mentioning_payment_unaffected():
         _check(f"35b[{text}]", route.intent != Intent.UPDATE_PAYMENT_FIELD, (text, route.intent))
 
 
+def test_36_fresh_command_escape_hatch_recognizes_phase4c_text():
+    """LIVE-FOUND REGRESSION (23/09/2026, production): a genuinely fresh,
+    well-formed Phase 4C UPDATE command sent right after an abandoned
+    CommercialCompletionRouter CREATE clarification (e.g. a failed 'צור
+    תנאי תשלום לעסקה X' still parked awaiting a deal name) was swallowed as
+    a literal answer to the OLD session — the exact SEARCH() query sent to
+    Airtable was the entire new message, not just the intended Deal
+    reference, and the reply was the stale session's own generic
+    "לא מצאתי התאמה" rather than anything from Phase 4C. Root cause:
+    app._is_fresh_deterministic_command() — the shared escape hatch every
+    other deterministic command family (create_task, create_deal, S2C
+    completion, lead-deal link) already used to break out of a parked
+    session — never checked parse_deterministic_commercial_update() at all,
+    since it didn't exist when that escape hatch was written. Fixed by
+    adding it there. This test locks in that fix directly against the
+    exact live-reproduced text."""
+    from app import _is_fresh_deterministic_command
+    live_text = "תעדכן בעסקה TEST-4B-DELETE-ME את ההערות ל-בדיקת Phase 4C"
+    _check("36a", _is_fresh_deterministic_command(live_text), live_text)
+    # Also the guard-recognized-but-incomplete shapes (matched, not certain)
+    # -- these must escape too, per the "matched, not certain" gate.
+    for text in (
+        "עדכן את הסטטוס של עסקה X ל-Y",
+        "שנה בתשלום X: הערות = Y",
+    ):
+        _check(f"36b[{text}]", _is_fresh_deterministic_command(text), text)
+    # Negative control: ordinary free text (a plausible field ANSWER to a
+    # parked session, e.g. just a name) must still NOT be treated as a
+    # fresh command -- this escape hatch must stay precise, not swallow
+    # everything.
+    _check("36c", not _is_fresh_deterministic_command("TEST-4B-DELETE-ME"), "plain text over-triggered the escape hatch")
+
+
 # ══════════════════════════════════════════════════
 # Runner
 # ══════════════════════════════════════════════════
