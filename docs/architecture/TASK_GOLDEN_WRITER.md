@@ -23,6 +23,15 @@ The 99 historical rows are **not** changed by this work.
 | **Diamond completion** | `core/task_writer.py` §3 (pure) + `complete_task_proposal` | Before asking, derive a missing Title from trusted context: (1) the user's own text through the router's existing deterministic create-task parser (`parse_deterministic_create_task`, certain results only; its due date is reused if the payload has none); (2) a **verified** linked Lead whose `Next Action` is actionable, plus the Lead's name, giving `"<action label> — <name>"` (for example `להתקשר בחזרה — דני כהן`). The labels match `tma_api._LEAD_NEXT_ACTION_OPTIONS`, enforced by a test. A name alone, a non-actionable Next Action (Waiting Response or Closed …), or an unverified record yields nothing, so nothing is invented. |
 | **Caller UX** | callers | **Agent / bot:** only when no title can be derived, `TaskCanonicalizationError` → `_queue_approval_detailed`'s existing CanonicalizationError handler → `APPROVAL_QUEUE_NEVER_ATTEMPTED` + `"מה כותרת המשימה?"` (asks for the title only). **Workers:** derive, else skip and log. **Router:** unchanged (it already asks). **Mini App:** unchanged. |
 
+### Diamond scope (intentional, this PR)
+
+Task Diamond completion is **deliberately limited** to the two trusted sources implemented here:
+
+1. the user's original create-task text, parsed by the router's existing deterministic parser (certain results only); and
+2. a **verified** linked Lead whose `Next Action` is actionable, combined with that Lead's name.
+
+It does **not** complete a Title from Contact or Deal context. Contact and Deal names are used only by **verification**, to turn a model-supplied link into a canonical ID or to omit it. They never produce a Title, because neither table carries an action to derive one from. Extending completion to other sources is out of scope for this PR.
+
 ## 3. Canonical flow
 
 ```
@@ -39,6 +48,14 @@ router / Agent airtable_add / Agent sheets_append / interaction_engine / abandon
         after _validate_execution_proof; Title invariant only; writes the normalized Title,
         every other field untouched
 ```
+
+**Ordering (verified in code and tests):**
+
+- **Agent path.** In `app._queue_approval_detailed_impl`, Gate 1 runs right after `resolve_canonical_call` and `resolve_identity`. It runs before the executed-action dedup fingerprint (`executed_action_cache.compute`), the EventBus business-fingerprint lookup, the approval label (`_describe_tool_call`) and `propose_action`. All of them receive the completed `tool_inputs`.
+- **Proposal.** Inside `propose_action`, Gate 1 runs before `normalize_payload`, the choice of fingerprint basis and `compute_business_fingerprint`.
+- **Result.** The completed payload is exactly what is approved, fingerprinted, stored on the ActionContract and passed to the dispatcher. Tests: `test_task_golden_writer.py` §P (P1–P4), which includes the real `_validate_execution_proof` check and a real `dispatch_tool` write.
+
+**Gate 2 is validation and normalization only.** It never runs Diamond completion or link resolution. Completion happens only before approval, so persistence cannot change a Task's business meaning after it was approved (§N). The only change Gate 2 makes is whitespace/NFKC normalization of the Title, which is idempotent on the stored payload: `propose_action` already canonicalizes Task text through `_canonical_task_payload`.
 
 ## 4. The six known Task creation paths
 
@@ -72,4 +89,4 @@ The change touches canonical Airtable write paths across the approvals and tools
 - The 99 historical blank rows (a data mutation, separate owner decision).
 - Owner auto-defaulting (no established write-time contract exists; My Work already shows Owner-less Tasks to the sole owner).
 - Mini App `tma_write` (path 6).
-- Deriving the Lead-link Title template beyond actionable `Next Action` options.
+- Title completion from Contact or Deal context, or from any source other than the two listed under "Diamond scope".

@@ -384,6 +384,133 @@ ok, title = _title_for(_lead("  ", {"budget": "2M"}))
 chk("no sender and no lead name → skipped (nothing identifies the lead)", ok is False and title is None)
 
 
+# ══════════════════════════════════════════════════
+print("\n[U] UPDATE regression — Title is protected, never required")
+# ══════════════════════════════════════════════════
+
+_UPDATE_NO_TITLE = {TaskFields.STATUS: TaskStatus.DONE, TaskFields.DUE_DATE: "2026-10-01"}
+_UPDATE_VALID_TITLE = {TaskFields.NAME: "לתאם פגישה עם דני"}
+_UPDATE_BLANK_TITLES = {"empty": "", "whitespace": "   ", "nbsp/zero-width": "\u00a0\u200b"}
+
+# writer level
+chk("U1 writer: update WITHOUT Title → allowed, unchanged", prepare_task_update(_UPDATE_NO_TITLE) == _UPDATE_NO_TITLE)
+chk("U2 writer: update with a valid Title → allowed", prepare_task_update(_UPDATE_VALID_TITLE) == _UPDATE_VALID_TITLE)
+for label, blank in _UPDATE_BLANK_TITLES.items():
+    chk(f"U3 writer: update to {label} Title → rejected", rejected(prepare_task_update, {TaskFields.NAME: blank}) is not None)
+
+# Gate 1 (before approval)
+out, canonical, _ = gate1("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": dict(_UPDATE_NO_TITLE)})
+chk("U1 Gate 1: update WITHOUT Title → allowed, payload untouched", out is canonical)
+out, canonical, _ = gate1("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": dict(_UPDATE_VALID_TITLE)})
+chk("U2 Gate 1: update with a valid Title → allowed, payload untouched", out is canonical)
+for label, blank in _UPDATE_BLANK_TITLES.items():
+    exc, _, _ = gate1("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": {TaskFields.NAME: blank}})
+    chk(f"U3 Gate 1: update to {label} Title → rejected before approval", isinstance(exc, TaskCanonicalizationError))
+
+# Gate 2 (persistence)
+with patch.object(dispatcher_module, "airtable_update", return_value=_ok) as upd:
+    _dispatch("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": dict(_UPDATE_NO_TITLE)})
+chk("U1 Gate 2: update WITHOUT Title → written exactly as approved",
+    upd.call_count == 1 and upd.call_args.args[2] == _UPDATE_NO_TITLE)
+with patch.object(dispatcher_module, "airtable_update", return_value=_ok) as upd:
+    _dispatch("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": dict(_UPDATE_VALID_TITLE)})
+chk("U2 Gate 2: update with a valid Title → written",
+    upd.call_count == 1 and upd.call_args.args[2] == _UPDATE_VALID_TITLE)
+for label, blank in _UPDATE_BLANK_TITLES.items():
+    with patch.object(dispatcher_module, "airtable_update", return_value=_ok) as upd:
+        result = _dispatch("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": {TaskFields.NAME: blank}})
+    chk(f"U3 Gate 2: update to {label} Title → rejected, never written",
+        upd.call_count == 0 and result.get("ok") is False)
+
+# ══════════════════════════════════════════════════
+print("\n[P] proposed == approved == fingerprinted == executed")
+# ══════════════════════════════════════════════════
+
+from tools.dispatcher import _validate_execution_proof  # noqa: E402
+
+
+def _execution_context_for(contract) -> dict:
+    """Same fields core/action_gateway.py::_make_dispatch_executor() builds."""
+    return {
+        "contract_id": contract.contract_id, "approved_by": contract.canonical_user_id,
+        "tool_name": contract.tool_name, "tenant_id": contract.tenant_id,
+        "canonical_user_id": contract.canonical_user_id,
+        "business_action_fingerprint": contract.business_action_fingerprint, "status": "approved",
+    }
+
+
+def _propose_completed(user_id, fields, *, user_text="", records=None):
+    ident = Identity(user_id=user_id, role=Role.OWNER, display_name=user_id, tenant_id="boss_hq",
+                     domain_id="general", channel="telegram", external_id=user_id)
+    with patch.object(gateway_module, "_fetch_task_link_record", fake_fetch(records or {})):
+        result = action_gateway.propose_action(
+            tenant_id="boss_hq", canonical_user_id=ident.memory_key, tool_name="airtable_add",
+            tool_inputs={"table": Tables.TASKS, "fields": fields}, origin_channel="telegram",
+            origin_chat_id=user_id, requires_approval=True, identity=ident, trusted_source="agent",
+            user_text=user_text,
+            # a stale caller fingerprint_payload (the blank proposal) must not survive completion
+            fingerprint_payload={"table": Tables.TASKS, "fields": dict(fields)},
+        )
+    return ident, (action_gateway.find_contract(result.contract_id) if result.ok else None)
+
+
+for label, kwargs, expected_title in (
+    ("user text", {"fields": {TaskFields.NAME: ""}, "user_text": "צור משימה לקנות חלב"}, "לקנות חלב"),
+    ("verified Lead", {"fields": {TaskFields.NAME: " ", TaskFields.LEAD_LINK: [REC_LEAD]},
+                       "records": {(Tables.LEADS, REC_LEAD): LEAD_FIELDS}}, "להתקשר בחזרה — דני כהן"),
+):
+    ident, contract = _propose_completed(f"u-parity-{label}", **kwargs)
+    stored = contract.normalized_payload if contract else {}
+    chk(f"P1 [{label}] contract stores the Diamond-completed Title (what the owner approves)",
+        stored.get("fields", {}).get(TaskFields.NAME) == expected_title)
+    chk(f"P2 [{label}] stored fingerprint == fingerprint the dispatcher recomputes from the stored payload",
+        contract is not None and _validate_execution_proof(
+            "airtable_add", stored, ident, _execution_context_for(contract), "agent") is None)
+    with patch.object(dispatcher_module, "airtable_add", return_value=_ok) as write, \
+         patch.object(dispatcher_module, "_check_duplicate", return_value=None), \
+         patch.object(dispatcher_module._ff, "is_enabled", return_value=False):
+        result = dispatcher_module.dispatch_tool(
+            "airtable_add", stored, identity=ident, trusted_source="agent",
+            execution_context=_execution_context_for(contract),
+        )
+    chk(f"P3 [{label}] real execution proof passes and Airtable receives exactly the approved fields",
+        result.get("ok") is True and write.call_count == 1 and write.call_args.args[1] == stored["fields"])
+
+captured = {}
+
+
+def _capture_compute(user_chat_id, tool_name, tool_inputs):
+    captured["dedup"] = tool_inputs
+    raise RuntimeError("captured")
+
+
+import event_bus  # noqa: E402
+with patch.object(event_bus.executed_action_cache, "compute", side_effect=_capture_compute):
+    app._queue_approval_detailed(
+        "sheets_append", {"sheet_name": "Tasks", "row_data": [""]}, "chat-golden-3", "telegram", "צור משימה לקנות חלב",
+    )
+chk("P4 Agent path: the dedup fingerprint is computed from the COMPLETED payload (Gate 1 runs first)",
+    captured.get("dedup", {}).get("fields", {}).get(TaskFields.NAME) == "לקנות חלב")
+
+# ══════════════════════════════════════════════════
+print("\n[N] Gate 2 is validation/normalization only — no Diamond after approval")
+# ══════════════════════════════════════════════════
+
+_forbidden = AssertionError("Gate 2 must not run Diamond completion or link resolution")
+with patch.object(task_writer, "title_from_user_text", side_effect=_forbidden), \
+     patch.object(task_writer, "title_from_lead", side_effect=_forbidden), \
+     patch.object(task_writer, "verify_task_links", side_effect=_forbidden), \
+     patch.object(gateway_module, "_fetch_task_link_record", side_effect=_forbidden), \
+     patch.object(dispatcher_module, "airtable_add", return_value=_ok) as write, \
+     patch.object(dispatcher_module, "_check_duplicate", return_value=None):
+    blocked = _dispatch("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "", TaskFields.LEAD_LINK: [REC_LEAD]}})
+    written = _dispatch("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "לקנות חלב", TaskFields.LEAD_LINK: [REC_LEAD]}})
+chk("N1 blank Title at Gate 2 (even with a Lead link) → rejected, nothing derived, nothing written",
+    blocked.get("ok") is False and blocked.get("user_message") == ASK_TITLE_MESSAGE)
+chk("N2 valid Task at Gate 2 → written with the same fields (links not re-resolved or dropped)",
+    written.get("ok") is True and write.call_count == 1
+    and write.call_args.args[1] == {TaskFields.NAME: "לקנות חלב", TaskFields.LEAD_LINK: [REC_LEAD]})
+
 print(f"\n{'=' * 60}")
 print(f"Task Golden Writer tests: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)
