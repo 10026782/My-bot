@@ -252,7 +252,8 @@
         "core/dispatcher_outcome.py",
         "core/last_tool_result_shadow.py",
         "core/commercial_generic_canonicalization.py",
-        "core/deterministic_commercial_update.py"
+        "core/deterministic_commercial_update.py",
+        "core/task_writer.py"
       ],
       "test_paths": [
         "test_tool_registry_invariants.py",
