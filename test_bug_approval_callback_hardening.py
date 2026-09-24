@@ -153,7 +153,7 @@ _rollback_contract = SimpleNamespace(
     normalized_payload={
         "table": "Tasks",
         "fields": {
-            "כותרת המשימה": "בדיקת rollback",
+            "Task": "בדיקת rollback",
             "ActionContractRecord": "recACTIONCONTRACT01",
             "BusinessRecord": "recBUSINESSRECORD01",
         },
@@ -275,7 +275,7 @@ _legacy_action_id, _ = _real_bus.request_approval(
     action="airtable_add",
     payload={
         "tool_name": "airtable_add",
-        "tool_inputs": {"table": "Tasks", "fields": {"כותרת המשימה": "unlinked"}},
+        "tool_inputs": {"table": "Tasks", "fields": {"Task": "unlinked"}},
         "origin_channel": "telegram", "origin_chat_id": requester3.user_id,
         "canonical_user_id": requester3.memory_key,
         "user_chat_id": requester3.user_id, "channel": "telegram",
@@ -512,7 +512,7 @@ from tools import dispatcher as _dispatcher_mod
 
 _EXISTING_RECORD = {
     "id": "recEXISTING000001",
-    "fields": {"כותרת המשימה": "כפילות", "סטטוס": "פתוח"},
+    "fields": {"Task": "כפילות", "סטטוס": "פתוח"},
 }
 
 _dup_identity = _identity("owner-hard-dup", Role.OWNER)

@@ -243,11 +243,14 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
     יוצר משימה לנציג אנושי ב-Airtable Tasks + מודיע בטלגרם.
     לשימוש כשערוץ = voice (IVR).
     """
-    # Task Golden Writer: הכותרת נגזרת מזהות הליד. בלי sender אין כותרת
-    # מזהה ("📞 ליד נטוש — " בלבד) — לא יוצרים משימה.
-    sender = str(lead.sender or "").strip()
-    if not sender:
-        logger.warning("[D02] skipping human pipeline task: abandoned lead has no sender")
+    # Task Golden Writer (Diamond): הפעולה ידועה (תבנית ה-worker הקיימת
+    # "📞 ליד נטוש — <נושא>"); הנושא נגזר מהקשר מהימן של הליד — sender, ואם
+    # חסר, השם שהליד עצמו מסר בשאלון (answers["name"], אותו מפתח ש-
+    # voice_adapter משתמש בו). רק אם אין שום מזהה של הליד — לא יוצרים.
+    from core.task_writer import compose_title, normalize_title
+    subject = normalize_title(lead.sender) or normalize_title((lead.answers or {}).get("name"))
+    if not subject:
+        logger.warning("[D02] skipping human pipeline task: no sender or lead name to identify the lead")
         return False
     try:
         from core.action_gateway import action_gateway
@@ -255,7 +258,7 @@ def create_human_pipeline_task(lead: AbandonedLead, owner_chat_id: str) -> bool:
         answers_str = " | ".join(f"{k}={v}" for k, v in lead.answers.items())
         priority = "high" if lead.step >= 3 else "medium"
         fields = {
-            TaskFields.NAME:   f"📞 ליד נטוש — {sender}",
+            TaskFields.NAME:   compose_title("📞 ליד נטוש", subject),
             TaskFields.STATUS: TaskStatus.PENDING,
             TaskFields.DESCRIPTION: (
                 f"ערוץ: {lead.channel} | דומיין: {lead.domain}\n"

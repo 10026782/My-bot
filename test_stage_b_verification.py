@@ -56,7 +56,7 @@ gw = ActionGateway(ledger=ExecutionLedger(), tool_executor=_tracking_exec)
 r = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_1",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש מכונת הדפסה", "תאריך יעד": "2026-10-01"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש מכונת הדפסה", "Due": "היום"}},
     origin_channel="whatsapp", origin_chat_id="whatsapp:972501234567",
     requires_approval=True,
 )
@@ -72,7 +72,7 @@ print("\n── Req #2: Confirmation executes saved contract payload ───�
 dispatched.clear()
 
 # The saved payload — this is what must be dispatched, nothing else
-saved_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש מכונת הדפסה", "תאריך יעד": "2026-10-01"}}
+saved_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש מכונת הדפסה", "Due": "היום"}}
 r2 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_2",
     tool_name="airtable_add", tool_inputs=saved_inputs,
@@ -98,7 +98,7 @@ gw3 = ActionGateway(ledger=ExecutionLedger(), tool_executor=_payload_capturing_e
 r3 = gw3.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_3",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "רכישת מדפסת", "תאריך יעד": "2026-10-02"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "רכישת מדפסת", "Due": "מחר"}},
     origin_channel="whatsapp", origin_chat_id="whatsapp:9725012",
     requires_approval=True,
 )

@@ -434,16 +434,15 @@ def dispatch_tool(
                     # ok=False only.
                     return _tool_result(ok=False, tool="airtable_add", user_message=str(e))
 
-                # Task Golden Writer (core/task_writer.py) — גבול הביצוע.
-                # כל יצירת משימה שאינה מה-Mini App מגיעה לכאן (Agent,
-                # sheets_append אחרי המרה, router דטרמיניסטי, workers).
-                # מאמת שוב (גם אם resolve_canonical_call כבר אימת בגבול
-                # ההצעה) וכותב את השדות המנורמלים: כותרת תקינה חובה, סטטוס
-                # ברירת מחדל "ממתין", מזהי רשומות מה-Agent נדחים. רץ אחרי
+                # Task Golden Writer (core/task_writer.py) — Gate 2, גבול
+                # ההתמדה. כל יצירת משימה שאינה מה-Mini App מגיעה לכאן (Agent,
+                # sheets_append אחרי המרה, router דטרמיניסטי, workers). אימות
+                # בלבד של האינווריאנט: כותרת לא ריקה אחרי נרמול (הכותרת
+                # המנורמלת נכתבת; שאר השדות ללא שינוי). רץ אחרי
                 # _validate_execution_proof, כך שהנרמול לא נוגע ב-fingerprint.
                 if _task_writer.is_task_table(table):
                     try:
-                        fields = _task_writer.prepare_task_create(fields, source=_write_source)
+                        fields = _task_writer.prepare_task_create(fields)
                     except _task_writer.TaskWriteRejected as e:
                         logger.warning(
                             "[TaskGoldenWriter] create rejected | code=%s source=%s reason=%s",
@@ -840,7 +839,7 @@ def dispatch_tool(
 
                     # Task Golden Writer: עדכון לעולם לא מרוקן כותרת.
                     try:
-                        fields = _task_writer.prepare_task_update(fields, source=_write_source)
+                        fields = _task_writer.prepare_task_update(fields)
                     except _task_writer.TaskWriteRejected as e:
                         result = _tool_result(ok=False, tool="airtable_update", user_message=e.user_message)
                         audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)

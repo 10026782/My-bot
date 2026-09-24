@@ -2451,16 +2451,24 @@ def _queue_approval_detailed_impl(tool_name: str, tool_inputs: dict,
     the SAME Deal / PaymentTerm / Payment seams below -- there is no separate
     generic draft lifecycle, and the generic origin is irrelevant from here on.
     """
-    from core.action_gateway import enforce_task_write_contract, resolve_canonical_call
+    from core.action_gateway import complete_task_proposal, resolve_canonical_call
     tool_name, tool_inputs = resolve_canonical_call(
         tool_name, tool_inputs, user_text
     )
-    # Task Golden Writer: a Tasks write that fails the canonical Task contract
-    # (blank title etc.) raises TaskCanonicalizationError here, before any
-    # dedup/EventBus/ActionContract — the CanonicalizationError handler in
-    # _queue_approval_detailed() returns its user_message (ask for the title).
-    enforce_task_write_contract(tool_name, tool_inputs, trusted_source)
     identity = resolve_identity(channel, user_chat_id)
+    # Task Golden Writer Gate 1: verify model-supplied links, derive a missing
+    # Title from trusted context (Diamond), and only then — if no Title can be
+    # derived — raise TaskCanonicalizationError, which _queue_approval_detailed()'s
+    # CanonicalizationError handler turns into "ask for the title only", before
+    # any dedup/EventBus/ActionContract. A completed payload drops the caller's
+    # fingerprint_payload (same precedent as the Deal hook below).
+    _completed_inputs = complete_task_proposal(
+        tool_name, tool_inputs, trusted_source=trusted_source,
+        identity=identity, user_text=user_text,
+    )
+    if _completed_inputs is not tool_inputs:
+        tool_inputs = _completed_inputs
+        fingerprint_payload = None
 
     _deal_draft_ctx = None
     if tool_name in ("crm_create_deal", "crm_update_deal"):

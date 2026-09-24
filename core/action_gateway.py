@@ -726,26 +726,115 @@ def resolve_canonical_call(
     return resolved_tool, payload
 
 
-def enforce_task_write_contract(tool_name: str, tool_inputs: dict, trusted_source: str = "agent") -> None:
-    """Task Golden Writer -- proposal boundary (core/task_writer.py).
+_UNTRUSTED_TASK_SOURCES = frozenset({"agent", ""})
+
+
+def _fetch_task_link_record(table: str, record_id: str) -> dict | None:
+    """Verification I/O: the linked record's fields, or None when it does not
+    exist or cannot be read (both mean "unverified" -- never passed through)."""
+    from tools.airtable_read_adapter import get_record_fields
+    try:
+        return get_record_fields(table, record_id, timeout=5)
+    except Exception as exc:
+        logger.info("[TaskGoldenWriter] link %s/%s unverified: %s", table, record_id, type(exc).__name__)
+        return None
+
+
+def _task_link_name_resolver(identity):
+    """Canonical exact-label resolver (commercial_crm.lookup_human_reference,
+    tenant-scoped). No identity → no name resolution (fail closed → omit)."""
+    if identity is None:
+        return None
+    from commercial_crm import lookup_human_reference
+
+    # Same scope convention as lead_deal_link.resolve_deal_by_query().
+    scope = str(getattr(identity, "user_id", "") or "")
+
+    def _resolve(entity: str, name: str) -> list[str]:
+        try:
+            matches = lookup_human_reference(entity, name, scope=scope, identity=identity, limit=2)
+        except Exception as exc:
+            logger.info("[TaskGoldenWriter] %s name unresolved: %s", entity, type(exc).__name__)
+            return []
+        return [m.get("id", "") for m in matches if m.get("id")]
+
+    return _resolve
+
+
+def complete_task_proposal(
+    tool_name: str,
+    tool_inputs: dict,
+    *,
+    trusted_source: str = "agent",
+    identity=None,
+    user_text: str = "",
+) -> dict:
+    """Task Golden Writer -- proposal boundary (Gate 1), see core/task_writer.py.
 
     Called right after resolve_canonical_call() by every proposal entry point
-    (ActionGateway.propose_action() and app._queue_approval_detailed_impl()).
-    A canonical airtable_add/airtable_update on Tasks is VALIDATED only, never
-    rewritten -- the stored payload must stay byte-identical for BUG-TASK-01
-    fingerprint parity; normalization happens once, in the dispatcher, after
-    _validate_execution_proof(). Fails closed with TaskCanonicalizationError
-    before any fingerprint/ActionContract exists. This is what stops the
-    sheets_append row_data=[""] / generic airtable_add blank-title writes
-    (blank Task audit, 24/09/2026). No-op for every non-Task call.
+    (app._queue_approval_detailed_impl() and ActionGateway.propose_action()),
+    BEFORE any dedup fingerprint / ActionContract exists, so what the owner
+    approves is exactly what Gate 2 (tools/dispatcher.py) writes.
+
+    For airtable_add on Tasks:
+      1. resolver/verification -- model-supplied link ids (trusted_source
+         "agent") are verified; unverifiable/ambiguous optional links omitted.
+      2. Diamond completion -- a missing/blank Title is derived from trusted
+         context: the user's own text via the router's deterministic parser,
+         else a verified Lead's actionable Next Action + Lead name.
+      3. Golden Writer validation -- Title must be non-empty after
+         normalization, else TaskCanonicalizationError asking ONLY for it.
+    For airtable_update on Tasks: only an update that blanks Title is rejected.
+
+    Returns the SAME dict object when nothing changed (callers then keep any
+    fingerprint_payload they were given), otherwise a new dict. No-op for every
+    non-Task call.
     """
-    from core.task_writer import TaskWriteRejected, validate_task_payload
+    from core import task_writer
+    from airtable_schema import TaskFields
+
+    payload = tool_inputs or {}
+    if tool_name not in ("airtable_add", "airtable_update") or not task_writer.is_task_table(payload.get("table")):
+        return tool_inputs
     try:
-        validate_task_payload(tool_name, tool_inputs, source=trusted_source)
-    except TaskWriteRejected as exc:
+        if tool_name == "airtable_update":
+            task_writer.validate_task_payload(tool_name, payload)
+            return tool_inputs
+
+        original = payload.get("fields")
+        fields = dict(original) if isinstance(original, dict) else {}
+        verified: dict[str, dict] = {}
+        if str(trusted_source or "").strip() in _UNTRUSTED_TASK_SOURCES:
+            fields, verified, omitted = task_writer.verify_task_links(
+                fields,
+                fetch_record=_fetch_task_link_record,
+                resolve_name=_task_link_name_resolver(identity),
+            )
+            if omitted:
+                logger.warning("[TaskGoldenWriter] omitted unverified task links: %s", omitted)
+
+        if not task_writer.normalize_title(fields.get(TaskFields.NAME)):
+            title, due = task_writer.title_from_user_text(user_text)
+            if not title:
+                lead_ids = fields.get(TaskFields.LEAD_LINK) or []
+                if len(lead_ids) == 1 and lead_ids[0] in verified:
+                    title = task_writer.title_from_lead(verified[lead_ids[0]])
+                due = None
+            if title:
+                fields[TaskFields.NAME] = title
+                if due and not fields.get(TaskFields.DUE_DATE):
+                    fields[TaskFields.DUE_DATE] = due
+                logger.info("[TaskGoldenWriter] title derived from trusted context")
+
+        task_writer.prepare_task_create(fields)
+    except task_writer.TaskWriteRejected as exc:
         raise TaskCanonicalizationError(
             str(exc), exc.user_message, code=exc.code, missing=exc.missing
         ) from None
+
+    if fields == original:
+        return tool_inputs
+    return {**payload, "fields": fields}
 
 
 def _hash_challenge(code: str) -> str:
@@ -1864,7 +1953,17 @@ class ActionGateway:
         tool_name, tool_inputs = resolve_canonical_call(
             tool_name, tool_inputs, user_text
         )
-        enforce_task_write_contract(tool_name, tool_inputs, trusted_source)
+        # Task Golden Writer Gate 1 (verification → Diamond completion →
+        # validation). A changed payload drops any caller fingerprint_payload
+        # (BUG-CRM-BYPASS-FINGERPRINT-PARITY precedent) so the stored
+        # fingerprint is computed from exactly what will be dispatched.
+        _completed_inputs = complete_task_proposal(
+            tool_name, tool_inputs, trusted_source=trusted_source,
+            identity=identity, user_text=user_text,
+        )
+        if _completed_inputs is not tool_inputs:
+            tool_inputs = _completed_inputs
+            fingerprint_payload = None
 
         # BUG-122: Router classification is advisory and can be "unknown"
         # before the Agent emits a mutating tool call. Enforce the one-live-

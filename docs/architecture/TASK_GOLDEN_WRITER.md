@@ -1,121 +1,75 @@
 # Task Golden Writer — canonical Task write core
 
-**Status:** `CODE_DONE + STATIC_VERIFIED` on branch `claude/blank-task-cards-audit-4rsy4t` (24/09/2026). Not merged, deployed, or runtime-verified.
+**Status:** `CODE_DONE + STATIC_VERIFIED` on branch `claude/blank-task-cards-audit-4rsy4t` (24/09/2026, revision 2 after owner review). Not merged, deployed, or runtime-verified.
 **Owner module:** `core/task_writer.py`
 **Trigger:** blank task cards in the Mini App's "My Work" screen (audit, 24/09/2026).
 
 ## 1. Why
 
-A read-only audit of the live Tasks table (`משימות (Tasks)`, 135 rows) found **99 rows with an empty `כותרת המשימה`**. 97 of them had *no* other field set. The TMA projection (`tma_api._process_owner_tasks`) and the card (`MyWork.tsx`) only pass values through, so the title was already empty in the **creation payload**:
+A read-only audit of the live Tasks table (`משימות (Tasks)`, 135 rows) found **99 rows with an empty `כותרת המשימה`**. 97 of them had no other field set. The TMA projection and the card only pass values through, so the title was already empty in the **creation payload**:
 
-- `core/action_gateway._sheets_payload_to_airtable()` mapped `row_data[0]` to the title with no value check. `row_data=[""]` produced `{כותרת המשימה: ""}` and nothing else, which matches the live blank-row shape. This is the primary root cause.
-- `action_validator._check_presence()` only checks that `fields`/`row_data` keys are present. `tools/airtable_gateway.validate_airtable_fields()` checks field *names*, not text *values*. So the generic `airtable_add` path was equally open.
-- `interaction_engine` wrote the title straight from the LLM's JSON (`task.get("title", "")`), plus an unvalidated LLM due date.
+- `core/action_gateway._sheets_payload_to_airtable()` mapped `row_data[0]` to the title with no value check. `row_data=[""]` produced `{כותרת המשימה: ""}` and nothing else. This is the primary root cause.
+- `action_validator` checks key presence and `airtable_gateway.validate_airtable_fields()` checks field names, not text values. So the generic `airtable_add` path was equally open.
+- `interaction_engine` wrote the title and due date straight from the LLM's JSON.
 
-## 2. Canonical flow
+The 99 historical rows are **not** changed by this work.
 
-The write core is shared. Each caller keeps its own interaction layer (UX).
+## 2. Four separated concerns
+
+| Concern | Where | What it does |
+|---|---|---|
+| **Golden Writer validation** | `core/task_writer.py` §1 (pure) | The one invariant: Title is required and non-empty after safe normalization (NFKC, zero-width removal, whitespace normalization). A non-text value has no title (the field is `singleLineText`). UPDATE is checked only when it touches Title. It adds **no** policy for Status, Due Date, Owner or unknown fields; existing schema contracts and `airtable_gateway` still own those. |
+| **Resolver / verification** | `core/task_writer.py` §2 (pure, I/O injected) + `core/action_gateway._fetch_task_link_record` / `_task_link_name_resolver` | A model-supplied link is never passed through directly. A `rec…` ID that exists in its linked table (`get_record_fields`) is kept. A Contact or Deal name is resolved through the existing canonical exact-label, tenant-scoped resolver `commercial_crm.lookup_human_reference`, and only an exactly-one match yields the canonical ID. Anything not found, ambiguous or without a resolver (Lead or Owner by name) is **omitted**, because every link field is optional. Links from trusted internal sources keep the existing behavior. |
+| **Diamond completion** | `core/task_writer.py` §3 (pure) + `complete_task_proposal` | Before asking, derive a missing Title from trusted context: (1) the user's own text through the router's existing deterministic create-task parser (`parse_deterministic_create_task`, certain results only; its due date is reused if the payload has none); (2) a **verified** linked Lead whose `Next Action` is actionable, plus the Lead's name, giving `"<action label> — <name>"` (for example `להתקשר בחזרה — דני כהן`). The labels match `tma_api._LEAD_NEXT_ACTION_OPTIONS`, enforced by a test. A name alone, a non-actionable Next Action (Waiting Response or Closed …), or an unverified record yields nothing, so nothing is invented. |
+| **Caller UX** | callers | **Agent / bot:** only when no title can be derived, `TaskCanonicalizationError` → `_queue_approval_detailed`'s existing CanonicalizationError handler → `APPROVAL_QUEUE_NEVER_ATTEMPTED` + `"מה כותרת המשימה?"` (asks for the title only). **Workers:** derive, else skip and log. **Router:** unchanged (it already asks). **Mini App:** unchanged. |
+
+## 3. Canonical flow
 
 ```
-router (task_builders) ─┐
-Agent airtable_add ─────┤
-Agent sheets_append ────┤ resolve_canonical_call()  → canonical airtable_add / airtable_update
-interaction_engine ─────┤
-abandoned_lead_worker ──┘
-        │
-        ▼  GATE 1: proposal boundary. Validate only; the payload is never rewritten (BUG-TASK-01 fingerprint parity)
-   core.action_gateway.enforce_task_write_contract(tool, payload, trusted_source)
-     └─ called by ActionGateway.propose_action() and app._queue_approval_detailed_impl()
-     └─ fails closed with TaskCanonicalizationError(user_message, code, missing) before any fingerprint/ActionContract
-        │  (app: CanonicalizationError handler → APPROVAL_QUEUE_NEVER_ATTEMPTED + "מה כותרת המשימה?")
-        ▼
-   approval (ActionContract lifecycle unchanged)
-        │
-        ▼  GATE 2: execution boundary (after _validate_execution_proof)
-   tools/dispatcher.py  airtable_add  → task_writer.prepare_task_create()  → dedup → airtable_add()
-                        airtable_update → task_writer.prepare_task_update() → allowlist/Domain → airtable_update()
+router / Agent airtable_add / Agent sheets_append / interaction_engine / abandoned_lead_worker
+   → resolve_canonical_call()                                   (unchanged)
+   → GATE 1  core.action_gateway.complete_task_proposal()       (before approval)
+        verification (agent source) → Diamond completion → Title validation
+        · called by app._queue_approval_detailed_impl() and ActionGateway.propose_action()
+        · returns the SAME dict when nothing changed, so the caller's fingerprint_payload is kept
+        · a changed payload drops the caller's fingerprint_payload (BUG-CRM-BYPASS-FINGERPRINT-PARITY
+          precedent), so the stored fingerprint is computed from exactly what will be dispatched
+   → approval (ActionContract lifecycle, dedup and audit unchanged)
+   → GATE 2  tools/dispatcher.py airtable_add / airtable_update on Tasks   (persistence boundary)
+        after _validate_execution_proof; Title invariant only; writes the normalized Title,
+        every other field untouched
 ```
 
-`core/task_writer.py` is pure: no I/O, idempotent, `prepare(prepare(x)) == prepare(x)`.
+## 4. The six known Task creation paths
 
-## 3. Rules (Golden Writer + Diamond completion)
+| # | Path | Bypass risk before | Changed in this work? |
+|---|---|---|---|
+| 1 | Router deterministic create (`task_builders` → `gateway_call`) | Low: title already required | **No code change.** It passes through both gates; its valid payload comes back as the same object, so its `fingerprint_payload` (BUG-TASK-01) is untouched |
+| 2 | Agent raw `airtable_add` → Tasks | **High** | **Yes, via both gates:** verification, Diamond completion, title-only ask |
+| 3 | Agent `sheets_append` → Tasks (**root cause**) | **High** | **Yes, via both gates.** Diamond can recover the title from the user's own create-task text |
+| 4 | `interaction_engine.create_tasks_from_analysis` | **High** | **Yes (worker code):** an item without a non-empty `title` is skipped, because the interaction offers no trusted action to derive one from. An invalid LLM due date is **omitted**, not invented, and the Task is still created. Non-object items are skipped. The existing Status default is kept |
+| 5 | `abandoned_lead_worker.create_human_pipeline_task` | Medium | **Yes (worker code):** existing template `📞 ליד נטוש — <subject>`; subject = sender, else the lead's own `answers["name"]` (same key `voice_adapter` uses); skipped only if neither exists. (`_parse_sessions` already requires a sender, so that skip is defensive) |
+| 6 | Mini App `POST /api/leads/<id>/task` → `tma_write` | Low: requires title (HTTP 400) | **No.** Out of scope |
+| + | `airtable_update` on Tasks | Medium: could blank a title | **Yes, both gates:** only an update that blanks Title is rejected |
 
-| Field | Rule |
-|---|---|
-| **Title** (`כותרת המשימה`) | **Required.** Must be text. Normalized with NFKC; zero-width characters and NBSP removed; whitespace collapsed. Must contain a letter or digit. Must not be a placeholder (`משימה`, `משימה חדשה`, `task`, `null`, `none`, `n/a`, `tbd`, …). At most 250 characters (rejected, never truncated). Rejection carries `missing=("כותרת המשימה",)` and asks only for the title. |
-| Status | Auto-defaults to `ממתין` (deterministic). Accepts `ממתין/בביצוע/בוצע` and the fixed aliases `pending/todo/in progress/done/completed`. Anything else is rejected, never guessed. |
-| Due date | Optional. Strict `YYYY-MM-DD` and a real calendar date. `מחר`, `tomorrow`, `2026-02-31` and datetimes are rejected. |
-| Description, Domain | Optional text. Empty values are dropped. Domain on update keeps the existing live-select canonicalization. |
-| Owner / Contacts / Deals / Leads links | **Rejected when the source is the Agent** (`trusted_source` missing or `"agent"`). Trusted internal sources must supply well-formed `rec…` IDs. Owner is **not** auto-resolved in this migration. A Task with no Owner is already shown to the sole owner by the My Work projection. |
-| Unknown fields | Rejected (fail closed). The aliases `title/description/due_date/status` map deterministically. The same field sent under two names is rejected as ambiguous. `tenant_id` is ignored. |
+## 5. Existing test fixtures changed
 
-Automatic (system) Tasks must derive a meaningful title from their source. If they cannot, **no Task is created**. Bot-created Tasks ask only for the missing title.
+Each change supplies the canonical title field. The pre-existing contract that justifies it: the Task title field is `כותרת המשימה` (`airtable_schema.TaskFields.NAME`, `FIELD_MAP[Tables.TASKS]`, `tools/dispatcher._DEDUP_FIELDS`, and the Agent's own schema in `core_knowledge.py`: "אין שדה Name… שמות השדות בעברית בלבד"). `"Task"`, `"name"` and an empty `fields` are not Task title fields; `airtable_gateway.airtable_create()` drops unknown fields and blocks the write (SPEC A1). These fixtures therefore described a Task write that the pre-existing contract could never persist with a title. Every changed line was then minimized automatically: each was reverted individually and kept only if the test fails without it. All `"Due": "היום"`/`"מחר"` values are restored (the revised writer has no due-date rule). `test_pending_contract_read_amplification.py` is fully restored; it passes unchanged.
 
-## 4. Migration matrix (the six known creation paths)
+See the completion report for the per-file list.
 
-| # | Path | Bypass risk before | Diamond completion needed? | Migration in this change |
-|---|---|---|---|---|
-| 1 | Router deterministic create (`core/router/task_builders.py` → `turn_coordinator_runtime.gateway_call`) | Low: `_require_text` already required a title | Already asks for the title | None needed. Both gates apply transparently; Status now defaults to `ממתין` at write time |
-| 2 | Agent raw `airtable_add` on Tasks | **High**: no value checks | Ask for the title only | Gate 1 + Gate 2 |
-| 3 | Agent `sheets_append` → Tasks (`_sheets_payload_to_airtable`) — **root cause** | **High**: `row_data[0]` unchecked | Ask for the title only | Gate 1 + Gate 2 |
-| 4 | `interaction_engine.create_tasks_from_analysis` (LLM output) | **High**: blank or placeholder title; unvalidated due date | Automatic: skip a task with no real title; drop an invalid optional due date | Pre-validation in the worker + both gates |
-| 5 | `abandoned_lead_worker.create_human_pipeline_task` | Medium: an empty sender gives the generic title `📞 ליד נטוש — ` | Automatic: no identifiable sender → no task | Guard in the worker + both gates |
-| 6 | TMA `POST /api/leads/<id>/task` → `tma_write` | Low: strips and requires the title (HTTP 400) | Mini App UX unchanged | **Out of scope** (Mini App). A possible follow-up is to call `prepare_task_create(source="tma_api")` inside `tma_write` for defense in depth |
-| + | `airtable_update` on Tasks | Medium: could blank an existing title | n/a | Gate 1 + Gate 2 title/due/status checks |
+## 6. Cross-Layer Impact: FULL
 
-## 5. Cross-Layer Impact: FULL
+The change touches canonical Airtable write paths across the approvals and tools layers.
 
-The change touches canonical Airtable write paths and two layers (approvals + tools).
-
-### Layer 1 — Core Reasoning / BUG-104
-- touched: not touched
-- input/output/authority impact: none. Proof: no file under the Core Reasoning layer changed. The Agent only sees a different `message` string in the existing CanonicalizationError return.
-- shared identifiers: none new
-- invariants: unchanged
-- failure semantics: unchanged
-- observability: n/a
-- cross-layer tests: `test_pa01_phantom_approval_enforcement.py` (passes)
-
-### Layer 2 — TurnCoordinator
-- touched: indirectly (`app._queue_approval_detailed_impl` calls the new gate)
-- input impact: none
-- output impact: a Tasks proposal that fails the Task contract now returns the existing `APPROVAL_QUEUE_NEVER_ATTEMPTED` shape, carrying a title-request `message`
-- authority impact: none. The existing CanonicalizationError handler owns the reply
-- shared identifiers: `TaskCanonicalizationError` (a subclass of the existing `CanonicalizationError`, same `user_message` attribute as `CommercialCanonicalizationError`)
-- invariants: BUG-122 slot accounting is unchanged (NEVER_ATTEMPTED does not consume the slot)
-- failure semantics: fail closed; nothing is queued
-- observability: `[Approval] _queue_approval_detailed canonicalization failed` log
-- cross-layer tests: `test_task_golden_writer.py` §C, `test_single_speaker_fallback_and_duplication.py`, `test_bug_canonical_tool_wiring.py`
-
-### Layer 3 — F52 / Phase 4C Action & Tool Contract
-- touched: directly (`tools/dispatcher.py` airtable_add/airtable_update Tasks branches; new `core/task_writer.py`)
-- input impact: none
-- output impact: an invalid Task write returns C53-A `ok=False` with a user-safe message. A valid write persists normalized fields (trimmed title, Status defaulted)
-- authority impact: a new validation authority for the Tasks write *shape*. There is no new source of truth, and the registry/role/tenant/emergency/proof gates are unchanged and still run first
-- shared identifiers: `TaskWriteRejected`, `prepare_task_create`, `prepare_task_update`
-- invariants: normalization runs after `_validate_execution_proof`, so the fingerprint is still computed on the approved payload. Dedup (`_DEDUP_FIELDS`) now runs on the normalized title
-- failure semantics: fail closed before any Airtable call
-- observability: `[TaskGoldenWriter] create rejected | code=…` warning and `audit_log_airtable(... "blocked: <code>")`
-- cross-layer tests: `test_task_golden_writer.py` §D, `test_bug_crm_bypass_airtable_update.py`, `test_c53a.py`
-
-### Layer 4 — Durable Atomic Approval
-- touched: directly (`ActionGateway.propose_action` calls `enforce_task_write_contract` right after `resolve_canonical_call`)
-- input impact: none
-- output impact: an invalid Tasks proposal raises before any ledger, live-contract or persistence access
-- authority impact: none. ActionContracts remain the lifecycle authority. No contract is created, inferred or repaired
-- shared identifiers: `enforce_task_write_contract`
-- invariants: the stored payload is byte-identical to before (validate-only), so BUG-TASK-01 parity holds
-- failure semantics: `TaskCanonicalizationError`, the same class of exception `CommercialCanonicalizationError` already raises from this point
-- observability: the exception message and code
-- cross-layer tests: `test_task_golden_writer.py` §B, `test_bug_task_01_execution_proof_fingerprint_parity.py`, `test_create_task_deterministic_route.py`, `test_business_action_fingerprint_normalization.py`
-
-## 6. Test fixture changes
-
-About a dozen existing approval-flow tests proposed Tasks using made-up field names (`"Task"`, `"Due": "היום"`, `"name"`, or empty `fields`). Those payloads could never have produced a real Airtable Task: the gateway drops unknown fields and blocks the write. They were switched to the real field names (`כותרת המשימה`, `תאריך יעד`) without changing what each test asserts. One fixture was left unchanged on purpose: `test_pa01` P2-4 relies on an unapproved field name to trigger the CanonicalizationError path.
+- **Layer 1 — Core Reasoning / BUG-104:** not touched. The Agent only receives the existing CanonicalizationError return shape carrying a title question. Test: `test_pa01_phantom_approval_enforcement.py`.
+- **Layer 2 — TurnCoordinator:** touched indirectly. `app._queue_approval_detailed_impl` calls Gate 1 after `resolve_identity`. Output: either a completed payload (fingerprint_payload dropped only when changed) or `APPROVAL_QUEUE_NEVER_ATTEMPTED` + the title question. BUG-122 slot accounting is unchanged. Tests: §E, `test_single_speaker_fallback_and_duplication.py`, `test_bug_canonical_tool_wiring.py`.
+- **Layer 3 — F52 / Phase 4C Action & Tool Contract:** touched directly. The dispatcher Tasks branches (Gate 2) and `core/task_writer.py`. There is no new source of truth, and the registry, role, tenant, emergency and proof gates are unchanged and still run first. Dedup runs on the normalized title. Observability: the `[TaskGoldenWriter] create rejected` warning plus `audit_log_airtable(... "blocked: title_blank")`. Tests: §F, `test_c53a.py`, `test_bug_crm_bypass_airtable_update.py`.
+- **Layer 4 — Durable Atomic Approval:** touched directly. `propose_action` runs Gate 1 before BUG-122 and before any ledger access. ActionContracts remain the lifecycle authority. Stored payload = dispatched payload, and fingerprint parity holds (§D, `test_bug_task_01_execution_proof_fingerprint_parity.py`, `test_business_action_fingerprint_normalization.py`). New reads (link verification) happen only when the Agent supplied link values. Each failure means "unverified → omit", never a pass-through.
 
 ## 7. Not in this change
 
-- Cleaning up the 99 existing blank rows in Airtable. This is a data mutation and needs a separate owner decision.
-- Owner auto-resolution. It needs a Profile lookup (I/O) and an ambiguity policy.
-- TMA `tma_write` defense in depth (path 6).
-- Editing the `interaction_engine` prompt example (`"title": "משימה"`). Such output is now rejected as a placeholder.
+- The 99 historical blank rows (a data mutation, separate owner decision).
+- Owner auto-defaulting (no established write-time contract exists; My Work already shows Owner-less Tasks to the sole owner).
+- Mini App `tma_write` (path 6).
+- Deriving the Lead-link Title template beyond actionable `Next Action` options.

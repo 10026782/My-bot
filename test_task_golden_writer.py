@@ -10,14 +10,14 @@ presence of the `fields`/`row_data` keys. Root cause: core/action_gateway.py's
 sheets_append → Tasks positional converter (`row_data[0]` unchecked), with the
 generic airtable_add path equally unguarded.
 
-Covers:
-  A. core/task_writer.py — pure validation/normalization rules
-  B. gate 1 — resolve_canonical_call() fails closed before any approval
-  C. app._queue_approval_detailed — the Agent gets a Diamond "ask for title"
-     message and no ActionContract is attempted
-  D. gate 2 — dispatcher airtable_add/airtable_update on Tasks
-  E. interaction_engine — LLM tasks without a real title are never proposed
-  F. abandoned_lead_worker — no identifiable sender → no task
+Sections map 1:1 onto the four separated concerns:
+  A. Golden Writer validation   (core/task_writer.py §1 — Title non-empty only)
+  B. resolver / verification    (core/task_writer.py §2 — model-supplied links)
+  C. Diamond completion         (core/task_writer.py §3 — derive Title first)
+  D. Gate 1 — complete_task_proposal / propose_action (verification → Diamond → validation)
+  E. caller UX — Agent path asks for the title only; no contract attempted
+  F. Gate 2 — dispatcher persistence boundary (CREATE + UPDATE)
+  G. interaction_engine / H. abandoned_lead_worker — automatic callers
 """
 
 from __future__ import annotations
@@ -35,16 +35,15 @@ os.environ.setdefault("SETUP_WEBHOOK", "0")
 os.environ["FEATURE_ACTION_CONTRACT_PERSISTENCE"] = "false"
 
 import app  # noqa: E402
+import core.action_gateway as gateway_module  # noqa: E402
 import tools.dispatcher as dispatcher_module  # noqa: E402
-from airtable_schema import Tables, TaskFields, TaskStatus  # noqa: E402
+from airtable_schema import LeadFields, Tables, TaskFields, TaskStatus  # noqa: E402
 from core import task_writer  # noqa: E402
 from core.action_gateway import (  # noqa: E402
-    CanonicalizationError, TaskCanonicalizationError, action_gateway, enforce_task_write_contract,
-    resolve_canonical_call,
+    ActionGateway, CanonicalizationError, ExecutionLedger, TaskCanonicalizationError,
+    action_gateway, complete_task_proposal, resolve_canonical_call,
 )
-from core.task_writer import (  # noqa: E402
-    ASK_TITLE_MESSAGE, TaskWriteRejected, prepare_task_create, prepare_task_update,
-)
+from core.task_writer import ASK_TITLE_MESSAGE, TaskWriteRejected, prepare_task_create, prepare_task_update  # noqa: E402
 from identity import Identity, Role  # noqa: E402
 
 passed = 0
@@ -61,7 +60,7 @@ def chk(desc: str, cond: bool) -> None:
         print(f"❌ {desc}")
 
 
-def rejected(fn, *args, **kwargs) -> TaskWriteRejected | None:
+def rejected(fn, *args, **kwargs):
     try:
         fn(*args, **kwargs)
     except TaskWriteRejected as exc:
@@ -69,131 +68,186 @@ def rejected(fn, *args, **kwargs) -> TaskWriteRejected | None:
     return None
 
 
-def canon_error(tool, inputs, user_text="", trusted_source="agent"):
-    try:
-        enforce_task_write_contract(*resolve_canonical_call(tool, inputs, user_text), trusted_source)
-    except CanonicalizationError as exc:
-        return exc
-    return None
+REC_LEAD = "recLEADAAAAAAAAAA"
+REC_CONTACT = "recCONTACTAAAAAAA"
+REC_MISSING = "recMISSINGAAAAAAA"
+LEAD_FIELDS = {LeadFields.NAME: "דני כהן", LeadFields.NEXT_STEP: "Call Back"}
+
+owner = Identity(
+    user_id="owner-golden-writer", role=Role.OWNER, display_name="owner-golden-writer",
+    tenant_id="boss_hq", domain_id="general", channel="telegram", external_id="owner-golden-writer",
+)
 
 
-REC_A = "recAAAAAAAAAAAAAA"
-REC_B = "recBBBBBBBBBBBBBB"
+def fake_fetch(records: dict):
+    calls = []
+
+    def _fetch(table, record_id):
+        calls.append((table, record_id))
+        return records.get((table, record_id))
+    _fetch.calls = calls
+    return _fetch
+
+
+def gate1(tool, inputs, *, user_text="", trusted_source="agent", records=None, names=None, identity=owner):
+    """resolve_canonical_call + complete_task_proposal with I/O faked."""
+    fetch = fake_fetch(records or {})
+    resolver = (lambda entity, name: (names or {}).get((entity, name), []))
+    with patch.object(gateway_module, "_fetch_task_link_record", fetch), \
+         patch.object(gateway_module, "_task_link_name_resolver", lambda ident: resolver if ident else None):
+        tool, payload = resolve_canonical_call(tool, inputs, user_text)
+        try:
+            out = complete_task_proposal(tool, payload, trusted_source=trusted_source,
+                                         identity=identity, user_text=user_text)
+        except CanonicalizationError as exc:
+            return exc, payload, fetch
+    return out, payload, fetch
+
 
 # ══════════════════════════════════════════════════
-print("\n[A] Golden Writer — title is the only required business field")
+print("\n[A] Golden Writer validation — Title non-empty after normalization, nothing else")
 # ══════════════════════════════════════════════════
 
-_BLANK_TITLES = {
-    "empty": "", "spaces": "   ", "tabs/newlines": "\t\n ", "nbsp": "  ",
-    "zero-width": "​‏", "None": None, "punctuation": "...", "emoji-only": "📞",
-    "dash": "—",
-}
-for label, value in _BLANK_TITLES.items():
+for label, value in {"empty": "", "spaces": "   ", "tabs/newlines": "\t\n ", "nbsp": "  ",
+                     "zero-width": "​‏﻿", "None": None, "number": 123, "list": ["x"]}.items():
     exc = rejected(prepare_task_create, {TaskFields.NAME: value})
-    chk(f"title {label!r} is rejected and asks only for the title",
+    chk(f"title {label!r} → rejected, asks only for the title",
         exc is not None and exc.missing == (TaskFields.NAME,) and exc.user_message == ASK_TITLE_MESSAGE)
+chk("missing title key → rejected (the live blank-row shape)",
+    rejected(prepare_task_create, {TaskFields.STATUS: TaskStatus.PENDING}) is not None)
+chk("empty / non-dict fields → rejected",
+    rejected(prepare_task_create, {}) is not None and rejected(prepare_task_create, None) is not None)
 
-exc = rejected(prepare_task_create, {TaskFields.STATUS: TaskStatus.PENDING, TaskFields.DESCRIPTION: "x"})
-chk("missing title key (only other fields) is rejected — the exact live blank-row shape",
-    exc is not None and exc.code == "title_missing")
-chk("empty fields dict is rejected", rejected(prepare_task_create, {}) is not None)
-chk("non-dict fields is rejected", rejected(prepare_task_create, ["x"]) is not None)
-for bad in (123, ["לקרוא לדני"], {"he": "x"}):
-    chk(f"non-text title {bad!r} is rejected",
-        getattr(rejected(prepare_task_create, {TaskFields.NAME: bad}), "code", "") == "title_invalid_type")
-
-for placeholder in ("משימה", "משימה חדשה", "Task", "NEW TASK", "null", "None", "N/A", "undefined", "TBD", "משימה.",
-                    "[משימה]", "> משימה", '"Task"', "to-do"):
-    chk(f"placeholder title {placeholder!r} (hallucination-prone LLM echo) is rejected",
-        getattr(rejected(prepare_task_create, {TaskFields.NAME: placeholder}), "code", "") == "title_placeholder")
-
-chk("over-long title is rejected, not truncated",
-    getattr(rejected(prepare_task_create, {TaskFields.NAME: "א" * 251}), "code", "") == "title_too_long")
+for value in ("...", "📞", "—", "משימה", "Task", "null", "N/A", "א" * 300):
+    chk(f"no new semantic restriction: {value[:12]!r} is a valid title",
+        prepare_task_create({TaskFields.NAME: value})[TaskFields.NAME] == value)
 
 out = prepare_task_create({TaskFields.NAME: "  ​לקרוא   לדני  "})
-chk("valid title is normalized (NFKC, zero-width removed, whitespace collapsed)",
-    out[TaskFields.NAME] == "לקרוא לדני")
-chk("Status is deterministically defaulted to ממתין", out[TaskFields.STATUS] == TaskStatus.PENDING)
-chk("nothing else is invented (no Owner/Due/Description/links)", set(out) == {TaskFields.NAME, TaskFields.STATUS})
-chk("a short real title such as 'CRM' is accepted", prepare_task_create({TaskFields.NAME: "CRM"})[TaskFields.NAME] == "CRM")
-chk("a title that merely contains the word משימה is accepted",
-    prepare_task_create({TaskFields.NAME: "משימה לדני — הצעת מחיר"})[TaskFields.NAME] == "משימה לדני — הצעת מחיר")
+chk("safe normalization only (NFKC, zero-width removed, whitespace collapsed)", out[TaskFields.NAME] == "לקרוא לדני")
+chk("no Status default is invented", TaskFields.STATUS not in out)
+raw = {TaskFields.NAME: "x", TaskFields.STATUS: "urgent", TaskFields.DUE_DATE: "tomorrow", "Priority": "high",
+       TaskFields.OWNER: ["recOWNERAAAAAAAAA"], "tenant_id": "boss_hq"}
+chk("optional/unknown fields pass through untouched (existing contracts own them)",
+    prepare_task_create(raw) == raw)
+chk("prepare(prepare(x)) == prepare(x)", prepare_task_create(prepare_task_create(raw)) == prepare_task_create(raw))
 
-print("\n[A] Golden Writer — optional fields")
-chk("Status alias 'done' → בוצע",
-    prepare_task_create({TaskFields.NAME: "x1", TaskFields.STATUS: "done"})[TaskFields.STATUS] == TaskStatus.DONE)
-chk("Status בביצוע kept", prepare_task_create({TaskFields.NAME: "x1", TaskFields.STATUS: "בביצוע"})[TaskFields.STATUS] == TaskStatus.IN_PROGRESS)
-chk("unknown Status is rejected, not guessed",
-    getattr(rejected(prepare_task_create, {TaskFields.NAME: "x1", TaskFields.STATUS: "urgent"}), "code", "") == "status_invalid")
-chk("valid due date kept",
-    prepare_task_create({TaskFields.NAME: "x1", TaskFields.DUE_DATE: "2026-10-01"})[TaskFields.DUE_DATE] == "2026-10-01")
-for bad_due in ("tomorrow", "מחר", "2026-02-31", "01/10/2026", "2026-10-01T10:00", 20261001):
-    chk(f"due date {bad_due!r} is rejected, never guessed",
-        getattr(rejected(prepare_task_create, {TaskFields.NAME: "x1", TaskFields.DUE_DATE: bad_due}), "code", "") == "due_date_invalid")
-out = prepare_task_create({TaskFields.NAME: "x1", TaskFields.DUE_DATE: "", TaskFields.DESCRIPTION: "  ", "tenant_id": "boss_hq"})
-chk("empty optional fields are dropped; tenant_id is ignored", set(out) == {TaskFields.NAME, TaskFields.STATUS})
-chk("unknown field is rejected (fail closed)",
-    getattr(rejected(prepare_task_create, {TaskFields.NAME: "x1", "Priority": "high"}), "code", "") == "field_unknown")
-out = prepare_task_create({"title": "לקרוא לדני", "due_date": "2026-10-01"})
-chk("English aliases title/due_date map deterministically to the Hebrew fields",
-    out[TaskFields.NAME] == "לקרוא לדני" and out[TaskFields.DUE_DATE] == "2026-10-01")
-chk("the same field under two names is rejected as ambiguous",
-    getattr(rejected(prepare_task_create, {"title": "a1", TaskFields.NAME: "b1"}), "code", "") == "field_ambiguous")
-
-print("\n[A] Golden Writer — record ids are never trusted from the Agent")
-for field in (TaskFields.OWNER, TaskFields.CONTACTS_LINK, TaskFields.DEALS_LINK, TaskFields.LEAD_LINK):
-    chk(f"Agent-supplied {field} is rejected",
-        getattr(rejected(prepare_task_create, {TaskFields.NAME: "x1", field: [REC_A]}, source="agent"), "code", "") == "link_untrusted")
-chk("unspecified source defaults to untrusted",
-    rejected(prepare_task_create, {TaskFields.NAME: "x1", TaskFields.OWNER: [REC_A]}) is not None)
-out = prepare_task_create({TaskFields.NAME: "x1", TaskFields.LEAD_LINK: REC_A}, source="interaction_engine_scheduler")
-chk("trusted internal source may link a well-formed record id (normalized to a list)", out[TaskFields.LEAD_LINK] == [REC_A])
-chk("trusted source with a malformed record id is still rejected",
-    getattr(rejected(prepare_task_create, {TaskFields.NAME: "x1", TaskFields.OWNER: ["Eli"]}, source="tma_api"), "code", "") == "link_invalid")
-
-print("\n[A] Golden Writer — idempotence + update")
-once = prepare_task_create({TaskFields.NAME: " לקרוא לדני ", TaskFields.STATUS: "pending", TaskFields.DUE_DATE: "2026-10-01"})
-chk("prepare(prepare(x)) == prepare(x)", prepare_task_create(once) == once)
-chk("update blanking the title is rejected", rejected(prepare_task_update, {TaskFields.NAME: "  "}) is not None)
-chk("update without a title key is allowed (status only)",
-    prepare_task_update({TaskFields.STATUS: "done"}) == {TaskFields.STATUS: TaskStatus.DONE})
-chk("update with an invalid due date is rejected", rejected(prepare_task_update, {TaskFields.DUE_DATE: "tomorrow"}) is not None)
+print("\n[A] UPDATE")
+chk("update not touching Title → valid, unchanged", prepare_task_update({TaskFields.STATUS: "done"}) == {TaskFields.STATUS: "done"})
+chk("update with empty fields → valid", prepare_task_update({}) == {})
+chk("update making Title empty → rejected", rejected(prepare_task_update, {TaskFields.NAME: "   "}) is not None)
+chk("update making Title zero-width only → rejected", rejected(prepare_task_update, {TaskFields.NAME: "​"}) is not None)
+chk("update with a real Title → normalized", prepare_task_update({TaskFields.NAME: " חדש "}) == {TaskFields.NAME: "חדש"})
 
 # ══════════════════════════════════════════════════
-print("\n[B] Gate 1 — proposal boundary (resolve_canonical_call + enforce_task_write_contract)")
+print("\n[B] resolver / verification — model-supplied references")
 # ══════════════════════════════════════════════════
 
-for row in ([""], ["   "], ["​"], ["משימה"], ["", "2026-10-01"]):
-    exc = canon_error("sheets_append", {"sheet_name": "Tasks", "row_data": row})
-    chk(f"ROOT CAUSE sheets_append row_data={row!r} → TaskCanonicalizationError asking for the title",
+fetch = fake_fetch({(Tables.LEADS, REC_LEAD): LEAD_FIELDS})
+fields, verified, omitted = task_writer.verify_task_links(
+    {TaskFields.NAME: "x", TaskFields.LEAD_LINK: [REC_LEAD]}, fetch_record=fetch)
+chk("existing rec id → kept as canonical id, record fields captured",
+    fields[TaskFields.LEAD_LINK] == [REC_LEAD] and verified[REC_LEAD] == LEAD_FIELDS and not omitted)
+fields, _, omitted = task_writer.verify_task_links(
+    {TaskFields.NAME: "x", TaskFields.LEAD_LINK: [REC_MISSING]}, fetch_record=fake_fetch({}))
+chk("non-existent (hallucinated) rec id → omitted, field removed, never passed through",
+    TaskFields.LEAD_LINK not in fields and omitted == [TaskFields.LEAD_LINK])
+fields, _, _ = task_writer.verify_task_links(
+    {TaskFields.LEAD_LINK: [REC_LEAD, REC_MISSING]}, fetch_record=fetch)
+chk("mixed list → only verified ids kept", fields[TaskFields.LEAD_LINK] == [REC_LEAD])
+chk("rec id looked up in the correct linked table", fetch.calls[0] == (Tables.LEADS, REC_LEAD))
+
+names = {("contact", "דני"): [REC_CONTACT], ("contact", "יוסי"): ["recA0000000000001", "recA0000000000002"]}
+resolver = lambda entity, name: names.get((entity, name), [])  # noqa: E731
+fields, _, omitted = task_writer.verify_task_links(
+    {TaskFields.CONTACTS_LINK: "דני"}, fetch_record=fake_fetch({}), resolve_name=resolver)
+chk("contact name with exactly one canonical match → canonical id", fields[TaskFields.CONTACTS_LINK] == [REC_CONTACT])
+fields, _, omitted = task_writer.verify_task_links(
+    {TaskFields.CONTACTS_LINK: "יוסי"}, fetch_record=fake_fetch({}), resolve_name=resolver)
+chk("ambiguous contact name → omitted (optional), never a guess",
+    TaskFields.CONTACTS_LINK not in fields and omitted == [TaskFields.CONTACTS_LINK])
+fields, _, _ = task_writer.verify_task_links(
+    {TaskFields.DEALS_LINK: "עסקה שלא קיימת"}, fetch_record=fake_fetch({}), resolve_name=resolver)
+chk("unknown deal name → omitted", TaskFields.DEALS_LINK not in fields)
+fields, _, _ = task_writer.verify_task_links(
+    {TaskFields.OWNER: "Eliyahu", TaskFields.LEAD_LINK: "דני"}, fetch_record=fake_fetch({}), resolve_name=resolver)
+chk("Owner / Lead by name (no canonical name resolver) → omitted",
+    TaskFields.OWNER not in fields and TaskFields.LEAD_LINK not in fields)
+fields, _, _ = task_writer.verify_task_links({TaskFields.CONTACTS_LINK: "דני"}, fetch_record=fake_fetch({}))
+chk("no resolver available (no identity) → name omitted", TaskFields.CONTACTS_LINK not in fields)
+
+# ══════════════════════════════════════════════════
+print("\n[C] Diamond completion — derive from trusted context, never invent")
+# ══════════════════════════════════════════════════
+
+chk("user's own text via the router's deterministic parser → title",
+    task_writer.title_from_user_text("צור משימה לקנות חלב") == ("לקנות חלב", None))
+title, due = task_writer.title_from_user_text("צור משימה לשלוח הצעת מחיר עד לתאריך 6/10/26")
+chk("…and the parser's due date is reused", title == "לשלוח הצעת מחיר" and due == "2026-10-06")
+chk("non-create text → nothing derived", task_writer.title_from_user_text("מה קורה עם דני?") == ("", None))
+chk("bare 'צור משימה' → nothing derived", task_writer.title_from_user_text("צור משימה") == ("", None))
+chk("Lead + actionable Next Action + known name → derived title",
+    task_writer.title_from_lead(LEAD_FIELDS) == "להתקשר בחזרה — דני כהן")
+chk("non-actionable Next Action (Waiting Response) → nothing derived",
+    task_writer.title_from_lead({LeadFields.NAME: "דני", LeadFields.NEXT_STEP: "Waiting Response"}) == "")
+chk("Next Action without a lead name → nothing derived",
+    task_writer.title_from_lead({LeadFields.NEXT_STEP: "Call Back"}) == "")
+chk("name without an action → nothing derived (a name is not a task)", task_writer.compose_title("", "דני") == "")
+import tma_api  # noqa: E402
+chk("actionable Next Action labels match the canonical TMA display labels",
+    all(tma_api._LEAD_NEXT_ACTION_OPTIONS[k][1] == v for k, v in task_writer.ACTIONABLE_LEAD_NEXT_ACTIONS.items()))
+
+# ══════════════════════════════════════════════════
+print("\n[D] Gate 1 — proposal boundary")
+# ══════════════════════════════════════════════════
+
+for row in ([""], ["   "], ["​"], ["", "2026-10-01"]):
+    exc, _, _ = gate1("sheets_append", {"sheet_name": "Tasks", "row_data": row})
+    chk(f"ROOT CAUSE sheets_append row_data={row!r}, no context → TaskCanonicalizationError asking for the title",
         isinstance(exc, TaskCanonicalizationError) and exc.missing == (TaskFields.NAME,)
         and exc.user_message == ASK_TITLE_MESSAGE)
 
-tool, payload = resolve_canonical_call("sheets_append", {"sheet_name": "Tasks", "row_data": ["לקרוא לדני", "2026-10-01"]})
-chk("valid sheets_append row still canonicalizes to airtable_add, payload NOT rewritten (fingerprint parity)",
-    tool == "airtable_add"
-    and payload == {"table": Tables.TASKS, "fields": {TaskFields.NAME: "לקרוא לדני", TaskFields.DUE_DATE: "2026-10-01"}})
+out, _, _ = gate1("sheets_append", {"sheet_name": "Tasks", "row_data": [""]}, user_text="צור משימה לקנות חלב")
+chk("Diamond: blank sheets_append + user's own create-task text → title derived instead of asking",
+    isinstance(out, dict) and out["fields"][TaskFields.NAME] == "לקנות חלב")
 
-for fields in ({TaskFields.NAME: ""}, {TaskFields.NAME: "   "}, {}, {TaskFields.STATUS: TaskStatus.PENDING}):
-    for table in ("Tasks", Tables.TASKS):
-        exc = canon_error("airtable_add", {"table": table, "fields": fields})
-        chk(f"generic airtable_add {table!r} fields={fields!r} → rejected before approval",
-            isinstance(exc, TaskCanonicalizationError))
+out, _, fetch = gate1("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "", TaskFields.LEAD_LINK: [REC_LEAD]}},
+                      records={(Tables.LEADS, REC_LEAD): LEAD_FIELDS})
+chk("Diamond: blank title + verified Lead (Call Back, דני כהן) → 'להתקשר בחזרה — דני כהן', link kept",
+    isinstance(out, dict) and out["fields"][TaskFields.NAME] == "להתקשר בחזרה — דני כהן"
+    and out["fields"][TaskFields.LEAD_LINK] == [REC_LEAD])
 
-chk("Agent airtable_add with a hallucinated Owner id → rejected",
-    isinstance(canon_error("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "x1", TaskFields.OWNER: [REC_A]}}),
-               TaskCanonicalizationError))
-chk("same Owner from a trusted internal source is accepted at the proposal boundary",
-    canon_error("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "x1", TaskFields.OWNER: [REC_A]}},
-                trusted_source="interaction_engine_scheduler") is None)
-chk("airtable_update blanking a Task title → rejected",
-    isinstance(canon_error("airtable_update", {"table": "Tasks", "record_id": REC_B, "fields": {TaskFields.NAME: ""}}),
-               TaskCanonicalizationError))
-chk("airtable_update status-only on Tasks is unaffected",
-    canon_error("airtable_update", {"table": "Tasks", "record_id": REC_B, "fields": {TaskFields.STATUS: "done"}}) is None)
-chk("non-Task tables are untouched by the Task writer",
-    canon_error("airtable_add", {"table": "Interaction Log", "fields": {"Summary": ""}}) is None)
+exc, _, _ = gate1("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "", TaskFields.LEAD_LINK: [REC_MISSING]}})
+chk("blank title + hallucinated Lead id → not trusted, nothing derived → ask for title",
+    isinstance(exc, TaskCanonicalizationError))
+exc, _, _ = gate1("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "", TaskFields.LEAD_LINK: [REC_LEAD]}},
+                  records={(Tables.LEADS, REC_LEAD): {LeadFields.NAME: "דני", LeadFields.NEXT_STEP: "Closed Won"}})
+chk("blank title + verified Lead with a non-actionable Next Action → ask (no invented action)",
+    isinstance(exc, TaskCanonicalizationError))
+exc, _, _ = gate1("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "", TaskFields.CONTACTS_LINK: "דני"}},
+                  names={("contact", "דני"): [REC_CONTACT]})
+chk("blank title + verified Contact name only → ask (a name alone is not a task)",
+    isinstance(exc, TaskCanonicalizationError))
+
+payload = {"table": "Tasks", "fields": {TaskFields.NAME: "לקרוא לדני", TaskFields.LEAD_LINK: [REC_MISSING]}}
+out, _, _ = gate1("airtable_add", payload)
+chk("valid title + hallucinated optional link → Task kept, link omitted (not failed)",
+    isinstance(out, dict) and out["fields"] == {TaskFields.NAME: "לקרוא לדני"})
+
+payload = {"table": "Tasks", "fields": {TaskFields.NAME: "לקרוא לדני", TaskFields.STATUS: "urgent", "Due": "היום"}}
+out, canonical, fetch = gate1("airtable_add", payload)
+chk("valid payload without links → the SAME object is returned (fingerprint untouched), no I/O",
+    out is canonical and fetch.calls == [])
+
+out, canonical, fetch = gate1("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "x", TaskFields.LEAD_LINK: [REC_LEAD]}},
+                              trusted_source="abandoned_lead_scheduler")
+chk("trusted internal source → its links are not re-resolved (existing behavior)", out is canonical and fetch.calls == [])
+
+exc, _, _ = gate1("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": {TaskFields.NAME: " "}})
+chk("UPDATE blanking a Title → rejected before approval", isinstance(exc, TaskCanonicalizationError))
+out, canonical, _ = gate1("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": {TaskFields.STATUS: "done"}})
+chk("UPDATE not touching Title → unchanged", out is canonical)
+out, canonical, _ = gate1("airtable_add", {"table": "Interaction Log", "fields": {"Summary": ""}})
+chk("non-Task tables untouched", out is canonical)
 
 with patch.object(action_gateway, "find_live_contracts", side_effect=AssertionError("must not be reached")):
     try:
@@ -205,36 +259,46 @@ with patch.object(action_gateway, "find_live_contracts", side_effect=AssertionEr
         raised = False
     except TaskCanonicalizationError:
         raised = True
-chk("propose_action (worker entry point) raises before any ledger/live-contract access", raised)
+chk("propose_action: underivable blank Title raises before any ledger/live-contract access", raised)
 
-# ══════════════════════════════════════════════════
-print("\n[C] Agent path — Diamond ask, no ActionContract attempted")
-# ══════════════════════════════════════════════════
-
-with patch.object(action_gateway, "propose_action", side_effect=AssertionError("must not propose")) as spy:
-    result = app._queue_approval_detailed(
-        "sheets_append", {"sheet_name": "Tasks", "row_data": [""]}, "chat-golden-1", "telegram", "צור משימה",
-    )
-chk("blank sheets_append from the Agent → ok=False, never queued",
-    result.get("ok") is False and result.get("terminal_outcome") == "APPROVAL_QUEUE_NEVER_ATTEMPTED"
-    and result.get("contract_id") is None and spy.call_count == 0)
-chk("…and the Agent is told to ask only for the missing title", result.get("message") == ASK_TITLE_MESSAGE)
-
-with patch.object(action_gateway, "propose_action", side_effect=AssertionError("must not propose")) as spy:
-    result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: " "}}, "chat-golden-2", "telegram", "",
-    )
-chk("blank generic airtable_add from the Agent → never queued, asks for the title",
-    result.get("ok") is False and spy.call_count == 0 and result.get("message") == ASK_TITLE_MESSAGE)
-
-# ══════════════════════════════════════════════════
-print("\n[D] Gate 2 — dispatcher execution boundary")
-# ══════════════════════════════════════════════════
-
-owner = Identity(
-    user_id="owner-golden-writer", role=Role.OWNER, display_name="owner-golden-writer",
-    tenant_id="boss_hq", domain_id="general", channel="telegram", external_id="owner-golden-writer",
+gw = ActionGateway(ledger=ExecutionLedger())
+result = gw.propose_action(
+    tenant_id="boss_hq", canonical_user_id="boss_hq:golden", tool_name="airtable_add",
+    tool_inputs={"table": "Tasks", "fields": {TaskFields.NAME: ""}},
+    origin_channel="telegram", origin_chat_id="golden", requires_approval=True,
+    trusted_source="test_harness", user_text="צור משימה לקנות חלב",
+    fingerprint_payload={"table": "Tasks", "fields": {TaskFields.NAME: ""}},
 )
+stored = gw.find_contract(result.contract_id) if result.ok else None
+chk("propose_action: Diamond-completed title is what the contract stores (the owner approves what is written)",
+    stored is not None and stored.normalized_payload["fields"][TaskFields.NAME] == "לקנות חלב")
+
+# ══════════════════════════════════════════════════
+print("\n[E] caller UX — Agent path")
+# ══════════════════════════════════════════════════
+
+with patch.object(action_gateway, "propose_action", side_effect=AssertionError("must not propose")) as spy:
+    result = app._queue_approval_detailed(
+        "sheets_append", {"sheet_name": "Tasks", "row_data": [""]}, "chat-golden-1", "telegram", "תעשה משהו",
+    )
+chk("underivable blank Task → never queued (NEVER_ATTEMPTED), Agent asked for the title only",
+    result.get("ok") is False and result.get("terminal_outcome") == "APPROVAL_QUEUE_NEVER_ATTEMPTED"
+    and result.get("contract_id") is None and spy.call_count == 0 and result.get("message") == ASK_TITLE_MESSAGE)
+
+with patch.object(action_gateway, "propose_action", side_effect=RuntimeError("captured")) as spy:
+    app._queue_approval_detailed(
+        "sheets_append", {"sheet_name": "Tasks", "row_data": [""]}, "chat-golden-2", "telegram", "צור משימה לקנות חלב",
+        fingerprint_payload={"table": "Tasks", "fields": {TaskFields.NAME: ""}},
+    )
+kwargs = spy.call_args.kwargs if spy.call_args else {}
+chk("Diamond-completed Task reaches propose_action with the derived title (no question asked)",
+    kwargs.get("tool_inputs", {}).get("fields", {}).get(TaskFields.NAME) == "לקנות חלב")
+chk("…and the stale caller fingerprint_payload is dropped (fingerprint = what is dispatched)",
+    kwargs.get("fingerprint_payload") is None)
+
+# ══════════════════════════════════════════════════
+print("\n[F] Gate 2 — dispatcher persistence boundary")
+# ══════════════════════════════════════════════════
 
 
 def _dispatch(name, inputs, trusted_source="agent"):
@@ -246,92 +310,78 @@ def _dispatch(name, inputs, trusted_source="agent"):
         )
 
 
-_ok_write = {"ok": True, "tool": "airtable_add", "external_id": "recCCCCCCCCCCCCCC",
-             "evidence": {"record_id": "recCCCCCCCCCCCCCC"}, "user_message": "ok"}
+_ok = {"ok": True, "tool": "airtable_add", "external_id": "recCCCCCCCCCCCCCC",
+       "evidence": {"record_id": "recCCCCCCCCCCCCCC"}, "user_message": "ok"}
 
-for fields in ({TaskFields.NAME: ""}, {TaskFields.NAME: "   "}, {TaskFields.STATUS: TaskStatus.DONE}, {TaskFields.NAME: "Task"}):
-    with patch.object(dispatcher_module, "airtable_add", return_value=_ok_write) as write, \
+for fields in ({TaskFields.NAME: ""}, {TaskFields.NAME: "   "}, {TaskFields.STATUS: TaskStatus.DONE}):
+    with patch.object(dispatcher_module, "airtable_add", return_value=_ok) as write, \
          patch.object(dispatcher_module, "_check_duplicate", return_value=None):
         result = _dispatch("airtable_add", {"table": "Tasks", "fields": fields})
-    chk(f"stored/legacy contract with fields={fields!r} never reaches Airtable",
+    chk(f"stored/legacy contract fields={fields!r} never reaches Airtable",
         write.call_count == 0 and isinstance(result, dict) and result.get("ok") is False
         and result.get("user_message") == ASK_TITLE_MESSAGE)
 
-with patch.object(dispatcher_module, "airtable_add", return_value=_ok_write) as write, \
+with patch.object(dispatcher_module, "airtable_add", return_value=_ok) as write, \
      patch.object(dispatcher_module, "_check_duplicate", return_value=None) as dedup:
-    result = _dispatch("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "  לקרוא לדני ", "due_date": "2026-10-01"}})
-chk("valid Task is written once", write.call_count == 1 and result.get("ok") is True)
-chk("written fields are the Golden Writer's normalized output (title trimmed, Status defaulted, alias mapped)",
-    write.call_args.args[1] == {TaskFields.NAME: "לקרוא לדני", TaskFields.STATUS: TaskStatus.PENDING,
-                                TaskFields.DUE_DATE: "2026-10-01"})
+    result = _dispatch("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "  לקרוא לדני ", TaskFields.DUE_DATE: "2026-10-01"}})
+chk("valid Task written once", write.call_count == 1 and result.get("ok") is True)
+chk("written fields: normalized title, every other field untouched (no Status invented)",
+    write.call_args.args[1] == {TaskFields.NAME: "לקרוא לדני", TaskFields.DUE_DATE: "2026-10-01"})
 chk("dedup still runs, on the normalized title", dedup.call_args.args[2] == "לקרוא לדני")
 
-with patch.object(dispatcher_module, "airtable_add", return_value=_ok_write) as write, \
-     patch.object(dispatcher_module, "_check_duplicate", return_value=None):
-    result = _dispatch("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "x1", TaskFields.LEAD_LINK: [REC_A]}})
-chk("Agent-sourced Lead link is refused at execution time too", write.call_count == 0 and result.get("ok") is False)
-
-with patch.object(dispatcher_module, "airtable_add", return_value=_ok_write) as write, \
-     patch.object(dispatcher_module, "_check_duplicate", return_value=None):
-    _dispatch("airtable_add", {"table": "Tasks", "fields": {TaskFields.NAME: "x1", TaskFields.LEAD_LINK: [REC_A]}},
-              trusted_source="abandoned_lead_scheduler")
-chk("trusted scheduler source may carry a well-formed Lead link", write.call_count == 1)
-
-with patch.object(dispatcher_module, "airtable_update", return_value=_ok_write) as upd:
-    result = _dispatch("airtable_update", {"table": "Tasks", "record_id": REC_B, "fields": {TaskFields.NAME: " "}})
-chk("airtable_update cannot blank an existing Task title", upd.call_count == 0 and result.get("ok") is False)
-
-with patch.object(dispatcher_module, "airtable_update", return_value=_ok_write) as upd:
-    _dispatch("airtable_update", {"table": "Tasks", "record_id": REC_B, "fields": {TaskFields.STATUS: "done"}})
-chk("status update still written (alias normalized to בוצע)",
+with patch.object(dispatcher_module, "airtable_update", return_value=_ok) as upd:
+    result = _dispatch("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": {TaskFields.NAME: " "}})
+chk("UPDATE cannot blank an existing Task title", upd.call_count == 0 and result.get("ok") is False)
+with patch.object(dispatcher_module, "airtable_update", return_value=_ok) as upd:
+    _dispatch("airtable_update", {"table": "Tasks", "record_id": REC_LEAD, "fields": {TaskFields.STATUS: TaskStatus.DONE}})
+chk("UPDATE not touching Title written unchanged",
     upd.call_count == 1 and upd.call_args.args[2] == {TaskFields.STATUS: TaskStatus.DONE})
 
 # ══════════════════════════════════════════════════
-print("\n[E] interaction_engine — automatic Tasks need a real title")
+print("\n[G] interaction_engine")
 # ══════════════════════════════════════════════════
 
 import interaction_engine  # noqa: E402
 
 analysis = interaction_engine.InteractionAnalysis(tasks=[
-    {"title": ""}, {"title": "   "}, {"title": "משימה"}, {"owner": "דני"}, "not-a-dict", None,
+    {"title": ""}, {"title": "  ​"}, {"owner": "דני"}, "not-a-dict", None,
+    {"title": "משימה"},
     {"title": "לשלוח הצעת מחיר לדני", "due": "tomorrow"},
     {"title": "לתאם פגישה", "due": "2026-10-05"},
 ])
 interaction = interaction_engine.InteractionSchema(source_channel="email", raw_id="r1", title="שיחה עם דני")
-proposal = MagicMock(ok=False, contract_id="", reason="spy")
-with patch.object(action_gateway, "propose_action", return_value=proposal) as spy:
+with patch.object(action_gateway, "propose_action", return_value=MagicMock(ok=False, contract_id="", reason="spy")) as spy:
     interaction_engine.create_tasks_from_analysis(analysis, interaction)
-titles = [c.kwargs["tool_inputs"]["fields"][TaskFields.NAME] for c in spy.call_args_list]
-chk("only the two LLM tasks with real titles are proposed", titles == ["לשלוח הצעת מחיר לדני", "לתאם פגישה"])
-chk("an invalid LLM due date is dropped (optional), not guessed",
-    TaskFields.DUE_DATE not in spy.call_args_list[0].kwargs["tool_inputs"]["fields"])
-chk("a valid LLM due date is kept",
-    spy.call_args_list[1].kwargs["tool_inputs"]["fields"].get(TaskFields.DUE_DATE) == "2026-10-05")
-chk("every proposed payload passes the Golden Writer",
-    all(task_writer.prepare_task_create(c.kwargs["tool_inputs"]["fields"], source=c.kwargs["trusted_source"])
-        for c in spy.call_args_list))
+calls = [c.kwargs["tool_inputs"]["fields"] for c in spy.call_args_list]
+chk("items with a non-empty title are proposed (no placeholder blacklist); blank/untitled items are not",
+    [f[TaskFields.NAME] for f in calls] == ["משימה", "לשלוח הצעת מחיר לדני", "לתאם פגישה"])
+chk("invalid model-derived due date is omitted, the Task still created", TaskFields.DUE_DATE not in calls[1])
+chk("valid due date kept", calls[2].get(TaskFields.DUE_DATE) == "2026-10-05")
+chk("worker's existing Status default is preserved", all(f[TaskFields.STATUS] == TaskStatus.PENDING for f in calls))
 
 # ══════════════════════════════════════════════════
-print("\n[F] abandoned_lead_worker — title derived from the lead, else no task")
+print("\n[H] abandoned_lead_worker")
 # ══════════════════════════════════════════════════
 
 import abandoned_lead_worker as alw  # noqa: E402
 
 
-def _lead(sender):
-    return alw.AbandonedLead(sender=sender, channel="voice", domain="general", step=2, total_steps=4, minutes_silent=30)
+def _lead(sender, answers=None):
+    return alw.AbandonedLead(sender=sender, channel="voice", domain="general", step=2, total_steps=4,
+                             minutes_silent=30, answers=answers or {})
 
 
-for sender in ("", "   ", None):
-    with patch.object(action_gateway, "propose_action", side_effect=AssertionError("must not propose")) as spy:
-        ok = alw.create_human_pipeline_task(_lead(sender), owner_chat_id="1")
-    chk(f"sender={sender!r} → no task created", ok is False and spy.call_count == 0)
+def _title_for(lead):
+    with patch.object(action_gateway, "propose_action", return_value=MagicMock(ok=False, contract_id="", reason="spy")) as spy:
+        ok = alw.create_human_pipeline_task(lead, owner_chat_id="1")
+    return ok, (spy.call_args.kwargs["tool_inputs"]["fields"][TaskFields.NAME] if spy.call_args else None)
 
-with patch.object(action_gateway, "propose_action", return_value=MagicMock(ok=False, contract_id="", reason="spy")) as spy:
-    alw.create_human_pipeline_task(_lead(" 0501234567 "), owner_chat_id="1")
-fields = spy.call_args.kwargs["tool_inputs"]["fields"]
-chk("identifiable sender → task title derived from it", fields[TaskFields.NAME] == "📞 ליד נטוש — 0501234567")
-chk("…and it passes the Golden Writer", bool(task_writer.prepare_task_create(fields, source="abandoned_lead_scheduler")))
+
+chk("sender present → existing template unchanged", _title_for(_lead("0501234567"))[1] == "📞 ליד נטוש — 0501234567")
+chk("no sender but the lead's own name in its answers → derived from it (not skipped)",
+    _title_for(_lead("", {"name": "דני"}))[1] == "📞 ליד נטוש — דני")
+ok, title = _title_for(_lead("  ", {"budget": "2M"}))
+chk("no sender and no lead name → skipped (nothing identifies the lead)", ok is False and title is None)
 
 
 print(f"\n{'=' * 60}")
