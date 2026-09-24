@@ -395,7 +395,19 @@ def create_tasks_from_analysis(
             channel="scheduler",
             external_id="interaction_engine_scheduler",
         )
+        from core.task_writer import TaskWriteRejected, normalize_due_date, normalize_task_title
         for task in analysis.tasks:
+            # Task Golden Writer: analysis.tasks הוא JSON חופשי מה-LLM. משימה
+            # אוטומטית נוצרת רק אם יש לה כותרת-פעולה אמיתית; אחרת לא יוצרים
+            # (לעולם לא ממציאים כותרת). תאריך יעד פגום (אופציונלי) מושמט.
+            if not isinstance(task, dict):
+                logger.warning("[Interaction] skipping non-object task item: %r", task)
+                continue
+            try:
+                task_title = normalize_task_title(task.get("title"))
+            except TaskWriteRejected as exc:
+                logger.warning("[Interaction] skipping task without a meaningful title: %s", exc)
+                continue
             priority = "high" if analysis.sentiment == "negative" else "medium"
             stable_description = (
                 f"מקור: {interaction.source_channel} — {interaction.title}\n"
@@ -421,12 +433,15 @@ def create_tasks_from_analysis(
             # because it's never dispatched either, not because a second
             # fingerprint object tries to hide it after the fact).
             fields = {
-                TaskFields.NAME:        task.get("title", ""),
+                TaskFields.NAME:        task_title,
                 TaskFields.STATUS:      TaskStatus.PENDING,
                 TaskFields.DESCRIPTION: stable_description,
             }
             if task.get("due"):
-                fields[TaskFields.DUE_DATE] = task.get("due", "")
+                try:
+                    fields[TaskFields.DUE_DATE] = normalize_due_date(task.get("due"))
+                except TaskWriteRejected as exc:
+                    logger.warning("[Interaction] dropping invalid LLM due date: %s", exc)
 
             proposal = action_gateway.propose_action(
                 tenant_id=tenant_id,

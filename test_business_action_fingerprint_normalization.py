@@ -20,7 +20,7 @@ def _propose(gateway: ActionGateway, title: str, fingerprint_payload: dict | Non
         tenant_id="boss_hq",
         canonical_user_id="boss_hq:fingerprint-test",
         tool_name="airtable_add",
-        tool_inputs={"table": "Tasks", "fields": {"name": title}},
+        tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": title}},
         origin_channel="telegram",
         origin_chat_id="fingerprint-test",
         requires_approval=True,

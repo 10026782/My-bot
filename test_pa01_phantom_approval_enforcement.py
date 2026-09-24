@@ -378,7 +378,7 @@ with patch.object(app, "enforce", side_effect=ToolDenied(_tool_denied_msg)):
         allowed_tool_names=("airtable_add",),
         anthropic_responses=[
             _tool_use_response([{"name": "airtable_add",
-                                  "input": {"table": "Tasks", "fields": {"Task": "בדיקה"}}}]),
+                                  "input": {"table": "Tasks", "fields": {"כותרת המשימה": "בדיקה"}}}]),
             _text_response("לא הצלחתי להוסיף את המשימה"),
         ],
         pa01_state="enforce",
@@ -424,7 +424,7 @@ with patch.object(app, "_queue_approval_detailed", return_value={
         allowed_tool_names=("airtable_add",),
         anthropic_responses=[
             _tool_use_response([{"name": "airtable_add",
-                                  "input": {"table": "Tasks", "fields": {"Task": "בדיקה"}}}]),
+                                  "input": {"table": "Tasks", "fields": {"כותרת המשימה": "בדיקה"}}}]),
             _text_response("זה כבר בטיפול"),
         ],
         pa01_state="enforce",
@@ -448,7 +448,7 @@ with patch.object(app, "_queue_approval_detailed", return_value={
         allowed_tool_names=("airtable_add",),
         anthropic_responses=[
             _tool_use_response([{"name": "airtable_add",
-                                  "input": {"table": "Tasks", "fields": {"Task": "בדיקה"}}}]),
+                                  "input": {"table": "Tasks", "fields": {"כותרת המשימה": "בדיקה"}}}]),
             _text_response(_gw_reply_correct),
         ],
         pa01_state="enforce",
@@ -504,7 +504,7 @@ reply_j2_1, _ = _run_agent(
     allowed_tool_names=("airtable_add",),
     anthropic_responses=[
         _tool_use_response([{"name": "airtable_add",
-                              "input": {"table": "Tasks", "fields": {"Task": "בדיקה קנונית 1"}}}]),
+                              "input": {"table": "Tasks", "fields": {"כותרת המשימה": "בדיקה קנונית 1"}}}]),
         _text_response(_gw_echo_1),
     ],
     pa01_state="enforce",
@@ -595,7 +595,7 @@ chk("...but NOT for an unrelated expected tool (e.g. calendar_create_event)",
 # J2.5 — backward compatibility: _queue_approval() (the string-returning
 # wrapper) is unaffected by the action_tool addition.
 _wrapper_reply = app._queue_approval(
-    "airtable_add", {"table": "Tasks", "fields": {"Task": "wrapper בדיקה"}},
+    "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "wrapper בדיקה"}},
     "canon_wrapper", "telegram", "צור לי משימה",
 )
 chk("J2.5: _queue_approval() still returns a plain string",
@@ -678,7 +678,7 @@ with patch.object(app, "_queue_approval_detailed", return_value={
         allowed_tool_names=("airtable_add",),
         anthropic_responses=[
             _tool_use_response([{"name": "airtable_add",
-                                  "input": {"table": "Tasks", "fields": {"Task": "R1"}}}]),
+                                  "input": {"table": "Tasks", "fields": {"כותרת המשימה": "R1"}}}]),
             _text_response("איזה כיף, זה כבר בטיפול"),
         ],
         pa01_state="enforce",
@@ -701,7 +701,7 @@ with patch("feature_flags.is_enabled", return_value=False), \
          failure_code="persistence_failed",
      )):
     _r2_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "R2"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "R2"}},
         "r2_shadow_fail", "telegram", "צור לי משימה",
     )
 chk("R2 (unit): shadow proposal failure -> ok=False, contract_id=None, "
@@ -719,7 +719,7 @@ with patch.object(app, "_queue_approval_detailed", return_value=_r2_result):
         allowed_tool_names=("airtable_add",),
         anthropic_responses=[
             _tool_use_response([{"name": "airtable_add",
-                                  "input": {"table": "Tasks", "fields": {"Task": "R2b"}}}]),
+                                  "input": {"table": "Tasks", "fields": {"כותרת המשימה": "R2b"}}}]),
             _text_response("מעולה, זה ממתין לאישור"),
         ],
         pa01_state="enforce",
@@ -762,7 +762,7 @@ with patch.object(app, "enforce", side_effect=lambda name, ident: (
         anthropic_responses=[
             _tool_use_response([
                 {"name": "gmail_send_draft", "input": {"to": "x@y.com", "body": "..."}},
-                {"name": "airtable_add", "input": {"table": "Tasks", "fields": {"Task": "R3"}}},
+                {"name": "airtable_add", "input": {"table": "Tasks", "fields": {"כותרת המשימה": "R3"}}},
             ]),
             _text_response("סיימתי, שלח מאשר להוספה"),
         ],
@@ -812,7 +812,7 @@ from event_bus import bus as _real_bus, pending as _real_pending, batch_queue as
 with patch("feature_flags.is_enabled", return_value=False), \
      patch.object(_canon_gw, "propose_action", side_effect=RuntimeError("boom")):
     _r2real_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "R2real"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "R2real"}},
         "r2real_exc", "telegram", "צור לי משימה",
     )
 chk("P1-A / R2-real: propose_action() raising a real exception -> no ActionContract exists "
@@ -836,7 +836,7 @@ with patch.object(app, "_queue_approval_detailed", return_value=_r2real_result):
         allowed_tool_names=("airtable_add",),
         anthropic_responses=[
             _tool_use_response([{"name": "airtable_add",
-                                  "input": {"table": "Tasks", "fields": {"Task": "R2real-b"}}}]),
+                                  "input": {"table": "Tasks", "fields": {"כותרת המשימה": "R2real-b"}}}]),
             _text_response("מעולה, זה ממתין לאישור"),
         ],
         pa01_state="enforce",
@@ -855,7 +855,7 @@ try:
     with patch("feature_flags.is_enabled", return_value=False), \
          patch.object(_canon_gw, "propose_action", side_effect=RuntimeError("boom")):
         _r2real_off_result = app._queue_approval_detailed(
-            "airtable_add", {"table": "Tasks", "fields": {"Task": "R2real-off"}},
+            "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "R2real-off"}},
             "r2real_off", "telegram", "צור לי משימה",
         )
 finally:
@@ -878,7 +878,7 @@ chk("P1-A / R2-real: PA-01 state=off (unset) -> identical safe return contract -
 with patch("feature_flags.is_enabled", return_value=True), \
      patch.object(_canon_gw, "propose_action", side_effect=RuntimeError("boom")):
     _r2real_enforce_gw_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "R2real-enforce-gw"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "R2real-enforce-gw"}},
         "r2real_enforce_gw", "telegram", "צור לי משימה",
     )
 chk("P1-A / R2-real: FEATURE_ACTION_GATEWAY=True (Gateway enforce mode) -- already safe for "
@@ -895,7 +895,7 @@ chk("...and no EventBus pending representation was created for this identity eit
 # requires_approval=True, so the BUG-149 pre-scan now fires first -- zero
 # contracts for either tool, not "the first mutating call wins". Updated to
 # assert the new, approved behavior.
-_r3real_inputs = {"table": "Tasks", "fields": {"Task": "P1B"}}
+_r3real_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "P1B"}}
 
 reply_r3real, _ = _run_agent(
     "r3real_mixed_batch", "קבע לי פגישה וגם צור משימה", role=Role.OWNER,
@@ -997,7 +997,7 @@ try:
     with patch("feature_flags.is_enabled", return_value=False), \
          patch.object(app, "bot", _mock_bot_r4b):
         _r4b_result = app._queue_approval_detailed(
-            "airtable_add", {"table": "Tasks", "fields": {"Task": "R4b"}},
+            "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "R4b"}},
             "r4b_notify_fail", "telegram", "צור לי משימה",
         )
 finally:
@@ -1061,7 +1061,7 @@ def _raise_after_persist(msg, *args, **kwargs):
 with patch("feature_flags.is_enabled", return_value=False), \
      patch.object(_action_gateway_module.logger, "info", side_effect=_raise_after_persist):
     _p2_1_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-1-shadow"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "P2-1-shadow"}},
         "p2_1_shadow_after_persist", "telegram", "צור לי משימה",
     )
 _p2_1_live = _canon_gw.find_live_contracts("boss_hq:p2_1_shadow_after_persist")
@@ -1080,7 +1080,7 @@ chk("P2-1 (shadow mode): return is the conservative ORPHANED state -- contract_i
 with patch("feature_flags.is_enabled", return_value=True), \
      patch.object(_action_gateway_module.logger, "info", side_effect=_raise_after_persist):
     _p2_1_enforce_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-1-enforce"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "P2-1-enforce"}},
         "p2_1_enforce_after_persist", "telegram", "צור לי משימה",
     )
 _p2_1_enforce_live = _canon_gw.find_live_contracts("boss_hq:p2_1_enforce_after_persist")
@@ -1102,7 +1102,7 @@ with patch("feature_flags.is_enabled", return_value=False), \
      patch.object(_canon_gw._ledger, "update_status",
                    side_effect=ActionContractTransitionError("simulated durable transition failure")):
     _p2_2_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-2"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "P2-2"}},
         "p2_2_durable_reject_fail", "telegram", "צור לי משימה",
     )
 _p2_2_live = _canon_gw.find_live_contracts("boss_hq:p2_2_durable_reject_fail")
@@ -1129,7 +1129,7 @@ try:
          patch.object(app, "bot", _mock_bot_p23), \
          patch.object(_real_pending, "cancel", side_effect=RuntimeError("eventbus cancel broken")):
         _p2_3_result = app._queue_approval_detailed(
-            "airtable_add", {"table": "Tasks", "fields": {"Task": "P2-3"}},
+            "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "P2-3"}},
             "p2_3_pending_cancel_fail", "telegram", "צור לי משימה",
         )
 finally:
@@ -1183,7 +1183,7 @@ chk("P1-2 (Codex re-audit of 818c8a6, refined by PR Hotfix A): the outer wrapper
 
 with patch("core.action_gateway.resolve_canonical_tool", side_effect=RuntimeError("canonicalization itself broke")):
     _p2_4b_result = app._queue_approval_detailed(
-        "sheets_append", {"table": "Tasks", "fields": {"Task": "P2-4b"}},
+        "sheets_append", {"table": "Tasks", "fields": {"כותרת המשימה": "P2-4b"}},
         "p2_4b_canonicalization_itself_fails", "telegram", "צור לי משימה",
     )
 chk("P2-4b: when canonicalization ITSELF is what fails (the one case where 'canonical' "
@@ -1212,7 +1212,7 @@ chk("P1-2: no fingerprint lookup is attempted when canonicalization itself fails
 # with an unattributed exception. Must be left completely untouched.
 _p3_1_preexisting = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p3_preexisting", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "pre-existing"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "pre-existing"}},
     origin_channel="telegram", origin_chat_id="p3_preexisting", requires_approval=True,
     identity=Identity(user_id="p3_preexisting", role=Role.OWNER), user_text="",
 )
@@ -1222,7 +1222,7 @@ with patch("feature_flags.is_enabled", return_value=False), \
      patch.object(_canon_gw, "propose_action",
                    side_effect=RuntimeError("our own call crashes, same fingerprint")):
     _p3_1_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "pre-existing"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "pre-existing"}},
         "p3_preexisting", "telegram", "",
     )
 chk("P3-1: a pre-existing same-fingerprint contract is left COMPLETELY UNTOUCHED (still "
@@ -1245,12 +1245,12 @@ with patch("feature_flags.is_enabled", return_value=False), \
                    side_effect=RuntimeError("our own call crashes; a concurrent turn will "
                                              "create the real contract for this fingerprint")):
     _p3_2_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "concurrent"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "concurrent"}},
         "p3_concurrent", "telegram", "",
     )
 _p3_2_concurrent = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p3_concurrent", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "concurrent"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "concurrent"}},
     origin_channel="telegram", origin_chat_id="p3_concurrent", requires_approval=True,
     identity=Identity(user_id="p3_concurrent", role=Role.OWNER), user_text="",
 )
@@ -1269,13 +1269,13 @@ chk("P3-2: our failed call's own return never attributes the concurrent contract
 # same-fingerprint contract either.
 _p3_3_preexisting = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p3_before_propose", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "before-propose"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "before-propose"}},
     origin_channel="telegram", origin_chat_id="p3_before_propose", requires_approval=True,
     identity=Identity(user_id="p3_before_propose", role=Role.OWNER), user_text="",
 )
 with patch.object(_real_eac, "compute", side_effect=RuntimeError("cache compute broken")):
     _p3_3_result = app._queue_approval_detailed(
-        "airtable_add", {"table": "Tasks", "fields": {"Task": "before-propose"}},
+        "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "before-propose"}},
         "p3_before_propose", "telegram", "",
     )
 chk("P3-3: a failure before propose_action() is ever reached does not touch the "
@@ -1293,7 +1293,7 @@ chk("P3-3: return is the conservative ORPHANED state",
 # pre-existing contract is genuinely raw-tool-named.
 _p3_4_preexisting = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p3_canon_fail", tool_name="sheets_append",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "raw-tool"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "raw-tool"}},
     origin_channel="telegram", origin_chat_id="p3_canon_fail", requires_approval=True,
     identity=Identity(user_id="p3_canon_fail", role=Role.OWNER),
     user_text="תוסיף את זה לגיליון בבקשה",
@@ -1305,7 +1305,7 @@ assert _canon_gw.find_contract(_p3_4_preexisting.contract_id).tool_name == "shee
 with patch("core.action_gateway.resolve_canonical_tool",
            side_effect=RuntimeError("canonicalization broke")):
     _p3_4_result = app._queue_approval_detailed(
-        "sheets_append", {"table": "Tasks", "fields": {"Task": "raw-tool"}},
+        "sheets_append", {"table": "Tasks", "fields": {"כותרת המשימה": "raw-tool"}},
         "p3_canon_fail", "telegram", "",
     )
 chk("P3-4: canonicalization failure does not touch a pre-existing raw-tool-named contract",
@@ -1326,7 +1326,7 @@ chk("P3-4: action_tool falls back to the raw tool name for telemetry only; no lo
 # report success, and must not disturb the concurrently-approved contract.
 _p3_6_owned = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p3_race", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "race"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "race"}},
     origin_channel="telegram", origin_chat_id="p3_race", requires_approval=True,
     identity=Identity(user_id="p3_race", role=Role.OWNER), user_text="",
 )
@@ -1351,7 +1351,7 @@ chk("P3-6: the concurrently-approved contract is undisturbed -- our reject() att
 # "rejected" IS reported as a successful, verified cleanup.
 _p3_7_owned = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p3_success", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "success"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "success"}},
     origin_channel="telegram", origin_chat_id="p3_success", requires_approval=True,
     identity=Identity(user_id="p3_success", role=Role.OWNER), user_text="",
 )
@@ -1390,7 +1390,7 @@ chk("P3-7: the contract's exact status is confirmed 'rejected' via the authorita
 
 _p4_owned = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p4_race", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "race-window"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "race-window"}},
     origin_channel="telegram", origin_chat_id="p4_race", requires_approval=True,
     identity=Identity(user_id="p4_race", role=Role.OWNER), user_text="",
 )
@@ -1432,7 +1432,7 @@ chk("P4 (TOCTOU race): cleanup does NOT report success for the raced-approval co
 # True (transitioning to 'rejected') only from a genuine pending state.
 _p4_np = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p4_nonpending", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "non-pending"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "non-pending"}},
     origin_channel="telegram", origin_chat_id="p4_nonpending", requires_approval=True,
     identity=Identity(user_id="p4_nonpending", role=Role.OWNER), user_text="",
 )
@@ -1444,7 +1444,7 @@ chk("P4 (unit): reject_if_pending() returns False on an already-approved contrac
 
 _p4_p = _canon_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:p4_pending", tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "pending-ok"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "pending-ok"}},
     origin_channel="telegram", origin_chat_id="p4_pending", requires_approval=True,
     identity=Identity(user_id="p4_pending", role=Role.OWNER), user_text="",
 )
@@ -1518,7 +1518,7 @@ class _NoCASRepo:
 def _d_propose(gw, uid, chat, task):
     r = gw.propose_action(
         tenant_id="boss_hq", canonical_user_id=uid, tool_name="airtable_add",
-        tool_inputs={"table": "Tasks", "fields": {"Task": task}},
+        tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": task}},
         origin_channel="telegram", origin_chat_id=chat, requires_approval=True,
         identity=Identity(user_id=chat, role=Role.OWNER), user_text="",
     )
@@ -1608,7 +1608,7 @@ try:
     with patch("feature_flags.is_enabled", return_value=False), \
          patch.object(app, "bot", _d5_bot):
         _d5_result = app._queue_approval_detailed(
-            "airtable_add", {"table": "Tasks", "fields": {"Task": "d5-durable"}},
+            "airtable_add", {"table": "Tasks", "fields": {"כותרת המשימה": "d5-durable"}},
             "d5_durable", "telegram", "צור לי משימה",
         )
 finally:
@@ -1650,7 +1650,7 @@ from core.action_gateway import action_gateway as _real_gw  # noqa: E402
 _prior_identity = Identity(user_id="prior_turn_user", role=Role.OWNER)
 _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=_prior_identity.memory_key,
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"Task": "משהו ישן"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "משהו ישן"}},
     origin_channel="telegram", origin_chat_id="prior_turn_user",
     requires_approval=True, identity=_prior_identity, user_text="צור משימה ישנה",
 )

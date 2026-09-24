@@ -173,7 +173,7 @@ chk("Sessions remains exactly 1 read per turn (LL-11 untouched by this fix)",
 
 _mutating_responses = [
     _fake_anthropic_response(
-        "", tool_use={"name": "airtable_add", "input": {"table": "Tasks", "fields": {"Task": "בדיקה"}}},
+        "", tool_use={"name": "airtable_add", "input": {"table": "Tasks", "fields": {"כותרת המשימה": "בדיקה"}}},
     ),
     _fake_anthropic_response("בסדר, זה ממתין לאישור שלך."),
 ]

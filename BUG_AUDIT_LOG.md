@@ -6979,3 +6979,17 @@ timestamps, methods, scope, and results are recorded in
 - **Deployed:** לא.
 - **Verified בפרודקשן:** לא — Phase 0 הוא static authority closure בלבד (per task's own scope boundary); אין תביעת runtime verification.
 - **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — ממתין ל-PR review/merge. PHASE0_STATIC_COMPLETE (ראה `docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md` לפרטים מלאים).
+
+---
+
+### BLANK-TASK-TITLES — 99 משימות בלי כותרת ב-My Work; Task Golden Writer כליבת כתיבה קנונית
+- **תאריך דיווח:** 24/09/2026 (צילום מסך של הבעלים: כרטיסי משימה ריקים במסך "עבודה שלי" ב-Mini App, רק עם הכפתור "✓ סמן כבוצע")
+- **Audit (read-only, Airtable MCP מול הבסיס החי):** 99 מתוך 135 רשומות ב-`משימות (Tasks)` עם `כותרת המשימה` ריק; ב-97 מהן אין אף שדה אחר (אין סטטוס, תיאור, Owner או תאריך). ההצגה ב-TMA (`tma_api._process_owner_tasks`) והרינדור (`MyWork.tsx`) רק מעבירים את הערך הלאה, כלומר הכותרת הייתה ריקה כבר ב-**creation payload**.
+- **Root cause:** `core/action_gateway._sheets_payload_to_airtable()` מיפה את `row_data[0]` לכותרת בלי שום בדיקת ערך (`row_data=[""]` → `{כותרת המשימה: ""}` בלבד, בדיוק הצורה שנמצאה בבסיס החי). `action_validator._check_presence()` ו-`airtable_gateway.validate_airtable_fields()` בודקים נוכחות מפתחות ושמות שדות, לא ערכי טקסט, ולכן גם `airtable_add` הגנרי היה פתוח. בנוסף, `interaction_engine` כתב את הכותרת ותאריך היעד ישירות מה-JSON של ה-LLM.
+- **Fix:** `core/task_writer.py` (Task Golden Writer, טהור ואידמפוטנטי) נאכף בשני גבולות: (1) `enforce_task_write_contract()` ב-`ActionGateway.propose_action()` וב-`app._queue_approval_detailed_impl()`, אימות בלבד (שומר על BUG-TASK-01 fingerprint parity), fail-closed לפני שנוצר ActionContract, ומבקש רק את הכותרת; (2) dispatcher `airtable_add`/`airtable_update` על Tasks, שמנרמל אחרי `_validate_execution_proof`. ה-workers: `interaction_engine` מדלג על משימת LLM בלי כותרת אמיתית ומשמיט תאריך פגום; `abandoned_lead_worker` לא יוצר משימה בלי sender. פירוט: `docs/architecture/TASK_GOLDEN_WRITER.md`.
+- **Verification:** `test_task_golden_writer.py` (חדש, 99 בדיקות על כל ה-bypasses ומקרי ההזיה). נוסף לכך עודכנו fixtures ב-13 טסטים קיימים שהציעו משימות עם שמות שדה מומצאים (`"Task"`/`"Due"`/`"name"`); חבילת `test_*.py` המלאה ירוקה, למעט `test_google_drive_artifact_store.py` שנכשל זהה גם על `main` (חסר `_cffi_backend` בסביבה המקומית).
+- **Not in scope:** ניקוי 99 הרשומות הריקות הקיימות (מוטציית נתונים, דורשת החלטת בעלים); Owner auto-resolve; הקשחת `tma_write` (Mini App).
+- **Merged:** לא עדיין.
+- **Deployed:** לא.
+- **Verified בפרודקשן:** לא.
+- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED

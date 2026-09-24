@@ -119,7 +119,7 @@ _BASE_PROPOSE = dict(
     tenant_id="boss_hq",
     canonical_user_id="boss_hq:owner_1",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "לרכוש מכונת הדפסה"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש מכונת הדפסה"}},
     origin_channel="whatsapp",
     origin_chat_id="whatsapp:972501234567",
     requires_approval=True,
@@ -345,7 +345,7 @@ r7 = gw7.propose_action(
     tenant_id="boss_hq",
     canonical_user_id="boss_hq:owner_1",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "לרכוש"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש"}},
     origin_channel="telegram",
     origin_chat_id="tg:123",
     requires_approval=True,
@@ -490,7 +490,7 @@ r9 = gw9.propose_action(
     tenant_id="boss_hq",
     canonical_user_id="boss_hq:owner_1",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "test"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "test"}},
     origin_channel="whatsapp",
     origin_chat_id="whatsapp:972501234567",
     requires_approval=True,
@@ -527,7 +527,7 @@ for channel, chat_id, label in [
         tenant_id="boss_hq",
         canonical_user_id="boss_hq:owner_1",
         tool_name="airtable_add",
-        tool_inputs={"table": "Tasks", "fields": {"Task": "משימה E2E"}},
+        tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "משימה E2E"}},
         origin_channel=channel,
         origin_chat_id=chat_id,
         requires_approval=True,
@@ -573,7 +573,7 @@ gw_sub = _new_gw(_sub_executor)
 r_sub = gw_sub.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_1",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "test"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "test"}},
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
     identity=_identity_for("boss_hq", "boss_hq:owner_1", "telegram"),
@@ -678,7 +678,7 @@ _gw21 = _new_gw(_ok_executor)
 # propose two separate contracts (different tool names → different fingerprints)
 _p21a = _gw21.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_21",
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"name": "T1"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "T1"}},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
     identity=_identity_for("boss_hq", "boss_hq:owner_21", "whatsapp"),
 )
@@ -708,7 +708,7 @@ chk("DoD21: no pending contracts after selection", len(_live21_after) == 0)
 _gw22 = _new_gw(_ok_executor)
 _p22a = _gw22.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_22",
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"name": "T2"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "T2"}},
     origin_channel="whatsapp", origin_chat_id="972501111111", requires_approval=True,
     identity=_identity_for("boss_hq", "boss_hq:owner_22", "whatsapp"),
 )

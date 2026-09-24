@@ -57,7 +57,7 @@ def _make_gw():
 def _propose(gw, user_id, tool_name, chat_id="tg:1"):
     return gw.propose_action(
         tenant_id="boss_hq", canonical_user_id=user_id,
-        tool_name=tool_name, tool_inputs={"table": "Tasks", "row": tool_name},
+        tool_name=tool_name, tool_inputs={"table": "Tasks", "row": tool_name, "fields": {"כותרת המשימה": f"TTL {tool_name}"}},
         origin_channel="telegram", origin_chat_id=chat_id,
         requires_approval=True,
         trusted_source="test_harness",

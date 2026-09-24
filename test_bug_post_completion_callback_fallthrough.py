@@ -116,7 +116,7 @@ chk("after pop(), the item is actually gone", _real_bus.peek(_peek_action_id) is
 print("\n── Post-completion callback fallthrough (live incident repro) ──")
 
 requester = _identity("owner-pc1", Role.OWNER)
-tool_inputs = {"table": "Tasks", "fields": {"Task": "לסגור עם אהרן"}}
+tool_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "לסגור עם אהרן"}}
 
 # _queue_approval() registers both a legacy event_bus item (for the Telegram
 # button) and a durable ActionContract (for the text-confirmation path) —
@@ -234,7 +234,7 @@ chk("contract status is unchanged by the stale callback",
 print("\n── Backstop independence (early pre-check payload missing canonical_user_id) ──")
 
 requester2 = _identity("owner-pc2", Role.OWNER)
-tool_inputs2 = {"table": "Tasks", "fields": {"Task": "לבדוק מה קורה עם אבי"}}
+tool_inputs2 = {"table": "Tasks", "fields": {"כותרת המשימה": "לבדוק מה קורה עם אבי"}}
 
 _legacy_action_id2, _ = _real_bus.request_approval(
     action="airtable_add",

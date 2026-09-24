@@ -548,6 +548,20 @@ class CanonicalizationError(ValueError):
     """A tool override could not produce a safe payload for its new tool."""
 
 
+class TaskCanonicalizationError(CanonicalizationError):
+    """Task Golden Writer (core/task_writer.py): a Tasks write whose fields
+    fail the canonical Task contract (blank/placeholder title, malformed due
+    date/status, untrusted record ids, unknown fields). Raised before any
+    fingerprint or ActionContract exists; ``user_message`` asks only for what
+    cannot be derived (e.g. the task title)."""
+
+    def __init__(self, reason: str, user_message: str, code: str = "", missing: tuple = ()):
+        super().__init__(reason)
+        self.user_message = user_message
+        self.code = code
+        self.missing = missing
+
+
 class CommercialCanonicalizationError(CanonicalizationError):
     """BusinessDraft Phase 4B: a generic call on a covered commercial table
     (Deals/Payment Terms/Payments) cannot be represented losslessly as its
@@ -710,6 +724,28 @@ def resolve_canonical_call(
     if commercial is not None:
         resolved_tool, payload = commercial
     return resolved_tool, payload
+
+
+def enforce_task_write_contract(tool_name: str, tool_inputs: dict, trusted_source: str = "agent") -> None:
+    """Task Golden Writer -- proposal boundary (core/task_writer.py).
+
+    Called right after resolve_canonical_call() by every proposal entry point
+    (ActionGateway.propose_action() and app._queue_approval_detailed_impl()).
+    A canonical airtable_add/airtable_update on Tasks is VALIDATED only, never
+    rewritten -- the stored payload must stay byte-identical for BUG-TASK-01
+    fingerprint parity; normalization happens once, in the dispatcher, after
+    _validate_execution_proof(). Fails closed with TaskCanonicalizationError
+    before any fingerprint/ActionContract exists. This is what stops the
+    sheets_append row_data=[""] / generic airtable_add blank-title writes
+    (blank Task audit, 24/09/2026). No-op for every non-Task call.
+    """
+    from core.task_writer import TaskWriteRejected, validate_task_payload
+    try:
+        validate_task_payload(tool_name, tool_inputs, source=trusted_source)
+    except TaskWriteRejected as exc:
+        raise TaskCanonicalizationError(
+            str(exc), exc.user_message, code=exc.code, missing=exc.missing
+        ) from None
 
 
 def _hash_challenge(code: str) -> str:
@@ -1828,6 +1864,7 @@ class ActionGateway:
         tool_name, tool_inputs = resolve_canonical_call(
             tool_name, tool_inputs, user_text
         )
+        enforce_task_write_contract(tool_name, tool_inputs, trusted_source)
 
         # BUG-122: Router classification is advisory and can be "unknown"
         # before the Agent emits a mutating tool call. Enforce the one-live-
