@@ -92,6 +92,11 @@ class DeterministicTaskParse:
     due_time: str | None = None
     matched: bool = False
     uncertain: bool = False
+    # Task recurrence (Tasks.Cadence) — core/task_writer.recurrence_from_text.
+    # None = לא צוינה תדירות (חד-פעמית). recurrence_uncertain = ביטוי תדירות
+    # עמום/לא נתמך → uncertain=True, והבהרה שואלת רק על התדירות.
+    recurrence: str | None = None
+    recurrence_uncertain: bool = False
 
     @property
     def certain(self) -> bool:
@@ -130,6 +135,9 @@ class DeterministicTaskParse:
         fields = {TaskFields.NAME: self.title or ""}
         if self.due_date:
             fields[TaskFields.DUE_DATE] = self.due_date
+        if self.recurrence:
+            # נכתב ל-Airtable (Cadence) → חלק מזהות הפעולה, כמו תאריך היעד.
+            fields[TaskFields.RECURRENCE] = self.recurrence
         return {"table": Tables.TASKS, "fields": fields}
 
 
@@ -230,12 +238,19 @@ def parse_deterministic_create_task(text: str) -> DeterministicTaskParse:
         title = body[:date_marker.start()].strip(" ,:;-–—")
     if not title:
         uncertain = True
+    # תדירות: זיהוי שמרני על גוף הבקשה; הכותרת נשארת כפי שהמשתמש כתב.
+    from core.task_writer import recurrence_from_text
+    recurrence = recurrence_from_text(body)
+    if recurrence.uncertain:
+        uncertain = True
     return DeterministicTaskParse(
         title=title or None,
         due_date=due_date,
         due_time=due_time,
         matched=True,
         uncertain=uncertain,
+        recurrence=recurrence.value,
+        recurrence_uncertain=recurrence.uncertain,
     )
 
 
@@ -758,6 +773,9 @@ def route_request(
             "לא בטוח שהבנתי את כותרת המשימה או את התאריך/שעה. "
             "נא לנסח מחדש, בלי תיקון אוטומטי של שגיאות כתיב."
         )
+        if _create_task_parse.recurrence_uncertain:
+            from core.task_writer import ASK_RECURRENCE_MESSAGE
+            response_override = ASK_RECURRENCE_MESSAGE
 
     elif intent in (Intent.UPDATE_TASK, Intent.COMPLETE_TASK) and _task_ref_parse.uncertain:
         handler = Handler.CLARIFY

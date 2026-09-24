@@ -1261,6 +1261,8 @@ def _queue_deterministic_create_task(
         fingerprint_payload = task_parse.business_identity()
         if task_parse.due_date:
             task_fields[TaskFields.DUE_DATE] = task_parse.due_date
+        if task_parse.recurrence:
+            task_fields[TaskFields.RECURRENCE] = task_parse.recurrence
         if task_parse.due_time:
             # BUG-156: שדה תאריך היעד בטבלת Tasks הוא מסוג Airtable "date" —
             # אין שדה חי ששומר ערך שעה, אז due_time מנותח ומאומת אך לעולם

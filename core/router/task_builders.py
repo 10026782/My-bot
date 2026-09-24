@@ -22,6 +22,7 @@ _TASK_WRITE_FIELDS = frozenset({
     TaskFields.DOMAIN,
     TaskFields.OWNER,
     TaskFields.LEAD_LINK,
+    TaskFields.RECURRENCE,
 })
 
 

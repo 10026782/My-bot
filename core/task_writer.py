@@ -20,6 +20,13 @@
    לא לגזירת כותרת. לעולם לא ממציאים עובדה חסרה. רץ רק לפני אישור (Gate 1);
    Gate 2 מאמת ומנרמל בלבד.
 
+4. Recurrence (טהור) — שדה Cadence הקיים (Daily/Weekly/Monthly/One-time),
+   נפרד מסטטוס. ריק / "One Time" = חד-פעמית. משימה חוזרת חייבת עוגן תזמון
+   (תאריך יעד = המופע הבא): Daily בלי תאריך → היום המקומי; Weekly/Monthly
+   בלי תאריך → שואלים רק על התאריך. השלמת משימה חוזרת (Gate 1 בלבד, לפני
+   אישור) מקדמת את תאריך היעד על אותה רשומה ומחזירה סטטוס "ממתין" — לא
+   נוצרת רשומת מופע חדשה. זיהוי מטקסט שמרני: "כל יום/שבוע/חודש" בלבד.
+
 Root cause (audit 24/09/2026): 97 רשומות Tasks ריקות נוצרו כי אף שכבה לא
 בדקה את *ערך* הכותרת — רק את נוכחות המפתח (sheets_append row_data=[""]).
 """
@@ -28,14 +35,21 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import calendar
 from collections.abc import Callable, Mapping
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
-from airtable_schema import Tables, TaskFields
+from airtable_schema import Tables, TaskFields, TaskRecurrence, TaskStatus
 
 TASK_TABLE_NAMES = frozenset({Tables.TASKS, "Tasks"})
 
 ASK_TITLE_MESSAGE = "מה כותרת המשימה? (מה בדיוק צריך לעשות)"
+ASK_START_DATE_MESSAGE = "מאיזה תאריך מתחילה המשימה החוזרת? (למשל 1/10/26)"
+ASK_RECURRENCE_MESSAGE = "באיזו תדירות המשימה חוזרת? כרגע נתמך: כל יום / כל שבוע / כל חודש (או חד-פעמית)."
+TASK_UNVERIFIABLE_MESSAGE = "לא הצלחתי לבדוק את המשימה כרגע — נסה שוב בעוד רגע."
+INVALID_RECURRENCE_MESSAGE = "❌ תדירות לא מוכרת. אפשר: Daily / Weekly / Monthly / One-time."
 
 _ZERO_WIDTH_RE = re.compile(r"[​-‏‪-‮⁠-⁤﻿]")
 _RECORD_ID_RE = re.compile(r"rec[A-Za-z0-9]{14}")
@@ -81,17 +95,29 @@ def _require_title(value: object) -> str:
 
 
 def prepare_task_create(fields: Mapping[str, object] | None) -> dict:
-    """מאמת יצירה ומחזיר את השדות עם כותרת מנורמלת. כל שדה אחר — כמות-שהוא."""
+    """מאמת יצירה ומחזיר את השדות עם כותרת מנורמלת. Cadence (אם קיים) מאומת
+    מול האפשרויות הקיימות ומנורמל; משימה חוזרת חייבת תאריך יעד (עוגן). כל
+    שדה אחר — כמות-שהוא."""
     fields = dict(fields) if isinstance(fields, Mapping) else {}
     fields[TaskFields.NAME] = _require_title(fields.get(TaskFields.NAME))
+    recurrence = _prepare_recurrence_field(fields)
+    if recurrence in RECURRING and iso_date_or_none(fields.get(TaskFields.DUE_DATE)) is None:
+        raise TaskWriteRejected(
+            "recurrence_anchor_missing",
+            "recurring task requires a due date (next occurrence)",
+            ASK_START_DATE_MESSAGE,
+            (TaskFields.DUE_DATE,),
+        )
     return fields
 
 
 def prepare_task_update(fields: Mapping[str, object] | None) -> dict:
-    """UPDATE שלא נוגע בכותרת → כמות-שהוא. UPDATE שמרוקן כותרת → נדחה."""
+    """UPDATE שלא נוגע בכותרת → כמות-שהוא. UPDATE שמרוקן כותרת → נדחה.
+    Cadence (אם קיים) מאומת ומנורמל בלבד."""
     fields = dict(fields) if isinstance(fields, Mapping) else {}
     if TaskFields.NAME in fields:
         fields[TaskFields.NAME] = _require_title(fields[TaskFields.NAME])
+    _prepare_recurrence_field(fields)
     return fields
 
 
@@ -232,3 +258,196 @@ def title_from_lead(lead_fields: Mapping[str, object]) -> str:
     if not action or not name:
         return ""
     return compose_title(action, name)
+
+
+# ══════════════════════════════════════════════════
+# 4. Recurrence — existing Tasks.Cadence field (separate from Status)
+# ══════════════════════════════════════════════════
+
+RECURRING = frozenset({TaskRecurrence.DAILY, TaskRecurrence.WEEKLY, TaskRecurrence.MONTHLY})
+
+_RECURRENCE_ALIASES: dict[str, str] = {
+    "one-time": TaskRecurrence.ONE_TIME,
+    "one time": TaskRecurrence.ONE_TIME,     # אפשרות legacy קיימת ב-Airtable
+    "daily":    TaskRecurrence.DAILY,
+    "weekly":   TaskRecurrence.WEEKLY,
+    "monthly":  TaskRecurrence.MONTHLY,
+}
+
+_IL_TZ = ZoneInfo("Asia/Jerusalem")
+
+
+def local_today() -> date:
+    """התאריך המקומי (ישראל) — עוגן דטרמיניסטי ל-Daily בלי תאריך."""
+    return datetime.now(_IL_TZ).date()
+
+
+def normalize_recurrence(value: object) -> str | None:
+    """ערך קנוני של Cadence, או None אם הערך אינו אפשרות מוכרת.
+
+    ריק / None / "One Time" (legacy) → One-time. משמש גם לקריאת רשומה קיימת.
+    """
+    if value is None:
+        return TaskRecurrence.ONE_TIME
+    if not isinstance(value, str):
+        return None
+    key = " ".join(value.split()).casefold()
+    if not key:
+        return TaskRecurrence.ONE_TIME
+    return _RECURRENCE_ALIASES.get(key)
+
+
+def _prepare_recurrence_field(fields: dict) -> str:
+    """מאמת ומנרמל את Cadence במקום (אידמפוטנטי). ריק → השדה מוסר (חד-פעמית
+    = היעדר ערך; לא כותבים ברירת מחדל). ערך לא מוכר → נדחה."""
+    if TaskFields.RECURRENCE not in fields:
+        return TaskRecurrence.ONE_TIME
+    raw = fields[TaskFields.RECURRENCE]
+    recurrence = normalize_recurrence(raw)
+    if recurrence is None:
+        raise TaskWriteRejected(
+            "recurrence_invalid",
+            f"unsupported task recurrence: {raw!r}",
+            INVALID_RECURRENCE_MESSAGE,
+            (TaskFields.RECURRENCE,),
+        )
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        del fields[TaskFields.RECURRENCE]
+    else:
+        fields[TaskFields.RECURRENCE] = recurrence
+    return recurrence
+
+
+# ── parsing: conservative, deterministic ──
+_HEB = "\u0590-\u05FF"
+_RECURRENCE_PHRASE_RE = re.compile(
+    rf"(?<![{_HEB}\w])ו?ב?כל\s+(?P<unit>יום|שבוע|חודש)(?![{_HEB}\w])"
+)
+_RECURRENCE_UNITS = {
+    "יום": TaskRecurrence.DAILY,
+    "שבוע": TaskRecurrence.WEEKLY,
+    "חודש": TaskRecurrence.MONTHLY,
+}
+# "כל יום שני" = כל יום שני בשבוע (שבועי!), לא יומי → עמום, לעולם לא מנחשים.
+_WEEKDAY_AFTER_RE = re.compile(
+    rf"\s*(?:(?:ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)(?![{_HEB}\w])|[אבגדהו]\s*['׳])"
+)
+# תדירות שאינה נתמכת בשלב זה (כל N / כל יומיים / כל שנה ...) → לא מתעלמים
+# בשקט (זו הייתה הופכת בקשה חוזרת לחד-פעמית) אלא מסמנים כעמום.
+_UNSUPPORTED_RECURRENCE_RE = re.compile(
+    rf"(?<![{_HEB}\w])ו?ב?כל\s+(?:\d+|כמה|יומיים|שבועיים|חודשיים|שנה|שנתיים|רבעון)(?![{_HEB}\w])"
+)
+_NEGATION_BEFORE_RE = re.compile(rf"(?<![{_HEB}\w])(?:לא|אל)\s+$")
+
+
+@dataclass(frozen=True)
+class RecurrenceParse:
+    value: str | None = None
+    uncertain: bool = False
+
+
+def recurrence_from_text(text: object) -> RecurrenceParse:
+    """"כל יום" / "כל שבוע" / "כל חודש" (גם עם ו-/ב-) → Daily / Weekly / Monthly.
+
+    לא-תדירות: "כל היום/השבוע/החודש" (= כל משך היום) — אינו מתאים לתבנית.
+    עמום (uncertain, לא מנחשים): יום בשבוע אחרי "כל יום", שלילה ("לא כל
+    יום"), שתי תדירויות שונות, או תדירות לא נתמכת (כל יומיים / כל 3 ...).
+    """
+    if not isinstance(text, str):
+        return RecurrenceParse()
+    normalized = normalize_title(text)
+    if not normalized:
+        return RecurrenceParse()
+    if _UNSUPPORTED_RECURRENCE_RE.search(normalized):
+        return RecurrenceParse(uncertain=True)
+    found: set[str] = set()
+    for match in _RECURRENCE_PHRASE_RE.finditer(normalized):
+        unit = match.group("unit")
+        if _NEGATION_BEFORE_RE.search(normalized[:match.start()]):
+            return RecurrenceParse(uncertain=True)
+        if unit == "יום" and _WEEKDAY_AFTER_RE.match(normalized, match.end()):
+            return RecurrenceParse(uncertain=True)
+        found.add(_RECURRENCE_UNITS[unit])
+    if len(found) > 1:
+        return RecurrenceParse(uncertain=True)
+    return RecurrenceParse(value=next(iter(found)) if found else None)
+
+
+# ── schedule math ──
+
+def _add_months(anchor: date, months: int) -> date:
+    year, month_index = divmod(anchor.month - 1 + months, 12)
+    year += anchor.year
+    month = month_index + 1
+    return date(year, month, min(anchor.day, calendar.monthrange(year, month)[1]))
+
+
+def next_occurrence(recurrence: str, anchor: date, today: date) -> date:
+    """המופע הבא: anchor + k·מרווח, עבור ה-k≥1 הקטן ביותר שנותן תאריך אחרי
+    היום. משימה שפספסה כמה מחזורים קופצת למופע העתידי הבא (לא נשארת באיחור);
+    שבועית שומרת על היום בשבוע. חודשי = חודש קלנדרי, היום מוגבל לסוף החודש
+    (31/1 → 28/2)."""
+    if recurrence not in RECURRING:
+        raise ValueError(f"not a recurring cadence: {recurrence!r}")
+    if recurrence == TaskRecurrence.MONTHLY:
+        # k-1 חודשים נופל תמיד בחודש שלפני החודש הנוכחי (או שהעוגן עתידי ו-k=1),
+        # לכן המועמד הוא k, ואם הוא עדיין לא אחרי היום — k+1 (החודש הבא).
+        months = max(1, (today.year - anchor.year) * 12 + (today.month - anchor.month))
+        candidate = _add_months(anchor, months)
+        return candidate if candidate > today else _add_months(anchor, months + 1)
+    step = 1 if recurrence == TaskRecurrence.DAILY else 7
+    steps = max(1, (today - anchor).days // step + 1)
+    return anchor + timedelta(days=step * steps)
+
+
+def fill_recurrence_anchor(fields: dict, *, today: date) -> dict:
+    """Diamond (Gate 1, create): Daily בלי תאריך → היום המקומי כעוגן. Weekly/
+    Monthly בלי תאריך → לא ממציאים יום בשבוע/יום בחודש; prepare_task_create
+    ישאל רק על התאריך. מחזיר את אותו dict אם לא השתנה דבר."""
+    recurrence = normalize_recurrence(fields.get(TaskFields.RECURRENCE))
+    if recurrence == TaskRecurrence.DAILY and not fields.get(TaskFields.DUE_DATE):
+        return {**fields, TaskFields.DUE_DATE: today.isoformat()}
+    return fields
+
+
+def recurring_completion(
+    update_fields: Mapping[str, object],
+    record_fields: Mapping[str, object],
+    *,
+    today: date,
+) -> Mapping[str, object]:
+    """Gate 1 בלבד (לפני אישור): השלמת משימה חוזרת → אותה רשומה, תאריך יעד
+    = המופע הבא, סטטוס חוזר ל-"ממתין" (TaskStatus.PENDING). לא נוצר מופע חדש.
+
+    מחזיר את אותו אובייקט (ללא שינוי) כאשר: ה-UPDATE אינו מסמן "בוצע", המשימה
+    חד-פעמית (כולל ריק / "One Time"), או שהרשומה כבר "בוצע" (אין קידום כפול).
+    Weekly/Monthly בלי תאריך יעד → TaskWriteRejected ששואל רק על התאריך.
+    """
+    if update_fields.get(TaskFields.STATUS) != TaskStatus.DONE:
+        return update_fields
+    if TaskFields.RECURRENCE in update_fields:
+        recurrence = normalize_recurrence(update_fields.get(TaskFields.RECURRENCE))
+    else:
+        recurrence = normalize_recurrence(record_fields.get(TaskFields.RECURRENCE))
+    if recurrence not in RECURRING:
+        return update_fields
+    if record_fields.get(TaskFields.STATUS) == TaskStatus.DONE:
+        return update_fields
+    raw_anchor = (update_fields if TaskFields.DUE_DATE in update_fields else record_fields).get(TaskFields.DUE_DATE)
+    anchor_iso = iso_date_or_none(raw_anchor)
+    if anchor_iso is None:
+        if recurrence != TaskRecurrence.DAILY:
+            raise TaskWriteRejected(
+                "recurrence_anchor_missing",
+                "recurring task has no due date to advance from",
+                ASK_START_DATE_MESSAGE,
+                (TaskFields.DUE_DATE,),
+            )
+        anchor = today
+    else:
+        anchor = date.fromisoformat(anchor_iso)
+    return {
+        **update_fields,
+        TaskFields.STATUS: TaskStatus.PENDING,
+        TaskFields.DUE_DATE: next_occurrence(recurrence, anchor, today).isoformat(),
+    }

@@ -859,6 +859,7 @@ class TaskFields:
     DOMAIN          = "Domain"          # domain copied from lead on create-from-lead
     OWNER           = "Owner"           # multipleRecordLinks -> Tables.PROFILE (NOT plain text; verified via Airtable MCP 2026-08-19). Read/write as a list of Profile record IDs -- see tma_api._resolve_profile_record_id.
     LEAD_LINK       = "Leads"           # linked record to Leads table (Airtable linked field name)
+    RECURRENCE      = "Cadence"         # singleSelect קיים (fldcQk3DisdkzhPMX) — ראה TaskRecurrence. ריק = חד-פעמי
 
 
 class DeadlineFields:
@@ -1085,6 +1086,17 @@ class TaskStatus:
     PENDING         = "ממתין"
     IN_PROGRESS     = "בביצוע"
     DONE            = "בוצע"
+
+class TaskRecurrence:
+    """אפשרויות שדה Cadence הקיים בטבלת Tasks. נפרד לחלוטין מ-TaskStatus:
+    סטטוס = מצב המופע הנוכחי; Cadence = תדירות החזרה. ריק / "One Time"
+    (אפשרות legacy קיימת) נקראים כ-ONE_TIME. ראה core/task_writer.py §4."""
+    ONE_TIME        = "One-time"
+    DAILY           = "Daily"
+    WEEKLY          = "Weekly"
+    MONTHLY         = "Monthly"
+    LEGACY_ONE_TIME = "One Time"
+
 
 class DeadlineStatus:
     NOT_STARTED     = "לא התחיל"
@@ -1578,6 +1590,7 @@ FIELD_MAP = {
         "תיאור":         "תיאור חופשי",
         "תאריך יעד":     "YYYY-MM-DD",
         "סטטוס":         "ממתין | בביצוע | בוצע",
+        "Cadence":       "Daily | Weekly | Monthly | One-time (ריק = חד-פעמית; חוזרת דורשת תאריך יעד = המופע הבא)",
     },
     Tables.DEADLINES: {
         "שם המשימה":     "שם המשימה",

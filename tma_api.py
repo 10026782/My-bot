@@ -3227,18 +3227,37 @@ def update_task_status(task_id, identity):
         # authorization. Fail closed rather than trusting the caller.
         return jsonify({"error": "forbidden"}), 403
 
+    # Task recurrence (core/task_writer.py §4): marking a RECURRING Task done
+    # advances the SAME record (Due Date = next occurrence, Status = ממתין)
+    # instead of closing it. Computed here, before the approval/contract is
+    # proposed, from the record already loaded above -- so the approved,
+    # fingerprinted and executed payload are identical. One-time → unchanged.
+    from core import task_writer
+    try:
+        fields = dict(task_writer.recurring_completion(
+            {TaskFields.STATUS: new_status},
+            record_fields(task_rec),
+            today=task_writer.local_today(),
+        ))
+    except task_writer.TaskWriteRejected as exc:
+        return jsonify({"error": exc.user_message, "code": exc.code}), 409
+    if fields.get(TaskFields.STATUS) != new_status:
+        change = f"{fields.get(TaskFields.STATUS)} (recurring, next due {fields.get(TaskFields.DUE_DATE)})"
+    else:
+        change = new_status
+
     _, response, status = _queue_or_owner_execute(
         "tma_update_task_status",
         {
             "op": "patch",
             "table": Tables.TASKS,
             "record_id": task_id,
-            "fields": {TaskFields.STATUS: new_status},
+            "fields": fields,
             "audit_action": "task_status_update",
-            "audit_details": f"{task_id} -> {new_status}",
+            "audit_details": f"{task_id} -> {change}",
         },
         identity,
-        f"Update task status: {task_id} -> {new_status}",
+        f"Update task status: {task_id} -> {change}",
     )
     return jsonify(response), status
 
