@@ -4195,12 +4195,23 @@ def _is_fresh_deterministic_command(user_text: str) -> bool:
     route_request() itself would use to classify this text as a genuine new
     command."""
     from lead_deal_link import parse_direct_link_text, is_promote_lead_trigger
+    from core.deterministic_commercial_update import parse_deterministic_commercial_update
     return bool(
         parse_deterministic_create_task(user_text).certain
         or parse_deterministic_create_deal(user_text).domain_resolved
         or parse_deterministic_commercial_completion(user_text).certain
         or parse_direct_link_text(user_text) is not None
         or is_promote_lead_trigger(user_text)
+        # Phase 4C (live-found, 23/09/2026): a genuinely fresh, well-formed
+        # commercial UPDATE command ("תעדכן בעסקה X את...") was still being
+        # swallowed as a literal answer to a stale parked commercial_
+        # completion CREATE session — the exact BUG-S2C-STALE-SESSION-
+        # SWALLOWS-NEW-COMMAND failure class above, just for a command
+        # family that didn't exist yet when that fix was written. Gated on
+        # `matched` (not `certain`) so a guard-recognized-but-incomplete
+        # UPDATE also escapes to its own deterministic CLARIFY, never gets
+        # silently treated as a deal-name answer for the old session.
+        or parse_deterministic_commercial_update(user_text).matched
     )
 
 
