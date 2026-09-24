@@ -138,7 +138,7 @@ def _propose(gw: ActionGateway, tool_name: str = "airtable_add") -> tuple[str, s
     uid = f"boss_hq:f52pr6-{_CID}"
     result = gw.propose_action(
         tenant_id="boss_hq", canonical_user_id=uid, tool_name=tool_name,
-        tool_inputs={"table": "Tasks", "fields": {"Task": f"pr6-{_CID}"}},
+        tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": f"pr6-{_CID}"}},
         origin_channel="telegram", origin_chat_id=uid, requires_approval=True,
     )
     assert result.ok, f"propose_action failed: {result}"
@@ -445,7 +445,7 @@ def _run_agent(chat_id: str, user_text: str, *, anthropic_responses):
 
 _TURN = [
     _tool_use_response([{"name": "airtable_add",
-                          "input": {"table": "Tasks", "fields": {"Task": "בדיקת F52 PR6"}}}]),
+                          "input": {"table": "Tasks", "fields": {"כותרת המשימה": "בדיקת F52 PR6"}}}]),
     _text_response("⏳ הפעולה ממתינה לאישור, אעדכן ברגע שיאושר"),
 ]
 

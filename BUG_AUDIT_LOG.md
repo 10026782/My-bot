@@ -6979,3 +6979,17 @@ timestamps, methods, scope, and results are recorded in
 - **Deployed:** לא.
 - **Verified בפרודקשן:** לא — Phase 0 הוא static authority closure בלבד (per task's own scope boundary); אין תביעת runtime verification.
 - **סטטוס:** 🟡 CODE DONE, NOT VERIFIED — ממתין ל-PR review/merge. PHASE0_STATIC_COMPLETE (ראה `docs/architecture/BUSINESSDRAFT_UX_CONTRACT_FREEZE_20260922.md` לפרטים מלאים).
+
+---
+
+### BLANK-TASK-TITLES — 99 משימות בלי כותרת ב-My Work; Task Golden Writer כליבת כתיבה קנונית
+- **תאריך דיווח:** 24/09/2026 (צילום מסך של הבעלים: כרטיסי משימה ריקים במסך "עבודה שלי" ב-Mini App, רק עם הכפתור "✓ סמן כבוצע")
+- **Audit (read-only, Airtable MCP מול הבסיס החי):** 99 מתוך 135 רשומות ב-`משימות (Tasks)` עם `כותרת המשימה` ריק; ב-97 מהן אין אף שדה אחר (אין סטטוס, תיאור, Owner או תאריך). ההצגה ב-TMA (`tma_api._process_owner_tasks`) והרינדור (`MyWork.tsx`) רק מעבירים את הערך הלאה, כלומר הכותרת הייתה ריקה כבר ב-**creation payload**.
+- **Root cause:** `core/action_gateway._sheets_payload_to_airtable()` מיפה את `row_data[0]` לכותרת בלי שום בדיקת ערך (`row_data=[""]` → `{כותרת המשימה: ""}` בלבד, בדיוק הצורה שנמצאה בבסיס החי). `action_validator._check_presence()` ו-`airtable_gateway.validate_airtable_fields()` בודקים נוכחות מפתחות ושמות שדות, לא ערכי טקסט, ולכן גם `airtable_add` הגנרי היה פתוח. בנוסף, `interaction_engine` כתב את הכותרת ותאריך היעד ישירות מה-JSON של ה-LLM.
+- **Fix (revision 2, אחרי review של הבעלים):** `core/task_writer.py` בשלוש שכבות נפרדות. (1) validation: אינווריאנט אחד בלבד, כותרת לא ריקה אחרי נרמול בטוח; בלי מדיניות חדשה לסטטוס, תאריך, Owner או שדות לא מוכרים. (2) verification: מזהה קישור שסיפק המודל נשמר רק אם אומת (קיים בטבלה, או שם שנפתר לרשומה יחידה ב-`lookup_human_reference`); אחרת מושמט. (3) Diamond completion: כותרת חסרה נגזרת מטקסט המשתמש (parser הדטרמיניסטי של ה-router) או מ-Next Action ושם של ליד מאומת, לפני ששואלים. Gate 1 = `complete_task_proposal()` ב-`app._queue_approval_detailed_impl()` וב-`ActionGateway.propose_action()`, לפני כל ActionContract; שואלים רק "מה כותרת המשימה?". Gate 2 = dispatcher `airtable_add`/`airtable_update` על Tasks. Workers: `interaction_engine` מדלג רק על פריט בלי כותרת ומשמיט תאריך LLM פגום; `abandoned_lead_worker` גוזר נושא מ-sender או מ-answers["name"] ומדלג רק כשאין מזהה. פירוט: `docs/architecture/TASK_GOLDEN_WRITER.md`.
+- **Verification:** `test_task_golden_writer.py` (104 בדיקות: validation / verification / Diamond / UX / Gate 2 / workers, ובנוסף UPDATE regression, parity בין proposed/approved/fingerprinted/executed, ובדיקה ש-Gate 2 לא מבצע Diamond). היקף ה-Diamond בכוונה: טקסט המשתמש המקורי וליד מאומת עם Next Action שהוא פעולה; שמות Contact/Deal משמשים רק ל-verification של קישורים. ב-12 טסטים קיימים ה-fixtures קיבלו את שדה הכותרת הקנוני `כותרת המשימה` (קודם הופיע `"Task"`/`"name"`/fields ריקים — לא שדות Tasks לפי ה-schema הקיים); כל שורה צומצמה אוטומטית למינימום ההכרחי, ו-`"Due"` שוחזר בכולם. חבילת `test_*.py` המלאה ירוקה, למעט `test_google_drive_artifact_store.py` שנכשל זהה גם על `main`.
+- **Not in scope:** 99 הרשומות הריקות הקיימות; Owner auto-default; `tma_write` (Mini App).
+- **Merged:** לא עדיין.
+- **Deployed:** לא.
+- **Verified בפרודקשן:** לא.
+- **סטטוס:** 🟡 CODE DONE, NOT VERIFIED

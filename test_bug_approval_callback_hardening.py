@@ -211,13 +211,13 @@ requester1 = _identity("owner-hard-1", Role.OWNER)
 
 propose_a = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester1.memory_key,
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"Task": "A"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "A"}},
     origin_channel="telegram", origin_chat_id=requester1.user_id,
     requires_approval=True, identity=requester1, trusted_source="agent",
 )
 propose_b = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester1.memory_key,
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"Task": "B"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "B"}},
     origin_channel="telegram", origin_chat_id=requester1.user_id,
     requires_approval=True, identity=requester1, trusted_source="test_harness",
 )
@@ -249,7 +249,7 @@ chk("reject: callback also does not mark context_interrupted",
 requester2 = _identity("owner-hard-2", Role.OWNER)
 propose_c = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester2.memory_key,
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"Task": "C"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "C"}},
     origin_channel="telegram", origin_chat_id=requester2.user_id,
     requires_approval=True, identity=requester2, trusted_source="agent",
 )
@@ -313,7 +313,7 @@ chk("callback without a linked contract: deterministic expired/already-resolved 
 print("\n── BUG-144/145: canonical reject + one final response ─────────")
 
 requester4 = _identity("owner-hard-4", Role.OWNER)
-reject_inputs = {"table": "Tasks", "fields": {"Task": "reject canonical"}}
+reject_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "reject canonical"}}
 reject_proposal = _real_gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=requester4.memory_key,
     tool_name="airtable_add", tool_inputs=reject_inputs,
@@ -516,7 +516,7 @@ _EXISTING_RECORD = {
 }
 
 _dup_identity = _identity("owner-hard-dup", Role.OWNER)
-_dup_inputs = {"table": "Tasks", "fields": {"Task": "כפילות"}}
+_dup_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "כפילות"}}
 _dup_proof = {
     "contract_id": "duplicate-test-contract",
     "approved_by": _dup_identity.memory_key,
@@ -534,7 +534,7 @@ _dup_proof = {
 
 with patch.object(_dispatcher_mod, "_check_duplicate", return_value=_EXISTING_RECORD), \
      patch.object(_dispatcher_mod, "_ALIAS_MAP", {}), \
-     patch.object(_dispatcher_mod, "_DEDUP_FIELDS", {"Tasks": "Task"}), \
+     patch.object(_dispatcher_mod, "_DEDUP_FIELDS", {"Tasks": "כותרת המשימה"}), \
      patch.object(_dispatcher_mod, "enforce_leads_write_gate", return_value=None), \
      patch.object(_dispatcher_mod, "enforce_tenant_scope", return_value=None), \
      patch.object(_dispatcher_mod, "audit_log_airtable", return_value=None):

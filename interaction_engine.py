@@ -395,7 +395,19 @@ def create_tasks_from_analysis(
             channel="scheduler",
             external_id="interaction_engine_scheduler",
         )
+        from core.task_writer import iso_date_or_none, normalize_title
         for task in analysis.tasks:
+            # Task Golden Writer: analysis.tasks הוא JSON חופשי מה-LLM. הכותרת
+            # היא ה-"title" של הפריט (החוזה של ה-prompt). ל-interaction עצמו
+            # אין פעולה מהימנה לגזור ממנה כותרת (כותרת הפגישה/המייל אינה
+            # פעולה), אז פריט בלי כותרת לא-ריקה אחרי נרמול — לא נוצר.
+            if not isinstance(task, dict):
+                logger.warning("[Interaction] skipping non-object task item: %r", task)
+                continue
+            task_title = normalize_title(task.get("title"))
+            if not task_title:
+                logger.warning("[Interaction] skipping task item without a title (nothing trusted to derive one from)")
+                continue
             priority = "high" if analysis.sentiment == "negative" else "medium"
             stable_description = (
                 f"מקור: {interaction.source_channel} — {interaction.title}\n"
@@ -421,12 +433,18 @@ def create_tasks_from_analysis(
             # because it's never dispatched either, not because a second
             # fingerprint object tries to hide it after the fact).
             fields = {
-                TaskFields.NAME:        task.get("title", ""),
+                TaskFields.NAME:        task_title,
                 TaskFields.STATUS:      TaskStatus.PENDING,
                 TaskFields.DESCRIPTION: stable_description,
             }
             if task.get("due"):
-                fields[TaskFields.DUE_DATE] = task.get("due", "")
+                # תאריך אופציונלי שנגזר מה-LLM: נכתב רק אם הוא תאריך תקין לפי
+                # סוג השדה הקיים; אחרת מושמט (לא ממציאים, לא מכשילים משימה).
+                due_date = iso_date_or_none(task.get("due"))
+                if due_date:
+                    fields[TaskFields.DUE_DATE] = due_date
+                else:
+                    logger.warning("[Interaction] omitting invalid LLM due date: %r", task.get("due"))
 
             proposal = action_gateway.propose_action(
                 tenant_id=tenant_id,

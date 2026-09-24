@@ -99,7 +99,7 @@ def _ok_dispatch(*args, **kwargs):
 print("── Scenario A: SB-02 pre-check — already completed ─────────────")
 
 requester_a = _identity("owner-staleux-a", Role.OWNER)
-tool_inputs_a = {"table": "Tasks", "fields": {"Task": _TASK_TITLE}}
+tool_inputs_a = {"table": "Tasks", "fields": {"כותרת המשימה": _TASK_TITLE}}
 
 _legacy_action_id_a, _ = _real_bus.request_approval(
     action="airtable_add",
@@ -158,7 +158,7 @@ chk("A: the one final response uses the exact repeated-completion message",
 print("\n── Scenario B: post-completion-fallthrough terminal reply ──────")
 
 requester_b = _identity("owner-staleux-b", Role.OWNER)
-tool_inputs_b = {"table": "Tasks", "fields": {"Task": _TASK_TITLE}}
+tool_inputs_b = {"table": "Tasks", "fields": {"כותרת המשימה": _TASK_TITLE}}
 
 _legacy_action_id_b, _ = _real_bus.request_approval(
     action="airtable_add",

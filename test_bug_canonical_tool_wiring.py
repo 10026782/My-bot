@@ -125,7 +125,7 @@ identity3 = _identity("owner-canon-3", Role.OWNER)
 propose3 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id=identity3.memory_key,
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "x"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "x"}},
     origin_channel="telegram", origin_chat_id=identity3.user_id,
     requires_approval=True, identity=identity3, trusted_source="agent",
     user_text="",

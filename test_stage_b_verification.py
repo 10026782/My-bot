@@ -56,7 +56,7 @@ gw = ActionGateway(ledger=ExecutionLedger(), tool_executor=_tracking_exec)
 r = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_1",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "לרכוש מכונת הדפסה", "Due": "היום"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש מכונת הדפסה", "Due": "היום"}},
     origin_channel="whatsapp", origin_chat_id="whatsapp:972501234567",
     requires_approval=True,
 )
@@ -72,7 +72,7 @@ print("\n── Req #2: Confirmation executes saved contract payload ───�
 dispatched.clear()
 
 # The saved payload — this is what must be dispatched, nothing else
-saved_inputs = {"table": "Tasks", "fields": {"Task": "לרכוש מכונת הדפסה", "Due": "היום"}}
+saved_inputs = {"table": "Tasks", "fields": {"כותרת המשימה": "לרכוש מכונת הדפסה", "Due": "היום"}}
 r2 = gw.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_2",
     tool_name="airtable_add", tool_inputs=saved_inputs,
@@ -98,7 +98,7 @@ gw3 = ActionGateway(ledger=ExecutionLedger(), tool_executor=_payload_capturing_e
 r3 = gw3.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_3",
     tool_name="airtable_add",
-    tool_inputs={"table": "Tasks", "fields": {"Task": "רכישת מדפסת", "Due": "מחר"}},
+    tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "רכישת מדפסת", "Due": "מחר"}},
     origin_channel="whatsapp", origin_chat_id="whatsapp:9725012",
     requires_approval=True,
 )
@@ -120,7 +120,7 @@ def _failing_exec(tool_name, tool_inputs, contract_id):
 gw_fail = ActionGateway(ledger=ExecutionLedger(), tool_executor=_failing_exec)
 r_fail = gw_fail.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_1",
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "Req3 failing tool"}},
     origin_channel="telegram", origin_chat_id="tg:1",
     requires_approval=True,
 )
@@ -171,7 +171,7 @@ def _counting_exec(tool_name, tool_inputs, contract_id):
 gw5 = ActionGateway(ledger=ExecutionLedger(), tool_executor=_counting_exec)
 r5 = gw5.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_5",
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"Task": "X"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "X"}},
     origin_channel="telegram", origin_chat_id="tg:5",
     requires_approval=True,
 )
@@ -220,7 +220,7 @@ def _no_record_exec(tool_name, tool_inputs, contract_id):
 gw6 = ActionGateway(ledger=ExecutionLedger(), tool_executor=_no_record_exec)
 r6 = gw6.propose_action(
     tenant_id="boss_hq", canonical_user_id="boss_hq:owner_6",
-    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"Task": "Y"}},
+    tool_name="airtable_add", tool_inputs={"table": "Tasks", "fields": {"כותרת המשימה": "Y"}},
     origin_channel="whatsapp", origin_chat_id="whatsapp:97250",
     requires_approval=True,
 )
