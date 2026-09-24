@@ -94,6 +94,7 @@ def gate1(tool, inputs, *, user_text="", trusted_source="agent", records=None, n
     fetch = fake_fetch(records or {})
     resolver = (lambda entity, name: (names or {}).get((entity, name), []))
     with patch.object(gateway_module, "_fetch_task_link_record", fetch), \
+         patch.object(gateway_module, "_fetch_task_record", lambda rid: (records or {}).get((Tables.TASKS, rid))), \
          patch.object(gateway_module, "_task_link_name_resolver", lambda ident: resolver if ident else None):
         tool, payload = resolve_canonical_call(tool, inputs, user_text)
         try:

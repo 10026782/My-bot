@@ -740,6 +740,103 @@ def _fetch_task_link_record(table: str, record_id: str) -> dict | None:
         return None
 
 
+def _fetch_task_record(record_id: str) -> dict | None:
+    """Recurrence I/O (Gate 1): the Task being updated. None = record does not
+    exist (404 -- the write itself will fail as before). Any other read failure
+    fails CLOSED: without the record we cannot know whether a completion must
+    advance a recurring Task, and guessing would either end a series or invent
+    a date."""
+    from core import task_writer
+    from airtable_schema import Tables
+    from tools.airtable_read_adapter import AirtableReadError, get_record_fields
+    try:
+        return get_record_fields(Tables.TASKS, record_id, timeout=5)
+    except AirtableReadError as exc:
+        if getattr(exc, "status_code", None) == 404:
+            return None
+        failure = exc
+    except Exception as exc:  # noqa: BLE001 -- any failure means "unknown"
+        failure = exc
+    logger.warning("[TaskGoldenWriter] task %s unreadable for recurrence: %s", record_id, type(failure).__name__)
+    raise task_writer.TaskWriteRejected(
+        "task_unverifiable",
+        "task record could not be read to evaluate recurrence",
+        task_writer.TASK_UNVERIFIABLE_MESSAGE,
+        (),
+    )
+
+
+# Task recurrence draft (Gate 1 only). Holds the recurrence the USER asked
+# for while the Golden Writer asks for the missing start date, so that a
+# date-only answer can carry it. It is written ONLY from a user-supported
+# recurrence (the user's own text, or the router's deterministic parse of it)
+# -- never from a model-supplied value -- and it is bound to tenant + user,
+# expires, and is claimed by the first Task title that uses it.
+_TASK_RECURRENCE_DRAFT_TTL_SECONDS = 30 * 60
+
+
+def _task_recurrence_draft_scope(identity) -> tuple[str, str] | None:
+    if identity is None:
+        return None
+    sender = str(getattr(identity, "external_id", "") or "").strip()
+    if not sender:
+        return None
+    return sender, str(getattr(identity, "channel", "") or "")
+
+
+def _save_task_recurrence_draft(identity, recurrence: str) -> None:
+    scope = _task_recurrence_draft_scope(identity)
+    if scope is None:
+        return
+    sender, channel = scope
+    try:
+        from session_store import lead_sessions
+        lead_sessions.set_task_recurrence_draft(sender, {
+            "recurrence": recurrence,
+            "tenant_id": str(getattr(identity, "tenant_id", "") or ""),
+            "user_id": str(getattr(identity, "user_id", "") or ""),
+            "created_at": time.time(),
+            "claimed_title": None,
+        }, channel=channel)
+    except Exception as exc:  # noqa: BLE001 -- the user can still restate the frequency
+        logger.warning("[TaskGoldenWriter] recurrence draft not saved: %s", type(exc).__name__)
+
+
+def _verify_task_recurrence_draft(identity, recurrence: str, title: object) -> bool:
+    """True only when a live, identity-bound draft from the user's own earlier
+    recurrence request names exactly this recurrence (and, once claimed, this
+    Task title). Any read failure → False (fail closed: the model-supplied
+    value never becomes a business fact)."""
+    from core import task_writer
+
+    scope = _task_recurrence_draft_scope(identity)
+    if scope is None:
+        return False
+    sender, channel = scope
+    try:
+        from session_store import lead_sessions
+        draft = lead_sessions.get_task_recurrence_draft(sender, channel=channel)
+        if not draft:
+            return False
+        if (
+            draft.get("tenant_id") != str(getattr(identity, "tenant_id", "") or "")
+            or draft.get("user_id") != str(getattr(identity, "user_id", "") or "")
+            or draft.get("recurrence") != recurrence
+            or time.time() - float(draft.get("created_at") or 0) > _TASK_RECURRENCE_DRAFT_TTL_SECONDS
+        ):
+            return False
+        normalized_title = task_writer.normalize_title(title)
+        claimed = draft.get("claimed_title")
+        if claimed and claimed != normalized_title:
+            return False
+        if not claimed:
+            lead_sessions.set_task_recurrence_draft(sender, {**draft, "claimed_title": normalized_title}, channel=channel)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[TaskGoldenWriter] recurrence draft unverifiable: %s", type(exc).__name__)
+        return False
+
+
 def _task_link_name_resolver(identity):
     """Canonical exact-label resolver (commercial_crm.lookup_human_reference,
     tenant-scoped). No identity → no name resolution (fail closed → omit)."""
@@ -784,7 +881,20 @@ def complete_task_proposal(
          else a verified Lead's actionable Next Action + Lead name.
       3. Golden Writer validation -- Title must be non-empty after
          normalization, else TaskCanonicalizationError asking ONLY for it.
-    For airtable_update on Tasks: only an update that blanks Title is rejected.
+      4. Recurrence (Tasks.Cadence) -- agent source: the user's own text
+         ("כל יום/שבוע/חודש") fills a missing value and wins over a conflicting
+         recurring value; ambiguous text asks only about frequency. A
+         model-supplied recurring value survives only if a live draft saved
+         from the user's own earlier request names it (date-only follow-up);
+         otherwise the user is asked about the frequency -- a model-only
+         recurrence never becomes a business fact. Daily without a date is
+         anchored to today (local); Weekly/Monthly without a date asks only
+         for the start date and saves that user-supported draft.
+    For airtable_update on Tasks: an update that blanks Title is rejected;
+    Cadence is validated; marking a RECURRING Task done (Status=בוצע) becomes
+    "advance the SAME record" -- Due Date = next occurrence, Status = ממתין --
+    here, before approval, so approved == fingerprinted == executed payload.
+    Gate 2 never performs this transformation.
 
     Returns the SAME dict object when nothing changed (callers then keep any
     fingerprint_payload they were given), otherwise a new dict. No-op for every
@@ -798,8 +908,7 @@ def complete_task_proposal(
         return tool_inputs
     try:
         if tool_name == "airtable_update":
-            task_writer.validate_task_payload(tool_name, payload)
-            return tool_inputs
+            return _complete_task_update(payload, tool_inputs)
 
         original = payload.get("fields")
         fields = dict(original) if isinstance(original, dict) else {}
@@ -826,11 +935,110 @@ def complete_task_proposal(
                     fields[TaskFields.DUE_DATE] = due
                 logger.info("[TaskGoldenWriter] title derived from trusted context")
 
-        task_writer.prepare_task_create(fields)
+        # §4 recurrence: prepare validates the enum (and normalizes legacy
+        # aliases) before any Diamond step reads it.
+        if TaskFields.RECURRENCE in fields:
+            fields = _normalized_recurrence_fields(fields)
+        # A recurring value may become a business fact only when the USER
+        # supports it: their own text in this turn, the router's
+        # deterministic parse of it (trusted internal source), or a live
+        # draft saved from their earlier request. A model-only recurrence
+        # never survives: the user is asked about the frequency instead.
+        supplied = fields.get(TaskFields.RECURRENCE)
+        if str(trusted_source or "").strip() in _UNTRUSTED_TASK_SOURCES:
+            parsed = task_writer.recurrence_from_text(user_text)
+            if parsed.uncertain:
+                raise task_writer.TaskWriteRejected(
+                    "recurrence_ambiguous",
+                    "user text names an ambiguous or unsupported recurrence",
+                    task_writer.ASK_RECURRENCE_MESSAGE,
+                    (TaskFields.RECURRENCE,),
+                )
+            if parsed.value and (supplied is None or supplied in task_writer.RECURRING):
+                if supplied != parsed.value:
+                    fields[TaskFields.RECURRENCE] = parsed.value
+                    logger.info("[TaskGoldenWriter] recurrence derived from user text: %s", parsed.value)
+            elif supplied in task_writer.RECURRING and not _verify_task_recurrence_draft(
+                identity, supplied, fields.get(TaskFields.NAME),
+            ):
+                raise task_writer.TaskWriteRejected(
+                    "recurrence_unsupported",
+                    "model-supplied recurrence is not supported by the user's text or draft",
+                    task_writer.ASK_RECURRENCE_MESSAGE,
+                    (TaskFields.RECURRENCE,),
+                )
+        fields = dict(task_writer.fill_recurrence_anchor(fields, today=task_writer.local_today()))
+
+        try:
+            task_writer.prepare_task_create(fields)
+        except task_writer.TaskWriteRejected as exc:
+            recurrence = fields.get(TaskFields.RECURRENCE)
+            if exc.code == "recurrence_anchor_missing" and recurrence in task_writer.RECURRING:
+                # Reaching here, the recurrence is user-supported (see above).
+                _save_task_recurrence_draft(identity, recurrence)
+            raise
     except task_writer.TaskWriteRejected as exc:
         raise TaskCanonicalizationError(
             str(exc), exc.user_message, code=exc.code, missing=exc.missing
         ) from None
+
+    if fields == original:
+        return tool_inputs
+    return {**payload, "fields": fields}
+
+
+def _normalized_recurrence_fields(fields: dict) -> dict:
+    """Validate Cadence and apply ONLY its normalization (legacy "One Time" →
+    "One-time", empty → removed); every other field is left exactly as given."""
+    from core import task_writer
+    from airtable_schema import TaskFields
+
+    checked = task_writer.prepare_task_update({TaskFields.RECURRENCE: fields[TaskFields.RECURRENCE]})
+    result = {k: v for k, v in fields.items() if k != TaskFields.RECURRENCE}
+    if TaskFields.RECURRENCE in checked:
+        result[TaskFields.RECURRENCE] = checked[TaskFields.RECURRENCE]
+    return result
+
+
+def _complete_task_update(payload: dict, tool_inputs: dict) -> dict:
+    """Gate 1 for airtable_update on Tasks (see complete_task_proposal)."""
+    from core import task_writer
+    from airtable_schema import TaskFields, TaskStatus
+
+    task_writer.validate_task_payload("airtable_update", payload)
+    original = payload.get("fields")
+    if not isinstance(original, dict):
+        return tool_inputs
+    fields = _normalized_recurrence_fields(original) if TaskFields.RECURRENCE in original else dict(original)
+
+    completing = fields.get(TaskFields.STATUS) == TaskStatus.DONE
+    becoming_recurring = (
+        task_writer.normalize_recurrence(fields.get(TaskFields.RECURRENCE)) in task_writer.RECURRING
+        and TaskFields.RECURRENCE in fields
+        and not fields.get(TaskFields.DUE_DATE)
+    )
+    record_id = str(payload.get("record_id") or "").strip()
+    if (completing or becoming_recurring) and record_id:
+        record = _fetch_task_record(record_id)
+        if record is not None:
+            today = task_writer.local_today()
+            if completing:
+                fields = dict(task_writer.recurring_completion(fields, record, today=today))
+                if fields.get(TaskFields.STATUS) != TaskStatus.DONE:
+                    logger.info(
+                        "[TaskGoldenWriter] recurring completion %s -> next due %s",
+                        record_id, fields.get(TaskFields.DUE_DATE),
+                    )
+            elif not record.get(TaskFields.DUE_DATE):
+                # Making an undated Task recurring needs a schedule anchor.
+                fields = dict(task_writer.fill_recurrence_anchor(fields, today=today))
+                if not fields.get(TaskFields.DUE_DATE):
+                    raise task_writer.TaskWriteRejected(
+                        "recurrence_anchor_missing",
+                        "recurring task requires a due date (next occurrence)",
+                        task_writer.ASK_START_DATE_MESSAGE,
+                        (TaskFields.DUE_DATE,),
+                    )
 
     if fields == original:
         return tool_inputs

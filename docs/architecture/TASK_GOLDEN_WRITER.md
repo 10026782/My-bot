@@ -1,6 +1,6 @@
 # Task Golden Writer — canonical Task write core
 
-**Status:** `CODE_DONE + STATIC_VERIFIED` on branch `claude/blank-task-cards-audit-4rsy4t` (24/09/2026, revision 2 after owner review). Not merged, deployed, or runtime-verified.
+**Status:** Golden Writer core merged to `main` (PR #1266, merge `df623f89`). Not deployed or runtime-verified. §8 Recurrence: `CODE_DONE + STATIC_VERIFIED` on branch `claude/blank-task-cards-audit-4rsy4t` (24/09/2026). Not merged, deployed, or runtime-verified.
 **Owner module:** `core/task_writer.py`
 **Trigger:** blank task cards in the Mini App's "My Work" screen (audit, 24/09/2026).
 
@@ -90,3 +90,27 @@ The change touches canonical Airtable write paths across the approvals and tools
 - Owner auto-defaulting (no established write-time contract exists; My Work already shows Owner-less Tasks to the sole owner).
 - Mini App `tma_write` (path 6).
 - Title completion from Contact or Deal context, or from any source other than the two listed under "Diamond scope".
+
+## 8. Recurrence (Tasks.`Cadence`)
+
+Owner decisions (24/09/2026): reuse the existing `Cadence` single-select (`fldcQk3DisdkzhPMX`); no new field, no rename, no backfill, no option cleanup. Recurrence is separate from Status: Status is the state of the current occurrence, `Cadence` is how often it repeats.
+
+| Topic | Rule |
+|---|---|
+| Values | `Daily` / `Weekly` / `Monthly` / `One-time` (`airtable_schema.TaskRecurrence`, `TaskFields.RECURRENCE = "Cadence"`). Empty and the legacy live option `One Time` read as One-time. Nothing writes a default: One-time = no value. Any other value is rejected (it would otherwise become a new select option). |
+| Parsing | `task_writer.recurrence_from_text`, deterministic and conservative: `כל יום` / `כל שבוע` / `כל חודש` (also with ו-/ב-). `כל היום/השבוע/החודש` ("the whole day…") is not a frequency. Ambiguous or unsupported → never guessed: a weekday after `כל יום` (`כל יום שני` = every Monday), negation, two different frequencies, `כל יומיים/שבועיים/חודשיים/שנה`, `כל N …`. The Title keeps the user's wording. |
+| Where it is derived | Router deterministic create: `parse_deterministic_create_task` → `DeterministicTaskParse.recurrence` (also in `business_identity()`, so the fingerprint basis matches the write payload; BUG-TASK-01). Ambiguous → the router's existing clarification, asking only about frequency. Agent path (Gate 1): the user's own text fills a missing value and wins over a conflicting recurring value; ambiguous text asks only about frequency. **A model-supplied recurring value is never trusted by itself**: when the text is silent it survives only if a live **recurrence draft** saved from the user's own earlier request names it (see next row); otherwise the user is asked about the frequency (`recurrence_unsupported`), so a model-only recurrence never becomes a business fact. |
+| Recurrence draft | Saved only when Gate 1 asks for the start date of a **user-supported** recurrence (the user's text, or the router's deterministic parse of it). Stored in the existing persisted session (`session_store.lead_sessions.set_task_recurrence_draft`, same slot pattern as `commercial_completion`; registered in `_sync_to_db`/`_load_from_db`). It is bound to tenant + user, expires after 30 minutes, is claimed by the first Task title that uses it (so both Gate 1 passes verify, and it can never lend its recurrence to a different Task), and a read failure means "not verified" (fail closed). It is never written from a model-supplied value. |
+| Schedule anchor | Due Date = the next occurrence. A recurring Task needs one. **Daily** without a date → local today (Asia/Jerusalem). **Weekly/Monthly** without a date → `TaskCanonicalizationError` asking only for the start date; no weekday or month-day is invented. One-time: Due Date stays optional. |
+| Completion | Marking a recurring Task `בוצע` becomes an update of the **same record**: `Due Date` = next occurrence, `Status` = `ממתין` (`TaskStatus.PENDING`, the existing pending option). No occurrence rows are created. One-time/empty/`One Time` → normal Done. A Task already `בוצע` is never advanced again. Completion history = the ActionContract/approval and audit records. |
+| Next occurrence | `anchor + k·interval` for the smallest k ≥ 1 that is after today. Anchor = the current Due Date, or today for an undated Daily. An overdue Task jumps to the next future occurrence; Weekly keeps its weekday; Monthly = calendar month, day capped at month end (31/1 → 28/2 → 28/3: a known one-time drift). |
+| Where it runs | **Gate 1 only**, before approval: `complete_task_proposal` → `_complete_task_update` (router `COMPLETE_TASK` and Agent `airtable_update`) and `tma_api.update_task_status` (Mini App "mark done", computed from the record the handler already loads). The record read (`_fetch_task_record`) fails **closed** on a read error (404 = no record → unchanged). The rewritten payload drops any stale `fingerprint_payload`, so approved == fingerprinted == executed. |
+| Gate 2 | Validation only: Cadence must be a known option; a recurring create must carry a Due Date. It never reads the record, advances a date or fills an anchor. |
+| Duplicates | Two completions from the same record state produce the same payload and fingerprint, so the second is caught as a duplicate. The next occurrence's completion has a later Due Date, so it is a different action. |
+| Mini App | UX unchanged. Create stays One-time (it never writes `Cadence`). Completion correctly advances an already-recurring Task (backend only; response shape unchanged; an undated Weekly/Monthly returns 409 with the date question). My Work needs no change: it already reloads after "mark done" and buckets by Due Date. |
+
+Tests: `test_task_recurrence.py` (R1–R12: parser, router create, normalization, math, pure completion, Gate 1 create/update, caller UX, parity with the real `_validate_execution_proof` + `dispatch_tool`, duplicate completion, Gate 2 validation-only, Mini App completion).
+
+Cross-Layer Impact: FULL (same four layers as §6). Layer 2 (TurnCoordinator): the deterministic parse carries `recurrence`; ambiguous → existing CLARIFY. Layer 3 (Action & Tool Contract): the Tasks update allowlist and the router builder field set accept `Cadence`; Gate 2 validates it. Layer 4 (Durable Atomic Approval): the transformation happens before `propose_action` fingerprints anything; the ActionContract stores the advanced payload; `_validate_execution_proof` is unchanged. Layer 1 (Core Reasoning): one schema line in `core_knowledge.py`. New read: one `get_record_fields` per Task completion (and per update that makes an undated Task recurring), fail-closed.
+
+Not in this change: RRULE / every N / weekday schedules; a recurrence badge in the Mini App; Mini App recurrence on create; the live `One Time`/`Open` option cleanup; the My Work 100-record read cap (separate HIGH bug, `BUG_AUDIT_LOG.md` → MY-WORK-TASK-READ-CAP).

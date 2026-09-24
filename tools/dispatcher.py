@@ -134,6 +134,7 @@ _TASK_ALLOWED_UPDATE_FIELDS: frozenset[str] = frozenset({
     TaskFields.NAME, TaskFields.DESCRIPTION, TaskFields.DUE_DATE,
     TaskFields.STATUS, TaskFields.CONTACTS_LINK, TaskFields.DEALS_LINK,
     TaskFields.DOMAIN, TaskFields.OWNER, TaskFields.LEAD_LINK,
+    TaskFields.RECURRENCE,
 })
 
 
@@ -438,7 +439,8 @@ def dispatch_tool(
                 # ההתמדה. כל יצירת משימה שאינה מה-Mini App מגיעה לכאן (Agent,
                 # sheets_append אחרי המרה, router דטרמיניסטי, workers). אימות
                 # בלבד של האינווריאנט: כותרת לא ריקה אחרי נרמול (הכותרת
-                # המנורמלת נכתבת; שאר השדות ללא שינוי). רץ אחרי
+                # המנורמלת נכתבת; שאר השדות ללא שינוי); Cadence מאומת, ומשימה
+                # חוזרת חייבת תאריך יעד — Gate 2 לא משלים אותו. רץ אחרי
                 # _validate_execution_proof, כך שהנרמול לא נוגע ב-fingerprint.
                 if _task_writer.is_task_table(table):
                     try:
@@ -837,7 +839,9 @@ def dispatch_tool(
                         audit_log_airtable("airtable_update", identity, {"table": table, "record_id": record_id}, result)
                         return result
 
-                    # Task Golden Writer: עדכון לעולם לא מרוקן כותרת.
+                    # Task Golden Writer: עדכון לעולם לא מרוקן כותרת; Cadence
+                    # מאומת בלבד. קידום משימה חוזרת בהשלמה קורה רק ב-Gate 1
+                    # (לפני אישור) — לעולם לא כאן.
                     try:
                         fields = _task_writer.prepare_task_update(fields)
                     except _task_writer.TaskWriteRejected as e:
