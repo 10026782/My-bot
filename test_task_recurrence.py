@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import date
 from unittest.mock import patch
 
@@ -53,6 +54,18 @@ from core.task_writer import (  # noqa: E402
 )
 from core.turn_coordinator_runtime import gateway_call  # noqa: E402
 from identity import Identity, Role  # noqa: E402
+import inspect  # noqa: E402
+import session_store  # noqa: E402
+from session_store import lead_sessions  # noqa: E402
+
+# Session store runs RAM-only here (no Airtable I/O). Sources captured first so
+# R13 can check the persistence whitelists of the real methods.
+_SYNC_SRC = inspect.getsource(session_store.PersistentSessionStore._sync_to_db)
+_LOAD_SRC = inspect.getsource(session_store.PersistentSessionStore._load_from_db)
+for _p in (patch.object(session_store.PersistentSessionStore, "_sync_to_db", lambda self, *a, **k: True),
+           patch.object(session_store.PersistentSessionStore, "_load_from_db", lambda self, *a, **k: None),
+           patch.object(session_store.PersistentSessionStore, "_delete_from_db", lambda self, *a, **k: None)):
+    _p.start()
 
 passed = 0
 failed = 0
@@ -272,10 +285,6 @@ chk("Daily without a date → Due Date = local today (deterministic anchor)",
 out = create({NAME: "ישיבת צוות"}, "תקבע משימה כל יום שני ישיבת צוות")
 chk("ambiguous text → asks ONLY about the frequency, nothing proposed",
     isinstance(out, CanonicalizationError) and out.user_message == ASK_RECURRENCE_MESSAGE and out.missing == (CAD,))
-inputs = {"table": Tables.TASKS, "fields": {NAME: "לשלוח דוח", CAD: WEEKLY, DUE: "2026-10-01"}}
-out, _ = gate1("airtable_add", inputs, user_text="מ-1/10/26")
-chk("follow-up answer (text silent on frequency) → model's canonical value kept, payload unchanged (same object)",
-    out is inputs)
 inputs = {"table": Tables.TASKS, "fields": {NAME: "לקנות חלב"}}
 out, _ = gate1("airtable_add", inputs, user_text="צור משימה לקנות חלב")
 chk("plain one-time create → unchanged (same object; no Cadence, no Due invented)", out is inputs)
@@ -542,6 +551,106 @@ r, posted = _tma_patch(_record(**{CAD: DAILY, DUE: "2026-09-20", S: DONE}))
 chk("M5 recurring Task already Done → normal Done (no second advance)", posted[0][0]["fields"] == {S: DONE})
 chk("M6 Mini App create path does not write Cadence (stays One-time)",
     "RECURRENCE" not in open("tma_api.py", encoding="utf-8").read().split("def create_lead_task", 1)[1].split("\n@tma_api.route", 1)[0])
+
+# ══════════════════════════════════════════════════
+print("\n[R13] date-only follow-up: user-supported recurrence survives, model-only never does")
+# ══════════════════════════════════════════════════
+
+SENDER = owner.external_id
+
+
+def _draft():
+    return lead_sessions.get_task_recurrence_draft(SENDER, channel=owner.channel)
+
+
+def _clear_draft():
+    lead_sessions.set_task_recurrence_draft(SENDER, {}, channel=owner.channel)
+
+
+def _followup(fields, text="1/10/26"):
+    return gate1("airtable_add", {"table": Tables.TASKS, "fields": fields}, user_text=text)[0]
+
+
+FOLLOWUP = {NAME: "לשלוח דוח", CAD: WEEKLY, DUE: "2026-10-01"}
+
+# ── A. user-supported (Agent origin) survives a date-only answer ──
+_clear_draft()
+out = _followup({NAME: "לשלוח דוח"}, "תזכיר לי כל שבוע לשלוח דוח")
+d = _draft() or {}
+chk("A1 user said 'כל שבוע', no date → asks ONLY for the date and saves a draft from the USER's request",
+    isinstance(out, CanonicalizationError) and out.user_message == ASK_START_DATE_MESSAGE
+    and d.get("recurrence") == WEEKLY and d.get("user_id") == owner.user_id
+    and d.get("tenant_id") == owner.tenant_id and d.get("claimed_title") is None)
+inputs = {"table": Tables.TASKS, "fields": dict(FOLLOWUP)}
+out, _ = gate1("airtable_add", inputs, user_text="1/10/26")
+chk("A2 date-only answer; model carries Weekly + date → verified against the draft, payload unchanged",
+    out is inputs and (_draft() or {}).get("claimed_title") == "לשלוח דוח")
+out, _ = gate1("airtable_add", {"table": Tables.TASKS, "fields": dict(FOLLOWUP)}, user_text="1/10/26")
+chk("A3 second Gate 1 pass (propose_action re-runs it) → still verified (idempotent claim)",
+    isinstance(out, dict) and out["fields"].get(CAD) == WEEKLY)
+out = _followup({NAME: "משימה אחרת", CAD: WEEKLY, DUE: "2026-10-02"}, "2/10/26")
+chk("A4 the claimed draft cannot lend its recurrence to a DIFFERENT Task",
+    isinstance(out, CanonicalizationError) and out.code == "recurrence_unsupported")
+
+# ── B. user-supported (router origin), full proposal: approved == executed ──
+_clear_draft()
+out, _ = gate1("airtable_add", {"table": Tables.TASKS, "fields": {NAME: "כל שבוע לשלוח דוח", CAD: WEEKLY}},
+               trusted_source="deterministic_create_task", user_text="צור משימה: כל שבוע לשלוח דוח")
+chk("B1 router create 'צור משימה: כל שבוע …' without a date → asks for the date, draft saved",
+    isinstance(out, CanonicalizationError) and (_draft() or {}).get("recurrence") == WEEKLY)
+with _today(), patch.object(app, "resolve_identity", lambda *a, **k: owner), \
+     patch.object(gateway_module, "_fetch_task_link_record", lambda t, r: None):
+    result = app._queue_approval_detailed(
+        "airtable_add", {"table": Tables.TASKS, "fields": {NAME: "כל שבוע לשלוח דוח", CAD: WEEKLY, DUE: "2026-10-01"}},
+        SENDER, "telegram", "1/10/26",
+    )
+contract = action_gateway.find_contract(result.get("contract_id")) if result.get("contract_id") else None
+stored = contract.normalized_payload if contract else {}
+chk("B2 date-only answer through the real app path (both Gate 1 passes) → the contract stores Weekly",
+    stored.get("fields") == {NAME: "כל שבוע לשלוח דוח", CAD: WEEKLY, DUE: "2026-10-01"})
+chk("B3 …and its fingerprint matches the dispatcher's recomputation (approved == executed)",
+    contract is not None and _validate_execution_proof("airtable_add", stored, owner, _ctx(contract), "agent") is None)
+
+# ── C. model-only recurrence never becomes a business fact ──
+_clear_draft()
+with _today(), patch.object(action_gateway, "propose_action", side_effect=AssertionError("must not propose")) as spy:
+    result = app._queue_approval_detailed(
+        "airtable_add", {"table": Tables.TASKS, "fields": dict(FOLLOWUP)}, "chat-rec-model-only", "telegram", "1/10/26",
+    )
+chk("C1 date-only answer, NO user-supported draft, model says Weekly → nothing proposed; asks about the frequency",
+    result.get("terminal_outcome") == "APPROVAL_QUEUE_NEVER_ATTEMPTED" and spy.call_count == 0
+    and result.get("message") == ASK_RECURRENCE_MESSAGE)
+out = _followup(dict(FOLLOWUP), "תזכיר לי לשלוח דוח שבועי")
+chk("C2 first turn, text has no recurrence phrase, model infers Weekly → rejected (not written as a fact)",
+    isinstance(out, CanonicalizationError) and out.code == "recurrence_unsupported")
+out = _followup({NAME: "לשלוח דוח", CAD: WEEKLY}, "תזכיר לי לשלוח דוח")
+chk("C3 model-only Weekly without a date → asks about the frequency (not the date) and saves NO draft",
+    isinstance(out, CanonicalizationError) and out.code == "recurrence_unsupported" and _draft() is None)
+
+lead_sessions.set_task_recurrence_draft(SENDER, {"recurrence": DAILY, "tenant_id": owner.tenant_id,
+                                                 "user_id": owner.user_id, "created_at": time.time(),
+                                                 "claimed_title": None}, channel=owner.channel)
+chk("C4 draft says Daily, model says Weekly → rejected", _followup(dict(FOLLOWUP)).code == "recurrence_unsupported")
+lead_sessions.set_task_recurrence_draft(SENDER, {"recurrence": WEEKLY, "tenant_id": owner.tenant_id,
+                                                 "user_id": owner.user_id, "created_at": time.time() - 31 * 60,
+                                                 "claimed_title": None}, channel=owner.channel)
+chk("C5 expired draft (>30 min) → rejected", _followup(dict(FOLLOWUP)).code == "recurrence_unsupported")
+lead_sessions.set_task_recurrence_draft(SENDER, {"recurrence": WEEKLY, "tenant_id": owner.tenant_id,
+                                                 "user_id": "someone-else", "created_at": time.time(),
+                                                 "claimed_title": None}, channel=owner.channel)
+chk("C6 draft bound to another user → rejected", _followup(dict(FOLLOWUP)).code == "recurrence_unsupported")
+with patch.object(lead_sessions, "get_task_recurrence_draft", side_effect=RuntimeError("store down")):
+    out = _followup(dict(FOLLOWUP))
+chk("C7 draft store unreadable → rejected (fail closed)",
+    isinstance(out, CanonicalizationError) and out.code == "recurrence_unsupported")
+_clear_draft()
+inputs = {"table": Tables.TASKS, "fields": {NAME: "לשלוח דוח", CAD: ONE_TIME, DUE: "2026-10-01"}}
+out, _ = gate1("airtable_add", inputs, user_text="1/10/26")
+chk("C8 model One-time (the default, not a recurrence fact) → unaffected", out is inputs)
+
+chk("P persistence: the draft slot is in the session defaults and both DB whitelists (not RAM-only)",
+    "task_recurrence_draft" in session_store._new_session()
+    and '"task_recurrence_draft"' in _SYNC_SRC and '"task_recurrence_draft"' in _LOAD_SRC)
 
 print(f"\n{'=' * 60}")
 print(f"Task recurrence tests: {passed} passed, {failed} failed")

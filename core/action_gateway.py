@@ -766,6 +766,77 @@ def _fetch_task_record(record_id: str) -> dict | None:
     )
 
 
+# Task recurrence draft (Gate 1 only). Holds the recurrence the USER asked
+# for while the Golden Writer asks for the missing start date, so that a
+# date-only answer can carry it. It is written ONLY from a user-supported
+# recurrence (the user's own text, or the router's deterministic parse of it)
+# -- never from a model-supplied value -- and it is bound to tenant + user,
+# expires, and is claimed by the first Task title that uses it.
+_TASK_RECURRENCE_DRAFT_TTL_SECONDS = 30 * 60
+
+
+def _task_recurrence_draft_scope(identity) -> tuple[str, str] | None:
+    if identity is None:
+        return None
+    sender = str(getattr(identity, "external_id", "") or "").strip()
+    if not sender:
+        return None
+    return sender, str(getattr(identity, "channel", "") or "")
+
+
+def _save_task_recurrence_draft(identity, recurrence: str) -> None:
+    scope = _task_recurrence_draft_scope(identity)
+    if scope is None:
+        return
+    sender, channel = scope
+    try:
+        from session_store import lead_sessions
+        lead_sessions.set_task_recurrence_draft(sender, {
+            "recurrence": recurrence,
+            "tenant_id": str(getattr(identity, "tenant_id", "") or ""),
+            "user_id": str(getattr(identity, "user_id", "") or ""),
+            "created_at": time.time(),
+            "claimed_title": None,
+        }, channel=channel)
+    except Exception as exc:  # noqa: BLE001 -- the user can still restate the frequency
+        logger.warning("[TaskGoldenWriter] recurrence draft not saved: %s", type(exc).__name__)
+
+
+def _verify_task_recurrence_draft(identity, recurrence: str, title: object) -> bool:
+    """True only when a live, identity-bound draft from the user's own earlier
+    recurrence request names exactly this recurrence (and, once claimed, this
+    Task title). Any read failure → False (fail closed: the model-supplied
+    value never becomes a business fact)."""
+    from core import task_writer
+
+    scope = _task_recurrence_draft_scope(identity)
+    if scope is None:
+        return False
+    sender, channel = scope
+    try:
+        from session_store import lead_sessions
+        draft = lead_sessions.get_task_recurrence_draft(sender, channel=channel)
+        if not draft:
+            return False
+        if (
+            draft.get("tenant_id") != str(getattr(identity, "tenant_id", "") or "")
+            or draft.get("user_id") != str(getattr(identity, "user_id", "") or "")
+            or draft.get("recurrence") != recurrence
+            or time.time() - float(draft.get("created_at") or 0) > _TASK_RECURRENCE_DRAFT_TTL_SECONDS
+        ):
+            return False
+        normalized_title = task_writer.normalize_title(title)
+        claimed = draft.get("claimed_title")
+        if claimed and claimed != normalized_title:
+            return False
+        if not claimed:
+            lead_sessions.set_task_recurrence_draft(sender, {**draft, "claimed_title": normalized_title}, channel=channel)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[TaskGoldenWriter] recurrence draft unverifiable: %s", type(exc).__name__)
+        return False
+
+
 def _task_link_name_resolver(identity):
     """Canonical exact-label resolver (commercial_crm.lookup_human_reference,
     tenant-scoped). No identity → no name resolution (fail closed → omit)."""
@@ -812,9 +883,13 @@ def complete_task_proposal(
          normalization, else TaskCanonicalizationError asking ONLY for it.
       4. Recurrence (Tasks.Cadence) -- agent source: the user's own text
          ("כל יום/שבוע/חודש") fills a missing value and wins over a conflicting
-         recurring value; ambiguous text asks only about frequency. Daily
-         without a date is anchored to today (local); Weekly/Monthly without a
-         date asks only for the start date.
+         recurring value; ambiguous text asks only about frequency. A
+         model-supplied recurring value survives only if a live draft saved
+         from the user's own earlier request names it (date-only follow-up);
+         otherwise the user is asked about the frequency -- a model-only
+         recurrence never becomes a business fact. Daily without a date is
+         anchored to today (local); Weekly/Monthly without a date asks only
+         for the start date and saves that user-supported draft.
     For airtable_update on Tasks: an update that blanks Title is rejected;
     Cadence is validated; marking a RECURRING Task done (Status=בוצע) becomes
     "advance the SAME record" -- Due Date = next occurrence, Status = ממתין --
@@ -864,6 +939,12 @@ def complete_task_proposal(
         # aliases) before any Diamond step reads it.
         if TaskFields.RECURRENCE in fields:
             fields = _normalized_recurrence_fields(fields)
+        # A recurring value may become a business fact only when the USER
+        # supports it: their own text in this turn, the router's
+        # deterministic parse of it (trusted internal source), or a live
+        # draft saved from their earlier request. A model-only recurrence
+        # never survives: the user is asked about the frequency instead.
+        supplied = fields.get(TaskFields.RECURRENCE)
         if str(trusted_source or "").strip() in _UNTRUSTED_TASK_SOURCES:
             parsed = task_writer.recurrence_from_text(user_text)
             if parsed.uncertain:
@@ -873,14 +954,29 @@ def complete_task_proposal(
                     task_writer.ASK_RECURRENCE_MESSAGE,
                     (TaskFields.RECURRENCE,),
                 )
-            supplied = fields.get(TaskFields.RECURRENCE)
             if parsed.value and (supplied is None or supplied in task_writer.RECURRING):
                 if supplied != parsed.value:
                     fields[TaskFields.RECURRENCE] = parsed.value
                     logger.info("[TaskGoldenWriter] recurrence derived from user text: %s", parsed.value)
+            elif supplied in task_writer.RECURRING and not _verify_task_recurrence_draft(
+                identity, supplied, fields.get(TaskFields.NAME),
+            ):
+                raise task_writer.TaskWriteRejected(
+                    "recurrence_unsupported",
+                    "model-supplied recurrence is not supported by the user's text or draft",
+                    task_writer.ASK_RECURRENCE_MESSAGE,
+                    (TaskFields.RECURRENCE,),
+                )
         fields = dict(task_writer.fill_recurrence_anchor(fields, today=task_writer.local_today()))
 
-        task_writer.prepare_task_create(fields)
+        try:
+            task_writer.prepare_task_create(fields)
+        except task_writer.TaskWriteRejected as exc:
+            recurrence = fields.get(TaskFields.RECURRENCE)
+            if exc.code == "recurrence_anchor_missing" and recurrence in task_writer.RECURRING:
+                # Reaching here, the recurrence is user-supported (see above).
+                _save_task_recurrence_draft(identity, recurrence)
+            raise
     except task_writer.TaskWriteRejected as exc:
         raise TaskCanonicalizationError(
             str(exc), exc.user_message, code=exc.code, missing=exc.missing

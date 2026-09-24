@@ -192,6 +192,11 @@ def _new_session(domain: str = "real_estate", channel: str = "whatsapp") -> dict
                                              #   deal_enrichment_offer above — independent of
                                              #   "commercial_completion" so it can never be misread
                                              #   by the S2C restore()/answer_human() path.
+        "task_recurrence_draft":    None,   # ← Task recurrence: {"recurrence", "tenant_id", "user_id",
+                                             #   "created_at", "claimed_title"} — the recurrence the USER
+                                             #   asked for while the date is being asked (TTL 1800s).
+                                             #   Registered in _sync_to_db()/_load_from_db() below
+                                             #   (the deal_enrichment_offer RAM-only-loss lesson).
         "business_drafts":          {},    # ← BUSINESSDRAFT PHASE 2: one canonical namespace,
                                              #   {entity_type: serialize_business_draft(...)} — a
                                              #   nested dict, not a new top-level key per entity
@@ -651,6 +656,24 @@ class PersistentSessionStore:
         session["updated_at"] = _now_iso()
         self._sync_to_db(sender, session)
 
+    def set_task_recurrence_draft(self, sender: str, state: dict, channel: str = "") -> None:
+        """Task recurrence (core/task_writer.py §4): persist the recurrence the
+        USER asked for while the Golden Writer asks for the missing start date,
+        so a date-only answer can carry it. Written only by
+        core/action_gateway._save_task_recurrence_draft — never from a
+        model-supplied value. Same slot pattern as set_commercial_completion."""
+        session = self.get_or_create(sender, channel=channel)
+        session["task_recurrence_draft"] = dict(state)
+        session["updated_at"] = _now_iso()
+        self._sync_to_db(sender, session)
+
+    def get_task_recurrence_draft(self, sender: str, channel: str = "") -> Optional[dict]:
+        session = self.get(sender, channel=channel)
+        if not session:
+            return None
+        state = session.get("task_recurrence_draft")
+        return dict(state) if isinstance(state, dict) and state else None
+
     def set_last_prompted_contract(self, sender: str, contract_id: str, kind: str = "action_gateway") -> None:
         """BUG-115: רושם את ה-ActionContract שהצגתו-לאישור הוצגה הרגע למשתמש
         הזה, כדי שמילת אישור בודדת ("כן"/"מאשר") הבאה תיפתר מולו ישירות
@@ -742,6 +765,7 @@ class PersistentSessionStore:
                 # comment on this same key for the full RAM-only-loss history.
                 "deal_enrichment_offer":    session.get("deal_enrichment_offer"),
                 "lead_deal_link":           session.get("lead_deal_link"),
+                "task_recurrence_draft":    session.get("task_recurrence_draft"),
                 "business_drafts":          session.get("business_drafts", {}),
             }
             session_channel = session.get("channel", "")
@@ -978,6 +1002,7 @@ class PersistentSessionStore:
                 # comment on this same key for the full RAM-only-loss history.
                 ("deal_enrichment_offer", None),
                 ("lead_deal_link", None),
+                ("task_recurrence_draft", None),
                 ("business_drafts", {}),
             ):
                 session[key] = state.get(key, default)
