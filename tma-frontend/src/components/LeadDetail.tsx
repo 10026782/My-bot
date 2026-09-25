@@ -39,6 +39,15 @@ const SCORE_CHIP_CLASS: Record<string, string> = {
   blue: "lead-detail-score-chip--blue",
 };
 
+// Owner-only quick temperature buttons — one-tap Score presets instead of
+// typing a raw number. Values chosen to land inside the existing 3-bucket
+// Pipeline scale (tma_api.py::_pipeline_temperature: <25 קר / 25-59 חם / ≥60 חם מאוד).
+const QUICK_SCORE_PRESETS: { key: string; label: string; value: number }[] = [
+  { key: "cold", label: "קר", value: 10 },
+  { key: "warm", label: "הגיב למודעה", value: 30 },
+  { key: "hot", label: "שוחח וחיובי", value: 70 },
+];
+
 const OUTCOMES: OutcomeOption[] = [
   { key: "open", label: "פתוח", terminal: false },
   { key: "needs_followup", label: "צריך פולואפ", terminal: false },
@@ -257,6 +266,22 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
+  async function handleQuickScore(value: number, label: string) {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await patchLead(lead.id, { score: value });
+      setScoreInput(String(value));
+      setScoreDirty(false);
+      updateLoadedData({ score: value });
+      showToast("ok", `דרגת חום עודכנה: ${label}`);
+    } catch (e) {
+      showToast("err", formatError(e, "עדכון דרגת החום נכשל"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSaveScore() {
     if (saving || !scoreDirty) return;
     const parsed = parseInt(scoreInput, 10);
@@ -431,6 +456,25 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
               ))}
             </div>
           </Surface>
+
+          {isOwner && (
+            <Surface>
+              <SectionHeader title="דרגת חום" sub="עדכון מהיר של הציון — קובע את הטמפרטורה והסינון בפייפליין" />
+              <div className="lead-detail-outcome-row">
+                {QUICK_SCORE_PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => handleQuickScore(p.value, p.label)}
+                    disabled={saving}
+                    className="boss-button boss-button--quiet boss-bubble--action"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </Surface>
+          )}
 
           <Surface padding="compact" className="lead-detail-meta-row">
             {data.domain && <span className="boss-status-badge boss-status-badge--info">{data.domain}</span>}
