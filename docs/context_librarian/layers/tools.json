@@ -179,7 +179,7 @@
         "catalog.reconciles_evidence": false,
         "catalog.business_write_ownership": false
       },
-      "last_observed_commit": "58bb29c67815b002c18edc5971f6d47b770002de"
+      "last_observed_commit": "4209b2ffc51a17427dd50fd7347d7d34ab573c1a"
     },
     {
       "id": "component.free_worker_pilot",
@@ -333,7 +333,7 @@
           "dispatcher"
         ]
       },
-      "last_observed_commit": "58bb29c67815b002c18edc5971f6d47b770002de"
+      "last_observed_commit": "4209b2ffc51a17427dd50fd7347d7d34ab573c1a"
     }
   ],
   "edges": [
