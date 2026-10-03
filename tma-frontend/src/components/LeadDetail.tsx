@@ -7,6 +7,7 @@ import {
   patchLead,
   setLeadOutcome,
 } from "../api";
+import { LEAD_OPEN_STATUSES, leadStatusLabel } from "../leadLabels";
 import type { LeadDetail as TLeadDetail, LeadSummary } from "../types";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
@@ -135,6 +136,8 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
   const [scoreDirty, setScoreDirty] = useState(false);
   const [nextActionBusy, setNextActionBusy] = useState(false);
   const [nextActionPending, setNextActionPending] = useState(false);
+  const [statusPending, setStatusPending] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
 
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
@@ -202,34 +205,47 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
+  // Target date for the next action only — it no longer flips Business Outcome.
   async function handleSetFollowup() {
-    if (saving) return;
+    if (saving || !nextFollowup) return;
     setSaving(true);
     try {
-      const fields: Parameters<typeof patchLead>[1] = {};
-      if (nextFollowup) fields.next_followup = nextFollowup;
-      await setLeadOutcome(lead.id, "needs_followup");
-      if (Object.keys(fields).length > 0) await patchLead(lead.id, fields);
-      setCurrentOutcome("needs_followup");
-      setScheduleDirty(false);
-      updateLoadedData({ outcome: "needs_followup", next_followup: nextFollowup });
-      showToast("ok", "הליד הועבר לפולואפ");
+      const result = await patchLead(lead.id, { next_followup: nextFollowup });
+      if (result.status === "executed") {
+        setScheduleDirty(false);
+        updateLoadedData({ next_followup: nextFollowup });
+        showToast("ok", "תאריך יעד נשמר");
+      } else if (result.status === "pending_approval") {
+        showToast("ok", "הבקשה נשלחה לאישור — טרם בוצעה");
+      } else {
+        showToast("err", "שמירת תאריך היעד לא הושלמה");
+      }
     } catch (e) {
-      showToast("err", formatError(e, "שמירת הפולואפ נכשלה"));
+      showToast("err", formatError(e, "שמירת תאריך היעד נכשלה"));
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleMarkQualified() {
-    if (saving) return;
+  // Status = where the lead is. A pending_approval result must never be
+  // shown as already applied.
+  async function handleStatusChange(status: string) {
+    if (saving || status === (state.status === "ok" ? state.data.status : "")) return;
     setSaving(true);
     try {
-      await patchLead(lead.id, { status: "high_confidence" });
-      updateLoadedData({ status: "high_confidence" });
-      showToast("ok", "הליד סומן כמתאים");
+      const result = await patchLead(lead.id, { status });
+      if (result.status === "executed") {
+        setStatusPending(false);
+        updateLoadedData({ status });
+        showToast("ok", `שלב הליד: ${leadStatusLabel(status)}`);
+      } else if (result.status === "pending_approval") {
+        setStatusPending(true);
+        showToast("ok", "הבקשה נשלחה לאישור — טרם בוצעה");
+      } else {
+        showToast("err", "עדכון שלב הליד לא הושלם");
+      }
     } catch (e) {
-      showToast("err", formatError(e, "סימון הליד כמתאים נכשל"));
+      showToast("err", formatError(e, "עדכון שלב הליד נכשל"));
     } finally {
       setSaving(false);
     }
@@ -444,10 +460,38 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
             {data.created_at && <span className="lead-detail-meta-row__date">{data.created_at.slice(0, 10)}</span>}
           </Surface>
 
+          {!terminal && (
+            <Surface>
+              <SectionHeader
+                title="שלב הליד"
+                sub={statusPending ? "הבקשה נשלחה לאישור — טרם בוצעה" : "איפה הליד נמצא כרגע"}
+              />
+              <div className="lead-detail-followup-row">
+                <select
+                  value={LEAD_OPEN_STATUSES.includes(data.status as (typeof LEAD_OPEN_STATUSES)[number]) ? data.status : ""}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  disabled={saving}
+                  className="boss-select"
+                  aria-label="שלב הליד"
+                >
+                  {!LEAD_OPEN_STATUSES.includes(data.status as (typeof LEAD_OPEN_STATUSES)[number]) && (
+                    <option value="" disabled>{data.status ? leadStatusLabel(data.status) : "בחר/י שלב"}</option>
+                  )}
+                  {LEAD_OPEN_STATUSES.map((s) => (
+                    <option key={s} value={s}>{leadStatusLabel(s)}</option>
+                  ))}
+                </select>
+                <button type="button" onClick={handleMeetingBooked} disabled={saving} className="boss-button boss-button--quiet boss-bubble--action">
+                  פגישה נקבעה
+                </button>
+              </div>
+            </Surface>
+          )}
+
           <Surface>
             <SectionHeader
-              title="Next Action"
-              sub={nextActionPending ? "הבקשה נשלחה לאישור — טרם בוצעה" : "הפעולה הבאה לליד — נשמר דרך אותו מסלול אישורים כמו שאר עדכוני הליד"}
+              title="הפעולה הבאה"
+              sub={nextActionPending ? "הבקשה נשלחה לאישור — טרם בוצעה" : "מה עושים עכשיו, ועד מתי"}
             />
             {data.next_step_options?.length ? (
               <select
@@ -465,40 +509,35 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
               <p className="lead-detail-plain-text">{data.next_step_label || "אין פעולה מומלצת"}</p>
             )}
             {nextActionPending && <p className="lead-detail-pending-note">ממתין לאישור Owner — הערך עדיין לא נכנס לתוקף</p>}
-            {data.next_followup && <p className="lead-detail-hint">פולואפ הבא: {data.next_followup}</p>}
+            {!terminal && (
+              <div className="lead-detail-followup-row">
+                <input
+                  type="date"
+                  value={nextFollowup}
+                  onChange={(e) => {
+                    setNextFollowup(e.target.value);
+                    setScheduleDirty(true);
+                  }}
+                  className="boss-input"
+                  aria-label="תאריך יעד"
+                />
+                <button
+                  type="button"
+                  onClick={handleSetFollowup}
+                  disabled={saving || !nextFollowup || !scheduleDirty}
+                  className="boss-button boss-button--quiet boss-bubble--action"
+                >
+                  שמור תאריך
+                </button>
+              </div>
+            )}
+            {data.next_followup && <p className="lead-detail-hint">תאריך יעד: {data.next_followup}</p>}
           </Surface>
 
           {!terminal && (
             <Surface>
-              <SectionHeader title="הפעולה הבאה" sub="זרימה אחת: New → Followup → Qualified → Task/Meeting → Closed" />
+              <SectionHeader title="פעולות" />
               <div className="lead-detail-progress-stack">
-                <div className="lead-detail-followup-row">
-                  <input
-                    type="date"
-                    value={nextFollowup}
-                    onChange={(e) => {
-                      setNextFollowup(e.target.value);
-                      setScheduleDirty(true);
-                    }}
-                    className="boss-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSetFollowup}
-                    disabled={saving || (!scheduleDirty && currentOutcome === "needs_followup")}
-                    className="boss-button boss-button--quiet boss-bubble--action"
-                  >
-                    פולואפ
-                  </button>
-                </div>
-                <div className="lead-detail-action-grid">
-                  <button type="button" onClick={handleMarkQualified} disabled={saving} className="boss-button boss-button--primary boss-bubble--action">
-                    סמן כמתאים
-                  </button>
-                  <button type="button" onClick={handleMeetingBooked} disabled={saving} className="boss-button boss-button--primary boss-bubble--action">
-                    פגישה נקבעה
-                  </button>
-                </div>
                 <button
                   type="button"
                   onClick={() => setTaskOpen((o) => !o)}
@@ -570,20 +609,30 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
 
           {!terminal && (
             <Surface>
-              <SectionHeader title="סגירת ליד" sub="Business Outcome הוא מקור האמת העסקי" />
-              <div className="lead-detail-outcome-row">
-                {OUTCOMES.filter((o) => o.terminal).map((opt) => (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => handleOutcome(opt.key)}
-                    disabled={saving}
-                    className="ventures-choice boss-bubble--selectable"
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+              <SectionHeader title="סגירת ליד" sub="רק כשמסיימים טיפול — Business Outcome הוא התוצאה הסופית" />
+              <button
+                type="button"
+                onClick={() => setCloseOpen((o) => !o)}
+                aria-pressed={closeOpen}
+                className={`boss-button boss-bubble--action lead-detail-full-button ${closeOpen ? "boss-button--primary" : "boss-button--quiet"}`}
+              >
+                {closeOpen ? "ביטול סגירה" : "סגור ליד…"}
+              </button>
+              {closeOpen && (
+                <div className="lead-detail-outcome-row" style={{ marginTop: "var(--boss-space-3)" }}>
+                  {OUTCOMES.filter((o) => o.terminal).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => handleOutcome(opt.key)}
+                      disabled={saving}
+                      className="ventures-choice boss-bubble--selectable"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </Surface>
           )}
 

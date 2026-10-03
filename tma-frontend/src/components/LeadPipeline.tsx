@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchLeads } from "../api";
+import { LEAD_STATUS_LABELS } from "../leadLabels";
 import type { LeadsResponse, ProjectCard, LeadSummary } from "../types";
 import { LeadCard } from "./LeadCard";
 import { LeadDetail } from "./LeadDetail";
@@ -14,21 +15,7 @@ interface Props {
   authRole?: string | null;
 }
 
-// LeadStatus (airtable_schema.py) — Hebrew labels for the status filter
-// dropdown. Keep in sync with LeadStatus.ALL; a value missing here still
-// renders (falls back to the raw key) rather than disappearing.
-const STATUS_LABELS: Record<string, string> = {
-  new: "חדש",
-  waiting_call: "ממתין לשיחה",
-  waiting_response: "ממתין לתגובה",
-  high_confidence: "בטחון גבוה",
-  active: "פעיל",
-  done: "הושלם",
-  archived: "בארכיון",
-  lost: "אבוד",
-  duplicate: "כפילות",
-  not_relevant: "לא רלוונטי",
-};
+const STATUS_LABELS = LEAD_STATUS_LABELS;
 
 const TEMPERATURE_OPTIONS = ["קר", "חם", "חם מאוד"];
 

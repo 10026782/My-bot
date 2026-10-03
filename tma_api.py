@@ -1555,6 +1555,15 @@ _LEAD_NEXT_ACTION_OPTIONS: dict[str, tuple[str, str]] = {
     "ליד חדש":          ("ליד חדש", "ליד חדש"),
 }
 
+# Options that are statuses/outcomes rather than actions to perform. Hidden
+# from the lead-detail picker only — they stay valid for PATCH validation,
+# the pipeline filter and existing records (nothing is deleted in Airtable);
+# a lead already holding one still sees it as its current value.
+_LEAD_NEXT_ACTION_PICKER_HIDDEN = frozenset({
+    "Follow Up", "Waiting Response", "Closed Won", "Closed Lost", "ליד חדש",
+})
+
+
 def _next_action_label(raw_value: str) -> str:
     opt = _LEAD_NEXT_ACTION_OPTIONS.get((raw_value or "").strip())
     return opt[1] if opt else raw_value
@@ -2016,7 +2025,9 @@ def get_lead(lead_id, identity):
         # option set itself.
         "next_step_label":   _next_action_label(next_step) if next_step else "",
         "next_step_options": [
-            {"value": key, "label": label} for key, (_, label) in _LEAD_NEXT_ACTION_OPTIONS.items()
+            {"value": key, "label": label}
+            for key, (_, label) in _LEAD_NEXT_ACTION_OPTIONS.items()
+            if key not in _LEAD_NEXT_ACTION_PICKER_HIDDEN or key == (next_step or "").strip()
         ],
         "created_at":    f.get(LeadFields.CREATED_AT, ""),
         "timeline":      timeline,
