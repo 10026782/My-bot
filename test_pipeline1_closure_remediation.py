@@ -98,6 +98,17 @@ try:
     detail = r.get_json()
     chk("detail: score=30 -> temperature=חם (matches list logic, not old 70/40)",
         detail["temperature"] == "חם" and detail["score_color"] == "yellow")
+
+    picker = {o["value"] for o in detail["next_step_options"]}
+    chk("detail: picker hides status/outcome-type options (nothing deleted from the canonical map)",
+        picker == set(tma_api._LEAD_NEXT_ACTION_OPTIONS) - tma_api._LEAD_NEXT_ACTION_PICKER_HIDDEN
+        and tma_api._LEAD_NEXT_ACTION_PICKER_HIDDEN <= set(tma_api._LEAD_NEXT_ACTION_OPTIONS))
+    tma_api._at_get_record = lambda table, rid: {
+        "id": rid, "fields": {"Name": "X", "phone": "1", "domain": "media", "status": "active", "Next Action": "Follow Up"},
+    }
+    legacy = client.get("/api/leads/recX", headers=_HDR).get_json()
+    chk("detail: a lead already holding a hidden option still lists it as its current value",
+        "Follow Up" in {o["value"] for o in legacy["next_step_options"]})
 finally:
     tma_api._at_list = _orig_at_list
     tma_api._at_get_record = _orig_at_get_record

@@ -1,3 +1,4 @@
+import { leadStatusLabel } from "../leadLabels";
 import type { LeadSummary } from "../types";
 import { StatusBadge } from "./ui/StatusBadge";
 import { Surface } from "./ui/Surface";
@@ -42,7 +43,7 @@ export function LeadCard({ lead, onClick }: { lead: LeadSummary; onClick?: () =>
       <div className="lead-pipeline-card__body">
         <p className="lead-pipeline-card__name">{lead.name || "—"}</p>
         <div className="lead-pipeline-card__badges">
-          <StatusBadge tone={statusTone(lead.status)}>{lead.status}</StatusBadge>
+          <StatusBadge tone={statusTone(lead.status)}>{leadStatusLabel(lead.status)}</StatusBadge>
           {lead.temperature && <StatusBadge tone="neutral">{lead.temperature}</StatusBadge>}
         </div>
         {lead.next_step_label && (
