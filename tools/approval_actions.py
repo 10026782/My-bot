@@ -202,7 +202,7 @@ _TMA_WRITE_ALLOWED_TABLES = {
     "Ventures",
     "משימות (Tasks)", "Tasks",
     "ProjectsHub",
-    "אנשי קשר (Contacts)", "Contacts",
+    "אנשי קשר (Contacts)", "Contacts", "Financial Goals", "Financial Progress Events",  # FCC: owner-scoped by data_access_policy
 }
 
 
