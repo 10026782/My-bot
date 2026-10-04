@@ -192,10 +192,21 @@ def airtable_get_records(
     return records
 
 
-def airtable_get(table: str, filter_formula: str = "") -> str:
-    """Return an agent-facing summary; never parse this in application code."""
+def airtable_get(table: str, filter_formula: str = "", record_filter=None) -> str:
+    """Return an agent-facing summary; never parse this in application code.
+
+    ``record_filter`` (list[dict] -> list[dict]) narrows the result BEFORE it is
+    rendered. Owner-scoped tables (core/data_access_policy.py) refuse to render without
+    one (defense in depth: a caller that skips the dispatcher cannot dump a
+    personal table).
+    """
+    from core import data_access_policy
+    if record_filter is None and data_access_policy.is_owner_scoped(table):
+        return "❌ גישה נחסמה: טבלה זו דורשת סינון לפי בעלות על הרשומה."
     try:
         records = airtable_get_records(table, filter_formula)
+        if record_filter is not None:
+            records = record_filter(records)
     except Exception as exc:
         return f"❌ {exc}"
     if not records:

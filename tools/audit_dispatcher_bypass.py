@@ -188,11 +188,11 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 # that IS on the allowlist, just not itself named dispatcher*/scheduler*/etc.
 # Verified by direct caller-graph read (Track D-Structure Audit #7), not a
 # guess:
-#   - tools/approval_actions.py:365 -- tools/dispatcher.py:26 does
+#   - tools/approval_actions.py:367 -- tools/dispatcher.py:26 does
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "post" branch contains this `import crm`.
-#   - tools/approval_actions.py:398 -- tools/dispatcher.py:26 does
+#   - tools/approval_actions.py:400 -- tools/dispatcher.py:26 does
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "patch" branch contains the B2-02 Contact UPDATE `import crm`.
@@ -200,6 +200,10 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 #     in the "post" branch, 01/09/2026 -- exactly the (file, line, module)
 #     baseline fragility this script's own C05-C07 audit refresh already
 #     documented; the call site itself is unchanged, only its line moved.)
+#     Both sites shifted +2 (365->367, 398->400) on 04/10/2026 when the
+#     Privacy Foundation (PRIV-FCC-01) replaced `fields = dict(fields or {})`
+#     with the 3-line execution-time owner-of-record re-check call; the
+#     `import crm` call sites themselves are unchanged.
 #   - tools/schema_snapshot.py:286 -- scheduler.py:66 imports and calls
 #     run_snapshot_archive() (scheduled at scheduler.py:857), which calls
 #     apply_retention_policy() at tools/schema_snapshot.py:265, containing
@@ -208,8 +212,8 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 # debt -- they are permanently excluded from findings, never surfaced as
 # WARN_NEW, and never need baselining.
 _SANCTIONED_CALL_SITES: frozenset[tuple[str, int, str]] = frozenset({
-    ("tools/approval_actions.py", 365, "crm"),
-    ("tools/approval_actions.py", 398, "crm"),
+    ("tools/approval_actions.py", 367, "crm"),
+    ("tools/approval_actions.py", 400, "crm"),
     ("tools/schema_snapshot.py", 286, "tools.airtable_tools"),
 })
 

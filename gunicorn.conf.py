@@ -29,6 +29,37 @@
 # regardless of worker/instance count. That's out of scope for PATCH 3B.
 workers = 1
 
+# PROD-INCIDENT 04/10/2026: two people (owner + partner) opening the TMA
+# at the same time -- one of them stalls until the other's request(s)
+# finish, with no error status anywhere (confirmed via Render log replay:
+# every request eventually returns 200, nothing 5xx/times-out server-side,
+# but a single page load retried itself 5x in 7s). Root cause: the "sync"
+# worker class (gunicorn's default when unset) processes exactly one HTTP
+# request at a time per worker, with no concurrency inside a worker at
+# all -- combined with workers=1 above, that means the ENTIRE app (bot
+# webhook + TMA API + health checks) serializes globally, one request at
+# a time, process-wide. Airtable reads take long enough (TMA screens issue
+# several sequential calls) that a second person's request simply queues
+# behind the first's until it's done.
+#
+# Fix: "gthread" worker class with a small thread pool, workers left at 1.
+# This does NOT add a second process -- post_worker_init above still runs
+# exactly once, so the scheduler/EmergencyStopManager single-instance
+# invariant above is untouched -- it only lets that one process hold
+# several requests in flight at once via a thread pool, which is exactly
+# what's needed for I/O-bound work (blocking httpx calls to Airtable/
+# Telegram release the GIL while waiting on the network).
+#
+# Already-thread-safe-by-construction call sites that make this change
+# low-risk: event_bus.PendingActionsStore (LL-13 lock around get+delete),
+# guards.rate_limiter.RateLimiter (its own lock), tma_api._APPROVAL_LOCKS
+# (per-approval-id lock dict guarded by _APPROVAL_LOCKS_GUARD). A full
+# thread-safety audit of every remaining global was NOT performed -- if a
+# new unguarded shared-mutable-state bug shows up under real concurrent
+# load, that's the next thing to look at, not a reason to revert this.
+worker_class = "gthread"
+threads = 4
+
 
 def post_worker_init(worker):
     import app as _app

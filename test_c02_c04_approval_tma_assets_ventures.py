@@ -38,6 +38,10 @@ def test_tma_assets_and_ventures_owner_writes_use_gateway(monkeypatch):
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute", queue)
     monkeypatch.setattr(tma_api, "_at_patch", lambda *args: (_ for _ in ()).throw(AssertionError("direct patch")))
     monkeypatch.setattr(tma_api, "_at_post", lambda *args: (_ for _ in ()).throw(AssertionError("direct post")))
+    # Privacy Foundation: asset writes need owner-of-record. The actor owns recASSET1.
+    from core import owner_resolution
+    monkeypatch.setattr(owner_resolution, "resolve_profile_record_strict", lambda uid: ("recOWNER", "ok"))
+    monkeypatch.setattr(tma_api, "_at_get_record", lambda table, rid: {"id": rid, "fields": {"Owner": ["recOWNER"]}})
     client = _client(monkeypatch)
     headers = {"X-Telegram-Init-Data": "valid"}
 

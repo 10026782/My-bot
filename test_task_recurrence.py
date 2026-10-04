@@ -409,6 +409,7 @@ def _propose(ident, tool, inputs, record=None, user_text=""):
 def _execute(ident, tool, contract, writer):
     with patch.object(dispatcher_module, writer, return_value={**_ok, "tool": tool}) as write, \
          patch.object(dispatcher_module, "_check_duplicate", return_value=None), \
+         patch("tools.airtable_read_adapter.get_record_fields", return_value={}), \
          patch.object(dispatcher_module._ff, "is_enabled", return_value=False):
         result = dispatcher_module.dispatch_tool(
             tool, contract.normalized_payload, identity=ident, trusted_source="agent", execution_context=_ctx(contract),
@@ -469,7 +470,9 @@ print("\n[R11] Gate 2 is validation-only (no recurrence transformation after app
 
 
 def _dispatch(name, inputs):
+    # Privacy Foundation: a generic Task update reads the record once (private-task check).
     with patch.object(dispatcher_module, "_validate_execution_proof", return_value=None), \
+         patch("tools.airtable_read_adapter.get_record_fields", return_value={}), \
          patch.object(dispatcher_module._ff, "is_enabled", return_value=False):
         return dispatcher_module.dispatch_tool(name, inputs, identity=owner, trusted_source="agent",
                                                execution_context={"contract_id": "c-rec"})

@@ -7006,11 +7006,12 @@ timestamps, methods, scope, and results are recorded in
 
 ---
 
-### PRIV-FCC-01 — קריאות Airtable/Assets אינן owner-of-record scoped (לטנטי, נמצא במיפוי Private Financial Control Center)
-- **תאריך דיווח:** 04/10/2026 (מיפוי read-only על `origin/main` `d784ae6`; דוח מלא: `docs/architecture/financial-control-center/FCC_MAPPING_REPORT_20261004.md` §0)
-- **ממצא:** (1) `enforce_tenant_scope()` מחזיר params ללא סינון ל-owner/manager/employee ו-`airtable_get` פתוח לכל role על כל טבלה — שוחזר מקומית: `Loans` נקרא `<NO FILTER>` ע"י manager/employee/owner. (2) `GET /api/assets*` מחזיר את כל ה-Assets + aggregates לכל `is_owner`/`"personal" in allowed_domains` בלי סינון `Assets.Owner`. (3) partner מסונן לפי Domain בלבד. (4) Task ללא Owner מוגש לכל owner.
-- **חומרה:** לטנטי/מותנה קונפיגורציה — לא נבדק `IDENTITY_MAP` החי; עם משתמש יחיד אין דליפה בפועל. מחסום מוחלט לכל טבלה פיננסית פרטית חדשה.
-- **לא תוקן:** שינוי התנהגות בנתיבים קיימים דורש החלטת בעלים (תיקון נפרד לפני FCC, או deny-list ייעודי ל-FCC בלבד).
-- **Merged / Deployed / Verified בפרודקשן:** N/A — ממצא, לא תיקון.
-- **סטטוס:** 🔴 OPEN — ממתין להחלטת בעלים
-- **אימות חי 04/10/2026 (Airtable MCP read-only):** `Assets` — 9 רשומות, 7 `Domain=Personal`, **0 עם `Owner`**; `Loans` ריקה; `Profile` 5 שורות (Eliyahu=Owner, Ahron/Orri=Partner, Avi=Marketing, + שורה זבל). סינון Owner ב-`/api/assets` ידרוש backfill. `IDENTITY_MAP` החי לא נבדק.
+### PRIV-FCC-01 — owner-of-record privacy foundation (תיקון קוד; ממשיך את הרשומה מ-04/10/2026)
+- **תאריך:** 04/10/2026, מ-`origin/main` `d784ae6`, ענף `claude/privacy-foundation-owner-scope`.
+- **Root cause:** `enforce_tenant_scope` לא סינן זהויות פנימיות; אין policy לפי טבלה/בעלים; `/api/assets*` הסתמך על role/`allowed_domains`; Task ללא Owner הוגש לכל owner; Profile נפתר ל-`[0]` מתוך כמה. פירוט: `docs/architecture/privacy-foundation/PRIVACY_FOUNDATION_20261004.md`.
+- **Fix:** `core/data_access_policy.py` (נקודת החלטה יחידה, fail-closed, owner-of-record), hook ב-`enforce_tenant_scope`, סינון ב-dispatcher/`airtable_get`, scoping ב-`/api/assets*`/my-work/task PATCH, re-check ב-`tma_write`, `resolve_profile_record_strict` (התאמה יחידה).
+- **Verification:** `test_privacy_foundation_owner_scope.py` (23 בדיקות; 19 נכשלות על הקוד הישן). ריצת test_*.py מלאה (419 קבצים, סגנון CI) מול baseline של `origin/main`: אותה קבוצת 21 כשלים קיימים-מראש בשני הצדדים, אפס רגרסיות חדשות (שני טסטים ישנים עודכנו למוק של קריאת-הרשומה החדשה: `test_bug_crm_bypass_airtable_update.py`, `test_task_golden_writer.py`; ו-`test_c02_c04` לבעלות על Asset).
+- **Backfill (מאושר ע"י הבעלים, בוצע live 04/10/2026, Airtable MCP, שדה `Owner` בלבד):** 7 מתוך 9 רשומות Assets שויכו ל-Eliyahu (updated 7 / failed 0; 5 בסבב ראשון + 2 × נוף הגליל אחרי אישור הבעלים שאהרן שותף 50%), אומת בקריאה חוזרת; 2 שורות ריקות לגמרי לא שויכו (מועמדות למחיקה). שותפים (אהרן, אורי) לא נוספו ל-Owner — מודל נראות לשותפים = החלטה עתידית.
+- **נשאר פתוח:** `REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE` ל-Payments/Expenses/Deals (ללא שינוי runtime, החלטת בעלים); `Tasks.Visibility` לא נוצר ב-live בכוונה (23/23 Tasks ללא Owner; נקבע ב-FCC); 2 שורות Assets ריקות מוחזקות.
+- **Merged:** לא. **Deployed:** לא. **Verified בפרודקשן:** לא.
+- **סטטוס:** 🟡 CODE DONE / STATIC_VERIFIED, NOT MERGED
