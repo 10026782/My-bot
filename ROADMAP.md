@@ -51,15 +51,17 @@ formula string content (`"...Name text..." in formula` and
 have passed either way, so this is the one that actually catches this bug
 class.
 
-STATUS: 🟡 CODE DONE, STATIC_VERIFIED — merged pending; not yet deployed or
-runtime-verified.
-EVIDENCE: branch `claude/roadmap-open-items-7sfdt6` (restarted from `main`
-after #1243 merged as `623a6dd`); root-caused directly from the owner's own
-Render log excerpt for the exact failing request (18:01:38, two
-`httpx GET` calls: `Payment%20Terms?filterByFormula=SEARCH(...)` then
-`Charges?filterByFormula=OR(SEARCH('recnoz5NeUwlVeGYj',...))`); `pytest
-tests/` 217/217, `smoke_tests.py`, `python3 -m compileall -q .`.
-NEXT: merge → deploy → owner re-runs the same canary a fourth time; close
+STATUS: 🟡 CODE MERGED + DEPLOYED, STATIC_VERIFIED — awaiting only the
+owner's live canary; not yet RUNTIME_VERIFIED.
+EVIDENCE: merged via PR #1245 (`0b93b8f`, 17/09/2026); root-caused directly
+from the owner's own Render log excerpt for the exact failing request
+(18:01:38, two `httpx GET` calls: `Payment%20Terms?filterByFormula=SEARCH(...)`
+then `Charges?filterByFormula=OR(SEARCH('recnoz5NeUwlVeGYj',...))`); `pytest
+tests/` 217/217, `smoke_tests.py`, `python3 -m compileall -q .`. Deploy
+confirmed 04/10/2026 via Render API: `0b93b8f` is a git ancestor of the
+currently live deploy on the `My-bot` service (commit `bcf55ce`, deploy
+`dep-db142u60tbcc739dr6d0`, status `live`).
+NEXT: owner re-runs the same canary a fourth time against production; close
 as RUNTIME VERIFIED only after that live re-check.
 
 ## RECRUITMENT WORKER DATA MODEL — PHASE 2 ACTIONGATEWAY WRITERS — 17/09/2026
@@ -151,13 +153,15 @@ BUG-CHARGE-TERM-BYPASS (`_prefill_charge_context()`/
 `create_charge_from_term`, not `create_charge_payment`) — a real UX
 improvement, but a new scope decision, not part of this bug list.
 
-STATUS: 🟡 CODE DONE, STATIC_VERIFIED — merged pending; not yet deployed or
-runtime-verified.
-EVIDENCE: commit on branch `claude/roadmap-open-items-7sfdt6` (restarted
-from `main` after PR #1242 merged as `ca47a9f`), tests/
-test_commercial_completion_ux.py 41/41, full `pytest tests/` 216/216,
-`smoke_tests.py`, `python3 -m compileall -q .`.
-NEXT: merge → deploy → owner re-runs the same canary a third time; close
+STATUS: 🟡 CODE MERGED + DEPLOYED, STATIC_VERIFIED — awaiting only the
+owner's live canary; not yet RUNTIME_VERIFIED.
+EVIDENCE: merged via PR #1245 (`0b93b8f`, 17/09/2026), tests/
+test_commercial_completion_ux.py 41/41 (40/40 on current `main`, 04/10/2026
+re-run), full `pytest tests/` 216/216, `smoke_tests.py`,
+`python3 -m compileall -q .`. Deploy confirmed 04/10/2026 via Render API:
+`0b93b8f` is a git ancestor of the currently live deploy on the `My-bot`
+service (commit `bcf55ce`, deploy `dep-db142u60tbcc739dr6d0`, status `live`).
+NEXT: owner re-runs the same canary a third time against production; close
 as RUNTIME VERIFIED only after that live re-check.
 
 ## BUG-CHARGE-PAYMENT-INTENT-GAP + 4 related bugs — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1242)
@@ -206,11 +210,15 @@ tests/` 214/214, `smoke_tests.py`, `test_integration.py` 4/4,
 pre-existing, unrelated shallow-clone `test_pilot_preflight.py` failure
 reproduces identically with these changes stashed).
 
-STATUS: 🟡 CODE DONE, STATIC_VERIFIED — merged pending; not yet deployed or
-runtime-verified.
-EVIDENCE: commit `e355711` on branch `claude/roadmap-open-items-7sfdt6`,
-PR https://github.com/10026782/My-bot/pull/1242.
-NEXT: merge → deploy → owner re-runs the exact failing canary
+STATUS: 🟡 CODE MERGED + DEPLOYED, STATIC_VERIFIED — awaiting only the
+owner's live canary; not yet RUNTIME_VERIFIED.
+EVIDENCE: merged as `ca47a9f` via PR https://github.com/10026782/My-bot/pull/1242;
+router regression re-confirmed on current `main` (04/10/2026):
+`core/router/test_router.py` 60/60. Deploy confirmed 04/10/2026 via Render
+API: `ca47a9f` is a git ancestor of the currently live deploy on the
+`My-bot` service (commit `bcf55ce`, deploy `dep-db142u60tbcc739dr6d0`,
+status `live`).
+NEXT: owner re-runs the exact failing canary against production
 (`רשום תשלום של 2320 על החיוב מעמלת פוסידון בשיטת מזומן`) clean end-to-end;
 close this entry as RUNTIME VERIFIED only after that live re-check.
 
