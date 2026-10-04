@@ -23,3 +23,4 @@ that approved the implementation and its single owner.
 | `core/task_writer.py` | `<module>` | tasks | `decision.task_golden_writer` |
 | `core/task_writer.py` | `TaskWriteRejected` | tasks | `decision.task_golden_writer` |
 | `test_task_golden_writer.py` | `<module>` | tasks | `decision.task_golden_writer` |
+| `core/financial_control/writer.py` | `<module>` | financial_control | `decision.fcc_slice1_write_planner` |

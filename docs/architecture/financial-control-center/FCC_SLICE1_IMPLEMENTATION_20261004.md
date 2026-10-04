@@ -35,3 +35,6 @@
 
 ## חשיפות שהתגלו
 ללא חדשות. נשארות הפתוחות מ-PRIV-FCC-01 (Payments/Expenses/Deals גנרי, `/api/finance/pulse`) — `REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE`. משימת follow-up של FCC נראית בקריאות Tasks כלליות לבעליה לפי כללי Tasks הקיימים (אין `Tasks.Visibility` חי) — הכותרת נגזרת מכותרת היעד; להחליט אם להסתיר.
+
+## רישום Writer Authority
+`core/financial_control/writer.py` נרשם ב-`docs/governance/WRITER_AUTHORITY_REGISTRY.md` (owner `financial_control`, decision `decision.fcc_slice1_write_planner`). המודול **מתכנן בלבד** (Classify→Resolve→Validate→Preview→proposals) ואינו כותב ל-Airtable; הכתיבה היחידה עוברת `_queue_or_owner_execute` → ActionGateway → dispatcher → `tma_write`. הרישום מתעד את החלטת הבעלים לאשר את Slice 1 (04/10/2026).
