@@ -87,5 +87,67 @@ with patch("feature_flags.is_enabled", side_effect=_flags), \
         captured.get("create", {}).get(LeadFields.EXPERIENCE_STATUS) == X.WORKING_NOW
         and captured["create"][LeadFields.SCORE] == 0)
 
+print("[5] כרטיס טיוטת ליד — הצעת השלמה גלויה וניתנת לעריכה")
+from core.draft_flow import resolve_draft_reply
+
+def _full_draft(**kw):
+    d = ls.new_empty_draft("telegram")
+    d.update({"name": "משה כהן", "phone": "0501234567", "domain": "recruitment", "note": "קבלן סלקום דרום"})
+    d.update(kw)
+    d["mode"], d["awaiting_field"] = "review", None
+    return d
+
+with patch("feature_flags.is_enabled", side_effect=_flags):
+    d = ls.build_draft_from_text("משה כהן 0501234567 קבלן סלקום דרום", "telegram", "recruitment")
+chk("טיוטה חדשה מקבלת הצעה כש-flag דלוק", d.get("experience_status") == X.WORKING_NOW and d.get("experience_hint") == "קבלן")
+chk("ההצעה לא מוסיפה שדה חובה ולא משנה את מצב הטיוטה (אופציונלי, לא חוסם)",
+    ls.first_missing_required_field(d) != "experience_status")
+
+with patch("feature_flags.is_enabled", return_value=False):
+    d_off = ls.build_draft_from_text("משה כהן 0501234567 קבלן סלקום דרום", "telegram", "recruitment")
+chk("flag כבוי: אין הצעה בטיוטה", "experience_status" not in d_off and "experience_hint" not in d_off)
+
+card = ls.render_lead_draft_card(_full_draft(experience_status=X.WORKING_NOW, experience_hint="קבלן"))
+chk("הכרטיס מציג 'ניסיון בתחום (הצעה)' עם הערך והביטוי", "ניסיון בתחום (הצעה): " + X.WORKING_NOW in card and "הוסק מ'קבלן'" in card)
+card2 = ls.render_lead_draft_card(_full_draft())
+chk("בלי הצעה: אין שורת ניסיון בכרטיס", "ניסיון בתחום" not in card2)
+card3 = ls.render_lead_draft_card(_full_draft(experience_status=X.NO_EXPERIENCE))
+chk("ערך שעודכן ידנית (בלי ביטוי) מוצג בלי 'הצעה'", "ניסיון בתחום: " + X.NO_EXPERIENCE in card3 and "(הצעה)" not in card3)
+
+print("[6] עריכה / ניקוי בכרטיס")
+d = _full_draft(experience_status=X.WORKING_NOW, experience_hint="קבלן")
+o = resolve_draft_reply("ערוך", d, ls.LEAD_DRAFT_SPEC)
+o = resolve_draft_reply("ניסיון", d, ls.LEAD_DRAFT_SPEC)
+chk("'ניסיון' מזוהה כשדה לעריכה ונשאל עם רשימה ממוספרת",
+    d["awaiting_field"] == "experience_status" and "1. " + X.WORKING_NOW in o.message)
+o = resolve_draft_reply("3", d, ls.LEAD_DRAFT_SPEC)
+chk("בחירה במספר (3) -> ללא ניסיון, הביטוי המוסק נמחק, חוזרים לסקירה",
+    d.get("experience_status") == X.NO_EXPERIENCE and "experience_hint" not in d and d["mode"] == "review")
+
+for raw, want in (("עובד כיום בתחום", X.WORKING_NOW), ("לא ידוע", X.UNKNOWN), ("בעל ניסיון", X.EX_EXPERIENCED), ("1", X.WORKING_NOW)):
+    dd = _full_draft()
+    ok, err = ls.set_draft_field(dd, "experience_status", raw)
+    chk(f"set_draft_field({raw!r}) -> {want}", ok and dd["experience_status"] == want)
+dd = _full_draft(experience_status=X.WORKING_NOW, experience_hint="קבלן")
+ok, err = ls.set_draft_field(dd, "experience_status", "נקה")
+chk("'נקה' מנקה את הערך והביטוי", ok and dd["experience_status"] == "" and "experience_hint" not in dd)
+dd = _full_draft(experience_status=X.WORKING_NOW)
+ok, err = ls.set_draft_field(dd, "experience_status", "שטויות")
+chk("ערך לא מוכר נדחה, הטיוטה לא משתנה", (not ok) and dd["experience_status"] == X.WORKING_NOW and "ניסיון לא מוכר" in err)
+ok, err = ls.set_draft_field(_full_draft(), "experience_status", "5")
+chk("מספר מחוץ לטווח נדחה", not ok)
+
+print("[7] אישור: מה שבכרטיס הוא הערך הסופי — בלי הסקה שקטה נוספת")
+pl = ls.draft_to_payload(_full_draft(experience_status=X.EX_EXPERIENCED, experience_hint="בעל ניסיון"))
+chk("draft_to_payload מעביר את הערך כערך מפורש ומכבה הסקה", pl.experience_status == X.EX_EXPERIENCED and pl.infer_experience is False)
+with patch("feature_flags.is_enabled", side_effect=_flags):
+    f = ls.build_lead_fields(pl, None, "k")
+    chk("נכתב בדיוק הערך שבכרטיס", f.get(LeadFields.EXPERIENCE_STATUS) == X.EX_EXPERIENCED)
+    pl2 = ls.draft_to_payload(_full_draft(experience_status=""))   # הבעלים ניקה, הטקסט עדיין מכיל 'קבלן'
+    f2 = ls.build_lead_fields(pl2, None, "k")
+    chk("בעלים ניקה בכרטיס -> לא נכתב כלום, גם כש-flag דלוק והטקסט מכיל 'קבלן'",
+        LeadFields.EXPERIENCE_STATUS not in f2)
+chk("Score בטיוטה ללא שינוי (0)", pl.score == 0)
+
 print(f"\nLead Experience inference: {_p}/{_p + _f} passed")
 sys.exit(0 if _f == 0 else 1)
