@@ -31,7 +31,7 @@ SAVE_EVERY = 3
 class LeadState:
     memory_key:     str
     tier:           str = "COLD"
-    score:          int = 0
+    score:          int | None = None   # None = אין ציון אמיתי — לא נכתב ל-Airtable
     domain:         str = ""
     channel:        str = ""
     contact_name:   str = ""
@@ -156,11 +156,13 @@ class LeadMemory:
 
             fields = {
                 "memory_key": state.memory_key,
-                LeadFields.SCORE: state.score,        # tier הוא formula field — לא כותבים אליו
                 "domain":     state.domain,
                 "channel":    state.channel,
                 "Name":       state.contact_name,
             }
+            # בלי ציון אמיתי ב-state אסור לכתוב Score: ברירת מחדל 0 הייתה דורסת ציון קיים.
+            if state.score is not None:
+                fields[LeadFields.SCORE] = state.score
             if state.summary:
                 fields[LeadFields.SUMMARY] = state.summary
 

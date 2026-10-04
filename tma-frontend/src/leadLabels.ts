@@ -3,7 +3,7 @@
 // here still renders (falls back to the raw key) rather than disappearing.
 export const LEAD_STATUS_LABELS: Record<string, string> = {
   new: "חדש — טרם דיברנו",
-  waiting_call: "ניסינו — אין מענה",
+  waiting_call: "ממתין לשיחה",
   active: "בטיפול",
   waiting_response: "במעקב",
   high_confidence: "מתאים — רציני",

@@ -80,3 +80,31 @@ def test_lead_service_passes_canonical_record_id_to_memory():
         _run_post_write_enrichment(identity, payload, "recPOST789", "created", write_event=False)
 
     assert update.call_args.kwargs["record_id"] == "recPOST789"
+
+
+def _flush_fields(memory, key, record_id="recSC"):
+    from core.lead_service import LeadCreateResult
+    ok = LeadCreateResult(ok=True, action="updated", record_id=record_id, evidence={"mutation_executed": True})
+    with patch("core.lead_service.update_lead_fields", return_value=ok) as update:
+        assert memory.flush(key) is True
+    return update.call_args.args[2]
+
+
+def test_flush_without_real_score_never_writes_score():
+    # LeadService feeds lead_memory without a score; the old default of 0 was
+    # written over the lead's existing Score on the next flush.
+    memory = LeadMemory(save_every=1)
+    memory.update("tenant/lead@example.com", record_id="recSC", domain="import",
+                  channel="whatsapp", contact_name="Dana", last_message="hi")
+
+    assert memory.get("tenant/lead@example.com").score is None
+    assert "Score" not in _flush_fields(memory, "tenant/lead@example.com")
+
+
+def test_flush_with_real_score_including_zero_still_writes_it():
+    memory = LeadMemory(save_every=1)
+    memory.update("tenant/a@example.com", record_id="recSC", score=0, last_message="x")
+    assert _flush_fields(memory, "tenant/a@example.com")["Score"] == 0
+
+    memory.update("tenant/b@example.com", record_id="recSC", score=55, last_message="x")
+    assert _flush_fields(memory, "tenant/b@example.com")["Score"] == 55
