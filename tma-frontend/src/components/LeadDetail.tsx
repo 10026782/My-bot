@@ -251,6 +251,28 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
     }
   }
 
+  // סיווג ניסיון בתחום — לסינון בלבד, לא משנה Score. כמו שלב הליד:
+  // pending_approval לעולם לא מוצג כאילו בוצע.
+  async function handleExperienceChange(experience_status: string) {
+    if (saving || !experience_status) return;
+    setSaving(true);
+    try {
+      const result = await patchLead(lead.id, { experience_status });
+      if (result.status === "executed") {
+        updateLoadedData({ experience_status });
+        showToast("ok", `ניסיון בתחום: ${experience_status}`);
+      } else if (result.status === "pending_approval") {
+        showToast("ok", "הבקשה נשלחה לאישור — טרם בוצעה");
+      } else {
+        showToast("err", "עדכון הניסיון בתחום לא הושלם");
+      }
+    } catch (e) {
+      showToast("err", formatError(e, "עדכון הניסיון בתחום נכשל"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleMeetingBooked() {
     await handleOutcome("meeting_scheduled");
   }
@@ -487,6 +509,24 @@ export function LeadDetail({ lead, onBack, authRole }: Props) {
               </div>
             </Surface>
           )}
+
+          {data.experience_status_options?.length ? (
+            <Surface>
+              <SectionHeader title="ניסיון בתחום" sub="לסיווג וסינון בלבד — לא משנה את הציון" />
+              <select
+                value={data.experience_status || ""}
+                onChange={(e) => handleExperienceChange(e.target.value)}
+                disabled={saving}
+                className="boss-select"
+                aria-label="ניסיון בתחום"
+              >
+                {!data.experience_status && <option value="" disabled>לא סווג</option>}
+                {data.experience_status_options.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </Surface>
+          ) : null}
 
           <Surface>
             <SectionHeader

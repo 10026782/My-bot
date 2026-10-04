@@ -42,19 +42,20 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   const [sourceFilter, setSourceFilter] = useState<string>("");
   const [nextActionFilter, setNextActionFilter] = useState<string>("");
   const [temperatureFilter, setTemperatureFilter] = useState<string>("");
+  const [experienceFilter, setExperienceFilter] = useState<string>("");
   const [dateRange, setDateRange] = useState<string>("all");
   const [showFilters, setShowFilters] = useState(false);
 
   const baseDomain = project?.domain ?? "";
   const showDomainFilter = authRole === "owner" || authRole === "manager";
-  const activeAdvancedCount = [domainFilter, sourceFilter, nextActionFilter, temperatureFilter, dateRange !== "all" ? dateRange : ""]
+  const activeAdvancedCount = [domainFilter, sourceFilter, nextActionFilter, temperatureFilter, experienceFilter, dateRange !== "all" ? dateRange : ""]
     .filter(Boolean).length;
 
   const load = () => {
     setState({ status: "loading" });
     fetchLeads(baseDomain, {
       view, search, status: statusFilter, source: sourceFilter,
-      next_action: nextActionFilter, temperature: temperatureFilter, date_range: dateRange,
+      next_action: nextActionFilter, temperature: temperatureFilter, experience_status: experienceFilter, date_range: dateRange,
     })
       .then((data) => setState({ status: "ok", data }))
       .catch((e: unknown) => setState({ status: "error", message: String(e) }));
@@ -63,7 +64,7 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseDomain, view, search, statusFilter, sourceFilter, nextActionFilter, temperatureFilter, dateRange]);
+  }, [baseDomain, view, search, statusFilter, sourceFilter, nextActionFilter, temperatureFilter, experienceFilter, dateRange]);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -230,6 +231,20 @@ export function LeadPipeline({ project, onBack, authRole }: Props) {
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
+
+              {data && data.experience_status_options && data.experience_status_options.length > 0 && (
+                <select
+                  value={experienceFilter}
+                  onChange={(e) => setExperienceFilter(e.target.value)}
+                  className="boss-select"
+                  aria-label="סינון לפי ניסיון בתחום"
+                >
+                  <option value="">כל סוגי הניסיון</option>
+                  {data.experience_status_options.map((o) => (
+                    <option key={o} value={o}>{o}</option>
+                  ))}
+                </select>
+              )}
 
               <div className="ventures-action-row" role="tablist" aria-label="טווח תאריכים">
                 {DATE_RANGE_OPTIONS.map(({ key, label }) => (

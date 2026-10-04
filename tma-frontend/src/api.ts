@@ -73,7 +73,7 @@ export async function fetchLeads(
   domain: string,
   opts?: {
     view?: string; search?: string; status?: string; source?: string;
-    next_action?: string; temperature?: string; date_range?: string;
+    next_action?: string; temperature?: string; experience_status?: string; date_range?: string;
   },
 ): Promise<LeadsResponse> {
   const params = new URLSearchParams();
@@ -84,6 +84,7 @@ export async function fetchLeads(
   if (opts?.source) params.set("source", opts.source);
   if (opts?.next_action) params.set("next_action", opts.next_action);
   if (opts?.temperature) params.set("temperature", opts.temperature);
+  if (opts?.experience_status) params.set("experience_status", opts.experience_status);
   if (opts?.date_range && opts.date_range !== "all") params.set("date_range", opts.date_range);
   const qs = params.toString();
   const r = await fetch(`${BASE}/api/leads${qs ? `?${qs}` : ""}`, { headers: authHeaders() });
@@ -320,6 +321,7 @@ export async function patchLead(
     next_followup: string;
     owner: string[];      // Airtable multipleRecordLinks — must be array of record IDs
     next_step: string;
+    experience_status: string;
   }>,
 ): Promise<PatchLeadResult> {
   const r = await fetch(`${BASE}/api/leads/${encodeURIComponent(leadId)}`, {

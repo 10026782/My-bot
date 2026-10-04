@@ -60,6 +60,7 @@ export interface LeadSummary {
   source: string;
   next_step: string;
   next_step_label: string;
+  experience_status?: string;
 }
 
 export interface LeadsResponse {
@@ -72,6 +73,8 @@ export interface LeadsResponse {
   source: string;
   next_action: string;
   temperature: string;
+  experience_status?: string;
+  experience_status_options?: string[];
   date_range: string;
   has_more: boolean;
   count: number;
@@ -198,6 +201,8 @@ export interface LeadDetail {
   outcome?: string;
   next_followup?: string;
   owner?: string | string[];  // Airtable multipleRecordLinks returns string[]
+  experience_status?: string;
+  experience_status_options?: string[];
 }
 
 export interface DailyTask {
