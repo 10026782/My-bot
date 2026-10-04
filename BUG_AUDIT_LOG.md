@@ -7003,3 +7003,14 @@ timestamps, methods, scope, and results are recorded in
 - **Deployed:** לא.
 - **Verified בפרודקשן:** לא.
 - **סטטוס:** 🔴 OPEN (לטנטי; 28 רשומות כרגע)
+
+---
+
+### PRIV-FCC-01 — קריאות Airtable/Assets אינן owner-of-record scoped (לטנטי, נמצא במיפוי Private Financial Control Center)
+- **תאריך דיווח:** 04/10/2026 (מיפוי read-only על `origin/main` `d784ae6`; דוח מלא: `docs/architecture/financial-control-center/FCC_MAPPING_REPORT_20261004.md` §0)
+- **ממצא:** (1) `enforce_tenant_scope()` מחזיר params ללא סינון ל-owner/manager/employee ו-`airtable_get` פתוח לכל role על כל טבלה — שוחזר מקומית: `Loans` נקרא `<NO FILTER>` ע"י manager/employee/owner. (2) `GET /api/assets*` מחזיר את כל ה-Assets + aggregates לכל `is_owner`/`"personal" in allowed_domains` בלי סינון `Assets.Owner`. (3) partner מסונן לפי Domain בלבד. (4) Task ללא Owner מוגש לכל owner.
+- **חומרה:** לטנטי/מותנה קונפיגורציה — לא נבדק `IDENTITY_MAP` החי; עם משתמש יחיד אין דליפה בפועל. מחסום מוחלט לכל טבלה פיננסית פרטית חדשה.
+- **לא תוקן:** שינוי התנהגות בנתיבים קיימים דורש החלטת בעלים (תיקון נפרד לפני FCC, או deny-list ייעודי ל-FCC בלבד).
+- **Merged / Deployed / Verified בפרודקשן:** N/A — ממצא, לא תיקון.
+- **סטטוס:** 🔴 OPEN — ממתין להחלטת בעלים
+
