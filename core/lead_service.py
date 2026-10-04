@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from airtable_schema import LeadFields
+from airtable_schema import ExperienceStatus, LeadFields
 from core.query_contract import all_of, contains, equals
 from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_read_adapter import AirtableReadError, list_records
@@ -173,6 +173,12 @@ class LeadPayload:
     tenant_id: str = "boss_hq"
     memory_key: str = ""
     external_id: str = ""
+    # Experience Status — ערך מפורש (חייב להיות אחת מ-ExperienceStatus.ALL) גובר על
+    # ההסקה האוטומטית מהטקסט. "" = ללא ערך מפורש. סיווג וסינון בלבד, לא משפיע על Score.
+    experience_status: str = ""
+    # False = אל תסיק Experience Status בכתיבה (טיוטה שהבעלים כבר ראה/עדכן/ניקה אותו בכרטיס
+    # — ניקוי מפורש לא ייהפך להסקה שקטה). True (ברירת מחדל) = ההסקה הרגילה (flag-gated).
+    infer_experience: bool = True
 
     # ── Campaign attribution — distinct from `source` (technical origin) ──
     # accepted, not yet written — no live Airtable column exists for any of
@@ -305,6 +311,72 @@ def build_memory_key(tenant_id: str, phone: str, name: str) -> str:
     return f"{tenant_id}/dict_{safe_name}@lead"
 
 
+# ══════════════════════════════════════════════════
+# Experience Status — הסקה דטרמיניסטית מטקסט חופשי
+# ══════════════════════════════════════════════════
+# סיווג וסינון בלבד: לא משפיע על Score, לא מופעל על ליד קיים (רק ביצירה) ולכן לעולם
+# לא דורס ערך שהבעלים מילא ידנית. בלי LLM — כללי מילות מפתח בלבד. אין אות ברורה =
+# אין ערך (השדה נשאר ריק; "לא ידוע" נבחר ידנית). המילה "חדש" לבדה אינה אות, כי
+# "ליד חדש" היא תחילית הפקודה עצמה. הכתיב "נסיון"/"ניסיון" נתמך.
+_EXP_WORD = r"ני?סיון"
+_EXP_NONE_RE = re.compile(
+    rf"(?:ללא|בלי)\s+{_EXP_WORD}|אין\s+(?:לו\s+|לה\s+|להם\s+)?{_EXP_WORD}"
+    r"|ללא\s+ותק|(?:חדש|חדשה|חדשים|מתחיל|מתחילה|מתחילים)\s+בתחום"
+)
+# "לשעבר"/"לא עובד כיום" גוברים על "קבלן" ("קבלן לשעבר" = לא עובד כיום)
+_EXP_PAST_STRONG_RE = re.compile(
+    r"לשעבר|הפסיק(?:ה|ו)?\s+לעבוד|לא\s+עובד(?:ת|ים)?\s+(?:כיום|עכשיו|בתחום)"
+)
+_EXP_WORKING_RE = re.compile(
+    r"קבלן|קבלנית|קבלנים|קבלנות|עובד(?:ת|ים)?\s+(?:כיום|עכשיו|בתחום)|פעיל(?:ה|ים)?\s+בתחום"
+)
+_EXP_PAST_WEAK_RE = re.compile(
+    rf"בעל(?:ת|י)?\s+{_EXP_WORD}|עם\s+{_EXP_WORD}|{_EXP_WORD}\s+(?:קודם|רב)"
+)
+
+
+def infer_experience_with_reason(*texts: str) -> tuple[str, str]:
+    """(ערך, הביטוי שהפעיל את הכלל) או ("", "") כשאין אות ברורה.
+
+    סדר עדיפויות (הראשון שמתאים): ללא ניסיון > לשעבר/לא עובד כיום > קבלן/עובד
+    בתחום (= עובד כיום) > בעל ניסיון (= בעל ניסיון — לא עובד כיום). פונקציה טהורה.
+    הביטוי מוצג לבעלים בכרטיס הטיוטה ("הוסק מ'קבלן'")."""
+    text = " ".join(t for t in texts if t)
+    if not text.strip():
+        return "", ""
+    for rx, value in (
+        (_EXP_NONE_RE, ExperienceStatus.NO_EXPERIENCE),
+        (_EXP_PAST_STRONG_RE, ExperienceStatus.EX_EXPERIENCED),
+        (_EXP_WORKING_RE, ExperienceStatus.WORKING_NOW),
+        (_EXP_PAST_WEAK_RE, ExperienceStatus.EX_EXPERIENCED),
+    ):
+        m = rx.search(text)
+        if m:
+            return value, " ".join(m.group(0).split())
+    return "", ""
+
+
+def infer_experience_status(*texts: str) -> str:
+    """רק הערך מ-infer_experience_with_reason() — או "" כשאין אות ברורה."""
+    return infer_experience_with_reason(*texts)[0]
+
+
+def _resolve_experience_status(payload: "LeadPayload") -> str:
+    """ערך מפורש תקף גובר; אחרת הסקה — רק כש-LEAD_EXPERIENCE_INFERENCE דלוק."""
+    explicit = (payload.experience_status or "").strip()
+    if explicit:
+        if explicit in ExperienceStatus.ALL:
+            return explicit
+        logger.warning("[LeadService] experience_status לא תקף נדחה: %r", explicit)
+        return ""
+    if not payload.infer_experience:
+        return ""
+    from feature_flags import is_enabled
+    if not is_enabled("LEAD_EXPERIENCE_INFERENCE"):
+        return ""
+    return infer_experience_status(payload.summary, payload.name)
+
+
 def build_lead_fields(payload: LeadPayload, owner_record_id: Optional[str], memory_key: str) -> dict:
     """Pure field-construction — no I/O, no invented fields. campaign/adset/
     ad and the whole referral group are deliberately NOT written: no column
@@ -346,6 +418,9 @@ def build_lead_fields(payload: LeadPayload, owner_record_id: Optional[str], memo
         fields[LeadFields.EXTERNAL_ID] = payload.external_id
     if owner_record_id:
         fields[LeadFields.OWNER] = [owner_record_id]
+    experience = _resolve_experience_status(payload)
+    if experience:
+        fields[LeadFields.EXPERIENCE_STATUS] = experience
     return fields
 
 
@@ -750,11 +825,12 @@ def parse_structured_command(text: str) -> Optional[dict]:
 # All three converge on create_lead().
 # ══════════════════════════════════════════════════
 
-DRAFT_FIELD_ORDER = ("name", "phone", "domain", "source", "note")
+DRAFT_FIELD_ORDER = ("name", "phone", "domain", "source", "note", "experience_status")
 DRAFT_REQUIRED_FIELDS = ("name", "phone", "domain")
 
 DRAFT_FIELD_HE = {
     "name": "שם", "phone": "טלפון", "domain": "תחום", "source": "מקור", "note": "הערה",
+    "experience_status": "ניסיון בתחום",
 }
 
 def _domain_prompt_text() -> str:
@@ -767,6 +843,10 @@ DRAFT_FIELD_PROMPT_HE = {
     "phone": "מה מספר הטלפון?",
     "domain": _domain_prompt_text(),
     "note": "יש הערה לליד? כתוב/י אותה או השב/י 'דלג'.",
+    "experience_status": (
+        "מה הניסיון של הליד בתחום? בחר/י מספר או הקלד/י (או 'נקה' להסרה):\n"
+        + "\n".join(f"{i}. {o}" for i, o in enumerate(ExperienceStatus.ALL, 1))
+    ),
 }
 
 # Free-text tokens that identify which field an "ערוך" reply means —
@@ -778,6 +858,8 @@ _DRAFT_EDIT_LABELS: dict[str, str] = {
     "תחום": "domain", "domain": "domain",
     "מקור": "source", "source": "source",
     "הערה": "note", "הערות": "note", "note": "note",
+    "ניסיון": "experience_status", "נסיון": "experience_status", "ניסיון בתחום": "experience_status",
+    "נסיון בתחום": "experience_status",
 }
 
 _SOURCE_BY_CHANNEL = {"telegram": "Telegram", "whatsapp": "WhatsApp"}
@@ -824,10 +906,28 @@ def build_draft_from_text(text: str, channel: str, router_domain: str = "") -> d
 
     draft = new_empty_draft(channel)
     draft.update({"name": name, "phone": phone, "domain": domain, "note": note})
+    _suggest_experience_on_draft(draft, text)
     missing = first_missing_required_field(draft)
     draft["mode"] = "filling" if missing else "review"
     draft["awaiting_field"] = missing
     return draft
+
+
+def _suggest_experience_on_draft(draft: dict, text: str) -> None:
+    """הצעת השלמה ל-Experience Status בכרטיס הטיוטה (flag-gated, אותה הסקה דטרמיניסטית
+    כמו ביצירה). שדה אופציונלי: לא חוסם יצירה ולא נשאל כשאלה. נשמר ב-draft יחד עם
+    הביטוי שהפעיל אותו, כדי שהכרטיס יציג "הוסק מ'...'" והבעלים יוכל לשנות/לנקות."""
+    try:
+        from feature_flags import is_enabled
+        if not is_enabled("LEAD_EXPERIENCE_INFERENCE"):
+            return
+    except Exception as exc:
+        logger.warning("[LeadService] experience suggestion flag check failed: %s", exc)
+        return
+    value, hint = infer_experience_with_reason(text)
+    if value:
+        draft["experience_status"] = value
+        draft["experience_hint"] = hint
 
 
 def first_missing_required_field(draft: dict) -> Optional[str]:
@@ -872,6 +972,23 @@ def set_draft_field(draft: dict, field_key: str, raw_value: str) -> tuple[bool, 
             return True, ""
         except FieldOperationError as exc:
             return False, str(exc)
+
+    if field_key == "experience_status":
+        # בחירה מתוך 4 האפשרויות החיות (מספר / טקסט מדויק / ניסוח חופשי שההסקה מכירה),
+        # או 'נקה'. אחרי עדכון ידני ההצעה כבר לא "הוסקה" — מסירים את הביטוי.
+        from core.draft_fields import clear_field
+        try:
+            if raw_value in ("נקה", "ריק", "מחק", "הסר"):
+                clear_field(draft, field_key, LEAD_FIELD_METADATA)
+            else:
+                set_field(draft, field_key, raw_value, LEAD_FIELD_METADATA)
+        except FieldOperationError:
+            return False, (
+                f"ניסיון לא מוכר: {raw_value!r}. בחר/י מספר 1-{len(ExperienceStatus.ALL)} "
+                f"או הקלד/י: {' / '.join(ExperienceStatus.ALL)} (או 'נקה')."
+            )
+        draft.pop("experience_hint", None)
+        return True, ""
 
     if field_key == "name":
         if not raw_value:
@@ -926,6 +1043,14 @@ def _lead_display_items(draft: dict) -> list[str]:
         if key == "domain":
             value = _LEAD_DOMAIN_LABELS.get(value, value)
         items.append(f"{LEAD_FIELD_METADATA[key].user_label}: {value}")
+    experience = (draft.get("experience_status") or "").strip()
+    if experience:
+        hint = (draft.get("experience_hint") or "").strip()
+        label = LEAD_FIELD_METADATA["experience_status"].user_label
+        items.append(
+            f"{label} (הצעה): {experience} — הוסק מ'{hint}' (אפשר לשנות: ערוך ← ניסיון)"
+            if hint else f"{label}: {experience}"
+        )
     status = {"new": "חדש"}.get(draft.get("status") or "new", draft.get("status") or "new")
     items.append(f"סטטוס: {status}")
     return items
@@ -980,6 +1105,9 @@ def draft_to_payload(draft: dict) -> LeadPayload:
         source=draft.get("source") or default_source_for_channel(draft.get("channel", "")),
         channel=draft.get("channel", "telegram"),
         summary=draft.get("note", ""),
+        # הבעלים ראה את ההצעה בכרטיס: מה שבכרטיס הוא הערך הסופי (כולל ניקוי) — בלי הסקה שקטה נוספת.
+        experience_status=(draft.get("experience_status") or ""),
+        infer_experience=False,
     )
 
 
@@ -1012,6 +1140,19 @@ def _resolve_lead_domain(value: str) -> str:
     return resolved
 
 
+def _resolve_lead_experience(value: str) -> str:
+    """מספר 1-4 / טקסט מדויק של אפשרות / ניסוח חופשי שההסקה הדטרמיניסטית מזהה."""
+    value = str(value or "").strip()
+    if value in ExperienceStatus.ALL:
+        return value
+    if value.isdigit() and 1 <= int(value) <= len(ExperienceStatus.ALL):
+        return ExperienceStatus.ALL[int(value) - 1]
+    inferred = infer_experience_status(value)
+    if inferred:
+        return inferred
+    raise ValueError("ניסיון לא מוכר")
+
+
 from core.draft_fields import FieldMetadata
 
 LEAD_FIELD_METADATA = {
@@ -1023,6 +1164,10 @@ LEAD_FIELD_METADATA = {
     ),
     "source": FieldMetadata("source", "מקור", _DRAFT_FIELD_PROMPT_FULL_HE["source"]),
     "note": FieldMetadata("note", "הערה", _DRAFT_FIELD_PROMPT_FULL_HE["note"]),
+    "experience_status": FieldMetadata(
+        "experience_status", "ניסיון בתחום", _DRAFT_FIELD_PROMPT_FULL_HE["experience_status"],
+        input_type="single_select", choices=tuple(ExperienceStatus.ALL), resolver=_resolve_lead_experience,
+    ),
 }
 
 from core.draft_flow import DraftSpec as _DraftSpec  # noqa: E402
@@ -1034,6 +1179,6 @@ LEAD_DRAFT_SPEC = _DraftSpec(
     edit_labels=_DRAFT_EDIT_LABELS,
     set_field=set_draft_field,
     render=render_lead_draft_card,
-    unknown_field_message="לא זיהיתי שדה. אילו שדות: שם / טלפון / תחום / מקור / הערה.",
-    edit_choice_prompt="איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה.",
+    unknown_field_message="לא זיהיתי שדה. אילו שדות: שם / טלפון / תחום / מקור / הערה / ניסיון.",
+    edit_choice_prompt="איזה שדה לערוך? שם / טלפון / תחום / מקור / הערה / ניסיון.",
 )

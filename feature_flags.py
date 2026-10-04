@@ -39,6 +39,9 @@ LEAD PIPELINE:
    with no flag check; EMAIL_CANONICAL_LEAD_WRITE/FURNITURE_CANONICAL_LEAD_WRITE were removed
    27/08/2026 — declared here but never read anywhere in live code, so they gated nothing)
   LEAD_SCORING                - score+tier נכתב בעת יצירת lead
+  LEAD_EXPERIENCE_INFERENCE   - Experience Status נקבע אוטומטית מטקסט הרישום
+                                (קבלן→עובד כיום, בעל ניסיון, ללא ניסיון) ביצירת
+                                ליד בלבד; סיווג/סינון, לא משפיע על Score; default OFF
   LEAD_MEMORY                 - lead_memory.update() מחובר ל-lead_capture
   FOLLOWUP_AUTOMATION         - scheduler סורק לידים HOT, מעלה לאישור
   LEAD_RECOVERY               - זיהוי לידים דועכים + שליחה מחדש
