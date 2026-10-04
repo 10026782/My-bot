@@ -7015,4 +7015,3 @@ timestamps, methods, scope, and results are recorded in
 - **נשאר פתוח:** Payments/Expenses/Deals גנריים; שדה סימון Task פרטי לא קיים בסכמה החיה.
 - **Merged:** לא. **Deployed:** לא. **Verified בפרודקשן:** לא.
 - **סטטוס:** 🟡 CODE DONE / STATIC_VERIFIED, NOT MERGED
-
