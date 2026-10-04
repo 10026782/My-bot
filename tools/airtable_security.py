@@ -13,6 +13,7 @@ import re
 from typing import TYPE_CHECKING
 
 from tools.airtable_gateway import escape_formula_value
+from core import data_access_policy
 
 if TYPE_CHECKING:
     from identity import Identity
@@ -110,6 +111,15 @@ def enforce_tenant_scope(
     זה מונע מצב שבו Claude שולח filter "חכם" שעוקף את tenant.
     """
     params = dict(params)  # לא מוטציה של המקור
+
+    # Personal-data policy (core/data_access_policy.py) runs FIRST and for every
+    # role — partner/manager/employee/owner alike — so no role-specific branch
+    # below can bypass owner-of-record scoping. Read results are narrowed by the
+    # caller via data_access_policy.filter_records().
+    try:
+        data_access_policy.enforce_table_access(tool_name, identity, params)
+    except data_access_policy.PersonalDataAccessDenied as exc:
+        raise TenantScopeViolation(str(exc)) from exc
 
     if getattr(identity, "role", None) == "partner" and tool_name == "airtable_get":
         table = str(params.get("table", "")).strip()

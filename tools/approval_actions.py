@@ -360,6 +360,26 @@ def tma_write(
     # Already verified above against the live PostgreSQL claim's claimant_id.
     approved_by = _approved_by
 
+    # Personal-data policy, re-checked at EXECUTION time for the frozen
+    # requester (a stored approval is never trusted blindly): an owner-scoped
+    # table (e.g. Assets) may only be changed/created by its owner-of-record.
+    from core import data_access_policy
+    if data_access_policy.is_owner_scoped(table):
+        try:
+            if op == "patch":
+                from tools.airtable_read_adapter import get_record_fields
+                data_access_policy.authorize_record(
+                    table, get_record_fields(table, record_id), identity,
+                )
+            elif op == "post":
+                fields = data_access_policy.scope_new_record_fields(table, fields, identity)
+        except Exception as exc:
+            logger.error("[approval_actions] tma_write: personal-data policy denied table=%s op=%s: %s", table, op, exc)
+            return _tool_result(
+                ok=False, tool="tma_write",
+                user_message=data_access_policy.DENIED_MESSAGE,
+            )
+
     if op == "post":
         if table in (Tables.CONTACTS, "Contacts"):
             import crm
