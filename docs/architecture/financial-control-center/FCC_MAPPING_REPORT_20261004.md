@@ -117,3 +117,23 @@ duplicated SSOT (Loans/Assets/Payments — הפתרון: reference בלבד) · 
 ## 9. תוכנית בדיקות (טרם נכתבו)
 
 18 הבדיקות שהוגדרו במשימה → `test_financial_control_center_*.py` ליד הקיימים (סגנון script עם runner עצמי, נקלט ב-CI דרך `test_*.py`); בנוסף: (א) `airtable_get` על כל טבלת Financial_* נחסם לכל role; (ב) Task עם Financial Goal לא מופיע ב-my-work/generic reads של אחר.
+
+---
+
+## 10. אימות חי (Airtable MCP, read-only, 04/10/2026, base `app4bcgoX7t0HUVnm`)
+
+נעשו רק קריאות (`list_tables_for_base`, `get_table_schema`, `list_records_for_table`). לא נוצר/שונה דבר.
+
+| בדיקה | תוצאה |
+|-------|--------|
+| טבלאות חיות | 53 (ב-`schema_cache.json`: 46). 7 חסרות ב-cache: Allocation Rules, Allocation Snapshots, Deal Economics, Organizations, Worker Assignments, Monthly Calculation Batches, Worker Monthly Results (כולן עסקיות/Deal-Payment). **אין** טבלה פיננסית-אישית קיימת; ההנחה "אין SSOT ל-Goals/Events/הכנסה אישית" אומתה. |
+| `Tasks` | `Priority`=High/Medium/Low, `Topic` כולל `כספים`, `Cadence`=Daily/Weekly/Monthly/One Time/One-time, `סטטוס`=ממתין/בביצוע/בוצע/**Open** (אופציה legacy נוספת), `Owner`→Profile. אין שדה link ל-Goal (כצפוי). |
+| `Profile` (5 שורות) | Eliyahu=Owner, Ahron=Partner, Orri=Partner, Avi=**Marketing** (לא Partner כפי שהוזכר ב-AVI_PILOT doc), ועוד שורה זבל בשם "ליד חדש" ללא Role. |
+| `Assets` | 9 רשומות, **7 מסומנות `Domain=Personal`**, ו-**אף רשומה לא מקושרת ל-`Owner`**. |
+| `Loans` | ריקה (0 רשומות). |
+
+**השלכות:**
+1. §0 #2 חמור יותר מהמוערך: ל-Assets האישיים אין בעלים כלל, לכן גם תיקון "סינון לפי Owner" ידרוש backfill של `Owner` (החלטת בעלים) — אחרת ה-API יחזיר 0 רשומות.
+2. `Profile.name` קיים כשורה כללית ("ליד חדש") — מחזק את הדרישה להתאמה יחידה ב-`resolve_profile_record_id`.
+3. מי שמחזיק `IDENTITY_MAP` חי עדיין לא נבדק (env, לא Airtable) — מידת הדליפה בפועל נשארת "לא ידוע".
+4. `Loans` ריקה → ההנחה שהלוואות אישיות יימשכו מ-Loans אינה ישימה היום; חובות אישיים יהיו Goals+Events בלבד.

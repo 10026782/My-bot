@@ -7013,4 +7013,4 @@ timestamps, methods, scope, and results are recorded in
 - **לא תוקן:** שינוי התנהגות בנתיבים קיימים דורש החלטת בעלים (תיקון נפרד לפני FCC, או deny-list ייעודי ל-FCC בלבד).
 - **Merged / Deployed / Verified בפרודקשן:** N/A — ממצא, לא תיקון.
 - **סטטוס:** 🔴 OPEN — ממתין להחלטת בעלים
-
+- **אימות חי 04/10/2026 (Airtable MCP read-only):** `Assets` — 9 רשומות, 7 `Domain=Personal`, **0 עם `Owner`**; `Loans` ריקה; `Profile` 5 שורות (Eliyahu=Owner, Ahron/Orri=Partner, Avi=Marketing, + שורה זבל). סינון Owner ב-`/api/assets` ידרוש backfill. `IDENTITY_MAP` החי לא נבדק.
