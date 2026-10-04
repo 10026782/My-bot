@@ -468,6 +468,7 @@ def _identity_ref(identity) -> str:
 ACTION_RISK = {
     "tma_create_project":     "Medium",
     "tma_update_asset":       "Medium",
+    "tma_fcc_write":          "Medium",
     "tma_create_venture":     "Medium",
     "tma_update_venture":     "Medium",
     "tma_update_lead_status": "Low",
@@ -4837,3 +4838,63 @@ def tma_upload(identity):
         "drive_url":  result.drive_url,
         "file_size_tier": result.file_size_tier,
     })
+
+
+# ══════════════════════════════════════════════════════════════════
+# Private Financial Control Center (FCC) — owner-of-record only, flag-gated.
+# Reads: core.financial_control.service (filter_records on every table).
+# Writes: planned by core.financial_control.writer, executed ONLY through
+# _queue_or_owner_execute -> ActionGateway -> dispatcher -> tma_write.
+# ══════════════════════════════════════════════════════════════════
+
+def _fcc_enabled() -> bool:
+    import feature_flags
+    return feature_flags.is_enabled("FEATURE_FINANCIAL_CONTROL_CENTER")
+
+
+@tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/write", methods=["OPTIONS"])
+def _preflight_fcc():
+    return "", 204
+
+
+@tma_api.route("/api/fcc/overview", methods=["GET"])
+@require_tma_auth
+def fcc_overview(identity):
+    if not _fcc_enabled():
+        return jsonify({"error": "not found"}), 404
+    from core.financial_control import service as fcc_service
+    try:
+        return jsonify(fcc_service.overview(identity))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+
+
+@tma_api.route("/api/fcc/write", methods=["POST"])
+@require_tma_auth
+def fcc_write(identity):
+    """Body: {"text": str, "goal_id"?: str, "confirm"?: bool}. Without confirm -> preview only."""
+    if not _fcc_enabled():
+        return jsonify({"error": "not found"}), 404
+    from core.financial_control import classifier, service as fcc_service, writer as fcc_writer
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    try:
+        titles = [(g.get("fields") or {}).get("Title", "") for g in fcc_service.my_goals(identity)]
+        intent = classifier.classify(text, titles)
+        plan = fcc_writer.plan(text, intent, identity, goal_id=data.get("goal_id"))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    if plan["status"] != "preview" or not data.get("confirm"):
+        return jsonify(plan), (403 if plan["status"] == "denied" else 200)
+
+    results = []
+    for payload in plan["proposals"]:
+        _, response, status = _queue_or_owner_execute(
+            "tma_fcc_write", payload, identity, f"FCC: {plan.get('summary', '')[:80]}")
+        results.append({"table": payload["table"], "status": status, "response": response})
+        if status >= 300:        # stop at first failure; report explicitly, no silent partial success
+            return jsonify({"status": "partial_failure", "results": results}), status
+    return jsonify({"status": "executed", "results": results})

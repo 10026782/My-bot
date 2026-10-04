@@ -33,7 +33,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from airtable_schema import TABLE_ALIASES, Tables, TaskFields
+from airtable_schema import TABLE_ALIASES, FinGoalFields, Tables, TaskFields
 from core import owner_resolution
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,9 @@ class TablePolicy:
     owner_field: str = "Owner"              # multipleRecordLinks -> Profile
     ownerless: str = OWNERLESS_DENY         # OWNER_SCOPED only
     private_marker: tuple[str, str] | None = None   # RECORD_MARKER only: (field, value)
+    # (link field, target table): a record may only link to rows the actor owns
+    # (cross-owner link guard, checked on create and on update).
+    linked_owner_checks: tuple[tuple[str, str], ...] = ()
 
 
 # Proposed (NOT yet in the live schema): Tasks."Visibility" = "Private". The
@@ -70,6 +73,12 @@ TASK_PRIVATE_MARKER = ("Visibility", "Private")
 _POLICIES: dict[str, TablePolicy] = {
     "Assets":     TablePolicy("Assets", OWNER_SCOPED),
     Tables.LOANS: TablePolicy(Tables.LOANS, OWNER_SCOPED),
+    # FCC tables: owner-of-record only; role (even business owner) grants nothing.
+    Tables.FIN_GOALS:  TablePolicy(Tables.FIN_GOALS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER),
+    Tables.FIN_EVENTS: TablePolicy(
+        Tables.FIN_EVENTS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,
+        linked_owner_checks=(("Goal", Tables.FIN_GOALS),),
+    ),
     Tables.TASKS: TablePolicy(
         Tables.TASKS, RECORD_MARKER, owner_field=TaskFields.OWNER,
         private_marker=TASK_PRIVATE_MARKER,
@@ -211,9 +220,27 @@ def scope_new_record_fields(table: object, fields: dict, identity) -> dict:
     refs = owner_refs(fields, policy.owner_field)
     if refs and set(refs) != {actor.profile_id}:
         raise PersonalDataAccessDenied(DENIED_MESSAGE)
+    _check_linked_owners(policy, fields, actor)
     scoped = dict(fields)
     scoped[policy.owner_field] = [actor.profile_id]
     return scoped
+
+
+def _check_linked_owners(policy: TablePolicy, fields: dict | None, actor: ActorScope) -> None:
+    for link_field, target in policy.linked_owner_checks:
+        ids = (fields or {}).get(link_field)
+        if isinstance(ids, str):
+            ids = [ids]
+        for rid in ids or []:
+            if not isinstance(rid, str) or not rid.startswith("rec"):
+                raise PersonalDataAccessDenied(DENIED_MESSAGE)
+            from tools.airtable_read_adapter import get_record_fields
+            try:
+                linked = get_record_fields(target, rid)
+            except Exception as exc:
+                raise PersonalDataAccessDenied(UNRESOLVED_MESSAGE) from exc
+            if not record_visible(target, linked, actor):
+                raise PersonalDataAccessDenied(DENIED_MESSAGE)
 
 
 # ══════════════════════════════════════════════════
@@ -247,6 +274,8 @@ def enforce_table_access(tool_name: str, identity, params: dict) -> None:
                 "[data_access_policy] %s denied table=%s reason=%s", tool_name, policy.table, actor.reason,
             )
             raise PersonalDataAccessDenied(UNRESOLVED_MESSAGE)
+    if policy.linked_owner_checks and tool_name in ("airtable_add", "airtable_update"):
+        _check_linked_owners(policy, params.get("fields"), actor or resolve_actor(identity))
     if needs_record_check:
         from tools.airtable_read_adapter import get_record_fields
         try:
