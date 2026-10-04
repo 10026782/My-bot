@@ -28,7 +28,7 @@ from airtable_schema import (
     ApprovalsFields, ApprovalStatus,
     RoadmapTaskFields, RoadmapTaskStatus, DailyCheckinFields,
     VentureFields, VentureStage,
-    LeadStatus, LeadOutcome,
+    LeadStatus, LeadOutcome, ExperienceStatus,
     LeadEventFields,
     ProfileFields,
 )
@@ -1555,6 +1555,15 @@ _LEAD_NEXT_ACTION_OPTIONS: dict[str, tuple[str, str]] = {
     "ליד חדש":          ("ליד חדש", "ליד חדש"),
 }
 
+# Options that are statuses/outcomes rather than actions to perform. Hidden
+# from the lead-detail picker only — they stay valid for PATCH validation,
+# the pipeline filter and existing records (nothing is deleted in Airtable);
+# a lead already holding one still sees it as its current value.
+_LEAD_NEXT_ACTION_PICKER_HIDDEN = frozenset({
+    "Follow Up", "Waiting Response", "Closed Won", "Closed Lost", "ליד חדש",
+})
+
+
 def _next_action_label(raw_value: str) -> str:
     opt = _LEAD_NEXT_ACTION_OPTIONS.get((raw_value or "").strip())
     return opt[1] if opt else raw_value
@@ -1577,6 +1586,7 @@ def _fmt_lead_summary(rec: dict) -> dict:
         "source":           f.get(LeadFields.SOURCE, ""),
         "next_step":        next_step,
         "next_step_label":  _next_action_label(next_step) if next_step else "",
+        "experience_status": f.get(LeadFields.EXPERIENCE_STATUS, ""),
     }
 
 
@@ -1672,6 +1682,11 @@ def get_leads(identity):
     if temperature_q not in ("קר", "חם", "חם מאוד"):
         temperature_q = ""
 
+    # סיווג ניסיון בתחום — סינון בלבד (לא משפיע על Score). ערך לא מוכר = התעלמות.
+    experience_q = request.args.get("experience_status", "").strip()
+    if experience_q not in ExperienceStatus.ALL:
+        experience_q = ""
+
     date_range_q = request.args.get("date_range", "all")
     if date_range_q not in ("today", "week", "month", "all"):
         date_range_q = "all"
@@ -1725,6 +1740,9 @@ def get_leads(identity):
 
     if next_action_q:
         records = [r for r in records if record_fields(r).get(LeadFields.NEXT_STEP, "") == next_action_q]
+
+    if experience_q:
+        records = [r for r in records if record_fields(r).get(LeadFields.EXPERIENCE_STATUS, "") == experience_q]
 
     if temperature_q:
         records = [r for r in records if _pipeline_temperature(int(record_fields(r).get(LeadFields.SCORE, 0) or 0))[0] == temperature_q]
@@ -1792,6 +1810,8 @@ def get_leads(identity):
         "source": source_q,
         "next_action": next_action_q,
         "temperature": temperature_q,
+        "experience_status": experience_q,
+        "experience_status_options": list(ExperienceStatus.ALL),
         "date_range": date_range_q,
         "has_more": has_more,
         "count": len(records),
@@ -2016,13 +2036,17 @@ def get_lead(lead_id, identity):
         # option set itself.
         "next_step_label":   _next_action_label(next_step) if next_step else "",
         "next_step_options": [
-            {"value": key, "label": label} for key, (_, label) in _LEAD_NEXT_ACTION_OPTIONS.items()
+            {"value": key, "label": label}
+            for key, (_, label) in _LEAD_NEXT_ACTION_OPTIONS.items()
+            if key not in _LEAD_NEXT_ACTION_PICKER_HIDDEN or key == (next_step or "").strip()
         ],
         "created_at":    f.get(LeadFields.CREATED_AT, ""),
         "timeline":      timeline,
         "outcome":       f.get(LeadFields.OUTCOME, ""),
         "next_followup": f.get(LeadFields.NEXT_FOLLOWUP, ""),
         "owner":         owner_display,
+        "experience_status": f.get(LeadFields.EXPERIENCE_STATUS, ""),
+        "experience_status_options": list(ExperienceStatus.ALL),
     }
 
     # BUG-104 — Core Reasoning Activation Program, Phase 1 (read-only).
@@ -2076,12 +2100,14 @@ def update_lead_status(lead_id, identity):
 _LEAD_EDITABLE = {
     LeadFields.STATUS, LeadFields.SCORE,
     "Score", LeadFields.OUTCOME, "Next Followup", LeadFields.OWNER, LeadFields.NEXT_STEP,
+    LeadFields.EXPERIENCE_STATUS,
 }
 _LEAD_FIELD_ALIASES = {
     "score": "Score",
     "next_step": LeadFields.NEXT_STEP,
     "next_followup": "Next Followup",
     "owner": LeadFields.OWNER,
+    "experience_status": LeadFields.EXPERIENCE_STATUS,
 }
 _LEAD_IGNORED_PATCH_FIELDS = {"tier", "טמפרטורה"}
 
@@ -2101,7 +2127,7 @@ def _normalize_lead_patch_fields(data: dict) -> dict:
     return normalized
 
 # Single-select fields that must arrive as raw strings (no embedded quotes).
-_LEAD_SELECT_FIELDS = {LeadFields.STATUS, LeadFields.OUTCOME, LeadFields.NEXT_STEP}
+_LEAD_SELECT_FIELDS = {LeadFields.STATUS, LeadFields.OUTCOME, LeadFields.NEXT_STEP, LeadFields.EXPERIENCE_STATUS}
 
 # Linked record coercion (Owner → list of rec IDs) is handled by airtable_gateway.LINKED_RECORD_FIELDS.
 
@@ -2156,6 +2182,13 @@ def patch_lead(lead_id, identity):
     if LeadFields.STATUS in fields:
         if fields[LeadFields.STATUS] not in LeadStatus.ALL:
             return jsonify({"error": "invalid status", "valid": sorted(LeadStatus.ALL)}), 400
+    if LeadFields.EXPERIENCE_STATUS in fields:
+        # Typecast כבוי — חייב להתאים בדיוק לאחת מאפשרויות ה-select החיות.
+        if fields[LeadFields.EXPERIENCE_STATUS] not in ExperienceStatus.ALL:
+            return jsonify({
+                "error": "invalid experience_status",
+                "valid": list(ExperienceStatus.ALL),
+            }), 400
     if LeadFields.OUTCOME in fields:
         outcome_value = LeadOutcome.BY_KEY.get(fields[LeadFields.OUTCOME].lower())
         if outcome_value is None:

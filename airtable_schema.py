@@ -904,6 +904,9 @@ class LeadFields:
     DEAL_LINK       = "עסקאות (Deals)"
     EXTERNAL_ID     = "external_id"   # gmail:<msg_id> — idempotency key מדויק (F06)
     SENDER_ID       = "sender_id"     # email address / phone — dedup by sender (F06)
+    # singleSelect (fld8RbkjKHruwcxVE, נוצר ידנית ע"י הבעלים, אומת ב-Airtable MCP 04/10/2026).
+    # לסיווג וסינון בלבד — אינו משפיע על Score. ערכים: ראו ExperienceStatus.
+    EXPERIENCE_STATUS = "Experience Status"
 
 
 class LeadStatus:
@@ -918,11 +921,24 @@ class LeadStatus:
     DUPLICATE        = "duplicate"
     NOT_RELEVANT     = "not_relevant"
     DONE             = "done"
+    NEEDS_CONVINCING = "needs_convincing"  # נוסף ידנית ב-Airtable (sel2wC3CGHYu3Q467, אומת 04/10/2026) — "דיברנו, צריך שכנוע"
 
     ALL = {
         WAITING_CALL, ACTIVE, HIGH_CONFIDENCE, NEW, WAITING_RESPONSE,
-        ARCHIVED, LOST, DUPLICATE, NOT_RELEVANT, DONE,
+        ARCHIVED, LOST, DUPLICATE, NOT_RELEVANT, DONE, NEEDS_CONVINCING,
     }
+
+
+class ExperienceStatus:
+    """Leads.'Experience Status' singleSelect — exact live Airtable option strings
+    (verified via Airtable MCP get_table_schema, 04/10/2026, field fld8RbkjKHruwcxVE).
+    Typecast is OFF, so a write must match an option byte-for-byte."""
+    WORKING_NOW  = "עובד כיום בתחום"
+    EX_EXPERIENCED = "בעל ניסיון — לא עובד כיום"
+    NO_EXPERIENCE = "ללא ניסיון"
+    UNKNOWN      = "לא ידוע"
+
+    ALL = (WORKING_NOW, EX_EXPERIENCED, NO_EXPERIENCE, UNKNOWN)
 
 
 class LeadOutcome:

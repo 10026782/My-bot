@@ -1,6 +1,17 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 23/09/2026
+עודכן: 04/10/2026
+
+## PIPELINE-1 — Lead stage / Experience Status / needs_convincing — CODE DONE, NOT VERIFIED IN PROD — 04/10/2026 (PR #1268)
+
+מצב נוכחי (לא "הושלם"): הקוד נכתב ונבדק מול mock בלבד; לא מוזג, לא נפרס, ולא אומת ב-Render.
+
+- **Lead Detail**: שלב הליד (status), הפעולה הבאה (Next Action + תאריך), פעולות וסגירה מופרדים. ה-picker של Next Action מסתיר Follow Up / Waiting Response / Closed Won / Closed Lost / ליד חדש (UI בלבד; הערכים נשארים תקפים ל-PATCH, לסינון ולרשומות קיימות).
+- **Experience Status** (singleSelect חדש ב-Leads, נוצר ידנית ואומת ב-Airtable): סיווג וסינון בלבד — אין שינוי ב-Score ואין נוסחת ניקוד חדשה. PATCH ל-Owner/Manager עם ולידציה של האפשרות המדויקת, סינון `?experience_status=`, בורר בכרטיס הליד ותג ברשימה. כתיבה חיה אחת נבדקה על ליד בדיקה ונוקתה.
+- **needs_convincing** נוסף כערך `status` (נוצר ידנית ב-Airtable); `waiting_call` נשאר "ממתין לשיחה".
+- **lead_memory**: `Score` לא נכתב כשאין ל-state ציון אמיתי (מונע איפוס ל-0). לא אומת שהבאג פעיל בייצור — דגלי Render (`LEAD_MEMORY`/`LEAD_SCORING`/`LEAD_CAPTURE`) טרם אומתו.
+- **לא נעשה**: נוסחת ניקוד, clamp ל-Score ב-`patch_lead`, Convert Contact / Create Deal ככפתורים נפרדים.
+- **צעדים הבאים**: CI ירוק → merge → deploy → אימות ב-Render (commit hash ודגלים) → בדיקת PATCH אמיתי דרך ה-TMA.
 
 ## BUG-CHARGE-RESOLVER-FORMULA-USES-RECORD-ID — CODE DONE, STATIC VERIFIED — 17/09/2026 (PR #1243 follow-up)
 

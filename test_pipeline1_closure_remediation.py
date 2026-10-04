@@ -98,6 +98,17 @@ try:
     detail = r.get_json()
     chk("detail: score=30 -> temperature=חם (matches list logic, not old 70/40)",
         detail["temperature"] == "חם" and detail["score_color"] == "yellow")
+
+    picker = {o["value"] for o in detail["next_step_options"]}
+    chk("detail: picker hides status/outcome-type options (nothing deleted from the canonical map)",
+        picker == set(tma_api._LEAD_NEXT_ACTION_OPTIONS) - tma_api._LEAD_NEXT_ACTION_PICKER_HIDDEN
+        and tma_api._LEAD_NEXT_ACTION_PICKER_HIDDEN <= set(tma_api._LEAD_NEXT_ACTION_OPTIONS))
+    tma_api._at_get_record = lambda table, rid: {
+        "id": rid, "fields": {"Name": "X", "phone": "1", "domain": "media", "status": "active", "Next Action": "Follow Up"},
+    }
+    legacy = client.get("/api/leads/recX", headers=_HDR).get_json()
+    chk("detail: a lead already holding a hidden option still lists it as its current value",
+        "Follow Up" in {o["value"] for o in legacy["next_step_options"]})
 finally:
     tma_api._at_list = _orig_at_list
     tma_api._at_get_record = _orig_at_get_record
@@ -485,6 +496,87 @@ try:
 finally:
     tma_api.resolve_identity = _orig_resolve
     tma_api._at_list = _orig_at_list
+
+
+# ══════════════════════════════════════════════════════════════════
+# [10] Experience Status (סיווג וסינון בלבד, ללא השפעה על Score) +
+# status=needs_convincing ("דיברנו — צריך שכנוע"), 04/10/2026.
+# שני האובייקטים נוצרו ידנית ב-Airtable ואומתו ב-MCP לפני הוספת הקוד.
+# ══════════════════════════════════════════════════════════════════
+print("\n[10] Experience Status + needs_convincing")
+
+_EXP_OPTIONS = ("עובד כיום בתחום", "בעל ניסיון — לא עובד כיום", "ללא ניסיון", "לא ידוע")
+chk("ExperienceStatus.ALL = 4 live option strings, byte-exact",
+    tuple(tma_api.ExperienceStatus.ALL) == _EXP_OPTIONS)
+chk("LeadStatus.ALL includes needs_convincing",
+    "needs_convincing" in tma_api.LeadStatus.ALL and len(tma_api.LeadStatus.ALL) == 11)
+
+_queued_calls.clear()
+tma_api._queue_tma_write_approval = _fake_queue
+tma_api._claim_and_execute_approval = _fake_claim_execute
+
+
+def _exp_fixture_at_list(table, formula="", max_records=None, strict=False,
+                         measurement_label=None, paginate=False):
+    return [
+        {"id": "recX1", "createdTime": _iso(_now), "fields": {
+            "Name": "קבלן סלקום", "status": "needs_convincing", "Score": 0,
+            "Experience Status": "עובד כיום בתחום"}},
+        {"id": "recX2", "createdTime": _iso(_now), "fields": {
+            "Name": "ליד מודעה", "status": "new", "Score": 0}},
+    ]
+
+
+tma_api._at_list = _exp_fixture_at_list
+tma_api._at_get_record = lambda table, rid: {"id": rid, "fields": {
+    "Name": "קבלן סלקום", "status": "needs_convincing", "Experience Status": "עובד כיום בתחום"}}
+try:
+    for role in (Role.OWNER, Role.MANAGER):
+        tma_api.resolve_identity = lambda ch, tid, _r=role: _identity(_r)
+        _queued_calls.clear()
+        r = client.patch("/api/leads/recLEAD1", json={"experience_status": "ללא ניסיון"}, headers=_HDR)
+        chk(f"{role} PATCH experience_status (valid) accepted", r.status_code in (200, 202))
+        chk(f"{role} PATCH writes the exact option under 'Experience Status', no Score",
+            _queued_calls and _queued_calls[0][1]["fields"] == {"Experience Status": "ללא ניסיון"})
+
+    tma_api.resolve_identity = lambda ch, tid: _identity(Role.OWNER)
+    _queued_calls.clear()
+    r = client.patch("/api/leads/recLEAD1", json={"experience_status": "עובד בסלקום"}, headers=_HDR)
+    chk("unknown experience_status -> 400 and never reaches ActionGateway",
+        r.status_code == 400 and len(_queued_calls) == 0)
+
+    _queued_calls.clear()
+    r = client.patch("/api/leads/recLEAD1", json={"status": "needs_convincing"}, headers=_HDR)
+    chk("status=needs_convincing accepted and written verbatim",
+        r.status_code == 200 and _queued_calls[0][1]["fields"] == {"status": "needs_convincing"})
+
+    # סינון + חשיפה ב-API
+    r = client.get("/api/leads?view=all&experience_status=" + "עובד כיום בתחום", headers=_HDR)
+    body = r.get_json()
+    chk("experience_status filter narrows to the matching lead",
+        [l["id"] for l in body["leads"]] == ["recX1"] and body["experience_status"] == "עובד כיום בתחום")
+    chk("list summary exposes experience_status per lead",
+        {l["id"]: l["experience_status"] for l in body["leads"]} == {"recX1": "עובד כיום בתחום"})
+    chk("response lists the 4 filter options", tuple(body["experience_status_options"]) == _EXP_OPTIONS)
+
+    r = client.get("/api/leads?view=all&experience_status=not_real", headers=_HDR)
+    chk("unknown experience_status filter is ignored, not an error",
+        r.status_code == 200 and len(r.get_json()["leads"]) == 2)
+
+    r = client.get("/api/leads?view=active", headers=_HDR)
+    chk("needs_convincing lead is visible in the default (active) view",
+        "recX1" in [l["id"] for l in r.get_json()["leads"]])
+
+    r = client.get("/api/leads/recLEAD1", headers=_HDR)
+    d = r.get_json()
+    chk("lead detail exposes experience_status + options",
+        d.get("experience_status") == "עובד כיום בתחום" and tuple(d.get("experience_status_options", ())) == _EXP_OPTIONS)
+finally:
+    tma_api.resolve_identity = _orig_resolve
+    tma_api._queue_tma_write_approval = _orig_queue
+    tma_api._claim_and_execute_approval = _orig_claim_execute
+    tma_api._at_list = _orig_at_list
+    tma_api._at_get_record = _orig_at_get_record
 
 
 print(f"\n{'=' * 60}")

@@ -319,6 +319,7 @@ def _normalise_status(raw_status: str, raw_business_outcome: str = "") -> str:
         "waiting_call":     DecisionStatus.OPEN,
         "waiting_response": DecisionStatus.OPEN,
         "high_confidence":  DecisionStatus.OPEN,
+        "needs_convincing": DecisionStatus.OPEN,
         "done":             DecisionStatus.DECIDED_YES,
         "not_relevant":     DecisionStatus.DECIDED_NO,
         "archived":         DecisionStatus.CANCELLED,
