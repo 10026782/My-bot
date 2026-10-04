@@ -31,6 +31,7 @@ from .contact_resolver  import resolve_contact
 from . import approval_actions
 from core import owner_resolution as _owner_resolution
 from core import task_writer as _task_writer
+from core import data_access_policy as _access_policy
 
 from tool_registry import enforce, ToolDenied
 import feature_flags as _ff
@@ -400,7 +401,13 @@ def dispatch_tool(
                     return str(e)
 
                 secured_filter = secured_params.get("filterByFormula", "")
-                result = airtable_get(table, secured_filter)
+                result = airtable_get(
+                    table, secured_filter,
+                    record_filter=(
+                        (lambda records: _access_policy.filter_records(table, records, identity))
+                        if _access_policy.needs_record_filter(table) else None
+                    ),
+                )
                 audit_log_airtable("airtable_get", identity, secured_params, result)
                 return result
 
@@ -512,6 +519,14 @@ def dispatch_tool(
                     # BUG-147/Patch A: same structured-shape fix as the
                     # LeadsDirectWriteBlocked branch above — always a
                     # blocked-write failure, never ok=True.
+                    return _tool_result(ok=False, tool="airtable_add", user_message=str(e))
+
+                # Personal-data policy: owner-stamp (or refuse) new records of
+                # policy tables — an actor can only create their own.
+                try:
+                    fields = _access_policy.scope_new_record_fields(table, fields, identity)
+                except _access_policy.PersonalDataAccessDenied as e:
+                    audit_log_airtable("airtable_add", identity, {"table": table}, f"blocked: {e}")
                     return _tool_result(ok=False, tool="airtable_add", user_message=str(e))
 
                 if _ALIAS_MAP.get(table, table) == "אנשי קשר (Contacts)":

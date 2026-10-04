@@ -282,3 +282,18 @@ def resolve_identity(channel: str, external_id: str) -> Identity:
         external_id  = external_id,
         domain_id    = Domain.GENERAL,
     )
+
+
+def business_owner_user_ids() -> frozenset[str]:
+    """Distinct canonical user_ids holding role=owner in the identity registry.
+
+    Used by core/data_access_policy.py: ownerless business Tasks are only
+    auto-assigned to the requester while exactly ONE business owner exists
+    (fail closed the moment a second owner-role user is registered). One
+    person with several channel entries (Telegram + WhatsApp) counts once.
+    """
+    return frozenset(
+        str(entry.get("user") or key.split(":", 1)[-1])
+        for key, entry in _REGISTRY.items()
+        if isinstance(entry, dict) and entry.get("role") == Role.OWNER
+    )

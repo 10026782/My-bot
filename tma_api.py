@@ -52,6 +52,7 @@ from core.query_contract import (
 from health_monitor import get_health_status
 from core.command_center import compose_command_center_status
 from core.owner_attention import build_owner_attention_projection
+from core import data_access_policy
 from core.owner_development import generate_owner_development_status
 
 logger = logging.getLogger(__name__)
@@ -947,7 +948,7 @@ def require_tma_auth(f):
 # O0 aggregation helpers — same source as daily_digest.py
 # ══════════════════════════════════════════════════════════════════
 
-def _get_global_kpis() -> dict:
+def _get_global_kpis(identity=None) -> dict:
     """
     Aggregates KPIs for Projects Hub.
 
@@ -972,6 +973,8 @@ def _get_global_kpis() -> dict:
         _query_all_of(_query_before("תאריך יעד", tomorrow), _query_not_equals("סטטוס", "בוצע")),
         max_records=50,
     )
+    # Private tasks (data_access_policy) never count toward anyone but their owner.
+    overdue = data_access_policy.filter_records(Tables.TASKS, overdue, identity)
 
     return {
         "overdue_tasks": len(overdue),
@@ -1194,7 +1197,7 @@ def get_projects(identity):
     if not identity.is_owner:
         return jsonify({"error": "forbidden — owner only"}), 403
 
-    kpis                       = _get_global_kpis()
+    kpis                       = _get_global_kpis(identity)
     projects, hot_leads_count  = _get_project_cards(identity)
     kpis["hot_leads_count"]    = hot_leads_count
 
@@ -1314,6 +1317,7 @@ def get_project_dashboard(project_slug, identity):
             max_records=10,
             strict=True,
         )
+        tasks = data_access_policy.filter_records(Tables.TASKS, tasks, identity)
     except AirtableError as e:
         logger.error(f"[dashboard/{project_slug}] Airtable error: {e}")
         return jsonify({
@@ -3086,7 +3090,10 @@ def _resolve_profile_display_names(record_ids: list[str]) -> list[str]:
     return names
 
 
-def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str, today: str | None = None) -> dict:
+def _process_owner_tasks(
+    records: list, owner_record_id: str, owner_display: str, today: str | None = None,
+    *, claim_ownerless: bool = True,
+) -> dict:
     """
     Core task processing logic (testable, no Flask dependency).
 
@@ -3125,8 +3132,17 @@ def _process_owner_tasks(records: list, owner_record_id: str, owner_display: str
         # owner in the system there's no other rightful claimant for an
         # unassigned task. A task with an explicit owner link to someone
         # else is still excluded.
-        owner_links = relation_refs(fields.get(TaskFields.OWNER, []))
-        if owner_links and owner_record_id not in owner_links:
+        # Policy (core/data_access_policy.task_in_actor_queue): a private task
+        # is served only to its owner-of-record; an ownerless business task is
+        # served only when ``claim_ownerless`` (the requester is the SOLE
+        # business owner — see ownerless_task_claimable). The pure-function
+        # default keeps the historical single-owner behavior for direct callers;
+        # the route always passes the computed value.
+        if not data_access_policy.task_in_actor_queue(
+            fields,
+            data_access_policy.ActorScope(owner_record_id, "ok"),
+            claim_ownerless=claim_ownerless,
+        ):
             continue
 
         task_item = {
@@ -3207,7 +3223,10 @@ def owner_my_work(identity):
         logger.error(f"Failed to query tasks: {e}")
         return jsonify({"error": "failed to load tasks"}), 500
 
-    result = _process_owner_tasks(records, profile_record_id, identity.user_id)
+    result = _process_owner_tasks(
+        records, profile_record_id, identity.user_id,
+        claim_ownerless=data_access_policy.ownerless_task_claimable(identity),
+    )
 
     return jsonify({
         "ok": True,
@@ -3254,9 +3273,13 @@ def update_task_status(task_id, identity):
         return jsonify({"error": "task not found"}), 404
 
     profile_record_id = _resolve_profile_record_id(identity.user_id)
-    owner_links = relation_refs(record_fields(task_rec).get(TaskFields.OWNER, []))
-    if owner_links and profile_record_id not in owner_links:
-        # Task belongs to a different owner -- knowing the record ID is not
+    if not profile_record_id or not data_access_policy.task_in_actor_queue(
+        record_fields(task_rec),
+        data_access_policy.ActorScope(profile_record_id, "ok"),
+        claim_ownerless=data_access_policy.ownerless_task_claimable(identity),
+    ):
+        # Not this owner's task (other owner, private, or an ownerless task the
+        # requester may not claim) -- knowing the record ID is not
         # authorization. Fail closed rather than trusting the caller.
         return jsonify({"error": "forbidden"}), 403
 
@@ -3872,6 +3895,12 @@ def get_assets(identity):
         return jsonify({"error": "forbidden"}), 403
 
     recs   = _at_list("Assets", "", max_records=100)
+    # Owner-of-record only (core/data_access_policy): role/allowed_domains grant
+    # the feature, never another person's assets. Unresolved identity -> 403.
+    try:
+        recs = data_access_policy.filter_records("Assets", recs, identity)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
     assets = [_fmt_asset(r) for r in recs]
 
     return jsonify({
@@ -3894,6 +3923,11 @@ def get_asset(asset_id, identity):
     rec = _at_get_record("Assets", asset_id)
     if not rec:
         return jsonify({"error": "asset not found"}), 404
+    try:
+        data_access_policy.authorize_record("Assets", record_fields(rec), identity)
+    except data_access_policy.PersonalDataAccessDenied:
+        # Same answer as a missing record: no existence oracle for other owners.
+        return jsonify({"error": "asset not found"}), 404
 
     return jsonify(_fmt_asset(rec))
 
@@ -3914,6 +3948,16 @@ def update_asset(asset_id, identity):
     fields = {k: v for k, v in data.items() if k in _ASSET_EDITABLE}
     if not fields:
         return jsonify({"error": "no editable fields provided"}), 400
+
+    # Owner-of-record check BEFORE anything is proposed (tma_write re-checks at
+    # execution time). Missing / foreign / ownerless -> 404, never a write.
+    rec = _at_get_record("Assets", asset_id)
+    try:
+        if not rec:
+            raise data_access_policy.PersonalDataAccessDenied("asset not found")
+        data_access_policy.authorize_record("Assets", record_fields(rec), identity)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "asset not found"}), 404
 
     _, response, status = _queue_or_owner_execute(
         "tma_update_asset",

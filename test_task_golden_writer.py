@@ -299,6 +299,8 @@ chk("…and the stale caller fingerprint_payload is dropped (fingerprint = what 
 
 # ══════════════════════════════════════════════════
 print("\n[F] Gate 2 — dispatcher persistence boundary")
+# Privacy Foundation: a generic Task update reads the record once (private-task check).
+patch("tools.airtable_read_adapter.get_record_fields", return_value={}).start()
 # ══════════════════════════════════════════════════
 
 

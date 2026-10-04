@@ -142,7 +142,7 @@ def test_real_sanctioned_call_sites_are_never_reported(scratch_repo: Path) -> No
     tools_dir = scratch_repo / "tools"
     tools_dir.mkdir()
     (tools_dir / "approval_actions.py").write_text(
-        "\n" * 364 + "            import crm\n"
+        "\n" * 366 + "            import crm\n"
     )
     (tools_dir / "schema_snapshot.py").write_text(
         "\n" * 285 + "    from tools.airtable_tools import airtable_get_records\n"
@@ -151,7 +151,7 @@ def test_real_sanctioned_call_sites_are_never_reported(scratch_repo: Path) -> No
     _git(scratch_repo, "commit", "-q", "-m", "real sanctioned call site fixtures")
 
     findings = adb.scan()
-    assert ("tools/approval_actions.py", 365, "crm") not in findings
+    assert ("tools/approval_actions.py", 367, "crm") not in findings
     assert ("tools/schema_snapshot.py", 286, "tools.airtable_tools") not in findings
 
 

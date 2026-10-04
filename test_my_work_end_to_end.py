@@ -815,6 +815,11 @@ def test_route_patch_task_status_unowned_task_may_be_marked_done_by_sole_owner()
     orig_claim_execute = tma_api._claim_and_execute_approval
     import core.owner_resolution as owner_resolution
     orig_list_records = owner_resolution.list_records
+    # Privacy Foundation: "sole owner" is defined by the identity registry
+    # (core/data_access_policy.ownerless_task_claimable). CI has no
+    # IDENTITY_MAP/ELIYAHU_CHAT_ID, so declare the single business owner here.
+    orig_registry = identity_module._REGISTRY
+    identity_module._REGISTRY = {"telegram:999999": {"tenant": "boss_hq", "user": "eliyahu", "role": "owner"}}
 
     client = _make_client()
     tma_api._validate_initdata = lambda s: {"id": "999999"}
@@ -840,6 +845,7 @@ def test_route_patch_task_status_unowned_task_may_be_marked_done_by_sole_owner()
         tma_api._queue_tma_write_approval = orig_queue
         tma_api._claim_and_execute_approval = orig_claim_execute
         owner_resolution.list_records = orig_list_records
+        identity_module._REGISTRY = orig_registry
 
 
 def test_route_patch_task_status_nonexistent_task_returns_404():
