@@ -89,6 +89,11 @@ def _job_external_execution_poll():
 def _job_daily_digest():
     logger.info("[Scheduler] job=daily_digest start")
     try:
+        from feature_flags import is_enabled
+        if not is_enabled("DAILY_DIGEST"):
+            logger.info("[Scheduler] job=daily_digest skip — DAILY_DIGEST flag off (frozen)")
+            return
+
         from daily_digest import send_daily_digest
         import telebot
         token   = os.environ.get("TELEGRAM_TOKEN", "")
@@ -355,8 +360,18 @@ def _job_security_reminder():
     """
     רץ פעם בשבוע (ראשון בבוקר).
     שולח תזכורת רק אם עברו 28+ ימים מהreview האחרון.
+
+    הוקפא (flag SECURITY_REMINDER, כבוי כברירת מחדל): record_security_review()
+    רק כותב תאריך לקובץ בלי לאמת שreview קרה בפועל — תזכורת עקרה שמסתמכת על
+    honor system. הפעלה חזרה לא הופכת אותה לבדיקה אמיתית, רק שולחת שוב את
+    אותה תזכורת self-report.
     """
     try:
+        from feature_flags import is_enabled
+        if not is_enabled("SECURITY_REMINDER"):
+            logger.info("[SecurityReview] SECURITY_REMINDER flag off — job skipped (frozen)")
+            return
+
         days = _days_since_review()
         msg  = _build_security_reminder(days)
         if not msg:

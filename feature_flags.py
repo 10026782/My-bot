@@ -159,6 +159,13 @@ OUTPUT GATEWAY (C52):
 GAME / SCHEDULER:
   GAME_SCHEDULER              - scheduler jobs של מערכת הגיימיפיקציה
   PAYMENT_REMINDERS           - תזכורות תשלום אוטומטיות
+  SECURITY_REMINDER           - scheduler.py::_job_security_reminder (תזכורת אבטחה שבועית).
+                                 כבוי כברירת מחדל (הוקפא) — record_security_review() רק כותב
+                                 תאריך, לא מאמת review בפועל; honor-system עקר. הפעלה חזרה
+                                 שולחת שוב את אותה תזכורת self-report, לא בודקת שום דבר אמיתי.
+  DAILY_DIGEST                - scheduler.py::_job_daily_digest (דוח בוקר יומי).
+                                 כבוי כברירת מחדל (הוקפא לפי בקשת owner). הפעלה: DAILY_DIGEST=true
+                                 ב-Render env.
 
 PR3A — Airtable Schema Snapshot Archive:
   FEATURE_AIRTABLE_SCHEMA_SNAPSHOT         - scheduler job מייצר snapshot של ה-schema החי
