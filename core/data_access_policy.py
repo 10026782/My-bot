@@ -174,6 +174,10 @@ def filter_records(table: object, records: list[dict], identity) -> list[dict]:
     policy = policy_for(table)
     if policy is None:
         return list(records)
+    if policy.mode == RECORD_MARKER and not any(
+        _is_private(policy, (r or {}).get("fields")) for r in records
+    ):
+        return list(records)             # nothing private: no identity lookup needed
     actor = resolve_actor(identity)
     if policy.mode == OWNER_SCOPED and not actor.resolved:
         logger.warning("[data_access_policy] read denied table=%s reason=%s", policy.table, actor.reason)
@@ -231,20 +235,28 @@ def enforce_table_access(tool_name: str, identity, params: dict) -> None:
     policy = policy_for(table)
     if policy is None:
         return
-    actor = resolve_actor(identity)
-    if policy.mode == OWNER_SCOPED and not actor.resolved:
-        logger.warning(
-            "[data_access_policy] %s denied table=%s reason=%s", tool_name, policy.table, actor.reason,
-        )
-        raise PersonalDataAccessDenied(UNRESOLVED_MESSAGE)
     record_id = params.get("record_id")
-    if tool_name == "airtable_update" and record_id:
+    needs_record_check = tool_name == "airtable_update" and bool(record_id)
+    if policy.mode == RECORD_MARKER and not needs_record_check:
+        return                           # reads are narrowed by filter_records; creates by scope_new_record_fields
+    actor = None
+    if policy.mode == OWNER_SCOPED:
+        actor = resolve_actor(identity)
+        if not actor.resolved:
+            logger.warning(
+                "[data_access_policy] %s denied table=%s reason=%s", tool_name, policy.table, actor.reason,
+            )
+            raise PersonalDataAccessDenied(UNRESOLVED_MESSAGE)
+    if needs_record_check:
         from tools.airtable_read_adapter import get_record_fields
         try:
             existing = get_record_fields(policy.table, record_id)
         except Exception as exc:
             logger.warning("[data_access_policy] record read failed table=%s: %s", policy.table, exc)
             raise PersonalDataAccessDenied(UNRESOLVED_MESSAGE) from exc
+        if policy.mode == RECORD_MARKER and not _is_private(policy, existing):
+            return                       # business task: existing rules apply, no identity lookup
+        actor = actor or resolve_actor(identity)
         if not record_visible(policy.table, existing, actor):
             raise PersonalDataAccessDenied(DENIED_MESSAGE)
 

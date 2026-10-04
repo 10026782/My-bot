@@ -346,6 +346,22 @@ def test_14_existing_task_helpers_default_behavior_unchanged():
     assert titles(result) == ["ownerless"]
 
 
+def test_generic_task_update_private_check_is_minimal(monkeypatch):
+    """Business task update: no identity lookup. Private task: owner-of-record only."""
+    lookups = []
+    real = owner_resolution.resolve_profile_record_strict
+    monkeypatch.setattr(owner_resolution, "resolve_profile_record_strict", lambda u: (lookups.append(u) or real(u)))
+    store = {"tBiz": {"Domain": "Recruitment"}, "tPriv": {"Visibility": "Private", "Owner": [ELI]}}
+    monkeypatch.setattr("tools.airtable_read_adapter.get_record_fields", lambda table, rid, **k: store[rid])
+    enforce_tenant_scope("airtable_update", MANAGER, {"table": Tables.TASKS, "record_id": "tBiz"})
+    assert lookups == []
+    with pytest.raises(TenantScopeViolation):
+        enforce_tenant_scope("airtable_update", MANAGER, {"table": Tables.TASKS, "record_id": "tPriv"})
+    with pytest.raises(TenantScopeViolation):
+        enforce_tenant_scope("airtable_update", AVI_PARTNER, {"table": "Tasks", "record_id": "tPriv"})
+    enforce_tenant_scope("airtable_update", ELIYAHU, {"table": "Tasks", "record_id": "tPriv"})
+
+
 # ═══════════════ P5 — Profile resolution ═══════════════
 
 def test_7_ambiguous_profile_never_picks_first(monkeypatch):

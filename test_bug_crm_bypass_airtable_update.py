@@ -259,6 +259,9 @@ chk("Ambiguous protected-looking alias: never reaches any writer",
 # ══════════════════════════════════════════════════════════════════
 print("\n── Tasks: legitimate updates still work, unsupported fields fail closed ──")
 
+# Privacy Foundation: a generic Task update now reads the record once (private-task check).
+patch("tools.airtable_read_adapter.get_record_fields", return_value={}).start()
+
 with patch.object(dispatcher_module, "airtable_update", return_value={
     "ok": True, "tool": "airtable_update", "external_id": "recTASK01",
     "evidence": {}, "user_message": "✅",
