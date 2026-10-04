@@ -7011,7 +7011,7 @@ timestamps, methods, scope, and results are recorded in
 - **Root cause:** `enforce_tenant_scope` לא סינן זהויות פנימיות; אין policy לפי טבלה/בעלים; `/api/assets*` הסתמך על role/`allowed_domains`; Task ללא Owner הוגש לכל owner; Profile נפתר ל-`[0]` מתוך כמה. פירוט: `docs/architecture/privacy-foundation/PRIVACY_FOUNDATION_20261004.md`.
 - **Fix:** `core/data_access_policy.py` (נקודת החלטה יחידה, fail-closed, owner-of-record), hook ב-`enforce_tenant_scope`, סינון ב-dispatcher/`airtable_get`, scoping ב-`/api/assets*`/my-work/task PATCH, re-check ב-`tma_write`, `resolve_profile_record_strict` (התאמה יחידה).
 - **Verification:** `test_privacy_foundation_owner_scope.py` (23 בדיקות; 19 נכשלות על הקוד הישן). ריצת test_*.py מלאה (419 קבצים, סגנון CI) מול baseline של `origin/main`: אותה קבוצת 21 כשלים קיימים-מראש בשני הצדדים, אפס רגרסיות חדשות (שני טסטים ישנים עודכנו למוק של קריאת-הרשומה החדשה: `test_bug_crm_bypass_airtable_update.py`, `test_task_golden_writer.py`; ו-`test_c02_c04` לבעלות על Asset).
-- **⚠️ השפעה תפעולית:** ב-`Assets` החי 9 רשומות (7 Personal), 0 עם Owner → `/api/assets` יחזיר ריק עד backfill של Owner (data, לא schema; לא בוצע).
-- **נשאר פתוח:** Payments/Expenses/Deals גנריים; שדה סימון Task פרטי לא קיים בסכמה החיה.
+- **Backfill (מאושר ע"י הבעלים, בוצע live 04/10/2026, Airtable MCP, שדה `Owner` בלבד):** 5 מתוך 9 רשומות Assets שויכו ל-Eliyahu (updated 5 / failed 0), אומת בקריאה חוזרת; 4 נעצרו (2 × נוף הגליל — Next Step Owner=אהרן ובעלות 50%, ו-2 שורות ריקות) ממתינות להחלטת בעלים.
+- **נשאר פתוח:** `REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE` ל-Payments/Expenses/Deals (ללא שינוי runtime, החלטת בעלים); `Tasks.Visibility` לא נוצר ב-live בכוונה (23/23 Tasks ללא Owner; נקבע ב-FCC); 4 רשומות Assets מוחזקות.
 - **Merged:** לא. **Deployed:** לא. **Verified בפרודקשן:** לא.
 - **סטטוס:** 🟡 CODE DONE / STATIC_VERIFIED, NOT MERGED

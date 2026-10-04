@@ -34,8 +34,25 @@ Enforcement points (all call the same module): `airtable_security.enforce_tenant
 | partner (avi) | ✅ if owner-of-record | ❌ | ❌ | ❌ | domain no longer opens personal tables; business tasks by Domain unchanged |
 | unresolved / ambiguous / external | ❌ | ❌ | ❌ | ❌ | 403 / refusal |
 
-## ⚠️ Operational consequence — requires owner action BEFORE deploy
-Live check (Airtable MCP, 04/10/2026): `Assets` has 9 rows, 7 `Domain=Personal`, **0 with `Owner`**. With fail-closed semantics `/api/assets` will return **0 assets** (and PATCH 404) until `Owner` is set on those rows. This is a **data backfill, not a schema change** — not performed here. Also `Tasks`: 0 of 23 rows have `Owner` → they are all "ownerless business tasks", served to Eliyahu as before (sole owner).
+## Assets Owner backfill — DONE live (owner-approved 04/10/2026, data only, no schema change)
+Method: Airtable MCP `update_records_for_table`, single field `Assets.Owner` (`fldFLgcPtJwk8JcJa`) ← Profile `Eliyahu` (`recKJvNFiTYMXKkwO`, Role=Owner). Pre-write listing and post-write re-read of all 9 rows; no other field touched.
+
+| record | Name | Evidence | Result |
+|--------|------|----------|--------|
+| `recIZaIj5AQX4by2R` | קרקע ליפתא | Domain=Personal, Next Step Owner=אליהו | ✅ Owner=Eliyahu |
+| `recrnyIjnRghHSszE` | בית קרית ספר | Domain=Personal, Next Step Owner=אליהו | ✅ |
+| `rec4yxZIaQztHLZc3` | קרית ספר (קבוצת רכישה) | Domain=Personal, no contrary signal | ✅ |
+| `recjyWS7QcMt5yILr` | קרקע יבניאל | Domain=Personal, no contrary signal | ✅ |
+| `recxI3JGYnVK4N76Z` | בית שמש | Domain=Personal, no contrary signal | ✅ |
+| `recXqelINKDD6OCEq` | נוף הגליל גדול | Personal, but Next Step Owner=אהרן, Ownership 50% | ⛔ HELD — not provably Eliyahu's |
+| `recwTAkCyOlMiKl2U` | נוף הגליל קטן | same | ⛔ HELD |
+| `recDO0mDpxbmqORpq`, `recoc7q79oMpIdkya` | (blank rows) | no name/domain/data | ⛔ HELD |
+
+Counts: **updated 5, failed 0, held 4**. Consequence: until the owner decides the 4 held rows, `/api/assets` returns 5 assets for Eliyahu (the two נוף הגליל rows are hidden from everyone — fail-closed). Decision needed: assign them (Eliyahu / Ahron / co-owner model) or delete the blank rows.
+
+Simulated route check on the live-shaped post-backfill data (no network): Eliyahu → 5 assets, total value = sum of the 5; Avi (partner, recruitment) → 403; Avi/Ahron with `personal` → 0 assets, total 0.
+
+`Tasks`: 0/23 rows have `Owner` → all ownerless business tasks, served to Eliyahu as before (sole owner).
 
 ## Bypass audit (grep, `origin/main` + branch)
 * `airtable_get` runtime callers: dispatcher (policy-wrapped), `cmd_update` (Business Memory), `interaction_engine` (Interaction Log), `tenant_provisioner` ("Tenants", unwired) — none can reach Assets/Loans/Tasks; the function itself now refuses policy tables without a filter.
@@ -46,8 +63,8 @@ Live check (Airtable MCP, 04/10/2026): `Assets` has 9 rows, 7 `Domain=Personal`,
 * Raw table-id bypass (new finding, fixed): generic `airtable_get("tbl…")` would have skipped any name-based rule.
 
 ## Remaining gaps (not fixed here, deliberate)
-1. `Payments` / `Expenses` / `Deals`: business ledgers readable by manager/employee/owner through `airtable_get` (partner is domain-scoped). They have an `owner` link but are business data; widening scope would change business semantics → separate decision. `/api/finance/pulse` is owner-only, not owner-of-record scoped.
-2. Private-task marker field does not exist live → no task is private today. Needs an additive Tasks field (proposed `Visibility` singleSelect: `Private`), **owner approval + live schema change required**; code support and tests are in place.
+1. **`REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE`** — `Payments`, `Expenses`, `Deals`: business ledgers, **unchanged by this PR (owner decision 04/10/2026)**; readable by manager/employee/owner through `airtable_get` (partner is domain-scoped). `/api/finance/pulse` is owner-only, not owner-of-record. When the Financial Control Center is built it may only *reference* a row of these tables when that row is authorized under its own table's policy; personal data must never be copied out of them into new tables to sidestep permissions.
+2. **No live `Tasks.Visibility` (owner decision 04/10/2026).** The code marker (`TASK_PRIVATE_MARKER = ("Visibility", "Private")`) is inert placeholder support: the field does not exist and none will be created now, because 23/23 live Tasks have no `Owner` and an existing-task migration/classification policy must come first. In the FCC phase the owner decides the representation (Visibility / Scope / Task Type / an existing primitive); the placeholder name is not a commitment.
 3. `IDENTITY_MAP` supplied in this task (Eliyahu=owner, Avi=partner/recruitment) was verified against the policy by tests; the live Render env is unverified.
 4. `daily_digest` "done tasks" section for the owner is not owner-of-record scoped (single owner today).
 5. Approvals list (`/api/approvals`) shows action labels with record ids only; not payload-scoped here.
