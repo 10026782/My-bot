@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from airtable_schema import LeadFields
+from airtable_schema import ExperienceStatus, LeadFields
 from core.query_contract import all_of, contains, equals
 from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_read_adapter import AirtableReadError, list_records
@@ -173,6 +173,9 @@ class LeadPayload:
     tenant_id: str = "boss_hq"
     memory_key: str = ""
     external_id: str = ""
+    # Experience Status — ערך מפורש (חייב להיות אחת מ-ExperienceStatus.ALL) גובר על
+    # ההסקה האוטומטית מהטקסט. "" = ללא ערך מפורש. סיווג וסינון בלבד, לא משפיע על Score.
+    experience_status: str = ""
 
     # ── Campaign attribution — distinct from `source` (technical origin) ──
     # accepted, not yet written — no live Airtable column exists for any of
@@ -305,6 +308,63 @@ def build_memory_key(tenant_id: str, phone: str, name: str) -> str:
     return f"{tenant_id}/dict_{safe_name}@lead"
 
 
+# ══════════════════════════════════════════════════
+# Experience Status — הסקה דטרמיניסטית מטקסט חופשי
+# ══════════════════════════════════════════════════
+# סיווג וסינון בלבד: לא משפיע על Score, לא מופעל על ליד קיים (רק ביצירה) ולכן לעולם
+# לא דורס ערך שהבעלים מילא ידנית. בלי LLM — כללי מילות מפתח בלבד. אין אות ברורה =
+# אין ערך (השדה נשאר ריק; "לא ידוע" נבחר ידנית). המילה "חדש" לבדה אינה אות, כי
+# "ליד חדש" היא תחילית הפקודה עצמה. הכתיב "נסיון"/"ניסיון" נתמך.
+_EXP_WORD = r"ני?סיון"
+_EXP_NONE_RE = re.compile(
+    rf"(?:ללא|בלי)\s+{_EXP_WORD}|אין\s+(?:לו\s+|לה\s+|להם\s+)?{_EXP_WORD}"
+    r"|ללא\s+ותק|(?:חדש|חדשה|חדשים|מתחיל|מתחילה|מתחילים)\s+בתחום"
+)
+# "לשעבר"/"לא עובד כיום" גוברים על "קבלן" ("קבלן לשעבר" = לא עובד כיום)
+_EXP_PAST_STRONG_RE = re.compile(
+    r"לשעבר|הפסיק(?:ה|ו)?\s+לעבוד|לא\s+עובד(?:ת|ים)?\s+(?:כיום|עכשיו|בתחום)"
+)
+_EXP_WORKING_RE = re.compile(
+    r"קבלן|קבלנית|קבלנים|קבלנות|עובד(?:ת|ים)?\s+(?:כיום|עכשיו|בתחום)|פעיל(?:ה|ים)?\s+בתחום"
+)
+_EXP_PAST_WEAK_RE = re.compile(
+    rf"בעל(?:ת|י)?\s+{_EXP_WORD}|עם\s+{_EXP_WORD}|{_EXP_WORD}\s+(?:קודם|רב)"
+)
+
+
+def infer_experience_status(*texts: str) -> str:
+    """מחזיר אחד מ-ExperienceStatus.ALL לפי טקסט הרישום, או "" כשאין אות ברורה.
+
+    סדר עדיפויות (הראשון שמתאים): ללא ניסיון > לשעבר/לא עובד כיום > קבלן/עובד
+    בתחום (= עובד כיום) > בעל ניסיון (= בעל ניסיון — לא עובד כיום). פונקציה טהורה."""
+    text = " ".join(t for t in texts if t)
+    if not text.strip():
+        return ""
+    if _EXP_NONE_RE.search(text):
+        return ExperienceStatus.NO_EXPERIENCE
+    if _EXP_PAST_STRONG_RE.search(text):
+        return ExperienceStatus.EX_EXPERIENCED
+    if _EXP_WORKING_RE.search(text):
+        return ExperienceStatus.WORKING_NOW
+    if _EXP_PAST_WEAK_RE.search(text):
+        return ExperienceStatus.EX_EXPERIENCED
+    return ""
+
+
+def _resolve_experience_status(payload: "LeadPayload") -> str:
+    """ערך מפורש תקף גובר; אחרת הסקה — רק כש-LEAD_EXPERIENCE_INFERENCE דלוק."""
+    explicit = (payload.experience_status or "").strip()
+    if explicit:
+        if explicit in ExperienceStatus.ALL:
+            return explicit
+        logger.warning("[LeadService] experience_status לא תקף נדחה: %r", explicit)
+        return ""
+    from feature_flags import is_enabled
+    if not is_enabled("LEAD_EXPERIENCE_INFERENCE"):
+        return ""
+    return infer_experience_status(payload.summary, payload.name)
+
+
 def build_lead_fields(payload: LeadPayload, owner_record_id: Optional[str], memory_key: str) -> dict:
     """Pure field-construction — no I/O, no invented fields. campaign/adset/
     ad and the whole referral group are deliberately NOT written: no column
@@ -346,6 +406,9 @@ def build_lead_fields(payload: LeadPayload, owner_record_id: Optional[str], memo
         fields[LeadFields.EXTERNAL_ID] = payload.external_id
     if owner_record_id:
         fields[LeadFields.OWNER] = [owner_record_id]
+    experience = _resolve_experience_status(payload)
+    if experience:
+        fields[LeadFields.EXPERIENCE_STATUS] = experience
     return fields
 
 
