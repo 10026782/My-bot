@@ -7,7 +7,7 @@ import {
   patchLead,
   setLeadOutcome,
 } from "../api";
-import { LEAD_OPEN_STATUSES, leadStatusLabel } from "../leadLabels";
+import { LEAD_OPEN_STATUSES, leadStatusLabel } from "../types";
 import type { LeadDetail as TLeadDetail, LeadSummary } from "../types";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";

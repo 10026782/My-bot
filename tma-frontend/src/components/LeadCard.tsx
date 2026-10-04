@@ -1,4 +1,4 @@
-import { leadStatusLabel } from "../leadLabels";
+import { leadStatusLabel } from "../types";
 import type { LeadSummary } from "../types";
 import { StatusBadge } from "./ui/StatusBadge";
 import { Surface } from "./ui/Surface";

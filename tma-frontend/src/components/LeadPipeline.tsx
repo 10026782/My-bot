@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchLeads } from "../api";
-import { LEAD_STATUS_LABELS } from "../leadLabels";
+import { LEAD_STATUS_LABELS } from "../types";
 import type { LeadsResponse, ProjectCard, LeadSummary } from "../types";
 import { LeadCard } from "./LeadCard";
 import { LeadDetail } from "./LeadDetail";
