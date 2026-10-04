@@ -21,6 +21,7 @@ from core.financial_control import calc, service
 
 ACTIONS = ("log_progress", "set_target", "create_goal", "rename_goal", "follow_up", "note")
 SOURCE = "fcc_free_text"
+FCC_TASK_TOPIC = "כספים"   # existing Tasks.Topic choice; with the [FCC:<goal>] tag marks FCC-origin tasks
 
 
 def _norm(text: str) -> str:
@@ -184,5 +185,5 @@ def _followup(identity, actor, goal_id: str, title: str, raw_text: str) -> list[
     return [{"op": "post", "table": Tables.TASKS,
              "fields": {TaskFields.NAME: title, TaskFields.STATUS: "ממתין",
                         TaskFields.DESCRIPTION: f"{tag} {raw_text[:300]}".strip(),
-                        TaskFields.OWNER: [actor.profile_id]},
+                        TaskFields.OWNER: [actor.profile_id], TaskFields.TOPIC: FCC_TASK_TOPIC},
              "audit_action": "fcc_followup", "audit_details": goal_id}]

@@ -127,6 +127,7 @@ def test_6_followup_task_inherits_owner():
                       ELIYAHU, TODAY)
     task = [p for p in out["proposals"] if p["table"] == Tables.TASKS][0]
     assert task["fields"][TaskFields.OWNER] == [ELI] and "[FCC:recGE]" in task["fields"][TaskFields.DESCRIPTION]
+    assert task["fields"][TaskFields.TOPIC] == "כספים"          # identifiable as FCC-origin, no new schema
 
 
 # 7/8 — dynamic target
@@ -222,3 +223,77 @@ def test_recurring_not_blended():
     evs = [calc.Event("one_time", 100, date(2026, 10, 3)), calc.Event("monthly_recurring", 750, date(2026, 10, 3))]
     assert calc.compute_goal(g, evs, TODAY, GF)["actual"] == 100
     assert calc.monthly_cash_improvement(evs, TODAY) == 750
+
+
+# live FCC table ids (created 04/10/2026): the raw id never bypasses the owner policy
+def test_raw_live_table_ids_denied_for_every_role():
+    for raw in ("tblQPUteMKe13tvlr", "tblqNvcyK34zVjcXP"):
+        assert policy.is_raw_table_id(raw)
+        for who in (ELIYAHU, AVI_I):
+            with pytest.raises(TenantScopeViolation):
+                enforce_tenant_scope("airtable_get", who, {"table": raw})
+    for name in (Tables.FIN_GOALS, "financial goals", " Financial Progress Events "):
+        assert policy.is_owner_scoped(name)
+
+
+def test_schema_cache_matches_code_constants():
+    import json
+    from airtable_schema import FinEventFields, FinGoalFields
+    cache = json.load(open("schema_cache.json"))["tables"]
+    for table, cls_ in ((Tables.FIN_GOALS, FinGoalFields), (Tables.FIN_EVENTS, FinEventFields)):
+        names = {v for k, v in vars(cls_).items() if not k.startswith("_")}
+        assert names <= set(cache[table])
+
+
+# ═══ HTTP layer (/api/fcc/*): flag gate, isolation, canonical write path ═══
+from flask import Flask
+import tma_api
+from core.financial_control import classifier
+
+H = {"X-Telegram-Init-Data": "valid"}
+
+
+def http(monkeypatch, who, flag=True):
+    app = Flask(__name__)
+    app.register_blueprint(tma_api.tma_api)
+    monkeypatch.setattr(tma_api, "_validate_initdata", lambda _: {"id": who.user_id})
+    monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: who)
+    monkeypatch.setattr(tma_api, "_fcc_enabled", lambda: flag)
+    return app.test_client()
+
+
+def test_http_flag_off_is_404(monkeypatch):
+    c = http(monkeypatch, ELIYAHU, flag=False)
+    assert c.get("/api/fcc/overview", headers=H).status_code == 404
+    assert c.post("/api/fcc/write", json={"text": "x"}, headers=H).status_code == 404
+
+
+def test_http_overview_isolated_per_owner(monkeypatch):
+    body = http(monkeypatch, ELIYAHU).get("/api/fcc/overview", headers=H).get_json()
+    assert [g["goal_id"] for g in body["goals"]] == ["recGE"] and "99000" not in str(body)
+    body = http(monkeypatch, AVI_I).get("/api/fcc/overview", headers=H).get_json()
+    assert [g["goal_id"] for g in body["goals"]] == ["recGA"] and "2000" not in str(body["goals"])
+
+
+def test_http_unresolved_identity_403(monkeypatch):
+    assert http(monkeypatch, ident("nobody", Role.MANAGER)).get("/api/fcc/overview", headers=H).status_code == 403
+
+
+def test_http_write_preview_then_confirm_uses_canonical_path(monkeypatch):
+    calls = []
+    monkeypatch.setattr(classifier, "classify", lambda text, titles: {"action": "log_progress", "goal_hint": "הכנסה נוספת", "amount": 500})
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute", lambda action, payload, identity, label: (calls.append((action, payload)) or ("a1", {"ok": True}, 200)))
+    c = http(monkeypatch, ELIYAHU)
+    prev = c.post("/api/fcc/write", json={"text": "הכנסה 500"}, headers=H).get_json()
+    assert prev["status"] == "preview" and calls == []                      # preview never writes
+    done = c.post("/api/fcc/write", json={"text": "הכנסה 500", "confirm": True}, headers=H).get_json()
+    assert done["status"] == "executed" and [a for a, _ in calls] == ["tma_fcc_write"]
+    assert calls[0][1]["table"] == Tables.FIN_EVENTS
+
+
+def test_http_ambiguous_does_not_write(monkeypatch):
+    DB[Tables.FIN_GOALS] += [goal("recG2", "חיסכון קבוע", ELI), goal("recG3", "קרן חירום", ELI)]
+    monkeypatch.setattr(classifier, "classify", lambda t, titles: {"action": "log_progress", "goal_hint": "", "amount": 5000})
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute", lambda *a, **k: pytest.fail("must not write"))
+    out = http(monkeypatch, ELIYAHU).post("/api/fcc/write", json={"text": "הפקדתי 5000 לחיסכון", "confirm": True}, headers=H).get_json()
+    assert out["status"] == "needs_goal" and len(out["candidates"]) >= 2

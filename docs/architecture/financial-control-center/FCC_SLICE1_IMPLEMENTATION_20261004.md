@@ -1,6 +1,6 @@
 # FCC Slice 1 — Goal → Progress → Dynamic calc → Follow-up → Free-text writer (backend) — 04/10/2026
 
-סטטוס: 🟡 CODE DONE, NOT VERIFIED LIVE. Flag `FEATURE_FINANCIAL_CONTROL_CENTER` כבוי כברירת מחדל. **לא נוצרה שום טבלה/שדה חי ב-Airtable.**
+סטטוס: 🟡 CODE DONE, NOT VERIFIED LIVE. Flag `FEATURE_FINANCIAL_CONTROL_CENTER` כבוי כברירת מחדל. הטבלאות נוצרו חי ב-04/10/2026 באישור בעלים (ראו סעיף "סכימה חיה").
 
 ## מה ממומש
 | רכיב | קובץ |
@@ -21,10 +21,14 @@
 - **one_time מול monthly_recurring**: `Actual` סוכם רק מ-`one_time`; `monthly_recurring` נכנס רק ל-Monthly Cash Improvement.
 - **שבוע** = ראשון–שבת. `calc_method`: `period_sum` | `cumulative` | `recurring_level` (נתון, לא enum שמשנה התנהגות עסקית אחרת).
 
-## סכימה חיה נדרשת (ממתינה לאישור בעלים — לא בוצע)
-`Financial Goals`: Title, Category, Status, Priority, Display Order, Period Type, Start Date, End Date, Target Amount, Min/Max Amount, Calc Method, Notes, **Financial Owner** (link→Profile).
-`Financial Progress Events`: Goal (link), Amount, Kind (one_time|monthly_recurring|target_change|note), Occurred At, Recorded By, Source, Source Ref, Raw Text, Note, Idempotency Key, Superseded By, **Financial Owner** (link→Profile).
-עד היצירה + רענון `schema_cache.json`, `airtable_gateway` ידחה כתיבה לטבלאות (שדות לא ידועים) — ולכן הפיצ'ר כבוי.
+## סכימה חיה — נוצרה 04/10/2026 (Airtable MCP create_table/create_field, base `app4bcgoX7t0HUVnm`)
+| טבלה | table id |
+|------|----------|
+| `Financial Goals` | `tblQPUteMKe13tvlr` |
+| `Financial Progress Events` | `tblqNvcyK34zVjcXP` |
+
+שדות — זהים לקבועי `FinGoalFields`/`FinEventFields`, ללא mismatch. Goals: Title(primary), Financial Owner(link→Profile), Category, Status(active|paused|done), Priority, Display Order, Period Type(monthly|weekly|custom), Start Date, End Date, Target Amount, Min/Max Amount, Calc Method(period_sum|cumulative|recurring_level), Notes, Created At, Updated At. Events: Idempotency Key(primary), Financial Owner(link→Profile), Goal(link→Goals), Kind(one_time|monthly_recurring|target_change|note), Amount, Occurred At, Recorded By, Source, Source Ref, Raw Text, Note, Superseded By, Created At.
+הערות: (1) "Owner" שהוזכר בהחלטה = `Financial Owner` במסמך ובקוד (שם קנוני). (2) "Event Type"+"Recurrence" = שדה `Kind` אחד (כולל `target_change`/`note`). (3) Airtable יצר אוטומטית שדות inverse: שניים ב-`Profile` ואחד ב-`Financial Goals`. (4) `schema_cache.json` עודכן ידנית (אין AIRTABLE_API_KEY בסנדבוקס; תקדים: reconcile 04/09 ו-14/09). (5) Tasks: משימת המשך מסומנת `Topic="כספים"` (ערך קיים) + תגית `[FCC:<goal_id>]` בתיאור; ללא שינוי סכימת Tasks.
 
 ## לא ממומש ב-slice הזה
 מסך TMA (React), כלי agent לשיחה חופשית בטלגרם (רק TMA endpoint), Tasks חוזרות seed (reviews), קרן חירום/פנסיה כתצוגה ייעודית, חישוב Months-coverage, פריסה, אימות חי.

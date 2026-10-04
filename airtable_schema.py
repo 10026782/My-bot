@@ -71,8 +71,8 @@ class Tables:
     BOSS_BATTLES    = "Boss_Battles"
     # System / Monitoring
     AI_USAGE_DAILY  = "AI_Usage_Daily"   # שורה יומית לכל source_type — 1 רשומה/יום
-    FIN_GOALS       = "Financial Goals"            # FCC — PROPOSED, not yet in live base (owner approval pending)
-    FIN_EVENTS      = "Financial Progress Events"  # FCC — PROPOSED, append-only
+    FIN_GOALS       = "Financial Goals"            # FCC — live: tblQPUteMKe13tvlr (created 04/10/2026)
+    FIN_EVENTS      = "Financial Progress Events"  # FCC — live: tblqNvcyK34zVjcXP (created 04/10/2026), append-only
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
@@ -861,11 +861,12 @@ class TaskFields:
     DOMAIN          = "Domain"          # domain copied from lead on create-from-lead
     OWNER           = "Owner"           # multipleRecordLinks -> Tables.PROFILE (NOT plain text; verified via Airtable MCP 2026-08-19). Read/write as a list of Profile record IDs -- see tma_api._resolve_profile_record_id.
     LEAD_LINK       = "Leads"           # linked record to Leads table (Airtable linked field name)
+    TOPIC           = "Topic"           # singleSelect קיים; FCC משתמש ב-"כספים" לזיהוי משימות המשך
     RECURRENCE      = "Cadence"         # singleSelect קיים (fldcQk3DisdkzhPMX) — ראה TaskRecurrence. ריק = חד-פעמי
 
 
 class FinGoalFields:
-    """Financial Goals (FCC) — PROPOSED schema, not created live. Owner-scoped via FINANCIAL_OWNER."""
+    """Financial Goals (FCC) — LIVE (tblQPUteMKe13tvlr). Owner-scoped via FINANCIAL_OWNER."""
     TITLE           = "Title"
     CATEGORY        = "Category"
     STATUS          = "Status"            # active|paused|done
@@ -883,7 +884,7 @@ class FinGoalFields:
 
 
 class FinEventFields:
-    """Financial Progress Events (FCC) — PROPOSED, append-only."""
+    """Financial Progress Events (FCC) — LIVE (tblqNvcyK34zVjcXP), append-only."""
     GOAL            = "Goal"              # link -> Financial Goals
     AMOUNT          = "Amount"
     KIND            = "Kind"              # one_time|monthly_recurring|target_change|note
