@@ -44,13 +44,13 @@ Method: Airtable MCP `update_records_for_table`, single field `Assets.Owner` (`f
 | `rec4yxZIaQztHLZc3` | קרית ספר (קבוצת רכישה) | Domain=Personal, no contrary signal | ✅ |
 | `recjyWS7QcMt5yILr` | קרקע יבניאל | Domain=Personal, no contrary signal | ✅ |
 | `recxI3JGYnVK4N76Z` | בית שמש | Domain=Personal, no contrary signal | ✅ |
-| `recXqelINKDD6OCEq` | נוף הגליל גדול | Personal, but Next Step Owner=אהרן, Ownership 50% | ⛔ HELD — not provably Eliyahu's |
-| `recwTAkCyOlMiKl2U` | נוף הגליל קטן | same | ⛔ HELD |
-| `recDO0mDpxbmqORpq`, `recoc7q79oMpIdkya` | (blank rows) | no name/domain/data | ⛔ HELD |
+| `recXqelINKDD6OCEq` | נוף הגליל גדול | Owner statement 04/10/2026: all assets are Eliyahu's; Ahron is a 50% partner (Ownership % = 50, Next Step Owner=אהרן) | ✅ Owner=Eliyahu (second write, same day) |
+| `recwTAkCyOlMiKl2U` | נוף הגליל קטן | same | ✅ |
+| `recDO0mDpxbmqORpq`, `recoc7q79oMpIdkya` | (blank rows) | no name/domain/data — nothing to own | ⛔ HELD (candidates for deletion) |
 
-Counts: **updated 5, failed 0, held 4**. Consequence: until the owner decides the 4 held rows, `/api/assets` returns 5 assets for Eliyahu (the two נוף הגליל rows are hidden from everyone — fail-closed). Decision needed: assign them (Eliyahu / Ahron / co-owner model) or delete the blank rows.
+Counts: **updated 7 (5 + 2), failed 0, held 2 blank rows**. `/api/assets` returns 7 assets for Eliyahu. Co-ownership (owner statement): נוף הגליל ×2 — Ahron 50%; בית שמש and קרית ספר — Orri is a partner. `Owner` is the *visibility key* (record owner-of-record); `Ownership %` carries Eliyahu's share and `My Equity` is his share. Partners are **not** added to `Owner` (that would grant them visibility of Eliyahu's balance-sheet row; neither has an identity entry today) — a co-owner visibility model is an explicit future owner decision.
 
-Simulated route check on the live-shaped post-backfill data (no network): Eliyahu → 5 assets, total value = sum of the 5; Avi (partner, recruitment) → 403; Avi/Ahron with `personal` → 0 assets, total 0.
+Simulated route check on the live-shaped data (no network), run at the 5-row stage: Eliyahu → 5 assets (now expected 7); Avi (partner, recruitment) → 403; Avi/Ahron with `personal` → 0 assets, total 0.
 
 `Tasks`: 0/23 rows have `Owner` → all ownerless business tasks, served to Eliyahu as before (sole owner).
 
