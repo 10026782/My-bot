@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccWritePlan } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -410,4 +410,27 @@ export async function updateVenture(
     body: JSON.stringify(fields),
   });
   if (!r.ok) await throwApiError(r, `Venture update failed (${r.status})`);
+}
+
+export async function fetchFccOverview(): Promise<FccOverview> {
+  const r = await fetch(`${BASE}/api/fcc/overview`, { headers: authHeaders() });
+  if (!r.ok) {
+    const error = new Error(`API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
+  return r.json() as Promise<FccOverview>;
+}
+
+/** Single writer: the server classifies, resolves owner-scoped goals and previews.
+ *  `confirm: true` executes through the canonical approval path. No client-side parsing. */
+export async function postFccWrite(body: { text: string; goal_id?: string; confirm?: boolean }): Promise<FccWritePlan> {
+  const r = await fetch(`${BASE}/api/fcc/write`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  const data = (await r.json().catch(() => ({}))) as FccWritePlan & { error?: string };
+  if (!r.ok && !data.status) throw new Error(data.error || `API ${r.status}`);
+  return data;
 }
