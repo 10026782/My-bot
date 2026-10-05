@@ -258,7 +258,7 @@ def http(monkeypatch, who, flag=True):
     app.register_blueprint(tma_api.tma_api)
     monkeypatch.setattr(tma_api, "_validate_initdata", lambda _: {"id": who.user_id})
     monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: who)
-    monkeypatch.setattr(tma_api, "_fcc_enabled", lambda: flag)
+    monkeypatch.setattr(tma_api, "_fcc_enabled", lambda identity=None: flag)
     return app.test_client()
 
 
@@ -321,3 +321,29 @@ def test_fcc_tasks_only_owner_open_topic_and_tag():
                         mk("othertopic", ELI, topic="שיווק"), mk("notag", ELI, desc="plain")]
     assert [t["title"] for t in service.overview(ELIYAHU, TODAY)["tasks"]] == ["mine"]
     assert [t["title"] for t in service.overview(AVI_I, TODAY)["tasks"]] == ["avi"]
+
+
+# ═══ Canary: flag + FCC_CANARY_USER_IDS allowlist (fail closed) ═══
+def test_canary_allowlist_fail_closed(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.delenv("FCC_CANARY_USER_IDS", raising=False)
+    assert tma_api._fcc_enabled(ELIYAHU) is False                 # flag on, no allowlist -> nobody
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", " Eliyahu ")
+    assert tma_api._fcc_enabled(ELIYAHU) is True
+    assert tma_api._fcc_enabled(AVI_I) is False                   # partner stays out
+    assert tma_api._fcc_enabled(None) is False
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda *a, **k: False)
+    assert tma_api._fcc_enabled(ELIYAHU) is False                 # flag off wins
+
+
+def test_canary_http_other_user_gets_404(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
+    app = Flask(__name__)
+    app.register_blueprint(tma_api.tma_api)
+    monkeypatch.setattr(tma_api, "_validate_initdata", lambda _: {"id": "x"})
+    for who, code in ((ELIYAHU, 200), (AVI_I, 404)):
+        monkeypatch.setattr(tma_api, "resolve_identity", lambda *_, w=who: w)
+        assert app.test_client().get("/api/fcc/overview", headers=H).status_code == code
