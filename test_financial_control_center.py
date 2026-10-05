@@ -347,3 +347,39 @@ def test_canary_http_other_user_gets_404(monkeypatch):
     for who, code in ((ELIYAHU, 200), (AVI_I, 404)):
         monkeypatch.setattr(tma_api, "resolve_identity", lambda *_, w=who: w)
         assert app.test_client().get("/api/fcc/overview", headers=H).status_code == code
+
+
+# ═══ Writer extension: goal attributes (category / period / calc method / dates) ═══
+def test_create_goal_with_attributes():
+    out = writer.plan("קרן חירום 60000 עד סוף השנה", {
+        "action": "create_goal", "title": "קרן חירום", "target": 60000, "category": "emergency_fund",
+        "calc_method": "cumulative", "period_type": "custom", "end_date": "2026-12-31"}, ELIYAHU, TODAY)
+    f = out["proposals"][0]["fields"]
+    assert out["status"] == "preview" and out["proposals"][0]["table"] == Tables.FIN_GOALS
+    assert f[GF.CATEGORY] == "emergency_fund" and f[GF.CALC_METHOD] == "cumulative"
+    assert f[GF.PERIOD_TYPE] == "custom" and f[GF.END_DATE] == "2026-12-31" and f[GF.TARGET_AMOUNT] == 60000
+    assert GF.FINANCIAL_OWNER not in f           # owner is stamped server-side at execution, never by the writer
+    assert "emergency_fund" in out["summary"]
+
+
+def test_invalid_goal_attributes_are_rejected_not_guessed():
+    for bad in ({"calc_method": "magic"}, {"period_type": "yearly"}, {"end_date": "בקרוב"}):
+        out = writer.plan("x", {"action": "create_goal", "title": "t", **bad}, ELIYAHU, TODAY)
+        assert out["status"] == "clarify" and "proposals" not in out
+
+
+def test_create_goal_duplicate_title_not_created_twice():
+    out = writer.plan("x", {"action": "create_goal", "title": " הכנסה  נוספת "}, ELIYAHU, TODAY)
+    assert out["status"] == "duplicate"
+
+
+def test_update_goal_patches_only_attributes_of_own_goal():
+    out = writer.plan("הגדר כמצטבר", {"action": "update_goal", "goal_hint": "הכנסה נוספת",
+                                       "category": "income", "calc_method": "cumulative"}, ELIYAHU, TODAY)
+    p = out["proposals"][0]
+    assert p["op"] == "patch" and p["record_id"] == "recGE"
+    assert set(p["fields"]) == {GF.CATEGORY, GF.CALC_METHOD}
+    # another owner's goal can never be targeted
+    assert writer.plan("x", {"action": "update_goal", "category": "income"}, ELIYAHU, TODAY, goal_id="recGA")["status"] == "denied"
+    # nothing to update -> clarify
+    assert writer.plan("x", {"action": "update_goal", "goal_hint": "הכנסה נוספת"}, ELIYAHU, TODAY)["status"] == "clarify"

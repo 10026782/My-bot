@@ -19,7 +19,9 @@ from airtable_schema import FinEventFields, FinGoalFields, TaskFields, Tables
 from core import data_access_policy as policy
 from core.financial_control import calc, service
 
-ACTIONS = ("log_progress", "set_target", "create_goal", "rename_goal", "follow_up", "note")
+ACTIONS = ("log_progress", "set_target", "create_goal", "update_goal", "rename_goal", "follow_up", "note")
+PERIOD_TYPES = ("monthly", "weekly", "custom")
+CALC_METHODS = (calc.PERIOD_SUM, calc.CUMULATIVE, calc.RECURRING_LEVEL)
 SOURCE = "fcc_free_text"
 FCC_TASK_TOPIC = "כספים"   # existing Tasks.Topic choice; with the [FCC:<goal>] tag marks FCC-origin tasks
 
@@ -49,10 +51,40 @@ def validate_intent(intent: object) -> dict | None:
         if kind not in (calc.ONE_TIME, calc.MONTHLY_RECURRING):
             return None
         out["kind"] = kind
-    for key in ("title", "new_title", "task_title", "note"):
+    for key in ("title", "new_title", "task_title", "note", "category"):
         if intent.get(key):
             out[key] = str(intent[key]).strip()
+    for key, allowed in (("period_type", PERIOD_TYPES), ("calc_method", CALC_METHODS)):
+        val = intent.get(key)
+        if val is not None:
+            if val not in allowed:
+                return None
+            out[key] = val
+    for key in ("start_date", "end_date"):
+        val = intent.get(key)
+        if val is not None:
+            parsed = calc._d(val) if isinstance(val, str) else None
+            if parsed is None:
+                return None
+            out[key] = parsed.isoformat()
     return out
+
+
+_GOAL_ATTRS = (
+    ("category", FinGoalFields.CATEGORY, "קטגוריה"),
+    ("period_type", FinGoalFields.PERIOD_TYPE, "תקופה"),
+    ("calc_method", FinGoalFields.CALC_METHOD, "שיטת חישוב"),
+    ("start_date", FinGoalFields.START_DATE, "התחלה"),
+    ("end_date", FinGoalFields.END_DATE, "סיום"),
+)
+
+
+def _goal_attr_fields(clean: dict) -> dict:
+    return {field: clean[key] for key, field, _ in _GOAL_ATTRS if key in clean}
+
+
+def _goal_attr_summary(clean: dict) -> str:
+    return ", ".join(f"{label}: {clean[key]}" for key, _, label in _GOAL_ATTRS if key in clean)
 
 
 def resolve_goal(hint: str, goals: list[dict]) -> tuple[str, list[dict]]:
@@ -118,7 +150,11 @@ def plan(raw_text: str, intent: object, identity, today: date | None = None, goa
         fields = {FinGoalFields.TITLE: title, FinGoalFields.STATUS: "active"}
         if "target" in clean:
             fields[FinGoalFields.TARGET_AMOUNT] = clean["target"]
-        return {"status": "preview", "summary": f"יעד חדש: {title}",
+        fields.update(_goal_attr_fields(clean))
+        if any(_norm(g["fields"].get(FinGoalFields.TITLE, "")) == _norm(title) for g in service.my_goals(identity)):
+            return {"status": "duplicate", "message": "כבר קיים יעד בשם הזה."}
+        extra = _goal_attr_summary(clean)
+        return {"status": "preview", "summary": f"יעד חדש: {title}" + (f" ({extra})" if extra else ""),
                 "proposals": [{"op": "post", "table": Tables.FIN_GOALS, "fields": fields,
                                "audit_action": "fcc_goal_create", "audit_details": title[:80]}],
                 "idempotency_key": idempotency_key(actor.profile_id, action, "", clean.get("target"), day, raw_text)}
@@ -139,6 +175,16 @@ def plan(raw_text: str, intent: object, identity, today: date | None = None, goa
     goal = matches[0]
     gid = goal["id"]
     title = goal["fields"].get(FinGoalFields.TITLE, "")
+
+    if action == "update_goal":
+        attrs = _goal_attr_fields(clean)
+        if not attrs:
+            return {"status": "clarify", "message": "מה לעדכן ביעד (קטגוריה, תקופה, שיטת חישוב, תאריכים)?"}
+        proposals.append({"op": "patch", "table": Tables.FIN_GOALS, "record_id": gid, "fields": attrs,
+                          "audit_action": "fcc_goal_update", "audit_details": gid})
+        return {"status": "preview", "summary": f"עדכון יעד {title}: {_goal_attr_summary(clean)}",
+                "goal_id": gid, "proposals": proposals,
+                "idempotency_key": idempotency_key(actor.profile_id, action, gid, None, day, raw_text)}
 
     if action == "rename_goal":
         if not clean.get("new_title"):

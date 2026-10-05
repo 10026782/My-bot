@@ -230,7 +230,7 @@ export function FinancialControlCenter({ onBack }: Props) {
       <section className="fcc-section" aria-labelledby="fcc-goals-heading">
         <h2 id="fcc-goals-heading" className="fcc-section__heading">יעדים</h2>
         {data.goals.length === 0 ? (
-          <ScreenState state="empty" title="אין יעדים פעילים" message="כתבו בעדכון המהיר ״תוסיף יעד חדש …״ כדי להתחיל." />
+          <ScreenState state="empty" title="אין יעדים פעילים" message="כתבו בעדכון המהיר, למשל: ״תוסיף יעד קרן חירום 60000 מצטבר עד סוף השנה״." />
         ) : (
           <div className="fcc-list">{data.goals.map((g) => <GoalCard key={g.goal_id} goal={g} />)}</div>
         )}
