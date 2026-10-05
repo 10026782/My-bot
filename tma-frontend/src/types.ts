@@ -503,13 +503,15 @@ export interface FccOverview {
   monthly_cash_improvement: number;
   recent_events: { goal_ids: string[]; Amount: number | null; Kind: string | null; "Occurred At": string | null; Note: string | null }[];
   as_of: string;
+  draft: FccTurn | null;
 }
 
-export interface FccWritePlan {
-  status: "preview" | "needs_goal" | "duplicate" | "clarify" | "denied" | "executed" | "partial_failure";
-  summary?: string;
-  message?: string;
+/** One turn of the server-side FCC conversation (draft/completion). The client only renders it. */
+export interface FccTurn {
+  state: "ask" | "review" | "confirmed" | "executed" | "cancelled" | "needs_goal" | "duplicate" | "clarify" | "denied" | "info" | "partial_failure";
+  message: string;
+  entity?: string | null;
+  awaiting?: string | null;
+  fields?: Record<string, string>;
   candidates?: { goal_id: string; title: string | null }[];
-  proposals?: unknown[];
-  results?: { table: string; status: number }[];
 }

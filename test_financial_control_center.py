@@ -113,23 +113,6 @@ def test_3_progress_on_foreign_goal_denied():
     assert ok[EF.FINANCIAL_OWNER] == [ELI]
 
 
-# 4 — free text / search cannot resolve B's goal
-def test_4_free_text_never_resolves_other_owner_goal():
-    out = writer.plan("הכנסה של אבי 100", cls(goal_hint="הכנסה של אבי", amount=100), ELIYAHU, TODAY)
-    assert out["status"] == "needs_goal" and all(c["goal_id"] != "recGA" for c in out["candidates"])
-    forced = writer.plan("x", cls(amount=1), ELIYAHU, TODAY, goal_id="recGA")
-    assert forced["status"] == "denied"
-
-
-# 6 — task from goal inherits owner
-def test_6_followup_task_inherits_owner():
-    out = writer.plan("דיברתי עם הבנק", {"action": "follow_up", "goal_hint": "הכנסה נוספת", "task_title": "להשיג יתרות"},
-                      ELIYAHU, TODAY)
-    task = [p for p in out["proposals"] if p["table"] == Tables.TASKS][0]
-    assert task["fields"][TaskFields.OWNER] == [ELI] and "[FCC:recGE]" in task["fields"][TaskFields.DESCRIPTION]
-    assert task["fields"][TaskFields.TOPIC] == "כספים"          # identifiable as FCC-origin, no new schema
-
-
 # 7/8 — dynamic target
 def test_7_8_dynamic_target_under_and_over_performance():
     g = goal("g", "t", ELI, 12000)
@@ -151,43 +134,6 @@ def test_9_target_change_keeps_progress():
     assert calc.compute_goal(g, evs, date(2026, 10, 4), GF)["target"] == 12000   # history intact
 
 
-# 10 — rename patches title only; events keep the goal id
-def test_10_rename_keeps_links():
-    out = writer.plan("שנה שם", {"action": "rename_goal", "goal_hint": "הכנסה נוספת", "new_title": "הכנסה שוטפת"},
-                      ELIYAHU, TODAY)
-    p = out["proposals"][0]
-    assert p["op"] == "patch" and p["record_id"] == "recGE" and list(p["fields"]) == [GF.TITLE]
-
-
-# 11 — idempotency
-def test_11_duplicate_free_text_not_written_twice():
-    first = writer.plan("העברתי 5000", cls(amount=5000), ELIYAHU, TODAY)
-    assert first["status"] == "preview"
-    key = first["proposals"][0]["fields"][EF.IDEMPOTENCY_KEY]
-    DB[Tables.FIN_EVENTS].append(event("recNew", "recGE", ELI, 5000, key=key))
-    assert writer.plan("העברתי 5000", cls(amount=5000), ELIYAHU, TODAY)["status"] == "duplicate"
-
-
-# 12 — ambiguity not resolved by invention
-def test_12_ambiguity_returns_candidates():
-    DB[Tables.FIN_GOALS].append(goal("recG2", "חיסכון קבוע", ELI))
-    DB[Tables.FIN_GOALS].append(goal("recG3", "חיסכון לילדים", ELI))
-    out = writer.plan("הפקדתי 5000", cls(goal_hint="חיסכון", amount=5000), ELIYAHU, TODAY)
-    assert out["status"] == "needs_goal" and {c["goal_id"] for c in out["candidates"]} == {"recG2", "recG3"}
-    assert "proposals" not in out
-
-
-# 13 — missing amount -> follow-up task, no invented number; open duplicate deduped
-def test_13_missing_data_becomes_followup_and_dedupes():
-    out = writer.plan("שמתי כסף", cls(), ELIYAHU, TODAY)
-    assert out["status"] == "preview" and out["proposals"][0]["table"] == Tables.TASKS
-    title = out["proposals"][0]["fields"][TaskFields.NAME]
-    DB[Tables.TASKS].append({"id": "recT", "fields": {
-        TaskFields.NAME: title, TaskFields.STATUS: "ממתין", TaskFields.OWNER: [ELI],
-        TaskFields.DESCRIPTION: "[FCC:recGE] x"}})
-    assert writer.plan("שמתי כסף", cls(), ELIYAHU, TODAY)["proposals"] == []
-
-
 # 14/15 — writer is plan-only, no direct write calls in the feature package
 def test_14_15_no_direct_writes_in_feature_code():
     import pathlib
@@ -195,15 +141,6 @@ def test_14_15_no_direct_writes_in_feature_code():
     for forbidden in ("airtable_create", "airtable_patch", "requests.", "airtable_tools", "import crm", "urlopen"):
         assert forbidden not in src
     assert "Financial Goals" in approval_actions._TMA_WRITE_ALLOWED_TABLES
-
-
-# 16 — unresolved identity fails closed
-def test_16_unauthorized_identity_fails_closed():
-    stranger = ident("nobody", Role.MANAGER)
-    with pytest.raises(policy.PersonalDataAccessDenied):
-        service.overview(stranger, TODAY)
-    assert writer.plan("x", cls(amount=1), stranger, TODAY)["status"] == "denied"
-    assert writer.plan("x", cls(amount=1), None, TODAY)["status"] == "denied"
 
 
 # 17 — generic agent tools cannot bypass (raw id, other owner's table)
@@ -279,26 +216,6 @@ def test_http_unresolved_identity_403(monkeypatch):
     assert http(monkeypatch, ident("nobody", Role.MANAGER)).get("/api/fcc/overview", headers=H).status_code == 403
 
 
-def test_http_write_preview_then_confirm_uses_canonical_path(monkeypatch):
-    calls = []
-    monkeypatch.setattr(classifier, "classify", lambda text, titles: {"action": "log_progress", "goal_hint": "הכנסה נוספת", "amount": 500})
-    monkeypatch.setattr(tma_api, "_queue_or_owner_execute", lambda action, payload, identity, label: (calls.append((action, payload)) or ("a1", {"ok": True}, 200)))
-    c = http(monkeypatch, ELIYAHU)
-    prev = c.post("/api/fcc/write", json={"text": "הכנסה 500"}, headers=H).get_json()
-    assert prev["status"] == "preview" and calls == []                      # preview never writes
-    done = c.post("/api/fcc/write", json={"text": "הכנסה 500", "confirm": True}, headers=H).get_json()
-    assert done["status"] == "executed" and [a for a, _ in calls] == ["tma_fcc_write"]
-    assert calls[0][1]["table"] == Tables.FIN_EVENTS
-
-
-def test_http_ambiguous_does_not_write(monkeypatch):
-    DB[Tables.FIN_GOALS] += [goal("recG2", "חיסכון קבוע", ELI), goal("recG3", "קרן חירום", ELI)]
-    monkeypatch.setattr(classifier, "classify", lambda t, titles: {"action": "log_progress", "goal_hint": "", "amount": 5000})
-    monkeypatch.setattr(tma_api, "_queue_or_owner_execute", lambda *a, **k: pytest.fail("must not write"))
-    out = http(monkeypatch, ELIYAHU).post("/api/fcc/write", json={"text": "הפקדתי 5000 לחיסכון", "confirm": True}, headers=H).get_json()
-    assert out["status"] == "needs_goal" and len(out["candidates"]) >= 2
-
-
 # ═══ Slice 2: header summary + FCC tasks (owner-only) ═══
 def test_summary_by_category_and_owner_isolation():
     DB[Tables.FIN_GOALS] = [
@@ -349,37 +266,363 @@ def test_canary_http_other_user_gets_404(monkeypatch):
         assert app.test_client().get("/api/fcc/overview", headers=H).status_code == code
 
 
-# ═══ Writer extension: goal attributes (category / period / calc method / dates) ═══
-def test_create_goal_with_attributes():
-    out = writer.plan("קרן חירום 60000 עד סוף השנה", {
-        "action": "create_goal", "title": "קרן חירום", "target": 60000, "category": "emergency_fund",
-        "calc_method": "cumulative", "period_type": "custom", "end_date": "2026-12-31"}, ELIYAHU, TODAY)
-    f = out["proposals"][0]["fields"]
-    assert out["status"] == "preview" and out["proposals"][0]["table"] == Tables.FIN_GOALS
-    assert f[GF.CATEGORY] == "emergency_fund" and f[GF.CALC_METHOD] == "cumulative"
-    assert f[GF.PERIOD_TYPE] == "custom" and f[GF.END_DATE] == "2026-12-31" and f[GF.TARGET_AMOUNT] == 60000
-    assert GF.FINANCIAL_OWNER not in f           # owner is stamped server-side at execution, never by the writer
-    assert "emergency_fund" in out["summary"]
+
+# ═══════════════ FCC Diamond completion: one draft primitive for TMA + chat ═══════════════
+import core.business_draft as bd
+import session_store as ss_mod
+from core.draft_flow import DRAFT_TTL_SECONDS
+from core.financial_control import chat as fchat, conversation as conv, draft as fd
+from session_store import PersistentSessionStore
 
 
-def test_invalid_goal_attributes_are_rejected_not_guessed():
-    for bad in ({"calc_method": "magic"}, {"period_type": "yearly"}, {"end_date": "בקרוב"}):
-        out = writer.plan("x", {"action": "create_goal", "title": "t", **bad}, ELIYAHU, TODAY)
-        assert out["status"] == "clarify" and "proposals" not in out
+@pytest.fixture(autouse=True)
+def mem_store(monkeypatch):
+    """Real PersistentSessionStore (CAS/TTL/identity binding), RAM only: no Airtable I/O."""
+    store = PersistentSessionStore()
+    monkeypatch.setattr(PersistentSessionStore, "_sync_to_db", lambda self, sender, session, is_new=False: True)
+    monkeypatch.setattr(PersistentSessionStore, "_load_from_db", lambda self, sender, channel="": None)
+    monkeypatch.setattr(ss_mod, "lead_sessions", store)
+    return store
 
 
-def test_create_goal_duplicate_title_not_created_twice():
-    out = writer.plan("x", {"action": "create_goal", "title": " הכנסה  נוספת "}, ELIYAHU, TODAY)
-    assert out["status"] == "duplicate"
+class Ex:
+    """Scripted extractor (stands in for the LLM). Fails loudly if used while ``locked``."""
+
+    def __init__(self, classify=None, fill=None):
+        self.c, self.f, self.calls, self.locked = classify or {}, fill or {}, [], False
+
+    def classify(self, text, titles, today):
+        assert not self.locked, "classifier called after confirm"
+        self.calls.append(("classify", text))
+        return self.c.get(text)
+
+    def fill(self, text, awaiting, fields, entity, today):
+        assert not self.locked, "extractor called after confirm"
+        self.calls.append(("fill", text))
+        return self.f.get(text, {})
 
 
-def test_update_goal_patches_only_attributes_of_own_goal():
-    out = writer.plan("הגדר כמצטבר", {"action": "update_goal", "goal_hint": "הכנסה נוספת",
-                                       "category": "income", "calc_method": "cumulative"}, ELIYAHU, TODAY)
-    p = out["proposals"][0]
-    assert p["op"] == "patch" and p["record_id"] == "recGE"
-    assert set(p["fields"]) == {GF.CATEGORY, GF.CALC_METHOD}
-    # another owner's goal can never be targeted
-    assert writer.plan("x", {"action": "update_goal", "category": "income"}, ELIYAHU, TODAY, goal_id="recGA")["status"] == "denied"
-    # nothing to update -> clarify
-    assert writer.plan("x", {"action": "update_goal", "goal_hint": "הכנסה נוספת"}, ELIYAHU, TODAY)["status"] == "clarify"
+def run(ex, who, text, **kw):
+    return conv.handle_turn(who, text, extractor=ex, today=TODAY, **kw)
+
+
+EF_GOAL = {"action": "create_goal", "title": "קרן חירום", "category": "emergency_fund"}
+
+
+def eli_goal_writes(result):
+    return result.snapshot["writes"]
+
+
+# 1 + 2 + 5 + 6 + 12 — multi-turn create, persisted between messages, only missing fields asked
+def test_create_goal_multi_turn_persists_state_and_asks_only_missing():
+    ex = Ex(classify={"תוסיף יעד קרן חירום": EF_GOAL}, fill={"סוף השנה": {"end_date": "2026-12-31"}})
+    r1 = run(ex, ELIYAHU, "תוסיף יעד קרן חירום")
+    assert r1.state == "ask" and r1.awaiting == "target_amount" and "סכום היעד" in r1.message
+    r2 = run(ex, ELIYAHU, "60000")                                   # known fields are not asked again
+    assert r2.state == "ask" and r2.awaiting == "end_date" and "₪60,000" in r2.message
+    r3 = run(ex, ELIYAHU, "סוף השנה")
+    assert r3.state == "review"
+    for expected in ("קרן חירום", "₪60,000", "מצטבר", "31/12/2026", "אשר ורשום / ערוך / בטל"):
+        assert expected in r3.message                                # full final business payload
+    assert [c for c in ex.calls if c[0] == "classify"] == [("classify", "תוסיף יעד קרן חירום")]   # state persisted
+    assert not any(c == ("fill", "60000") for c in ex.calls)         # deterministic answers need no LLM
+
+
+# 13 + 14 — confirm freezes, writer does not re-infer, exact canonical fields, no field loss
+def test_confirm_freezes_snapshot_and_writes_exact_reviewed_fields(mem_store):
+    ex = Ex(classify={"x": EF_GOAL}, fill={"סוף השנה": {"end_date": "2026-12-31"}})
+    run(ex, ELIYAHU, "x"); run(ex, ELIYAHU, "60000"); run(ex, ELIYAHU, "סוף השנה")
+    ex.locked = True                                                  # no classify/extract after confirm
+    r = run(ex, ELIYAHU, "אשר")
+    assert r.state == "confirmed" and r.snapshot["tool_name"] == "fcc_writes"
+    (w,) = r.snapshot["writes"]
+    assert w["op"] == "post" and w["table"] == Tables.FIN_GOALS
+    assert w["fields"] == {GF.TITLE: "קרן חירום", GF.TARGET_AMOUNT: 60000.0, GF.CATEGORY: "emergency_fund",
+                           GF.CALC_METHOD: "cumulative", GF.END_DATE: "2026-12-31", GF.STATUS: "active"}
+    stored = mem_store.load_business_draft("eliyahu", fd.FCC_GOAL, tenant_id="boss_hq", actor_user_id="eliyahu",
+                                           source_channel="fcc", channel="fcc", contracts=fd.FCC_CONTRACTS)
+    assert stored.lifecycle_state is bd.DraftState.CONFIRMED and stored.snapshot is not None
+    with pytest.raises(bd.BusinessDraftError):
+        stored.set_field("target_amount", 1, adapter=fd.ADAPTER)      # frozen
+    conv.complete_execution(ELIYAHU)
+    assert conv.pending_view(ELIYAHU) is None
+
+
+# income: safe inference, no end date needed, straight to review
+def test_income_goal_infers_category_period_method_and_skips_end_date():
+    ex = Ex(classify={"תוסיף יעד הכנסה חודשית 15000": {
+        "action": "create_goal", "title": "הכנסה חודשית", "target": 15000, "category": "income"}})
+    r = run(ex, ELIYAHU, "תוסיף יעד הכנסה חודשית 15000")
+    assert r.state == "review" and "(הוסק)" in r.message
+    w = run(ex, ELIYAHU, "אשר").snapshot["writes"][0]["fields"]
+    assert (w[GF.CATEGORY], w[GF.PERIOD_TYPE], w[GF.CALC_METHOD]) == ("income", "monthly", "period_sum")
+    assert GF.END_DATE not in w
+
+
+# cumulative types need an end date; "other" never guesses period/method
+def test_required_matrix_cumulative_needs_end_date_and_other_asks_period_and_method():
+    for cat in ("savings", "debt"):
+        ex = Ex(classify={"g": {"action": "create_goal", "title": f"t-{cat}", "target": 1000, "category": cat}})
+        r = run(ex, ELIYAHU, "g")
+        assert r.awaiting == "end_date", cat
+        run(ex, ELIYAHU, "בטל")
+    ex = Ex(classify={"o": {"action": "create_goal", "title": "השקעות", "target": 5000, "category": "other"}})
+    r = run(ex, ELIYAHU, "o")
+    assert r.awaiting == "period_type"                                # not guessed
+    r = run(ex, ELIYAHU, "חודשי")
+    assert r.awaiting == "calc_method"
+    r = run(ex, ELIYAHU, "מצטבר")
+    assert r.awaiting == "end_date"                                   # conditional on cumulative
+
+
+# 7 + 8 — required cannot be skipped; optional fields are never asked
+def test_required_field_cannot_be_skipped_and_optional_never_asked():
+    ex = Ex(classify={"x": EF_GOAL})
+    run(ex, ELIYAHU, "x")
+    r = run(ex, ELIYAHU, "דלג")
+    assert r.awaiting == "target_amount" and "אי אפשר לדלג" in r.message
+    run(ex, ELIYAHU, "60000")
+    seen = {conv.pending_view(ELIYAHU)["awaiting"]}
+    assert seen == {"end_date"} and "start_date" not in seen          # optional start_date is never prompted
+    r = run(ex, ELIYAHU, "2026-12-31")                                # ISO accepted deterministically
+    assert r.state == "review"
+    assert run(ex, ELIYAHU, "דלג").state == "review"                  # a skip word is never a confirm
+
+
+# 9 — edit changes one field only, does not restart the flow
+def test_edit_changes_single_field_in_same_draft():
+    ex = Ex(classify={"x": EF_GOAL}, fill={"סכום 80000": {"target_amount": 80000}, "סוף יוני": {"end_date": "2027-06-30"}})
+    run(ex, ELIYAHU, "x"); run(ex, ELIYAHU, "60000"); run(ex, ELIYAHU, "2026-12-31")
+    r = run(ex, ELIYAHU, "ערוך")
+    assert r.state == "ask" and "מה לערוך" in r.message
+    r = run(ex, ELIYAHU, "סכום 80000")
+    assert r.state == "review" and "₪80,000" in r.message and "31/12/2026" in r.message
+    r = run(ex, ELIYAHU, "סוף יוני")                                  # direct edit from review
+    assert "30/06/2027" in r.message and "₪80,000" in r.message and "קרן חירום" in r.message
+    assert [c for c in ex.calls if c[0] == "classify"] == [("classify", "x")]
+
+
+# 10 — cancel closes the draft
+def test_cancel_closes_draft():
+    ex = Ex(classify={"x": EF_GOAL})
+    run(ex, ELIYAHU, "x")
+    assert run(ex, ELIYAHU, "בטל").state == "cancelled"
+    assert conv.pending_view(ELIYAHU) is None
+    assert run(ex, ELIYAHU, "אשר").state == "info"                    # nothing to confirm
+
+
+# 11 — TTL is the existing Diamond contract (1800s), expiry handled lazily
+def test_ttl_uses_existing_diamond_contract_and_expires(monkeypatch):
+    assert DRAFT_TTL_SECONDS == bd.DRAFT_TTL_SECONDS == 1800
+    ex = Ex(classify={"x": EF_GOAL})
+    run(ex, ELIYAHU, "x")
+    real = bd.time.time
+    monkeypatch.setattr(bd.time, "time", lambda: real() + 1801)
+    r = run(ex, ELIYAHU, "60000")
+    assert r.state == "clarify"                                       # expired draft is NOT resumed
+    assert conv.pending_view(ELIYAHU) is None
+    assert run(ex, ELIYAHU, "אשר").state == "info"                    # and nothing is left to confirm
+
+
+# 3 + 18 + 19 — concurrent users hold separate drafts; owner isolation
+def test_concurrent_users_have_isolated_drafts():
+    ex = Ex(classify={"e": EF_GOAL, "a": {"action": "create_goal", "title": "יעד אבי", "category": "income", "target": 7000}})
+    run(ex, ELIYAHU, "e")
+    run(ex, AVI_I, "a")
+    run(ex, ELIYAHU, "60000")
+    eli, avi = conv.pending_view(ELIYAHU), conv.pending_view(AVI_I)
+    assert eli["awaiting"] == "end_date" and eli["fields"]["יעד"] == "קרן חירום"
+    assert avi["state"] == "review" and avi["fields"]["יעד"] == "יעד אבי" and "קרן חירום" not in str(avi)
+    assert run(ex, AVI_I, "בטל").state == "cancelled"
+    assert conv.pending_view(ELIYAHU)["awaiting"] == "end_date"       # Eliyahu's draft untouched
+    assert conv.handle_turn(ident("nobody", Role.MANAGER), "x", extractor=ex).state == "denied"
+
+
+# 4 — missing amount asks the amount (no Task); ambiguity asks which goal (own goals only)
+def test_missing_amount_is_asked_not_turned_into_task_and_goal_is_chosen_not_guessed():
+    DB[Tables.FIN_GOALS] += [goal("recG2", "חיסכון קבוע", ELI), goal("recG3", "חיסכון לילדים", ELI)]
+    ex = Ex(classify={"העברתי לחיסכון": {"action": "log_progress", "goal_hint": "חיסכון"}})
+    r = run(ex, ELIYAHU, "העברתי לחיסכון")
+    assert r.state == "needs_goal" and {c["goal_id"] for c in r.candidates} == {"recG2", "recG3"}
+    assert "recGA" not in str(r.candidates)                           # never another owner's goal
+    r = run(ex, ELIYAHU, "הכנסה של אבי")
+    assert r.state == "needs_goal"                                    # foreign/unknown title does not resolve
+    r = run(ex, ELIYAHU, "חיסכון קבוע")
+    assert r.state == "ask" and r.awaiting == "amount" and "חיסכון קבוע" in r.message
+    assert DB[Tables.TASKS] == [] and r.snapshot is None              # no Task, no write
+    r = run(ex, ELIYAHU, "5,000")
+    assert r.state == "review" and "₪5,000" in r.message
+    w = run(ex, ELIYAHU, "אשר").snapshot["writes"][0]["fields"]
+    assert w[EF.GOAL] == ["recG2"] and w[EF.AMOUNT] == 5000.0 and w[EF.KIND] == "one_time"
+    assert w[EF.IDEMPOTENCY_KEY].startswith("fcc-") and w[EF.RAW_TEXT] == "העברתי לחיסכון"
+
+
+def test_explicit_goal_id_of_other_owner_denied():
+    ex = Ex(classify={"רשום": {"action": "log_progress", "goal_hint": "", "amount": 10}})
+    assert run(ex, ELIYAHU, "רשום", goal_id="recGA").state == "denied"
+
+
+# missing field != follow-up Task; a real external action is a Task
+def test_real_followup_task_inherits_owner_and_missing_field_is_not_a_task():
+    ex = Ex(classify={"דיברתי עם הבנק": {"action": "follow_up", "goal_hint": "הכנסה נוספת", "task_title": "להשיג יתרות"}})
+    r = run(ex, ELIYAHU, "דיברתי עם הבנק")
+    assert r.state == "review" and "משימת המשך" in r.message
+    (w,) = run(ex, ELIYAHU, "אשר").snapshot["writes"]
+    f = w["fields"]
+    assert w["table"] == Tables.TASKS and f[TaskFields.OWNER] == [ELI] and f[TaskFields.TOPIC] == "כספים"
+    assert f[TaskFields.DESCRIPTION].startswith("[FCC:recGE]") and f[TaskFields.STATUS] == "ממתין"
+
+
+# 15 — update_goal: overlay on the base snapshot, only changed fields are written
+def test_update_goal_overlay_preserves_unchanged_fields_and_target_is_an_event():
+    DB[Tables.FIN_GOALS] = [goal("recGE", "הכנסה נוספת", ELI, 12000, **{GF.CATEGORY: "income"}), DB[Tables.FIN_GOALS][1]]
+    ex = Ex(classify={"שנה": {"action": "update_goal", "goal_hint": "הכנסה נוספת", "target": 80000, "end_date": "2026-12-31"}})
+    r = run(ex, ELIYAHU, "שנה")
+    assert r.state == "review" and "₪80,000" in r.message and "הכנסה" in r.message and "שינויים" in r.message
+    writes = run(ex, ELIYAHU, "אשר").snapshot["writes"]
+    patch = next(w for w in writes if w["op"] == "patch")
+    assert patch["record_id"] == "recGE" and set(patch["fields"]) == {GF.END_DATE}     # nothing else touched
+    event = next(w for w in writes if w["op"] == "post")
+    assert event["table"] == Tables.FIN_EVENTS and event["fields"][EF.KIND] == "target_change"
+    assert event["fields"][EF.AMOUNT] == 80000.0 and event["fields"][EF.GOAL] == ["recGE"]
+    # nothing to change -> clarify, not an empty write
+    conv.complete_execution(ELIYAHU)
+    ex2 = Ex(classify={"כלום": {"action": "update_goal", "goal_hint": "הכנסה נוספת"}})
+    assert run(ex2, ELIYAHU, "כלום").state == "clarify"
+
+
+def test_rename_via_update_patches_title_only():
+    ex = Ex(classify={"שם": {"action": "rename_goal", "goal_hint": "הכנסה נוספת", "new_title": "הכנסה שוטפת"}})
+    run(ex, ELIYAHU, "שם")
+    (w,) = run(ex, ELIYAHU, "אשר").snapshot["writes"]
+    assert w["op"] == "patch" and w["fields"] == {GF.TITLE: "הכנסה שוטפת"} and w["record_id"] == "recGE"
+
+
+# 20 — duplicate title blocked; duplicate event not written twice
+def test_duplicate_goal_title_and_duplicate_event_blocked():
+    ex = Ex(classify={"d": {"action": "create_goal", "title": " הכנסה  נוספת "}})
+    assert run(ex, ELIYAHU, "d").state == "duplicate"
+    ev = {"action": "log_progress", "goal_hint": "הכנסה נוספת", "amount": 5000}
+    ex = Ex(classify={"העברתי 5000": ev})
+    run(ex, ELIYAHU, "העברתי 5000")
+    key = run(ex, ELIYAHU, "אשר").snapshot["writes"][0]["fields"][EF.IDEMPOTENCY_KEY]
+    DB[Tables.FIN_EVENTS].append(event("recNew", "recGE", ELI, 5000, key=key, day="2026-10-08"))
+    conv.complete_execution(ELIYAHU)
+    assert run(ex, ELIYAHU, "העברתי 5000").state == "duplicate"
+
+
+# 16 — TMA: same flow; the client only renders server state and executes the FROZEN writes
+def test_tma_flow_resumes_after_refresh_and_executes_frozen_writes(monkeypatch):
+    ex = Ex(classify={"תוסיף יעד קרן חירום": EF_GOAL}, fill={"סוף השנה": {"end_date": "2026-12-31"}})
+    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append((action, payload)) or ("a1", {"ok": True}, 200)))
+    c = http(monkeypatch, ELIYAHU)
+    post = lambda t, **kw: c.post("/api/fcc/write", json={"text": t, **kw}, headers=H).get_json()
+    assert post("תוסיף יעד קרן חירום")["awaiting"] == "target_amount"
+    ov = c.get("/api/fcc/overview", headers=H).get_json()             # refresh: the open question comes back
+    assert ov["draft"]["awaiting"] == "target_amount"
+    assert post("60000")["awaiting"] == "end_date"
+    assert post("סוף השנה")["state"] == "review" and sent == []       # nothing written before confirm
+    done = post("אשר")
+    assert done["state"] == "executed" and [a for a, _ in sent] == ["tma_fcc_write"]
+    assert sent[0][1]["fields"][GF.CATEGORY] == "emergency_fund" and sent[0][1]["table"] == Tables.FIN_GOALS
+    assert c.get("/api/fcc/overview", headers=H).get_json()["draft"] is None
+
+
+def test_tma_failed_execution_keeps_confirmed_draft_for_retry(monkeypatch):
+    ex = Ex(classify={"x": {"action": "create_goal", "title": "יעד", "target": 100, "category": "income"}})
+    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    calls = {"n": 0}
+
+    def flaky(action, payload, identity, label):
+        calls["n"] += 1
+        return ("a", {"error": "boom"}, 500) if calls["n"] == 1 else ("a", {"ok": True}, 200)
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute", flaky)
+    c = http(monkeypatch, ELIYAHU)
+    post = lambda t: c.post("/api/fcc/write", json={"text": t}, headers=H)
+    post("x")
+    first = post("אשר")
+    assert first.status_code == 500 and first.get_json()["state"] == "partial_failure"
+    assert post("אשר").get_json()["state"] == "executed"             # retry executes the same frozen writes
+
+
+# 17 — chat: same draft as the TMA; continuation claimed before the agent; writes via the canonical queue
+def test_chat_and_tma_share_one_draft_and_chat_executes_via_canonical_queue(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
+    ex = Ex(classify={"תוסיף יעד קרן חירום": EF_GOAL}, fill={"סוף השנה": {"end_date": "2026-12-31"}})
+    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    queued = []
+    q = lambda tool, inputs: (queued.append((tool, inputs)) or {"ok": True, "contract_id": "c1", "created_this_turn": True})
+    assert fchat.maybe_handle(ELIYAHU, "שלום", queue=q) == (None, None)       # no draft -> not an FCC turn
+    assert "סכום היעד" in fchat.start_turn(ELIYAHU, "תוסיף יעד קרן חירום")   # started by the agent tool
+    c = http(monkeypatch, ELIYAHU)
+    assert c.get("/api/fcc/overview", headers=H).get_json()["draft"]["awaiting"] == "target_amount"   # same draft in TMA
+    text, out = fchat.maybe_handle(ELIYAHU, "60000", queue=q)
+    assert text is not None and "עד מתי" in text and out is None
+    text, out = fchat.maybe_handle(ELIYAHU, "סוף השנה", queue=q)
+    assert "31/12/2026" in text and queued == []
+    text, out = fchat.maybe_handle(ELIYAHU, "אשר", queue=q)
+    assert text is None and out["contract_id"] == "c1"
+    (tool, inputs), = queued
+    assert tool == "airtable_add" and inputs["table"] == Tables.FIN_GOALS
+    assert inputs["fields"][GF.CATEGORY] == "emergency_fund" and inputs["fields"][GF.END_DATE] == "2026-12-31"
+    assert conv.pending_view(ELIYAHU) is None
+    # a different user (not on the canary list) is never claimed by FCC
+    assert fchat.maybe_handle(AVI_I, "אשר", queue=q) == (None, None)
+
+
+def test_chat_queue_failure_keeps_confirmed_draft_for_retry(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
+    ex = Ex(classify={"x": {"action": "create_goal", "title": "יעד", "target": 100, "category": "income"}})
+    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    fchat.start_turn(ELIYAHU, "x")
+    text, out = fchat.maybe_handle(ELIYAHU, "אשר", queue=lambda t, i: {"ok": False})
+    assert "לא הצלחתי" in text and out is None and conv.pending_view(ELIYAHU) is not None
+    text, out = fchat.maybe_handle(ELIYAHU, "אשר", queue=lambda t, i: {"ok": True, "contract_id": "c"})
+    assert text is None and out is not None and conv.pending_view(ELIYAHU) is None
+
+
+# 21 — ActionGateway stays the single write path: FCC code only emits frozen writes
+def test_no_direct_airtable_write_in_fcc_package_and_only_canonical_tools_emitted():
+    import pathlib
+    src = "".join(p.read_text() for p in pathlib.Path("core/financial_control").glob("*.py"))
+    for forbidden in ("airtable_create", "airtable_patch", "requests.", "urlopen", "airtable_tools", "import crm"):
+        assert forbidden not in src
+    assert fchat.to_canonical_call({"op": "post", "table": "T", "fields": {"a": 1}})[0] == "airtable_add"
+    assert fchat.to_canonical_call({"op": "patch", "table": "T", "record_id": "r", "fields": {"a": 1}})[0] == "airtable_update"
+
+
+# extractor plumbing (LLM boundary mocked): malformed output never becomes data
+def test_fill_reply_and_classify_parse_llm_json_and_reject_garbage(monkeypatch):
+    import llm_fallback
+    from core.financial_control import classifier
+    outs = iter(['noise {"end_date": "2026-12-31"} tail', "no json at all", '{"action": "create_goal", "title": "t"}'])
+    monkeypatch.setattr(llm_fallback, "call_anthropic_text", lambda **kw: next(outs))
+    assert classifier.fill_reply("סוף השנה", "end_date", {}, fd.FCC_GOAL, today=TODAY) == {"end_date": "2026-12-31"}
+    assert classifier.fill_reply("???", "end_date", {}, fd.FCC_GOAL, today=TODAY) == {}
+    assert classifier.classify("x", [], today=TODAY)["action"] == "create_goal"
+
+
+# agent tool: registered owner-only, schema'd, gated by the same canary, never writes
+def test_fcc_update_tool_is_owner_only_gated_and_draft_only(monkeypatch):
+    import feature_flags
+    import tool_registry
+    import tools.schemas as schemas
+    meta = tool_registry._REGISTRY.get("fcc_update")
+    assert meta is not None and meta.roles_allowed == {"owner"} and not meta.requires_approval
+    assert any(t["name"] == "fcc_update" for t in schemas.TOOL_SCHEMAS)
+    ex = Ex(classify={"תוסיף יעד קרן חירום": EF_GOAL})
+    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda *a, **k: False)
+    assert "לא פעיל" in dispatcher_module.dispatch_tool("fcc_update", {"text": "תוסיף יעד קרן חירום"}, ELIYAHU)
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
+    out = dispatcher_module.dispatch_tool("fcc_update", {"text": "תוסיף יעד קרן חירום"}, ELIYAHU)
+    assert "סכום היעד" in out and conv.pending_view(ELIYAHU)["awaiting"] == "target_amount"
+    assert DB[Tables.FIN_GOALS][0]["id"] == "recGE" and len(DB[Tables.FIN_GOALS]) == 2     # nothing written

@@ -337,6 +337,11 @@ def dispatch_tool(
             case "read_drive_file":
                 return read_drive_file(inputs["file_name"])
 
+            # ── Private Financial Control Center ─────
+            case "fcc_update":
+                from core.financial_control import chat as _fcc_chat
+                return _fcc_chat.start_turn(identity, str(inputs.get("text", "")))
+
             # ── Calendar ─────────────────────────────
             case "calendar_get_events":
                 return calendar_get_events(inputs.get("days_ahead", 7))

@@ -1,0 +1,463 @@
+"""FCC conversation: ONE draft/completion primitive for TMA and chat.
+
+free text -> extract known fields -> FCC draft (BusinessDraft, persisted by session_store)
+-> filling (ask only what is missing) -> review -> confirm -> immutable ConfirmedSnapshot
+-> (caller) ActionGateway -> canonical writes -> receipt.
+
+State lives on the server, keyed by the canonical person (``identity.user_id``) in the shared
+``fcc`` slot, so a question asked in the TMA can be answered in chat and vice-versa. React/chat
+adapters only render ``TurnResult`` and send the user's next text. Nothing here writes to
+Airtable; after ``confirm`` no extractor/classifier is called again and no field is defaulted.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field, replace
+from datetime import date
+from typing import Any
+
+from commercial_completion import CompletionError
+from core import data_access_policy as policy
+from core.business_draft import (
+    BusinessDraft, BusinessDraftError, DraftConflictError, DraftIdentityMismatchError,
+    DraftOperation, DraftState, create_draft,
+)
+from core.draft_flow import CANCEL_WORDS, CONFIRM_WORDS, EDIT_WORDS, SKIP_WORDS
+from core.financial_control import calc, draft as fd, service, writer
+from airtable_schema import FinEventFields as EF, FinGoalFields as GF, TaskFields
+
+logger = logging.getLogger(__name__)
+
+_TERMINAL = (DraftState.CANCELLED, DraftState.EXPIRED, DraftState.FAILED)
+_VALIDATION_ERRORS = (BusinessDraftError, CompletionError, ValueError)
+
+
+@dataclass
+class TurnResult:
+    state: str          # ask | review | confirmed | cancelled | needs_goal | duplicate | clarify | denied | info
+    message: str = ""
+    entity: str | None = None
+    awaiting: str | None = None
+    fields: dict = field(default_factory=dict)       # display view of the draft so far
+    candidates: list = field(default_factory=list)   # [{goal_id, title}] when the goal must be chosen
+    snapshot: dict | None = None                     # frozen writes, only when state == "confirmed"
+
+    def to_dict(self) -> dict:
+        return {k: getattr(self, k) for k in ("state", "message", "entity", "awaiting", "fields", "candidates", "snapshot")}
+
+
+# ── Extractor (LLM) — injectable; default wraps core.financial_control.classifier ────────────────
+class LlmExtractor:
+    def classify(self, text: str, goal_titles: list[str], today: date) -> dict | None:
+        from core.financial_control import classifier
+        return classifier.classify(text, goal_titles, today=today)
+
+    def fill(self, text: str, awaiting: str | None, fields: dict, entity: str, today: date) -> dict:
+        from core.financial_control import classifier
+        return classifier.fill_reply(text, awaiting, fields, entity, today=today)
+
+
+# ── helpers ─────────────────────────────────────────────────────────────────────────────────────
+def _store():
+    from session_store import lead_sessions
+    return lead_sessions
+
+
+def _ids(identity, actor) -> dict:
+    return {"tenant_id": identity.tenant_id, "actor_user_id": identity.user_id, "sender": identity.user_id,
+            "profile_id": actor.profile_id}
+
+
+def _load_all(store, ids) -> list[BusinessDraft]:
+    out = []
+    for entity in fd.FCC_ENTITIES:
+        try:
+            d = store.load_business_draft(ids["sender"], entity, tenant_id=ids["tenant_id"],
+                                          actor_user_id=ids["actor_user_id"], source_channel=fd.FCC_CHANNEL,
+                                          channel=fd.FCC_CHANNEL, contracts=fd.FCC_CONTRACTS)
+        except DraftIdentityMismatchError:
+            logger.warning("[fcc] draft binding mismatch entity=%s", entity)
+            continue
+        if d is not None:
+            out.append(d)
+    return out
+
+
+def _delete(store, ids, entity) -> None:
+    store.delete_business_draft(ids["sender"], entity, channel=fd.FCC_CHANNEL)
+
+
+def _save(store, ids, d: BusinessDraft, *, expected: int) -> BusinessDraft:
+    return store.save_business_draft(ids["sender"], d, expected_version=expected, channel=fd.FCC_CHANNEL,
+                                     contracts=fd.FCC_CONTRACTS)
+
+
+def _view(d: BusinessDraft) -> dict:
+    return {fd.LABELS.get(k, k): fd.display_value(k, v) for k, v in d.fields.items() if v not in (None, "")}
+
+
+def _missing(d: BusinessDraft) -> list[str]:
+    return [m.field_name for m in d.missing_fields()] if d.operation is DraftOperation.CREATE else []
+
+
+def _render(d: BusinessDraft) -> TurnResult:
+    goal_title = str(d.source_context.get("goal_title") or "")
+    inferred = tuple(d.source_context.get("inferred") or ())
+    if d.lifecycle_state is DraftState.EDITING:
+        return TurnResult("ask", "מה לערוך? (למשל: סכום 80000)", d.entity_type, None, _view(d))
+    if d.lifecycle_state is DraftState.READY_FOR_REVIEW:
+        original = d.original_fields or {}
+        changed = {k: v for k, v in d.fields.items() if d.operation is DraftOperation.UPDATE and v != original.get(k)}
+        return TurnResult("review", fd.render_review(
+            d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
+            inferred=inferred), d.entity_type, None, _view(d))
+    missing = _missing(d)
+    awaiting = missing[0] if missing else None
+    msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title) if awaiting else "מה לעדכן?"
+    return TurnResult("ask", msg, d.entity_type, awaiting, _view(d))
+
+
+def _set_fields(d: BusinessDraft, updates: dict, *, strict: bool) -> tuple[BusinessDraft, list[str]]:
+    """Apply validated updates; track inferred values. Returns (draft, rejected_field_names)."""
+    contract = fd.FCC_CONTRACTS[d.entity_type]
+    names = {f.field_name for f in contract.fields}
+    inferred = list(d.source_context.get("inferred") or [])
+    rejected: list[str] = []
+    ordered = sorted((k for k in updates if k in names), key=lambda k: k != "category")   # category first
+    for name in ordered:
+        value = updates[name]
+        if value in (None, ""):
+            continue
+        try:
+            d = d.set_field(name, value, adapter=fd.ADAPTER)
+        except _VALIDATION_ERRORS:
+            if strict:
+                raise
+            rejected.append(name)
+            continue
+        if name in inferred:
+            inferred.remove(name)
+        if name == "category" and d.entity_type == fd.FCC_GOAL:
+            for old in list(inferred):                       # category changed -> drop stale inference
+                try:
+                    d = d.clear_field(old, adapter=fd.ADAPTER)
+                except _VALIDATION_ERRORS:
+                    pass
+            inferred = []
+            for k, v in fd.INFERENCE.get(str(value), {}).items():
+                if d.fields.get(k) in (None, ""):
+                    d = d.set_field(k, v, adapter=fd.ADAPTER)
+                    inferred.append(k)
+    return replace(d, source_context={**d.source_context, "inferred": inferred}), rejected
+
+
+def _deterministic_answer(field_name: str, text: str):
+    t = text.strip()
+    vocab = fd.ANSWER_VOCAB.get(field_name)
+    if vocab and t in vocab:
+        return vocab[t]
+    if field_name in ("target_amount", "amount"):
+        cleaned = t.replace(",", "").replace("₪", "").replace("ש\"ח", "").replace("שח", "").strip()
+        try:
+            float(cleaned)
+            return cleaned
+        except ValueError:
+            return None
+    if field_name in ("end_date", "start_date", "occurred_at", "due_date"):
+        return t
+    if field_name in ("title", "note"):
+        return t
+    return None
+
+
+def _goal_by_text(goals: list[dict], text: str):
+    state, matches = writer.resolve_goal(text, goals)
+    return matches[0] if state == "one" else None
+
+
+# ── public API ──────────────────────────────────────────────────────────────────────────────────
+def pending_view(identity, *, store=None) -> dict | None:
+    """The open draft as a render-ready dict (so a refreshed TMA / the next chat message resumes it)."""
+    actor = policy.resolve_actor(identity)
+    if not actor.resolved:
+        return None
+    store = store or _store()
+    ids = _ids(identity, actor)
+    for d in _load_all(store, ids):
+        if d.lifecycle_state not in _TERMINAL:
+            return _render(d).to_dict()
+    return None
+
+
+def has_pending(identity, *, store=None) -> bool:
+    return pending_view(identity, store=store) is not None
+
+
+def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=None, store=None,
+                today: date | None = None) -> TurnResult:
+    today = today or date.today()
+    actor = policy.resolve_actor(identity)
+    if not actor.resolved:
+        return TurnResult("denied", policy.UNRESOLVED_MESSAGE)
+    text = (text or "").strip()
+    if not text:
+        return TurnResult("clarify", "מה לעדכן?")
+    store, extractor = store or _store(), extractor or LlmExtractor()
+    ids = _ids(identity, actor)
+    lower = text.lower()
+
+    drafts = _load_all(store, ids)
+    for d in list(drafts):                                   # clear closed/expired slots
+        if d.lifecycle_state in _TERMINAL:
+            _delete(store, ids, d.entity_type)
+            drafts.remove(d)
+            if d.lifecycle_state is DraftState.EXPIRED and (lower in CONFIRM_WORDS or lower in CANCEL_WORDS):
+                return TurnResult("info", "הטיוטה פגה (30 דקות). אפשר להתחיל מחדש.")
+    if drafts:
+        return _continue(identity, ids, drafts[0], text, goal_id, extractor, store, today)
+    if lower in CONFIRM_WORDS or lower in CANCEL_WORDS or lower in EDIT_WORDS:
+        return TurnResult("info", "אין עדכון פתוח כרגע.")
+    return _start(identity, actor, ids, text, goal_id, extractor, store, today)
+
+
+def complete_execution(identity, entity: str | None = None, *, store=None) -> None:
+    """Call ONLY after the confirmed writes were successfully handed to the ActionGateway."""
+    actor = policy.resolve_actor(identity)
+    if not actor.resolved:
+        return
+    store = store or _store()
+    ids = _ids(identity, actor)
+    for d in _load_all(store, ids):
+        if d.lifecycle_state is DraftState.CONFIRMED and (entity is None or d.entity_type == entity):
+            _delete(store, ids, d.entity_type)
+
+
+# ── continuing an open draft ────────────────────────────────────────────────────────────────────
+def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, today) -> TurnResult:
+    lower = text.lower()
+    if lower in CANCEL_WORDS:
+        _delete(store, ids, d.entity_type)
+        return TurnResult("cancelled", "בוטל. לא נרשם דבר.")
+
+    if d.lifecycle_state is DraftState.CONFIRMED:             # approved earlier, execution did not finish
+        if lower in CONFIRM_WORDS:
+            return _confirmed_result(identity, d)
+        return TurnResult("info", "יש פעולה שאושרה וממתינה לביצוע — אשר כדי לנסות שוב, או בטל.", d.entity_type)
+
+    if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in CONFIRM_WORDS:
+        return _confirm(identity, ids, d, store)
+    if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in EDIT_WORDS:
+        edited = d.begin_edit()
+        _save(store, ids, edited, expected=d.idempotency_key)
+        return _render(edited)
+
+    expected = d.idempotency_key
+    editing = d.lifecycle_state in (DraftState.READY_FOR_REVIEW, DraftState.EDITING)
+    awaiting = None if editing else (_missing(d) or [None])[0]
+    if awaiting and lower in SKIP_WORDS:
+        return replace_result(_render(d), message=f"שדה חובה — אי אפשר לדלג.\n{_render(d).message}")
+
+    updates: dict[str, Any] = {}
+    goals = service.my_goals(identity) if d.entity_type in (fd.FCC_EVENT, fd.FCC_FOLLOWUP) else []
+    if awaiting == "goal":                                    # choose among the caller's OWN goals only
+        chosen = None
+        if goal_id:
+            chosen = next((g for g in goals if g["id"] == goal_id), None)
+            if chosen is None:
+                return TurnResult("denied", policy.DENIED_MESSAGE)
+        else:
+            chosen = _goal_by_text(goals, text)
+        if chosen is None:
+            return TurnResult("needs_goal", "לא זיהיתי את היעד — בחר מהרשימה.", d.entity_type, "goal",
+                              _view(d), candidates=writer._cand(goals))
+        updates["goal"] = chosen["id"]
+        d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, "")})
+    elif awaiting:
+        value = _deterministic_answer(awaiting, text)
+        if value is not None:
+            try:
+                _set_fields(d, {awaiting: value}, strict=True)       # accepted as typed (number/ISO date/choice)
+                updates[awaiting] = value
+            except _VALIDATION_ERRORS:
+                pass                                                 # e.g. "סוף השנה" -> extractor resolves
+    if not updates or (awaiting and awaiting not in updates):
+        filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
+        for k, v in filled.items():
+            updates.setdefault(k, v)
+
+    d2, rejected = _set_fields(d, updates, strict=False)
+    if d2.fields == d.fields and not rejected and d2.lifecycle_state is d.lifecycle_state:
+        base = _render(d)
+        return replace_result(base, message=f"לא הבנתי.\n{base.message}")
+    if awaiting and awaiting in rejected:
+        base = _render(d2)
+        return replace_result(base, message=f"❌ ערך לא תקין ל{fd.LABELS.get(awaiting, awaiting)}.\n{base.message}")
+    saved = _save(store, ids, d2, expected=expected)
+    return _render(saved)
+
+
+def replace_result(r: TurnResult, **kw) -> TurnResult:
+    return replace(r, **kw)
+
+
+# ── confirm: freeze, final duplicate guard, immutable snapshot ──────────────────────────────────
+def _already_applied(identity, write: dict) -> bool:
+    fields = write.get("fields") or {}
+    if write["op"] == "post" and write["table"] == "Financial Progress Events":
+        key = fields.get(EF.IDEMPOTENCY_KEY)
+        return any((e.get("fields") or {}).get(EF.IDEMPOTENCY_KEY) == key for e in service.my_events(identity))
+    if write["op"] == "post" and write["table"] == "Financial Goals":
+        title = writer._norm(fields.get(GF.TITLE, ""))
+        return any(writer._norm((g.get("fields") or {}).get(GF.TITLE, "")) == title for g in service.my_goals(identity))
+    return False
+
+
+def _confirm(identity, ids, d: BusinessDraft, store) -> TurnResult:
+    try:
+        confirmed, snapshot = d.confirm(adapter=fd.ADAPTER)
+    except _VALIDATION_ERRORS as exc:
+        return TurnResult("clarify", f"❌ {exc}", d.entity_type)
+    writes = [w for w in snapshot.tool_inputs["writes"] if not _already_applied(identity, w)]
+    if not writes:
+        _delete(store, ids, d.entity_type)
+        return TurnResult("duplicate", "כבר נרשם — לא נוצרה כפילות.", d.entity_type)
+    stored = _save(store, ids, confirmed, expected=d.idempotency_key)
+    return _confirmed_result(identity, stored, writes)
+
+
+def _confirmed_result(identity, d: BusinessDraft, writes: list | None = None) -> TurnResult:
+    snap = d.snapshot
+    if writes is None:
+        writes = [w for w in snap.tool_inputs["writes"] if not _already_applied(identity, w)]
+        if not writes:
+            return TurnResult("duplicate", "כבר נרשם — לא נוצרה כפילות.", d.entity_type)
+    return TurnResult("confirmed", "מאושר — נרשם.", d.entity_type, None, _view(d), snapshot={
+        "draft_id": snap.draft_id, "entity": snap.entity_type, "tool_name": snap.tool_name,
+        "confirmed_at": snap.confirmed_at, "writes": writes})
+
+
+# ── starting a new draft ────────────────────────────────────────────────────────────────────────
+def _new_draft(identity, ids, entity, operation, *, fields, raw_text, today, extra_ctx=None, original=None):
+    ctx = {"raw_text": raw_text[:2000], "today": today.isoformat(), **(extra_ctx or {})}
+    return create_draft(
+        entity_type=entity, operation=operation, tenant_id=ids["tenant_id"], actor_role=str(identity.role),
+        actor_user_id=ids["actor_user_id"], source_channel=fd.FCC_CHANNEL, sender=ids["sender"],
+        fields=fields, source_context=ctx, identity={"profile_id": ids["profile_id"], "user_id": ids["actor_user_id"]},
+        original_fields=original, actor_display_name=getattr(identity, "display_name", "") or "",
+        contracts=fd.FCC_CONTRACTS,
+    )
+
+
+def _persist_new(store, ids, d: BusinessDraft) -> TurnResult:
+    try:
+        stored = store.create_business_draft(ids["sender"], d, channel=fd.FCC_CHANNEL, contracts=fd.FCC_CONTRACTS)
+    except DraftConflictError:
+        return TurnResult("info", "יש פעולה שאושרה וממתינה לביצוע — יש לסיים או לבטל אותה קודם.")
+    return _render(stored)
+
+
+def _with_goal_choices(res: TurnResult, goals: list[dict]) -> TurnResult:
+    """A draft that still lacks its goal asks for it, offering only the caller's own goals."""
+    if res.awaiting == "goal":
+        return replace(res, state="needs_goal", candidates=writer._cand(goals))
+    return res
+
+
+def _goal_original(identity, goal: dict) -> dict:
+    f = goal.get("fields") or {}
+
+    def sel(key):
+        v = f.get(key)
+        return v.get("name") if isinstance(v, dict) else v
+
+    events = calc.parse_events([e for e in service.my_events(identity)
+                                if goal["id"] in service._goal_ids_of(e)], EF)
+    base = calc._num(f.get(GF.TARGET_AMOUNT))
+    target = calc.effective_target(base, [e for e in events if not e.superseded], date.today())
+    original = {"title": f.get(GF.TITLE), "target_amount": target, "category": sel(GF.CATEGORY),
+                "period_type": sel(GF.PERIOD_TYPE), "calc_method": sel(GF.CALC_METHOD),
+                "end_date": f.get(GF.END_DATE), "start_date": f.get(GF.START_DATE)}
+    return {k: v for k, v in original.items() if v not in (None, "")}
+
+
+def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> TurnResult:
+    goals = service.my_goals(identity)
+    intent = writer.validate_intent(extractor.classify(text, [g["fields"].get(GF.TITLE, "") for g in goals], today))
+    if intent is None:
+        return TurnResult("clarify", "לא הבנתי את הבקשה — אפשר לנסח שוב?")
+    action = intent["action"]
+
+    if action == "create_goal":
+        title = intent.get("title") or intent.get("goal_hint")
+        if title and any(writer._norm(g["fields"].get(GF.TITLE, "")) == writer._norm(title) for g in goals):
+            return TurnResult("duplicate", "כבר קיים יעד בשם הזה.")
+        d = _new_draft(identity, ids, fd.FCC_GOAL, DraftOperation.CREATE, fields={}, raw_text=text, today=today)
+        updates = {"title": title, "target_amount": intent.get("target", intent.get("amount")),
+                   **{k: intent[k] for k in ("category", "period_type", "calc_method", "end_date", "start_date")
+                      if k in intent}}
+        d, _rej = _set_fields(d, {k: v for k, v in updates.items() if v is not None}, strict=False)
+        return _persist_new(store, ids, d)
+
+    state, matches = writer.resolve_goal(intent["goal_hint"], goals)
+    if goal_id:
+        chosen = [g for g in goals if g["id"] == goal_id]
+        if not chosen:
+            return TurnResult("denied", policy.DENIED_MESSAGE)
+        state, matches = "one", chosen
+    goal = matches[0] if state == "one" else None
+
+    if action in ("update_goal", "rename_goal"):
+        if goal is None:
+            return TurnResult("needs_goal", "איזה יעד לעדכן?", candidates=writer._cand(matches or goals))
+        original = _goal_original(identity, goal)
+        d = _new_draft(identity, ids, fd.FCC_GOAL, DraftOperation.UPDATE, fields=dict(original), raw_text=text,
+                       today=today, extra_ctx={"record_id": goal["id"], "goal_title": goal["fields"].get(GF.TITLE, "")},
+                       original=original)
+        updates = {k: intent[k] for k in ("category", "period_type", "calc_method", "end_date", "start_date") if k in intent}
+        if "target" in intent or "amount" in intent:
+            updates["target_amount"] = intent.get("target", intent.get("amount"))
+        if action == "rename_goal" and intent.get("new_title"):
+            updates["title"] = intent["new_title"]
+        d, _rej = _set_fields(d, updates, strict=False)
+        if d.fields == original:
+            return TurnResult("clarify", "מה לעדכן ביעד (סכום, קטגוריה, תקופה, שיטה, תאריכים, שם)?")
+        return _persist_new(store, ids, d)
+
+    if action in ("log_progress", "set_target", "note"):
+        kind = {"set_target": "target_change", "note": "note"}.get(action, intent.get("kind", "one_time"))
+        amount = intent.get("target") if action == "set_target" else intent.get("amount")
+        fields = {"kind": kind, "occurred_at": today.isoformat()}
+        if action == "note":
+            amount = 0
+            fields["note"] = intent.get("note") or text
+        elif intent.get("note"):
+            fields["note"] = intent["note"]
+        if amount is not None:
+            fields["amount"] = amount
+        extra = {}
+        if goal is not None:
+            fields["goal"] = goal["id"]
+            extra["goal_title"] = goal["fields"].get(GF.TITLE, "")
+        d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=text, today=today,
+                       extra_ctx=extra)
+        d, _rej = _set_fields(d, fields, strict=False)
+        if goal is not None and "amount" in d.fields:
+            key = fd.event_idempotency_key(ids["profile_id"], goal["id"], d.fields["kind"], d.fields["amount"],
+                                           d.fields["occurred_at"], text)
+            if any((e.get("fields") or {}).get(EF.IDEMPOTENCY_KEY) == key for e in service.my_events(identity)):
+                return TurnResult("duplicate", "האירוע כבר נרשם.", fd.FCC_EVENT)
+        return _with_goal_choices(_persist_new(store, ids, d), matches or goals)
+
+    if action == "follow_up":
+        title = intent.get("task_title") or (goal["fields"].get(GF.TITLE) if goal else None)
+        d = _new_draft(identity, ids, fd.FCC_FOLLOWUP, DraftOperation.CREATE, fields={}, raw_text=text, today=today,
+                       extra_ctx={"goal_title": goal["fields"].get(GF.TITLE, "")} if goal else None)
+        d, _rej = _set_fields(d, {"title": title, **({"goal": goal["id"]} if goal else {})}, strict=False)
+        if goal is not None and title:
+            for rec in service.open_followups(identity, goal["id"]):
+                if writer._norm(rec["fields"].get(TaskFields.NAME, "")) == writer._norm(title):
+                    return TurnResult("duplicate", "משימה פתוחה זהה כבר קיימת.", fd.FCC_FOLLOWUP)
+        return _with_goal_choices(_persist_new(store, ids, d), matches or goals)
+
+    return TurnResult("clarify", "לא הבנתי את הבקשה — אפשר לנסח שוב?")

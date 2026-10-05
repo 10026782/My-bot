@@ -307,6 +307,14 @@ _REGISTRY_ENTRIES: tuple[ToolMeta, ...] = (
         description_he="קריאת כל הטבלאות והשדות מ-Airtable בזמן אמת"
     ),
 
+    # ── Private Financial Control Center (draft/completion only — never writes business data) ──
+    ToolMeta(
+        name="fcc_update",
+        roles_allowed=_OWNER_ONLY,
+        tenant_scoped=True,
+        description_he="עדכון במרכז הכלכלי האישי (יעד/התקדמות) — פותח או ממשיך טיוטה; הכתיבה רק אחרי אישור ודרך האישור הרגיל"
+    ),
+
     # ── Lead Search ───────────────────────────────
     ToolMeta(
         name             = "search_lead",

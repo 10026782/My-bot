@@ -4848,15 +4848,9 @@ def tma_upload(identity):
 # ══════════════════════════════════════════════════════════════════
 
 def _fcc_enabled(identity=None) -> bool:
-    """Flag AND canary allowlist. ``FCC_CANARY_USER_IDS`` (comma-separated identity
-    user_ids, e.g. ``eliyahu``) must name the caller — empty/unset means nobody
-    (fail closed), so turning the flag on alone exposes the screen to no one."""
-    import feature_flags
-    if not feature_flags.is_enabled("FEATURE_FINANCIAL_CONTROL_CENTER"):
-        return False
-    allowed = {u.strip().casefold() for u in os.environ.get("FCC_CANARY_USER_IDS", "").split(",") if u.strip()}
-    uid = str(getattr(identity, "user_id", "") or "").casefold()
-    return bool(uid) and uid in allowed
+    """Flag AND canary allowlist — one gate shared with chat (core/financial_control/gate.py)."""
+    from core.financial_control import gate  # noqa: PLC0415
+    return gate.enabled_for(identity)
 
 
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
@@ -4872,7 +4866,10 @@ def fcc_overview(identity):
         return jsonify({"error": "not found"}), 404
     from core.financial_control import service as fcc_service
     try:
-        return jsonify(fcc_service.overview(identity))
+        from core.financial_control import conversation as fcc_conv
+        view = fcc_service.overview(identity)
+        view["draft"] = fcc_conv.pending_view(identity)      # resume an open Q&A after refresh
+        return jsonify(view)
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
 
@@ -4880,28 +4877,33 @@ def fcc_overview(identity):
 @tma_api.route("/api/fcc/write", methods=["POST"])
 @require_tma_auth
 def fcc_write(identity):
-    """Body: {"text": str, "goal_id"?: str, "confirm"?: bool}. Without confirm -> preview only."""
+    """Body: {"text": str, "goal_id"?: str}. The ONE FCC conversation primitive (shared with chat):
+    the server keeps the draft and answers with the next question / the review / the receipt.
+    The client only renders it and sends the user's next text ("אשר" / "ערוך" / "בטל" included)."""
     if not _fcc_enabled(identity):
         return jsonify({"error": "not found"}), 404
-    from core.financial_control import classifier, service as fcc_service, writer as fcc_writer
+    from core.financial_control import conversation as fcc_conv
     data = request.get_json(silent=True) or {}
     text = str(data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "text required"}), 400
     try:
-        titles = [(g.get("fields") or {}).get("Title", "") for g in fcc_service.my_goals(identity)]
-        intent = classifier.classify(text, titles)
-        plan = fcc_writer.plan(text, intent, identity, goal_id=data.get("goal_id"))
+        result = fcc_conv.handle_turn(identity, text, goal_id=data.get("goal_id"))
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
-    if plan["status"] != "preview" or not data.get("confirm"):
-        return jsonify(plan), (403 if plan["status"] == "denied" else 200)
+    except Exception:
+        logger.exception("[fcc] handle_turn failed")
+        return jsonify({"state": "clarify", "message": "לא הצלחתי לעבד את הבקשה כרגע — נסו שוב."}), 200
+    if result.state != "confirmed":
+        return jsonify(result.to_dict()), (403 if result.state == "denied" else 200)
 
     results = []
-    for payload in plan["proposals"]:
+    for write in result.snapshot["writes"]:           # frozen payload: executed as-is, never re-derived
         _, response, status = _queue_or_owner_execute(
-            "tma_fcc_write", payload, identity, f"FCC: {plan.get('summary', '')[:80]}")
-        results.append({"table": payload["table"], "status": status, "response": response})
-        if status >= 300:        # stop at first failure; report explicitly, no silent partial success
-            return jsonify({"status": "partial_failure", "results": results}), status
-    return jsonify({"status": "executed", "results": results})
+            "tma_fcc_write", write, identity, f"FCC: {write.get('audit_action', 'write')}")
+        results.append({"table": write["table"], "status": status, "response": response})
+        if status >= 300:        # the CONFIRMED draft stays: "אשר" retries; no silent partial success
+            return jsonify({"state": "partial_failure", "message": "הפעולה לא הושלמה — אפשר לאשר שוב כדי לנסות.",
+                            "results": results}), status
+    fcc_conv.complete_execution(identity, result.entity)
+    return jsonify({"state": "executed", "message": "נרשם ✓", "results": results})

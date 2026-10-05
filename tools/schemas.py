@@ -25,6 +25,17 @@ TOOL_SCHEMAS = [
         }
     },
     {
+        "name": "fcc_update",
+        "description": "עדכון במרכז הכלכלי האישי של הבעלים: יעד כלכלי חדש/עדכון יעד, התקדמות (הכנסה, חיסכון, קרן חירום, פירעון חוב), שינוי יעד. מעביר את הטקסט המקורי של המשתמש; המערכת שואלת בעצמה את הפרטים החסרים ומציגה סיכום לאישור לפני כל רישום.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "הטקסט המקורי של המשתמש, כפי שנכתב"}
+            },
+            "required": ["text"]
+        }
+    },
+    {
         "name": "calendar_get_events",
         "description": "קריאת אירועים מ-Google Calendar",
         "input_schema": {

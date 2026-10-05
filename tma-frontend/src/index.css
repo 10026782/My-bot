@@ -3111,7 +3111,8 @@
   border: 1px solid var(--boss-color-border-strong); border-radius: 16px;
   background: var(--boss-color-surface); color: inherit; font: inherit; resize: vertical;
 }
-.fcc-quick__preview { display: grid; gap: var(--boss-space-2); }
-.fcc-quick__preview p, .fcc-quick__note, .fcc-quick__receipt, .fcc-quick__error { margin: 0; font-size: 14px; }
+.fcc-quick__turn { display: grid; gap: var(--boss-space-2); }
+.fcc-quick__message { white-space: pre-line; }
+.fcc-quick__message, .fcc-quick__note, .fcc-quick__receipt, .fcc-quick__error { margin: 0; font-size: 14px; }
 .fcc-quick__choices { display: flex; flex-wrap: wrap; gap: var(--boss-space-2); }
 .fcc-quick__error { color: var(--boss-color-danger); }

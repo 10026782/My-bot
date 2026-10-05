@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- feat(fcc): Diamond completion flow for the Financial Control Center — one server-side BusinessDraft-based draft/completion primitive for TMA and chat (required-field matrix, multi-turn fill/review/edit/cancel, frozen ConfirmedSnapshot, no partial goal writes). `fcc_update` agent tool + app.py draft interception; shared `gate.py` canary. See docs/architecture/financial-control-center/FCC_DIAMOND_COMPLETION_20261005.md
+
 - feat(fcc): Private Financial Control Center slice 1 (flag `FEATURE_FINANCIAL_CONTROL_CENTER`, default OFF) — `core/financial_control/*`, owner-scoped policy for Financial Goals/Progress Events, `/api/fcc/overview|write`. No live schema created; see docs/architecture/financial-control-center/FCC_SLICE1_IMPLEMENTATION_20261004.md
 
 - **Privacy Foundation — owner-of-record scoping (PRIV-FCC-01)** (`core/data_access_policy.py`, `core/owner_resolution.py`, `tools/airtable_security.py`, `tools/dispatcher.py`, `tools/airtable_tools.py`, `tools/approval_actions.py`, `tma_api.py`, `identity.py`): one central policy for personal tables (`Assets`, `Loans`) — only the owner-of-record (unique Profile match) sees/changes a record, fail-closed for unresolved/ambiguous identity and ownerless records; generic `airtable_get` no longer exposes them; `/api/assets*` scoped and totals computed over permitted rows; ownerless Tasks served only to the sole business owner; private-task marker support (field not yet live); Profile resolution requires a unique match. Operational note: live `Assets` rows have no `Owner` yet. Details: `docs/architecture/privacy-foundation/PRIVACY_FOUNDATION_20261004.md`. STATIC_VERIFIED only.

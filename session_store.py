@@ -1215,6 +1215,7 @@ class PersistentSessionStore:
 
     def save_business_draft(
         self, sender: str, draft: BusinessDraft, *, expected_version: int, channel: str = "",
+        contracts=None,
     ) -> BusinessDraft:
         """Compare-and-swap save. `expected_version` is the `idempotency_key`
         the caller loaded before mutating — required requirement 6's
@@ -1251,9 +1252,11 @@ class PersistentSessionStore:
         data = serialize_business_draft(draft)
         data["idempotency_key"] = existing_version + 1
         self._write_business_draft_slot(sender, entity_type, data, channel)
-        return deserialize_business_draft(data)
+        # `contracts`: an entity family outside commercial ENTITY_CONTRACTS (e.g. FCC) passes
+        # its own live registry; None keeps the commercial default.
+        return deserialize_business_draft(data, contracts=contracts)
 
-    def create_business_draft(self, sender: str, draft: BusinessDraft, *, channel: str = "") -> BusinessDraft:
+    def create_business_draft(self, sender: str, draft: BusinessDraft, *, channel: str = "", contracts=None) -> BusinessDraft:
         """First save for a fresh draft (from `core.business_draft.create_draft()`).
 
         A second CREATE for the same entity_type silently replaces the first
@@ -1270,11 +1273,13 @@ class PersistentSessionStore:
                 f"a CONFIRMED {entity_type} draft is still pending execution -- cannot start a new one"
             )
         expected_version = int(existing_raw["idempotency_key"]) if existing_raw else 0
-        return self.save_business_draft(sender, draft, expected_version=expected_version, channel=channel)
+        return self.save_business_draft(
+            sender, draft, expected_version=expected_version, channel=channel, contracts=contracts,
+        )
 
     def load_business_draft(
         self, sender: str, entity_type: str, *,
-        tenant_id: str, actor_user_id: str, source_channel: str, channel: str = "",
+        tenant_id: str, actor_user_id: str, source_channel: str, channel: str = "", contracts=None,
     ) -> Optional[BusinessDraft]:
         """Returns None only when no draft exists for this slot (or the
         stored payload is corrupt -- fails closed, logged). Raises
@@ -1294,7 +1299,7 @@ class PersistentSessionStore:
         if raw is None:
             return None
         try:
-            draft = deserialize_business_draft(raw)
+            draft = deserialize_business_draft(raw, contracts=contracts)
         except BusinessDraftError as exc:
             logger.error(
                 "[SessionStore] malformed business draft sender=%s entity_type=%s: %s", sender, entity_type, exc,

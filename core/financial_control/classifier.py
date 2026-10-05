@@ -20,13 +20,13 @@ _SYSTEM = (
 )
 
 
-def classify(text: str, goal_titles: list[str]) -> dict | None:
+def classify(text: str, goal_titles: list[str], *, today: date | None = None) -> dict | None:
     from llm_fallback import call_anthropic_text
     out = call_anthropic_text(
         source="fcc_classify", model="claude-haiku-4-5-20251001", max_tokens=400, temperature=0,
         system=_SYSTEM,
         messages=[{"role": "user", "content": json.dumps(
-            {"text": text, "goal_titles": goal_titles, "today": date.today().isoformat()}, ensure_ascii=False)}],
+            {"text": text, "goal_titles": goal_titles, "today": (today or date.today()).isoformat()}, ensure_ascii=False)}],
     )
     match = re.search(r"\{.*\}", out or "", re.S)
     if not match:
@@ -35,3 +35,32 @@ def classify(text: str, goal_titles: list[str]) -> dict | None:
         return json.loads(match.group(0))
     except ValueError:
         return None
+
+
+_FILL_SYSTEM = (
+    "אתה ממלא שדות חסרים בטיוטת עדכון כלכלי אישי. החזר JSON בלבד: אובייקט של שדות שנאמרו בהודעה, "
+    "מתוך: title, target_amount (מספר), category (income|savings|emergency_fund|debt|other), "
+    "period_type (monthly|weekly|custom), calc_method (period_sum|cumulative|recurring_level), "
+    "end_date, start_date, occurred_at (YYYY-MM-DD; תאריך יחסי כמו ״סוף השנה״/״סוף יוני״ חשב לפי today), "
+    "amount (מספר), kind (one_time|monthly_recurring|target_change), note. "
+    "כלול רק מה שנאמר במפורש; אל תמציא ואל תנחש. אם ההודעה היא תשובה לשדה ב-awaiting, מלא אותו. "
+    "בעריכה (״ערוך סכום ל-80000״) החזר רק את השדה שהשתנה."
+)
+
+
+def fill_reply(text: str, awaiting: str | None, fields: dict, entity: str, *, today: date | None = None) -> dict:
+    from llm_fallback import call_anthropic_text
+    out = call_anthropic_text(
+        source="fcc_fill", model="claude-haiku-4-5-20251001", max_tokens=300, temperature=0, system=_FILL_SYSTEM,
+        messages=[{"role": "user", "content": json.dumps(
+            {"text": text, "awaiting": awaiting, "entity": entity, "draft": {k: str(v) for k, v in fields.items()},
+             "today": (today or date.today()).isoformat()}, ensure_ascii=False)}],
+    )
+    match = re.search(r"\{.*\}", out or "", re.S)
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
