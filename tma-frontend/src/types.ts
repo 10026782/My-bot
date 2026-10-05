@@ -470,3 +470,46 @@ export const LEAD_OPEN_STATUSES = ["new", "waiting_call", "active", "waiting_res
 export function leadStatusLabel(status: string): string {
   return LEAD_STATUS_LABELS[(status ?? "").trim()] ?? status;
 }
+
+// ── Private Financial Control Center (owner-of-record only) ──────────────
+export interface FccGoalRow {
+  goal_id: string;
+  title: string | null;
+  category: string | null;
+  priority: number | null;
+  method: string;
+  period_start: string;
+  period_end: string;
+  target: number | null;
+  actual: number;
+  remaining: number | null;
+  remaining_periods: number | null;
+  dynamic_target_per_week: number | null;
+  status: "in_progress" | "achieved" | "overdue" | "missing_target";
+}
+
+export interface FccSummaryCard {
+  target: number;
+  actual: number;
+  remaining: number;
+  dynamic_target_per_week: number;
+  goals: number;
+}
+
+export interface FccOverview {
+  goals: FccGoalRow[];
+  summary: Partial<Record<"income" | "savings" | "debt" | "emergency_fund", FccSummaryCard>>;
+  tasks: { id: string; title: string | null; due_date: string | null; status: string | null }[];
+  monthly_cash_improvement: number;
+  recent_events: { goal_ids: string[]; Amount: number | null; Kind: string | null; "Occurred At": string | null; Note: string | null }[];
+  as_of: string;
+}
+
+export interface FccWritePlan {
+  status: "preview" | "needs_goal" | "duplicate" | "clarify" | "denied" | "executed" | "partial_failure";
+  summary?: string;
+  message?: string;
+  candidates?: { goal_id: string; title: string | null }[];
+  proposals?: unknown[];
+  results?: { table: string; status: number }[];
+}

@@ -38,3 +38,24 @@
 
 ## רישום Writer Authority
 `core/financial_control/writer.py` נרשם ב-`docs/governance/WRITER_AUTHORITY_REGISTRY.md` (owner `financial_control`, decision `decision.fcc_slice1_write_planner`). המודול **מתכנן בלבד** (Classify→Resolve→Validate→Preview→proposals) ואינו כותב ל-Airtable; הכתיבה היחידה עוברת `_queue_or_owner_execute` → ActionGateway → dispatcher → `tma_write`. הרישום מתעד את החלטת הבעלים לאשר את Slice 1 (04/10/2026).
+
+---
+
+# FCC Slice 2 — TMA screen (05/10/2026)
+
+סטטוס: 🟡 CODE DONE, NOT VERIFIED LIVE. מסך "המרכז הכלכלי" ב-`tma-frontend/src/components/FinancialControlCenter.tsx`, נכנס מה-Hub (כפתור ₪, owner בלבד כמו My Work). השרת נשאר flag-gated (`FEATURE_FINANCIAL_CONTROL_CENTER`, כבוי) — כשכבוי המסך מציג "המסך עדיין לא פעיל" (404).
+
+## בהתאם ל-UX האחיד (BOSS_UNIFIED_SCREEN_CONTRACT / BOSS_DESIGN_SYSTEM_V1)
+שימוש חוזר ב-`PageHeader`, `Surface`, `StatusBadge`, `ScreenState` (loading/empty/error) ובטוקני העיצוב הקיימים; Dashboard pattern (KPI מוגבל + drill-down), Work Queue ל"דורש פעולה"; RTL, 390px, בלי overflow אופקי (נבדק light+dark); שגיאות ללא IDs/שמות טבלאות.
+
+## מבנה
+כרטיסי ראש (הכנסה מול יעד · יעד דינמי לשבוע · חיסכון · חוב שנפרע · שיפור תזרים חודשי · קרן חירום) → עדכון מהיר → דורש פעולה (Tasks FCC) → יעדים (target/actual/remaining/dynamic/status) → התקדמות אחרונה.
+
+## עדכון מהיר = ה-writer הקיים, לא writer שני
+`POST /api/fcc/write` בלבד: בלי `confirm` → preview (או `needs_goal` עם candidates לבחירה; אין בחירה אוטומטית); `confirm:true` → ביצוע דרך ActionGateway. ה-React לא מנתח טקסט ולא מכיר טבלאות. Receipt מוצג רק אחרי `executed`, ואז רענון מהשרת.
+
+## Backend (service.overview)
+נוספו `summary` (סכום נגזר לפי `Category` של היעד: income / savings / debt|debt_repaid / emergency_fund — מיפוי הצגה בלבד, היעדים נשארים data) ו-`tasks` (Tasks פתוחות של הבעלים עם `Topic="כספים"` + תגית `[FCC:`). שניהם אחרי `filter_records`/בדיקת Owner. קרן חירום ופנסיה: עדיין Goals רגילים; "כיסוי חודשים" לא מחושב (אין נתוני הוצאה) — מוצג כחסר, לא מנוחש.
+
+## בדיקות
+`test_financial_control_center.py` (24): summary לפי קטגוריה ובידוד בעלים, tasks רק של הבעלים. Frontend: `tsc --noEmit`, `npm run build`, `npm test`, צילומי מסך 390px light/dark עם mock API (לא נגד שרת חי).

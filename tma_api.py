@@ -4847,9 +4847,16 @@ def tma_upload(identity):
 # _queue_or_owner_execute -> ActionGateway -> dispatcher -> tma_write.
 # ══════════════════════════════════════════════════════════════════
 
-def _fcc_enabled() -> bool:
+def _fcc_enabled(identity=None) -> bool:
+    """Flag AND canary allowlist. ``FCC_CANARY_USER_IDS`` (comma-separated identity
+    user_ids, e.g. ``eliyahu``) must name the caller — empty/unset means nobody
+    (fail closed), so turning the flag on alone exposes the screen to no one."""
     import feature_flags
-    return feature_flags.is_enabled("FEATURE_FINANCIAL_CONTROL_CENTER")
+    if not feature_flags.is_enabled("FEATURE_FINANCIAL_CONTROL_CENTER"):
+        return False
+    allowed = {u.strip().casefold() for u in os.environ.get("FCC_CANARY_USER_IDS", "").split(",") if u.strip()}
+    uid = str(getattr(identity, "user_id", "") or "").casefold()
+    return bool(uid) and uid in allowed
 
 
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
@@ -4861,7 +4868,7 @@ def _preflight_fcc():
 @tma_api.route("/api/fcc/overview", methods=["GET"])
 @require_tma_auth
 def fcc_overview(identity):
-    if not _fcc_enabled():
+    if not _fcc_enabled(identity):
         return jsonify({"error": "not found"}), 404
     from core.financial_control import service as fcc_service
     try:
@@ -4874,7 +4881,7 @@ def fcc_overview(identity):
 @require_tma_auth
 def fcc_write(identity):
     """Body: {"text": str, "goal_id"?: str, "confirm"?: bool}. Without confirm -> preview only."""
-    if not _fcc_enabled():
+    if not _fcc_enabled(identity):
         return jsonify({"error": "not found"}), 404
     from core.financial_control import classifier, service as fcc_service, writer as fcc_writer
     data = request.get_json(silent=True) or {}

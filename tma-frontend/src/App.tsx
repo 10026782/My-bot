@@ -15,6 +15,7 @@ import { OwnerControlCenter } from "./components/OwnerControlCenter";
 import { Ventures } from "./components/Ventures";
 import { MarketingStatus } from "./components/MarketingStatus";
 import { MyWork } from "./components/MyWork";
+import { FinancialControlCenter } from "./components/FinancialControlCenter";
 import { PageHeader } from "./components/ui/PageHeader";
 import { ScreenState } from "./components/ui/ScreenState";
 import type { ProjectsResponse, ProjectCard as TProjectCard } from "./types";
@@ -39,6 +40,7 @@ export default function App() {
   const [venturesOpen, setVenturesOpen] = useState(false);
   const [marketingOpen, setMarketingOpen] = useState(false);
   const [myWorkOpen, setMyWorkOpen] = useState(false);
+  const [fccOpen, setFccOpen] = useState(false);
   const [leadsOpen, setLeadsOpen] = useState(false);
   const [authRole, setAuthRole] = useState<string | null>(null);
 
@@ -76,6 +78,11 @@ export default function App() {
         authRole={authRole}
       />
     );
+  }
+
+  // ── Financial Control Center (personal, owner-of-record; flag-gated server-side) ──
+  if (fccOpen) {
+    return <FinancialControlCenter onBack={() => setFccOpen(false)} />;
   }
 
   // ── My Work ──────────────────────────────────────────────────────
@@ -220,6 +227,9 @@ export default function App() {
           )}
           {canShowOwnerControl && (
             <button type="button" onClick={() => setMyWorkOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="העבודה שלי">✓</button>
+          )}
+          {canShowOwnerControl && (
+            <button type="button" onClick={() => setFccOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="המרכז הכלכלי">₪</button>
           )}
           <button type="button" onClick={() => setHealthOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="בריאות מערכת">⚙️</button>
           <button type="button" onClick={() => setMarketingOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="שיווק">📣</button>

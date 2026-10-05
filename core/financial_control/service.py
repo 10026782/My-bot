@@ -59,6 +59,66 @@ def assert_goal_owned(goal_id: str, identity) -> dict:
     return fields
 
 
+# Presentation mapping only: header cards read goals by their editable ``Category``
+# value. Goals themselves stay data (no hard-coded list); a missing category simply
+# leaves the card empty ("set a goal").
+SUMMARY_CATEGORIES = {
+    "income": ("income", "הכנסה"),
+    "savings": ("savings", "חיסכון"),
+    "debt": ("debt_repaid", "חוב", "debt"),
+    "emergency_fund": ("emergency_fund", "קרן חירום"),
+}
+
+
+def _category_key(category) -> str | None:
+    if isinstance(category, dict):
+        category = category.get("name")
+    cat = str(category or "").strip().casefold()
+    for key, names in SUMMARY_CATEGORIES.items():
+        if cat in {n.casefold() for n in names}:
+            return key
+    return None
+
+
+def summarize(rows: list[dict]) -> dict:
+    """Header cards: sum derived goal numbers per category (owner's rows only)."""
+    out: dict[str, dict] = {}
+    for row in rows:
+        key = _category_key(row.get("category"))
+        if not key:
+            continue
+        card = out.setdefault(key, {"target": 0.0, "actual": 0.0, "remaining": 0.0,
+                                    "dynamic_target_per_week": 0.0, "goals": 0})
+        card["goals"] += 1
+        for field in ("target", "actual", "remaining", "dynamic_target_per_week"):
+            card[field] = round(card[field] + (row.get(field) or 0.0), 2)
+    return out
+
+
+def fcc_tasks(identity) -> list[dict]:
+    """Open follow-up Tasks created from FCC goals, owned by the caller only."""
+    from airtable_schema import TaskFields
+    from core.financial_control.writer import FCC_TASK_TOPIC
+    actor = policy.resolve_actor(identity)
+    if not actor.resolved:
+        return []
+    out = []
+    for rec in _read(Tables.TASKS):
+        f = rec.get("fields") or {}
+        if f.get(TaskFields.STATUS) == "בוצע":
+            continue
+        if actor.profile_id not in policy.owner_refs(f, TaskFields.OWNER):
+            continue
+        topic = f.get(TaskFields.TOPIC)
+        topic = topic.get("name") if isinstance(topic, dict) else topic
+        desc = str(f.get(TaskFields.DESCRIPTION) or "")
+        if topic != FCC_TASK_TOPIC or "[FCC:" not in desc:
+            continue
+        out.append({"id": rec.get("id"), "title": f.get(TaskFields.NAME),
+                    "due_date": f.get(TaskFields.DUE_DATE), "status": f.get(TaskFields.STATUS)})
+    return sorted(out, key=lambda t: (t["due_date"] is None, str(t["due_date"] or "")))
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()
@@ -83,6 +143,8 @@ def overview(identity, today: date | None = None) -> dict:
 
     return {
         "goals": rows,
+        "summary": summarize(rows),
+        "tasks": fcc_tasks(identity),
         "monthly_cash_improvement": calc.monthly_cash_improvement(all_events, today),
         "recent_events": [
             {"goal_ids": _goal_ids_of(e), **{k: (e.get("fields") or {}).get(k) for k in (

@@ -258,7 +258,7 @@ def http(monkeypatch, who, flag=True):
     app.register_blueprint(tma_api.tma_api)
     monkeypatch.setattr(tma_api, "_validate_initdata", lambda _: {"id": who.user_id})
     monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: who)
-    monkeypatch.setattr(tma_api, "_fcc_enabled", lambda: flag)
+    monkeypatch.setattr(tma_api, "_fcc_enabled", lambda identity=None: flag)
     return app.test_client()
 
 
@@ -297,3 +297,53 @@ def test_http_ambiguous_does_not_write(monkeypatch):
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute", lambda *a, **k: pytest.fail("must not write"))
     out = http(monkeypatch, ELIYAHU).post("/api/fcc/write", json={"text": "הפקדתי 5000 לחיסכון", "confirm": True}, headers=H).get_json()
     assert out["status"] == "needs_goal" and len(out["candidates"]) >= 2
+
+
+# ═══ Slice 2: header summary + FCC tasks (owner-only) ═══
+def test_summary_by_category_and_owner_isolation():
+    DB[Tables.FIN_GOALS] = [
+        goal("recGE", "הכנסה נוספת", ELI, 12000, **{GF.CATEGORY: "income"}),
+        goal("recGS", "חיסכון קבוע", ELI, 3000, **{GF.CATEGORY: "savings"}),
+        goal("recGA", "של אבי", AVI, 99000, **{GF.CATEGORY: "income"}),
+    ]
+    DB[Tables.FIN_EVENTS] = [event("e1", "recGE", ELI, 2000), event("e2", "recGA", AVI, 55555)]
+    eli = service.overview(ELIYAHU, TODAY)["summary"]
+    assert eli["income"]["target"] == 12000 and eli["income"]["actual"] == 2000
+    assert eli["savings"]["target"] == 3000 and "debt" not in eli
+    assert "99000" not in str(eli) and "55555" not in str(eli)
+
+
+def test_fcc_tasks_only_owner_open_topic_and_tag():
+    mk = lambda tid, owner, status="ממתין", topic="כספים", desc="[FCC:recGE] x": {"id": tid, "fields": {
+        TaskFields.NAME: tid, TaskFields.STATUS: status, TaskFields.OWNER: [owner],
+        TaskFields.TOPIC: topic, TaskFields.DESCRIPTION: desc}}
+    DB[Tables.TASKS] = [mk("mine", ELI), mk("avi", AVI), mk("done", ELI, status="בוצע"),
+                        mk("othertopic", ELI, topic="שיווק"), mk("notag", ELI, desc="plain")]
+    assert [t["title"] for t in service.overview(ELIYAHU, TODAY)["tasks"]] == ["mine"]
+    assert [t["title"] for t in service.overview(AVI_I, TODAY)["tasks"]] == ["avi"]
+
+
+# ═══ Canary: flag + FCC_CANARY_USER_IDS allowlist (fail closed) ═══
+def test_canary_allowlist_fail_closed(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.delenv("FCC_CANARY_USER_IDS", raising=False)
+    assert tma_api._fcc_enabled(ELIYAHU) is False                 # flag on, no allowlist -> nobody
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", " Eliyahu ")
+    assert tma_api._fcc_enabled(ELIYAHU) is True
+    assert tma_api._fcc_enabled(AVI_I) is False                   # partner stays out
+    assert tma_api._fcc_enabled(None) is False
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda *a, **k: False)
+    assert tma_api._fcc_enabled(ELIYAHU) is False                 # flag off wins
+
+
+def test_canary_http_other_user_gets_404(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
+    app = Flask(__name__)
+    app.register_blueprint(tma_api.tma_api)
+    monkeypatch.setattr(tma_api, "_validate_initdata", lambda _: {"id": "x"})
+    for who, code in ((ELIYAHU, 200), (AVI_I, 404)):
+        monkeypatch.setattr(tma_api, "resolve_identity", lambda *_, w=who: w)
+        assert app.test_client().get("/api/fcc/overview", headers=H).status_code == code

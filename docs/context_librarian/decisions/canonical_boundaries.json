@@ -722,7 +722,8 @@
       },
       "owner": "governance",
       "code_paths": [
-        "tma-frontend/src/components/MyWork.tsx"
+        "tma-frontend/src/components/MyWork.tsx",
+        "tma-frontend/src/components/FinancialControlCenter.tsx"
       ],
       "test_paths": [],
       "canonical_docs": [],
@@ -734,6 +735,7 @@
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #749 (MY-WORK-1): MyWork.tsx is a new TMA screen component matching the TMA_FEATURE_SCREEN policy. Owner explicitly reviewed and approved this registration.",
         "MyWork.tsx is a read-only My Work personal task queue screen (Mobile-first, RTL Hebrew, no mutations in V1). Stateful (useState for loading/ok/error), fetches from GET /api/owner/my-work, displays immediate and upcoming task categories. Uses TMA patterns (PageHeader, ScreenState sub-components, Tailwind styling, RTL-safe layout).",
+        "FCC Slice 2 (05/10/2026): FinancialControlCenter.tsx is the private, owner-of-record Financial Control Center screen. Owner explicitly asked for this screen (\"תמשיך לSlice 2\"). Unlike MyWork.tsx it has one write entry point (quick update) but it holds no business authority: it only calls GET /api/fcc/overview and POST /api/fcc/write (preview then confirm), which route through the existing ActionGateway; no client-side parsing or Airtable access. Server side is flag-gated (FEATURE_FINANCIAL_CONTROL_CENTER) plus FCC_CANARY_USER_IDS.",
         "Future TMA screens (e.g. new domain-specific or owner-facing screens) should be evaluated individually against this node's scope and either registered here (if narrow/similar scope) or placed in a different decision node (if sufficiently different concerns)."
       ],
       "extensions": {
