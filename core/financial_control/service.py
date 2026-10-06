@@ -98,7 +98,7 @@ def summarize(rows: list[dict]) -> dict:
 def fcc_tasks(identity) -> list[dict]:
     """Open follow-up Tasks created from FCC goals, owned by the caller only."""
     from airtable_schema import TaskFields
-    from core.financial_control.writer import FCC_TASK_TOPIC
+    from core.financial_control.draft import FCC_TASK_TOPIC
     actor = policy.resolve_actor(identity)
     if not actor.resolved:
         return []

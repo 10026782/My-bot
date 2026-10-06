@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchFccOverview, postFccWrite } from "../api";
-import type { FccGoalRow, FccOverview, FccSummaryCard, FccWritePlan } from "../types";
+import type { FccGoalRow, FccOverview, FccSummaryCard, FccTurn } from "../types";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -43,30 +43,36 @@ function cardPair(card: FccSummaryCard | undefined, empty = "לא הוגדר י�
   return card ? { value: `${money(card.actual)} / ${money(card.target)}`, hint: undefined } : { value: "—", hint: empty };
 }
 
-function QuickUpdate({ onDone }: { onDone: () => void }) {
+const ACTION_WORDS = { confirm: "אשר", edit: "ערוך", cancel: "בטל" } as const;
+
+function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () => void }) {
   const [text, setText] = useState("");
+  const [turn, setTurn] = useState<FccTurn | null>(initial);
+  const [lastText, setLastText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [plan, setPlan] = useState<FccWritePlan | null>(null);
-  const [goalId, setGoalId] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
 
-  const run = async (confirm: boolean, chosen?: string) => {
-    if (busy || !text.trim()) return;
+  const send = async (body: { text: string; goal_id?: string }) => {
+    if (busy || !body.text.trim()) return;
     setBusy(true);
     setError(null);
+    setReceipt(null);
     try {
-      const result = await postFccWrite({ text: text.trim(), goal_id: chosen ?? goalId, confirm });
-      if (result.status === "executed") {
-        setReceipt("העדכון נרשם ✓");
-        setPlan(null);
-        setText("");
-        setGoalId(undefined);
+      const result = await postFccWrite(body);
+      if (result.state === "executed") {
+        setReceipt(result.message || "נרשם ✓");
+        setTurn(null);
+        setLastText("");
         onDone();
+      } else if (result.state === "cancelled") {
+        setReceipt(result.message);
+        setTurn(null);
       } else {
-        setPlan(result);
-        if (result.status === "partial_failure") setError("הפעולה לא הושלמה במלואה — בדקו ונסו שוב.");
+        setTurn(result);
+        if (result.state === "partial_failure") setError(result.message);
       }
+      setText("");
     } catch (e) {
       setError((e as Error).message || "הפעולה נכשלה");
     } finally {
@@ -74,48 +80,57 @@ function QuickUpdate({ onDone }: { onDone: () => void }) {
     }
   };
 
+  const submit = () => {
+    const value = text.trim();
+    if (!turn) setLastText(value);
+    void send({ text: value });
+  };
+  const open = turn && ["ask", "unrelated", "review", "needs_goal", "confirmed", "partial_failure"].includes(turn.state);
+  const reviewing = turn?.state === "review";
+
   return (
     <section className="fcc-section" aria-labelledby="fcc-quick-heading">
       <h2 id="fcc-quick-heading" className="fcc-section__heading">עדכון מהיר</h2>
       <Surface className="fcc-quick">
+        {turn && (
+          <div className="fcc-quick__turn" role="status">
+            <p className="fcc-quick__message">{turn.message}</p>
+            {turn.state === "needs_goal" && (
+              <div className="fcc-quick__choices">
+                {(turn.candidates ?? []).map((c) => (
+                  <button key={c.goal_id} type="button" className="boss-button boss-button--quiet boss-bubble--action"
+                          disabled={busy} onClick={() => void send({ text: lastText || c.title || "", goal_id: c.goal_id })}>
+                    {c.title}
+                  </button>
+                ))}
+              </div>
+            )}
+            {reviewing && (
+              <div className="fcc-quick__choices">
+                <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={busy}
+                        onClick={() => void send({ text: ACTION_WORDS.confirm })}>אשר ורשום</button>
+                <button type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={busy}
+                        onClick={() => void send({ text: ACTION_WORDS.edit })}>ערוך</button>
+              </div>
+            )}
+            {open && (
+              <button type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={busy}
+                      onClick={() => void send({ text: ACTION_WORDS.cancel })}>בטל</button>
+            )}
+          </div>
+        )}
         <textarea
           className="fcc-quick__input"
           rows={2}
           value={text}
-          placeholder="כתוב עדכון כלכלי…"
+          placeholder={open ? "ענה כאן…" : "כתוב עדכון כלכלי…"}
           aria-label="עדכון כלכלי"
-          onChange={(e) => { setText(e.target.value); setPlan(null); setReceipt(null); setGoalId(undefined); }}
+          onChange={(e) => setText(e.target.value)}
         />
         <button type="button" className="boss-button boss-button--primary boss-bubble--action"
-                disabled={busy || !text.trim()} onClick={() => run(false)}>
-          {busy ? "בודק…" : "תצוגה מקדימה"}
+                disabled={busy || !text.trim()} onClick={submit}>
+          {busy ? "בודק…" : open ? "שלח" : "שלח עדכון"}
         </button>
-
-        {plan?.status === "preview" && (
-          <div className="fcc-quick__preview" role="status">
-            <p>{plan.summary}</p>
-            <button type="button" className="boss-button boss-button--primary boss-bubble--action"
-                    disabled={busy} onClick={() => run(true)}>
-              אשר ורשום
-            </button>
-          </div>
-        )}
-        {plan?.status === "needs_goal" && (
-          <div className="fcc-quick__preview" role="status">
-            <p>{plan.message}</p>
-            <div className="fcc-quick__choices">
-              {(plan.candidates ?? []).map((c) => (
-                <button key={c.goal_id} type="button" className="boss-button boss-button--quiet boss-bubble--action"
-                        disabled={busy} onClick={() => { setGoalId(c.goal_id); run(false, c.goal_id); }}>
-                  {c.title}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {plan && ["duplicate", "clarify", "denied"].includes(plan.status) && (
-          <p className="fcc-quick__note" role="status">{plan.message}</p>
-        )}
         {receipt && <p className="fcc-quick__receipt" role="status">{receipt}</p>}
         {error && <p className="fcc-quick__error" role="alert">⚠️ {error}</p>}
       </Surface>
@@ -209,7 +224,7 @@ export function FinancialControlCenter({ onBack }: Props) {
                  hint={data.summary.emergency_fund ? "כיסוי חודשים: אין נתוני הוצאה" : emergency.hint} />
       </div>
 
-      <QuickUpdate onDone={load} />
+      <QuickUpdate initial={data.draft} onDone={load} />
 
       <section className="fcc-section" aria-labelledby="fcc-tasks-heading">
         <h2 id="fcc-tasks-heading" className="fcc-section__heading">דורש פעולה</h2>
@@ -230,7 +245,7 @@ export function FinancialControlCenter({ onBack }: Props) {
       <section className="fcc-section" aria-labelledby="fcc-goals-heading">
         <h2 id="fcc-goals-heading" className="fcc-section__heading">יעדים</h2>
         {data.goals.length === 0 ? (
-          <ScreenState state="empty" title="אין יעדים פעילים" message="כתבו בעדכון המהיר ״תוסיף יעד חדש …״ כדי להתחיל." />
+          <ScreenState state="empty" title="אין יעדים פעילים" message="כתבו בעדכון המהיר, למשל: ״תוסיף יעד קרן חירום 60000 מצטבר עד סוף השנה״." />
         ) : (
           <div className="fcc-list">{data.goals.map((g) => <GoalCard key={g.goal_id} goal={g} />)}</div>
         )}

@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccWritePlan } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccTurn } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -422,15 +422,15 @@ export async function fetchFccOverview(): Promise<FccOverview> {
   return r.json() as Promise<FccOverview>;
 }
 
-/** Single writer: the server classifies, resolves owner-scoped goals and previews.
- *  `confirm: true` executes through the canonical approval path. No client-side parsing. */
-export async function postFccWrite(body: { text: string; goal_id?: string; confirm?: boolean }): Promise<FccWritePlan> {
+/** The ONE FCC conversation endpoint (shared with chat): the server keeps the draft and replies with the
+ *  next question / review / receipt. No client-side parsing; "אשר" / "ערוך" / "בטל" are just text. */
+export async function postFccWrite(body: { text: string; goal_id?: string }): Promise<FccTurn> {
   const r = await fetch(`${BASE}/api/fcc/write`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
-  const data = (await r.json().catch(() => ({}))) as FccWritePlan & { error?: string };
-  if (!r.ok && !data.status) throw new Error(data.error || `API ${r.status}`);
+  const data = (await r.json().catch(() => ({}))) as FccTurn & { error?: string };
+  if (!r.ok && !data.state) throw new Error(data.error || `API ${r.status}`);
   return data;
 }

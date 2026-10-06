@@ -259,7 +259,11 @@
         "core/financial_control/calc.py",
         "core/financial_control/service.py",
         "core/financial_control/writer.py",
-        "core/financial_control/classifier.py"
+        "core/financial_control/classifier.py",
+        "core/financial_control/draft.py",
+        "core/financial_control/conversation.py",
+        "core/financial_control/gate.py",
+        "core/financial_control/chat.py"
       ],
       "test_paths": [
         "test_tool_registry_invariants.py",

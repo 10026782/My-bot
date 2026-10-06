@@ -420,6 +420,20 @@ class CommercialEntityAdapter:
         return result
 
 
+# Entity families outside the commercial ENTITY_CONTRACTS (e.g. FCC) register their own adapter so
+# that every lifecycle call that defaults the adapter (is_complete / set_field / confirm ...) uses
+# the right one. Additive: an unregistered entity keeps the CommercialEntityAdapter default.
+_ENTITY_ADAPTERS: dict[str, "EntityAdapter"] = {}
+
+
+def register_entity_adapter(entity_type: str, adapter: "EntityAdapter") -> None:
+    _ENTITY_ADAPTERS[entity_type] = adapter
+
+
+def _adapter_for(entity_type: str, contracts: Mapping[str, EntityContract]) -> "EntityAdapter":
+    return _ENTITY_ADAPTERS.get(entity_type) or CommercialEntityAdapter(contracts)
+
+
 # ══════════════════════════════════════════════════
 # ConfirmedSnapshot — freeze doc "Final Confirmation Boundary"
 # ══════════════════════════════════════════════════
@@ -512,7 +526,7 @@ class BusinessDraft:
 
     def is_complete(self, adapter: EntityAdapter | None = None) -> bool:
         if self.operation is DraftOperation.UPDATE:
-            adapter = adapter or CommercialEntityAdapter(self.contracts)
+            adapter = adapter or _adapter_for(self.entity_type, self.contracts)
             try:
                 return bool(adapter.build_update_payload(self._writer(), self.original_fields or {}))
             except UnsupportedOperationError:
@@ -546,14 +560,14 @@ class BusinessDraft:
 
     def set_field(self, field_name: str, value: Any, *, adapter: EntityAdapter | None = None) -> "BusinessDraft":
         self._ensure_mutable()
-        adapter = adapter or CommercialEntityAdapter(self.contracts)
+        adapter = adapter or _adapter_for(self.entity_type, self.contracts)
         self._ensure_editable_for_operation(field_name, adapter)
         writer = self._writer().apply_answer(field_name, value)
         return self._replace_fields(dict(writer.current_values))
 
     def clear_field(self, field_name: str, *, adapter: EntityAdapter | None = None) -> "BusinessDraft":
         self._ensure_mutable()
-        adapter = adapter or CommercialEntityAdapter(self.contracts)
+        adapter = adapter or _adapter_for(self.entity_type, self.contracts)
         self._ensure_editable_for_operation(field_name, adapter)
         contract = self._writer().contract.field(field_name)
         if contract.is_computed or not contract.manual_entry_allowed:
@@ -575,7 +589,7 @@ class BusinessDraft:
         self, source_key: str, target_key: str, *, adapter: EntityAdapter | None = None
     ) -> "BusinessDraft":
         self._ensure_mutable()
-        adapter = adapter or CommercialEntityAdapter(self.contracts)
+        adapter = adapter or _adapter_for(self.entity_type, self.contracts)
         self._ensure_editable_for_operation(target_key, adapter)
         writer = self._writer()
         self._assert_compatible(writer.contract.field(source_key), writer.contract.field(target_key))
@@ -591,7 +605,7 @@ class BusinessDraft:
         self, first_key: str, second_key: str, *, adapter: EntityAdapter | None = None
     ) -> "BusinessDraft":
         self._ensure_mutable()
-        adapter = adapter or CommercialEntityAdapter(self.contracts)
+        adapter = adapter or _adapter_for(self.entity_type, self.contracts)
         self._ensure_editable_for_operation(first_key, adapter)
         self._ensure_editable_for_operation(second_key, adapter)
         writer = self._writer()
@@ -647,7 +661,7 @@ class BusinessDraft:
         """
         if self.lifecycle_state != DraftState.READY_FOR_REVIEW:
             raise BusinessDraftError(f"cannot confirm from state {self.lifecycle_state.value}")
-        adapter = adapter or CommercialEntityAdapter(self.contracts)
+        adapter = adapter or _adapter_for(self.entity_type, self.contracts)
         writer = self._writer()
         if self.operation is DraftOperation.CREATE:
             missing = writer.missing_fields()

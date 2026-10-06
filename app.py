@@ -8903,6 +8903,29 @@ def _webhook_telegram_impl():
         except Exception as e:
             logger.error(f"[F23] text capture routing failed: {e}", exc_info=True)
 
+        # Private Financial Control Center — an open FCC draft claims the owner's next text itself
+        # (the SAME server-side draft the TMA shows), so answers and "אשר/ערוך/בטל" are never
+        # re-interpreted by the model. Flag + canary gated inside; fail-open on any error.
+        try:
+            from core.financial_control import chat as _fcc_chat
+
+            def _fcc_queue(_tool, _inputs):
+                _out = _queue_approval_detailed(
+                    _tool, _inputs, sender_user_id, "telegram", text, trusted_source="fcc_draft_confirmed",
+                )
+                return {**_out, "ok": bool(_out.get("created_this_turn") and _out.get("contract_id"))}
+
+            _fcc_text, _fcc_out = _fcc_chat.maybe_handle(identity_for_gate, text, queue=_fcc_queue)
+            if _fcc_text is not None or _fcc_out is not None:
+                _fcc_reply = _fcc_text if _fcc_text is not None else _finalize_deterministic_queue_outcome(
+                    _fcc_out, sender_user_id, None, "FCC", "לא הצלחתי להעביר את הפעולה לאישור.",
+                )
+                if _fcc_reply:
+                    _send_with_keyboard_fallback(reply_chat_id, _fcc_reply)
+                return "", 200
+        except Exception as e:
+            logger.error(f"[FCC] chat draft routing failed: {e}", exc_info=True)
+
         # ── Decision Hub Stage 0.6 — "זה הנספח" attachment reference ──
         # SPEC_File_Context_Reference.md, Rule 10: max one linking question.
         # Telegram-specific (inline keyboards) — handled here, not in the
