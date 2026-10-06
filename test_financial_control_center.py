@@ -1012,3 +1012,41 @@ def test_direct_costs_reduce_remaining_and_raise_pace():
     p = rows["recP"]
     assert (p["actual"], p["net"]) == (100, 70)
     assert p["remaining"] == p["target"] - 70                # profit is 70, not 100
+
+
+def test_household_spend_is_separate_from_income_and_net():
+    hierarchy([event("recA", "recT", ELI, 1000, day="2026-10-06"),
+               event("recH", "recP", ELI, 400, kind="household_expense", day="2026-10-05"),
+               event("recH2", "recP", ELI, 250, kind="household_expense", day="2026-09-28"),     # other month
+               event("recH3", "recP", ELI, 90, kind="household_expense", day="2026-10-04", **{EF.SUPERSEDED_BY: ["recX"]})])
+    view = service.overview(ELIYAHU, TODAY)
+    assert view["household"]["month_total"] == 400
+    card = view["summary"]["income"]
+    assert (card["actual"], card["direct_costs"], card["net"]) == (1000, 0, 1000)           # never part of income / net
+
+
+def test_household_kind_is_accepted_by_draft_and_classifier_validation():
+    assert "household_expense" in fd.EVENT_KINDS and fd.VALUE_LABELS["kind"]["household_expense"]
+    from core.financial_control import writer as w
+    assert w.validate_intent({"action": "log_progress", "goal_hint": "הוצאות בית", "amount": 300,
+                              "kind": "household_expense"})["kind"] == "household_expense"
+
+
+def _expense(eid, owner, amount, required=True, status=None):
+    f = {"name": eid, "amount": amount, "owner": [owner], "Receipt Required": required}
+    if status:
+        f["Receipt Status"] = status
+    return {"id": eid, "fields": f}
+
+
+def test_receipts_counter_counts_only_my_missing_business_receipts():
+    DB[Tables.EXPENSES] = [
+        _expense("e1", ELI, 100, status="missing"), _expense("e2", ELI, 50),            # missing / unset -> counted
+        _expense("e3", ELI, 70, status="received"), _expense("e4", ELI, 30, required=False),
+        _expense("e5", "recOTHER", 999, status="missing")]                              # someone else's row
+    assert service.receipts_overview(ELIYAHU) == {"missing_count": 2, "missing_amount": 150.0}
+
+
+def test_receipts_counter_fails_closed_for_unresolved_identity():
+    DB[Tables.EXPENSES] = [_expense("e1", ELI, 100, status="missing")]
+    assert service.receipts_overview(None) == {"missing_count": 0, "missing_amount": 0.0}

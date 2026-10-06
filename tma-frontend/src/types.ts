@@ -531,6 +531,8 @@ export interface FccOverview {
   summary: Partial<Record<"income" | "savings" | "emergency_fund" | "debt_repaid" | "payment_reduction", FccSummaryCard>>;
   tasks: { id: string; title: string | null; due_date: string | null; status: string | null }[];
   monthly_cash_improvement: number;
+  household?: { month_total: number };
+  receipts?: { missing_count: number; missing_amount: number };
   recent_events: { goal_ids: string[]; Amount: number | null; Kind: string | null; "Occurred At": string | null; Note: string | null }[];
   as_of: string;
   draft: FccTurn | null;

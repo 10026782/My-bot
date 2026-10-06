@@ -36,7 +36,7 @@ def validate_intent(intent: object) -> dict | None:
             out[key] = float(val)
     kind = intent.get("kind")
     if kind is not None:
-        if kind not in (calc.ONE_TIME, calc.MONTHLY_RECURRING, calc.DIRECT_COST):
+        if kind not in (calc.ONE_TIME, calc.MONTHLY_RECURRING, calc.DIRECT_COST, calc.HOUSEHOLD_EXPENSE):
             return None
         out["kind"] = kind
     for key in ("title", "new_title", "task_title", "note", "category"):
