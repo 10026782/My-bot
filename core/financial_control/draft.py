@@ -135,7 +135,7 @@ def display_value(field: str, value: Any) -> str:
     if field in VALUE_LABELS:
         return VALUE_LABELS[field].get(value, str(value))
     if field in ("target_amount", "amount", "saving") and isinstance(value, (int, float)):
-        return f"₪{value:,.0f}"
+        return f"-₪{abs(value):,.0f}" if value < 0 else f"₪{value:,.0f}"
     if field in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date") \
             and isinstance(value, str) and len(value) >= 10:
         y, m, d = value[:10].split("-")

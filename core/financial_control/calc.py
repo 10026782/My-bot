@@ -247,6 +247,12 @@ def summarize_obligations(items: list[dict]) -> dict:
             "flagged_monthly": round(flagged, 2), "cancel_pending": cancel_pending, "potential_saving": round(saving, 2), "count": len(items)}
 
 
+def monthly_level_now(events: list[Event], today: date) -> float:
+    """Current standing level of a ``recurring_level`` goal: the running total of its monthly_recurring changes."""
+    return round(sum(e.amount for e in events
+                     if e.kind == MONTHLY_RECURRING and not e.superseded and e.occurred <= today), 2)
+
+
 def household_month_total(events: list[Event], today: date) -> float:
     """Household spend in the calendar month of ``today`` (separate from income/net, superseded ignored)."""
     start = today.replace(day=1)

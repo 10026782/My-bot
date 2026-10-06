@@ -33,11 +33,28 @@ def render_text(result: conversation.TurnResult) -> str:
     return "\n".join(lines)
 
 
-def start_turn(identity, text: str) -> str:
+class PresetIntentExtractor(conversation.LlmExtractor):
+    """The calling agent already understood the message and passed a structured intent: use it for the FIRST
+    classification instead of paying for a second model call. It is validated exactly like the classifier output
+    (``writer.validate_intent``); an invalid/garbled intent falls back to the normal classifier. Only the opening
+    classification is skipped — follow-up answers still go through the normal fill path."""
+
+    def __init__(self, intent: dict):
+        self._intent = intent
+
+    def classify(self, text, goal_titles, today):
+        from core.financial_control import writer
+        if writer.validate_intent(self._intent) is not None:
+            return self._intent
+        return super().classify(text, goal_titles, today)
+
+
+def start_turn(identity, text: str, intent: dict | None = None) -> str:
     """Used by the ``fcc_update`` tool: first/next turn of the shared FCC conversation."""
     if not gate.enabled_for(identity):
         return "המרכז הכלכלי עדיין לא פעיל עבורך."
-    result = conversation.handle_turn(identity, text)
+    extractor = PresetIntentExtractor(intent) if isinstance(intent, dict) else None
+    result = conversation.handle_turn(identity, text, extractor=extractor)
     if result.state == "confirmed":          # a confirm word reached the tool: execution belongs to maybe_handle
         return "כדי לאשר, כתוב ״אשר״ בהודעה נפרדת."
     return render_text(result)

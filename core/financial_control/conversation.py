@@ -304,6 +304,13 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                               _view(d), candidates=writer._cand(goals))
         updates["goal"] = chosen["id"]
         d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, "")})
+        pending_level = d.source_context.get("level")
+        if pending_level is not None and d.fields.get("amount") in (None, ""):
+            delta = _level_delta(identity, chosen, float(pending_level), today)
+            if delta == 0:
+                return TurnResult("clarify", f"ההפרשה כבר עומדת על ₪{float(pending_level):,.0f} לחודש — אין מה לעדכן.")
+            updates["amount"] = delta
+            updates["note"] = f"קביעת רמה: ₪{float(pending_level):,.0f} לחודש"
     else:
         if awaiting:
             value = _deterministic_answer(awaiting, text)
@@ -493,6 +500,12 @@ def _start_obligation(identity, ids, intent, text, extractor, store, today) -> T
     return _persist_new(store, ids, d)
 
 
+def _level_delta(identity, goal: dict, level: float, today: date) -> float:
+    """Change needed to bring the goal's standing monthly level to ``level`` (never guessed from the text)."""
+    events = calc.parse_events([e for e in service.my_events(identity) if goal["id"] in service._goal_ids_of(e)], EF)
+    return round(level - calc.monthly_level_now(events, today), 2)
+
+
 def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> TurnResult:
     goals = service.my_goals(identity)
     intent = writer.validate_intent(extractor.classify(text, [g["fields"].get(GF.TITLE, "") for g in goals], today))
@@ -543,6 +556,14 @@ def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> Turn
         kind = {"set_target": "target_change", "note": "note"}.get(action, intent.get("kind", "one_time"))
         amount = intent.get("target") if action == "set_target" else intent.get("amount")
         fields = {"kind": kind, "occurred_at": today.isoformat()}
+        level = intent.get("level") if action == "log_progress" else None
+        if level is not None:
+            kind = fields["kind"] = calc.MONTHLY_RECURRING
+            if goal is not None:
+                amount = _level_delta(identity, goal, level, today)
+                if amount == 0:
+                    return TurnResult("clarify", f"ההפרשה כבר עומדת על ₪{level:,.0f} לחודש — אין מה לעדכן.")
+                fields["note"] = f"קביעת רמה: ₪{level:,.0f} לחודש"
         if action == "note":
             amount = 0
             fields["note"] = intent.get("note") or text
@@ -554,6 +575,8 @@ def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> Turn
         if goal is not None:
             fields["goal"] = goal["id"]
             extra["goal_title"] = goal["fields"].get(GF.TITLE, "")
+        elif level is not None:
+            extra["level"] = level                     # converted to a delta once the goal is chosen
         d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=text, today=today,
                        extra_ctx=extra)
         d, _rej = _set_fields(d, fields, strict=False)

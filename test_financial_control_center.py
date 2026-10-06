@@ -1198,16 +1198,16 @@ def test_new_savings_goal_is_a_standing_monthly_level_not_cumulative_nor_period_
     assert GF.END_DATE not in w
 
 
-def _savings_goal(gid="gS", target=5000):
+def _savings_goal(gid="recS", target=5000):
     return goal(gid, "הפרשה לשוק ההון", ELI, target,
                 **{GF.CATEGORY: "savings", GF.PERIOD_TYPE: "monthly", GF.CALC_METHOD: "recurring_level"})
 
 
 def test_savings_level_accumulates_across_months_and_never_resets():
     DB[Tables.FIN_GOALS] = [_savings_goal()]
-    DB[Tables.FIN_EVENTS] = [event("e1", "gS", ELI, 2000, kind="monthly_recurring", day="2026-08-15"),    # started two months ago
-                             event("e2", "gS", ELI, 1000, kind="monthly_recurring", day="2026-10-03"),   # raised this month
-                             event("e3", "gS", ELI, -300, kind="monthly_recurring", day="2026-10-05")]   # cut back a little
+    DB[Tables.FIN_EVENTS] = [event("e1", "recS", ELI, 2000, kind="monthly_recurring", day="2026-08-15"),    # started two months ago
+                             event("e2", "recS", ELI, 1000, kind="monthly_recurring", day="2026-10-03"),   # raised this month
+                             event("e3", "recS", ELI, -300, kind="monthly_recurring", day="2026-10-05")]   # cut back a little
     view = service.overview(ELIYAHU, TODAY)
     card = view["summary"]["savings"]
     assert (card["actual"], card["target"], card["remaining"], card["mode"]) == (2700, 5000, 2300, "monthly_level")
@@ -1216,7 +1216,7 @@ def test_savings_level_accumulates_across_months_and_never_resets():
 
 def test_savings_one_time_deposits_do_not_count_as_the_standing_level():
     DB[Tables.FIN_GOALS] = [_savings_goal()]
-    DB[Tables.FIN_EVENTS] = [event("e1", "gS", ELI, 9000, kind="one_time", day="2026-10-03")]
+    DB[Tables.FIN_EVENTS] = [event("e1", "recS", ELI, 9000, kind="one_time", day="2026-10-03")]
     assert service.overview(ELIYAHU, TODAY)["summary"]["savings"]["actual"] == 0
 
 
@@ -1228,3 +1228,56 @@ def test_legacy_cumulative_savings_shows_only_until_a_monthly_one_exists_and_nev
     DB[Tables.FIN_GOALS] = [legacy, _savings_goal(target=5000)]
     card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
     assert (card["target"], card["mode"]) == (5000, "monthly_level")                   # 15,000 would mean mixing families
+
+
+# ═══════════════ "I now allocate X per month" = a NEW total level; the system computes the delta ═══════════════
+def _level_world(*levels):
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event(f"e{i}", "recS", ELI, v, kind="monthly_recurring", day="2026-09-01") for i, v in enumerate(levels)]
+
+
+LEVEL = {"action": "log_progress", "goal_hint": "הפרשה", "kind": "monthly_recurring", "level": 3500}
+
+
+def test_set_level_computes_the_delta_from_the_current_level():
+    _level_world(2000, 1000)                                    # current level 3,000
+    ex = Ex(classify={"אני מפריש עכשיו 3500": LEVEL})
+    r = run(ex, ELIYAHU, "אני מפריש עכשיו 3500")
+    assert r.state == "review" and "₪500" in r.message and "קביעת רמה" in r.message
+    (w,) = run(ex, ELIYAHU, "אשר").snapshot["writes"]
+    assert w["fields"]["Amount"] == 500 and w["fields"]["Kind"] == "monthly_recurring"
+
+
+def test_set_level_downwards_is_a_negative_delta_and_same_level_is_a_noop():
+    _level_world(4000)
+    ex = Ex(classify={"עכשיו 3500": LEVEL, "עכשיו 4000": {**LEVEL, "level": 4000}})
+    r = run(ex, ELIYAHU, "עכשיו 3500")
+    assert "-₪500" in r.message
+    run(ex, ELIYAHU, "בטל")
+    assert run(ex, ELIYAHU, "עכשיו 4000").state == "clarify"
+
+
+def test_set_level_validation_rejects_garbage():
+    from core.financial_control import writer as w
+    assert w.validate_intent({**LEVEL, "level": -5}) is None
+    assert w.validate_intent({**LEVEL, "level": "הרבה"}) is None
+
+
+# ═══════════════ the agent passes a structured intent -> no second classification call ═══════════════
+def test_structured_intent_skips_the_classifier_call(monkeypatch):
+    from core.financial_control import classifier
+    monkeypatch.setattr(classifier, "classify", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Haiku must not be called")))
+    _level_world(3000)
+    monkeypatch.setattr(fchat.gate, "enabled_for", lambda identity: True)
+    out = fchat.start_turn(ELIYAHU, "אני מפריש עכשיו 3500", intent=LEVEL)
+    assert "₪500" in out and "אשר" in out
+
+
+def test_invalid_structured_intent_falls_back_to_the_classifier(monkeypatch):
+    from core.financial_control import classifier
+    calls = []
+    monkeypatch.setattr(classifier, "classify", lambda text, titles, today=None: calls.append(text) or None)
+    monkeypatch.setattr(fchat.gate, "enabled_for", lambda identity: True)
+    _level_world(3000)
+    fchat.start_turn(ELIYAHU, "x", intent={"action": "bogus"})
+    assert calls == ["x"]
