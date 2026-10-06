@@ -1,6 +1,6 @@
 # Neon Migration — M0 Readiness
 
-**Scope: repository-side readiness only** (same boundary as [`ORACLE_MIGRATION_M0.md`](ORACLE_MIGRATION_M0.md)). No Neon project was created, no Render/Vercel setting was changed, no secret was created or rotated, nothing was deployed. This slice adds operator tooling and documentation; see "Stop condition" at the bottom. No file under `core/`, `tools/`, `airtable_*`, `tool_registry.py` or `dispatcher.py` was changed.
+**Scope: repository-side readiness only** (same boundary as [`ORACLE_MIGRATION_M0.md`](ORACLE_MIGRATION_M0.md)). No Neon project was created, no Render/Vercel setting was changed, no secret was created or rotated, nothing was deployed. This slice adds operator tooling and documentation; see "Stop condition" at the bottom. The only runtime file changed is `core/database.py::get_conn()` (M0.5, owner-approved — see "Finding"); nothing under `tools/`, `airtable_*`, `tool_registry.py` or `dispatcher.py`, and no claim semantics changed.
 
 ## What this migration is (and is not)
 
@@ -48,7 +48,13 @@ Reproduced locally with the real `core.atomic_claim_repository.claim_contract_ex
 
 So this is **fail-closed and safe** — a claim is never granted on a dead link — but with Neon Free it would recur after every idle gap, surfacing as one failed approval attempt the owner must retry. It would also hit `durable_turn_state` first, since that path is live.
 
-Proposed hardening (**not applied** — it changes the live claim path's connection layer, so it needs an explicit go and the Cross-Layer Planning Gate assessment): validate on checkout, discard a dead connection, retry once, otherwise return `None` (the existing "unavailable → fail closed" contract):
+**M0.5 — APPLIED (owner-approved 06/10/2026, `core/database.py::get_conn()` only; CODE DONE, NOT VERIFIED IN PROD).** Validate on checkout, discard a dead connection, retry once, otherwise return `None` (the existing "unavailable → fail closed" contract). Scope guard: no change to `atomic_claim_repository.py` claim semantics, no retry of any external action, no flag/`DATABASE_URL`/deploy change.
+
+*Cross-Layer Planning Gate assessment:* `SINGLE-LAYER` — one function in the persistence-connection layer; contract unchanged (`get_conn()` still returns a connection or `None`; all callers already treat `None` as unavailable/fail-closed); no authority, lifecycle, routing or evidence change.
+
+*Verification (local PostgreSQL 16):* `test_database_conn_validation.py` (fake pool: healthy, dead→fresh, dead×2→`None`, `getconn` failure→`None`, unconfigured→`None`); real scenario with the real repository and a server-side `pg_terminate_backend` — first claim after the close `acquired` (was `error`), duplicate → `already_claimed`, same key on another contract → `idempotency_conflict`; and `test_phase_4b0_1a_atomic_claims`, `test_phase_4b0_1b_concurrency` (+ `_regression`, `_regression_mock`), `test_phase_4b0_1c_concurrent_approvals`, `test_phase_4b2_wiring`, `test_turn_state_repository`, `test_external_execution_boundary`/`_validator` (leases), `test_approval_concurrency`, `test_c84_tma_approval_ttl`, `test_pr0c0_tma_approval_truthfulness`, `test_predeploy`, `test_usage_telemetry`, `test_episodic_memory_repository`, `test_memory_shadow_logging`, `test_phase_4b_rollout_tooling`, `smoke_tests.py` all pass. Cost: one extra round trip per checkout. Still to confirm on a real Neon endpoint (M1): `neon_readiness_check.py --idle-seconds 330`.
+
+The applied code:
 
 ```python
 def get_conn():
@@ -72,14 +78,14 @@ def get_conn():
     return None
 ```
 
-Verified locally by wrapping `get_conn` the same way (no repo change): after the simulated server-side close, the next claim → `acquired`; a duplicate claim for the same contract → `already_claimed` (idempotency intact). Cost: one extra round trip per checkout. Re-run `neon_readiness_check.py --idle-seconds 330` against the real endpoint before and after to confirm on real Neon.
+Re-run `neon_readiness_check.py --idle-seconds 330` against the real endpoint to confirm on real Neon (the probe opens its own plain connection, so it shows the *server's* behaviour; the app-level fix is covered by the tests above).
 
 ## Phases
 
 | Phase | Content | Gate to proceed |
 |---|---|---|
 | **M0** (this slice) | Tooling, docs, local proof | Owner reviews; explicit go for M1 |
-| **M0.5** | Connection-validation hardening above (+ test) | Owner go; tests green; planning-gate record |
+| **M0.5** | Connection-validation hardening above (+ `test_database_conn_validation.py`) | **DONE (code, local tests green); not deployed.** Deploy rides the next manual Render deploy |
 | **M1** | Create Neon project (region near Render `virginia`, e.g. AWS us-east), **staging first**: point the staging service's `DATABASE_URL` at it; run migrations; run readiness check with `--concurrency-probe --idle-seconds 330` | All checks PASS on real Neon; cold connect well under 5s; idle probe understood |
 | **M2** | Staging soak: approve/reject flows, duplicate-approve race, restart survival | No unexplained `error`/`unavailable` claim results |
 | **M3** | Production cutover (below) | M2 clean; fresh backup exists off-platform |
@@ -123,4 +129,4 @@ python3 test_neon_readiness_check.py
 
 ## Stop condition
 
-M0 is repository readiness only. It does **not**: create a Neon project, change Render or Vercel, rotate or create secrets, deploy, apply the M0.5 hardening, or merge anything. M1 requires a separate, explicit instruction.
+M0 is repository readiness only. It does **not**: create a Neon project, change Render or Vercel, rotate or create secrets, deploy, perform the production cutover, change `DATABASE_URL` or any flag, decommission PostgreSQL/Oracle, or merge anything. M1 requires a separate, explicit instruction.
