@@ -331,6 +331,8 @@ def test_direct_cost_on_source_rolls_up_into_parent_net_once():
     assert (rows["recP"]["actual"], rows["recP"]["net"]) == (3000, 2500)
     card = view["summary"]["income"]
     assert (card["actual"], card["direct_costs"], card["net"]) == (3000, 500, 2500)    # source not added twice
+    src = next(x for x in card["sources"] if x["goal_id"] == "recT")
+    assert (src["direct_costs"], src["net"]) == (500, 2500)                            # weekly breakdown shows costs too
 
 
 def test_direct_cost_kind_is_accepted_by_draft_and_classifier_validation():

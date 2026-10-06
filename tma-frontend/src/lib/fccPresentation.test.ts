@@ -83,6 +83,16 @@ test("income hierarchy: weekly card shows the source minimum and the rest from o
   assert.equal((by.income_week.hint ?? "").includes("ממקורות אחרים השבוע: ₪2,583"), true);
 });
 
+test("weekly card source line shows its direct costs and net", () => {
+  const cards = headerCards({ monthly_cash_improvement: 0, summary: {
+    income: { target: 15000, actual: 1340, remaining: 13660, dynamic_target_per_week: 3678, goals: 1,
+      weekly_sources_required: 2350, other_sources_needed: 1328,
+      sources: [{ goal_id: "t", title: "נסיעות", period_type: "weekly", target: 2500, actual: 150, remaining: 2350,
+        direct_costs: 100, net: 50 }] } } });
+  const hint = cards.find((c) => c.key === "income_week")?.hint ?? "";
+  assert.equal(hint.includes("נסיעות: ₪150 / ₪2,500 השבוע · הוצאות ישירות -₪100 · נטו ₪50"), true);
+});
+
 test("a source goal card says it is inside the parent and has no weekly pace of its own", () => {
   const m = goalCardModel({ ...base, mode: "recurring", is_source: true, period_type: "weekly", target: 2500, actual: 0, remaining: 2500 });
   assert.equal((m.sourceNote ?? "").includes("לא מתווסף"), true);

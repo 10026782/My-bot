@@ -115,3 +115,8 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - Header income card shows `ברוטו · הוצאות ישירות · נטו` only when there are direct costs. Chat/TMA: the classifier maps "דלק/כביש/חניה" costs to `kind=direct_cost` on the source goal; goes through the same draft/confirm primitive.
 - **Live Airtable prerequisite**: the `direct_cost` choice must exist on `Financial Progress Events.Kind` before the first write.
 - Household expenses, business expense receipts and recurring obligations are separate follow-ups (privacy: `Expenses` is a shared business ledger, `REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE`).
+
+## Weekly card shows direct costs (06/10/2026)
+
+- Device test showed direct costs in the monthly income card but not in the weekly card. Each parent `sources[]` entry now carries `direct_costs` and `net` (its own period window), and the weekly income card line shows `<source>: actual / target השבוע · הוצאות ישירות -₪X · נטו ₪Y`.
+- Unchanged by design: the weekly pace is still computed from the **gross** remaining (costs never reduce progress). Whether pace should be based on net is an open owner decision.

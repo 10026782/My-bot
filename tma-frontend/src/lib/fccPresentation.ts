@@ -91,7 +91,8 @@ export function netBreakdown(card: FccSummaryCard | undefined): string | undefin
 export function weeklyBreakdown(card: FccSummaryCard | undefined): string | undefined {
   if (!card?.sources?.length || card.other_sources_needed == null) return undefined;
   const weekly = card.sources.filter((s) => s.period_type === "weekly");
-  const parts = weekly.map((s) => `${s.title ?? "מקור"}: ${money(s.actual)} / ${money(s.target)} השבוע`);
+  const parts = weekly.map((s) => `${s.title ?? "מקור"}: ${money(s.actual)} / ${money(s.target)} השבוע`
+    + (s.direct_costs ? ` · הוצאות ישירות -${money(s.direct_costs)} · נטו ${money(s.net)}` : ""));
   parts.push(`ממקורות אחרים השבוע: ${money(card.other_sources_needed)}`);
   return parts.join(" · ");
 }
