@@ -247,6 +247,30 @@ def summarize_obligations(items: list[dict]) -> dict:
             "flagged_monthly": round(flagged, 2), "cancel_pending": cancel_pending, "potential_saving": round(saving, 2), "count": len(items)}
 
 
+def monthly_level_now(events: list[Event], today: date) -> float:
+    """Current standing level of a ``recurring_level`` goal: the running total of its monthly_recurring changes."""
+    return round(sum(e.amount for e in events
+                     if e.kind == MONTHLY_RECURRING and not e.superseded and e.occurred <= today), 2)
+
+
+def deposit_status(events: list[Event], today: date) -> dict:
+    """Standing-order savings: PLAN (the standing level) vs ACTUAL (one_time deposits recorded in the month).
+    A missed month is a recorded gap, never an automatic catch-up: next month's target is not inflated; a make-up
+    deposit is simply a deposit in the month it is made. Superseded events are ignored."""
+    live = [e for e in events if not e.superseded]
+    this_start = today.replace(day=1)
+    last_end = this_start - timedelta(days=1)
+    last_start = last_end.replace(day=1)
+    level = sum(e.amount for e in live if e.kind == MONTHLY_RECURRING and e.occurred <= today)
+    level_last = sum(e.amount for e in live if e.kind == MONTHLY_RECURRING and e.occurred <= last_end)
+    dep = sum(e.amount for e in live if e.kind == ONE_TIME and this_start <= e.occurred <= today)
+    dep_last = sum(e.amount for e in live if e.kind == ONE_TIME and last_start <= e.occurred <= last_end)
+    return {"level": round(level, 2), "deposited_month": round(dep, 2),
+            "gap_month": round(max(level - dep, 0.0), 2),
+            "deposited_last_month": round(dep_last, 2), "level_last_month": round(level_last, 2),
+            "gap_last_month": round(max(level_last - dep_last, 0.0), 2)}
+
+
 def household_month_total(events: list[Event], today: date) -> float:
     """Household spend in the calendar month of ``today`` (separate from income/net, superseded ignored)."""
     start = today.replace(day=1)

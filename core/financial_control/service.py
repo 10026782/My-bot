@@ -66,7 +66,7 @@ def assert_goal_owned(goal_id: str, identity) -> dict:
 # Goal families (presentation only; the Goals table is unchanged):
 #   recurring     period_sum        e.g. monthly income      -> target / actual / remaining / weekly pace
 #   monthly_level recurring_level   e.g. lower the instalment -> target / achieved / remaining (no weekly pace)
-#   cumulative    cumulative        e.g. close loans, savings -> total target / actual / remaining / % (pace only with an end date)
+#   cumulative    cumulative        e.g. close loans, emergency fund -> total target / actual / remaining / % (pace only with an end date)
 #   project       no amount target  e.g. sell a property     -> status + next action + date, never ₪0 / "—"
 NUMERIC_CATEGORIES = ("income", "savings", "emergency_fund", "debt")
 SUMMARY_CATEGORIES = {
@@ -99,11 +99,16 @@ def classify_row(row: dict, next_action: dict | None) -> dict:
 # summary card key -> (category key, modes that belong to the card). Different modes are NEVER summed together.
 _CARDS = {
     "income": ("income", ("recurring",)),
-    "savings": ("savings", ("cumulative",)),
+    "savings": ("savings", ("monthly_level",)),        # standing monthly allocation vs target (never resets); legacy cumulative: see _CARD_FALLBACKS
     "emergency_fund": ("emergency_fund", ("cumulative",)),
     "debt_repaid": ("debt", ("cumulative",)),
     "payment_reduction": ("debt", ("recurring", "monthly_level")),
 }
+
+
+# A legacy one-time (cumulative) savings goal still shows on the savings card until it is switched to a monthly
+# allocation — but only when no monthly savings goal exists, so the two families are never summed.
+_CARD_FALLBACKS = {"savings": ("cumulative",)}
 
 
 def _parent_map(goals: list[dict], active_ids: set[str]) -> dict[str, str]:
@@ -162,19 +167,16 @@ def _attach_sources(rows: list[dict]) -> None:
         row["other_sources_needed"] = None if pace is None else round(max(pace - owed, 0.0), 2)
 
 
-def summarize(rows: list[dict]) -> dict:
-    """Header cards: per (category, family) sums over the owner's rows only. A cumulative loan balance
-    is never added to a monthly instalment reduction, and projects never enter any card."""
-    out: dict[str, dict] = {}
+def _accumulate(out: dict, rows: list[dict], cards: dict) -> None:
     for row in rows:
         if row.get("mode") == "project" or row.get("target") is None or row.get("is_source"):
             continue            # a source's target/actual live inside its parent (no double counting)
         cat = _category_key(row.get("category"))
-        for key, (card_cat, modes) in _CARDS.items():
+        for key, (card_cat, modes) in cards.items():
             if cat != card_cat or row.get("mode") not in modes:
                 continue
             card = out.setdefault(key, {"target": 0.0, "actual": 0.0, "remaining": 0.0, "direct_costs": 0.0,
-                                        "net": 0.0, "dynamic_target_per_week": 0.0, "goals": 0})
+                                        "net": 0.0, "dynamic_target_per_week": 0.0, "goals": 0, "mode": row.get("mode")})
             card["goals"] += 1
             for src in row.get("sources") or []:
                 card.setdefault("sources", []).append(src)
@@ -182,8 +184,21 @@ def summarize(rows: list[dict]) -> dict:
                 card["weekly_sources_required"] = round(card.get("weekly_sources_required", 0.0) + row["weekly_sources_required"], 2)
                 if row.get("other_sources_needed") is not None:
                     card["other_sources_needed"] = round(card.get("other_sources_needed", 0.0) + row["other_sources_needed"], 2)
-            for field in ("target", "actual", "remaining", "dynamic_target_per_week", "direct_costs", "net"):
-                card[field] = round(card[field] + (row.get(field) or 0.0), 2)
+            for field in ("target", "actual", "remaining", "dynamic_target_per_week", "direct_costs", "net",
+                          "deposited_month", "gap_month", "gap_last_month"):
+                if field in ("deposited_month", "gap_month", "gap_last_month") and field not in row:
+                    continue
+                card[field] = round(card.get(field, 0.0) + (row.get(field) or 0.0), 2)
+
+
+def summarize(rows: list[dict]) -> dict:
+    """Header cards: per (category, family) sums over the owner's rows only. A cumulative loan balance
+    is never added to a monthly instalment reduction, and projects never enter any card."""
+    out: dict[str, dict] = {}
+    _accumulate(out, rows, _CARDS)
+    missing = {k: (_CARDS[k][0], modes) for k, modes in _CARD_FALLBACKS.items() if k not in out}
+    if missing:
+        _accumulate(out, rows, missing)
     return out
 
 
@@ -310,6 +325,8 @@ def overview(identity, today: date | None = None) -> dict:
         row["priority"] = gf.get(FinGoalFields.PRIORITY)
         row["parent_id"] = parent_of.get(goal["id"])
         row["is_source"] = goal["id"] in parent_of
+        if row.get("mode") == "monthly_level" and _category_key(gf.get(FinGoalFields.CATEGORY)) == "savings":
+            row.update(calc.deposit_status(own[goal["id"]], today))      # plan (level) vs actual deposits this month
         rows.append(classify_row(row, next_by_goal.get(goal["id"])))
     _attach_sources(rows)
 

@@ -511,7 +511,7 @@ def test_income_goal_infers_category_period_method_and_skips_end_date():
 
 # cumulative types need an end date; "other" never guesses period/method
 def test_required_matrix_cumulative_needs_end_date_and_other_asks_period_and_method():
-    for cat in ("savings", "debt"):
+    for cat in ("emergency_fund", "debt"):
         ex = Ex(classify={"g": {"action": "create_goal", "title": f"t-{cat}", "target": 1000, "category": cat}})
         r = run(ex, ELIYAHU, "g")
         assert r.awaiting == "end_date", cat
@@ -1186,3 +1186,141 @@ def test_cancelled_commitment_can_be_added_again():
     run(ex, ELIYAHU, "ביתי")
     r = run(ex, ELIYAHU, "אשר")
     assert r.state == "confirmed" and r.snapshot["writes"][0]["op"] == "post"       # inactive one does not block a new row
+
+
+# ═══════════════ Savings = a standing monthly allocation vs target (never resets); emergency fund = one-time pot ═══════════════
+def test_new_savings_goal_is_a_standing_monthly_level_not_cumulative_nor_period_sum():
+    ex = Ex(classify={"s": {"action": "create_goal", "title": "הפרשה לשוק ההון", "target": 5000, "category": "savings"}})
+    r = run(ex, ELIYAHU, "s")
+    assert r.state == "review" and "(הוסק)" in r.message                       # period + method inferred, no end date asked
+    w = run(ex, ELIYAHU, "אשר").snapshot["writes"][0]["fields"]
+    assert (w[GF.CATEGORY], w[GF.PERIOD_TYPE], w[GF.CALC_METHOD]) == ("savings", "monthly", "recurring_level")
+    assert GF.END_DATE not in w
+
+
+def _savings_goal(gid="recS", target=5000):
+    return goal(gid, "הפרשה לשוק ההון", ELI, target,
+                **{GF.CATEGORY: "savings", GF.PERIOD_TYPE: "monthly", GF.CALC_METHOD: "recurring_level"})
+
+
+def test_savings_level_accumulates_across_months_and_never_resets():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("e1", "recS", ELI, 2000, kind="monthly_recurring", day="2026-08-15"),    # started two months ago
+                             event("e2", "recS", ELI, 1000, kind="monthly_recurring", day="2026-10-03"),   # raised this month
+                             event("e3", "recS", ELI, -300, kind="monthly_recurring", day="2026-10-05")]   # cut back a little
+    view = service.overview(ELIYAHU, TODAY)
+    card = view["summary"]["savings"]
+    assert (card["actual"], card["target"], card["remaining"], card["mode"]) == (2700, 5000, 2300, "monthly_level")
+    assert view["goals"][0]["dynamic_target_per_week"] is None                      # a level has no weekly pace
+
+
+def test_savings_one_time_deposits_do_not_count_as_the_standing_level():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("e1", "recS", ELI, 9000, kind="one_time", day="2026-10-03")]
+    assert service.overview(ELIYAHU, TODAY)["summary"]["savings"]["actual"] == 0
+
+
+def test_legacy_cumulative_savings_shows_only_until_a_monthly_one_exists_and_never_sums():
+    legacy = goal("gL", "חיסכון ישן", ELI, 10000, **{GF.CATEGORY: "savings", GF.CALC_METHOD: "cumulative"})
+    DB[Tables.FIN_EVENTS] = []
+    DB[Tables.FIN_GOALS] = [legacy]
+    assert service.overview(ELIYAHU, TODAY)["summary"]["savings"]["mode"] == "cumulative"
+    DB[Tables.FIN_GOALS] = [legacy, _savings_goal(target=5000)]
+    card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
+    assert (card["target"], card["mode"]) == (5000, "monthly_level")                   # 15,000 would mean mixing families
+
+
+# ═══════════════ "I now allocate X per month" = a NEW total level; the system computes the delta ═══════════════
+def _level_world(*levels):
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event(f"e{i}", "recS", ELI, v, kind="monthly_recurring", day="2026-09-01") for i, v in enumerate(levels)]
+
+
+LEVEL = {"action": "log_progress", "goal_hint": "הפרשה", "kind": "monthly_recurring", "level": 3500}
+
+
+def test_set_level_computes_the_delta_from_the_current_level():
+    _level_world(2000, 1000)                                    # current level 3,000
+    ex = Ex(classify={"אני מפריש עכשיו 3500": LEVEL})
+    r = run(ex, ELIYAHU, "אני מפריש עכשיו 3500")
+    assert r.state == "review" and "₪500" in r.message and "קביעת רמה" in r.message
+    (w,) = run(ex, ELIYAHU, "אשר").snapshot["writes"]
+    assert w["fields"]["Amount"] == 500 and w["fields"]["Kind"] == "monthly_recurring"
+
+
+def test_set_level_downwards_is_a_negative_delta_and_same_level_is_a_noop():
+    _level_world(4000)
+    ex = Ex(classify={"עכשיו 3500": LEVEL, "עכשיו 4000": {**LEVEL, "level": 4000}})
+    r = run(ex, ELIYAHU, "עכשיו 3500")
+    assert "-₪500" in r.message
+    run(ex, ELIYAHU, "בטל")
+    assert run(ex, ELIYAHU, "עכשיו 4000").state == "clarify"
+
+
+def test_set_level_validation_rejects_garbage():
+    from core.financial_control import writer as w
+    assert w.validate_intent({**LEVEL, "level": -5}) is None
+    assert w.validate_intent({**LEVEL, "level": "הרבה"}) is None
+
+
+# ═══════════════ the agent passes a structured intent -> no second classification call ═══════════════
+def test_structured_intent_skips_the_classifier_call(monkeypatch):
+    from core.financial_control import classifier
+    monkeypatch.setattr(classifier, "classify", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Haiku must not be called")))
+    _level_world(3000)
+    monkeypatch.setattr(fchat.gate, "enabled_for", lambda identity: True)
+    out = fchat.start_turn(ELIYAHU, "אני מפריש עכשיו 3500", intent=LEVEL)
+    assert "₪500" in out and "אשר" in out
+
+
+def test_invalid_structured_intent_falls_back_to_the_classifier(monkeypatch):
+    from core.financial_control import classifier
+    calls = []
+    monkeypatch.setattr(classifier, "classify", lambda text, titles, today=None: calls.append(text) or None)
+    monkeypatch.setattr(fchat.gate, "enabled_for", lambda identity: True)
+    _level_world(3000)
+    fchat.start_turn(ELIYAHU, "x", intent={"action": "bogus"})
+    assert calls == ["x"]
+
+
+# ═══════════════ standing-order savings: plan (level) vs actual deposits; a missed month = a visible gap ═══════════════
+def test_deposits_vs_level_gap_this_month_and_last_month():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [
+        event("l1", "recS", ELI, 3000, kind="monthly_recurring", day="2026-08-01"),      # level 3,000 from August
+        event("l2", "recS", ELI, 2000, kind="monthly_recurring", day="2026-10-02"),      # raised to 5,000 this month
+        event("d1", "recS", ELI, 3000, kind="one_time", day="2026-09-10"),               # September fully deposited? no: 3,000 of 3,000
+        event("d2", "recS", ELI, 1200, kind="one_time", day="2026-10-04")]               # this month so far
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recS"]
+    assert (row["deposited_month"], row["gap_month"]) == (1200, 3800)                    # 5,000 plan - 1,200 deposited
+    assert (row["gap_last_month"]) == 0                                                  # September met its 3,000
+    card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
+    assert (card["deposited_month"], card["gap_month"]) == (1200, 3800)
+
+
+def test_missed_month_is_a_gap_and_does_not_inflate_this_months_level():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("l1", "recS", ELI, 5000, kind="monthly_recurring", day="2026-08-01"),
+                             event("d1", "recS", ELI, 1000, kind="one_time", day="2026-09-12")]      # September short by 4,000
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recS"]
+    assert row["gap_last_month"] == 4000
+    assert row["actual"] == 5000 and row["target"] == 5000                               # level untouched: no automatic catch-up
+
+
+def test_make_up_deposit_counts_in_the_month_it_is_made_not_backwards():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("l1", "recS", ELI, 5000, kind="monthly_recurring", day="2026-08-01"),
+                             event("d1", "recS", ELI, 9000, kind="one_time", day="2026-10-03")]      # 5,000 + 4,000 make-up
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recS"]
+    assert row["deposited_month"] == 9000 and row["gap_month"] == 0 and row["gap_last_month"] == 5000
+
+
+def test_deposit_is_logged_as_one_time_on_the_savings_goal():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = []
+    dep = {"action": "log_progress", "goal_hint": "הפרשה", "kind": "one_time", "amount": 5000}
+    ex = Ex(classify={"הפקדתי החודש 5000": dep})
+    r = run(ex, ELIYAHU, "הפקדתי החודש 5000")
+    assert r.state == "review"
+    (w,) = run(ex, ELIYAHU, "אשר").snapshot["writes"]
+    assert w["fields"]["Kind"] == "one_time" and w["fields"]["Amount"] == 5000

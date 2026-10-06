@@ -340,7 +340,7 @@ def dispatch_tool(
             # ── Private Financial Control Center ─────
             case "fcc_update":
                 from core.financial_control import chat as _fcc_chat
-                return _fcc_chat.start_turn(identity, str(inputs.get("text", "")))
+                return _fcc_chat.start_turn(identity, str(inputs.get("text", "")), intent=inputs.get("intent"))
 
             # ── Calendar ─────────────────────────────
             case "calendar_get_events":

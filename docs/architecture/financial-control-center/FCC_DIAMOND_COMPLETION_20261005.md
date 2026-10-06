@@ -151,3 +151,22 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 ## Weekly card wording (07/10/2026)
 
 - The weekly income target already INCLUDES the weekly sources (travel is a part of it, never added on top). The card line now shows what each source still owes so the parts add up to the headline: `מזה: נסיעות: נשאר ₪746 מתוך ₪2,500 השבוע · ממקורות אחרים: ₪2,963` (746 + 2,963 = 3,709). Wording only; no calculation changed.
+
+## Savings = a standing monthly allocation vs target (07/10/2026, owner decision)
+
+- **Savings** (`category = savings`) is a **standing monthly allocation to the capital market, like a standing order** (e.g. target ₪5,000 per month). It is a **level, not a sum that resets**: `recurring_level` / `monthly`, family `monthly_level`. The current level = the running total of `monthly_recurring` events (each raise/cut of the allocation is an event: positive = raise, negative = cut), so cutting costs / raising income is tracked as progress toward the target and nothing resets at month end. One-time deposits are not part of the level. **A one-time accumulated pot is the emergency fund** (`cumulative`).
+- New savings goals infer `monthly` + `recurring_level` (no end date asked); the classifier prompt states the distinction and the delta convention. The earlier same-day wording (monthly `period_sum`, resets on the 1st) is superseded by this section.
+- **Header card** `savings` counts `monthly_level` goals ("הפרשה חודשית לחיסכון", hint "הוראת קבע מול יעד · לא מתאפס"). A legacy cumulative savings goal still shows only while no monthly-level one exists (`_CARD_FALLBACKS`); families are never summed. The goal card shows "יעד הפרשה חודשית / מופרש כרגע לחודש / חסר ליעד".
+- **Live data**: the existing live savings goal (target 10,000) is still cumulative until it is switched (chat: "עדכן יעד חיסכון: חודשי, שיטת חישוב שינוי קבוע בחודש" + target 5,000, or an owner-approved edit of the record). Not changed by this commit.
+
+## Set a savings level + structured intent from the agent (08/10/2026)
+
+- **"אני מפריש עכשיו X בחודש"** = the NEW total level, not a delta. Classifier/agent intent key `level`; the conversation computes `delta = level - current standing level` (`calc.monthly_level_now`, running total of `monthly_recurring` events) and logs one `monthly_recurring` event (note "קביעת רמה: ₪X לחודש"). Same level -> "nothing to update"; goal chosen later -> delta computed then. Raises/cuts stated as a change ("הגדלתי ב-1,000") keep using `amount` (negative = cut).
+- **No second model call from chat**: the `fcc_update` tool takes an optional structured `intent` (the calling agent already understood the message). It is validated like classifier output (`writer.validate_intent`) and used for the FIRST classification via `chat.PresetIntentExtractor`; missing/invalid -> the Haiku classifier runs as before. Draft -> review -> confirm is unchanged. The TMA free-text box still uses the classifier (no calling agent there).
+- Open (owner decision): what a missed savings month means (shortfall recorded + follow-up task vs automatic catch-up).
+
+## Savings plan vs actual: a missed month is a visible gap (08/10/2026, owner-approved)
+
+- **Plan** = the standing level (running total of `monthly_recurring` events). **Actual** = `one_time` deposits recorded in the calendar month ("הפקדתי החודש X"). `calc.deposit_status` yields `deposited_month`, `gap_month = max(level - deposited, 0)` and the same for last month (`gap_last_month`, using the level as of last month's end). Superseded events are ignored.
+- **A missed month never inflates the next one**: the level/target is untouched (no automatic catch-up). A make-up deposit is simply a deposit in the month it is made (it does not rewrite last month). The gap stays visible: goal card rows "הופקד בפועל החודש / פער החודש / פער בחודש שעבר" and the savings card hint ("הופקד החודש ₪X · פער ₪Y · פער בחודש שעבר ₪Z"), which suggests the chat phrase "משימת המשך לפער בחיסכון" — the follow-up task is created through the existing `follow_up` draft/confirm primitive, never silently by a background job.
+- Classifier: "הפקדתי החודש X" = `log_progress`, `kind=one_time` on the savings goal (a real deposit, not a level change).

@@ -30,7 +30,31 @@ TOOL_SCHEMAS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "text": {"type": "string", "description": "הטקסט המקורי של המשתמש, כפי שנכתב"}
+                "text": {"type": "string", "description": "הטקסט המקורי של המשתמש, כפי שנכתב"},
+                "intent": {
+                    "type": "object",
+                    "description": "אופציונלי, חוסך קריאת מודל נוספת: הכוונה המובנית כפי שהבנת אותה מההודעה הפתיחה. אם חסר או לא תקין — המערכת מסווגת בעצמה. הכתיבה עדיין רק אחרי סיכום ואישור.",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["log_progress", "set_target", "create_goal", "update_goal", "rename_goal", "follow_up", "note", "upsert_obligation", "deactivate_obligation"]},
+                        "goal_hint": {"type": "string", "description": "שם היעד כפי שנאמר"},
+                        "amount": {"type": "number", "description": "סכום; בשינוי רמת הפרשה: ההפרש (חיובי=הגדלה, שלילי=הקטנה)"},
+                        "level": {"type": "number", "description": "הרמה החודשית הכוללת החדשה (״אני מפריש עכשיו X בחודש״) — במקום amount"},
+                        "target": {"type": "number"},
+                        "kind": {"type": "string", "enum": ["one_time", "monthly_recurring", "direct_cost", "household_expense"]},
+                        "title": {"type": "string"}, "new_title": {"type": "string"}, "task_title": {"type": "string"},
+                        "note": {"type": "string"}, "category": {"type": "string"},
+                        "period_type": {"type": "string", "enum": ["monthly", "weekly", "custom"]},
+                        "calc_method": {"type": "string", "enum": ["period_sum", "cumulative", "recurring_level"]},
+                        "start_date": {"type": "string"}, "end_date": {"type": "string"},
+                        "frequency": {"type": "string", "enum": ["monthly", "quarterly", "yearly", "custom"]},
+                        "scope": {"type": "string", "enum": ["household", "business", "personal"]},
+                        "review_status": {"type": "string", "enum": ["keep", "reduce", "cancel", "negotiate", "review"]},
+                        "obligation_type": {"type": "string", "enum": ["subscription", "standing_order", "service", "loan_payment", "other"]},
+                        "essentiality": {"type": "string", "enum": ["essential", "useful", "optional", "review"]},
+                        "saving": {"type": "number"}, "vendor": {"type": "string"}, "next_charge_date": {"type": "string"}
+                    },
+                    "required": ["action"]
+                }
             },
             "required": ["text"]
         }

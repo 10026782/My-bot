@@ -48,6 +48,11 @@ def validate_intent(intent: object) -> dict | None:
             if val not in allowed:
                 return None
             out[key] = val
+    lvl = intent.get("level")
+    if lvl is not None:                     # "I now allocate X per month": the NEW total level, not a delta
+        if isinstance(lvl, bool) or not isinstance(lvl, (int, float)) or lvl < 0:
+            return None
+        out["level"] = float(lvl)
     val = intent.get("saving")
     if val is not None:
         if isinstance(val, bool) or not isinstance(val, (int, float)) or val < 0:
