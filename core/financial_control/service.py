@@ -154,7 +154,8 @@ def _attach_sources(rows: list[dict]) -> None:
         if not kids:
             continue
         row["sources"] = [{"goal_id": k["goal_id"], "title": k["title"], "period_type": k.get("period_type"),
-                           "target": k["target"], "actual": k["actual"], "remaining": k["remaining"]} for k in kids]
+                           "target": k["target"], "actual": k["actual"], "remaining": k["remaining"],
+                           "direct_costs": k.get("direct_costs") or 0.0, "net": k.get("net")} for k in kids]
         owed = sum(k["remaining"] or 0.0 for k in kids if k.get("period_type") == "weekly")
         pace = row.get("dynamic_target_per_week")
         row["weekly_sources_required"] = round(owed, 2)

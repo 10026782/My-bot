@@ -42,7 +42,7 @@ export function goalCardModel(g: FccGoalRow): GoalCardModel {
   if (g.status === "missing_target" || g.target == null) {
     return { kind: "needs_target", metrics: [], progressPct: null, note: "הגדר סכום יעד כדי להתחיל לעקוב" };
   }
-  const pct = g.target > 0 ? Math.min(100, Math.round(((g.actual ?? 0) / g.target) * 100)) : 0;
+  const pct = g.target > 0 ? Math.min(100, Math.round((((g.direct_costs ? g.net : g.actual) ?? 0) / g.target) * 100)) : 0;
   if (g.mode === "monthly_level") {
     return { kind: "numeric", progressPct: pct, metrics: [
       { label: "יעד הפחתה לחודש", value: money(g.target) },
@@ -91,7 +91,8 @@ export function netBreakdown(card: FccSummaryCard | undefined): string | undefin
 export function weeklyBreakdown(card: FccSummaryCard | undefined): string | undefined {
   if (!card?.sources?.length || card.other_sources_needed == null) return undefined;
   const weekly = card.sources.filter((s) => s.period_type === "weekly");
-  const parts = weekly.map((s) => `${s.title ?? "מקור"}: ${money(s.actual)} / ${money(s.target)} השבוע`);
+  const parts = weekly.map((s) => `${s.title ?? "מקור"}: ${money(s.actual)} / ${money(s.target)} השבוע`
+    + (s.direct_costs ? ` · הוצאות ישירות -${money(s.direct_costs)} · נטו ${money(s.net)}` : ""));
   parts.push(`ממקורות אחרים השבוע: ${money(card.other_sources_needed)}`);
   return parts.join(" · ");
 }
@@ -103,7 +104,8 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
   const ratio = (card: { actual: number; target: number } | undefined, hint = "לא הוגדר יעד") =>
     card ? { value: `${money(card.actual)} / ${money(card.target)}`, hint: undefined as string | undefined }
          : { value: "—", hint };
-  const income = ratio(s.income);
+  // progress is NET when there are direct costs (profit, not turnover); gross/costs are in the hint
+  const income = s.income?.direct_costs ? ratio({ actual: s.income.net ?? 0, target: s.income.target }) : ratio(s.income);
   const savings = ratio(s.savings);
   const emergency = ratio(s.emergency_fund);
   const debt = ratio(s.debt_repaid);

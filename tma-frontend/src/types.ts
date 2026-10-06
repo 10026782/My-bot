@@ -509,6 +509,8 @@ export interface FccSource {
   target: number;
   actual: number;
   remaining: number | null;
+  direct_costs?: number | null;
+  net?: number | null;
 }
 
 export interface FccSummaryCard {

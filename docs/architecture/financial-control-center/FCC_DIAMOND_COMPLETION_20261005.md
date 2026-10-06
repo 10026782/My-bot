@@ -115,3 +115,14 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - Header income card shows `ברוטו · הוצאות ישירות · נטו` only when there are direct costs. Chat/TMA: the classifier maps "דלק/כביש/חניה" costs to `kind=direct_cost` on the source goal; goes through the same draft/confirm primitive.
 - **Live Airtable prerequisite**: the `direct_cost` choice must exist on `Financial Progress Events.Kind` before the first write.
 - Household expenses, business expense receipts and recurring obligations are separate follow-ups (privacy: `Expenses` is a shared business ledger, `REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE`).
+
+## Weekly card shows direct costs (06/10/2026)
+
+- Device test showed direct costs in the monthly income card but not in the weekly card. Each parent `sources[]` entry now carries `direct_costs` and `net` (its own period window), and the weekly income card line shows `<source>: actual / target השבוע · הוצאות ישירות -₪X · נטו ₪Y`.
+- **Owner decision (06/10/2026): progress is NET.** `remaining`, weekly pace and status use `net = gross - direct costs` (profit, not turnover); `actual` stays the gross display value. Goal: learn what to cut (EV, smarter trips) — direct vs indirect vs household. Header income card shows net / target, hint shows gross and costs. This supersedes the earlier "costs never reduce progress" wording above.
+
+## Business-expense fields on `Expenses` (06/10/2026)
+
+- Six fields added live to `Expenses` (owner-approved): `Expense Scope` (business_direct | business_reportable | indirect), `Receipt Required` (checkbox), `Receipt Status` (missing | received | not_required), `Vendor`, `Payment Method` (cash | card | transfer | standing_order), `Related Goal` (link -> Financial Goals). Constants in `ExpenseFields`, listed in `schema_cache.json`.
+- The `Related Goal` link auto-created an inverse link field on `Financial Goals` (`fldVcBORLDgrCVaa0`); it is not used by code.
+- `household` is deliberately **not** a scope: `Expenses` is a shared business ledger (manager/employee can read it). Household spending stays private (FCC events). No code reads or writes the new fields yet; an FCC receipts-missing counter needs an owner-scope decision first (`REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE`).

@@ -305,13 +305,13 @@ def test_parent_link_cycle_and_foreign_parent_are_ignored():
 
 
 # ═══ Gross -> direct costs -> net (event kind direct_cost; no new table) ═══
-def test_direct_cost_never_reduces_gross_actual_but_gives_net():
+def test_direct_cost_keeps_gross_actual_but_net_drives_remaining():
     g = goal("g", "t", ELI, 15000)
     evs = [calc.Event("one_time", 3000, date(2026, 10, 6)), calc.Event("direct_cost", 380, date(2026, 10, 6)),
            calc.Event("direct_cost", 120, date(2026, 10, 7))]
     r = calc.compute_goal(g, evs, TODAY, GF)
     assert (r["actual"], r["direct_costs"], r["net"]) == (3000, 500, 2500)
-    assert r["remaining"] == 12000                                   # progress vs target stays gross
+    assert r["remaining"] == 12500                                   # progress vs target is net
 
 
 def test_direct_cost_respects_period_and_superseded_and_other_months():
@@ -331,6 +331,8 @@ def test_direct_cost_on_source_rolls_up_into_parent_net_once():
     assert (rows["recP"]["actual"], rows["recP"]["net"]) == (3000, 2500)
     card = view["summary"]["income"]
     assert (card["actual"], card["direct_costs"], card["net"]) == (3000, 500, 2500)    # source not added twice
+    src = next(x for x in card["sources"] if x["goal_id"] == "recT")
+    assert (src["direct_costs"], src["net"]) == (500, 2500)                            # weekly breakdown shows costs too
 
 
 def test_direct_cost_kind_is_accepted_by_draft_and_classifier_validation():
@@ -1001,3 +1003,12 @@ def test_summary_never_mixes_families_or_includes_projects_or_other_owners():
     assert summary["emergency_fund"]["target"] == 60000
     assert "savings" not in summary                                    # only a target-less savings goal exists
     assert "99000" not in str(summary)                                 # another owner's goal never aggregates
+
+
+def test_direct_costs_reduce_remaining_and_raise_pace():
+    hierarchy([event("recA", "recT", ELI, 100, day="2026-10-06"),
+               event("recF", "recT", ELI, 30, kind="direct_cost", day="2026-10-06")])
+    rows = rows_of(service.overview(ELIYAHU, TODAY))
+    p = rows["recP"]
+    assert (p["actual"], p["net"]) == (100, 70)
+    assert p["remaining"] == p["target"] - 70                # profit is 70, not 100
