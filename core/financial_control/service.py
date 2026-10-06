@@ -91,7 +91,7 @@ def classify_row(row: dict, next_action: dict | None) -> dict:
     """Decide the goal family. No amount target + not a numeric category => project/milestone:
     amounts are blanked (no ₪0 / dead "—" cells) and the card carries the next action instead."""
     if row.get("target") is None and _category_key(row.get("category")) is None:
-        row.update(mode="project", status="project", actual=None, remaining=None,
+        row.update(mode="project", status="project", actual=None, remaining=None, direct_costs=None, net=None,
                    remaining_periods=None, dynamic_target_per_week=None, next_action=next_action)
     return row
 
@@ -172,8 +172,8 @@ def summarize(rows: list[dict]) -> dict:
         for key, (card_cat, modes) in _CARDS.items():
             if cat != card_cat or row.get("mode") not in modes:
                 continue
-            card = out.setdefault(key, {"target": 0.0, "actual": 0.0, "remaining": 0.0,
-                                        "dynamic_target_per_week": 0.0, "goals": 0})
+            card = out.setdefault(key, {"target": 0.0, "actual": 0.0, "remaining": 0.0, "direct_costs": 0.0,
+                                        "net": 0.0, "dynamic_target_per_week": 0.0, "goals": 0})
             card["goals"] += 1
             for src in row.get("sources") or []:
                 card.setdefault("sources", []).append(src)
@@ -181,7 +181,7 @@ def summarize(rows: list[dict]) -> dict:
                 card["weekly_sources_required"] = round(card.get("weekly_sources_required", 0.0) + row["weekly_sources_required"], 2)
                 if row.get("other_sources_needed") is not None:
                     card["other_sources_needed"] = round(card.get("other_sources_needed", 0.0) + row["other_sources_needed"], 2)
-            for field in ("target", "actual", "remaining", "dynamic_target_per_week"):
+            for field in ("target", "actual", "remaining", "dynamic_target_per_week", "direct_costs", "net"):
                 card[field] = round(card[field] + (row.get(field) or 0.0), 2)
     return out
 

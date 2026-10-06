@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- feat(fcc): gross -> direct costs -> net. New Progress Event kind `direct_cost` (no new table); `actual` stays gross, rows/summary add `direct_costs` and `net`, source costs roll up into the parent once; header income card and goal cards show the breakdown; classifier/draft accept `direct_cost`. Requires the `direct_cost` choice on `Financial Progress Events.Kind`.
+
 - feat(fcc): income hierarchy + calendar-day pacing. Explicit `Contributes To` link on Financial Goals (parent/source): a source target never adds to the parent target, its events roll up into the parent actual once (de-duplicated by event id; source target changes never move the parent). Monthly `period_sum` weekly pace = remaining / calendar days left * min(7, days left) (no whole-week divisor). Header weekly card shows the source minimum and the amount needed from other sources. Cycles/foreign parents ignored.
 
 - feat(fcc): goal families in FCC rendering/summary — recurring (period_sum), monthly_level, cumulative, project/milestone, derived from existing Goals data (no schema change, no new table). Header cards aggregate per family (income-only weekly target), project goals show next action/target date without amounts. See FCC_DIAMOND_COMPLETION_20261005.md.

@@ -89,6 +89,18 @@ test("a source goal card says it is inside the parent and has no weekly pace of 
   assert.equal(m.metrics.some((x) => x.label === "יעד דינמי לשבוע"), false);
 });
 
+test("gross -> direct costs -> net shows only when there are direct costs", () => {
+  const withCost = headerCards({ monthly_cash_improvement: 0, summary: {
+    income: { target: 15000, actual: 3000, remaining: 12000, direct_costs: 500, net: 2500, dynamic_target_per_week: 3500, goals: 1 } } });
+  const hint = withCost.find((c) => c.key === "income")?.hint ?? "";
+  assert.equal(hint, "ברוטו ₪3,000 · הוצאות ישירות -₪500 · נטו ₪2,500");
+  const without = headerCards({ monthly_cash_improvement: 0, summary: {
+    income: { target: 15000, actual: 3000, remaining: 12000, direct_costs: 0, net: 3000, dynamic_target_per_week: 3500, goals: 1 } } });
+  assert.equal(without.find((c) => c.key === "income")?.hint, undefined);
+  const m = goalCardModel({ ...base, mode: "recurring", target: 15000, actual: 3000, remaining: 12000, direct_costs: 500, net: 2500 });
+  assert.deepEqual(m.metrics.slice(-3).map((x) => x.label), ["ברוטו", "הוצאות ישירות", "נטו"]);
+});
+
 test("labels and dates", () => {
   assert.equal(CATEGORY_LABEL.business_project, "פרויקט עסקי");
   assert.equal(dmy("2026-12-31"), "31/12/2026");

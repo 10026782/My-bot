@@ -304,6 +304,49 @@ def test_parent_link_cycle_and_foreign_parent_are_ignored():
     assert not rows_of(service.overview(ELIYAHU, TODAY))["recT"]["is_source"]
 
 
+# ═══ Gross -> direct costs -> net (event kind direct_cost; no new table) ═══
+def test_direct_cost_never_reduces_gross_actual_but_gives_net():
+    g = goal("g", "t", ELI, 15000)
+    evs = [calc.Event("one_time", 3000, date(2026, 10, 6)), calc.Event("direct_cost", 380, date(2026, 10, 6)),
+           calc.Event("direct_cost", 120, date(2026, 10, 7))]
+    r = calc.compute_goal(g, evs, TODAY, GF)
+    assert (r["actual"], r["direct_costs"], r["net"]) == (3000, 500, 2500)
+    assert r["remaining"] == 12000                                   # progress vs target stays gross
+
+
+def test_direct_cost_respects_period_and_superseded_and_other_months():
+    g = goal("g", "t", ELI, 15000)
+    evs = [calc.Event("direct_cost", 100, date(2026, 9, 30)), calc.Event("direct_cost", 50, date(2026, 10, 2), superseded=True),
+           calc.Event("direct_cost", 70, date(2026, 10, 2))]
+    assert calc.compute_goal(g, evs, TODAY, GF)["direct_costs"] == 70
+
+
+def test_direct_cost_on_source_rolls_up_into_parent_net_once():
+    hierarchy([event("recA", "recT", ELI, 3000, day="2026-10-06"),
+               event("recF", "recT", ELI, 380, kind="direct_cost", day="2026-10-06"),
+               event("recG", "recT", ELI, 120, kind="direct_cost", day="2026-10-07")])
+    view = service.overview(ELIYAHU, TODAY)
+    rows = rows_of(view)
+    assert (rows["recT"]["actual"], rows["recT"]["direct_costs"], rows["recT"]["net"]) == (3000, 500, 2500)
+    assert (rows["recP"]["actual"], rows["recP"]["net"]) == (3000, 2500)
+    card = view["summary"]["income"]
+    assert (card["actual"], card["direct_costs"], card["net"]) == (3000, 500, 2500)    # source not added twice
+
+
+def test_direct_cost_kind_is_accepted_by_draft_and_classifier_validation():
+    assert "direct_cost" in fd.EVENT_KINDS and fd.VALUE_LABELS["kind"]["direct_cost"]
+    from core.financial_control import writer as w
+    assert w.validate_intent({"action": "log_progress", "goal_hint": "נסיעות", "amount": 380, "kind": "direct_cost"})["kind"] == "direct_cost"
+    assert w.validate_intent({"action": "log_progress", "goal_hint": "x", "amount": 1, "kind": "bogus"}) is None
+
+
+def test_project_rows_have_no_cost_fields():
+    DB[Tables.FIN_GOALS] = [goal("recPr", "פרויקט", ELI, None, **{GF.CATEGORY: "project"})]
+    DB[Tables.FIN_EVENTS] = []
+    row = service.overview(ELIYAHU, TODAY)["goals"][0]
+    assert row["mode"] == "project" and row["direct_costs"] is None and row["net"] is None
+
+
 def test_http_flag_off_is_404(monkeypatch):
     c = http(monkeypatch, ELIYAHU, flag=False)
     assert c.get("/api/fcc/overview", headers=H).status_code == 404

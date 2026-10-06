@@ -68,7 +68,23 @@ export function goalCardModel(g: FccGoalRow): GoalCardModel {
     { label: "בפועל", value: money(g.actual) },
     { label: "נשאר", value: money(g.remaining) },
     ...(g.is_source && g.period_type === "weekly" ? [] : [{ label: "יעד דינמי לשבוע", value: money(g.dynamic_target_per_week) }]),
+    ...costMetrics(g),
   ] };
+}
+
+/** Gross -> direct costs -> net, only when the goal actually has direct costs. */
+function costMetrics(g: { actual?: number | null; direct_costs?: number | null; net?: number | null }): GoalMetric[] {
+  if (!g.direct_costs) return [];
+  return [
+    { label: "ברוטו", value: money(g.actual) },
+    { label: "הוצאות ישירות", value: `-${money(g.direct_costs)}` },
+    { label: "נטו", value: money(g.net) },
+  ];
+}
+
+export function netBreakdown(card: FccSummaryCard | undefined): string | undefined {
+  if (!card?.direct_costs) return undefined;
+  return `ברוטו ${money(card.actual)} · הוצאות ישירות -${money(card.direct_costs)} · נטו ${money(card.net)}`;
 }
 
 /** "of which travel ₪1,500 still owed · from other sources ₪2,583" — the weekly income card breakdown. */
@@ -93,7 +109,7 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
   const debt = ratio(s.debt_repaid);
   const reduction = ratio(s.payment_reduction);
   return [
-    { key: "income", label: "הכנסה מול יעד", ...income },
+    { key: "income", label: "הכנסה מול יעד", ...income, hint: netBreakdown(s.income) },
     { key: "income_week", label: "יעד הכנסה לשבוע",
       value: s.income ? money(s.income.dynamic_target_per_week) : "—",
       hint: s.income ? weeklyBreakdown(s.income) : "לא הוגדר יעד" },

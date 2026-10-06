@@ -259,7 +259,8 @@ export function FinancialControlCenter({ onBack }: Props) {
             {data.recent_events.map((e, i) => (
               <div key={i} className="fcc-event">
                 <span>{e["Occurred At"]}</span>
-                <strong>{e.Kind === "target_change" ? `יעד חדש ${money(e.Amount)}` : money(e.Amount)}</strong>
+                <strong>{e.Kind === "target_change" ? `יעד חדש ${money(e.Amount)}` : e.Kind === "direct_cost" ? `-${money(e.Amount)}` : money(e.Amount)}</strong>
+                {e.Kind === "direct_cost" && <StatusBadge tone="warning">הוצאה ישירה</StatusBadge>}
                 {e.Kind === "monthly_recurring" && <StatusBadge tone="info">חודשי קבוע</StatusBadge>}
               </div>
             ))}
