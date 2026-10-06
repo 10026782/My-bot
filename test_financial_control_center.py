@@ -232,6 +232,78 @@ def http(monkeypatch, who, flag=True):
     return app.test_client()
 
 
+# ═══ Income hierarchy: parent goal + source/sub-goal (explicit "Contributes To" link) ═══
+def hierarchy(events):
+    DB[Tables.FIN_GOALS] = [
+        goal("recP", "הכנסה חודשית כוללת", ELI, 15000, **{GF.CATEGORY: "income"}),
+        goal("recT", "הכנסה מנסיעות", ELI, 2500, **{GF.CATEGORY: "income", GF.PERIOD_TYPE: "weekly", GF.PARENT_GOAL: ["recP"]}),
+    ]
+    DB[Tables.FIN_EVENTS] = events
+
+
+def rows_of(view):
+    return {g["goal_id"]: g for g in view["goals"]}
+
+
+def test_source_target_does_not_inflate_parent_target():
+    hierarchy([])
+    view = service.overview(ELIYAHU, TODAY)
+    card = view["summary"]["income"]
+    assert card["target"] == 15000 and card["goals"] == 1            # not 17,500
+    assert rows_of(view)["recT"]["is_source"] and rows_of(view)["recT"]["parent_id"] == "recP"
+
+
+def test_source_event_rolls_up_into_parent_actual_once():
+    both = event("recX", "recT", ELI, 300, day="2026-10-07")
+    both["fields"][EF.GOAL] = ["recT", "recP"]                     # same event linked to source AND parent
+    hierarchy([event("recA", "recT", ELI, 1000, day="2026-10-06"), event("recB", "recP", ELI, 500, day="2026-10-02"), both])
+    view = service.overview(ELIYAHU, TODAY)
+    rows = rows_of(view)
+    assert rows["recT"]["actual"] == 1300                           # the source keeps its own events
+    assert rows["recP"]["actual"] == 1800 == view["summary"]["income"]["actual"]    # 1000 + 500 + 300, no double count
+
+
+def test_source_target_change_never_moves_parent_target():
+    hierarchy([event("recC", "recT", ELI, 4000, kind="target_change", day="2026-10-05")])
+    rows = rows_of(service.overview(ELIYAHU, TODAY))
+    assert rows["recT"]["target"] == 4000 and rows["recP"]["target"] == 15000
+
+
+def test_weekly_source_resets_sunday_parent_resets_month():
+    hierarchy([event("recA", "recT", ELI, 1000, day="2026-10-03")])     # Saturday of the previous week
+    rows = rows_of(service.overview(ELIYAHU, TODAY))                     # Thursday 8/10: new week since Sun 4/10
+    assert rows["recT"]["actual"] == 0 and rows["recP"]["actual"] == 1000
+    nov = rows_of(service.overview(ELIYAHU, date(2026, 11, 1)))
+    assert nov["recP"]["actual"] == 0
+
+
+def test_weekly_breakdown_travel_minimum_and_other_sources():
+    hierarchy([event("recA", "recT", ELI, 1000, day="2026-10-06")])
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recP"]
+    pace = round(14000 / 24 * 7, 2)                                     # 4083.33
+    assert row["dynamic_target_per_week"] == pace
+    assert row["weekly_sources_required"] == 1500                        # travel still owes 2500 - 1000 this week
+    assert row["other_sources_needed"] == round(pace - 1500, 2)
+    card = service.overview(ELIYAHU, TODAY)["summary"]["income"]
+    assert card["other_sources_needed"] == row["other_sources_needed"] and card["sources"][0]["goal_id"] == "recT"
+
+
+def test_other_sources_never_negative_when_travel_exceeds_pace():
+    hierarchy([event("recA", "recP", ELI, 14000, day="2026-10-02")])     # parent almost done, pace small
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recP"]
+    assert row["other_sources_needed"] == 0.0
+
+
+def test_parent_link_cycle_and_foreign_parent_are_ignored():
+    hierarchy([])
+    DB[Tables.FIN_GOALS][0]["fields"][GF.PARENT_GOAL] = ["recT"]           # recP -> recT -> recP
+    view = service.overview(ELIYAHU, TODAY)
+    assert view["summary"]["income"]["goals"] == 2                        # cycle dropped: both stand alone
+    DB[Tables.FIN_GOALS][0]["fields"].pop(GF.PARENT_GOAL)
+    DB[Tables.FIN_GOALS][1]["fields"][GF.PARENT_GOAL] = ["recGA"]         # not an active goal of this owner
+    assert not rows_of(service.overview(ELIYAHU, TODAY))["recT"]["is_source"]
+
+
 def test_http_flag_off_is_404(monkeypatch):
     c = http(monkeypatch, ELIYAHU, flag=False)
     assert c.get("/api/fcc/overview", headers=H).status_code == 404

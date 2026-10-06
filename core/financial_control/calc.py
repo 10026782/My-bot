@@ -66,6 +66,7 @@ class Event:
     amount: float
     occurred: date
     superseded: bool = False
+    ref: str | None = None      # Airtable record id: the same event is never counted twice in a roll-up
 
 
 def parse_events(records: list[dict], ev_fields) -> list[Event]:
@@ -82,7 +83,7 @@ def parse_events(records: list[dict], ev_fields) -> list[Event]:
             continue
         if amount is None and kind != NOTE:
             continue
-        out.append(Event(kind, amount or 0.0, occurred, bool(f.get(ev_fields.SUPERSEDED_BY))))
+        out.append(Event(kind, amount or 0.0, occurred, bool(f.get(ev_fields.SUPERSEDED_BY)), (rec or {}).get("id")))
     return out
 
 
