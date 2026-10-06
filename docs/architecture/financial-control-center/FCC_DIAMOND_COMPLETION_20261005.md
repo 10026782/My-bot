@@ -107,3 +107,11 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Summary**: header cards aggregate top-level goals only (`is_source` rows are skipped). Parent rows carry `sources`, `weekly_sources_required` (what weekly sources still owe this week) and `other_sources_needed = max(weekly pace - weekly_sources_required, 0)`.
 - **Pacing**: monthly `period_sum` weekly pace = `remaining / calendar_days_left * min(7, calendar_days_left)` (today included). Weekly goals reset on Sunday, monthly goals on the 1st. Other goal families are unchanged (`weeks_left`).
 - Verification: `test_financial_control_center.py` (hierarchy, roll-up, 28/30/31-day, resets, over/under-performance); frontend `fccPresentation.test.ts`. Production/device: NOT verified.
+
+## Gross -> direct costs -> net (06/10/2026)
+
+- New event `Kind` value **`direct_cost`** in Financial Progress Events (no new table, owner-scoped, append-only). A direct cost is a positive amount tied to producing income (fuel, parking, fees) and is linked to the income source goal (e.g. travel).
+- `actual` stays **gross** (progress vs target and the weekly pace are never reduced by costs). Each goal row also carries `direct_costs` (same period window as `one_time`; superseded rows ignored) and `net = actual - direct_costs`. Costs of a source roll up into the parent once (same de-duplication as income). Project rows carry no cost fields.
+- Header income card shows `ברוטו · הוצאות ישירות · נטו` only when there are direct costs. Chat/TMA: the classifier maps "דלק/כביש/חניה" costs to `kind=direct_cost` on the source goal; goes through the same draft/confirm primitive.
+- **Live Airtable prerequisite**: the `direct_cost` choice must exist on `Financial Progress Events.Kind` before the first write.
+- Household expenses, business expense receipts and recurring obligations are separate follow-ups (privacy: `Expenses` is a shared business ledger, `REVIEW_REQUIRED_FOR_PERSONAL_FINANCE_SCOPE`).

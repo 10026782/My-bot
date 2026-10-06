@@ -485,6 +485,9 @@ export interface FccGoalRow {
   period_end: string;
   target: number | null;
   actual: number | null;
+  /** Direct costs of earning this income (fuel, parking, fees) and net = gross `actual` - costs. */
+  direct_costs?: number | null;
+  net?: number | null;
   remaining: number | null;
   remaining_periods: number | null;
   dynamic_target_per_week: number | null;
@@ -512,6 +515,8 @@ export interface FccSummaryCard {
   target: number;
   actual: number;
   remaining: number;
+  direct_costs?: number;
+  net?: number;
   dynamic_target_per_week: number;
   goals: number;
   sources?: FccSource[];

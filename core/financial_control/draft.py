@@ -39,7 +39,7 @@ FCC_TASK_TOPIC = "כספים"            # existing Tasks.Topic choice (FCC-orig
 CATEGORIES = ("income", "savings", "emergency_fund", "debt", "other")
 PERIOD_TYPES = ("monthly", "weekly", "custom")
 CALC_METHODS = ("period_sum", "cumulative", "recurring_level")
-EVENT_KINDS = ("one_time", "monthly_recurring", "target_change", "note")
+EVENT_KINDS = ("one_time", "monthly_recurring", "target_change", "direct_cost", "note")
 
 # Safe inference by goal type (user-approved matrix). "other" is never guessed.
 INFERENCE: dict[str, dict[str, str]] = {
@@ -91,7 +91,7 @@ VALUE_LABELS = {
     "category": {"income": "הכנסה", "savings": "חיסכון", "emergency_fund": "קרן חירום", "debt": "חוב", "other": "אחר"},
     "period_type": {"monthly": "חודשי", "weekly": "שבועי", "custom": "מותאם"},
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
-    "kind": {"one_time": "חד-פעמי", "monthly_recurring": "חודשי קבוע", "target_change": "שינוי יעד", "note": "הערה"},
+    "kind": {"one_time": "חד-פעמי", "monthly_recurring": "חודשי קבוע", "target_change": "שינוי יעד", "direct_cost": "הוצאה ישירה", "note": "הערה"},
 }
 # Closed answer vocabulary of the options we present (equivalent to buttons) — not NL parsing.
 ANSWER_VOCAB = {f: {label: key for key, label in labels.items()} for f, labels in VALUE_LABELS.items()}

@@ -8,6 +8,8 @@ Event kinds:
   monthly_recurring  a change to the MONTHLY run-rate (new income stream,
                      cancelled expense, lower instalment) — never summed into
                      one-time totals
+  direct_cost        positive cost tied directly to producing income (fuel, parking, fee). Never
+                     reduces ``actual`` (gross); shown as ``direct_costs`` and ``net`` = gross - costs
   target_change      ``amount`` is the new target, effective from occurred_at
   note               no amount semantics
 """
@@ -21,8 +23,9 @@ from datetime import date, datetime, timedelta
 ONE_TIME = "one_time"
 MONTHLY_RECURRING = "monthly_recurring"
 TARGET_CHANGE = "target_change"
+DIRECT_COST = "direct_cost"
 NOTE = "note"
-EVENT_KINDS = (ONE_TIME, MONTHLY_RECURRING, TARGET_CHANGE, NOTE)
+EVENT_KINDS = (ONE_TIME, MONTHLY_RECURRING, TARGET_CHANGE, DIRECT_COST, NOTE)
 
 # calc_method values (data, not an enum the code branches business meaning on)
 PERIOD_SUM = "period_sum"          # one_time events inside the current period
@@ -150,12 +153,15 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
     if method == CUMULATIVE:
         since = start or date.min
         actual = sum(e.amount for e in live if e.kind == ONE_TIME and since <= e.occurred <= today)
+        costs = sum(abs(e.amount) for e in live if e.kind == DIRECT_COST and since <= e.occurred <= today)
         horizon_end = end
     elif method == RECURRING_LEVEL:
         actual = sum(e.amount for e in live if e.kind == MONTHLY_RECURRING and e.occurred <= today)
+        costs = 0.0
         horizon_end = p_end
     else:
         actual = sum(e.amount for e in live if e.kind == ONE_TIME and p_start <= e.occurred <= p_end)
+        costs = sum(abs(e.amount) for e in live if e.kind == DIRECT_COST and p_start <= e.occurred <= p_end)
         horizon_end = p_end
 
     remaining = None if target is None else max(target - actual, 0.0)
@@ -196,7 +202,9 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         "period_start": p_start.isoformat(),
         "period_end": (horizon_end or p_end).isoformat(),
         "target": target,
-        "actual": round(actual, 2),
+        "actual": round(actual, 2),                      # gross: progress vs target is never reduced by costs
+        "direct_costs": round(costs, 2),
+        "net": round(actual - costs, 2),
         "remaining": None if remaining is None else round(remaining, 2),
         "remaining_periods": periods,
         "dynamic_target_per_week": dynamic,
