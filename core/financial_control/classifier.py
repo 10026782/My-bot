@@ -12,7 +12,7 @@ from datetime import date
 
 _SYSTEM = (
     "אתה מסווג הודעות פיננסיות אישיות. החזר JSON בלבד, בלי טקסט נוסף, עם השדות: "
-    "action (log_progress|set_target|create_goal|update_goal|rename_goal|follow_up|note), "
+    "action (log_progress|set_target|create_goal|update_goal|rename_goal|follow_up|note|upsert_obligation), "
     "goal_hint (שם היעד כפי שנאמר, או ריק), amount (מספר או null), target (מספר או null), "
     "kind (one_time|monthly_recurring|direct_cost|household_expense או null), title, new_title, task_title, note, category (אחד מ: income|savings|debt|emergency_fund, או טקסט חופשי אחר, או null), period_type (monthly|weekly|custom או null), calc_method (period_sum = סכום בתקופה, למשל הכנסה חודשית; cumulative = יתרה מצטברת מול יעד, למשל חיסכון/קרן חירום/סגירת חוב; recurring_level = שינוי קבוע בחודש, או null), start_date, end_date (YYYY-MM-DD או null; תאריך יחסי כמו ״סוף השנה״ חשב לפי היום שמסופק ב-today). update_goal = שינוי מאפייני יעד קיים (קטגוריה/תקופה/שיטה/תאריכים). "
     "אל תמציא סכומים או יעדים שלא נאמרו. הכנסה/חיסכון חד-פעמי = one_time; "
@@ -20,7 +20,12 @@ _SYSTEM = (
     "הוצאה שקשורה ישירות להפקת הכנסה (דלק, כביש, חניה, עמלה בנסיעות/עבודה) = log_progress עם kind=direct_cost, "
     "amount חיובי, ו-goal_hint של מקור ההכנסה (למשל נסיעות). "
     "הוצאה ביתית פרטית (סופר, חשבונות הבית, ילדים, בילויים) = log_progress עם kind=household_expense, "
-    "amount חיובי, goal_hint=הוצאות בית. היא לא קשורה להכנסה ולא מורידה נטו."
+    "amount חיובי, goal_hint=הוצאות בית. היא לא קשורה להכנסה ולא מורידה נטו. "
+    "התחייבות חוזרת (מנוי, הוראת קבע, שירות קבוע: נטפליקס, חשמל, ביטוח, תוכנה) = upsert_obligation עם title=שם ההתחייבות, "
+    "amount=סכום לחיוב, frequency (monthly|quarterly|yearly|custom, ברירת מחדל monthly), scope (household|business|personal רק אם נאמר), "
+    "review_status (cancel=לבטל, reduce=להקטין, negotiate=לנהל משא ומתן, keep=להשאיר, review=לבדוק), saving (חיסכון חודשי רק אם נאמר), "
+    "vendor, obligation_type (subscription|standing_order|service|loan_payment|other), essentiality (essential|useful|optional|review), next_charge_date. "
+    "התחייבות היא לא הוצאה בפועל ולא אירוע התקדמות: לעולם אל תחזיר log_progress בשבילה."
 )
 
 
@@ -46,7 +51,7 @@ _FILL_SYSTEM = (
     "מתוך: title, target_amount (מספר), category (income|savings|emergency_fund|debt|other), "
     "period_type (monthly|weekly|custom), calc_method (period_sum|cumulative|recurring_level), "
     "end_date, start_date, occurred_at (YYYY-MM-DD; תאריך יחסי כמו ״סוף השנה״/״סוף יוני״ חשב לפי today), "
-    "amount (מספר), kind (one_time|monthly_recurring|direct_cost|household_expense|target_change), note. "
+    "amount (מספר), kind (one_time|monthly_recurring|direct_cost|household_expense|target_change), note, name (שם התחייבות), scope (household|business|personal), frequency (monthly|quarterly|yearly|custom), review_status (keep|reduce|cancel|negotiate|review), saving (מספר), vendor, next_charge_date. "
     "כלול רק מה שנאמר במפורש; אל תמציא ואל תנחש. אם ההודעה היא תשובה לשדה ב-awaiting, מלא אותו. "
     "בעריכה (״ערוך סכום ל-80000״) החזר רק את השדה שהשתנה. "
     "אם ההודעה אינה קשורה לשאלה או לעריכה (למשל שאלה על לידים) — החזר fields ריק. "

@@ -99,7 +99,7 @@ export function weeklyBreakdown(card: FccSummaryCard | undefined): string | unde
 
 export interface HeaderCardModel { key: string; label: string; value: string; hint?: string }
 
-export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_improvement"> & Partial<Pick<FccOverview, "household" | "receipts">>): HeaderCardModel[] {
+export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_improvement"> & Partial<Pick<FccOverview, "household" | "receipts" | "obligations">>): HeaderCardModel[] {
   const s = data.summary;
   const ratio = (card: { actual: number; target: number } | undefined, hint = "לא הוגדר יעד") =>
     card ? { value: `${money(card.actual)} / ${money(card.target)}`, hint: undefined as string | undefined }
@@ -123,6 +123,14 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
     { key: "cash", label: "שיפור תזרים חודשי", value: money(data.monthly_cash_improvement) },
     // separate from income/net: private household spend this month, and business receipts still missing
     ...(data.household?.month_total ? [{ key: "household", label: "הוצאות בית החודש", value: money(data.household.month_total) }] : []),
+    // recurring commitments (not actual spend): total per month, how many are marked reduce/cancel/negotiate, potential saving
+    ...(data.obligations?.count ? [
+      { key: "obligations", label: "התחייבויות חודשיות", value: money(data.obligations.total_monthly),
+        hint: `${data.obligations.count} התחייבויות פעילות` },
+      { key: "obligations_flagged", label: "לצמצום / ביטול", value: String(data.obligations.flagged_count),
+        hint: data.obligations.flagged_count ? `${money(data.obligations.flagged_monthly)} בחודש` : undefined },
+      { key: "obligations_saving", label: "חיסכון חודשי פוטנציאלי", value: money(data.obligations.potential_saving) },
+    ] : []),
     ...(data.receipts?.missing_count ? [{ key: "receipts", label: "אסמכתאות חסרות", value: String(data.receipts.missing_count),
       hint: `סה״כ ${money(data.receipts.missing_amount)} בהוצאות עסק` }] : []),
   ];

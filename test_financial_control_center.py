@@ -1050,3 +1050,94 @@ def test_receipts_counter_counts_only_my_missing_business_receipts():
 def test_receipts_counter_fails_closed_for_unresolved_identity():
     DB[Tables.EXPENSES] = [_expense("e1", ELI, 100, status="missing")]
     assert service.receipts_overview(None) == {"missing_count": 0, "missing_amount": 0.0}
+
+
+# ═══════════════ Recurring Obligations: private commitments, not an expense ledger ═══════════════
+def _ob(oid, owner, name, amount, freq="monthly", active=True, review=None, saving=None):
+    f = {"Name": name, "Amount": amount, "Frequency": freq, "Active": active, "Financial Owner": [owner]}
+    if review:
+        f["Review Status"] = review
+    if saving is not None:
+        f["Potential Monthly Saving"] = saving
+    return {"id": oid, "fields": f}
+
+
+def test_obligation_table_is_owner_scoped_never_manager_or_employee():
+    from core import data_access_policy as pol
+    assert pol.is_owner_scoped(Tables.REC_OBLIGATIONS)
+    rows = [_ob("o1", ELI, "נטפליקס", 70), _ob("o2", "recOTHER", "סודי", 999)]
+    assert [r["id"] for r in pol.filter_records(Tables.REC_OBLIGATIONS, rows, ELIYAHU)] == ["o1"]
+    with pytest.raises(pol.PersonalDataAccessDenied):                    # a manager/employee has no owner-of-record access
+        pol.filter_records(Tables.REC_OBLIGATIONS, rows, ident("nobody", Role.MANAGER))
+
+
+def test_obligation_monthly_equivalent_by_frequency():
+    assert calc.monthly_equivalent(120, "monthly") == 120
+    assert calc.monthly_equivalent(300, "quarterly") == 100
+    assert calc.monthly_equivalent(1200, "yearly") == 100
+    assert calc.monthly_equivalent(500, "custom") is None           # no honest conversion -> not counted
+    assert calc.monthly_equivalent(None, "monthly") is None
+
+
+def test_obligations_summary_three_numbers_inactive_and_foreign_excluded():
+    DB[Tables.REC_OBLIGATIONS] = [
+        _ob("o1", ELI, "נטפליקס", 70, review="cancel"),
+        _ob("o2", ELI, "ביטוח", 1200, freq="yearly", review="negotiate", saving=30),
+        _ob("o3", ELI, "חשמל", 400, freq="quarterly"),
+        _ob("o4", ELI, "ישן", 999, active=False, review="cancel"),
+        _ob("o5", "recOTHER", "של מישהו אחר", 5000, review="cancel")]
+    s = service.obligations_overview(ELIYAHU)
+    assert s["total_monthly"] == round(70 + 100 + 400 / 3, 2)
+    assert (s["flagged_count"], s["flagged_monthly"]) == (2, 170)
+    assert s["potential_saving"] == 70 + 30            # cancel -> full monthly cost; stated saving wins
+
+
+def test_obligation_is_in_overview_and_never_touches_income_or_household():
+    DB[Tables.REC_OBLIGATIONS] = [_ob("o1", ELI, "נטפליקס", 70)]
+    hierarchy([event("recA", "recT", ELI, 1000, day="2026-10-06")])
+    view = service.overview(ELIYAHU, TODAY)
+    assert view["obligations"]["total_monthly"] == 70
+    assert view["summary"]["income"]["net"] == 1000 and view["household"]["month_total"] == 0
+
+
+OB_NETFLIX = {"action": "upsert_obligation", "goal_hint": "", "title": "נטפליקס", "amount": 70,
+              "frequency": "monthly", "review_status": "cancel"}
+
+
+def test_netflix_cancel_creates_obligation_not_a_progress_event():
+    DB[Tables.REC_OBLIGATIONS] = []
+    ex = Ex(classify={"נטפליקס 70 לחודש לבטל": OB_NETFLIX})
+    r = run(ex, ELIYAHU, "נטפליקס 70 לחודש לבטל")
+    assert r.state == "ask" and r.entity == fd.FCC_OBLIGATION and r.awaiting == "scope"
+    r = run(ex, ELIYAHU, "ביתי")
+    assert r.state == "review" and "(הוסק)" in r.message and "₪70" in r.message       # saving inferred = monthly cost
+    r = run(ex, ELIYAHU, "אשר")
+    assert r.state == "confirmed"
+    (write,) = r.snapshot["writes"]
+    assert write["op"] == "post" and write["table"] == Tables.REC_OBLIGATIONS            # NOT Financial Progress Events
+    f = write["fields"]
+    assert (f["Name"], f["Amount"], f["Frequency"], f["Scope"], f["Review Status"]) == ("נטפליקס", 70, "monthly", "household", "cancel")
+    assert f["Potential Monthly Saving"] == 70 and f["Active"] is True
+
+
+def test_existing_obligation_is_updated_not_duplicated():
+    DB[Tables.REC_OBLIGATIONS] = [_ob("recOB1", ELI, "נטפליקס", 50, review=None)]
+    ex = Ex(classify={"נטפליקס עכשיו 70 לבטל": OB_NETFLIX})
+    r = run(ex, ELIYAHU, "נטפליקס עכשיו 70 לבטל")
+    assert r.state == "review"
+    r = run(ex, ELIYAHU, "אשר")
+    (write,) = r.snapshot["writes"]
+    assert write["op"] == "patch" and write["table"] == Tables.REC_OBLIGATIONS and write["record_id"] == "recOB1"
+    assert write["fields"]["Amount"] == 70 and write["fields"]["Review Status"] == "cancel"
+    assert "Name" not in write["fields"] and "Scope" not in write["fields"]            # unmentioned fields untouched
+
+
+def test_obligation_intent_validation_and_foreign_obligation_never_matched():
+    from core.financial_control import writer as w
+    assert w.validate_intent({"action": "upsert_obligation", "title": "x", "amount": 5, "frequency": "weekly"}) is None
+    ok = w.validate_intent(OB_NETFLIX)
+    assert ok["review_status"] == "cancel" and ok["frequency"] == "monthly"
+    DB[Tables.REC_OBLIGATIONS] = [_ob("recX", "recOTHER", "נטפליקס", 50)]            # someone else's -> not mine
+    ex = Ex(classify={"נטפליקס 70": {**OB_NETFLIX, "review_status": None}})
+    r = run(ex, ELIYAHU, "נטפליקס 70")
+    assert r.state == "ask" and r.awaiting == "scope"                                   # CREATE, not UPDATE of a foreign row

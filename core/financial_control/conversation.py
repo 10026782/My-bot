@@ -25,7 +25,7 @@ from core.business_draft import (
 )
 from core.draft_flow import CANCEL_WORDS, CONFIRM_WORDS, EDIT_WORDS, SKIP_WORDS
 from core.financial_control import calc, draft as fd, service, writer
-from airtable_schema import FinEventFields as EF, FinGoalFields as GF, TaskFields
+from airtable_schema import FinEventFields as EF, FinGoalFields as GF, RecObFields as RF, TaskFields
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,25 @@ def _set_fields(d: BusinessDraft, updates: dict, *, strict: bool) -> tuple[Busin
                 if d.fields.get(k) in (None, ""):
                     d = d.set_field(k, v, adapter=fd.ADAPTER)
                     inferred.append(k)
-    return replace(d, source_context={**d.source_context, "inferred": inferred}), rejected
+    d = replace(d, source_context={**d.source_context, "inferred": inferred})
+    return _derive_obligation_saving(d), rejected
+
+
+def _derive_obligation_saving(d: BusinessDraft) -> BusinessDraft:
+    """Cancelling a commitment saves its monthly cost: when no saving was stated, fill it with the monthly
+    equivalent and mark it (הוסק) so the review shows it. A saving the owner stated is never overwritten."""
+    if d.entity_type != fd.FCC_OBLIGATION or d.fields.get("review_status") != "cancel":
+        return d
+    inferred = list(d.source_context.get("inferred") or [])
+    if d.fields.get("saving") not in (None, "") and "saving" not in inferred:
+        return d
+    monthly = calc.monthly_equivalent(d.fields.get("amount"), d.fields.get("frequency"))
+    if monthly is None:
+        return d
+    d = d.set_field("saving", monthly, adapter=fd.ADAPTER)
+    if "saving" not in inferred:
+        inferred.append("saving")
+    return replace(d, source_context={**d.source_context, "inferred": inferred})
 
 
 def _deterministic_answer(field_name: str, text: str):
@@ -163,14 +181,14 @@ def _deterministic_answer(field_name: str, text: str):
     vocab = fd.ANSWER_VOCAB.get(field_name)
     if vocab and t in vocab:
         return vocab[t]
-    if field_name in ("target_amount", "amount"):
+    if field_name in ("target_amount", "amount", "saving"):
         cleaned = t.replace(",", "").replace("₪", "").replace("ש\"ח", "").replace("שח", "").strip()
         try:
             float(cleaned)
             return cleaned
         except ValueError:
             return None
-    if field_name in ("end_date", "start_date", "occurred_at", "due_date") and any(ch.isdigit() for ch in t):
+    if field_name in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date") and any(ch.isdigit() for ch in t):
         return t
     return None
 
@@ -334,6 +352,10 @@ def _already_applied(identity, write: dict) -> bool:
     if write["op"] == "post" and write["table"] == "Financial Progress Events":
         key = fields.get(EF.IDEMPOTENCY_KEY)
         return any((e.get("fields") or {}).get(EF.IDEMPOTENCY_KEY) == key for e in service.my_events(identity))
+    if write["op"] == "post" and write["table"] == "Recurring Obligations":
+        name = writer._norm(fields.get(RF.NAME, ""))
+        return any(writer._norm((o.get("fields") or {}).get(RF.NAME, "")) == name
+                   for o in service.my_obligations(identity))
     if write["op"] == "post" and write["table"] == "Financial Goals":
         title = writer._norm(fields.get(GF.TITLE, ""))
         return any(writer._norm((g.get("fields") or {}).get(GF.TITLE, "")) == title for g in service.my_goals(identity))
@@ -408,12 +430,58 @@ def _goal_original(identity, goal: dict) -> dict:
     return {k: v for k, v in original.items() if v not in (None, "")}
 
 
+_OB_KEYS = ("frequency", "scope", "review_status", "obligation_type", "essentiality", "vendor", "next_charge_date")
+
+
+def _obligation_original(rec: dict) -> dict:
+    f = rec.get("fields") or {}
+    sel = service._sel
+    original = {"name": f.get(RF.NAME), "amount": calc._num(f.get(RF.AMOUNT)), "scope": sel(f.get(RF.SCOPE)),
+                "frequency": sel(f.get(RF.FREQUENCY)), "review_status": sel(f.get(RF.REVIEW_STATUS)),
+                "saving": calc._num(f.get(RF.POTENTIAL_SAVING)), "obligation_type": sel(f.get(RF.TYPE)),
+                "essentiality": sel(f.get(RF.ESSENTIALITY)), "vendor": f.get(RF.VENDOR),
+                "next_charge_date": f.get(RF.NEXT_CHARGE)}
+    return {k: v for k, v in original.items() if v not in (None, "")}
+
+
+def _start_obligation(identity, ids, intent, text, extractor, store, today) -> TurnResult:
+    """A commitment is created/updated in Recurring Obligations — never logged as a progress event, and never
+    rewritten monthly (an existing one with the same name is UPDATED, a new name is CREATED)."""
+    name = intent.get("title") or intent.get("goal_hint")
+    existing = None
+    if name:
+        for rec in service.my_obligations(identity):
+            f = rec.get("fields") or {}
+            if writer._norm(f.get(RF.NAME, "")) == writer._norm(name) and f.get(RF.ACTIVE):
+                existing = rec
+                break
+    updates = {k: intent[k] for k in _OB_KEYS if k in intent}
+    if "amount" in intent:
+        updates["amount"] = intent["amount"]
+    if "saving" in intent:
+        updates["saving"] = intent["saving"]
+    if existing is not None:
+        original = _obligation_original(existing)
+        d = _new_draft(identity, ids, fd.FCC_OBLIGATION, DraftOperation.UPDATE, fields=dict(original), raw_text=text,
+                       today=today, extra_ctx={"record_id": existing["id"]}, original=original)
+        d, _rej = _set_fields(d, updates, strict=False)
+        if d.fields == original:
+            return TurnResult("clarify", "מה לעדכן בהתחייבות (סכום, תדירות, החלטה, חיסכון)?")
+        return _persist_new(store, ids, d)
+    d = _new_draft(identity, ids, fd.FCC_OBLIGATION, DraftOperation.CREATE, fields={}, raw_text=text, today=today)
+    d, _rej = _set_fields(d, {k: v for k, v in {"name": name, **updates}.items() if v is not None}, strict=False)
+    return _persist_new(store, ids, d)
+
+
 def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> TurnResult:
     goals = service.my_goals(identity)
     intent = writer.validate_intent(extractor.classify(text, [g["fields"].get(GF.TITLE, "") for g in goals], today))
     if intent is None:
         return TurnResult("clarify", "לא הבנתי את הבקשה — אפשר לנסח שוב?")
     action = intent["action"]
+
+    if action == "upsert_obligation":
+        return _start_obligation(identity, ids, intent, text, extractor, store, today)
 
     if action == "create_goal":
         title = intent.get("title") or intent.get("goal_hint")

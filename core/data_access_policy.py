@@ -77,6 +77,11 @@ _POLICIES: dict[str, TablePolicy] = {
     Tables.LOANS: TablePolicy(Tables.LOANS, OWNER_SCOPED),
     # FCC tables: owner-of-record only; role (even business owner) grants nothing.
     Tables.FIN_GOALS:  TablePolicy(Tables.FIN_GOALS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER),
+    # Recurring Obligations: private commitments, owner-of-record only (never manager/employee, never via airtable_get).
+    Tables.REC_OBLIGATIONS: TablePolicy(
+        Tables.REC_OBLIGATIONS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,
+        linked_owner_checks=(("Related Goal", Tables.FIN_GOALS),),
+    ),
     Tables.FIN_EVENTS: TablePolicy(
         Tables.FIN_EVENTS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,
         linked_owner_checks=(("Goal", Tables.FIN_GOALS),),
