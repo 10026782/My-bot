@@ -231,7 +231,7 @@ def summarize_obligations(items: list[dict]) -> dict:
     """items: {monthly, review_status, saving} of ACTIVE obligations. A commitment is never an actual expense:
     these numbers are never added to income, net or household spend."""
     total = flagged = saving = 0.0
-    flagged_count = 0
+    flagged_count = cancel_pending = 0
     for it in items:
         monthly = it.get("monthly")
         if monthly is None:
@@ -239,11 +239,12 @@ def summarize_obligations(items: list[dict]) -> dict:
         total += monthly
         if it.get("review_status") in FLAGGED_REVIEW:
             flagged_count += 1
+            cancel_pending += it["review_status"] == "cancel"
             flagged += monthly
             saving += it.get("saving") if it.get("saving") is not None else (
                 monthly if it["review_status"] == "cancel" else 0.0)
     return {"total_monthly": round(total, 2), "flagged_count": flagged_count,
-            "flagged_monthly": round(flagged, 2), "potential_saving": round(saving, 2), "count": len(items)}
+            "flagged_monthly": round(flagged, 2), "cancel_pending": cancel_pending, "potential_saving": round(saving, 2), "count": len(items)}
 
 
 def household_month_total(events: list[Event], today: date) -> float:

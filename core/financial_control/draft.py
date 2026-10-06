@@ -48,6 +48,7 @@ OB_TYPES = ("subscription", "standing_order", "service", "loan_payment", "other"
 OB_FREQUENCIES = ("monthly", "quarterly", "yearly", "custom")
 OB_ESSENTIALITY = ("essential", "useful", "optional", "review")
 OB_REVIEW = ("keep", "reduce", "cancel", "negotiate", "review")
+OB_STATUS = ("active", "inactive")      # inactive = actually cancelled/ended: leaves the monthly total
 
 # Safe inference by goal type (user-approved matrix). "other" is never guessed.
 INFERENCE: dict[str, dict[str, str]] = {
@@ -89,6 +90,7 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("frequency", RF.FREQUENCY, InputType.SELECT, required=RequiredMode.ALWAYS, choices=OB_FREQUENCIES,
            default="monthly"),
         _f("review_status", RF.REVIEW_STATUS, InputType.SELECT, choices=OB_REVIEW),
+        _f("status", RF.ACTIVE, InputType.SELECT, choices=OB_STATUS),
         _f("saving", RF.POTENTIAL_SAVING, InputType.CURRENCY, validation="non_negative"),
         _f("obligation_type", RF.TYPE, InputType.SELECT, choices=OB_TYPES),
         _f("essentiality", RF.ESSENTIALITY, InputType.SELECT, choices=OB_ESSENTIALITY),
@@ -108,12 +110,13 @@ LABELS = {
     "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה",
     "goal": "יעד", "kind": "סוג", "amount": "סכום", "occurred_at": "תאריך", "note": "הערה", "due_date": "לתאריך",
     "name": "התחייבות", "scope": "שייכות", "frequency": "תדירות", "review_status": "החלטה", "saving": "חיסכון חודשי פוטנציאלי",
-    "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא",
+    "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
 }
 VALUE_LABELS = {
     "category": {"income": "הכנסה", "savings": "חיסכון", "emergency_fund": "קרן חירום", "debt": "חוב", "other": "אחר"},
     "period_type": {"monthly": "חודשי", "weekly": "שבועי", "custom": "מותאם"},
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
+    "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
     "scope": {"household": "ביתי", "business": "עסקי", "personal": "אישי"},
     "frequency": {"monthly": "חודשי", "quarterly": "רבעוני", "yearly": "שנתי", "custom": "מותאם"},
     "review_status": {"keep": "להשאיר", "reduce": "להקטין", "cancel": "לבטל", "negotiate": "לנהל משא ומתן", "review": "לבדוק"},
@@ -172,7 +175,7 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
 
 
 def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "", operation: str = "CREATE",
-                  changed: Mapping[str, Any] | None = None, inferred: tuple[str, ...] = ()) -> str:
+                  changed: Mapping[str, Any] | None = None, inferred: tuple[str, ...] = (), note: str = "") -> str:
     """Full final business payload, shown before confirmation."""
     order = [f.field_name for f in FCC_CONTRACTS[entity].fields]
     lines: list[str] = []
@@ -180,6 +183,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
             FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך"}[entity]
     lines.append(f"📋 {head}")
+    if note:
+        lines.append(note)
     if entity == FCC_EVENT and goal_title:
         lines.append(f"• יעד: {goal_title}")
     for name in order:
@@ -190,6 +195,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             continue
         mark = " (הוסק)" if name in inferred else ""
         lines.append(f"• {LABELS.get(name, name)}: {display_value(name, value)}{mark}")
+    if entity == FCC_OBLIGATION and fields.get("status") == "inactive":
+        lines.append("ההתחייבות תסומן כלא פעילה ותצא מהסכום החודשי.")
     if operation == "UPDATE" and changed:
         lines.append("שינויים: " + ", ".join(LABELS.get(k, k) for k in changed))
     lines.append("")
@@ -221,7 +228,12 @@ def _event_write(values: Mapping[str, Any], ctx: Mapping[str, Any], raw_text: st
             "audit_action": "fcc_event", "audit_details": key}
 
 
-_OB_FIELDS = (("name", RF.NAME), ("amount", RF.AMOUNT), ("scope", RF.SCOPE), ("frequency", RF.FREQUENCY),
+def _ob_value(name: str, value):
+    """``status`` is a select in the draft but a checkbox in storage."""
+    return value == "active" if name == "status" else value
+
+
+_OB_FIELDS = (("status", RF.ACTIVE), ("name", RF.NAME), ("amount", RF.AMOUNT), ("scope", RF.SCOPE), ("frequency", RF.FREQUENCY),
               ("review_status", RF.REVIEW_STATUS), ("saving", RF.POTENTIAL_SAVING), ("obligation_type", RF.TYPE),
               ("essentiality", RF.ESSENTIALITY), ("vendor", RF.VENDOR), ("next_charge_date", RF.NEXT_CHARGE))
 
@@ -263,7 +275,7 @@ class FccEntityAdapter(CommercialEntityAdapter):
             fields = {RF.ACTIVE: True}
             for name, spec in _OB_FIELDS:
                 if values.get(name) not in (None, ""):
-                    fields[spec] = values[name]
+                    fields[spec] = _ob_value(name, values[name])
             return {"writes": [{"op": "post", "table": Tables.REC_OBLIGATIONS, "fields": fields,
                                 "audit_action": "fcc_obligation_create", "audit_details": str(values.get("name", ""))[:80]}]}
         if entity == FCC_EVENT:
@@ -289,7 +301,7 @@ class FccEntityAdapter(CommercialEntityAdapter):
             if not changed:
                 return {}
             record_id = str(writer.source_context.get("record_id") or "")
-            patch = {spec: changed[name] for name, spec in _OB_FIELDS if name in changed}
+            patch = {spec: _ob_value(name, changed[name]) for name, spec in _OB_FIELDS if name in changed}
             return {"writes": [{"op": "patch", "table": Tables.REC_OBLIGATIONS, "record_id": record_id, "fields": patch,
                                 "audit_action": "fcc_obligation_update", "audit_details": record_id}]}
         if writer.target_entity != FCC_GOAL:

@@ -1141,3 +1141,48 @@ def test_obligation_intent_validation_and_foreign_obligation_never_matched():
     ex = Ex(classify={"נטפליקס 70": {**OB_NETFLIX, "review_status": None}})
     r = run(ex, ELIYAHU, "נטפליקס 70")
     assert r.state == "ask" and r.awaiting == "scope"                                   # CREATE, not UPDATE of a foreign row
+
+
+def test_cancel_of_untracked_commitment_says_so_in_review():
+    DB[Tables.REC_OBLIGATIONS] = []
+    ex = Ex(classify={"נטפליקס 70 לבטל": OB_NETFLIX})
+    run(ex, ELIYAHU, "נטפליקס 70 לבטל")
+    r = run(ex, ELIYAHU, "ביתי")
+    assert r.state == "review" and "לא מצאתי התחייבות בשם נטפליקס" in r.message and "לבטל" in r.message
+
+
+def test_summary_counts_cancel_pending_separately():
+    DB[Tables.REC_OBLIGATIONS] = [_ob("o1", ELI, "א", 70, review="cancel"), _ob("o2", ELI, "ב", 100, review="reduce")]
+    s = service.obligations_overview(ELIYAHU)
+    assert (s["flagged_count"], s["cancel_pending"]) == (2, 1)
+
+
+OB_DONE = {"action": "deactivate_obligation", "goal_hint": "", "title": "נטפליקס"}
+
+
+def test_actually_cancelled_marks_inactive_and_leaves_the_monthly_total():
+    DB[Tables.REC_OBLIGATIONS] = [_ob("recOB1", ELI, "נטפליקס", 70, review="cancel")]
+    ex = Ex(classify={"ביטלתי את נטפליקס": OB_DONE})
+    r = run(ex, ELIYAHU, "ביטלתי את נטפליקס")
+    assert r.state == "review" and "תצא מהסכום החודשי" in r.message
+    r = run(ex, ELIYAHU, "אשר")
+    (write,) = r.snapshot["writes"]
+    assert write["op"] == "patch" and write["record_id"] == "recOB1" and write["fields"] == {"Active": False}
+    DB[Tables.REC_OBLIGATIONS][0]["fields"]["Active"] = False                      # as stored after the write
+    assert service.obligations_overview(ELIYAHU)["total_monthly"] == 0
+
+
+def test_deactivate_without_a_tracked_commitment_is_clarified_not_created():
+    DB[Tables.REC_OBLIGATIONS] = [_ob("recX", "recOTHER", "נטפליקס", 70)]
+    ex = Ex(classify={"ביטלתי את נטפליקס": OB_DONE})
+    r = run(ex, ELIYAHU, "ביטלתי את נטפליקס")
+    assert r.state == "clarify" and "לא מצאתי" in r.message
+
+
+def test_cancelled_commitment_can_be_added_again():
+    DB[Tables.REC_OBLIGATIONS] = [_ob("recOB1", ELI, "נטפליקס", 70, active=False)]
+    ex = Ex(classify={"נטפליקס 70": {**OB_NETFLIX, "review_status": None}})
+    run(ex, ELIYAHU, "נטפליקס 70")
+    run(ex, ELIYAHU, "ביתי")
+    r = run(ex, ELIYAHU, "אשר")
+    assert r.state == "confirmed" and r.snapshot["writes"][0]["op"] == "post"       # inactive one does not block a new row

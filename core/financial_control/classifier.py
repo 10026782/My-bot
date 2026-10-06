@@ -12,7 +12,7 @@ from datetime import date
 
 _SYSTEM = (
     "אתה מסווג הודעות פיננסיות אישיות. החזר JSON בלבד, בלי טקסט נוסף, עם השדות: "
-    "action (log_progress|set_target|create_goal|update_goal|rename_goal|follow_up|note|upsert_obligation), "
+    "action (log_progress|set_target|create_goal|update_goal|rename_goal|follow_up|note|upsert_obligation|deactivate_obligation), "
     "goal_hint (שם היעד כפי שנאמר, או ריק), amount (מספר או null), target (מספר או null), "
     "kind (one_time|monthly_recurring|direct_cost|household_expense או null), title, new_title, task_title, note, category (אחד מ: income|savings|debt|emergency_fund, או טקסט חופשי אחר, או null), period_type (monthly|weekly|custom או null), calc_method (period_sum = סכום בתקופה, למשל הכנסה חודשית; cumulative = יתרה מצטברת מול יעד, למשל חיסכון/קרן חירום/סגירת חוב; recurring_level = שינוי קבוע בחודש, או null), start_date, end_date (YYYY-MM-DD או null; תאריך יחסי כמו ״סוף השנה״ חשב לפי היום שמסופק ב-today). update_goal = שינוי מאפייני יעד קיים (קטגוריה/תקופה/שיטה/תאריכים). "
     "אל תמציא סכומים או יעדים שלא נאמרו. הכנסה/חיסכון חד-פעמי = one_time; "
@@ -25,6 +25,7 @@ _SYSTEM = (
     "amount=סכום לחיוב, frequency (monthly|quarterly|yearly|custom, ברירת מחדל monthly), scope (household|business|personal רק אם נאמר), "
     "review_status (cancel=לבטל, reduce=להקטין, negotiate=לנהל משא ומתן, keep=להשאיר, review=לבדוק), saving (חיסכון חודשי רק אם נאמר), "
     "vendor, obligation_type (subscription|standing_order|service|loan_payment|other), essentiality (essential|useful|optional|review), next_charge_date. "
+    "״ביטלתי את X״ (הביטול בוצע בפועל אצל הספק) = deactivate_obligation עם title=X; ״לבטל את X״ (החלטה/כוונה) = upsert_obligation עם review_status=cancel. "
     "התחייבות היא לא הוצאה בפועל ולא אירוע התקדמות: לעולם אל תחזיר log_progress בשבילה."
 )
 

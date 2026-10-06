@@ -115,7 +115,7 @@ def _render(d: BusinessDraft) -> TurnResult:
         changed = {k: v for k, v in d.fields.items() if d.operation is DraftOperation.UPDATE and v != original.get(k)}
         return TurnResult("review", fd.render_review(
             d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
-            inferred=inferred), d.entity_type, None, _view(d))
+            inferred=inferred, note=str(d.source_context.get("review_note") or "")), d.entity_type, None, _view(d))
     missing = _missing(d)
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title) if awaiting else "מה לעדכן?"
@@ -154,7 +154,9 @@ def _set_fields(d: BusinessDraft, updates: dict, *, strict: bool) -> tuple[Busin
                     d = d.set_field(k, v, adapter=fd.ADAPTER)
                     inferred.append(k)
     d = replace(d, source_context={**d.source_context, "inferred": inferred})
-    return _derive_obligation_saving(d), rejected
+    if {"review_status", "amount", "frequency", "saving"} & set(updates):   # never touch unmentioned fields
+        d = _derive_obligation_saving(d)
+    return d, rejected
 
 
 def _derive_obligation_saving(d: BusinessDraft) -> BusinessDraft:
@@ -354,8 +356,8 @@ def _already_applied(identity, write: dict) -> bool:
         return any((e.get("fields") or {}).get(EF.IDEMPOTENCY_KEY) == key for e in service.my_events(identity))
     if write["op"] == "post" and write["table"] == "Recurring Obligations":
         name = writer._norm(fields.get(RF.NAME, ""))
-        return any(writer._norm((o.get("fields") or {}).get(RF.NAME, "")) == name
-                   for o in service.my_obligations(identity))
+        return any(writer._norm((o.get("fields") or {}).get(RF.NAME, "")) == name and (o.get("fields") or {}).get(RF.ACTIVE)
+                   for o in service.my_obligations(identity))          # a cancelled (inactive) one may be re-added
     if write["op"] == "post" and write["table"] == "Financial Goals":
         title = writer._norm(fields.get(GF.TITLE, ""))
         return any(writer._norm((g.get("fields") or {}).get(GF.TITLE, "")) == title for g in service.my_goals(identity))
@@ -441,20 +443,33 @@ def _obligation_original(rec: dict) -> dict:
                 "saving": calc._num(f.get(RF.POTENTIAL_SAVING)), "obligation_type": sel(f.get(RF.TYPE)),
                 "essentiality": sel(f.get(RF.ESSENTIALITY)), "vendor": f.get(RF.VENDOR),
                 "next_charge_date": f.get(RF.NEXT_CHARGE)}
+    original["status"] = "active" if f.get(RF.ACTIVE) else "inactive"
     return {k: v for k, v in original.items() if v not in (None, "")}
+
+
+def _find_active_obligation(identity, name):
+    if not name:
+        return None
+    for rec in service.my_obligations(identity):
+        f = rec.get("fields") or {}
+        if writer._norm(f.get(RF.NAME, "")) == writer._norm(name) and f.get(RF.ACTIVE):
+            return rec
+    return None
 
 
 def _start_obligation(identity, ids, intent, text, extractor, store, today) -> TurnResult:
     """A commitment is created/updated in Recurring Obligations — never logged as a progress event, and never
     rewritten monthly (an existing one with the same name is UPDATED, a new name is CREATED)."""
     name = intent.get("title") or intent.get("goal_hint")
-    existing = None
-    if name:
-        for rec in service.my_obligations(identity):
-            f = rec.get("fields") or {}
-            if writer._norm(f.get(RF.NAME, "")) == writer._norm(name) and f.get(RF.ACTIVE):
-                existing = rec
-                break
+    existing = _find_active_obligation(identity, name)
+    if intent["action"] == "deactivate_obligation":
+        if existing is None:
+            return TurnResult("clarify", f"לא מצאתי התחייבות פעילה בשם {name or ''}. אין מה לסמן כמבוטלת.".replace("  ", " "))
+        original = _obligation_original(existing)
+        d = _new_draft(identity, ids, fd.FCC_OBLIGATION, DraftOperation.UPDATE, fields=dict(original), raw_text=text,
+                       today=today, extra_ctx={"record_id": existing["id"]}, original=original)
+        d, _rej = _set_fields(d, {"status": "inactive"}, strict=False)
+        return _persist_new(store, ids, d)
     updates = {k: intent[k] for k in _OB_KEYS if k in intent}
     if "amount" in intent:
         updates["amount"] = intent["amount"]
@@ -468,7 +483,12 @@ def _start_obligation(identity, ids, intent, text, extractor, store, today) -> T
         if d.fields == original:
             return TurnResult("clarify", "מה לעדכן בהתחייבות (סכום, תדירות, החלטה, חיסכון)?")
         return _persist_new(store, ids, d)
-    d = _new_draft(identity, ids, fd.FCC_OBLIGATION, DraftOperation.CREATE, fields={}, raw_text=text, today=today)
+    ctx = None
+    if updates.get("review_status") and name:      # acting on a commitment that is not tracked yet -> say so in the review
+        label = fd.VALUE_LABELS["review_status"].get(updates["review_status"], updates["review_status"])
+        ctx = {"review_note": f"לא מצאתי התחייבות בשם {name}. לרשום אותה חדשה ולסמן: {label}?"}
+    d = _new_draft(identity, ids, fd.FCC_OBLIGATION, DraftOperation.CREATE, fields={}, raw_text=text, today=today,
+                   extra_ctx=ctx)
     d, _rej = _set_fields(d, {k: v for k, v in {"name": name, **updates}.items() if v is not None}, strict=False)
     return _persist_new(store, ids, d)
 
@@ -480,7 +500,7 @@ def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> Turn
         return TurnResult("clarify", "לא הבנתי את הבקשה — אפשר לנסח שוב?")
     action = intent["action"]
 
-    if action == "upsert_obligation":
+    if action in ("upsert_obligation", "deactivate_obligation"):
         return _start_obligation(identity, ids, intent, text, extractor, store, today)
 
     if action == "create_goal":
