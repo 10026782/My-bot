@@ -140,3 +140,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Screen**: three numbers from `overview.obligations` — total monthly commitments, how many are marked reduce/cancel/negotiate, and potential monthly saving (stated saving wins; a `cancel` without a stated saving = its monthly cost, shown as inferred in the review).
 - **Operating rule**: "נטפליקס 70 לחודש לבטל" -> classifier `upsert_obligation` -> draft/review/confirm -> CREATE a Recurring Obligation, or UPDATE (patch only changed fields) when an active one with that name already exists. Never a Financial Progress Event. Scope is asked when not stated.
 - Verification: `test_financial_control_center.py` (85 tests), frontend `fccPresentation.test.ts`. Device/production: NOT verified.
+
+## Obligations: cancel decision vs actual cancellation (06/10/2026, owner-approved)
+
+- **"לבטל X" is a decision, not an action**: `Review Status = cancel` only records the intent; nothing is cancelled at the vendor. When the name is not tracked yet, the review says so ("לא מצאתי התחייבות בשם X. לרשום אותה חדשה ולסמן: לבטל?") instead of silently creating a "new commitment".
+- **Screen**: the flagged card also shows how many are `cancel` and still waiting for the real cancellation; the potential-saving card is labelled "רק אחרי ביטול בפועל".
+- **"ביטלתי את X"** (classifier action `deactivate_obligation`) -> UPDATE draft with `status = inactive` -> patch `Active = false` only; the obligation leaves the monthly total. An untracked name is clarified, never created. A cancelled (inactive) commitment does not block adding the same name again.
+- Saving inference runs only when review status / amount / frequency / saving are part of the turn, so an unrelated update never touches other fields.

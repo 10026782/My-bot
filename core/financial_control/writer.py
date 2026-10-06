@@ -15,7 +15,7 @@ from airtable_schema import FinGoalFields
 from core.financial_control import calc
 
 ACTIONS = ("log_progress", "set_target", "create_goal", "update_goal", "rename_goal", "follow_up", "note",
-           "upsert_obligation")
+           "upsert_obligation", "deactivate_obligation")
 PERIOD_TYPES = ("monthly", "weekly", "custom")
 CALC_METHODS = (calc.PERIOD_SUM, calc.CUMULATIVE, calc.RECURRING_LEVEL)
 

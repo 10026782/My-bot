@@ -128,8 +128,11 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
       { key: "obligations", label: "התחייבויות חודשיות", value: money(data.obligations.total_monthly),
         hint: `${data.obligations.count} התחייבויות פעילות` },
       { key: "obligations_flagged", label: "לצמצום / ביטול", value: String(data.obligations.flagged_count),
-        hint: data.obligations.flagged_count ? `${money(data.obligations.flagged_monthly)} בחודש` : undefined },
-      { key: "obligations_saving", label: "חיסכון חודשי פוטנציאלי", value: money(data.obligations.potential_saving) },
+        hint: data.obligations.flagged_count
+          ? `${money(data.obligations.flagged_monthly)} בחודש${data.obligations.cancel_pending ? ` · ${data.obligations.cancel_pending} ממתינות לביטול בפועל` : ""}`
+          : undefined },
+      { key: "obligations_saving", label: "חיסכון חודשי פוטנציאלי", value: money(data.obligations.potential_saving),
+        hint: "רק אחרי ביטול בפועל" },
     ] : []),
     ...(data.receipts?.missing_count ? [{ key: "receipts", label: "אסמכתאות חסרות", value: String(data.receipts.missing_count),
       hint: `סה״כ ${money(data.receipts.missing_amount)} בהוצאות עסק` }] : []),
