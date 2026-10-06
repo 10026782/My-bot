@@ -53,3 +53,36 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - `update_goal` עם יעד לא חד-משמעי בצ'אט מחזיר רשימה ומבקש ניסוח מחדש (אין draft בלי יעד בסיס); ב-TMA הבחירה שולחת `goal_id`.
 - סיווג הטקסט נעשה ב-LLM (`classifier.classify`/`fill_reply`) ולא נבדק על טקסטים אמיתיים (אין מפתח בסנדבוקס).
 - לא נבדק חי: Airtable, PostgreSQL/ActionGateway בפועל, Telegram webhook.
+
+---
+
+## 9. Sessions privacy gate (נבדק 06/10/2026)
+ה-FCC draft נשמר בשורת `Sessions` (State JSON). נבדק כנתון רגיש, **לפני** merge.
+
+### Sessions access map (מקור: grep על כל ה-repo)
+| נתיב | קורא/כותב | מצב לפני | מצב אחרי |
+|---|---|---|---|
+| `session_store.py` (`_sync_to_db`, `_load_from_db`, `_find_best_session_in_db`, dedupe cleanup) | `airtable_add/update/get_records` ישיר, מפתח (Sender ID, Channel) | נתיב פנימי מורשה | **ללא שינוי** (לא עובר דרך מדיניות הכלים) |
+| 31 קריאות `lead_sessions.*` ב-`app.py`, `lead_candidate_handler`, `action_gateway`, `cmd_decision`, `furniture_lead_funnel`, `core/deterministic_commercial_update` | דרך ה-API של ה-store בלבד, `sender` נגזר מזהות ההודעה | פנימי | ללא שינוי |
+| `interaction_engine._adapter_whatsapp` → `get_all_active()` | RAM בלבד, רק sessions עם `done` + `summary` | FCC draft אינו נכלל (אין `summary`) | ללא שינוי |
+| **generic `airtable_get` / `airtable_add` / `airtable_update` (agent + approvals)** | owner/manager/employee: `enforce_tenant_scope` החזיר "מותר הכל" לכל טבלה | ⚠️ **כל role פנימי יכול היה לקרוא/לכתוב Sessions** (כולל drafts של אחרים) | ✅ נחסם לכל role דרך `data_access_policy` (מצב חדש `SYSTEM_INTERNAL`) |
+| raw table id (`tblHLfE24lTkVUhz0`) | נחסם מראש לכל נתיב כללי (`is_raw_table_id`) | חסום | חסום (נבדק) |
+| partner | `airtable_get` מוגבל לטבלאות דומיין; Sessions לא ברשימה | חסום | חסום + מדיניות |
+| `airtable_tools.airtable_get` (render) | | מרנדר | מחזיר `SYSTEM_STATE_MESSAGE` |
+| TMA | אין endpoint לקריאת Sessions; `tma_write` allowlist לא כולל Sessions | חסום | חסום (נבדק) |
+| debug/admin (`/status`, `/schema`, `boss_doctor`, `health_monitor`) | אין קריאת Sessions | — | — |
+
+### החלטה
+הרחבה במדיניות המרכזית הקיימת (`core/data_access_policy.py`), **לא** מדיניות מקבילה ולא סינון FCC בלבד: מצב `SYSTEM_INTERNAL` ל-`Sessions` (ול-`LeadSessions` הישן) — כל כלי נתונים כללי נחסם לכל role; `filter_records`→`[]`, `authorize_record`/`scope_new_record_fields` נדחים. אין השפעה על lead qualifier / BusinessDraft הקיים (הם עוברים דרך `session_store` ולא דרך הכלים הכלליים); הוכח בהרצת כל בדיקות ה-BusinessDraft וה-session.
+
+### זהות / מפתח ה-session
+`sender = "<tenant_id>:<user_id>"`, `channel = "fcc"`; בנוסף נבדקים בכל load: `tenant_id`, `actor_user_id`, `source_channel` (`DraftIdentityMismatchError`). אין שם תצוגה; tenant/user חסר או "unknown" ⇒ `denied` (fail closed); אין fallback למשתמש אחר. המפתח הוא מזהה, **לא** מדיניות גישה — הגישה נשלטת ע"י הכלל למעלה.
+
+## 10. הודעה לא קשורה באמצע draft
+- ערך תקף לשדה → נשמר. פקודה (אשר/ערוך/בטל/דלג) → מטופלת (דלג על שדה חובה נדחה).
+- ערך שנראה כערך אך לא תקין (תאריך לא קיים, סכום שלילי) → **לא נשמר**; אותה שאלה מוצגת שוב ("❌ ערך לא תקין").
+- טקסט שאינו תשובה כלל ("מה מצב הלידים שלי?") → **לא נשמר**, מצב `unrelated`, ה-draft ללא שינוי. ב-TMA מוצגת השאלה שוב; בצ'אט ההודעה ממשיכה לזרימה הרגילה (הסוכן) וה-draft נשאר פתוח.
+- מנגנון: ערכים "בצורת ערך" (מספר/תאריך עם ספרות/בחירה מוצגת) מאומתים דטרמיניסטית; כל השאר דרך `fill_reply` שחייב **ציטוט** מהטקסט לכל שדה (אין ציטוט ⇒ אין שדה); שדות נוספים מתקבלים רק לצד תשובה תקפה לשדה שנשאל. כותרות/הערות (טקסט חופשי) אינן מתקבלות דטרמיניסטית.
+
+## 11. Follow-up: FCC-CHAT-SINGLE-CONFIRM
+בצ'אט יש כרגע שני אישורים: אישור ה-draft (הבנה) ואחריו אישור ה-ActionGateway הרגיל (הרשאה). `self_confirm` הוא שינוי authorization ולכן **לא** נכלל ב-PR זה. אחרי runtime verification תוחלט האם פעולות FCC עצמיות ברמת סיכון נמוכה יעברו ActionGateway ללא אישור שני. ב-TMA נשארת מדיניות האישור הקיימת (owner auto-approve).

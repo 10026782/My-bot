@@ -44,7 +44,10 @@ _FILL_SYSTEM = (
     "end_date, start_date, occurred_at (YYYY-MM-DD; תאריך יחסי כמו ״סוף השנה״/״סוף יוני״ חשב לפי today), "
     "amount (מספר), kind (one_time|monthly_recurring|target_change), note. "
     "כלול רק מה שנאמר במפורש; אל תמציא ואל תנחש. אם ההודעה היא תשובה לשדה ב-awaiting, מלא אותו. "
-    "בעריכה (״ערוך סכום ל-80000״) החזר רק את השדה שהשתנה."
+    "בעריכה (״ערוך סכום ל-80000״) החזר רק את השדה שהשתנה. "
+    "אם ההודעה אינה קשורה לשאלה או לעריכה (למשל שאלה על לידים) — החזר fields ריק. "
+    "פורמט: {\"fields\": {שדה: ערך}, \"evidence\": {שדה: ציטוט מדויק מההודעה שממנו נלקח הערך}}. "
+    "אין ציטוט מהטקסט = אין שדה."
 )
 
 
@@ -63,4 +66,15 @@ def fill_reply(text: str, awaiting: str | None, fields: dict, entity: str, *, to
         data = json.loads(match.group(0))
     except ValueError:
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    fields, evidence = data.get("fields"), data.get("evidence")
+    if not isinstance(fields, dict) or not isinstance(evidence, dict):
+        return {}
+    haystack = re.sub(r"\s+", " ", text or "").casefold()
+    accepted = {}
+    for name, value in fields.items():                       # anti-hallucination: the value must be quoted from the text
+        quote = re.sub(r"\s+", " ", str(evidence.get(name) or "")).strip().casefold()
+        if value not in (None, "") and quote and quote in haystack:
+            accepted[name] = value
+    return accepted

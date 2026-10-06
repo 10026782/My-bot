@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 OWNER_SCOPED = "owner_scoped"      # visible ONLY to the owner-of-record
 RECORD_MARKER = "record_marker"    # visible per existing rules unless marked private
+SYSTEM_INTERNAL = "system_internal"  # internal system state (e.g. Sessions): no generic-tool access for ANY role
 
 OWNERLESS_DENY = "deny"
 
@@ -50,6 +51,7 @@ class PersonalDataAccessDenied(PermissionError):
 
 DENIED_MESSAGE = "❌ גישה נחסמה: נתונים אישיים זמינים רק לבעל הרשומה."
 UNRESOLVED_MESSAGE = "❌ גישה נחסמה: לא ניתן לאמת את זהותך מול רשומה אישית."
+SYSTEM_STATE_MESSAGE = "❌ גישה נחסמה: זה מצב פנימי של המערכת ואינו זמין דרך כלי הנתונים."
 RAW_TABLE_ID_MESSAGE = "❌ גישה נחסמה: יש לפנות לטבלה לפי שם, לא לפי מזהה."
 
 
@@ -79,6 +81,11 @@ _POLICIES: dict[str, TablePolicy] = {
         Tables.FIN_EVENTS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,
         linked_owner_checks=(("Goal", Tables.FIN_GOALS),),
     ),
+    # Sessions hold per-person working state (lead-qualifier answers, BusinessDraft incl. FCC financial
+    # drafts). Only session_store (its own sanctioned internal I/O) may touch them — never a generic
+    # agent/TMA tool, whatever the caller's role. The Sender-ID key is NOT an access policy.
+    Tables.SESSIONS: TablePolicy(Tables.SESSIONS, SYSTEM_INTERNAL),
+    Tables.LEAD_SESSIONS: TablePolicy(Tables.LEAD_SESSIONS, SYSTEM_INTERNAL),
     Tables.TASKS: TablePolicy(
         Tables.TASKS, RECORD_MARKER, owner_field=TaskFields.OWNER,
         private_marker=TASK_PRIVATE_MARKER,
@@ -109,6 +116,11 @@ def policy_for(table: object) -> TablePolicy | None:
 def is_owner_scoped(table: object) -> bool:
     policy = policy_for(table)
     return policy is not None and policy.mode == OWNER_SCOPED
+
+
+def is_system_internal(table: object) -> bool:
+    policy = policy_for(table)
+    return policy is not None and policy.mode == SYSTEM_INTERNAL
 
 
 def needs_record_filter(table: object) -> bool:
@@ -168,6 +180,8 @@ def record_visible(table: object, fields: dict | None, actor: ActorScope) -> boo
     policy = policy_for(table)
     if policy is None:
         return True
+    if policy.mode == SYSTEM_INTERNAL:
+        return False                    # never visible through a data tool, for any actor
     refs = owner_refs(fields, policy.owner_field)
     owner_of_record = actor.resolved and actor.profile_id in refs
     if policy.mode == OWNER_SCOPED:
@@ -183,6 +197,8 @@ def filter_records(table: object, records: list[dict], identity) -> list[dict]:
     policy = policy_for(table)
     if policy is None:
         return list(records)
+    if policy.mode == SYSTEM_INTERNAL:
+        return []
     if policy.mode == RECORD_MARKER and not any(
         _is_private(policy, (r or {}).get("fields")) for r in records
     ):
@@ -199,6 +215,8 @@ def authorize_record(table: object, fields: dict | None, identity) -> None:
     policy = policy_for(table)
     if policy is None:
         return
+    if policy.mode == SYSTEM_INTERNAL:
+        raise PersonalDataAccessDenied(SYSTEM_STATE_MESSAGE)
     actor = resolve_actor(identity)
     if policy.mode == OWNER_SCOPED and not actor.resolved:
         raise PersonalDataAccessDenied(UNRESOLVED_MESSAGE)
@@ -211,6 +229,8 @@ def scope_new_record_fields(table: object, fields: dict, identity) -> dict:
     policy = policy_for(table)
     if policy is None:
         return fields
+    if policy.mode == SYSTEM_INTERNAL:
+        raise PersonalDataAccessDenied(SYSTEM_STATE_MESSAGE)
     actor = resolve_actor(identity)
     wants_scope = policy.mode == OWNER_SCOPED or _is_private(policy, fields)
     if not wants_scope:
@@ -262,6 +282,9 @@ def enforce_table_access(tool_name: str, identity, params: dict) -> None:
     policy = policy_for(table)
     if policy is None:
         return
+    if policy.mode == SYSTEM_INTERNAL:
+        logger.warning("[data_access_policy] %s denied on system table=%s", tool_name, policy.table)
+        raise PersonalDataAccessDenied(SYSTEM_STATE_MESSAGE)
     record_id = params.get("record_id")
     needs_record_check = tool_name == "airtable_update" and bool(record_id)
     if policy.mode == RECORD_MARKER and not needs_record_check:

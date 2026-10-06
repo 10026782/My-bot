@@ -85,7 +85,7 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
     if (!turn) setLastText(value);
     void send({ text: value });
   };
-  const open = turn && ["ask", "review", "needs_goal", "confirmed", "partial_failure"].includes(turn.state);
+  const open = turn && ["ask", "unrelated", "review", "needs_goal", "confirmed", "partial_failure"].includes(turn.state);
   const reviewing = turn?.state === "review";
 
   return (

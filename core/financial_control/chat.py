@@ -52,6 +52,8 @@ def maybe_handle(identity, text: str, *, queue: Callable[[str, dict], dict]) -> 
     if not gate.enabled_for(identity) or not conversation.has_pending(identity):
         return None, None
     result = conversation.handle_turn(identity, text)
+    if result.state == "unrelated":          # not an answer/command: the draft stays open, untouched, and the
+        return None, None                    # message goes to the normal flow (the owner can still ask about leads)
     if result.state != "confirmed":
         return render_text(result), None
     outcome: dict = {}

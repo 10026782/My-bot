@@ -339,7 +339,7 @@ def test_confirm_freezes_snapshot_and_writes_exact_reviewed_fields(mem_store):
     assert w["op"] == "post" and w["table"] == Tables.FIN_GOALS
     assert w["fields"] == {GF.TITLE: "קרן חירום", GF.TARGET_AMOUNT: 60000.0, GF.CATEGORY: "emergency_fund",
                            GF.CALC_METHOD: "cumulative", GF.END_DATE: "2026-12-31", GF.STATUS: "active"}
-    stored = mem_store.load_business_draft("eliyahu", fd.FCC_GOAL, tenant_id="boss_hq", actor_user_id="eliyahu",
+    stored = mem_store.load_business_draft("boss_hq:eliyahu", fd.FCC_GOAL, tenant_id="boss_hq", actor_user_id="eliyahu",
                                            source_channel="fcc", channel="fcc", contracts=fd.FCC_CONTRACTS)
     assert stored.lifecycle_state is bd.DraftState.CONFIRMED and stored.snapshot is not None
     with pytest.raises(bd.BusinessDraftError):
@@ -386,7 +386,8 @@ def test_required_field_cannot_be_skipped_and_optional_never_asked():
     assert seen == {"end_date"} and "start_date" not in seen          # optional start_date is never prompted
     r = run(ex, ELIYAHU, "2026-12-31")                                # ISO accepted deterministically
     assert r.state == "review"
-    assert run(ex, ELIYAHU, "דלג").state == "review"                  # a skip word is never a confirm
+    r = run(ex, ELIYAHU, "דלג")                                       # a skip word is never a confirm
+    assert r.state == "unrelated" and conv.pending_view(ELIYAHU)["state"] == "review"
 
 
 # 9 — edit changes one field only, does not restart the flow
@@ -602,11 +603,21 @@ def test_no_direct_airtable_write_in_fcc_package_and_only_canonical_tools_emitte
 def test_fill_reply_and_classify_parse_llm_json_and_reject_garbage(monkeypatch):
     import llm_fallback
     from core.financial_control import classifier
-    outs = iter(['noise {"end_date": "2026-12-31"} tail', "no json at all", '{"action": "create_goal", "title": "t"}'])
+    outs = iter([
+        'noise {"fields": {"end_date": "2026-12-31"}, "evidence": {"end_date": "סוף השנה"}} tail',
+        "no json at all",
+        '{"action": "create_goal", "title": "t"}',
+        '{"fields": {"target_amount": 5}, "evidence": {"target_amount": "5 לידים"}}',      # quote not in the text
+        '{"fields": {"target_amount": 5}}',                                                  # no evidence at all
+        '{"fields": {"target_amount": 60000}, "evidence": {"target_amount": "60 אלף"}}',
+    ])
     monkeypatch.setattr(llm_fallback, "call_anthropic_text", lambda **kw: next(outs))
     assert classifier.fill_reply("סוף השנה", "end_date", {}, fd.FCC_GOAL, today=TODAY) == {"end_date": "2026-12-31"}
     assert classifier.fill_reply("???", "end_date", {}, fd.FCC_GOAL, today=TODAY) == {}
     assert classifier.classify("x", [], today=TODAY)["action"] == "create_goal"
+    assert classifier.fill_reply("מה מצב הלידים שלי?", "target_amount", {}, fd.FCC_GOAL, today=TODAY) == {}
+    assert classifier.fill_reply("מה מצב הלידים שלי?", "target_amount", {}, fd.FCC_GOAL, today=TODAY) == {}
+    assert classifier.fill_reply("60 אלף", "target_amount", {}, fd.FCC_GOAL, today=TODAY) == {"target_amount": 60000}
 
 
 # agent tool: registered owner-only, schema'd, gated by the same canary, never writes
@@ -626,3 +637,154 @@ def test_fcc_update_tool_is_owner_only_gated_and_draft_only(monkeypatch):
     out = dispatcher_module.dispatch_tool("fcc_update", {"text": "תוסיף יעד קרן חירום"}, ELIYAHU)
     assert "סכום היעד" in out and conv.pending_view(ELIYAHU)["awaiting"] == "target_amount"
     assert DB[Tables.FIN_GOALS][0]["id"] == "recGE" and len(DB[Tables.FIN_GOALS]) == 2     # nothing written
+
+
+# ═══════════════ Sessions privacy gate (PR: FCC Diamond completion) ═══════════════
+import identity as identity_module_  # noqa: E402
+from tools import airtable_tools  # noqa: E402
+
+SESSIONS_RAW_ID = "tblHLfE24lTkVUhz0"
+MANAGER = ident("manny", Role.MANAGER)
+EMPLOYEE = ident("eve", Role.EMPLOYEE)
+
+
+def _start_goal_draft(who, title="קרן חירום"):
+    ex = Ex(classify={"s": {"action": "create_goal", "title": title, "category": "emergency_fund"}})
+    run(ex, who, "s")
+    return ex
+
+
+# 1 — A cannot read B's FCC draft (neither through the conversation nor through the store binding)
+def test_a_cannot_read_b_fcc_draft(mem_store):
+    _start_goal_draft(AVI_I, "יעד סודי של אבי")
+    assert conv.pending_view(ELIYAHU) is None
+    assert "סודי" not in str(conv.pending_view(ELIYAHU))
+    # even a caller that guesses B's slot key is stopped by the stored identity binding
+    with pytest.raises(bd.DraftIdentityMismatchError):
+        mem_store.load_business_draft("boss_hq:avi", fd.FCC_GOAL, tenant_id="boss_hq", actor_user_id="eliyahu",
+                                      source_channel="fcc", channel="fcc", contracts=fd.FCC_CONTRACTS)
+    # a wrong tenant does not resolve either
+    with pytest.raises(bd.DraftIdentityMismatchError):
+        mem_store.load_business_draft("boss_hq:avi", fd.FCC_GOAL, tenant_id="other_tenant", actor_user_id="avi",
+                                      source_channel="fcc", channel="fcc", contracts=fd.FCC_CONTRACTS)
+
+
+# 2 — A cannot mutate B's draft: A's answers only ever touch A's slot; a forged save is refused
+def test_a_cannot_mutate_b_fcc_draft(mem_store):
+    ex = _start_goal_draft(AVI_I, "יעד אבי")
+    before = conv.pending_view(AVI_I)
+    run(ex, ELIYAHU, "60000")                                         # A answers: no draft of A's => not an answer
+    run(ex, ELIYAHU, "בטל")
+    assert conv.pending_view(AVI_I) == before
+    avi_draft = mem_store.load_business_draft("boss_hq:avi", fd.FCC_GOAL, tenant_id="boss_hq", actor_user_id="avi",
+                                              source_channel="fcc", channel="fcc", contracts=fd.FCC_CONTRACTS)
+    forged = bd.create_draft(entity_type=fd.FCC_GOAL, operation=bd.DraftOperation.CREATE, tenant_id="boss_hq",
+                             actor_role="owner", actor_user_id="eliyahu", source_channel="fcc", sender="boss_hq:avi",
+                             contracts=fd.FCC_CONTRACTS)
+    with pytest.raises(bd.DraftIdentityMismatchError):
+        mem_store.save_business_draft("boss_hq:avi", forged, expected_version=avi_draft.idempotency_key,
+                                      channel="fcc", contracts=fd.FCC_CONTRACTS)
+
+
+# 3 — generic Airtable tools (every internal role) can neither read nor write Sessions
+def test_generic_tools_cannot_read_or_write_sessions(monkeypatch):
+    rows = [{"id": "recS1", "fields": {"Sender ID": "boss_hq:avi", "State JSON": '{"business_drafts": "SECRET-DRAFT"}'}}]
+    monkeypatch.setattr(airtable_tools, "airtable_get_records", lambda t, f="", max_records=None: list(rows))
+    monkeypatch.setattr(airtable_tools, "_audit", lambda *a, **k: None)
+    monkeypatch.setattr(dispatcher_module._ff, "is_enabled", lambda *a, **k: False)
+    for who in (ELIYAHU, AVI_I, MANAGER, EMPLOYEE):
+        for variant in ("Sessions", "sessions", " Sessions "):
+            out = dispatcher_module.dispatch_tool("airtable_get", {"table": variant}, who)
+            assert "SECRET-DRAFT" not in out and "recS1" not in out, (who.user_id, variant)
+        for tool, params in (("airtable_get", {"table": "Sessions"}),
+                             ("airtable_add", {"table": "Sessions", "fields": {"Sender ID": "x"}}),
+                             ("airtable_update", {"table": "Sessions", "record_id": "recS1", "fields": {"Sender ID": "x"}})):
+            with pytest.raises(TenantScopeViolation):
+                enforce_tenant_scope(tool, who, params)
+    assert policy.filter_records("Sessions", rows, ELIYAHU) == []
+    with pytest.raises(policy.PersonalDataAccessDenied):
+        policy.authorize_record("Sessions", rows[0]["fields"], ELIYAHU)
+    assert airtable_tools.airtable_get("Sessions") == policy.SYSTEM_STATE_MESSAGE        # render path refuses too
+
+
+# 4 — a raw Sessions table id cannot bypass the policy; TMA write allowlist excludes Sessions
+def test_raw_sessions_table_id_and_tma_write_cannot_bypass_policy():
+    assert policy.is_raw_table_id(SESSIONS_RAW_ID)
+    for who in (ELIYAHU, MANAGER):
+        for tool in ("airtable_get", "airtable_add", "airtable_update"):
+            with pytest.raises(TenantScopeViolation):
+                enforce_tenant_scope(tool, who, {"table": SESSIONS_RAW_ID, "record_id": "recS1", "fields": {}})
+    assert "Sessions" not in approval_actions._TMA_WRITE_ALLOWED_TABLES
+
+
+# 5 — unrelated text in the middle of the amount question is NOT stored as a value
+def test_unrelated_text_is_not_saved_as_amount_and_draft_is_untouched(mem_store):
+    ex = Ex(classify={"x": EF_GOAL})                       # fill() returns {} for any other text
+    run(ex, ELIYAHU, "x")
+    before = conv.pending_view(ELIYAHU)
+    r = run(ex, ELIYAHU, "מה מצב הלידים שלי?")
+    assert r.state == "unrelated" and r.awaiting == "target_amount" and "סכום היעד" in r.message
+    assert conv.pending_view(ELIYAHU) == before
+    stored = mem_store.load_business_draft("boss_hq:eliyahu", fd.FCC_GOAL, tenant_id="boss_hq", actor_user_id="eliyahu",
+                                           source_channel="fcc", channel="fcc", contracts=fd.FCC_CONTRACTS)
+    assert "target_amount" not in stored.fields and set(stored.fields) == {"title", "category", "calc_method"}
+    # an extractor that hallucinates a number WITHOUT evidence cannot sneak one in either (classifier-level filter)
+    ex2 = Ex(fill={"מה מצב הלידים שלי?": {"title": "מה מצב הלידים שלי?"}})
+    assert run(ex2, ELIYAHU, "מה מצב הלידים שלי?").awaiting == "target_amount"
+
+
+# 6 + 7 — an invalid date keeps the draft on the same field; the next valid reply continues the same draft
+def test_invalid_date_reasks_same_field_then_valid_reply_continues(mem_store):
+    ex = Ex(classify={"x": EF_GOAL}, fill={"31/02/2026": {"end_date": "31/02/2026"}})
+    run(ex, ELIYAHU, "x"); run(ex, ELIYAHU, "60000")
+    r = run(ex, ELIYAHU, "31/02/2026")
+    assert r.state == "ask" and r.awaiting == "end_date" and "ערך לא תקין" in r.message
+    stored = mem_store.load_business_draft("boss_hq:eliyahu", fd.FCC_GOAL, tenant_id="boss_hq", actor_user_id="eliyahu",
+                                           source_channel="fcc", channel="fcc", contracts=fd.FCC_CONTRACTS)
+    assert "end_date" not in stored.fields and stored.fields["target_amount"] == 60000
+    r = run(ex, ELIYAHU, "31/12/2026")
+    assert r.state == "review" and "31/12/2026" in r.message         # same draft, nothing re-asked
+    assert [c for c in ex.calls if c[0] == "classify"] == [("classify", "x")]
+    r = run(ex, ELIYAHU, "-5")                                         # invalid amount on an edit is also rejected
+    assert r.state in ("unrelated", "ask") and "₪60,000" in conv.pending_view(ELIYAHU)["message"]
+
+
+# 8 — cancel clears only the current user's draft
+def test_cancel_clears_only_current_users_draft():
+    ex = Ex(classify={"e": EF_GOAL, "a": {"action": "create_goal", "title": "יעד אבי", "target": 5, "category": "income"}})
+    run(ex, ELIYAHU, "e"); run(ex, AVI_I, "a")
+    assert run(ex, ELIYAHU, "בטל").state == "cancelled"
+    assert conv.pending_view(ELIYAHU) is None and conv.pending_view(AVI_I)["state"] == "review"
+
+
+# 9 — simultaneous A/B drafts stay isolated through their whole lifecycle incl. confirm
+def test_simultaneous_drafts_isolated_through_confirm():
+    ex = Ex(classify={"e": EF_GOAL, "a": {"action": "create_goal", "title": "יעד אבי", "target": 7000, "category": "income"}},
+            fill={"סוף השנה": {"end_date": "2026-12-31"}})
+    run(ex, ELIYAHU, "e"); run(ex, AVI_I, "a"); run(ex, ELIYAHU, "60000")
+    avi = run(ex, AVI_I, "אשר").snapshot["writes"][0]["fields"]
+    eli = run(ex, ELIYAHU, "סוף השנה")
+    assert avi[GF.TITLE] == "יעד אבי" and "קרן חירום" not in str(avi)
+    assert eli.state == "review" and "יעד אבי" not in eli.message
+
+
+# identity fail-closed: no tenant / unresolved => nothing is read or written
+def test_unresolved_or_tenantless_identity_fails_closed():
+    tenantless = Identity(user_id="eliyahu", role=Role.OWNER, display_name="eliyahu", tenant_id="",
+                          domain_id=Domain.GENERAL, allowed_domains=[], channel="telegram", external_id="tg-x")
+    ex = Ex(classify={"x": EF_GOAL})
+    assert conv.handle_turn(tenantless, "x", extractor=ex, today=TODAY).state == "denied"
+    assert conv.pending_view(tenantless) is None and ex.calls == []
+
+
+# chat releases unrelated messages to the normal flow while the draft stays open
+def test_chat_releases_unrelated_message_and_keeps_draft(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
+    ex = Ex(classify={"x": EF_GOAL})
+    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    fchat.start_turn(ELIYAHU, "x")
+    q = lambda t, i: pytest.fail("must not queue")
+    assert fchat.maybe_handle(ELIYAHU, "מה מצב הלידים שלי?", queue=q) == (None, None)
+    assert conv.pending_view(ELIYAHU)["awaiting"] == "target_amount"

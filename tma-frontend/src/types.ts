@@ -508,7 +508,7 @@ export interface FccOverview {
 
 /** One turn of the server-side FCC conversation (draft/completion). The client only renders it. */
 export interface FccTurn {
-  state: "ask" | "review" | "confirmed" | "executed" | "cancelled" | "needs_goal" | "duplicate" | "clarify" | "denied" | "info" | "partial_failure";
+  state: "ask" | "unrelated" | "review" | "confirmed" | "executed" | "cancelled" | "needs_goal" | "duplicate" | "clarify" | "denied" | "info" | "partial_failure";
   message: string;
   entity?: string | null;
   awaiting?: string | null;

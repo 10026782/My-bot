@@ -35,7 +35,7 @@ _VALIDATION_ERRORS = (BusinessDraftError, CompletionError, ValueError)
 
 @dataclass
 class TurnResult:
-    state: str          # ask | review | confirmed | cancelled | needs_goal | duplicate | clarify | denied | info
+    state: str          # ask | review | confirmed | cancelled | needs_goal | duplicate | clarify | denied | info | unrelated
     message: str = ""
     entity: str | None = None
     awaiting: str | None = None
@@ -64,9 +64,13 @@ def _store():
     return lead_sessions
 
 
-def _ids(identity, actor) -> dict:
-    return {"tenant_id": identity.tenant_id, "actor_user_id": identity.user_id, "sender": identity.user_id,
-            "profile_id": actor.profile_id}
+def _ids(identity, actor) -> dict | None:
+    """Canonical slot key = tenant + stable user_id (never a display name); no fallback to anyone else."""
+    tenant = str(getattr(identity, "tenant_id", "") or "").strip()
+    user = str(getattr(identity, "user_id", "") or "").strip()
+    if not tenant or tenant == "unknown" or not user:
+        return None
+    return {"tenant_id": tenant, "actor_user_id": user, "sender": f"{tenant}:{user}", "profile_id": actor.profile_id}
 
 
 def _load_all(store, ids) -> list[BusinessDraft]:
@@ -153,6 +157,8 @@ def _set_fields(d: BusinessDraft, updates: dict, *, strict: bool) -> tuple[Busin
 
 
 def _deterministic_answer(field_name: str, text: str):
+    """Value-shaped answers only (a number, a date with digits, one of the presented choices). Free text
+    (titles, notes) is never accepted deterministically — it must be evidenced by the extractor."""
     t = text.strip()
     vocab = fd.ANSWER_VOCAB.get(field_name)
     if vocab and t in vocab:
@@ -164,9 +170,7 @@ def _deterministic_answer(field_name: str, text: str):
             return cleaned
         except ValueError:
             return None
-    if field_name in ("end_date", "start_date", "occurred_at", "due_date"):
-        return t
-    if field_name in ("title", "note"):
+    if field_name in ("end_date", "start_date", "occurred_at", "due_date") and any(ch.isdigit() for ch in t):
         return t
     return None
 
@@ -184,6 +188,8 @@ def pending_view(identity, *, store=None) -> dict | None:
         return None
     store = store or _store()
     ids = _ids(identity, actor)
+    if ids is None:
+        return None
     for d in _load_all(store, ids):
         if d.lifecycle_state not in _TERMINAL:
             return _render(d).to_dict()
@@ -205,6 +211,8 @@ def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=No
         return TurnResult("clarify", "מה לעדכן?")
     store, extractor = store or _store(), extractor or LlmExtractor()
     ids = _ids(identity, actor)
+    if ids is None:                                          # no tenant / user_id -> fail closed
+        return TurnResult("denied", policy.UNRESOLVED_MESSAGE)
     lower = text.lower()
 
     drafts = _load_all(store, ids)
@@ -228,6 +236,8 @@ def complete_execution(identity, entity: str | None = None, *, store=None) -> No
         return
     store = store or _store()
     ids = _ids(identity, actor)
+    if ids is None:
+        return
     for d in _load_all(store, ids):
         if d.lifecycle_state is DraftState.CONFIRMED and (entity is None or d.entity_type == entity):
             _delete(store, ids, d.entity_type)
@@ -259,6 +269,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         return replace_result(_render(d), message=f"שדה חובה — אי אפשר לדלג.\n{_render(d).message}")
 
     updates: dict[str, Any] = {}
+    det_failed = fill_failed = False
     goals = service.my_goals(identity) if d.entity_type in (fd.FCC_EVENT, fd.FCC_FOLLOWUP) else []
     if awaiting == "goal":                                    # choose among the caller's OWN goals only
         chosen = None
@@ -268,33 +279,49 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                 return TurnResult("denied", policy.DENIED_MESSAGE)
         else:
             chosen = _goal_by_text(goals, text)
-        if chosen is None:
+        if chosen is None:                                    # no mutation; draft stays open
             return TurnResult("needs_goal", "לא זיהיתי את היעד — בחר מהרשימה.", d.entity_type, "goal",
                               _view(d), candidates=writer._cand(goals))
         updates["goal"] = chosen["id"]
         d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, "")})
-    elif awaiting:
-        value = _deterministic_answer(awaiting, text)
-        if value is not None:
-            try:
-                _set_fields(d, {awaiting: value}, strict=True)       # accepted as typed (number/ISO date/choice)
-                updates[awaiting] = value
-            except _VALIDATION_ERRORS:
-                pass                                                 # e.g. "סוף השנה" -> extractor resolves
-    if not updates or (awaiting and awaiting not in updates):
-        filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
-        for k, v in filled.items():
-            updates.setdefault(k, v)
+    else:
+        if awaiting:
+            value = _deterministic_answer(awaiting, text)
+            if value is not None:
+                try:
+                    _set_fields(d, {awaiting: value}, strict=True)   # valid number / ISO date / presented choice
+                    updates[awaiting] = value
+                except _VALIDATION_ERRORS:
+                    det_failed = True                                # looked like a value but is not a valid one
+        if awaiting is None or awaiting not in updates:
+            filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
+            if awaiting is None:                                     # review/edit: any evidenced field change
+                updates.update(filled)
+            elif awaiting in filled:                                 # extras only ALONGSIDE a valid awaited answer
+                try:
+                    _set_fields(d, {awaiting: filled[awaiting]}, strict=True)
+                    updates.update(filled)
+                except _VALIDATION_ERRORS:
+                    fill_failed = True
 
-    d2, rejected = _set_fields(d, updates, strict=False)
-    if d2.fields == d.fields and not rejected and d2.lifecycle_state is d.lifecycle_state:
-        base = _render(d)
-        return replace_result(base, message=f"לא הבנתי.\n{base.message}")
-    if awaiting and awaiting in rejected:
-        base = _render(d2)
-        return replace_result(base, message=f"❌ ערך לא תקין ל{fd.LABELS.get(awaiting, awaiting)}.\n{base.message}")
+    d2, rejected = _set_fields(d, updates, strict=False) if updates else (d, [])
+    answered = bool(updates) and (awaiting is None or awaiting in updates) and awaiting not in rejected
+    if not answered or (d2.fields == d.fields and d2.lifecycle_state is d.lifecycle_state and awaiting != "goal"):
+        return _not_an_answer(d, awaiting, invalid=det_failed or fill_failed or (awaiting in rejected))
     saved = _save(store, ids, d2, expected=expected)
     return _render(saved)
+
+
+def _not_an_answer(d: BusinessDraft, awaiting: str | None, *, invalid: bool) -> TurnResult:
+    """No mutation: the draft stays exactly as stored. An invalid value re-asks the same field; text that is
+    not an answer at all is reported as ``unrelated`` (chat lets it fall through to the agent)."""
+    base = _render(d)
+    label = fd.LABELS.get(awaiting or "", "")
+    if invalid and awaiting:
+        return replace(base, state="ask", message=f"❌ ערך לא תקין ל{label}.\n{base.message}")
+    if awaiting is None:
+        return replace(base, state="unrelated", message=f"לא הבנתי את העריכה.\n{base.message}")
+    return replace(base, state="unrelated", message=f"לא הבנתי — {base.message}\n(אפשר לכתוב ״בטל״ לביטול)")
 
 
 def replace_result(r: TurnResult, **kw) -> TurnResult:
