@@ -79,8 +79,8 @@ test("income hierarchy: weekly card shows the source minimum and the rest from o
       sources: [{ goal_id: "t", title: "הכנסה מנסיעות", period_type: "weekly", target: 2500, actual: 1000, remaining: 1500 }] } } });
   const by = Object.fromEntries(cards.map((c) => [c.key, c]));
   assert.equal(by.income.value, "₪1,000 / ₪15,000");
-  assert.equal((by.income_week.hint ?? "").includes("הכנסה מנסיעות: ₪1,000 / ₪2,500 השבוע"), true);
-  assert.equal((by.income_week.hint ?? "").includes("ממקורות אחרים השבוע: ₪2,583"), true);
+  assert.equal((by.income_week.hint ?? "").includes("הכנסה מנסיעות: נשאר ₪1,500 מתוך ₪2,500 השבוע"), true);
+  assert.equal((by.income_week.hint ?? "").includes("ממקורות אחרים: ₪2,583"), true);
 });
 
 test("weekly card source line shows its direct costs and net", () => {
@@ -90,7 +90,7 @@ test("weekly card source line shows its direct costs and net", () => {
       sources: [{ goal_id: "t", title: "נסיעות", period_type: "weekly", target: 2500, actual: 150, remaining: 2350,
         direct_costs: 100, net: 50 }] } } });
   const hint = cards.find((c) => c.key === "income_week")?.hint ?? "";
-  assert.equal(hint.includes("נסיעות: ₪150 / ₪2,500 השבוע · הוצאות ישירות -₪100 · נטו ₪50"), true);
+  assert.equal(hint.includes("נסיעות: נשאר ₪2,350 מתוך ₪2,500 השבוע (הוצאות ישירות -₪100 · נטו ₪50)"), true);
 });
 
 test("a source goal card says it is inside the parent and has no weekly pace of its own", () => {

@@ -147,3 +147,7 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Screen**: the flagged card also shows how many are `cancel` and still waiting for the real cancellation; the potential-saving card is labelled "רק אחרי ביטול בפועל".
 - **"ביטלתי את X"** (classifier action `deactivate_obligation`) -> UPDATE draft with `status = inactive` -> patch `Active = false` only; the obligation leaves the monthly total. An untracked name is clarified, never created. A cancelled (inactive) commitment does not block adding the same name again.
 - Saving inference runs only when review status / amount / frequency / saving are part of the turn, so an unrelated update never touches other fields.
+
+## Weekly card wording (07/10/2026)
+
+- The weekly income target already INCLUDES the weekly sources (travel is a part of it, never added on top). The card line now shows what each source still owes so the parts add up to the headline: `מזה: נסיעות: נשאר ₪746 מתוך ₪2,500 השבוע · ממקורות אחרים: ₪2,963` (746 + 2,963 = 3,709). Wording only; no calculation changed.
