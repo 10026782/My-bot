@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 04/10/2026
+עודכן: 06/10/2026
 
 ## PIPELINE-1 — Experience Status אוטומטי ביצירת ליד — CODE DONE, NOT VERIFIED IN PROD — 04/10/2026
 
@@ -1172,6 +1172,7 @@ runtime-only item is represented here as static code work.
 | U1 | Understanding Layer Architecture | MERGED_STATIC | Owner decision recorded: no new general Understanding Contract or PendingAction Store; reuse existing layers | Continue with the approved reuse architecture | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) §3.5 |
 | UX-01 | Unified BOSS Experience | IN_PROGRESS | R0.1, R1.1, R2.0, R2.1, R3.1, R3.2, R4, R4.1 and R6.1–R6.6 MERGED / STATIC VERIFIED; R5 GATE_COMPLETE; R7.1–R7.2 MERGED / STATIC VERIFIED (`3c45a87`, `1ff1cee`) | Continue only with the next gated channel-adapter phase | [`BOSS_UNIFIED_MASTER_PLAN.md`](docs/governance/BOSS_UNIFIED_MASTER_PLAN.md) §3.5 |
 | ORACLE_MIGRATION_M0 | Oracle Always Free Migration — M0 Repository Readiness | IN_PROGRESS | MERGED_STATIC — PR #1095 (`881ea33`); Dockerfile, Oracle Compose/Caddy/env template, gated deploy workflow, Postgres backup/restore, healthcheck alerting; overall migration verdict remains FULL MIGRATION POSSIBLE — REMEDIATION REQUIRED, STATIC VERIFIED / RUNTIME NOT ESTABLISHED; ARM64 status is STATIC ARM64 READY, not runtime-verified | M1 OPEN / NOT STARTED: provision Oracle VM, perform real Ampere A1 ARM64 verification, and complete DNS, TLS, and secrets cutover | [`ORACLE_MIGRATION_M0.md`](docs/operations/ORACLE_MIGRATION_M0.md) |
+| NEON_MIGRATION_M0 | Neon PostgreSQL Migration — M0 Repository Readiness (DB only; app host unchanged; supersedes the Postgres half of ORACLE_MIGRATION_M0) | IN_PROGRESS | CODE DONE, NOT VERIFIED IN PROD — operator tooling (`scripts/neon/`) + [`NEON_MIGRATION_M0.md`](docs/operations/NEON_MIGRATION_M0.md); proven only against local PostgreSQL 16, not against a real Neon endpoint; no Neon project, Render change or deploy yet. Open finding: pooled connections are not validated (first claim after a server-side close returns `error`, fail-closed) — hardening proposed, not applied | Owner go for M1 (staging Neon) and for the M0.5 connection-validation patch | [`NEON_MIGRATION_M0.md`](docs/operations/NEON_MIGRATION_M0.md) |
 
 The historical dependency Pending Approval stable → U1 decision → UX-01 is
 satisfied. U1 is resolved at architecture/static level. F52 / Single-Speaker

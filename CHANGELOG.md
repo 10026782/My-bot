@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- chore(neon): Neon PostgreSQL migration M0 (repo readiness only, no runtime change) — `scripts/neon/neon_readiness_check.py` (read-only endpoint probe + opt-in concurrency/idle probes), `scripts/neon/pg_transfer.sh` (dump/restore/verify, restore refuses target==source), `test_neon_readiness_check.py`, `docs/operations/NEON_MIGRATION_M0.md`. Documents an unapplied finding: `core/database.py` does not validate pooled connections, so the first claim after a server-side close returns `error` (fail-closed).
+
 - feat(fcc): gross -> direct costs -> net. New Progress Event kind `direct_cost` (no new table); `actual` stays gross, rows/summary add `direct_costs` and `net`, source costs roll up into the parent once; header income card and goal cards show the breakdown; classifier/draft accept `direct_cost`. Requires the `direct_cost` choice on `Financial Progress Events.Kind`.
 
 - feat(fcc): income hierarchy + calendar-day pacing. Explicit `Contributes To` link on Financial Goals (parent/source): a source target never adds to the parent target, its events roll up into the parent actual once (de-duplicated by event id; source target changes never move the parent). Monthly `period_sum` weekly pace = remaining / calendar days left * min(7, days left) (no whole-week divisor). Header weekly card shows the source minimum and the amount needed from other sources. Cycles/foreign parents ignored.
