@@ -204,6 +204,14 @@ class ExpenseFields:
     DATE            = "date"
     STATUS          = "status"
     DOMAIN          = "domain"
+    # Business-expense fields (06/10/2026, added live): scope + receipt tracking. Household expenses are NOT
+    # recorded here (shared ledger) — they live as private FCC events.
+    SCOPE           = "Expense Scope"      # business_direct | business_reportable | indirect
+    RECEIPT_REQUIRED = "Receipt Required"  # checkbox
+    RECEIPT_STATUS  = "Receipt Status"     # missing | received | not_required
+    VENDOR          = "Vendor"
+    PAYMENT_METHOD  = "Payment Method"     # cash | card | transfer | standing_order
+    RELATED_GOAL    = "Related Goal"       # link -> Financial Goals
 
 
 class PaymentFields:

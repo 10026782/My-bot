@@ -229,7 +229,13 @@
       "status",
       "owner",
       "role (from Owner)",
-      "domain"
+      "domain",
+      "Expense Scope",
+      "Receipt Required",
+      "Receipt Status",
+      "Vendor",
+      "Payment Method",
+      "Related Goal"
     ],
     "Payments": [
       "reference",
@@ -873,5 +879,5 @@
     ]
   },
   "fetched_at": "2026-09-04",
-  "note": "manually reconciled via Track 8C read-only Airtable MCP pass (list_tables_for_base); schema_audit.py --live not run (no AIRTABLE_API_KEY in this sandbox). 04/09/2026: added ActionContracts.continuation_ref (DIAMOND PATH nested-entity approval continuation) after creating the live field via the Airtable MCP create_field tool and confirming it via list_tables_for_base. 14/09/2026 (BUG-CHARGE-VAT-NONE-SENTINEL follow-up): reconciled 'Payments' table via live Airtable MCP list_tables_for_base + get_table_schema (no AIRTABLE_API_KEY in this sandbox) — added 8 fields missing since the 04/09 fetch (Charge, Direction, Currency, Method, Counterparty Contact, Counterparty Organization, Document Requirement, Document Status), the V2 Payment write path used by crm_create_charge_payment(). Every one of these was silently dropped as 'unknown field' by the legacy unknown-field guard, tripping SPEC A1 on every V2 Payment write regardless of value — a second instance of the same failure class as the sentinel bug, caught by a regression test while fixing it. 04/10/2026 (FCC Slice 1): added 'Financial Goals' (tblQPUteMKe13tvlr) and 'Financial Progress Events' (tblqNvcyK34zVjcXP), created via the Airtable MCP create_table/create_field tools and confirmed via get_table_schema (no AIRTABLE_API_KEY in this sandbox); inverse link fields were auto-created on Profile and on Financial Goals."
+  "note": "manually reconciled via Track 8C read-only Airtable MCP pass (list_tables_for_base); schema_audit.py --live not run (no AIRTABLE_API_KEY in this sandbox). 04/09/2026: added ActionContracts.continuation_ref (DIAMOND PATH nested-entity approval continuation) after creating the live field via the Airtable MCP create_field tool and confirming it via list_tables_for_base. 14/09/2026 (BUG-CHARGE-VAT-NONE-SENTINEL follow-up): reconciled 'Payments' table via live Airtable MCP list_tables_for_base + get_table_schema (no AIRTABLE_API_KEY in this sandbox) — added 8 fields missing since the 04/09 fetch (Charge, Direction, Currency, Method, Counterparty Contact, Counterparty Organization, Document Requirement, Document Status), the V2 Payment write path used by crm_create_charge_payment(). Every one of these was silently dropped as 'unknown field' by the legacy unknown-field guard, tripping SPEC A1 on every V2 Payment write regardless of value — a second instance of the same failure class as the sentinel bug, caught by a regression test while fixing it. 04/10/2026 (FCC Slice 1): added 'Financial Goals' (tblQPUteMKe13tvlr) and 'Financial Progress Events' (tblqNvcyK34zVjcXP), created via the Airtable MCP create_table/create_field tools and confirmed via get_table_schema (no AIRTABLE_API_KEY in this sandbox); inverse link fields were auto-created on Profile and on Financial Goals. 06/10/2026: added 6 business-expense fields to Expenses (Expense Scope, Receipt Required, Receipt Status, Vendor, Payment Method, Related Goal) via Airtable MCP create_field with owner approval; the Related Goal link auto-created an inverse field on Financial Goals (fldVcBORLDgrCVaa0)."
 }
