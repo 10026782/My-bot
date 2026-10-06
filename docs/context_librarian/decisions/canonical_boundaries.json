@@ -710,6 +710,45 @@
       "last_observed_commit": "ac833e9ebc13047186e0f6200814f50856c2245b"
     },
     {
+      "id": "decision.fcc_presentation_helper",
+      "name": "fccPresentation.ts is a pure frontend presentation helper for FCC goal families, not a runtime authority",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "deterministic display model for Financial Control Center goal cards and header cards (recurring / monthly_level / cumulative / project families), derived from the already-returned /api/fcc/overview payload",
+        "precedence": "carries no authority over backend calculation, privacy gate or writer; performs no fetch/state/writes"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "tma-frontend/src/lib/fccPresentation.ts"
+      ],
+      "test_paths": [
+        "tma-frontend/src/lib/fccPresentation.test.ts"
+      ],
+      "canonical_docs": [],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-10-06",
+      "last_verified_commit": "94342a10b230927813618634b9e0273fabcd1884",
+      "confidence": 0.9,
+      "notes": [
+        "Registered to resolve a Context Librarian REVIEW_REQUIRED finding (new runtime source, NO_POLICY_MATCH) for the FCC goal-families change; follows decision.command_center_presentation_helper precedent. Requires owner approval at review.",
+        "Pure by construction: synchronous transforms over FccGoalRow/FccOverview only."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "frontend_presentation_helper",
+          "authority": false,
+          "purpose": "pure display-transformation helpers for FCC goal/header cards; no writes, no business authority",
+          "runtime_consumed": true
+        }
+      },
+      "last_observed_commit": "94342a10b230927813618634b9e0273fabcd1884"
+    },
+    {
       "id": "decision.tma_screens",
       "name": "TMA feature screens (stateful, API-integrated components)",
       "type": "decision",

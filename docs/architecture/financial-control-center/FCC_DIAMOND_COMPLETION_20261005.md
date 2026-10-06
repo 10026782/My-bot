@@ -86,3 +86,16 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 
 ## 11. Follow-up: FCC-CHAT-SINGLE-CONFIRM
 בצ'אט יש כרגע שני אישורים: אישור ה-draft (הבנה) ואחריו אישור ה-ActionGateway הרגיל (הרשאה). `self_confirm` הוא שינוי authorization ולכן **לא** נכלל ב-PR זה. אחרי runtime verification תוחלט האם פעולות FCC עצמיות ברמת סיכון נמוכה יעברו ActionGateway ללא אישור שני. ב-TMA נשארת מדיניות האישור הקיימת (owner auto-approve).
+
+## Goal families (תצוגה לפי סוג יעד)
+
+ללא שינוי בטבלת Goals וללא טבלה חדשה — המשפחה נגזרת מנתונים קיימים (`Calc Method`, `Category`, קיום סכום יעד):
+
+| משפחה | תנאי | תצוגה |
+|---|---|---|
+| recurring | `period_sum` | יעד/בפועל/נשאר + יעד דינמי לשבוע |
+| monthly_level | `recurring_level` | יעד חודשי/הושג/נשאר — ללא קצב שבועי |
+| cumulative | `cumulative` | התקדמות מול יעד כולל; קצב שבועי רק עם `end_date` מפורש |
+| project | אין סכום יעד + קטגוריה לא-מספרית | כרטיס אבן-דרך: סטטוס, פעולה הבאה, תאריך יעד — ללא סכומים |
+
+`summarize()` מצרף לפי משפחה בלבד, מדלג על פרויקטים ולא מערבב משפחות; כרטיס "יעד הכנסה לשבוע" בכותרת הוא הכנסה בלבד.

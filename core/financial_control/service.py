@@ -9,6 +9,7 @@ writes are never done here (see ``writer`` + the ActionGateway path).
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 
 from airtable_schema import FinEventFields, FinGoalFields, Tables
@@ -62,6 +63,12 @@ def assert_goal_owned(goal_id: str, identity) -> dict:
 # Presentation mapping only: header cards read goals by their editable ``Category``
 # value. Goals themselves stay data (no hard-coded list); a missing category simply
 # leaves the card empty ("set a goal").
+# Goal families (presentation only; the Goals table is unchanged):
+#   recurring     period_sum        e.g. monthly income      -> target / actual / remaining / weekly pace
+#   monthly_level recurring_level   e.g. lower the instalment -> target / achieved / remaining (no weekly pace)
+#   cumulative    cumulative        e.g. close loans, savings -> total target / actual / remaining / % (pace only with an end date)
+#   project       no amount target  e.g. sell a property     -> status + next action + date, never ₪0 / "—"
+NUMERIC_CATEGORIES = ("income", "savings", "emergency_fund", "debt")
 SUMMARY_CATEGORIES = {
     "income": ("income", "הכנסה"),
     "savings": ("savings", "חיסכון"),
@@ -80,19 +87,45 @@ def _category_key(category) -> str | None:
     return None
 
 
+def classify_row(row: dict, next_action: dict | None) -> dict:
+    """Decide the goal family. No amount target + not a numeric category => project/milestone:
+    amounts are blanked (no ₪0 / dead "—" cells) and the card carries the next action instead."""
+    if row.get("target") is None and _category_key(row.get("category")) is None:
+        row.update(mode="project", status="project", actual=None, remaining=None,
+                   remaining_periods=None, dynamic_target_per_week=None, next_action=next_action)
+    return row
+
+
+# summary card key -> (category key, modes that belong to the card). Different modes are NEVER summed together.
+_CARDS = {
+    "income": ("income", ("recurring",)),
+    "savings": ("savings", ("cumulative",)),
+    "emergency_fund": ("emergency_fund", ("cumulative",)),
+    "debt_repaid": ("debt", ("cumulative",)),
+    "payment_reduction": ("debt", ("recurring", "monthly_level")),
+}
+
+
 def summarize(rows: list[dict]) -> dict:
-    """Header cards: sum derived goal numbers per category (owner's rows only)."""
+    """Header cards: per (category, family) sums over the owner's rows only. A cumulative loan balance
+    is never added to a monthly instalment reduction, and projects never enter any card."""
     out: dict[str, dict] = {}
     for row in rows:
-        key = _category_key(row.get("category"))
-        if not key:
+        if row.get("mode") == "project" or row.get("target") is None:
             continue
-        card = out.setdefault(key, {"target": 0.0, "actual": 0.0, "remaining": 0.0,
-                                    "dynamic_target_per_week": 0.0, "goals": 0})
-        card["goals"] += 1
-        for field in ("target", "actual", "remaining", "dynamic_target_per_week"):
-            card[field] = round(card[field] + (row.get(field) or 0.0), 2)
+        cat = _category_key(row.get("category"))
+        for key, (card_cat, modes) in _CARDS.items():
+            if cat != card_cat or row.get("mode") not in modes:
+                continue
+            card = out.setdefault(key, {"target": 0.0, "actual": 0.0, "remaining": 0.0,
+                                        "dynamic_target_per_week": 0.0, "goals": 0})
+            card["goals"] += 1
+            for field in ("target", "actual", "remaining", "dynamic_target_per_week"):
+                card[field] = round(card[field] + (row.get(field) or 0.0), 2)
     return out
+
+
+_FCC_TAG = re.compile(r"\[FCC:([A-Za-z0-9]+)\]")
 
 
 def fcc_tasks(identity) -> list[dict]:
@@ -114,7 +147,8 @@ def fcc_tasks(identity) -> list[dict]:
         desc = str(f.get(TaskFields.DESCRIPTION) or "")
         if topic != FCC_TASK_TOPIC or "[FCC:" not in desc:
             continue
-        out.append({"id": rec.get("id"), "title": f.get(TaskFields.NAME),
+        tag = _FCC_TAG.search(desc)
+        out.append({"id": rec.get("id"), "goal_id": tag.group(1) if tag else None, "title": f.get(TaskFields.NAME),
                     "due_date": f.get(TaskFields.DUE_DATE), "status": f.get(TaskFields.STATUS)})
     return sorted(out, key=lambda t: (t["due_date"] is None, str(t["due_date"] or "")))
 
@@ -129,6 +163,12 @@ def overview(identity, today: date | None = None) -> dict:
         for gid in _goal_ids_of(ev):
             by_goal.setdefault(gid, []).append(ev)
 
+    tasks = fcc_tasks(identity)
+    next_by_goal: dict[str, dict] = {}
+    for t in tasks:                                           # tasks are sorted by due date: first wins
+        if t.get("goal_id") and t["goal_id"] not in next_by_goal:
+            next_by_goal[t["goal_id"]] = {"title": t["title"], "due_date": t["due_date"]}
+
     rows, all_events = [], []
     for goal in goals:
         parsed = calc.parse_events(by_goal.get(goal["id"], []), FinEventFields)
@@ -139,12 +179,12 @@ def overview(identity, today: date | None = None) -> dict:
         row = calc.compute_goal(goal, parsed, today, FinGoalFields)
         row["category"] = gf.get(FinGoalFields.CATEGORY)
         row["priority"] = gf.get(FinGoalFields.PRIORITY)
-        rows.append(row)
+        rows.append(classify_row(row, next_by_goal.get(goal["id"])))
 
     return {
         "goals": rows,
         "summary": summarize(rows),
-        "tasks": fcc_tasks(identity),
+        "tasks": tasks,
         "monthly_cash_improvement": calc.monthly_cash_improvement(all_events, today),
         "recent_events": [
             {"goal_ids": _goal_ids_of(e), **{k: (e.get("fields") or {}).get(k) for k in (

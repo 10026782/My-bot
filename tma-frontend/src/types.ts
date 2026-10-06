@@ -478,14 +478,18 @@ export interface FccGoalRow {
   category: string | null;
   priority: number | null;
   method: string;
+  /** Goal family: recurring (period sum) | monthly_level (run-rate change) | cumulative | project (no amount). */
+  mode: "recurring" | "monthly_level" | "cumulative" | "project";
+  end_date: string | null;
   period_start: string;
   period_end: string;
   target: number | null;
-  actual: number;
+  actual: number | null;
   remaining: number | null;
   remaining_periods: number | null;
   dynamic_target_per_week: number | null;
-  status: "in_progress" | "achieved" | "overdue" | "missing_target";
+  status: "in_progress" | "achieved" | "overdue" | "missing_target" | "project";
+  next_action?: { title: string | null; due_date: string | null } | null;
 }
 
 export interface FccSummaryCard {
@@ -498,7 +502,7 @@ export interface FccSummaryCard {
 
 export interface FccOverview {
   goals: FccGoalRow[];
-  summary: Partial<Record<"income" | "savings" | "debt" | "emergency_fund", FccSummaryCard>>;
+  summary: Partial<Record<"income" | "savings" | "emergency_fund" | "debt_repaid" | "payment_reduction", FccSummaryCard>>;
   tasks: { id: string; title: string | null; due_date: string | null; status: string | null }[];
   monthly_cash_improvement: number;
   recent_events: { goal_ids: string[]; Amount: number | null; Kind: string | null; "Occurred At": string | null; Note: string | null }[];

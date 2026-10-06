@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchFccOverview, postFccWrite } from "../api";
-import type { FccGoalRow, FccOverview, FccSummaryCard, FccTurn } from "../types";
+import type { FccGoalRow, FccOverview, FccTurn } from "../types";
+import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -15,18 +16,12 @@ type State =
   | { status: "ok"; data: FccOverview }
   | { status: "error"; code?: number };
 
-const nf = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 });
-const money = (n: number | null | undefined) => (n == null ? "—" : `₪${nf.format(n)}`);
-
-const CATEGORY_LABEL: Record<string, string> = {
-  income: "הכנסה", savings: "חיסכון", debt: "חוב", debt_repaid: "חוב", emergency_fund: "קרן חירום",
-};
-
-const GOAL_STATUS: Record<FccGoalRow["status"], { label: string; tone: "info" | "success" | "danger" | "warning" }> = {
+const GOAL_STATUS: Record<FccGoalRow["status"], { label: string; tone: "info" | "success" | "danger" | "warning" | "neutral" }> = {
   in_progress: { label: "בדרך", tone: "info" },
   achieved: { label: "הושג", tone: "success" },
   overdue: { label: "באיחור", tone: "danger" },
   missing_target: { label: "חסר יעד", tone: "warning" },
+  project: { label: "פעיל", tone: "info" },
 };
 
 function KpiCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -39,10 +34,6 @@ function KpiCard({ label, value, hint }: { label: string; value: string; hint?: 
   );
 }
 
-function cardPair(card: FccSummaryCard | undefined, empty = "לא הוגדר יעד") {
-  return card ? { value: `${money(card.actual)} / ${money(card.target)}`, hint: undefined } : { value: "—", hint: empty };
-}
-
 const ACTION_WORDS = { confirm: "אשר", edit: "ערוך", cancel: "בטל" } as const;
 
 function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () => void }) {
@@ -52,6 +43,9 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
+  const turnRef = useRef<HTMLElement | null>(null);
+  // התשובה מוצגת מעל תיבת הכתיבה ודוחפת אותה למטה — מגלגלים אליה כדי שלא תיעלם מחוץ למסך
+  useEffect(() => { turnRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" }); }, [turn, receipt, error]);
 
   const send = async (body: { text: string; goal_id?: string }) => {
     if (busy || !body.text.trim()) return;
@@ -80,6 +74,8 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
     }
   };
 
+  // במובייל: לחיצה על הכפתור גורמת ל-blur של התיבה → המקלדת נסגרת, הפריסה זזה והקליק אובד. שומרים את הפוקוס.
+  const keepKeyboard = (e: { preventDefault: () => void }) => e.preventDefault();
   const submit = () => {
     const value = text.trim();
     if (!turn) setLastText(value);
@@ -89,7 +85,7 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
   const reviewing = turn?.state === "review";
 
   return (
-    <section className="fcc-section" aria-labelledby="fcc-quick-heading">
+    <section className="fcc-section" aria-labelledby="fcc-quick-heading" ref={turnRef}>
       <h2 id="fcc-quick-heading" className="fcc-section__heading">עדכון מהיר</h2>
       <Surface className="fcc-quick">
         {turn && (
@@ -128,7 +124,8 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
           onChange={(e) => setText(e.target.value)}
         />
         <button type="button" className="boss-button boss-button--primary boss-bubble--action"
-                disabled={busy || !text.trim()} onClick={submit}>
+                disabled={busy || !text.trim()} onClick={submit}
+                onPointerDown={keepKeyboard} onMouseDown={keepKeyboard}>
           {busy ? "בודק…" : open ? "שלח" : "שלח עדכון"}
         </button>
         {receipt && <p className="fcc-quick__receipt" role="status">{receipt}</p>}
@@ -140,23 +137,36 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
 
 function GoalCard({ goal }: { goal: FccGoalRow }) {
   const st = GOAL_STATUS[goal.status];
-  const pct = goal.target ? Math.min(100, Math.round((goal.actual / goal.target) * 100)) : 0;
+  const model = goalCardModel(goal);
   return (
-    <div className="fcc-goal">
+    <div className={`fcc-goal fcc-goal--${model.kind}`}>
       <div className="fcc-goal__topline">
         <StatusBadge tone={st.tone}>{st.label}</StatusBadge>
         {goal.category && <StatusBadge tone="neutral">{CATEGORY_LABEL[goal.category] ?? goal.category}</StatusBadge>}
       </div>
       <h3>{goal.title}</h3>
-      <div className="fcc-goal__bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-        <span style={{ inlineSize: `${pct}%` }} />
-      </div>
-      <dl className="fcc-goal__grid">
-        <div><dt>יעד</dt><dd>{money(goal.target)}</dd></div>
-        <div><dt>בפועל</dt><dd>{money(goal.actual)}</dd></div>
-        <div><dt>נשאר</dt><dd>{money(goal.remaining)}</dd></div>
-        <div><dt>יעד דינמי לשבוע</dt><dd>{money(goal.dynamic_target_per_week)}</dd></div>
-      </dl>
+      {model.progressPct != null && (
+        <div className="fcc-goal__bar" role="progressbar" aria-valuenow={model.progressPct} aria-valuemin={0} aria-valuemax={100}>
+          <span style={{ inlineSize: `${model.progressPct}%` }} />
+        </div>
+      )}
+      {model.metrics.length > 0 && (
+        <dl className="fcc-goal__grid">
+          {model.metrics.map((m) => (
+            <div key={m.label}><dt>{m.label}</dt><dd>{m.value}</dd></div>
+          ))}
+        </dl>
+      )}
+      {model.kind === "needs_target" && <p className="fcc-goal__note">{model.note}</p>}
+      {model.kind === "project" && (
+        <dl className="fcc-goal__grid fcc-goal__grid--project">
+          <div>
+            <dt>פעולה הבאה</dt>
+            <dd>{model.nextAction ? `${model.nextAction.title}${model.nextAction.due ? ` · ${model.nextAction.due}` : ""}` : "חסרה פעולה הבאה"}</dd>
+          </div>
+          {model.targetDate && <div><dt>תאריך יעד</dt><dd>{model.targetDate}</dd></div>}
+        </dl>
+      )}
     </div>
   );
 }
@@ -206,22 +216,10 @@ export function FinancialControlCenter({ onBack }: Props) {
   }
 
   const { data } = state;
-  const income = cardPair(data.summary.income);
-  const savings = cardPair(data.summary.savings);
-  const debt = cardPair(data.summary.debt);
-  const emergency = cardPair(data.summary.emergency_fund);
-  const weekly = data.summary.income?.dynamic_target_per_week;
-
   return shell(
     <div className="fcc-stack">
       <div className="fcc-kpis">
-        <KpiCard label="הכנסה מול יעד" value={income.value} hint={income.hint} />
-        <KpiCard label="יעד דינמי לשבוע" value={weekly != null ? money(weekly) : "—"} />
-        <KpiCard label="חיסכון" value={savings.value} hint={savings.hint} />
-        <KpiCard label="חוב שנפרע" value={debt.value} hint={debt.hint} />
-        <KpiCard label="שיפור תזרים חודשי" value={money(data.monthly_cash_improvement)} />
-        <KpiCard label="קרן חירום" value={emergency.value}
-                 hint={data.summary.emergency_fund ? "כיסוי חודשים: אין נתוני הוצאה" : emergency.hint} />
+        {headerCards(data).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
       </div>
 
       <QuickUpdate initial={data.draft} onDone={load} />
