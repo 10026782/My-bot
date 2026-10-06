@@ -215,6 +215,33 @@ def fcc_tasks(identity) -> list[dict]:
     return sorted(out, key=lambda t: (t["due_date"] is None, str(t["due_date"] or "")))
 
 
+def receipts_overview(identity) -> dict:
+    """Caller's OWN business expenses still missing a receipt (count + amount only, no row details).
+    ``Expenses`` is a shared ledger, so rows are kept only when the caller is in the row's ``owner``
+    link; an unresolved identity or any read failure yields zeros (never another person's rows)."""
+    from airtable_schema import ExpenseFields as XF
+    empty = {"missing_count": 0, "missing_amount": 0.0}
+    try:
+        actor = policy.resolve_actor(identity)
+        if not actor.resolved:
+            return empty
+        records = _read(Tables.EXPENSES)
+    except Exception:
+        logger.exception("[fcc] receipts read failed")
+        return empty
+    count, amount = 0, 0.0
+    for rec in records:
+        f = rec.get("fields") or {}
+        if actor.profile_id not in policy.owner_refs(f, "owner"):
+            continue
+        status = f.get(XF.RECEIPT_STATUS)
+        status = status.get("name") if isinstance(status, dict) else status
+        if f.get(XF.RECEIPT_REQUIRED) and status != "received":
+            count += 1
+            amount += abs(float(f.get(XF.AMOUNT) or 0))
+    return {"missing_count": count, "missing_amount": round(amount, 2)}
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()
@@ -255,6 +282,8 @@ def overview(identity, today: date | None = None) -> dict:
     return {
         "goals": rows,
         "summary": summarize(rows),
+        "household": {"month_total": calc.household_month_total(all_events, today)},
+        "receipts": receipts_overview(identity),
         "tasks": tasks,
         "monthly_cash_improvement": calc.monthly_cash_improvement(all_events, today),
         "recent_events": [

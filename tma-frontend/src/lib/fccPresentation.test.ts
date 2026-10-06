@@ -112,6 +112,17 @@ test("gross -> direct costs -> net shows only when there are direct costs", () =
   assert.deepEqual(m.metrics.slice(-3).map((x) => x.label), ["ברוטו", "הוצאות ישירות", "נטו"]);
 });
 
+test("household spend and missing receipts are separate cards that appear only when relevant", () => {
+  const none = headerCards({ monthly_cash_improvement: 0, summary: {} });
+  assert.equal(none.some((c) => c.key === "household" || c.key === "receipts"), false);
+  const cards = headerCards({ monthly_cash_improvement: 0, summary: {},
+    household: { month_total: 2400 }, receipts: { missing_count: 3, missing_amount: 410 } });
+  assert.equal(cards.find((c) => c.key === "household")?.value, "₪2,400");
+  const r = cards.find((c) => c.key === "receipts");
+  assert.equal(r?.value, "3");
+  assert.equal((r?.hint ?? "").includes("₪410"), true);
+});
+
 test("labels and dates", () => {
   assert.equal(CATEGORY_LABEL.business_project, "פרויקט עסקי");
   assert.equal(dmy("2026-12-31"), "31/12/2026");

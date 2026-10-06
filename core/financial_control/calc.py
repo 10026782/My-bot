@@ -24,8 +24,9 @@ ONE_TIME = "one_time"
 MONTHLY_RECURRING = "monthly_recurring"
 TARGET_CHANGE = "target_change"
 DIRECT_COST = "direct_cost"
+HOUSEHOLD_EXPENSE = "household_expense"   # private household spend: shown separately, never part of income/net
 NOTE = "note"
-EVENT_KINDS = (ONE_TIME, MONTHLY_RECURRING, TARGET_CHANGE, DIRECT_COST, NOTE)
+EVENT_KINDS = (ONE_TIME, MONTHLY_RECURRING, TARGET_CHANGE, DIRECT_COST, HOUSEHOLD_EXPENSE, NOTE)
 
 # calc_method values (data, not an enum the code branches business meaning on)
 PERIOD_SUM = "period_sum"          # one_time events inside the current period
@@ -211,6 +212,13 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         "dynamic_target_per_week": dynamic,
         "status": status,
     }
+
+
+def household_month_total(events: list[Event], today: date) -> float:
+    """Household spend in the calendar month of ``today`` (separate from income/net, superseded ignored)."""
+    start = today.replace(day=1)
+    return round(sum(abs(e.amount) for e in events
+                     if e.kind == HOUSEHOLD_EXPENSE and not e.superseded and start <= e.occurred <= today), 2)
 
 
 def monthly_cash_improvement(events: list[Event], today: date) -> float:
