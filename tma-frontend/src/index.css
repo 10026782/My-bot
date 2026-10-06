@@ -3116,3 +3116,7 @@
 .fcc-quick__message, .fcc-quick__note, .fcc-quick__receipt, .fcc-quick__error { margin: 0; font-size: 14px; }
 .fcc-quick__choices { display: flex; flex-wrap: wrap; gap: var(--boss-space-2); }
 .fcc-quick__error { color: var(--boss-color-danger); }
+
+.fcc-goal__note { margin: 0; color: var(--boss-color-text-muted); font-size: 13px; }
+.fcc-goal__grid--project { grid-template-columns: minmax(0, 1fr); }
+.fcc-goal__grid--project dd { font-weight: 500; overflow-wrap: anywhere; }

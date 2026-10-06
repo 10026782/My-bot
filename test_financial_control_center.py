@@ -220,7 +220,7 @@ def test_http_unresolved_identity_403(monkeypatch):
 def test_summary_by_category_and_owner_isolation():
     DB[Tables.FIN_GOALS] = [
         goal("recGE", "הכנסה נוספת", ELI, 12000, **{GF.CATEGORY: "income"}),
-        goal("recGS", "חיסכון קבוע", ELI, 3000, **{GF.CATEGORY: "savings"}),
+        goal("recGS", "חיסכון קבוע", ELI, 3000, **{GF.CATEGORY: "savings", GF.CALC_METHOD: "cumulative"}),
         goal("recGA", "של אבי", AVI, 99000, **{GF.CATEGORY: "income"}),
     ]
     DB[Tables.FIN_EVENTS] = [event("e1", "recGE", ELI, 2000), event("e2", "recGA", AVI, 55555)]
@@ -788,3 +788,68 @@ def test_chat_releases_unrelated_message_and_keeps_draft(monkeypatch):
     q = lambda t, i: pytest.fail("must not queue")
     assert fchat.maybe_handle(ELIYAHU, "מה מצב הלידים שלי?", queue=q) == (None, None)
     assert conv.pending_view(ELIYAHU)["awaiting"] == "target_amount"
+
+
+
+# ═══════════════ Goal families: recurring / monthly_level / cumulative / project ═══════════════
+def _family_db():
+    DB[Tables.FIN_GOALS] = [
+        goal("g1", "הכנסה חודשית קבועה", ELI, 10000, **{GF.CATEGORY: "income"}),
+        goal("g2", "הכנסה מנסיעות", ELI, 1500, **{GF.CATEGORY: "income"}),
+        goal("g3", "סגירת הלוואות", ELI, 700000, **{GF.CATEGORY: "debt", GF.CALC_METHOD: "cumulative"}),
+        goal("g4", "הפחתת החזרים חודשיים", ELI, 7000, **{GF.CATEGORY: "debt"}),
+        goal("g5", "הפחתת ריבית קבועה", ELI, 3000, **{GF.CATEGORY: "debt", GF.CALC_METHOD: "recurring_level"}),
+        goal("g6", "קרן חירום זמינה", ELI, 60000, **{GF.CATEGORY: "emergency_fund", GF.CALC_METHOD: "cumulative",
+                                                     GF.END_DATE: "2026-12-31"}),
+        goal("g7", "תוספת חיסכון מהפרטי", ELI, None, **{GF.CATEGORY: "savings"}),         # numeric, target not set yet
+        goal("p1", "מכירת יבנאל", ELI, None, **{GF.CATEGORY: "project"}),
+        goal("p2", "ייבוא סיבים", ELI, None, **{GF.CATEGORY: "business_project"}),
+        goal("p3", "חסכונות ושוק ההון", ELI, None, **{GF.CATEGORY: "investment"}),
+        goal("zA", "של אבי", AVI, 99000, **{GF.CATEGORY: "debt", GF.CALC_METHOD: "cumulative"}),
+    ]
+    for g in DB[Tables.FIN_GOALS]:
+        if g["fields"].get(GF.TARGET_AMOUNT) is None:
+            g["fields"].pop(GF.TARGET_AMOUNT, None)
+    DB[Tables.FIN_EVENTS] = []
+
+
+def test_goal_families_are_classified_from_existing_data_without_schema_change():
+    _family_db()
+    rows = {r["goal_id"]: r for r in service.overview(ELIYAHU, TODAY)["goals"]}
+    assert {k: rows[k]["mode"] for k in ("g1", "g2", "g3", "g4", "g5", "g6", "p1", "p2", "p3")} == {
+        "g1": "recurring", "g2": "recurring", "g3": "cumulative", "g4": "recurring", "g5": "monthly_level",
+        "g6": "cumulative", "p1": "project", "p2": "project", "p3": "project"}
+    assert rows["g7"]["status"] == "missing_target" and rows["g7"]["mode"] != "project"   # a numeric goal lacking an amount
+
+
+def test_project_goal_carries_no_amounts_and_shows_next_action():
+    _family_db()
+    DB[Tables.TASKS] = [{"id": "t1", "fields": {
+        TaskFields.NAME: "לקבל הערכת שווי", TaskFields.STATUS: "ממתין", TaskFields.OWNER: [ELI],
+        TaskFields.TOPIC: "כספים", TaskFields.DESCRIPTION: "[FCC:p1] x", TaskFields.DUE_DATE: "2026-10-20"}}]
+    rows = {r["goal_id"]: r for r in service.overview(ELIYAHU, TODAY)["goals"]}
+    p1, p2 = rows["p1"], rows["p2"]
+    for key in ("actual", "remaining", "dynamic_target_per_week", "remaining_periods", "target"):
+        assert p1[key] is None and p2[key] is None                    # no ₪0, no dead "—" cells to render
+    assert p1["status"] == "project" and p1["next_action"] == {"title": "לקבל הערכת שווי", "due_date": "2026-10-20"}
+    assert p2["next_action"] is None                                  # explicit: no next action yet
+
+
+def test_pace_rules_per_family():
+    _family_db()
+    rows = {r["goal_id"]: r for r in service.overview(ELIYAHU, TODAY)["goals"]}
+    assert rows["g1"]["dynamic_target_per_week"] is not None          # recurring: weekly pace
+    assert rows["g5"]["dynamic_target_per_week"] is None              # monthly level: never a weekly pace
+    assert rows["g3"]["dynamic_target_per_week"] is None              # cumulative without an end date: no pace
+    assert rows["g6"]["dynamic_target_per_week"] and rows["g6"]["end_date"] == "2026-12-31"   # explicit end date opts in
+
+
+def test_summary_never_mixes_families_or_includes_projects_or_other_owners():
+    _family_db()
+    summary = service.overview(ELIYAHU, TODAY)["summary"]
+    assert summary["income"]["target"] == 11500 and summary["income"]["goals"] == 2
+    assert summary["debt_repaid"]["target"] == 700000 and summary["debt_repaid"]["goals"] == 1   # not 707,000
+    assert summary["payment_reduction"]["target"] == 10000 and summary["payment_reduction"]["goals"] == 2
+    assert summary["emergency_fund"]["target"] == 60000
+    assert "savings" not in summary                                    # only a target-less savings goal exists
+    assert "99000" not in str(summary)                                 # another owner's goal never aggregates

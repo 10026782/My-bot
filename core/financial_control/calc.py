@@ -29,6 +29,10 @@ PERIOD_SUM = "period_sum"          # one_time events inside the current period
 CUMULATIVE = "cumulative"          # all one_time events since start_date
 RECURRING_LEVEL = "recurring_level"  # sum of monthly_recurring run-rate changes
 
+# Presentation family of a numeric goal (derived from the method; "project" is decided by the service
+# from the absence of any amount target — see service.classify_row).
+MODE_BY_METHOD = {PERIOD_SUM: "recurring", RECURRING_LEVEL: "monthly_level", CUMULATIVE: "cumulative"}
+
 
 def _d(value) -> date | None:
     if isinstance(value, datetime):
@@ -146,6 +150,8 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         dynamic = round(remaining / periods, 2)
     elif remaining == 0:
         dynamic = 0.0
+    if method == RECURRING_LEVEL:
+        dynamic = None          # a change in the monthly run-rate has no weekly pace
 
     if target is None:
         status = "missing_target"
@@ -160,6 +166,8 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         "goal_id": goal.get("id"),
         "title": f.get(gf.TITLE),
         "method": method,
+        "mode": MODE_BY_METHOD.get(method, "recurring"),
+        "end_date": end.isoformat() if end else None,
         "period_start": p_start.isoformat(),
         "period_end": (horizon_end or p_end).isoformat(),
         "target": target,
