@@ -99,7 +99,7 @@ def classify_row(row: dict, next_action: dict | None) -> dict:
 # summary card key -> (category key, modes that belong to the card). Different modes are NEVER summed together.
 _CARDS = {
     "income": ("income", ("recurring",)),
-    "savings": ("savings", ("recurring",)),            # monthly allocation (capital markets); legacy cumulative: see _CARD_FALLBACKS
+    "savings": ("savings", ("monthly_level",)),        # standing monthly allocation vs target (never resets); legacy cumulative: see _CARD_FALLBACKS
     "emergency_fund": ("emergency_fund", ("cumulative",)),
     "debt_repaid": ("debt", ("cumulative",)),
     "payment_reduction": ("debt", ("recurring", "monthly_level")),

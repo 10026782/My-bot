@@ -1188,23 +1188,36 @@ def test_cancelled_commitment_can_be_added_again():
     assert r.state == "confirmed" and r.snapshot["writes"][0]["op"] == "post"       # inactive one does not block a new row
 
 
-# ═══════════════ Savings = monthly allocation (capital markets); emergency fund = one-time pot ═══════════════
-def test_new_savings_goal_is_monthly_allocation_not_cumulative():
-    ex = Ex(classify={"s": {"action": "create_goal", "title": "חיסכון בשוק ההון", "target": 10000, "category": "savings"}})
+# ═══════════════ Savings = a standing monthly allocation vs target (never resets); emergency fund = one-time pot ═══════════════
+def test_new_savings_goal_is_a_standing_monthly_level_not_cumulative_nor_period_sum():
+    ex = Ex(classify={"s": {"action": "create_goal", "title": "הפרשה לשוק ההון", "target": 5000, "category": "savings"}})
     r = run(ex, ELIYAHU, "s")
     assert r.state == "review" and "(הוסק)" in r.message                       # period + method inferred, no end date asked
     w = run(ex, ELIYAHU, "אשר").snapshot["writes"][0]["fields"]
-    assert (w[GF.CATEGORY], w[GF.PERIOD_TYPE], w[GF.CALC_METHOD]) == ("savings", "monthly", "period_sum")
+    assert (w[GF.CATEGORY], w[GF.PERIOD_TYPE], w[GF.CALC_METHOD]) == ("savings", "monthly", "recurring_level")
     assert GF.END_DATE not in w
 
 
-def test_savings_card_is_monthly_and_resets_with_the_month():
-    DB[Tables.FIN_GOALS] = [goal("gS", "חיסכון בשוק ההון", ELI, 10000,
-                                 **{GF.CATEGORY: "savings", GF.PERIOD_TYPE: "monthly", GF.CALC_METHOD: "period_sum"})]
-    DB[Tables.FIN_EVENTS] = [event("e1", "gS", ELI, 2000, day="2026-10-03"),
-                             event("e0", "gS", ELI, 5000, day="2026-09-20")]          # last month's deposit never counts
-    card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
-    assert (card["actual"], card["target"], card["mode"]) == (2000, 10000, "recurring")
+def _savings_goal(gid="gS", target=5000):
+    return goal(gid, "הפרשה לשוק ההון", ELI, target,
+                **{GF.CATEGORY: "savings", GF.PERIOD_TYPE: "monthly", GF.CALC_METHOD: "recurring_level"})
+
+
+def test_savings_level_accumulates_across_months_and_never_resets():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("e1", "gS", ELI, 2000, kind="monthly_recurring", day="2026-08-15"),    # started two months ago
+                             event("e2", "gS", ELI, 1000, kind="monthly_recurring", day="2026-10-03"),   # raised this month
+                             event("e3", "gS", ELI, -300, kind="monthly_recurring", day="2026-10-05")]   # cut back a little
+    view = service.overview(ELIYAHU, TODAY)
+    card = view["summary"]["savings"]
+    assert (card["actual"], card["target"], card["remaining"], card["mode"]) == (2700, 5000, 2300, "monthly_level")
+    assert view["goals"][0]["dynamic_target_per_week"] is None                      # a level has no weekly pace
+
+
+def test_savings_one_time_deposits_do_not_count_as_the_standing_level():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("e1", "gS", ELI, 9000, kind="one_time", day="2026-10-03")]
+    assert service.overview(ELIYAHU, TODAY)["summary"]["savings"]["actual"] == 0
 
 
 def test_legacy_cumulative_savings_shows_only_until_a_monthly_one_exists_and_never_sums():
@@ -1212,7 +1225,6 @@ def test_legacy_cumulative_savings_shows_only_until_a_monthly_one_exists_and_nev
     DB[Tables.FIN_EVENTS] = []
     DB[Tables.FIN_GOALS] = [legacy]
     assert service.overview(ELIYAHU, TODAY)["summary"]["savings"]["mode"] == "cumulative"
-    DB[Tables.FIN_GOALS] = [legacy, goal("gS", "הפרשה חודשית", ELI, 3000,
-                                         **{GF.CATEGORY: "savings", GF.PERIOD_TYPE: "monthly", GF.CALC_METHOD: "period_sum"})]
+    DB[Tables.FIN_GOALS] = [legacy, _savings_goal(target=5000)]
     card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
-    assert (card["target"], card["mode"]) == (3000, "recurring")                       # 13,000 would mean mixing families
+    assert (card["target"], card["mode"]) == (5000, "monthly_level")                   # 15,000 would mean mixing families

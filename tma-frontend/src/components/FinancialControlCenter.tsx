@@ -157,7 +157,7 @@ function GoalCard({ goal }: { goal: FccGoalRow }) {
           ))}
         </dl>
       )}
-      {model.kind === "needs_target" && <p className="fcc-goal__note">{model.note}</p>}
+      {(model.kind === "needs_target" || (model.kind === "numeric" && model.note)) && <p className="fcc-goal__note">{model.note}</p>}
       {model.sourceNote && <p className="fcc-goal__note">{model.sourceNote}</p>}
       {model.kind === "project" && (
         <dl className="fcc-goal__grid fcc-goal__grid--project">

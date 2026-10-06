@@ -18,6 +18,11 @@ export const CATEGORY_LABEL: Record<string, string> = {
   project: "פרויקט", business_project: "פרויקט עסקי", investment: "השקעות", other: "אחר",
 };
 
+function isSavings(category: unknown): boolean {
+  const c = String(typeof category === "object" && category ? (category as { name?: string }).name : category ?? "").trim().toLowerCase();
+  return c === "savings" || c === "חיסכון";
+}
+
 export interface GoalMetric { label: string; value: string }
 
 export interface GoalCardModel {
@@ -43,6 +48,13 @@ export function goalCardModel(g: FccGoalRow): GoalCardModel {
     return { kind: "needs_target", metrics: [], progressPct: null, note: "הגדר סכום יעד כדי להתחיל לעקוב" };
   }
   const pct = g.target > 0 ? Math.min(100, Math.round((((g.direct_costs ? g.net : g.actual) ?? 0) / g.target) * 100)) : 0;
+  if (g.mode === "monthly_level" && isSavings(g.category)) {      // standing monthly allocation: a level vs target, never resets
+    return { kind: "numeric", progressPct: pct, note: "הוראת קבע חודשית — לא מתאפסת בסוף החודש", metrics: [
+      { label: "יעד הפרשה חודשית", value: money(g.target) },
+      { label: "מופרש כרגע לחודש", value: money(g.actual) },
+      { label: "חסר ליעד", value: money(g.remaining) },
+    ] };
+  }
   if (g.mode === "monthly_level") {
     return { kind: "numeric", progressPct: pct, metrics: [
       { label: "יעד הפחתה לחודש", value: money(g.target) },
@@ -116,8 +128,8 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
     { key: "income_week", label: "יעד הכנסה לשבוע",
       value: s.income ? money(s.income.dynamic_target_per_week) : "—",
       hint: s.income ? weeklyBreakdown(s.income) : "לא הוגדר יעד" },
-    { key: "savings", label: s.savings?.mode === "recurring" ? "חיסכון חודשי" : "חיסכון", ...savings,
-      ...(s.savings?.mode === "recurring" ? { hint: "הפרשה החודש לשוק ההון" } : {}) },
+    { key: "savings", label: s.savings?.mode === "monthly_level" ? "הפרשה חודשית לחיסכון" : "חיסכון", ...savings,
+      ...(s.savings?.mode === "monthly_level" ? { hint: "הוראת קבע מול יעד · לא מתאפס" } : {}) },
     { key: "emergency", label: "קרן חירום", ...emergency,
       hint: s.emergency_fund ? "כיסוי חודשים: אין נתוני הוצאה" : emergency.hint },
     { key: "debt", label: "חוב שנפרע", ...debt },

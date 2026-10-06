@@ -53,7 +53,7 @@ OB_STATUS = ("active", "inactive")      # inactive = actually cancelled/ended: l
 # Safe inference by goal type (user-approved matrix). "other" is never guessed.
 INFERENCE: dict[str, dict[str, str]] = {
     "income": {"period_type": "monthly", "calc_method": "period_sum"},
-    "savings": {"period_type": "monthly", "calc_method": "period_sum"},   # monthly allocation (capital markets); a one-time pot is an emergency fund
+    "savings": {"period_type": "monthly", "calc_method": "recurring_level"},   # a standing monthly allocation (like a standing order) vs a target; never resets. A one-time pot is an emergency fund
     "emergency_fund": {"calc_method": "cumulative"},
     "debt": {"calc_method": "cumulative"},
 }
