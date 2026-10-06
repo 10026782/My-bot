@@ -71,6 +71,8 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
     }
   };
 
+  // במובייל: לחיצה על הכפתור גורמת ל-blur של התיבה → המקלדת נסגרת, הפריסה זזה והקליק אובד. שומרים את הפוקוס.
+  const keepKeyboard = (e: { preventDefault: () => void }) => e.preventDefault();
   const submit = () => {
     const value = text.trim();
     if (!turn) setLastText(value);
@@ -119,7 +121,8 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
           onChange={(e) => setText(e.target.value)}
         />
         <button type="button" className="boss-button boss-button--primary boss-bubble--action"
-                disabled={busy || !text.trim()} onClick={submit}>
+                disabled={busy || !text.trim()} onClick={submit}
+                onPointerDown={keepKeyboard} onMouseDown={keepKeyboard}>
           {busy ? "בודק…" : open ? "שלח" : "שלח עדכון"}
         </button>
         {receipt && <p className="fcc-quick__receipt" role="status">{receipt}</p>}
