@@ -15,3 +15,5 @@ review metadata; it does not itself wire or activate a runtime surface.
 | `core/approval_lifecycle_message_adapter.py` | `contract_entry` | `message_contract` | f52_approval_r8 | `D-012/R8.7-A` |
 | `commercial_completion_ux.py` | `public_renderer` | `render_prompt` | commercial_completion_ux | `S2D-R1` |
 | `commercial_completion_ux.py` | `public_renderer` | `render_counterparty_prompt` | commercial_completion_ux | `S2D-R1` |
+| `core/financial_control/chat.py` | `public_renderer` | `render_text` | financial_control | `decision.fcc_diamond_completion` |
+| `core/financial_control/draft.py` | `public_renderer` | `render_review` | financial_control | `decision.fcc_diamond_completion` |
