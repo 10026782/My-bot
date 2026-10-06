@@ -10,6 +10,8 @@
 
 Why Neon: it is real PostgreSQL, so `core/atomic_claim_repository.py`'s `INSERT ... ON CONFLICT DO NOTHING RETURNING`, the multi-step `SELECT ... FOR UPDATE` recovery transaction, `core/turn_state_repository.py`'s versioned CAS and `core/external_poll_lease.py`'s `NOW() + INTERVAL` upsert all keep their exact semantics. Turso/D1 would require rewriting the repository SQL, the migration runner and (for D1) giving up interactive transactions.
 
+**Next:** [`NEON_M1_STAGING_CHECKLIST.md`](NEON_M1_STAGING_CHECKLIST.md) (14-check staging run, plan only) · [`NEON_BACKUP_PLAN_DRIVE.md`](NEON_BACKUP_PLAN_DRIVE.md) (Drive backups, plan only) · [`RENDER_STATE_VERIFICATION_CHECKLIST.md`](RENDER_STATE_VERIFICATION_CHECKLIST.md) (read-only production/staging fact-finding).
+
 ## Files added
 
 | File | Purpose |
