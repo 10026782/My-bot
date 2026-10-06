@@ -91,10 +91,11 @@ export function netBreakdown(card: FccSummaryCard | undefined): string | undefin
 export function weeklyBreakdown(card: FccSummaryCard | undefined): string | undefined {
   if (!card?.sources?.length || card.other_sources_needed == null) return undefined;
   const weekly = card.sources.filter((s) => s.period_type === "weekly");
-  const parts = weekly.map((s) => `${s.title ?? "מקור"}: ${money(s.actual)} / ${money(s.target)} השבוע`
-    + (s.direct_costs ? ` · הוצאות ישירות -${money(s.direct_costs)} · נטו ${money(s.net)}` : ""));
-  parts.push(`ממקורות אחרים השבוע: ${money(card.other_sources_needed)}`);
-  return parts.join(" · ");
+  // the weekly target INCLUDES the sources: show what each still owes so the parts add up to the headline number
+  const parts = weekly.map((s) => `${s.title ?? "מקור"}: נשאר ${money(s.remaining)} מתוך ${money(s.target)} השבוע`
+    + (s.direct_costs ? ` (הוצאות ישירות -${money(s.direct_costs)} · נטו ${money(s.net)})` : ""));
+  parts.push(`ממקורות אחרים: ${money(card.other_sources_needed)}`);
+  return `מזה: ${parts.join(" · ")}`;
 }
 
 export interface HeaderCardModel { key: string; label: string; value: string; hint?: string }
