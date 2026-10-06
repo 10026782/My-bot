@@ -106,13 +106,68 @@ _CARDS = {
 }
 
 
+def _parent_map(goals: list[dict], active_ids: set[str]) -> dict[str, str]:
+    """child -> parent from the explicit ``Contributes To`` link. Only active parents count; self-links
+    and cycles are dropped (a cycle would otherwise count an event inside itself)."""
+    raw = {}
+    for g in goals:
+        pid = calc.parent_goal_id(g.get("fields") or {}, FinGoalFields)
+        if pid and pid != g["id"] and pid in active_ids and g["id"] in active_ids:
+            raw[g["id"]] = pid
+    out = {}
+    for child, parent in raw.items():
+        seen, cur = {child}, parent
+        while cur in raw and cur not in seen:
+            seen.add(cur)
+            cur = raw[cur]
+        if cur not in seen:
+            out[child] = parent
+    return out
+
+
+def _rolled_up(goal_id: str, own: dict[str, list[calc.Event]], parent_of: dict[str, str]) -> list[calc.Event]:
+    """Own events + all descendants' events (target changes of a source never move the parent's target),
+    de-duplicated by event record id."""
+    result, seen = list(own.get(goal_id, [])), {e.ref for e in own.get(goal_id, []) if e.ref}
+    stack, visited = [goal_id], {goal_id}
+    while stack:
+        cur = stack.pop()
+        for child, parent in parent_of.items():
+            if parent != cur or child in visited:
+                continue
+            visited.add(child)
+            stack.append(child)
+            for e in own.get(child, []):
+                if e.kind == calc.TARGET_CHANGE or (e.ref and e.ref in seen):
+                    continue
+                if e.ref:
+                    seen.add(e.ref)
+                result.append(e)
+    return result
+
+
+def _attach_sources(rows: list[dict]) -> None:
+    """Parent rows list their direct sources. Weekly sources are minimums inside the parent's weekly
+    pace, so ``other_sources_needed`` = max(parent weekly pace - what the weekly sources still owe, 0)."""
+    for row in rows:
+        kids = [r for r in rows if r.get("parent_id") == row["goal_id"] and r.get("target") is not None]
+        if not kids:
+            continue
+        row["sources"] = [{"goal_id": k["goal_id"], "title": k["title"], "period_type": k.get("period_type"),
+                           "target": k["target"], "actual": k["actual"], "remaining": k["remaining"]} for k in kids]
+        owed = sum(k["remaining"] or 0.0 for k in kids if k.get("period_type") == "weekly")
+        pace = row.get("dynamic_target_per_week")
+        row["weekly_sources_required"] = round(owed, 2)
+        row["other_sources_needed"] = None if pace is None else round(max(pace - owed, 0.0), 2)
+
+
 def summarize(rows: list[dict]) -> dict:
     """Header cards: per (category, family) sums over the owner's rows only. A cumulative loan balance
     is never added to a monthly instalment reduction, and projects never enter any card."""
     out: dict[str, dict] = {}
     for row in rows:
-        if row.get("mode") == "project" or row.get("target") is None:
-            continue
+        if row.get("mode") == "project" or row.get("target") is None or row.get("is_source"):
+            continue            # a source's target/actual live inside its parent (no double counting)
         cat = _category_key(row.get("category"))
         for key, (card_cat, modes) in _CARDS.items():
             if cat != card_cat or row.get("mode") not in modes:
@@ -120,6 +175,12 @@ def summarize(rows: list[dict]) -> dict:
             card = out.setdefault(key, {"target": 0.0, "actual": 0.0, "remaining": 0.0,
                                         "dynamic_target_per_week": 0.0, "goals": 0})
             card["goals"] += 1
+            for src in row.get("sources") or []:
+                card.setdefault("sources", []).append(src)
+            if row.get("sources"):
+                card["weekly_sources_required"] = round(card.get("weekly_sources_required", 0.0) + row["weekly_sources_required"], 2)
+                if row.get("other_sources_needed") is not None:
+                    card["other_sources_needed"] = round(card.get("other_sources_needed", 0.0) + row["other_sources_needed"], 2)
             for field in ("target", "actual", "remaining", "dynamic_target_per_week"):
                 card[field] = round(card[field] + (row.get(field) or 0.0), 2)
     return out
@@ -169,17 +230,26 @@ def overview(identity, today: date | None = None) -> dict:
         if t.get("goal_id") and t["goal_id"] not in next_by_goal:
             next_by_goal[t["goal_id"]] = {"title": t["title"], "due_date": t["due_date"]}
 
+    active_ids = {g["id"] for g in goals
+                  if str((g.get("fields") or {}).get(FinGoalFields.STATUS) or "active").lower() in ("active", "פעיל")}
+    parent_of = _parent_map(goals, active_ids)
+    own: dict[str, list[calc.Event]] = {
+        g["id"]: calc.parse_events(by_goal.get(g["id"], []), FinEventFields) for g in goals}
+
     rows, all_events = [], []
     for goal in goals:
-        parsed = calc.parse_events(by_goal.get(goal["id"], []), FinEventFields)
-        all_events.extend(parsed)
-        gf = goal.get("fields") or {}
-        if str(gf.get(FinGoalFields.STATUS) or "active").lower() not in ("active", "פעיל"):
+        all_events.extend(own[goal["id"]])
+        if goal["id"] not in active_ids:
             continue
-        row = calc.compute_goal(goal, parsed, today, FinGoalFields)
+        gf = goal.get("fields") or {}
+        # parent goal = its own events + every descendant source's events, each event once (roll-up)
+        row = calc.compute_goal(goal, _rolled_up(goal["id"], own, parent_of), today, FinGoalFields)
         row["category"] = gf.get(FinGoalFields.CATEGORY)
         row["priority"] = gf.get(FinGoalFields.PRIORITY)
+        row["parent_id"] = parent_of.get(goal["id"])
+        row["is_source"] = goal["id"] in parent_of
         rows.append(classify_row(row, next_by_goal.get(goal["id"])))
+    _attach_sources(rows)
 
     return {
         "goals": rows,

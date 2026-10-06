@@ -72,6 +72,23 @@ test("header cards: families are separate and the weekly card is income-only", (
   assert.equal(by.savings.hint, "לא הוגדר יעד");
 });
 
+test("income hierarchy: weekly card shows the source minimum and the rest from other sources", () => {
+  const cards = headerCards({ monthly_cash_improvement: 0, summary: {
+    income: { target: 15000, actual: 1000, remaining: 14000, dynamic_target_per_week: 4083.33, goals: 1,
+      weekly_sources_required: 1500, other_sources_needed: 2583.33,
+      sources: [{ goal_id: "t", title: "הכנסה מנסיעות", period_type: "weekly", target: 2500, actual: 1000, remaining: 1500 }] } } });
+  const by = Object.fromEntries(cards.map((c) => [c.key, c]));
+  assert.equal(by.income.value, "₪1,000 / ₪15,000");
+  assert.equal((by.income_week.hint ?? "").includes("הכנסה מנסיעות: ₪1,000 / ₪2,500 השבוע"), true);
+  assert.equal((by.income_week.hint ?? "").includes("ממקורות אחרים השבוע: ₪2,583"), true);
+});
+
+test("a source goal card says it is inside the parent and has no weekly pace of its own", () => {
+  const m = goalCardModel({ ...base, mode: "recurring", is_source: true, period_type: "weekly", target: 2500, actual: 0, remaining: 2500 });
+  assert.equal((m.sourceNote ?? "").includes("לא מתווסף"), true);
+  assert.equal(m.metrics.some((x) => x.label === "יעד דינמי לשבוע"), false);
+});
+
 test("labels and dates", () => {
   assert.equal(CATEGORY_LABEL.business_project, "פרויקט עסקי");
   assert.equal(dmy("2026-12-31"), "31/12/2026");

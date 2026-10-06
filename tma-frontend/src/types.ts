@@ -490,6 +490,22 @@ export interface FccGoalRow {
   dynamic_target_per_week: number | null;
   status: "in_progress" | "achieved" | "overdue" | "missing_target" | "project";
   next_action?: { title: string | null; due_date: string | null } | null;
+  period_type?: string;
+  /** Explicit "Contributes To" link: this goal is a source inside its parent, never added on top of it. */
+  parent_id?: string | null;
+  is_source?: boolean;
+  sources?: FccSource[];
+  weekly_sources_required?: number;
+  other_sources_needed?: number | null;
+}
+
+export interface FccSource {
+  goal_id: string;
+  title: string | null;
+  period_type: string | null;
+  target: number;
+  actual: number;
+  remaining: number | null;
 }
 
 export interface FccSummaryCard {
@@ -498,6 +514,9 @@ export interface FccSummaryCard {
   remaining: number;
   dynamic_target_per_week: number;
   goals: number;
+  sources?: FccSource[];
+  weekly_sources_required?: number;
+  other_sources_needed?: number;
 }
 
 export interface FccOverview {

@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- feat(fcc): income hierarchy + calendar-day pacing. Explicit `Contributes To` link on Financial Goals (parent/source): a source target never adds to the parent target, its events roll up into the parent actual once (de-duplicated by event id; source target changes never move the parent). Monthly `period_sum` weekly pace = remaining / calendar days left * min(7, days left) (no whole-week divisor). Header weekly card shows the source minimum and the amount needed from other sources. Cycles/foreign parents ignored.
+
 - feat(fcc): goal families in FCC rendering/summary — recurring (period_sum), monthly_level, cumulative, project/milestone, derived from existing Goals data (no schema change, no new table). Header cards aggregate per family (income-only weekly target), project goals show next action/target date without amounts. See FCC_DIAMOND_COMPLETION_20261005.md.
 
 - feat(fcc): Diamond completion flow for the Financial Control Center — one server-side BusinessDraft-based draft/completion primitive for TMA and chat (required-field matrix, multi-turn fill/review/edit/cancel, frozen ConfirmedSnapshot, no partial goal writes). `fcc_update` agent tool + app.py draft interception; shared `gate.py` canary. Also: `data_access_policy` `SYSTEM_INTERNAL` mode closes generic-tool access to `Sessions` for every role; mid-draft unrelated/invalid replies never mutate the draft; follow-up FCC-CHAT-SINGLE-CONFIRM. See docs/architecture/financial-control-center/FCC_DIAMOND_COMPLETION_20261005.md

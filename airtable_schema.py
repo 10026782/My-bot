@@ -880,6 +880,7 @@ class FinGoalFields:
     MAX_AMOUNT      = "Max Amount"
     CALC_METHOD     = "Calc Method"      # period_sum|cumulative|recurring_level
     NOTES           = "Notes"
+    PARENT_GOAL     = "Contributes To"   # multipleRecordLinks -> Financial Goals: parent goal this one is a source/sub-goal of
     FINANCIAL_OWNER = "Financial Owner"  # multipleRecordLinks -> Profile (owner-of-record)
 
 

@@ -2,7 +2,7 @@
 // (`mode`) from existing data; this file only maps a family to the fields worth showing, so a
 // project never renders ₪0 / "—" and a cumulative or monthly-level goal never shows a weekly pace
 // it does not have. No fetching, no state.
-import type { FccGoalRow, FccOverview } from "../types";
+import type { FccGoalRow, FccOverview, FccSummaryCard } from "../types";
 
 const nf = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 });
 export const money = (n: number | null | undefined): string => (n == null ? "—" : `₪${nf.format(n)}`);
@@ -25,6 +25,7 @@ export interface GoalCardModel {
   metrics: GoalMetric[];
   progressPct: number | null;      // null = no progress bar
   note?: string;                   // single explanatory line (needs_target)
+  sourceNote?: string;             // source/sub-goal: its target is part of the parent, not on top of it
   nextAction?: { title: string; due: string } | null;   // project only; null = explicitly missing
   targetDate?: string;             // project only
 }
@@ -61,12 +62,22 @@ export function goalCardModel(g: FccGoalRow): GoalCardModel {
     }
     return { kind: "numeric", progressPct: pct, metrics };
   }
-  return { kind: "numeric", progressPct: pct, metrics: [
+  const sourceNote = g.is_source ? "מקור שתורם ליעד הכולל — לא מתווסף אליו" : undefined;
+  return { kind: "numeric", progressPct: pct, sourceNote, metrics: [
     { label: "יעד", value: money(g.target) },
     { label: "בפועל", value: money(g.actual) },
     { label: "נשאר", value: money(g.remaining) },
-    { label: "יעד דינמי לשבוע", value: money(g.dynamic_target_per_week) },
+    ...(g.is_source && g.period_type === "weekly" ? [] : [{ label: "יעד דינמי לשבוע", value: money(g.dynamic_target_per_week) }]),
   ] };
+}
+
+/** "of which travel ₪1,500 still owed · from other sources ₪2,583" — the weekly income card breakdown. */
+export function weeklyBreakdown(card: FccSummaryCard | undefined): string | undefined {
+  if (!card?.sources?.length || card.other_sources_needed == null) return undefined;
+  const weekly = card.sources.filter((s) => s.period_type === "weekly");
+  const parts = weekly.map((s) => `${s.title ?? "מקור"}: ${money(s.actual)} / ${money(s.target)} השבוע`);
+  parts.push(`ממקורות אחרים השבוע: ${money(card.other_sources_needed)}`);
+  return parts.join(" · ");
 }
 
 export interface HeaderCardModel { key: string; label: string; value: string; hint?: string }
@@ -84,7 +95,8 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
   return [
     { key: "income", label: "הכנסה מול יעד", ...income },
     { key: "income_week", label: "יעד הכנסה לשבוע",
-      value: s.income ? money(s.income.dynamic_target_per_week) : "—", hint: s.income ? undefined : "לא הוגדר יעד" },
+      value: s.income ? money(s.income.dynamic_target_per_week) : "—",
+      hint: s.income ? weeklyBreakdown(s.income) : "לא הוגדר יעד" },
     { key: "savings", label: "חיסכון", ...savings },
     { key: "emergency", label: "קרן חירום", ...emergency,
       hint: s.emergency_fund ? "כיסוי חודשים: אין נתוני הוצאה" : emergency.hint },
