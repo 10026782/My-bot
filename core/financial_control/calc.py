@@ -214,6 +214,38 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
     }
 
 
+_PER_MONTH = {"monthly": 1.0, "quarterly": 1 / 3, "yearly": 1 / 12}
+FLAGGED_REVIEW = ("reduce", "cancel", "negotiate")
+
+
+def monthly_equivalent(amount, frequency) -> float | None:
+    """Per-charge amount -> monthly cost. ``custom`` / unknown frequency has no honest conversion -> None."""
+    amt = _num(amount)
+    factor = _PER_MONTH.get(str(frequency or "").strip().lower())
+    if amt is None or factor is None:
+        return None
+    return round(abs(amt) * factor, 2)
+
+
+def summarize_obligations(items: list[dict]) -> dict:
+    """items: {monthly, review_status, saving} of ACTIVE obligations. A commitment is never an actual expense:
+    these numbers are never added to income, net or household spend."""
+    total = flagged = saving = 0.0
+    flagged_count = 0
+    for it in items:
+        monthly = it.get("monthly")
+        if monthly is None:
+            continue
+        total += monthly
+        if it.get("review_status") in FLAGGED_REVIEW:
+            flagged_count += 1
+            flagged += monthly
+            saving += it.get("saving") if it.get("saving") is not None else (
+                monthly if it["review_status"] == "cancel" else 0.0)
+    return {"total_monthly": round(total, 2), "flagged_count": flagged_count,
+            "flagged_monthly": round(flagged, 2), "potential_saving": round(saving, 2), "count": len(items)}
+
+
 def household_month_total(events: list[Event], today: date) -> float:
     """Household spend in the calendar month of ``today`` (separate from income/net, superseded ignored)."""
     start = today.replace(day=1)

@@ -215,6 +215,40 @@ def fcc_tasks(identity) -> list[dict]:
     return sorted(out, key=lambda t: (t["due_date"] is None, str(t["due_date"] or "")))
 
 
+def my_obligations(identity) -> list[dict]:
+    """Recurring commitments of the caller only (owner-scoped table)."""
+    return policy.filter_records(Tables.REC_OBLIGATIONS, _read(Tables.REC_OBLIGATIONS), identity)
+
+
+def _sel(value):
+    return value.get("name") if isinstance(value, dict) else value
+
+
+def obligation_items(records: list[dict]) -> list[dict]:
+    """Active obligations as {monthly, review_status, saving}; the monthly equivalent is computed here (the
+    Airtable formula is display-only), so the number does not depend on the storage provider."""
+    from airtable_schema import RecObFields as RF
+    items = []
+    for rec in records:
+        f = rec.get("fields") or {}
+        if not f.get(RF.ACTIVE):
+            continue
+        items.append({"monthly": calc.monthly_equivalent(f.get(RF.AMOUNT), _sel(f.get(RF.FREQUENCY))),
+                      "review_status": _sel(f.get(RF.REVIEW_STATUS)),
+                      "saving": calc._num(f.get(RF.POTENTIAL_SAVING))})
+    return items
+
+
+def obligations_overview(identity) -> dict:
+    try:
+        return calc.summarize_obligations(obligation_items(my_obligations(identity)))
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] obligations read failed")
+        return calc.summarize_obligations([])
+
+
 def receipts_overview(identity) -> dict:
     """Caller's OWN business expenses still missing a receipt (count + amount only, no row details).
     ``Expenses`` is a shared ledger, so rows are kept only when the caller is in the row's ``owner``
@@ -284,6 +318,7 @@ def overview(identity, today: date | None = None) -> dict:
         "summary": summarize(rows),
         "household": {"month_total": calc.household_month_total(all_events, today)},
         "receipts": receipts_overview(identity),
+        "obligations": obligations_overview(identity),
         "tasks": tasks,
         "monthly_cash_improvement": calc.monthly_cash_improvement(all_events, today),
         "recent_events": [

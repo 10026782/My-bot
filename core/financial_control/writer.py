@@ -14,7 +14,8 @@ import re
 from airtable_schema import FinGoalFields
 from core.financial_control import calc
 
-ACTIONS = ("log_progress", "set_target", "create_goal", "update_goal", "rename_goal", "follow_up", "note")
+ACTIONS = ("log_progress", "set_target", "create_goal", "update_goal", "rename_goal", "follow_up", "note",
+           "upsert_obligation")
 PERIOD_TYPES = ("monthly", "weekly", "custom")
 CALC_METHODS = (calc.PERIOD_SUM, calc.CUMULATIVE, calc.RECURRING_LEVEL)
 
@@ -39,7 +40,20 @@ def validate_intent(intent: object) -> dict | None:
         if kind not in (calc.ONE_TIME, calc.MONTHLY_RECURRING, calc.DIRECT_COST, calc.HOUSEHOLD_EXPENSE):
             return None
         out["kind"] = kind
-    for key in ("title", "new_title", "task_title", "note", "category"):
+    from core.financial_control import draft as fd        # obligation vocab lives with the draft contract
+    for key, allowed in (("frequency", fd.OB_FREQUENCIES), ("scope", fd.OB_SCOPES), ("review_status", fd.OB_REVIEW),
+                         ("obligation_type", fd.OB_TYPES), ("essentiality", fd.OB_ESSENTIALITY)):
+        val = intent.get(key)
+        if val is not None:
+            if val not in allowed:
+                return None
+            out[key] = val
+    val = intent.get("saving")
+    if val is not None:
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or val < 0:
+            return None
+        out["saving"] = float(val)
+    for key in ("title", "new_title", "task_title", "note", "category", "vendor"):
         if intent.get(key):
             out[key] = str(intent[key]).strip()
     for key, allowed in (("period_type", PERIOD_TYPES), ("calc_method", CALC_METHODS)):
@@ -48,7 +62,7 @@ def validate_intent(intent: object) -> dict | None:
             if val not in allowed:
                 return None
             out[key] = val
-    for key in ("start_date", "end_date"):
+    for key in ("start_date", "end_date", "next_charge_date"):
         val = intent.get(key)
         if val is not None:
             parsed = calc._d(val) if isinstance(val, str) else None

@@ -20,6 +20,7 @@ from typing import Any, Mapping
 
 from airtable_schema import FinEventFields as EF
 from airtable_schema import FinGoalFields as GF
+from airtable_schema import RecObFields as RF
 from airtable_schema import TaskFields, Tables
 from commercial_completion import (
     Condition, EntityContract, InputType, RequiredMode, _f,
@@ -29,7 +30,8 @@ from core.business_draft import CommercialEntityAdapter, UnsupportedOperationErr
 FCC_GOAL = "fcc_goal"
 FCC_EVENT = "fcc_event"
 FCC_FOLLOWUP = "fcc_followup"
-FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP)
+FCC_OBLIGATION = "fcc_obligation"   # Recurring Obligations: a COMMITMENT (never an actual-expense ledger row)
+FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION)
 
 SNAPSHOT_TOOL = "fcc_writes"        # snapshot envelope name; executors translate to canonical tools
 FCC_CHANNEL = "fcc"                 # one draft slot per person, shared by TMA and chat
@@ -40,6 +42,12 @@ CATEGORIES = ("income", "savings", "emergency_fund", "debt", "other")
 PERIOD_TYPES = ("monthly", "weekly", "custom")
 CALC_METHODS = ("period_sum", "cumulative", "recurring_level")
 EVENT_KINDS = ("one_time", "monthly_recurring", "target_change", "direct_cost", "household_expense", "note")
+
+OB_SCOPES = ("household", "business", "personal")
+OB_TYPES = ("subscription", "standing_order", "service", "loan_payment", "other")
+OB_FREQUENCIES = ("monthly", "quarterly", "yearly", "custom")
+OB_ESSENTIALITY = ("essential", "useful", "optional", "review")
+OB_REVIEW = ("keep", "reduce", "cancel", "negotiate", "review")
 
 # Safe inference by goal type (user-approved matrix). "other" is never guessed.
 INFERENCE: dict[str, dict[str, str]] = {
@@ -74,6 +82,19 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
         _f("note", EF.NOTE, InputType.TEXT),
     )),
+    FCC_OBLIGATION: EntityContract(FCC_OBLIGATION, (
+        _f("name", RF.NAME, InputType.TEXT, required=RequiredMode.ALWAYS, example="נטפליקס"),
+        _f("amount", RF.AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive", example="70"),
+        _f("scope", RF.SCOPE, InputType.SELECT, required=RequiredMode.ALWAYS, choices=OB_SCOPES),
+        _f("frequency", RF.FREQUENCY, InputType.SELECT, required=RequiredMode.ALWAYS, choices=OB_FREQUENCIES,
+           default="monthly"),
+        _f("review_status", RF.REVIEW_STATUS, InputType.SELECT, choices=OB_REVIEW),
+        _f("saving", RF.POTENTIAL_SAVING, InputType.CURRENCY, validation="non_negative"),
+        _f("obligation_type", RF.TYPE, InputType.SELECT, choices=OB_TYPES),
+        _f("essentiality", RF.ESSENTIALITY, InputType.SELECT, choices=OB_ESSENTIALITY),
+        _f("vendor", RF.VENDOR, InputType.TEXT),
+        _f("next_charge_date", RF.NEXT_CHARGE, InputType.DATE, example="2026-11-01"),
+    )),
     FCC_FOLLOWUP: EntityContract(FCC_FOLLOWUP, (
         _f("title", TaskFields.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("goal", EF.GOAL, InputType.LINK),
@@ -86,11 +107,19 @@ LABELS = {
     "title": "יעד", "target_amount": "סכום", "category": "קטגוריה", "period_type": "תקופה",
     "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה",
     "goal": "יעד", "kind": "סוג", "amount": "סכום", "occurred_at": "תאריך", "note": "הערה", "due_date": "לתאריך",
+    "name": "התחייבות", "scope": "שייכות", "frequency": "תדירות", "review_status": "החלטה", "saving": "חיסכון חודשי פוטנציאלי",
+    "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא",
 }
 VALUE_LABELS = {
     "category": {"income": "הכנסה", "savings": "חיסכון", "emergency_fund": "קרן חירום", "debt": "חוב", "other": "אחר"},
     "period_type": {"monthly": "חודשי", "weekly": "שבועי", "custom": "מותאם"},
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
+    "scope": {"household": "ביתי", "business": "עסקי", "personal": "אישי"},
+    "frequency": {"monthly": "חודשי", "quarterly": "רבעוני", "yearly": "שנתי", "custom": "מותאם"},
+    "review_status": {"keep": "להשאיר", "reduce": "להקטין", "cancel": "לבטל", "negotiate": "לנהל משא ומתן", "review": "לבדוק"},
+    "obligation_type": {"subscription": "מנוי", "standing_order": "הוראת קבע", "service": "שירות",
+                        "loan_payment": "החזר הלוואה", "other": "אחר"},
+    "essentiality": {"essential": "הכרחי", "useful": "שימושי", "optional": "אופציונלי", "review": "לבדיקה"},
     "kind": {"one_time": "חד-פעמי", "monthly_recurring": "חודשי קבוע", "target_change": "שינוי יעד", "direct_cost": "הוצאה ישירה", "household_expense": "הוצאה ביתית", "note": "הערה"},
 }
 # Closed answer vocabulary of the options we present (equivalent to buttons) — not NL parsing.
@@ -101,9 +130,10 @@ ANSWER_VOCAB["category"]["קרן חירום זמינה"] = "emergency_fund"
 def display_value(field: str, value: Any) -> str:
     if field in VALUE_LABELS:
         return VALUE_LABELS[field].get(value, str(value))
-    if field in ("target_amount", "amount") and isinstance(value, (int, float)):
+    if field in ("target_amount", "amount", "saving") and isinstance(value, (int, float)):
         return f"₪{value:,.0f}"
-    if field in ("end_date", "start_date", "occurred_at", "due_date") and isinstance(value, str) and len(value) >= 10:
+    if field in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date") \
+            and isinstance(value, str) and len(value) >= 10:
         y, m, d = value[:10].split("-")
         return f"{d}/{m}/{y}"
     return str(value)
@@ -125,6 +155,15 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         target = fields.get("target_amount")
         goal = f" ל-{display_value('target_amount', target)}" if target else ""
         return f"עד מתי אתה רוצה להגיע{goal}?"
+    if entity == FCC_OBLIGATION:
+        if field == "name":
+            return "איך לקרוא להתחייבות? (למשל: נטפליקס)"
+        if field == "amount":
+            return f"כמה החיוב{' של ' + str(fields.get('name')) if fields.get('name') else ''}?"
+        if field == "scope":
+            return "שייך לבית, לעסק או אישי? ביתי / עסקי / אישי"
+        if field == "frequency":
+            return "באיזו תדירות? חודשי / רבעוני / שנתי / מותאם"
     if field == "amount":
         return f"כמה לרשום{' ביעד ' + goal_title if goal_title else ''}?"
     if field == "goal":
@@ -138,6 +177,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     order = [f.field_name for f in FCC_CONTRACTS[entity].fields]
     lines: list[str] = []
     head = {FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
+            FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
             FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך"}[entity]
     lines.append(f"📋 {head}")
     if entity == FCC_EVENT and goal_title:
@@ -181,6 +221,11 @@ def _event_write(values: Mapping[str, Any], ctx: Mapping[str, Any], raw_text: st
             "audit_action": "fcc_event", "audit_details": key}
 
 
+_OB_FIELDS = (("name", RF.NAME), ("amount", RF.AMOUNT), ("scope", RF.SCOPE), ("frequency", RF.FREQUENCY),
+              ("review_status", RF.REVIEW_STATUS), ("saving", RF.POTENTIAL_SAVING), ("obligation_type", RF.TYPE),
+              ("essentiality", RF.ESSENTIALITY), ("vendor", RF.VENDOR), ("next_charge_date", RF.NEXT_CHARGE))
+
+
 class FccEntityAdapter(CommercialEntityAdapter):
     """Entity adapter for the FCC contracts. Canonical 'tool' = the frozen ``fcc_writes`` envelope."""
 
@@ -188,15 +233,15 @@ class FccEntityAdapter(CommercialEntityAdapter):
         super().__init__(FCC_CONTRACTS)
 
     def get_update_editable_fields(self, entity_type: str) -> frozenset[str]:
-        if entity_type != FCC_GOAL:
+        if entity_type not in (FCC_GOAL, FCC_OBLIGATION):
             return frozenset()
-        return frozenset(f.field_name for f in FCC_CONTRACTS[FCC_GOAL].fields)
+        return frozenset(f.field_name for f in FCC_CONTRACTS[entity_type].fields)
 
     def get_canonical_create_tool(self, entity_type: str) -> str | None:
         return SNAPSHOT_TOOL if entity_type in FCC_CONTRACTS else None
 
     def get_canonical_update_tool(self, entity_type: str) -> str | None:
-        return SNAPSHOT_TOOL if entity_type == FCC_GOAL else None
+        return SNAPSHOT_TOOL if entity_type in (FCC_GOAL, FCC_OBLIGATION) else None
 
     def build_create_payload(self, writer) -> dict[str, Any]:
         values = writer.resolved_values()
@@ -214,6 +259,13 @@ class FccEntityAdapter(CommercialEntityAdapter):
             write = {"op": "post", "table": Tables.FIN_GOALS, "fields": fields,
                      "audit_action": "fcc_goal_create", "audit_details": str(values.get("title", ""))[:80]}
             return {"writes": [write]}
+        if entity == FCC_OBLIGATION:
+            fields = {RF.ACTIVE: True}
+            for name, spec in _OB_FIELDS:
+                if values.get(name) not in (None, ""):
+                    fields[spec] = values[name]
+            return {"writes": [{"op": "post", "table": Tables.REC_OBLIGATIONS, "fields": fields,
+                                "audit_action": "fcc_obligation_create", "audit_details": str(values.get("name", ""))[:80]}]}
         if entity == FCC_EVENT:
             return {"writes": [_event_write(values, ctx, raw)]}
         if entity == FCC_FOLLOWUP:
@@ -231,6 +283,15 @@ class FccEntityAdapter(CommercialEntityAdapter):
         """Partial update: ONLY changed fields. A target change is an append-only event
         (history is never rewritten); everything else patches the goal. Unmentioned
         fields are never touched."""
+        if writer.target_entity == FCC_OBLIGATION:
+            values = dict(writer.current_values)
+            changed = {k: v for k, v in values.items() if v != original_fields.get(k)}
+            if not changed:
+                return {}
+            record_id = str(writer.source_context.get("record_id") or "")
+            patch = {spec: changed[name] for name, spec in _OB_FIELDS if name in changed}
+            return {"writes": [{"op": "patch", "table": Tables.REC_OBLIGATIONS, "record_id": record_id, "fields": patch,
+                                "audit_action": "fcc_obligation_update", "audit_details": record_id}]}
         if writer.target_entity != FCC_GOAL:
             raise UnsupportedOperationError(f"{writer.target_entity} has no UPDATE")
         values = dict(writer.current_values)

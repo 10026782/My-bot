@@ -72,6 +72,7 @@ class Tables:
     # System / Monitoring
     AI_USAGE_DAILY  = "AI_Usage_Daily"   # שורה יומית לכל source_type — 1 רשומה/יום
     FIN_GOALS       = "Financial Goals"            # FCC — live: tblQPUteMKe13tvlr (created 04/10/2026)
+    REC_OBLIGATIONS = "Recurring Obligations"      # FCC — live: tblAvpGNDWs1tNoKG (created 06/10/2026), owner-scoped commitments (NOT an expense ledger)
     FIN_EVENTS      = "Financial Progress Events"  # FCC — live: tblqNvcyK34zVjcXP (created 04/10/2026), append-only
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
@@ -906,6 +907,30 @@ class FinEventFields:
     IDEMPOTENCY_KEY = "Idempotency Key"
     SUPERSEDED_BY   = "Superseded By"
     FINANCIAL_OWNER = "Financial Owner"  # multipleRecordLinks -> Profile
+
+
+class RecObFields:
+    """Recurring Obligations (FCC) — LIVE (tblAvpGNDWs1tNoKG). A COMMITMENT (subscription/standing order), never a
+    ledger of actual monthly charges. Owner-scoped via FINANCIAL_OWNER."""
+    NAME            = "Name"
+    FINANCIAL_OWNER = "Financial Owner"        # multipleRecordLinks -> Profile (owner-of-record)
+    SCOPE           = "Scope"                  # household | business | personal
+    TYPE            = "Obligation Type"        # subscription | standing_order | service | loan_payment | other
+    CATEGORY        = "Category"               # free text
+    AMOUNT          = "Amount"                 # per charge
+    FREQUENCY       = "Frequency"              # monthly | quarterly | yearly | custom
+    MONTHLY_EQUIVALENT = "Monthly Equivalent"  # Airtable formula (text result) — code derives its own number (calc.monthly_equivalent)
+    NEXT_CHARGE     = "Next Charge Date"
+    ACTIVE          = "Active"                 # checkbox
+    ESSENTIALITY    = "Essentiality"           # essential | useful | optional | review
+    REVIEW_STATUS   = "Review Status"          # keep | reduce | cancel | negotiate | review
+    POTENTIAL_SAVING = "Potential Monthly Saving"
+    VENDOR          = "Vendor"
+    PAYMENT_METHOD  = "Payment Method"         # free text
+    RELATED_GOAL    = "Related Goal"           # link -> Financial Goals
+    NOTES           = "Notes"
+    CREATED_AT      = "Created At"
+    UPDATED_AT      = "Updated At"
 
 
 class DeadlineFields:

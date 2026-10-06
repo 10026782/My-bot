@@ -533,6 +533,7 @@ export interface FccOverview {
   monthly_cash_improvement: number;
   household?: { month_total: number };
   receipts?: { missing_count: number; missing_amount: number };
+  obligations?: { total_monthly: number; flagged_count: number; flagged_monthly: number; potential_saving: number; count: number };
   recent_events: { goal_ids: string[]; Amount: number | null; Kind: string | null; "Occurred At": string | null; Note: string | null }[];
   as_of: string;
   draft: FccTurn | null;

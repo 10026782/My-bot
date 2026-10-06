@@ -123,6 +123,16 @@ test("household spend and missing receipts are separate cards that appear only w
   assert.equal((r?.hint ?? "").includes("₪410"), true);
 });
 
+test("recurring obligations show three separate numbers only when there are active obligations", () => {
+  assert.equal(headerCards({ monthly_cash_improvement: 0, summary: {} }).some((c) => c.key.startsWith("obligations")), false);
+  const cards = headerCards({ monthly_cash_improvement: 0, summary: {},
+    obligations: { total_monthly: 303.33, flagged_count: 2, flagged_monthly: 170, potential_saving: 100, count: 4 } });
+  const by = Object.fromEntries(cards.map((c) => [c.key, c]));
+  assert.equal(by.obligations.value, "₪303");
+  assert.equal(by.obligations_flagged.value, "2");
+  assert.equal(by.obligations_saving.value, "₪100");
+});
+
 test("labels and dates", () => {
   assert.equal(CATEGORY_LABEL.business_project, "פרויקט עסקי");
   assert.equal(dmy("2026-12-31"), "31/12/2026");
