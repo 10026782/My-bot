@@ -184,8 +184,11 @@ def _accumulate(out: dict, rows: list[dict], cards: dict) -> None:
                 card["weekly_sources_required"] = round(card.get("weekly_sources_required", 0.0) + row["weekly_sources_required"], 2)
                 if row.get("other_sources_needed") is not None:
                     card["other_sources_needed"] = round(card.get("other_sources_needed", 0.0) + row["other_sources_needed"], 2)
-            for field in ("target", "actual", "remaining", "dynamic_target_per_week", "direct_costs", "net"):
-                card[field] = round(card[field] + (row.get(field) or 0.0), 2)
+            for field in ("target", "actual", "remaining", "dynamic_target_per_week", "direct_costs", "net",
+                          "deposited_month", "gap_month", "gap_last_month"):
+                if field in ("deposited_month", "gap_month", "gap_last_month") and field not in row:
+                    continue
+                card[field] = round(card.get(field, 0.0) + (row.get(field) or 0.0), 2)
 
 
 def summarize(rows: list[dict]) -> dict:
@@ -322,6 +325,8 @@ def overview(identity, today: date | None = None) -> dict:
         row["priority"] = gf.get(FinGoalFields.PRIORITY)
         row["parent_id"] = parent_of.get(goal["id"])
         row["is_source"] = goal["id"] in parent_of
+        if row.get("mode") == "monthly_level" and _category_key(gf.get(FinGoalFields.CATEGORY)) == "savings":
+            row.update(calc.deposit_status(own[goal["id"]], today))      # plan (level) vs actual deposits this month
         rows.append(classify_row(row, next_by_goal.get(goal["id"])))
     _attach_sources(rows)
 

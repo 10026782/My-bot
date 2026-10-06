@@ -1281,3 +1281,46 @@ def test_invalid_structured_intent_falls_back_to_the_classifier(monkeypatch):
     _level_world(3000)
     fchat.start_turn(ELIYAHU, "x", intent={"action": "bogus"})
     assert calls == ["x"]
+
+
+# ═══════════════ standing-order savings: plan (level) vs actual deposits; a missed month = a visible gap ═══════════════
+def test_deposits_vs_level_gap_this_month_and_last_month():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [
+        event("l1", "recS", ELI, 3000, kind="monthly_recurring", day="2026-08-01"),      # level 3,000 from August
+        event("l2", "recS", ELI, 2000, kind="monthly_recurring", day="2026-10-02"),      # raised to 5,000 this month
+        event("d1", "recS", ELI, 3000, kind="one_time", day="2026-09-10"),               # September fully deposited? no: 3,000 of 3,000
+        event("d2", "recS", ELI, 1200, kind="one_time", day="2026-10-04")]               # this month so far
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recS"]
+    assert (row["deposited_month"], row["gap_month"]) == (1200, 3800)                    # 5,000 plan - 1,200 deposited
+    assert (row["gap_last_month"]) == 0                                                  # September met its 3,000
+    card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
+    assert (card["deposited_month"], card["gap_month"]) == (1200, 3800)
+
+
+def test_missed_month_is_a_gap_and_does_not_inflate_this_months_level():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("l1", "recS", ELI, 5000, kind="monthly_recurring", day="2026-08-01"),
+                             event("d1", "recS", ELI, 1000, kind="one_time", day="2026-09-12")]      # September short by 4,000
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recS"]
+    assert row["gap_last_month"] == 4000
+    assert row["actual"] == 5000 and row["target"] == 5000                               # level untouched: no automatic catch-up
+
+
+def test_make_up_deposit_counts_in_the_month_it_is_made_not_backwards():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = [event("l1", "recS", ELI, 5000, kind="monthly_recurring", day="2026-08-01"),
+                             event("d1", "recS", ELI, 9000, kind="one_time", day="2026-10-03")]      # 5,000 + 4,000 make-up
+    row = rows_of(service.overview(ELIYAHU, TODAY))["recS"]
+    assert row["deposited_month"] == 9000 and row["gap_month"] == 0 and row["gap_last_month"] == 5000
+
+
+def test_deposit_is_logged_as_one_time_on_the_savings_goal():
+    DB[Tables.FIN_GOALS] = [_savings_goal()]
+    DB[Tables.FIN_EVENTS] = []
+    dep = {"action": "log_progress", "goal_hint": "הפרשה", "kind": "one_time", "amount": 5000}
+    ex = Ex(classify={"הפקדתי החודש 5000": dep})
+    r = run(ex, ELIYAHU, "הפקדתי החודש 5000")
+    assert r.state == "review"
+    (w,) = run(ex, ELIYAHU, "אשר").snapshot["writes"]
+    assert w["fields"]["Kind"] == "one_time" and w["fields"]["Amount"] == 5000

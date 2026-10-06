@@ -477,6 +477,10 @@ export interface FccGoalRow {
   title: string | null;
   category: string | null;
   priority: number | null;
+  /** Standing-order savings only: actual deposits vs the standing level (plan). */
+  deposited_month?: number;
+  gap_month?: number;
+  gap_last_month?: number;
   method: string;
   /** Goal family: recurring (period sum) | monthly_level (run-rate change) | cumulative | project (no amount). */
   mode: "recurring" | "monthly_level" | "cumulative" | "project";
@@ -515,6 +519,9 @@ export interface FccSource {
 
 export interface FccSummaryCard {
   mode?: string;
+  deposited_month?: number;
+  gap_month?: number;
+  gap_last_month?: number;
   target: number;
   actual: number;
   remaining: number;

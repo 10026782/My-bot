@@ -18,6 +18,14 @@ export const CATEGORY_LABEL: Record<string, string> = {
   project: "פרויקט", business_project: "פרויקט עסקי", investment: "השקעות", other: "אחר",
 };
 
+/** Plan vs actual for the standing-order savings card; a missed month is a visible gap, not an automatic catch-up. */
+function savingsHint(card: { deposited_month?: number; gap_month?: number; gap_last_month?: number }): string {
+  const parts = ["הוראת קבע מול יעד · לא מתאפס"];
+  if (card.deposited_month != null) parts.push(`הופקד החודש ${money(card.deposited_month)}${card.gap_month ? ` · פער ${money(card.gap_month)}` : ""}`);
+  if (card.gap_last_month) parts.push(`פער בחודש שעבר ${money(card.gap_last_month)} — אפשר לכתוב ״משימת המשך לפער בחיסכון״`);
+  return parts.join(" · ");
+}
+
 function isSavings(category: unknown): boolean {
   const c = String(typeof category === "object" && category ? (category as { name?: string }).name : category ?? "").trim().toLowerCase();
   return c === "savings" || c === "חיסכון";
@@ -53,6 +61,9 @@ export function goalCardModel(g: FccGoalRow): GoalCardModel {
       { label: "יעד הפרשה חודשית", value: money(g.target) },
       { label: "מופרש כרגע לחודש", value: money(g.actual) },
       { label: "חסר ליעד", value: money(g.remaining) },
+      ...(g.deposited_month != null ? [{ label: "הופקד בפועל החודש", value: money(g.deposited_month) }] : []),
+      ...(g.gap_month ? [{ label: "פער החודש", value: money(g.gap_month) }] : []),
+      ...(g.gap_last_month ? [{ label: "פער בחודש שעבר", value: money(g.gap_last_month) }] : []),
     ] };
   }
   if (g.mode === "monthly_level") {
@@ -129,7 +140,7 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
       value: s.income ? money(s.income.dynamic_target_per_week) : "—",
       hint: s.income ? weeklyBreakdown(s.income) : "לא הוגדר יעד" },
     { key: "savings", label: s.savings?.mode === "monthly_level" ? "הפרשה חודשית לחיסכון" : "חיסכון", ...savings,
-      ...(s.savings?.mode === "monthly_level" ? { hint: "הוראת קבע מול יעד · לא מתאפס" } : {}) },
+      ...(s.savings?.mode === "monthly_level" ? { hint: savingsHint(s.savings) } : {}) },
     { key: "emergency", label: "קרן חירום", ...emergency,
       hint: s.emergency_fund ? "כיסוי חודשים: אין נתוני הוצאה" : emergency.hint },
     { key: "debt", label: "חוב שנפרע", ...debt },
