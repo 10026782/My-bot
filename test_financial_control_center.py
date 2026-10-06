@@ -116,13 +116,46 @@ def test_3_progress_on_foreign_goal_denied():
 # 7/8 — dynamic target
 def test_7_8_dynamic_target_under_and_over_performance():
     g = goal("g", "t", ELI, 12000)
-    weeks = calc.weeks_left(TODAY, date(2026, 10, 31))
     base = calc.compute_goal(g, [], TODAY, GF)
-    assert base["dynamic_target_per_week"] == round(12000 / weeks, 2)
+    assert base["dynamic_target_per_week"] == round(12000 / 24 * 7, 2)     # 24 calendar days left on 8/10 (31-day month)
     under = calc.compute_goal(g, [calc.Event("one_time", 500, date(2026, 10, 3))], TODAY, GF)
     over = calc.compute_goal(g, [calc.Event("one_time", 9000, date(2026, 10, 3))], TODAY, GF)
     assert under["dynamic_target_per_week"] > over["dynamic_target_per_week"]
     assert under["remaining"] == 11500 and over["remaining"] == 3000
+
+
+# monthly goal -> weekly pace by real calendar days (not whole weeks)
+@pytest.mark.parametrize("today,days", [
+    (date(2026, 2, 1), 28), (date(2026, 4, 1), 30), (date(2026, 10, 1), 31),    # month start: 28/30/31
+    (date(2026, 10, 16), 16), (date(2026, 10, 25), 7),                          # mid month, exactly one week left
+])
+def test_monthly_pace_uses_calendar_days(today, days):
+    r = calc.compute_goal(goal("g", "t", ELI, 15000), [], today, GF)
+    assert r["dynamic_target_per_week"] == round(15000 / days * min(7, days), 2)
+
+
+def test_monthly_pace_last_days_is_partial_week_and_never_exceeds_remaining():
+    r = calc.compute_goal(goal("g", "t", ELI, 15000), [calc.Event("one_time", 12000, date(2026, 10, 5))], date(2026, 10, 29), GF)
+    assert r["dynamic_target_per_week"] == round(3000 / 3 * 3, 2) == 3000.0       # 3 days left: the whole remainder
+    last = calc.compute_goal(goal("g", "t", ELI, 15000), [], date(2026, 10, 31), GF)
+    assert last["dynamic_target_per_week"] == 15000.0                             # last day: all of it
+
+
+def test_monthly_pace_resets_on_new_month_and_follows_performance():
+    g = goal("g", "t", ELI, 15000)
+    oct_ev = [calc.Event("one_time", 14000, date(2026, 10, 20))]
+    assert calc.compute_goal(g, oct_ev, date(2026, 11, 1), GF)["actual"] == 0      # parent resets on the 1st
+    ev9 = [calc.Event("one_time", 9000, date(2026, 10, 3))]
+    none = calc.compute_goal(g, [], TODAY, GF)["dynamic_target_per_week"]
+    assert calc.compute_goal(g, ev9, TODAY, GF)["dynamic_target_per_week"] < none          # over-performance lowers the pace
+    assert calc.compute_goal(g, [], date(2026, 10, 22), GF)["dynamic_target_per_week"] > none   # nothing earned => pace rises
+
+
+def test_weekly_goal_resets_on_sunday():
+    g = goal("g", "t", ELI, 2500, **{GF.PERIOD_TYPE: "weekly"})
+    ev = [calc.Event("one_time", 1000, date(2026, 10, 10))]                      # Saturday
+    assert calc.compute_goal(g, ev, date(2026, 10, 10), GF)["actual"] == 1000
+    assert calc.compute_goal(g, ev, date(2026, 10, 11), GF)["actual"] == 0       # Sunday: new week
 
 
 # 9 — mid-period target change keeps events

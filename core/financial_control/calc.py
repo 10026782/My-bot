@@ -104,6 +104,11 @@ def weeks_left(today: date, period_end: date) -> int:
     return (period_end - wk_start).days // 7 + 1
 
 
+def days_left(today: date, period_end: date) -> int:
+    """Calendar days left in the period, today included (last day of the month => 1)."""
+    return max((period_end - today).days + 1, 0)
+
+
 def effective_target(base_target: float | None, events: list[Event], as_of: date) -> float | None:
     """Latest target_change on/before ``as_of`` wins; history stays in the events."""
     target = base_target
@@ -114,6 +119,15 @@ def effective_target(base_target: float | None, events: list[Event], as_of: date
     if changes:
         target = changes[-1].amount
     return target
+
+
+def parent_goal_id(fields: dict, gf) -> str | None:
+    """Explicit "contributes to" link (Financial Goals -> Financial Goals). No inference from titles."""
+    name = getattr(gf, "PARENT_GOAL", None)
+    value = fields.get(name) if name else None
+    if isinstance(value, list):
+        value = next((v for v in value if isinstance(v, str)), None)
+    return value if isinstance(value, str) and value.startswith("rec") else None
 
 
 def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
@@ -146,7 +160,15 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
     remaining = None if target is None else max(target - actual, 0.0)
     periods = weeks_left(today, horizon_end) if horizon_end else None
     dynamic = None
-    if remaining is not None and periods:
+    if method == PERIOD_SUM and period_type == "monthly":
+        # monthly goal => weekly pace by REAL calendar days: remaining / days left * min(7, days left).
+        # Never remaining / whole weeks: months of 28/30/31 days and partial first/last weeks stay correct.
+        left = days_left(today, p_end)
+        if remaining is not None and left:
+            dynamic = round(remaining / left * min(7, left), 2)
+        elif remaining == 0:
+            dynamic = 0.0
+    elif remaining is not None and periods:
         dynamic = round(remaining / periods, 2)
     elif remaining == 0:
         dynamic = 0.0
@@ -164,6 +186,8 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
 
     return {
         "goal_id": goal.get("id"),
+        "parent_id": parent_goal_id(f, gf),
+        "period_type": period_type or "monthly",
         "title": f.get(gf.TITLE),
         "method": method,
         "mode": MODE_BY_METHOD.get(method, "recurring"),
