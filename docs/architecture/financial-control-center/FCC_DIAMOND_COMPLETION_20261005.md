@@ -99,3 +99,11 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 | project | אין סכום יעד + קטגוריה לא-מספרית | כרטיס אבן-דרך: סטטוס, פעולה הבאה, תאריך יעד — ללא סכומים |
 
 `summarize()` מצרף לפי משפחה בלבד, מדלג על פרויקטים ולא מערבב משפחות; כרטיס "יעד הכנסה לשבוע" בכותרת הוא הכנסה בלבד.
+
+
+## Income hierarchy + calendar-day pacing (06/10/2026)
+
+- **Parent / source**: Financial Goals has an explicit link field `Contributes To` (-> Financial Goals). A goal with a parent is a *source*: its target is **not** added to the parent target; its events roll up into the parent actual **once** (de-duplicated by event record id). A source's `target_change` never moves the parent target. Self-links, cycles and non-active / foreign parents are ignored (the goal then stands alone). No inference from titles.
+- **Summary**: header cards aggregate top-level goals only (`is_source` rows are skipped). Parent rows carry `sources`, `weekly_sources_required` (what weekly sources still owe this week) and `other_sources_needed = max(weekly pace - weekly_sources_required, 0)`.
+- **Pacing**: monthly `period_sum` weekly pace = `remaining / calendar_days_left * min(7, calendar_days_left)` (today included). Weekly goals reset on Sunday, monthly goals on the 1st. Other goal families are unchanged (`weeks_left`).
+- Verification: `test_financial_control_center.py` (hierarchy, roll-up, 28/30/31-day, resets, over/under-performance); frontend `fccPresentation.test.ts`. Production/device: NOT verified.
