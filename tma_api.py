@@ -4894,6 +4894,7 @@ def fcc_write(identity):
     except Exception:
         logger.exception("[fcc] handle_turn failed")
         return jsonify({"state": "clarify", "message": "לא הצלחתי לעבד את הבקשה כרגע — נסו שוב."}), 200
+    logger.info("[fcc] write turn state=%s entity=%s awaiting=%s", result.state, result.entity, result.awaiting)
     if result.state != "confirmed":
         return jsonify(result.to_dict()), (403 if result.state == "denied" else 200)
 
