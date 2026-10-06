@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchFccOverview, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
@@ -43,6 +43,9 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
+  const turnRef = useRef<HTMLElement | null>(null);
+  // התשובה מוצגת מעל תיבת הכתיבה ודוחפת אותה למטה — מגלגלים אליה כדי שלא תיעלם מחוץ למסך
+  useEffect(() => { turnRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" }); }, [turn, receipt, error]);
 
   const send = async (body: { text: string; goal_id?: string }) => {
     if (busy || !body.text.trim()) return;
@@ -82,7 +85,7 @@ function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () 
   const reviewing = turn?.state === "review";
 
   return (
-    <section className="fcc-section" aria-labelledby="fcc-quick-heading">
+    <section className="fcc-section" aria-labelledby="fcc-quick-heading" ref={turnRef}>
       <h2 id="fcc-quick-heading" className="fcc-section__heading">עדכון מהיר</h2>
       <Surface className="fcc-quick">
         {turn && (
