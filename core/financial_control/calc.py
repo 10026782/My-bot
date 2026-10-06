@@ -8,8 +8,8 @@ Event kinds:
   monthly_recurring  a change to the MONTHLY run-rate (new income stream,
                      cancelled expense, lower instalment) — never summed into
                      one-time totals
-  direct_cost        positive cost tied directly to producing income (fuel, parking, fee). Never
-                     reduces ``actual`` (gross); shown as ``direct_costs`` and ``net`` = gross - costs
+  direct_cost        positive cost tied directly to producing income (fuel, parking, fee).
+                     ``actual`` stays gross (display); ``net`` = gross - costs drives remaining, pace and status
   target_change      ``amount`` is the new target, effective from occurred_at
   note               no amount semantics
 """
@@ -164,7 +164,8 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         costs = sum(abs(e.amount) for e in live if e.kind == DIRECT_COST and p_start <= e.occurred <= p_end)
         horizon_end = p_end
 
-    remaining = None if target is None else max(target - actual, 0.0)
+    # progress toward the target is NET (what is actually earned): direct costs reduce it, so the pace rises
+    remaining = None if target is None else max(target - (actual - costs), 0.0)
     periods = weeks_left(today, horizon_end) if horizon_end else None
     dynamic = None
     if method == PERIOD_SUM and period_type == "monthly":
@@ -202,7 +203,7 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         "period_start": p_start.isoformat(),
         "period_end": (horizon_end or p_end).isoformat(),
         "target": target,
-        "actual": round(actual, 2),                      # gross: progress vs target is never reduced by costs
+        "actual": round(actual, 2),                      # gross (display only); remaining / pace / status use net
         "direct_costs": round(costs, 2),
         "net": round(actual - costs, 2),
         "remaining": None if remaining is None else round(remaining, 2),

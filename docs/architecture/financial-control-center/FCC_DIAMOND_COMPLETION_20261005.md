@@ -119,4 +119,4 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 ## Weekly card shows direct costs (06/10/2026)
 
 - Device test showed direct costs in the monthly income card but not in the weekly card. Each parent `sources[]` entry now carries `direct_costs` and `net` (its own period window), and the weekly income card line shows `<source>: actual / target השבוע · הוצאות ישירות -₪X · נטו ₪Y`.
-- Unchanged by design: the weekly pace is still computed from the **gross** remaining (costs never reduce progress). Whether pace should be based on net is an open owner decision.
+- **Owner decision (06/10/2026): progress is NET.** `remaining`, weekly pace and status use `net = gross - direct costs` (profit, not turnover); `actual` stays the gross display value. Goal: learn what to cut (EV, smarter trips) — direct vs indirect vs household. Header income card shows net / target, hint shows gross and costs. This supersedes the earlier "costs never reduce progress" wording above.

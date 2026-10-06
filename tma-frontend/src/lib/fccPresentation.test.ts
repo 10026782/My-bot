@@ -104,6 +104,7 @@ test("gross -> direct costs -> net shows only when there are direct costs", () =
     income: { target: 15000, actual: 3000, remaining: 12000, direct_costs: 500, net: 2500, dynamic_target_per_week: 3500, goals: 1 } } });
   const hint = withCost.find((c) => c.key === "income")?.hint ?? "";
   assert.equal(hint, "ברוטו ₪3,000 · הוצאות ישירות -₪500 · נטו ₪2,500");
+  assert.equal(withCost.find((c) => c.key === "income")?.value, "₪2,500 / ₪15,000");   // progress is net
   const without = headerCards({ monthly_cash_improvement: 0, summary: {
     income: { target: 15000, actual: 3000, remaining: 12000, direct_costs: 0, net: 3000, dynamic_target_per_week: 3500, goals: 1 } } });
   assert.equal(without.find((c) => c.key === "income")?.hint, undefined);
