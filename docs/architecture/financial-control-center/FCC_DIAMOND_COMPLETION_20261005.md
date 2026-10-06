@@ -151,3 +151,9 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 ## Weekly card wording (07/10/2026)
 
 - The weekly income target already INCLUDES the weekly sources (travel is a part of it, never added on top). The card line now shows what each source still owes so the parts add up to the headline: `מזה: נסיעות: נשאר ₪746 מתוך ₪2,500 השבוע · ממקורות אחרים: ₪2,963` (746 + 2,963 = 3,709). Wording only; no calculation changed.
+
+## Savings = monthly allocation (07/10/2026, owner decision)
+
+- **Savings** (`category = savings`) is a **monthly allocation to the capital market**: a recurring `period_sum` / `monthly` goal that resets on the 1st, shown as "חיסכון חודשי X / target". **A one-time accumulated pot is the emergency fund** (`cumulative`). New savings goals infer `monthly` + `period_sum` (no end date asked); the classifier prompt states the distinction.
+- **Header card** `savings` now counts `recurring` goals. A legacy cumulative savings goal still shows on the card only while no monthly savings goal exists (`_CARD_FALLBACKS`); the two families are never summed. The card carries `mode` so the label is "חיסכון חודשי" only for the monthly one.
+- **Live data**: the existing live savings goal (target 10,000) is still cumulative until it is switched (chat: "עדכן יעד חיסכון: חודשי, סכום בתקופה", or an owner-approved edit of the record). Not changed by this commit.

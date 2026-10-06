@@ -514,6 +514,7 @@ export interface FccSource {
 }
 
 export interface FccSummaryCard {
+  mode?: string;
   target: number;
   actual: number;
   remaining: number;

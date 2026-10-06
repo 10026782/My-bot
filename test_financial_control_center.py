@@ -511,7 +511,7 @@ def test_income_goal_infers_category_period_method_and_skips_end_date():
 
 # cumulative types need an end date; "other" never guesses period/method
 def test_required_matrix_cumulative_needs_end_date_and_other_asks_period_and_method():
-    for cat in ("savings", "debt"):
+    for cat in ("emergency_fund", "debt"):
         ex = Ex(classify={"g": {"action": "create_goal", "title": f"t-{cat}", "target": 1000, "category": cat}})
         r = run(ex, ELIYAHU, "g")
         assert r.awaiting == "end_date", cat
@@ -1186,3 +1186,33 @@ def test_cancelled_commitment_can_be_added_again():
     run(ex, ELIYAHU, "ביתי")
     r = run(ex, ELIYAHU, "אשר")
     assert r.state == "confirmed" and r.snapshot["writes"][0]["op"] == "post"       # inactive one does not block a new row
+
+
+# ═══════════════ Savings = monthly allocation (capital markets); emergency fund = one-time pot ═══════════════
+def test_new_savings_goal_is_monthly_allocation_not_cumulative():
+    ex = Ex(classify={"s": {"action": "create_goal", "title": "חיסכון בשוק ההון", "target": 10000, "category": "savings"}})
+    r = run(ex, ELIYAHU, "s")
+    assert r.state == "review" and "(הוסק)" in r.message                       # period + method inferred, no end date asked
+    w = run(ex, ELIYAHU, "אשר").snapshot["writes"][0]["fields"]
+    assert (w[GF.CATEGORY], w[GF.PERIOD_TYPE], w[GF.CALC_METHOD]) == ("savings", "monthly", "period_sum")
+    assert GF.END_DATE not in w
+
+
+def test_savings_card_is_monthly_and_resets_with_the_month():
+    DB[Tables.FIN_GOALS] = [goal("gS", "חיסכון בשוק ההון", ELI, 10000,
+                                 **{GF.CATEGORY: "savings", GF.PERIOD_TYPE: "monthly", GF.CALC_METHOD: "period_sum"})]
+    DB[Tables.FIN_EVENTS] = [event("e1", "gS", ELI, 2000, day="2026-10-03"),
+                             event("e0", "gS", ELI, 5000, day="2026-09-20")]          # last month's deposit never counts
+    card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
+    assert (card["actual"], card["target"], card["mode"]) == (2000, 10000, "recurring")
+
+
+def test_legacy_cumulative_savings_shows_only_until_a_monthly_one_exists_and_never_sums():
+    legacy = goal("gL", "חיסכון ישן", ELI, 10000, **{GF.CATEGORY: "savings", GF.CALC_METHOD: "cumulative"})
+    DB[Tables.FIN_EVENTS] = []
+    DB[Tables.FIN_GOALS] = [legacy]
+    assert service.overview(ELIYAHU, TODAY)["summary"]["savings"]["mode"] == "cumulative"
+    DB[Tables.FIN_GOALS] = [legacy, goal("gS", "הפרשה חודשית", ELI, 3000,
+                                         **{GF.CATEGORY: "savings", GF.PERIOD_TYPE: "monthly", GF.CALC_METHOD: "period_sum"})]
+    card = service.overview(ELIYAHU, TODAY)["summary"]["savings"]
+    assert (card["target"], card["mode"]) == (3000, "recurring")                       # 13,000 would mean mixing families

@@ -53,7 +53,7 @@ OB_STATUS = ("active", "inactive")      # inactive = actually cancelled/ended: l
 # Safe inference by goal type (user-approved matrix). "other" is never guessed.
 INFERENCE: dict[str, dict[str, str]] = {
     "income": {"period_type": "monthly", "calc_method": "period_sum"},
-    "savings": {"calc_method": "cumulative"},
+    "savings": {"period_type": "monthly", "calc_method": "period_sum"},   # monthly allocation (capital markets); a one-time pot is an emergency fund
     "emergency_fund": {"calc_method": "cumulative"},
     "debt": {"calc_method": "cumulative"},
 }
@@ -113,7 +113,7 @@ LABELS = {
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
 }
 VALUE_LABELS = {
-    "category": {"income": "הכנסה", "savings": "חיסכון", "emergency_fund": "קרן חירום", "debt": "חוב", "other": "אחר"},
+    "category": {"income": "הכנסה", "savings": "חיסכון חודשי", "emergency_fund": "קרן חירום", "debt": "חוב", "other": "אחר"},
     "period_type": {"monthly": "חודשי", "weekly": "שבועי", "custom": "מותאם"},
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
     "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
@@ -128,6 +128,7 @@ VALUE_LABELS = {
 # Closed answer vocabulary of the options we present (equivalent to buttons) — not NL parsing.
 ANSWER_VOCAB = {f: {label: key for key, label in labels.items()} for f, labels in VALUE_LABELS.items()}
 ANSWER_VOCAB["category"]["קרן חירום זמינה"] = "emergency_fund"
+ANSWER_VOCAB["category"]["חיסכון"] = "savings"
 
 
 def display_value(field: str, value: Any) -> str:
@@ -149,7 +150,7 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
     if field == "target_amount":
         return f"מה סכום היעד{' ל' + title if title else ''}?"
     if field == "category":
-        return "איזה סוג יעד זה? הכנסה / חיסכון / קרן חירום / חוב / אחר"
+        return "איזה סוג יעד זה? הכנסה / חיסכון (הפרשה חודשית) / קרן חירום (סכום חד-פעמי) / חוב / אחר"
     if field == "period_type":
         return "באיזו תקופה נמדד היעד? חודשי / שבועי / מותאם"
     if field == "calc_method":

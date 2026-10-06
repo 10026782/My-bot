@@ -134,6 +134,15 @@ test("recurring obligations show three separate numbers only when there are acti
   assert.equal((by.obligations_flagged.hint ?? "").includes("1 ממתינות לביטול בפועל"), true);
 });
 
+test("savings card says monthly only for a monthly allocation (legacy cumulative keeps the plain label)", () => {
+  const monthly = headerCards({ monthly_cash_improvement: 0, summary: { savings: { target: 10000, actual: 2000, remaining: 8000, dynamic_target_per_week: 0, goals: 1, mode: "recurring" } } });
+  const m = monthly.find((c) => c.key === "savings");
+  assert.equal(m?.label, "חיסכון חודשי");
+  assert.equal(m?.value, "₪2,000 / ₪10,000");
+  const legacy = headerCards({ monthly_cash_improvement: 0, summary: { savings: { target: 10000, actual: 0, remaining: 10000, dynamic_target_per_week: 0, goals: 1, mode: "cumulative" } } });
+  assert.equal(legacy.find((c) => c.key === "savings")?.label, "חיסכון");
+});
+
 test("labels and dates", () => {
   assert.equal(CATEGORY_LABEL.business_project, "פרויקט עסקי");
   assert.equal(dmy("2026-12-31"), "31/12/2026");
