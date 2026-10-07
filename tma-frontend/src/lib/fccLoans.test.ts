@@ -18,7 +18,7 @@ const mk = (o: Partial<FccLoan>): FccLoan => ({
   current_balance: null, early_closure_balance: null, interest_rate: null, monthly_payment: null, payments_remaining: null,
   end_date: null, early_repayment_fee: null, active: true, months_remaining: null, estimated_total_remaining_payments: null,
   estimated_future_cost: null, future_cost_exact: false, monthly_cash_freed_if_closed: null, annual_interest_cost: null,
-  missing: [], ...o,
+  status_unknown: false, missing: [], ...o,
 });
 
 const full = mk({ id: "a", name: "פועלים", lender: "בנק הפועלים", loan_type: "פרטית", related_asset: "r1", related_asset_name: "דירה",
@@ -33,7 +33,7 @@ const loans: FccLoans = {
   items: [empty, business, full, closed],
   summary: { total_active_loans: 3, total_original_amount: null, total_early_closure_balance: 150000, total_monthly_payments: 3500,
     weighted_average_interest_rate: 8.17, total_estimated_future_cost: null,
-    total_monthly_cash_freed_if_all_closed: 3500, incomplete_count: 1, future_cost_exact: false, by_type: {}, by_asset: [],
+    total_monthly_cash_freed_if_all_closed: 3500, incomplete_count: 1, unknown_status_count: 1, future_cost_exact: false, by_type: {}, by_asset: [],
     coverage: { original_amount: 0, early_closure_balance: 2, monthly_payment: 2, future_cost: 2, interest_rate: 2 } },
   rankings: { high_interest: ["b", "a", "c"], cash_freed: ["a", "b", "c"], small_balance: ["b", "a", "c"] },
   goal: { target: 700000, closed: null, remaining: 700000, active_closure_balance: 150000 },
@@ -98,6 +98,13 @@ test("comparison of two loans: six rows, approximate cost flagged, no recommenda
   assert.equal(futureCostLabel(full), "₪17,000");
   assert.equal(futureCostLabel(empty), UNKNOWN);
   assert.equal(compareRows(full, empty)[1].b, UNKNOWN);
+});
+
+test("unknown-status loan stays visible with the badge flag; a confirmed one does not", () => {
+  const unk = mk({ id: "u", name: "ללא סטטוס", status_unknown: true });
+  assert.ok(filterLoans([unk, full], "all").some((l) => l.id === "u"));
+  assert.equal(loanCardModel(unk).statusUnknown, true);
+  assert.equal(loanCardModel(full).statusUnknown, false);
 });
 
 test("debt goal block passes the SSOT numbers through", () => {

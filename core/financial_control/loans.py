@@ -71,6 +71,12 @@ def is_active(fields: dict) -> bool:
     return str(_sel(fields.get(LF.STATUS)) or "").strip().casefold() != _PAID_OFF
 
 
+def status_unknown(fields: dict) -> bool:
+    """Active Loan unchecked (or never filled — Airtable cannot tell) AND not Paid Off: the loan is kept visible and
+    counted, but flagged so the owner can confirm it."""
+    return not fields.get(LF.ACTIVE) and is_active(fields)
+
+
 def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = None) -> dict:
     f = record.get("fields") or {}
     loan_type = _sel(f.get(LF.LOAN_TYPE))
@@ -111,6 +117,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "early_repayment_fee": str(f.get(LF.EARLY_FEE)).strip() if f.get(LF.EARLY_FEE) else None,
         "early_fee_amount": fee_amount,
         "active": is_active(f),
+        "status_unknown": status_unknown(f),
         # derived
         "months_remaining": months,
         "estimated_total_remaining_payments": total_remaining,
@@ -179,6 +186,7 @@ def summarize(items: list[dict]) -> dict:
         # how many loans each figure is actually based on (a total over 4 of 9 loans must not look complete)
         "coverage": {"original_amount": orig_n, "early_closure_balance": bal_n, "monthly_payment": pay_n,
                      "future_cost": cost_n, "interest_rate": len(weighted)},
+        "unknown_status_count": sum(1 for i in active if i["status_unknown"]),
         "incomplete_count": sum(1 for i in active if i["missing"]),
         "future_cost_exact": bool(cost_n) and all(i["future_cost_exact"] for i in active if i["estimated_future_cost"] is not None),
         "by_type": {k: _bucket(v) for k, v in by_type.items()},

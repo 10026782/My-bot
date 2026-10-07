@@ -1435,3 +1435,19 @@ def test_loans_http_payload_isolated(monkeypatch):
     seed_loans()
     body = http(monkeypatch, AVI_I).get("/api/fcc/overview", headers=H).get_json()
     assert [i["id"] for i in body["loans"]["items"]] == ["recLX"] and "100000" not in str(body["loans"])
+
+
+def test_loans_status_unknown_kept_visible_and_counted():
+    DB[Tables.LOANS] = [
+        loan("recK", **{LF.ACTIVE: True, LF.EARLY_CLOSURE: 1000, LF.MONTHLY_PAYMENT: 100}),              # confirmed active
+        loan("recU1", **{LF.EARLY_CLOSURE: 2000, LF.MONTHLY_PAYMENT: 200}),                              # unchecked, no status
+        loan("recU2", **{LF.STATUS: "Current", LF.EARLY_CLOSURE: 3000}),                                 # unchecked, not Paid Off
+        loan("recP", **{LF.STATUS: "Paid Off", LF.EARLY_CLOSURE: 9000}),                                 # closed: not unknown, not shown active
+    ]
+    body = loans_for()
+    flags = {i["id"]: i["status_unknown"] for i in body["items"]}
+    assert flags == {"recK": False, "recU1": True, "recU2": True, "recP": False}
+    s = body["summary"]
+    assert s["unknown_status_count"] == 2
+    assert s["total_active_loans"] == 3 and s["total_early_closure_balance"] == 6000   # unknown-status loans are included
+    assert s["total_monthly_payments"] == 300

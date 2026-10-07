@@ -6,6 +6,7 @@ import { dmy, money } from "./fccPresentation";
 
 export const UNKNOWN = "לא הוגדר";
 export const UNCLASSIFIED = "לא סווג";
+export const STATUS_UNKNOWN = "סטטוס לא הוגדר";
 
 export const val = (n: number | null | undefined): string => (n == null ? UNKNOWN : money(n));
 export const pct = (n: number | null | undefined): string => (n == null ? UNKNOWN : `${n.toFixed(2).replace(/\.?0+$/, "")}%`);
@@ -64,6 +65,7 @@ export interface LoanCardModel {
   rows: LoanRow[];
   freedLine: string;
   incomplete: boolean;
+  statusUnknown: boolean;              // badge "סטטוס לא הוגדר"
 }
 
 export function loanCardModel(l: FccLoan): LoanCardModel {
@@ -81,6 +83,7 @@ export function loanCardModel(l: FccLoan): LoanCardModel {
     ],
     freedLine: l.monthly_cash_freed_if_closed == null ? `החזר חודשי: ${UNKNOWN}` : `בסגירה משתחררים ${money(l.monthly_cash_freed_if_closed)} לחודש`,
     incomplete: l.missing.length > 0,
+    statusUnknown: l.status_unknown,
   };
 }
 

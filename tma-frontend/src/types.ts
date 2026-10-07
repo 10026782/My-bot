@@ -550,6 +550,8 @@ export interface FccLoan {
   end_date: string | null;
   early_repayment_fee: string | null;
   active: boolean;
+  /** Active Loan unchecked and not Paid Off: shown and counted, flagged for confirmation. */
+  status_unknown: boolean;
   months_remaining: number | null;
   estimated_total_remaining_payments: number | null;
   estimated_future_cost: number | null;
@@ -573,6 +575,7 @@ export interface FccLoans {
     total_monthly_cash_freed_if_all_closed: number | null;
     coverage: { original_amount: number; early_closure_balance: number; monthly_payment: number; future_cost: number; interest_rate: number };
     incomplete_count: number;
+    unknown_status_count: number;
     future_cost_exact: boolean;
     by_type: Record<string, FccLoanBucket>;
     by_asset: (FccLoanBucket & { asset_id: string; asset_name: string | null })[];

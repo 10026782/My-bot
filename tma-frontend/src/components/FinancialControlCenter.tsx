@@ -3,7 +3,7 @@ import { fetchFccOverview, postFccWrite } from "../api";
 import type { FccGoalRow, FccLoans, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import {
-  FILTERS, RANK_MODES, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards, sortLoans,
+  FILTERS, RANK_MODES, STATUS_UNKNOWN, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards, sortLoans,
   type LoanFilter, type RankMode,
 } from "../lib/fccLoans";
 import { PageHeader } from "./ui/PageHeader";
@@ -197,6 +197,9 @@ function LoansSection({ loans }: { loans: FccLoans }) {
           <div className="fcc-kpis">
             {loanHeaderCards(loans).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
           </div>
+          {loans.summary.unknown_status_count > 0 && (
+            <p className="fcc-goal__note">{loans.summary.unknown_status_count} הלוואות עם {STATUS_UNKNOWN} (Active Loan לא מסומן) — כלולות בסיכומים.</p>
+          )}
           {goal && (
             <Surface variant="subtle" padding="compact">
               <dl className="fcc-goal__grid">
@@ -228,6 +231,7 @@ function LoansSection({ loans }: { loans: FccLoans }) {
                   <div key={l.id} className="fcc-goal fcc-loan">
                     <div className="fcc-goal__topline">
                       <StatusBadge tone={l.loan_type ? "neutral" : "warning"}>{m.typeLabel}</StatusBadge>
+                      {m.statusUnknown && <StatusBadge tone="warning">{STATUS_UNKNOWN}</StatusBadge>}
                       {m.incomplete && <StatusBadge tone="warning">נתונים חלקיים</StatusBadge>}
                     </div>
                     <h3>{m.title}{m.lender && <span className="fcc-loan__lender"> · {m.lender}</span>}</h3>
