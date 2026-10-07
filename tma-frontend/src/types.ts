@@ -563,6 +563,65 @@ export interface FccLoan {
 
 export interface FccLoanBucket { count: number; early_closure_balance: number | null; monthly_payments: number | null }
 
+export interface FccPayoffRow {
+  id: string;
+  name: string | null;
+  lender: string | null;
+  loan_type: string | null;
+  amount_to_close: number | null;
+  interest_rate: number | null;
+  monthly_cash_freed: number | null;
+  months_remaining: number | null;
+  estimated_remaining_payments: number | null;
+  /** Continuation cost estimate = monthly × remaining payments − closure (null when data is inconsistent/suspicious). */
+  estimated_future_cost: number | null;
+  future_cost_exact: boolean;
+  /** What closing now could avoid: continuation cost − known early-repayment fee (null = unknown / excluded). */
+  cost_saving: number | null;
+  cost_saving_exact: boolean;
+  no_saving: boolean;
+  data_inconsistent: boolean;
+  data_suspicious: boolean;
+  data_issue: "inconsistent" | "suspicious" | null;
+  annual_interest_burden: number | null;
+  scores: Record<"interest" | "cash" | "closure" | "time", number | null>;
+  balanced_score: number | null;
+  score_coverage: number;
+  score_coverage_label: string;
+  missing_factors: ("interest" | "cash" | "closure" | "time")[];
+  partial: boolean;
+}
+
+export type PayoffStrategy = "balanced" | "interest" | "cash" | "savings";
+
+export interface FccPayoff {
+  weights: Record<"interest" | "cash" | "closure" | "time", number>;
+  items: FccPayoffRow[];
+  rankings: Record<PayoffStrategy, string[]>;
+}
+
+export interface FccScenarioResult {
+  budget: number;
+  used: number;
+  remaining_budget: number;
+  closed_count: number;
+  closed: { id: string; name: string | null; amount_to_close: number; monthly_cash_freed: number | null; cost_saving: number | null; cost_saving_exact: boolean }[];
+  debt_removed: number;
+  monthly_cash_released: number | null;
+  future_cost_saved: number | null;
+  future_cost_saved_exact: boolean;
+  partial: boolean;
+  skipped_over_budget: string[];
+  excluded_unknown_amount: string[];
+  excluded_no_data: string[];
+}
+
+export interface FccScenarios {
+  budget: number;
+  strategies: Record<PayoffStrategy, FccScenarioResult>;
+  optimal: { cash: FccScenarioResult | null; saved: FccScenarioResult | null };
+}
+
 export interface FccLoans {
   items: FccLoan[];
   summary: {
@@ -582,6 +641,7 @@ export interface FccLoans {
   };
   rankings: { high_interest: string[]; cash_freed: string[]; small_balance: string[] };
   goal: { target: number; closed: number | null; remaining: number | null; active_closure_balance: number | null } | null;
+  payoff?: FccPayoff;
 }
 
 export interface FccOverview {

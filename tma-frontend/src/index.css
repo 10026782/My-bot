@@ -3176,3 +3176,35 @@
 .fcc-compare__table { inline-size: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
 .fcc-compare__table th, .fcc-compare__table td { padding: 4px 6px; text-align: start; border-block-end: 1px solid var(--boss-color-border); unicode-bidi: plaintext; overflow-wrap: anywhere; }
 .fcc-compare__table thead th { font-weight: 650; }
+
+/* ── early-payoff engine ── */
+.fcc-pay { display: grid; gap: var(--boss-space-2); min-inline-size: 0; }
+.fcc-pay__card { gap: 6px; }
+.fcc-pay__rank {
+  display: inline-grid; place-items: center; min-inline-size: 20px; block-size: 20px; margin-inline-end: 6px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; background: color-mix(in srgb, var(--boss-color-text-muted) 18%, transparent);
+}
+.fcc-pay__figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px var(--boss-space-3); margin: 0; }
+.fcc-pay__figures div { min-inline-size: 0; }
+.fcc-pay__figures dt { color: var(--boss-color-text-muted); font-size: 11px; }
+.fcc-pay__figures dd { margin: 0; font-size: 14px; font-weight: 600; unicode-bidi: plaintext; overflow-wrap: anywhere; }
+.fcc-pay__figures dd.fcc-unknown { font-size: 13px; font-weight: 500; color: var(--boss-color-text-muted); }
+.fcc-pay__score { font-weight: 600; }
+.fcc-pay__tags { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.fcc-tag--warn { border-color: var(--boss-color-warning, #b7791f); color: var(--boss-color-warning, #b7791f); }
+.fcc-pay__warn { margin: 0; padding: 5px var(--boss-space-2); border-radius: 8px; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; background: color-mix(in srgb, var(--boss-color-warning, #b7791f) 14%, transparent); }
+.fcc-pay__saving { margin: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.fcc-pay__why { margin: 0; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.fcc-pay__budget { display: grid; gap: var(--boss-space-2); }
+.fcc-pay__subhead { margin: 0; font-size: 14px; font-weight: 650; }
+.fcc-pay__input { display: flex; gap: var(--boss-space-2); min-inline-size: 0; }
+.fcc-pay__input input {
+  flex: 1 1 auto; min-inline-size: 0; min-block-size: 36px; padding: 0 var(--boss-space-3); font: inherit; font-size: 15px; color: inherit;
+  border: 1px solid var(--boss-color-border-strong); border-radius: 10px; background: var(--boss-color-surface);
+}
+.fcc-pay__table { table-layout: auto; }
+.fcc-pay__table th, .fcc-pay__table td { overflow-wrap: normal; word-break: normal; }
+.fcc-pay__table td, .fcc-pay__table thead th:not(:first-child) { white-space: nowrap; text-align: center; }
+.fcc-pay__row--on { font-weight: 650; background: color-mix(in srgb, var(--boss-color-accent-readable) 10%, transparent); }
+.fcc-pay__scenario { display: grid; gap: var(--boss-space-2); min-inline-size: 0; overflow-x: auto; }
+

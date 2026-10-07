@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccTurn } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccScenarios, FccTurn } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -424,6 +424,16 @@ export async function fetchFccOverview(): Promise<FccOverview> {
 
 /** The ONE FCC conversation endpoint (shared with chat): the server keeps the draft and replies with the
  *  next question / review / receipt. No client-side parsing; "אשר" / "ערוך" / "בטל" are just text. */
+export async function fetchFccLoanScenario(budget: number): Promise<FccScenarios> {
+  const r = await fetch(`${BASE}/api/fcc/loans/scenario?budget=${encodeURIComponent(String(budget))}`, { headers: authHeaders() });
+  if (!r.ok) {
+    const error = new Error(`API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
+  return r.json() as Promise<FccScenarios>;
+}
+
 export async function postFccWrite(body: { text: string; goal_id?: string }): Promise<FccTurn> {
   const r = await fetch(`${BASE}/api/fcc/write`, {
     method: "POST",

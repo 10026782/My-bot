@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchFccOverview, postFccWrite } from "../api";
+import { fetchFccLoanScenario, fetchFccOverview, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import { KpiCard } from "./FccKpiCard";
@@ -242,7 +242,7 @@ export function FinancialControlCenter({ onBack }: Props) {
         )}
       </section>
 
-      {data.loans && <LoansSection loans={data.loans} />}
+      {data.loans && <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario} />}
 
       <section className="fcc-section" aria-labelledby="fcc-recent-heading">
         <h2 id="fcc-recent-heading" className="fcc-section__heading">התקדמות אחרונה</h2>
