@@ -727,7 +727,8 @@
         "tma-frontend/src/components/FccLoans.tsx",
         "tma-frontend/src/components/FccKpiCard.tsx",
         "tma-frontend/src/components/FccPayoff.tsx",
-        "tma-frontend/src/lib/fccPayoff.ts"
+        "tma-frontend/src/lib/fccPayoff.ts",
+        "core/financial_control/payoff.py"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",

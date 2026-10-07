@@ -264,8 +264,7 @@
         "core/financial_control/conversation.py",
         "core/financial_control/gate.py",
         "core/financial_control/chat.py",
-        "core/financial_control/loans.py",
-        "core/financial_control/payoff.py"
+        "core/financial_control/loans.py"
       ],
       "test_paths": [
         "test_tool_registry_invariants.py",
