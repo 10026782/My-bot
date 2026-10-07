@@ -1471,7 +1471,7 @@ def seed_payoff():
     DB[Tables.LOANS] = [
         pl("recP1", 100000, 6.0, 2000, 60, **{LF.EARLY_FEE: "אין"}),     # big, low rate, high payment, long
         pl("recP2", 50000, 12.0, 1800, 36, **{LF.EARLY_FEE: "אין"}),     # mid
-        pl("recP3", 10000, 9.0, 450, 30, **{LF.EARLY_FEE: "אין"}),       # small, short
+        pl("recP3", 10000, 9.0, 375, 30, **{LF.EARLY_FEE: "אין"}),       # small, short
         pl("recPX", 5000, 20.0, 9999, 99, owner=AVI),                     # someone else's
     ]
 
@@ -1518,25 +1518,90 @@ def test_payoff_partial_data_loan_is_listed_but_not_fabricated():
     r = payoff_rows()["recEmpty"]
     assert r["balanced_score"] is None and r["score_coverage"] == 0.0 and r["score_coverage_label"] == "0/4"
     assert set(r["missing_factors"]) == {"interest", "cash", "closure", "time"}
-    assert r["monthly_cash_efficiency"] is None and r["annualized_cash_release"] is None
+    assert r["cost_saving"] is None and r["estimated_future_cost"] is None and r["data_issue"] is None
     ranks = loans_for()["payoff"]["rankings"]
     assert all(ranks[k][-1] == "recEmpty" for k in ranks)                 # unknown always last
 
 
-def test_payoff_cash_release_efficiency_and_annualised():
+def test_misleading_percentage_metrics_are_gone_from_the_contract():
     seed_payoff()
-    r = payoff_rows()["recP3"]
-    assert r["monthly_cash_efficiency"] == 450 / 10000 == 0.045
-    assert r["annualized_cash_release"] == 450 * 12 / 10000 == 0.54
-    assert payoff_rows()["recP1"]["annualized_cash_release"] == 2000 * 12 / 100000
+    body = loans_for()["payoff"]
+    text = str(body)
+    for gone in ("annualized_cash_release", "monthly_cash_efficiency", "cash_release_efficiency", "efficiency"):
+        assert gone not in text
+    assert set(body["rankings"]) == {"balanced", "interest", "cash", "savings"}
+    assert fcc_payoff.STRATEGIES == ("balanced", "interest", "cash", "savings")
 
 
-def test_payoff_future_cost_unknown_when_inconsistent():
-    DB[Tables.LOANS] = [pl("recI", 90000, 5.0, 1000, 60)]                 # 60*1000 = 60000 < 90000 closure -> inconsistent
-    r = payoff_rows()["recI"]
-    assert r["estimated_remaining_payments"] == 60000 and r["estimated_future_cost"] is None
+def test_payoff_cost_formulas_gross_net_and_interest_burden():
     seed_payoff()
-    assert payoff_rows()["recP1"]["estimated_future_cost"] == 20000      # 2000*60 - 100000
+    r = payoff_rows()
+    assert r["recP1"]["estimated_remaining_payments"] == 2000 * 60
+    assert r["recP1"]["estimated_future_cost"] == 120000 - 100000          # monthly × remaining − closure
+    assert r["recP1"]["cost_saving"] == 20000 and r["recP1"]["cost_saving_exact"] is True      # fee "אין" is a known zero
+    assert r["recP1"]["annual_interest_burden"] == 100000 * 6.0 / 100       # closure × rate
+    assert r["recP2"]["estimated_future_cost"] == 1800 * 36 - 50000 == 14800
+
+
+def test_cost_saving_is_net_of_a_known_fee_and_estimated_when_the_fee_is_unknown():
+    DB[Tables.LOANS] = [pl("recF", 100000, 6.0, 2000, 60, **{LF.EARLY_FEE: "3000"}),     # known numeric fee
+                        pl("recU", 100000, 6.0, 2000, 60),                                  # fee unknown
+                        pl("recT", 100000, 6.0, 2000, 60, **{LF.EARLY_FEE: "2%"}),         # non-numeric fee = unknown
+                        pl("recZ", 100000, 6.0, 2000, 60, **{LF.EARLY_FEE: "25000"})]      # fee larger than the gross cost
+    r = payoff_rows()
+    assert r["recF"]["estimated_future_cost"] == 20000 and r["recF"]["cost_saving"] == 17000 and r["recF"]["cost_saving_exact"] is True
+    for k in ("recU", "recT"):
+        assert r[k]["cost_saving"] == 20000 and r[k]["cost_saving_exact"] is False       # shown as an estimate, never claimed as net
+    assert r["recZ"]["no_saving"] is True and r["recZ"]["cost_saving"] == 0.0           # never a positive "saving" after the fee
+
+
+def test_hard_inconsistency_blocks_cost_and_the_savings_ranking():
+    DB[Tables.LOANS] = [pl("recI", 90000, 5.0, 1000, 60),                                  # 60×1000 < 90000
+                        pl("recK", 1000, 5.0, 50, 12, **{LF.EARLY_FEE: "500"}),           # 600 ≥ 1000? no: 600 < 1000+500
+                        pl("recOk", 50000, 6.0, 1000, 60)]
+    r = payoff_rows()
+    for k in ("recI", "recK"):
+        assert r[k]["data_inconsistent"] is True and r[k]["data_issue"] == "inconsistent"
+        assert r[k]["estimated_future_cost"] is None and r[k]["cost_saving"] is None and r[k]["data_suspicious"] is False
+        assert r[k]["amount_to_close"] is not None and r[k]["monthly_cash_freed"] is not None    # the four facts stay visible
+    ranks = loans_for()["payoff"]["rankings"]
+    assert ranks["savings"][0] == "recOk" and set(ranks["savings"][1:]) == {"recI", "recK"}     # excluded = after every loan with a saving
+    assert r["recOk"]["data_issue"] is None
+
+
+def test_a_known_fee_above_the_continuation_cost_is_no_saving_not_bad_data():
+    DB[Tables.LOANS] = [pl("recE", 1000, 5.0, 105, 10, **{LF.EARLY_FEE: "300"}),          # cost 50, fee 300 -> closing loses money
+                        pl("recN", 1000, 5.0, 105, 10, **{LF.EARLY_FEE: "אין"})]          # cost 50, no fee -> saves 50
+    r = payoff_rows()
+    assert r["recE"]["data_inconsistent"] is False and r["recE"]["estimated_future_cost"] == 50.0
+    assert r["recE"]["no_saving"] is True and r["recE"]["cost_saving"] == 0.0 and r["recE"]["cost_saving_exact"] is True
+    assert r["recN"]["no_saving"] is False and r["recN"]["cost_saving"] == 50.0
+    assert loans_for()["payoff"]["rankings"]["savings"] == ["recN", "recE"]               # a zero saving ranks below a real one
+
+
+def test_suspicious_loans_keep_their_facts_but_leave_the_cost_and_savings_ranking():
+    DB[Tables.LOANS] = [pl("recLow", 100000, 6.0, 2300, 46, **{LF.EARLY_FEE: "אין"}),     # cost 5,800 vs rough 11,500 -> 0.50 ok
+                        pl("recTooLow", 118400, 6.0, 2600, 46, **{LF.EARLY_FEE: "אין"}),   # cost 1,200 vs rough ~13,600 -> suspicious
+                        pl("recTooHigh", 10000, 6.0, 1000, 30, **{LF.EARLY_FEE: "אין"}),  # cost 20,000 vs rough 75 -> suspicious
+                        pl("recFine", 55342, 12.05, 1189, 63, **{LF.EARLY_FEE: "אין"})]   # ~ the rough estimate
+    r = payoff_rows()
+    assert r["recLow"]["data_suspicious"] is False and r["recFine"]["data_suspicious"] is False
+    for k in ("recTooLow", "recTooHigh"):
+        assert r[k]["data_suspicious"] is True and r[k]["data_issue"] == "suspicious" and r[k]["data_inconsistent"] is False
+        assert r[k]["estimated_future_cost"] is None and r[k]["cost_saving"] is None
+        assert r[k]["amount_to_close"] is not None and r[k]["interest_rate"] == 6.0 and r[k]["monthly_cash_freed"] is not None
+        assert r[k]["months_remaining"] is not None                                          # the four facts stay
+    sav = loans_for()["payoff"]["rankings"]["savings"]
+    assert set(sav[:2]) == {"recLow", "recFine"} and set(sav[2:]) == {"recTooLow", "recTooHigh"}
+
+
+def test_corrected_hapoalim_is_consistent_and_not_flagged():
+    DB[Tables.LOANS] = [pl("recHap", 118400, 6.0, 2816.16, 45, **{LF.EARLY_FEE: "אין"})]
+    r = payoff_rows()["recHap"]
+    assert r["data_issue"] is None and round(r["estimated_future_cost"], 2) == round(2816.16 * 45 - 118400, 2)
+    old = pl("recHapOld", 118400, 6.25, 2600, 45, **{LF.EARLY_FEE: "אין"})                  # the pre-correction data
+    DB[Tables.LOANS] = [old]
+    assert payoff_rows()["recHapOld"]["data_inconsistent"] is True
 
 
 def test_payoff_rankings_by_each_strategy():
@@ -1544,7 +1609,7 @@ def test_payoff_rankings_by_each_strategy():
     rk = loans_for()["payoff"]["rankings"]
     assert rk["interest"] == ["recP2", "recP3", "recP1"]
     assert rk["cash"] == ["recP1", "recP2", "recP3"]
-    assert rk["efficiency"] == ["recP3", "recP2", "recP1"]                              # .54 > .432 > .24
+    assert rk["savings"] == ["recP1", "recP2", "recP3"]                                 # 20,000 > 14,800 > 1,250
     bal = {i: r["balanced_score"] for i, r in payoff_rows().items()}
     assert rk["balanced"] == sorted(bal, key=lambda i: -bal[i])
 
@@ -1559,8 +1624,8 @@ def test_budget_scenario_closes_whole_loans_in_strategy_order():
     s = out["interest"]                       # interest order P2(50000) -> P3(10000) -> P1(100000 does not fit)
     assert [c["id"] for c in s["closed"]] == ["recP2", "recP3"] and s["closed_count"] == 2
     assert s["used"] == 60000 and s["remaining_budget"] == 0 and s["debt_removed"] == 60000
-    assert s["monthly_cash_released"] == 2250 and s["skipped_over_budget"] == ["recP1"]
-    assert s["future_cost_saved"] == 14800 + 3500 and s["future_cost_saved_exact"] is True
+    assert s["monthly_cash_released"] == 2175 and s["skipped_over_budget"] == ["recP1"]
+    assert s["future_cost_saved"] == 14800 + 1250 and s["future_cost_saved_exact"] is True
     assert [c["id"] for c in out["cash"]["closed"]] == ["recP2", "recP3"]          # P1 (100000) skipped whole, never partial
 
 
@@ -1586,7 +1651,20 @@ def test_budget_with_partial_data_loan_excludes_unknown_amount_and_flags_partial
     r = scen(200000)["strategies"]["interest"]
     assert "recEmpty" in r["excluded_unknown_amount"]
     assert any(c["id"] == "recNoPay" for c in r["closed"]) and r["partial"] is True
-    assert r["monthly_cash_released"] == 4250                              # the unknown payment is not guessed
+    assert r["monthly_cash_released"] == 4175                              # the unknown payment is not guessed
+
+
+def test_savings_strategy_and_optimal_modes_never_close_a_loan_whose_metric_is_unknown():
+    DB[Tables.LOANS] = [pl("recOk", 50000, 6.0, 1000, 60), pl("recBad", 20000, 6.0, 100, 10),         # recBad: inconsistent -> no saving
+                        pl("recNoPay", 1000, 7.0)]                                                     # no monthly payment, no saving
+    out = scen(500000)
+    sv = out["strategies"]["savings"]
+    assert [c["id"] for c in sv["closed"]] == ["recOk"] and set(sv["excluded_no_data"]) == {"recBad", "recNoPay"}
+    assert {c["id"] for c in out["optimal"]["saved"]["closed"]} == {"recOk"}
+    assert {c["id"] for c in out["optimal"]["cash"]["closed"]} == {"recOk", "recBad"}                 # cash needs a monthly payment: both have one
+    assert "recNoPay" in out["optimal"]["cash"]["excluded_no_data"] and "recNoPay" not in {c["id"] for c in out["optimal"]["cash"]["closed"]}
+    interest = out["strategies"]["interest"]                                                          # other strategies still use them as plain fills
+    assert {"recOk", "recBad", "recNoPay"} == {c["id"] for c in interest["closed"]}
 
 
 def test_budget_optimal_combination_matches_or_beats_every_greedy_strategy():
@@ -1598,14 +1676,14 @@ def test_budget_optimal_combination_matches_or_beats_every_greedy_strategy():
     assert best_cash["monthly_cash_released"] >= max(s["monthly_cash_released"] for s in out["strategies"].values())
     assert best_saved["future_cost_saved"] == 20000 + 14800
     assert best_saved["future_cost_saved"] >= max(s["future_cost_saved"] or 0 for s in out["strategies"].values())
-    assert out["strategies"]["interest"]["monthly_cash_released"] == 2250       # greedy by rate is strictly worse here
+    assert out["strategies"]["interest"]["monthly_cash_released"] == 2175       # greedy by rate is strictly worse here
 
 
 def test_budget_700k_preset_closes_everything_and_leaves_the_rest():
     seed_payoff()
     r = scen(700000)["strategies"]["balanced"]
     assert r["closed_count"] == 3 and r["debt_removed"] == 160000 and r["remaining_budget"] == 540000
-    assert r["monthly_cash_released"] == 4250
+    assert r["monthly_cash_released"] == 4175
 
 
 def test_budget_scenario_owner_isolation_and_http(monkeypatch):
@@ -1637,23 +1715,12 @@ def _rows(specs):
     return fcc_payoff.metrics([fcc_loans.loan_item(r, TODAY) for r in recs])
 
 
-def test_huge_balance_small_payment_gives_low_cash_release_efficiency():
-    rows = {r["id"]: r for r in _rows([("recHuge", 1234567, 12.05, 1189, 63), ("recSmall", 3060, 12.85, 784, 4), ("recMid", 55342, 12.05, 1189, 63)])}
+def test_huge_balance_small_payment_has_a_tiny_saving_share_and_no_percentage_metric():
+    rows = {r["id"]: r for r in _rows([("recHuge", 1234567, 12.05, 1189, 63), ("recSmall", 3060, 12.85, 784, 4)])}
     huge = rows["recHuge"]
-    assert huge["annualized_cash_release"] == 1189 * 12 / 1234567            # the formula, exactly
-    assert round(huge["annualized_cash_release"] * 100, 2) == 1.16            # ≈1.16%, not 26%
-    assert huge["monthly_cash_efficiency"] == 1189 / 1234567
-    assert huge["annualized_cash_release"] < 0.02
-    assert huge["annualized_cash_release"] < rows["recMid"]["annualized_cash_release"] < rows["recSmall"]["annualized_cash_release"]
-    assert round(rows["recMid"]["annualized_cash_release"] * 100, 2) == 25.78  # same payment, 22x smaller balance
-    assert fcc_payoff.rankings(list(rows.values()))["efficiency"][-1] == "recHuge"
-
-
-def test_annualized_cash_release_matches_formula_for_every_loan():
-    rows = _rows([("recA", 118400, 6.25, 2600, 45), ("recB", 94549, 6.96, 1389, 86), ("recC", 3060, 12.85, 784, 4), ("recD", 20000, 5.0, 500, 20)])
-    for r in rows:
-        assert r["annualized_cash_release"] == r["monthly_cash_freed"] * 12 / r["amount_to_close"]
-        assert r["monthly_cash_efficiency"] == r["monthly_cash_freed"] / r["amount_to_close"]
+    assert "annualized_cash_release" not in huge and "monthly_cash_efficiency" not in huge        # no 307% / 1.16% style metric anywhere
+    assert huge["monthly_cash_freed"] == 1189 and huge["amount_to_close"] == 1234567              # only the plain facts
+    assert huge["data_inconsistent"] is True                                                       # 63×1,189 = 74,907 < 1,234,567
 
 
 def _check_invariants(result, rows, budget, order=None):
@@ -1672,6 +1739,8 @@ def _check_invariants(result, rows, budget, order=None):
             amt = by_id[iid]["amount_to_close"]
             if amt is None:
                 assert iid in result["excluded_unknown_amount"]
+            elif iid in result["excluded_no_data"]:
+                assert iid not in picked                                           # strategy metric unknown: never a filler pick
             elif iid in picked:
                 assert amt <= left + 1e-9
                 left -= amt
@@ -1686,8 +1755,10 @@ def test_no_scenario_may_exceed_budget_700k_with_a_loan_larger_than_the_budget()
     out = fcc_payoff.scenarios(rows, 700000)
     for strat, result in out["strategies"].items():
         _check_invariants(result, rows, 700000, ranks[strat])
-        assert "recBig" not in {c["id"] for c in result["closed"]} and "recBig" in result["skipped_over_budget"]
-        assert result["used"] == 118400 + 94549 + 3060 + 55342 and result["remaining_budget"] == 700000 - result["used"]
+        assert "recBig" not in {c["id"] for c in result["closed"]}
+        assert "recBig" in result["skipped_over_budget"] or "recBig" in result["excluded_no_data"]       # too big, or no saving data
+        expected = 94549 + 3060 + 55342 + (0 if strat == "savings" else 118400)        # recHap has no saving data (45×2,600 < closure): never a savings pick
+        assert result["used"] == expected and result["remaining_budget"] == 700000 - result["used"]
     for kind, result in out["optimal"].items():
         _check_invariants(result, rows, 700000)
         assert "recBig" not in {c["id"] for c in result["closed"]}

@@ -59,7 +59,7 @@ export function PayoffEngine({ loans, loadScenario }: { loans: FccLoans; loadSce
   return (
     <section className="fcc-pay" aria-labelledby="fcc-pay-heading">
       <h3 id="fcc-pay-heading" className="fcc-section__heading">מנוע פרעון מוקדם</h3>
-      <p className="fcc-goal__note">חישוב והשוואה בלבד — אין המלצה אוטומטית ואין ביצוע. יעילות פינוי תזרים היא תזרים שמתפנה לכל שקל סילוק, לא תשואה.</p>
+      <p className="fcc-goal__note">חישוב והשוואה בלבד — אין המלצה אוטומטית ואין ביצוע. עלות ועומס ריבית הם אומדנים (בריבית משתנה הם ישתנו).</p>
       <div className="fcc-chips" role="tablist" aria-label="אסטרטגיית דירוג">
         {STRATEGY_TABS.map((t) => (
           <button key={t.key} type="button" role="tab" aria-selected={strategy === t.key}
@@ -74,11 +74,16 @@ export function PayoffEngine({ loans, loadScenario }: { loans: FccLoans; loadSce
             <article key={r.id} className="fcc-loan fcc-pay__card">
               <header className="fcc-loan__head">
                 <h4 className="fcc-loan__title"><span className="fcc-pay__rank">{m.rank}</span>{m.title}</h4>
-                {m.partial && <span className="fcc-tag fcc-tag--muted">נתונים חלקיים</span>}
+                <span className="fcc-pay__tags">
+                  {m.issueTag && <span className="fcc-tag fcc-tag--warn">{m.issueTag}</span>}
+                  {m.partial && <span className="fcc-tag fcc-tag--muted">נתונים חלקיים</span>}
+                </span>
               </header>
               <dl className="fcc-pay__figures">
                 {m.figures.map((f) => <div key={f.label}><dt>{f.label}</dt><dd className={f.value === UNKNOWN ? "fcc-unknown" : undefined}>{f.value}</dd></div>)}
               </dl>
+              {m.issueText && <p className="fcc-pay__warn" role="note">{m.issueText}</p>}
+              {m.savingLine && <p className="fcc-pay__saving">{m.savingLine}</p>}
               <p className="fcc-loan__meta fcc-pay__score">{m.scoreLabel}{m.missingLabel ? ` · ${m.missingLabel}` : ""}</p>
               <p className="fcc-pay__why"><strong>למה כאן: </strong>{m.why}</p>
             </article>

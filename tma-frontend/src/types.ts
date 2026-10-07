@@ -573,10 +573,16 @@ export interface FccPayoffRow {
   monthly_cash_freed: number | null;
   months_remaining: number | null;
   estimated_remaining_payments: number | null;
+  /** Continuation cost estimate = monthly × remaining payments − closure (null when data is inconsistent/suspicious). */
   estimated_future_cost: number | null;
   future_cost_exact: boolean;
-  monthly_cash_efficiency: number | null;
-  annualized_cash_release: number | null;
+  /** What closing now could avoid: continuation cost − known early-repayment fee (null = unknown / excluded). */
+  cost_saving: number | null;
+  cost_saving_exact: boolean;
+  no_saving: boolean;
+  data_inconsistent: boolean;
+  data_suspicious: boolean;
+  data_issue: "inconsistent" | "suspicious" | null;
   annual_interest_burden: number | null;
   scores: Record<"interest" | "cash" | "closure" | "time", number | null>;
   balanced_score: number | null;
@@ -586,7 +592,7 @@ export interface FccPayoffRow {
   partial: boolean;
 }
 
-export type PayoffStrategy = "balanced" | "interest" | "cash" | "efficiency";
+export type PayoffStrategy = "balanced" | "interest" | "cash" | "savings";
 
 export interface FccPayoff {
   weights: Record<"interest" | "cash" | "closure" | "time", number>;
@@ -599,7 +605,7 @@ export interface FccScenarioResult {
   used: number;
   remaining_budget: number;
   closed_count: number;
-  closed: { id: string; name: string | null; amount_to_close: number; monthly_cash_freed: number | null; estimated_future_cost: number | null; future_cost_exact: boolean }[];
+  closed: { id: string; name: string | null; amount_to_close: number; monthly_cash_freed: number | null; cost_saving: number | null; cost_saving_exact: boolean }[];
   debt_removed: number;
   monthly_cash_released: number | null;
   future_cost_saved: number | null;
@@ -607,6 +613,7 @@ export interface FccScenarioResult {
   partial: boolean;
   skipped_over_budget: string[];
   excluded_unknown_amount: string[];
+  excluded_no_data: string[];
 }
 
 export interface FccScenarios {

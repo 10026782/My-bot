@@ -8,17 +8,10 @@ export const STRATEGY_TABS: { key: PayoffStrategy; label: string; basis: string 
   { key: "balanced", label: "מאוזן", basis: "ציון מאוזן (ריבית 30% · פינוי תזרים 30% · סכום לסילוק 25% · זמן שנותר 15%)" },
   { key: "interest", label: "ריבית", basis: "ריבית גבוהה קודם" },
   { key: "cash", label: "פינוי תזרים", basis: "החזר חודשי שמתפנה, גבוה קודם" },
-  { key: "efficiency", label: "יעילות סילוק", basis: "יעילות פינוי תזרים שנתית (החזר חודשי × 12 ÷ יתרת סילוק), גבוהה קודם" },
+  { key: "savings", label: "חיסכון בעלות", basis: "חיסכון בעלות משוער (עלות המשך − עמלת פירעון ידועה), גבוה קודם" },
 ];
 
 export const FACTOR_LABEL: Record<string, string> = { interest: "ריבית", cash: "החזר חודשי", closure: "יתרת סילוק", time: "זמן שנותר" };
-
-/** Ratio -> "54%" / "4.5%". Not a return on investment — it is cash released per shekel of closure amount. */
-export function ratioPct(r: number | null | undefined): string {
-  if (r == null) return UNKNOWN;
-  const v = r * 100;
-  return `${v >= 10 ? Math.round(v) : Number(v.toFixed(2))}%`;      // 1.16%, 4.5%, 26%, 307%
-}
 
 export function orderedRows(loans: FccLoans, strategy: PayoffStrategy): FccPayoffRow[] {
   const payoff = loans.payoff;
@@ -29,9 +22,24 @@ export function orderedRows(loans: FccLoans, strategy: PayoffStrategy): FccPayof
 
 const tier = (score: number | null): string => (score == null ? "" : score >= 67 ? "גבוהה" : score <= 33 ? "נמוכה" : "בינונית");
 
-function futureCost(r: FccPayoffRow): string {
+const ISSUE_TAG: Record<"inconsistent" | "suspicious", string> = { inconsistent: "נתונים לא עקביים", suspicious: "נתונים חשודים" };
+const ISSUE_TEXT: Record<"inconsistent" | "suspicious", string> = {
+  inconsistent: "נתונים לא עקביים — דורש בדיקה: סך התשלומים הנותרים נמוך מיתרת הסילוק, לכן עלות וחיסכון לא חושבו ולא נכנסים לדירוג החיסכון.",
+  suspicious: "נתונים חשודים: העלות אינה תואמת בקירוב לריבית ולזמן שנותר — יש לבדוק את נתוני ההלוואה. עלות וחיסכון לא מוצגים ולא נכנסים לדירוג החיסכון.",
+};
+
+function continuationCost(r: FccPayoffRow): string {
+  if (r.data_issue) return "לא מחושב";
   if (r.estimated_future_cost == null) return UNKNOWN;
   return r.future_cost_exact ? money(r.estimated_future_cost) : `משוער ${money(r.estimated_future_cost)}`;
+}
+
+/** Cost saving line: never a positive "saving" after the fee, and "משוער" (not "נטו") while the fee is unknown. */
+export function savingLine(r: FccPayoffRow): string | null {
+  if (r.data_issue) return null;
+  if (r.cost_saving == null) return `חיסכון בעלות: ${UNKNOWN}`;
+  if (r.no_saving) return "אין חיסכון חיובי אחרי עמלת פירעון";
+  return r.cost_saving_exact ? `חיסכון בעלות (נטו אחרי עמלה): ${money(r.cost_saving)}` : `חיסכון בעלות משוער: ${money(r.cost_saving)}`;
 }
 
 export interface PayoffCardModel {
@@ -39,18 +47,22 @@ export interface PayoffCardModel {
   title: string;
   rank: number;
   figures: { label: string; value: string }[];
+  savingLine: string | null;
   scoreLabel: string;               // "62 · כיסוי נתונים 3/4"
   partial: boolean;
+  issueTag: string | null;          // "נתונים לא עקביים" | "נתונים חשודים"
+  issueText: string | null;
   missingLabel: string | null;      // "חסר: ריבית"
   why: string;                      // explanation, strategy-led; facts only
 }
 
 export function payoffCardModel(r: FccPayoffRow, strategy: PayoffStrategy, rank: number): PayoffCardModel {
+  const savingLead = r.cost_saving != null && !r.no_saving && !r.data_issue ? `חיסכון בעלות ${r.cost_saving_exact ? "" : "משוער "}${money(r.cost_saving)}` : null;
   const lead: Record<PayoffStrategy, string | null> = {
     balanced: r.balanced_score == null ? null : `ציון מאוזן ${Math.round(r.balanced_score)}`,
     interest: r.interest_rate == null ? null : `ריבית ${tier(r.scores.interest)} (${pct(r.interest_rate)})`,
     cash: r.monthly_cash_freed == null ? null : `פינוי תזרים ${tier(r.scores.cash)}`,
-    efficiency: r.annualized_cash_release == null ? null : `יעילות פינוי תזרים ${ratioPct(r.annualized_cash_release)} בשנה`,
+    savings: savingLead,
   };
   const facts = [
     lead[strategy],
@@ -68,11 +80,14 @@ export function payoffCardModel(r: FccPayoffRow, strategy: PayoffStrategy, rank:
       { label: "ריבית", value: pct(r.interest_rate) },
       { label: "החזר חודשי שמתפנה", value: val(r.monthly_cash_freed) },
       { label: "חודשים שנותרו", value: r.months_remaining == null ? UNKNOWN : String(r.months_remaining) },
-      { label: "יעילות פינוי תזרים שנתית", value: ratioPct(r.annualized_cash_release) },
-      { label: "עלות עתידית משוערת", value: futureCost(r) },
+      { label: "עלות המשך משוערת", value: continuationCost(r) },
+      { label: "עומס ריבית שנתי משוער", value: r.annual_interest_burden == null ? UNKNOWN : `משוער ${money(r.annual_interest_burden)}` },
     ],
+    savingLine: savingLine(r),
     scoreLabel: r.balanced_score == null ? `ציון משוקלל: ${UNKNOWN}` : `ציון משוקלל ${Math.round(r.balanced_score)} · כיסוי נתונים ${r.score_coverage_label}`,
     partial: r.partial,
+    issueTag: r.data_issue ? ISSUE_TAG[r.data_issue] : null,
+    issueText: r.data_issue ? ISSUE_TEXT[r.data_issue] : null,
     missingLabel: missing.length ? `חסר: ${missing.join(", ")}` : null,
     why: facts.length ? facts.join(" · ") : "אין מספיק נתונים לדירוג",
   };
@@ -110,6 +125,7 @@ export function scenarioDetail(r: FccScenarioResult): { lines: { label: string; 
   const notes: string[] = [];
   if (r.skipped_over_budget.length) notes.push(`${r.skipped_over_budget.length} הלוואות לא נכנסו בתקציב — אין פרעון חלקי`);
   if (r.excluded_unknown_amount.length) notes.push(`${r.excluded_unknown_amount.length} הלוואות בלי יתרת סילוק לא נכללו בסימולציה`);
+  if (r.excluded_no_data.length) notes.push(`${r.excluded_no_data.length} הלוואות ללא נתון לאסטרטגיה הזו לא נכללו בחישוב`);
   if (r.partial) notes.push("נתונים חלקיים: חלק מהסכומים כוללים רק הלוואות עם נתון ידוע");
   return {
     lines: [
