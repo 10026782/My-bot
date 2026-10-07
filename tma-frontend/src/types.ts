@@ -534,8 +534,59 @@ export interface FccSummaryCard {
   other_sources_needed?: number;
 }
 
+export interface FccLoan {
+  id: string;
+  name: string | null;
+  lender: string | null;
+  loan_type: "פרטית" | "עסקית" | "משכנתא" | null;
+  related_asset: string | null;
+  related_asset_name: string | null;
+  original_amount: number | null;
+  current_balance: number | null;
+  early_closure_balance: number | null;
+  interest_rate: number | null;
+  monthly_payment: number | null;
+  payments_remaining: number | null;
+  end_date: string | null;
+  early_repayment_fee: string | null;
+  active: boolean;
+  /** Active Loan unchecked and not Paid Off: shown and counted, flagged for confirmation. */
+  status_unknown: boolean;
+  months_remaining: number | null;
+  estimated_total_remaining_payments: number | null;
+  estimated_future_cost: number | null;
+  future_cost_exact: boolean;
+  monthly_cash_freed_if_closed: number | null;
+  annual_interest_cost: number | null;
+  missing: string[];
+}
+
+export interface FccLoanBucket { count: number; early_closure_balance: number | null; monthly_payments: number | null }
+
+export interface FccLoans {
+  items: FccLoan[];
+  summary: {
+    total_active_loans: number;
+    total_original_amount: number | null;
+    total_early_closure_balance: number | null;
+    total_monthly_payments: number | null;
+    weighted_average_interest_rate: number | null;
+    total_estimated_future_cost: number | null;
+    total_monthly_cash_freed_if_all_closed: number | null;
+    coverage: { original_amount: number; early_closure_balance: number; monthly_payment: number; future_cost: number; interest_rate: number };
+    incomplete_count: number;
+    unknown_status_count: number;
+    future_cost_exact: boolean;
+    by_type: Record<string, FccLoanBucket>;
+    by_asset: (FccLoanBucket & { asset_id: string; asset_name: string | null })[];
+  };
+  rankings: { high_interest: string[]; cash_freed: string[]; small_balance: string[] };
+  goal: { target: number; closed: number | null; remaining: number | null; active_closure_balance: number | null } | null;
+}
+
 export interface FccOverview {
   goals: FccGoalRow[];
+  loans?: FccLoans;
   summary: Partial<Record<"income" | "savings" | "emergency_fund" | "debt_repaid" | "payment_reduction", FccSummaryCard>>;
   tasks: { id: string; title: string | null; due_date: string | null; status: string | null }[];
   monthly_cash_improvement: number;

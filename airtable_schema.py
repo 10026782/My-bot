@@ -182,6 +182,15 @@ class LoanFields:
     NEXT_PAYMENT    = "Next Payment Due"
     STATUS          = "Payment Status"  # Current|Due|Overdue|Paid Off
     NOTES           = "Notes"
+    # Personal-debt fields (added live 07/10/2026) — read by the FCC loans area
+    LOAN_TYPE       = "Loan Type"                    # פרטית | עסקית | משכנתא
+    RELATED_ASSET   = "Related Asset"                # link -> Assets
+    MONTHLY_PAYMENT = "Current Monthly Payment"
+    PAYMENTS_LEFT   = "Payments Remaining"
+    EARLY_CLOSURE   = "Outstanding Principal for Early Closure"
+    DUE_DAY         = "Monthly Due Day"
+    EARLY_FEE       = "Early Repayment Fee/Penalty"  # free text (e.g. "אין", "2%")
+    ACTIVE          = "Active Loan"                  # checkbox
 
 
 class DebtMgmtFields:

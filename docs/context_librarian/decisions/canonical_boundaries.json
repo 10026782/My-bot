@@ -722,10 +722,12 @@
       },
       "owner": "governance",
       "code_paths": [
-        "tma-frontend/src/lib/fccPresentation.ts"
+        "tma-frontend/src/lib/fccPresentation.ts",
+        "tma-frontend/src/lib/fccLoans.ts"
       ],
       "test_paths": [
-        "tma-frontend/src/lib/fccPresentation.test.ts"
+        "tma-frontend/src/lib/fccPresentation.test.ts",
+        "tma-frontend/src/lib/fccLoans.test.ts"
       ],
       "canonical_docs": [],
       "production_evidence": [],

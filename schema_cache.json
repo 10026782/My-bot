@@ -69,7 +69,15 @@
       "Notes",
       "Owner",
       "Role (from Owner)",
-      "Domain"
+      "Domain",
+      "Loan Type",
+      "Related Asset",
+      "Current Monthly Payment",
+      "Payments Remaining",
+      "Outstanding Principal for Early Closure",
+      "Monthly Due Day",
+      "Early Repayment Fee/Penalty",
+      "Active Loan"
     ],
     "Company A - Debt Management": [
       "Invoice Number",

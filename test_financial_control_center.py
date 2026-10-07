@@ -1324,3 +1324,130 @@ def test_deposit_is_logged_as_one_time_on_the_savings_goal():
     assert r.state == "review"
     (w,) = run(ex, ELIYAHU, "אשר").snapshot["writes"]
     assert w["fields"]["Kind"] == "one_time" and w["fields"]["Amount"] == 5000
+
+
+# ───────── Loans & debt (read-only, owner-scoped) ─────────
+from airtable_schema import LoanFields as LF
+from core.financial_control import loans as fcc_loans
+
+
+def loan(lid, owner=ELI, **f):
+    return {"id": lid, "fields": {LF.NAME: lid, "Owner": [owner], **f}}
+
+
+def seed_loans():
+    DB[Tables.LOANS] = [
+        loan("recL1", **{LF.LOAN_TYPE: "פרטית", LF.EARLY_CLOSURE: 100000, LF.INTEREST_RATE: 6.0, LF.MONTHLY_PAYMENT: 2000,
+                         LF.PAYMENTS_LEFT: 60, LF.AMOUNT: 150000, LF.EARLY_FEE: "אין", LF.RELATED_ASSET: ["recA1"]}),
+        loan("recL2", **{LF.LOAN_TYPE: "עסקית", LF.EARLY_CLOSURE: 50000, LF.INTEREST_RATE: 12.0, LF.MONTHLY_PAYMENT: 1000,
+                         LF.PAYMENTS_LEFT: 60, LF.AMOUNT: 60000}),
+        loan("recL3"),                                                                  # partial: mortgage with no details
+        loan("recL4", **{LF.EARLY_CLOSURE: 7000, LF.STATUS: "Paid Off", LF.MONTHLY_PAYMENT: 500}),
+        loan("recLX", owner=AVI, **{LF.EARLY_CLOSURE: 999999, LF.MONTHLY_PAYMENT: 77777}),
+    ]
+    DB["Assets"] = [{"id": "recA1", "fields": {"Name": "דירה", "Owner": [ELI]}},
+                    {"id": "recA2", "fields": {"Name": "נכס של אבי", "Owner": [AVI]}}]
+
+
+def loans_for(who=ELIYAHU):
+    return service.overview(who, TODAY)["loans"]
+
+
+def test_loans_owner_isolation():
+    seed_loans()
+    body = loans_for()
+    assert {i["id"] for i in body["items"]} == {"recL1", "recL2", "recL3", "recL4"}
+    assert "999999" not in str(body) and "77777" not in str(body)
+    assert {i["id"] for i in loans_for(AVI_I)["items"]} == {"recLX"}
+
+
+def test_loans_summary_active_only_and_totals():
+    seed_loans()
+    s = loans_for()["summary"]
+    assert s["total_active_loans"] == 3                      # Paid Off excluded
+    assert s["total_early_closure_balance"] == 150000        # 7000 of the closed loan not included
+    assert s["total_monthly_payments"] == 3000 == s["total_monthly_cash_freed_if_all_closed"]
+    assert s["total_original_amount"] == 210000
+    assert s["incomplete_count"] == 1                        # only the empty mortgage lacks data
+
+
+def test_loans_weighted_interest_ignores_missing():
+    seed_loans()
+    s = loans_for()["summary"]
+    assert s["weighted_average_interest_rate"] == round((6 * 100000 + 12 * 50000) / 150000, 2) == 8.0
+    assert s["coverage"]["interest_rate"] == 2               # the empty mortgage is not averaged in as 0
+
+
+def test_loans_missing_values_stay_none_not_zero():
+    seed_loans()
+    l3 = next(i for i in loans_for()["items"] if i["id"] == "recL3")
+    for k in ("early_closure_balance", "interest_rate", "monthly_payment", "months_remaining",
+              "estimated_total_remaining_payments", "estimated_future_cost", "monthly_cash_freed_if_closed", "annual_interest_cost"):
+        assert l3[k] is None
+    assert l3["loan_type"] is None and l3["related_asset"] is None
+    assert fcc_loans.summarize([fcc_loans.loan_item(loan("recE"), TODAY)])["total_early_closure_balance"] is None
+
+
+def test_loans_future_cost_and_exactness():
+    seed_loans()
+    items = {i["id"]: i for i in loans_for()["items"]}
+    l1, l2 = items["recL1"], items["recL2"]
+    assert l1["estimated_total_remaining_payments"] == 120000 and l1["estimated_future_cost"] == 20000
+    assert l1["future_cost_exact"] is True                   # fee "אין" is a known zero
+    assert l2["estimated_future_cost"] == 10000 and l2["future_cost_exact"] is False   # fee blank -> not exact
+    assert fcc_loans.parse_fee("2%") == (None, False) and fcc_loans.parse_fee("500 ₪") == (500.0, True)
+
+
+def test_loans_types_and_uncategorized_breakdown():
+    seed_loans()
+    s = loans_for()["summary"]
+    assert set(s["by_type"]) == {"פרטית", "עסקית", fcc_loans.UNCLASSIFIED}
+    assert s["by_type"]["פרטית"]["early_closure_balance"] == 100000
+    assert s["by_type"][fcc_loans.UNCLASSIFIED]["early_closure_balance"] is None
+
+
+def test_loans_related_asset_name_only_from_own_assets():
+    seed_loans()
+    body = loans_for()
+    l1 = next(i for i in body["items"] if i["id"] == "recL1")
+    assert l1["related_asset"] == "recA1" and l1["related_asset_name"] == "דירה"
+    assert body["summary"]["by_asset"][0]["asset_name"] == "דירה" and len(body["summary"]["by_asset"]) == 1
+    assert "נכס של אבי" not in str(body)
+
+
+def test_loans_rankings_are_orderings_unknown_last():
+    seed_loans()
+    r = loans_for()["rankings"]
+    assert r["high_interest"] == ["recL2", "recL1", "recL3"]
+    assert r["cash_freed"] == ["recL1", "recL2", "recL3"]
+    assert r["small_balance"] == ["recL2", "recL1", "recL3"]
+
+
+def test_loans_goal_passthrough_does_not_touch_ssot():
+    seed_loans()
+    DB[Tables.FIN_GOALS].append(goal("recDebt", "סגירת הלוואות", ELI, 700000, **{GF.CALC_METHOD: "cumulative", GF.CATEGORY: "debt"}))
+    DB[Tables.FIN_EVENTS].append(event("recDE", "recDebt", ELI, 100000))
+    g = loans_for()["goal"]
+    assert g["target"] == 700000 and g["closed"] == 100000 and g["remaining"] == 600000 and g["active_closure_balance"] == 150000
+
+
+def test_loans_http_payload_isolated(monkeypatch):
+    seed_loans()
+    body = http(monkeypatch, AVI_I).get("/api/fcc/overview", headers=H).get_json()
+    assert [i["id"] for i in body["loans"]["items"]] == ["recLX"] and "100000" not in str(body["loans"])
+
+
+def test_loans_status_unknown_kept_visible_and_counted():
+    DB[Tables.LOANS] = [
+        loan("recK", **{LF.ACTIVE: True, LF.EARLY_CLOSURE: 1000, LF.MONTHLY_PAYMENT: 100}),              # confirmed active
+        loan("recU1", **{LF.EARLY_CLOSURE: 2000, LF.MONTHLY_PAYMENT: 200}),                              # unchecked, no status
+        loan("recU2", **{LF.STATUS: "Current", LF.EARLY_CLOSURE: 3000}),                                 # unchecked, not Paid Off
+        loan("recP", **{LF.STATUS: "Paid Off", LF.EARLY_CLOSURE: 9000}),                                 # closed: not unknown, not shown active
+    ]
+    body = loans_for()
+    flags = {i["id"]: i["status_unknown"] for i in body["items"]}
+    assert flags == {"recK": False, "recU1": True, "recU2": True, "recP": False}
+    s = body["summary"]
+    assert s["unknown_status_count"] == 2
+    assert s["total_active_loans"] == 3 and s["total_early_closure_balance"] == 6000   # unknown-status loans are included
+    assert s["total_monthly_payments"] == 300
