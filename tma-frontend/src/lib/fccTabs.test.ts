@@ -3,7 +3,7 @@ declare function require(id: string): { readFileSync(path: string, enc: string):
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FccTabBar } from "../components/FccTabBar";
-import { DEFAULT_TAB, FCC_TABS, initialTab, isTab, panelId, rememberTab, resetTabMemory, tabId } from "./fccTabs";
+import { DEFAULT_TAB, FCC_TABS, initialTab, isTab, panelId, rememberTab, resetTabMemory, tabForKey, tabId } from "./fccTabs";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -60,6 +60,24 @@ test("390px smoke (css): tabs share the width and can shrink; hidden panels are 
   assert.ok(block.includes("flex: 1 1 0") && block.includes("min-inline-size: 0"));
   assert.ok(block.includes('[role="tabpanel"][hidden] { display: none; }'));
   assert.ok(!/(^|[^-])width:\s*\d+px/m.test(block));
+});
+
+test("keyboard: arrows follow the visual order (mirrored in RTL), wrap, Home/End jump, other keys ignored", () => {
+  assert.equal(tabForKey("monthly", "ArrowLeft", true), "loans");        // RTL: next tab is on the left
+  assert.equal(tabForKey("monthly", "ArrowRight", true), "assets");      // wraps to the last
+  assert.equal(tabForKey("assets", "ArrowLeft", true), "monthly");
+  assert.equal(tabForKey("monthly", "ArrowRight", false), "loans");      // LTR is the mirror image
+  assert.equal(tabForKey("loans", "Home", true), "monthly");
+  assert.equal(tabForKey("loans", "End", true), "assets");
+  assert.equal(tabForKey("loans", "Enter", true), null);
+  assert.equal(tabForKey("loans", "ArrowDown", true), null);
+});
+
+test("only the selected tab is in the Tab order; every tab points at an existing panel id", () => {
+  const html = renderToStaticMarkup(createElement(FccTabBar, { active: "loans", onChange: () => undefined }));
+  assert.equal((html.match(/tabindex="0"/g) || []).length, 1);
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 2);
+  for (const t of FCC_TABS) assert.ok(html.includes(`aria-controls="${panelId(t.key)}"`) && html.includes(`id="${tabId(t.key)}"`));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

@@ -20,3 +20,15 @@ export function resetTabMemory(): void { remembered = null; }
 
 export const tabId = (key: FccTabKey): string => `fcc-tab-${key}`;
 export const panelId = (key: FccTabKey): string => `fcc-panel-${key}`;
+
+/** Keyboard model of the tab strip (WAI-ARIA tabs): arrows move to the neighbouring tab (wrapping), Home/End jump to the
+ *  ends. The visual order is mirrored in RTL, so "next" is ArrowLeft there. Returns null for any other key. */
+export function tabForKey(current: FccTabKey, key: string, rtl: boolean): FccTabKey | null {
+  const i = FCC_TABS.findIndex((t) => t.key === current);
+  const last = FCC_TABS.length - 1;
+  if (i < 0) return null;
+  if (key === "Home") return FCC_TABS[0].key;
+  if (key === "End") return FCC_TABS[last].key;
+  const step = key === "ArrowRight" ? (rtl ? -1 : 1) : key === "ArrowLeft" ? (rtl ? 1 : -1) : 0;
+  return step ? FCC_TABS[(i + step + FCC_TABS.length) % FCC_TABS.length].key : null;
+}
