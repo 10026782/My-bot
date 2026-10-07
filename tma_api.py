@@ -4855,6 +4855,7 @@ def _fcc_enabled(identity=None) -> bool:
 
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/write", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/loans/scenario", methods=["OPTIONS"])
 def _preflight_fcc():
     return "", 204
 
@@ -4870,6 +4871,25 @@ def fcc_overview(identity):
         view = fcc_service.overview(identity)
         view["draft"] = fcc_conv.pending_view(identity)      # resume an open Q&A after refresh
         return jsonify(view)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+
+
+@tma_api.route("/api/fcc/loans/scenario", methods=["GET"])
+@require_tma_auth
+def fcc_loans_scenario(identity):
+    """Read-only early-payoff budget simulation: ``?budget=<number>``. Owner-scoped; nothing is written or executed."""
+    if not _fcc_enabled(identity):
+        return jsonify({"error": "not found"}), 404
+    try:
+        budget = float(request.args.get("budget", ""))
+    except ValueError:
+        budget = -1.0
+    if not (0 < budget <= 1_000_000_000):
+        return jsonify({"error": "invalid budget"}), 400
+    from core.financial_control import service as fcc_service
+    try:
+        return jsonify(fcc_service.loan_scenarios(identity, budget))
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
 

@@ -12,6 +12,7 @@ import re
 from datetime import date
 
 from airtable_schema import LoanFields as LF
+from core.financial_control import payoff
 
 UNCLASSIFIED = "לא סווג"
 LOAN_TYPES = ("פרטית", "עסקית", "משכנתא")
@@ -205,4 +206,11 @@ def build(records: list[dict], today: date, asset_names: dict[str, str] | None =
     if debt_goal and debt_goal.get("target") is not None:
         goal = {"target": debt_goal["target"], "closed": debt_goal.get("actual"), "remaining": debt_goal.get("remaining"),
                 "active_closure_balance": summary["total_early_closure_balance"]}
-    return {"items": items, "summary": summary, "rankings": rankings(active_items), "goal": goal}
+    return {"items": items, "summary": summary, "rankings": rankings(active_items), "goal": goal,
+            "payoff": payoff.build(active_items)}
+
+
+def scenarios(records: list[dict], today: date, budget: float) -> dict:
+    """Budget simulator over the owner's active loans (read-only; nothing is executed or written)."""
+    items = [loan_item(r, today) for r in records]
+    return payoff.scenarios(payoff.metrics([i for i in items if i["active"]]), budget)

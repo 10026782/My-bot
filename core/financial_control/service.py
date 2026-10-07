@@ -291,6 +291,12 @@ def receipts_overview(identity) -> dict:
     return {"missing_count": count, "missing_amount": round(amount, 2)}
 
 
+def loan_scenarios(identity, budget: float, today: date | None = None) -> dict:
+    """Early-payoff budget simulation over the caller's own active loans. Pure computation: no write, no execution."""
+    records = policy.filter_records(Tables.LOANS, _read(Tables.LOANS), identity)
+    return fcc_loans.scenarios(records, today or date.today(), budget)
+
+
 def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict:
     """Caller's own loans (owner-scoped table) with derived numbers. Asset names come only from the caller's own
     Assets rows. A read failure degrades to an empty section; a denied identity still propagates."""

@@ -1451,3 +1451,177 @@ def test_loans_status_unknown_kept_visible_and_counted():
     assert s["unknown_status_count"] == 2
     assert s["total_active_loans"] == 3 and s["total_early_closure_balance"] == 6000   # unknown-status loans are included
     assert s["total_monthly_payments"] == 300
+
+
+# ───────── Early-payoff engine (read-only) ─────────
+from core.financial_control import payoff as fcc_payoff
+
+
+def pl(lid, closure=None, rate=None, monthly=None, left=None, owner=ELI, **extra):
+    f = {}
+    if closure is not None: f[LF.EARLY_CLOSURE] = closure
+    if rate is not None: f[LF.INTEREST_RATE] = rate
+    if monthly is not None: f[LF.MONTHLY_PAYMENT] = monthly
+    if left is not None: f[LF.PAYMENTS_LEFT] = left
+    f.update(extra)
+    return loan(lid, owner, **f)
+
+
+def seed_payoff():
+    DB[Tables.LOANS] = [
+        pl("recP1", 100000, 6.0, 2000, 60, **{LF.EARLY_FEE: "אין"}),     # big, low rate, high payment, long
+        pl("recP2", 50000, 12.0, 1800, 36, **{LF.EARLY_FEE: "אין"}),     # mid
+        pl("recP3", 10000, 9.0, 450, 30, **{LF.EARLY_FEE: "אין"}),       # small, short
+        pl("recPX", 5000, 20.0, 9999, 99, owner=AVI),                     # someone else's
+    ]
+
+
+def payoff_rows(who=ELIYAHU):
+    return {r["id"]: r for r in loans_for(who)["payoff"]["items"]}
+
+
+def test_payoff_scores_are_min_max_normalised_and_closure_is_inverse():
+    seed_payoff()
+    r = payoff_rows()
+    assert r["recP2"]["scores"]["interest"] == 100.0 and r["recP1"]["scores"]["interest"] == 0.0     # 12 high, 6 low
+    assert r["recP1"]["scores"]["cash"] == 100.0 and r["recP3"]["scores"]["cash"] == 0.0
+    assert r["recP3"]["scores"]["closure"] == 100.0 and r["recP1"]["scores"]["closure"] == 0.0       # smaller amount = higher
+    assert r["recP1"]["scores"]["time"] == 100.0 and r["recP3"]["scores"]["time"] == 0.0             # longer remaining = higher
+    assert r["recP2"]["scores"]["interest"] == 100.0 and r["recP3"]["scores"]["interest"] == 50.0    # (9-6)/(12-6)
+
+
+def test_payoff_balanced_score_uses_the_documented_weights():
+    seed_payoff()
+    r = payoff_rows()["recP3"]
+    s = r["scores"]
+    expected = 0.30 * s["interest"] + 0.30 * s["cash"] + 0.25 * s["closure"] + 0.15 * s["time"]
+    assert r["balanced_score"] == round(expected, 2)
+    assert fcc_payoff.WEIGHTS == {"interest": 0.30, "cash": 0.30, "closure": 0.25, "time": 0.15}
+    assert r["score_coverage"] == 1.0 and r["score_coverage_label"] == "4/4" and r["missing_factors"] == [] and r["partial"] is False
+
+
+def test_payoff_missing_factor_is_renormalised_not_zero_and_reports_coverage():
+    seed_payoff()
+    DB[Tables.LOANS].append(pl("recP4", 20000, None, 500, 20))            # no interest rate
+    r = payoff_rows()["recP4"]
+    assert r["scores"]["interest"] is None and r["missing_factors"] == ["interest"] and r["partial"] is True
+    assert r["score_coverage"] == 0.75 and r["score_coverage_label"] == "3/4"
+    s = r["scores"]
+    expected = (0.30 * s["cash"] + 0.25 * s["closure"] + 0.15 * s["time"]) / (0.30 + 0.25 + 0.15)    # weights renormalised over known
+    assert r["balanced_score"] == round(expected, 2)
+    assert payoff_rows()["recP1"]["scores"]["interest"] == 0.0           # the missing rate did not distort the others
+
+
+def test_payoff_partial_data_loan_is_listed_but_not_fabricated():
+    seed_payoff()
+    DB[Tables.LOANS].append(loan("recEmpty"))                             # the empty mortgage
+    r = payoff_rows()["recEmpty"]
+    assert r["balanced_score"] is None and r["score_coverage"] == 0.0 and r["score_coverage_label"] == "0/4"
+    assert set(r["missing_factors"]) == {"interest", "cash", "closure", "time"}
+    assert r["monthly_cash_efficiency"] is None and r["annualized_cash_release"] is None
+    ranks = loans_for()["payoff"]["rankings"]
+    assert all(ranks[k][-1] == "recEmpty" for k in ranks)                 # unknown always last
+
+
+def test_payoff_cash_release_efficiency_and_annualised():
+    seed_payoff()
+    r = payoff_rows()["recP3"]
+    assert r["monthly_cash_efficiency"] == 450 / 10000 == 0.045
+    assert r["annualized_cash_release"] == 450 * 12 / 10000 == 0.54
+    assert payoff_rows()["recP1"]["annualized_cash_release"] == 2000 * 12 / 100000
+
+
+def test_payoff_future_cost_unknown_when_inconsistent():
+    DB[Tables.LOANS] = [pl("recI", 90000, 5.0, 1000, 60)]                 # 60*1000 = 60000 < 90000 closure -> inconsistent
+    r = payoff_rows()["recI"]
+    assert r["estimated_remaining_payments"] == 60000 and r["estimated_future_cost"] is None
+    seed_payoff()
+    assert payoff_rows()["recP1"]["estimated_future_cost"] == 20000      # 2000*60 - 100000
+
+
+def test_payoff_rankings_by_each_strategy():
+    seed_payoff()
+    rk = loans_for()["payoff"]["rankings"]
+    assert rk["interest"] == ["recP2", "recP3", "recP1"]
+    assert rk["cash"] == ["recP1", "recP2", "recP3"]
+    assert rk["efficiency"] == ["recP3", "recP2", "recP1"]                              # .54 > .432 > .24
+    bal = {i: r["balanced_score"] for i, r in payoff_rows().items()}
+    assert rk["balanced"] == sorted(bal, key=lambda i: -bal[i])
+
+
+def scen(budget, who=ELIYAHU):
+    return service.loan_scenarios(who, budget, TODAY)
+
+
+def test_budget_scenario_closes_whole_loans_in_strategy_order():
+    seed_payoff()
+    out = scen(60000)["strategies"]
+    s = out["interest"]                       # interest order P2(50000) -> P3(10000) -> P1(100000 does not fit)
+    assert [c["id"] for c in s["closed"]] == ["recP2", "recP3"] and s["closed_count"] == 2
+    assert s["used"] == 60000 and s["remaining_budget"] == 0 and s["debt_removed"] == 60000
+    assert s["monthly_cash_released"] == 2250 and s["skipped_over_budget"] == ["recP1"]
+    assert s["future_cost_saved"] == 14800 + 3500 and s["future_cost_saved_exact"] is True
+    assert [c["id"] for c in out["cash"]["closed"]] == ["recP2", "recP3"]          # P1 (100000) skipped whole, never partial
+
+
+def test_budget_exact_boundary_is_included():
+    seed_payoff()
+    assert scen(10000)["strategies"]["cash"]["closed"][0]["id"] == "recP3"
+    assert scen(10000)["strategies"]["cash"]["remaining_budget"] == 0
+    assert scen(9999.99)["strategies"]["cash"]["closed_count"] == 0
+
+
+def test_budget_insufficient_closes_nothing_and_never_partial():
+    seed_payoff()
+    r = scen(5000)["strategies"]["balanced"]
+    assert r["closed_count"] == 0 and r["used"] == 0 and r["remaining_budget"] == 5000
+    assert r["monthly_cash_released"] == 0 and r["debt_removed"] == 0
+    assert set(r["skipped_over_budget"]) == {"recP1", "recP2", "recP3"}
+
+
+def test_budget_with_partial_data_loan_excludes_unknown_amount_and_flags_partial():
+    seed_payoff()
+    DB[Tables.LOANS].append(loan("recEmpty"))
+    DB[Tables.LOANS].append(pl("recNoPay", 1000, 7.0))                    # closable but no monthly payment / months
+    r = scen(200000)["strategies"]["interest"]
+    assert "recEmpty" in r["excluded_unknown_amount"]
+    assert any(c["id"] == "recNoPay" for c in r["closed"]) and r["partial"] is True
+    assert r["monthly_cash_released"] == 4250                              # the unknown payment is not guessed
+
+
+def test_budget_optimal_combination_matches_or_beats_every_greedy_strategy():
+    seed_payoff()
+    out = scen(150000)
+    best_cash, best_saved = out["optimal"]["cash"], out["optimal"]["saved"]
+    assert best_cash["used"] <= 150000 and best_saved["used"] <= 150000
+    assert best_cash["monthly_cash_released"] == 3800 and {c["id"] for c in best_cash["closed"]} == {"recP1", "recP2"}
+    assert best_cash["monthly_cash_released"] >= max(s["monthly_cash_released"] for s in out["strategies"].values())
+    assert best_saved["future_cost_saved"] == 20000 + 14800
+    assert best_saved["future_cost_saved"] >= max(s["future_cost_saved"] or 0 for s in out["strategies"].values())
+    assert out["strategies"]["interest"]["monthly_cash_released"] == 2250       # greedy by rate is strictly worse here
+
+
+def test_budget_700k_preset_closes_everything_and_leaves_the_rest():
+    seed_payoff()
+    r = scen(700000)["strategies"]["balanced"]
+    assert r["closed_count"] == 3 and r["debt_removed"] == 160000 and r["remaining_budget"] == 540000
+    assert r["monthly_cash_released"] == 4250
+
+
+def test_budget_scenario_owner_isolation_and_http(monkeypatch):
+    seed_payoff()
+    avi = scen(10 ** 7, AVI_I)["strategies"]["balanced"]
+    assert [c["id"] for c in avi["closed"]] == ["recPX"] and avi["used"] == 5000
+    mine = http(monkeypatch, ELIYAHU)
+    ok = mine.get("/api/fcc/loans/scenario?budget=60000", headers=H)
+    assert ok.status_code == 200 and "recPX" not in str(ok.get_json()) and "9999" not in str(ok.get_json())
+    assert mine.get("/api/fcc/loans/scenario?budget=abc", headers=H).status_code == 400
+    assert mine.get("/api/fcc/loans/scenario?budget=-5", headers=H).status_code == 400
+    assert http(monkeypatch, ELIYAHU, flag=False).get("/api/fcc/loans/scenario?budget=1", headers=H).status_code == 404
+
+
+def test_payoff_overview_payload_owner_isolation():
+    seed_payoff()
+    body = loans_for()
+    assert {r["id"] for r in body["payoff"]["items"]} == {"recP1", "recP2", "recP3"}
+    assert "recPX" not in str(body["payoff"])

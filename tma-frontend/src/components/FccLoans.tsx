@@ -5,10 +5,11 @@ import {
   type LoanFilter, type RankMode,
 } from "../lib/fccLoans";
 import { KpiCard } from "./FccKpiCard";
+import { PayoffEngine, type LoadScenario } from "./FccPayoff";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
 
-export function LoansSection({ loans }: { loans: FccLoans }) {
+export function LoansSection({ loans, loadScenario }: { loans: FccLoans; loadScenario?: LoadScenario }) {
   const [filter, setFilter] = useState<LoanFilter>("all");
   const [mode, setMode] = useState<RankMode>("high_interest");
   const [picked, setPicked] = useState<string[]>([]);
@@ -106,6 +107,7 @@ export function LoansSection({ loans }: { loans: FccLoans }) {
               <p className="fcc-goal__note">ההשוואה מציגה נתונים בלבד — ההחלטה שלך.</p>
             </Surface>
           ) : picked.length === 1 ? <p className="fcc-goal__note">בחר הלוואה נוספת להשוואה (עד 2).</p> : null}
+          <PayoffEngine loans={loans} loadScenario={loadScenario} />
         </div>
       )}
     </section>
