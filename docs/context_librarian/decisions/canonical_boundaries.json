@@ -723,7 +723,9 @@
       "owner": "governance",
       "code_paths": [
         "tma-frontend/src/lib/fccPresentation.ts",
-        "tma-frontend/src/lib/fccLoans.ts"
+        "tma-frontend/src/lib/fccLoans.ts",
+        "tma-frontend/src/components/FccLoans.tsx",
+        "tma-frontend/src/components/FccKpiCard.tsx"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",
