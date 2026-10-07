@@ -644,9 +644,38 @@ export interface FccLoans {
   payoff?: FccPayoff;
 }
 
+export interface FccAssetItem {
+  id: string;
+  name: string | null;
+  asset_type: string | null;
+  status: string | null;
+  current_value: number | null;
+  monthly_income: number | null;
+  mortgage_balance: number | null;
+  ownership_pct: number | null;
+  equity: number | null;
+  my_equity: number | null;
+  linked_loans: { id: string; name: string | null; loan_type: string | null; early_closure_balance: number | null; monthly_payment: number | null; interest_rate: number | null }[];
+  linked_debt: number | null;
+  linked_debt_known: number;
+  linked_monthly_payments: number | null;
+}
+
+export interface FccAssets {
+  items: FccAssetItem[];
+  summary: {
+    count: number;
+    total_value: number | null; total_mortgage: number | null; total_equity: number | null; total_my_equity: number | null; total_monthly_income: number | null;
+    coverage: { value: number; mortgage: number; equity: number; my_equity: number; monthly_income: number };
+    linked_loans_count: number; linked_loans_debt: number | null;
+    unlinked_loans_count: number; unlinked_loans_debt: number | null;
+  };
+}
+
 export interface FccOverview {
   goals: FccGoalRow[];
   loans?: FccLoans;
+  assets?: FccAssets;
   summary: Partial<Record<"income" | "savings" | "emergency_fund" | "debt_repaid" | "payment_reduction", FccSummaryCard>>;
   tasks: { id: string; title: string | null; due_date: string | null; status: string | null }[];
   monthly_cash_improvement: number;

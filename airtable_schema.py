@@ -168,6 +168,20 @@ class UnitFields:
     SALE_PRICE_NIS  = "Sale Price (NIS)"
 
 
+class AssetFields:
+    """Assets (read-only use by the FCC "נכסים והון" tab)."""
+    NAME            = "Name"
+    TYPE            = "Asset Type"           # Residential | Land | Commercial | Income Property | Residential Investment | Other
+    VALUE           = "Current Value"
+    MONTHLY_INCOME  = "Monthly Income"
+    MORTGAGE        = "Mortgage Balance"     # debt recorded on the asset itself (may overlap linked Loans — never added together)
+    STATUS          = "Status"
+    OWNERSHIP_PCT   = "Ownership %"
+    EQUITY          = "Equity"               # Airtable formula: value − mortgage (read as stored)
+    MY_EQUITY       = "My Equity"            # Airtable formula: equity × ownership % (read as stored)
+    LOANS           = "Loans"                # link -> Loans
+
+
 class LoanFields:
     NAME            = "Loan Name/ID"
     PROJECT         = "Project"

@@ -3208,3 +3208,15 @@
 .fcc-pay__row--on { font-weight: 650; background: color-mix(in srgb, var(--boss-color-accent-readable) 10%, transparent); }
 .fcc-pay__scenario { display: grid; gap: var(--boss-space-2); min-inline-size: 0; overflow-x: auto; }
 
+/* ── FCC tabs ── */
+.fcc-tabs {
+  position: sticky; inset-block-start: 0; z-index: 3; display: flex; gap: 4px; padding: 4px; min-inline-size: 0;
+  border: 1px solid var(--boss-color-border); border-radius: 14px; background: var(--boss-color-surface);
+}
+.fcc-tab {
+  flex: 1 1 0; min-inline-size: 0; min-block-size: 40px; padding: 4px 6px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--boss-color-text-muted); font: inherit; font-size: 13px; line-height: 1.2; cursor: pointer; overflow-wrap: anywhere;
+}
+.fcc-tab--on { background: var(--boss-color-accent-readable); color: var(--boss-color-surface); font-weight: 650; }
+.fcc-asset__loans { display: grid; gap: 2px; padding-block-start: 4px; border-block-start: 1px dashed var(--boss-color-border); }
+[role="tabpanel"][hidden] { display: none; }

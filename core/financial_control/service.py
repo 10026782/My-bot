@@ -14,7 +14,7 @@ from datetime import date
 
 from airtable_schema import FinEventFields, FinGoalFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import calc, loans as fcc_loans
+from core.financial_control import assets as fcc_assets, calc, loans as fcc_loans
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +319,19 @@ def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict
     return fcc_loans.build(records, today, {k: v for k, v in names.items() if v}, debt_goal)
 
 
+def assets_overview(identity, loan_items: list[dict]) -> dict:
+    """Caller's own assets (owner-scoped table) with their linked loans. Read-only; a read failure degrades to an
+    empty section, a denied identity still propagates."""
+    try:
+        records = policy.filter_records("Assets", _read("Assets"), identity)
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] assets read failed")
+        records = []
+    return fcc_assets.build(records, loan_items)
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()
@@ -358,11 +371,13 @@ def overview(identity, today: date | None = None) -> dict:
         rows.append(classify_row(row, next_by_goal.get(goal["id"])))
     _attach_sources(rows)
     summary = summarize(rows)
+    loans_payload = loans_overview(identity, today, summary.get("debt_repaid"))
 
     return {
         "goals": rows,
         "summary": summary,
-        "loans": loans_overview(identity, today, summary.get("debt_repaid")),
+        "loans": loans_payload,
+        "assets": assets_overview(identity, loans_payload["items"]),
         "household": {"month_total": calc.household_month_total(all_events, today)},
         "receipts": receipts_overview(identity),
         "obligations": obligations_overview(identity),
