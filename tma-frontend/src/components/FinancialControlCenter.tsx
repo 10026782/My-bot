@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchFccOverview, postFccWrite } from "../api";
-import type { FccGoalRow, FccOverview, FccTurn } from "../types";
+import type { FccGoalRow, FccLoans, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
+import {
+  FILTERS, RANK_MODES, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards, sortLoans,
+  type LoanFilter, type RankMode,
+} from "../lib/fccLoans";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -172,6 +176,90 @@ function GoalCard({ goal }: { goal: FccGoalRow }) {
   );
 }
 
+function LoansSection({ loans }: { loans: FccLoans }) {
+  const [filter, setFilter] = useState<LoanFilter>("all");
+  const [mode, setMode] = useState<RankMode>("high_interest");
+  const [picked, setPicked] = useState<string[]>([]);
+  const visible = sortLoans(filterLoans(loans.items, filter), loans, mode);
+  const goal = loanGoalModel(loans);
+  const byId = (id: string) => loans.items.find((l) => l.id === id);
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length >= 2 ? [p[1], id] : [...p, id]));
+  const a = picked[0] ? byId(picked[0]) : undefined;
+  const b = picked[1] ? byId(picked[1]) : undefined;
+
+  return (
+    <section className="fcc-section" aria-labelledby="fcc-loans-heading">
+      <h2 id="fcc-loans-heading" className="fcc-section__heading">הלוואות וחוב</h2>
+      {loans.summary.total_active_loans === 0 ? (
+        <ScreenState state="empty" title="אין הלוואות פעילות" message="הלוואות נרשמות בטבלת Loans." />
+      ) : (
+        <div className="fcc-stack">
+          <div className="fcc-kpis">
+            {loanHeaderCards(loans).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
+          </div>
+          {goal && (
+            <Surface variant="subtle" padding="compact">
+              <dl className="fcc-goal__grid">
+                {goal.lines.map((m) => <div key={m.label}><dt>{m.label}</dt><dd>{m.value}</dd></div>)}
+              </dl>
+            </Surface>
+          )}
+          <div className="fcc-chips" role="tablist" aria-label="סוג הלוואה">
+            {FILTERS.map((f) => (
+              <button key={f.key} type="button" role="tab" aria-selected={filter === f.key}
+                      className={`boss-button boss-bubble--action ${filter === f.key ? "boss-button--primary" : "boss-button--quiet"}`}
+                      onClick={() => setFilter(f.key)}>{f.label}</button>
+            ))}
+          </div>
+          <div className="fcc-chips" role="group" aria-label="סדר תצוגה">
+            {RANK_MODES.map((m) => (
+              <button key={m.key} type="button" aria-pressed={mode === m.key}
+                      className={`boss-button boss-bubble--action ${mode === m.key ? "boss-button--primary" : "boss-button--quiet"}`}
+                      onClick={() => setMode(m.key)}>{m.label}</button>
+            ))}
+          </div>
+          {visible.length === 0 ? (
+            <ScreenState state="empty" title="אין הלוואות בסוג הזה" />
+          ) : (
+            <div className="fcc-list">
+              {visible.map((l) => {
+                const m = loanCardModel(l);
+                return (
+                  <div key={l.id} className="fcc-goal fcc-loan">
+                    <div className="fcc-goal__topline">
+                      <StatusBadge tone={l.loan_type ? "neutral" : "warning"}>{m.typeLabel}</StatusBadge>
+                      {m.incomplete && <StatusBadge tone="warning">נתונים חלקיים</StatusBadge>}
+                    </div>
+                    <h3>{m.title}{m.lender && <span className="fcc-loan__lender"> · {m.lender}</span>}</h3>
+                    {m.assetLine && <p className="fcc-goal__note">{m.assetLine}</p>}
+                    <dl className="fcc-goal__grid">
+                      {m.rows.map((r) => <div key={r.label}><dt>{r.label}</dt><dd>{r.value}</dd></div>)}
+                    </dl>
+                    <p className="fcc-goal__note">{m.freedLine}</p>
+                    <button type="button" className="boss-button boss-button--quiet boss-bubble--action" aria-pressed={picked.includes(l.id)}
+                            onClick={() => toggle(l.id)}>{picked.includes(l.id) ? "הסר מההשוואה" : "השווה"}</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {a && b ? (
+            <Surface className="fcc-compare" aria-label="השוואת הלוואות">
+              <table className="fcc-compare__table">
+                <thead><tr><th></th><th>{a.name}</th><th>{b.name}</th></tr></thead>
+                <tbody>
+                  {compareRows(a, b).map((r) => <tr key={r.label}><th scope="row">{r.label}</th><td>{r.a}</td><td>{r.b}</td></tr>)}
+                </tbody>
+              </table>
+              <p className="fcc-goal__note">ההשוואה מציגה נתונים בלבד — ההחלטה שלך.</p>
+            </Surface>
+          ) : picked.length === 1 ? <p className="fcc-goal__note">בחר הלוואה נוספת להשוואה.</p> : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function FinancialControlCenter({ onBack }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
 
@@ -249,6 +337,8 @@ export function FinancialControlCenter({ onBack }: Props) {
           <div className="fcc-list">{data.goals.map((g) => <GoalCard key={g.goal_id} goal={g} />)}</div>
         )}
       </section>
+
+      {data.loans && <LoansSection loans={data.loans} />}
 
       <section className="fcc-section" aria-labelledby="fcc-recent-heading">
         <h2 id="fcc-recent-heading" className="fcc-section__heading">התקדמות אחרונה</h2>

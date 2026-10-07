@@ -12,9 +12,9 @@ import logging
 import re
 from datetime import date
 
-from airtable_schema import FinEventFields, FinGoalFields, Tables
+from airtable_schema import FinEventFields, FinGoalFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import calc
+from core.financial_control import calc, loans as fcc_loans
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +291,28 @@ def receipts_overview(identity) -> dict:
     return {"missing_count": count, "missing_amount": round(amount, 2)}
 
 
+def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict:
+    """Caller's own loans (owner-scoped table) with derived numbers. Asset names come only from the caller's own
+    Assets rows. A read failure degrades to an empty section; a denied identity still propagates."""
+    try:
+        records = policy.filter_records(Tables.LOANS, _read(Tables.LOANS), identity)
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] loans read failed")
+        return fcc_loans.build([], today, None, debt_goal)
+    names: dict[str, str] = {}
+    if any((r.get("fields") or {}).get(LoanFields.RELATED_ASSET) for r in records):
+        try:
+            for a in policy.filter_records("Assets", _read("Assets"), identity):
+                names[a["id"]] = (a.get("fields") or {}).get("Name") or ""
+        except policy.PersonalDataAccessDenied:
+            raise
+        except Exception:
+            logger.exception("[fcc] loan asset names read failed")
+    return fcc_loans.build(records, today, {k: v for k, v in names.items() if v}, debt_goal)
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()
@@ -329,10 +351,12 @@ def overview(identity, today: date | None = None) -> dict:
             row.update(calc.deposit_status(own[goal["id"]], today))      # plan (level) vs actual deposits this month
         rows.append(classify_row(row, next_by_goal.get(goal["id"])))
     _attach_sources(rows)
+    summary = summarize(rows)
 
     return {
         "goals": rows,
-        "summary": summarize(rows),
+        "summary": summary,
+        "loans": loans_overview(identity, today, summary.get("debt_repaid")),
         "household": {"month_total": calc.household_month_total(all_events, today)},
         "receipts": receipts_overview(identity),
         "obligations": obligations_overview(identity),

@@ -170,3 +170,15 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Plan** = the standing level (running total of `monthly_recurring` events). **Actual** = `one_time` deposits recorded in the calendar month ("הפקדתי החודש X"). `calc.deposit_status` yields `deposited_month`, `gap_month = max(level - deposited, 0)` and the same for last month (`gap_last_month`, using the level as of last month's end). Superseded events are ignored.
 - **A missed month never inflates the next one**: the level/target is untouched (no automatic catch-up). A make-up deposit is simply a deposit in the month it is made (it does not rewrite last month). The gap stays visible: goal card rows "הופקד בפועל החודש / פער החודש / פער בחודש שעבר" and the savings card hint ("הופקד החודש ₪X · פער ₪Y · פער בחודש שעבר ₪Z"), which suggests the chat phrase "משימת המשך לפער בחיסכון" — the follow-up task is created through the existing `follow_up` draft/confirm primitive, never silently by a background job.
 - Classifier: "הפקדתי החודש X" = `log_progress`, `kind=one_time` on the savings goal (a real deposit, not a level change).
+
+## הלוואות וחוב (07/10/2026) — קריאה בלבד
+
+אזור "הלוואות וחוב" בתוך ה־FCC, מעל טבלת `Loans` הקיימת (לא נוצרה טבלה חדשה; SSOT של יעד סגירת ה־₪700,000 נשאר ב־Financial Goals).
+
+- **קוד:** `core/financial_control/loans.py` (טהור, ללא I/O) + `service.loans_overview` (קריאה owner-scoped דרך `data_access_policy`, שמות נכסים רק מ־Assets של אותו בעלים) → מפתח `loans` ב־`/api/fcc/overview`. שמות השדות ב־`airtable_schema.LoanFields` וב־`schema_cache.json`.
+- **פרטיות:** `Loans` כבר `OWNER_SCOPED`; סיכומים מחושבים רק על הרשומות שעברו סינון.
+- **Unknown ≠ 0:** ערך חסר נשאר `None`; נגזרות `None` כשחסר קלט; סכומים וממוצעים מדלגים על חסרים ומחזירים `coverage` (על כמה הלוואות הם מבוססים). ממוצע ריבית משוקלל ביתרת סילוק רק על הלוואות עם ריבית ויתרה.
+- **עלות עתידית:** `תשלום חודשי × תשלומים שנותרו − יתרת סילוק`; `future_cost_exact` רק כשעמלת הפירעון מספרית (או "אין"); אחרת מוצגת "≈ משוער".
+- **פעילה:** כל הלוואה שאינה `Payment Status = Paid Off`. תיבת `Active Loan` לא יכולה לסגור הלוואה, כי Airtable לא מבחין בין תיבה לא מסומנת לתיבה שלא מולאה.
+- **תעדוף:** שלושה סדרי תצוגה (ריבית גבוהה / פינוי תזרים / יתרה קטנה), לא החלטה אוטומטית; ערכים חסרים בסוף. השוואה בין שתי הלוואות — נתונים בלבד.
+- **UI:** `tma-frontend/src/lib/fccLoans.ts` (פרזנטציה טהורה) + `LoansSection` ב־`FinancialControlCenter.tsx`. שלב 2 (עדכון/סגירת הלוואה דרך Diamond ואירוע ליעד) טרם נבנה.
