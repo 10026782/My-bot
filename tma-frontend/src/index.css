@@ -3120,8 +3120,59 @@
 .fcc-goal__note { margin: 0; color: var(--boss-color-text-muted); font-size: 13px; }
 .fcc-goal__grid--project { grid-template-columns: minmax(0, 1fr); }
 .fcc-goal__grid--project dd { font-weight: 500; overflow-wrap: anywhere; }
-.fcc-chips { display: flex; flex-wrap: wrap; gap: var(--boss-space-2); }
-.fcc-loan__lender { color: var(--boss-color-text-muted); font-weight: 400; font-size: 13px; }
-.fcc-compare__table { inline-size: 100%; border-collapse: collapse; font-size: 13px; }
-.fcc-compare__table th, .fcc-compare__table td { padding: var(--boss-space-1) var(--boss-space-2); text-align: start; border-block-end: 1px solid var(--boss-color-border, rgba(127,127,127,.25)); unicode-bidi: plaintext; }
+
+/* ── FCC loans & debt (mobile-first, compact) ── */
+.fcc-stack--tight { gap: var(--boss-space-3); }
+.fcc-list--tight { gap: var(--boss-space-2); }
+.fcc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fcc-chip {
+  min-block-size: 32px; padding: 0 var(--boss-space-3); border-radius: 999px; font: inherit; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--boss-color-border); background: var(--boss-color-surface); color: inherit;
+}
+.fcc-chip--on { background: var(--boss-color-accent-readable); border-color: var(--boss-color-accent-readable); color: var(--boss-color-surface); font-weight: 600; }
+.fcc-loans-goal { display: grid; gap: var(--boss-space-2); }
+.fcc-loans-goal__top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--boss-space-2); }
+.fcc-loans-goal__title { margin: 0; font-size: 14px; font-weight: 650; }
+.fcc-loans-goal__pct { font-size: 18px; font-weight: 700; unicode-bidi: plaintext; }
+.fcc-loans-goal__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px var(--boss-space-3); margin: 0; }
+.fcc-loans-goal__grid dt { color: var(--boss-color-text-muted); font-size: 11px; }
+.fcc-loans-goal__grid dd { margin: 0; font-size: 14px; font-weight: 600; unicode-bidi: plaintext; overflow-wrap: anywhere; }
+.fcc-loan {
+  display: grid; gap: 6px; padding: 10px var(--boss-space-3); min-inline-size: 0;
+  border: 1px solid var(--boss-color-border); border-radius: var(--boss-radius-card);
+  background: var(--boss-color-surface); box-shadow: var(--boss-shadow-section);
+}
+.fcc-loan__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--boss-space-2); min-inline-size: 0; }
+.fcc-loan__titlebox { display: grid; gap: 3px; min-inline-size: 0; flex: 1 1 auto; }
+.fcc-loan__title { margin: 0; font-size: 15px; line-height: 1.25; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+.fcc-loan__lender { color: var(--boss-color-text-muted); font-weight: 400; font-size: 12px; }
+.fcc-loan__tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.fcc-tag {
+  padding: 1px 6px; border-radius: 6px; font-size: 10.5px; line-height: 1.5; white-space: nowrap;
+  border: 1px solid var(--boss-color-border); color: var(--boss-color-text-muted); background: transparent;
+}
+.fcc-tag--plain { background: color-mix(in srgb, var(--boss-color-text-muted) 10%, transparent); }
+.fcc-tag--muted { border-style: dashed; opacity: 0.85; }
+.fcc-loan__pick {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; min-block-size: 28px; padding: 0 6px;
+  border-radius: 8px; font-size: 12px; color: var(--boss-color-text-muted); cursor: pointer;
+}
+.fcc-loan__pick input { inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--boss-color-accent-readable); }
+.fcc-loan__pick--on { color: inherit; font-weight: 600; }
+.fcc-loan__asset { margin: 0; font-size: 12px; color: var(--boss-color-text-muted); overflow-wrap: anywhere; }
+.fcc-loan__key { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--boss-space-2); margin: 0; }
+.fcc-loan__key div { min-inline-size: 0; }
+.fcc-loan__key dt { color: var(--boss-color-text-muted); font-size: 11px; }
+.fcc-loan__key dd { margin: 0; font-size: 15px; font-weight: 600; unicode-bidi: plaintext; overflow-wrap: anywhere; }
+.fcc-loan__key .fcc-loan__key-main dd { font-size: 17px; font-weight: 700; }
+.fcc-loan__meta { margin: 0; font-size: 12px; color: var(--boss-color-text-muted); overflow-wrap: anywhere; }
+.fcc-loan__freed {
+  margin: 0; padding: 5px var(--boss-space-2); border-radius: 8px; font-size: 13.5px; font-weight: 650;
+  background: color-mix(in srgb, var(--boss-color-accent-readable) 14%, transparent); color: var(--boss-color-accent-readable);
+}
+.fcc-loan__freed--unknown { background: transparent; color: var(--boss-color-text-muted); font-weight: 400; font-size: 12px; padding-inline: 0; }
+.fcc-loan__key dd.fcc-unknown, .fcc-loans-goal__grid dd.fcc-unknown { font-size: 13px; font-weight: 500; color: var(--boss-color-text-muted); }
+.fcc-compare { overflow-x: auto; }
+.fcc-compare__table { inline-size: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.fcc-compare__table th, .fcc-compare__table td { padding: 4px 6px; text-align: start; border-block-end: 1px solid var(--boss-color-border); unicode-bidi: plaintext; overflow-wrap: anywhere; }
 .fcc-compare__table thead th { font-weight: 650; }

@@ -39,7 +39,8 @@ export function loanHeaderCards(loans: FccLoans): LoanHeaderCard[] {
   return [
     { key: "balance", label: "יתרת חוב לסילוק", value: val(s.total_early_closure_balance), hint: coverageHint(s.coverage.early_closure_balance, n) },
     { key: "payments", label: "החזר חודשי כולל", value: val(s.total_monthly_payments), hint: coverageHint(s.coverage.monthly_payment, n) },
-    { key: "rate", label: "ריבית ממוצעת", value: pct(s.weighted_average_interest_rate), hint: s.weighted_average_interest_rate == null ? undefined : `משוקללת לפי יתרה · ${coverageHint(s.coverage.interest_rate, n) ?? "כל ההלוואות"}` },
+    { key: "rate", label: "ריבית ממוצעת", value: pct(s.weighted_average_interest_rate),
+      hint: s.weighted_average_interest_rate == null ? undefined : ["משוקללת לפי יתרת סילוק", coverageHint(s.coverage.interest_rate, n)].filter(Boolean).join(" · ") },
     { key: "freed", label: "תזרים חודשי שיכול להשתחרר", value: val(s.total_monthly_cash_freed_if_all_closed), hint: coverageHint(s.coverage.monthly_payment, n) ?? "אם כל ההלוואות ייסגרו" },
   ];
 }
@@ -57,34 +58,60 @@ export function sortLoans(items: FccLoan[], loans: FccLoans, mode: RankMode): Fc
 }
 
 export interface LoanRow { label: string; value: string }
+export interface LoanTag { text: string; tone: "plain" | "muted" }
 export interface LoanCardModel {
   title: string;
   lender: string | null;
   typeLabel: string;
+  tags: LoanTag[];                     // small, low-contrast chips: type (only if unclassified) / status / partial data
   assetLine: string | null;            // null = no linked asset -> no row at all
-  rows: LoanRow[];
+  keyRows: LoanRow[];                  // the three headline figures: closure balance, monthly payment, rate
+  metaRows: LoanRow[];                 // payments remaining, end date
+  rows: LoanRow[];                     // keyRows + metaRows
   freedLine: string;
+  freedKnown: boolean;                 // true -> emphasised line; false -> plain "unknown" line
   incomplete: boolean;
-  statusUnknown: boolean;              // badge "סטטוס לא הוגדר"
+  statusUnknown: boolean;
+}
+
+/** "Partial data" only when a headline figure is really missing (months remaining alone is not enough). */
+export function isPartial(l: FccLoan): boolean {
+  return l.missing.some((m) => m !== "months_remaining");
 }
 
 export function loanCardModel(l: FccLoan): LoanCardModel {
+  const keyRows: LoanRow[] = [
+    { label: "יתרת סילוק", value: val(l.early_closure_balance) },
+    { label: "החזר חודשי", value: val(l.monthly_payment) },
+    { label: "ריבית", value: pct(l.interest_rate) },
+  ];
+  const metaRows: LoanRow[] = [
+    { label: "תשלומים שנותרו", value: months(l.payments_remaining) },
+    { label: "תאריך סיום", value: dmy(l.end_date) || UNKNOWN },
+  ];
+  const typeLabel = l.loan_type ?? UNCLASSIFIED;
+  const tags: LoanTag[] = [{ text: typeLabel, tone: l.loan_type ? "plain" : "muted" }];
+  if (l.status_unknown) tags.push({ text: STATUS_UNKNOWN, tone: "muted" });
+  if (isPartial(l)) tags.push({ text: "נתונים חלקיים", tone: "muted" });
+  const freed = l.monthly_cash_freed_if_closed;
   return {
     title: l.name || UNKNOWN,
     lender: l.lender && l.lender !== l.name ? l.lender : null,
-    typeLabel: l.loan_type ?? UNCLASSIFIED,
+    typeLabel,
+    tags,
     assetLine: l.related_asset ? `נכס: ${l.related_asset_name || "נכס מקושר"}` : null,
-    rows: [
-      { label: "יתרת סילוק", value: val(l.early_closure_balance) },
-      { label: "ריבית", value: pct(l.interest_rate) },
-      { label: "החזר חודשי", value: val(l.monthly_payment) },
-      { label: "תשלומים שנותרו", value: months(l.payments_remaining) },
-      { label: "תאריך סיום", value: dmy(l.end_date) || UNKNOWN },
-    ],
-    freedLine: l.monthly_cash_freed_if_closed == null ? `החזר חודשי: ${UNKNOWN}` : `בסגירה משתחררים ${money(l.monthly_cash_freed_if_closed)} לחודש`,
-    incomplete: l.missing.length > 0,
+    keyRows, metaRows, rows: [...keyRows, ...metaRows],
+    freedLine: freed == null ? `החזר חודשי: ${UNKNOWN}` : `בסגירה משתחררים ${money(freed)} לחודש`,
+    freedKnown: freed != null,
+    incomplete: isPartial(l),
     statusUnknown: l.status_unknown,
   };
+}
+
+/** Compare selection: at most two loans; a third pick replaces the oldest. */
+export function togglePick(picked: string[], id: string): string[] {
+  if (picked.includes(id)) return picked.filter((x) => x !== id);
+  return picked.length >= 2 ? [picked[1], id] : [...picked, id];
 }
 
 /** Future cost is approximate unless every input (incl. a numeric early-repayment fee) is known. */
@@ -104,15 +131,20 @@ export function compareRows(a: FccLoan, b: FccLoan): { label: string; a: string;
   ];
 }
 
-export interface LoanGoalModel { lines: LoanRow[] }
+export interface LoanGoalModel { lines: LoanRow[]; pct: number | null; pctLabel: string }
 
 export function loanGoalModel(loans: FccLoans): LoanGoalModel | null {
   const g = loans.goal;
   if (!g) return null;
-  return { lines: [
-    { label: "יעד סגירה", value: money(g.target) },
-    { label: "נסגר עד כה", value: val(g.closed) },
-    { label: "נשאר", value: val(g.remaining) },
-    { label: "יתרות סילוק של הלוואות פעילות", value: val(g.active_closure_balance) },
-  ] };
+  const pct = g.closed != null && g.target > 0 ? Math.max(0, Math.min(100, Math.round((g.closed / g.target) * 100))) : null;
+  return {
+    pct,
+    pctLabel: pct == null ? UNKNOWN : `${pct}%`,
+    lines: [
+      { label: "יעד", value: money(g.target) },
+      { label: "נסגר עד כה", value: val(g.closed) },
+      { label: "נשאר", value: val(g.remaining) },
+      { label: "יתרות סילוק פעילות", value: val(g.active_closure_balance) },
+    ],
+  };
 }

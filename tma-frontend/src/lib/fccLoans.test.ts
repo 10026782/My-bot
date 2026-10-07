@@ -1,6 +1,10 @@
 // Plain node + esbuild test (see package.json `npm test`).
+declare function require(id: string): { readFileSync(path: string, enc: string): string };
 import type { FccLoan, FccLoans } from "../types";
-import { FILTERS, UNKNOWN, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, val } from "./fccLoans";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LoansSection } from "../components/FccLoans";
+import { FILTERS, UNKNOWN, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -107,11 +111,79 @@ test("unknown-status loan stays visible with the badge flag; a confirmed one doe
   assert.equal(loanCardModel(full).statusUnknown, false);
 });
 
-test("debt goal block passes the SSOT numbers through", () => {
+test("debt goal block passes the SSOT numbers through (unknown closed stays unknown)", () => {
   const g = loanGoalModel(loans);
   assert.equal(g?.lines[0].value, "₪700,000");
-  assert.equal(g?.lines[1].value, UNKNOWN);   // nothing closed yet is "unknown/none", never invented
+  assert.equal(g?.lines[1].value, UNKNOWN);
+  assert.equal(g?.pct, null);
+  assert.equal(g?.pctLabel, UNKNOWN);
   assert.equal(loanGoalModel({ ...loans, goal: null }), null);
+});
+
+test("progress bar: 0 closed is a clean 0%, partial closed is a rounded %, never above 100", () => {
+  const withClosed = (closed: number) => loanGoalModel({ ...loans, goal: { target: 700000, closed, remaining: 700000 - closed, active_closure_balance: 150000 } });
+  assert.equal(withClosed(0)?.pct, 0);
+  assert.equal(withClosed(0)?.pctLabel, "0%");
+  assert.equal(withClosed(0)?.lines[1].value, "₪0");
+  assert.equal(withClosed(100000)?.pctLabel, "14%");
+  assert.equal(withClosed(900000)?.pct, 100);
+  assert.equal(withClosed(100000)?.lines.map((l) => l.label).join(), "יעד,נסגר עד כה,נשאר,יתרות סילוק פעילות");
+});
+
+test("compact loan card: three headline figures first, meta line, emphasised freed-cash line", () => {
+  const m = loanCardModel(full);
+  assert.equal(m.keyRows.map((r) => r.label).join(), "יתרת סילוק,החזר חודשי,ריבית");
+  assert.equal(m.metaRows.map((r) => r.label).join(), "תשלומים שנותרו,תאריך סיום");
+  assert.equal(m.keyRows[0].value, "₪100,000");
+  assert.ok(m.freedKnown);
+  assert.equal(loanCardModel(empty).freedKnown, false);
+});
+
+test("badges: partial only when a headline figure is missing; unclassified/unknown-status are muted", () => {
+  assert.equal(loanCardModel(mk({ missing: ["months_remaining"] })).incomplete, false);
+  assert.equal(loanCardModel(mk({ missing: ["interest_rate"] })).incomplete, true);
+  const tags = loanCardModel(mk({ status_unknown: true, missing: ["monthly_payment"] })).tags;
+  assert.equal(tags.map((t) => t.text).join(), "לא סווג,סטטוס לא הוגדר,נתונים חלקיים");
+  assert.ok(tags.every((t) => t.tone === "muted"));
+  assert.equal(loanCardModel(full).tags.length, 1);
+});
+
+test("compare selection holds at most two; a third replaces the oldest; toggling off works", () => {
+  assert.equal(togglePick([], "a").join(), "a");
+  assert.equal(togglePick(["a"], "b").join(), "a,b");
+  assert.equal(togglePick(["a", "b"], "c").join(), "b,c");
+  assert.equal(togglePick(["a", "b"], "a").join(), "b");
+});
+
+test("rate card says it is weighted by closure balance, plus coverage only when partial", () => {
+  assert.equal(loanHeaderCards(loans)[2].hint, "משוקללת לפי יתרת סילוק · מבוסס על 2 מתוך 3 הלוואות");
+  const all = loanHeaderCards({ ...loans, summary: { ...loans.summary, coverage: { ...loans.summary.coverage, interest_rate: 3 } } });
+  assert.equal(all[2].hint, "משוקללת לפי יתרת סילוק");
+});
+
+const html = renderToStaticMarkup(createElement(LoansSection, { loans: { ...loans, goal: { target: 700000, closed: 0, remaining: 700000, active_closure_balance: 150000 } } }));
+
+test("390px smoke (render): one compact card per active loan, small checkbox control, no full-width compare button", () => {
+  assert.equal((html.match(/class="fcc-loan"/g) ?? []).length, 3);
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, 3);
+  assert.ok(!html.includes(">השווה<"));
+  assert.ok(html.includes('aria-valuenow="0"') && html.includes(">0%<"));
+  assert.ok(html.includes("fcc-loan__freed"));
+  assert.ok(html.includes('class="fcc-unknown"'), "unknown values get the muted style");
+  assert.ok(html.includes("fcc-tag--muted"));
+  assert.ok(html.includes("משוקללת לפי יתרת סילוק"));
+  assert.ok(!/₪0[^,0-9]/.test(html.replace("נסגר עד כה</dt><dd>₪0", "")), "no fake zero for unknown values");
+});
+
+test("390px smoke (css): loan blocks can shrink — grids use minmax(0,1fr), long text wraps, no fixed widths", () => {
+  const css = require("node:fs").readFileSync("src/index.css", "utf8");
+  const block = css.slice(css.indexOf("FCC loans & debt"));
+  assert.ok(block.length > 500);
+  assert.ok(block.includes("repeat(3, minmax(0, 1fr))"));
+  assert.ok(block.includes("min-inline-size: 0"));
+  assert.ok(block.includes("overflow-wrap: anywhere"));
+  assert.ok(!/(^|[^-])width:\s*\d+px/m.test(block), "no fixed pixel width");
+  assert.ok(!/min-(inline-size|width):\s*[1-9]\d{2,}px/.test(block), "no wide min-width");
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
