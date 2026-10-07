@@ -728,12 +728,19 @@
         "tma-frontend/src/components/FccKpiCard.tsx",
         "tma-frontend/src/components/FccPayoff.tsx",
         "tma-frontend/src/lib/fccPayoff.ts",
-        "core/financial_control/payoff.py"
+        "core/financial_control/payoff.py",
+        "core/financial_control/assets.py",
+        "tma-frontend/src/lib/fccTabs.ts",
+        "tma-frontend/src/lib/fccAssets.ts",
+        "tma-frontend/src/components/FccTabBar.tsx",
+        "tma-frontend/src/components/FccAssets.tsx"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",
         "tma-frontend/src/lib/fccLoans.test.ts",
-        "tma-frontend/src/lib/fccPayoff.test.ts"
+        "tma-frontend/src/lib/fccPayoff.test.ts",
+        "tma-frontend/src/lib/fccTabs.test.ts",
+        "tma-frontend/src/lib/fccAssets.test.ts"
       ],
       "canonical_docs": [],
       "production_evidence": [],

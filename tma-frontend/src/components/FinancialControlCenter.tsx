@@ -3,7 +3,10 @@ import { fetchFccLoanScenario, fetchFccOverview, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import { KpiCard } from "./FccKpiCard";
+import { AssetsSection } from "./FccAssets";
 import { LoansSection } from "./FccLoans";
+import { FccTabBar } from "./FccTabBar";
+import { initialTab, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -166,6 +169,8 @@ function GoalCard({ goal }: { goal: FccGoalRow }) {
 
 export function FinancialControlCenter({ onBack }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [tab, setTab] = useState<FccTabKey>(initialTab);       // remembered while the app stays open; a fresh open starts on "monthly"
+  const changeTab = (key: FccTabKey) => { rememberTab(key); setTab(key); };
 
   const load = () => {
     setState({ status: "loading" });
@@ -209,7 +214,7 @@ export function FinancialControlCenter({ onBack }: Props) {
   }
 
   const { data } = state;
-  return shell(
+  const monthly = (
     <div className="fcc-stack">
       <div className="fcc-kpis">
         {headerCards(data).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
@@ -242,8 +247,6 @@ export function FinancialControlCenter({ onBack }: Props) {
         )}
       </section>
 
-      {data.loans && <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario} />}
-
       <section className="fcc-section" aria-labelledby="fcc-recent-heading">
         <h2 id="fcc-recent-heading" className="fcc-section__heading">התקדמות אחרונה</h2>
         {data.recent_events.length === 0 ? (
@@ -261,6 +264,20 @@ export function FinancialControlCenter({ onBack }: Props) {
           </div>
         )}
       </section>
+    </div>
+  );
+  const panels: Record<FccTabKey, React.ReactNode> = {
+    monthly,
+    loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
+    assets: data.assets ? <AssetsSection assets={data.assets} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
+  };
+  return shell(
+    <div className="fcc-stack">
+      <FccTabBar active={tab} onChange={changeTab} />
+      {/* all panels stay mounted (hidden when inactive) so a half-typed update, the loans filter or the budget input survive a tab switch */}
+      {(Object.keys(panels) as FccTabKey[]).map((key) => (
+        <div key={key} role="tabpanel" id={panelId(key)} aria-labelledby={tabId(key)} hidden={tab !== key}>{panels[key]}</div>
+      ))}
     </div>,
     `נכון ל-${data.as_of}`,
   );

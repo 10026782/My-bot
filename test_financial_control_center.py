@@ -1796,3 +1796,74 @@ def test_budget_used_plus_remaining_equals_budget_through_the_service_and_http(m
             assert round(result["used"] + result["remaining_budget"], 2) == budget and result["used"] <= budget
     body = http(monkeypatch, ELIYAHU).get("/api/fcc/loans/scenario?budget=700000", headers=H).get_json()
     assert all(round(s["used"] + s["remaining_budget"], 2) == 700000 for s in body["strategies"].values())
+
+
+# ───────── Assets & equity tab (read-only) ─────────
+from airtable_schema import AssetFields as AF
+
+
+def asset(aid, name, owner=ELI, **f):
+    return {"id": aid, "fields": {AF.NAME: name, "Owner": [owner], **f}}
+
+
+def seed_assets():
+    DB["Assets"] = [
+        asset("recAH", "בית", **{AF.TYPE: {"name": "Residential"}, AF.STATUS: {"name": "פעיל"}, AF.VALUE: 5000000, AF.MORTGAGE: 1200000,
+                                 AF.EQUITY: 3800000, AF.MY_EQUITY: 3800000, AF.OWNERSHIP_PCT: 100, AF.MONTHLY_INCOME: 0}),
+        asset("recAL", "קרקע", **{AF.TYPE: {"name": "Land"}, AF.VALUE: 1200000, AF.MORTGAGE: 0, AF.EQUITY: 1200000, AF.MY_EQUITY: 1200000}),
+        asset("recAE", "נכס ריק"),                                                   # nothing filled in
+        asset("recAX", "נכס של אבי", owner=AVI, **{AF.VALUE: 99999999}),
+    ]
+    DB[Tables.LOANS] = [
+        loan("recL1", **{LF.EARLY_CLOSURE: 100000, LF.MONTHLY_PAYMENT: 2000, LF.RELATED_ASSET: ["recAH"]}),
+        loan("recL2", **{LF.EARLY_CLOSURE: 50000, LF.MONTHLY_PAYMENT: 1000}),                       # not linked to any asset
+        loan("recL3", **{LF.STATUS: "Paid Off", LF.EARLY_CLOSURE: 7000, LF.RELATED_ASSET: ["recAH"]}),   # closed: not counted
+    ]
+
+
+def assets_for(who=ELIYAHU):
+    return service.overview(who, TODAY)["assets"]
+
+
+def test_assets_owner_isolation():
+    seed_assets()
+    body = assets_for()
+    assert {i["id"] for i in body["items"]} == {"recAH", "recAL", "recAE"}
+    assert "99999999" not in str(body) and "נכס של אבי" not in str(body)
+    assert {i["id"] for i in assets_for(AVI_I)["items"]} == {"recAX"}
+
+
+def test_assets_values_are_shown_as_stored_and_unknown_stays_none():
+    seed_assets()
+    items = {i["id"]: i for i in assets_for()["items"]}
+    h = items["recAH"]
+    assert (h["current_value"], h["mortgage_balance"], h["equity"], h["my_equity"], h["ownership_pct"]) == (5000000, 1200000, 3800000, 3800000, 100)
+    e = items["recAE"]
+    assert all(e[k] is None for k in ("current_value", "mortgage_balance", "equity", "my_equity", "monthly_income", "ownership_pct", "asset_type"))
+    assert e["linked_loans"] == [] and e["linked_debt"] is None
+
+
+def test_assets_linked_loans_are_active_only_and_separate_from_the_recorded_mortgage():
+    seed_assets()
+    h = {i["id"]: i for i in assets_for()["items"]}["recAH"]
+    assert [l["id"] for l in h["linked_loans"]] == ["recL1"]                       # the Paid Off loan is not linked debt
+    assert h["linked_debt"] == 100000 and h["linked_monthly_payments"] == 2000
+    assert h["mortgage_balance"] == 1200000                                        # kept apart: never summed with linked debt
+
+
+def test_assets_summary_totals_skip_unknown_and_report_coverage():
+    seed_assets()
+    s = assets_for()["summary"]
+    assert s["count"] == 3 and s["total_value"] == 6200000 and s["total_equity"] == 5000000 and s["total_my_equity"] == 5000000
+    assert s["total_mortgage"] == 1200000 and s["coverage"]["value"] == 2 and s["coverage"]["mortgage"] == 2
+    assert s["linked_loans_count"] == 1 and s["linked_loans_debt"] == 100000
+    assert s["unlinked_loans_count"] == 1 and s["unlinked_loans_debt"] == 50000      # debt that belongs to no asset
+    DB["Assets"] = [asset("recAE", "נכס ריק")]
+    e = assets_for()["summary"]
+    assert e["total_value"] is None and e["total_equity"] is None and e["total_monthly_income"] is None
+
+
+def test_assets_http_payload_isolated(monkeypatch):
+    seed_assets()
+    body = http(monkeypatch, AVI_I).get("/api/fcc/overview", headers=H).get_json()
+    assert [i["id"] for i in body["assets"]["items"]] == ["recAX"] and "5000000" not in str(body["assets"])
