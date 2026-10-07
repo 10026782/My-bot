@@ -39,12 +39,24 @@ const ranks = { balanced: ["k", "m", "n", "e"], interest: ["m", "k", "n", "e"], 
 const loans = { items: [], summary: {}, rankings: {}, goal: { target: 700000, closed: 0, remaining: 700000, active_closure_balance: 78402 },
   payoff: { weights: { interest: 0.3, cash: 0.3, closure: 0.25, time: 0.15 }, items: [empty, noRate, max, kal], rankings: ranks } } as unknown as FccLoans;
 
-const res = (o: Partial<FccScenarioResult>): FccScenarioResult => ({ budget: 100000, used: 58402, remaining_budget: 41598, closed_count: 2,
-  closed: [{ id: "k", name: "כאל", amount_to_close: 55342, monthly_cash_freed: 1189, estimated_future_cost: 19565, future_cost_exact: true }],
-  debt_removed: 58402, monthly_cash_released: 1973, future_cost_saved: 19641, future_cost_saved_exact: false, partial: false,
-  skipped_over_budget: [], excluded_unknown_amount: [], ...o });
+// Scenario fixtures are COMPUTED from the loan rows (never hand-typed), so they obey the engine's own invariants.
+const mkRes = (budget: number, picked: FccPayoffRow[], o: Partial<FccScenarioResult> = {}): FccScenarioResult => {
+  const used = picked.reduce((a, r) => a + (r.amount_to_close ?? 0), 0);
+  const known = picked.filter((r) => r.monthly_cash_freed != null);
+  const costs = picked.filter((r) => r.estimated_future_cost != null);
+  return { budget, used, remaining_budget: budget - used, closed_count: picked.length,
+    closed: picked.map((r) => ({ id: r.id, name: r.name, amount_to_close: r.amount_to_close ?? 0, monthly_cash_freed: r.monthly_cash_freed, estimated_future_cost: r.estimated_future_cost, future_cost_exact: r.future_cost_exact })),
+    debt_removed: used,
+    monthly_cash_released: picked.length === 0 ? 0 : known.length ? known.reduce((a, r) => a + (r.monthly_cash_freed ?? 0), 0) : null,
+    future_cost_saved: picked.length === 0 ? 0 : costs.length ? costs.reduce((a, r) => a + (r.estimated_future_cost ?? 0), 0) : null,
+    future_cost_saved_exact: picked.length > 0 && picked.every((r) => r.future_cost_exact),
+    partial: picked.some((r) => r.monthly_cash_freed == null || r.estimated_future_cost == null),
+    skipped_over_budget: [], excluded_unknown_amount: [], ...o };
+};
+const res = (o: Partial<FccScenarioResult>) => mkRes(100000, [kal, max], o);
 const scenarios: FccScenarios = { budget: 100000,
-  strategies: { balanced: res({}), interest: res({ closed_count: 1, monthly_cash_released: null, skipped_over_budget: ["a"], excluded_unknown_amount: ["e"], partial: true }), cash: res({}), efficiency: res({ closed_count: 0, closed: [], used: 0, remaining_budget: 100000, debt_removed: 0, monthly_cash_released: 0, future_cost_saved: 0 }) },
+  strategies: { balanced: res({}), interest: mkRes(100000, [kal], { skipped_over_budget: ["a"], excluded_unknown_amount: ["e"], partial: true, monthly_cash_released: null }),
+    cash: res({}), efficiency: mkRes(100000, []) },
   optimal: { cash: res({}), saved: null } };
 
 test("strategy switch re-orders the same loans; unknown-score loans stay last", () => {
@@ -75,6 +87,19 @@ test("fully partial loan: no fake zeroes, unknown everywhere, no score", () => {
   assert.equal(m.scoreLabel, `ציון משוקלל: ${UNKNOWN}`);
   assert.equal(m.why, "אין מספיק נתונים לדירוג");
   assert.equal(ratioPct(null), UNKNOWN);
+});
+
+test("numeric truth: annualised cash release = monthly × 12 ÷ closure (huge balance + small payment ≈ 1.16%, not 26%)", () => {
+  const huge = row({ amount_to_close: 1234567, monthly_cash_freed: 1189, annualized_cash_release: (1189 * 12) / 1234567, months_remaining: 63 });
+  assert.equal(ratioPct(huge.annualized_cash_release), "1.16%");
+  const f = Object.fromEntries(payoffCardModel(huge, "efficiency", 1).figures.map((x) => [x.label, x.value]));
+  assert.equal(f["יעילות פינוי תזרים שנתית"], "1.16%");
+  assert.equal(f["יתרת סילוק"], "₪1,234,567");
+  assert.equal(f["החזר חודשי שמתפנה"], "₪1,189");
+  for (const r of [kal, max]) {            // fixtures themselves must obey the formula
+    assert.equal(ratioPct(r.annualized_cash_release), ratioPct(((r.monthly_cash_freed as number) * 12) / (r.amount_to_close as number)));
+  }
+  assert.equal(ratioPct(kal.annualized_cash_release), "26%");
 });
 
 test("figures: closure, rate, monthly released, months, annual efficiency %, future cost (marked משוער when not exact)", () => {
@@ -111,6 +136,18 @@ test("budget simulator view: four strategies + two combinations, detail, notes, 
   const html = renderToStaticMarkup(createElement(ScenarioView, { scenarios, strategy: "interest" }));
   assert.equal((html.match(/<tr/g) ?? []).length, 7);
   assert.ok(html.includes("fcc-pay__row--on"));
+});
+
+test("scenario numbers are internally consistent: used ≤ budget, used + remaining = budget, no loan above the budget", () => {
+  const all = [...Object.values(scenarios.strategies), scenarios.optimal.cash].filter((x): x is FccScenarioResult => x != null);
+  for (const r of all) {
+    assert.ok(r.used <= r.budget, "used must not exceed budget");
+    assert.equal(r.used + r.remaining_budget, r.budget);
+    assert.ok(r.closed.every((c) => c.amount_to_close <= r.budget));
+    assert.equal(r.closed.reduce((a, c) => a + c.amount_to_close, 0), r.used);
+    const d = scenarioDetail(r);
+    assert.equal(d.lines[1].value, `₪${new Intl.NumberFormat("he-IL").format(r.used)}`);
+  }
 });
 
 const forbidden = ["מומלץ", "מומלצת", "מומלצים", "כדאי", "עדיף", "הכי טוב", "תסגור", "recommended", "winner"];

@@ -82,7 +82,7 @@ def metrics(items: list[dict]) -> list[dict]:
             "estimated_future_cost": item.get("estimated_future_cost"),
             "future_cost_exact": item.get("future_cost_exact", False),
             "monthly_cash_efficiency": monthly_eff,                                   # NOT a return / ROI
-            "annualized_cash_release": monthly_eff * 12 if monthly_eff is not None else None,
+            "annualized_cash_release": _ratio(monthly * 12 if monthly is not None else None, closure),   # monthly × 12 ÷ closure
             "annual_interest_burden": item.get("annual_interest_cost"),
             "scores": scores,
             "balanced_score": balanced,

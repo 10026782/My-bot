@@ -1625,3 +1625,103 @@ def test_payoff_overview_payload_owner_isolation():
     body = loans_for()
     assert {r["id"] for r in body["payoff"]["items"]} == {"recP1", "recP2", "recP3"}
     assert "recPX" not in str(body["payoff"])
+
+
+# ───────── Payoff engine — numeric truth checks & budget invariants ─────────
+import random
+
+
+def _rows(specs):
+    """specs: [(id, closure, rate, monthly, left)] -> engine metric rows via the real loan_item path."""
+    recs = [pl(i, c, r, m, n) for i, c, r, m, n in specs]
+    return fcc_payoff.metrics([fcc_loans.loan_item(r, TODAY) for r in recs])
+
+
+def test_huge_balance_small_payment_gives_low_cash_release_efficiency():
+    rows = {r["id"]: r for r in _rows([("recHuge", 1234567, 12.05, 1189, 63), ("recSmall", 3060, 12.85, 784, 4), ("recMid", 55342, 12.05, 1189, 63)])}
+    huge = rows["recHuge"]
+    assert huge["annualized_cash_release"] == 1189 * 12 / 1234567            # the formula, exactly
+    assert round(huge["annualized_cash_release"] * 100, 2) == 1.16            # ≈1.16%, not 26%
+    assert huge["monthly_cash_efficiency"] == 1189 / 1234567
+    assert huge["annualized_cash_release"] < 0.02
+    assert huge["annualized_cash_release"] < rows["recMid"]["annualized_cash_release"] < rows["recSmall"]["annualized_cash_release"]
+    assert round(rows["recMid"]["annualized_cash_release"] * 100, 2) == 25.78  # same payment, 22x smaller balance
+    assert fcc_payoff.rankings(list(rows.values()))["efficiency"][-1] == "recHuge"
+
+
+def test_annualized_cash_release_matches_formula_for_every_loan():
+    rows = _rows([("recA", 118400, 6.25, 2600, 45), ("recB", 94549, 6.96, 1389, 86), ("recC", 3060, 12.85, 784, 4), ("recD", 20000, 5.0, 500, 20)])
+    for r in rows:
+        assert r["annualized_cash_release"] == r["monthly_cash_freed"] * 12 / r["amount_to_close"]
+        assert r["monthly_cash_efficiency"] == r["monthly_cash_freed"] / r["amount_to_close"]
+
+
+def _check_invariants(result, rows, budget, order=None):
+    by_id = {r["id"]: r for r in rows}
+    closed_sum = round(sum(c["amount_to_close"] for c in result["closed"]), 2)
+    assert result["used"] == closed_sum == result["debt_removed"]
+    assert result["used"] <= budget + 1e-9                                         # never over budget
+    assert round(result["used"] + result["remaining_budget"], 2) == round(budget, 2)   # used + remaining == budget
+    assert result["remaining_budget"] >= -1e-9
+    assert all(c["amount_to_close"] <= budget + 1e-9 for c in result["closed"])    # no loan bigger than the budget is ever closed
+    assert len({c["id"] for c in result["closed"]}) == result["closed_count"]
+    if order is not None:                                                          # replay the greedy walk: each pick fit what was left
+        left = float(budget)
+        picked = {c["id"] for c in result["closed"]}
+        for iid in order:
+            amt = by_id[iid]["amount_to_close"]
+            if amt is None:
+                assert iid in result["excluded_unknown_amount"]
+            elif iid in picked:
+                assert amt <= left + 1e-9
+                left -= amt
+            else:
+                assert amt > left + 1e-9 and iid in result["skipped_over_budget"]  # skipped only because it did not fit what remained
+
+
+def test_no_scenario_may_exceed_budget_700k_with_a_loan_larger_than_the_budget():
+    rows = _rows([("recBig", 1234567, 12.05, 1189, 63), ("recHap", 118400, 6.25, 2600, 45), ("recMax", 94549, 6.96, 1389, 86),
+                  ("recSmall", 3060, 12.85, 784, 4), ("recKal", 55342, 12.05, 1189, 63)])
+    ranks = fcc_payoff.rankings(rows)
+    out = fcc_payoff.scenarios(rows, 700000)
+    for strat, result in out["strategies"].items():
+        _check_invariants(result, rows, 700000, ranks[strat])
+        assert "recBig" not in {c["id"] for c in result["closed"]} and "recBig" in result["skipped_over_budget"]
+        assert result["used"] == 118400 + 94549 + 3060 + 55342 and result["remaining_budget"] == 700000 - result["used"]
+    for kind, result in out["optimal"].items():
+        _check_invariants(result, rows, 700000)
+        assert "recBig" not in {c["id"] for c in result["closed"]}
+
+
+def test_budget_invariants_hold_for_random_portfolios_in_every_mode():
+    rnd = random.Random(20261007)
+    for _ in range(60):
+        specs = [(f"rec{n}", rnd.choice([None, rnd.randint(500, 400000)]), rnd.choice([None, round(rnd.uniform(2, 20), 2)]),
+                  rnd.choice([None, rnd.randint(50, 5000)]), rnd.choice([None, rnd.randint(1, 120)])) for n in range(rnd.randint(1, 9))]
+        rows = _rows([(i, c, r, m, n) for i, c, r, m, n in specs if c is not None] or [("recOnly", 1000, 5, 100, 12)])
+        ranks = fcc_payoff.rankings(rows)
+        for budget in (1, 999.5, 25000, 123456.78, 700000):
+            out = fcc_payoff.scenarios(rows, budget)
+            for strat, result in out["strategies"].items():
+                _check_invariants(result, rows, budget, ranks[strat])
+            for result in out["optimal"].values():
+                if result is not None:
+                    _check_invariants(result, rows, budget)
+
+
+def test_optimal_combination_never_exceeds_budget_even_when_it_is_tight():
+    rows = _rows([("recX", 60000, 5, 900, 100), ("recY", 40000, 6, 700, 80), ("recZ", 35000, 7, 800, 60)])
+    for budget in (74999, 75000, 75001, 100000, 134999):
+        for result in fcc_payoff.scenarios(rows, budget)["optimal"].values():
+            _check_invariants(result, rows, budget)
+    assert fcc_payoff.optimal(rows, 75000, "cash")["used"] == 75000          # exact fit is allowed
+    assert fcc_payoff.optimal(rows, 74999, "cash")["used"] <= 74999
+
+
+def test_budget_used_plus_remaining_equals_budget_through_the_service_and_http(monkeypatch):
+    seed_payoff()
+    for budget in (5000, 10000, 60000, 150000, 700000):
+        for result in list(scen(budget)["strategies"].values()) + [v for v in scen(budget)["optimal"].values() if v]:
+            assert round(result["used"] + result["remaining_budget"], 2) == budget and result["used"] <= budget
+    body = http(monkeypatch, ELIYAHU).get("/api/fcc/loans/scenario?budget=700000", headers=H).get_json()
+    assert all(round(s["used"] + s["remaining_budget"], 2) == 700000 for s in body["strategies"].values())

@@ -17,7 +17,7 @@ export const FACTOR_LABEL: Record<string, string> = { interest: "ריבית", ca
 export function ratioPct(r: number | null | undefined): string {
   if (r == null) return UNKNOWN;
   const v = r * 100;
-  return `${v >= 10 ? Math.round(v) : Number(v.toFixed(1))}%`;
+  return `${v >= 10 ? Math.round(v) : Number(v.toFixed(2))}%`;      // 1.16%, 4.5%, 26%, 307%
 }
 
 export function orderedRows(loans: FccLoans, strategy: PayoffStrategy): FccPayoffRow[] {
