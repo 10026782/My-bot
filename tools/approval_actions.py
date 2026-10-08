@@ -202,8 +202,7 @@ _TMA_WRITE_ALLOWED_TABLES = {
     "Ventures",
     "משימות (Tasks)", "Tasks",
     "ProjectsHub",
-    "אנשי קשר (Contacts)", "Contacts", "Financial Goals", "Financial Progress Events", "Recurring Obligations",  # FCC: owner-scoped by data_access_policy
-    "Loans",  # FCC loan close (Payment Status -> Paid Off): owner-scoped, record owner re-checked at execution
+    "אנשי קשר (Contacts)", "Contacts", "Financial Goals", "Financial Progress Events", "Recurring Obligations", "Loans",  # FCC (Loans = loan close): owner-scoped by data_access_policy, record owner re-checked at execution
 }
 
 
