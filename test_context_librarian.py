@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import math
 import re
@@ -1055,6 +1056,110 @@ def test_turn_coordinator_routing_expansion_surfaces_adjacent_bug(catalog):
     assert "## Local Context Expansion" in bundle
     assert "BUG-130" in bundle
     assert "BUG-140" in bundle
+
+
+# הבחירה ב-2000: ה-remediation של 2026-10-08 הוריד את turn_coordinator_routing
+# מ-19684/19450 (חריגה) ל-~12k; "מתחת ל-hard cap" לבדו לא הגן עליו מגידול
+# שקט עד שנגמר ה-headroom שוב.
+_TURN_COORDINATOR_MIN_HEADROOM_TOKENS = 2000
+_TURN_COORDINATOR_WORST_CASE_MIN_HEADROOM_TOKENS = 1500
+# כל ה-conditional_optional_evidence של הפרופיל (tools + ux_f52 + rp5) מופעלים.
+_TURN_COORDINATOR_ALL_CONDITIONAL_LAYERS_QUERY = (
+    "execute tool handler reply message speaker evidence gateway owned "
+    "single speaker approval turn"
+)
+
+
+def test_turn_coordinator_routing_keeps_minimum_headroom_on_canonical_query(catalog):
+    profile = catalog.profiles["turn_coordinator_routing"]
+    query = {e.profile: e.query for e in canonical_profile_queries()}["turn_coordinator_routing"]
+    bundle = build_bundle(catalog, task_type="turn_coordinator_routing", query=query)
+    usage = math.ceil(len(bundle) / 4)
+    headroom = profile["maximum_approximate_token_budget"] - usage
+    assert headroom >= _TURN_COORDINATOR_MIN_HEADROOM_TOKENS, (
+        f"turn_coordinator_routing headroom {headroom} < "
+        f"{_TURN_COORDINATOR_MIN_HEADROOM_TOKENS} tokens (usage={usage}, "
+        f"budget={profile['maximum_approximate_token_budget']}): trim "
+        "non-turn-critical material before raising the budget"
+    )
+
+
+def test_turn_coordinator_routing_keeps_minimum_headroom_with_all_conditional_layers(catalog):
+    # estimate_bundle (לא build_bundle): query סינתטי שמפעיל את כל ה-conditional
+    # layers גם חורג ממגבלת *המסמכים* (37>31) — עניין נפרד מתקציב הטוקנים שנבדק
+    # כאן, ולכן לא נזרקת כאן שגיאת build.
+    estimate = estimate_bundle(
+        catalog,
+        task_type="turn_coordinator_routing",
+        query=_TURN_COORDINATOR_ALL_CONDITIONAL_LAYERS_QUERY,
+    )
+    headroom = estimate.token_budget - estimate.actual_tokens
+    assert headroom >= _TURN_COORDINATOR_WORST_CASE_MIN_HEADROOM_TOKENS, (
+        f"worst-case (all conditional layers) headroom {headroom} < "
+        f"{_TURN_COORDINATOR_WORST_CASE_MIN_HEADROOM_TOKENS} tokens "
+        f"(usage={estimate.actual_tokens}, budget={estimate.token_budget})"
+    )
+
+
+_TURN_COORDINATOR_CONDITIONAL_LAYER_TERMS = {
+    "tools": "tool",
+    "ux_f52": "reply",
+    "rp5": "evidence",
+}
+_TURN_COORDINATOR_MIN_DOCUMENT_HEADROOM = 2
+
+
+def test_turn_coordinator_routing_every_conditional_layer_combination_fits_documents(catalog):
+    """אף שילוב של ה-conditional layers (שמופעלים ע"י מילים נפוצות כמו "reply")
+    לא יכול להפיל את ה-build על מגבלת המסמכים; ובמקרה הגרוע ביותר נשאר headroom."""
+    terms = _TURN_COORDINATOR_CONDITIONAL_LAYER_TERMS
+    worst_headroom = None
+    for size in range(len(terms) + 1):
+        for layers in itertools.combinations(terms, size):
+            query = " ".join(terms[name] for name in layers) or "routing"
+            estimate = estimate_bundle(
+                catalog, task_type="turn_coordinator_routing", query=query
+            )
+            assert estimate.fits, (
+                f"layers={layers}: documents={estimate.selected_documents}/"
+                f"{estimate.document_budget} tokens={estimate.actual_tokens}/"
+                f"{estimate.token_budget}"
+            )
+            if size == len(terms):
+                worst_headroom = estimate.document_budget - estimate.selected_documents
+    assert worst_headroom >= _TURN_COORDINATOR_MIN_DOCUMENT_HEADROOM, (
+        f"all-conditional-layers document headroom {worst_headroom} < "
+        f"{_TURN_COORDINATOR_MIN_DOCUMENT_HEADROOM}"
+    )
+
+
+def test_turn_coordinator_routing_expansions_inline_whole_entries_only(catalog):
+    """כל חלון מכסה את ה-entry שלו עד ה-heading הבא (לא נחתך), ולא גולש לתוך
+    entries לא-רלוונטיים — כך ה-expansion לא חוזר להיות ~50% מה-bundle."""
+    profile = catalog.profiles["turn_coordinator_routing"]
+    expansions = profile["bounded_local_expansions"]
+    anchors = {e["anchor"].strip() for e in expansions}
+    assert {"## BUG-130", "## BUG-140"} <= anchors
+    for expansion in expansions:
+        lines = (REPO_ROOT / expansion["path"]).read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines) if expansion["anchor"] in line)
+        next_heading = next(
+            (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+            len(lines),
+        )
+        assert expansion["window_lines"] >= next_heading - start, (
+            f"{expansion['anchor']!r} window truncates its own entry"
+        )
+        assert expansion["window_lines"] <= next_heading - start + 2, (
+            f"{expansion['anchor']!r} window spills into the next entry"
+        )
+    bundle = build_bundle(
+        catalog,
+        task_type="turn_coordinator_routing",
+        query="explicit request routes to wrong handler",
+    )
+    for unrelated in ("BUG-131", "BUG-135", "BUG-139"):
+        assert f"## {unrelated} " not in bundle
 
 
 def test_bounded_local_expansion_is_not_query_driven(catalog):

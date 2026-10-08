@@ -2347,3 +2347,28 @@ not start.
   execution, deployment, or live canary.
 - **Evidence:** `CODE_DONE + STATIC_VERIFIED` on the PR branch; see
   `docs/evidence/COMMERCIAL_S2B_MUTATION_PRIMITIVES_20260903.md`.
+
+### Context Librarian budget remediation — turn_coordinator_routing — 08/10/2026
+
+- **Audit (canonical query):** 19,684 / 19,450 tokens (overflow 234). One entry —
+  the 160-line `BUG_AUDIT_LOG.md` bounded local expansion anchored on the first
+  prose mention of `BUG-130` — cost 9,617 tokens (48.9%) and pulled in
+  BUG-131..BUG-139, which are not turn-critical.
+- **Change:** `bounded_local_expansions` for `turn_coordinator_routing` split into
+  two exact-entry windows (`## BUG-130 `, 17 lines; `## BUG-140 `, 13 lines). Both
+  pilot-required entries stay inlined; `BUG_AUDIT_LOG.md` remains a canonical doc.
+  Budget (19,450) unchanged.
+- **Result:** 12,062 tokens, headroom 7,388 (37.98%).
+- **Tests:** three headroom/window regression tests in `test_context_librarian.py`.
+- **Boundary:** no bot runtime, routing, approval, or tool behavior touched.
+
+### Context Librarian document-cap remediation — turn_coordinator_routing — 08/10/2026
+
+- **Audit:** `build` hard-failed on the document cap (31) for 4 of 8 conditional-layer
+  combinations, including the single common word "reply" (ux_f52 → 33 docs).
+  All-layers worst case: 37 docs / 14,796 of 19,450 tokens. Tokens were never the limit.
+- **Change:** `maximum_documents` 31 → 39 for `turn_coordinator_routing` only
+  (worst case 37 + 2 headroom). Token budget, layers, and sources unchanged;
+  no source removed or made optional.
+- **Tests:** every conditional-layer combination must fit; worst-case document headroom ≥ 2.
+- **Boundary:** separate from the token remediation (PR #1289). No runtime/routing change.

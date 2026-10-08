@@ -47,7 +47,7 @@
         {"layer": "rp5", "query_terms": ["evidence", "gateway owned", "single speaker", "approval turn", "ראיה", "בעלות"]}
       ],
       "excluded_areas": [],
-      "maximum_documents": 31,
+      "maximum_documents": 39,
       "maximum_approximate_token_budget": 19450,
       "mandatory_canonical_decisions": ["main_overrides_planning", "actioncontracts_authority", "no_new_source_of_truth", "shadow_not_active", "production_verification", "cross_layer_authority"],
       "allowed_edge_types": ["depends_on", "proposes_to", "requires_approval_via", "must_not_own", "governed_by", "blocked_by"],
@@ -57,9 +57,15 @@
       "bounded_local_expansions": [
         {
           "path": "BUG_AUDIT_LOG.md",
-          "anchor": "BUG-130",
-          "window_lines": 160,
-          "role": "2026-07-28 N17 pilot Task 3 fix: BUG-140 (unrelated-lead overwrite risk, still pending) sits 142 lines below BUG-130 (create-vs-update misroute) in the same log section; the pilot's Librarian-track investigation grepped BUG-130 and never read this far. This window inlines both entries so the adjacent defect cannot be missed by stopping at the first match."
+          "anchor": "## BUG-130 ",
+          "window_lines": 17,
+          "role": "2026-07-28 N17 pilot Task 3 fix: BUG-130 (create-vs-update misroute, registered/unfixed) entry only. Budget remediation 2026-10-08: the former single 160-line window anchored on the first prose mention of BUG-130 (line 3167) and dragged in BUG-131..BUG-139 (turn-irrelevant, ~7k tokens, ~49% of this profile's bundle). The window is now exactly this one entry, up to the next '## BUG-' heading; BUG_AUDIT_LOG.md remains a canonical doc of layer.turn_coordinator for everything else."
+        },
+        {
+          "path": "BUG_AUDIT_LOG.md",
+          "anchor": "## BUG-140 ",
+          "window_lines": 13,
+          "role": "2026-07-28 N17 pilot Task 3 fix: BUG-140 (unrelated-lead overwrite risk, still pending) sits ~142 lines below BUG-130 in the same log section; the pilot's Librarian-track investigation grepped BUG-130 and never read this far. Its entry is inlined on its own (up to the next '## BUG-' heading) so the adjacent defect cannot be missed by stopping at the first match, without inlining the unrelated entries between the two."
         }
       ]
     },
