@@ -2,8 +2,12 @@
 declare function require(id: string): { readFileSync(path: string, enc: string): string };
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FccTabBar } from "../components/FccTabBar";
-import { DEFAULT_TAB, FCC_TABS, initialTab, isTab, panelId, rememberTab, resetTabMemory, tabForKey, tabId } from "./fccTabs";
+import { ContextualComposer, FccTabBar, type ComposerTargets } from "../components/FccTabBar";
+import type { FccTurn } from "../types";
+import {
+  COMPOSER, DEFAULT_TAB, FCC_TABS, WRITER_WORDS, chipsEnabled, initialTab, inputVisible, isTab, nextWriterState, panelId,
+  rememberTab, resetTabMemory, tabForKey, tabId, writerView, type FccTabKey,
+} from "./fccTabs";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -78,6 +82,116 @@ test("only the selected tab is in the Tab order; every tab points at an existing
   assert.equal((html.match(/tabindex="0"/g) || []).length, 1);
   assert.equal((html.match(/tabindex="-1"/g) || []).length, 2);
   for (const t of FCC_TABS) assert.ok(html.includes(`aria-controls="${panelId(t.key)}"`) && html.includes(`id="${tabId(t.key)}"`));
+});
+
+// ── Contextual composer ──────────────────────────────────────────────────────────────────────────────────────────────
+const turn = (state: FccTurn["state"], message = "m", extra: Partial<FccTurn> = {}): FccTurn => ({ state, message, ...extra });
+const targets: ComposerTargets = { goals: [{ id: "g1", title: "משכורת" }], loans: [{ id: "recL1", title: "פועלים" }] };
+const noop = () => undefined;
+const composer = (tab: FccTabKey, t: FccTurn | null = null, receipt: string | null = null, busy = false) =>
+  renderToStaticMarkup(createElement(ContextualComposer, { tab, turn: t, receipt, error: null, busy, targets, onStart: noop, onSend: noop, onDismiss: noop }));
+
+test("each tab has its own title; the monthly chips are income / household expense / direct cost / obligation / goal update", () => {
+  assert.equal(COMPOSER.monthly.title, "עדכון כספי"); assert.equal(COMPOSER.loans.title, "עדכון הלוואה"); assert.equal(COMPOSER.assets.title, "עדכון נכס");
+  assert.equal(COMPOSER.monthly.chips.map((c) => c.intent).join(),
+    "monthly.income,monthly.household_expense,monthly.direct_cost,monthly.obligation,monthly.goal_update");
+  assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.household_expense")?.label, "+ הוצאה ביתית");
+  assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.direct_cost")?.label, "+ עלות ישירה");
+});
+
+test("chips are intents only: no chip carries a write, a field name or a kind; targets are chosen, never typed", () => {
+  for (const tab of FCC_TABS) for (const c of COMPOSER[tab.key].chips) {
+    assert.ok(/^(monthly|loan)\.[a-z_]+$/.test(c.intent), c.intent);
+    assert.ok(Object.keys(c).every((k) => ["intent", "label", "pick"].includes(k)));
+  }
+  assert.equal(COMPOSER.loans.chips[0].intent, "loan.close"); assert.equal(COMPOSER.loans.chips[0].pick, "loan");
+  assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.goal_update")?.pick, "goal");
+});
+
+test("later-phase actions are NOT offered yet (new loan, balance, sold, ...)", () => {
+  const all = FCC_TABS.flatMap((t) => COMPOSER[t.key].chips.map((c) => c.intent)).join();
+  for (const later of ["loan.create", "loan.update", "asset", "sold"]) assert.ok(!all.includes(later), later);
+  assert.equal(COMPOSER.assets.chips.length, 0);
+});
+
+test("free text may open a NEW draft only on the monthly tab", () => {
+  assert.ok(COMPOSER.monthly.freeText && !COMPOSER.loans.freeText && !COMPOSER.assets.freeText);
+  const idle = writerView(null, null);
+  assert.ok(inputVisible(COMPOSER.monthly, idle, false));
+  assert.ok(!inputVisible(COMPOSER.loans, idle, false) && !inputVisible(COMPOSER.assets, idle, false));
+  assert.ok(inputVisible(COMPOSER.loans, writerView(turn("ask"), null), false), "an open question is answerable in any tab");
+  assert.ok(!inputVisible(COMPOSER.monthly, idle, true), "no input while choosing a target");
+});
+
+test("writerView: review -> confirm/edit/cancel; ask -> input; needs_goal -> own-goal choices; partial failure -> retry", () => {
+  const r = writerView(turn("review"), null);
+  assert.equal(r.confirm, "אשר ורשום"); assert.ok(r.canEdit && r.cancelsDraft && !r.showInput && !r.dismissOnly);
+  const a = writerView(turn("ask"), null); assert.ok(a.showInput && a.cancelsDraft && a.confirm === null);
+  const g = writerView(turn("needs_goal", "איזה יעד?", { candidates: [{ goal_id: "g1", title: "משכורת" }] }), null);
+  assert.equal(g.choices.length, 1); assert.equal(g.choices[0].goal_id, "g1"); assert.ok(g.cancelsDraft);
+  const p = writerView(turn("partial_failure"), null); assert.equal(p.confirm, "נסה שוב"); assert.ok(p.cancelsDraft);
+  for (const s of ["info", "denied", "duplicate", "clarify"] as const) {
+    const v = writerView(turn(s), null); assert.ok(v.dismissOnly && v.confirm === null && !v.cancelsDraft && !v.showInput, s);
+  }
+});
+
+test("a receipt cannot be confirmed twice; chips are disabled while ANY draft is open or the server is busy", () => {
+  const done = writerView(null, "נרשם ✓");
+  assert.ok(done.dismissOnly && done.confirm === null && done.message === "נרשם ✓");
+  assert.ok(chipsEnabled(done, false) && !chipsEnabled(done, true));
+  assert.ok(!chipsEnabled(writerView(turn("review"), null), false), "one shared draft slot");
+  assert.ok(!chipsEnabled(writerView(turn("ask"), null), false));
+});
+
+test("nextWriterState: executed -> receipt + refresh; cancelled -> clears; anything else keeps the turn", () => {
+  const ex = nextWriterState(turn("executed", "נרשם ✓"));
+  assert.ok(ex.refresh && ex.turn === null && ex.receipt === "נרשם ✓");
+  const c = nextWriterState(turn("cancelled", "בוטל. לא נרשם דבר."));
+  assert.ok(!c.refresh && c.turn === null);
+  const k = nextWriterState(turn("review")); assert.ok(!k.refresh && k.turn?.state === "review" && k.receipt === null);
+  assert.equal(WRITER_WORDS.confirm, "אשר"); assert.equal(WRITER_WORDS.edit, "ערוך"); assert.equal(WRITER_WORDS.cancel, "בטל");
+});
+
+test("markup: idle monthly shows 5 chips + one input; loans shows the close chip and NO input; assets shows neither", () => {
+  const m = composer("monthly");
+  assert.equal((m.match(/class="fcc-chip /g) || []).length, 5); assert.equal((m.match(/<textarea/g) || []).length, 1);
+  assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד"));
+  const l = composer("loans");
+  assert.equal((l.match(/class="fcc-chip /g) || []).length, 1); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה"));
+  const a = composer("assets");
+  assert.ok(!a.includes("<textarea") && !a.includes("fcc-chip ") && a.includes("עדכון נכס"));
+});
+
+test("markup: a review shows the server's text with confirm/edit/cancel and no input; chips are disabled", () => {
+  const html = composer("loans", turn("review", "📋 סגירת הלוואה\n• הלוואה: פועלים"));
+  assert.ok(html.includes("פועלים") && html.includes("אשר ורשום") && html.includes("ערוך") && html.includes("בטל"));
+  assert.ok(!html.includes("<textarea"));
+  assert.ok(/class="fcc-chip[^"]*"[^>]*disabled=""|disabled=""[^>]*class="fcc-chip/.test(html));
+});
+
+test("markup: the SAME open draft renders in every tab (one shared slot, one set of controls per render)", () => {
+  const t = turn("ask", "כמה לרשום ביעד משכורת?");
+  for (const tab of ["monthly", "loans", "assets"] as FccTabKey[]) {
+    const html = composer(tab, t);
+    assert.ok(html.includes("כמה לרשום ביעד משכורת?"), tab);
+    assert.equal((html.match(/<textarea/g) || []).length, 1, tab);
+  }
+});
+
+test("markup: busy disables confirm (no double confirm); the receipt state has no confirm button", () => {
+  const busy = composer("monthly", turn("review"), null, true);
+  assert.ok(!busy.includes('<button type="button" class="boss-button boss-button--primary boss-bubble--action">אשר ורשום'));
+  const rec = composer("loans", null, "נרשם ✓");
+  assert.ok(rec.includes("נרשם ✓") && !rec.includes("אשר ורשום") && rec.includes("סגור"));
+});
+
+test("idle composer is compact (chips + one-row input, no send button, no turn); an active draft expands it", () => {
+  const idle = composer("monthly");
+  assert.ok(idle.includes("fcc-composer--idle") && !idle.includes("fcc-composer--open"));
+  assert.ok(idle.includes('rows="1"') && !idle.includes("שלח עדכון") && !idle.includes("fcc-quick__turn"));
+  const open = composer("monthly", turn("ask", "כמה?"));
+  assert.ok(open.includes("fcc-composer--open") && open.includes('rows="2"') && open.includes("fcc-quick__turn"));
+  assert.ok(composer("loans", null, "נרשם ✓").includes("fcc-composer--open"), "a receipt is an active state");
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

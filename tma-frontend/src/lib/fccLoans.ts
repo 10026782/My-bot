@@ -1,7 +1,7 @@
 // Pure presentation of the FCC loans & debt area. Unknown stays unknown: a missing number renders
 // "לא הוגדר" (never ₪0 / 0%), a derived cost is marked approximate while it rests on incomplete data,
 // and nothing here recommends which loan to close — it only orders and lays out the facts.
-import type { FccLoan, FccLoans, FccTurn } from "../types";
+import type { FccLoan, FccLoans } from "../types";
 import { dmy, money } from "./fccPresentation";
 
 export const UNKNOWN = "לא הוגדר";
@@ -154,47 +154,6 @@ export function loanGoalModel(loans: FccLoans): LoanGoalModel | null {
 // owner's next word (אשר / ערוך / בטל / an answer).
 
 export const CLOSE_BUTTON = "סגרתי את ההלוואה";
-export const CLOSE_WORDS = { confirm: "אשר", edit: "ערוך", cancel: "בטל" } as const;
 
-export interface CloseFlow {
-  loanId: string;
-  turn: FccTurn | null;       // the server's latest turn (null once executed)
-  receipt: string | null;     // shown after the writes succeeded
-}
-
-export interface CloseView {
-  message: string;
-  confirm: string | null;     // label of the confirm button (also the retry after a partial failure)
-  canEdit: boolean;
-  showInput: boolean;         // the server asks something / waits for an edit
-  cancelsDraft: boolean;      // "בטל" must reach the server (an open draft exists)
-  dismissOnly: boolean;       // terminal info: nothing to confirm, just close the panel
-}
-
-export function closeView(flow: CloseFlow): CloseView {
-  if (flow.receipt) return { message: flow.receipt, confirm: null, canEdit: false, showInput: false, cancelsDraft: false, dismissOnly: true };
-  const t = flow.turn;
-  const base = { message: t?.message ?? "", confirm: null, canEdit: false, showInput: false, cancelsDraft: false, dismissOnly: true };
-  if (!t) return base;
-  switch (t.state) {
-    case "review":
-      return { ...base, confirm: "אשר ורשום", canEdit: true, cancelsDraft: true, dismissOnly: false };
-    case "ask":
-    case "unrelated":
-      return { ...base, showInput: true, cancelsDraft: true, dismissOnly: false };
-    case "partial_failure":
-      return { ...base, confirm: "נסה שוב", cancelsDraft: true, dismissOnly: false };
-    default:                  // info / denied / duplicate / clarify / cancelled: nothing pending on the client
-      return base;
-  }
-}
-
-/** Next flow after a server turn. ``refresh`` = the writes landed, so the overview must be reloaded. */
-export function applyTurn(flow: CloseFlow, result: FccTurn): { flow: CloseFlow | null; refresh: boolean } {
-  if (result.state === "executed") return { flow: { ...flow, turn: null, receipt: result.message || "נרשם ✓" }, refresh: true };
-  if (result.state === "cancelled") return { flow: null, refresh: false };
-  return { flow: { ...flow, turn: result, receipt: null }, refresh: false };
-}
-
-/** Only an active loan can be closed; one flow at a time. */
+/** Only an active loan can be closed; the close flow itself runs in the shared contextual writer (intent ``loan.close``). */
 export const canClose = (loan: { active: boolean }): boolean => loan.active;

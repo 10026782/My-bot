@@ -4856,7 +4856,7 @@ def _fcc_enabled(identity=None) -> bool:
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/write", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/loans/scenario", methods=["OPTIONS"])
-@tma_api.route("/api/fcc/loans/close", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/intent/start", methods=["OPTIONS"])
 def _preflight_fcc():
     return "", 204
 
@@ -4895,24 +4895,26 @@ def fcc_loans_scenario(identity):
         return jsonify({"error": "forbidden"}), 403
 
 
-@tma_api.route("/api/fcc/loans/close", methods=["POST"])
+@tma_api.route("/api/fcc/intent/start", methods=["POST"])
 @require_tma_auth
-def fcc_loans_close(identity):
-    """Body: {"loan_id": str}. Opens the close-loan draft (nothing is written). The owner then answers on
-    /api/fcc/write with the usual "אשר" / "ערוך" / "בטל"; only that confirmation executes the frozen writes."""
+def fcc_intent_start(identity):
+    """Body: {"intent": str, "entity_id"?: str}. The ONE structured entry of the contextual composer (chips and card
+    actions). Opens a draft with only the intent's fixed fields pre-filled — nothing is written; the owner then answers /
+    confirms on /api/fcc/write ("אשר" / "ערוך" / "בטל"), the only path that executes the frozen writes."""
     if not _fcc_enabled(identity):
         return jsonify({"error": "not found"}), 404
-    loan_id = str((request.get_json(silent=True) or {}).get("loan_id") or "").strip()
-    if not loan_id:
-        return jsonify({"error": "loan_id required"}), 400
+    data = request.get_json(silent=True) or {}
+    intent = str(data.get("intent") or "").strip()
+    if not intent:
+        return jsonify({"error": "intent required"}), 400
     from core.financial_control import conversation as fcc_conv
     try:
-        result = fcc_conv.start_loan_close(identity, loan_id)
+        result = fcc_conv.start_intent(identity, intent, data.get("entity_id"))
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
     except Exception:
-        logger.exception("[fcc] start_loan_close failed")
-        return jsonify({"state": "clarify", "message": "לא הצלחתי לפתוח את סגירת ההלוואה כרגע — נסו שוב."}), 200
+        logger.exception("[fcc] start_intent failed")
+        return jsonify({"state": "clarify", "message": "לא הצלחתי לפתוח את הפעולה כרגע — נסו שוב."}), 200
     return jsonify(result.to_dict()), (403 if result.state == "denied" else 200)
 
 
@@ -4930,7 +4932,8 @@ def fcc_write(identity):
     if not text:
         return jsonify({"error": "text required"}), 400
     try:
-        result = fcc_conv.handle_turn(identity, text, goal_id=data.get("goal_id"))
+        result = fcc_conv.handle_turn(identity, text, goal_id=data.get("goal_id"),
+                                      scope=str(data.get("scope") or "").strip() or None)
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
     except Exception:

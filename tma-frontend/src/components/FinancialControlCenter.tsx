@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { fetchFccLoanScenario, fetchFccOverview, postFccLoanClose, postFccWrite } from "../api";
+import { useState, useEffect } from "react";
+import { fetchFccLoanScenario, fetchFccOverview, postFccIntent, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import { KpiCard } from "./FccKpiCard";
 import { AssetsSection } from "./FccAssets";
 import { LoansSection } from "./FccLoans";
-import { FccTabBar } from "./FccTabBar";
-import { initialTab, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
+import { ContextualComposer, FccTabBar } from "./FccTabBar";
+import { initialTab, nextWriterState, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -29,105 +29,43 @@ const GOAL_STATUS: Record<FccGoalRow["status"], { label: string; tone: "info" | 
   project: { label: "פעיל", tone: "info" },
 };
 
-const ACTION_WORDS = { confirm: "אשר", edit: "ערוך", cancel: "בטל" } as const;
-
-function QuickUpdate({ initial, onDone }: { initial: FccTurn | null; onDone: () => void }) {
-  const [text, setText] = useState("");
+/** The single shared writer state (one draft slot per person): the composer in every tab renders THIS, so a half-finished
+ *  draft is never forked by a tab switch. All logic is the server's; this only calls it and keeps the latest turn. */
+function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => void) {
   const [turn, setTurn] = useState<FccTurn | null>(initial);
-  const [lastText, setLastText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
-  const turnRef = useRef<HTMLElement | null>(null);
-  // התשובה מוצגת מעל תיבת הכתיבה ודוחפת אותה למטה — מגלגלים אליה כדי שלא תיעלם מחוץ למסך
-  useEffect(() => { turnRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" }); }, [turn, receipt, error]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // the overview (and a draft opened in chat) arrives after the first render: adopt it unless this screen is already showing something
+  useEffect(() => { if (initial && !turn && !receipt) setTurn(initial); }, [initial]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const send = async (body: { text: string; goal_id?: string }) => {
-    if (busy || !body.text.trim()) return;
+  const run = async (call: () => Promise<FccTurn>) => {
+    if (busy) return;
     setBusy(true);
     setError(null);
-    setReceipt(null);
     try {
-      const result = await postFccWrite(body);
-      if (result.state === "executed") {
-        setReceipt(result.message || "נרשם ✓");
-        setTurn(null);
-        setLastText("");
-        onDone();
-      } else if (result.state === "cancelled") {
-        setReceipt(result.message);
-        setTurn(null);
-      } else {
-        setTurn(result);
-        if (result.state === "partial_failure") setError(result.message);
-      }
-      setText("");
+      const result = await call();
+      const next = nextWriterState(result);
+      setTurn(next.turn);
+      setReceipt(next.receipt);
+      if (result.state === "partial_failure") setError(result.message);
+      if (next.refresh) onDone();
     } catch (e) {
       setError((e as Error).message || "הפעולה נכשלה");
     } finally {
       setBusy(false);
     }
   };
-
-  // במובייל: לחיצה על הכפתור גורמת ל-blur של התיבה → המקלדת נסגרת, הפריסה זזה והקליק אובד. שומרים את הפוקוס.
-  const keepKeyboard = (e: { preventDefault: () => void }) => e.preventDefault();
-  const submit = () => {
-    const value = text.trim();
-    if (!turn) setLastText(value);
-    void send({ text: value });
-  };
-  const open = turn && ["ask", "unrelated", "review", "needs_goal", "confirmed", "partial_failure"].includes(turn.state);
-  const reviewing = turn?.state === "review";
-
-  return (
-    <section className="fcc-section" aria-labelledby="fcc-quick-heading" ref={turnRef}>
-      <h2 id="fcc-quick-heading" className="fcc-section__heading">עדכון מהיר</h2>
-      <Surface className="fcc-quick">
-        {turn && (
-          <div className="fcc-quick__turn" role="status">
-            <p className="fcc-quick__message">{turn.message}</p>
-            {turn.state === "needs_goal" && (
-              <div className="fcc-quick__choices">
-                {(turn.candidates ?? []).map((c) => (
-                  <button key={c.goal_id} type="button" className="boss-button boss-button--quiet boss-bubble--action"
-                          disabled={busy} onClick={() => void send({ text: lastText || c.title || "", goal_id: c.goal_id })}>
-                    {c.title}
-                  </button>
-                ))}
-              </div>
-            )}
-            {reviewing && (
-              <div className="fcc-quick__choices">
-                <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={busy}
-                        onClick={() => void send({ text: ACTION_WORDS.confirm })}>אשר ורשום</button>
-                <button type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={busy}
-                        onClick={() => void send({ text: ACTION_WORDS.edit })}>ערוך</button>
-              </div>
-            )}
-            {open && (
-              <button type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={busy}
-                      onClick={() => void send({ text: ACTION_WORDS.cancel })}>בטל</button>
-            )}
-          </div>
-        )}
-        <textarea
-          className="fcc-quick__input"
-          rows={2}
-          value={text}
-          placeholder={open ? "ענה כאן…" : "כתוב עדכון כלכלי…"}
-          aria-label="עדכון כלכלי"
-          onChange={(e) => setText(e.target.value)}
-        />
-        <button type="button" className="boss-button boss-button--primary boss-bubble--action"
-                disabled={busy || !text.trim()} onClick={submit}
-                onPointerDown={keepKeyboard} onMouseDown={keepKeyboard}>
-          {busy ? "בודק…" : open ? "שלח" : "שלח עדכון"}
-        </button>
-        {receipt && <p className="fcc-quick__receipt" role="status">{receipt}</p>}
-        {error && <p className="fcc-quick__error" role="alert">⚠️ {error}</p>}
-      </Surface>
-    </section>
-  );
+  const start = (intent: string, entityId?: string) => run(async () => {
+    const result = await postFccIntent(intent, entityId);
+    if (result.state !== "info" || !result.entity) return result;
+    // another draft is already open: show IT (the server's own latest turn) instead of a dead-end message
+    const open = await fetchFccOverview().then((o) => o.draft).catch(() => null);
+    return open ?? result;
+  });
+  const send = (text: string, goalId?: string) => run(() => postFccWrite({ text, scope: tab, ...(goalId ? { goal_id: goalId } : {}) }));
+  const dismiss = () => { setTurn(null); setReceipt(null); setError(null); };
+  return { turn, receipt, error, busy, start, send, dismiss };
 }
 
 function GoalCard({ goal }: { goal: FccGoalRow }) {
@@ -181,6 +119,7 @@ export function FinancialControlCenter({ onBack }: Props) {
   useEffect(load, []);
   // refresh without the loading state: the loans tab keeps its closing receipt on screen while the numbers update
   const refresh = () => { fetchFccOverview().then((data) => setState({ status: "ok", data })).catch(() => undefined); };
+  const writer = useFccWriter(state.status === "ok" ? state.data.draft : null, tab, refresh);
 
   const shell = (children: React.ReactNode, subtitle?: string) => (
     <main className="ventures-screen fcc-screen">
@@ -221,8 +160,6 @@ export function FinancialControlCenter({ onBack }: Props) {
       <div className="fcc-kpis">
         {headerCards(data).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
       </div>
-
-      <QuickUpdate initial={data.draft} onDone={load} />
 
       <section className="fcc-section" aria-labelledby="fcc-tasks-heading">
         <h2 id="fcc-tasks-heading" className="fcc-section__heading">דורש פעולה</h2>
@@ -268,15 +205,22 @@ export function FinancialControlCenter({ onBack }: Props) {
       </section>
     </div>
   );
+  const targets = {
+    goals: data.goals.map((g) => ({ id: g.goal_id, title: g.title ?? "" })),
+    loans: (data.loans?.items ?? []).filter((l) => l.active).map((l) => ({ id: l.id, title: l.name ?? "" })),
+  };
   const panels: Record<FccTabKey, React.ReactNode> = {
     monthly,
     loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario}
-                                                closeApi={{ open: postFccLoanClose, send: (text) => postFccWrite({ text }), onDone: refresh }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
+                                                closeEntry={{ onClose: (id) => void writer.start("loan.close", id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
     assets: data.assets ? <AssetsSection assets={data.assets} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
   };
   return shell(
     <div className="fcc-stack">
       <FccTabBar active={tab} onChange={changeTab} />
+      <ContextualComposer tab={tab} turn={writer.turn} receipt={writer.receipt} error={writer.error} busy={writer.busy}
+                          targets={targets} onStart={(i, id) => void writer.start(i, id)} onSend={(t, g) => void writer.send(t, g)}
+                          onDismiss={writer.dismiss} />
       {/* all panels stay mounted (hidden when inactive) so a half-typed update, the loans filter or the budget input survive a tab switch */}
       {(Object.keys(panels) as FccTabKey[]).map((key) => (
         <div key={key} role="tabpanel" id={panelId(key)} aria-labelledby={tabId(key)} hidden={tab !== key}>{panels[key]}</div>

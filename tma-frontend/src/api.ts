@@ -434,19 +434,20 @@ export async function fetchFccLoanScenario(budget: number): Promise<FccScenarios
   return r.json() as Promise<FccScenarios>;
 }
 
-/** Opens the close-loan draft (nothing is written); the owner then confirms through postFccWrite("אשר"). */
-export async function postFccLoanClose(loanId: string): Promise<FccTurn> {
-  const r = await fetch(`${BASE}/api/fcc/loans/close`, {
+/** The ONE structured entry of the contextual composer (chips / card actions). Opens a draft with the intent's fixed
+ *  fields only — nothing is written; the owner then confirms through postFccWrite("אשר"). */
+export async function postFccIntent(intent: string, entityId?: string): Promise<FccTurn> {
+  const r = await fetch(`${BASE}/api/fcc/intent/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ loan_id: loanId }),
+    body: JSON.stringify({ intent, ...(entityId ? { entity_id: entityId } : {}) }),
   });
   const data = (await r.json().catch(() => ({}))) as FccTurn & { error?: string };
   if (!r.ok && !data.state) throw new Error(data.error || `API ${r.status}`);
   return data;
 }
 
-export async function postFccWrite(body: { text: string; goal_id?: string }): Promise<FccTurn> {
+export async function postFccWrite(body: { text: string; goal_id?: string; scope?: string }): Promise<FccTurn> {
   const r = await fetch(`${BASE}/api/fcc/write`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
