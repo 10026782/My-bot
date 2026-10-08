@@ -61,9 +61,14 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
   },
   loans: {
     title: "עדכון הלוואה",
-    chips: [{ intent: "loan.close", label: "סגירת הלוואה", pick: "loan" }],
+    chips: [
+      { intent: "loan.update_balance", label: "עדכון יתרה", pick: "loan" },
+      { intent: "loan.update_payment", label: "שינוי החזר", pick: "loan" },
+      { intent: "loan.create", label: "הלוואה חדשה" },
+      { intent: "loan.close", label: "סגירת הלוואה", pick: "loan" },
+    ],
     freeText: false,
-    hint: "עדכון יתרה, שינוי החזר והלוואה חדשה יתווספו בשלב הבא.",
+    hint: "בחרו פעולה — המערכת תשאל רק מה שחסר.",
   },
   assets: {
     title: "עדכון נכס",

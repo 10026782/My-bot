@@ -228,3 +228,16 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Scope:** `/api/fcc/write` מקבל `scope`; בלשוניות `loans`/`assets` טקסט חופשי לא פותח טיוטה חדשה (ה־classifier לא נקרא); מענה לטיוטה פתוחה תמיד אפשרי.
 - **Frontend:** `useFccWriter` (state יחיד) + `ContextualComposer` (ב־`FccTabBar.tsx`) מעל פאנלי הלשוניות; כותרת וצ'יפים לפי לשונית (`COMPOSER` ב־`fccTabs.ts`); `writerView`/`nextWriterState` טהורים. כפתור הסגירה בכרטיס הלוואה רק קורא `loan.close` עם ה־id. `LoanClosePanel` הוסר (כפילות).
 - **לא נבנה (שלבים הבאים):** עדכון יתרה/החזר, הלוואה חדשה (P2), פעולות נכס (P3), נכס נמכר (P4). בלשונית נכסים אין צ'יפים ואין קלט.
+
+
+## Contextual Writer — P2: הלוואות (08/10/2026)
+
+אותו מנגנון intent (`POST /api/fcc/intent/start`) ואותו `BusinessDraft`; שלוש ישויות חדשות ב־`FCC_CONTRACTS`, ללא מסלול כתיבה חדש (ActionGateway → `tma_fcc_write`; `Loans` כבר ברשימה המורשית). סכמה חיה נקראה לקריאה בלבד (08/10/2026): `Loan Type` = פרטית/עסקית/משכנתא; `Payment Schedule` = Monthly/Quarterly/Annually/Custom; אין שינוי סכמה.
+
+- `loan.update_balance` → `fcc_loan_balance`: patch **שדה אחד** — `Outstanding Principal for Early Closure` (ה"יתרה" שהמסך ומנוע הסילוק מציגים). `Outstanding Balance` לא נכתב. ה־Review מציג "היום: ₪X" → חדש.
+- `loan.update_payment` → `fcc_loan_payment`: patch שדה אחד — `Current Monthly Payment` (חיובי).
+- `loan.create` → `fcc_loan_new`: post ל־`Loans`; חובה: שם, סוג (פרטית/עסקית/משכנתא), יתרה לסגירה, החזר חודשי, ריבית (0–100); אופציונלי (דרך "ערוך"): מלווה, סכום מקורי, תשלומים שנותרו. נכתב גם `Active Loan=true`; `Owner` נוסף בביצוע ע"י מדיניות הבעלות. לא נכתבים `Payment Status`, `Domain`, נכס מקושר.
+- שדה היעד ברשומה נקבע בשרת לפי הישות (לא מטקסט המשתמש); ההלוואה המטרה נשמרת ב־`source_context` ולא ניתנת לעריכה. הלוואה של אחר = `denied`; הלוואה סגורה = `info`.
+- אידמפוטנטיות: עדכון לערך שכבר שמור = `duplicate`; `loan.create` עם שם זהה להלוואה פעילה קיימת = `duplicate`.
+- UI: צ'יפים `עדכון יתרה · שינוי החזר · הלוואה חדשה · סגירת הלוואה`; בכרטיס הלוואה פעילה: `עדכון יתרה · שינוי החזר · סגרתי את ההלוואה`.
+- **לא נבנה:** עדכון `Outstanding Balance`/ריבית/תאריכים של הלוואה קיימת, קישור נכס בהלוואה חדשה, `Monthly Due Day`.

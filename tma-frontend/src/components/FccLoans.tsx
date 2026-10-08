@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FccLoans } from "../types";
 import {
-  CLOSE_BUTTON, FILTERS, RANK_MODES, STATUS_UNKNOWN, UNKNOWN, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards, sortLoans, togglePick, canClose,
+  BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, RANK_MODES, STATUS_UNKNOWN, UNKNOWN, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards, sortLoans, togglePick, canClose,
   type LoanFilter, type RankMode,
 } from "../lib/fccLoans";
 import { KpiCard } from "./FccKpiCard";
@@ -9,13 +9,13 @@ import { PayoffEngine, type LoadScenario } from "./FccPayoff";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
 
-/** The close flow runs in the shared contextual composer (intent ``loan.close``): a card button only names the loan. */
-export interface LoanCloseEntry {
-  onClose: (loanId: string) => void;
+/** Card actions run in the shared contextual composer: a button only names the intent + the loan. */
+export interface LoanActions {
+  onAction: (intent: string, loanId: string) => void;
   disabled: boolean;          // a draft is already open in the shared writer (one slot per person)
 }
 
-export function LoansSection({ loans, loadScenario, closeEntry }: { loans: FccLoans; loadScenario?: LoadScenario; closeEntry?: LoanCloseEntry }) {
+export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans; loadScenario?: LoadScenario; actions?: LoanActions }) {
   const [filter, setFilter] = useState<LoanFilter>("all");
   const [mode, setMode] = useState<RankMode>("high_interest");
   const [picked, setPicked] = useState<string[]>([]);
@@ -97,9 +97,15 @@ export function LoansSection({ loans, loadScenario, closeEntry }: { loans: FccLo
                     </dl>
                     <p className="fcc-loan__meta">{m.metaRows.map((r) => `${r.label}: ${r.value}`).join(" · ")}</p>
                     <p className={`fcc-loan__freed ${m.freedKnown ? "" : "fcc-loan__freed--unknown"}`}>{m.freedLine}</p>
-                    {closeEntry && canClose(l) && (
-                      <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__closebtn"
-                              disabled={closeEntry.disabled} onClick={() => closeEntry.onClose(l.id)}>{CLOSE_BUTTON}</button>
+                    {actions && canClose(l) && (
+                      <div className="fcc-loan__actions">
+                        <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__actionbtn"
+                                disabled={actions.disabled} onClick={() => actions.onAction("loan.update_balance", l.id)}>{BALANCE_BUTTON}</button>
+                        <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__actionbtn"
+                                disabled={actions.disabled} onClick={() => actions.onAction("loan.update_payment", l.id)}>{PAYMENT_BUTTON}</button>
+                        <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__closebtn"
+                                disabled={actions.disabled} onClick={() => actions.onAction("loan.close", l.id)}>{CLOSE_BUTTON}</button>
+                      </div>
                     )}
                   </article>
                 );

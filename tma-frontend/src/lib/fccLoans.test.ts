@@ -4,7 +4,7 @@ import type { FccLoan, FccLoans } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LoansSection } from "../components/FccLoans";
-import { CLOSE_BUTTON, FILTERS, UNKNOWN, canClose, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
+import { BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, UNKNOWN, canClose, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -186,21 +186,27 @@ test("390px smoke (css): loan blocks can shrink — grids use minmax(0,1fr), lon
   assert.ok(!/min-(inline-size|width):\s*[1-9]\d{2,}px/.test(block), "no wide min-width");
 });
 
-test("only an active loan can be closed; the card button only names the loan (the flow is the shared writer's)", () => {
+test("only an active loan has actions; the card buttons only name an intent (the flows are the shared writer's)", () => {
   assert.ok(canClose({ active: true })); assert.ok(!canClose({ active: false }));
-  assert.ok(CLOSE_BUTTON.length > 0);
+  assert.ok(CLOSE_BUTTON.length > 0 && BALANCE_BUTTON.length > 0 && PAYMENT_BUTTON.length > 0);
 });
 
-const withEntry = (disabled: boolean) => renderToStaticMarkup(createElement(LoansSection, { loans, closeEntry: { onClose: () => undefined, disabled } }));
+const withActions = (disabled: boolean, onAction: (i: string, id: string) => void = () => undefined) =>
+  renderToStaticMarkup(createElement(LoansSection, { loans, actions: { onAction, disabled } }));
+const activeCount = loans.items.filter((l) => l.active).length;
 
-test("loan cards: one close button per ACTIVE loan; disabled while the shared writer holds a draft; no panel or input in the loans list", () => {
-  const html = withEntry(false);
-  const buttons = html.match(/fcc-loan__closebtn/g) || [];
-  assert.equal(buttons.length, loans.items.filter((l) => l.active).length);
+test("loan cards: balance / payment / close buttons on every ACTIVE loan, none on closed ones; no input or panel in the list", () => {
+  const html = withActions(false);
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, activeCount * 2);
+  assert.equal((html.match(/fcc-loan__closebtn/g) || []).length, activeCount);
+  assert.ok(html.includes("עדכון יתרה") && html.includes("שינוי החזר") && html.includes("סגרתי את ההלוואה"));
   assert.ok(!html.includes("<textarea"));
-  const locked = withEntry(true);
-  assert.equal((locked.match(/fcc-loan__closebtn[^>]*disabled=""|disabled=""[^>]*fcc-loan__closebtn/g) || []).length, buttons.length);
-  assert.ok(!renderToStaticMarkup(createElement(LoansSection, { loans })).includes("fcc-loan__closebtn"));
+});
+
+test("while the shared writer holds a draft every card action is disabled; without actions no buttons render", () => {
+  const locked = withActions(true);
+  assert.equal((locked.match(/fcc-loan__(actionbtn|closebtn)[^>]*disabled=""|disabled=""[^>]*fcc-loan__(actionbtn|closebtn)/g) || []).length, activeCount * 3);
+  assert.ok(!renderToStaticMarkup(createElement(LoansSection, { loans })).includes("fcc-loan__actions"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

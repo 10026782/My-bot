@@ -2190,3 +2190,143 @@ def test_intent_start_endpoint_flag_auth_and_validation(monkeypatch):
     r = c.post("/api/fcc/intent/start", json={"intent": "monthly.obligation"}, headers=H)
     assert r.status_code == 200 and r.get_json()["entity"] == "fcc_obligation"
     assert c.post("/api/fcc/intent/start", json={"intent": "monthly.income", "entity_id": "recGAV"}, headers=H).status_code in (403, 200)
+
+
+# ── Contextual writer P2: loan balance / monthly payment / new loan ────────────────────────────────────────────────
+def seed_p2():
+    seed_close()
+    DB[Tables.LOANS] = [
+        loan("recC1", **{LF.NAME: "פועלים", LF.EARLY_CLOSURE: 118400, LF.MONTHLY_PAYMENT: 2816.16, LF.OUTSTANDING: 120000}),
+        loan("recC3", **{LF.NAME: "סגורה", LF.STATUS: "Paid Off", LF.EARLY_CLOSURE: 1000}),
+        loan("recCX", owner=AVI, **{LF.NAME: "של אבי", LF.EARLY_CLOSURE: 77777}),
+    ]
+
+
+def say(text, **fill):
+    return conv.handle_turn(ELIYAHU, text, extractor=Ex(fill={text: fill} if fill else {}), today=TODAY)
+
+
+def test_p2_intents_are_registered_and_none_is_a_transition():
+    for iid, ent in (("loan.update_balance", "fcc_loan_balance"), ("loan.update_payment", "fcc_loan_payment"), ("loan.create", "fcc_loan_new")):
+        assert fd.INTENTS[iid]["entity"] == ent and not fd.INTENTS[iid].get("transition")
+    assert fd.INTENTS["loan.update_balance"]["target_required"] and fd.INTENTS["loan.update_payment"]["target_required"]
+    assert not fd.INTENTS["loan.create"].get("target")
+
+
+def test_update_balance_shows_today_asks_then_writes_exactly_one_field():
+    seed_p2()
+    r = intent("loan.update_balance", "recC1")
+    assert r.state == "ask" and r.entity == "fcc_loan_balance" and "פועלים" in r.message and "₪118,400" in r.message
+    r = say("112000", balance=112000)
+    assert r.state == "review" and "עדכון יתרת הלוואה" in r.message and "היום: ₪118,400" in r.message and "₪112,000" in r.message
+    assert r.snapshot is None
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["op"] == "patch" and w["table"] == Tables.LOANS and w["record_id"] == "recC1"
+    assert w["fields"] == {LF.EARLY_CLOSURE: 112000}                       # ONE field; Outstanding Balance / status untouched
+
+
+def test_update_payment_writes_only_the_monthly_payment():
+    seed_p2()
+    intent("loan.update_payment", "recC1")
+    say("2500", payment=2500)
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"] == {LF.MONTHLY_PAYMENT: 2500} and w["record_id"] == "recC1"
+
+
+def test_loan_updates_validate_amounts_and_cannot_retarget_the_loan():
+    seed_p2()
+    intent("loan.update_payment", "recC1")
+    r = say("0", payment=0)
+    assert r.state == "ask"                                                 # a zero payment is not accepted
+    r = say("2500", payment=2500, record_id="recCX", loan="recCX")           # a smuggled other loan id is ignored
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert c.snapshot["writes"][0]["record_id"] == "recC1"
+
+
+def test_loan_updates_are_owner_scoped_and_only_for_active_loans():
+    seed_p2()
+    assert intent("loan.update_balance", "recCX").state == "denied"          # Avi's loan == not found
+    assert intent("loan.update_payment", "recCX").state == "denied"
+    r = intent("loan.update_balance", "recC3")
+    assert r.state == "info" and "נסגרה" in r.message                        # a closed loan has nothing to update
+    assert intent("loan.update_balance").state == "clarify"                  # no loan chosen
+
+
+def test_loan_update_to_the_value_it_already_has_is_not_written_twice():
+    seed_p2()
+    intent("loan.update_balance", "recC1")
+    say("118400", balance=118400)
+    r = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert r.state == "duplicate"
+
+
+def test_new_loan_asks_only_what_is_missing_then_reviews_then_one_owner_scoped_post():
+    seed_p2()
+    r = intent("loan.create")
+    assert r.state == "ask" and r.entity == "fcc_loan_new" and r.awaiting == "name"
+    assert say("כאל", name="כאל").awaiting == "loan_type"
+    assert say("פרטית").awaiting == "balance"                                # closed vocabulary answer, no LLM needed
+    assert say("48300", balance=48300).awaiting == "payment"
+    assert say("1900", payment=1900).awaiting == "rate"
+    r = say("7.5", rate=7.5)
+    assert r.state == "review" and "הלוואה חדשה" in r.message and "₪48,300" in r.message and "7.5%" in r.message and "פרטית" in r.message
+    assert r.snapshot is None
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    (w,) = c.snapshot["writes"]
+    assert w["op"] == "post" and w["table"] == Tables.LOANS
+    assert w["fields"] == {LF.NAME: "כאל", LF.LOAN_TYPE: "פרטית", LF.EARLY_CLOSURE: 48300, LF.MONTHLY_PAYMENT: 1900,
+                           LF.INTEREST_RATE: 7.5, LF.ACTIVE: True}          # Owner is added at execution by the owner-scope policy
+
+
+def test_new_loan_rejects_bad_numbers_and_an_unknown_type_and_blocks_a_same_named_active_loan():
+    seed_p2()
+    intent("loan.create")
+    say("כאל", name="כאל")
+    assert say("מעורבת").awaiting == "loan_type"                             # not one of the three live choices
+    say("עסקית"); say("1000", balance=1000)
+    assert say("0", payment=0).awaiting == "payment"
+    say("500", payment=500)
+    assert say("150", rate=150).awaiting == "rate"                           # percent must be 0..100
+    say("6", rate=6)
+    DB[Tables.LOANS].append(loan("recDup", **{LF.NAME: "כאל", LF.EARLY_CLOSURE: 1}))
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).state == "duplicate"
+
+
+def test_new_loan_optional_fields_can_be_added_in_edit():
+    seed_p2()
+    intent("loan.create")
+    for t, k in (("כאל", {"name": "כאל"}), ("פרטית", {}), ("48300", {"balance": 48300}), ("1900", {"payment": 1900}), ("7.5", {"rate": 7.5})):
+        say(t, **k)
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    say("מלווה כאל, תשלומים 30", lender="כאל", payments_left=30)
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"][LF.LENDER] == "כאל" and w["fields"][LF.PAYMENTS_LEFT] == 30
+
+
+def test_loan_intents_share_the_single_draft_slot_with_everything_else():
+    seed_p2()
+    intent("loan.create")
+    assert intent("loan.update_balance", "recC1").state == "info"
+    assert intent("monthly.obligation").state == "info"
+
+
+def test_p2_http_new_loan_and_update_confirm_executes_frozen_writes_and_scopes_the_new_loan(monkeypatch):
+    seed_p2()
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
+    monkeypatch.setattr(conv.LlmExtractor, "fill", lambda self, text, awaiting, fields, entity, today:
+                        {"balance": 1000} if awaiting == "balance" else {"payment": 100} if awaiting == "payment" else
+                        {"rate": 5} if awaiting == "rate" else {"name": text} if awaiting == "name" else {})
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/intent/start", json={"intent": "loan.create"}, headers=H).get_json()["awaiting"] == "name"
+    for text in ("הלוואה חדשה", "משכנתא", "1000", "100", "5"):
+        turn = c.post("/api/fcc/write", json={"text": text, "scope": "loans"}, headers=H).get_json()
+    assert turn["state"] == "review" and sent == []
+    assert c.post("/api/fcc/write", json={"text": "אשר", "scope": "loans"}, headers=H).get_json()["state"] == "executed"
+    assert sent[0]["op"] == "post" and sent[0]["table"] == Tables.LOANS and sent[0]["fields"][LF.LOAN_TYPE] == "משכנתא"
+    # the executor adds the Owner for the caller and re-checks the record owner of a patch
+    scoped = policy.scope_new_record_fields(Tables.LOANS, dict(sent[0]["fields"]), ELIYAHU)
+    assert scoped.get("Owner")
+    _, denied = approval_actions._enforce_personal_data_policy("patch", "Loans", "recCX", {LF.EARLY_CLOSURE: 1}, ELIYAHU)
+    assert denied is not None

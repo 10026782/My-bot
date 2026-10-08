@@ -99,7 +99,7 @@ def _save(store, ids, d: BusinessDraft, *, expected: int) -> BusinessDraft:
 
 
 def _view(d: BusinessDraft) -> dict:
-    return {fd.LABELS.get(k, k): fd.display_value(k, v) for k, v in d.fields.items() if v not in (None, "")}
+    return {fd.label(d.entity_type, k): fd.display_value(k, v) for k, v in d.fields.items() if v not in (None, "")}
 
 
 def _missing(d: BusinessDraft) -> list[str]:
@@ -120,6 +120,8 @@ def _render(d: BusinessDraft) -> TurnResult:
     missing = _missing(d)
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title) if awaiting else "מה לעדכן?"
+    if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT) and d.source_context.get("review_note"):
+        msg += f"\n({d.source_context['review_note']})"
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d))
 
 
@@ -317,6 +319,31 @@ def start_loan_close(identity, loan_id: str, *, store=None, today: date | None =
     return _persist_new(store, ids, d)
 
 
+_LOAN_CURRENT = {fd.FCC_LOAN_BALANCE: LF.EARLY_CLOSURE, fd.FCC_LOAN_PAYMENT: LF.MONTHLY_PAYMENT}
+
+
+def _start_loan_intent(identity, ids, entity, entity_id, store, today) -> TurnResult:
+    """update balance / update monthly payment (the chosen ACTIVE loan, one field) or a new loan. The loan must be the
+    caller's own (not found == not yours); the draft shows today's stored value so the owner reviews old -> new."""
+    raw = f"intent:{entity}#{uuid.uuid4().hex[:8]}"
+    if entity == fd.FCC_LOAN_NEW:
+        return _persist_new(store, ids, _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today))
+    if not entity_id:
+        return TurnResult("clarify", "בחרו קודם את ההלוואה לעדכון.")
+    loan = next((r for r in service.my_loans(identity) if r["id"] == str(entity_id)), None)
+    if loan is None:
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    item = fcc_loans.loan_item(loan, today)
+    if not item["active"]:
+        return TurnResult("info", "ההלוואה מסומנת כנסגרה — אין מה לעדכן.")
+    name = item["name"] or "ההלוואה"
+    current = calc._num((loan.get("fields") or {}).get(_LOAN_CURRENT[entity]))
+    note = f"היום: {fd.display_value('balance', current)}" if current is not None else "היום: לא הוגדר"
+    d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today,
+                   extra_ctx={"record_id": loan["id"], "loan_name": name, "goal_title": name, "review_note": note})
+    return _persist_new(store, ids, d)
+
+
 def _is_income_goal(g: dict) -> bool:
     return service._category_key((g.get("fields") or {}).get(GF.CATEGORY)) == "income"
 
@@ -337,6 +364,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     store, ids, stop = _open_slot(identity, store, "פעולה חדשה")
     if stop is not None:
         return stop
+    if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_NEW):
+        return _start_loan_intent(identity, ids, spec["entity"], entity_id, store, today)
     goals = service.my_goals(identity) if spec.get("target") == "goal" else []
     chosen = None
     if entity_id:
@@ -503,6 +532,14 @@ def _already_applied(identity, write: dict) -> bool:
     if write["op"] == "patch" and write["table"] == Tables.LOANS and fields.get(LF.STATUS) == fd.LOAN_PAID_OFF:
         rec = next((r for r in service.my_loans(identity) if r["id"] == write.get("record_id")), None)
         return rec is not None and not fcc_loans.is_active(rec.get("fields") or {})      # already closed -> nothing to do
+    if write["op"] == "patch" and write["table"] == Tables.LOANS and LF.STATUS not in fields:
+        rec = next((r for r in service.my_loans(identity) if r["id"] == write.get("record_id")), None)
+        cur = (rec or {}).get("fields") or {}
+        return rec is not None and all(calc._num(cur.get(k)) == v for k, v in fields.items())    # the loan already holds this value
+    if write["op"] == "post" and write["table"] == Tables.LOANS:
+        name = writer._norm(fields.get(LF.NAME, ""))
+        return any(writer._norm((r.get("fields") or {}).get(LF.NAME, "")) == name and fcc_loans.is_active(r.get("fields") or {})
+                   for r in service.my_loans(identity))                                           # same-named ACTIVE loan exists
     if write["op"] == "post" and write["table"] == "Financial Goals":
         title = writer._norm(fields.get(GF.TITLE, ""))
         return any(writer._norm((g.get("fields") or {}).get(GF.TITLE, "")) == title for g in service.my_goals(identity))
