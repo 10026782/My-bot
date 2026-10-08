@@ -1,8 +1,8 @@
 // Pure presentation of the FCC "נכסים והון" tab (read-only). Values are shown as stored; an unknown value is
 // "לא הוגדר" (never ₪0), and the recorded mortgage vs. the linked loans are shown apart — never added together.
-import type { FccAssetItem, FccAssets } from "../types";
+import type { FccAssetItem, FccAssets, FccSoldAsset } from "../types";
 import { UNKNOWN, pct, val } from "./fccLoans";
-import { money } from "./fccPresentation";
+import { dmy, money } from "./fccPresentation";
 
 export const ASSET_TYPE_LABEL: Record<string, string> = {
   Residential: "מגורים", "Residential Investment": "השקעה למגורים", "Income Property": "נכס מניב",
@@ -19,10 +19,10 @@ function coverage(known: number, total: number): string | undefined {
 export function assetsHeaderCards(a: FccAssets): AssetsHeaderCard[] {
   const s = a.summary;
   return [
-    { key: "value", label: "שווי נכסים", value: val(s.total_value), hint: coverage(s.coverage.value, s.count) },
-    { key: "equity", label: "הון (Equity)", value: val(s.total_equity), hint: coverage(s.coverage.equity, s.count) ?? "שווי פחות משכנתא רשומה" },
-    { key: "my_equity", label: "ההון שלי (לפי בעלות)", value: val(s.total_my_equity), hint: coverage(s.coverage.my_equity, s.count) },
-    { key: "income", label: "הכנסה חודשית מנכסים", value: val(s.total_monthly_income), hint: coverage(s.coverage.monthly_income, s.count) },
+    { key: "value", label: "שווי נכסים פעילים", value: val(s.total_value), hint: coverage(s.coverage.value, s.count) },
+    { key: "equity", label: "הון בנכסים פעילים (Equity)", value: val(s.total_equity), hint: coverage(s.coverage.equity, s.count) ?? "שווי פחות משכנתא רשומה" },
+    { key: "my_equity", label: "ההון שלי בנכסים פעילים (לפי בעלות)", value: val(s.total_my_equity), hint: coverage(s.coverage.my_equity, s.count) },
+    { key: "income", label: "הכנסה חודשית מנכסים פעילים", value: val(s.total_monthly_income), hint: coverage(s.coverage.monthly_income, s.count) },
   ];
 }
 
@@ -33,8 +33,8 @@ export function debtLines(a: FccAssets): DebtLine[] {
   const s = a.summary;
   return [
     { label: "משכנתא רשומה בנכסים", value: val(s.total_mortgage) },
-    { label: `הלוואות מקושרות לנכס (${s.linked_loans_count})`, value: val(s.linked_loans_debt) },
-    { label: `הלוואות שלא מקושרות לנכס (${s.unlinked_loans_count})`, value: val(s.unlinked_loans_debt) },
+    { label: `הלוואות מקושרות לנכס פעיל (${s.linked_loans_count})`, value: val(s.linked_loans_debt) },
+    { label: `הלוואות שלא מקושרות לנכס פעיל (${s.unlinked_loans_count})`, value: val(s.unlinked_loans_debt) },
   ];
 }
 
@@ -81,3 +81,30 @@ export function assetCardModel(i: FccAssetItem): AssetCardModel {
 }
 
 export { money };
+
+/** The totals above are ACTIVE assets only. A sale turns an asset into proceeds this screen does not track, so once any asset
+ *  is sold the screen says so — it never presents the active total as the owner's total net worth. */
+export function soldNote(a: FccAssets): string | null {
+  const n = a.sold?.count ?? 0;
+  return n > 0 ? `הסיכומים כוללים נכסים פעילים בלבד (לא כולל ${n} שנמכרו). תמורת המכירה אינה נרשמת כאן כנכס או כמזומן — זה אינו "הון כולל".` : null;
+}
+
+export interface SoldCardModel {
+  id: string;
+  title: string;
+  rows: { label: string; value: string }[];
+  openLoans: string[];              // loans still linked to the sold asset (they stay open)
+}
+
+export function soldCardModel(i: FccSoldAsset): SoldCardModel {
+  return {
+    id: i.id,
+    title: i.name || UNKNOWN,
+    rows: [
+      { label: "תאריך מכירה", value: i.sale_date ? dmy(i.sale_date) : UNKNOWN },
+      { label: "מחיר מכירה (100%)", value: val(i.sale_amount) },
+      { label: i.ownership_pct == null ? "החלק שלי" : `החלק שלי (${i.ownership_pct}%)`, value: val(i.my_share) },
+    ],
+    openLoans: i.linked_loans.map((l) => `${l.name || UNKNOWN} · יתרת סילוק ${val(l.early_closure_balance)}`),
+  };
+}

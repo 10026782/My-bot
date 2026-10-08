@@ -109,11 +109,10 @@ test("chips are intents only: no chip carries a write, a field name or a kind; t
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.goal_update")?.pick, "goal");
 });
 
-test("assets chips are the P3 trio, all choose an asset; mark-sold is NOT offered yet (P4)", () => {
-  assert.equal(COMPOSER.assets.chips.map((c) => c.intent).join(), "asset.update_value,asset.update_mortgage,asset.next_step");
+test("assets chips: value / mortgage / next step / mark-sold — all choose an asset; nothing offers a loan close or a write directly", () => {
+  assert.equal(COMPOSER.assets.chips.map((c) => c.intent).join(), "asset.update_value,asset.update_mortgage,asset.next_step,asset.mark_sold");
   for (const c of COMPOSER.assets.chips) assert.equal(c.pick, "asset");
-  const all = FCC_TABS.flatMap((t) => COMPOSER[t.key].chips.map((c) => c.intent)).join();
-  assert.ok(!all.includes("sold"));
+  assert.equal(COMPOSER.assets.chips.find((c) => c.intent === "asset.mark_sold")?.label, "נכס נמכר");
 });
 
 test("free text may open a NEW draft only on the monthly tab", () => {
@@ -154,15 +153,15 @@ test("nextWriterState: executed -> receipt + refresh; cancelled -> clears; anyth
   assert.equal(WRITER_WORDS.confirm, "אשר"); assert.equal(WRITER_WORDS.edit, "ערוך"); assert.equal(WRITER_WORDS.cancel, "בטל");
 });
 
-test("markup: idle monthly shows 5 chips + one input; loans shows its 4 chips and NO input; assets shows its 3 chips and NO input", () => {
+test("markup: idle monthly shows 5 chips + one input; loans shows its 4 chips and NO input; assets shows its 4 chips and NO input", () => {
   const m = composer("monthly");
   assert.equal((m.match(/class="fcc-chip /g) || []).length, 5); assert.equal((m.match(/<textarea/g) || []).length, 1);
   assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד"));
   const l = composer("loans");
   assert.equal((l.match(/class="fcc-chip /g) || []).length, 4); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה") && l.includes("הלוואה חדשה"));
   const a = composer("assets");
-  assert.equal((a.match(/class="fcc-chip /g) || []).length, 3);
-  assert.ok(!a.includes("<textarea") && a.includes("עדכון נכס") && a.includes("עדכון שווי") && a.includes("עדכון משכנתא") && a.includes("פעולה הבאה"));
+  assert.equal((a.match(/class="fcc-chip /g) || []).length, 4);
+  assert.ok(!a.includes("<textarea") && a.includes("עדכון נכס") && a.includes("עדכון שווי") && a.includes("עדכון משכנתא") && a.includes("פעולה הבאה") && a.includes("נכס נמכר"));
 });
 
 test("markup: a review shows the server's text with confirm/edit/cancel and no input; chips are disabled", () => {

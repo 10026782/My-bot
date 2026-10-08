@@ -76,9 +76,10 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
       { intent: "asset.update_value", label: "עדכון שווי", pick: "asset" },
       { intent: "asset.update_mortgage", label: "עדכון משכנתא", pick: "asset" },
       { intent: "asset.next_step", label: "פעולה הבאה", pick: "asset" },
+      { intent: "asset.mark_sold", label: "נכס נמכר", pick: "asset" },     // transition: review + a separate approval
     ],
     freeText: false,
-    hint: "בחרו פעולה — המערכת תשאל רק מה שחסר. סימון נכס כנמכר יתווסף בשלב הבא.",
+    hint: "בחרו פעולה — המערכת תשאל רק מה שחסר. סימון נכס כנמכר מציג סקירה מלאה ודורש אישור נפרד.",
   },
 };
 

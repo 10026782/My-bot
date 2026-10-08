@@ -2358,10 +2358,9 @@ def seed_p3():
     DB[Tables.LOANS] = [loan("recL1", **{LF.EARLY_CLOSURE: 100000, LF.RELATED_ASSET: ["recAH"]})]
 
 
-def test_p3_intents_registered_none_is_mark_sold_and_none_is_a_transition():
+def test_p3_intents_registered_and_none_of_them_is_a_transition():
     for iid, ent in (("asset.update_value", "fcc_asset_value"), ("asset.update_mortgage", "fcc_asset_mortgage"), ("asset.next_step", "fcc_asset_step")):
         assert fd.INTENTS[iid]["entity"] == ent and fd.INTENTS[iid]["target_required"] and not fd.INTENTS[iid].get("transition")
-    assert not any("sold" in k for k in fd.INTENTS)                         # P4 is not built yet
 
 
 def test_asset_value_shows_today_asks_then_writes_exactly_one_field():
@@ -2466,4 +2465,127 @@ def test_p3_http_asset_next_step_executes_the_frozen_patch_and_the_executor_rech
     assert sent[0]["table"] == "Assets" and sent[0]["record_id"] == "recAH" and sent[0]["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך"}
     assert "Assets" in approval_actions._TMA_WRITE_ALLOWED_TABLES
     _, denied = approval_actions._enforce_personal_data_policy("patch", "Assets", "recAX", {AF.VALUE: 1}, ELIYAHU)
+    assert denied is not None
+
+
+# ── Contextual writer P4: mark an asset sold (Sale Date + Sale Amount) ─────────────────────────────────────────────
+def seed_p4():
+    DB["Assets"] = [
+        asset("recAH", "בית שמש", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 2300000, AF.MORTGAGE: 900000, AF.OWNERSHIP_PCT: 50,
+                                     AF.EQUITY: 1400000, AF.MY_EQUITY: 700000}),
+        asset("recAN", "נכס בלי אחוז בעלות", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 1000000}),
+        asset("recAS", "דירה שנמכרה", **{AF.STATUS: {"name": "נמכר"}, AF.VALUE: 1000000, AF.MORTGAGE: 300000, AF.OWNERSHIP_PCT: 100,
+                                         AF.SALE_DATE: "2026-09-01", AF.SALE_AMOUNT: 1100000, AF.EQUITY: 700000, AF.MY_EQUITY: 700000}),
+        asset("recAX", "נכס של אבי", owner=AVI, **{AF.VALUE: 99999999}),
+    ]
+    DB[Tables.LOANS] = [loan("recL1", **{LF.NAME: "כאל", LF.EARLY_CLOSURE: 48300, LF.RELATED_ASSET: ["recAH"]}),
+                        loan("recL2", **{LF.NAME: "לא קשורה", LF.EARLY_CLOSURE: 1000})]
+
+
+def test_p4_mark_sold_is_a_registered_transition_with_both_values_required():
+    spec = fd.INTENTS["asset.mark_sold"]
+    assert spec["entity"] == "fcc_asset_sold" and spec["transition"] is True and spec["target_required"]
+    req = {f.field_name for f in fd.FCC_CONTRACTS["fcc_asset_sold"].fields if f.required.value == "true"}
+    assert req == {"sale_date", "sale_amount"}
+
+
+def test_p4_sale_review_is_loud_and_writes_nothing_before_approval():
+    seed_p4()
+    r = intent("asset.mark_sold", "recAH")
+    assert r.state == "ask" and r.awaiting == "sale_amount" and "100%" in r.message       # the date defaults to today, the price is asked
+    r = say("2500000", sale_amount=2500000)
+    assert r.state == "review" and r.snapshot is None
+    for part in ("סימון נכס כנמכר", "בית שמש", "08/10/2026", "(הוסק)", "₪2,500,000", "החלק שלך (50%): ₪1,250,000",
+                 "כאל", "₪48,300", "לא נסגרות אוטומטית", "₪900,000", "לא מתאפסת", "יצא מסיכומי הנכסים הפעילים", "לא נרשמת כנכס/מזומן"):
+        assert part in r.message, part
+    assert "₪1,000" not in r.message.replace("₪1,000,000", "")                          # an unrelated loan is not listed
+
+
+def test_p4_confirm_freezes_exactly_one_atomic_patch_and_nothing_else():
+    seed_p4()
+    intent("asset.mark_sold", "recAH"); say("2500000", sale_amount=2500000)
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert c.state == "confirmed"
+    (w,) = c.snapshot["writes"]                                                         # ONE write: no loan close, no mortgage reset, no proceeds record
+    assert w["op"] == "patch" and w["table"] == "Assets" and w["record_id"] == "recAH"
+    assert w["fields"] == {AF.STATUS: "נמכר", AF.SALE_DATE: "2026-10-08", AF.SALE_AMOUNT: 2500000}
+
+
+def test_p4_sale_date_is_editable_before_approval_and_the_amount_is_mandatory():
+    seed_p4()
+    intent("asset.mark_sold", "recAH")
+    assert say("0", sale_amount=0).awaiting == "sale_amount"                            # a sale without a (positive) price is not recorded
+    say("2500000", sale_amount=2500000)
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    r = say("התאריך 2026-09-20", sale_date="2026-09-20")
+    assert r.state == "review" and "20/09/2026" in r.message and "(הוסק)" not in r.message.split("תאריך מכירה")[1].split("\n")[0]
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"][AF.SALE_DATE] == "2026-09-20"
+
+
+def test_p4_unknown_ownership_leaves_my_share_unknown_never_100_percent():
+    seed_p4()
+    intent("asset.mark_sold", "recAN")
+    r = say("1200000", sale_amount=1200000)
+    assert "לא ניתן לחשב" in r.message and "₪1,200,000" in r.message
+
+
+def test_p4_owner_scope_sold_assets_and_missing_target():
+    seed_p4()
+    assert intent("asset.mark_sold", "recAX").state == "denied"
+    assert intent("asset.mark_sold").state == "clarify"
+    r = intent("asset.mark_sold", "recAS")
+    assert r.state == "info" and "נמכר" in r.message                                    # already sold: nothing to do
+
+
+def test_p4_second_confirmation_of_the_same_sale_is_a_duplicate_not_a_second_write():
+    seed_p4()
+    intent("asset.mark_sold", "recAH"); say("2500000", sale_amount=2500000)
+    DB["Assets"][0]["fields"][AF.STATUS] = {"name": "נמכר"}                              # applied elsewhere in the meantime
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).state == "duplicate"
+
+
+def test_p4_sold_assets_leave_the_active_totals_and_are_listed_apart_with_my_share():
+    seed_p4()
+    view = service.overview(ELIYAHU, TODAY)["assets"]
+    assert {i["id"] for i in view["items"]} == {"recAH", "recAN"}                       # the sold one is not an active asset
+    assert view["summary"]["count"] == 2 and view["summary"]["total_value"] == 3300000 and view["summary"]["total_mortgage"] == 900000
+    assert view["summary"]["total_my_equity"] == 700000                                 # only active assets: recAS' 700,000 is excluded
+    (s,) = view["sold"]["items"]
+    assert view["sold"]["count"] == 1 and s["id"] == "recAS" and s["sale_date"] == "2026-09-01"
+    assert s["sale_amount"] == 1100000 and s["ownership_pct"] == 100 and s["my_share"] == 1100000
+
+
+def test_p4_sold_share_follows_ownership_and_stays_unknown_without_it():
+    seed_p4()
+    DB["Assets"][2]["fields"][AF.OWNERSHIP_PCT] = 50
+    (s,) = service.overview(ELIYAHU, TODAY)["assets"]["sold"]["items"]
+    assert s["my_share"] == 550000
+    del DB["Assets"][2]["fields"][AF.OWNERSHIP_PCT]
+    (s,) = service.overview(ELIYAHU, TODAY)["assets"]["sold"]["items"]
+    assert s["my_share"] is None and s["sale_amount"] == 1100000
+
+
+def test_p4_loans_linked_to_a_sold_asset_stay_open_and_visible():
+    seed_p4()
+    DB["Assets"][0]["fields"][AF.STATUS] = {"name": "נמכר"}
+    view = service.overview(ELIYAHU, TODAY)
+    sold = {s["id"]: s for s in view["assets"]["sold"]["items"]}
+    assert [l["name"] for l in sold["recAH"]["linked_loans"]] == ["כאל"]               # still listed against the sold asset
+    assert any(i["name"] == "כאל" and i["active"] for i in view["loans"]["items"])      # and still an active loan
+
+
+def test_p4_http_sale_executes_the_frozen_patch_and_the_executor_rechecks_the_owner(monkeypatch):
+    seed_p4()
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
+    monkeypatch.setattr(conv.LlmExtractor, "fill", lambda self, text, awaiting, fields, entity, today: {"sale_amount": 2500000} if awaiting == "sale_amount" else {})
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/intent/start", json={"intent": "asset.mark_sold", "entity_id": "recAH"}, headers=H).get_json()["awaiting"] == "sale_amount"
+    assert c.post("/api/fcc/write", json={"text": "2500000", "scope": "assets"}, headers=H).get_json()["state"] == "review"
+    assert sent == []
+    assert c.post("/api/fcc/write", json={"text": "אשר", "scope": "assets"}, headers=H).get_json()["state"] == "executed"
+    assert len(sent) == 1 and sent[0]["fields"][AF.STATUS] == "נמכר" and sent[0]["record_id"] == "recAH"
+    _, denied = approval_actions._enforce_personal_data_policy("patch", "Assets", "recAX", {AF.STATUS: "נמכר"}, ELIYAHU)
     assert denied is not None

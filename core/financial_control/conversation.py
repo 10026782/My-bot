@@ -116,7 +116,8 @@ def _render(d: BusinessDraft) -> TurnResult:
         changed = {k: v for k, v in d.fields.items() if d.operation is DraftOperation.UPDATE and v != original.get(k)}
         return TurnResult("review", fd.render_review(
             d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
-            inferred=inferred, note=str(d.source_context.get("review_note") or "")), d.entity_type, None, _view(d))
+            inferred=inferred, note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else str(d.source_context.get("review_note") or ""))),
+            d.entity_type, None, _view(d))
     missing = _missing(d)
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title) if awaiting else "מה לעדכן?"
@@ -345,7 +346,8 @@ def _start_loan_intent(identity, ids, entity, entity_id, store, today) -> TurnRe
     return _persist_new(store, ids, d)
 
 
-_ASSET_CURRENT = {fd.FCC_ASSET_VALUE: AF.VALUE, fd.FCC_ASSET_MORTGAGE: AF.MORTGAGE, fd.FCC_ASSET_STEP: AF.NEXT_STEP}
+_ASSET_CURRENT = {fd.FCC_ASSET_VALUE: AF.VALUE, fd.FCC_ASSET_MORTGAGE: AF.MORTGAGE, fd.FCC_ASSET_STEP: AF.NEXT_STEP,
+                  fd.FCC_ASSET_SOLD: AF.STATUS}
 _ASSET_GONE = ("נמכר", "לא פעיל")      # live Assets.Status choices that mean the asset is no longer held
 
 
@@ -362,6 +364,8 @@ def _start_asset_intent(identity, ids, entity, entity_id, store, today) -> TurnR
     if status in _ASSET_GONE:
         return TurnResult("info", f"הנכס מסומן כ״{status}״ — אין מה לעדכן.")
     name = f.get(AF.NAME) or "הנכס"
+    if entity == fd.FCC_ASSET_SOLD:
+        return _start_asset_sale(identity, ids, asset, name, store, today)
     current = f.get(_ASSET_CURRENT[entity])
     if entity == fd.FCC_ASSET_STEP:
         owner = service._sel(f.get(AF.NEXT_STEP_OWNER))
@@ -373,6 +377,47 @@ def _start_asset_intent(identity, ids, entity, entity_id, store, today) -> TurnR
     d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=f"intent:{entity}#{uuid.uuid4().hex[:8]}", today=today,
                    extra_ctx={"record_id": asset["id"], "asset_name": name, "goal_title": name, "review_note": note})
     return _persist_new(store, ids, d)
+
+
+def _sale_warnings(identity, asset: dict, today) -> str:
+    """What stays UNTOUCHED by a sale, shown before approval: linked loans remain open, the mortgage field is not reset."""
+    f = asset.get("fields") or {}
+    lines = []
+    linked = [fcc_loans.loan_item(r, today) for r in service.my_loans(identity)
+              if asset["id"] in (r.get("fields") or {}).get(LF.RELATED_ASSET, []) and fcc_loans.is_active(r.get("fields") or {})]
+    if linked:
+        lines.append("⚠️ הלוואות מקושרות שיישארו פתוחות (לא נסגרות אוטומטית): " + ", ".join(
+            f"{i['name'] or 'ללא שם'} ({fd.display_value('balance', i['early_closure_balance']) if i['early_closure_balance'] is not None else 'יתרה לא הוגדרה'})"
+            for i in linked))
+    mortgage = calc._num(f.get(AF.MORTGAGE))
+    if mortgage:
+        lines.append(f"⚠️ יתרת המשכנתא הרשומה בנכס ({fd.display_value('mortgage', mortgage)}) לא מתאפסת.")
+    return "\n".join(lines)
+
+
+def _start_asset_sale(identity, ids, asset: dict, name: str, store, today) -> TurnResult:
+    """TRANSITION: opens the sale draft (date defaults to today as an inferred, editable value). Nothing is written; the
+    owner reviews date / full price / own share / what stays open, then approves in a separate turn."""
+    f = asset.get("fields") or {}
+    ctx = {"record_id": asset["id"], "asset_name": name, "goal_title": name,
+           "ownership_pct": calc._num(f.get(AF.OWNERSHIP_PCT)), "sale_warnings": _sale_warnings(identity, asset, today)}
+    d = _new_draft(identity, ids, fd.FCC_ASSET_SOLD, DraftOperation.CREATE, fields={}, raw_text=f"intent:{fd.FCC_ASSET_SOLD}#{uuid.uuid4().hex[:8]}",
+                   today=today, extra_ctx=ctx)
+    d, _rej = _set_fields(d, {"sale_date": today.isoformat()}, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": ["sale_date"]})
+    return _persist_new(store, ids, d)
+
+
+def _sale_note(d: BusinessDraft) -> str:
+    """Review note of a sale: my share (price × Ownership %, unknown stays unknown) + the untouched-items warnings."""
+    lines = []
+    amount, pct = d.fields.get("sale_amount"), d.source_context.get("ownership_pct")
+    if amount:
+        lines.append(f"• החלק שלך ({pct:g}%): {fd.display_value('sale_amount', round(amount * pct / 100.0, 2))}" if pct is not None
+                     else "• החלק שלך: לא ניתן לחשב — אחוז הבעלות בנכס לא הוגדר")
+    if d.source_context.get("sale_warnings"):
+        lines.append(d.source_context["sale_warnings"])
+    return "\n".join(lines)
 
 
 def _is_income_goal(g: dict) -> bool:
@@ -565,6 +610,9 @@ def _already_applied(identity, write: dict) -> bool:
     if write["op"] == "patch" and write["table"] == Tables.LOANS and fields.get(LF.STATUS) == fd.LOAN_PAID_OFF:
         rec = next((r for r in service.my_loans(identity) if r["id"] == write.get("record_id")), None)
         return rec is not None and not fcc_loans.is_active(rec.get("fields") or {})      # already closed -> nothing to do
+    if write["op"] == "patch" and write["table"] == "Assets" and fields.get(AF.STATUS) == fd.ASSET_SOLD_STATUS:
+        rec = next((r for r in service.my_assets(identity) if r["id"] == write.get("record_id")), None)
+        return rec is not None and service._sel((rec.get("fields") or {}).get(AF.STATUS)) == fd.ASSET_SOLD_STATUS
     if write["op"] == "patch" and write["table"] in (Tables.LOANS, "Assets") and LF.STATUS not in fields:
         rows = service.my_loans(identity) if write["table"] == Tables.LOANS else service.my_assets(identity)
         rec = next((r for r in rows if r["id"] == write.get("record_id")), None)

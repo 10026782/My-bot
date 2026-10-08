@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AssetsSection } from "../components/FccAssets";
 import { UNKNOWN } from "./fccLoans";
-import { ASSET_GONE, UNTYPED, assetCardModel, assetsHeaderCards, debtLines } from "./fccAssets";
+import { ASSET_GONE, UNTYPED, assetCardModel, soldCardModel, soldNote, assetsHeaderCards, debtLines } from "./fccAssets";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -95,15 +95,48 @@ const assetsSummary = { count: 2, total_value: null, total_mortgage: null, total
 
 test("asset cards: value / mortgage / next-step buttons on a live asset only; next step line rendered; no input", () => {
   const html = withActions(false);
-  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 3);
-  assert.ok(html.includes("עדכון שווי") && html.includes("עדכון משכנתא") && html.includes("פעולה הבאה") && html.includes("לדבר עם המתווך ביום ראשון"));
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 4);
+  assert.ok(html.includes("עדכון שווי") && html.includes("עדכון משכנתא") && html.includes("פעולה הבאה") && html.includes(">נמכר<") && html.includes("לדבר עם המתווך ביום ראשון"));
   assert.ok(!html.includes("<textarea"));
 });
 
 test("while the shared writer holds a draft every asset action is disabled; without actions no buttons render", () => {
   const locked = withActions(true);
-  assert.equal((locked.match(/fcc-loan__actionbtn[^>]*disabled=""|disabled=""[^>]*fcc-loan__actionbtn/g) || []).length, 3);
+  assert.equal((locked.match(/fcc-loan__actionbtn[^>]*disabled=""|disabled=""[^>]*fcc-loan__actionbtn/g) || []).length, 4);
   assert.ok(!renderToStaticMarkup(createElement(AssetsSection, { assets: { items: [withStep], summary: assetsSummary } })).includes("fcc-loan__actions"));
+});
+
+const soldA = { id: "z", name: "בית שמש", sale_date: "2026-10-08", sale_amount: 2500000, ownership_pct: 50, my_share: 1250000,
+  linked_loans: [{ id: "l1", name: "כאל", early_closure_balance: 48300 }] };
+const soldNoPct = { id: "y", name: "קרקע", sale_date: null, sale_amount: 1000000, ownership_pct: null, my_share: null, linked_loans: [] };
+
+test("sold card: date, FULL price and MY share (labelled with the %); unknown share/date stay unknown; open loans listed", () => {
+  const m = soldCardModel(soldA);
+  assert.equal(m.rows.map((r) => r.label).join(" | "), "תאריך מכירה | מחיר מכירה (100%) | החלק שלי (50%)");
+  assert.ok(m.rows[0].value.includes("08/10/2026") && m.rows[1].value.includes("2,500,000") && m.rows[2].value.includes("1,250,000"));
+  assert.equal(m.openLoans.length, 1); assert.ok(m.openLoans[0].includes("כאל") && m.openLoans[0].includes("48,300"));
+  const u = soldCardModel(soldNoPct);
+  assert.equal(u.rows[0].value, UNKNOWN); assert.equal(u.rows[2].value, UNKNOWN); assert.equal(u.rows[2].label, "החלק שלי");
+});
+
+const withSold = (n = 1): FccAssets => ({ items: [withStep], summary: assetsSummary, sold: { count: n, items: n ? [soldA] : [] } });
+
+test("totals are labelled ACTIVE; once something is sold the screen says it is not a total net worth", () => {
+  const labels = assetsHeaderCards(withSold()).map((c) => c.label).join("|");
+  assert.ok(labels.includes("שווי נכסים פעילים") && labels.includes("הון בנכסים פעילים") && labels.includes("ההון שלי בנכסים פעילים") && labels.includes("מנכסים פעילים"));
+  const note = soldNote(withSold(2));
+  assert.ok(note && note.includes("נכסים פעילים בלבד") && note.includes("2") && note.includes("אינו \"הון כולל\""));
+  assert.equal(soldNote(withSold(0)), null);
+  assert.equal(soldNote({ items: [], summary: assetsSummary }), null);
+});
+
+test("sold assets render apart (collapsed section, 'שנמכרו'), never among the actionable cards; all-sold still renders", () => {
+  const html = renderToStaticMarkup(createElement(AssetsSection, { assets: withSold(), actions: { onAction: () => undefined, disabled: false } }));
+  assert.ok(html.includes("<details") && html.includes("נכסים שנמכרו (1)") && html.includes("החלק שלי (50%)") && html.includes("הלוואות שעדיין פתוחות"));
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 4, "only the ONE active asset has actions");
+  const allSold = renderToStaticMarkup(createElement(AssetsSection, { assets: { items: [], summary: assetsSummary, sold: { count: 1, items: [soldA] } } }));
+  assert.ok(allSold.includes("אין נכסים פעילים") && allSold.includes("נכסים שנמכרו (1)"));
+  assert.ok(!renderToStaticMarkup(createElement(AssetsSection, { assets: withSold(0) })).includes("<details"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

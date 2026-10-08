@@ -182,6 +182,8 @@ class AssetFields:
     LOANS           = "Loans"                # link -> Loans
     NEXT_STEP       = "Next Step"            # multilineText — free text, written by the FCC "פעולה הבאה" flow
     NEXT_STEP_OWNER = "Next Step Owner"      # singleSelect (live choices: אליהו / אהרן / אורי / משפטי / —)
+    SALE_DATE       = "Sale Date"            # date (ISO) — added live 08/10/2026; written ONLY by the FCC "נכס נמכר" flow
+    SALE_AMOUNT     = "Sale Amount"          # currency ₪ — FULL (100%) sale price before costs/taxes; my share = amount × Ownership %
 
 
 class LoanFields:

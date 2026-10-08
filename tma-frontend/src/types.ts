@@ -662,8 +662,20 @@ export interface FccAssetItem {
   linked_monthly_payments: number | null;
 }
 
+/** A sold asset, listed apart from the active ones (never part of the active totals). */
+export interface FccSoldAsset {
+  id: string;
+  name: string | null;
+  sale_date: string | null;
+  sale_amount: number | null;       // FULL (100%) sale price
+  ownership_pct: number | null;
+  my_share: number | null;          // price × Ownership %; null when either is unknown (100% is never assumed)
+  linked_loans: { id: string; name: string | null; early_closure_balance: number | null }[];   // stay OPEN after a sale
+}
+
 export interface FccAssets {
   items: FccAssetItem[];
+  sold?: { count: number; items: FccSoldAsset[] };
   summary: {
     count: number;
     total_value: number | null; total_mortgage: number | null; total_equity: number | null; total_my_equity: number | null; total_monthly_income: number | null;
