@@ -38,7 +38,7 @@ export function tabForKey(current: FccTabKey, key: string, rtl: boolean): FccTab
 // ── Contextual composer (one writer engine on the server, one draft slot; each tab only changes its title and chips) ──
 /** A chip only names an intent (+ which kind of record it is about when that record must be chosen first). It never
  *  writes: the server opens the draft (POST /api/fcc/intent/start) and the usual review -> אשר flow follows. */
-export interface ComposerChip { intent: string; label: string; pick?: "goal" | "loan" }
+export interface ComposerChip { intent: string; label: string; pick?: "goal" | "loan" | "asset" }
 export interface ComposerConfig {
   title: string;
   chips: ComposerChip[];
@@ -72,9 +72,13 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
   },
   assets: {
     title: "עדכון נכס",
-    chips: [],
+    chips: [
+      { intent: "asset.update_value", label: "עדכון שווי", pick: "asset" },
+      { intent: "asset.update_mortgage", label: "עדכון משכנתא", pick: "asset" },
+      { intent: "asset.next_step", label: "פעולה הבאה", pick: "asset" },
+    ],
     freeText: false,
-    hint: "עדכון שווי, משכנתא, פעולה הבאה וסימון נכס כנמכר יתווספו בשלבים הבאים.",
+    hint: "בחרו פעולה — המערכת תשאל רק מה שחסר. סימון נכס כנמכר יתווסף בשלב הבא.",
   },
 };
 

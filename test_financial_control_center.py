@@ -2344,3 +2344,126 @@ def test_early_closure_principal_is_the_only_balance_outstanding_balance_is_lega
     assert all("current_balance" not in i for i in view["items"])               # the legacy number is not even exposed
     assert view["summary"]["total_early_closure_balance"] == 50000               # the legacy 90,000 / 999,999 never counted
     assert view["summary"]["weighted_average_interest_rate"] == 6.0              # weighted only by the SSOT balance
+
+
+# ── Contextual writer P3: asset value / mortgage / next step ───────────────────────────────────────────────────────
+def seed_p3():
+    DB["Assets"] = [
+        asset("recAH", "בית שמש", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 5000000, AF.MORTGAGE: 1200000,
+                                     AF.NEXT_STEP: "לבדוק מחיר", AF.NEXT_STEP_OWNER: {"name": "אהרן"}}),
+        asset("recAS", "דירה שנמכרה", **{AF.STATUS: {"name": "נמכר"}, AF.VALUE: 1000000}),
+        asset("recAE", "נכס ריק"),
+        asset("recAX", "נכס של אבי", owner=AVI, **{AF.VALUE: 99999999}),
+    ]
+    DB[Tables.LOANS] = [loan("recL1", **{LF.EARLY_CLOSURE: 100000, LF.RELATED_ASSET: ["recAH"]})]
+
+
+def test_p3_intents_registered_none_is_mark_sold_and_none_is_a_transition():
+    for iid, ent in (("asset.update_value", "fcc_asset_value"), ("asset.update_mortgage", "fcc_asset_mortgage"), ("asset.next_step", "fcc_asset_step")):
+        assert fd.INTENTS[iid]["entity"] == ent and fd.INTENTS[iid]["target_required"] and not fd.INTENTS[iid].get("transition")
+    assert not any("sold" in k for k in fd.INTENTS)                         # P4 is not built yet
+
+
+def test_asset_value_shows_today_asks_then_writes_exactly_one_field():
+    seed_p3()
+    r = intent("asset.update_value", "recAH")
+    assert r.state == "ask" and r.entity == "fcc_asset_value" and "בית שמש" in r.message and "₪5,000,000" in r.message
+    r = say("5400000", value=5400000)
+    assert r.state == "review" and "עדכון שווי נכס" in r.message and "היום: ₪5,000,000" in r.message and "₪5,400,000" in r.message
+    assert r.snapshot is None
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["op"] == "patch" and w["table"] == "Assets" and w["record_id"] == "recAH"
+    assert w["fields"] == {AF.VALUE: 5400000}                               # Equity / Mortgage / Status untouched
+
+
+def test_asset_mortgage_writes_only_its_field_and_says_it_is_not_synced_with_loans():
+    seed_p3()
+    intent("asset.update_mortgage", "recAH")
+    r = say("1100000", mortgage=1100000)
+    assert "לא מסתנכרנת להלוואות" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"] == {AF.MORTGAGE: 1100000}
+    conv.complete_execution(ELIYAHU)
+    DB["Assets"][0]["fields"][AF.MORTGAGE] = 1100000
+    intent("asset.update_mortgage", "recAH")
+    say("0", mortgage=0)                                                    # zero is a valid "no mortgage"
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"][0]["fields"] == {AF.MORTGAGE: 0}
+
+
+def test_asset_next_step_is_free_text_and_the_owner_is_one_of_the_live_choices_only():
+    seed_p3()
+    r = intent("asset.next_step", "recAH")
+    assert r.state == "ask" and "לבדוק מחיר" in r.message and "אהרן" in r.message
+    r = say("לדבר עם המתווך ביום ראשון", step="לדבר עם המתווך ביום ראשון")
+    assert r.state == "review" and "פעולה הבאה בנכס" in r.message and "לדבר עם המתווך ביום ראשון" in r.message and "תוחלף" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך ביום ראשון"}       # owner not chosen -> not written
+    conv.complete_execution(ELIYAHU)
+    intent("asset.next_step", "recAH")
+    say("לשלוח הצעה", step="לשלוח הצעה")
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    say("אחראי אורי", step_owner="אורי")
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"] == {AF.NEXT_STEP: "לשלוח הצעה", AF.NEXT_STEP_OWNER: "אורי"}
+    conv.complete_execution(ELIYAHU)
+    intent("asset.next_step", "recAH")
+    say("משהו", step="משהו")
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    r = say("אחראי דוד", step_owner="דוד")                                   # not a live choice: rejected, nothing stored
+    assert "דוד" not in r.message
+    say("משהו אחר", step="משהו אחר")                                         # a valid edit brings the draft back to review
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert AF.NEXT_STEP_OWNER not in w["fields"]
+
+
+def test_asset_intents_are_owner_scoped_skip_sold_assets_and_need_a_target():
+    seed_p3()
+    for iid in ("asset.update_value", "asset.update_mortgage", "asset.next_step"):
+        assert intent(iid, "recAX").state == "denied"                       # Avi's asset == not found
+        assert intent(iid).state == "clarify"
+        r = intent(iid, "recAS")
+        assert r.state == "info" and "נמכר" in r.message
+    assert intent("asset.update_value", "recLOAN").state == "denied"
+
+
+def test_asset_update_to_the_value_it_already_has_or_same_text_is_not_written_twice():
+    seed_p3()
+    intent("asset.update_value", "recAH"); say("5000000", value=5000000)
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).state == "duplicate"
+    intent("asset.next_step", "recAH"); say("לבדוק מחיר", step=" לבדוק מחיר ")
+    r = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert r.state == "duplicate"                                           # same text (whitespace aside), owner not part of the write -> nothing new
+
+
+def test_asset_cannot_be_retargeted_by_an_edit_and_shares_the_single_draft_slot():
+    seed_p3()
+    intent("asset.update_value", "recAH")
+    say("6000000", value=6000000, record_id="recAX", asset="recAX")
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"][0]["record_id"] == "recAH"
+    seed_p3(); conv.complete_execution(ELIYAHU)
+    intent("asset.update_value", "recAH")
+    assert intent("asset.next_step", "recAH").state == "info"
+
+
+def test_asset_read_model_exposes_next_step_and_owner_as_stored():
+    seed_p3()
+    items = {i["id"]: i for i in service.overview(ELIYAHU, TODAY)["assets"]["items"]}
+    assert items["recAH"]["next_step"] == "לבדוק מחיר" and items["recAH"]["next_step_owner"] == "אהרן"
+    assert items["recAE"]["next_step"] is None and items["recAE"]["next_step_owner"] is None
+
+
+def test_p3_http_asset_next_step_executes_the_frozen_patch_and_the_executor_rechecks_the_owner(monkeypatch):
+    seed_p3()
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
+    monkeypatch.setattr(conv.LlmExtractor, "fill", lambda self, text, awaiting, fields, entity, today: {"step": text} if awaiting == "step" else {})
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/intent/start", json={"intent": "asset.next_step", "entity_id": "recAH"}, headers=H).get_json()["awaiting"] == "step"
+    assert c.post("/api/fcc/write", json={"text": "לדבר עם המתווך", "scope": "assets"}, headers=H).get_json()["state"] == "review"
+    assert sent == []
+    assert c.post("/api/fcc/write", json={"text": "אשר", "scope": "assets"}, headers=H).get_json()["state"] == "executed"
+    assert sent[0]["table"] == "Assets" and sent[0]["record_id"] == "recAH" and sent[0]["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך"}
+    assert "Assets" in approval_actions._TMA_WRITE_ALLOWED_TABLES
+    _, denied = approval_actions._enforce_personal_data_policy("patch", "Assets", "recAX", {AF.VALUE: 1}, ELIYAHU)
+    assert denied is not None

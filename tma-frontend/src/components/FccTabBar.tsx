@@ -27,7 +27,7 @@ export function FccTabBar({ active, onChange }: { active: FccTabKey; onChange: (
   );
 }
 
-export interface ComposerTargets { goals: { id: string; title: string }[]; loans: { id: string; title: string }[] }
+export interface ComposerTargets { goals: { id: string; title: string }[]; loans: { id: string; title: string }[]; assets: { id: string; title: string }[] }
 
 /** ONE writer for the whole screen, dressed per tab (title + chips). The draft/turn state lives in the parent — a single
  *  shared draft slot — so switching tabs never forks it. Chips and card actions only name an intent; every answer,
@@ -50,7 +50,7 @@ export function ContextualComposer({ tab, turn, receipt, error, busy, targets, o
   useEffect(() => { if (turn) setPicking(null); }, [turn]);
 
   const canPick = chipsEnabled(view, busy);
-  const options = picking?.pick === "loan" ? targets.loans : targets.goals;
+  const options = picking?.pick === "loan" ? targets.loans : picking?.pick === "asset" ? targets.assets : targets.goals;
   const active = turn != null || receipt != null || picking != null;     // compact while idle, expanded only for an active draft
   const submit = () => { const value = text.trim(); if (value) { onSend(value); setText(""); } };
   // mobile: a button press blurs the textarea, the keyboard closes and the click is lost — keep the focus
@@ -71,9 +71,9 @@ export function ContextualComposer({ tab, turn, receipt, error, busy, targets, o
         )}
         {picking && (
           <div className="fcc-quick__turn">
-            <p className="fcc-quick__message">{picking.pick === "loan" ? "איזו הלוואה?" : "איזה יעד?"}</p>
+            <p className="fcc-quick__message">{picking.pick === "loan" ? "איזו הלוואה?" : picking.pick === "asset" ? "איזה נכס?" : "איזה יעד?"}</p>
             {options.length === 0 ? (
-              <p className="fcc-goal__note">{picking.pick === "loan" ? "אין הלוואות פעילות." : "אין יעדים פעילים."}</p>
+              <p className="fcc-goal__note">{picking.pick === "loan" ? "אין הלוואות פעילות." : picking.pick === "asset" ? "אין נכסים לעדכון." : "אין יעדים פעילים."}</p>
             ) : (
               <div className="fcc-quick__choices">
                 {options.map((o) => (

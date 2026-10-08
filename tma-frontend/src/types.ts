@@ -652,6 +652,8 @@ export interface FccAssetItem {
   monthly_income: number | null;
   mortgage_balance: number | null;
   ownership_pct: number | null;
+  next_step: string | null;
+  next_step_owner: string | null;
   equity: number | null;
   my_equity: number | null;
   linked_loans: { id: string; name: string | null; loan_type: string | null; early_closure_balance: number | null; monthly_payment: number | null; interest_rate: number | null }[];

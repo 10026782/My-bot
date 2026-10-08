@@ -19,6 +19,7 @@ import re
 from typing import Any, Mapping
 
 from airtable_schema import FinEventFields as EF
+from airtable_schema import AssetFields as AF
 from airtable_schema import LoanFields as LF
 from airtable_schema import FinGoalFields as GF
 from airtable_schema import RecObFields as RF
@@ -36,7 +37,12 @@ FCC_LOAN_CLOSE = "fcc_loan_close"   # closing a loan: Loans.Payment Status = Pai
 FCC_LOAN_BALANCE = "fcc_loan_balance"   # one field of an existing loan: Outstanding Principal for Early Closure (the "יתרה" the screen shows)
 FCC_LOAN_PAYMENT = "fcc_loan_payment"   # one field of an existing loan: Current Monthly Payment
 FCC_LOAN_NEW = "fcc_loan_new"           # a new loan (owner-scoped create)
-FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW)
+FCC_ASSET_VALUE = "fcc_asset_value"        # one field of an existing asset: Current Value
+FCC_ASSET_MORTGAGE = "fcc_asset_mortgage"  # one field of an existing asset: Mortgage Balance (on the asset itself)
+FCC_ASSET_STEP = "fcc_asset_step"          # Next Step (free text) + optional Next Step Owner (live select)
+FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
+                FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP)
+STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
 LOAN_TYPE_STORED = {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"}   # the live Loans."Loan Type" choices
 LOAN_PAID_OFF = "Paid Off"          # existing Loans.Payment Status choice
@@ -54,6 +60,9 @@ INTENTS: dict[str, dict] = {
     "loan.update_balance":       {"tab": "loans", "entity": "fcc_loan_balance", "target": "loan", "target_required": True},
     "loan.update_payment":       {"tab": "loans", "entity": "fcc_loan_payment", "target": "loan", "target_required": True},
     "loan.create":               {"tab": "loans", "entity": "fcc_loan_new"},
+    "asset.update_value":        {"tab": "assets", "entity": "fcc_asset_value", "target": "asset", "target_required": True},
+    "asset.update_mortgage":     {"tab": "assets", "entity": "fcc_asset_mortgage", "target": "asset", "target_required": True},
+    "asset.next_step":           {"tab": "assets", "entity": "fcc_asset_step", "target": "asset", "target_required": True},
 }
 
 SNAPSHOT_TOOL = "fcc_writes"        # snapshot envelope name; executors translate to canonical tools
@@ -145,6 +154,17 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("original", LF.AMOUNT, InputType.CURRENCY, validation="positive"),
         _f("payments_left", LF.PAYMENTS_LEFT, InputType.NUMBER, validation="non_negative_integer"),
     )),
+    # Assets: the asset itself lives in source_context (never editable). Exactly the named field(s) are written.
+    FCC_ASSET_VALUE: EntityContract(FCC_ASSET_VALUE, (
+        _f("value", AF.VALUE, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="non_negative"),
+    )),
+    FCC_ASSET_MORTGAGE: EntityContract(FCC_ASSET_MORTGAGE, (
+        _f("mortgage", AF.MORTGAGE, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="non_negative"),
+    )),
+    FCC_ASSET_STEP: EntityContract(FCC_ASSET_STEP, (
+        _f("step", AF.NEXT_STEP, InputType.TEXT, required=RequiredMode.ALWAYS),
+        _f("step_owner", AF.NEXT_STEP_OWNER, InputType.SELECT, choices=STEP_OWNERS),
+    )),
     FCC_FOLLOWUP: EntityContract(FCC_FOLLOWUP, (
         _f("title", TaskFields.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("goal", EF.GOAL, InputType.LINK),
@@ -161,6 +181,7 @@ LABELS = {
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
     "balance": "יתרה לסגירה מוקדמת", "payment": "החזר חודשי", "loan_type": "סוג", "rate": "ריבית שנתית", "lender": "מלווה",
     "original": "סכום מקורי", "payments_left": "תשלומים שנותרו",
+    "value": "שווי נוכחי", "mortgage": "יתרת משכנתא", "step": "פעולה הבאה", "step_owner": "אחראי",
 }
 LABELS_BY_ENTITY = {FCC_LOAN_NEW: {"name": "שם ההלוואה"}}
 
@@ -174,6 +195,7 @@ VALUE_LABELS = {
     "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
     "scope": {"household": "ביתי", "business": "עסקי", "personal": "אישי"},
     "loan_type": {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"},
+    "step_owner": {o: o for o in STEP_OWNERS},
     "frequency": {"monthly": "חודשי", "quarterly": "רבעוני", "yearly": "שנתי", "custom": "מותאם"},
     "review_status": {"keep": "להשאיר", "reduce": "להקטין", "cancel": "לבטל", "negotiate": "לנהל משא ומתן", "review": "לבדוק"},
     "obligation_type": {"subscription": "מנוי", "standing_order": "הוראת קבע", "service": "שירות",
@@ -192,7 +214,7 @@ def display_value(field: str, value: Any) -> str:
         return VALUE_LABELS[field].get(value, str(value))
     if field == "rate" and isinstance(value, (int, float)):
         return f"{value:g}%"
-    if field in ("target_amount", "amount", "saving", "balance", "payment", "original") and isinstance(value, (int, float)):
+    if field in ("target_amount", "amount", "saving", "balance", "payment", "original", "value", "mortgage") and isinstance(value, (int, float)):
         digits = 2 if round(float(value), 2) != round(float(value)) else 0       # agorot are shown when they exist (what is stored = what is reviewed)
         return f"-₪{abs(value):,.{digits}f}" if value < 0 else f"₪{value:,.{digits}f}"
     if field in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date") \
@@ -224,6 +246,12 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         return f"מה היתרה לסגירה מוקדמת של {goal_title or 'ההלוואה'}?"
     if entity == FCC_LOAN_PAYMENT:
         return f"מה ההחזר החודשי של {goal_title or 'ההלוואה'}?"
+    if entity == FCC_ASSET_VALUE:
+        return f"מה השווי הנוכחי של {goal_title or 'הנכס'}?"
+    if entity == FCC_ASSET_MORTGAGE:
+        return f"מה יתרת המשכנתא של {goal_title or 'הנכס'}? (0 אם אין)"
+    if entity == FCC_ASSET_STEP:
+        return f"מה הפעולה הבאה עבור {goal_title or 'הנכס'}?"
     if entity == FCC_LOAN_NEW:
         return {"name": "איך לקרוא להלוואה? (למשל: בנק הפועלים)", "loan_type": "איזה סוג? פרטית / עסקית / משכנתא",
                 "balance": "מה היתרה לסגירה מוקדמת?", "payment": "מה ההחזר החודשי?",
@@ -252,7 +280,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     head = {FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
             FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה",
-            FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה"}[entity]
+            FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה",
+            FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: "פעולה הבאה בנכס"}[entity]
     lines.append(f"📋 {head}")
     if note:
         lines.append(note)
@@ -260,6 +289,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append(f"• יעד: {goal_title}")
     if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT) and goal_title:
         lines.append(f"• הלוואה: {goal_title}")
+    if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP) and goal_title:
+        lines.append(f"• נכס: {goal_title}")
     for name in order:
         if name == "goal" and entity == FCC_EVENT:
             continue
@@ -274,6 +305,12 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append("יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
     if entity == FCC_LOAN_NEW:
         lines.append("תיווצר הלוואה פעילה בבעלותך.")
+    if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE):
+        lines.append("יתעדכן שדה אחד בלבד; שאר נתוני הנכס לא ייגעו.")
+    if entity == FCC_ASSET_MORTGAGE:
+        lines.append("זו יתרה הרשומה על הנכס עצמו — היא לא מסתנכרנת להלוואות המקושרות ולא נוספת אליהן.")
+    if entity == FCC_ASSET_STEP:
+        lines.append("הפעולה הבאה הקיימת בנכס תוחלף בטקסט החדש.")
     if entity == FCC_OBLIGATION and fields.get("status") == "inactive":
         lines.append("ההתחייבות תסומן כלא פעילה ותצא מהסכום החודשי.")
     if operation == "UPDATE" and changed:
@@ -334,17 +371,35 @@ def loan_close_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source:
     return writes
 
 
-_LOAN_FIELD_UPDATES = {FCC_LOAN_BALANCE: ("balance", LF.EARLY_CLOSURE), FCC_LOAN_PAYMENT: ("payment", LF.MONTHLY_PAYMENT)}
+# entity -> (table, draft field, storage field, audit action): the storage field is fixed by the entity, never by user text
+_FIELD_UPDATES = {
+    FCC_LOAN_BALANCE: (Tables.LOANS, "balance", LF.EARLY_CLOSURE, "fcc_loan_update"),
+    FCC_LOAN_PAYMENT: (Tables.LOANS, "payment", LF.MONTHLY_PAYMENT, "fcc_loan_update"),
+    FCC_ASSET_VALUE: ("Assets", "value", AF.VALUE, "fcc_asset_update"),
+    FCC_ASSET_MORTGAGE: ("Assets", "mortgage", AF.MORTGAGE, "fcc_asset_update"),
+}
 
 
-def loan_field_writes(entity: str, values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
-    """ONE patch, ONE field of the chosen loan (the storage field is fixed by the entity, never by the user's text)."""
-    loan_id = str(source.get("record_id") or "")
-    if not loan_id:
-        raise UnsupportedOperationError("loan update without a loan record")
-    name, field = _LOAN_FIELD_UPDATES[entity]
-    return [{"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": {field: values[name]},
-             "audit_action": "fcc_loan_update", "audit_details": f"{loan_id}:{name}"}]
+def field_update_writes(entity: str, values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """ONE patch, ONE field of the chosen record (loan or asset)."""
+    record_id = str(source.get("record_id") or "")
+    if not record_id:
+        raise UnsupportedOperationError(f"{entity} without a record")
+    table, name, field, audit = _FIELD_UPDATES[entity]
+    return [{"op": "patch", "table": table, "record_id": record_id, "fields": {field: values[name]},
+             "audit_action": audit, "audit_details": f"{record_id}:{name}"}]
+
+
+def asset_step_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """Next Step (free text) and — only when the owner chose one — Next Step Owner, in ONE patch of the chosen asset."""
+    record_id = str(source.get("record_id") or "")
+    if not record_id:
+        raise UnsupportedOperationError("asset next step without an asset record")
+    fields = {AF.NEXT_STEP: str(values["step"]).strip()}
+    if values.get("step_owner") not in (None, ""):
+        fields[AF.NEXT_STEP_OWNER] = values["step_owner"]
+    return [{"op": "patch", "table": "Assets", "record_id": record_id, "fields": fields,
+             "audit_action": "fcc_asset_step", "audit_details": record_id}]
 
 
 def loan_new_write(values: Mapping[str, Any]) -> dict:
@@ -407,8 +462,10 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": [_event_write(values, ctx, raw)]}
         if entity == FCC_LOAN_CLOSE:
             return {"writes": loan_close_writes(values, ctx, writer.source_context)}
-        if entity in _LOAN_FIELD_UPDATES:
-            return {"writes": loan_field_writes(entity, values, writer.source_context)}
+        if entity in _FIELD_UPDATES:
+            return {"writes": field_update_writes(entity, values, writer.source_context)}
+        if entity == FCC_ASSET_STEP:
+            return {"writes": asset_step_writes(values, writer.source_context)}
         if entity == FCC_LOAN_NEW:
             return {"writes": [loan_new_write(values)]}
         if entity == FCC_FOLLOWUP:

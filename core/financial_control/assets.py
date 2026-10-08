@@ -43,6 +43,8 @@ def asset_item(record: dict, loans_by_asset: dict[str, list[dict]]) -> dict:
         "monthly_income": _num(f.get(AF.MONTHLY_INCOME)),
         "mortgage_balance": _num(f.get(AF.MORTGAGE)),
         "ownership_pct": _num(f.get(AF.OWNERSHIP_PCT)),
+        "next_step": (f.get(AF.NEXT_STEP) or "").strip() or None,
+        "next_step_owner": _sel(f.get(AF.NEXT_STEP_OWNER)) or None,
         "equity": _num(f.get(AF.EQUITY)),
         "my_equity": _num(f.get(AF.MY_EQUITY)),
         "linked_loans": [{k: l[k] for k in ("id", "name", "loan_type", "early_closure_balance", "monthly_payment", "interest_rate")}
