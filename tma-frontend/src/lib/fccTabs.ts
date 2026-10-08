@@ -1,5 +1,7 @@
 // Tabs of the Financial Control Center. Pure: no fetching, no storage. The last-used tab is remembered only in this
 // module's memory (i.e. while the app stays open); a fresh open of the app always starts on "התנהלות חודשית".
+import type { FccTurn } from "../types";
+
 export type FccTabKey = "monthly" | "loans" | "assets";
 
 export const FCC_TABS: { key: FccTabKey; label: string }[] = [
@@ -31,4 +33,92 @@ export function tabForKey(current: FccTabKey, key: string, rtl: boolean): FccTab
   if (key === "End") return FCC_TABS[last].key;
   const step = key === "ArrowRight" ? (rtl ? -1 : 1) : key === "ArrowLeft" ? (rtl ? 1 : -1) : 0;
   return step ? FCC_TABS[(i + step + FCC_TABS.length) % FCC_TABS.length].key : null;
+}
+
+// ── Contextual composer (one writer engine on the server, one draft slot; each tab only changes its title and chips) ──
+/** A chip only names an intent (+ which kind of record it is about when that record must be chosen first). It never
+ *  writes: the server opens the draft (POST /api/fcc/intent/start) and the usual review -> אשר flow follows. */
+export interface ComposerChip { intent: string; label: string; pick?: "goal" | "loan" }
+export interface ComposerConfig {
+  title: string;
+  chips: ComposerChip[];
+  freeText: boolean;     // free text may open a NEW draft here (monthly only); an open draft can always be answered
+  hint: string;
+}
+
+export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
+  monthly: {
+    title: "עדכון כספי",
+    chips: [
+      { intent: "monthly.income", label: "+ הכנסה" },
+      { intent: "monthly.household_expense", label: "+ הוצאה ביתית" },
+      { intent: "monthly.direct_cost", label: "+ עלות ישירה" },
+      { intent: "monthly.obligation", label: "+ התחייבות" },
+      { intent: "monthly.goal_update", label: "+ עדכון יעד", pick: "goal" },
+    ],
+    freeText: true,
+    hint: "אפשר גם לכתוב חופשי.",
+  },
+  loans: {
+    title: "עדכון הלוואה",
+    chips: [{ intent: "loan.close", label: "סגירת הלוואה", pick: "loan" }],
+    freeText: false,
+    hint: "עדכון יתרה, שינוי החזר והלוואה חדשה יתווספו בשלב הבא.",
+  },
+  assets: {
+    title: "עדכון נכס",
+    chips: [],
+    freeText: false,
+    hint: "עדכון שווי, משכנתא, פעולה הבאה וסימון נכס כנמכר יתווספו בשלבים הבאים.",
+  },
+};
+
+export const WRITER_WORDS = { confirm: "אשר", edit: "ערוך", cancel: "בטל" } as const;
+
+export interface WriterView {
+  message: string;
+  confirm: string | null;                      // label of the confirm button (also the retry after a partial failure)
+  canEdit: boolean;
+  showInput: boolean;                          // the server asks something / waits for an edit
+  cancelsDraft: boolean;                       // "בטל" must reach the server (an open draft exists)
+  choices: { goal_id: string; title: string }[];   // the server asks WHICH of the caller's own goals
+  dismissOnly: boolean;                        // terminal info: nothing pending, just clear the message
+}
+
+/** What the composer shows for the server's latest turn. Pure: the client renders, the server decides. */
+export function writerView(turn: FccTurn | null, receipt: string | null): WriterView {
+  const base: WriterView = { message: receipt ?? turn?.message ?? "", confirm: null, canEdit: false, showInput: false, cancelsDraft: false, choices: [], dismissOnly: true };
+  if (receipt || !turn) return base;
+  switch (turn.state) {
+    case "review":
+      return { ...base, confirm: "אשר ורשום", canEdit: true, cancelsDraft: true, dismissOnly: false };
+    case "ask":
+    case "unrelated":
+      return { ...base, showInput: true, cancelsDraft: true, dismissOnly: false };
+    case "needs_goal":
+      return { ...base, showInput: true, cancelsDraft: true, dismissOnly: false,
+               choices: (turn.candidates ?? []).map((c) => ({ goal_id: c.goal_id, title: c.title ?? "" })) };
+    case "confirmed":
+      return { ...base, cancelsDraft: true, dismissOnly: false };
+    case "partial_failure":
+      return { ...base, confirm: "נסה שוב", cancelsDraft: true, dismissOnly: false };
+    default:                                   // info / denied / duplicate / clarify / cancelled: nothing pending on the client
+      return base;
+  }
+}
+
+/** The one input box: an open question is always answerable; a NEW free-text draft only where the tab allows it. */
+export function inputVisible(cfg: ComposerConfig, view: WriterView, pickingIntent: boolean): boolean {
+  if (pickingIntent) return false;
+  return view.showInput || (cfg.freeText && view.dismissOnly);
+}
+
+/** Chips are disabled while any draft is open (one shared slot) — the open turn is shown instead. */
+export const chipsEnabled = (view: WriterView, busy: boolean): boolean => !busy && view.dismissOnly;
+
+/** Next writer state after a server turn. ``refresh`` = the writes landed, so the overview must be reloaded. */
+export function nextWriterState(result: FccTurn): { turn: FccTurn | null; receipt: string | null; refresh: boolean } {
+  if (result.state === "executed") return { turn: null, receipt: result.message || "נרשם ✓", refresh: true };
+  if (result.state === "cancelled") return { turn: null, receipt: result.message || null, refresh: false };
+  return { turn: result, receipt: null, refresh: false };
 }

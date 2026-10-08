@@ -36,6 +36,18 @@ FCC_LOAN_CLOSE = "fcc_loan_close"   # closing a loan: Loans.Payment Status = Pai
 FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE)
 LOAN_PAID_OFF = "Paid Off"          # existing Loans.Payment Status choice
 
+# Intent registry (SSOT for the contextual composer chips / card actions). A chip only names an intent (+ optionally the
+# record it is about); it pre-fills `kind` and nothing else, and the SAME BusinessDraft completion flow asks what is missing.
+# target: the kind of record the intent is about ("goal" | "loan" | None). target_required: it cannot start without one.
+INTENTS: dict[str, dict] = {
+    "monthly.income":            {"tab": "monthly", "entity": "fcc_event", "kind": "one_time", "target": "goal", "goal_filter": "income"},
+    "monthly.household_expense": {"tab": "monthly", "entity": "fcc_event", "kind": "household_expense", "target": "goal", "goal_hint": "הוצאות בית"},
+    "monthly.direct_cost":       {"tab": "monthly", "entity": "fcc_event", "kind": "direct_cost", "target": "goal", "goal_filter": "income"},
+    "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
+    "monthly.obligation":        {"tab": "monthly", "entity": "fcc_obligation"},
+    "loan.close":                {"tab": "loans", "entity": "fcc_loan_close", "target": "loan", "target_required": True, "transition": True},
+}
+
 SNAPSHOT_TOOL = "fcc_writes"        # snapshot envelope name; executors translate to canonical tools
 FCC_CHANNEL = "fcc"                 # one draft slot per person, shared by TMA and chat
 SOURCE = "fcc_free_text"

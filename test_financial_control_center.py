@@ -2007,7 +2007,7 @@ def test_close_http_open_then_confirm_executes_the_frozen_writes(monkeypatch):
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
                         lambda action, payload, identity, label: (sent.append((action, payload)) or ("a", {"ok": True}, 200)))
     c = http(monkeypatch, ELIYAHU)
-    opened = c.post("/api/fcc/loans/close", json={"loan_id": "recC1"}, headers=H).get_json()
+    opened = c.post("/api/fcc/intent/start", json={"intent": "loan.close", "entity_id": "recC1"}, headers=H).get_json()
     assert opened["state"] == "review" and sent == []                              # opening writes nothing
     done = c.post("/api/fcc/write", json={"text": "אשר"}, headers=H).get_json()
     assert done["state"] == "executed" and [p["table"] for _, p in sent] == [Tables.LOANS, Tables.FIN_EVENTS]
@@ -2016,10 +2016,10 @@ def test_close_http_open_then_confirm_executes_the_frozen_writes(monkeypatch):
 
 def test_close_http_guards_flag_off_missing_id_foreign_loan(monkeypatch):
     seed_close()
-    assert http(monkeypatch, ELIYAHU, flag=False).post("/api/fcc/loans/close", json={"loan_id": "recC1"}, headers=H).status_code == 404
+    assert http(monkeypatch, ELIYAHU, flag=False).post("/api/fcc/intent/start", json={"intent": "loan.close", "entity_id": "recC1"}, headers=H).status_code == 404
     c = http(monkeypatch, ELIYAHU)
-    assert c.post("/api/fcc/loans/close", json={}, headers=H).status_code == 400
-    r = c.post("/api/fcc/loans/close", json={"loan_id": "recCX"}, headers=H)
+    assert c.post("/api/fcc/intent/start", json={}, headers=H).status_code == 400
+    r = c.post("/api/fcc/intent/start", json={"intent": "loan.close", "entity_id": "recCX"}, headers=H)
     assert r.status_code == 403 and "77777" not in r.get_data(as_text=True)
 
 
@@ -2040,3 +2040,153 @@ def test_close_leaves_the_payoff_engine_and_summary_consistent_after_the_write()
     after = service.overview(ELIYAHU, TODAY)["loans"]
     assert "recC1" not in [i["id"] for i in after["payoff"]["items"]]
     assert after["summary"]["total_active_loans"] == before["summary"]["total_active_loans"] - 1
+
+
+# ── Contextual writer P1: intents (chips / card actions) — one engine, one draft slot, no classifier ───────────────
+def seed_intents():
+    DB[Tables.FIN_GOALS] = [
+        goal("recGI", "משכורת", ELI, 20000, **{GF.CATEGORY: "income"}),
+        goal("recGI2", "פרילנס", ELI, 5000, **{GF.CATEGORY: "income"}),
+        goal("recGH", "הוצאות בית", ELI, 9000, **{GF.CATEGORY: "other"}),
+        goal("recGK", "קרן חירום", ELI, 60000, **{GF.CATEGORY: "emergency_fund", GF.CALC_METHOD: "cumulative"}),
+        goal("recGAV", "של אבי", AVI, 5000, **{GF.CATEGORY: "income"}),
+    ]
+    DB[Tables.FIN_EVENTS] = []
+    DB[Tables.LOANS] = [loan("recC1", **{LF.NAME: "פועלים", LF.EARLY_CLOSURE: 118400})]
+
+
+def intent(iid, entity_id=None, who=ELIYAHU):
+    return conv.start_intent(who, iid, entity_id, today=TODAY)
+
+
+def test_intent_registry_covers_the_p1_monthly_chips_and_loan_close():
+    for iid in ("monthly.income", "monthly.household_expense", "monthly.direct_cost", "monthly.goal_update",
+                "monthly.obligation", "loan.close"):
+        assert iid in fd.INTENTS
+    assert fd.INTENTS["loan.close"]["transition"] is True
+    assert fd.INTENTS["monthly.household_expense"]["kind"] == "household_expense"     # NOT direct_cost
+    assert fd.INTENTS["monthly.direct_cost"]["kind"] == "direct_cost"
+
+
+def test_intent_unknown_is_rejected_and_writes_nothing():
+    seed_intents()
+    assert intent("monthly.nope").state == "clarify"
+    assert intent("").state == "clarify"
+
+
+def test_intent_income_prefills_kind_and_offers_only_own_income_goals():
+    seed_intents()
+    r = intent("monthly.income")
+    assert r.state == "needs_goal" and r.entity == "fcc_event"
+    assert {c["goal_id"] for c in r.candidates} == {"recGI", "recGI2"}            # income goals of the caller only
+    assert r.fields.get("סוג") == "חד-פעמי"                                       # kind pre-filled by the intent
+    assert r.snapshot is None
+
+
+def test_intent_income_full_flow_reviews_then_freezes_one_event():
+    seed_intents()
+    intent("monthly.income", "recGI")
+    r = conv.handle_turn(ELIYAHU, "5000", extractor=Ex(fill={"5000": {"amount": 5000}}), today=TODAY)
+    assert r.state == "review" and "משכורת" in r.message and "₪5,000" in r.message
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert c.state == "confirmed"
+    (w,) = c.snapshot["writes"]
+    assert w["table"] == Tables.FIN_EVENTS and w["fields"][EF.GOAL] == ["recGI"] and w["fields"][EF.KIND] == "one_time"
+
+
+def test_intent_household_expense_is_household_never_direct_cost():
+    seed_intents()
+    r = intent("monthly.household_expense")                  # a unique "הוצאות בית" goal is selected without asking
+    assert r.state == "ask" and r.awaiting == "amount"
+    r = conv.handle_turn(ELIYAHU, "300", extractor=Ex(fill={"300": {"amount": 300}}), today=TODAY)
+    assert r.state == "review" and "הוצאה ביתית" in r.message
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    (w,) = c.snapshot["writes"]
+    assert w["fields"][EF.KIND] == "household_expense" and w["fields"][EF.GOAL] == ["recGH"]
+
+
+def test_intent_direct_cost_prefills_direct_cost_on_an_income_goal():
+    seed_intents()
+    intent("monthly.direct_cost", "recGI2")
+    r = conv.handle_turn(ELIYAHU, "80", extractor=Ex(fill={"80": {"amount": 80}}), today=TODAY)
+    assert r.state == "review" and "הוצאה ישירה" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"][EF.KIND] == "direct_cost" and w["fields"][EF.GOAL] == ["recGI2"]
+
+
+def test_intent_goal_update_needs_the_goal_and_then_asks_what_to_change():
+    seed_intents()
+    assert intent("monthly.goal_update").state == "clarify"                      # no record chosen -> nothing opened
+    r = intent("monthly.goal_update", "recGK")
+    assert r.state == "ask" and r.entity == "fcc_goal"
+    ex = Ex(fill={"סכום 80000": {"target_amount": 80000}})
+    assert conv.handle_turn(ELIYAHU, "סכום 80000", extractor=ex, today=TODAY).state == "review"
+
+
+def test_intent_obligation_opens_an_empty_obligation_draft():
+    seed_intents()
+    r = intent("monthly.obligation")
+    assert r.state == "ask" and r.entity == "fcc_obligation" and r.awaiting == "name"
+
+
+def test_intent_cannot_target_somebody_elses_goal_or_loan():
+    seed_intents()
+    assert intent("monthly.income", "recGAV").state == "denied"                  # Avi's goal == not found
+    assert intent("monthly.goal_update", "recGAV").state == "denied"
+    seed_close()
+    assert intent("loan.close", "recCX").state == "denied"
+
+
+def test_intent_blocks_a_second_open_draft_across_intents():
+    seed_intents()
+    intent("monthly.income", "recGI")
+    r = intent("monthly.household_expense")
+    assert r.state == "info" and "יש עדכון פתוח" in r.message
+
+
+def test_intent_loan_close_is_the_same_flow_as_the_card_button():
+    seed_close()
+    r = intent("loan.close", "recC1")
+    assert r.state == "review" and r.entity == "fcc_loan_close" and r.snapshot is None
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    assert intent("loan.close").state in ("denied", "clarify")                    # needs a loan id
+
+
+def test_two_legitimate_entries_of_the_same_amount_are_not_deduplicated():
+    seed_intents()
+    ex = Ex(fill={"300": {"amount": 300}})
+    keys = []
+    for _ in range(2):
+        intent("monthly.household_expense")
+        conv.handle_turn(ELIYAHU, "300", extractor=ex, today=TODAY)
+        (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+        keys.append(w["fields"][EF.IDEMPOTENCY_KEY])
+        conv.complete_execution(ELIYAHU, "fcc_event")
+    assert keys[0] != keys[1]
+
+
+def test_free_text_cannot_open_a_new_draft_from_the_loans_or_assets_tabs():
+    seed_intents()
+    ex = Ex(classify={"שילמתי 500": {"action": "log_progress", "goal_hint": "משכורת", "amount": 500}})
+    for tab in ("loans", "assets"):
+        r = conv.handle_turn(ELIYAHU, "שילמתי 500", extractor=ex, today=TODAY, scope=tab)
+        assert r.state == "info" and "בכפתורים" in r.message
+    assert ex.calls == []                                                            # classifier never consulted
+    assert conv.handle_turn(ELIYAHU, "שילמתי 500", extractor=ex, today=TODAY, scope="monthly").state != "info"
+
+
+def test_scope_does_not_block_answering_an_open_draft():
+    seed_intents()
+    intent("monthly.income", "recGI")
+    r = conv.handle_turn(ELIYAHU, "700", extractor=Ex(fill={"700": {"amount": 700}}), today=TODAY, scope="loans")
+    assert r.state == "review"
+
+
+def test_intent_start_endpoint_flag_auth_and_validation(monkeypatch):
+    seed_intents()
+    assert http(monkeypatch, ELIYAHU, flag=False).post("/api/fcc/intent/start", json={"intent": "monthly.obligation"}, headers=H).status_code == 404
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/intent/start", json={}, headers=H).status_code == 400
+    r = c.post("/api/fcc/intent/start", json={"intent": "monthly.obligation"}, headers=H)
+    assert r.status_code == 200 and r.get_json()["entity"] == "fcc_obligation"
+    assert c.post("/api/fcc/intent/start", json={"intent": "monthly.income", "entity_id": "recGAV"}, headers=H).status_code in (403, 200)

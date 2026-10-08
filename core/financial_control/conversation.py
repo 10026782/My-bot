@@ -13,6 +13,7 @@ Airtable; after ``confirm`` no extractor/classifier is called again and no field
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
@@ -220,8 +221,11 @@ def has_pending(identity, *, store=None) -> bool:
     return pending_view(identity, store=store) is not None
 
 
+FREE_TEXT_TABS = (None, "monthly")      # free text opens a NEW draft only from the monthly area; other tabs start via intents
+
+
 def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=None, store=None,
-                today: date | None = None) -> TurnResult:
+                today: date | None = None, scope: str | None = None) -> TurnResult:
     today = today or date.today()
     actor = policy.resolve_actor(identity)
     if not actor.resolved:
@@ -246,6 +250,8 @@ def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=No
         return _continue(identity, ids, drafts[0], text, goal_id, extractor, store, today)
     if lower in CONFIRM_WORDS or lower in CANCEL_WORDS or lower in EDIT_WORDS:
         return TurnResult("info", "אין עדכון פתוח כרגע.")
+    if scope not in FREE_TEXT_TABS:
+        return TurnResult("info", "בלשונית הזו הפעולות נבחרות בכפתורים. לכתיבה חופשית עברו ל״התנהלות חודשית״.")
     return _start(identity, actor, ids, text, goal_id, extractor, store, today)
 
 
@@ -257,23 +263,32 @@ def _debt_goal(identity) -> dict | None:
     return active[0] if len(active) == 1 else None
 
 
-def start_loan_close(identity, loan_id: str, *, store=None, today: date | None = None) -> TurnResult:
-    """Structured entry for "I closed this loan" (a button on the loan card — no classifier involved). Opens a
-    draft on the shared FCC slot: amount paid defaults to the stored early-closure balance (shown as inferred,
-    editable), then the usual review -> אשר / ערוך / בטל. Nothing is written here."""
-    today = today or date.today()
+def _open_slot(identity, store, why: str):
+    """Shared preamble of every structured entry: resolved actor, canonical slot key, no other draft open
+    (closed/expired slots are cleared). Returns (store, ids, None) or (None, None, a ready TurnResult)."""
     actor = policy.resolve_actor(identity)
     if not actor.resolved:
-        return TurnResult("denied", policy.UNRESOLVED_MESSAGE)
+        return None, None, TurnResult("denied", policy.UNRESOLVED_MESSAGE)
     store = store or _store()
     ids = _ids(identity, actor)
     if ids is None:
-        return TurnResult("denied", policy.UNRESOLVED_MESSAGE)
+        return None, None, TurnResult("denied", policy.UNRESOLVED_MESSAGE)
     for d in _load_all(store, ids):
         if d.lifecycle_state in _TERMINAL:
             _delete(store, ids, d.entity_type)
         else:
-            return TurnResult("info", "יש עדכון פתוח — לסיים או לבטל אותו לפני סגירת הלוואה.", d.entity_type)
+            return None, None, TurnResult("info", f"יש עדכון פתוח — לסיים או לבטל אותו לפני {why}.", d.entity_type)
+    return store, ids, None
+
+
+def start_loan_close(identity, loan_id: str, *, store=None, today: date | None = None) -> TurnResult:
+    """Structured entry for "I closed this loan" (intent ``loan.close`` — no classifier involved). Opens a
+    draft on the shared FCC slot: amount paid defaults to the stored early-closure balance (shown as inferred,
+    editable), then the usual review -> אשר / ערוך / בטל. Nothing is written here."""
+    today = today or date.today()
+    store, ids, stop = _open_slot(identity, store, "סגירת הלוואה")
+    if stop is not None:
+        return stop
     loan = next((r for r in service.my_loans(identity) if r["id"] == str(loan_id or "")), None)
     if loan is None:                                          # not found == not yours: same answer, no probing
         return TurnResult("denied", policy.DENIED_MESSAGE)
@@ -300,6 +315,73 @@ def start_loan_close(identity, loan_id: str, *, store=None, today: date | None =
     d, _rej = _set_fields(d, fields, strict=False)
     d = replace(d, source_context={**d.source_context, "inferred": inferred})
     return _persist_new(store, ids, d)
+
+
+def _is_income_goal(g: dict) -> bool:
+    return service._category_key((g.get("fields") or {}).get(GF.CATEGORY)) == "income"
+
+
+def start_intent(identity, intent_id: str, entity_id: str | None = None, *, store=None,
+                 today: date | None = None) -> TurnResult:
+    """THE structured entry (POST /api/fcc/intent/start). A chip / card action names an intent and, when it is about
+    one record, that record's id. It opens a draft on the shared FCC slot with only the intent's fixed fields
+    pre-filled; the usual completion flow then asks what is missing -> review -> אשר. Nothing is written here,
+    the classifier is not called, and a record that is not the caller's own is answered exactly like a missing one."""
+    today = today or date.today()
+    spec = fd.INTENTS.get(str(intent_id or ""))
+    if spec is None:
+        return TurnResult("clarify", "הפעולה לא מוכרת.")
+    entity_id = str(entity_id or "").strip() or None
+    if intent_id == "loan.close":
+        return start_loan_close(identity, entity_id or "", store=store, today=today)
+    store, ids, stop = _open_slot(identity, store, "פעולה חדשה")
+    if stop is not None:
+        return stop
+    goals = service.my_goals(identity) if spec.get("target") == "goal" else []
+    chosen = None
+    if entity_id:
+        chosen = next((g for g in goals if g["id"] == entity_id), None)
+        if chosen is None:                                    # not found == not yours
+            return TurnResult("denied", policy.DENIED_MESSAGE)
+    elif spec.get("target_required"):
+        return TurnResult("clarify", "בחרו קודם את הרשומה לעדכון.")
+    entity = spec["entity"]
+    raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"      # unique per draft: a retry of THIS draft is idempotent, a second legitimate entry is not
+
+    if entity == fd.FCC_OBLIGATION:
+        d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today)
+        return _persist_new(store, ids, d)
+
+    if entity == fd.FCC_GOAL:                                 # update of an existing goal: ask what to change
+        original = _goal_original(identity, chosen)
+        d = _new_draft(identity, ids, entity, DraftOperation.UPDATE, fields=dict(original), raw_text=raw, today=today,
+                       extra_ctx={"record_id": chosen["id"], "goal_title": chosen["fields"].get(GF.TITLE, "")},
+                       original=original)
+        if d.lifecycle_state is DraftState.READY_FOR_REVIEW:
+            d = d.begin_edit()
+        return _persist_new(store, ids, d)
+
+    # progress event: kind is fixed by the intent; the goal comes from the card, a unique match, or a choice among OWN goals
+    candidates = goals
+    if spec.get("goal_filter") == "income":
+        candidates = [g for g in goals if _is_income_goal(g)] or goals
+    if chosen is None and spec.get("goal_hint"):
+        state, matches = writer.resolve_goal(spec["goal_hint"], goals)
+        if state == "one":
+            chosen = matches[0]
+        elif matches:
+            candidates = matches
+    if chosen is None and not goals:
+        return TurnResult("clarify", "אין עדיין יעדים — צרו יעד קודם.")
+    fields = {"kind": spec["kind"], "occurred_at": today.isoformat()}
+    extra = {}
+    if chosen is not None:
+        fields["goal"] = chosen["id"]
+        extra["goal_title"] = chosen["fields"].get(GF.TITLE, "")
+    d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
+    d, _rej = _set_fields(d, fields, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
+    return _with_goal_choices(_persist_new(store, ids, d), candidates)
 
 
 def complete_execution(identity, entity: str | None = None, *, store=None) -> None:

@@ -208,10 +208,23 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 
 פעולה אחת בלבד: "סגרתי את ההלוואה". אישור אחד כותב שני דברים, ושום דבר אחר.
 
-- **כניסה:** כפתור "סגרתי את ההלוואה" בכרטיס של הלוואה פעילה → `POST /api/fcc/loans/close {loan_id}` (flag + auth + owner-scope; הלוואה לא קיימת/של אחר = אותה תשובה `denied`). הקריאה פותחת טיוטה ולא כותבת דבר. הכניסה מובנית (בלי classifier/LLM); שפה חופשית לסגירה לא נבנתה.
+- **כניסה:** כפתור "סגרתי את ההלוואה" בכרטיס של הלוואה פעילה → `POST /api/fcc/intent/start {intent:"loan.close", entity_id}` (flag + auth + owner-scope; הלוואה לא קיימת/של אחר = אותה תשובה `denied`). הקריאה פותחת טיוטה ולא כותבת דבר. הכניסה מובנית (בלי classifier/LLM); שפה חופשית לסגירה לא נבנתה.
 - **Diamond, בלי מנגנון חדש:** ישות `fcc_loan_close` על `BusinessDraft` הקיים, באותו slot משותף של ה־FCC (טיוטה אחת לאדם). שדות הניתנים לעריכה: סכום ששולם בפועל (ברירת מחדל = יתרת הסילוק השמורה, מסומן "הוסק"; חסרה יתרה — נשאל, לא מנוחש) ותאריך (ברירת מחדל היום). **איזו הלוואה נסגרת ואיזה יעד חוב** נשמרים ב־source_context ולא ניתנים לעריכה — עריכה לא יכולה להפנות את הסגירה להלוואה אחרת. זרימה: review → אשר / ערוך / בטל דרך `/api/fcc/write` הקיים; תוצר האישור הוא `ConfirmedSnapshot` קפוא שמבוצע כמו שהוא.
 - **מה נכתב (שני writes קפואים, דרך ActionGateway → `tma_fcc_write`):** (1) `Loans.Payment Status = "Paid Off"` על רשומת ההלוואה בלבד — אף שדה יתרה/תשלום/ריבית לא נכתב מחדש; (2) אירוע התקדמות אחד (`one_time`) ביעד החוב הפעיל היחיד של הבעלים עם הסכום ששולם. אין יעד חוב פעיל אחד (אפס או כמה) → נכתב רק הסטטוס, וה־review אומר זאת במפורש. `Active Loan` לא נוגעים בו.
 - **Idempotency:** מפתח האירוע נגזר מההלוואה + יעד + סכום + יום (`close_loan:<record>`), ו־`_already_applied` מדלג על status שכבר `Paid Off` ועל אירוע שכבר קיים. כישלון חלקי נשאר כטיוטה מאושרת — "אשר" שוב ממשיך רק במה שחסר ולא מכפיל. הלוואה שכבר `Paid Off` → `info`, בלי טיוטה.
 - **הרשאות:** `Loans` נוספה ל־`_TMA_WRITE_ALLOWED_TABLES`; הטבלה OWNER_SCOPED ו־`_enforce_personal_data_policy` בודק ברגע הביצוע שהרשומה שייכת לבעלים המבקש (בדוק: patch על הלוואה של אחר נדחה). אין `self_confirm` חדש; אין נתיב כתיבה ישיר.
 - **תצוגה:** סכום עם אגורות מוצג עם אגורות (מה שנבדק = מה שנשמר). הפאנל ב־`FccLoans.tsx` (LoanClosePanel) מציג את ההודעה מהשרת ושולח את המילה הבאה; אחרי ביצוע — קבלה, ללא כפתור אישור, ורענון שקט של ה־overview (בלי מסך טעינה) כך שההלוואה יוצאת מהרשימה, מהסיכומים ומהמנוע.
 - **לא נבנה:** סגירה בשפה חופשית/צ'אט; סגירה חלקית; עדכון יתרה/תשלום; Diamond לנכסים; אירוע תזרים או ביטול התחייבות מקבילה.
+
+
+## Contextual Writer — P1 (08/10/2026)
+
+אותו מנוע `BusinessDraft`/Diamond, draft יחיד משותף, composer הקשרי לכל לשונית. תכנון: `FCC_CONTEXTUAL_WRITER_PLAN_20261008.md`.
+
+- **כניסה מובנית אחת:** `POST /api/fcc/intent/start {intent, entity_id?}` → `conversation.start_intent`. אין כתיבה; הטיוטה נפתחת עם השדות הקבועים של ה־intent בלבד (`kind`, תאריך), והמשך ההשלמה/Review/אישור הוא `/api/fcc/write` הקיים. `POST /api/fcc/loans/close` הוסר (נבלע ב־`loan.close`).
+- **Registry:** `draft.INTENTS` — `monthly.income` (kind=one_time, יעדי הכנסה), `monthly.household_expense` (kind=**household_expense**, יעד "הוצאות בית" אם ייחודי), `monthly.direct_cost` (kind=direct_cost, יעדי הכנסה), `monthly.goal_update` (חובה לבחור יעד), `monthly.obligation`, `loan.close` (transition: Review + אישור נפרד, כמו קודם). `+ הוצאה ביתית` **לא** ממופה ל־`direct_cost`.
+- **Owner scope:** `entity_id` שאינו של הקורא = `denied` (כמו "לא נמצא"); קטלוג בחירת היעד = יעדי הקורא בלבד.
+- **Idempotency:** `raw_text` ייחודי לטיוטה (`intent:<id>#<hex>`) — ניסיון חוזר של אותה טיוטה אידמפוטנטי; שתי הכנסות לגיטימיות באותו סכום באותו יום אינן נחסמות.
+- **Scope:** `/api/fcc/write` מקבל `scope`; בלשוניות `loans`/`assets` טקסט חופשי לא פותח טיוטה חדשה (ה־classifier לא נקרא); מענה לטיוטה פתוחה תמיד אפשרי.
+- **Frontend:** `useFccWriter` (state יחיד) + `ContextualComposer` (ב־`FccTabBar.tsx`) מעל פאנלי הלשוניות; כותרת וצ'יפים לפי לשונית (`COMPOSER` ב־`fccTabs.ts`); `writerView`/`nextWriterState` טהורים. כפתור הסגירה בכרטיס הלוואה רק קורא `loan.close` עם ה־id. `LoanClosePanel` הוסר (כפילות).
+- **לא נבנה (שלבים הבאים):** עדכון יתרה/החזר, הלוואה חדשה (P2), פעולות נכס (P3), נכס נמכר (P4). בלשונית נכסים אין צ'יפים ואין קלט.
