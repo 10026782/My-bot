@@ -84,7 +84,6 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     loan_type = loan_type if loan_type in LOAN_TYPES else None
     asset_id = _first_link(f.get(LF.RELATED_ASSET))
     closure = _num(f.get(LF.EARLY_CLOSURE))
-    balance = _num(f.get(LF.OUTSTANDING))
     monthly = _num(f.get(LF.MONTHLY_PAYMENT))
     rate = _num(f.get(LF.INTEREST_RATE))
     left = _num(f.get(LF.PAYMENTS_LEFT))
@@ -96,8 +95,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     future_cost = round(total_remaining - closure, 2) if total_remaining is not None and closure is not None else None
     if future_cost is not None and future_cost < 0:
         future_cost = None                      # inconsistent inputs: show unknown rather than a negative "cost"
-    basis = closure if closure is not None else balance
-    annual_interest = round(basis * rate / 100.0, 2) if basis is not None and rate is not None else None
+    annual_interest = round(closure * rate / 100.0, 2) if closure is not None and rate is not None else None   # SSOT balance only
 
     missing = [name for name, v in (("early_closure_balance", closure), ("interest_rate", rate),
                                     ("monthly_payment", monthly), ("months_remaining", months)) if v is None]
@@ -109,7 +107,6 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "related_asset": asset_id,
         "related_asset_name": (asset_names or {}).get(asset_id) if asset_id else None,
         "original_amount": _num(f.get(LF.AMOUNT)),
-        "current_balance": balance,
         "early_closure_balance": closure,
         "interest_rate": rate,
         "monthly_payment": monthly,
@@ -164,8 +161,8 @@ def summarize(items: list[dict]) -> dict:
     bal, bal_n = _sum(i["early_closure_balance"] for i in active)
     pay, pay_n = _sum(i["monthly_payment"] for i in active)
     cost, cost_n = _sum(i["estimated_future_cost"] for i in active)
-    weighted = [(i["interest_rate"], i["early_closure_balance"] if i["early_closure_balance"] is not None else i["current_balance"])
-                for i in active if i["interest_rate"] is not None]
+    # SSOT: the early-closure principal is THE balance; Loans."Outstanding Balance" is legacy and never read here
+    weighted = [(i["interest_rate"], i["early_closure_balance"]) for i in active if i["interest_rate"] is not None]
     weighted = [(r, b) for r, b in weighted if b]
     total_b = sum(b for _, b in weighted)
     avg_rate = round(sum(r * b for r, b in weighted) / total_b, 2) if total_b else None

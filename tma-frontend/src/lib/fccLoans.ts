@@ -154,6 +154,8 @@ export function loanGoalModel(loans: FccLoans): LoanGoalModel | null {
 // owner's next word (אשר / ערוך / בטל / an answer).
 
 export const CLOSE_BUTTON = "סגרתי את ההלוואה";
+export const BALANCE_BUTTON = "עדכון יתרה";
+export const PAYMENT_BUTTON = "שינוי החזר";
 
-/** Only an active loan can be closed; the close flow itself runs in the shared contextual writer (intent ``loan.close``). */
+/** Only an active loan can be closed; the flows themselves (``loan.close`` / ``loan.update_balance`` / ``loan.update_payment``) run in the shared contextual writer. */
 export const canClose = (loan: { active: boolean }): boolean => loan.active;

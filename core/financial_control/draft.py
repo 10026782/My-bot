@@ -33,7 +33,12 @@ FCC_EVENT = "fcc_event"
 FCC_FOLLOWUP = "fcc_followup"
 FCC_OBLIGATION = "fcc_obligation"   # Recurring Obligations: a COMMITMENT (never an actual-expense ledger row)
 FCC_LOAN_CLOSE = "fcc_loan_close"   # closing a loan: Loans.Payment Status = Paid Off + one progress event on the debt goal
-FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE)
+FCC_LOAN_BALANCE = "fcc_loan_balance"   # one field of an existing loan: Outstanding Principal for Early Closure (the "יתרה" the screen shows)
+FCC_LOAN_PAYMENT = "fcc_loan_payment"   # one field of an existing loan: Current Monthly Payment
+FCC_LOAN_NEW = "fcc_loan_new"           # a new loan (owner-scoped create)
+FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW)
+LOAN_TYPES = ("private", "business", "mortgage")
+LOAN_TYPE_STORED = {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"}   # the live Loans."Loan Type" choices
 LOAN_PAID_OFF = "Paid Off"          # existing Loans.Payment Status choice
 
 # Intent registry (SSOT for the contextual composer chips / card actions). A chip only names an intent (+ optionally the
@@ -46,6 +51,9 @@ INTENTS: dict[str, dict] = {
     "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
     "monthly.obligation":        {"tab": "monthly", "entity": "fcc_obligation"},
     "loan.close":                {"tab": "loans", "entity": "fcc_loan_close", "target": "loan", "target_required": True, "transition": True},
+    "loan.update_balance":       {"tab": "loans", "entity": "fcc_loan_balance", "target": "loan", "target_required": True},
+    "loan.update_payment":       {"tab": "loans", "entity": "fcc_loan_payment", "target": "loan", "target_required": True},
+    "loan.create":               {"tab": "loans", "entity": "fcc_loan_new"},
 }
 
 SNAPSHOT_TOOL = "fcc_writes"        # snapshot envelope name; executors translate to canonical tools
@@ -119,6 +127,24 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
         _f("note", EF.NOTE, InputType.TEXT),
     )),
+    # One field of an EXISTING loan: the loan itself lives in source_context (never editable), so an edit can change the
+    # value, never WHICH loan is updated. Exactly one field is written — no other loan number is touched.
+    FCC_LOAN_BALANCE: EntityContract(FCC_LOAN_BALANCE, (
+        _f("balance", LF.EARLY_CLOSURE, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="non_negative"),
+    )),
+    FCC_LOAN_PAYMENT: EntityContract(FCC_LOAN_PAYMENT, (
+        _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
+    )),
+    FCC_LOAN_NEW: EntityContract(FCC_LOAN_NEW, (
+        _f("name", LF.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
+        _f("loan_type", LF.LOAN_TYPE, InputType.SELECT, required=RequiredMode.ALWAYS, choices=LOAN_TYPES),
+        _f("balance", LF.EARLY_CLOSURE, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="non_negative"),
+        _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
+        _f("rate", LF.INTEREST_RATE, InputType.PERCENT, required=RequiredMode.ALWAYS),
+        _f("lender", LF.LENDER, InputType.TEXT),
+        _f("original", LF.AMOUNT, InputType.CURRENCY, validation="positive"),
+        _f("payments_left", LF.PAYMENTS_LEFT, InputType.NUMBER, validation="non_negative_integer"),
+    )),
     FCC_FOLLOWUP: EntityContract(FCC_FOLLOWUP, (
         _f("title", TaskFields.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("goal", EF.GOAL, InputType.LINK),
@@ -133,13 +159,21 @@ LABELS = {
     "goal": "יעד", "kind": "סוג", "amount": "סכום", "occurred_at": "תאריך", "note": "הערה", "due_date": "לתאריך",
     "name": "התחייבות", "scope": "שייכות", "frequency": "תדירות", "review_status": "החלטה", "saving": "חיסכון חודשי פוטנציאלי",
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
+    "balance": "יתרה לסגירה מוקדמת", "payment": "החזר חודשי", "loan_type": "סוג", "rate": "ריבית שנתית", "lender": "מלווה",
+    "original": "סכום מקורי", "payments_left": "תשלומים שנותרו",
 }
+LABELS_BY_ENTITY = {FCC_LOAN_NEW: {"name": "שם ההלוואה"}}
+
+
+def label(entity: str, field: str) -> str:
+    return LABELS_BY_ENTITY.get(entity, {}).get(field) or LABELS.get(field, field)
 VALUE_LABELS = {
     "category": {"income": "הכנסה", "savings": "חיסכון חודשי", "emergency_fund": "קרן חירום", "debt": "חוב", "other": "אחר"},
     "period_type": {"monthly": "חודשי", "weekly": "שבועי", "custom": "מותאם"},
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
     "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
     "scope": {"household": "ביתי", "business": "עסקי", "personal": "אישי"},
+    "loan_type": {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"},
     "frequency": {"monthly": "חודשי", "quarterly": "רבעוני", "yearly": "שנתי", "custom": "מותאם"},
     "review_status": {"keep": "להשאיר", "reduce": "להקטין", "cancel": "לבטל", "negotiate": "לנהל משא ומתן", "review": "לבדוק"},
     "obligation_type": {"subscription": "מנוי", "standing_order": "הוראת קבע", "service": "שירות",
@@ -156,7 +190,9 @@ ANSWER_VOCAB["category"]["חיסכון"] = "savings"
 def display_value(field: str, value: Any) -> str:
     if field in VALUE_LABELS:
         return VALUE_LABELS[field].get(value, str(value))
-    if field in ("target_amount", "amount", "saving") and isinstance(value, (int, float)):
+    if field == "rate" and isinstance(value, (int, float)):
+        return f"{value:g}%"
+    if field in ("target_amount", "amount", "saving", "balance", "payment", "original") and isinstance(value, (int, float)):
         digits = 2 if round(float(value), 2) != round(float(value)) else 0       # agorot are shown when they exist (what is stored = what is reviewed)
         return f"-₪{abs(value):,.{digits}f}" if value < 0 else f"₪{value:,.{digits}f}"
     if field in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date") \
@@ -184,6 +220,14 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         return f"עד מתי אתה רוצה להגיע{goal}?"
     if entity == FCC_LOAN_CLOSE and field == "amount":
         return f"כמה שילמת בפועל לסגירת {goal_title or 'ההלוואה'}?"
+    if entity == FCC_LOAN_BALANCE:
+        return f"מה היתרה לסגירה מוקדמת של {goal_title or 'ההלוואה'}?"
+    if entity == FCC_LOAN_PAYMENT:
+        return f"מה ההחזר החודשי של {goal_title or 'ההלוואה'}?"
+    if entity == FCC_LOAN_NEW:
+        return {"name": "איך לקרוא להלוואה? (למשל: בנק הפועלים)", "loan_type": "איזה סוג? פרטית / עסקית / משכנתא",
+                "balance": "מה היתרה לסגירה מוקדמת?", "payment": "מה ההחזר החודשי?",
+                "rate": "מה הריבית השנתית (באחוזים)?"}.get(field, f"מה {label(entity, field)}?")
     if entity == FCC_OBLIGATION:
         if field == "name":
             return "איך לקרוא להתחייבות? (למשל: נטפליקס)"
@@ -207,13 +251,14 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     lines: list[str] = []
     head = {FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
-            FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה"}[entity]
+            FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה",
+            FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה"}[entity]
     lines.append(f"📋 {head}")
     if note:
         lines.append(note)
     if entity == FCC_EVENT and goal_title:
         lines.append(f"• יעד: {goal_title}")
-    if entity == FCC_LOAN_CLOSE and goal_title:
+    if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT) and goal_title:
         lines.append(f"• הלוואה: {goal_title}")
     for name in order:
         if name == "goal" and entity == FCC_EVENT:
@@ -222,9 +267,13 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         if value in (None, ""):
             continue
         mark = " (הוסק)" if name in inferred else ""
-        lines.append(f"• {LABELS.get(name, name)}: {display_value(name, value)}{mark}")
+        lines.append(f"• {label(entity, name)}: {display_value(name, value)}{mark}")
     if entity == FCC_LOAN_CLOSE:
         lines.append(f"ההלוואה תסומן {LOAN_PAID_OFF} ותצא מהחובות הפעילים.")
+    if entity in (FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT):
+        lines.append("יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
+    if entity == FCC_LOAN_NEW:
+        lines.append("תיווצר הלוואה פעילה בבעלותך.")
     if entity == FCC_OBLIGATION and fields.get("status") == "inactive":
         lines.append("ההתחייבות תסומן כלא פעילה ותצא מהסכום החודשי.")
     if operation == "UPDATE" and changed:
@@ -285,6 +334,30 @@ def loan_close_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source:
     return writes
 
 
+_LOAN_FIELD_UPDATES = {FCC_LOAN_BALANCE: ("balance", LF.EARLY_CLOSURE), FCC_LOAN_PAYMENT: ("payment", LF.MONTHLY_PAYMENT)}
+
+
+def loan_field_writes(entity: str, values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """ONE patch, ONE field of the chosen loan (the storage field is fixed by the entity, never by the user's text)."""
+    loan_id = str(source.get("record_id") or "")
+    if not loan_id:
+        raise UnsupportedOperationError("loan update without a loan record")
+    name, field = _LOAN_FIELD_UPDATES[entity]
+    return [{"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": {field: values[name]},
+             "audit_action": "fcc_loan_update", "audit_details": f"{loan_id}:{name}"}]
+
+
+def loan_new_write(values: Mapping[str, Any]) -> dict:
+    fields: dict[str, Any] = {LF.ACTIVE: True}
+    for name, spec in (("name", LF.NAME), ("balance", LF.EARLY_CLOSURE), ("payment", LF.MONTHLY_PAYMENT), ("rate", LF.INTEREST_RATE),
+                       ("lender", LF.LENDER), ("original", LF.AMOUNT), ("payments_left", LF.PAYMENTS_LEFT)):
+        if values.get(name) not in (None, ""):
+            fields[spec] = values[name]
+    fields[LF.LOAN_TYPE] = LOAN_TYPE_STORED[values["loan_type"]]
+    return {"op": "post", "table": Tables.LOANS, "fields": fields,
+            "audit_action": "fcc_loan_create", "audit_details": str(values.get("name", ""))[:80]}
+
+
 _OB_FIELDS = (("status", RF.ACTIVE), ("name", RF.NAME), ("amount", RF.AMOUNT), ("scope", RF.SCOPE), ("frequency", RF.FREQUENCY),
               ("review_status", RF.REVIEW_STATUS), ("saving", RF.POTENTIAL_SAVING), ("obligation_type", RF.TYPE),
               ("essentiality", RF.ESSENTIALITY), ("vendor", RF.VENDOR), ("next_charge_date", RF.NEXT_CHARGE))
@@ -334,6 +407,10 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": [_event_write(values, ctx, raw)]}
         if entity == FCC_LOAN_CLOSE:
             return {"writes": loan_close_writes(values, ctx, writer.source_context)}
+        if entity in _LOAN_FIELD_UPDATES:
+            return {"writes": loan_field_writes(entity, values, writer.source_context)}
+        if entity == FCC_LOAN_NEW:
+            return {"writes": [loan_new_write(values)]}
         if entity == FCC_FOLLOWUP:
             tag = f"[FCC:{values.get('goal') or 'none'}]"
             fields = {TaskFields.NAME: values["title"], TaskFields.STATUS: "ממתין",

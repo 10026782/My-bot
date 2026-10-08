@@ -104,13 +104,14 @@ test("chips are intents only: no chip carries a write, a field name or a kind; t
     assert.ok(/^(monthly|loan)\.[a-z_]+$/.test(c.intent), c.intent);
     assert.ok(Object.keys(c).every((k) => ["intent", "label", "pick"].includes(k)));
   }
-  assert.equal(COMPOSER.loans.chips[0].intent, "loan.close"); assert.equal(COMPOSER.loans.chips[0].pick, "loan");
+  assert.equal(COMPOSER.loans.chips.map((c) => c.intent).join(), "loan.update_balance,loan.update_payment,loan.create,loan.close");
+  for (const c of COMPOSER.loans.chips) assert.equal(c.pick, c.intent === "loan.create" ? undefined : "loan", c.intent);
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.goal_update")?.pick, "goal");
 });
 
-test("later-phase actions are NOT offered yet (new loan, balance, sold, ...)", () => {
+test("later-phase actions are NOT offered yet (asset actions, mark sold)", () => {
   const all = FCC_TABS.flatMap((t) => COMPOSER[t.key].chips.map((c) => c.intent)).join();
-  for (const later of ["loan.create", "loan.update", "asset", "sold"]) assert.ok(!all.includes(later), later);
+  for (const later of ["asset", "sold"]) assert.ok(!all.includes(later), later);
   assert.equal(COMPOSER.assets.chips.length, 0);
 });
 
@@ -152,12 +153,12 @@ test("nextWriterState: executed -> receipt + refresh; cancelled -> clears; anyth
   assert.equal(WRITER_WORDS.confirm, "אשר"); assert.equal(WRITER_WORDS.edit, "ערוך"); assert.equal(WRITER_WORDS.cancel, "בטל");
 });
 
-test("markup: idle monthly shows 5 chips + one input; loans shows the close chip and NO input; assets shows neither", () => {
+test("markup: idle monthly shows 5 chips + one input; loans shows its 4 chips and NO input; assets shows neither", () => {
   const m = composer("monthly");
   assert.equal((m.match(/class="fcc-chip /g) || []).length, 5); assert.equal((m.match(/<textarea/g) || []).length, 1);
   assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד"));
   const l = composer("loans");
-  assert.equal((l.match(/class="fcc-chip /g) || []).length, 1); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה"));
+  assert.equal((l.match(/class="fcc-chip /g) || []).length, 4); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה") && l.includes("הלוואה חדשה"));
   const a = composer("assets");
   assert.ok(!a.includes("<textarea") && !a.includes("fcc-chip ") && a.includes("עדכון נכס"));
 });

@@ -3133,6 +3133,7 @@
 }
 .fcc-chip--on { background: var(--boss-color-accent-readable); border-color: var(--boss-color-accent-readable); color: var(--boss-color-surface); font-weight: 600; }
 .fcc-chip:disabled { opacity: 0.5; cursor: default; }
+.fcc-loan__actions { display: flex; flex-wrap: wrap; gap: var(--boss-space-2); margin-block-start: 8px; }
 .fcc-loans-goal { display: grid; gap: var(--boss-space-2); }
 .fcc-loans-goal__top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--boss-space-2); }
 .fcc-loans-goal__title { margin: 0; font-size: 14px; font-weight: 650; }
@@ -3225,6 +3226,6 @@
 [role="tabpanel"][hidden] { display: none; }
 
 /* Close-loan flow (loans tab) */
-.fcc-loan__closebtn { margin-block-start: 8px; inline-size: 100%; }
+.fcc-loan__actionbtn, .fcc-loan__closebtn { flex: 1 1 auto; }
 .fcc-loan__close { margin-block: 8px; }
 .fcc-loan__close .fcc-quick__message { white-space: pre-wrap; }

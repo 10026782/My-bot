@@ -542,7 +542,6 @@ export interface FccLoan {
   related_asset: string | null;
   related_asset_name: string | null;
   original_amount: number | null;
-  current_balance: number | null;
   early_closure_balance: number | null;
   interest_rate: number | null;
   monthly_payment: number | null;

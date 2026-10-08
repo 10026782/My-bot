@@ -212,7 +212,7 @@ export function FinancialControlCenter({ onBack }: Props) {
   const panels: Record<FccTabKey, React.ReactNode> = {
     monthly,
     loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario}
-                                                closeEntry={{ onClose: (id) => void writer.start("loan.close", id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
+                                                actions={{ onAction: (intent, id) => void writer.start(intent, id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
     assets: data.assets ? <AssetsSection assets={data.assets} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
   };
   return shell(

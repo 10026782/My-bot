@@ -192,7 +192,7 @@ class LoanFields:
     START_DATE      = "Start Date"
     END_DATE        = "End Date"
     PAYMENT_SCHED   = "Payment Schedule"
-    OUTSTANDING     = "Outstanding Balance"
+    OUTSTANDING     = "Outstanding Balance"      # LEGACY: not used by the FCC (SSOT = EARLY_CLOSURE); no automatic sync
     NEXT_PAYMENT    = "Next Payment Due"
     STATUS          = "Payment Status"  # Current|Due|Overdue|Paid Off
     NOTES           = "Notes"
