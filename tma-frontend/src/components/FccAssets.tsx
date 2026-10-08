@@ -5,7 +5,19 @@ import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
 
-export function AssetsSection({ assets }: { assets: FccAssets }) {
+/** Card actions run in the shared contextual composer: a button only names the intent + the asset. */
+export interface AssetActions {
+  onAction: (intent: string, assetId: string) => void;
+  disabled: boolean;          // a draft is already open in the shared writer (one slot per person)
+}
+
+export const ASSET_ACTIONS = [
+  { intent: "asset.update_value", label: "עדכון שווי" },
+  { intent: "asset.update_mortgage", label: "עדכון משכנתא" },
+  { intent: "asset.next_step", label: "פעולה הבאה" },
+] as const;
+
+export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?: AssetActions }) {
   if (assets.items.length === 0) {
     return <ScreenState state="empty" title="אין נכסים" message="הנכסים נרשמים בטבלת Assets." />;
   }
@@ -41,11 +53,20 @@ export function AssetsSection({ assets }: { assets: FccAssets }) {
                 <dl className="fcc-pay__figures">
                   {m.rows.map((r) => <div key={r.label}><dt>{r.label}</dt><dd className={r.value === UNKNOWN ? "fcc-unknown" : undefined}>{r.value}</dd></div>)}
                 </dl>
+                {m.nextStep && <p className="fcc-asset__step"><strong>פעולה הבאה:</strong> {m.nextStep}</p>}
                 {m.linkedLoans.length > 0 && (
                   <div className="fcc-asset__loans">
                     <p className="fcc-loan__meta"><strong>הלוואות מקושרות</strong></p>
                     {m.linkedLoans.map((l) => <p key={l.id} className="fcc-loan__meta">{l.text}</p>)}
                     {m.linkedDebtLine && <p className="fcc-pay__saving">{m.linkedDebtLine}</p>}
+                  </div>
+                )}
+                {actions && m.actionable && (
+                  <div className="fcc-loan__actions">
+                    {ASSET_ACTIONS.map((a) => (
+                      <button key={a.intent} type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__actionbtn"
+                              disabled={actions.disabled} onClick={() => actions.onAction(a.intent, m.id)}>{a.label}</button>
+                    ))}
                   </div>
                 )}
               </article>

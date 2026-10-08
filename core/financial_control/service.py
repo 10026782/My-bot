@@ -296,6 +296,11 @@ def my_loans(identity) -> list[dict]:
     return policy.filter_records(Tables.LOANS, _read(Tables.LOANS), identity)
 
 
+def my_assets(identity) -> list[dict]:
+    """The caller's own Assets rows (owner-scoped; a denied identity propagates)."""
+    return policy.filter_records("Assets", _read("Assets"), identity)
+
+
 def loan_scenarios(identity, budget: float, today: date | None = None) -> dict:
     """Early-payoff budget simulation over the caller's own active loans. Pure computation: no write, no execution."""
     records = policy.filter_records(Tables.LOANS, _read(Tables.LOANS), identity)

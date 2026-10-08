@@ -86,7 +86,7 @@ test("only the selected tab is in the Tab order; every tab points at an existing
 
 // ── Contextual composer ──────────────────────────────────────────────────────────────────────────────────────────────
 const turn = (state: FccTurn["state"], message = "m", extra: Partial<FccTurn> = {}): FccTurn => ({ state, message, ...extra });
-const targets: ComposerTargets = { goals: [{ id: "g1", title: "משכורת" }], loans: [{ id: "recL1", title: "פועלים" }] };
+const targets: ComposerTargets = { goals: [{ id: "g1", title: "משכורת" }], loans: [{ id: "recL1", title: "פועלים" }], assets: [{ id: "recA1", title: "בית שמש" }] };
 const noop = () => undefined;
 const composer = (tab: FccTabKey, t: FccTurn | null = null, receipt: string | null = null, busy = false) =>
   renderToStaticMarkup(createElement(ContextualComposer, { tab, turn: t, receipt, error: null, busy, targets, onStart: noop, onSend: noop, onDismiss: noop }));
@@ -101,7 +101,7 @@ test("each tab has its own title; the monthly chips are income / household expen
 
 test("chips are intents only: no chip carries a write, a field name or a kind; targets are chosen, never typed", () => {
   for (const tab of FCC_TABS) for (const c of COMPOSER[tab.key].chips) {
-    assert.ok(/^(monthly|loan)\.[a-z_]+$/.test(c.intent), c.intent);
+    assert.ok(/^(monthly|loan|asset)\.[a-z_]+$/.test(c.intent), c.intent);
     assert.ok(Object.keys(c).every((k) => ["intent", "label", "pick"].includes(k)));
   }
   assert.equal(COMPOSER.loans.chips.map((c) => c.intent).join(), "loan.update_balance,loan.update_payment,loan.create,loan.close");
@@ -109,10 +109,11 @@ test("chips are intents only: no chip carries a write, a field name or a kind; t
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.goal_update")?.pick, "goal");
 });
 
-test("later-phase actions are NOT offered yet (asset actions, mark sold)", () => {
+test("assets chips are the P3 trio, all choose an asset; mark-sold is NOT offered yet (P4)", () => {
+  assert.equal(COMPOSER.assets.chips.map((c) => c.intent).join(), "asset.update_value,asset.update_mortgage,asset.next_step");
+  for (const c of COMPOSER.assets.chips) assert.equal(c.pick, "asset");
   const all = FCC_TABS.flatMap((t) => COMPOSER[t.key].chips.map((c) => c.intent)).join();
-  for (const later of ["asset", "sold"]) assert.ok(!all.includes(later), later);
-  assert.equal(COMPOSER.assets.chips.length, 0);
+  assert.ok(!all.includes("sold"));
 });
 
 test("free text may open a NEW draft only on the monthly tab", () => {
@@ -153,14 +154,15 @@ test("nextWriterState: executed -> receipt + refresh; cancelled -> clears; anyth
   assert.equal(WRITER_WORDS.confirm, "אשר"); assert.equal(WRITER_WORDS.edit, "ערוך"); assert.equal(WRITER_WORDS.cancel, "בטל");
 });
 
-test("markup: idle monthly shows 5 chips + one input; loans shows its 4 chips and NO input; assets shows neither", () => {
+test("markup: idle monthly shows 5 chips + one input; loans shows its 4 chips and NO input; assets shows its 3 chips and NO input", () => {
   const m = composer("monthly");
   assert.equal((m.match(/class="fcc-chip /g) || []).length, 5); assert.equal((m.match(/<textarea/g) || []).length, 1);
   assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד"));
   const l = composer("loans");
   assert.equal((l.match(/class="fcc-chip /g) || []).length, 4); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה") && l.includes("הלוואה חדשה"));
   const a = composer("assets");
-  assert.ok(!a.includes("<textarea") && !a.includes("fcc-chip ") && a.includes("עדכון נכס"));
+  assert.equal((a.match(/class="fcc-chip /g) || []).length, 3);
+  assert.ok(!a.includes("<textarea") && a.includes("עדכון נכס") && a.includes("עדכון שווי") && a.includes("עדכון משכנתא") && a.includes("פעולה הבאה"));
 });
 
 test("markup: a review shows the server's text with confirm/edit/cancel and no input; chips are disabled", () => {

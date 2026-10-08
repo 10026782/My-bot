@@ -52,7 +52,7 @@ _FILL_SYSTEM = (
     "מתוך: title, target_amount (מספר), category (income|savings|emergency_fund|debt|other), "
     "period_type (monthly|weekly|custom), calc_method (period_sum|cumulative|recurring_level), "
     "end_date, start_date, occurred_at (YYYY-MM-DD; תאריך יחסי כמו ״סוף השנה״/״סוף יוני״ חשב לפי today), "
-    "amount (מספר), kind (one_time|monthly_recurring|direct_cost|household_expense|target_change), note, name (שם התחייבות), scope (household|business|personal), frequency (monthly|quarterly|yearly|custom), review_status (keep|reduce|cancel|negotiate|review), saving (מספר), vendor, next_charge_date, balance (יתרה לסגירה מוקדמת, מספר), payment (החזר חודשי, מספר), rate (ריבית שנתית באחוזים, מספר), loan_type (private|business|mortgage), lender, original (סכום הלוואה מקורי, מספר), payments_left (מספר שלם). "
+    "amount (מספר), kind (one_time|monthly_recurring|direct_cost|household_expense|target_change), note, name (שם התחייבות), scope (household|business|personal), frequency (monthly|quarterly|yearly|custom), review_status (keep|reduce|cancel|negotiate|review), saving (מספר), vendor, next_charge_date, balance (יתרה לסגירה מוקדמת, מספר), payment (החזר חודשי, מספר), rate (ריבית שנתית באחוזים, מספר), loan_type (private|business|mortgage), lender, original (סכום הלוואה מקורי, מספר), payments_left (מספר שלם), value (שווי נוכחי של נכס, מספר), mortgage (יתרת משכנתא בנכס, מספר), step (פעולה הבאה בנכס, טקסט חופשי כפי שנאמר), step_owner (אליהו|אהרן|אורי|משפטי). "
     "כלול רק מה שנאמר במפורש; אל תמציא ואל תנחש. אם ההודעה היא תשובה לשדה ב-awaiting, מלא אותו. "
     "בעריכה (״ערוך סכום ל-80000״) החזר רק את השדה שהשתנה. "
     "אם ההודעה אינה קשורה לשאלה או לעריכה (למשל שאלה על לידים) — החזר fields ריק. "

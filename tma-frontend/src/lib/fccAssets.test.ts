@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AssetsSection } from "../components/FccAssets";
 import { UNKNOWN } from "./fccLoans";
-import { UNTYPED, assetCardModel, assetsHeaderCards, debtLines } from "./fccAssets";
+import { ASSET_GONE, UNTYPED, assetCardModel, assetsHeaderCards, debtLines } from "./fccAssets";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -18,7 +18,7 @@ function test(name: string, fn: () => void) {
 }
 
 const mk = (o: Partial<FccAssetItem>): FccAssetItem => ({ id: "x", name: "x", asset_type: null, status: null, current_value: null, monthly_income: null,
-  mortgage_balance: null, ownership_pct: null, equity: null, my_equity: null, linked_loans: [], linked_debt: null, linked_debt_known: 0, linked_monthly_payments: null, ...o });
+  mortgage_balance: null, ownership_pct: null, equity: null, my_equity: null, next_step: null, next_step_owner: null, linked_loans: [], linked_debt: null, linked_debt_known: 0, linked_monthly_payments: null, ...o });
 
 const house = mk({ id: "h", name: "בית", asset_type: "Residential", status: "פעיל", current_value: 5000000, mortgage_balance: 1200000, equity: 3800000, my_equity: 3800000,
   ownership_pct: 100, monthly_income: 0, linked_loans: [{ id: "l1", name: "בנק", loan_type: "משכנתא", early_closure_balance: 100000, monthly_payment: 2000, interest_rate: 6 }],
@@ -72,6 +72,38 @@ test("render smoke: read-only tab (no buttons/inputs), cards, debt block", () =>
 test("empty state when there are no assets", () => {
   const html = renderToStaticMarkup(createElement(AssetsSection, { assets: { ...assets, items: [] } }));
   assert.ok(html.includes("אין נכסים"));
+});
+
+const withStep = mk({ id: "s", name: "בית שמש", status: "פעיל", next_step: "לדבר עם המתווך ביום ראשון", next_step_owner: "אהרן" });
+const sold = mk({ id: "o", name: "נמכר", status: "נמכר" });
+
+test("next step is shown as stored with its owner; the '—' owner and a missing step render nothing extra", () => {
+  assert.equal(assetCardModel(withStep).nextStep, "לדבר עם המתווך ביום ראשון · אחראי: אהרן");
+  assert.equal(assetCardModel(mk({ next_step: "משהו", next_step_owner: "—" })).nextStep, "משהו");
+  assert.equal(assetCardModel(empty).nextStep, null);
+});
+
+test("sold / inactive assets are not actionable; live statuses are", () => {
+  assert.ok(ASSET_GONE.includes("נמכר") && ASSET_GONE.includes("לא פעיל"));
+  assert.ok(assetCardModel(withStep).actionable && assetCardModel(empty).actionable && !assetCardModel(sold).actionable);
+});
+
+const withActions = (disabled: boolean, onAction: (i: string, id: string) => void = () => undefined) =>
+  renderToStaticMarkup(createElement(AssetsSection, { assets: { items: [withStep, sold], summary: assetsSummary }, actions: { onAction, disabled } }));
+const assetsSummary = { count: 2, total_value: null, total_mortgage: null, total_equity: null, total_my_equity: null, total_monthly_income: null,
+  coverage: { value: 0, mortgage: 0, equity: 0, my_equity: 0, monthly_income: 0 }, linked_loans_count: 0, linked_loans_debt: null, unlinked_loans_count: 0, unlinked_loans_debt: null };
+
+test("asset cards: value / mortgage / next-step buttons on a live asset only; next step line rendered; no input", () => {
+  const html = withActions(false);
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 3);
+  assert.ok(html.includes("עדכון שווי") && html.includes("עדכון משכנתא") && html.includes("פעולה הבאה") && html.includes("לדבר עם המתווך ביום ראשון"));
+  assert.ok(!html.includes("<textarea"));
+});
+
+test("while the shared writer holds a draft every asset action is disabled; without actions no buttons render", () => {
+  const locked = withActions(true);
+  assert.equal((locked.match(/fcc-loan__actionbtn[^>]*disabled=""|disabled=""[^>]*fcc-loan__actionbtn/g) || []).length, 3);
+  assert.ok(!renderToStaticMarkup(createElement(AssetsSection, { assets: { items: [withStep], summary: assetsSummary } })).includes("fcc-loan__actions"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

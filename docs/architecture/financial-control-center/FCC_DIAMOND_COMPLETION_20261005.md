@@ -243,3 +243,16 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **לא נבנה:** עדכון `Outstanding Balance`/ריבית/תאריכים של הלוואה קיימת, קישור נכס בהלוואה חדשה, `Monthly Due Day`.
 
 **החלטת SSOT ליתרה (08/10/2026, אושרה):** `Outstanding Principal for Early Closure` הוא היתרה הקנונית של ה־FCC (סילוק, חוב נוכחי, ריבית משוקללת, עלות ריבית שנתית). `Outstanding Balance` = legacy: ה־FCC לא קורא ולא כותב אותו, אין סנכרון אוטומטי, ואין fallback אליו — יתרה חסרה מוצגת "לא הוגדר". הוסרו: `current_balance` מה־payload ומה־type, ושני ה־fallback ב־`loans.py` (ממוצע ריבית משוקלל, עלות ריבית שנתית). נעילה בטסט: `test_early_closure_principal_is_the_only_balance_...`.
+
+
+## Contextual Writer — P3: נכסים (08/10/2026)
+
+אותו `POST /api/fcc/intent/start` / `BusinessDraft` / draft משותף. ללא מסלול כתיבה חדש (`Assets` כבר ברשימה המורשית; בדיקת בעלות ברשומה בביצוע). סכמה חיה נקראה לקריאה בלבד: `Assets.Next Step` = multilineText; `Next Step Owner` = select (אליהו / אהרן / אורי / משפטי / —); `Status` כולל "נמכר" ו"לא פעיל".
+
+- `asset.update_value` → `fcc_asset_value`: patch שדה אחד — `Current Value` (≥0). `Equity`/`My Equity` הם formula ולא נכתבים.
+- `asset.update_mortgage` → `fcc_asset_mortgage`: patch שדה אחד — `Mortgage Balance` (≥0; 0 = אין). ה־Review אומר במפורש שהיתרה על הנכס **לא מסתנכרנת** להלוואות המקושרות ולא נוספת אליהן.
+- `asset.next_step` → `fcc_asset_step`: patch אחד של `Next Step` (טקסט חופשי; מחליף את הקיים — ה־Review מציג "היום: …") ו־`Next Step Owner` **רק אם נבחר** ערך מהרשימה החיה (ערך אחר נדחה; אין ערכים מומצאים).
+- הנכס נבחר לפי id בלבד (כרטיס / בורר), נכס של אחר = `denied`, נכס עם סטטוס נמכר / לא פעיל = `info` (אין מה לעדכן). הנכס היעד ב־`source_context` ולא ניתן לעריכה. עדכון לערך/טקסט שכבר שמור = `duplicate`.
+- קריאה: כרטיס נכס מציג את `Next Step` ואת האחראי כפי שנשמרו (`next_step`, `next_step_owner` ב־payload).
+- UI: צ'יפים בלשונית נכסים `עדכון שווי · עדכון משכנתא · פעולה הבאה` (עם בורר נכס); בכרטיס נכס פעיל אותם שלושה כפתורים.
+- **לא נבנה:** `נכס נמכר` (P4 — עדיין לא הוחלט איפה נשמרים תאריך וסכום המכירה), עדכון סוג/סטטוס/אחוז בעלות/הכנסה חודשית של נכס.

@@ -180,6 +180,8 @@ class AssetFields:
     EQUITY          = "Equity"               # Airtable formula: value − mortgage (read as stored)
     MY_EQUITY       = "My Equity"            # Airtable formula: equity × ownership % (read as stored)
     LOANS           = "Loans"                # link -> Loans
+    NEXT_STEP       = "Next Step"            # multilineText — free text, written by the FCC "פעולה הבאה" flow
+    NEXT_STEP_OWNER = "Next Step Owner"      # singleSelect (live choices: אליהו / אהרן / אורי / משפטי / —)
 
 
 class LoanFields:

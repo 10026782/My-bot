@@ -47,7 +47,12 @@ export interface AssetCardModel {
   linkedLoans: { id: string; text: string }[];       // empty -> no linked-loans block at all
   linkedDebtLine: string | null;
   partial: boolean;
+  nextStep: string | null;          // "<text> · אחראי: <owner>" as stored; null -> no line
+  actionable: boolean;              // false for a sold / inactive asset: no write actions on its card
 }
+
+/** Live Assets.Status choices meaning the asset is no longer held: the writer has nothing to update there. */
+export const ASSET_GONE = ["נמכר", "לא פעיל"];
 
 export function assetCardModel(i: FccAssetItem): AssetCardModel {
   const rows = [
@@ -70,6 +75,8 @@ export function assetCardModel(i: FccAssetItem): AssetCardModel {
     })),
     linkedDebtLine: i.linked_loans.length ? `חוב מקושר: ${val(i.linked_debt)}${i.linked_debt_known < i.linked_loans.length ? " (חלקי)" : ""}` : null,
     partial: i.current_value == null || i.equity == null,
+    nextStep: i.next_step ? `${i.next_step}${i.next_step_owner && i.next_step_owner !== "—" ? ` · אחראי: ${i.next_step_owner}` : ""}` : null,
+    actionable: !ASSET_GONE.includes(i.status ?? ""),
   };
 }
 

@@ -4,6 +4,7 @@ import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import { KpiCard } from "./FccKpiCard";
 import { AssetsSection } from "./FccAssets";
+import { ASSET_GONE } from "../lib/fccAssets";
 import { LoansSection } from "./FccLoans";
 import { ContextualComposer, FccTabBar } from "./FccTabBar";
 import { initialTab, nextWriterState, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
@@ -207,13 +208,14 @@ export function FinancialControlCenter({ onBack }: Props) {
   );
   const targets = {
     goals: data.goals.map((g) => ({ id: g.goal_id, title: g.title ?? "" })),
+    assets: (data.assets?.items ?? []).filter((a) => !ASSET_GONE.includes(a.status ?? "")).map((a) => ({ id: a.id, title: a.name ?? "" })),
     loans: (data.loans?.items ?? []).filter((l) => l.active).map((l) => ({ id: l.id, title: l.name ?? "" })),
   };
   const panels: Record<FccTabKey, React.ReactNode> = {
     monthly,
     loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario}
                                                 actions={{ onAction: (intent, id) => void writer.start(intent, id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
-    assets: data.assets ? <AssetsSection assets={data.assets} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
+    assets: data.assets ? <AssetsSection assets={data.assets} actions={{ onAction: (intent, id) => void writer.start(intent, id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
   };
   return shell(
     <div className="fcc-stack">
