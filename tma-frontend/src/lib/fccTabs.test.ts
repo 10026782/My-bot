@@ -185,5 +185,14 @@ test("markup: busy disables confirm (no double confirm); the receipt state has n
   assert.ok(rec.includes("נרשם ✓") && !rec.includes("אשר ורשום") && rec.includes("סגור"));
 });
 
+test("idle composer is compact (chips + one-row input, no send button, no turn); an active draft expands it", () => {
+  const idle = composer("monthly");
+  assert.ok(idle.includes("fcc-composer--idle") && !idle.includes("fcc-composer--open"));
+  assert.ok(idle.includes('rows="1"') && !idle.includes("שלח עדכון") && !idle.includes("fcc-quick__turn"));
+  const open = composer("monthly", turn("ask", "כמה?"));
+  assert.ok(open.includes("fcc-composer--open") && open.includes('rows="2"') && open.includes("fcc-quick__turn"));
+  assert.ok(composer("loans", null, "נרשם ✓").includes("fcc-composer--open"), "a receipt is an active state");
+});
+
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
 console.log("all fccTabs tests passed");

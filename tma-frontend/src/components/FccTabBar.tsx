@@ -51,12 +51,13 @@ export function ContextualComposer({ tab, turn, receipt, error, busy, targets, o
 
   const canPick = chipsEnabled(view, busy);
   const options = picking?.pick === "loan" ? targets.loans : targets.goals;
+  const active = turn != null || receipt != null || picking != null;     // compact while idle, expanded only for an active draft
   const submit = () => { const value = text.trim(); if (value) { onSend(value); setText(""); } };
   // mobile: a button press blurs the textarea, the keyboard closes and the click is lost — keep the focus
   const keepKeyboard = (e: { preventDefault: () => void }) => e.preventDefault();
 
   return (
-    <section className="fcc-section" aria-labelledby="fcc-quick-heading" ref={ref}>
+    <section className={`fcc-section fcc-composer ${active ? "fcc-composer--open" : "fcc-composer--idle"}`} aria-labelledby="fcc-quick-heading" ref={ref}>
       <h2 id="fcc-quick-heading" className="fcc-section__heading">{cfg.title}</h2>
       <Surface className="fcc-quick">
         {cfg.chips.length > 0 && (
@@ -115,15 +116,17 @@ export function ContextualComposer({ tab, turn, receipt, error, busy, targets, o
         )}
         {inputVisible(cfg, view, picking != null) && (
           <>
-            <textarea className="fcc-quick__input" rows={2} value={text} aria-label={cfg.title}
+            <textarea className="fcc-quick__input" rows={active ? 2 : 1} value={text} aria-label={cfg.title}
                       placeholder={view.showInput ? "ענה כאן…" : "כתוב עדכון כלכלי…"} onChange={(e) => setText(e.target.value)} />
-            <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={busy || !text.trim()}
+            {(active || text.trim() !== "") && (
+              <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={busy || !text.trim()}
                     onPointerDown={keepKeyboard} onMouseDown={keepKeyboard} onClick={submit}>
               {busy ? "בודק…" : view.showInput ? "שלח" : "שלח עדכון"}
             </button>
+            )}
           </>
         )}
-        {!turn && !receipt && <p className="fcc-goal__note">{cfg.hint}</p>}
+        {!active && !cfg.freeText && <p className="fcc-goal__note">{cfg.hint}</p>}
         {error && <p className="fcc-quick__error" role="alert">⚠️ {error}</p>}
       </Surface>
     </section>

@@ -3106,6 +3106,8 @@
 .fcc-goal__grid dd { margin: 0; font-weight: 600; unicode-bidi: plaintext; }
 .fcc-event { grid-auto-flow: column; justify-content: space-between; align-items: center; padding: var(--boss-space-3) var(--boss-space-4); }
 .fcc-quick { display: grid; gap: var(--boss-space-3); }
+.fcc-composer--idle .fcc-quick { gap: var(--boss-space-2); }
+.fcc-composer--idle .fcc-quick__input { min-block-size: 0; }
 .fcc-quick__input {
   inline-size: 100%; box-sizing: border-box; padding: var(--boss-space-3); min-block-size: 44px;
   border: 1px solid var(--boss-color-border-strong); border-radius: 16px;
