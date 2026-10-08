@@ -2330,3 +2330,17 @@ def test_p2_http_new_loan_and_update_confirm_executes_frozen_writes_and_scopes_t
     assert scoped.get("Owner")
     _, denied = approval_actions._enforce_personal_data_policy("patch", "Loans", "recCX", {LF.EARLY_CLOSURE: 1}, ELIYAHU)
     assert denied is not None
+
+
+def test_early_closure_principal_is_the_only_balance_outstanding_balance_is_legacy_and_never_a_fallback():
+    DB[Tables.LOANS] = [
+        loan("recOnlyLegacy", **{LF.NAME: "ישן", LF.OUTSTANDING: 90000, LF.INTEREST_RATE: 10.0, LF.MONTHLY_PAYMENT: 1000}),
+        loan("recNew", **{LF.NAME: "חדש", LF.EARLY_CLOSURE: 50000, LF.OUTSTANDING: 999999, LF.INTEREST_RATE: 6.0, LF.MONTHLY_PAYMENT: 800}),
+    ]
+    view = service.loans_overview(ELIYAHU, TODAY)
+    by = {i["id"]: i for i in view["items"]}
+    assert by["recOnlyLegacy"]["early_closure_balance"] is None                  # missing stays "not defined"
+    assert by["recNew"]["early_closure_balance"] == 50000
+    assert all("current_balance" not in i for i in view["items"])               # the legacy number is not even exposed
+    assert view["summary"]["total_early_closure_balance"] == 50000               # the legacy 90,000 / 999,999 never counted
+    assert view["summary"]["weighted_average_interest_rate"] == 6.0              # weighted only by the SSOT balance

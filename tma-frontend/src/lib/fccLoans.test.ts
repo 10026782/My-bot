@@ -19,7 +19,7 @@ function test(name: string, fn: () => void) {
 
 const mk = (o: Partial<FccLoan>): FccLoan => ({
   id: "x", name: "x", lender: null, loan_type: null, related_asset: null, related_asset_name: null, original_amount: null,
-  current_balance: null, early_closure_balance: null, interest_rate: null, monthly_payment: null, payments_remaining: null,
+  early_closure_balance: null, interest_rate: null, monthly_payment: null, payments_remaining: null,
   end_date: null, early_repayment_fee: null, active: true, months_remaining: null, estimated_total_remaining_payments: null,
   estimated_future_cost: null, future_cost_exact: false, monthly_cash_freed_if_closed: null, annual_interest_cost: null,
   status_unknown: false, missing: [], ...o,

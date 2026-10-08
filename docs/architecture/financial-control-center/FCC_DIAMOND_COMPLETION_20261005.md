@@ -241,3 +241,5 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - אידמפוטנטיות: עדכון לערך שכבר שמור = `duplicate`; `loan.create` עם שם זהה להלוואה פעילה קיימת = `duplicate`.
 - UI: צ'יפים `עדכון יתרה · שינוי החזר · הלוואה חדשה · סגירת הלוואה`; בכרטיס הלוואה פעילה: `עדכון יתרה · שינוי החזר · סגרתי את ההלוואה`.
 - **לא נבנה:** עדכון `Outstanding Balance`/ריבית/תאריכים של הלוואה קיימת, קישור נכס בהלוואה חדשה, `Monthly Due Day`.
+
+**החלטת SSOT ליתרה (08/10/2026, אושרה):** `Outstanding Principal for Early Closure` הוא היתרה הקנונית של ה־FCC (סילוק, חוב נוכחי, ריבית משוקללת, עלות ריבית שנתית). `Outstanding Balance` = legacy: ה־FCC לא קורא ולא כותב אותו, אין סנכרון אוטומטי, ואין fallback אליו — יתרה חסרה מוצגת "לא הוגדר". הוסרו: `current_balance` מה־payload ומה־type, ושני ה־fallback ב־`loans.py` (ממוצע ריבית משוקלל, עלות ריבית שנתית). נעילה בטסט: `test_early_closure_principal_is_the_only_balance_...`.
