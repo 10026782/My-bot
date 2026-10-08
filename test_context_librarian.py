@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import math
 import re
@@ -1097,6 +1098,38 @@ def test_turn_coordinator_routing_keeps_minimum_headroom_with_all_conditional_la
         f"worst-case (all conditional layers) headroom {headroom} < "
         f"{_TURN_COORDINATOR_WORST_CASE_MIN_HEADROOM_TOKENS} tokens "
         f"(usage={estimate.actual_tokens}, budget={estimate.token_budget})"
+    )
+
+
+_TURN_COORDINATOR_CONDITIONAL_LAYER_TERMS = {
+    "tools": "tool",
+    "ux_f52": "reply",
+    "rp5": "evidence",
+}
+_TURN_COORDINATOR_MIN_DOCUMENT_HEADROOM = 2
+
+
+def test_turn_coordinator_routing_every_conditional_layer_combination_fits_documents(catalog):
+    """אף שילוב של ה-conditional layers (שמופעלים ע"י מילים נפוצות כמו "reply")
+    לא יכול להפיל את ה-build על מגבלת המסמכים; ובמקרה הגרוע ביותר נשאר headroom."""
+    terms = _TURN_COORDINATOR_CONDITIONAL_LAYER_TERMS
+    worst_headroom = None
+    for size in range(len(terms) + 1):
+        for layers in itertools.combinations(terms, size):
+            query = " ".join(terms[name] for name in layers) or "routing"
+            estimate = estimate_bundle(
+                catalog, task_type="turn_coordinator_routing", query=query
+            )
+            assert estimate.fits, (
+                f"layers={layers}: documents={estimate.selected_documents}/"
+                f"{estimate.document_budget} tokens={estimate.actual_tokens}/"
+                f"{estimate.token_budget}"
+            )
+            if size == len(terms):
+                worst_headroom = estimate.document_budget - estimate.selected_documents
+    assert worst_headroom >= _TURN_COORDINATOR_MIN_DOCUMENT_HEADROOM, (
+        f"all-conditional-layers document headroom {worst_headroom} < "
+        f"{_TURN_COORDINATOR_MIN_DOCUMENT_HEADROOM}"
     )
 
 
