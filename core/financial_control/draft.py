@@ -19,6 +19,7 @@ import re
 from typing import Any, Mapping
 
 from airtable_schema import FinEventFields as EF
+from airtable_schema import LoanFields as LF
 from airtable_schema import FinGoalFields as GF
 from airtable_schema import RecObFields as RF
 from airtable_schema import TaskFields, Tables
@@ -31,7 +32,9 @@ FCC_GOAL = "fcc_goal"
 FCC_EVENT = "fcc_event"
 FCC_FOLLOWUP = "fcc_followup"
 FCC_OBLIGATION = "fcc_obligation"   # Recurring Obligations: a COMMITMENT (never an actual-expense ledger row)
-FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION)
+FCC_LOAN_CLOSE = "fcc_loan_close"   # closing a loan: Loans.Payment Status = Paid Off + one progress event on the debt goal
+FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE)
+LOAN_PAID_OFF = "Paid Off"          # existing Loans.Payment Status choice
 
 SNAPSHOT_TOOL = "fcc_writes"        # snapshot envelope name; executors translate to canonical tools
 FCC_CHANNEL = "fcc"                 # one draft slot per person, shared by TMA and chat
@@ -97,6 +100,13 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("vendor", RF.VENDOR, InputType.TEXT),
         _f("next_charge_date", RF.NEXT_CHARGE, InputType.DATE, example="2026-11-01"),
     )),
+    # The loan itself (record id) and the debt goal live in the draft's source_context, not in editable fields:
+    # an edit can change the amount actually paid or the date, never WHICH loan is being closed.
+    FCC_LOAN_CLOSE: EntityContract(FCC_LOAN_CLOSE, (
+        _f("amount", EF.AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
+        _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
+        _f("note", EF.NOTE, InputType.TEXT),
+    )),
     FCC_FOLLOWUP: EntityContract(FCC_FOLLOWUP, (
         _f("title", TaskFields.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("goal", EF.GOAL, InputType.LINK),
@@ -135,7 +145,8 @@ def display_value(field: str, value: Any) -> str:
     if field in VALUE_LABELS:
         return VALUE_LABELS[field].get(value, str(value))
     if field in ("target_amount", "amount", "saving") and isinstance(value, (int, float)):
-        return f"-₪{abs(value):,.0f}" if value < 0 else f"₪{value:,.0f}"
+        digits = 2 if round(float(value), 2) != round(float(value)) else 0       # agorot are shown when they exist (what is stored = what is reviewed)
+        return f"-₪{abs(value):,.{digits}f}" if value < 0 else f"₪{value:,.{digits}f}"
     if field in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date") \
             and isinstance(value, str) and len(value) >= 10:
         y, m, d = value[:10].split("-")
@@ -159,6 +170,8 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         target = fields.get("target_amount")
         goal = f" ל-{display_value('target_amount', target)}" if target else ""
         return f"עד מתי אתה רוצה להגיע{goal}?"
+    if entity == FCC_LOAN_CLOSE and field == "amount":
+        return f"כמה שילמת בפועל לסגירת {goal_title or 'ההלוואה'}?"
     if entity == FCC_OBLIGATION:
         if field == "name":
             return "איך לקרוא להתחייבות? (למשל: נטפליקס)"
@@ -182,12 +195,14 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     lines: list[str] = []
     head = {FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
-            FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך"}[entity]
+            FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה"}[entity]
     lines.append(f"📋 {head}")
     if note:
         lines.append(note)
     if entity == FCC_EVENT and goal_title:
         lines.append(f"• יעד: {goal_title}")
+    if entity == FCC_LOAN_CLOSE and goal_title:
+        lines.append(f"• הלוואה: {goal_title}")
     for name in order:
         if name == "goal" and entity == FCC_EVENT:
             continue
@@ -196,6 +211,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             continue
         mark = " (הוסק)" if name in inferred else ""
         lines.append(f"• {LABELS.get(name, name)}: {display_value(name, value)}{mark}")
+    if entity == FCC_LOAN_CLOSE:
+        lines.append(f"ההלוואה תסומן {LOAN_PAID_OFF} ותצא מהחובות הפעילים.")
     if entity == FCC_OBLIGATION and fields.get("status") == "inactive":
         lines.append("ההתחייבות תסומן כלא פעילה ותצא מהסכום החודשי.")
     if operation == "UPDATE" and changed:
@@ -232,6 +249,28 @@ def _event_write(values: Mapping[str, Any], ctx: Mapping[str, Any], raw_text: st
 def _ob_value(name: str, value):
     """``status`` is a select in the draft but a checkbox in storage."""
     return value == "active" if name == "status" else value
+
+
+def loan_close_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """Closing a loan = ONE confirmation, two canonical writes, nothing else: the loan's Payment Status becomes
+    Paid Off (the only thing the loans read model treats as closed) and — when the owner has a debt goal — one
+    progress event with the amount actually paid. The event key is derived from the loan, so a retry or a second tap
+    can never log the same closing twice. No loan balance/payment field is rewritten."""
+    loan_id = str(source.get("record_id") or "")
+    if not loan_id:
+        raise UnsupportedOperationError("loan close without a loan record")
+    writes = [{"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": {LF.STATUS: LOAN_PAID_OFF},
+               "audit_action": "fcc_loan_close", "audit_details": loan_id}]
+    goal_id = str(source.get("debt_goal_id") or "")
+    if goal_id:
+        name = str(source.get("loan_name") or "")
+        event = _event_write({"goal": goal_id, "kind": "one_time", "amount": values["amount"],
+                              "occurred_at": values["occurred_at"],
+                              "note": (f"סגירת הלוואה: {name}" + (f" — {values['note']}" if values.get("note") else "")).strip()},
+                             ctx, f"close_loan:{loan_id}")
+        event["audit_action"] = "fcc_loan_close_event"
+        writes.append(event)
+    return writes
 
 
 _OB_FIELDS = (("status", RF.ACTIVE), ("name", RF.NAME), ("amount", RF.AMOUNT), ("scope", RF.SCOPE), ("frequency", RF.FREQUENCY),
@@ -281,6 +320,8 @@ class FccEntityAdapter(CommercialEntityAdapter):
                                 "audit_action": "fcc_obligation_create", "audit_details": str(values.get("name", ""))[:80]}]}
         if entity == FCC_EVENT:
             return {"writes": [_event_write(values, ctx, raw)]}
+        if entity == FCC_LOAN_CLOSE:
+            return {"writes": loan_close_writes(values, ctx, writer.source_context)}
         if entity == FCC_FOLLOWUP:
             tag = f"[FCC:{values.get('goal') or 'none'}]"
             fields = {TaskFields.NAME: values["title"], TaskFields.STATUS: "ממתין",

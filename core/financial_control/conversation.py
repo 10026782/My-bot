@@ -24,8 +24,8 @@ from core.business_draft import (
     DraftOperation, DraftState, create_draft,
 )
 from core.draft_flow import CANCEL_WORDS, CONFIRM_WORDS, EDIT_WORDS, SKIP_WORDS
-from core.financial_control import calc, draft as fd, service, writer
-from airtable_schema import FinEventFields as EF, FinGoalFields as GF, RecObFields as RF, TaskFields
+from core.financial_control import calc, draft as fd, loans as fcc_loans, service, writer
+from airtable_schema import FinEventFields as EF, FinGoalFields as GF, LoanFields as LF, RecObFields as RF, TaskFields, Tables
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +249,59 @@ def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=No
     return _start(identity, actor, ids, text, goal_id, extractor, store, today)
 
 
+def _debt_goal(identity) -> dict | None:
+    """The one active debt goal progress events go to. Zero or several -> None (never guess which one)."""
+    active = [g for g in service.my_goals(identity)
+              if str((g.get("fields") or {}).get(GF.STATUS) or "active").lower() in ("active", "פעיל")
+              and service._category_key((g.get("fields") or {}).get(GF.CATEGORY)) == "debt"]
+    return active[0] if len(active) == 1 else None
+
+
+def start_loan_close(identity, loan_id: str, *, store=None, today: date | None = None) -> TurnResult:
+    """Structured entry for "I closed this loan" (a button on the loan card — no classifier involved). Opens a
+    draft on the shared FCC slot: amount paid defaults to the stored early-closure balance (shown as inferred,
+    editable), then the usual review -> אשר / ערוך / בטל. Nothing is written here."""
+    today = today or date.today()
+    actor = policy.resolve_actor(identity)
+    if not actor.resolved:
+        return TurnResult("denied", policy.UNRESOLVED_MESSAGE)
+    store = store or _store()
+    ids = _ids(identity, actor)
+    if ids is None:
+        return TurnResult("denied", policy.UNRESOLVED_MESSAGE)
+    for d in _load_all(store, ids):
+        if d.lifecycle_state in _TERMINAL:
+            _delete(store, ids, d.entity_type)
+        else:
+            return TurnResult("info", "יש עדכון פתוח — לסיים או לבטל אותו לפני סגירת הלוואה.", d.entity_type)
+    loan = next((r for r in service.my_loans(identity) if r["id"] == str(loan_id or "")), None)
+    if loan is None:                                          # not found == not yours: same answer, no probing
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    item = fcc_loans.loan_item(loan, today)
+    if not item["active"]:
+        return TurnResult("info", "ההלוואה כבר מסומנת כנסגרה.")
+    goal = _debt_goal(identity)
+    name = item["name"] or "ההלוואה"
+    ctx = {"record_id": loan["id"], "loan_name": name, "goal_title": name}
+    review_note = ""
+    if goal is not None:
+        ctx["debt_goal_id"] = goal["id"]
+        review_note = f"יירשם גם אירוע התקדמות ביעד: {goal['fields'].get(GF.TITLE, '')}"
+    else:
+        review_note = "לא נמצא יעד חוב פעיל אחד — יתעדכן רק סטטוס ההלוואה, בלי אירוע התקדמות."
+    ctx["review_note"] = review_note
+    d = _new_draft(identity, ids, fd.FCC_LOAN_CLOSE, DraftOperation.CREATE, fields={}, raw_text=f"close_loan:{loan['id']}",
+                   today=today, extra_ctx=ctx)
+    fields = {"occurred_at": today.isoformat()}
+    inferred = ["occurred_at"]
+    if item["early_closure_balance"] is not None and item["early_closure_balance"] > 0:
+        fields["amount"] = item["early_closure_balance"]
+        inferred.append("amount")
+    d, _rej = _set_fields(d, fields, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": inferred})
+    return _persist_new(store, ids, d)
+
+
 def complete_execution(identity, entity: str | None = None, *, store=None) -> None:
     """Call ONLY after the confirmed writes were successfully handed to the ActionGateway."""
     actor = policy.resolve_actor(identity)
@@ -365,6 +418,9 @@ def _already_applied(identity, write: dict) -> bool:
         name = writer._norm(fields.get(RF.NAME, ""))
         return any(writer._norm((o.get("fields") or {}).get(RF.NAME, "")) == name and (o.get("fields") or {}).get(RF.ACTIVE)
                    for o in service.my_obligations(identity))          # a cancelled (inactive) one may be re-added
+    if write["op"] == "patch" and write["table"] == Tables.LOANS and fields.get(LF.STATUS) == fd.LOAN_PAID_OFF:
+        rec = next((r for r in service.my_loans(identity) if r["id"] == write.get("record_id")), None)
+        return rec is not None and not fcc_loans.is_active(rec.get("fields") or {})      # already closed -> nothing to do
     if write["op"] == "post" and write["table"] == "Financial Goals":
         title = writer._norm(fields.get(GF.TITLE, ""))
         return any(writer._norm((g.get("fields") or {}).get(GF.TITLE, "")) == title for g in service.my_goals(identity))

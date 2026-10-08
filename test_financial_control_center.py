@@ -1867,3 +1867,176 @@ def test_assets_http_payload_isolated(monkeypatch):
     seed_assets()
     body = http(monkeypatch, AVI_I).get("/api/fcc/overview", headers=H).get_json()
     assert [i["id"] for i in body["assets"]["items"]] == ["recAX"] and "5000000" not in str(body["assets"])
+
+
+# ═══════════════ Phase 2 — closing a loan (one confirmation: Payment Status = Paid Off + one debt-goal event) ═══════════════
+def seed_close():
+    DB[Tables.FIN_GOALS] = [goal("recGD", "סגירת חובות", ELI, 700000, **{GF.CATEGORY: "debt", GF.CALC_METHOD: "cumulative"}),
+                            goal("recGAV", "חוב של אבי", AVI, 5000, **{GF.CATEGORY: "debt"})]
+    DB[Tables.FIN_EVENTS] = []
+    DB[Tables.LOANS] = [
+        loan("recC1", **{LF.NAME: "פועלים", LF.EARLY_CLOSURE: 118400, LF.MONTHLY_PAYMENT: 2816.16, LF.PAYMENTS_LEFT: 45}),
+        loan("recC2", **{LF.NAME: "בלי יתרה", LF.MONTHLY_PAYMENT: 500}),
+        loan("recC3", **{LF.NAME: "סגורה", LF.STATUS: "Paid Off", LF.EARLY_CLOSURE: 1000}),
+        loan("recCX", owner=AVI, **{LF.NAME: "של אבי", LF.EARLY_CLOSURE: 77777}),
+    ]
+
+
+def start_close(loan_id="recC1", who=ELIYAHU):
+    return conv.start_loan_close(who, loan_id, today=TODAY)
+
+
+def test_close_review_shows_everything_that_will_change_and_writes_nothing(monkeypatch):
+    seed_close()
+    r = start_close()
+    assert r.state == "review" and r.entity == "fcc_loan_close"
+    for part in ("סגירת הלוואה", "פועלים", "₪118,400", "(הוסק)", "Paid Off", "סגירת חובות"):
+        assert part in r.message
+    assert r.snapshot is None                                            # nothing frozen or written yet
+
+
+def test_close_confirm_freezes_exactly_two_writes_status_and_one_event():
+    seed_close()
+    start_close()
+    r = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert r.state == "confirmed"
+    status, ev = r.snapshot["writes"]
+    assert status["op"] == "patch" and status["table"] == Tables.LOANS and status["record_id"] == "recC1"
+    assert status["fields"] == {LF.STATUS: "Paid Off"}                  # only the status: no balance / payment rewritten
+    assert ev["op"] == "post" and ev["table"] == Tables.FIN_EVENTS
+    assert ev["fields"][EF.GOAL] == ["recGD"] and ev["fields"][EF.AMOUNT] == 118400 and ev["fields"][EF.KIND] == "one_time"
+    assert ev["fields"][EF.OCCURRED_AT] == "2026-10-08" and "פועלים" in ev["fields"][EF.NOTE]
+
+
+def test_close_amount_can_be_edited_to_what_was_actually_paid():
+    seed_close()
+    start_close()
+    ex = Ex(fill={"סכום 118248.80": {"amount": 118248.8}})
+    assert conv.handle_turn(ELIYAHU, "ערוך", extractor=ex, today=TODAY).state == "ask"
+    assert "118,248.80" in conv.handle_turn(ELIYAHU, "סכום 118248.80", extractor=ex, today=TODAY).message
+    r = conv.handle_turn(ELIYAHU, "אשר", extractor=ex, today=TODAY)
+    assert r.snapshot["writes"][1]["fields"][EF.AMOUNT] == 118248.8
+
+
+def test_close_edit_cannot_change_which_loan_is_closed():
+    seed_close()
+    start_close()
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    ex = Ex(fill={"x": {"loan": "recCX", "record_id": "recCX", "goal": "recGAV", "amount": 100000}})   # one valid edit rides along
+    assert conv.handle_turn(ELIYAHU, "x", extractor=ex, today=TODAY).state == "review"
+    r = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    status, ev = r.snapshot["writes"]
+    assert status["record_id"] == "recC1" and ev["fields"][EF.GOAL] == ["recGD"]
+
+
+def test_close_unknown_balance_asks_for_the_amount_paid_and_does_not_guess():
+    seed_close()
+    r = start_close("recC2")
+    assert r.state == "ask" and r.awaiting == "amount" and "בלי יתרה" in r.message
+    r = conv.handle_turn(ELIYAHU, "5000", extractor=Ex(), today=TODAY)
+    assert r.state == "review"
+
+
+def test_close_is_owner_scoped_foreign_and_unknown_loans_are_denied_identically():
+    seed_close()
+    foreign, unknown = start_close("recCX"), start_close("recNOPE")
+    assert foreign.state == unknown.state == "denied" and foreign.message == unknown.message
+    assert conv.start_loan_close(AVI_I, "recC1", today=TODAY).state == "denied"      # Avi cannot close Eli's loan
+    assert not [d for d in conv.pending_view(ELIYAHU) or []]                          # no draft was opened for Eli
+
+
+def test_close_already_paid_off_loan_is_info_not_a_second_closing():
+    seed_close()
+    r = start_close("recC3")
+    assert r.state == "info" and "כבר" in r.message and conv.pending_view(ELIYAHU) is None
+
+
+def test_close_blocks_a_second_open_draft():
+    seed_close()
+    start_close()
+    assert start_close("recC1").state == "info" and start_close("recC2").state == "info"
+
+
+def test_close_without_a_unique_debt_goal_updates_only_the_status_and_says_so():
+    seed_close()
+    DB[Tables.FIN_GOALS] = [goal("recGAV", "חוב של אבי", AVI, 5000, **{GF.CATEGORY: "debt"})]       # Eli has none
+    r = start_close()
+    assert "בלי אירוע התקדמות" in r.message
+    (status,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert status["fields"] == {LF.STATUS: "Paid Off"}
+    seed_close()
+    DB[Tables.FIN_GOALS].append(goal("recGD2", "חוב נוסף", ELI, 10000, **{GF.CATEGORY: "debt"}))       # two -> never guess
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    r = start_close()
+    assert "בלי אירוע התקדמות" in r.message
+
+
+def test_close_retry_after_a_partial_failure_never_logs_the_closing_twice():
+    seed_close()
+    start_close()
+    first = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    status, ev = first.snapshot["writes"]
+    DB[Tables.LOANS][0]["fields"][LF.STATUS] = "Paid Off"                  # the status write landed, the event did not
+    retry = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert retry.state == "confirmed" and [w["table"] for w in retry.snapshot["writes"]] == [Tables.FIN_EVENTS]
+    DB[Tables.FIN_EVENTS].append({"id": "recEv", "fields": {**ev["fields"], EF.FINANCIAL_OWNER: [ELI]}})   # now the event landed too
+    again = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    assert again.state == "duplicate"
+
+
+def test_close_event_key_is_stable_per_loan_amount_and_day():
+    seed_close()
+    start_close()
+    k1 = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"][1]["fields"][EF.IDEMPOTENCY_KEY]
+    conv.complete_execution(ELIYAHU)
+    start_close()
+    k2 = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"][1]["fields"][EF.IDEMPOTENCY_KEY]
+    assert k1 == k2
+
+
+def test_close_cancel_leaves_everything_untouched():
+    seed_close()
+    start_close()
+    assert conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY).state == "cancelled"
+    assert conv.pending_view(ELIYAHU) is None and DB[Tables.LOANS][0]["fields"].get(LF.STATUS) is None
+
+
+def test_close_http_open_then_confirm_executes_the_frozen_writes(monkeypatch):
+    seed_close()
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append((action, payload)) or ("a", {"ok": True}, 200)))
+    c = http(monkeypatch, ELIYAHU)
+    opened = c.post("/api/fcc/loans/close", json={"loan_id": "recC1"}, headers=H).get_json()
+    assert opened["state"] == "review" and sent == []                              # opening writes nothing
+    done = c.post("/api/fcc/write", json={"text": "אשר"}, headers=H).get_json()
+    assert done["state"] == "executed" and [p["table"] for _, p in sent] == [Tables.LOANS, Tables.FIN_EVENTS]
+    assert sent[0][1]["fields"] == {LF.STATUS: "Paid Off"}
+
+
+def test_close_http_guards_flag_off_missing_id_foreign_loan(monkeypatch):
+    seed_close()
+    assert http(monkeypatch, ELIYAHU, flag=False).post("/api/fcc/loans/close", json={"loan_id": "recC1"}, headers=H).status_code == 404
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/loans/close", json={}, headers=H).status_code == 400
+    r = c.post("/api/fcc/loans/close", json={"loan_id": "recCX"}, headers=H)
+    assert r.status_code == 403 and "77777" not in r.get_data(as_text=True)
+
+
+def test_close_loans_table_is_in_the_write_allowlist_and_owner_recheck_blocks_foreign_record(monkeypatch):
+    assert "Loans" in approval_actions._TMA_WRITE_ALLOWED_TABLES
+    seed_close()
+    _, denied = approval_actions._enforce_personal_data_policy("patch", "Loans", "recCX", {LF.STATUS: "Paid Off"}, ELIYAHU)
+    assert denied is not None
+    _, ok = approval_actions._enforce_personal_data_policy("patch", "Loans", "recC1", {LF.STATUS: "Paid Off"}, ELIYAHU)
+    assert ok is None
+
+
+def test_close_leaves_the_payoff_engine_and_summary_consistent_after_the_write():
+    seed_close()
+    before = service.overview(ELIYAHU, TODAY)["loans"]
+    assert "recC1" in [i["id"] for i in before["payoff"]["items"]]
+    DB[Tables.LOANS][0]["fields"][LF.STATUS] = "Paid Off"                       # as stored after the status write
+    after = service.overview(ELIYAHU, TODAY)["loans"]
+    assert "recC1" not in [i["id"] for i in after["payoff"]["items"]]
+    assert after["summary"]["total_active_loans"] == before["summary"]["total_active_loans"] - 1

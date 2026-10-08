@@ -434,6 +434,18 @@ export async function fetchFccLoanScenario(budget: number): Promise<FccScenarios
   return r.json() as Promise<FccScenarios>;
 }
 
+/** Opens the close-loan draft (nothing is written); the owner then confirms through postFccWrite("אשר"). */
+export async function postFccLoanClose(loanId: string): Promise<FccTurn> {
+  const r = await fetch(`${BASE}/api/fcc/loans/close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ loan_id: loanId }),
+  });
+  const data = (await r.json().catch(() => ({}))) as FccTurn & { error?: string };
+  if (!r.ok && !data.state) throw new Error(data.error || `API ${r.status}`);
+  return data;
+}
+
 export async function postFccWrite(body: { text: string; goal_id?: string }): Promise<FccTurn> {
   const r = await fetch(`${BASE}/api/fcc/write`, {
     method: "POST",

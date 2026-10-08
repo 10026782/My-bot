@@ -3220,3 +3220,8 @@
 .fcc-tab--on { background: var(--boss-color-accent-readable); color: var(--boss-color-surface); font-weight: 650; }
 .fcc-asset__loans { display: grid; gap: 2px; padding-block-start: 4px; border-block-start: 1px dashed var(--boss-color-border); }
 [role="tabpanel"][hidden] { display: none; }
+
+/* Close-loan flow (loans tab) */
+.fcc-loan__closebtn { margin-block-start: 8px; inline-size: 100%; }
+.fcc-loan__close { margin-block: 8px; }
+.fcc-loan__close .fcc-quick__message { white-space: pre-wrap; }
