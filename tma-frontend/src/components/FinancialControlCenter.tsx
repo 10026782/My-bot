@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchFccLoanScenario, fetchFccOverview, postFccWrite } from "../api";
+import { fetchFccLoanScenario, fetchFccOverview, postFccLoanClose, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import { KpiCard } from "./FccKpiCard";
@@ -179,6 +179,8 @@ export function FinancialControlCenter({ onBack }: Props) {
       .catch((e: unknown) => setState({ status: "error", code: (e as { status?: number }).status }));
   };
   useEffect(load, []);
+  // refresh without the loading state: the loans tab keeps its closing receipt on screen while the numbers update
+  const refresh = () => { fetchFccOverview().then((data) => setState({ status: "ok", data })).catch(() => undefined); };
 
   const shell = (children: React.ReactNode, subtitle?: string) => (
     <main className="ventures-screen fcc-screen">
@@ -268,7 +270,8 @@ export function FinancialControlCenter({ onBack }: Props) {
   );
   const panels: Record<FccTabKey, React.ReactNode> = {
     monthly,
-    loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
+    loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario}
+                                                closeApi={{ open: postFccLoanClose, send: (text) => postFccWrite({ text }), onDone: refresh }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
     assets: data.assets ? <AssetsSection assets={data.assets} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
   };
   return shell(

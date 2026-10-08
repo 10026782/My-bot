@@ -4856,6 +4856,7 @@ def _fcc_enabled(identity=None) -> bool:
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/write", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/loans/scenario", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/loans/close", methods=["OPTIONS"])
 def _preflight_fcc():
     return "", 204
 
@@ -4892,6 +4893,27 @@ def fcc_loans_scenario(identity):
         return jsonify(fcc_service.loan_scenarios(identity, budget))
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
+
+
+@tma_api.route("/api/fcc/loans/close", methods=["POST"])
+@require_tma_auth
+def fcc_loans_close(identity):
+    """Body: {"loan_id": str}. Opens the close-loan draft (nothing is written). The owner then answers on
+    /api/fcc/write with the usual "אשר" / "ערוך" / "בטל"; only that confirmation executes the frozen writes."""
+    if not _fcc_enabled(identity):
+        return jsonify({"error": "not found"}), 404
+    loan_id = str((request.get_json(silent=True) or {}).get("loan_id") or "").strip()
+    if not loan_id:
+        return jsonify({"error": "loan_id required"}), 400
+    from core.financial_control import conversation as fcc_conv
+    try:
+        result = fcc_conv.start_loan_close(identity, loan_id)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:
+        logger.exception("[fcc] start_loan_close failed")
+        return jsonify({"state": "clarify", "message": "לא הצלחתי לפתוח את סגירת ההלוואה כרגע — נסו שוב."}), 200
+    return jsonify(result.to_dict()), (403 if result.state == "denied" else 200)
 
 
 @tma_api.route("/api/fcc/write", methods=["POST"])

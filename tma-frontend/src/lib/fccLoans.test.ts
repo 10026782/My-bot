@@ -1,10 +1,10 @@
 // Plain node + esbuild test (see package.json `npm test`).
 declare function require(id: string): { readFileSync(path: string, enc: string): string };
-import type { FccLoan, FccLoans } from "../types";
+import type { FccLoan, FccLoans, FccTurn } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LoansSection } from "../components/FccLoans";
-import { FILTERS, UNKNOWN, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
+import { LoanClosePanel, LoansSection } from "../components/FccLoans";
+import { CLOSE_BUTTON, CLOSE_WORDS, FILTERS, UNKNOWN, applyTurn, canClose, closeView, type CloseFlow, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -184,6 +184,75 @@ test("390px smoke (css): loan blocks can shrink — grids use minmax(0,1fr), lon
   assert.ok(block.includes("overflow-wrap: anywhere"));
   assert.ok(!/(^|[^-])width:\s*\d+px/m.test(block), "no fixed pixel width");
   assert.ok(!/min-(inline-size|width):\s*[1-9]\d{2,}px/.test(block), "no wide min-width");
+});
+
+const turn = (state: FccTurn["state"], message = "m"): FccTurn => ({ state, message });
+const flow = (t: FccTurn | null, receipt: string | null = null): CloseFlow => ({ loanId: "recL1", turn: t, receipt });
+
+test("review offers confirm + edit + cancel (cancel reaches the server)", () => {
+  const v = closeView(flow(turn("review")));
+  assert.equal(v.confirm, "אשר ורשום"); assert.ok(v.canEdit && v.cancelsDraft && !v.showInput && !v.dismissOnly);
+});
+
+test("ask / unrelated show the answer input and can cancel the draft", () => {
+  for (const s of ["ask", "unrelated"] as const) {
+    const v = closeView(flow(turn(s)));
+    assert.ok(v.showInput && v.cancelsDraft && v.confirm === null && !v.canEdit);
+  }
+});
+
+test("a partial failure offers a retry (the confirmed draft stays on the server) and can still be cancelled", () => {
+  const v = closeView(flow(turn("partial_failure")));
+  assert.equal(v.confirm, "נסה שוב"); assert.ok(v.cancelsDraft);
+});
+
+test("terminal info states only offer to close the panel", () => {
+  for (const s of ["info", "denied", "duplicate", "clarify"] as const) {
+    const v = closeView(flow(turn(s)));
+    assert.ok(v.dismissOnly && v.confirm === null && !v.showInput && !v.cancelsDraft, s);
+  }
+});
+
+test("executed -> receipt + overview refresh; cancelled -> panel closes without refresh; other turns keep the panel", () => {
+  const done = applyTurn(flow(turn("review")), { state: "executed", message: "נרשם ✓" });
+  assert.equal(done.refresh, true); assert.equal(done.flow?.receipt, "נרשם ✓"); assert.equal(done.flow?.turn, null);
+  assert.ok(closeView(done.flow!).dismissOnly);
+  const cancelled = applyTurn(flow(turn("review")), turn("cancelled"));
+  assert.equal(cancelled.flow, null); assert.equal(cancelled.refresh, false);
+  const next = applyTurn(flow(turn("review")), turn("ask"));
+  assert.equal(next.flow?.turn?.state, "ask"); assert.equal(next.refresh, false);
+});
+
+test("the words sent to the server are the shared FCC ones", () => {
+  assert.equal(CLOSE_WORDS.confirm, "אשר"); assert.equal(CLOSE_WORDS.edit, "ערוך"); assert.equal(CLOSE_WORDS.cancel, "בטל");
+});
+
+test("only an active loan can be closed", () => {
+  assert.ok(canClose({ active: true })); assert.ok(!canClose({ active: false }));
+});
+
+const noop = () => undefined;
+const panel = (f: CloseFlow, busy = false) => renderToStaticMarkup(createElement(LoanClosePanel, {
+  flow: f, busy, error: null, onSend: noop, onDismiss: noop }));
+
+test("review panel renders the server's review text and the three actions, nothing else", () => {
+  const html = panel(flow(turn("review", "📋 סגירת הלוואה\n• הלוואה: פועלים")));
+  assert.ok(html.includes("סגירת הלוואה") && html.includes("פועלים"));
+  assert.ok(html.includes("אשר ורשום") && html.includes("ערוך") && html.includes("בטל"));
+  assert.ok(!html.includes("<textarea") && !html.includes("<input"));
+});
+
+test("ask panel renders one input; busy disables the buttons (no double confirm)", () => {
+  assert.equal((panel(flow(turn("ask", "כמה שילמת?"))).match(/<textarea/g) || []).length, 1);
+  const busy = panel(flow(turn("review")), true);
+  assert.ok(!busy.includes("<button type=\"button\" class=\"boss-button boss-button--primary boss-bubble--action\">"));
+  assert.equal((busy.match(/disabled=""/g) || []).length >= 3, true);
+});
+
+test("the receipt panel has no confirm button, so a done closing cannot be confirmed twice", () => {
+  const html = panel(flow(null, "נרשם ✓"));
+  assert.ok(html.includes("נרשם ✓") && !html.includes("אשר ורשום") && html.includes("סגור"));
+  assert.ok(CLOSE_BUTTON.length > 0);
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
