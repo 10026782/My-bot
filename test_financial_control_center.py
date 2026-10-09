@@ -2589,3 +2589,58 @@ def test_p4_http_sale_executes_the_frozen_patch_and_the_executor_rechecks_the_ow
     assert len(sent) == 1 and sent[0]["fields"][AF.STATUS] == "נמכר" and sent[0]["record_id"] == "recAH"
     _, denied = approval_actions._enforce_personal_data_policy("patch", "Assets", "recAX", {AF.STATUS: "נמכר"}, ELIYAHU)
     assert denied is not None
+
+
+# ── Income is booked on a SOURCE (not a goal): wording + "מקור אחר" ────────────────────────────────────────────
+def seed_sources():
+    DB[Tables.FIN_GOALS] = [
+        goal("recP", "הכנסה חודשית קבועה", ELI, 15000, **{GF.CATEGORY: "income"}),
+        goal("recT", "הכנסה מנסיעות", ELI, 2500, **{GF.CATEGORY: "income", GF.PARENT_GOAL: ["recP"]}),
+        goal("recGH", "הוצאות בית", ELI, 9000, **{GF.CATEGORY: "other"}),
+    ]
+    DB[Tables.FIN_EVENTS] = []
+
+
+def test_income_chip_speaks_of_a_source_and_offers_other_source():
+    seed_sources()
+    r = intent("monthly.income")
+    assert r.state == "needs_goal" and "מקור" in r.message and "יעד" not in r.message
+    assert [c["goal_id"] for c in r.candidates] == ["recP", "recT", conv.OTHER_SOURCE_ID]
+    assert r.candidates[-1]["title"] == "מקור אחר"
+
+
+def test_other_source_books_on_the_total_goal_with_the_named_source_in_the_note():
+    seed_sources()
+    intent("monthly.income")
+    r = conv.handle_turn(ELIYAHU, "מקור אחר", goal_id=conv.OTHER_SOURCE_ID, extractor=Ex(), today=TODAY)
+    assert r.state == "ask" and r.awaiting == "source"
+    r = conv.handle_turn(ELIYAHU, "אבי", extractor=Ex(), today=TODAY)
+    assert r.state == "ask" and r.awaiting == "amount" and "מקור" in r.message and "יעד" not in r.message
+    r = conv.handle_turn(ELIYAHU, "1200", extractor=Ex(fill={"1200": {"amount": 1200}}), today=TODAY)
+    assert r.state == "review" and "• מקור: הכנסה חודשית קבועה" in r.message and "מקור: אבי" in r.message
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    (w,) = c.snapshot["writes"]
+    assert w["fields"][EF.GOAL] == ["recP"] and w["fields"][EF.NOTE] == "מקור: אבי" and w["fields"][EF.KIND] == "one_time"
+
+
+def test_other_source_requires_a_name_and_confirm_words_are_not_a_name():
+    seed_sources()
+    intent("monthly.income")
+    conv.handle_turn(ELIYAHU, "x", goal_id=conv.OTHER_SOURCE_ID, extractor=Ex(), today=TODAY)
+    for bad in ("אשר", "דלג"):                               # empty text never reaches the draft (answered "מה לעדכן?")
+        r = conv.handle_turn(ELIYAHU, bad, extractor=Ex(), today=TODAY)
+        assert r.awaiting == "source" and "שם" in r.message
+
+
+def test_other_source_not_offered_without_a_single_total_income_goal():
+    seed_intents()                                           # two top-level income goals: ambiguous, so no synthetic choice
+    r = intent("monthly.income")
+    assert conv.OTHER_SOURCE_ID not in {c["goal_id"] for c in r.candidates}
+    r = conv.handle_turn(ELIYAHU, "x", goal_id=conv.OTHER_SOURCE_ID, extractor=Ex(), today=TODAY)
+    assert r.state == "denied" or r.state == "needs_goal"    # never silently picks some goal
+
+
+def test_household_expense_wording_is_an_item_not_a_goal():
+    seed_sources()
+    r = intent("monthly.household_expense")
+    assert r.state == "ask" and "סעיף" in r.message and "יעד" not in r.message

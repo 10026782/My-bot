@@ -118,6 +118,8 @@ def _render(d: BusinessDraft) -> TurnResult:
             d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
             inferred=inferred, note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else str(d.source_context.get("review_note") or ""))),
             d.entity_type, None, _view(d))
+    if d.source_context.get("ask_source"):                    # "מקור אחר": the source's name comes before the amount
+        return TurnResult("ask", "מה שם המקור? (למשל: אבי, תיווך)", d.entity_type, "source", _view(d))
     missing = _missing(d)
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title) if awaiting else "מה לעדכן?"
@@ -424,6 +426,23 @@ def _is_income_goal(g: dict) -> bool:
     return service._category_key((g.get("fields") or {}).get(GF.CATEGORY)) == "income"
 
 
+OTHER_SOURCE_ID = "other"           # synthetic choice id: "מקור אחר" -> booked on the total income goal + the named source in the note
+OTHER_SOURCE_TITLE = "מקור אחר"
+
+
+def _total_income_goal(goals: list[dict]) -> dict | None:
+    """The one top-level income goal (no "Contributes To" parent). Without exactly one, "other source" is not offered."""
+    roots = [g for g in goals if _is_income_goal(g) and calc.parent_goal_id(g.get("fields") or {}, GF) is None]
+    return roots[0] if len(roots) == 1 else None
+
+
+def _choices_for(d: BusinessDraft, goals: list[dict]) -> list[dict]:
+    cands = writer._cand(goals)
+    if d.source_context.get("offer_other"):
+        cands.append({"goal_id": OTHER_SOURCE_ID, "title": OTHER_SOURCE_TITLE})
+    return cands
+
+
 def start_intent(identity, intent_id: str, entity_id: str | None = None, *, store=None,
                  today: date | None = None) -> TurnResult:
     """THE structured entry (POST /api/fcc/intent/start). A chip / card action names an intent and, when it is about
@@ -482,13 +501,16 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return TurnResult("clarify", "אין עדיין יעדים — צרו יעד קודם.")
     fields = {"kind": spec["kind"], "occurred_at": today.isoformat()}
     extra = {}
+    offer_other = chosen is None and spec.get("goal_filter") == "income" and _total_income_goal(goals) is not None
+    if offer_other:
+        extra["offer_other"] = True
     if chosen is not None:
         fields["goal"] = chosen["id"]
         extra["goal_title"] = chosen["fields"].get(GF.TITLE, "")
     d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
     d, _rej = _set_fields(d, fields, strict=False)
     d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
-    return _with_goal_choices(_persist_new(store, ids, d), candidates)
+    return _with_goal_choices(_persist_new(store, ids, d), candidates, other=offer_other)
 
 
 def complete_execution(identity, entity: str | None = None, *, store=None) -> None:
@@ -525,6 +547,13 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         return _render(edited)
 
     expected = d.idempotency_key
+    if d.source_context.get("ask_source") and d.lifecycle_state not in (DraftState.READY_FOR_REVIEW, DraftState.EDITING):
+        name = text.strip()
+        if not name or lower in SKIP_WORDS or lower in CONFIRM_WORDS or lower in EDIT_WORDS:
+            return replace_result(_render(d), message=f"שדה חובה — צריך שם למקור.\n{_render(d).message}")
+        d2, _rej = _set_fields(d, {"note": f"מקור: {name[:80]}"}, strict=False)
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_source"})
+        return _render(_save(store, ids, d2, expected=expected))
     editing = d.lifecycle_state in (DraftState.READY_FOR_REVIEW, DraftState.EDITING)
     awaiting = None if editing else (_missing(d) or [None])[0]
     if awaiting and lower in SKIP_WORDS:
@@ -535,17 +564,22 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
     goals = service.my_goals(identity) if d.entity_type in (fd.FCC_EVENT, fd.FCC_FOLLOWUP) else []
     if awaiting == "goal":                                    # choose among the caller's OWN goals only
         chosen = None
-        if goal_id:
+        other = bool(d.source_context.get("offer_other")) and (goal_id == OTHER_SOURCE_ID or (not goal_id and text.strip() == OTHER_SOURCE_TITLE))
+        if other:
+            chosen = _total_income_goal(goals)                # the caller's OWN total income goal; none -> "not recognised" below
+        elif goal_id:
             chosen = next((g for g in goals if g["id"] == goal_id), None)
             if chosen is None:
                 return TurnResult("denied", policy.DENIED_MESSAGE)
         else:
             chosen = _goal_by_text(goals, text)
         if chosen is None:                                    # no mutation; draft stays open
-            return TurnResult("needs_goal", "לא זיהיתי את היעד — בחר מהרשימה.", d.entity_type, "goal",
-                              _view(d), candidates=writer._cand(goals))
+            noun = fd.record_noun(d.entity_type, d.fields)
+            return TurnResult("needs_goal", f"לא זיהיתי את ה{noun} — בחר מהרשימה.", d.entity_type, "goal",
+                              _view(d), candidates=_choices_for(d, goals))
         updates["goal"] = chosen["id"]
-        d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, "")})
+        d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, ""),
+                                       **({"ask_source": True} if other else {})})
         pending_level = d.source_context.get("level")
         if pending_level is not None and d.fields.get("amount") in (None, ""):
             delta = _level_delta(identity, chosen, float(pending_level), today)
@@ -673,10 +707,11 @@ def _persist_new(store, ids, d: BusinessDraft) -> TurnResult:
     return _render(stored)
 
 
-def _with_goal_choices(res: TurnResult, goals: list[dict]) -> TurnResult:
-    """A draft that still lacks its goal asks for it, offering only the caller's own goals."""
+def _with_goal_choices(res: TurnResult, goals: list[dict], other: bool = False) -> TurnResult:
+    """A draft that still lacks its goal asks for it, offering only the caller's own goals (+ "מקור אחר" for income)."""
     if res.awaiting == "goal":
-        return replace(res, state="needs_goal", candidates=writer._cand(goals))
+        cands = writer._cand(goals) + ([{"goal_id": OTHER_SOURCE_ID, "title": OTHER_SOURCE_TITLE}] if other else [])
+        return replace(res, state="needs_goal", candidates=cands)
     return res
 
 
