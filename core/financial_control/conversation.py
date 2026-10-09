@@ -116,8 +116,10 @@ def _render(d: BusinessDraft) -> TurnResult:
         changed = {k: v for k, v in d.fields.items() if d.operation is DraftOperation.UPDATE and v != original.get(k)}
         return TurnResult("review", fd.render_review(
             d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
-            inferred=inferred, note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else str(d.source_context.get("review_note") or ""))),
+            inferred=inferred, note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
             d.entity_type, None, _view(d))
+    if d.source_context.get("ask_kind") and d.fields.get("goal") and not d.source_context.get("ask_source"):
+        return TurnResult("ask", "איזה סוג הכנסה זו?", d.entity_type, "kind", _view(d), candidates=list(KIND_CHOICES))
     if d.source_context.get("ask_source"):                    # "מקור אחר": the source's name comes before the amount
         return TurnResult("ask", "מה שם המקור? (למשל: אבי, תיווך)", d.entity_type, "source", _view(d))
     missing = _missing(d)
@@ -430,6 +432,24 @@ OTHER_SOURCE_ID = "other"           # synthetic choice id: "מקור אחר" -> 
 OTHER_SOURCE_TITLE = "מקור אחר"
 
 
+KIND_CHOICES = [{"goal_id": "one_time", "title": "חד-פעמית"}, {"goal_id": "monthly_recurring", "title": "חודשית קבועה"}]
+_KIND_WORDS = {"חד-פעמית": "one_time", "חד פעמית": "one_time", "חד-פעמי": "one_time", "חד פעמי": "one_time",
+               "חודשית קבועה": "monthly_recurring", "חודשי קבוע": "monthly_recurring", "קבועה": "monthly_recurring", "קבוע": "monthly_recurring"}
+
+
+def _goal_method(goal: dict) -> str:
+    m = (goal.get("fields") or {}).get(GF.CALC_METHOD)
+    return str((m.get("name") if isinstance(m, dict) else m) or "")
+
+
+def _recurring_note(d: BusinessDraft) -> str:
+    """monthly_recurring only counts on a recurring-level goal (calc.compute_goal): anywhere else it is stored but not summed."""
+    if (d.entity_type == fd.FCC_EVENT and d.fields.get("kind") == calc.MONTHLY_RECURRING
+            and d.source_context.get("goal_method") not in (None, calc.RECURRING_LEVEL)):
+        return "שימו לב: במקור הזה נספרות רק הכנסות חד-פעמיות בסכום החודש — הכנסה חודשית קבועה תירשם אך לא תיכלל בו. לשינוי: ערוך סוג."
+    return ""
+
+
 def _total_income_goal(goals: list[dict]) -> dict | None:
     """The one top-level income goal (no "Contributes To" parent). Without exactly one, "other source" is not offered."""
     roots = [g for g in goals if _is_income_goal(g) and calc.parent_goal_id(g.get("fields") or {}, GF) is None]
@@ -504,9 +524,12 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     offer_other = chosen is None and spec.get("goal_filter") == "income" and _total_income_goal(goals) is not None
     if offer_other:
         extra["offer_other"] = True
+    if intent_id == "monthly.income":                          # one-time vs recurring is the user's call, not a silent default
+        extra["ask_kind"] = True
     if chosen is not None:
         fields["goal"] = chosen["id"]
         extra["goal_title"] = chosen["fields"].get(GF.TITLE, "")
+        extra["goal_method"] = _goal_method(chosen)
     d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
     d, _rej = _set_fields(d, fields, strict=False)
     d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
@@ -554,6 +577,14 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         d2, _rej = _set_fields(d, {"note": f"מקור: {name[:80]}"}, strict=False)
         d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_source"})
         return _render(_save(store, ids, d2, expected=expected))
+    if (d.source_context.get("ask_kind") and d.fields.get("goal")
+            and d.lifecycle_state not in (DraftState.READY_FOR_REVIEW, DraftState.EDITING)):
+        kind = goal_id if goal_id in ("one_time", "monthly_recurring") else _KIND_WORDS.get(text.strip())
+        if kind is None:
+            return replace_result(_render(d), message=f"בחרו: חד-פעמית או חודשית קבועה.\n{_render(d).message}")
+        d2, _rej = _set_fields(d, {"kind": kind}, strict=False)
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_kind"})
+        return _render(_save(store, ids, d2, expected=expected))
     editing = d.lifecycle_state in (DraftState.READY_FOR_REVIEW, DraftState.EDITING)
     awaiting = None if editing else (_missing(d) or [None])[0]
     if awaiting and lower in SKIP_WORDS:
@@ -579,7 +610,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                               _view(d), candidates=_choices_for(d, goals))
         updates["goal"] = chosen["id"]
         d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, ""),
-                                       **({"ask_source": True} if other else {})})
+                                       "goal_method": _goal_method(chosen), **({"ask_source": True} if other else {})})
         pending_level = d.source_context.get("level")
         if pending_level is not None and d.fields.get("amount") in (None, ""):
             delta = _level_delta(identity, chosen, float(pending_level), today)

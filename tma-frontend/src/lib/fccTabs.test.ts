@@ -198,3 +198,11 @@ test("idle composer is compact (chips + one-row input, no send button, no turn);
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
 console.log("all fccTabs tests passed");
+
+test("writerView: a closed question (ask + candidates, e.g. income type) is offered as buttons", () => {
+  const t = { ...turn("ask", "איזה סוג הכנסה זו?"), candidates: [{ goal_id: "one_time", title: "חד-פעמית" }, { goal_id: "monthly_recurring", title: "חודשית קבועה" }] } as FccTurn;
+  const v = writerView(t, null);
+  assert.equal(v.choices.map((c) => c.goal_id).join(","), "one_time,monthly_recurring");
+  assert.ok(v.showInput && v.cancelsDraft);
+  assert.equal(writerView(turn("ask"), null).choices.length, 0);      // a plain question has no buttons
+});

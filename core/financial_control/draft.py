@@ -290,6 +290,9 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
             return "באיזו תדירות? חודשי / רבעוני / שנתי / מותאם"
     noun = record_noun(entity, fields)
     if field == "amount":
+        note = str(fields.get("note") or "")
+        if noun == "מקור" and note.startswith("מקור: "):         # "מקור אחר": speak of the NAMED source, not the total goal behind it
+            return f"כמה לרשום ממקור {note[len('מקור: '):]}?"
         return f"כמה לרשום{' ב' + noun + ' ' + goal_title if goal_title else ''}?"
     if field == "goal":
         return {"מקור": "מאיזה מקור?", "סעיף": "באיזה סעיף?"}.get(noun, "לאיזה יעד?")

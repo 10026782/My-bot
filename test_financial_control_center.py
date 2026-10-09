@@ -2085,7 +2085,9 @@ def test_intent_income_prefills_kind_and_offers_only_own_income_goals():
 
 def test_intent_income_full_flow_reviews_then_freezes_one_event():
     seed_intents()
-    intent("monthly.income", "recGI")
+    r = intent("monthly.income", "recGI")
+    assert r.awaiting == "kind"                                                   # the income type is asked, never silently defaulted
+    conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
     r = conv.handle_turn(ELIYAHU, "5000", extractor=Ex(fill={"5000": {"amount": 5000}}), today=TODAY)
     assert r.state == "review" and "משכורת" in r.message and "₪5,000" in r.message
     c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
@@ -2178,6 +2180,7 @@ def test_free_text_cannot_open_a_new_draft_from_the_loans_or_assets_tabs():
 def test_scope_does_not_block_answering_an_open_draft():
     seed_intents()
     intent("monthly.income", "recGI")
+    conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY, scope="loans")
     r = conv.handle_turn(ELIYAHU, "700", extractor=Ex(fill={"700": {"amount": 700}}), today=TODAY, scope="loans")
     assert r.state == "review"
 
@@ -2615,7 +2618,9 @@ def test_other_source_books_on_the_total_goal_with_the_named_source_in_the_note(
     r = conv.handle_turn(ELIYAHU, "מקור אחר", goal_id=conv.OTHER_SOURCE_ID, extractor=Ex(), today=TODAY)
     assert r.state == "ask" and r.awaiting == "source"
     r = conv.handle_turn(ELIYAHU, "אבי", extractor=Ex(), today=TODAY)
-    assert r.state == "ask" and r.awaiting == "amount" and "מקור" in r.message and "יעד" not in r.message
+    assert r.awaiting == "kind" and [c["goal_id"] for c in r.candidates] == ["one_time", "monthly_recurring"]
+    r = conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
+    assert r.state == "ask" and r.awaiting == "amount" and r.message == "כמה לרשום ממקור אבי?"
     r = conv.handle_turn(ELIYAHU, "1200", extractor=Ex(fill={"1200": {"amount": 1200}}), today=TODAY)
     assert r.state == "review" and "• מקור: הכנסה חודשית קבועה" in r.message and "מקור: אבי" in r.message
     c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
@@ -2644,3 +2649,25 @@ def test_household_expense_wording_is_an_item_not_a_goal():
     seed_sources()
     r = intent("monthly.household_expense")
     assert r.state == "ask" and "סעיף" in r.message and "יעד" not in r.message
+
+
+def test_income_kind_is_asked_and_recurring_on_a_period_goal_is_flagged_in_review():
+    seed_sources()
+    intent("monthly.income", "recT")                                              # a period_sum source (default calc method)
+    r = conv.handle_turn(ELIYAHU, "x", extractor=Ex(), today=TODAY)               # not a kind: asked again, nothing stored
+    assert r.awaiting == "kind" and "בחרו" in r.message
+    r = conv.handle_turn(ELIYAHU, "חודשית קבועה", extractor=Ex(), today=TODAY)   # typed label works like the button
+    assert r.awaiting == "amount"
+    r = conv.handle_turn(ELIYAHU, "800", extractor=Ex(fill={"800": {"amount": 800}}), today=TODAY)
+    assert r.state == "review" and "חודשי קבוע" in r.message and "לא תיכלל" in r.message
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    (w,) = c.snapshot["writes"]
+    assert w["fields"][EF.KIND] == "monthly_recurring"
+
+
+def test_income_one_time_review_has_no_recurring_warning():
+    seed_sources()
+    intent("monthly.income", "recT")
+    conv.handle_turn(ELIYAHU, "חד פעמית", extractor=Ex(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "300", extractor=Ex(fill={"300": {"amount": 300}}), today=TODAY)
+    assert r.state == "review" and "לא תיכלל" not in r.message and "חד-פעמי" in r.message
