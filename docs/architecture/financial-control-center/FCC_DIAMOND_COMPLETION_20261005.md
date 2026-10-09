@@ -98,7 +98,7 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 | cumulative | `cumulative` | התקדמות מול יעד כולל; קצב שבועי רק עם `end_date` מפורש |
 | project | אין סכום יעד + קטגוריה לא-מספרית | כרטיס אבן-דרך: סטטוס, פעולה הבאה, תאריך יעד — ללא סכומים |
 
-`summarize()` מצרף לפי משפחה בלבד, מדלג על פרויקטים ולא מערבב משפחות; כרטיס "יעד הכנסה לשבוע" בכותרת הוא הכנסה בלבד.
+`summarize()` מצרף לפי משפחה בלבד, מדלג על פרויקטים ולא מערבב משפחות; כרטיס "קצב נדרש לשבוע (מעכשיו)" בכותרת הוא הכנסה בלבד.
 
 
 ## Income hierarchy + calendar-day pacing (06/10/2026)

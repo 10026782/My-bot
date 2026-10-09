@@ -110,15 +110,25 @@ export function netBreakdown(card: FccSummaryCard | undefined): string | undefin
   return `ברוטו ${money(card.actual)} · הוצאות ישירות -${money(card.direct_costs)} · נטו ${money(card.net)}`;
 }
 
-/** "of which travel ₪1,500 still owed · from other sources ₪2,583" — the weekly income card breakdown. */
+/** The weekly card's headline is the PACE still needed from now to reach the monthly goal. A weekly source (e.g. travel)
+ *  is a part INSIDE that pace, never on top of it:
+ *   - a source that still owes shows what is left, and "other sources" is the rest, so the parts add up to the headline;
+ *   - once every weekly source has reached its minimum there is nothing to add up: each is shown as achieved and
+ *     "other sources" is left out (it would just repeat the headline and read like 2,500 + 2,681). */
 export function weeklyBreakdown(card: FccSummaryCard | undefined): string | undefined {
   if (!card?.sources?.length || card.other_sources_needed == null) return undefined;
   const weekly = card.sources.filter((s) => s.period_type === "weekly");
-  // the weekly target INCLUDES the sources: show what each still owes so the parts add up to the headline number
-  const parts = weekly.map((s) => `${s.title ?? "מקור"}: נשאר ${money(s.remaining)} מתוך ${money(s.target)} השבוע`
-    + (s.direct_costs ? ` (הוצאות ישירות -${money(s.direct_costs)} · נטו ${money(s.net)})` : ""));
-  parts.push(`ממקורות אחרים: ${money(card.other_sources_needed)}`);
-  return `מזה: ${parts.join(" · ")}`;
+  const met = (s: (typeof weekly)[number]) => s.remaining != null && s.remaining <= 0;
+  const line = (s: (typeof weekly)[number]) => met(s)
+    ? `${s.title ?? "מקור"} השבוע: היעד ${money(s.target)} הושג ✅`
+    : `${s.title ?? "מקור"}: נשאר ${money(s.remaining)} מתוך ${money(s.target)} השבוע`
+      + (s.direct_costs ? ` (הוצאות ישירות -${money(s.direct_costs)} · נטו ${money(s.net)})` : "");
+  const parts = weekly.map(line);
+  if (weekly.some((s) => !met(s))) {
+    parts.push(`ממקורות אחרים: ${money(card.other_sources_needed)}`);
+    return `מזה: ${parts.join(" · ")}`;
+  }
+  return parts.length ? parts.join(" · ") : undefined;
 }
 
 export interface HeaderCardModel { key: string; label: string; value: string; hint?: string }
@@ -136,7 +146,7 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
   const reduction = ratio(s.payment_reduction);
   return [
     { key: "income", label: "הכנסה מול יעד", ...income, hint: netBreakdown(s.income) },
-    { key: "income_week", label: "יעד הכנסה לשבוע",
+    { key: "income_week", label: "קצב נדרש לשבוע (מעכשיו)",
       value: s.income ? money(s.income.dynamic_target_per_week) : "—",
       hint: s.income ? weeklyBreakdown(s.income) : "לא הוגדר יעד" },
     { key: "savings", label: s.savings?.mode === "monthly_level" ? "הפרשה חודשית לחיסכון" : "חיסכון", ...savings,
