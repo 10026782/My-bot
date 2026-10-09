@@ -2391,32 +2391,6 @@ def test_asset_mortgage_writes_only_its_field_and_says_it_is_not_synced_with_loa
     assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"][0]["fields"] == {AF.MORTGAGE: 0}
 
 
-def test_asset_next_step_is_free_text_and_the_owner_is_one_of_the_live_choices_only():
-    seed_p3()
-    r = intent("asset.next_step", "recAH")
-    assert r.state == "ask" and "לבדוק מחיר" in r.message and "אהרן" in r.message
-    r = say("לדבר עם המתווך ביום ראשון", step="לדבר עם המתווך ביום ראשון")
-    assert r.state == "review" and "פעולה הבאה בנכס" in r.message and "לדבר עם המתווך ביום ראשון" in r.message and "תוחלף" in r.message
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
-    assert w["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך ביום ראשון"}       # owner not chosen -> not written
-    conv.complete_execution(ELIYAHU)
-    intent("asset.next_step", "recAH")
-    say("לשלוח הצעה", step="לשלוח הצעה")
-    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
-    say("אחראי אורי", step_owner="אורי")
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
-    assert w["fields"] == {AF.NEXT_STEP: "לשלוח הצעה", AF.NEXT_STEP_OWNER: "אורי"}
-    conv.complete_execution(ELIYAHU)
-    intent("asset.next_step", "recAH")
-    say("משהו", step="משהו")
-    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
-    r = say("אחראי דוד", step_owner="דוד")                                   # not a live choice: rejected, nothing stored
-    assert "דוד" not in r.message
-    say("משהו אחר", step="משהו אחר")                                         # a valid edit brings the draft back to review
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
-    assert AF.NEXT_STEP_OWNER not in w["fields"]
-
-
 def test_asset_intents_are_owner_scoped_skip_sold_assets_and_need_a_target():
     seed_p3()
     for iid in ("asset.update_value", "asset.update_mortgage", "asset.next_step"):
@@ -2431,9 +2405,10 @@ def test_asset_update_to_the_value_it_already_has_or_same_text_is_not_written_tw
     seed_p3()
     intent("asset.update_value", "recAH"); say("5000000", value=5000000)
     assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).state == "duplicate"
+    DB[Tables.TASKS] = [step_task("tOpen", "recAH", "לבדוק מחיר")]
     intent("asset.next_step", "recAH"); say("לבדוק מחיר", step=" לבדוק מחיר ")
     r = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
-    assert r.state == "duplicate"                                           # same text (whitespace aside), owner not part of the write -> nothing new
+    assert r.state == "duplicate"                                           # the same OPEN action already exists on this asset
 
 
 def test_asset_cannot_be_retargeted_by_an_edit_and_shares_the_single_draft_slot():
@@ -2446,28 +2421,14 @@ def test_asset_cannot_be_retargeted_by_an_edit_and_shares_the_single_draft_slot(
     assert intent("asset.next_step", "recAH").state == "info"
 
 
-def test_asset_read_model_exposes_next_step_and_owner_as_stored():
+def test_asset_read_model_keeps_the_legacy_next_step_as_stored_and_lists_open_actions():
     seed_p3()
+    DB[Tables.TASKS] = [step_task("t1", "recAH", "לשלוח הצעה", owner="אורי", due="2026-10-20")]
     items = {i["id"]: i for i in service.overview(ELIYAHU, TODAY)["assets"]["items"]}
-    assert items["recAH"]["next_step"] == "לבדוק מחיר" and items["recAH"]["next_step_owner"] == "אהרן"
+    assert items["recAH"]["next_step"] == "לבדוק מחיר" and items["recAH"]["next_step_owner"] == "אהרן"      # legacy text, untouched
+    (a,) = items["recAH"]["actions"]
+    assert a["id"] == "t1" and a["title"] == "לשלוח הצעה" and a["status"] == "ממתין" and a["owner"] == "אורי" and a["due_date"] == "2026-10-20"
     assert items["recAE"]["next_step"] is None and items["recAE"]["next_step_owner"] is None
-
-
-def test_p3_http_asset_next_step_executes_the_frozen_patch_and_the_executor_rechecks_the_owner(monkeypatch):
-    seed_p3()
-    sent = []
-    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
-                        lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
-    monkeypatch.setattr(conv.DeterministicExtractor, "fill", lambda self, text, awaiting, fields, entity, today: {"step": text} if awaiting == "step" else {})
-    c = http(monkeypatch, ELIYAHU)
-    assert c.post("/api/fcc/intent/start", json={"intent": "asset.next_step", "entity_id": "recAH"}, headers=H).get_json()["awaiting"] == "step"
-    assert c.post("/api/fcc/write", json={"text": "לדבר עם המתווך", "scope": "assets"}, headers=H).get_json()["state"] == "review"
-    assert sent == []
-    assert c.post("/api/fcc/write", json={"text": "אשר", "scope": "assets"}, headers=H).get_json()["state"] == "executed"
-    assert sent[0]["table"] == "Assets" and sent[0]["record_id"] == "recAH" and sent[0]["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך"}
-    assert "Assets" in approval_actions._TMA_WRITE_ALLOWED_TABLES
-    _, denied = approval_actions._enforce_personal_data_policy("patch", "Assets", "recAX", {AF.VALUE: 1}, ELIYAHU)
-    assert denied is not None
 
 
 # ── Contextual writer P4: mark an asset sold (Sale Date + Sale Amount) ─────────────────────────────────────────────
@@ -2773,18 +2734,6 @@ def _boom(**kw):
     raise RuntimeError("the model must not be called for a free-text next step")
 
 
-def test_next_step_text_is_taken_verbatim_without_calling_the_model(monkeypatch):
-    import llm_fallback
-    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
-    seed_p3()
-    r = intent("asset.next_step", "recAH")
-    assert r.awaiting == "step"
-    r = conv.handle_turn(ELIYAHU, "לדבר עם המתווך ביום ראשון ולשלוח הצעה", extractor=conv.DeterministicExtractor(), today=TODAY, scope="assets")
-    assert r.state == "review" and "לדבר עם המתווך ביום ראשון ולשלוח הצעה" in r.message
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
-    assert w["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך ביום ראשון ולשלוח הצעה"}
-
-
 def test_next_step_command_words_and_blank_are_not_a_step(monkeypatch):
     import llm_fallback
     monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
@@ -2793,24 +2742,6 @@ def test_next_step_command_words_and_blank_are_not_a_step(monkeypatch):
     for word in ("דלג", "אשר"):
         r = conv.handle_turn(ELIYAHU, word, extractor=conv.DeterministicExtractor(), today=TODAY, scope="assets")
         assert r.awaiting == "step" or r.state == "info", (word, r.state)
-
-
-def test_next_step_edit_takes_an_owner_pick_or_new_text_as_written_without_the_model(monkeypatch):
-    import llm_fallback
-    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
-    seed_p3()
-    intent("asset.next_step", "recAH")
-    conv.handle_turn(ELIYAHU, "לשלוח הצעה", extractor=conv.DeterministicExtractor(), today=TODAY)
-    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.DeterministicExtractor(), today=TODAY)
-    r = conv.handle_turn(ELIYAHU, "אחראי אורי", extractor=conv.DeterministicExtractor(), today=TODAY)
-    assert r.state == "review" and "אורי" in r.message
-    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.DeterministicExtractor(), today=TODAY)
-    r = conv.handle_turn(ELIYAHU, "אחראי דוד", extractor=conv.DeterministicExtractor(), today=TODAY)           # not a live choice
-    assert "דוד" not in r.message
-    r = conv.handle_turn(ELIYAHU, "לשלוח הצעה מעודכנת", extractor=conv.DeterministicExtractor(), today=TODAY)
-    assert r.state == "review" and "לשלוח הצעה מעודכנת" in r.message
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
-    assert w["fields"] == {AF.NEXT_STEP: "לשלוח הצעה מעודכנת", AF.NEXT_STEP_OWNER: "אורי"}
 
 
 def test_a_model_failure_is_not_understood_never_a_crashed_turn(monkeypatch):
@@ -2896,3 +2827,129 @@ def test_goal_update_edit_is_label_then_value_without_a_model(no_model):
     assert r.state == "review" and "₪75,000" in r.message
     (w,) = _say("אשר").snapshot["writes"]
     assert w["table"] == Tables.FIN_EVENTS and w["fields"][EF.AMOUNT] == 75000 and w["fields"][EF.KIND] == "target_change"
+
+
+# ── Asset next actions are TASKS: several open, a life cycle (בתהליך / בוצע / בוטלה), edit; the legacy text stays ───────
+def step_task(tid, asset, title, owner=None, status="ממתין", due=None, owner_profile=ELI, extra=""):
+    desc = f"[FCC-ASSET:{asset}]" + (f"\nאחראי: {owner}" if owner else "") + (f"\n{extra}" if extra else "")
+    f = {TaskFields.NAME: title, TaskFields.STATUS: status, TaskFields.DESCRIPTION: desc, TaskFields.TOPIC: "כספים",
+         TaskFields.OWNER: [owner_profile]}
+    if due:
+        f[TaskFields.DUE_DATE] = due
+    return {"id": tid, "fields": f}
+
+
+def _confirm_one():
+    return conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+
+
+def test_a_new_next_action_is_a_new_task_and_the_open_ones_stay(no_model):
+    seed_p3()
+    DB[Tables.TASKS] = [step_task("t1", "recAH", "לשלוח הצעה")]
+    r = intent("asset.next_step", "recAH")
+    assert r.awaiting == "step" and "1" in r.message                           # "open actions in the asset right now: 1"
+    r = _say("לבדוק תכנית בנייה", scope="assets")
+    assert r.state == "review" and "משימת מעקב חדשה" in r.message and "נשארות" in r.message
+    _say("ערוך", scope="assets"); _say("אחראי אורי", scope="assets")
+    _say("ערוך", scope="assets"); r = _say("תאריך יעד 2026-11-01", scope="assets")
+    assert "2026-11-01" in r.message or "01/11/2026" in r.message
+    (w,) = _confirm_one()
+    f = w["fields"]
+    assert w["op"] == "post" and w["table"] == Tables.TASKS
+    assert f[TaskFields.NAME] == "לבדוק תכנית בנייה" and f[TaskFields.STATUS] == "ממתין" and f[TaskFields.TOPIC] == "כספים"
+    assert f[TaskFields.OWNER] == [ELI] and f[TaskFields.DUE_DATE] == "2026-11-01"
+    assert f[TaskFields.DESCRIPTION] == "[FCC-ASSET:recAH]\nאחראי: אורי"        # tag first, then who is responsible
+    assert AF.NEXT_STEP not in f                                                # the legacy asset field is no longer written
+
+
+def test_start_done_and_cancel_are_status_moves_with_a_history_line_and_a_review(no_model):
+    seed_p3()
+    DB[Tables.TASKS] = [step_task("t1", "recAH", "לשלוח הצעה", owner="אורי")]
+    r = intent("asset.step_start", "t1")
+    assert r.state == "review" and "לשלוח הצעה" in r.message and "בתהליך" in r.message and r.snapshot is None   # nothing written before אשר
+    (w,) = _confirm_one()
+    assert w["op"] == "patch" and w["record_id"] == "t1" and w["fields"][TaskFields.STATUS] == "בביצוע"
+    assert w["fields"][TaskFields.DESCRIPTION].startswith("[FCC-ASSET:recAH]\nאחראי: אורי\nהתחילה ב־2026-10-08")
+    conv.complete_execution(ELIYAHU)
+    DB[Tables.TASKS][0]["fields"][TaskFields.STATUS] = "בביצוע"
+    assert intent("asset.step_start", "t1").state == "info"                     # already in progress
+    intent("asset.step_done", "t1")
+    (w,) = _confirm_one()
+    assert w["fields"][TaskFields.STATUS] == "בוצע" and "הושלמה ב־2026-10-08" in w["fields"][TaskFields.DESCRIPTION]
+    conv.complete_execution(ELIYAHU)
+    intent("asset.step_cancel", "t1")
+    (w,) = _confirm_one()
+    assert w["fields"][TaskFields.STATUS] == "בוצע" and "בוטלה ב־2026-10-08" in w["fields"][TaskFields.DESCRIPTION]   # no new Status choice
+
+
+def test_edit_one_action_changes_only_that_task_and_keeps_its_history(no_model):
+    seed_p3()
+    DB[Tables.TASKS] = [step_task("t1", "recAH", "לשלוח הצעה", owner="אורי", due="2026-10-20", extra="התחילה ב־2026-10-05"),
+                        step_task("t2", "recAH", "לבדוק מחיר")]
+    r = intent("asset.step_edit", "t1")
+    assert r.state == "ask" and "לשלוח הצעה" in r.message or r.state == "ask"
+    r = _say("שלוח הצעה מעודכנת — רק חלק מהתכנית התחיל", scope="assets")
+    assert r.state == "review" and "רק חלק מהתכנית התחיל" in r.message
+    (w,) = _confirm_one()
+    assert w["op"] == "patch" and w["record_id"] == "t1" and w["fields"][TaskFields.NAME] == "שלוח הצעה מעודכנת — רק חלק מהתכנית התחיל"
+    assert w["fields"][TaskFields.DUE_DATE] == "2026-10-20"
+    assert w["fields"][TaskFields.DESCRIPTION] == "[FCC-ASSET:recAH]\nאחראי: אורי\nהתחילה ב־2026-10-05"   # owner + history preserved
+    assert "t2" not in str(w)
+
+
+def test_task_actions_are_owner_scoped_and_a_closed_or_foreign_task_is_not_found(no_model):
+    seed_p3()
+    DB[Tables.TASKS] = [step_task("tAvi", "recAX", "של אבי", owner_profile=AVI), step_task("tDone", "recAH", "סגורה", status="בוצע"),
+                        step_task("tMine", "recAH", "שלי")]
+    for tid in ("tAvi", "tDone", "tNope"):
+        for iid in ("asset.step_edit", "asset.step_start", "asset.step_done", "asset.step_cancel"):
+            assert intent(iid, tid).state == "denied", (iid, tid)
+    assert intent("asset.step_done").state == "clarify"
+    assert intent("asset.step_done", "tMine", who=AVI_I).state == "denied"      # Avi cannot move Eliyahu's task
+
+
+def test_a_task_patch_is_idempotent_and_a_closed_task_is_not_written_again(no_model):
+    seed_p3()
+    DB[Tables.TASKS] = [step_task("t1", "recAH", "לשלוח הצעה")]
+    intent("asset.step_done", "t1")
+    DB[Tables.TASKS][0]["fields"][TaskFields.STATUS] = "בוצע"                    # closed meanwhile (another device)
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).state == "duplicate"
+
+
+def test_finishing_an_action_offers_the_next_one_for_that_asset_only():
+    done = {"writes": [{"op": "patch", "table": Tables.TASKS, "record_id": "t1",
+                        "fields": {TaskFields.STATUS: "בוצע", TaskFields.DESCRIPTION: "[FCC-ASSET:recAH]\nהושלמה ב־2026-10-08"}}]}
+    assert conv.next_step_followup(done) == "recAH"
+    started = {"writes": [{"op": "patch", "table": Tables.TASKS, "record_id": "t1",
+                           "fields": {TaskFields.STATUS: "בביצוע", TaskFields.DESCRIPTION: "[FCC-ASSET:recAH]"}}]}
+    assert conv.next_step_followup(started) is None and conv.next_step_followup(None) is None
+    goal_task = {"writes": [{"op": "patch", "table": Tables.TASKS, "fields": {TaskFields.STATUS: "בוצע", TaskFields.DESCRIPTION: "[FCC:recG]"}}]}
+    assert conv.next_step_followup(goal_task) is None
+
+
+def test_goal_follow_up_list_ignores_asset_actions_and_vice_versa(no_model):
+    seed_p3()
+    DB[Tables.TASKS] = [step_task("t1", "recAH", "פעולת נכס"),
+                        {"id": "g1", "fields": {TaskFields.NAME: "משימת יעד", TaskFields.STATUS: "ממתין", TaskFields.TOPIC: "כספים",
+                                                TaskFields.DESCRIPTION: "[FCC:recG1] x", TaskFields.OWNER: [ELI]}}]
+    assert [t["id"] for t in service.asset_tasks(ELIYAHU)] == ["t1"]
+    assert [t["id"] for t in service.fcc_tasks(ELIYAHU)] == ["g1"]
+
+
+def test_p3_http_next_action_creates_a_task_and_the_executor_rechecks_the_owner(monkeypatch, no_model):
+    seed_p3()
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/intent/start", json={"intent": "asset.next_step", "entity_id": "recAH"}, headers=H).get_json()["awaiting"] == "step"
+    assert c.post("/api/fcc/write", json={"text": "לדבר עם המתווך", "scope": "assets"}, headers=H).get_json()["state"] == "review"
+    assert sent == []
+    done = c.post("/api/fcc/write", json={"text": "אשר", "scope": "assets"}, headers=H).get_json()
+    assert done["state"] == "executed" and done["follow_up_asset"] is None
+    assert sent[0]["table"] == Tables.TASKS and sent[0]["op"] == "post" and sent[0]["fields"][TaskFields.NAME] == "לדבר עם המתווך"
+    assert Tables.TASKS in approval_actions._TMA_WRITE_ALLOWED_TABLES
+    DB[Tables.TASKS] = [step_task("t1", "recAH", "x")]
+    c.post("/api/fcc/intent/start", json={"intent": "asset.step_done", "entity_id": "t1"}, headers=H)
+    done = c.post("/api/fcc/write", json={"text": "אשר", "scope": "assets"}, headers=H).get_json()
+    assert done["state"] == "executed" and done["follow_up_asset"] == "recAH"       # the screen then asks for the next action

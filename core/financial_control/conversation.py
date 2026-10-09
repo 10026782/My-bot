@@ -201,6 +201,8 @@ def _derive_obligation_saving(d: BusinessDraft) -> BusinessDraft:
 
 
 # Free-text answers that are the user's own words: stored as written (never paraphrased, never sent to the model).
+_STEP_ENTITIES = (fd.FCC_ASSET_STEP, fd.FCC_ASSET_STEP_EDIT)
+_ASSET_TAG = re.compile(r"\[FCC-ASSET:(rec[A-Za-z0-9]+)\]")
 _VERBATIM_FIELDS = {"step": 500, "title": 120, "name": 120, "vendor": 120, "lender": 120, "note": 300}
 
 
@@ -419,15 +421,57 @@ def _start_asset_intent(identity, ids, entity, entity_id, store, today) -> TurnR
         return _start_asset_sale(identity, ids, asset, name, store, today)
     current = f.get(_ASSET_CURRENT[entity])
     if entity == fd.FCC_ASSET_STEP:
-        owner = service._sel(f.get(AF.NEXT_STEP_OWNER))
-        text = str(current or "").strip()
-        note = ("היום: " + (text[:120] + ("…" if len(text) > 120 else "") if text else "לא הוגדר")) + (f" · אחראי: {owner}" if owner else "")
+        open_n = sum(1 for t in service.asset_tasks(identity) if t["asset_id"] == asset["id"])
+        note = f"פעולות פתוחות בנכס כרגע: {open_n}" if open_n else "אין פעולות פתוחות בנכס"
     else:
         num = calc._num(current)
         note = f"היום: {fd.display_value('value', num)}" if num is not None else "היום: לא הוגדר"
     d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=f"intent:{entity}#{uuid.uuid4().hex[:8]}", today=today,
-                   extra_ctx={"record_id": asset["id"], "asset_name": name, "goal_title": name, "review_note": note})
+                   extra_ctx={"record_id": asset["id"], "asset_id": asset["id"], "asset_name": name, "goal_title": name, "review_note": note})
     return _persist_new(store, ids, d)
+
+
+def _start_task_intent(identity, ids, intent_id: str, spec: dict, task_id: str | None, store, today) -> TurnResult:
+    """Edit / start / finish / cancel ONE open next action of the caller's own asset. The task is chosen by id (never typed); a task
+    that is not the caller's, or is already closed, is answered like a missing one."""
+    task = next((t for t in service.asset_tasks(identity) if t["id"] == str(task_id or "")), None)
+    if not task_id:
+        return TurnResult("clarify", "בחרו קודם את הפעולה.")
+    asset = next((r for r in service.my_assets(identity) if r["id"] == (task or {}).get("asset_id")), None)
+    if task is None or asset is None:
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    name = (asset.get("fields") or {}).get(AF.NAME) or "הנכס"
+    mode, entity = spec.get("mode"), spec["entity"]
+    if mode == "start" and task["status"] == "בביצוע":
+        return TurnResult("info", "הפעולה כבר מסומנת ״בתהליך״.")
+    raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"
+    ctx = {"record_id": task["id"], "asset_id": asset["id"], "asset_name": name, "goal_title": name, "history": task["history"],
+           "description": task["description"], "mode": mode, "task_title": task["title"]}
+    if entity == fd.FCC_ASSET_STEP_STATUS:
+        word = {"start": "התחלת הפעולה (בתהליך)", "done": "סיום הפעולה", "cancel": "ביטול הפעולה"}[mode]
+        ctx["review_note"] = f"{word}: {task['title']}"
+        d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=ctx)
+        d, _rej = _set_fields(d, {"occurred_at": today.isoformat()}, strict=False)
+        d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
+        return _persist_new(store, ids, d)
+    values = {"step": task["title"], "step_owner": task["owner"] if task["owner"] in fd.STEP_OWNERS else None,
+              "due_date": str(task["due_date"] or "")[:10] or None}
+    d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=ctx)
+    d, _rej = _set_fields(d, {k: v for k, v in values.items() if v}, strict=False)
+    if d.lifecycle_state is DraftState.READY_FOR_REVIEW:
+        d = d.begin_edit()                                       # ask what to change (label then value), then review
+    return _persist_new(store, ids, d)
+
+
+def next_step_followup(snapshot: dict | None) -> str | None:
+    """After a next action was finished / cancelled: the asset it belonged to (the screen asks "what is the next action?" if none
+    is left open). Derived from the frozen write itself — nothing is read or guessed."""
+    for w in (snapshot or {}).get("writes") or []:
+        f = w.get("fields") or {}
+        m = _ASSET_TAG.search(str(f.get(TaskFields.DESCRIPTION) or ""))
+        if w.get("table") == Tables.TASKS and w.get("op") == "patch" and f.get(TaskFields.STATUS) == "בוצע" and m:
+            return m.group(1)
+    return None
 
 
 def _sale_warnings(identity, asset: dict, today) -> str:
@@ -591,6 +635,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return stop
     if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_NEW):
         return _start_loan_intent(identity, ids, spec["entity"], entity_id, store, today)
+    if spec.get("target") == "task":
+        return _start_task_intent(identity, ids, intent_id, spec, entity_id, store, today)
     if spec["entity"] in _ASSET_CURRENT:
         return _start_asset_intent(identity, ids, spec["entity"], entity_id, store, today)
     if intent_id in ("savings.deposit", "savings.gap_reason"):
@@ -739,12 +785,15 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
             updates["amount"] = delta
             updates["note"] = f"קביעת רמה: ₪{float(pending_level):,.0f} לחודש"
     else:
-        if editing and d.entity_type == fd.FCC_ASSET_STEP and lower not in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS:
-            # editing a next step: an owner pick ("אורי" / "אחראי אורי") or the new step text, both taken as written
+        if editing and d.entity_type in _STEP_ENTITIES and lower not in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS:
+            # editing a next action: "<label> <value>" (תאריך יעד …), an owner pick ("אורי" / "אחראי אורי"), or the new text — as written
             t = text.strip()
+            updates.update(_parse_edit(d.entity_type, t))
             m = re.match(r"^אחראי[:\s]+(.+)$", t)
             who = m.group(1).strip() if m else t
-            if who in fd.STEP_OWNERS:
+            if updates:
+                pass
+            elif who in fd.STEP_OWNERS:
                 updates["step_owner"] = who
             elif not m:
                 updates["step"] = t[:_VERBATIM_FIELDS["step"]]
@@ -757,7 +806,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                 except _VALIDATION_ERRORS:
                     det_failed = True                                # looked like a value but is not a valid one
         if (awaiting is None or awaiting not in updates) and awaiting not in _VERBATIM_FIELDS and not updates \
-                and not (editing and d.entity_type == fd.FCC_ASSET_STEP):
+                and not (editing and d.entity_type in _STEP_ENTITIES):
             try:
                 filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
             except Exception:                                    # a model failure is "not understood", never a crashed turn
@@ -818,6 +867,18 @@ def _already_applied(identity, write: dict) -> bool:
         cur = (rec or {}).get("fields") or {}
         same = lambda have, want: (writer._norm(str(have or "")) == writer._norm(want)) if isinstance(want, str) else calc._num(have) == want
         return rec is not None and all(same(cur.get(k), v) for k, v in fields.items())    # the record already holds exactly this
+    if write["table"] == Tables.TASKS and fields.get(TaskFields.DESCRIPTION, "").startswith(fd.ASSET_TASK_TAG):
+        open_tasks = service.asset_tasks(identity)
+        if write["op"] == "post":                                  # the same open action already exists on this asset
+            asset_id = _ASSET_TAG.search(fields[TaskFields.DESCRIPTION]).group(1)
+            return any(t["asset_id"] == asset_id and writer._norm(t["title"] or "") == writer._norm(fields.get(TaskFields.NAME, ""))
+                       for t in open_tasks)
+        cur = next((t for t in open_tasks if t["id"] == write.get("record_id")), None)
+        if cur is None:                                            # closed (or not the caller's) already: nothing left to change
+            return True
+        if fields.get(TaskFields.STATUS) == "בביצוע":
+            return cur["status"] == "בביצוע"
+        return False
     if write["op"] == "post" and write["table"] == Tables.LOANS:
         name = writer._norm(fields.get(LF.NAME, ""))
         return any(writer._norm((r.get("fields") or {}).get(LF.NAME, "")) == name and fcc_loans.is_active(r.get("fields") or {})

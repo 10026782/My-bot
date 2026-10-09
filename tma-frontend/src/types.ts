@@ -643,6 +643,9 @@ export interface FccLoans {
   payoff?: FccPayoff;
 }
 
+/** One OPEN next action of an asset (a Task): several may be open; ממתין -> בביצוע -> בוצע / בוטלה. */
+export interface FccAssetAction { id: string; title: string | null; status: string; due_date: string | null; owner: string | null; history: string }
+
 export interface FccAssetItem {
   id: string;
   name: string | null;
@@ -654,6 +657,7 @@ export interface FccAssetItem {
   ownership_pct: number | null;
   next_step: string | null;
   next_step_owner: string | null;
+  actions?: FccAssetAction[];       // open next actions (Tasks); next_step above is the LEGACY single text, left as stored
   equity: number | null;
   my_equity: number | null;
   linked_loans: { id: string; name: string | null; loan_type: string | null; early_closure_balance: number | null; monthly_payment: number | null; interest_rate: number | null }[];
@@ -717,4 +721,5 @@ export interface FccTurn {
   fields?: Record<string, string>;
   candidates?: { goal_id: string; title: string | null }[];
   follow_up?: "savings" | null;     // executed income: the screen offers to put the freed amount away
+  follow_up_asset?: string | null;  // executed finish / cancel of a next action: the asset to ask "what is the next action?" for
 }

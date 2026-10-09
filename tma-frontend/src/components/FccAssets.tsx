@@ -1,5 +1,5 @@
-import type { FccAssets } from "../types";
-import { assetCardModel, assetsHeaderCards, debtLines, soldCardModel, soldNote } from "../lib/fccAssets";
+import type { FccAssets, FccAssetItem } from "../types";
+import { askNextAction, assetCardModel, assetsHeaderCards, debtLines, soldCardModel, soldNote } from "../lib/fccAssets";
 import { UNKNOWN } from "../lib/fccLoans";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -10,6 +10,14 @@ export interface AssetActions {
   onAction: (intent: string, assetId: string) => void;
   disabled: boolean;          // a draft is already open in the shared writer (one slot per person)
 }
+
+/** The actions of ONE open next action; a click names the intent and the TASK id (never text) — review + אשר follow. */
+export const STEP_ACTIONS = [
+  { intent: "asset.step_start", label: "בתהליך", hideWhenInProgress: true },
+  { intent: "asset.step_done", label: "בוצע" },
+  { intent: "asset.step_cancel", label: "בוטל" },
+  { intent: "asset.step_edit", label: "ערוך" },
+] as const;
 
 export const ASSET_ACTIONS = [
   { intent: "asset.update_value", label: "עדכון שווי" },
@@ -57,7 +65,27 @@ export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?
                 <dl className="fcc-pay__figures">
                   {m.rows.map((r) => <div key={r.label}><dt>{r.label}</dt><dd className={r.value === UNKNOWN ? "fcc-unknown" : undefined}>{r.value}</dd></div>)}
                 </dl>
-                {m.nextStep && <p className="fcc-asset__step"><strong>פעולה הבאה:</strong> {m.nextStep}</p>}
+                {m.actions.length > 0 && (
+                  <div className="fcc-asset__steps" aria-label="פעולות הבאות פתוחות">
+                    <p className="fcc-loan__meta"><strong>פעולות הבאות ({m.actions.length})</strong></p>
+                    {m.actions.map((a) => (
+                      <div key={a.id} className="fcc-asset__step">
+                        <p><strong>{a.title}</strong> <span className="fcc-tag fcc-tag--muted">{a.statusLabel}</span></p>
+                        {a.meta && <p className="fcc-loan__meta">{a.meta}</p>}
+                        {a.history.map((h) => <p key={h} className="fcc-loan__meta">{h}</p>)}
+                        {actions && (
+                          <div className="fcc-loan__actions">
+                            {STEP_ACTIONS.filter((x) => !("hideWhenInProgress" in x && x.hideWhenInProgress && a.inProgress)).map((x) => (
+                              <button key={x.intent} type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__actionbtn"
+                                      disabled={actions.disabled} onClick={() => actions.onAction(x.intent, a.id)}>{x.label}</button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {m.nextStep && <p className="fcc-asset__step fcc-loan__meta"><strong>פעולה קודמת (ישנה):</strong> {m.nextStep}</p>}
                 {m.linkedLoans.length > 0 && (
                   <div className="fcc-asset__loans">
                     <p className="fcc-loan__meta"><strong>הלוואות מקושרות</strong></p>
@@ -104,5 +132,22 @@ export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?
         )}
       </div>
     </section>
+  );
+}
+
+/** After an action was finished / cancelled and none is left open: "what is the next action?" (or none). */
+export function NextActionPrompt({ assets, assetId, onAdd, onDismiss, disabled }:
+  { assets: FccAssets | undefined; assetId: string | null; onAdd: (assetId: string) => void; onDismiss: () => void; disabled: boolean }) {
+  const q = assets ? askNextAction(assets.items as FccAssetItem[], assetId) : null;
+  if (!q) return null;
+  return (
+    <Surface variant="subtle" padding="compact" className="fcc-release" role="status">
+      <p className="fcc-quick__message">מה הפעולה הבאה ב{q.name}?</p>
+      <div className="fcc-quick__choices">
+        <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={disabled}
+                onClick={() => { onDismiss(); onAdd(q.assetId); }}>הוסף פעולה</button>
+        <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onDismiss}>אין פעולה נוספת</button>
+      </div>
+    </Surface>
   );
 }

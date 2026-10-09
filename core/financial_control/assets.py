@@ -95,7 +95,7 @@ def sold_item(record: dict, loans_by_asset: dict[str, list[dict]]) -> dict:
     }
 
 
-def build(records: list[dict], loan_items: list[dict]) -> dict:
+def build(records: list[dict], loan_items: list[dict], tasks: list[dict] | None = None) -> dict:
     """Owner-scoped asset ``records`` + the owner's loan items (``loans.loan_item`` rows) -> screen payload."""
     loans_by_asset: dict[str, list[dict]] = {}
     for loan in loan_items:
@@ -108,4 +108,7 @@ def build(records: list[dict], loan_items: list[dict]) -> dict:
     # this screen does not track — so the totals are "active assets", never a total net worth (the UI says so).
     items = [asset_item(r, loans_by_asset) for r in records if r not in sold_records]
     items.sort(key=lambda i: (-(i["current_value"] or 0), i["name"] or ""))
+    for item in items:                                       # the OPEN next actions of this asset (several allowed), soonest first
+        item["actions"] = [{k: t[k] for k in ("id", "title", "status", "due_date", "owner", "history")}
+                           for t in (tasks or []) if t.get("asset_id") == item["id"]]
     return {"items": items, "summary": summarize(items, loan_items), "sold": {"count": len(sold), "items": sold}}

@@ -2,9 +2,9 @@
 import type { FccAssetItem, FccAssets } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AssetsSection } from "../components/FccAssets";
+import { AssetsSection, NextActionPrompt } from "../components/FccAssets";
 import { UNKNOWN } from "./fccLoans";
-import { ASSET_GONE, UNTYPED, assetCardModel, soldCardModel, soldNote, assetsHeaderCards, debtLines } from "./fccAssets";
+import { ASSET_GONE, UNTYPED, actionRows, askNextAction, assetCardModel, soldCardModel, soldNote, assetsHeaderCards, debtLines } from "./fccAssets";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -137,6 +137,44 @@ test("sold assets render apart (collapsed section, 'שנמכרו'), never among 
   const allSold = renderToStaticMarkup(createElement(AssetsSection, { assets: { items: [], summary: assetsSummary, sold: { count: 1, items: [soldA] } } }));
   assert.ok(allSold.includes("אין נכסים פעילים") && allSold.includes("נכסים שנמכרו (1)"));
   assert.ok(!renderToStaticMarkup(createElement(AssetsSection, { assets: withSold(0) })).includes("<details"));
+});
+
+const act = (o: Partial<{ id: string; title: string; status: string; due_date: string | null; owner: string | null; history: string }>) =>
+  ({ id: "t1", title: "לשלוח הצעה", status: "ממתין", due_date: null, owner: null, history: "", ...o });
+
+test("open actions: several per asset, status label, owner + due date and history lines; the legacy text stays as 'previous'", () => {
+  const two = mk({ id: "h", status: "פעיל", next_step: "ישן", actions: [act({ owner: "אורי", due_date: "2026-10-20", history: "התחילה ב־2026-10-05" }), act({ id: "t2", title: "לבדוק מחיר", status: "בביצוע" })] });
+  const rows = actionRows(two);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].statusLabel, "ממתין"); assert.equal(rows[0].inProgress, false);
+  assert.equal(rows[0].meta, "אחראי: אורי · עד 20/10/2026"); assert.equal(rows[0].history[0], "התחילה ב־2026-10-05");
+  assert.equal(rows[1].statusLabel, "בתהליך"); assert.equal(rows[1].inProgress, true); assert.equal(rows[1].meta, "");
+  assert.equal(actionRows(mk({})).length, 0);
+  assert.equal(assetCardModel(two).nextStep, "ישן");
+});
+
+test("open actions markup: start button only while waiting; done / cancel / edit always; every click names the TASK; legacy line labelled", () => {
+  const a = mk({ id: "h", name: "בית", status: "פעיל", next_step: "ישן", actions: [act({}), act({ id: "t2", title: "פעולה שרצה", status: "בביצוע" })] });
+  const html = renderToStaticMarkup(createElement(AssetsSection, { assets: { ...assets, items: [a] }, actions: { onAction: () => undefined, disabled: false } }));
+  assert.equal(html.includes("פעולות הבאות (2)") && html.includes("לשלוח הצעה") && html.includes("פעולה שרצה"), true);
+  assert.equal((html.match(/>בתהליך</g) || []).length, 1 + 1, "one start button (waiting action) + one status tag (running action)");
+  const count = (re: RegExp) => (html.match(re) || []).length;
+  assert.equal(count(/>בוצע</g) === 2 && count(/>בוטל</g) === 2 && count(/>ערוך</g) === 2, true);
+  assert.equal(html.includes("פעולה קודמת (ישנה):") && html.includes("ישן"), true);
+  const disabled = renderToStaticMarkup(createElement(AssetsSection, { assets: { ...assets, items: [a] }, actions: { onAction: () => undefined, disabled: true } }));
+  assert.equal(disabled.includes('disabled=""'), true);
+  const readonly = renderToStaticMarkup(createElement(AssetsSection, { assets: { ...assets, items: [a] } }));
+  assert.equal(readonly.includes(">ערוך<"), false, "no actions prop -> no buttons at all");
+});
+
+test("after finishing the last open action the screen asks for the next one — only for a live asset with none left", () => {
+  const live = mk({ id: "h", name: "בית", status: "פעיל", actions: [] });
+  assert.equal(JSON.stringify(askNextAction([live], "h")), JSON.stringify({ assetId: "h", name: "בית" }));
+  assert.equal(askNextAction([mk({ id: "h", status: "פעיל", actions: [act({})] })], "h"), null, "another action is still open");
+  assert.equal(askNextAction([mk({ id: "h", status: "נמכר", actions: [] })], "h"), null);
+  assert.equal(askNextAction([live], null), null); assert.equal(askNextAction([live], "zzz"), null);
+  const html = renderToStaticMarkup(createElement(NextActionPrompt, { assets: { ...assets, items: [live] }, assetId: "h", onAdd: () => undefined, onDismiss: () => undefined, disabled: false }));
+  assert.equal(html.includes("מה הפעולה הבאה בבית?") && html.includes("הוסף פעולה") && html.includes("אין פעולה נוספת"), true);
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

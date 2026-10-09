@@ -3,7 +3,7 @@ import { fetchFccLoanScenario, fetchFccOverview, postFccIntent, postFccWrite } f
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
 import { KpiCard, SavingsFollowUp, SavingsReleaseCard } from "./FccKpiCard";
-import { AssetsSection } from "./FccAssets";
+import { AssetsSection, NextActionPrompt } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
 import { LoansSection } from "./FccLoans";
 import { ContextualComposer, FccTabBar } from "./FccTabBar";
@@ -38,6 +38,7 @@ function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => voi
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [followUp, setFollowUp] = useState(false);
+  const [followUpAsset, setFollowUpAsset] = useState<string | null>(null);
   // the overview (and a draft opened in chat) arrives after the first render: adopt it unless this screen is already showing something
   useEffect(() => { if (initial && !turn && !receipt) setTurn(initial); }, [initial]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -52,6 +53,7 @@ function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => voi
       setReceipt(next.receipt);
       if (result.state === "partial_failure") setError(result.message);
       setFollowUp(result.state === "executed" && result.follow_up === "savings");
+      setFollowUpAsset(result.state === "executed" ? result.follow_up_asset ?? null : null);
       if (next.refresh) onDone();
     } catch (e) {
       setError((e as Error).message || "הפעולה נכשלה");
@@ -68,7 +70,8 @@ function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => voi
   });
   const send = (text: string, goalId?: string) => run(() => postFccWrite({ text, scope: tab, ...(goalId ? { goal_id: goalId } : {}) }));
   const dismiss = () => { setTurn(null); setReceipt(null); setError(null); };
-  return { turn, receipt, error, busy, start, send, dismiss, followUp, clearFollowUp: () => setFollowUp(false) };
+  return { turn, receipt, error, busy, start, send, dismiss, followUp, clearFollowUp: () => setFollowUp(false),
+           followUpAsset, clearFollowUpAsset: () => setFollowUpAsset(null) };
 }
 
 function GoalCard({ goal }: { goal: FccGoalRow }) {
@@ -229,6 +232,10 @@ export function FinancialControlCenter({ onBack }: Props) {
       <ContextualComposer tab={tab} turn={writer.turn} receipt={writer.receipt} error={writer.error} busy={writer.busy}
                           targets={targets} onStart={(i, id) => void writer.start(i, id)} onSend={(t, g) => void writer.send(t, g)}
                           onDismiss={writer.dismiss} />
+      {writer.followUpAsset && writer.turn == null && (
+        <NextActionPrompt assets={data.assets} assetId={writer.followUpAsset} onAdd={(id) => void writer.start("asset.next_step", id)}
+                          onDismiss={writer.clearFollowUpAsset} disabled={writer.busy} />
+      )}
       {writer.followUp && writer.turn == null && (
         <SavingsFollowUp release={data.savings_release} onStart={(i) => void writer.start(i)} onDismiss={writer.clearFollowUp}
                          disabled={writer.busy} />

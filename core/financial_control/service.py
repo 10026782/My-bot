@@ -230,6 +230,34 @@ def fcc_tasks(identity) -> list[dict]:
     return sorted(out, key=lambda t: (t["due_date"] is None, str(t["due_date"] or "")))
 
 
+_ASSET_TAG = re.compile(r"\[FCC-ASSET:(rec[A-Za-z0-9]+)\]")
+
+
+def asset_tasks(identity) -> list[dict]:
+    """OPEN next-action Tasks of the caller's assets (Topic כספים + a ``[FCC-ASSET:<asset id>]`` tag). Owner-scoped like every Task
+    read; a closed (בוצע) task is history and not returned. The responsible person is a line in the description."""
+    from airtable_schema import TaskFields
+    from core.financial_control.draft import FCC_TASK_TOPIC
+    actor = policy.resolve_actor(identity)
+    if not actor.resolved:
+        return []
+    out = []
+    for rec in _read(Tables.TASKS):
+        f = rec.get("fields") or {}
+        status = _sel(f.get(TaskFields.STATUS))
+        if status == "בוצע" or actor.profile_id not in policy.owner_refs(f, TaskFields.OWNER):
+            continue
+        desc = str(f.get(TaskFields.DESCRIPTION) or "")
+        tag = _ASSET_TAG.search(desc)
+        if _sel(f.get(TaskFields.TOPIC)) != FCC_TASK_TOPIC or tag is None:
+            continue
+        owner = next((l.split(":", 1)[1].strip() for l in desc.splitlines() if l.startswith("אחראי:")), None)
+        history = "\n".join(l for l in desc.splitlines() if l.strip() and not l.startswith("[FCC-ASSET:") and not l.startswith("אחראי:"))
+        out.append({"id": rec.get("id"), "asset_id": tag.group(1), "title": f.get(TaskFields.NAME), "status": status or "ממתין",
+                    "due_date": f.get(TaskFields.DUE_DATE), "owner": owner, "history": history, "description": desc})
+    return sorted(out, key=lambda t: (t["due_date"] is None, str(t["due_date"] or ""), str(t["title"] or "")))
+
+
 def my_obligations(identity) -> list[dict]:
     """Recurring commitments of the caller only (owner-scoped table)."""
     return policy.filter_records(Tables.REC_OBLIGATIONS, _read(Tables.REC_OBLIGATIONS), identity)
@@ -339,7 +367,14 @@ def assets_overview(identity, loan_items: list[dict]) -> dict:
     except Exception:
         logger.exception("[fcc] assets read failed")
         records = []
-    return fcc_assets.build(records, loan_items)
+    try:
+        tasks = asset_tasks(identity)
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] asset next actions read failed")
+        tasks = []
+    return fcc_assets.build(records, loan_items, tasks)
 
 
 def _raw_category(category) -> str:
