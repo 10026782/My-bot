@@ -232,6 +232,18 @@ def display_value(field: str, value: Any) -> str:
     return str(value)
 
 
+INCOME_KINDS = ("one_time", "monthly_recurring", "direct_cost")   # events booked against an income SOURCE (not a goal to reach)
+
+
+def record_noun(entity: str, fields: Mapping[str, Any]) -> str:
+    """What the screen calls the record an event is booked on: income events -> a "מקור", household spending -> a "סעיף",
+    anything else (progress on a savings / debt goal) stays a "יעד"."""
+    if entity != FCC_EVENT:
+        return "יעד"
+    kind = fields.get("kind")
+    return "מקור" if kind in INCOME_KINDS else "סעיף" if kind == "household_expense" else "יעד"
+
+
 def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: str = "") -> str:
     title = fields.get("title") or goal_title
     if field == "title":
@@ -276,10 +288,11 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
             return "שייך לבית, לעסק או אישי? ביתי / עסקי / אישי"
         if field == "frequency":
             return "באיזו תדירות? חודשי / רבעוני / שנתי / מותאם"
+    noun = record_noun(entity, fields)
     if field == "amount":
-        return f"כמה לרשום{' ביעד ' + goal_title if goal_title else ''}?"
+        return f"כמה לרשום{' ב' + noun + ' ' + goal_title if goal_title else ''}?"
     if field == "goal":
-        return "לאיזה יעד?"
+        return {"מקור": "מאיזה מקור?", "סעיף": "באיזה סעיף?"}.get(noun, "לאיזה יעד?")
     return f"מה {LABELS.get(field, field)}?"
 
 
@@ -297,7 +310,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     if note and entity != FCC_ASSET_SOLD:
         lines.append(note)
     if entity == FCC_EVENT and goal_title:
-        lines.append(f"• יעד: {goal_title}")
+        lines.append(f"• {record_noun(entity, fields)}: {goal_title}")
     if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT) and goal_title:
         lines.append(f"• הלוואה: {goal_title}")
     if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_SOLD) and goal_title:
