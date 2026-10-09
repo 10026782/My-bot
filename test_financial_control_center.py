@@ -2953,3 +2953,53 @@ def test_p3_http_next_action_creates_a_task_and_the_executor_rechecks_the_owner(
     c.post("/api/fcc/intent/start", json={"intent": "asset.step_done", "entity_id": "t1"}, headers=H)
     done = c.post("/api/fcc/write", json={"text": "אשר", "scope": "assets"}, headers=H).get_json()
     assert done["state"] == "executed" and done["follow_up_asset"] == "recAH"       # the screen then asks for the next action
+
+
+# ── Free text for a next action: what is stored, what is a rule, what is rejected ───────────────────────────────────
+def _edit_say(text):
+    return _say(text, scope="assets")
+
+
+def test_next_action_text_is_stored_whole_even_when_it_starts_with_a_label_word(no_model):
+    seed_p3()
+    intent("asset.next_step", "recAH")
+    r = _edit_say("הפעולה הבאה: לשלוח הצעה, ואחראי אורי יבדוק")                 # contains label words, still just text
+    assert r.state == "review" and "הפעולה הבאה: לשלוח הצעה, ואחראי אורי יבדוק" in r.message
+    _edit_say("ערוך")
+    r = _edit_say("הפעולה מעודכנת לגמרי")                                       # in edit too: no label is needed for the action text
+    assert r.state == "review" and "הפעולה מעודכנת לגמרי" in r.message
+    (w,) = _confirm_one()
+    assert w["fields"][TaskFields.NAME] == "הפעולה מעודכנת לגמרי"
+
+
+def test_action_text_is_one_line_and_capped_and_command_words_are_not_an_action(no_model):
+    seed_p3()
+    intent("asset.next_step", "recAH")
+    r = _edit_say("שורה ראשונה\n\n   שורה   שנייה\t")
+    assert "שורה ראשונה שורה שנייה" in r.message
+    _edit_say("ערוך")
+    r = _edit_say("א" * 800)
+    (w,) = _confirm_one()
+    assert len(w["fields"][TaskFields.NAME]) == 500 and "\n" not in w["fields"][TaskFields.NAME]
+    conv.complete_execution(ELIYAHU)
+    intent("asset.next_step", "recAH")
+    for word in ("אשר", "דלג", "ערוך"):
+        assert _edit_say(word).awaiting == "step", word                          # a command word is never taken as the action
+
+
+def test_owner_and_due_date_rules_reject_what_they_cannot_parse_instead_of_storing_it_as_text(no_model):
+    seed_p3()
+    intent("asset.next_step", "recAH")
+    _edit_say("לשלוח הצעה")
+    _edit_say("ערוך")
+    for bad in ("אחראי דוד", "אחראי", "תאריך יעד מתישהו"):
+        r = _edit_say(bad)
+        assert r.state == "unrelated", bad                                       # not understood; nothing changed
+        _edit_say("ערוך") if r.state != "review" else None
+    r = _edit_say("אחראי אהרן")
+    assert r.state == "review" and "אהרן" in r.message and "לשלוח הצעה" in r.message
+    _edit_say("ערוך")
+    r = _edit_say("תאריך יעד 2026-12-01")
+    (w,) = _confirm_one()
+    assert w["fields"][TaskFields.NAME] == "לשלוח הצעה" and w["fields"][TaskFields.DUE_DATE] == "2026-12-01"
+    assert w["fields"][TaskFields.DESCRIPTION] == "[FCC-ASSET:recAH]\nאחראי: אהרן"

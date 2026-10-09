@@ -206,6 +206,11 @@ _ASSET_TAG = re.compile(r"\[FCC-ASSET:(rec[A-Za-z0-9]+)\]")
 _VERBATIM_FIELDS = {"step": 500, "title": 120, "name": 120, "vendor": 120, "lender": 120, "note": 300}
 
 
+def _one_line(text: str) -> str:
+    """Titles / names / next actions live in single-line Airtable fields: line breaks and runs of spaces become one space."""
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
 # value-shaped fields (the contract input types CURRENCY / NUMBER / PERCENT / DATE), parsed by rule
 _NUMERIC_FIELDS = ("target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount")
 _DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date")
@@ -218,7 +223,7 @@ def _deterministic_answer(field_name: str, text: str):
     if field_name in _VERBATIM_FIELDS:
         if not t or t.lower() in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS | CANCEL_WORDS:
             return None
-        return t[:_VERBATIM_FIELDS[field_name]]
+        return (t if field_name == "note" else _one_line(t))[:_VERBATIM_FIELDS[field_name]]
     vocab = fd.ANSWER_VOCAB.get(field_name)
     if vocab and t in vocab:
         return vocab[t]
@@ -247,7 +252,7 @@ def _parse_edit(entity: str, text: str) -> dict:
             if not rest:
                 return {}
             if name in _VERBATIM_FIELDS:
-                return {name: rest[:_VERBATIM_FIELDS[name]]}
+                return {name: (rest if name == "note" else _one_line(rest))[:_VERBATIM_FIELDS[name]]}
             value = _deterministic_answer(name, rest)
             return {name: value} if value is not None else {}
     return {}
@@ -786,17 +791,20 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
             updates["note"] = f"קביעת רמה: ₪{float(pending_level):,.0f} לחודש"
     else:
         if editing and d.entity_type in _STEP_ENTITIES and lower not in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS:
-            # editing a next action: "<label> <value>" (תאריך יעד …), an owner pick ("אורי" / "אחראי אורי"), or the new text — as written
+            # Editing a next action. Only two prefixes are rules — "אחראי <name from the live list>" and "תאריך יעד <date>"; a rule that
+            # does not parse is NOT understood (never stored as text). Everything else is the new action text, exactly as written.
             t = text.strip()
-            updates.update(_parse_edit(d.entity_type, t))
-            m = re.match(r"^אחראי[:\s]+(.+)$", t)
-            who = m.group(1).strip() if m else t
-            if updates:
-                pass
-            elif who in fd.STEP_OWNERS:
-                updates["step_owner"] = who
-            elif not m:
-                updates["step"] = t[:_VERBATIM_FIELDS["step"]]
+            owner_m = re.match(r"^אחראי(?:[:\s]+(.*))?$", t)
+            due_m = re.match(r"^תאריך יעד(?:[:\s=-]+(.*))?$", t)
+            if owner_m:
+                if (owner_m.group(1) or "").strip() in fd.STEP_OWNERS:
+                    updates["step_owner"] = owner_m.group(1).strip()
+            elif due_m:
+                value = _deterministic_answer("due_date", due_m.group(1) or "")
+                if value is not None:
+                    updates["due_date"] = value
+            else:
+                updates["step"] = _one_line(t)[:_VERBATIM_FIELDS["step"]]
         if awaiting:
             value = _deterministic_answer(awaiting, text)
             if value is not None:
