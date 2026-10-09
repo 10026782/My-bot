@@ -21,7 +21,7 @@ free text → extract known fields → FCC draft (BusinessDraft) → filling →
 - slot אחד לאדם ולסוג-ישות: `lead_sessions` עם `sender = identity.user_id`, `channel = "fcc"`, `source_channel = "fcc"` ⇒ **אותו draft ב-TMA ובצ'אט**; בידוד לפי `user_id` קנוני (+ `tenant_id`, `actor_user_id` נבדקים בכל load; `DraftIdentityMismatchError` אחרת).
 - 3 ישויות: `fcc_goal` (CREATE/UPDATE), `fcc_event`, `fcc_followup`. draft פתוח אחד בכל רגע בפועל.
 - TTL 1800s (Diamond), פקיעה עצלה ב-load; terminal drafts מנוקים בתור הבא.
-- הערה לפרטיות: ה-draft נשמר בשורת `Sessions` הקיימת (State JSON). נשאר פער פתוח: טבלת `Sessions` לא תחת `data_access_policy` (ראו §פערים).
+- הערה לפרטיות: ה-draft נשמר בשורת `Sessions` הקיימת (State JSON). הפער נסגר: `Sessions` תחת `data_access_policy` במצב `SYSTEM_INTERNAL` (ראו §9; נבדק ב־`test_generic_tools_cannot_read_or_write_sessions` וב־`test_raw_sessions_table_id_and_tma_write_cannot_bypass_policy`).
 
 ## 3. מטריצת שדות חובה (יעד חדש)
 | קטגוריה | חובה תמיד | מוסק בבטחה | נדרש עוד |
@@ -49,7 +49,7 @@ free text → extract known fields → FCC draft (BusinessDraft) → filling →
 draft-reviewed payload = approved snapshot = ActionContract payload = written fields: `confirm()` בונה את ה-writes **פעם אחת** מ-`resolved_values()`; אחרי confirm אין classify/extractor (נבדק: extractor נכשל בקול רם אם נקרא), אין default חדש, ואין field loss. `update_goal`: base snapshot + overlay ⇒ patch רק של שדות ששונו; שינוי סכום יעד = אירוע `target_change` (היסטוריה לא נכתבת מחדש).
 
 ## 8. פערים
-- `Sessions` מכיל draft פיננסי של הבעלים; הטבלה אינה תחת מדיניות owner-of-record.
+- ~~`Sessions` מכיל draft פיננסי של הבעלים; הטבלה אינה תחת מדיניות owner-of-record.~~ **נסגר** (§9): `Sessions` ו־`LeadSessions` במצב `SYSTEM_INTERNAL` — חסומות לכל role בכלים הכלליים, גם דרך table id גולמי; ה־TMA write allowlist לא כולל אותן. מעודכן 09/10/2026 אחרי אימות מחדש מול `main`.
 - `update_goal` עם יעד לא חד-משמעי בצ'אט מחזיר רשימה ומבקש ניסוח מחדש (אין draft בלי יעד בסיס); ב-TMA הבחירה שולחת `goal_id`.
 - סיווג הטקסט נעשה ב-LLM (`classifier.classify`/`fill_reply`) ולא נבדק על טקסטים אמיתיים (אין מפתח בסנדבוקס).
 - לא נבדק חי: Airtable, PostgreSQL/ActionGateway בפועל, Telegram webhook.
