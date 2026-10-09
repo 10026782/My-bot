@@ -4952,4 +4952,5 @@ def fcc_write(identity):
             return jsonify({"state": "partial_failure", "message": "הפעולה לא הושלמה — אפשר לאשר שוב כדי לנסות.",
                             "results": results}), status
     fcc_conv.complete_execution(identity, result.entity)
-    return jsonify({"state": "executed", "message": "נרשם ✓", "results": results})
+    return jsonify({"state": "executed", "message": "נרשם ✓", "results": results,
+                    "follow_up": "savings" if fcc_conv.income_followup(identity, result.snapshot) else None})

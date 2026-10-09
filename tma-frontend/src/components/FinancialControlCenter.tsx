@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { fetchFccLoanScenario, fetchFccOverview, postFccIntent, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
-import { KpiCard } from "./FccKpiCard";
+import { KpiCard, SavingsFollowUp, SavingsReleaseCard } from "./FccKpiCard";
 import { AssetsSection } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
 import { LoansSection } from "./FccLoans";
@@ -37,6 +37,7 @@ function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => voi
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [followUp, setFollowUp] = useState(false);
   // the overview (and a draft opened in chat) arrives after the first render: adopt it unless this screen is already showing something
   useEffect(() => { if (initial && !turn && !receipt) setTurn(initial); }, [initial]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -50,6 +51,7 @@ function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => voi
       setTurn(next.turn);
       setReceipt(next.receipt);
       if (result.state === "partial_failure") setError(result.message);
+      setFollowUp(result.state === "executed" && result.follow_up === "savings");
       if (next.refresh) onDone();
     } catch (e) {
       setError((e as Error).message || "הפעולה נכשלה");
@@ -66,7 +68,7 @@ function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => voi
   });
   const send = (text: string, goalId?: string) => run(() => postFccWrite({ text, scope: tab, ...(goalId ? { goal_id: goalId } : {}) }));
   const dismiss = () => { setTurn(null); setReceipt(null); setError(null); };
-  return { turn, receipt, error, busy, start, send, dismiss };
+  return { turn, receipt, error, busy, start, send, dismiss, followUp, clearFollowUp: () => setFollowUp(false) };
 }
 
 function GoalCard({ goal }: { goal: FccGoalRow }) {
@@ -162,6 +164,10 @@ export function FinancialControlCenter({ onBack }: Props) {
         {headerCards(data).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
       </div>
 
+      {data.savings_release && (
+        <SavingsReleaseCard release={data.savings_release} onStart={(i) => void writer.start(i)} disabled={writer.busy || writer.turn != null} />
+      )}
+
       <section className="fcc-section" aria-labelledby="fcc-tasks-heading">
         <h2 id="fcc-tasks-heading" className="fcc-section__heading">דורש פעולה</h2>
         {data.tasks.length === 0 ? (
@@ -223,6 +229,10 @@ export function FinancialControlCenter({ onBack }: Props) {
       <ContextualComposer tab={tab} turn={writer.turn} receipt={writer.receipt} error={writer.error} busy={writer.busy}
                           targets={targets} onStart={(i, id) => void writer.start(i, id)} onSend={(t, g) => void writer.send(t, g)}
                           onDismiss={writer.dismiss} />
+      {writer.followUp && writer.turn == null && (
+        <SavingsFollowUp release={data.savings_release} onStart={(i) => void writer.start(i)} onDismiss={writer.clearFollowUp}
+                         disabled={writer.busy} />
+      )}
       {/* all panels stay mounted (hidden when inactive) so a half-typed update, the loans filter or the budget input survive a tab switch */}
       {(Object.keys(panels) as FccTabKey[]).map((key) => (
         <div key={key} role="tabpanel" id={panelId(key)} aria-labelledby={tabId(key)} hidden={tab !== key}>{panels[key]}</div>

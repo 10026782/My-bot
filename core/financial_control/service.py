@@ -342,6 +342,33 @@ def assets_overview(identity, loan_items: list[dict]) -> dict:
     return fcc_assets.build(records, loan_items)
 
 
+def _raw_category(category) -> str:
+    return str((category.get("name") if isinstance(category, dict) else category) or "").strip().casefold()
+
+
+FIXED_INCOME_CATEGORY = "fixed_income"        # live Financial Goals.Category choice (a standing income, not part of the income goal)
+SAVINGS_DESTINATION_CATEGORY = "long_term"    # the pension portfolio goal: the one active goal of this category receives deposits
+
+
+def savings_release_view(rows: list[dict], summary: dict, own: dict[str, list[calc.Event]], goals: list[dict],
+                         active_ids: set[str], today: date) -> dict | None:
+    """The monthly "freed for savings" picture, or None when it cannot be derived (no income goal / no fixed income).
+    Pure derivation from existing goals and events — nothing is written or assumed from a title."""
+    income = summary.get("income")
+    fixed = round(sum(r.get("target") or 0.0 for r in rows if _raw_category(r.get("category")) == FIXED_INCOME_CATEGORY), 2)
+    if not income or not income.get("target") or fixed <= 0:
+        return None
+    dests = [g for g in goals if g["id"] in active_ids
+             and _raw_category((g.get("fields") or {}).get(FinGoalFields.CATEGORY)) == SAVINGS_DESTINATION_CATEGORY]
+    dest = dests[0] if len(dests) == 1 else None
+    deposited = calc.deposits_in_month(own.get(dest["id"], []), today) if dest else 0.0
+    out = calc.savings_release(income.get("net") if income.get("net") is not None else income.get("actual"),
+                               income["target"], fixed, deposited)
+    out.update(month=today.strftime("%Y-%m"), closing=calc.month_closing(today),
+               destination=({"id": dest["id"], "title": (dest.get("fields") or {}).get(FinGoalFields.TITLE)} if dest else None))
+    return out
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()
@@ -386,6 +413,7 @@ def overview(identity, today: date | None = None) -> dict:
     return {
         "goals": rows,
         "summary": summary,
+        "savings_release": savings_release_view(rows, summary, own, goals, active_ids, today),
         "loans": loans_payload,
         "assets": assets_overview(identity, loans_payload["items"]),
         "household": {"month_total": calc.household_month_total(all_events, today)},

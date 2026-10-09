@@ -109,6 +109,9 @@ def _missing(d: BusinessDraft) -> list[str]:
 def _render(d: BusinessDraft) -> TurnResult:
     goal_title = str(d.source_context.get("goal_title") or "")
     inferred = tuple(d.source_context.get("inferred") or ())
+    if d.source_context.get("ask_reason") and d.fields.get("goal"):
+        return TurnResult("ask", "מה הסיבה לפער בהפקדה? בחרו או כתבו סיבה אחרת.", d.entity_type, "reason", _view(d),
+                          candidates=list(REASON_CHOICES))
     if d.lifecycle_state is DraftState.EDITING:
         return TurnResult("ask", "מה לערוך? (למשל: סכום 80000)", d.entity_type, None, _view(d))
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW:
@@ -450,6 +453,69 @@ def _recurring_note(d: BusinessDraft) -> str:
     return ""
 
 
+GAP_REASONS = {"extra_fixed": "הוצאה חריגה בנוף הגליל", "extra_home": "הוצאה חריגה בבית", "income_hard": "קושי בהכנסה החודש"}
+REASON_CHOICES = [{"goal_id": k, "title": v} for k, v in GAP_REASONS.items()]
+
+
+def _savings_release(identity, today: date) -> dict | None:
+    try:
+        return service.overview(identity, today).get("savings_release")
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("[fcc] savings release failed")
+        return None
+
+
+def income_followup(identity, snapshot: dict | None) -> bool:
+    """True when the writes just executed booked a one-time income on one of the caller's income goals: the screen then
+    asks whether to put the freed amount away (the amount comes from the fresh overview, never from this answer)."""
+    try:
+        goals = {g["id"]: g for g in service.my_goals(identity)}
+        for w in (snapshot or {}).get("writes") or []:
+            f = w.get("fields") or {}
+            if w.get("table") != Tables.FIN_EVENTS or f.get(EF.KIND) != calc.ONE_TIME:
+                continue
+            if any(_is_income_goal(goals[g]) for g in (f.get(EF.GOAL) or []) if g in goals):
+                return True
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("[fcc] income follow-up check failed")
+    return False
+
+
+def _start_savings_intent(identity, ids, intent_id: str, store, today: date) -> TurnResult:
+    """"הפקדה לחיסכון" (amount = what is still free this month) / "סיבת הפער" (why the month fell short). Both are ordinary
+    fcc_event drafts on the pension goal: the same review -> אשר flow, no new write path."""
+    rel = _savings_release(identity, today)
+    if rel is None:
+        return TurnResult("clarify", "אי אפשר לחשב כרגע כמה מתפנה לחיסכון — חסר יעד הכנסה חודשי או הכנסה קבועה.")
+    goals = service.my_goals(identity)
+    dest = next((g for g in goals if rel.get("destination") and g["id"] == rel["destination"]["id"]), None)
+    reason = intent_id == "savings.gap_reason"
+    if reason and rel["gap"] <= 0:
+        return TurnResult("info", "אין פער הפקדה החודש — אין מה להסביר.")
+    amount = rel["gap"] if reason else rel["remaining"]
+    raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"
+    fields = {"kind": "note" if reason else "one_time", "occurred_at": today.isoformat()}
+    if amount > 0:
+        fields["amount"] = amount
+    if not reason:
+        fields["note"] = fd.SAVINGS_DEPOSIT_NOTE
+    extra = {"savings_month": rel["month"]}
+    if reason:
+        extra["ask_reason"] = True
+    if dest is not None:
+        fields["goal"] = dest["id"]
+        extra["goal_title"] = dest["fields"].get(GF.TITLE, "")
+    d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
+    d, _rej = _set_fields(d, fields, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"] + (["amount"] if amount > 0 else [])})
+    res = _persist_new(store, ids, d)
+    return _with_goal_choices(res, [g for g in goals if not _is_income_goal(g)])
+
+
 def _total_income_goal(goals: list[dict]) -> dict | None:
     """The one top-level income goal (no "Contributes To" parent). Without exactly one, "other source" is not offered."""
     roots = [g for g in goals if _is_income_goal(g) and calc.parent_goal_id(g.get("fields") or {}, GF) is None]
@@ -483,6 +549,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return _start_loan_intent(identity, ids, spec["entity"], entity_id, store, today)
     if spec["entity"] in _ASSET_CURRENT:
         return _start_asset_intent(identity, ids, spec["entity"], entity_id, store, today)
+    if intent_id in ("savings.deposit", "savings.gap_reason"):
+        return _start_savings_intent(identity, ids, intent_id, store, today)
     goals = service.my_goals(identity) if spec.get("target") == "goal" else []
     chosen = None
     if entity_id:
@@ -561,6 +629,14 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         if lower in CONFIRM_WORDS:
             return _confirmed_result(identity, d)
         return TurnResult("info", "יש פעולה שאושרה וממתינה לביצוע — אשר כדי לנסות שוב, או בטל.", d.entity_type)
+
+    if d.source_context.get("ask_reason") and d.fields.get("goal"):      # the reason comes first, whatever else is complete
+        why = GAP_REASONS.get(goal_id or "") or (text.strip()[:120] if lower not in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS else "")
+        if not why:
+            return replace_result(_render(d), message=f"צריך סיבה כדי להמשיך.\n{_render(d).message}")
+        d2, _rej = _set_fields(d, {"note": f"פער הפקדה {d.source_context.get('savings_month', '')}: {why}"}, strict=False)
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_reason"})
+        return _render(_save(store, ids, d2, expected=d.idempotency_key))
 
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in CONFIRM_WORDS:
         return _confirm(identity, ids, d, store)

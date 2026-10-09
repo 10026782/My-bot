@@ -3,6 +3,7 @@ declare function require(id: string): { readFileSync(path: string, enc: string):
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ContextualComposer, FccTabBar, type ComposerTargets } from "../components/FccTabBar";
+import { SavingsFollowUp, SavingsReleaseCard } from "../components/FccKpiCard";
 import type { FccTurn } from "../types";
 import {
   COMPOSER, DEFAULT_TAB, FCC_TABS, WRITER_WORDS, chipsEnabled, initialTab, inputVisible, isTab, nextWriterState, panelId,
@@ -94,14 +95,14 @@ const composer = (tab: FccTabKey, t: FccTurn | null = null, receipt: string | nu
 test("each tab has its own title; the monthly chips are income / household expense / direct cost / obligation / goal update", () => {
   assert.equal(COMPOSER.monthly.title, "עדכון כספי"); assert.equal(COMPOSER.loans.title, "עדכון הלוואה"); assert.equal(COMPOSER.assets.title, "עדכון נכס");
   assert.equal(COMPOSER.monthly.chips.map((c) => c.intent).join(),
-    "monthly.income,monthly.household_expense,monthly.direct_cost,monthly.obligation,monthly.goal_update");
+    "monthly.income,monthly.household_expense,monthly.direct_cost,monthly.obligation,monthly.goal_update,savings.deposit");
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.household_expense")?.label, "+ הוצאה ביתית");
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.direct_cost")?.label, "+ עלות ישירה");
 });
 
 test("chips are intents only: no chip carries a write, a field name or a kind; targets are chosen, never typed", () => {
   for (const tab of FCC_TABS) for (const c of COMPOSER[tab.key].chips) {
-    assert.ok(/^(monthly|loan|asset)\.[a-z_]+$/.test(c.intent), c.intent);
+    assert.ok(/^(monthly|loan|asset|savings)\.[a-z_]+$/.test(c.intent), c.intent);
     assert.ok(Object.keys(c).every((k) => ["intent", "label", "pick"].includes(k)));
   }
   assert.equal(COMPOSER.loans.chips.map((c) => c.intent).join(), "loan.update_balance,loan.update_payment,loan.create,loan.close");
@@ -153,10 +154,10 @@ test("nextWriterState: executed -> receipt + refresh; cancelled -> clears; anyth
   assert.equal(WRITER_WORDS.confirm, "אשר"); assert.equal(WRITER_WORDS.edit, "ערוך"); assert.equal(WRITER_WORDS.cancel, "בטל");
 });
 
-test("markup: idle monthly shows 5 chips + one input; loans shows its 4 chips and NO input; assets shows its 4 chips and NO input", () => {
+test("markup: idle monthly shows 6 chips + one input; loans shows its 4 chips and NO input; assets shows its 4 chips and NO input", () => {
   const m = composer("monthly");
-  assert.equal((m.match(/class="fcc-chip /g) || []).length, 5); assert.equal((m.match(/<textarea/g) || []).length, 1);
-  assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד"));
+  assert.equal((m.match(/class="fcc-chip /g) || []).length, 6); assert.equal((m.match(/<textarea/g) || []).length, 1);
+  assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד") && m.includes("+ הפקדה לחיסכון"));
   const l = composer("loans");
   assert.equal((l.match(/class="fcc-chip /g) || []).length, 4); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה") && l.includes("הלוואה חדשה"));
   const a = composer("assets");
@@ -194,6 +195,19 @@ test("idle composer is compact (chips + one-row input, no send button, no turn);
   const open = composer("monthly", turn("ask", "כמה?"));
   assert.ok(open.includes("fcc-composer--open") && open.includes('rows="2"') && open.includes("fcc-quick__turn"));
   assert.ok(composer("loans", null, "נרשם ✓").includes("fcc-composer--open"), "a receipt is an active state");
+});
+
+const relFx = { income_net: 10000, income_target: 15000, fixed_level: 8000, shortfall: 5000, from_fixed: 3000, extra: 0, available: 3000, deposited: 0,
+  remaining: 3000, expected: 8000, gap: 8000, month: "2026-10", closing: false, destination: { id: "p", title: "תכנון פנסיוני" } };
+
+test("markup: the release card shows the freed amount + deposit button; month end adds the gap-reason button; follow-up asks once", () => {
+  const card = renderToStaticMarkup(createElement(SavingsReleaseCard, { release: relFx, onStart: () => undefined, disabled: false }));
+  assert.equal(card.includes("מתפנה לחיסכון החודש") && card.includes("₪3,000") && card.includes("הפקד ₪3,000") && !card.includes("תעד סיבה"), true);
+  const closing = renderToStaticMarkup(createElement(SavingsReleaseCard, { release: { ...relFx, closing: true }, onStart: () => undefined, disabled: true }));
+  assert.equal(closing.includes("תעד סיבה לפער") && closing.includes("סוף החודש") && closing.includes("disabled"), true);
+  const fu = renderToStaticMarkup(createElement(SavingsFollowUp, { release: relFx, onStart: () => undefined, onDismiss: () => undefined, disabled: false }));
+  assert.equal(fu.includes("להפקיד?") && fu.includes("לא עכשיו"), true);
+  assert.equal(renderToStaticMarkup(createElement(SavingsFollowUp, { release: { ...relFx, remaining: 0 }, onStart: () => undefined, onDismiss: () => undefined, disabled: false })), "");
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
