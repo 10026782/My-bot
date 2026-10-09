@@ -2767,3 +2767,58 @@ def test_savings_intents_are_owner_scoped_and_income_followup_flags_only_income_
     assert conv.income_followup(ELIYAHU, snap) is True
     assert conv.income_followup(ELIYAHU, {"writes": [{"table": Tables.FIN_EVENTS, "fields": {EF.KIND: "one_time", EF.GOAL: ["recPen"]}}]}) is False
     assert conv.income_followup(ELIYAHU, {"writes": [{"table": Tables.FIN_EVENTS, "fields": {EF.KIND: "household_expense", EF.GOAL: ["recInc"]}}]}) is False
+
+
+# ── Next step: a free-text answer is taken verbatim; the model is not on this path ───────────────────────────────
+def _boom(**kw):
+    raise RuntimeError("the model must not be called for a free-text next step")
+
+
+def test_next_step_text_is_taken_verbatim_without_calling_the_model(monkeypatch):
+    import llm_fallback
+    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
+    seed_p3()
+    r = intent("asset.next_step", "recAH")
+    assert r.awaiting == "step"
+    r = conv.handle_turn(ELIYAHU, "לדבר עם המתווך ביום ראשון ולשלוח הצעה", extractor=conv.LlmExtractor(), today=TODAY, scope="assets")
+    assert r.state == "review" and "לדבר עם המתווך ביום ראשון ולשלוח הצעה" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.LlmExtractor(), today=TODAY).snapshot["writes"]
+    assert w["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך ביום ראשון ולשלוח הצעה"}
+
+
+def test_next_step_command_words_and_blank_are_not_a_step(monkeypatch):
+    import llm_fallback
+    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
+    seed_p3()
+    intent("asset.next_step", "recAH")
+    for word in ("דלג", "אשר"):
+        r = conv.handle_turn(ELIYAHU, word, extractor=conv.LlmExtractor(), today=TODAY, scope="assets")
+        assert r.awaiting == "step" or r.state == "info", (word, r.state)
+
+
+def test_next_step_edit_takes_an_owner_pick_or_new_text_as_written_without_the_model(monkeypatch):
+    import llm_fallback
+    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
+    seed_p3()
+    intent("asset.next_step", "recAH")
+    conv.handle_turn(ELIYAHU, "לשלוח הצעה", extractor=conv.LlmExtractor(), today=TODAY)
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.LlmExtractor(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "אחראי אורי", extractor=conv.LlmExtractor(), today=TODAY)
+    assert r.state == "review" and "אורי" in r.message
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.LlmExtractor(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "אחראי דוד", extractor=conv.LlmExtractor(), today=TODAY)           # not a live choice
+    assert "דוד" not in r.message
+    r = conv.handle_turn(ELIYAHU, "לשלוח הצעה מעודכנת", extractor=conv.LlmExtractor(), today=TODAY)
+    assert r.state == "review" and "לשלוח הצעה מעודכנת" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.LlmExtractor(), today=TODAY).snapshot["writes"]
+    assert w["fields"] == {AF.NEXT_STEP: "לשלוח הצעה מעודכנת", AF.NEXT_STEP_OWNER: "אורי"}
+
+
+def test_a_model_failure_is_not_understood_never_a_crashed_turn(monkeypatch):
+    import llm_fallback
+    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
+    seed_intents()
+    intent("monthly.income", "recGI")
+    conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "כמה מאה ועשרים", extractor=conv.LlmExtractor(), today=TODAY)       # free-form amount needs the model
+    assert r.state in ("ask", "unrelated") and r.awaiting == "amount"

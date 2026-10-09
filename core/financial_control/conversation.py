@@ -13,6 +13,7 @@ Airtable; after ``confirm`` no extractor/classifier is called again and no field
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -188,10 +189,18 @@ def _derive_obligation_saving(d: BusinessDraft) -> BusinessDraft:
     return replace(d, source_context={**d.source_context, "inferred": inferred})
 
 
+# Free-text answers that are the user's own words: stored as written (never paraphrased, never sent to the model).
+_VERBATIM_FIELDS = {"step": 500}
+
+
 def _deterministic_answer(field_name: str, text: str):
     """Value-shaped answers only (a number, a date with digits, one of the presented choices). Free text
     (titles, notes) is never accepted deterministically — it must be evidenced by the extractor."""
     t = text.strip()
+    if field_name in _VERBATIM_FIELDS:
+        if not t or t.lower() in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS | CANCEL_WORDS:
+            return None
+        return t[:_VERBATIM_FIELDS[field_name]]
     vocab = fd.ANSWER_VOCAB.get(field_name)
     if vocab and t in vocab:
         return vocab[t]
@@ -695,6 +704,15 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
             updates["amount"] = delta
             updates["note"] = f"קביעת רמה: ₪{float(pending_level):,.0f} לחודש"
     else:
+        if editing and d.entity_type == fd.FCC_ASSET_STEP and lower not in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS:
+            # editing a next step: an owner pick ("אורי" / "אחראי אורי") or the new step text, both taken as written
+            t = text.strip()
+            m = re.match(r"^אחראי[:\s]+(.+)$", t)
+            who = m.group(1).strip() if m else t
+            if who in fd.STEP_OWNERS:
+                updates["step_owner"] = who
+            elif not m:
+                updates["step"] = t[:_VERBATIM_FIELDS["step"]]
         if awaiting:
             value = _deterministic_answer(awaiting, text)
             if value is not None:
@@ -703,8 +721,13 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                     updates[awaiting] = value
                 except _VALIDATION_ERRORS:
                     det_failed = True                                # looked like a value but is not a valid one
-        if awaiting is None or awaiting not in updates:
-            filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
+        if (awaiting is None or awaiting not in updates) and awaiting not in _VERBATIM_FIELDS and not updates \
+                and not (editing and d.entity_type == fd.FCC_ASSET_STEP):
+            try:
+                filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
+            except Exception:                                    # a model failure is "not understood", never a crashed turn
+                logging.getLogger(__name__).exception("[fcc] extractor.fill failed")
+                filled = {}
             if awaiting is None:                                     # review/edit: any evidenced field change
                 updates.update(filled)
             elif awaiting in filled:                                 # extras only ALONGSIDE a valid awaited answer
