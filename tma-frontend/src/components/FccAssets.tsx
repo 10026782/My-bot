@@ -1,5 +1,5 @@
 import type { FccAssets } from "../types";
-import { assetCardModel, assetsHeaderCards, debtLines } from "../lib/fccAssets";
+import { assetCardModel, assetsHeaderCards, debtLines, soldCardModel, soldNote } from "../lib/fccAssets";
 import { UNKNOWN } from "../lib/fccLoans";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -15,10 +15,12 @@ export const ASSET_ACTIONS = [
   { intent: "asset.update_value", label: "עדכון שווי" },
   { intent: "asset.update_mortgage", label: "עדכון משכנתא" },
   { intent: "asset.next_step", label: "פעולה הבאה" },
+  { intent: "asset.mark_sold", label: "נמכר" },          // a state transition: the review + a separate approval follow
 ] as const;
 
 export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?: AssetActions }) {
-  if (assets.items.length === 0) {
+  const soldCount = assets.sold?.count ?? 0;
+  if (assets.items.length === 0 && soldCount === 0) {
     return <ScreenState state="empty" title="אין נכסים" message="הנכסים נרשמים בטבלת Assets." />;
   }
   return (
@@ -28,6 +30,7 @@ export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?
         <div className="fcc-kpis">
           {assetsHeaderCards(assets).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
         </div>
+        {soldNote(assets) && <p className="fcc-goal__note" role="note">{soldNote(assets)}</p>}
         <Surface variant="subtle" padding="compact" className="fcc-loans-goal">
           <h3 className="fcc-loans-goal__title">חוב ביחס לנכסים</h3>
           <dl className="fcc-loans-goal__grid">
@@ -36,6 +39,7 @@ export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?
           <p className="fcc-loan__meta">משכנתא רשומה והלוואות מקושרות עשויות לתאר את אותו חוב — הן מוצגות בנפרד ולא מחוברות.</p>
         </Surface>
         <div className="fcc-list fcc-list--tight">
+          {assets.items.length === 0 && <ScreenState state="empty" title="אין נכסים פעילים" message="כל הנכסים הרשומים סומנו כנמכרו." />}
           {assets.items.map((i) => {
             const m = assetCardModel(i);
             return (
@@ -73,6 +77,31 @@ export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?
             );
           })}
         </div>
+        {soldCount > 0 && (
+          <details className="fcc-sold">
+            <summary>נכסים שנמכרו ({soldCount})</summary>
+            <div className="fcc-list fcc-list--tight">
+              {(assets.sold?.items ?? []).map((i) => {
+                const m = soldCardModel(i);
+                return (
+                  <article key={m.id} className="fcc-loan fcc-asset fcc-asset--sold">
+                    <header className="fcc-loan__head"><div className="fcc-loan__titlebox"><h3 className="fcc-loan__title">{m.title}</h3>
+                      <div className="fcc-loan__tags"><span className="fcc-tag fcc-tag--muted">נמכר</span></div></div></header>
+                    <dl className="fcc-pay__figures">
+                      {m.rows.map((r) => <div key={r.label}><dt>{r.label}</dt><dd className={r.value === UNKNOWN ? "fcc-unknown" : undefined}>{r.value}</dd></div>)}
+                    </dl>
+                    {m.openLoans.length > 0 && (
+                      <div className="fcc-asset__loans">
+                        <p className="fcc-loan__meta"><strong>הלוואות שעדיין פתוחות ומקושרות לנכס</strong></p>
+                        {m.openLoans.map((t) => <p key={t} className="fcc-loan__meta">{t}</p>)}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </details>
+        )}
       </div>
     </section>
   );

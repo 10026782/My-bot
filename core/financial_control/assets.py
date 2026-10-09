@@ -75,12 +75,37 @@ def summarize(items: list[dict], loan_items: list[dict]) -> dict:
     }
 
 
+SOLD = "נמכר"          # live Assets.Status choice
+
+
+def sold_item(record: dict, loans_by_asset: dict[str, list[dict]]) -> dict:
+    """A sold asset, shown apart from the active ones: sale date / full price / MY share (price × Ownership %).
+    An unknown ownership % leaves the share unknown — 100% is never assumed. Linked loans stay what they are (open)."""
+    f = record.get("fields") or {}
+    amount, pct = _num(f.get(AF.SALE_AMOUNT)), _num(f.get(AF.OWNERSHIP_PCT))
+    linked = loans_by_asset.get(record.get("id"), [])
+    return {
+        "id": record.get("id"),
+        "name": f.get(AF.NAME) or None,
+        "sale_date": f.get(AF.SALE_DATE) or None,
+        "sale_amount": amount,
+        "ownership_pct": pct,
+        "my_share": round(amount * pct / 100.0, 2) if amount is not None and pct is not None else None,
+        "linked_loans": [{k: l[k] for k in ("id", "name", "early_closure_balance")} for l in linked],
+    }
+
+
 def build(records: list[dict], loan_items: list[dict]) -> dict:
     """Owner-scoped asset ``records`` + the owner's loan items (``loans.loan_item`` rows) -> screen payload."""
     loans_by_asset: dict[str, list[dict]] = {}
     for loan in loan_items:
         if loan.get("active") and loan.get("related_asset"):
             loans_by_asset.setdefault(loan["related_asset"], []).append(loan)
-    items = [asset_item(r, loans_by_asset) for r in records]
+    sold_records = [r for r in records if _sel((r.get("fields") or {}).get(AF.STATUS)) == SOLD]
+    sold = [sold_item(r, loans_by_asset) for r in sold_records]
+    sold.sort(key=lambda i: (i["sale_date"] or "", i["name"] or ""), reverse=True)
+    # Active assets only feed the totals. A sold asset is NOT deleted from the owner's wealth — it became proceeds that
+    # this screen does not track — so the totals are "active assets", never a total net worth (the UI says so).
+    items = [asset_item(r, loans_by_asset) for r in records if r not in sold_records]
     items.sort(key=lambda i: (-(i["current_value"] or 0), i["name"] or ""))
-    return {"items": items, "summary": summarize(items, loan_items)}
+    return {"items": items, "summary": summarize(items, loan_items), "sold": {"count": len(sold), "items": sold}}

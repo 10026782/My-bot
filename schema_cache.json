@@ -367,7 +367,9 @@
       "Domain",
       "Next Step",
       "Next Step Owner",
-      "Loans"
+      "Loans",
+      "Sale Date",
+      "Sale Amount"
     ],
     "Business Memory": [
       "Event Title",
