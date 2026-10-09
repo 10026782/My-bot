@@ -2,7 +2,7 @@
 // (`mode`) from existing data; this file only maps a family to the fields worth showing, so a
 // project never renders ₪0 / "—" and a cumulative or monthly-level goal never shows a weekly pace
 // it does not have. No fetching, no state.
-import type { FccGoalRow, FccOverview, FccSummaryCard } from "../types";
+import type { FccGoalRow, FccOverview, FccSavingsRelease, FccSummaryCard } from "../types";
 
 const nf = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 });
 export const money = (n: number | null | undefined): string => (n == null ? "—" : `₪${nf.format(n)}`);
@@ -162,4 +162,39 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
     ...(data.receipts?.missing_count ? [{ key: "receipts", label: "אסמכתאות חסרות", value: String(data.receipts.missing_count),
       hint: `סה״כ ${money(data.receipts.missing_amount)} בהוצאות עסק` }] : []),
   ];
+}
+
+
+// ── Savings release: "מתפנה לחיסכון" (all numbers come from the server; this only words them) ──
+export interface SavingsReleaseModel {
+  headline: string;
+  lines: string[];
+  depositLabel: string;
+  closing: string | null;        // month-end question text (last days of the month)
+  gapLine: string | null;
+  canExplainGap: boolean;
+  destination: string;
+}
+
+export function savingsReleaseModel(r: FccSavingsRelease): SavingsReleaseModel {
+  const lines = [`הכנסה נטו ${money(r.income_net)} מתוך ${money(r.income_target)}`];
+  lines.push(r.shortfall > 0
+    ? `חסרים ${money(r.shortfall)} ליעד — מהכנסות נוף הגליל נשארים ${money(r.from_fixed)} מתוך ${money(r.fixed_level)}`
+    : `יעד ההכנסה הושג — מתפנים ${money(r.fixed_level)} מנוף הגליל${r.extra > 0 ? ` ועוד ${money(r.extra)} מעל היעד` : ""}`);
+  lines.push(`הופקדו החודש ${money(r.deposited)} · נשארו להפקדה ${money(r.remaining)}`);
+  return {
+    headline: money(r.available),
+    lines,
+    depositLabel: r.remaining > 0 ? `הפקד ${money(r.remaining)}` : "רשום הפקדה",
+    closing: r.closing ? `סוף החודש — סך הפקדות החודש: ${money(r.deposited)}. נכון?` : null,
+    gapLine: r.closing && r.gap > 0 ? `פער ${money(r.gap)} מול חודש מלא` : null,
+    canExplainGap: r.closing && r.gap > 0,
+    destination: r.destination?.title ? `יעד ההפקדה: ${r.destination.title}` : "יעד ההפקדה ייבחר בעת ההפקדה",
+  };
+}
+
+/** The question asked right after an income was booked. Null = nothing is free (no question). */
+export function savingsFollowUp(r: FccSavingsRelease | null | undefined): { message: string; confirm: string } | null {
+  if (!r || r.remaining <= 0) return null;
+  return { message: `מתפנים לחיסכון ${money(r.remaining)} החודש. להפקיד?`, confirm: `הפקד ${money(r.remaining)}` };
 }

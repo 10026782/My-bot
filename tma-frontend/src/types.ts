@@ -685,8 +685,16 @@ export interface FccAssets {
   };
 }
 
+/** What the month frees for savings (server-derived): the fixed income is "free" once the income goal is met from the other sources. */
+export interface FccSavingsRelease {
+  income_net: number; income_target: number; fixed_level: number; shortfall: number; from_fixed: number; extra: number;
+  available: number; deposited: number; remaining: number; expected: number; gap: number;
+  month: string; closing: boolean; destination: { id: string; title: string | null } | null;
+}
+
 export interface FccOverview {
   goals: FccGoalRow[];
+  savings_release?: FccSavingsRelease | null;
   loans?: FccLoans;
   assets?: FccAssets;
   summary: Partial<Record<"income" | "savings" | "emergency_fund" | "debt_repaid" | "payment_reduction", FccSummaryCard>>;
@@ -708,4 +716,5 @@ export interface FccTurn {
   awaiting?: string | null;
   fields?: Record<string, string>;
   candidates?: { goal_id: string; title: string | null }[];
+  follow_up?: "savings" | null;     // executed income: the screen offers to put the freed amount away
 }

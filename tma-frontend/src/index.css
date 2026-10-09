@@ -3085,6 +3085,8 @@
 .fcc-stack { display: grid; gap: var(--boss-space-4); padding-bottom: var(--boss-space-8); }
 .fcc-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--boss-space-3); }
 .fcc-kpi { text-align: center; }
+.fcc-release .fcc-quick__choices { justify-content: center; margin-block-start: var(--boss-space-2, 8px); }
+.fcc-release__closing { font-weight: 600; margin-block: var(--boss-space-2, 8px) 0; }
 .fcc-kpi__value { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; unicode-bidi: plaintext; }
 .fcc-kpi__label { margin: var(--boss-space-1) 0 0; color: var(--boss-color-text-muted); font-size: 12px; }
 .fcc-kpi__hint { margin: var(--boss-space-1) 0 0; color: var(--boss-color-text-muted); font-size: 11px; }

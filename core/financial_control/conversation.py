@@ -109,6 +109,9 @@ def _missing(d: BusinessDraft) -> list[str]:
 def _render(d: BusinessDraft) -> TurnResult:
     goal_title = str(d.source_context.get("goal_title") or "")
     inferred = tuple(d.source_context.get("inferred") or ())
+    if d.source_context.get("ask_reason") and d.fields.get("goal"):
+        return TurnResult("ask", "מה הסיבה לפער בהפקדה? בחרו או כתבו סיבה אחרת.", d.entity_type, "reason", _view(d),
+                          candidates=list(REASON_CHOICES))
     if d.lifecycle_state is DraftState.EDITING:
         return TurnResult("ask", "מה לערוך? (למשל: סכום 80000)", d.entity_type, None, _view(d))
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW:
@@ -116,8 +119,10 @@ def _render(d: BusinessDraft) -> TurnResult:
         changed = {k: v for k, v in d.fields.items() if d.operation is DraftOperation.UPDATE and v != original.get(k)}
         return TurnResult("review", fd.render_review(
             d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
-            inferred=inferred, note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else str(d.source_context.get("review_note") or ""))),
+            inferred=inferred, note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
             d.entity_type, None, _view(d))
+    if d.source_context.get("ask_kind") and d.fields.get("goal") and not d.source_context.get("ask_source"):
+        return TurnResult("ask", "איזה סוג הכנסה זו?", d.entity_type, "kind", _view(d), candidates=list(KIND_CHOICES))
     if d.source_context.get("ask_source"):                    # "מקור אחר": the source's name comes before the amount
         return TurnResult("ask", "מה שם המקור? (למשל: אבי, תיווך)", d.entity_type, "source", _view(d))
     missing = _missing(d)
@@ -430,6 +435,87 @@ OTHER_SOURCE_ID = "other"           # synthetic choice id: "מקור אחר" -> 
 OTHER_SOURCE_TITLE = "מקור אחר"
 
 
+KIND_CHOICES = [{"goal_id": "one_time", "title": "חד-פעמית"}, {"goal_id": "monthly_recurring", "title": "חודשית קבועה"}]
+_KIND_WORDS = {"חד-פעמית": "one_time", "חד פעמית": "one_time", "חד-פעמי": "one_time", "חד פעמי": "one_time",
+               "חודשית קבועה": "monthly_recurring", "חודשי קבוע": "monthly_recurring", "קבועה": "monthly_recurring", "קבוע": "monthly_recurring"}
+
+
+def _goal_method(goal: dict) -> str:
+    m = (goal.get("fields") or {}).get(GF.CALC_METHOD)
+    return str((m.get("name") if isinstance(m, dict) else m) or "")
+
+
+def _recurring_note(d: BusinessDraft) -> str:
+    """monthly_recurring only counts on a recurring-level goal (calc.compute_goal): anywhere else it is stored but not summed."""
+    if (d.entity_type == fd.FCC_EVENT and d.fields.get("kind") == calc.MONTHLY_RECURRING
+            and d.source_context.get("goal_method") not in (None, calc.RECURRING_LEVEL)):
+        return "שימו לב: במקור הזה נספרות רק הכנסות חד-פעמיות בסכום החודש — הכנסה חודשית קבועה תירשם אך לא תיכלל בו. לשינוי: ערוך סוג."
+    return ""
+
+
+GAP_REASONS = {"extra_fixed": "הוצאה חריגה בנוף הגליל", "extra_home": "הוצאה חריגה בבית", "income_hard": "קושי בהכנסה החודש"}
+REASON_CHOICES = [{"goal_id": k, "title": v} for k, v in GAP_REASONS.items()]
+
+
+def _savings_release(identity, today: date) -> dict | None:
+    try:
+        return service.overview(identity, today).get("savings_release")
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("[fcc] savings release failed")
+        return None
+
+
+def income_followup(identity, snapshot: dict | None) -> bool:
+    """True when the writes just executed booked a one-time income on one of the caller's income goals: the screen then
+    asks whether to put the freed amount away (the amount comes from the fresh overview, never from this answer)."""
+    try:
+        goals = {g["id"]: g for g in service.my_goals(identity)}
+        for w in (snapshot or {}).get("writes") or []:
+            f = w.get("fields") or {}
+            if w.get("table") != Tables.FIN_EVENTS or f.get(EF.KIND) != calc.ONE_TIME:
+                continue
+            if any(_is_income_goal(goals[g]) for g in (f.get(EF.GOAL) or []) if g in goals):
+                return True
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("[fcc] income follow-up check failed")
+    return False
+
+
+def _start_savings_intent(identity, ids, intent_id: str, store, today: date) -> TurnResult:
+    """"הפקדה לחיסכון" (amount = what is still free this month) / "סיבת הפער" (why the month fell short). Both are ordinary
+    fcc_event drafts on the pension goal: the same review -> אשר flow, no new write path."""
+    rel = _savings_release(identity, today)
+    if rel is None:
+        return TurnResult("clarify", "אי אפשר לחשב כרגע כמה מתפנה לחיסכון — חסר יעד הכנסה חודשי או הכנסה קבועה.")
+    goals = service.my_goals(identity)
+    dest = next((g for g in goals if rel.get("destination") and g["id"] == rel["destination"]["id"]), None)
+    reason = intent_id == "savings.gap_reason"
+    if reason and rel["gap"] <= 0:
+        return TurnResult("info", "אין פער הפקדה החודש — אין מה להסביר.")
+    amount = rel["gap"] if reason else rel["remaining"]
+    raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"
+    fields = {"kind": "note" if reason else "one_time", "occurred_at": today.isoformat()}
+    if amount > 0:
+        fields["amount"] = amount
+    if not reason:
+        fields["note"] = fd.SAVINGS_DEPOSIT_NOTE
+    extra = {"savings_month": rel["month"]}
+    if reason:
+        extra["ask_reason"] = True
+    if dest is not None:
+        fields["goal"] = dest["id"]
+        extra["goal_title"] = dest["fields"].get(GF.TITLE, "")
+    d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
+    d, _rej = _set_fields(d, fields, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"] + (["amount"] if amount > 0 else [])})
+    res = _persist_new(store, ids, d)
+    return _with_goal_choices(res, [g for g in goals if not _is_income_goal(g)])
+
+
 def _total_income_goal(goals: list[dict]) -> dict | None:
     """The one top-level income goal (no "Contributes To" parent). Without exactly one, "other source" is not offered."""
     roots = [g for g in goals if _is_income_goal(g) and calc.parent_goal_id(g.get("fields") or {}, GF) is None]
@@ -463,6 +549,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return _start_loan_intent(identity, ids, spec["entity"], entity_id, store, today)
     if spec["entity"] in _ASSET_CURRENT:
         return _start_asset_intent(identity, ids, spec["entity"], entity_id, store, today)
+    if intent_id in ("savings.deposit", "savings.gap_reason"):
+        return _start_savings_intent(identity, ids, intent_id, store, today)
     goals = service.my_goals(identity) if spec.get("target") == "goal" else []
     chosen = None
     if entity_id:
@@ -504,9 +592,12 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     offer_other = chosen is None and spec.get("goal_filter") == "income" and _total_income_goal(goals) is not None
     if offer_other:
         extra["offer_other"] = True
+    if intent_id == "monthly.income":                          # one-time vs recurring is the user's call, not a silent default
+        extra["ask_kind"] = True
     if chosen is not None:
         fields["goal"] = chosen["id"]
         extra["goal_title"] = chosen["fields"].get(GF.TITLE, "")
+        extra["goal_method"] = _goal_method(chosen)
     d = _new_draft(identity, ids, fd.FCC_EVENT, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
     d, _rej = _set_fields(d, fields, strict=False)
     d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
@@ -539,6 +630,14 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
             return _confirmed_result(identity, d)
         return TurnResult("info", "יש פעולה שאושרה וממתינה לביצוע — אשר כדי לנסות שוב, או בטל.", d.entity_type)
 
+    if d.source_context.get("ask_reason") and d.fields.get("goal"):      # the reason comes first, whatever else is complete
+        why = GAP_REASONS.get(goal_id or "") or (text.strip()[:120] if lower not in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS else "")
+        if not why:
+            return replace_result(_render(d), message=f"צריך סיבה כדי להמשיך.\n{_render(d).message}")
+        d2, _rej = _set_fields(d, {"note": f"פער הפקדה {d.source_context.get('savings_month', '')}: {why}"}, strict=False)
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_reason"})
+        return _render(_save(store, ids, d2, expected=d.idempotency_key))
+
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in CONFIRM_WORDS:
         return _confirm(identity, ids, d, store)
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in EDIT_WORDS:
@@ -553,6 +652,14 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
             return replace_result(_render(d), message=f"שדה חובה — צריך שם למקור.\n{_render(d).message}")
         d2, _rej = _set_fields(d, {"note": f"מקור: {name[:80]}"}, strict=False)
         d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_source"})
+        return _render(_save(store, ids, d2, expected=expected))
+    if (d.source_context.get("ask_kind") and d.fields.get("goal")
+            and d.lifecycle_state not in (DraftState.READY_FOR_REVIEW, DraftState.EDITING)):
+        kind = goal_id if goal_id in ("one_time", "monthly_recurring") else _KIND_WORDS.get(text.strip())
+        if kind is None:
+            return replace_result(_render(d), message=f"בחרו: חד-פעמית או חודשית קבועה.\n{_render(d).message}")
+        d2, _rej = _set_fields(d, {"kind": kind}, strict=False)
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_kind"})
         return _render(_save(store, ids, d2, expected=expected))
     editing = d.lifecycle_state in (DraftState.READY_FOR_REVIEW, DraftState.EDITING)
     awaiting = None if editing else (_missing(d) or [None])[0]
@@ -579,7 +686,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                               _view(d), candidates=_choices_for(d, goals))
         updates["goal"] = chosen["id"]
         d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, ""),
-                                       **({"ask_source": True} if other else {})})
+                                       "goal_method": _goal_method(chosen), **({"ask_source": True} if other else {})})
         pending_level = d.source_context.get("level")
         if pending_level is not None and d.fields.get("amount") in (None, ""):
             delta = _level_delta(identity, chosen, float(pending_level), today)

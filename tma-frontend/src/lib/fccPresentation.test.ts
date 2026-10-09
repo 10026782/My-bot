@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`); same conventions as commandCenterPresentation.test.ts.
-import type { FccGoalRow } from "../types";
-import { CATEGORY_LABEL, dmy, goalCardModel, headerCards } from "./fccPresentation";
+import type { FccGoalRow, FccSavingsRelease } from "../types";
+import { CATEGORY_LABEL, dmy, goalCardModel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -157,6 +157,38 @@ test("labels and dates", () => {
   assert.equal(CATEGORY_LABEL.business_project, "פרויקט עסקי");
   assert.equal(dmy("2026-12-31"), "31/12/2026");
   assert.equal(dmy(null), "");
+});
+
+const rel = (o: Partial<FccSavingsRelease> = {}): FccSavingsRelease => ({ income_net: 10000, income_target: 15000, fixed_level: 8000, shortfall: 5000, from_fixed: 3000, extra: 0,
+  available: 3000, deposited: 0, remaining: 3000, expected: 8000, gap: 8000, month: "2026-10", closing: false,
+  destination: { id: "recP", title: "תכנון פנסיוני" }, ...o });
+
+test("savings release: a shortfall comes out of the fixed income (10,000 of 15,000 -> 3,000 of 8,000 stay)", () => {
+  const m = savingsReleaseModel(rel());
+  assert.equal(m.headline, "₪3,000");
+  assert.equal(m.lines[1].includes("חסרים ₪5,000") && m.lines[1].includes("₪3,000 מתוך ₪8,000"), true);
+  assert.equal(m.lines[2].includes("נשארו להפקדה ₪3,000"), true);
+  assert.equal(m.depositLabel, "הפקד ₪3,000");
+  assert.equal(m.closing, null); assert.equal(m.canExplainGap, false);
+});
+
+test("savings release: goal met + extra, nothing left to deposit offers a plain 'record a deposit'", () => {
+  const m = savingsReleaseModel(rel({ income_net: 17000, shortfall: 0, from_fixed: 8000, extra: 2000, available: 10000, deposited: 10000, remaining: 0, expected: 10000, gap: 0 }));
+  assert.equal(m.lines[1].includes("יעד ההכנסה הושג") && m.lines[1].includes("ועוד ₪2,000"), true);
+  assert.equal(m.depositLabel, "רשום הפקדה");
+});
+
+test("savings release: month end asks the total and offers to document the gap only when there is one", () => {
+  const closing = savingsReleaseModel(rel({ closing: true, deposited: 3000, remaining: 0, gap: 5000 }));
+  assert.equal(closing.closing?.includes("סך הפקדות החודש: ₪3,000"), true); assert.equal(closing.gapLine?.includes("₪5,000"), true); assert.equal(closing.canExplainGap, true);
+  assert.equal(savingsReleaseModel(rel({ closing: true, gap: 0 })).canExplainGap, false);
+  assert.equal(savingsReleaseModel(rel({ destination: null })).destination, "יעד ההפקדה ייבחר בעת ההפקדה");
+});
+
+test("savings follow-up: asked only while something is still free", () => {
+  assert.equal(savingsFollowUp(rel())?.confirm, "הפקד ₪3,000");
+  assert.equal(savingsFollowUp(rel({ remaining: 0 })), null);
+  assert.equal(savingsFollowUp(null), null);
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

@@ -55,6 +55,7 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
       { intent: "monthly.direct_cost", label: "+ עלות ישירה" },
       { intent: "monthly.obligation", label: "+ התחייבות" },
       { intent: "monthly.goal_update", label: "+ עדכון יעד", pick: "goal" },
+      { intent: "savings.deposit", label: "+ הפקדה לחיסכון" },
     ],
     freeText: true,
     hint: "אפשר גם לכתוב חופשי.",
@@ -102,7 +103,9 @@ export function writerView(turn: FccTurn | null, receipt: string | null): Writer
   switch (turn.state) {
     case "review":
       return { ...base, confirm: "אשר ורשום", canEdit: true, cancelsDraft: true, dismissOnly: false };
-    case "ask":
+    case "ask":                                // a closed question (e.g. income type) also arrives as buttons
+      return { ...base, showInput: true, cancelsDraft: true, dismissOnly: false,
+               choices: (turn.candidates ?? []).map((c) => ({ goal_id: c.goal_id, title: c.title ?? "" })) };
     case "unrelated":
       return { ...base, showInput: true, cancelsDraft: true, dismissOnly: false };
     case "needs_goal":

@@ -58,6 +58,8 @@ INTENTS: dict[str, dict] = {
     "monthly.direct_cost":       {"tab": "monthly", "entity": "fcc_event", "kind": "direct_cost", "target": "goal", "goal_filter": "income"},
     "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
     "monthly.obligation":        {"tab": "monthly", "entity": "fcc_obligation"},
+    "savings.deposit":           {"tab": "monthly", "entity": "fcc_event", "kind": "one_time", "target": "savings"},      # amount prefilled by the server
+    "savings.gap_reason":        {"tab": "monthly", "entity": "fcc_event", "kind": "note", "target": "savings"},          # why the month fell short
     "loan.close":                {"tab": "loans", "entity": "fcc_loan_close", "target": "loan", "target_required": True, "transition": True},
     "loan.update_balance":       {"tab": "loans", "entity": "fcc_loan_balance", "target": "loan", "target_required": True},
     "loan.update_payment":       {"tab": "loans", "entity": "fcc_loan_payment", "target": "loan", "target_required": True},
@@ -232,13 +234,14 @@ def display_value(field: str, value: Any) -> str:
     return str(value)
 
 
+SAVINGS_DEPOSIT_NOTE = "הפקדה לחיסכון"        # server-set marker on a savings deposit: its record is a goal, not an income source
 INCOME_KINDS = ("one_time", "monthly_recurring", "direct_cost")   # events booked against an income SOURCE (not a goal to reach)
 
 
 def record_noun(entity: str, fields: Mapping[str, Any]) -> str:
     """What the screen calls the record an event is booked on: income events -> a "מקור", household spending -> a "סעיף",
     anything else (progress on a savings / debt goal) stays a "יעד"."""
-    if entity != FCC_EVENT:
+    if entity != FCC_EVENT or str(fields.get("note") or "").startswith(SAVINGS_DEPOSIT_NOTE):
         return "יעד"
     kind = fields.get("kind")
     return "מקור" if kind in INCOME_KINDS else "סעיף" if kind == "household_expense" else "יעד"
@@ -290,6 +293,9 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
             return "באיזו תדירות? חודשי / רבעוני / שנתי / מותאם"
     noun = record_noun(entity, fields)
     if field == "amount":
+        note = str(fields.get("note") or "")
+        if noun == "מקור" and note.startswith("מקור: "):         # "מקור אחר": speak of the NAMED source, not the total goal behind it
+            return f"כמה לרשום ממקור {note[len('מקור: '):]}?"
         return f"כמה לרשום{' ב' + noun + ' ' + goal_title if goal_title else ''}?"
     if field == "goal":
         return {"מקור": "מאיזה מקור?", "סעיף": "באיזה סעיף?"}.get(noun, "לאיזה יעד?")

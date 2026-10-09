@@ -283,3 +283,31 @@ def monthly_cash_improvement(events: list[Event], today: date) -> float:
     return round(
         sum(e.amount for e in events if e.kind == MONTHLY_RECURRING and not e.superseded and e.occurred <= today), 2,
     )
+
+
+def savings_release(net: float, income_target: float, fixed_level: float, deposited: float) -> dict:
+    """What the month frees for savings. The fixed income (e.g. 8,000 a month) is only "free" once the income goal is met
+    from the OTHER sources: every shekel the goal still lacks is taken from the fixed income, and every shekel above
+    the goal is extra. available = max(net - (target - fixed), 0); e.g. goal 15,000, fixed 8,000, net 10,000 -> 3,000."""
+    net, target, fixed, dep = (round(max(float(v or 0.0), 0.0), 2) for v in (net, income_target, fixed_level, deposited))
+    shortfall = max(target - net, 0.0)
+    from_fixed = max(fixed - shortfall, 0.0)
+    extra = max(net - target, 0.0)
+    available = round(from_fixed + extra, 2)
+    expected = round(fixed + extra, 2)                   # what a full month would put away
+    return {"income_net": net, "income_target": target, "fixed_level": fixed, "shortfall": round(shortfall, 2),
+            "from_fixed": round(from_fixed, 2), "extra": round(extra, 2), "available": available,
+            "deposited": dep, "remaining": round(max(available - dep, 0.0), 2), "expected": expected,
+            "gap": round(max(expected - dep, 0.0), 2)}
+
+
+def deposits_in_month(events: list[Event], today: date) -> float:
+    """one_time deposits recorded in the current calendar month (superseded ones ignored)."""
+    start = today.replace(day=1)
+    end = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    return round(sum(e.amount for e in events if not e.superseded and e.kind == ONE_TIME and start <= e.occurred <= end), 2)
+
+
+def month_closing(today: date, window: int = 7) -> bool:
+    """The last ``window`` days of the calendar month: the "how much did you put away?" question is due."""
+    return calendar.monthrange(today.year, today.month)[1] - today.day < window

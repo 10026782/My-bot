@@ -2085,7 +2085,9 @@ def test_intent_income_prefills_kind_and_offers_only_own_income_goals():
 
 def test_intent_income_full_flow_reviews_then_freezes_one_event():
     seed_intents()
-    intent("monthly.income", "recGI")
+    r = intent("monthly.income", "recGI")
+    assert r.awaiting == "kind"                                                   # the income type is asked, never silently defaulted
+    conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
     r = conv.handle_turn(ELIYAHU, "5000", extractor=Ex(fill={"5000": {"amount": 5000}}), today=TODAY)
     assert r.state == "review" and "משכורת" in r.message and "₪5,000" in r.message
     c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
@@ -2178,6 +2180,7 @@ def test_free_text_cannot_open_a_new_draft_from_the_loans_or_assets_tabs():
 def test_scope_does_not_block_answering_an_open_draft():
     seed_intents()
     intent("monthly.income", "recGI")
+    conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY, scope="loans")
     r = conv.handle_turn(ELIYAHU, "700", extractor=Ex(fill={"700": {"amount": 700}}), today=TODAY, scope="loans")
     assert r.state == "review"
 
@@ -2615,7 +2618,9 @@ def test_other_source_books_on_the_total_goal_with_the_named_source_in_the_note(
     r = conv.handle_turn(ELIYAHU, "מקור אחר", goal_id=conv.OTHER_SOURCE_ID, extractor=Ex(), today=TODAY)
     assert r.state == "ask" and r.awaiting == "source"
     r = conv.handle_turn(ELIYAHU, "אבי", extractor=Ex(), today=TODAY)
-    assert r.state == "ask" and r.awaiting == "amount" and "מקור" in r.message and "יעד" not in r.message
+    assert r.awaiting == "kind" and [c["goal_id"] for c in r.candidates] == ["one_time", "monthly_recurring"]
+    r = conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
+    assert r.state == "ask" and r.awaiting == "amount" and r.message == "כמה לרשום ממקור אבי?"
     r = conv.handle_turn(ELIYAHU, "1200", extractor=Ex(fill={"1200": {"amount": 1200}}), today=TODAY)
     assert r.state == "review" and "• מקור: הכנסה חודשית קבועה" in r.message and "מקור: אבי" in r.message
     c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
@@ -2644,3 +2649,121 @@ def test_household_expense_wording_is_an_item_not_a_goal():
     seed_sources()
     r = intent("monthly.household_expense")
     assert r.state == "ask" and "סעיף" in r.message and "יעד" not in r.message
+
+
+def test_income_kind_is_asked_and_recurring_on_a_period_goal_is_flagged_in_review():
+    seed_sources()
+    intent("monthly.income", "recT")                                              # a period_sum source (default calc method)
+    r = conv.handle_turn(ELIYAHU, "x", extractor=Ex(), today=TODAY)               # not a kind: asked again, nothing stored
+    assert r.awaiting == "kind" and "בחרו" in r.message
+    r = conv.handle_turn(ELIYAHU, "חודשית קבועה", extractor=Ex(), today=TODAY)   # typed label works like the button
+    assert r.awaiting == "amount"
+    r = conv.handle_turn(ELIYAHU, "800", extractor=Ex(fill={"800": {"amount": 800}}), today=TODAY)
+    assert r.state == "review" and "חודשי קבוע" in r.message and "לא תיכלל" in r.message
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    (w,) = c.snapshot["writes"]
+    assert w["fields"][EF.KIND] == "monthly_recurring"
+
+
+def test_income_one_time_review_has_no_recurring_warning():
+    seed_sources()
+    intent("monthly.income", "recT")
+    conv.handle_turn(ELIYAHU, "חד פעמית", extractor=Ex(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "300", extractor=Ex(fill={"300": {"amount": 300}}), today=TODAY)
+    assert r.state == "review" and "לא תיכלל" not in r.message and "חד-פעמי" in r.message
+
+
+# ── Savings release: the fixed income frees up once the income goal is met from the other sources ─────────────────
+def seed_release(income_events, deposits=()):
+    DB[Tables.FIN_GOALS] = [
+        goal("recInc", "הכנסה חודשית", ELI, 15000, **{GF.CATEGORY: "income"}),
+        goal("recFix", "הכנסות נוף הגליל", ELI, 8000, **{GF.CATEGORY: "fixed_income", GF.CALC_METHOD: "recurring_level"}),
+        goal("recPen", "תכנון פנסיוני", ELI, None, **{GF.CATEGORY: "long_term"}),
+    ]
+    DB[Tables.FIN_GOALS][2]["fields"].pop(GF.TARGET_AMOUNT)
+    DB[Tables.FIN_EVENTS] = [event(f"recI{i}", "recInc", ELI, a) for i, a in enumerate(income_events)] + \
+                            [event(f"recD{i}", "recPen", ELI, a, day="2026-10-05") for i, a in enumerate(deposits)]
+
+
+def release(**kw):
+    return service.overview(ELIYAHU, TODAY)["savings_release"]
+
+
+def test_release_formula_shortfall_comes_out_of_the_fixed_income_and_excess_is_extra():
+    for net, avail in ((0, 0), (7000, 0), (10000, 3000), (15000, 8000), (17000, 10000)):
+        seed_release([net] if net else [])
+        r = release()
+        assert r["available"] == avail, (net, r)
+    seed_release([10000])
+    r = release()
+    assert (r["shortfall"], r["from_fixed"], r["extra"], r["fixed_level"], r["income_target"]) == (5000, 3000, 0, 8000, 15000)
+    assert r["destination"]["id"] == "recPen" and r["remaining"] == 3000 and r["month"] == "2026-10"
+
+
+def test_release_counts_deposits_this_month_and_reports_the_gap_against_a_full_month():
+    seed_release([17000], deposits=[4000])
+    r = release()
+    assert r["available"] == 10000 and r["deposited"] == 4000 and r["remaining"] == 6000
+    assert r["expected"] == 10000 and r["gap"] == 6000
+    seed_release([10000], deposits=[3000])
+    r = release()
+    assert r["remaining"] == 0 and r["expected"] == 8000 and r["gap"] == 5000        # 15,000 not reached: the missing part is the gap
+
+
+def test_release_is_none_without_a_fixed_income_and_never_reads_titles():
+    seed_release([10000])
+    DB[Tables.FIN_GOALS][1]["fields"][GF.CATEGORY] = "other"
+    assert release() is None
+
+
+def test_deposit_intent_prefills_the_freed_amount_on_the_pension_goal_and_writes_one_event():
+    seed_release([10000])
+    r = intent("savings.deposit")
+    assert r.state == "review" and "₪3,000" in r.message and "• יעד: תכנון פנסיוני" in r.message
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    (w,) = c.snapshot["writes"]
+    f = w["fields"]
+    assert w["table"] == Tables.FIN_EVENTS and f[EF.GOAL] == ["recPen"] and f[EF.AMOUNT] == 3000 and f[EF.KIND] == "one_time"
+
+
+def test_deposit_amount_is_editable_and_nothing_freed_asks_for_an_amount():
+    seed_release([10000])
+    intent("savings.deposit")
+    r = conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    assert r.state == "ask"
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    seed_release([5000])
+    r = intent("savings.deposit")
+    assert r.state == "ask" and r.awaiting == "amount"
+
+
+def test_gap_reason_is_documented_as_a_note_event_with_the_chosen_reason():
+    seed_release([10000])                                   # 15,000 not reached, nothing deposited: gap 8,000
+    r = intent("savings.gap_reason")
+    assert r.state == "ask" and r.awaiting == "reason"
+    assert [c["goal_id"] for c in r.candidates] == ["extra_fixed", "extra_home", "income_hard"]
+    r = conv.handle_turn(ELIYAHU, "x", goal_id="extra_fixed", extractor=Ex(), today=TODAY)
+    assert r.state == "review" and "פער הפקדה 2026-10: הוצאה חריגה בנוף הגליל" in r.message
+    c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
+    (w,) = c.snapshot["writes"]
+    assert w["fields"][EF.KIND] == "note" and w["fields"][EF.GOAL] == ["recPen"] and w["fields"][EF.AMOUNT] == 8000
+
+
+def test_gap_reason_accepts_free_text_and_rejects_command_words_and_no_gap_is_info():
+    seed_release([10000])
+    intent("savings.gap_reason")
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).awaiting == "reason"
+    r = conv.handle_turn(ELIYAHU, "הלוואה דחופה לקרוב", extractor=Ex(), today=TODAY)
+    assert r.state == "review" and "הלוואה דחופה לקרוב" in r.message
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    seed_release([15000], deposits=[8000])
+    assert intent("savings.gap_reason").state == "info"
+
+
+def test_savings_intents_are_owner_scoped_and_income_followup_flags_only_income_events():
+    seed_release([10000])
+    assert intent("savings.deposit", who=AVI_I).state in ("clarify", "denied", "needs_goal", "ask", "review", "info")
+    snap = {"writes": [{"table": Tables.FIN_EVENTS, "fields": {EF.KIND: "one_time", EF.GOAL: ["recInc"]}}]}
+    assert conv.income_followup(ELIYAHU, snap) is True
+    assert conv.income_followup(ELIYAHU, {"writes": [{"table": Tables.FIN_EVENTS, "fields": {EF.KIND: "one_time", EF.GOAL: ["recPen"]}}]}) is False
+    assert conv.income_followup(ELIYAHU, {"writes": [{"table": Tables.FIN_EVENTS, "fields": {EF.KIND: "household_expense", EF.GOAL: ["recInc"]}}]}) is False
