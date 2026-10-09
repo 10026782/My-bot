@@ -33,7 +33,7 @@ def render_text(result: conversation.TurnResult) -> str:
     return "\n".join(lines)
 
 
-class PresetIntentExtractor(conversation.LlmExtractor):
+class PresetIntentExtractor(conversation.DeterministicExtractor):
     """The calling agent already understood the message and passed a structured intent: use it for the FIRST
     classification instead of paying for a second model call. It is validated exactly like the classifier output
     (``writer.validate_intent``); an invalid/garbled intent falls back to the normal classifier. Only the opening

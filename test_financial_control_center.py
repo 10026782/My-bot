@@ -665,7 +665,7 @@ def test_duplicate_goal_title_and_duplicate_event_blocked():
 # 16 — TMA: same flow; the client only renders server state and executes the FROZEN writes
 def test_tma_flow_resumes_after_refresh_and_executes_frozen_writes(monkeypatch):
     ex = Ex(classify={"תוסיף יעד קרן חירום": EF_GOAL}, fill={"סוף השנה": {"end_date": "2026-12-31"}})
-    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    monkeypatch.setattr(conv, "DeterministicExtractor", lambda: ex)
     sent = []
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
                         lambda action, payload, identity, label: (sent.append((action, payload)) or ("a1", {"ok": True}, 200)))
@@ -684,7 +684,7 @@ def test_tma_flow_resumes_after_refresh_and_executes_frozen_writes(monkeypatch):
 
 def test_tma_failed_execution_keeps_confirmed_draft_for_retry(monkeypatch):
     ex = Ex(classify={"x": {"action": "create_goal", "title": "יעד", "target": 100, "category": "income"}})
-    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    monkeypatch.setattr(conv, "DeterministicExtractor", lambda: ex)
     calls = {"n": 0}
 
     def flaky(action, payload, identity, label):
@@ -705,7 +705,7 @@ def test_chat_and_tma_share_one_draft_and_chat_executes_via_canonical_queue(monk
     monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
     monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
     ex = Ex(classify={"תוסיף יעד קרן חירום": EF_GOAL}, fill={"סוף השנה": {"end_date": "2026-12-31"}})
-    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    monkeypatch.setattr(conv, "DeterministicExtractor", lambda: ex)
     queued = []
     q = lambda tool, inputs: (queued.append((tool, inputs)) or {"ok": True, "contract_id": "c1", "created_this_turn": True})
     assert fchat.maybe_handle(ELIYAHU, "שלום", queue=q) == (None, None)       # no draft -> not an FCC turn
@@ -731,7 +731,7 @@ def test_chat_queue_failure_keeps_confirmed_draft_for_retry(monkeypatch):
     monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
     monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
     ex = Ex(classify={"x": {"action": "create_goal", "title": "יעד", "target": 100, "category": "income"}})
-    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    monkeypatch.setattr(conv, "DeterministicExtractor", lambda: ex)
     fchat.start_turn(ELIYAHU, "x")
     text, out = fchat.maybe_handle(ELIYAHU, "אשר", queue=lambda t, i: {"ok": False})
     assert "לא הצלחתי" in text and out is None and conv.pending_view(ELIYAHU) is not None
@@ -779,7 +779,7 @@ def test_fcc_update_tool_is_owner_only_gated_and_draft_only(monkeypatch):
     assert meta is not None and meta.roles_allowed == {"owner"} and not meta.requires_approval
     assert any(t["name"] == "fcc_update" for t in schemas.TOOL_SCHEMAS)
     ex = Ex(classify={"תוסיף יעד קרן חירום": EF_GOAL})
-    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    monkeypatch.setattr(conv, "DeterministicExtractor", lambda: ex)
     monkeypatch.setattr(feature_flags, "is_enabled", lambda *a, **k: False)
     assert "לא פעיל" in dispatcher_module.dispatch_tool("fcc_update", {"text": "תוסיף יעד קרן חירום"}, ELIYAHU)
     monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
@@ -933,7 +933,7 @@ def test_chat_releases_unrelated_message_and_keeps_draft(monkeypatch):
     monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
     monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
     ex = Ex(classify={"x": EF_GOAL})
-    monkeypatch.setattr(conv, "LlmExtractor", lambda: ex)
+    monkeypatch.setattr(conv, "DeterministicExtractor", lambda: ex)
     fchat.start_turn(ELIYAHU, "x")
     q = lambda t, i: pytest.fail("must not queue")
     assert fchat.maybe_handle(ELIYAHU, "מה מצב הלידים שלי?", queue=q) == (None, None)
@@ -1273,14 +1273,13 @@ def test_structured_intent_skips_the_classifier_call(monkeypatch):
     assert "₪500" in out and "אשר" in out
 
 
-def test_invalid_structured_intent_falls_back_to_the_classifier(monkeypatch):
-    from core.financial_control import classifier
-    calls = []
-    monkeypatch.setattr(classifier, "classify", lambda text, titles, today=None: calls.append(text) or None)
+def test_invalid_structured_intent_is_not_understood_and_no_model_is_called(monkeypatch):
+    import llm_fallback
+    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
     monkeypatch.setattr(fchat.gate, "enabled_for", lambda identity: True)
     _level_world(3000)
-    fchat.start_turn(ELIYAHU, "x", intent={"action": "bogus"})
-    assert calls == ["x"]
+    out = fchat.start_turn(ELIYAHU, "x", intent={"action": "bogus"})
+    assert "כפתורים" in out and not conv.has_pending(ELIYAHU)
 
 
 # ═══════════════ standing-order savings: plan (level) vs actual deposits; a missed month = a visible gap ═══════════════
@@ -2174,7 +2173,7 @@ def test_free_text_cannot_open_a_new_draft_from_the_loans_or_assets_tabs():
         r = conv.handle_turn(ELIYAHU, "שילמתי 500", extractor=ex, today=TODAY, scope=tab)
         assert r.state == "info" and "בכפתורים" in r.message
     assert ex.calls == []                                                            # classifier never consulted
-    assert conv.handle_turn(ELIYAHU, "שילמתי 500", extractor=ex, today=TODAY, scope="monthly").state != "info"
+    assert conv.handle_turn(ELIYAHU, "שילמתי 500", extractor=ex, today=TODAY, scope="monthly").state == "info"    # the TMA starts from chips only
 
 
 def test_scope_does_not_block_answering_an_open_draft():
@@ -2318,7 +2317,7 @@ def test_p2_http_new_loan_and_update_confirm_executes_frozen_writes_and_scopes_t
     sent = []
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
                         lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
-    monkeypatch.setattr(conv.LlmExtractor, "fill", lambda self, text, awaiting, fields, entity, today:
+    monkeypatch.setattr(conv.DeterministicExtractor, "fill", lambda self, text, awaiting, fields, entity, today:
                         {"balance": 1000} if awaiting == "balance" else {"payment": 100} if awaiting == "payment" else
                         {"rate": 5} if awaiting == "rate" else {"name": text} if awaiting == "name" else {})
     c = http(monkeypatch, ELIYAHU)
@@ -2459,7 +2458,7 @@ def test_p3_http_asset_next_step_executes_the_frozen_patch_and_the_executor_rech
     sent = []
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
                         lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
-    monkeypatch.setattr(conv.LlmExtractor, "fill", lambda self, text, awaiting, fields, entity, today: {"step": text} if awaiting == "step" else {})
+    monkeypatch.setattr(conv.DeterministicExtractor, "fill", lambda self, text, awaiting, fields, entity, today: {"step": text} if awaiting == "step" else {})
     c = http(monkeypatch, ELIYAHU)
     assert c.post("/api/fcc/intent/start", json={"intent": "asset.next_step", "entity_id": "recAH"}, headers=H).get_json()["awaiting"] == "step"
     assert c.post("/api/fcc/write", json={"text": "לדבר עם המתווך", "scope": "assets"}, headers=H).get_json()["state"] == "review"
@@ -2583,7 +2582,7 @@ def test_p4_http_sale_executes_the_frozen_patch_and_the_executor_rechecks_the_ow
     sent = []
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
                         lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
-    monkeypatch.setattr(conv.LlmExtractor, "fill", lambda self, text, awaiting, fields, entity, today: {"sale_amount": 2500000} if awaiting == "sale_amount" else {})
+    monkeypatch.setattr(conv.DeterministicExtractor, "fill", lambda self, text, awaiting, fields, entity, today: {"sale_amount": 2500000} if awaiting == "sale_amount" else {})
     c = http(monkeypatch, ELIYAHU)
     assert c.post("/api/fcc/intent/start", json={"intent": "asset.mark_sold", "entity_id": "recAH"}, headers=H).get_json()["awaiting"] == "sale_amount"
     assert c.post("/api/fcc/write", json={"text": "2500000", "scope": "assets"}, headers=H).get_json()["state"] == "review"
@@ -2780,9 +2779,9 @@ def test_next_step_text_is_taken_verbatim_without_calling_the_model(monkeypatch)
     seed_p3()
     r = intent("asset.next_step", "recAH")
     assert r.awaiting == "step"
-    r = conv.handle_turn(ELIYAHU, "לדבר עם המתווך ביום ראשון ולשלוח הצעה", extractor=conv.LlmExtractor(), today=TODAY, scope="assets")
+    r = conv.handle_turn(ELIYAHU, "לדבר עם המתווך ביום ראשון ולשלוח הצעה", extractor=conv.DeterministicExtractor(), today=TODAY, scope="assets")
     assert r.state == "review" and "לדבר עם המתווך ביום ראשון ולשלוח הצעה" in r.message
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.LlmExtractor(), today=TODAY).snapshot["writes"]
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
     assert w["fields"] == {AF.NEXT_STEP: "לדבר עם המתווך ביום ראשון ולשלוח הצעה"}
 
 
@@ -2792,7 +2791,7 @@ def test_next_step_command_words_and_blank_are_not_a_step(monkeypatch):
     seed_p3()
     intent("asset.next_step", "recAH")
     for word in ("דלג", "אשר"):
-        r = conv.handle_turn(ELIYAHU, word, extractor=conv.LlmExtractor(), today=TODAY, scope="assets")
+        r = conv.handle_turn(ELIYAHU, word, extractor=conv.DeterministicExtractor(), today=TODAY, scope="assets")
         assert r.awaiting == "step" or r.state == "info", (word, r.state)
 
 
@@ -2801,16 +2800,16 @@ def test_next_step_edit_takes_an_owner_pick_or_new_text_as_written_without_the_m
     monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
     seed_p3()
     intent("asset.next_step", "recAH")
-    conv.handle_turn(ELIYAHU, "לשלוח הצעה", extractor=conv.LlmExtractor(), today=TODAY)
-    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.LlmExtractor(), today=TODAY)
-    r = conv.handle_turn(ELIYAHU, "אחראי אורי", extractor=conv.LlmExtractor(), today=TODAY)
+    conv.handle_turn(ELIYAHU, "לשלוח הצעה", extractor=conv.DeterministicExtractor(), today=TODAY)
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.DeterministicExtractor(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "אחראי אורי", extractor=conv.DeterministicExtractor(), today=TODAY)
     assert r.state == "review" and "אורי" in r.message
-    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.LlmExtractor(), today=TODAY)
-    r = conv.handle_turn(ELIYAHU, "אחראי דוד", extractor=conv.LlmExtractor(), today=TODAY)           # not a live choice
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.DeterministicExtractor(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "אחראי דוד", extractor=conv.DeterministicExtractor(), today=TODAY)           # not a live choice
     assert "דוד" not in r.message
-    r = conv.handle_turn(ELIYAHU, "לשלוח הצעה מעודכנת", extractor=conv.LlmExtractor(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "לשלוח הצעה מעודכנת", extractor=conv.DeterministicExtractor(), today=TODAY)
     assert r.state == "review" and "לשלוח הצעה מעודכנת" in r.message
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.LlmExtractor(), today=TODAY).snapshot["writes"]
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
     assert w["fields"] == {AF.NEXT_STEP: "לשלוח הצעה מעודכנת", AF.NEXT_STEP_OWNER: "אורי"}
 
 
@@ -2820,5 +2819,80 @@ def test_a_model_failure_is_not_understood_never_a_crashed_turn(monkeypatch):
     seed_intents()
     intent("monthly.income", "recGI")
     conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
-    r = conv.handle_turn(ELIYAHU, "כמה מאה ועשרים", extractor=conv.LlmExtractor(), today=TODAY)       # free-form amount needs the model
+    r = conv.handle_turn(ELIYAHU, "כמה מאה ועשרים", extractor=conv.DeterministicExtractor(), today=TODAY)       # free-form amount needs the model
     assert r.state in ("ask", "unrelated") and r.awaiting == "amount"
+
+
+# ── The TMA writer is deterministic: no model anywhere on the path (credits exhausted / model down must not matter) ──
+def _say(text, goal_id=None, scope="monthly"):
+    return conv.handle_turn(ELIYAHU, text, goal_id=goal_id, extractor=conv.DeterministicExtractor(), today=TODAY, scope=scope)
+
+
+@pytest.fixture
+def no_model(monkeypatch):
+    import llm_fallback
+    monkeypatch.setattr(llm_fallback, "call_anthropic_text", _boom)
+
+
+def test_new_goal_is_built_from_a_chip_with_buttons_and_typed_values_without_a_model(no_model):
+    seed_intents()
+    r = intent("monthly.goal_new")
+    assert r.state == "ask" and r.awaiting == "title"
+    r = _say("קרן לימודים")
+    assert r.awaiting == "target_amount"
+    r = _say("120000")
+    assert r.awaiting == "category" and {c["title"] for c in r.candidates} >= {"חיסכון חודשי", "קרן חירום", "חוב"}
+    r = _say("קרן חירום", goal_id="emergency_fund")                      # a button click == typing the label
+    assert r.awaiting == "end_date"
+    r = _say("2027-06-30")
+    assert r.state == "review" and "קרן לימודים" in r.message and "₪120,000" in r.message
+    (w,) = _say("אשר").snapshot["writes"]
+    assert w["table"] == Tables.FIN_GOALS and w["fields"][GF.TITLE] == "קרן לימודים" and w["fields"][GF.TARGET_AMOUNT] == 120000
+
+
+def test_review_edit_grammar_is_label_then_value_and_unknown_text_is_not_understood(no_model):
+    seed_intents()
+    intent("monthly.goal_new")
+    _say("שכר דירה")
+    _say("5000")
+    r = _say("הכנסה", goal_id="income")                                  # income: period / method / end date are inferred
+    assert r.state == "review" and "₪5,000" in r.message
+    assert _say("ערוך").state == "ask"
+    r = _say("סכום 8000")
+    assert r.state == "review" and "₪8,000" in r.message
+    _say("ערוך")
+    r = _say("משהו שלא מובן")                                             # no label: nothing is changed, nothing is guessed
+    assert r.state in ("ask", "unrelated")
+    assert conv.pending_view(ELIYAHU) is not None
+
+
+def test_obligation_chip_asks_choices_as_buttons_and_stores_the_typed_name_verbatim(no_model):
+    seed_intents()
+    r = intent("monthly.obligation")
+    assert r.awaiting == "name"
+    r = _say("נטפליקס")
+    assert r.awaiting == "amount"
+    r = _say("70")
+    assert r.awaiting == "scope" and {c["goal_id"] for c in r.candidates} == {"household", "business", "personal"}
+    r = _say("ביתי", goal_id="household")                                   # frequency defaults to monthly: straight to review
+    assert r.state == "review" and "נטפליקס" in r.message and "ביתי" in r.message
+
+
+def test_a_new_loan_is_collected_without_a_model(no_model):
+    seed_intents()
+    r = intent("loan.create")
+    for expect, answer, gid in (("name", "בנק מזרחי", None), ("loan_type", "פרטית", "private"), ("balance", "50000", None),
+                                ("payment", "1500", None), ("rate", "5.5", None)):
+        assert r.awaiting == expect, (expect, r.awaiting)
+        r = _say(answer, goal_id=gid, scope="loans")
+    assert r.state == "review" and "בנק מזרחי" in r.message
+
+
+def test_goal_update_edit_is_label_then_value_without_a_model(no_model):
+    seed_intents()
+    r = intent("monthly.goal_update", "recGK")
+    assert r.state == "ask"
+    r = _say("סכום 75000")
+    assert r.state == "review" and "₪75,000" in r.message
+    (w,) = _say("אשר").snapshot["writes"]
+    assert w["table"] == Tables.FIN_EVENTS and w["fields"][EF.AMOUNT] == 75000 and w["fields"][EF.KIND] == "target_change"

@@ -57,6 +57,7 @@ INTENTS: dict[str, dict] = {
     "monthly.household_expense": {"tab": "monthly", "entity": "fcc_event", "kind": "household_expense", "target": "goal", "goal_hint": "הוצאות בית"},
     "monthly.direct_cost":       {"tab": "monthly", "entity": "fcc_event", "kind": "direct_cost", "target": "goal", "goal_filter": "income"},
     "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
+    "monthly.goal_new":          {"tab": "monthly", "entity": "fcc_goal"},
     "monthly.obligation":        {"tab": "monthly", "entity": "fcc_obligation"},
     "savings.deposit":           {"tab": "monthly", "entity": "fcc_event", "kind": "one_time", "target": "savings"},      # amount prefilled by the server
     "savings.gap_reason":        {"tab": "monthly", "entity": "fcc_event", "kind": "note", "target": "savings"},          # why the month fell short
