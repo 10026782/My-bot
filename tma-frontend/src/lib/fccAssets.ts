@@ -47,8 +47,37 @@ export interface AssetCardModel {
   linkedLoans: { id: string; text: string }[];       // empty -> no linked-loans block at all
   linkedDebtLine: string | null;
   partial: boolean;
-  nextStep: string | null;          // "<text> · אחראי: <owner>" as stored; null -> no line
+  nextStep: string | null;          // the LEGACY single "Next Step" text as stored (+ owner); shown as "previous action"; null -> no line
+  actions: ActionRow[];             // the OPEN next actions (several allowed), soonest first
   actionable: boolean;              // false for a sold / inactive asset: no write actions on its card
+}
+
+export interface ActionRow {
+  id: string;
+  title: string;
+  statusLabel: string;              // "ממתין" | "בתהליך"
+  inProgress: boolean;              // true -> no "start" button
+  meta: string;                     // "אחראי: אורי · עד 20/10/2026"
+  history: string[];                // lines already recorded (started / …)
+}
+
+const ymd = (iso: string | null) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
+
+export function actionRows(i: FccAssetItem): ActionRow[] {
+  return (i.actions ?? []).map((a) => ({
+    id: a.id,
+    title: a.title || UNKNOWN,
+    statusLabel: a.status === "בביצוע" ? "בתהליך" : "ממתין",
+    inProgress: a.status === "בביצוע",
+    meta: [a.owner && a.owner !== "—" ? `אחראי: ${a.owner}` : "", a.due_date ? `עד ${ymd(a.due_date)}` : ""].filter(Boolean).join(" · "),
+    history: a.history ? a.history.split("\n").filter(Boolean) : [],
+  }));
+}
+
+/** After finishing / cancelling an action: ask for the next one only when the asset has none left open. */
+export function askNextAction(items: FccAssetItem[], assetId: string | null | undefined): { assetId: string; name: string } | null {
+  const a = assetId ? items.find((x) => x.id === assetId) : undefined;
+  return a && (a.actions ?? []).length === 0 && !ASSET_GONE.includes(a.status ?? "") ? { assetId: a.id, name: a.name || "הנכס" } : null;
 }
 
 /** Live Assets.Status choices meaning the asset is no longer held: the writer has nothing to update there. */
@@ -76,6 +105,7 @@ export function assetCardModel(i: FccAssetItem): AssetCardModel {
     linkedDebtLine: i.linked_loans.length ? `חוב מקושר: ${val(i.linked_debt)}${i.linked_debt_known < i.linked_loans.length ? " (חלקי)" : ""}` : null,
     partial: i.current_value == null || i.equity == null,
     nextStep: i.next_step ? `${i.next_step}${i.next_step_owner && i.next_step_owner !== "—" ? ` · אחראי: ${i.next_step_owner}` : ""}` : null,
+    actions: actionRows(i),
     actionable: !ASSET_GONE.includes(i.status ?? ""),
   };
 }

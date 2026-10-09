@@ -65,7 +65,7 @@ test("header cards: families are separate and the weekly card is income-only", (
     debt_repaid: { target: 700000, actual: 0, remaining: 700000, dynamic_target_per_week: 0, goals: 1 },
     payment_reduction: { target: 7000, actual: 0, remaining: 7000, dynamic_target_per_week: 1750, goals: 1 } } });
   const by = Object.fromEntries(cards.map((c) => [c.key, c]));
-  assert.equal(by.income_week.label, "יעד הכנסה לשבוע");
+  assert.equal(by.income_week.label, "קצב נדרש לשבוע (מעכשיו)");
   assert.equal(by.debt.value, "₪0 / ₪700,000");
   assert.equal(by.reduction.value, "₪0 / ₪7,000");
   assert.equal(by.savings.value, "—");
@@ -91,6 +91,18 @@ test("weekly card source line shows its direct costs and net", () => {
         direct_costs: 100, net: 50 }] } } });
   const hint = cards.find((c) => c.key === "income_week")?.hint ?? "";
   assert.equal(hint.includes("נסיעות: נשאר ₪2,350 מתוך ₪2,500 השבוע (הוצאות ישירות -₪100 · נטו ₪50)"), true);
+});
+
+test("weekly card: once the weekly source is met it reads as achieved and 'other sources' is not repeated", () => {
+  const cards = headerCards({ monthly_cash_improvement: 0, summary: {
+    income: { target: 15000, actual: 6192, remaining: 8808, dynamic_target_per_week: 2681, goals: 1,
+      weekly_sources_required: 0, other_sources_needed: 2681,
+      sources: [{ goal_id: "t", title: "הכנסה מנסיעות", period_type: "weekly", target: 2500, actual: 2600, remaining: 0 }] } } });
+  const card = cards.find((c) => c.key === "income_week");
+  assert.equal(card?.label, "קצב נדרש לשבוע (מעכשיו)");
+  assert.equal(card?.value, "₪2,681");
+  assert.equal(card?.hint, "הכנסה מנסיעות השבוע: היעד ₪2,500 הושג ✅");
+  assert.equal((card?.hint ?? "").includes("ממקורות אחרים"), false);
 });
 
 test("a source goal card says it is inside the parent and has no weekly pace of its own", () => {

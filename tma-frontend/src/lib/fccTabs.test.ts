@@ -95,7 +95,7 @@ const composer = (tab: FccTabKey, t: FccTurn | null = null, receipt: string | nu
 test("each tab has its own title; the monthly chips are income / household expense / direct cost / obligation / goal update", () => {
   assert.equal(COMPOSER.monthly.title, "עדכון כספי"); assert.equal(COMPOSER.loans.title, "עדכון הלוואה"); assert.equal(COMPOSER.assets.title, "עדכון נכס");
   assert.equal(COMPOSER.monthly.chips.map((c) => c.intent).join(),
-    "monthly.income,monthly.household_expense,monthly.direct_cost,monthly.obligation,monthly.goal_update,savings.deposit");
+    "monthly.income,monthly.household_expense,monthly.direct_cost,monthly.obligation,monthly.goal_update,monthly.goal_new,savings.deposit");
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.household_expense")?.label, "+ הוצאה ביתית");
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.direct_cost")?.label, "+ עלות ישירה");
 });
@@ -116,11 +116,10 @@ test("assets chips: value / mortgage / next step / mark-sold — all choose an a
   assert.equal(COMPOSER.assets.chips.find((c) => c.intent === "asset.mark_sold")?.label, "נכס נמכר");
 });
 
-test("free text may open a NEW draft only on the monthly tab", () => {
-  assert.ok(COMPOSER.monthly.freeText && !COMPOSER.loans.freeText && !COMPOSER.assets.freeText);
+test("no tab opens a draft from free text (deterministic writer); an open question is answerable anywhere", () => {
+  assert.ok(!COMPOSER.monthly.freeText && !COMPOSER.loans.freeText && !COMPOSER.assets.freeText);   // the writer is deterministic: chips open drafts
   const idle = writerView(null, null);
-  assert.ok(inputVisible(COMPOSER.monthly, idle, false));
-  assert.ok(!inputVisible(COMPOSER.loans, idle, false) && !inputVisible(COMPOSER.assets, idle, false));
+  assert.ok(!inputVisible(COMPOSER.monthly, idle, false) && !inputVisible(COMPOSER.loans, idle, false) && !inputVisible(COMPOSER.assets, idle, false));
   assert.ok(inputVisible(COMPOSER.loans, writerView(turn("ask"), null), false), "an open question is answerable in any tab");
   assert.ok(!inputVisible(COMPOSER.monthly, idle, true), "no input while choosing a target");
 });
@@ -154,10 +153,10 @@ test("nextWriterState: executed -> receipt + refresh; cancelled -> clears; anyth
   assert.equal(WRITER_WORDS.confirm, "אשר"); assert.equal(WRITER_WORDS.edit, "ערוך"); assert.equal(WRITER_WORDS.cancel, "בטל");
 });
 
-test("markup: idle monthly shows 6 chips + one input; loans shows its 4 chips and NO input; assets shows its 4 chips and NO input", () => {
+test("markup: idle monthly shows 7 chips and NO input; loans shows its 4 chips and NO input; assets shows its 4 chips and NO input", () => {
   const m = composer("monthly");
-  assert.equal((m.match(/class="fcc-chip /g) || []).length, 6); assert.equal((m.match(/<textarea/g) || []).length, 1);
-  assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד") && m.includes("+ הפקדה לחיסכון"));
+  assert.equal((m.match(/class="fcc-chip /g) || []).length, 7); assert.ok(!m.includes("<textarea"));
+  assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד") && m.includes("+ הפקדה לחיסכון") && m.includes("+ יעד חדש"));
   const l = composer("loans");
   assert.equal((l.match(/class="fcc-chip /g) || []).length, 4); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה") && l.includes("הלוואה חדשה"));
   const a = composer("assets");
@@ -188,10 +187,10 @@ test("markup: busy disables confirm (no double confirm); the receipt state has n
   assert.ok(rec.includes("נרשם ✓") && !rec.includes("אשר ורשום") && rec.includes("סגור"));
 });
 
-test("idle composer is compact (chips + one-row input, no send button, no turn); an active draft expands it", () => {
+test("idle composer is compact (chips only, no input, no turn); an active draft expands it", () => {
   const idle = composer("monthly");
   assert.ok(idle.includes("fcc-composer--idle") && !idle.includes("fcc-composer--open"));
-  assert.ok(idle.includes('rows="1"') && !idle.includes("שלח עדכון") && !idle.includes("fcc-quick__turn"));
+  assert.ok(!idle.includes("<textarea") && !idle.includes("שלח עדכון") && !idle.includes("fcc-quick__turn"));
   const open = composer("monthly", turn("ask", "כמה?"));
   assert.ok(open.includes("fcc-composer--open") && open.includes('rows="2"') && open.includes("fcc-quick__turn"));
   assert.ok(composer("loans", null, "נרשם ✓").includes("fcc-composer--open"), "a receipt is an active state");

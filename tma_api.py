@@ -4953,4 +4953,5 @@ def fcc_write(identity):
                             "results": results}), status
     fcc_conv.complete_execution(identity, result.entity)
     return jsonify({"state": "executed", "message": "נרשם ✓", "results": results,
-                    "follow_up": "savings" if fcc_conv.income_followup(identity, result.snapshot) else None})
+                    "follow_up": "savings" if fcc_conv.income_followup(identity, result.snapshot) else None,
+                    "follow_up_asset": fcc_conv.next_step_followup(result.snapshot)})

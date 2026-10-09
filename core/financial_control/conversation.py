@@ -13,6 +13,7 @@ Airtable; after ``confirm`` no extractor/classifier is called again and no field
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -48,15 +49,15 @@ class TurnResult:
         return {k: getattr(self, k) for k in ("state", "message", "entity", "awaiting", "fields", "candidates", "snapshot")}
 
 
-# ── Extractor (LLM) — injectable; default wraps core.financial_control.classifier ────────────────
-class LlmExtractor:
+# ── Extractor — deterministic. The TMA writer never calls a model: free text is stored as written, numbers / dates / presented
+# choices are parsed by rule, and an edit is "<field label> <value>". The class stays injectable (tests, and the chat
+# agent that already classified the message and hands over a structured intent: ``chat.PresetIntentExtractor``).
+class DeterministicExtractor:
     def classify(self, text: str, goal_titles: list[str], today: date) -> dict | None:
-        from core.financial_control import classifier
-        return classifier.classify(text, goal_titles, today=today)
+        return None                                           # no free-text start: drafts open from chips / card actions
 
     def fill(self, text: str, awaiting: str | None, fields: dict, entity: str, today: date) -> dict:
-        from core.financial_control import classifier
-        return classifier.fill_reply(text, awaiting, fields, entity, today=today)
+        return _parse_edit(entity, text) if awaiting is None else {}
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────
@@ -131,7 +132,18 @@ def _render(d: BusinessDraft) -> TurnResult:
     if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
                                       fd.FCC_ASSET_STEP) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
-    return TurnResult("ask", msg, d.entity_type, awaiting, _view(d))
+    return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
+
+
+def _choice_buttons(entity: str, field_name: str | None) -> list[dict]:
+    """A question about a closed list (category, period, scope, frequency, loan type…) is answered by buttons. A click sends the
+    label (what typing it would send), so one deterministic parser serves both."""
+    labels = fd.VALUE_LABELS.get(field_name or "")
+    contract = fd.FCC_CONTRACTS.get(entity)
+    fc = next((f for f in contract.fields if f.field_name == field_name), None) if contract else None
+    if not labels or fc is None or not getattr(fc, "choices", None):
+        return []
+    return [{"goal_id": key, "title": labels[key]} for key in fc.choices if key in labels]
 
 
 def _set_fields(d: BusinessDraft, updates: dict, *, strict: bool) -> tuple[BusinessDraft, list[str]]:
@@ -188,23 +200,62 @@ def _derive_obligation_saving(d: BusinessDraft) -> BusinessDraft:
     return replace(d, source_context={**d.source_context, "inferred": inferred})
 
 
+# Free-text answers that are the user's own words: stored as written (never paraphrased, never sent to the model).
+_STEP_ENTITIES = (fd.FCC_ASSET_STEP, fd.FCC_ASSET_STEP_EDIT)
+_ASSET_TAG = re.compile(r"\[FCC-ASSET:(rec[A-Za-z0-9]+)\]")
+_VERBATIM_FIELDS = {"step": 500, "title": 120, "name": 120, "vendor": 120, "lender": 120, "note": 300}
+
+
+def _one_line(text: str) -> str:
+    """Titles / names / next actions live in single-line Airtable fields: line breaks and runs of spaces become one space."""
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+# value-shaped fields (the contract input types CURRENCY / NUMBER / PERCENT / DATE), parsed by rule
+_NUMERIC_FIELDS = ("target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount")
+_DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date")
+
+
 def _deterministic_answer(field_name: str, text: str):
-    """Value-shaped answers only (a number, a date with digits, one of the presented choices). Free text
-    (titles, notes) is never accepted deterministically — it must be evidenced by the extractor."""
+    """Every answer is parsed by rule: a number / percent, a date, one of the presented choices, or — for the free-text fields in
+    ``_VERBATIM_FIELDS`` (titles, names, notes, a next step) — the user's own words exactly as written. Nothing is guessed."""
     t = text.strip()
+    if field_name in _VERBATIM_FIELDS:
+        if not t or t.lower() in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS | CANCEL_WORDS:
+            return None
+        return (t if field_name == "note" else _one_line(t))[:_VERBATIM_FIELDS[field_name]]
     vocab = fd.ANSWER_VOCAB.get(field_name)
     if vocab and t in vocab:
         return vocab[t]
-    if field_name in ("target_amount", "amount", "saving"):
-        cleaned = t.replace(",", "").replace("₪", "").replace("ש\"ח", "").replace("שח", "").strip()
+    if field_name in _NUMERIC_FIELDS:
+        cleaned = t.replace(",", "").replace("%", "").replace("₪", "").replace("ש\"ח", "").replace("שח", "").strip()
         try:
             float(cleaned)
             return cleaned
         except ValueError:
             return None
-    if field_name in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date") and any(ch.isdigit() for ch in t):
+    if field_name in _DATE_FIELDS and any(ch.isdigit() for ch in t):
         return t
     return None
+
+
+def _parse_edit(entity: str, text: str) -> dict:
+    """An edit is "<field label> <value>" (the labels the review shows: "סכום יעד 80000", "קטגוריה חיסכון", "שם נטפליקס").
+    Numbers, dates and presented choices are parsed by rule, free text is taken as written. Anything else -> {} (not understood)."""
+    contract = fd.FCC_CONTRACTS.get(entity)
+    t = (text or "").strip()
+    if contract is None or not t:
+        return {}
+    for label_, name in sorted(((fd.label(entity, f.field_name), f.field_name) for f in contract.fields), key=lambda p: -len(p[0])):
+        if label_ and t.startswith(label_) and (len(t) == len(label_) or t[len(label_)] in " :=-"):
+            rest = t[len(label_):].lstrip(" :=-").strip()
+            if not rest:
+                return {}
+            if name in _VERBATIM_FIELDS:
+                return {name: (rest if name == "note" else _one_line(rest))[:_VERBATIM_FIELDS[name]]}
+            value = _deterministic_answer(name, rest)
+            return {name: value} if value is not None else {}
+    return {}
 
 
 def _goal_by_text(goals: list[dict], text: str):
@@ -232,7 +283,7 @@ def has_pending(identity, *, store=None) -> bool:
     return pending_view(identity, store=store) is not None
 
 
-FREE_TEXT_TABS = (None, "monthly")      # free text opens a NEW draft only from the monthly area; other tabs start via intents
+FREE_TEXT_TABS = (None,)      # free text opens a NEW draft only outside the TMA (chat); the TMA starts every draft from a chip / card action
 
 
 def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=None, store=None,
@@ -244,7 +295,7 @@ def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=No
     text = (text or "").strip()
     if not text:
         return TurnResult("clarify", "מה לעדכן?")
-    store, extractor = store or _store(), extractor or LlmExtractor()
+    store, extractor = store or _store(), extractor or DeterministicExtractor()
     ids = _ids(identity, actor)
     if ids is None:                                          # no tenant / user_id -> fail closed
         return TurnResult("denied", policy.UNRESOLVED_MESSAGE)
@@ -262,7 +313,7 @@ def handle_turn(identity, text: str, *, goal_id: str | None = None, extractor=No
     if lower in CONFIRM_WORDS or lower in CANCEL_WORDS or lower in EDIT_WORDS:
         return TurnResult("info", "אין עדכון פתוח כרגע.")
     if scope not in FREE_TEXT_TABS:
-        return TurnResult("info", "בלשונית הזו הפעולות נבחרות בכפתורים. לכתיבה חופשית עברו ל״התנהלות חודשית״.")
+        return TurnResult("info", "הפעולות נבחרות בכפתורים — בחרו פעולה ואשאל רק מה שחסר.")
     return _start(identity, actor, ids, text, goal_id, extractor, store, today)
 
 
@@ -375,15 +426,57 @@ def _start_asset_intent(identity, ids, entity, entity_id, store, today) -> TurnR
         return _start_asset_sale(identity, ids, asset, name, store, today)
     current = f.get(_ASSET_CURRENT[entity])
     if entity == fd.FCC_ASSET_STEP:
-        owner = service._sel(f.get(AF.NEXT_STEP_OWNER))
-        text = str(current or "").strip()
-        note = ("היום: " + (text[:120] + ("…" if len(text) > 120 else "") if text else "לא הוגדר")) + (f" · אחראי: {owner}" if owner else "")
+        open_n = sum(1 for t in service.asset_tasks(identity) if t["asset_id"] == asset["id"])
+        note = f"פעולות פתוחות בנכס כרגע: {open_n}" if open_n else "אין פעולות פתוחות בנכס"
     else:
         num = calc._num(current)
         note = f"היום: {fd.display_value('value', num)}" if num is not None else "היום: לא הוגדר"
     d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=f"intent:{entity}#{uuid.uuid4().hex[:8]}", today=today,
-                   extra_ctx={"record_id": asset["id"], "asset_name": name, "goal_title": name, "review_note": note})
+                   extra_ctx={"record_id": asset["id"], "asset_id": asset["id"], "asset_name": name, "goal_title": name, "review_note": note})
     return _persist_new(store, ids, d)
+
+
+def _start_task_intent(identity, ids, intent_id: str, spec: dict, task_id: str | None, store, today) -> TurnResult:
+    """Edit / start / finish / cancel ONE open next action of the caller's own asset. The task is chosen by id (never typed); a task
+    that is not the caller's, or is already closed, is answered like a missing one."""
+    task = next((t for t in service.asset_tasks(identity) if t["id"] == str(task_id or "")), None)
+    if not task_id:
+        return TurnResult("clarify", "בחרו קודם את הפעולה.")
+    asset = next((r for r in service.my_assets(identity) if r["id"] == (task or {}).get("asset_id")), None)
+    if task is None or asset is None:
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    name = (asset.get("fields") or {}).get(AF.NAME) or "הנכס"
+    mode, entity = spec.get("mode"), spec["entity"]
+    if mode == "start" and task["status"] == "בביצוע":
+        return TurnResult("info", "הפעולה כבר מסומנת ״בתהליך״.")
+    raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"
+    ctx = {"record_id": task["id"], "asset_id": asset["id"], "asset_name": name, "goal_title": name, "history": task["history"],
+           "description": task["description"], "mode": mode, "task_title": task["title"]}
+    if entity == fd.FCC_ASSET_STEP_STATUS:
+        word = {"start": "התחלת הפעולה (בתהליך)", "done": "סיום הפעולה", "cancel": "ביטול הפעולה"}[mode]
+        ctx["review_note"] = f"{word}: {task['title']}"
+        d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=ctx)
+        d, _rej = _set_fields(d, {"occurred_at": today.isoformat()}, strict=False)
+        d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
+        return _persist_new(store, ids, d)
+    values = {"step": task["title"], "step_owner": task["owner"] if task["owner"] in fd.STEP_OWNERS else None,
+              "due_date": str(task["due_date"] or "")[:10] or None}
+    d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=ctx)
+    d, _rej = _set_fields(d, {k: v for k, v in values.items() if v}, strict=False)
+    if d.lifecycle_state is DraftState.READY_FOR_REVIEW:
+        d = d.begin_edit()                                       # ask what to change (label then value), then review
+    return _persist_new(store, ids, d)
+
+
+def next_step_followup(snapshot: dict | None) -> str | None:
+    """After a next action was finished / cancelled: the asset it belonged to (the screen asks "what is the next action?" if none
+    is left open). Derived from the frozen write itself — nothing is read or guessed."""
+    for w in (snapshot or {}).get("writes") or []:
+        f = w.get("fields") or {}
+        m = _ASSET_TAG.search(str(f.get(TaskFields.DESCRIPTION) or ""))
+        if w.get("table") == Tables.TASKS and w.get("op") == "patch" and f.get(TaskFields.STATUS) == "בוצע" and m:
+            return m.group(1)
+    return None
 
 
 def _sale_warnings(identity, asset: dict, today) -> str:
@@ -547,6 +640,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return stop
     if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_NEW):
         return _start_loan_intent(identity, ids, spec["entity"], entity_id, store, today)
+    if spec.get("target") == "task":
+        return _start_task_intent(identity, ids, intent_id, spec, entity_id, store, today)
     if spec["entity"] in _ASSET_CURRENT:
         return _start_asset_intent(identity, ids, spec["entity"], entity_id, store, today)
     if intent_id in ("savings.deposit", "savings.gap_reason"):
@@ -562,7 +657,7 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     entity = spec["entity"]
     raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"      # unique per draft: a retry of THIS draft is idempotent, a second legitimate entry is not
 
-    if entity == fd.FCC_OBLIGATION:
+    if entity == fd.FCC_OBLIGATION or (entity == fd.FCC_GOAL and not spec.get("target")):      # a new commitment / a new goal
         d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today)
         return _persist_new(store, ids, d)
 
@@ -695,6 +790,21 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
             updates["amount"] = delta
             updates["note"] = f"קביעת רמה: ₪{float(pending_level):,.0f} לחודש"
     else:
+        if editing and d.entity_type in _STEP_ENTITIES and lower not in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS:
+            # Editing a next action. Only two prefixes are rules — "אחראי <name from the live list>" and "תאריך יעד <date>"; a rule that
+            # does not parse is NOT understood (never stored as text). Everything else is the new action text, exactly as written.
+            t = text.strip()
+            owner_m = re.match(r"^אחראי(?:[:\s]+(.*))?$", t)
+            due_m = re.match(r"^תאריך יעד(?:[:\s=-]+(.*))?$", t)
+            if owner_m:
+                if (owner_m.group(1) or "").strip() in fd.STEP_OWNERS:
+                    updates["step_owner"] = owner_m.group(1).strip()
+            elif due_m:
+                value = _deterministic_answer("due_date", due_m.group(1) or "")
+                if value is not None:
+                    updates["due_date"] = value
+            else:
+                updates["step"] = _one_line(t)[:_VERBATIM_FIELDS["step"]]
         if awaiting:
             value = _deterministic_answer(awaiting, text)
             if value is not None:
@@ -703,8 +813,13 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                     updates[awaiting] = value
                 except _VALIDATION_ERRORS:
                     det_failed = True                                # looked like a value but is not a valid one
-        if awaiting is None or awaiting not in updates:
-            filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
+        if (awaiting is None or awaiting not in updates) and awaiting not in _VERBATIM_FIELDS and not updates \
+                and not (editing and d.entity_type in _STEP_ENTITIES):
+            try:
+                filled = extractor.fill(text, awaiting, dict(d.fields), d.entity_type, today) or {}
+            except Exception:                                    # a model failure is "not understood", never a crashed turn
+                logging.getLogger(__name__).exception("[fcc] extractor.fill failed")
+                filled = {}
             if awaiting is None:                                     # review/edit: any evidenced field change
                 updates.update(filled)
             elif awaiting in filled:                                 # extras only ALONGSIDE a valid awaited answer
@@ -760,6 +875,18 @@ def _already_applied(identity, write: dict) -> bool:
         cur = (rec or {}).get("fields") or {}
         same = lambda have, want: (writer._norm(str(have or "")) == writer._norm(want)) if isinstance(want, str) else calc._num(have) == want
         return rec is not None and all(same(cur.get(k), v) for k, v in fields.items())    # the record already holds exactly this
+    if write["table"] == Tables.TASKS and fields.get(TaskFields.DESCRIPTION, "").startswith(fd.ASSET_TASK_TAG):
+        open_tasks = service.asset_tasks(identity)
+        if write["op"] == "post":                                  # the same open action already exists on this asset
+            asset_id = _ASSET_TAG.search(fields[TaskFields.DESCRIPTION]).group(1)
+            return any(t["asset_id"] == asset_id and writer._norm(t["title"] or "") == writer._norm(fields.get(TaskFields.NAME, ""))
+                       for t in open_tasks)
+        cur = next((t for t in open_tasks if t["id"] == write.get("record_id")), None)
+        if cur is None:                                            # closed (or not the caller's) already: nothing left to change
+            return True
+        if fields.get(TaskFields.STATUS) == "בביצוע":
+            return cur["status"] == "בביצוע"
+        return False
     if write["op"] == "post" and write["table"] == Tables.LOANS:
         name = writer._norm(fields.get(LF.NAME, ""))
         return any(writer._norm((r.get("fields") or {}).get(LF.NAME, "")) == name and fcc_loans.is_active(r.get("fields") or {})
@@ -910,7 +1037,7 @@ def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> Turn
     goals = service.my_goals(identity)
     intent = writer.validate_intent(extractor.classify(text, [g["fields"].get(GF.TITLE, "") for g in goals], today))
     if intent is None:
-        return TurnResult("clarify", "לא הבנתי את הבקשה — אפשר לנסח שוב?")
+        return TurnResult("clarify", "בחרו פעולה מהכפתורים (הכנסה, הוצאה, יעד חדש…) — אשאל רק מה שחסר.")
     action = intent["action"]
 
     if action in ("upsert_obligation", "deactivate_obligation"):

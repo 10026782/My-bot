@@ -42,7 +42,7 @@ export interface ComposerChip { intent: string; label: string; pick?: "goal" | "
 export interface ComposerConfig {
   title: string;
   chips: ComposerChip[];
-  freeText: boolean;     // free text may open a NEW draft here (monthly only); an open draft can always be answered
+  freeText: boolean;     // no tab opens a draft from free text any more (the writer is deterministic); an open question can always be answered
   hint: string;
 }
 
@@ -55,10 +55,11 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
       { intent: "monthly.direct_cost", label: "+ עלות ישירה" },
       { intent: "monthly.obligation", label: "+ התחייבות" },
       { intent: "monthly.goal_update", label: "+ עדכון יעד", pick: "goal" },
+      { intent: "monthly.goal_new", label: "+ יעד חדש" },
       { intent: "savings.deposit", label: "+ הפקדה לחיסכון" },
     ],
-    freeText: true,
-    hint: "אפשר גם לכתוב חופשי.",
+    freeText: false,
+    hint: "בחרו פעולה — המערכת תשאל רק מה שחסר.",
   },
   loans: {
     title: "עדכון הלוואה",
