@@ -43,6 +43,12 @@ export interface GoalCardModel {
   targetDate?: string;             // project only
 }
 
+/** Label in the "which goal?" picker: the title plus its current target, so two similar goals are told apart. */
+export function goalPickLabel(g: Pick<FccGoalRow, "title" | "target">): string {
+  const title = g.title ?? "";
+  return g.target != null ? `${title} · ${money(g.target)}` : title;
+}
+
 export function goalCardModel(g: FccGoalRow): GoalCardModel {
   if (g.mode === "project" || g.status === "project") {
     const na = g.next_action;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { fetchFccLoanScenario, fetchFccOverview, postFccIntent, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
-import { CATEGORY_LABEL, goalCardModel, headerCards, money } from "../lib/fccPresentation";
+import { CATEGORY_LABEL, goalCardModel, goalPickLabel, headerCards, money } from "../lib/fccPresentation";
 import { KpiCard, SavingsFollowUp, SavingsReleaseCard } from "./FccKpiCard";
 import { AssetsSection, NextActionPrompt } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
@@ -74,7 +74,7 @@ function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => voi
            followUpAsset, clearFollowUpAsset: () => setFollowUpAsset(null) };
 }
 
-function GoalCard({ goal }: { goal: FccGoalRow }) {
+function GoalCard({ goal, onUpdate, disabled }: { goal: FccGoalRow; onUpdate: (goalId: string) => void; disabled: boolean }) {
   const st = GOAL_STATUS[goal.status];
   const model = goalCardModel(goal);
   return (
@@ -107,6 +107,8 @@ function GoalCard({ goal }: { goal: FccGoalRow }) {
           {model.targetDate && <div><dt>תאריך יעד</dt><dd>{model.targetDate}</dd></div>}
         </dl>
       )}
+      <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-goal__update" disabled={disabled}
+              onClick={() => onUpdate(goal.goal_id)}>עדכן יעד</button>
     </div>
   );
 }
@@ -192,7 +194,8 @@ export function FinancialControlCenter({ onBack }: Props) {
         {data.goals.length === 0 ? (
           <ScreenState state="empty" title="אין יעדים פעילים" message="כתבו בעדכון המהיר, למשל: ״תוסיף יעד קרן חירום 60000 מצטבר עד סוף השנה״." />
         ) : (
-          <div className="fcc-list">{data.goals.map((g) => <GoalCard key={g.goal_id} goal={g} />)}</div>
+          <div className="fcc-list">{data.goals.map((g) => <GoalCard key={g.goal_id} goal={g} disabled={writer.busy || writer.turn != null}
+                                                          onUpdate={(id) => void writer.start("monthly.goal_update", id)} />)}</div>
         )}
       </section>
 
@@ -216,7 +219,7 @@ export function FinancialControlCenter({ onBack }: Props) {
     </div>
   );
   const targets = {
-    goals: data.goals.map((g) => ({ id: g.goal_id, title: g.title ?? "" })),
+    goals: data.goals.map((g) => ({ id: g.goal_id, title: goalPickLabel(g) })),
     assets: (data.assets?.items ?? []).filter((a) => !ASSET_GONE.includes(a.status ?? "")).map((a) => ({ id: a.id, title: a.name ?? "" })),
     loans: (data.loans?.items ?? []).filter((l) => l.active).map((l) => ({ id: l.id, title: l.name ?? "" })),
   };
