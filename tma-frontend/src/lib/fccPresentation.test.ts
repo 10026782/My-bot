@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`); same conventions as commandCenterPresentation.test.ts.
 import type { FccGoalRow, FccSavingsRelease } from "../types";
-import { CATEGORY_LABEL, dmy, goalCardModel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
+import { CATEGORY_LABEL, dmy, goalCardModel, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -205,3 +205,9 @@ test("savings follow-up: asked only while something is still free", () => {
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
 console.log("all fccPresentation tests passed");
+
+test("goalPickLabel adds the current target so similar goals are told apart", () => {
+  assert.equal(goalPickLabel({ title: "הכנסה חודשית קבועה", target: 15000 }).startsWith("הכנסה חודשית קבועה · "), true);
+  assert.equal(goalPickLabel({ title: "הכנסה חודשית קבועה", target: 15000 }).includes("15,000"), true);
+  assert.equal(goalPickLabel({ title: "גולה", target: null }), "גולה");
+});
