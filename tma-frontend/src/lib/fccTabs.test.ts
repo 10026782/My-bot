@@ -95,7 +95,7 @@ const composer = (tab: FccTabKey, t: FccTurn | null = null, receipt: string | nu
 test("each tab has its own title; the monthly chips are income / household expense / direct cost / obligation / goal update", () => {
   assert.equal(COMPOSER.monthly.title, "עדכון כספי"); assert.equal(COMPOSER.loans.title, "עדכון הלוואה"); assert.equal(COMPOSER.assets.title, "עדכון נכס");
   assert.equal(COMPOSER.monthly.chips.map((c) => c.intent).join(),
-    "monthly.income,monthly.household_expense,monthly.direct_cost,monthly.obligation,monthly.goal_update,monthly.goal_new,savings.deposit");
+    "monthly.income,monthly.household_expense,monthly.direct_cost,monthly.obligation,monthly.goal_update,monthly.goal_new,monthly.source_new,savings.deposit");
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.household_expense")?.label, "+ הוצאה ביתית");
   assert.equal(COMPOSER.monthly.chips.find((c) => c.intent === "monthly.direct_cost")?.label, "+ עלות ישירה");
 });
@@ -153,10 +153,10 @@ test("nextWriterState: executed -> receipt + refresh; cancelled -> clears; anyth
   assert.equal(WRITER_WORDS.confirm, "אשר"); assert.equal(WRITER_WORDS.edit, "ערוך"); assert.equal(WRITER_WORDS.cancel, "בטל");
 });
 
-test("markup: idle monthly shows 7 chips and NO input; loans shows its 8 chips and NO input; assets shows its 4 chips and NO input", () => {
+test("markup: idle monthly shows 8 chips and NO input; loans shows its 8 chips and NO input; assets shows its 4 chips and NO input", () => {
   const m = composer("monthly");
-  assert.equal((m.match(/class="fcc-chip /g) || []).length, 7); assert.ok(!m.includes("<textarea"));
-  assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד") && m.includes("+ הפקדה לחיסכון") && m.includes("+ יעד חדש"));
+  assert.equal((m.match(/class="fcc-chip /g) || []).length, 8); assert.ok(!m.includes("<textarea"));
+  assert.ok(m.includes("עדכון כספי") && m.includes("+ הכנסה") && m.includes("+ הוצאה ביתית") && m.includes("+ עלות ישירה") && m.includes("+ עדכון יעד") && m.includes("+ הפקדה לחיסכון") && m.includes("+ יעד חדש") && m.includes("+ מקור הכנסה"));
   const l = composer("loans");
   assert.equal((l.match(/class="fcc-chip /g) || []).length, 8); assert.ok(!l.includes("<textarea") && l.includes("עדכון הלוואה") && l.includes("סגירת הלוואה") && l.includes("הלוואה חדשה") && l.includes("פרעון חלקי") && l.includes("הסדר פירעון") && l.includes("חוב שחייבים לי"));
   const a = composer("assets");

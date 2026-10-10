@@ -47,10 +47,12 @@ LOAN_TASK_TAG = "[FCC-LOAN:"                     # the same for a loan / a debt 
 FCC_LOAN_PARTIAL = "fcc_loan_partial"            # a partial repayment: new balance + where the money went / came from (+ a debt-goal event for own debts)
 FCC_LOAN_ARRANGEMENT = "fcc_loan_arrangement"    # how a debt is repaid: monthly amount / a deadline / no arrangement
 FCC_RECEIVABLE_NEW = "fcc_receivable_new"        # a debt owed TO the owner (Loans.Direction = חייבים לי)
+FCC_SOURCE_NEW = "fcc_source_new"                # a new income SOURCE inside the total income goal (a goal with "Contributes To")
+SOURCE_PERIODS = ("monthly", "weekly")
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
 FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
-                FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
+                FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
 LOAN_TYPE_STORED = {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"}   # the live Loans."Loan Type" choices
@@ -68,6 +70,7 @@ INTENTS: dict[str, dict] = {
     "monthly.direct_cost":       {"tab": "monthly", "entity": "fcc_event", "kind": "direct_cost", "target": "goal", "goal_filter": "income"},
     "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
     "monthly.goal_new":          {"tab": "monthly", "entity": "fcc_goal"},
+    "monthly.source_new":        {"tab": "monthly", "entity": "fcc_source_new"},
     "monthly.obligation":        {"tab": "monthly", "entity": "fcc_obligation"},
     "savings.deposit":           {"tab": "monthly", "entity": "fcc_event", "kind": "one_time", "target": "savings"},      # amount prefilled by the server
     "savings.gap_reason":        {"tab": "monthly", "entity": "fcc_event", "kind": "note", "target": "savings"},          # why the month fell short
@@ -182,6 +185,12 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.CONDITIONAL, when=_MONTHLY, validation="positive"),
         _f("end_date", LF.END_DATE, InputType.DATE, required=RequiredMode.CONDITIONAL, when=_DEADLINE),
     )),
+    # A new income source: its parent (the total income goal) lives in source_context, never an editable field.
+    FCC_SOURCE_NEW: EntityContract(FCC_SOURCE_NEW, (
+        _f("title", GF.TITLE, InputType.TEXT, required=RequiredMode.ALWAYS, example="אבי"),
+        _f("target_amount", GF.TARGET_AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive", example="2000"),
+        _f("period_type", GF.PERIOD_TYPE, InputType.SELECT, required=RequiredMode.ALWAYS, choices=SOURCE_PERIODS),
+    )),
     FCC_RECEIVABLE_NEW: EntityContract(FCC_RECEIVABLE_NEW, (
         _f("name", LF.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("balance", LF.EARLY_CLOSURE, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
@@ -248,6 +257,7 @@ _ARRANGEMENT_LABELS = {"payment": "פירעון חודשי", "end_date": "מוע
 LABELS_BY_ENTITY = {FCC_LOAN_NEW: {"name": "שם ההלוואה"}, FCC_ASSET_STEP: _STEP_LABELS, FCC_ASSET_STEP_EDIT: _STEP_LABELS,
                     FCC_LOAN_PARTIAL: {"amount": "סכום הפרעון", "occurred_at": "תאריך"},
                     FCC_LOAN_ARRANGEMENT: _ARRANGEMENT_LABELS,
+                    FCC_SOURCE_NEW: {"title": "שם המקור", "target_amount": "יעד לתקופה", "period_type": "תקופה"},
                     FCC_RECEIVABLE_NEW: {"name": "שם החייב", "balance": "יתרת החוב", **_ARRANGEMENT_LABELS}}
 
 
@@ -314,6 +324,10 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         return {"arrangement": f"איך {who} אמור להיפרע? פירעון חודשי קבוע / מועד פירעון / אין הסדר",
                 "payment": f"כמה לחודש בפירעון של {who}?",
                 "end_date": f"עד איזה תאריך {who} אמור להיפרע?"}[field]
+    if entity == FCC_SOURCE_NEW:
+        return {"title": "איך לקרוא למקור ההכנסה? (למשל: אבי, תיווכים)",
+                "target_amount": f"מה היעד של {fields.get('title') or 'המקור'} לתקופה?",
+                "period_type": "באיזו תקופה נמדד המקור? חודשי / שבועי"}.get(field, f"מה {label(entity, field)}?")
     if entity == FCC_RECEIVABLE_NEW:
         return {"name": "מי חייב לך? (שם החייב)", "balance": "כמה הוא חייב לך כרגע?"}.get(field, f"מה {label(entity, field)}?")
     if field == "title":
@@ -381,7 +395,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה",
             FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: f"פעולה הבאה ב{subject}", FCC_ASSET_STEP_EDIT: f"עריכת פעולה ב{subject}",
             FCC_ASSET_STEP_STATUS: f"עדכון סטטוס פעולה ב{subject}", FCC_ASSET_SOLD: "סימון נכס כנמכר",
-            FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי"}[entity]
+            FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי", FCC_SOURCE_NEW: "מקור הכנסה חדש"}[entity]
     lines.append(f"📋 {head}")
     if note and entity != FCC_ASSET_SOLD:
         lines.append(note)
@@ -405,6 +419,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append("יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
     if entity == FCC_LOAN_NEW:
         lines.append("תיווצר הלוואה פעילה בבעלותך.")
+    if entity == FCC_SOURCE_NEW:
+        lines.append("ייווצר מקור הכנסה פעיל בתוך יעד ההכנסה הכולל — הוא נספר בתוכו ולא מעליו.")
     if entity == FCC_RECEIVABLE_NEW:
         lines.append("יירשם חוב שחייבים לך. הוא לא נספר בהתחייבויות שלך, ותשלום שיתקבל עליו אינו הכנסה.")
     if entity == FCC_LOAN_ARRANGEMENT:
@@ -604,6 +620,18 @@ def loan_arrangement_writes(values: Mapping[str, Any], source: Mapping[str, Any]
              "audit_action": "fcc_loan_arrangement", "audit_details": loan_id}]
 
 
+def source_new_write(values: Mapping[str, Any], source: Mapping[str, Any]) -> dict:
+    """A new income SOURCE: an active ``income`` goal measured by period sum, linked to the total income goal ("Contributes To"), so it is
+    counted inside it and never on top. The parent was validated as the caller's own when the draft opened and is checked again at execution."""
+    parent = str(source.get("parent_goal_id") or "")
+    if not parent:
+        raise UnsupportedOperationError("income source without a parent goal")
+    fields = {GF.TITLE: str(values["title"]).strip(), GF.TARGET_AMOUNT: values["target_amount"], GF.CATEGORY: "income",
+              GF.PERIOD_TYPE: values["period_type"], GF.CALC_METHOD: "period_sum", GF.STATUS: "active", GF.PARENT_GOAL: [parent]}
+    return {"op": "post", "table": Tables.FIN_GOALS, "fields": fields,
+            "audit_action": "fcc_source_create", "audit_details": str(values.get("title", ""))[:80]}
+
+
 def receivable_new_write(values: Mapping[str, Any], source: Mapping[str, Any]) -> dict:
     """A debt owed TO the owner: a Loans row marked Direction = חייבים לי (the debtor is the Lender), active, with its repayment mechanism."""
     line = f"הסדר פירעון ({source.get('today', '')}): {_arrangement_text(values)}"
@@ -721,6 +749,8 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": loan_arrangement_writes(values, writer.source_context)}
         if entity == FCC_RECEIVABLE_NEW:
             return {"writes": [receivable_new_write(values, writer.source_context)]}
+        if entity == FCC_SOURCE_NEW:
+            return {"writes": [source_new_write(values, writer.source_context)]}
         if entity == FCC_FOLLOWUP:
             tag = f"[FCC:{values.get('goal') or 'none'}]"
             fields = {TaskFields.NAME: values["title"], TaskFields.STATUS: "ממתין",
