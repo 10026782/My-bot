@@ -1,7 +1,7 @@
 // Pure presentation of the FCC "נכסים והון" tab (read-only). Values are shown as stored; an unknown value is
 // "לא הוגדר" (never ₪0), and the recorded mortgage vs. the linked loans are shown apart — never added together.
 import type { FccAssetItem, FccAssets, FccSoldAsset } from "../types";
-import { UNKNOWN, pct, val } from "./fccLoans";
+import { UNKNOWN, actionRows, pct, val, type ActionRow } from "./fccLoans";
 import { dmy, money } from "./fccPresentation";
 
 export const ASSET_TYPE_LABEL: Record<string, string> = {
@@ -52,27 +52,8 @@ export interface AssetCardModel {
   actionable: boolean;              // false for a sold / inactive asset: no write actions on its card
 }
 
-export interface ActionRow {
-  id: string;
-  title: string;
-  statusLabel: string;              // "ממתין" | "בתהליך"
-  inProgress: boolean;              // true -> no "start" button
-  meta: string;                     // "אחראי: אורי · עד 20/10/2026"
-  history: string[];                // lines already recorded (started / …)
-}
-
-const ymd = (iso: string | null) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
-
-export function actionRows(i: FccAssetItem): ActionRow[] {
-  return (i.actions ?? []).map((a) => ({
-    id: a.id,
-    title: a.title || UNKNOWN,
-    statusLabel: a.status === "בביצוע" ? "בתהליך" : "ממתין",
-    inProgress: a.status === "בביצוע",
-    meta: [a.owner && a.owner !== "—" ? `אחראי: ${a.owner}` : "", a.due_date ? `עד ${ymd(a.due_date)}` : ""].filter(Boolean).join(" · "),
-    history: a.history ? a.history.split("\n").filter(Boolean) : [],
-  }));
-}
+export { actionRows };
+export type { ActionRow };
 
 /** After finishing / cancelling an action: ask for the next one only when the asset has none left open. */
 export function askNextAction(items: FccAssetItem[], assetId: string | null | undefined): { assetId: string; name: string } | null {

@@ -3003,3 +3003,273 @@ def test_owner_and_due_date_rules_reject_what_they_cannot_parse_instead_of_stori
     (w,) = _confirm_one()
     assert w["fields"][TaskFields.NAME] == "לשלוח הצעה" and w["fields"][TaskFields.DUE_DATE] == "2026-12-01"
     assert w["fields"][TaskFields.DESCRIPTION] == "[FCC-ASSET:recAH]\nאחראי: אהרן"
+
+
+# ═══ Debts owed TO the owner, partial repayment, repayment arrangement, loan next actions ═══
+DEBT_GOAL = lambda: goal("recGD", "סגירת הלוואות", ELI, 700000, **{GF.CATEGORY: "debt", GF.CALC_METHOD: "cumulative"})
+
+
+def seed_debts(with_goal=True):
+    DB[Tables.FIN_GOALS] = [DEBT_GOAL()] if with_goal else []
+    DB[Tables.FIN_EVENTS] = []
+    DB[Tables.LOANS] = [
+        loan("recM", **{LF.NAME: "כאל", LF.EARLY_CLOSURE: 55000, LF.MONTHLY_PAYMENT: 1182.65, LF.INTEREST_RATE: 6, LF.PAYMENTS_LEFT: 40,
+                        LF.NOTES: "לכל מטרה"}),
+        loan("recR", **{LF.NAME: "דני", LF.EARLY_CLOSURE: 20000, LF.DIRECTION: "חייבים לי"}),
+        loan("recN", **{LF.NAME: "בלי יתרה"}),
+        loan("recX", owner=AVI, **{LF.NAME: "של אבי", LF.EARLY_CLOSURE: 777}),
+    ]
+    DB["Assets"] = [asset("recAH", "בית שמש", **{AF.STATUS: {"name": "פעיל"}}), asset("recAS", "נמכר", **{AF.STATUS: {"name": "נמכר"}}),
+                    asset("recAX", "נכס של אבי", owner=AVI)]
+
+
+def _loans_view():
+    return service.loans_overview(ELIYAHU, TODAY)
+
+
+def test_a_debt_owed_to_the_owner_is_listed_apart_and_never_counted_as_his_liability():
+    seed_debts()
+    v = _loans_view()
+    by_id = {i["id"]: i for i in v["items"]}
+    assert by_id["recR"]["direction"] == "owed_to_me" and by_id["recM"]["direction"] == "owed_by_me" and by_id["recN"]["direction"] == "owed_by_me"
+    assert v["summary"]["total_early_closure_balance"] == 55000                 # 20,000 owed to him is not in the liabilities
+    assert v["summary"]["total_active_loans"] == 2
+    assert "recR" not in v["rankings"]["small_balance"] and "recR" not in str(v["payoff"])
+    assert v["receivables"] == {"count": 1, "total_balance": 20000.0, "coverage": 1, "no_arrangement": 1}
+    assert fcc_loans.loan_item(DB[Tables.LOANS][1], TODAY)["arrangement"] is None
+    assert "777" not in str(v)                                                  # another owner's row never reaches the payload
+
+
+def test_receivables_are_excluded_from_asset_debt_and_from_the_budget_simulator():
+    seed_debts()
+    DB[Tables.LOANS][1]["fields"][LF.RELATED_ASSET] = ["recAH"]
+    a = service.assets_overview(ELIYAHU, _loans_view()["items"])
+    assert a["summary"]["linked_loans_count"] == 0 and a["summary"]["unlinked_loans_debt"] == 55000
+    sc = service.loan_scenarios(ELIYAHU, 1_000_000, TODAY)
+    assert "דני" not in str(sc)
+
+
+def test_partial_payment_asks_amount_then_where_the_money_came_from_then_reviews_old_to_new(no_model):
+    seed_debts()
+    r = intent("loan.partial_payment", "recM")
+    assert r.state == "ask" and r.awaiting == "amount" and "כמה שילמת" in r.message
+    r = _say("5,000", scope="loans")
+    assert r.state == "ask" and r.awaiting == "destination" and "מאיפה שולם" in r.message
+    assert [c["goal_id"] for c in r.candidates] == ["savings", "current", "asset:recAH"]      # own, held assets only (sold / foreign are not offered)
+    r = _say("שוטף", goal_id="current", scope="loans")
+    assert r.state == "review"
+    assert "₪55,000 ← ₪50,000" in r.message and "מקור התשלום: שוטף" in r.message and "סגירת הלוואות" in r.message
+    patch, event = _confirm_one()
+    assert patch["op"] == "patch" and patch["record_id"] == "recM" and patch["fields"][LF.EARLY_CLOSURE] == 50000.0
+    assert patch["fields"][LF.NOTES].startswith("לכל מטרה\nפרעון חלקי ₪5,000 ב־08/10/2026 — מקור התשלום: שוטף")   # the old note is kept
+    assert LF.MONTHLY_PAYMENT not in patch["fields"] and LF.STATUS not in patch["fields"]
+    assert event["table"] == Tables.FIN_EVENTS and event["fields"][EF.AMOUNT] == 5000 and event["fields"][EF.GOAL] == ["recGD"]
+    assert "פרעון חלקי: כאל" in event["fields"][EF.NOTE]
+
+
+def test_partial_payment_destination_is_one_of_the_presented_places_only(no_model):
+    seed_debts()
+    intent("loan.partial_payment", "recM")
+    _say("1000", scope="loans")
+    for bad in ("איפשהו", "asset:recAS", "asset:recAX", "אשר"):
+        r = _say(bad, scope="loans")
+        assert r.state == "ask" and r.awaiting == "destination", bad
+    r = _say("נכס: בית שמש", scope="loans")                                       # typing the button label also works
+    assert r.state == "review" and "נכס: בית שמש" in r.message
+
+
+def test_partial_payment_cannot_exceed_the_balance_and_points_to_closing(no_model):
+    seed_debts()
+    intent("loan.partial_payment", "recM")
+    r = _say("60000", scope="loans")
+    assert r.awaiting == "amount" and "סגירת הלוואה" in r.message
+    r = _say("55000", scope="loans")                                              # exactly the balance is still allowed: balance 0, not closed
+    assert r.awaiting == "destination"
+
+
+def test_partial_payment_on_a_debt_owed_to_the_owner_is_not_income_and_has_no_goal_event(no_model):
+    seed_debts()
+    r = intent("loan.partial_payment", "recR")
+    assert "החזיר" in r.message
+    r = _say("5000", scope="loans")
+    assert "מה נעשה עם הכסף" in r.message
+    r = _say("חיסכון", goal_id="savings", scope="loans")
+    assert "אינו הכנסה" in r.message and "יעד הכסף: חיסכון" in r.message and "אירוע התקדמות" not in r.message
+    (patch,) = _confirm_one()
+    assert patch["fields"][LF.EARLY_CLOSURE] == 15000.0 and "הכסף הועבר לחיסכון" in patch["fields"][LF.NOTES]
+    assert DB[Tables.FIN_EVENTS] == []                                            # nothing was booked on any goal
+
+
+def test_partial_payment_with_unknown_balance_only_logs_history_and_without_debt_goal_books_no_event(no_model):
+    seed_debts(with_goal=False)
+    intent("loan.partial_payment", "recN")
+    _say("300", scope="loans")
+    r = _say("שוטף", goal_id="current", scope="loans")
+    assert "לא הוגדרה" in r.message and "בלי אירוע התקדמות" in r.message
+    (patch,) = _confirm_one()
+    assert set(patch["fields"]) == {LF.NOTES}                                     # no balance is invented
+
+
+def test_partial_payment_is_idempotent_and_owner_scoped(no_model):
+    seed_debts()
+    intent("loan.partial_payment", "recM")
+    _say("5000", scope="loans"); _say("שוטף", goal_id="current", scope="loans")
+    writes = _confirm_one()
+    DB[Tables.LOANS][0]["fields"].update(writes[0]["fields"])                     # the patch landed
+    DB[Tables.FIN_EVENTS].append({"id": "e1", "fields": {**writes[1]["fields"], EF.FINANCIAL_OWNER: [ELI]}})
+    assert not [w for w in writes if not conv._already_applied(ELIYAHU, w)]       # a retry writes nothing twice
+    conv.complete_execution(ELIYAHU)
+    assert intent("loan.partial_payment", "recX").state == "denied"               # Avi's loan is "not found"
+    assert intent("loan.partial_payment").state == "clarify"
+
+
+def _arrangement_flow(text_after_loan):
+    seed_debts()
+    r = intent("loan.arrangement", "recR")
+    assert r.awaiting == "arrangement" and "לא הוגדר הסדר פירעון" in r.message
+    assert [c["title"] for c in r.candidates] == ["פירעון חודשי קבוע", "מועד פירעון", "אין הסדר"]
+    return r
+
+
+def test_arrangement_monthly_asks_for_the_amount_and_stores_schedule_amount_and_a_note_line(no_model):
+    _arrangement_flow(None)
+    r = _say("פירעון חודשי קבוע", scope="loans")
+    assert r.awaiting == "payment"
+    r = _say("1500", scope="loans")
+    assert r.state == "review" and "פירעון חודשי: ₪1,500" in r.message
+    (w,) = _confirm_one()
+    assert w["record_id"] == "recR" and w["fields"][LF.PAYMENT_SCHED] == "Monthly" and w["fields"][LF.MONTHLY_PAYMENT] == 1500
+    assert "הסדר פירעון (2026-10-08): פירעון חודשי ₪1,500" in w["fields"][LF.NOTES] and LF.EARLY_CLOSURE not in w["fields"]
+
+
+def test_arrangement_deadline_asks_for_a_date_and_none_writes_only_a_note(no_model):
+    _arrangement_flow(None)
+    _say("מועד פירעון", scope="loans")
+    assert _say("מתישהו", scope="loans").awaiting == "end_date"                     # not a date -> asked again
+    r = _say("2027-03-01", scope="loans")
+    assert r.state == "review"
+    (w,) = _confirm_one()
+    assert w["fields"][LF.PAYMENT_SCHED] == "Custom" and w["fields"][LF.END_DATE] == "2027-03-01" and LF.MONTHLY_PAYMENT not in w["fields"]
+    conv.complete_execution(ELIYAHU)
+    intent("loan.arrangement", "recR")
+    r = _say("אין הסדר", scope="loans")
+    assert r.state == "review"
+    (w,) = _confirm_one()
+    assert set(w["fields"]) == {LF.NOTES} and "אין הסדר פירעון" in w["fields"][LF.NOTES]
+
+
+def test_an_arrangement_shows_on_the_card_after_it_is_stored():
+    seed_debts()
+    DB[Tables.LOANS][1]["fields"].update({LF.MONTHLY_PAYMENT: 1500})
+    assert {i["id"]: i for i in _loans_view()["items"]}["recR"]["arrangement"] == "monthly"
+    assert _loans_view()["receivables"]["no_arrangement"] == 0
+    DB[Tables.LOANS][1]["fields"].update({LF.MONTHLY_PAYMENT: None, LF.END_DATE: "2027-01-01"})
+    assert {i["id"]: i for i in _loans_view()["items"]}["recR"]["arrangement"] == "deadline"
+
+
+def test_a_new_debt_owed_to_the_owner_is_created_with_its_repayment_mechanism(no_model):
+    seed_debts()
+    r = intent("loan.receivable_new")
+    assert r.awaiting == "name" and "מי חייב לך" in r.message
+    assert _say("דני כהן", scope="loans").awaiting == "balance"
+    assert _say("12000", scope="loans").awaiting == "arrangement"
+    assert _say("פירעון חודשי קבוע", scope="loans").awaiting == "payment"
+    r = _say("1000", scope="loans")
+    assert r.state == "review" and "חוב שחייבים לך" in r.message
+    (w,) = _confirm_one()
+    f = w["fields"]
+    assert w["op"] == "post" and w["table"] == Tables.LOANS
+    assert f[LF.NAME] == "דני כהן" and f[LF.LENDER] == "דני כהן" and f[LF.EARLY_CLOSURE] == 12000 and f[LF.ACTIVE] is True
+    assert f[LF.DIRECTION] == "חייבים לי" and f[LF.PAYMENT_SCHED] == "Monthly" and f[LF.MONTHLY_PAYMENT] == 1000
+    assert LF.LOAN_TYPE not in f and LF.INTEREST_RATE not in f
+    conv.complete_execution(ELIYAHU)
+    DB[Tables.LOANS].append({"id": "recNew", "fields": {**f, "Owner": [ELI]}})
+    intent("loan.receivable_new"); _say("דני כהן", scope="loans"); _say("5", scope="loans"); _say("אין הסדר", scope="loans")
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).state == "duplicate"
+
+
+def test_closing_a_debt_owed_to_the_owner_marks_it_paid_without_a_goal_event(no_model):
+    seed_debts()
+    r = conv.start_loan_close(ELIYAHU, "recR", today=TODAY)
+    assert "חוב שחייבים לך" in r.message
+    writes = _confirm_one()
+    assert len(writes) == 1 and writes[0]["fields"] == {LF.STATUS: "Paid Off"}
+
+
+def loan_step_task(tid, loan_id, title, **kw):
+    t = step_task(tid, loan_id, title, **kw)
+    t["fields"][TaskFields.DESCRIPTION] = t["fields"][TaskFields.DESCRIPTION].replace("[FCC-ASSET:", "[FCC-LOAN:")
+    return t
+
+
+def test_a_loan_next_action_is_a_task_tagged_with_the_loan_and_never_mixes_with_assets(no_model):
+    seed_debts()
+    DB[Tables.TASKS] = [loan_step_task("tl1", "recR", "להתקשר לדני", due="2026-10-20"), step_task("ta1", "recAH", "פעולת נכס")]
+    assert [t["id"] for t in service.loan_tasks(ELIYAHU)] == ["tl1"] and [t["id"] for t in service.asset_tasks(ELIYAHU)] == ["ta1"]
+    assert {i["id"]: i for i in _loans_view()["items"]}["recR"]["actions"][0]["title"] == "להתקשר לדני"
+    assert service.assets_overview(ELIYAHU, _loans_view()["items"])["items"][0]["actions"][0]["title"] == "פעולת נכס"
+    r = intent("loan.next_step", "recR")
+    assert r.awaiting == "step" and "דני" in r.message and "1" in r.message
+    r = _say("לדרוש שיק", scope="loans")
+    assert r.state == "review" and "פעולה הבאה בהלוואה" in r.message and "משימת מעקב חדשה" in r.message
+    (w,) = _confirm_one()
+    assert w["op"] == "post" and w["table"] == Tables.TASKS and w["fields"][TaskFields.NAME] == "לדרוש שיק"
+    assert w["fields"][TaskFields.DESCRIPTION] == "[FCC-LOAN:recR]" and w["fields"][TaskFields.TOPIC] == "כספים"
+    conv.complete_execution(ELIYAHU)
+    assert intent("loan.next_step", "recX").state == "denied"
+
+
+def test_loan_next_action_life_cycle_edit_start_done_cancel_keep_the_loan_tag(no_model):
+    seed_debts()
+    DB[Tables.TASKS] = [loan_step_task("tl1", "recR", "להתקשר לדני", owner="אורי")]
+    intent("asset.step_start", "tl1")
+    (w,) = _confirm_one()
+    assert w["record_id"] == "tl1" and w["fields"][TaskFields.STATUS] == "בביצוע" and w["fields"][TaskFields.DESCRIPTION].startswith("[FCC-LOAN:recR]")
+    conv.complete_execution(ELIYAHU)
+    intent("asset.step_edit", "tl1")
+    r = _say("להתקשר לדני ולשלוח הודעה", scope="loans")
+    assert r.state == "review" and "עריכת פעולה בהלוואה" in r.message
+    (w,) = _confirm_one()
+    assert w["fields"][TaskFields.DESCRIPTION] == "[FCC-LOAN:recR]\nאחראי: אורי"          # tag + owner survive an edit
+    conv.complete_execution(ELIYAHU)
+    DB[Tables.TASKS].append(loan_step_task("tl2", "recX", "של אבי", owner_profile=AVI))
+    assert intent("asset.step_done", "tl2").state == "denied"                            # not the owner's -> not found
+    intent("asset.step_done", "tl1")
+    (w,) = _confirm_one()
+    assert w["fields"][TaskFields.STATUS] == "בוצע" and "[FCC-LOAN:recR]" in w["fields"][TaskFields.DESCRIPTION]
+    assert conv.next_step_followup({"writes": [w]}) is None                              # the "next action?" prompt is for assets only
+
+
+def test_loan_task_post_is_not_written_twice(no_model):
+    seed_debts()
+    DB[Tables.TASKS] = [loan_step_task("tl1", "recR", "להתקשר לדני")]
+    intent("loan.next_step", "recR")
+    _say("להתקשר לדני", scope="loans")
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).state == "duplicate"
+
+
+def test_new_loan_intents_are_registered_and_none_is_a_transition():
+    for iid, ent in (("loan.partial_payment", "fcc_loan_partial"), ("loan.arrangement", "fcc_loan_arrangement"),
+                     ("loan.receivable_new", "fcc_receivable_new"), ("loan.next_step", "fcc_asset_step")):
+        assert fd.INTENTS[iid]["entity"] == ent and fd.INTENTS[iid]["tab"] == "loans" and not fd.INTENTS[iid].get("transition")
+    assert fd.INTENTS["loan.partial_payment"]["target_required"] and fd.INTENTS["loan.arrangement"]["target_required"]
+    assert "target_required" not in fd.INTENTS["loan.receivable_new"]
+
+
+def test_http_partial_payment_runs_the_same_review_then_executes_the_frozen_writes(monkeypatch, no_model):
+    seed_debts()
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/intent/start", json={"intent": "loan.partial_payment", "entity_id": "recM"}, headers=H).get_json()["awaiting"] == "amount"
+    assert c.post("/api/fcc/write", json={"text": "2000", "scope": "loans"}, headers=H).get_json()["awaiting"] == "destination"
+    assert c.post("/api/fcc/write", json={"text": "חיסכון", "goal_id": "savings", "scope": "loans"}, headers=H).get_json()["state"] == "review"
+    assert sent == []
+    done = c.post("/api/fcc/write", json={"text": "אשר", "scope": "loans"}, headers=H).get_json()
+    assert done["state"] == "executed" and [w["table"] for w in sent] == [Tables.LOANS, Tables.FIN_EVENTS]
+    assert Tables.LOANS in approval_actions._TMA_WRITE_ALLOWED_TABLES
+
+
+def test_the_direction_field_name_is_the_one_the_live_table_will_have():
+    assert LF.DIRECTION == "Direction" and fd.DIRECTION_TO_ME == "חייבים לי" == fcc_loans.DIRECTION_TO_ME_STORED

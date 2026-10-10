@@ -1,8 +1,30 @@
 // Pure presentation of the FCC loans & debt area. Unknown stays unknown: a missing number renders
 // "לא הוגדר" (never ₪0 / 0%), a derived cost is marked approximate while it rests on incomplete data,
 // and nothing here recommends which loan to close — it only orders and lays out the facts.
-import type { FccLoan, FccLoans } from "../types";
+import type { FccAssetAction, FccLoan, FccLoans } from "../types";
 import { dmy, money } from "./fccPresentation";
+
+export interface ActionRow {
+  id: string;
+  title: string;
+  statusLabel: string;              // "ממתין" | "בתהליך"
+  inProgress: boolean;              // true -> no "start" button
+  meta: string;                     // "אחראי: אורי · עד 20/10/2026"
+  history: string[];                // lines already recorded (started / …)
+}
+
+const ymd = (iso: string | null) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
+
+export function actionRows(i: { actions?: FccAssetAction[] }): ActionRow[] {
+  return (i.actions ?? []).map((a) => ({
+    id: a.id,
+    title: a.title || UNKNOWN,
+    statusLabel: a.status === "בביצוע" ? "בתהליך" : "ממתין",
+    inProgress: a.status === "בביצוע",
+    meta: [a.owner && a.owner !== "—" ? `אחראי: ${a.owner}` : "", a.due_date ? `עד ${ymd(a.due_date)}` : ""].filter(Boolean).join(" · "),
+    history: a.history ? a.history.split("\n").filter(Boolean) : [],
+  }));
+}
 
 export const UNKNOWN = "לא הוגדר";
 export const UNCLASSIFIED = "לא סווג";
@@ -45,8 +67,10 @@ export function loanHeaderCards(loans: FccLoans): LoanHeaderCard[] {
   ];
 }
 
+export const owedToMe = (l: { direction?: string }): boolean => l.direction === "owed_to_me";
+
 export function filterLoans(items: FccLoan[], filter: LoanFilter): FccLoan[] {
-  const active = items.filter((i) => i.active);
+  const active = items.filter((i) => i.active && !owedToMe(i));       // a debt owed TO the owner is never listed among his loans
   const type = FILTERS.find((f) => f.key === filter)?.type;
   return filter === "all" ? active : active.filter((i) => i.loan_type === type);   // unclassified loans appear under "הכל" only
 }
@@ -154,6 +178,34 @@ export function loanGoalModel(loans: FccLoans): LoanGoalModel | null {
 // owner's next word (אשר / ערוך / בטל / an answer).
 
 export const CLOSE_BUTTON = "סגרתי את ההלוואה";
+export const PARTIAL_BUTTON = "פרעון חלקי";
+export const ARRANGEMENT_BUTTON = "הסדר פירעון";
+export const NEXT_ACTION_BUTTON = "פעולה הבאה";
+export const RECEIVED_BUTTON = "נפרע במלואו";
+
+/** Debts owed TO the owner: active ones, largest first (unknown balance last). */
+export function receivableItems(loans: FccLoans): FccLoan[] {
+  return loans.items.filter((i) => i.active && owedToMe(i))
+    .sort((a, b) => (b.early_closure_balance ?? -1) - (a.early_closure_balance ?? -1) || (a.name ?? "").localeCompare(b.name ?? ""));
+}
+
+export const NO_ARRANGEMENT = "לא הוגדר הסדר פירעון";
+
+export interface ReceivableCardModel { id: string; title: string; balance: string; arrangement: string; arrangementKnown: boolean; actions: ActionRow[] }
+
+export function receivableCardModel(l: FccLoan): ReceivableCardModel {
+  const arrangement = l.arrangement === "monthly" ? `פירעון חודשי ${val(l.monthly_payment)}${l.end_date ? ` · עד ${dmy(l.end_date)}` : ""}`
+    : l.arrangement === "deadline" ? `מועד פירעון ${dmy(l.end_date) || UNKNOWN}` : NO_ARRANGEMENT;
+  return { id: l.id, title: l.name || UNKNOWN, balance: val(l.early_closure_balance), arrangement, arrangementKnown: !!l.arrangement,
+           actions: actionRows(l) };
+}
+
+export function receivablesSummary(loans: FccLoans): string | null {
+  const r = loans.receivables;
+  if (!r || r.count === 0) return null;
+  const missing = r.no_arrangement > 0 ? ` · ${r.no_arrangement} בלי הסדר פירעון` : "";
+  return `חייבים לי: ${val(r.total_balance)} (${r.count} חובות)${missing}`;
+}
 export const BALANCE_BUTTON = "עדכון יתרה";
 export const PAYMENT_BUTTON = "שינוי החזר";
 

@@ -231,11 +231,13 @@ def fcc_tasks(identity) -> list[dict]:
 
 
 _ASSET_TAG = re.compile(r"\[FCC-ASSET:(rec[A-Za-z0-9]+)\]")
+_SUBJECT_TAG = re.compile(r"\[FCC-(ASSET|LOAN):(rec[A-Za-z0-9]+)\]")
 
 
-def asset_tasks(identity) -> list[dict]:
-    """OPEN next-action Tasks of the caller's assets (Topic כספים + a ``[FCC-ASSET:<asset id>]`` tag). Owner-scoped like every Task
-    read; a closed (בוצע) task is history and not returned. The responsible person is a line in the description."""
+def next_actions(identity) -> list[dict]:
+    """OPEN next-action Tasks of the caller's assets AND loans (Topic כספים + a ``[FCC-ASSET:<id>]`` / ``[FCC-LOAN:<id>]`` tag).
+    Owner-scoped like every Task read; a closed (בוצע) task is history and not returned. The responsible person is a line in the
+    description. ``subject_kind`` / ``subject_id`` name what the action belongs to (``asset_id`` is kept for assets)."""
     from airtable_schema import TaskFields
     from core.financial_control.draft import FCC_TASK_TOPIC
     actor = policy.resolve_actor(identity)
@@ -248,14 +250,29 @@ def asset_tasks(identity) -> list[dict]:
         if status == "בוצע" or actor.profile_id not in policy.owner_refs(f, TaskFields.OWNER):
             continue
         desc = str(f.get(TaskFields.DESCRIPTION) or "")
-        tag = _ASSET_TAG.search(desc)
+        tag = _SUBJECT_TAG.search(desc)
         if _sel(f.get(TaskFields.TOPIC)) != FCC_TASK_TOPIC or tag is None:
             continue
         owner = next((l.split(":", 1)[1].strip() for l in desc.splitlines() if l.startswith("אחראי:")), None)
-        history = "\n".join(l for l in desc.splitlines() if l.strip() and not l.startswith("[FCC-ASSET:") and not l.startswith("אחראי:"))
-        out.append({"id": rec.get("id"), "asset_id": tag.group(1), "title": f.get(TaskFields.NAME), "status": status or "ממתין",
-                    "due_date": f.get(TaskFields.DUE_DATE), "owner": owner, "history": history, "description": desc})
+        history = "\n".join(l for l in desc.splitlines() if l.strip() and not l.startswith("[FCC-") and not l.startswith("אחראי:"))
+        kind = tag.group(1).lower()
+        row = {"id": rec.get("id"), "subject_kind": kind, "subject_id": tag.group(2), "title": f.get(TaskFields.NAME),
+               "status": status or "ממתין", "due_date": f.get(TaskFields.DUE_DATE), "owner": owner, "history": history,
+               "description": desc}
+        if kind == "asset":
+            row["asset_id"] = tag.group(2)
+        out.append(row)
     return sorted(out, key=lambda t: (t["due_date"] is None, str(t["due_date"] or ""), str(t["title"] or "")))
+
+
+def asset_tasks(identity) -> list[dict]:
+    """Open next actions of the caller's ASSETS only."""
+    return [t for t in next_actions(identity) if t["subject_kind"] == "asset"]
+
+
+def loan_tasks(identity) -> list[dict]:
+    """Open next actions of the caller's LOANS / debts owed to the caller."""
+    return [t for t in next_actions(identity) if t["subject_kind"] == "loan"]
 
 
 def my_obligations(identity) -> list[dict]:
@@ -354,7 +371,14 @@ def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict
             raise
         except Exception:
             logger.exception("[fcc] loan asset names read failed")
-    return fcc_loans.build(records, today, {k: v for k, v in names.items() if v}, debt_goal)
+    try:
+        tasks = loan_tasks(identity)
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] loan next actions read failed")
+        tasks = []
+    return fcc_loans.build(records, today, {k: v for k, v in names.items() if v}, debt_goal, tasks)
 
 
 def assets_overview(identity, loan_items: list[dict]) -> dict:
@@ -374,7 +398,7 @@ def assets_overview(identity, loan_items: list[dict]) -> dict:
     except Exception:
         logger.exception("[fcc] asset next actions read failed")
         tasks = []
-    return fcc_assets.build(records, loan_items, tasks)
+    return fcc_assets.build(records, [i for i in loan_items if i.get("direction") != fcc_loans.OWED_TO_ME], tasks)
 
 
 def _raw_category(category) -> str:

@@ -549,6 +549,12 @@ export interface FccLoan {
   end_date: string | null;
   early_repayment_fee: string | null;
   active: boolean;
+  /** owed_by_me (default) | owed_to_me: a debt owed TO the owner — listed apart, never part of his liabilities. */
+  direction?: "owed_by_me" | "owed_to_me";
+  /** How the debt is repaid: a standing monthly amount, a deadline, or null (nothing recorded yet). */
+  arrangement?: "monthly" | "deadline" | null;
+  /** The OPEN next actions of this loan / debt (Tasks tagged with the loan). */
+  actions?: FccAssetAction[];
   /** Active Loan unchecked and not Paid Off: shown and counted, flagged for confirmation. */
   status_unknown: boolean;
   months_remaining: number | null;
@@ -641,6 +647,8 @@ export interface FccLoans {
   rankings: { high_interest: string[]; cash_freed: string[]; small_balance: string[] };
   goal: { target: number; closed: number | null; remaining: number | null; active_closure_balance: number | null } | null;
   payoff?: FccPayoff;
+  /** Debts owed TO the owner (apart from the liabilities above). */
+  receivables?: { count: number; total_balance: number | null; coverage: number; no_arrangement: number };
 }
 
 /** One OPEN next action of an asset (a Task): several may be open; ממתין -> בביצוע -> בוצע / בוטלה. */
