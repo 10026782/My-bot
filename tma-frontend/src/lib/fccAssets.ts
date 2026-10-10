@@ -55,6 +55,26 @@ export interface AssetCardModel {
 export { actionRows };
 export type { ActionRow };
 
+export interface PersonalEquityModel {
+  lines: { label: string; value: string }[];
+  total: string;
+  notes: string[];
+}
+
+/** The personal equity with its parts: the owner's share of the assets, the net financial asset (positive net) or the net debt (negative net — not an asset). */
+export function personalEquityModel(a: FccAssets): PersonalEquityModel | null {
+  const p = a.summary.personal_equity;
+  if (!p) return null;
+  const lines = [{ label: "ההון שלי בנכסים פעילים", value: val(p.assets_my_equity) }];
+  if (p.financial_asset) lines.push({ label: "נכס פיננסי נטו (חייבים לי פחות החובות שלי)", value: val(p.financial_asset) });
+  if (p.net_debt) lines.push({ label: "חוב נטו (שלילי — אינו נכס)", value: val(p.net_debt) });
+  const notes: string[] = [];
+  if (p.assets_known < p.assets_count) notes.push(`ההון בנכסים מבוסס על ${p.assets_known} מתוך ${p.assets_count} נכסים — לשאר חסר שווי / משכנתא / אחוז בעלות.`);
+  if (p.partial && p.assets_known >= p.assets_count) notes.push("חלק מהחובות בלי יתרה — לא נכללו.");
+  notes.push("חובות המקושרים לנכס כבר כלולים בהון הנכס ולא נספרים פעמיים.");
+  return { lines, total: val(p.total), notes };
+}
+
 /** After finishing / cancelling an action: ask for the next one only when the asset has none left open. */
 export function askNextAction(items: FccAssetItem[], assetId: string | null | undefined): { assetId: string; name: string } | null {
   const a = assetId ? items.find((x) => x.id === assetId) : undefined;

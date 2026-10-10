@@ -191,6 +191,33 @@ export function receivableItems(loans: FccLoans): FccLoan[] {
 
 export const NO_ARRANGEMENT = "לא הוגדר הסדר פירעון";
 
+export interface BalanceCardModel {
+  lines: LoanRow[];
+  verdict: string;                     // what the net is: a financial asset, or NOT an asset
+  positive: boolean;
+  notes: string[];                     // what was left out / unknown — never hidden
+}
+
+/** "Owed to me" vs "I owe": shown only when something is owed to the owner. A negative net is not an asset (but it still counts in the personal equity). */
+export function balanceCardModel(loans: FccLoans): BalanceCardModel | null {
+  const b = loans.balance;
+  if (!b || b.receivables_count === 0) return null;
+  const net = b.net;
+  const notes: string[] = [];
+  if (b.linked_excluded_count > 0) notes.push(`${b.linked_excluded_count} הלוואות מקושרות לנכס (${money(b.linked_excluded_total)}) לא נכללות — החוב שלהן כבר בהון הנכס.`);
+  if (b.missing_liabilities > 0 || b.missing_receivables > 0) notes.push(`${b.missing_liabilities + b.missing_receivables} חובות בלי יתרה לא נכללים בחישוב.`);
+  return {
+    lines: [
+      { label: "חייבים לי", value: money(b.receivables_total) },
+      { label: "החובות שלי (בלי מקושרות לנכס)", value: money(b.liabilities_total) },
+      { label: "יתרה נטו", value: net == null ? UNKNOWN : money(net) },
+    ],
+    verdict: net == null ? UNKNOWN : net > 0 ? `נכס פיננסי נטו: ${money(net)} — נרשם בנכסים` : net < 0 ? `היתרה שלילית (${money(net)}) — אינה נכס, אך נכנסת להון האישי` : "המאזן מתאזן — אין נכס נטו",
+    positive: net != null && net > 0,
+    notes,
+  };
+}
+
 export interface ReceivableCardModel { id: string; title: string; balance: string; arrangement: string; arrangementKnown: boolean; actions: ActionRow[] }
 
 export function receivableCardModel(l: FccLoan): ReceivableCardModel {

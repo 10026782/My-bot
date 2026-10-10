@@ -3273,3 +3273,120 @@ def test_http_partial_payment_runs_the_same_review_then_executes_the_frozen_writ
 
 def test_the_direction_field_name_is_the_one_the_live_table_will_have():
     assert LF.DIRECTION == "Direction" and fd.DIRECTION_TO_ME == "חייבים לי" == fcc_loans.DIRECTION_TO_ME_STORED
+
+
+# ═══ Goal update: which field (buttons), then its value — the user typed free text and got "לא הבנתי את העריכה" ═══
+def test_goal_update_asks_which_field_by_buttons_then_the_value_then_reviews(no_model):
+    seed_intents()
+    r = intent("monthly.goal_update", "recGK")
+    assert r.state == "ask" and r.awaiting == "field" and "קרן חירום" in r.message
+    assert [c["goal_id"] for c in r.candidates][:2] == ["target_amount", "title"]
+    r = _say("סכום יעד", goal_id="target_amount")
+    assert r.state == "ask" and r.awaiting == "target_amount" and "₪60,000" in r.message            # today's value is shown
+    r = _say("90,000")
+    assert r.state == "review" and "₪90,000" in r.message
+    writes = _confirm_one()
+    assert [w["fields"].get("Kind") for w in writes] == ["target_change"] and writes[0]["fields"]["Amount"] == 90000
+
+
+def test_goal_update_value_step_rejects_a_non_value_and_asks_the_same_field_again(no_model):
+    seed_intents()
+    intent("monthly.goal_update", "recGK")
+    _say("סכום יעד", goal_id="target_amount")
+    r = _say("הרבה יותר")
+    assert r.state == "ask" and r.awaiting == "target_amount" and "❌" in r.message
+    r = _say("-5")
+    assert r.awaiting == "target_amount"
+    assert _say("70000").state == "review"
+
+
+def test_goal_update_accepts_what_the_owner_naturally_types_without_the_field_question(no_model):
+    for typed in ("סכום יעד 80000", "סכום 80000", "80000", "80,000"):
+        DB.clear(); seed_intents()
+        conv.complete_execution(ELIYAHU)
+        r = intent("monthly.goal_update", "recGK")
+        r = _say(typed)
+        assert r.state == "review" and "₪80,000" in r.message, typed
+        _say("בטל")
+
+
+def test_goal_update_edit_after_review_offers_the_fields_again_and_other_fields_work_by_buttons(no_model):
+    seed_intents()
+    intent("monthly.goal_update", "recGK")
+    _say("80000")
+    r = _say("ערוך")
+    assert r.awaiting == "field" and r.candidates
+    r = _say("קטגוריה", goal_id="category")
+    assert r.awaiting == "category" and [c["title"] for c in r.candidates]                      # a closed list is answered by buttons
+    r = _say("חוב")
+    assert r.state == "review" and "₪80,000" in r.message and "חוב" in r.message
+    assert _say("בחרו משהו", goal_id="nope").state == "unrelated"                             # in review, text that is not an edit changes nothing
+
+
+def test_goal_update_field_step_ignores_command_words_and_unknown_buttons(no_model):
+    seed_intents()
+    intent("monthly.goal_update", "recGK")
+    for word in ("אשר", "ערוך", "לא יודע"):
+        r = _say(word)
+        assert r.state == "ask" and r.awaiting == "field" and "בחרו מה לעדכן" in r.message, word
+    assert _say("בטל").state == "cancelled"
+
+
+# ═══ Debts balance (owed to me vs owed by me) and the personal equity ═══
+def seed_balance(receivable=1_000_000, mine=700_000, linked=400_000):
+    DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] = [], []
+    DB[Tables.LOANS] = [
+        loan("recR", **{LF.NAME: "חייב א", LF.EARLY_CLOSURE: receivable, LF.DIRECTION: "חייבים לי "}),     # the live choice name carries a trailing space
+        loan("recM", **{LF.NAME: "שלי", LF.EARLY_CLOSURE: mine}),
+        loan("recK", **{LF.NAME: "מקושרת", LF.EARLY_CLOSURE: linked, LF.RELATED_ASSET: ["recAH"]}),
+        loan("recU", **{LF.NAME: "בלי יתרה"}),
+        loan("recC", **{LF.NAME: "נסגרה", LF.EARLY_CLOSURE: 5000, LF.STATUS: "Paid Off"}),
+        loan("recX", owner=AVI, **{LF.NAME: "של אבי", LF.EARLY_CLOSURE: 123456789}),
+    ]
+    DB["Assets"] = [asset("recAH", "בית שמש", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 2_000_000, AF.MORTGAGE: 500_000, AF.OWNERSHIP_PCT: 50}),
+                    asset("recAL", "קרקע", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 1_000_000, AF.MORTGAGE: 0, AF.OWNERSHIP_PCT: 100, AF.MY_EQUITY: 900_000}),
+                    asset("recAU", "בלי נתונים", **{AF.STATUS: {"name": "פעיל"}}),
+                    asset("recAX", "של אבי", owner=AVI, **{AF.VALUE: 99_999_999})]
+
+
+def test_positive_net_is_a_financial_asset_negative_net_is_not_and_linked_loans_are_not_counted_twice():
+    seed_balance()
+    b = _loans_view()["balance"]
+    assert b["receivables_total"] == 1_000_000 and b["liabilities_total"] == 700_000      # the asset-linked 400,000 and the closed 5,000 are left out
+    assert b["net"] == 300_000 and b["financial_asset"] == 300_000 and b["net_debt"] == 0
+    assert b["linked_excluded_count"] == 1 and b["linked_excluded_total"] == 400_000
+    assert b["missing_liabilities"] == 1 and b["missing_receivables"] == 0                # "בלי יתרה" is reported, never turned into 0
+    assert "123456789" not in str(_loans_view())
+    seed_balance(receivable=200_000)
+    b = _loans_view()["balance"]
+    assert b["net"] == -500_000 and b["financial_asset"] == 0 and b["net_debt"] == -500_000
+
+
+def test_balance_is_unknown_without_any_known_balance_and_receivables_alone_make_an_asset():
+    DB[Tables.LOANS] = [loan("recU", **{LF.NAME: "בלי יתרה"})]
+    b = _loans_view()["balance"]
+    assert b["net"] is None and b["financial_asset"] is None and b["missing_liabilities"] == 1
+    DB[Tables.LOANS] = [loan("recR", **{LF.EARLY_CLOSURE: 40_000, LF.DIRECTION: "חייבים לי"})]
+    assert _loans_view()["balance"]["financial_asset"] == 40_000
+
+
+def test_personal_equity_adds_the_owners_share_of_assets_and_the_net_debt_position():
+    seed_balance()
+    pe = service.assets_overview(ELIYAHU, _loans_view()["items"])["summary"]["personal_equity"]
+    # (2,000,000 − 500,000) × 50% = 750,000 (computed: Airtable's formula is empty) + 900,000 (stored) ; + net 300,000
+    assert pe["assets_my_equity"] == 1_650_000 and pe["assets_known"] == 2 and pe["assets_count"] == 3
+    assert pe["financial_asset"] == 300_000 and pe["net_debt"] == 0 and pe["total"] == 1_950_000 and pe["partial"] is True
+    seed_balance(receivable=200_000)
+    pe = service.assets_overview(ELIYAHU, _loans_view()["items"])["summary"]["personal_equity"]
+    assert pe["financial_asset"] == 0 and pe["net_debt"] == -500_000 and pe["total"] == 1_150_000      # not an asset, still reduces the equity
+    assert "99999999" not in str(pe)
+
+
+def test_personal_equity_never_invents_an_ownership_or_a_mortgage_and_asset_linked_debt_stays_separate():
+    seed_balance()
+    DB["Assets"] = [asset("recAH", "בית", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 2_000_000, AF.MORTGAGE: 500_000}),         # no ownership %
+                    asset("recAL", "קרקע", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 1_000_000, AF.OWNERSHIP_PCT: 100})]         # no mortgage
+    a = service.assets_overview(ELIYAHU, _loans_view()["items"])
+    assert a["summary"]["personal_equity"]["assets_my_equity"] is None and a["summary"]["personal_equity"]["total"] == 300_000
+    assert a["summary"]["personal_equity"]["partial"] is True
+    assert a["summary"]["linked_loans_count"] == 1 and a["summary"]["linked_loans_debt"] == 400_000     # the asset-linked debt view is unchanged

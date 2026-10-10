@@ -4,7 +4,7 @@ import type { FccLoan, FccLoans } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LoansSection } from "../components/FccLoans";
-import { BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, NO_ARRANGEMENT, UNKNOWN, canClose, receivableCardModel, receivableItems, receivablesSummary, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
+import { balanceCardModel, BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, NO_ARRANGEMENT, UNKNOWN, canClose, receivableCardModel, receivableItems, receivablesSummary, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -245,6 +245,27 @@ test("a loan card lists its open next actions with start / done / cancel / edit 
   const html = renderToStaticMarkup(createElement(LoansSection, { loans: { ...loans, items: loans.items.map((l) => (l.id === "a" ? { ...l, actions: owedMonthly.actions } : l)) },
     actions: { onAction: () => undefined, disabled: false } }));
   assert.ok(html.includes("פעולות הבאות (1)") && html.includes("להתקשר") && html.includes("בוצע") && html.includes("ערוך"));
+});
+
+const bal = (o: Partial<NonNullable<FccLoans["balance"]>>): FccLoans => ({ ...withOwed, balance: {
+  receivables_total: 1000000, liabilities_total: 700000, net: 300000, financial_asset: 300000, net_debt: 0, linked_excluded_count: 1, linked_excluded_total: 400000,
+  missing_receivables: 0, missing_liabilities: 1, receivables_count: 2, ...o } });
+
+test("balance card: owed to me vs I owe; positive net is a financial asset, negative is NOT an asset, exclusions are said out loud", () => {
+  const m = balanceCardModel(bal({}))!;
+  assert.equal(m.lines.map((l) => l.value).join(" | "), "₪1,000,000 | ₪700,000 | ₪300,000");
+  assert.ok(m.positive && m.verdict.includes("נכס פיננסי נטו") && m.verdict.includes("נרשם בנכסים"));
+  assert.ok(m.notes.some((n) => n.includes("מקושרות לנכס") && n.includes("400,000")) && m.notes.some((n) => n.includes("בלי יתרה")));
+  const neg = balanceCardModel(bal({ net: -500000, financial_asset: 0, net_debt: -500000 }))!;
+  assert.ok(!neg.positive && neg.verdict.includes("אינה נכס") && neg.verdict.includes("הון האישי"));
+  assert.equal(balanceCardModel(bal({ net: null }))!.verdict, UNKNOWN);
+});
+
+test("balance card shows only when something is owed to the owner, in the loans tab section", () => {
+  assert.equal(balanceCardModel(withOwed), null);                                    // no balance block in the payload
+  assert.equal(balanceCardModel(bal({ receivables_count: 0 })), null);
+  const html = renderToStaticMarkup(createElement(LoansSection, { loans: bal({}) }));
+  assert.ok(html.includes("חייבים לי מול החובות שלי") && html.includes("נכס פיננסי נטו"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

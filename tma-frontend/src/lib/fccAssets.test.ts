@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AssetsSection, NextActionPrompt } from "../components/FccAssets";
 import { UNKNOWN } from "./fccLoans";
-import { ASSET_GONE, UNTYPED, actionRows, askNextAction, assetCardModel, soldCardModel, soldNote, assetsHeaderCards, debtLines } from "./fccAssets";
+import { ASSET_GONE, UNTYPED, actionRows, personalEquityModel, askNextAction, assetCardModel, soldCardModel, soldNote, assetsHeaderCards, debtLines } from "./fccAssets";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -175,6 +175,26 @@ test("after finishing the last open action the screen asks for the next one — 
   assert.equal(askNextAction([live], null), null); assert.equal(askNextAction([live], "zzz"), null);
   const html = renderToStaticMarkup(createElement(NextActionPrompt, { assets: { ...assets, items: [live] }, assetId: "h", onAdd: () => undefined, onDismiss: () => undefined, disabled: false }));
   assert.equal(html.includes("מה הפעולה הבאה בבית?") && html.includes("הוסף פעולה") && html.includes("אין פעולה נוספת"), true);
+});
+
+const pe = (o: Partial<NonNullable<FccAssets["summary"]["personal_equity"]>>): FccAssets => ({ ...assets, summary: { ...assets.summary, personal_equity: {
+  assets_my_equity: 1650000, assets_known: 2, assets_count: 3, financial_asset: 300000, net_debt: 0, net: 300000, total: 1950000, partial: true, ...o } } });
+
+test("personal equity: assets share + a positive net as a financial asset, the total, and what is partial", () => {
+  const m = personalEquityModel(pe({}))!;
+  assert.equal(m.lines.map((l) => l.label).join("|"), "ההון שלי בנכסים פעילים|נכס פיננסי נטו (חייבים לי פחות החובות שלי)");
+  assert.equal(m.total, "₪1,950,000");
+  assert.ok(m.notes.some((n) => n.includes("2 מתוך 3")) && m.notes.some((n) => n.includes("פעמיים")));
+  const html = renderToStaticMarkup(createElement(AssetsSection, { assets: pe({}) }));
+  assert.ok(html.includes("הון אישי מחושב") && html.includes("סה״כ הון אישי") && html.includes("₪1,950,000"));
+});
+
+test("personal equity: a negative net is shown as a debt (not an asset) and unknown stays unknown", () => {
+  const m = personalEquityModel(pe({ financial_asset: 0, net_debt: -500000, net: -500000, total: 1150000 }))!;
+  assert.ok(m.lines.some((l) => l.label.includes("אינו נכס") && l.value.includes("500,000")) && !m.lines.some((l) => l.label.includes("נכס פיננסי")));
+  const u = personalEquityModel(pe({ assets_my_equity: null, assets_known: 0, total: null, net: null, financial_asset: null, net_debt: null }))!;
+  assert.equal(u.total, UNKNOWN); assert.equal(u.lines[0].value, UNKNOWN);
+  assert.equal(personalEquityModel(assets), null);                       // an old payload without the block renders nothing
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

@@ -91,7 +91,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     left = _num(f.get(LF.PAYMENTS_LEFT))
     end = _iso_date(f.get(LF.END_DATE))
     fee_amount, fee_known = parse_fee(f.get(LF.EARLY_FEE))
-    direction = OWED_TO_ME if _sel(f.get(LF.DIRECTION)) == DIRECTION_TO_ME_STORED else OWED_BY_ME
+    direction = OWED_TO_ME if str(_sel(f.get(LF.DIRECTION)) or "").strip() == DIRECTION_TO_ME_STORED else OWED_BY_ME      # tolerant of a stray space in the choice name
 
     months = int(left) if left is not None else (_months_between(today, end) if end else None)
     total_remaining = round(monthly * left, 2) if monthly is not None and left is not None else None
@@ -198,6 +198,30 @@ def summarize(items: list[dict]) -> dict:
     }
 
 
+def debt_balance(items: list[dict]) -> dict:
+    """What is owed TO the owner against what the owner owes: ``net`` > 0 is a net financial asset, ``net`` < 0 is not an asset
+    (it still reduces the personal equity). The owner's loans that are linked to an asset (``Related Asset``) are left out of the
+    net: that debt already sits inside the asset's own equity, and counting it here would count it twice. Unknown balances are
+    skipped and reported, never turned into 0; ``net`` is None only when there is no known balance at all."""
+    active = [i for i in items if i["active"]]
+    recv = [i for i in active if i["direction"] == OWED_TO_ME]
+    mine = [i for i in active if i["direction"] == OWED_BY_ME]
+    counted = [i for i in mine if not i["related_asset"]]
+    linked = [i for i in mine if i["related_asset"]]
+    r_total, r_known = _sum(i["early_closure_balance"] for i in recv)
+    l_total, l_known = _sum(i["early_closure_balance"] for i in counted)
+    linked_total, _ = _sum(i["early_closure_balance"] for i in linked)
+    net = round((r_total or 0.0) - (l_total or 0.0), 2) if (r_known or l_known) else None
+    return {
+        "receivables_total": r_total or 0.0, "liabilities_total": l_total or 0.0, "net": net,
+        "financial_asset": max(net, 0.0) if net is not None else None,         # a negative net is NOT an asset
+        "net_debt": min(net, 0.0) if net is not None else None,
+        "linked_excluded_count": len(linked), "linked_excluded_total": linked_total or 0.0,
+        "missing_receivables": len(recv) - r_known, "missing_liabilities": len(counted) - l_known,
+        "receivables_count": len(recv),
+    }
+
+
 def receivables(items: list[dict]) -> dict:
     """Debts owed TO the owner: listed and totalled apart. They are never part of the owner's liabilities, the rankings or the
     payoff simulation, and money received on them is not income."""
@@ -224,7 +248,8 @@ def build(records: list[dict], today: date, asset_names: dict[str, str] | None =
         goal = {"target": debt_goal["target"], "closed": debt_goal.get("actual"), "remaining": debt_goal.get("remaining"),
                 "active_closure_balance": summary["total_early_closure_balance"]}
     return {"items": items, "summary": summary, "rankings": rankings(active_items), "goal": goal,
-            "payoff": payoff.build(active_items), "receivables": receivables(items)}
+            "payoff": payoff.build(active_items), "receivables": receivables(items),
+            "balance": debt_balance(items)}
 
 
 def scenarios(records: list[dict], today: date, budget: float) -> dict:

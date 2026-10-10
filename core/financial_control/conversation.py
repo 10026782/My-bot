@@ -107,9 +107,35 @@ def _missing(d: BusinessDraft) -> list[str]:
     return [m.field_name for m in d.missing_fields()] if d.operation is DraftOperation.CREATE else []
 
 
+GOAL_FIELDS = {"target_amount": "סכום יעד", "title": "שם היעד", "category": "קטגוריה", "period_type": "תקופה",
+               "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה"}
+GOAL_FIELD_CHOICES = [{"goal_id": k, "title": v} for k, v in GOAL_FIELDS.items()]
+
+
+def _goal_update_step(d: BusinessDraft) -> str | None:
+    """Updating an existing goal is asked in two steps, both by buttons / typed values: WHICH field ("field"), then its new value
+    ("value"). A reviewed draft is left to the label grammar ("סכום 18000"); nothing here is free text."""
+    if d.entity_type != fd.FCC_GOAL or d.operation is not DraftOperation.UPDATE:
+        return None
+    if d.source_context.get("edit_field"):
+        return "value"
+    if d.source_context.get("ask_field") or d.lifecycle_state not in (DraftState.READY_FOR_REVIEW,):
+        return "field"
+    return None
+
+
 def _render(d: BusinessDraft) -> TurnResult:
     goal_title = str(d.source_context.get("goal_title") or "")
     inferred = tuple(d.source_context.get("inferred") or ())
+    step = _goal_update_step(d)
+    if step == "field":
+        return TurnResult("ask", f"מה לעדכן ב{goal_title or 'יעד'}?", d.entity_type, "field", _view(d), candidates=list(GOAL_FIELD_CHOICES))
+    if step == "value":
+        name = str(d.source_context["edit_field"])
+        now = (d.original_fields or {}).get(name)
+        hint = f"\n(היום: {fd.display_value(name, now)})" if now not in (None, "") else ""
+        return TurnResult("ask", fd.prompt_for(d.entity_type, name, d.fields, goal_title) + hint, d.entity_type, name, _view(d),
+                          candidates=_choice_buttons(d.entity_type, name))
     if d.source_context.get("ask_reason") and d.fields.get("goal"):
         return TurnResult("ask", "מה הסיבה לפער בהפקדה? בחרו או כתבו סיבה אחרת.", d.entity_type, "reason", _view(d),
                           candidates=list(REASON_CHOICES))
@@ -277,6 +303,9 @@ def _deterministic_answer(field_name: str, text: str):
     return None
 
 
+_EDIT_ALIASES = {fd.FCC_GOAL: {"סכום יעד": "target_amount", "שם היעד": "title", "שם": "title"}}   # what the owner naturally types
+
+
 def _parse_edit(entity: str, text: str) -> dict:
     """An edit is "<field label> <value>" (the labels the review shows: "סכום יעד 80000", "קטגוריה חיסכון", "שם נטפליקס").
     Numbers, dates and presented choices are parsed by rule, free text is taken as written. Anything else -> {} (not understood)."""
@@ -284,7 +313,11 @@ def _parse_edit(entity: str, text: str) -> dict:
     t = (text or "").strip()
     if contract is None or not t:
         return {}
-    for label_, name in sorted(((fd.label(entity, f.field_name), f.field_name) for f in contract.fields), key=lambda p: -len(p[0])):
+    if entity == fd.FCC_GOAL and _deterministic_answer("target_amount", t) is not None:       # a bare number on a goal = its target amount
+        return {"target_amount": _deterministic_answer("target_amount", t)}
+    aliases = _EDIT_ALIASES.get(entity, {})
+    labels = [(fd.label(entity, f.field_name), f.field_name) for f in contract.fields] + list(aliases.items())
+    for label_, name in sorted(labels, key=lambda p: -len(p[0])):
         if label_ and t.startswith(label_) and (len(t) == len(label_) or t[len(label_)] in " :=-"):
             rest = t[len(label_):].lstrip(" :=-").strip()
             if not rest:
@@ -839,10 +872,40 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                                         "destination": choices[key]})
         return _render(_save(store, ids, d2, expected=d.idempotency_key))
 
+    step = _goal_update_step(d)
+    if step == "field":                                      # which field of the goal to change: one of the presented buttons
+        key = goal_id if goal_id in GOAL_FIELDS else next((k for k, t in GOAL_FIELDS.items() if t == text.strip()), None)
+        typed = _parse_edit(d.entity_type, text) if key is None else {}          # "סכום 18000" / "18000" skips the field question
+        if typed:
+            try:
+                d2, _rej = _set_fields(d, typed, strict=True)
+            except _VALIDATION_ERRORS:
+                d2, _rej = d, list(typed)
+            if not _rej:
+                d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k not in ("edit_field", "ask_field")})
+                return _render(_save(store, ids, d2, expected=d.idempotency_key))
+        if key is None:
+            return replace_result(_render(d), message=f"בחרו מה לעדכן.\n{_render(d).message}")
+        rest = {k: v for k, v in d.source_context.items() if k != "ask_field"}
+        return _render(_save(store, ids, replace(d, source_context={**rest, "edit_field": key}), expected=d.idempotency_key))
+    if step == "value":                                      # its new value, parsed by rule; a bad value re-asks the same field
+        name = str(d.source_context["edit_field"])
+        value = _deterministic_answer(name, text)
+        try:
+            d2, _rej = _set_fields(d, {name: value}, strict=True) if value is not None else (d, [name])
+        except _VALIDATION_ERRORS:
+            d2, _rej = d, [name]
+        if _rej:
+            return replace_result(_render(d), message=f"❌ ערך לא תקין ל{fd.LABELS.get(name, name)}.\n{_render(d).message}")
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k not in ("edit_field", "ask_field")})
+        return _render(_save(store, ids, d2, expected=d.idempotency_key))
+
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in CONFIRM_WORDS:
         return _confirm(identity, ids, d, store)
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in EDIT_WORDS:
         edited = d.begin_edit()
+        if d.entity_type == fd.FCC_GOAL and d.operation is DraftOperation.UPDATE:       # "ערוך" on a goal update: pick the field again
+            edited = replace(edited, source_context={**edited.source_context, "ask_field": True})
         _save(store, ids, edited, expected=d.idempotency_key)
         return _render(edited)
 

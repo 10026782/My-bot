@@ -1,5 +1,5 @@
 import type { FccAssets, FccAssetItem } from "../types";
-import { askNextAction, assetCardModel, assetsHeaderCards, debtLines, soldCardModel, soldNote } from "../lib/fccAssets";
+import { askNextAction, assetCardModel, assetsHeaderCards, debtLines, personalEquityModel, soldCardModel, soldNote } from "../lib/fccAssets";
 import { UNKNOWN } from "../lib/fccLoans";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -39,6 +39,16 @@ export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?
           {assetsHeaderCards(assets).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
         </div>
         {soldNote(assets) && <p className="fcc-goal__note" role="note">{soldNote(assets)}</p>}
+        {personalEquityModel(assets) && (
+          <Surface variant="subtle" padding="compact" className="fcc-loans-goal" aria-label="הון אישי מחושב">
+            <h3 className="fcc-loans-goal__title">הון אישי מחושב</h3>
+            <dl className="fcc-loans-goal__grid">
+              {personalEquityModel(assets)!.lines.map((l) => <div key={l.label}><dt>{l.label}</dt><dd className={l.value === UNKNOWN ? "fcc-unknown" : undefined}>{l.value}</dd></div>)}
+              <div><dt><strong>סה״כ הון אישי</strong></dt><dd><strong>{personalEquityModel(assets)!.total}</strong></dd></div>
+            </dl>
+            {personalEquityModel(assets)!.notes.map((n) => <p key={n} className="fcc-loan__meta">{n}</p>)}
+          </Surface>
+        )}
         <Surface variant="subtle" padding="compact" className="fcc-loans-goal">
           <h3 className="fcc-loans-goal__title">חוב ביחס לנכסים</h3>
           <dl className="fcc-loans-goal__grid">

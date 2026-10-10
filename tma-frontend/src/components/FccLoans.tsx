@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FccLoans } from "../types";
 import {
-  ARRANGEMENT_BUTTON, BALANCE_BUTTON, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RECEIVED_BUTTON,
+  ARRANGEMENT_BUTTON, BALANCE_BUTTON, balanceCardModel, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RECEIVED_BUTTON,
   FILTERS, RANK_MODES, STATUS_UNKNOWN, UNKNOWN, actionRows, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards,
   receivableCardModel, receivableItems, receivablesSummary, sortLoans, togglePick, canClose,
   type ActionRow, type LoanFilter, type RankMode,
@@ -55,11 +55,27 @@ function DebtActions({ id, actions }: { id: string; actions: LoanActions }) {
   );
 }
 
+function BalanceCard({ loans }: { loans: FccLoans }) {
+  const m = balanceCardModel(loans);
+  if (!m) return null;
+  return (
+    <Surface variant="subtle" padding="compact" className="fcc-loans-goal" aria-label="חייבים לי מול החובות שלי">
+      <h3 className="fcc-loans-goal__title">חייבים לי מול החובות שלי</h3>
+      <dl className="fcc-loans-goal__grid">
+        {m.lines.map((l) => <div key={l.label}><dt>{l.label}</dt><dd className={l.value === UNKNOWN ? "fcc-unknown" : undefined}>{l.value}</dd></div>)}
+      </dl>
+      <p className={m.positive ? "fcc-pay__saving" : "fcc-goal__note"}>{m.verdict}</p>
+      {m.notes.map((n) => <p key={n} className="fcc-loan__meta">{n}</p>)}
+    </Surface>
+  );
+}
+
 function ReceivablesSection({ loans, actions }: { loans: FccLoans; actions?: LoanActions }) {
   const items = receivableItems(loans);
   if (items.length === 0) return null;
   return (
     <section className="fcc-stack fcc-stack--tight" aria-labelledby="fcc-receivables-heading">
+      <BalanceCard loans={loans} />
       <h3 id="fcc-receivables-heading" className="fcc-loans-goal__title">חובות שחייבים לי</h3>
       <p className="fcc-goal__note">{receivablesSummary(loans)} · לא נספרים בהתחייבויות שלך, ותשלום שמתקבל עליהם אינו הכנסה.</p>
       <div className="fcc-list fcc-list--tight">

@@ -649,6 +649,22 @@ export interface FccLoans {
   payoff?: FccPayoff;
   /** Debts owed TO the owner (apart from the liabilities above). */
   receivables?: { count: number; total_balance: number | null; coverage: number; no_arrangement: number };
+  /** Owed TO the owner vs owed BY him (asset-linked loans left out: that debt is already inside the asset's equity). */
+  balance?: FccDebtBalance;
+}
+
+export interface FccDebtBalance {
+  receivables_total: number; liabilities_total: number; net: number | null;
+  financial_asset: number | null;      // max(net, 0): a negative net is NOT an asset
+  net_debt: number | null;             // min(net, 0)
+  linked_excluded_count: number; linked_excluded_total: number;
+  missing_receivables: number; missing_liabilities: number; receivables_count: number;
+}
+
+/** Personal equity = the owner's share of his active assets + the net debt position. */
+export interface FccPersonalEquity {
+  assets_my_equity: number | null; assets_known: number; assets_count: number;
+  financial_asset: number | null; net_debt: number | null; net: number | null; total: number | null; partial: boolean;
 }
 
 /** One OPEN next action of an asset (a Task): several may be open; ממתין -> בביצוע -> בוצע / בוטלה. */
@@ -694,6 +710,7 @@ export interface FccAssets {
     coverage: { value: number; mortgage: number; equity: number; my_equity: number; monthly_income: number };
     linked_loans_count: number; linked_loans_debt: number | null;
     unlinked_loans_count: number; unlinked_loans_debt: number | null;
+    personal_equity?: FccPersonalEquity;
   };
 }
 

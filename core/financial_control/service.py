@@ -398,7 +398,8 @@ def assets_overview(identity, loan_items: list[dict]) -> dict:
     except Exception:
         logger.exception("[fcc] asset next actions read failed")
         tasks = []
-    return fcc_assets.build(records, [i for i in loan_items if i.get("direction") != fcc_loans.OWED_TO_ME], tasks)
+    mine = [i for i in loan_items if i.get("direction") != fcc_loans.OWED_TO_ME]       # a debt owed TO the owner is not asset-linked debt
+    return fcc_assets.build(records, mine, tasks, fcc_loans.debt_balance(loan_items))
 
 
 def _raw_category(category) -> str:
