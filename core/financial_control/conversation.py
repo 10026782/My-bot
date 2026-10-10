@@ -162,7 +162,7 @@ def _render(d: BusinessDraft) -> TurnResult:
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title, str(d.source_context.get("direction") or "")) if awaiting else "מה לעדכן?"
     if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
-                                      fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT) and d.source_context.get("review_note"):
+                                      fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
 
@@ -749,6 +749,19 @@ def _choices_for(d: BusinessDraft, goals: list[dict]) -> list[dict]:
     return cands
 
 
+def _start_source_new(identity, ids, store, today) -> TurnResult:
+    """A new income SOURCE (e.g. a person or a business line) inside the owner's total income goal: it asks name, target and period,
+    then the usual review -> אשר. The parent is the caller's own single root income goal — without exactly one there is nothing to attach to."""
+    root = _total_income_goal(service.my_goals(identity))
+    if root is None:
+        return TurnResult("clarify", "אין יעד הכנסה כולל אחד ברור — אי אפשר להוסיף מקור. צרו או תקנו קודם את יעד ההכנסה הכולל.")
+    parent_title = root["fields"].get(GF.TITLE, "")
+    d = _new_draft(identity, ids, fd.FCC_SOURCE_NEW, DraftOperation.CREATE, fields={}, raw_text=f"intent:monthly.source_new#{uuid.uuid4().hex[:8]}",
+                   today=today, extra_ctx={"parent_goal_id": root["id"], "parent_title": parent_title,
+                                           "review_note": f"המקור ייספר בתוך: {parent_title}"})
+    return _persist_new(store, ids, d)
+
+
 def start_intent(identity, intent_id: str, entity_id: str | None = None, *, store=None,
                  today: date | None = None) -> TurnResult:
     """THE structured entry (POST /api/fcc/intent/start). A chip / card action names an intent and, when it is about
@@ -765,6 +778,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     store, ids, stop = _open_slot(identity, store, "פעולה חדשה")
     if stop is not None:
         return stop
+    if intent_id == "monthly.source_new":
+        return _start_source_new(identity, ids, store, today)
     if intent_id == "loan.next_step":
         return _start_loan_step(identity, ids, entity_id, store, today)
     if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_NEW, fd.FCC_LOAN_PARTIAL, fd.FCC_LOAN_ARRANGEMENT,

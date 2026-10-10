@@ -3390,3 +3390,54 @@ def test_personal_equity_never_invents_an_ownership_or_a_mortgage_and_asset_link
     assert a["summary"]["personal_equity"]["assets_my_equity"] is None and a["summary"]["personal_equity"]["total"] == 300_000
     assert a["summary"]["personal_equity"]["partial"] is True
     assert a["summary"]["linked_loans_count"] == 1 and a["summary"]["linked_loans_debt"] == 400_000     # the asset-linked debt view is unchanged
+
+
+# ═══ A new income SOURCE inside the total income goal ("מקורות הכנסה קבועים": אבי, תיווכים…) ═══
+def test_new_income_source_is_built_from_a_chip_and_linked_under_the_total_goal(no_model):
+    hierarchy([])
+    r = intent("monthly.source_new")
+    assert r.state == "ask" and r.awaiting == "title" and "אבי, תיווכים" in r.message
+    r = _say("אבי")
+    assert r.awaiting == "target_amount" and "אבי" in r.message
+    r = _say("2,000")
+    assert r.awaiting == "period_type" and [c["title"] for c in r.candidates] == ["חודשי", "שבועי"]
+    r = _say("חודשי")
+    assert r.state == "review" and "מקור הכנסה חדש" in r.message and "הכנסה חודשית כוללת" in r.message and "₪2,000" in r.message
+    (w,) = _confirm_one()
+    f = w["fields"]
+    assert w["op"] == "post" and w["table"] == Tables.FIN_GOALS
+    assert f[GF.TITLE] == "אבי" and f[GF.TARGET_AMOUNT] == 2000 and f[GF.CATEGORY] == "income" and f[GF.PERIOD_TYPE] == "monthly"
+    assert f[GF.CALC_METHOD] == "period_sum" and f[GF.STATUS] == "active" and f[GF.PARENT_GOAL] == ["recP"]
+
+
+def test_a_new_source_is_counted_inside_the_parent_never_on_top_of_it(no_model):
+    hierarchy([])
+    DB[Tables.FIN_GOALS].append(goal("recAvi", "אבי", ELI, 2000, **{GF.CATEGORY: "income", GF.PARENT_GOAL: ["recP"]}))
+    DB[Tables.FIN_EVENTS] = [event("recE", "recAvi", ELI, 700, day="2026-10-05")]
+    view = service.overview(ELIYAHU, TODAY)
+    assert view["summary"]["income"]["target"] == 15000 and rows_of(view)["recP"]["actual"] == 700       # rolled up once, target not inflated
+
+
+def test_a_source_needs_exactly_one_total_income_goal_and_never_duplicates_a_name(no_model):
+    DB[Tables.FIN_GOALS] = [goal("recA", "הכנסה א", ELI, 100, **{GF.CATEGORY: "income"}), goal("recB", "הכנסה ב", ELI, 200, **{GF.CATEGORY: "income"})]
+    assert intent("monthly.source_new").state == "clarify"                                   # two roots: ambiguous, nothing is guessed
+    DB[Tables.FIN_GOALS] = []
+    assert intent("monthly.source_new").state == "clarify"
+    hierarchy([])
+    intent("monthly.source_new"); _say("הכנסה מנסיעות"); _say("100"); _say("שבועי")
+    assert conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).state == "duplicate"
+
+
+def test_a_source_cannot_hang_under_another_persons_goal():
+    hierarchy([])
+    DB[Tables.FIN_GOALS].append(goal("recAv", "של אבי", AVI, 1000, **{GF.CATEGORY: "income"}))
+    own = {GF.TITLE: "x", GF.PARENT_GOAL: ["recP"]}
+    assert policy.scope_new_record_fields(Tables.FIN_GOALS, own, ELIYAHU)[GF.FINANCIAL_OWNER] == [ELI]
+    with pytest.raises(policy.PersonalDataAccessDenied):
+        policy.scope_new_record_fields(Tables.FIN_GOALS, {GF.TITLE: "x", GF.PARENT_GOAL: ["recAv"]}, ELIYAHU)
+    _f, denied = approval_actions._enforce_personal_data_policy("post", Tables.FIN_GOALS, "", {GF.TITLE: "x", GF.PARENT_GOAL: ["recAv"]}, ELIYAHU)
+    assert denied is not None and denied["ok"] is False
+
+
+def test_source_intent_is_registered_and_is_not_a_transition():
+    assert fd.INTENTS["monthly.source_new"]["entity"] == "fcc_source_new" and "target_required" not in fd.INTENTS["monthly.source_new"]

@@ -56,6 +56,7 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
       { intent: "monthly.obligation", label: "+ התחייבות" },
       { intent: "monthly.goal_update", label: "+ עדכון יעד", pick: "goal" },
       { intent: "monthly.goal_new", label: "+ יעד חדש" },
+      { intent: "monthly.source_new", label: "+ מקור הכנסה" },
       { intent: "savings.deposit", label: "+ הפקדה לחיסכון" },
     ],
     freeText: false,
