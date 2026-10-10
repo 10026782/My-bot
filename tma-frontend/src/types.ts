@@ -549,6 +549,12 @@ export interface FccLoan {
   end_date: string | null;
   early_repayment_fee: string | null;
   active: boolean;
+  /** owed_by_me (default) | owed_to_me: a debt owed TO the owner — listed apart, never part of his liabilities. */
+  direction?: "owed_by_me" | "owed_to_me";
+  /** How the debt is repaid: a standing monthly amount, a deadline, or null (nothing recorded yet). */
+  arrangement?: "monthly" | "deadline" | null;
+  /** The OPEN next actions of this loan / debt (Tasks tagged with the loan). */
+  actions?: FccAssetAction[];
   /** Active Loan unchecked and not Paid Off: shown and counted, flagged for confirmation. */
   status_unknown: boolean;
   months_remaining: number | null;
@@ -641,6 +647,24 @@ export interface FccLoans {
   rankings: { high_interest: string[]; cash_freed: string[]; small_balance: string[] };
   goal: { target: number; closed: number | null; remaining: number | null; active_closure_balance: number | null } | null;
   payoff?: FccPayoff;
+  /** Debts owed TO the owner (apart from the liabilities above). */
+  receivables?: { count: number; total_balance: number | null; coverage: number; no_arrangement: number };
+  /** Owed TO the owner vs owed BY him (asset-linked loans left out: that debt is already inside the asset's equity). */
+  balance?: FccDebtBalance;
+}
+
+export interface FccDebtBalance {
+  receivables_total: number; liabilities_total: number; net: number | null;
+  financial_asset: number | null;      // max(net, 0): a negative net is NOT an asset
+  net_debt: number | null;             // min(net, 0)
+  linked_excluded_count: number; linked_excluded_total: number;
+  missing_receivables: number; missing_liabilities: number; receivables_count: number;
+}
+
+/** Personal equity = the owner's share of his active assets + the net debt position. */
+export interface FccPersonalEquity {
+  assets_my_equity: number | null; assets_known: number; assets_count: number;
+  financial_asset: number | null; net_debt: number | null; net: number | null; total: number | null; partial: boolean;
 }
 
 /** One OPEN next action of an asset (a Task): several may be open; ממתין -> בביצוע -> בוצע / בוטלה. */
@@ -686,6 +710,7 @@ export interface FccAssets {
     coverage: { value: number; mortgage: number; equity: number; my_equity: number; monthly_income: number };
     linked_loans_count: number; linked_loans_debt: number | null;
     unlinked_loans_count: number; unlinked_loans_debt: number | null;
+    personal_equity?: FccPersonalEquity;
   };
 }
 

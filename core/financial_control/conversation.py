@@ -107,12 +107,42 @@ def _missing(d: BusinessDraft) -> list[str]:
     return [m.field_name for m in d.missing_fields()] if d.operation is DraftOperation.CREATE else []
 
 
+GOAL_FIELDS = {"target_amount": "סכום יעד", "title": "שם היעד", "category": "קטגוריה", "period_type": "תקופה",
+               "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה"}
+GOAL_FIELD_CHOICES = [{"goal_id": k, "title": v} for k, v in GOAL_FIELDS.items()]
+
+
+def _goal_update_step(d: BusinessDraft) -> str | None:
+    """Updating an existing goal is asked in two steps, both by buttons / typed values: WHICH field ("field"), then its new value
+    ("value"). A reviewed draft is left to the label grammar ("סכום 18000"); nothing here is free text."""
+    if d.entity_type != fd.FCC_GOAL or d.operation is not DraftOperation.UPDATE:
+        return None
+    if d.source_context.get("edit_field"):
+        return "value"
+    if d.source_context.get("ask_field") or d.lifecycle_state not in (DraftState.READY_FOR_REVIEW,):
+        return "field"
+    return None
+
+
 def _render(d: BusinessDraft) -> TurnResult:
     goal_title = str(d.source_context.get("goal_title") or "")
     inferred = tuple(d.source_context.get("inferred") or ())
+    step = _goal_update_step(d)
+    if step == "field":
+        return TurnResult("ask", f"מה לעדכן ב{goal_title or 'יעד'}?", d.entity_type, "field", _view(d), candidates=list(GOAL_FIELD_CHOICES))
+    if step == "value":
+        name = str(d.source_context["edit_field"])
+        now = (d.original_fields or {}).get(name)
+        hint = f"\n(היום: {fd.display_value(name, now)})" if now not in (None, "") else ""
+        return TurnResult("ask", fd.prompt_for(d.entity_type, name, d.fields, goal_title) + hint, d.entity_type, name, _view(d),
+                          candidates=_choice_buttons(d.entity_type, name))
     if d.source_context.get("ask_reason") and d.fields.get("goal"):
         return TurnResult("ask", "מה הסיבה לפער בהפקדה? בחרו או כתבו סיבה אחרת.", d.entity_type, "reason", _view(d),
                           candidates=list(REASON_CHOICES))
+    if d.source_context.get("ask_dest") and d.fields.get("amount") not in (None, ""):      # where the money went / came from comes before the review
+        to_me = d.source_context.get("direction") == fcc_loans.OWED_TO_ME
+        return TurnResult("ask", "מה נעשה עם הכסף שהתקבל?" if to_me else "מאיפה שולם הפרעון?", d.entity_type, "destination", _view(d),
+                          candidates=list(d.source_context.get("dest_choices") or []))
     if d.lifecycle_state is DraftState.EDITING:
         return TurnResult("ask", "מה לערוך? (למשל: סכום 80000)", d.entity_type, None, _view(d))
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW:
@@ -120,7 +150,9 @@ def _render(d: BusinessDraft) -> TurnResult:
         changed = {k: v for k, v in d.fields.items() if d.operation is DraftOperation.UPDATE and v != original.get(k)}
         return TurnResult("review", fd.render_review(
             d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
-            inferred=inferred, note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
+            inferred=inferred, subject=str(d.source_context.get("subject_noun") or "נכס"),
+            note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else _partial_note(d) if d.entity_type == fd.FCC_LOAN_PARTIAL
+                  else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
             d.entity_type, None, _view(d))
     if d.source_context.get("ask_kind") and d.fields.get("goal") and not d.source_context.get("ask_source"):
         return TurnResult("ask", "איזה סוג הכנסה זו?", d.entity_type, "kind", _view(d), candidates=list(KIND_CHOICES))
@@ -128,11 +160,42 @@ def _render(d: BusinessDraft) -> TurnResult:
         return TurnResult("ask", "מה שם המקור? (למשל: אבי, תיווך)", d.entity_type, "source", _view(d))
     missing = _missing(d)
     awaiting = missing[0] if missing else None
-    msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title) if awaiting else "מה לעדכן?"
+    msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title, str(d.source_context.get("direction") or "")) if awaiting else "מה לעדכן?"
     if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
-                                      fd.FCC_ASSET_STEP) and d.source_context.get("review_note"):
+                                      fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
+
+
+def _partial_note(d: BusinessDraft) -> str:
+    """Review note of a partial repayment: balance before -> after, where the money went, and what is (not) recorded besides."""
+    ctx, lines = d.source_context, []
+    before, amount = ctx.get("balance_before"), d.fields.get("amount")
+    if before is not None and amount not in (None, ""):
+        after = round(max(float(before) - float(amount), 0.0), 2)
+        lines.append(f"• יתרה: {fd.display_value('balance', before)} ← {fd.display_value('balance', after)}")
+    elif before is None:
+        lines.append("• היתרה לא הוגדרה — היא לא תתעדכן (תירשם רק שורת היסטוריה).")
+    if ctx.get("destination"):
+        lines.append(f"• {'יעד הכסף' if ctx.get('direction') == fcc_loans.OWED_TO_ME else 'מקור התשלום'}: {ctx['destination']}")
+    if ctx.get("direction") == fcc_loans.OWED_TO_ME:
+        lines.append("תשלום שהתקבל על חוב אינו הכנסה — הוא לא נספר בכרטיס ההכנסות.")
+    elif ctx.get("debt_goal_id"):
+        lines.append(f"יירשם גם אירוע התקדמות ביעד: {ctx.get('debt_goal_title', '')}")
+    else:
+        lines.append("לא נמצא יעד חוב פעיל אחד — יתעדכנו רק ההלוואה וההערות, בלי אירוע התקדמות.")
+    lines.append("הכסף עצמו לא מועבר לחיסכון / לנכס — מתועד כאן בלבד.")
+    return "\n".join(lines)
+
+
+def _dest_choices(identity) -> list[dict]:
+    """Where a repayment went / came from: savings, the current account, or one of the owner's own held assets."""
+    choices = [{"goal_id": "savings", "title": "חיסכון"}, {"goal_id": "current", "title": "שוטף"}]
+    for a in service.my_assets(identity):
+        f = a.get("fields") or {}
+        if service._sel(f.get(AF.STATUS)) not in _ASSET_GONE and f.get(AF.NAME):
+            choices.append({"goal_id": f"asset:{a['id']}", "title": f"נכס: {f[AF.NAME]}"})
+    return choices
 
 
 def _choice_buttons(entity: str, field_name: str | None) -> list[dict]:
@@ -203,6 +266,7 @@ def _derive_obligation_saving(d: BusinessDraft) -> BusinessDraft:
 # Free-text answers that are the user's own words: stored as written (never paraphrased, never sent to the model).
 _STEP_ENTITIES = (fd.FCC_ASSET_STEP, fd.FCC_ASSET_STEP_EDIT)
 _ASSET_TAG = re.compile(r"\[FCC-ASSET:(rec[A-Za-z0-9]+)\]")
+_SUBJECT_TAG = re.compile(r"\[FCC-(ASSET|LOAN):(rec[A-Za-z0-9]+)\]")
 _VERBATIM_FIELDS = {"step": 500, "title": 120, "name": 120, "vendor": 120, "lender": 120, "note": 300}
 
 
@@ -239,6 +303,9 @@ def _deterministic_answer(field_name: str, text: str):
     return None
 
 
+_EDIT_ALIASES = {fd.FCC_GOAL: {"סכום יעד": "target_amount", "שם היעד": "title", "שם": "title"}}   # what the owner naturally types
+
+
 def _parse_edit(entity: str, text: str) -> dict:
     """An edit is "<field label> <value>" (the labels the review shows: "סכום יעד 80000", "קטגוריה חיסכון", "שם נטפליקס").
     Numbers, dates and presented choices are parsed by rule, free text is taken as written. Anything else -> {} (not understood)."""
@@ -246,7 +313,11 @@ def _parse_edit(entity: str, text: str) -> dict:
     t = (text or "").strip()
     if contract is None or not t:
         return {}
-    for label_, name in sorted(((fd.label(entity, f.field_name), f.field_name) for f in contract.fields), key=lambda p: -len(p[0])):
+    if entity == fd.FCC_GOAL and _deterministic_answer("target_amount", t) is not None:       # a bare number on a goal = its target amount
+        return {"target_amount": _deterministic_answer("target_amount", t)}
+    aliases = _EDIT_ALIASES.get(entity, {})
+    labels = [(fd.label(entity, f.field_name), f.field_name) for f in contract.fields] + list(aliases.items())
+    for label_, name in sorted(labels, key=lambda p: -len(p[0])):
         if label_ and t.startswith(label_) and (len(t) == len(label_) or t[len(label_)] in " :=-"):
             rest = t[len(label_):].lstrip(" :=-").strip()
             if not rest:
@@ -357,11 +428,14 @@ def start_loan_close(identity, loan_id: str, *, store=None, today: date | None =
     item = fcc_loans.loan_item(loan, today)
     if not item["active"]:
         return TurnResult("info", "ההלוואה כבר מסומנת כנסגרה.")
-    goal = _debt_goal(identity)
+    to_me = item["direction"] == fcc_loans.OWED_TO_ME
+    goal = None if to_me else _debt_goal(identity)
     name = item["name"] or "ההלוואה"
     ctx = {"record_id": loan["id"], "loan_name": name, "goal_title": name}
     review_note = ""
-    if goal is not None:
+    if to_me:
+        review_note = "חוב שחייבים לך — יסומן כנפרע. אין אירוע התקדמות, והסכום אינו הכנסה."
+    elif goal is not None:
         ctx["debt_goal_id"] = goal["id"]
         review_note = f"יירשם גם אירוע התקדמות ביעד: {goal['fields'].get(GF.TITLE, '')}"
     else:
@@ -386,7 +460,7 @@ def _start_loan_intent(identity, ids, entity, entity_id, store, today) -> TurnRe
     """update balance / update monthly payment (the chosen ACTIVE loan, one field) or a new loan. The loan must be the
     caller's own (not found == not yours); the draft shows today's stored value so the owner reviews old -> new."""
     raw = f"intent:{entity}#{uuid.uuid4().hex[:8]}"
-    if entity == fd.FCC_LOAN_NEW:
+    if entity in (fd.FCC_LOAN_NEW, fd.FCC_RECEIVABLE_NEW):
         return _persist_new(store, ids, _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today))
     if not entity_id:
         return TurnResult("clarify", "בחרו קודם את ההלוואה לעדכון.")
@@ -397,10 +471,58 @@ def _start_loan_intent(identity, ids, entity, entity_id, store, today) -> TurnRe
     if not item["active"]:
         return TurnResult("info", "ההלוואה מסומנת כנסגרה — אין מה לעדכן.")
     name = item["name"] or "ההלוואה"
-    current = calc._num((loan.get("fields") or {}).get(_LOAN_CURRENT[entity]))
+    f = loan.get("fields") or {}
+    if entity == fd.FCC_LOAN_PARTIAL:
+        return _start_partial_payment(identity, ids, loan, item, raw, store, today)
+    if entity == fd.FCC_LOAN_ARRANGEMENT:
+        now = {"monthly": f"היום: פירעון חודשי {fd.display_value('payment', item['monthly_payment'])}",
+               "deadline": f"היום: מועד פירעון {fd.display_value('end_date', item['end_date'])}"}.get(item["arrangement"], "היום: לא הוגדר הסדר פירעון")
+        d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today,
+                       extra_ctx={"record_id": loan["id"], "loan_name": name, "goal_title": name, "review_note": now,
+                                  "notes_before": str(f.get(LF.NOTES) or ""), "direction": item["direction"]})
+        return _persist_new(store, ids, d)
+    current = calc._num(f.get(_LOAN_CURRENT[entity]))
     note = f"היום: {fd.display_value('balance', current)}" if current is not None else "היום: לא הוגדר"
     d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today,
                    extra_ctx={"record_id": loan["id"], "loan_name": name, "goal_title": name, "review_note": note})
+    return _persist_new(store, ids, d)
+
+
+def _start_partial_payment(identity, ids, loan: dict, item: dict, raw: str, store, today) -> TurnResult:
+    """Partial repayment of ONE loan / debt: the amount first, then where the money went (savings / current / an asset) or came from,
+    then the usual review -> אשר. The balance before and the debt goal are captured here, so the review shows old -> new."""
+    name = item["name"] or "ההלוואה"
+    to_me = item["direction"] == fcc_loans.OWED_TO_ME
+    goal = None if to_me else _debt_goal(identity)
+    ctx = {"record_id": loan["id"], "loan_name": name, "goal_title": name, "direction": item["direction"],
+           "balance_before": item["early_closure_balance"], "notes_before": str((loan.get("fields") or {}).get(LF.NOTES) or ""),
+           "ask_dest": True, "dest_choices": _dest_choices(identity)}
+    if goal is not None:
+        ctx.update(debt_goal_id=goal["id"], debt_goal_title=goal["fields"].get(GF.TITLE, ""))
+    now = item["early_closure_balance"]
+    ctx["review_note"] = f"היתרה היום: {fd.display_value('balance', now)}" if now is not None else "היתרה היום: לא הוגדרה"
+    d = _new_draft(identity, ids, fd.FCC_LOAN_PARTIAL, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=ctx)
+    d, _rej = _set_fields(d, {"occurred_at": today.isoformat()}, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
+    return _persist_new(store, ids, d)
+
+
+def _start_loan_step(identity, ids, loan_id: str | None, store, today) -> TurnResult:
+    """A NEW next action on a loan / a debt owed to the owner: the same Task flow as an asset's, tagged ``[FCC-LOAN:<id>]``."""
+    loan = next((r for r in service.my_loans(identity) if r["id"] == str(loan_id or "")), None)
+    if not loan_id:
+        return TurnResult("clarify", "בחרו קודם את ההלוואה.")
+    if loan is None:
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    item = fcc_loans.loan_item(loan, today)
+    if not item["active"]:
+        return TurnResult("info", "ההלוואה מסומנת כנסגרה — אין מה לעדכן.")
+    name = item["name"] or "ההלוואה"
+    open_n = sum(1 for t in service.loan_tasks(identity) if t["subject_id"] == loan["id"])
+    note = f"פעולות פתוחות בחוב כרגע: {open_n}" if open_n else "אין פעולות פתוחות בחוב"
+    d = _new_draft(identity, ids, fd.FCC_ASSET_STEP, DraftOperation.CREATE, fields={}, raw_text=f"intent:loan.next_step#{uuid.uuid4().hex[:8]}",
+                   today=today, extra_ctx={"record_id": loan["id"], "subject_id": loan["id"], "task_tag": fd.LOAN_TASK_TAG,
+                                           "subject_noun": "הלוואה", "asset_name": name, "goal_title": name, "review_note": note})
     return _persist_new(store, ids, d)
 
 
@@ -439,19 +561,24 @@ def _start_asset_intent(identity, ids, entity, entity_id, store, today) -> TurnR
 def _start_task_intent(identity, ids, intent_id: str, spec: dict, task_id: str | None, store, today) -> TurnResult:
     """Edit / start / finish / cancel ONE open next action of the caller's own asset. The task is chosen by id (never typed); a task
     that is not the caller's, or is already closed, is answered like a missing one."""
-    task = next((t for t in service.asset_tasks(identity) if t["id"] == str(task_id or "")), None)
+    task = next((t for t in service.next_actions(identity) if t["id"] == str(task_id or "")), None)
     if not task_id:
         return TurnResult("clarify", "בחרו קודם את הפעולה.")
-    asset = next((r for r in service.my_assets(identity) if r["id"] == (task or {}).get("asset_id")), None)
-    if task is None or asset is None:
+    on_loan = (task or {}).get("subject_kind") == "loan"
+    subject = next((r for r in (service.my_loans(identity) if on_loan else service.my_assets(identity))
+                    if r["id"] == (task or {}).get("subject_id")), None)
+    if task is None or subject is None:
         return TurnResult("denied", policy.DENIED_MESSAGE)
-    name = (asset.get("fields") or {}).get(AF.NAME) or "הנכס"
+    name = (subject.get("fields") or {}).get(LF.NAME if on_loan else AF.NAME) or ("ההלוואה" if on_loan else "הנכס")
+    asset = subject
     mode, entity = spec.get("mode"), spec["entity"]
     if mode == "start" and task["status"] == "בביצוע":
         return TurnResult("info", "הפעולה כבר מסומנת ״בתהליך״.")
     raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"
     ctx = {"record_id": task["id"], "asset_id": asset["id"], "asset_name": name, "goal_title": name, "history": task["history"],
            "description": task["description"], "mode": mode, "task_title": task["title"]}
+    if on_loan:                                                  # a loan's action: same entities, the subject is the loan
+        ctx.update(subject_id=asset["id"], task_tag=fd.LOAN_TASK_TAG, subject_noun="הלוואה")
     if entity == fd.FCC_ASSET_STEP_STATUS:
         word = {"start": "התחלת הפעולה (בתהליך)", "done": "סיום הפעולה", "cancel": "ביטול הפעולה"}[mode]
         ctx["review_note"] = f"{word}: {task['title']}"
@@ -638,7 +765,10 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     store, ids, stop = _open_slot(identity, store, "פעולה חדשה")
     if stop is not None:
         return stop
-    if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_NEW):
+    if intent_id == "loan.next_step":
+        return _start_loan_step(identity, ids, entity_id, store, today)
+    if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_NEW, fd.FCC_LOAN_PARTIAL, fd.FCC_LOAN_ARRANGEMENT,
+                          fd.FCC_RECEIVABLE_NEW):
         return _start_loan_intent(identity, ids, spec["entity"], entity_id, store, today)
     if spec.get("target") == "task":
         return _start_task_intent(identity, ids, intent_id, spec, entity_id, store, today)
@@ -733,10 +863,49 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_reason"})
         return _render(_save(store, ids, d2, expected=d.idempotency_key))
 
+    if d.source_context.get("ask_dest") and d.fields.get("amount") not in (None, ""):    # one of the PRESENTED places, never free text
+        choices = {c["goal_id"]: c["title"] for c in d.source_context.get("dest_choices") or []}
+        key = goal_id if goal_id in choices else next((k for k, t in choices.items() if t == text.strip()), None)
+        if key is None:
+            return replace_result(_render(d), message=f"בחרו אחד מהאפשרויות.\n{_render(d).message}")
+        d2 = replace(d, source_context={**{k: v for k, v in d.source_context.items() if k not in ("ask_dest", "dest_choices")},
+                                        "destination": choices[key]})
+        return _render(_save(store, ids, d2, expected=d.idempotency_key))
+
+    step = _goal_update_step(d)
+    if step == "field":                                      # which field of the goal to change: one of the presented buttons
+        key = goal_id if goal_id in GOAL_FIELDS else next((k for k, t in GOAL_FIELDS.items() if t == text.strip()), None)
+        typed = _parse_edit(d.entity_type, text) if key is None else {}          # "סכום 18000" / "18000" skips the field question
+        if typed:
+            try:
+                d2, _rej = _set_fields(d, typed, strict=True)
+            except _VALIDATION_ERRORS:
+                d2, _rej = d, list(typed)
+            if not _rej:
+                d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k not in ("edit_field", "ask_field")})
+                return _render(_save(store, ids, d2, expected=d.idempotency_key))
+        if key is None:
+            return replace_result(_render(d), message=f"בחרו מה לעדכן.\n{_render(d).message}")
+        rest = {k: v for k, v in d.source_context.items() if k != "ask_field"}
+        return _render(_save(store, ids, replace(d, source_context={**rest, "edit_field": key}), expected=d.idempotency_key))
+    if step == "value":                                      # its new value, parsed by rule; a bad value re-asks the same field
+        name = str(d.source_context["edit_field"])
+        value = _deterministic_answer(name, text)
+        try:
+            d2, _rej = _set_fields(d, {name: value}, strict=True) if value is not None else (d, [name])
+        except _VALIDATION_ERRORS:
+            d2, _rej = d, [name]
+        if _rej:
+            return replace_result(_render(d), message=f"❌ ערך לא תקין ל{fd.LABELS.get(name, name)}.\n{_render(d).message}")
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k not in ("edit_field", "ask_field")})
+        return _render(_save(store, ids, d2, expected=d.idempotency_key))
+
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in CONFIRM_WORDS:
         return _confirm(identity, ids, d, store)
     if d.lifecycle_state is DraftState.READY_FOR_REVIEW and lower in EDIT_WORDS:
         edited = d.begin_edit()
+        if d.entity_type == fd.FCC_GOAL and d.operation is DraftOperation.UPDATE:       # "ערוך" on a goal update: pick the field again
+            edited = replace(edited, source_context={**edited.source_context, "ask_field": True})
         _save(store, ids, edited, expected=d.idempotency_key)
         return _render(edited)
 
@@ -830,6 +999,10 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                     fill_failed = True
 
     d2, rejected = _set_fields(d, updates, strict=False) if updates else (d, [])
+    before = d.source_context.get("balance_before")
+    if (d.entity_type == fd.FCC_LOAN_PARTIAL and before is not None and d2.fields.get("amount") not in (None, "")
+            and float(d2.fields["amount"]) > float(before)):                  # more than is owed: that is a full repayment, not a partial one
+        return replace_result(_render(d), message=f"הסכום גדול מהיתרה ({fd.display_value('balance', before)}). לפרעון מלא השתמשו ב״סגירת הלוואה״.\n{_render(d).message}")
     answered = bool(updates) and (awaiting is None or awaiting in updates) and awaiting not in rejected
     if not answered or (d2.fields == d.fields and d2.lifecycle_state is d.lifecycle_state and awaiting != "goal"):
         return _not_an_answer(d, awaiting, invalid=det_failed or fill_failed or (awaiting in rejected))
@@ -875,11 +1048,11 @@ def _already_applied(identity, write: dict) -> bool:
         cur = (rec or {}).get("fields") or {}
         same = lambda have, want: (writer._norm(str(have or "")) == writer._norm(want)) if isinstance(want, str) else calc._num(have) == want
         return rec is not None and all(same(cur.get(k), v) for k, v in fields.items())    # the record already holds exactly this
-    if write["table"] == Tables.TASKS and fields.get(TaskFields.DESCRIPTION, "").startswith(fd.ASSET_TASK_TAG):
-        open_tasks = service.asset_tasks(identity)
-        if write["op"] == "post":                                  # the same open action already exists on this asset
-            asset_id = _ASSET_TAG.search(fields[TaskFields.DESCRIPTION]).group(1)
-            return any(t["asset_id"] == asset_id and writer._norm(t["title"] or "") == writer._norm(fields.get(TaskFields.NAME, ""))
+    if write["table"] == Tables.TASKS and fields.get(TaskFields.DESCRIPTION, "").startswith((fd.ASSET_TASK_TAG, fd.LOAN_TASK_TAG)):
+        open_tasks = service.next_actions(identity)
+        if write["op"] == "post":                                  # the same open action already exists on this asset / loan
+            subject_id = _SUBJECT_TAG.search(fields[TaskFields.DESCRIPTION]).group(2)
+            return any(t["subject_id"] == subject_id and writer._norm(t["title"] or "") == writer._norm(fields.get(TaskFields.NAME, ""))
                        for t in open_tasks)
         cur = next((t for t in open_tasks if t["id"] == write.get("record_id")), None)
         if cur is None:                                            # closed (or not the caller's) already: nothing left to change

@@ -209,6 +209,7 @@ class LoanFields:
     DUE_DAY         = "Monthly Due Day"
     EARLY_FEE       = "Early Repayment Fee/Penalty"  # free text (e.g. "אין", "2%")
     ACTIVE          = "Active Loan"                  # checkbox
+    DIRECTION       = "Direction"                    # אני חייב (empty = same) | חייבים לי — a debt owed TO the owner (FCC receivables)
 
 
 class DebtMgmtFields:

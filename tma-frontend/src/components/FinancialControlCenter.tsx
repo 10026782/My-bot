@@ -221,7 +221,7 @@ export function FinancialControlCenter({ onBack }: Props) {
   const targets = {
     goals: data.goals.map((g) => ({ id: g.goal_id, title: goalPickLabel(g) })),
     assets: (data.assets?.items ?? []).filter((a) => !ASSET_GONE.includes(a.status ?? "")).map((a) => ({ id: a.id, title: a.name ?? "" })),
-    loans: (data.loans?.items ?? []).filter((l) => l.active).map((l) => ({ id: l.id, title: l.name ?? "" })),
+    loans: (data.loans?.items ?? []).filter((l) => l.active).map((l) => ({ id: l.id, title: `${l.name ?? ""}${l.direction === "owed_to_me" ? " (חייב לי)" : ""}` })),
   };
   const panels: Record<FccTabKey, React.ReactNode> = {
     monthly,

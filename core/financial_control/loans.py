@@ -14,6 +14,8 @@ from datetime import date
 from airtable_schema import LoanFields as LF
 from core.financial_control import payoff
 
+OWED_BY_ME, OWED_TO_ME = "owed_by_me", "owed_to_me"       # a debt of the owner / a debt owed TO the owner (Loans.Direction)
+DIRECTION_TO_ME_STORED = "חייבים לי"                       # the live Loans.Direction choice for OWED_TO_ME; empty or anything else = OWED_BY_ME
 UNCLASSIFIED = "לא סווג"
 LOAN_TYPES = ("פרטית", "עסקית", "משכנתא")
 _PAID_OFF = "paid off"
@@ -89,6 +91,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     left = _num(f.get(LF.PAYMENTS_LEFT))
     end = _iso_date(f.get(LF.END_DATE))
     fee_amount, fee_known = parse_fee(f.get(LF.EARLY_FEE))
+    direction = OWED_TO_ME if str(_sel(f.get(LF.DIRECTION)) or "").strip() == DIRECTION_TO_ME_STORED else OWED_BY_ME      # tolerant of a stray space in the choice name
 
     months = int(left) if left is not None else (_months_between(today, end) if end else None)
     total_remaining = round(monthly * left, 2) if monthly is not None and left is not None else None
@@ -115,6 +118,9 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "early_repayment_fee": str(f.get(LF.EARLY_FEE)).strip() if f.get(LF.EARLY_FEE) else None,
         "early_fee_amount": fee_amount,
         "active": is_active(f),
+        "direction": direction,
+        # how the debt is repaid: a standing monthly amount, a deadline, or nothing recorded yet (None = ask the owner)
+        "arrangement": "monthly" if monthly else "deadline" if end else None,
         "status_unknown": status_unknown(f),
         # derived
         "months_remaining": months,
@@ -192,22 +198,61 @@ def summarize(items: list[dict]) -> dict:
     }
 
 
+def debt_balance(items: list[dict]) -> dict:
+    """What is owed TO the owner against what the owner owes: ``net`` > 0 is a net financial asset, ``net`` < 0 is not an asset
+    (it still reduces the personal equity). The owner's loans that are linked to an asset (``Related Asset``) are left out of the
+    net: that debt already sits inside the asset's own equity, and counting it here would count it twice. Unknown balances are
+    skipped and reported, never turned into 0; ``net`` is None only when there is no known balance at all."""
+    active = [i for i in items if i["active"]]
+    recv = [i for i in active if i["direction"] == OWED_TO_ME]
+    mine = [i for i in active if i["direction"] == OWED_BY_ME]
+    counted = [i for i in mine if not i["related_asset"]]
+    linked = [i for i in mine if i["related_asset"]]
+    r_total, r_known = _sum(i["early_closure_balance"] for i in recv)
+    l_total, l_known = _sum(i["early_closure_balance"] for i in counted)
+    linked_total, _ = _sum(i["early_closure_balance"] for i in linked)
+    net = round((r_total or 0.0) - (l_total or 0.0), 2) if (r_known or l_known) else None
+    return {
+        "receivables_total": r_total or 0.0, "liabilities_total": l_total or 0.0, "net": net,
+        "financial_asset": max(net, 0.0) if net is not None else None,         # a negative net is NOT an asset
+        "net_debt": min(net, 0.0) if net is not None else None,
+        "linked_excluded_count": len(linked), "linked_excluded_total": linked_total or 0.0,
+        "missing_receivables": len(recv) - r_known, "missing_liabilities": len(counted) - l_known,
+        "receivables_count": len(recv),
+    }
+
+
+def receivables(items: list[dict]) -> dict:
+    """Debts owed TO the owner: listed and totalled apart. They are never part of the owner's liabilities, the rankings or the
+    payoff simulation, and money received on them is not income."""
+    active = [i for i in items if i["active"] and i["direction"] == OWED_TO_ME]
+    total, known = _sum(i["early_closure_balance"] for i in active)
+    return {"count": len(active), "total_balance": total, "coverage": known,
+            "no_arrangement": sum(1 for i in active if i["arrangement"] is None)}
+
+
 def build(records: list[dict], today: date, asset_names: dict[str, str] | None = None,
-          debt_goal: dict | None = None) -> dict:
+          debt_goal: dict | None = None, tasks: list[dict] | None = None) -> dict:
     """Owner-scoped ``records`` (already policy-filtered) -> screen payload. ``debt_goal`` is the existing
-    Financial Goals debt card (the SSOT of the closing target) and is only passed through."""
+    Financial Goals debt card (the SSOT of the closing target) and is only passed through. ``tasks`` are the owner's open
+    next actions of loans (each item lists its own)."""
     items = [loan_item(r, today, asset_names) for r in records]
-    active_items = [i for i in items if i["active"]]
-    summary = summarize(items)
+    for item in items:                                       # the OPEN next actions of this loan / debt, soonest first
+        item["actions"] = [{k: t[k] for k in ("id", "title", "status", "due_date", "owner", "history")}
+                           for t in (tasks or []) if t.get("subject_id") == item["id"]]
+    mine = [i for i in items if i["direction"] == OWED_BY_ME]
+    active_items = [i for i in mine if i["active"]]
+    summary = summarize(mine)
     goal = None
     if debt_goal and debt_goal.get("target") is not None:
         goal = {"target": debt_goal["target"], "closed": debt_goal.get("actual"), "remaining": debt_goal.get("remaining"),
                 "active_closure_balance": summary["total_early_closure_balance"]}
     return {"items": items, "summary": summary, "rankings": rankings(active_items), "goal": goal,
-            "payoff": payoff.build(active_items)}
+            "payoff": payoff.build(active_items), "receivables": receivables(items),
+            "balance": debt_balance(items)}
 
 
 def scenarios(records: list[dict], today: date, budget: float) -> dict:
     """Budget simulator over the owner's active loans (read-only; nothing is executed or written)."""
     items = [loan_item(r, today) for r in records]
-    return payoff.scenarios(payoff.metrics([i for i in items if i["active"]]), budget)
+    return payoff.scenarios(payoff.metrics([i for i in items if i["active"] and i["direction"] == OWED_BY_ME]), budget)

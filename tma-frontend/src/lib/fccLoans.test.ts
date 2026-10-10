@@ -4,7 +4,7 @@ import type { FccLoan, FccLoans } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LoansSection } from "../components/FccLoans";
-import { BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, UNKNOWN, canClose, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
+import { balanceCardModel, BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, NO_ARRANGEMENT, UNKNOWN, canClose, receivableCardModel, receivableItems, receivablesSummary, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -195,9 +195,9 @@ const withActions = (disabled: boolean, onAction: (i: string, id: string) => voi
   renderToStaticMarkup(createElement(LoansSection, { loans, actions: { onAction, disabled } }));
 const activeCount = loans.items.filter((l) => l.active).length;
 
-test("loan cards: balance / payment / close buttons on every ACTIVE loan, none on closed ones; no input or panel in the list", () => {
+test("loan cards: balance / payment / partial / arrangement / next action / close buttons on every ACTIVE loan, none on closed ones; no input or panel in the list", () => {
   const html = withActions(false);
-  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, activeCount * 2);
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, activeCount * 5);   // balance, payment + partial, arrangement, next action
   assert.equal((html.match(/fcc-loan__closebtn/g) || []).length, activeCount);
   assert.ok(html.includes("עדכון יתרה") && html.includes("שינוי החזר") && html.includes("סגרתי את ההלוואה"));
   assert.ok(!html.includes("<textarea"));
@@ -205,8 +205,67 @@ test("loan cards: balance / payment / close buttons on every ACTIVE loan, none o
 
 test("while the shared writer holds a draft every card action is disabled; without actions no buttons render", () => {
   const locked = withActions(true);
-  assert.equal((locked.match(/fcc-loan__(actionbtn|closebtn)[^>]*disabled=""|disabled=""[^>]*fcc-loan__(actionbtn|closebtn)/g) || []).length, activeCount * 3);
+  assert.equal((locked.match(/fcc-loan__(actionbtn|closebtn)[^>]*disabled=""|disabled=""[^>]*fcc-loan__(actionbtn|closebtn)/g) || []).length, activeCount * 6);   // balance / payment / partial / arrangement / next action + close
   assert.ok(!renderToStaticMarkup(createElement(LoansSection, { loans })).includes("fcc-loan__actions"));
+});
+
+// ── debts owed TO the owner ──────────────────────────────────────────────────────────────────────────────────────
+const owed = mk({ id: "r1", name: "דני", direction: "owed_to_me", early_closure_balance: 20000 });
+const owedMonthly = mk({ id: "r2", name: "רונית", direction: "owed_to_me", early_closure_balance: 9000, arrangement: "monthly", monthly_payment: 1500, end_date: "2027-03-01",
+  actions: [{ id: "t1", title: "להתקשר", status: "ממתין", due_date: "2026-10-20", owner: "אורי", history: "" }] });
+const withOwed: FccLoans = { ...loans, items: [...loans.items, owed, owedMonthly], receivables: { count: 2, total_balance: 29000, coverage: 2, no_arrangement: 1 } };
+
+test("a debt owed to the owner is never listed among his loans", () => {
+  const ids = filterLoans(withOwed.items, "all").map((l) => l.id);
+  assert.ok(!ids.includes("r1") && !ids.includes("r2") && ids.includes("a"));
+});
+
+test("receivables: largest first, arrangement text per mechanism, 'not set' stays visible, the open actions travel with the card", () => {
+  assert.equal(receivableItems(withOwed).map((l) => l.id).join(), "r1,r2");
+  assert.equal(receivableCardModel(owed).arrangement, NO_ARRANGEMENT);
+  assert.equal(receivableCardModel(owed).arrangementKnown, false);
+  const m = receivableCardModel(owedMonthly);
+  assert.ok(m.arrangement.includes("פירעון חודשי") && m.arrangement.includes("01/03/2027") && m.arrangementKnown);
+  assert.equal(m.actions[0].title, "להתקשר");
+  assert.equal(receivableCardModel(mk({ id: "r3", direction: "owed_to_me", arrangement: "deadline", end_date: "2027-01-02" })).arrangement, "מועד פירעון 02/01/2027");
+  assert.equal(receivablesSummary(withOwed)?.includes("29,000") && receivablesSummary(withOwed)?.includes("1 בלי הסדר פירעון"), true);
+  assert.equal(receivablesSummary(loans), null);
+});
+
+test("the receivables section is separate, says they are not liabilities / not income, and offers the debt actions", () => {
+  const html = renderToStaticMarkup(createElement(LoansSection, { loans: withOwed, actions: { onAction: () => undefined, disabled: false } }));
+  assert.ok(html.includes("חובות שחייבים לי") && html.includes("אינו הכנסה") && html.includes("נפרע במלואו"));
+  assert.ok(html.includes("פרעון חלקי") && html.includes("הסדר פירעון") && html.includes("פעולה הבאה"));
+  assert.ok(html.includes("להתקשר") && html.includes("אחראי: אורי"));
+  const only = renderToStaticMarkup(createElement(LoansSection, { loans: { ...withOwed, items: [owed], summary: { ...withOwed.summary, total_active_loans: 0 }, receivables: { count: 1, total_balance: 20000, coverage: 1, no_arrangement: 1 } } }));
+  assert.ok(only.includes("דני") && !only.includes("אין הלוואות פעילות"));
+});
+
+test("a loan card lists its open next actions with start / done / cancel / edit by task id", () => {
+  const html = renderToStaticMarkup(createElement(LoansSection, { loans: { ...loans, items: loans.items.map((l) => (l.id === "a" ? { ...l, actions: owedMonthly.actions } : l)) },
+    actions: { onAction: () => undefined, disabled: false } }));
+  assert.ok(html.includes("פעולות הבאות (1)") && html.includes("להתקשר") && html.includes("בוצע") && html.includes("ערוך"));
+});
+
+const bal = (o: Partial<NonNullable<FccLoans["balance"]>>): FccLoans => ({ ...withOwed, balance: {
+  receivables_total: 1000000, liabilities_total: 700000, net: 300000, financial_asset: 300000, net_debt: 0, linked_excluded_count: 1, linked_excluded_total: 400000,
+  missing_receivables: 0, missing_liabilities: 1, receivables_count: 2, ...o } });
+
+test("balance card: owed to me vs I owe; positive net is a financial asset, negative is NOT an asset, exclusions are said out loud", () => {
+  const m = balanceCardModel(bal({}))!;
+  assert.equal(m.lines.map((l) => l.value).join(" | "), "₪1,000,000 | ₪700,000 | ₪300,000");
+  assert.ok(m.positive && m.verdict.includes("נכס פיננסי נטו") && m.verdict.includes("נרשם בנכסים"));
+  assert.ok(m.notes.some((n) => n.includes("מקושרות לנכס") && n.includes("400,000")) && m.notes.some((n) => n.includes("בלי יתרה")));
+  const neg = balanceCardModel(bal({ net: -500000, financial_asset: 0, net_debt: -500000 }))!;
+  assert.ok(!neg.positive && neg.verdict.includes("אינה נכס") && neg.verdict.includes("הון האישי"));
+  assert.equal(balanceCardModel(bal({ net: null }))!.verdict, UNKNOWN);
+});
+
+test("balance card shows only when something is owed to the owner, in the loans tab section", () => {
+  assert.equal(balanceCardModel(withOwed), null);                                    // no balance block in the payload
+  assert.equal(balanceCardModel(bal({ receivables_count: 0 })), null);
+  const html = renderToStaticMarkup(createElement(LoansSection, { loans: bal({}) }));
+  assert.ok(html.includes("חייבים לי מול החובות שלי") && html.includes("נכס פיננסי נטו"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

@@ -1,8 +1,30 @@
 // Pure presentation of the FCC loans & debt area. Unknown stays unknown: a missing number renders
 // "לא הוגדר" (never ₪0 / 0%), a derived cost is marked approximate while it rests on incomplete data,
 // and nothing here recommends which loan to close — it only orders and lays out the facts.
-import type { FccLoan, FccLoans } from "../types";
+import type { FccAssetAction, FccLoan, FccLoans } from "../types";
 import { dmy, money } from "./fccPresentation";
+
+export interface ActionRow {
+  id: string;
+  title: string;
+  statusLabel: string;              // "ממתין" | "בתהליך"
+  inProgress: boolean;              // true -> no "start" button
+  meta: string;                     // "אחראי: אורי · עד 20/10/2026"
+  history: string[];                // lines already recorded (started / …)
+}
+
+const ymd = (iso: string | null) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
+
+export function actionRows(i: { actions?: FccAssetAction[] }): ActionRow[] {
+  return (i.actions ?? []).map((a) => ({
+    id: a.id,
+    title: a.title || UNKNOWN,
+    statusLabel: a.status === "בביצוע" ? "בתהליך" : "ממתין",
+    inProgress: a.status === "בביצוע",
+    meta: [a.owner && a.owner !== "—" ? `אחראי: ${a.owner}` : "", a.due_date ? `עד ${ymd(a.due_date)}` : ""].filter(Boolean).join(" · "),
+    history: a.history ? a.history.split("\n").filter(Boolean) : [],
+  }));
+}
 
 export const UNKNOWN = "לא הוגדר";
 export const UNCLASSIFIED = "לא סווג";
@@ -45,8 +67,10 @@ export function loanHeaderCards(loans: FccLoans): LoanHeaderCard[] {
   ];
 }
 
+export const owedToMe = (l: { direction?: string }): boolean => l.direction === "owed_to_me";
+
 export function filterLoans(items: FccLoan[], filter: LoanFilter): FccLoan[] {
-  const active = items.filter((i) => i.active);
+  const active = items.filter((i) => i.active && !owedToMe(i));       // a debt owed TO the owner is never listed among his loans
   const type = FILTERS.find((f) => f.key === filter)?.type;
   return filter === "all" ? active : active.filter((i) => i.loan_type === type);   // unclassified loans appear under "הכל" only
 }
@@ -154,6 +178,61 @@ export function loanGoalModel(loans: FccLoans): LoanGoalModel | null {
 // owner's next word (אשר / ערוך / בטל / an answer).
 
 export const CLOSE_BUTTON = "סגרתי את ההלוואה";
+export const PARTIAL_BUTTON = "פרעון חלקי";
+export const ARRANGEMENT_BUTTON = "הסדר פירעון";
+export const NEXT_ACTION_BUTTON = "פעולה הבאה";
+export const RECEIVED_BUTTON = "נפרע במלואו";
+
+/** Debts owed TO the owner: active ones, largest first (unknown balance last). */
+export function receivableItems(loans: FccLoans): FccLoan[] {
+  return loans.items.filter((i) => i.active && owedToMe(i))
+    .sort((a, b) => (b.early_closure_balance ?? -1) - (a.early_closure_balance ?? -1) || (a.name ?? "").localeCompare(b.name ?? ""));
+}
+
+export const NO_ARRANGEMENT = "לא הוגדר הסדר פירעון";
+
+export interface BalanceCardModel {
+  lines: LoanRow[];
+  verdict: string;                     // what the net is: a financial asset, or NOT an asset
+  positive: boolean;
+  notes: string[];                     // what was left out / unknown — never hidden
+}
+
+/** "Owed to me" vs "I owe": shown only when something is owed to the owner. A negative net is not an asset (but it still counts in the personal equity). */
+export function balanceCardModel(loans: FccLoans): BalanceCardModel | null {
+  const b = loans.balance;
+  if (!b || b.receivables_count === 0) return null;
+  const net = b.net;
+  const notes: string[] = [];
+  if (b.linked_excluded_count > 0) notes.push(`${b.linked_excluded_count} הלוואות מקושרות לנכס (${money(b.linked_excluded_total)}) לא נכללות — החוב שלהן כבר בהון הנכס.`);
+  if (b.missing_liabilities > 0 || b.missing_receivables > 0) notes.push(`${b.missing_liabilities + b.missing_receivables} חובות בלי יתרה לא נכללים בחישוב.`);
+  return {
+    lines: [
+      { label: "חייבים לי", value: money(b.receivables_total) },
+      { label: "החובות שלי (בלי מקושרות לנכס)", value: money(b.liabilities_total) },
+      { label: "יתרה נטו", value: net == null ? UNKNOWN : money(net) },
+    ],
+    verdict: net == null ? UNKNOWN : net > 0 ? `נכס פיננסי נטו: ${money(net)} — נרשם בנכסים` : net < 0 ? `היתרה שלילית (${money(net)}) — אינה נכס, אך נכנסת להון האישי` : "המאזן מתאזן — אין נכס נטו",
+    positive: net != null && net > 0,
+    notes,
+  };
+}
+
+export interface ReceivableCardModel { id: string; title: string; balance: string; arrangement: string; arrangementKnown: boolean; actions: ActionRow[] }
+
+export function receivableCardModel(l: FccLoan): ReceivableCardModel {
+  const arrangement = l.arrangement === "monthly" ? `פירעון חודשי ${val(l.monthly_payment)}${l.end_date ? ` · עד ${dmy(l.end_date)}` : ""}`
+    : l.arrangement === "deadline" ? `מועד פירעון ${dmy(l.end_date) || UNKNOWN}` : NO_ARRANGEMENT;
+  return { id: l.id, title: l.name || UNKNOWN, balance: val(l.early_closure_balance), arrangement, arrangementKnown: !!l.arrangement,
+           actions: actionRows(l) };
+}
+
+export function receivablesSummary(loans: FccLoans): string | null {
+  const r = loans.receivables;
+  if (!r || r.count === 0) return null;
+  const missing = r.no_arrangement > 0 ? ` · ${r.no_arrangement} בלי הסדר פירעון` : "";
+  return `חייבים לי: ${val(r.total_balance)} (${r.count} חובות)${missing}`;
+}
 export const BALANCE_BUTTON = "עדכון יתרה";
 export const PAYMENT_BUTTON = "שינוי החזר";
 

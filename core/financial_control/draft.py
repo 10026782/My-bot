@@ -43,14 +43,21 @@ FCC_ASSET_STEP = "fcc_asset_step"          # Next Step (free text) + optional Ne
 FCC_ASSET_STEP_EDIT = "fcc_asset_step_edit"      # edit one OPEN next action (a Task): text / owner / due date
 FCC_ASSET_STEP_STATUS = "fcc_asset_step_status"  # move one open next action: בביצוע / בוצע / בוטלה (a patch of that Task)
 ASSET_TASK_TAG = "[FCC-ASSET:"                   # description tag of an asset next-action Task (goal follow-ups use "[FCC:")
+LOAN_TASK_TAG = "[FCC-LOAN:"                     # the same for a loan / a debt owed to the owner (the draft entities are shared)
+FCC_LOAN_PARTIAL = "fcc_loan_partial"            # a partial repayment: new balance + where the money went / came from (+ a debt-goal event for own debts)
+FCC_LOAN_ARRANGEMENT = "fcc_loan_arrangement"    # how a debt is repaid: monthly amount / a deadline / no arrangement
+FCC_RECEIVABLE_NEW = "fcc_receivable_new"        # a debt owed TO the owner (Loans.Direction = חייבים לי)
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
 FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
-                FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
+                FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
 LOAN_TYPE_STORED = {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"}   # the live Loans."Loan Type" choices
 LOAN_PAID_OFF = "Paid Off"          # existing Loans.Payment Status choice
+DIRECTION_TO_ME = "חייבים לי"       # Loans.Direction choice (created 10/2026): a debt owed TO the owner; empty = the owner's own debt
+ARRANGEMENTS = ("monthly", "deadline", "none")
+ARRANGEMENT_SCHEDULE = {"monthly": "Monthly", "deadline": "Custom"}   # the live Loans."Payment Schedule" choices
 
 # Intent registry (SSOT for the contextual composer chips / card actions). A chip only names an intent (+ optionally the
 # record it is about); it pre-fills `kind` and nothing else, and the SAME BusinessDraft completion flow asks what is missing.
@@ -68,6 +75,10 @@ INTENTS: dict[str, dict] = {
     "loan.update_balance":       {"tab": "loans", "entity": "fcc_loan_balance", "target": "loan", "target_required": True},
     "loan.update_payment":       {"tab": "loans", "entity": "fcc_loan_payment", "target": "loan", "target_required": True},
     "loan.create":               {"tab": "loans", "entity": "fcc_loan_new"},
+    "loan.partial_payment":      {"tab": "loans", "entity": "fcc_loan_partial", "target": "loan", "target_required": True},
+    "loan.arrangement":          {"tab": "loans", "entity": "fcc_loan_arrangement", "target": "loan", "target_required": True},
+    "loan.receivable_new":       {"tab": "loans", "entity": "fcc_receivable_new"},
+    "loan.next_step":            {"tab": "loans", "entity": "fcc_asset_step", "target": "loan", "target_required": True},
     "asset.update_value":        {"tab": "assets", "entity": "fcc_asset_value", "target": "asset", "target_required": True},
     "asset.update_mortgage":     {"tab": "assets", "entity": "fcc_asset_mortgage", "target": "asset", "target_required": True},
     "asset.next_step":           {"tab": "assets", "entity": "fcc_asset_step", "target": "asset", "target_required": True},
@@ -106,6 +117,8 @@ INFERENCE: dict[str, dict[str, str]] = {
 
 _CUM = (Condition("calc_method", ("cumulative",)),)
 _OTHER = (Condition("category", ("other",)),)
+_MONTHLY = (Condition("arrangement", ("monthly",)),)
+_DEADLINE = (Condition("arrangement", ("deadline",)),)
 
 FCC_CONTRACTS: dict[str, EntityContract] = {
     FCC_GOAL: EntityContract(FCC_GOAL, (
@@ -158,6 +171,24 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
     FCC_LOAN_PAYMENT: EntityContract(FCC_LOAN_PAYMENT, (
         _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
     )),
+    # A partial repayment: the loan, its balance before and the destination of the money live in source_context (never editable
+    # fields) — an edit can change the amount or the date, never WHICH loan or what it was before.
+    FCC_LOAN_PARTIAL: EntityContract(FCC_LOAN_PARTIAL, (
+        _f("amount", EF.AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
+        _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
+    )),
+    FCC_LOAN_ARRANGEMENT: EntityContract(FCC_LOAN_ARRANGEMENT, (
+        _f("arrangement", LF.PAYMENT_SCHED, InputType.SELECT, required=RequiredMode.ALWAYS, choices=ARRANGEMENTS),
+        _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.CONDITIONAL, when=_MONTHLY, validation="positive"),
+        _f("end_date", LF.END_DATE, InputType.DATE, required=RequiredMode.CONDITIONAL, when=_DEADLINE),
+    )),
+    FCC_RECEIVABLE_NEW: EntityContract(FCC_RECEIVABLE_NEW, (
+        _f("name", LF.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
+        _f("balance", LF.EARLY_CLOSURE, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
+        _f("arrangement", LF.PAYMENT_SCHED, InputType.SELECT, required=RequiredMode.ALWAYS, choices=ARRANGEMENTS),
+        _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.CONDITIONAL, when=_MONTHLY, validation="positive"),
+        _f("end_date", LF.END_DATE, InputType.DATE, required=RequiredMode.CONDITIONAL, when=_DEADLINE),
+    )),
     FCC_LOAN_NEW: EntityContract(FCC_LOAN_NEW, (
         _f("name", LF.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("loan_type", LF.LOAN_TYPE, InputType.SELECT, required=RequiredMode.ALWAYS, choices=LOAN_TYPES),
@@ -209,11 +240,15 @@ LABELS = {
     "name": "התחייבות", "scope": "שייכות", "frequency": "תדירות", "review_status": "החלטה", "saving": "חיסכון חודשי פוטנציאלי",
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
     "balance": "יתרה לסגירה מוקדמת", "payment": "החזר חודשי", "loan_type": "סוג", "rate": "ריבית שנתית", "lender": "מלווה",
-    "original": "סכום מקורי", "payments_left": "תשלומים שנותרו",
+    "original": "סכום מקורי", "payments_left": "תשלומים שנותרו", "arrangement": "הסדר פירעון",
     "sale_date": "תאריך מכירה", "sale_amount": "מחיר מכירה (100%)", "value": "שווי נוכחי", "mortgage": "יתרת משכנתא", "step": "פעולה הבאה", "step_owner": "אחראי",
 }
 _STEP_LABELS = {"step": "הפעולה", "due_date": "תאריך יעד"}
-LABELS_BY_ENTITY = {FCC_LOAN_NEW: {"name": "שם ההלוואה"}, FCC_ASSET_STEP: _STEP_LABELS, FCC_ASSET_STEP_EDIT: _STEP_LABELS}
+_ARRANGEMENT_LABELS = {"payment": "פירעון חודשי", "end_date": "מועד פירעון"}
+LABELS_BY_ENTITY = {FCC_LOAN_NEW: {"name": "שם ההלוואה"}, FCC_ASSET_STEP: _STEP_LABELS, FCC_ASSET_STEP_EDIT: _STEP_LABELS,
+                    FCC_LOAN_PARTIAL: {"amount": "סכום הפרעון", "occurred_at": "תאריך"},
+                    FCC_LOAN_ARRANGEMENT: _ARRANGEMENT_LABELS,
+                    FCC_RECEIVABLE_NEW: {"name": "שם החייב", "balance": "יתרת החוב", **_ARRANGEMENT_LABELS}}
 
 
 def label(entity: str, field: str) -> str:
@@ -231,12 +266,14 @@ VALUE_LABELS = {
     "obligation_type": {"subscription": "מנוי", "standing_order": "הוראת קבע", "service": "שירות",
                         "loan_payment": "החזר הלוואה", "other": "אחר"},
     "essentiality": {"essential": "הכרחי", "useful": "שימושי", "optional": "אופציונלי", "review": "לבדיקה"},
+    "arrangement": {"monthly": "פירעון חודשי קבוע", "deadline": "מועד פירעון", "none": "אין הסדר"},
     "kind": {"one_time": "חד-פעמי", "monthly_recurring": "חודשי קבוע", "target_change": "שינוי יעד", "direct_cost": "הוצאה ישירה", "household_expense": "הוצאה ביתית", "note": "הערה"},
 }
 # Closed answer vocabulary of the options we present (equivalent to buttons) — not NL parsing.
 ANSWER_VOCAB = {f: {label: key for key, label in labels.items()} for f, labels in VALUE_LABELS.items()}
 ANSWER_VOCAB["category"]["קרן חירום זמינה"] = "emergency_fund"
 ANSWER_VOCAB["category"]["חיסכון"] = "savings"
+ANSWER_VOCAB["arrangement"].update({"חודשי": "monthly", "פירעון חודשי": "monthly", "מועד": "deadline", "תאריך": "deadline", "אין": "none"})
 
 
 def display_value(field: str, value: Any) -> str:
@@ -267,8 +304,18 @@ def record_noun(entity: str, fields: Mapping[str, Any]) -> str:
     return "מקור" if kind in INCOME_KINDS else "סעיף" if kind == "household_expense" else "יעד"
 
 
-def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: str = "") -> str:
+def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: str = "", direction: str = "") -> str:
     title = fields.get("title") or goal_title
+    if entity == FCC_LOAN_PARTIAL and field == "amount":
+        return (f"כמה {goal_title or 'החייב'} החזיר/ה בפרעון החלקי?" if direction == "owed_to_me"
+                else f"כמה שילמת בפרעון החלקי של {goal_title or 'ההלוואה'}?")
+    if entity in (FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW) and field in ("arrangement", "payment", "end_date"):
+        who = goal_title or fields.get("name") or "החוב"
+        return {"arrangement": f"איך {who} אמור להיפרע? פירעון חודשי קבוע / מועד פירעון / אין הסדר",
+                "payment": f"כמה לחודש בפירעון של {who}?",
+                "end_date": f"עד איזה תאריך {who} אמור להיפרע?"}[field]
+    if entity == FCC_RECEIVABLE_NEW:
+        return {"name": "מי חייב לך? (שם החייב)", "balance": "כמה הוא חייב לך כרגע?"}.get(field, f"מה {label(entity, field)}?")
     if field == "title":
         return "איך לקרוא ליעד?"
     if field == "target_amount":
@@ -323,7 +370,8 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
 
 
 def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "", operation: str = "CREATE",
-                  changed: Mapping[str, Any] | None = None, inferred: tuple[str, ...] = (), note: str = "") -> str:
+                  changed: Mapping[str, Any] | None = None, inferred: tuple[str, ...] = (), note: str = "",
+                  subject: str = "נכס") -> str:
     """Full final business payload, shown before confirmation."""
     order = [f.field_name for f in FCC_CONTRACTS[entity].fields]
     lines: list[str] = []
@@ -331,17 +379,18 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
             FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה",
             FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה",
-            FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: "פעולה הבאה בנכס", FCC_ASSET_STEP_EDIT: "עריכת פעולה בנכס",
-            FCC_ASSET_STEP_STATUS: "עדכון סטטוס פעולה בנכס", FCC_ASSET_SOLD: "סימון נכס כנמכר"}[entity]
+            FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: f"פעולה הבאה ב{subject}", FCC_ASSET_STEP_EDIT: f"עריכת פעולה ב{subject}",
+            FCC_ASSET_STEP_STATUS: f"עדכון סטטוס פעולה ב{subject}", FCC_ASSET_SOLD: "סימון נכס כנמכר",
+            FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי"}[entity]
     lines.append(f"📋 {head}")
     if note and entity != FCC_ASSET_SOLD:
         lines.append(note)
     if entity == FCC_EVENT and goal_title:
         lines.append(f"• {record_noun(entity, fields)}: {goal_title}")
-    if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT) and goal_title:
-        lines.append(f"• הלוואה: {goal_title}")
+    if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT) and goal_title:
+        lines.append(f"• הלוואה / חוב: {goal_title}")
     if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD) and goal_title:
-        lines.append(f"• נכס: {goal_title}")
+        lines.append(f"• {subject}: {goal_title}")
     for name in order:
         if name == "goal" and entity == FCC_EVENT:
             continue
@@ -356,6 +405,12 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append("יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
     if entity == FCC_LOAN_NEW:
         lines.append("תיווצר הלוואה פעילה בבעלותך.")
+    if entity == FCC_RECEIVABLE_NEW:
+        lines.append("יירשם חוב שחייבים לך. הוא לא נספר בהתחייבויות שלך, ותשלום שיתקבל עליו אינו הכנסה.")
+    if entity == FCC_LOAN_ARRANGEMENT:
+        lines.append("יתעדכנו רק פרטי הפירעון של החוב (ושורה בהערות); שאר נתוני ההלוואה לא ייגעו.")
+    if entity == FCC_LOAN_PARTIAL:
+        lines.append("יתעדכנו היתרה ושורת היסטוריה בהערות ההלוואה. ההחזר החודשי ומספר התשלומים לא משתנים — לעדכון: ״שינוי החזר״.")
     if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE):
         lines.append("יתעדכן שדה אחד בלבד; שאר נתוני הנכס לא ייגעו.")
     if entity == FCC_ASSET_MORTGAGE:
@@ -458,10 +513,10 @@ def asset_sold_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> l
              "audit_action": "fcc_asset_sold", "audit_details": record_id}]
 
 
-def _task_description(asset_id: str, owner: Any, extra: str = "") -> str:
+def _task_description(subject_id: str, owner: Any, extra: str = "", tag: str = ASSET_TASK_TAG) -> str:
     """Tag first (how the screen finds the task), then who is responsible (an Assets.Next Step Owner choice, not a Profile), then
-    any history lines (started / done) that were already there."""
-    lines = [f"{ASSET_TASK_TAG}{asset_id}]"]
+    any history lines (started / done) that were already there. ``tag`` names the subject: an asset (default) or a loan."""
+    lines = [f"{tag}{subject_id}]"]
     if owner not in (None, "", "—"):
         lines.append(f"אחראי: {owner}")
     if extra.strip():
@@ -471,11 +526,11 @@ def _task_description(asset_id: str, owner: Any, extra: str = "") -> str:
 
 def asset_step_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
     """A NEW next action = one new Task owned by the caller (Topic כספים), tagged with the asset. Existing open actions are untouched."""
-    asset_id = str(source.get("asset_id") or "")
+    asset_id = str(source.get("subject_id") or source.get("asset_id") or "")      # the subject: an asset, or a loan (task_tag)
     if not asset_id:
         raise UnsupportedOperationError("asset next action without an asset record")
     fields = {TaskFields.NAME: str(values["step"]).strip(), TaskFields.STATUS: "ממתין",
-              TaskFields.DESCRIPTION: _task_description(asset_id, values.get("step_owner")),
+              TaskFields.DESCRIPTION: _task_description(asset_id, values.get("step_owner"), tag=source.get("task_tag") or ASSET_TASK_TAG),
               TaskFields.OWNER: [source["profile_id"]], TaskFields.TOPIC: FCC_TASK_TOPIC}
     if values.get("due_date") not in (None, ""):
         fields[TaskFields.DUE_DATE] = values["due_date"]
@@ -483,11 +538,12 @@ def asset_step_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> l
 
 
 def asset_step_edit_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
-    task_id, asset_id = str(source.get("record_id") or ""), str(source.get("asset_id") or "")
+    task_id, asset_id = str(source.get("record_id") or ""), str(source.get("subject_id") or source.get("asset_id") or "")
     if not task_id or not asset_id:
         raise UnsupportedOperationError("edit of a next action without its task")
     fields = {TaskFields.NAME: str(values["step"]).strip(),
-              TaskFields.DESCRIPTION: _task_description(asset_id, values.get("step_owner"), str(source.get("history") or ""))}
+              TaskFields.DESCRIPTION: _task_description(asset_id, values.get("step_owner"), str(source.get("history") or ""),
+                                                        tag=source.get("task_tag") or ASSET_TASK_TAG)}
     if values.get("due_date") not in (None, ""):
         fields[TaskFields.DUE_DATE] = values["due_date"]
     return [{"op": "patch", "table": Tables.TASKS, "record_id": task_id, "fields": fields,
@@ -499,7 +555,7 @@ STEP_MODES = {"start": ("בביצוע", "התחילה"), "done": ("בוצע", "�
 
 def asset_step_status_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
     """Move ONE open action. "בוטלה" has no status of its own in Tasks: it closes the task (בוצע) with a visible history line."""
-    task_id, asset_id = str(source.get("record_id") or ""), str(source.get("asset_id") or "")
+    task_id, asset_id = str(source.get("record_id") or ""), str(source.get("subject_id") or source.get("asset_id") or "")
     status, word = STEP_MODES[str(source.get("mode"))]
     if not task_id or not asset_id:
         raise UnsupportedOperationError("status of a next action without its task")
@@ -507,6 +563,84 @@ def asset_step_status_writes(values: Mapping[str, Any], source: Mapping[str, Any
     return [{"op": "patch", "table": Tables.TASKS, "record_id": task_id,
              "fields": {TaskFields.STATUS: status, TaskFields.DESCRIPTION: history},
              "audit_action": "fcc_asset_step_status", "audit_details": f"{task_id}:{source.get('mode')}"}]
+
+
+def _note_line(old: Any, line: str) -> str:
+    """Append one history line to a record's free-text Notes (what was there is kept as it is)."""
+    return "\n".join(x for x in (str(old or "").strip(), line) if x)
+
+
+def _arrangement_text(values: Mapping[str, Any]) -> str:
+    kind = values.get("arrangement")
+    if kind == "monthly":
+        text = f"פירעון חודשי {display_value('payment', values.get('payment'))}"
+        return text + (f", עד {display_value('end_date', values['end_date'])}" if values.get("end_date") else "")
+    if kind == "deadline":
+        return f"מועד פירעון {display_value('end_date', values.get('end_date'))}"
+    return "אין הסדר פירעון"
+
+
+def _arrangement_fields(values: Mapping[str, Any]) -> dict:
+    """The repayment mechanism as storage fields: a monthly amount and/or a deadline; "none" writes no number."""
+    fields: dict[str, Any] = {}
+    kind = values.get("arrangement")
+    if kind in ARRANGEMENT_SCHEDULE:
+        fields[LF.PAYMENT_SCHED] = ARRANGEMENT_SCHEDULE[kind]
+    if kind == "monthly" and values.get("payment") not in (None, ""):
+        fields[LF.MONTHLY_PAYMENT] = values["payment"]
+    if kind in ("monthly", "deadline") and values.get("end_date") not in (None, ""):
+        fields[LF.END_DATE] = values["end_date"]
+    return fields
+
+
+def loan_arrangement_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """ONE patch of the chosen loan / debt: the repayment mechanism fields + a dated line in its Notes."""
+    loan_id = str(source.get("record_id") or "")
+    if not loan_id:
+        raise UnsupportedOperationError("repayment arrangement without a loan record")
+    line = f"הסדר פירעון ({source.get('today', '')}): {_arrangement_text(values)}"
+    fields = {**_arrangement_fields(values), LF.NOTES: _note_line(source.get("notes_before"), line)}
+    return [{"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": fields,
+             "audit_action": "fcc_loan_arrangement", "audit_details": loan_id}]
+
+
+def receivable_new_write(values: Mapping[str, Any], source: Mapping[str, Any]) -> dict:
+    """A debt owed TO the owner: a Loans row marked Direction = חייבים לי (the debtor is the Lender), active, with its repayment mechanism."""
+    line = f"הסדר פירעון ({source.get('today', '')}): {_arrangement_text(values)}"
+    fields = {LF.NAME: str(values["name"]).strip(), LF.LENDER: str(values["name"]).strip(), LF.EARLY_CLOSURE: values["balance"],
+              LF.ACTIVE: True, LF.DIRECTION: DIRECTION_TO_ME, LF.NOTES: line, **_arrangement_fields(values)}
+    return {"op": "post", "table": Tables.LOANS, "fields": fields,
+            "audit_action": "fcc_receivable_create", "audit_details": str(values.get("name", ""))[:80]}
+
+
+def loan_partial_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """A partial repayment = ONE confirmation, one patch of the loan (new balance + a history line in its Notes) and — for the owner's
+    OWN debt with a debt goal — one progress event. Money received on a debt owed TO the owner is not income: no event, no goal.
+    The new balance is derived from the balance the owner reviewed (never below 0); an unknown balance stays untouched."""
+    loan_id = str(source.get("record_id") or "")
+    if not loan_id:
+        raise UnsupportedOperationError("partial repayment without a loan record")
+    amount, day = values["amount"], values["occurred_at"]
+    before = source.get("balance_before")
+    dest = str(source.get("destination") or "").strip()
+    to_me = source.get("direction") == "owed_to_me"
+    line = f"פרעון חלקי {display_value('amount', amount)} ב־{display_value('occurred_at', day)}"
+    if dest:
+        line += f" — {'הכסף הועבר ל' if to_me else 'מקור התשלום: '}{dest}"
+    fields: dict[str, Any] = {LF.NOTES: _note_line(source.get("notes_before"), line)}
+    if before is not None:
+        fields[LF.EARLY_CLOSURE] = round(max(float(before) - float(amount), 0.0), 2)
+    writes = [{"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": fields,
+               "audit_action": "fcc_loan_partial", "audit_details": loan_id}]
+    goal_id = str(source.get("debt_goal_id") or "")
+    if goal_id and not to_me:
+        raw = f"partial_loan:{loan_id}:{source.get('raw_text', '')}"
+        event = _event_write({"goal": goal_id, "kind": "one_time", "amount": amount, "occurred_at": day,
+                              "note": f"פרעון חלקי: {source.get('loan_name', '')}" + (f" — {dest}" if dest else "")},
+                             ctx, raw)
+        event["audit_action"] = "fcc_loan_partial_event"
+        writes.append(event)
+    return writes
 
 
 def loan_new_write(values: Mapping[str, Any]) -> dict:
@@ -581,6 +715,12 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": asset_sold_writes(values, writer.source_context)}
         if entity == FCC_LOAN_NEW:
             return {"writes": [loan_new_write(values)]}
+        if entity == FCC_LOAN_PARTIAL:
+            return {"writes": loan_partial_writes(values, ctx, writer.source_context)}
+        if entity == FCC_LOAN_ARRANGEMENT:
+            return {"writes": loan_arrangement_writes(values, writer.source_context)}
+        if entity == FCC_RECEIVABLE_NEW:
+            return {"writes": [receivable_new_write(values, writer.source_context)]}
         if entity == FCC_FOLLOWUP:
             tag = f"[FCC:{values.get('goal') or 'none'}]"
             fields = {TaskFields.NAME: values["title"], TaskFields.STATUS: "ממתין",
