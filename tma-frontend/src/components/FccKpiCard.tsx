@@ -1,5 +1,5 @@
 import type { FccSavingsRelease, FccWeekly } from "../types";
-import { savingsFollowUp, savingsReleaseModel, WEEKLY_SURPLUS_CHOICES, weeklySurplusQuestion } from "../lib/fccPresentation";
+import { savingsFollowUp, savingsReleaseModel, weeklySurplusChoices, weeklySurplusQuestion } from "../lib/fccPresentation";
 import { Surface } from "./ui/Surface";
 
 export function KpiCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -43,8 +43,8 @@ export function WeeklySurplusCard({ weekly, onStart, disabled }: { weekly: FccWe
     <Surface variant="subtle" padding="compact" className="fcc-release" role="status" aria-label="עודף שבועי">
       <p className="fcc-quick__message">{question}</p>
       <div className="fcc-quick__choices">
-        {WEEKLY_SURPLUS_CHOICES.map((c) => (
-          <button key={c.intent} type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={disabled}
+        {weeklySurplusChoices(weekly).map((c, i) => (
+          <button key={c.intent} type="button" className={`boss-button ${i === 0 ? "boss-button--primary" : "boss-button--quiet"} boss-bubble--action`} disabled={disabled}
                   onClick={() => onStart(c.intent)}>{c.label}</button>
         ))}
       </div>

@@ -3747,131 +3747,51 @@ def test_adopting_needs_a_legacy_step_and_an_owned_asset(no_model):
     assert intent("asset.adopt_step").state == "clarify"
 
 
-# ── The fixed weekly quota: target / days-in-month × 7, per-day month rates, carry between weeks ──────────────────
+# ── The fixed weekly quota: target / days-in-month × 7, per-day month rates; a shortfall carries, a surplus is HELD for the month end ──
 def _live(*pairs):
     return [calc.Event(k, a, date.fromisoformat(d), False, None) for d, a, k in pairs]
 
 
-def test_weekly_quota_uses_each_days_own_month_rate_and_carries_the_gap_forward():
-    live = _live(("2026-10-05", 3000, "one_time"), ("2026-10-06", 1000, "one_time"))
-    w = calc.weekly_quota(15000, live, date(2026, 10, 12))
-    assert w["week_start"] == "2026-10-11" and w["week_end"] == "2026-10-17"
-    assert w["quota"] == round(15000 / 31 * 7, 2)                      # 3,387.10
-    assert [h["week_start"] for h in w["history"]] == ["2026-10-04"]    # Oct 1-3 belong to September's last week
-    assert w["history"][0]["balance"] == round(4000 - 15000 / 31 * 7, 2)
-    assert w["carry_in"] == -w["history"][0]["balance"] and w["surplus"] == 0.0     # last week went over -> it lowers this week's need
-    assert abs(w["required"] - (w["quota"] + w["carry_in"])) < 0.02 and w["remaining"] == w["required"] and abs(w["balance"] + w["required"]) < 0.02
-
-
-def test_weekly_quota_week_that_crosses_a_month_takes_the_next_months_rate_for_its_last_days():
-    w = calc.weekly_quota(14000, [], date(2026, 10, 28))               # 25/10 - 31/10 stays in October
+def test_weekly_quota_uses_each_days_own_month_rate_and_a_shortfall_carries_forward():
+    w = calc.weekly_quota(15000, [], date(2026, 10, 14))
+    assert w["week_start"] == "2026-10-11" and w["week_end"] == "2026-10-17" and w["quota"] == round(15000 / 31 * 7, 2)    # 3,387.10
+    assert [h["week_start"] for h in w["history"]] == ["2026-10-04"]                      # Oct 1-3 belong to September's last week
+    assert w["carry_in"] == round(15000 / 31 * 7, 2) and w["required"] == round(2 * 15000 / 31 * 7, 2)    # last week's shortfall is still owed
+    assert w["remaining"] == w["required"] and w["surplus"] == 0.0 and w["held_total"] == 0.0
+    w = calc.weekly_quota(14000, [], date(2026, 10, 28))                                  # 25/10 - 31/10 stays in October
     assert w["quota"] == round(14000 / 31 * 7, 2)
-    w = calc.weekly_quota(15000, [], date(2026, 11, 29))               # 29/11 - 5/12: 2 days of November (30d) + 5 days of December (31d)
+    w = calc.weekly_quota(15000, [], date(2026, 11, 29))                                  # 29/11 - 5/12: 2 days of November (30d) + 5 days of December (31d)
     assert w["week_start"] == "2026-11-29" and w["quota"] == round(15000 / 30 * 2 + 15000 / 31 * 5, 2)
 
 
-def test_weekly_quota_surplus_and_costs_and_no_target():
-    live = _live(("2026-10-12", 9000, "one_time"), ("2026-10-13", 500, "direct_cost"))
-    w = calc.weekly_quota(15000, live, date(2026, 10, 14))
-    assert w["actual"] == 8500 and w["surplus"] > 0 and w["remaining"] == 0.0 and w["balance"] == w["surplus"]
+def test_weekly_quota_a_surplus_is_held_not_netted_against_the_next_week():
+    live = _live(("2026-10-05", 3000, "one_time"), ("2026-10-06", 1000, "one_time"))
+    w = calc.weekly_quota(18000, live, date(2026, 10, 12))
+    short = round(18000 / 31 * 7 - 4000, 2)
+    assert w["carry_in"] == short and abs(w["required"] - (18000 / 31 * 7 + short)) < 0.02   # 4,000 < the quota: the shortfall is still owed
+    assert w["history"][0]["surplus"] == 0.0 and w["held_total"] == 0.0                   # ... and there is nothing to hold
+    rich = _live(("2026-10-05", 9000, "one_time"))
+    w = calc.weekly_quota(18000, rich, date(2026, 10, 12))
+    assert w["history"][0]["surplus"] == w["history"][0]["held"] == round(9000 - 18000 / 31 * 7, 2) and w["held_total"] == w["history"][0]["held"]
+    assert w["carry_in"] == 0.0 and w["required"] == round(18000 / 31 * 7, 2)             # next week still needs its full quota
+    cur = calc.weekly_quota(18000, rich + _live(("2026-10-12", 6000, "one_time"), ("2026-10-13", 500, "direct_cost")), date(2026, 10, 14))
+    assert cur["actual"] == 5500 and cur["surplus"] == round(5500 - 18000 / 31 * 7, 2) and cur["held_total"] == round(w["held_total"] + cur["surplus"], 2)
     assert calc.weekly_quota(None, [], date(2026, 10, 14)) is None and calc.weekly_quota(0, [], date(2026, 10, 14)) is None
 
 
-def test_weekly_quota_is_on_monthly_goals_only_and_the_income_card_sums_it():
-    g = goal("recW", "הכנסה חודשית", ELI, 15000, **{GF.CATEGORY: "income"})
-    row = calc.compute_goal(g, [], date(2026, 10, 14), GF)
-    assert row["weekly"]["quota"] == round(15000 / 31 * 7, 2) and row["dynamic_target_per_week"] is not None      # the dynamic pace stays
-    cum = calc.compute_goal(goal("recC", "קרן", ELI, 60000, **{GF.CALC_METHOD: "cumulative", GF.START_DATE: "2026-01-01", GF.END_DATE: "2026-12-31"}),
-                            [], date(2026, 10, 14), GF)
-    assert cum["weekly"] is None
-    DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] = [g], []
-    card = service.overview(ELIYAHU, date(2026, 10, 14))["summary"]["income"]
-    assert card["weekly"]["quota"] == row["weekly"]["quota"] and card["dynamic_target_per_week"] > 0
-
-
-# ── The weekly-surplus question: carry on / use / save, asked once per closed week ──────────────────────────────
-FRI = date(2026, 10, 16)
-
-
-def seed_week_surplus(with_savings=True):
-    DB[Tables.FIN_GOALS] = [goal("recInc", "הכנסה חודשית", ELI, 18000, **{GF.CATEGORY: "income"})]
-    if with_savings:
-        DB[Tables.FIN_GOALS].append(goal("recPen", "תכנון פנסיוני", ELI, None, **{GF.CATEGORY: "long_term"}))
-        DB[Tables.FIN_GOALS][1]["fields"].pop(GF.TARGET_AMOUNT)
-    DB[Tables.FIN_EVENTS] = [event("recE1", "recInc", ELI, 9000, day="2026-10-05"), event("recE2", "recInc", ELI, 1000, day="2026-10-12")]
-    DB[Tables.TASKS] = []
-
-
-def _wk(today):
-    return service.overview(ELIYAHU, today)["summary"]["income"]["weekly"]
-
-
-def _fri_say(text):
-    return conv.handle_turn(ELIYAHU, text, extractor=conv.DeterministicExtractor(), today=FRI, scope="monthly")
-
-
-def test_weekly_surplus_is_asked_when_the_week_closes_and_for_the_last_closed_week_until_answered():
-    seed_week_surplus()
-    fri = _wk(FRI)
-    assert fri["closing"]["week_start"] == "2026-10-11" and fri["closing"]["amount"] == 1870.97 and fri["closing"]["goal_id"] == "recInc"
-    assert fri["surplus"] == 1870.97 and fri["actual"] == 1000                       # headline numbers are unchanged
-    wed = _wk(date(2026, 10, 14))                                                    # mid-week: the PREVIOUS week is the open question
-    assert wed["closing"]["week_start"] == "2026-10-04" and wed["closing"]["amount"] == 4935.48
-    assert _wk(date(2026, 10, 30))["closing"] is None                                # last week of the month: the month-end flow covers it
-    DB[Tables.FIN_EVENTS] = [DB[Tables.FIN_EVENTS][1]]                               # no surplus -> no question
-    assert _wk(FRI)["closing"] is None
-
-
-def test_weekly_surplus_carry_writes_only_a_marker_and_the_question_is_not_asked_again(no_model):
-    seed_week_surplus()
-    r = conv.start_intent(ELIYAHU, "weekly.surplus_carry", None, today=FRI)
-    assert r.state == "review" and "₪1,870.97" in r.message and "ממשיכים לשבוע הבא" in r.message
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
-    f = w["fields"]
-    assert w["table"] == Tables.FIN_EVENTS and f[EF.KIND] == "note" and f[EF.AMOUNT] == 0.0 and f[EF.NOTE] == "עודף שבועי 2026-10-11: הועבר"
-    assert f[EF.GOAL] == ["recInc"]
-    DB[Tables.FIN_EVENTS].append({"id": "recM", "fields": {**f, EF.FINANCIAL_OWNER: [ELI]}})
-    assert _wk(FRI)["closing"] is None and _wk(FRI)["surplus"] == 1870.97              # carried: the ledger is unchanged
-
-
-def test_weekly_surplus_use_takes_it_out_of_the_ledger_and_save_adds_one_savings_deposit(no_model):
-    seed_week_surplus()
-    conv.start_intent(ELIYAHU, "weekly.surplus_use", None, today=FRI)
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
-    assert w["fields"][EF.AMOUNT] == 1870.97 and w["fields"][EF.NOTE] == "עודף שבועי 2026-10-11: נוצל"
-    DB[Tables.FIN_EVENTS].append({"id": "recM", "fields": {**w["fields"], EF.FINANCIAL_OWNER: [ELI]}})
-    assert _wk(date(2026, 10, 18))["carry_in"] == 0.0                                       # the used surplus no longer lowers next week's need
-    assert _wk(FRI)["balance"] == 0.0 and _wk(FRI)["surplus"] == 0.0                      # used: nothing is left to carry
-    conv.complete_execution(ELIYAHU)
-    seed_week_surplus()
-    r = conv.start_intent(ELIYAHU, "weekly.surplus_save", None, today=FRI)
-    assert r.state == "review" and "הפקדה לחיסכון" in r.message
-    marker, dep = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
-    assert marker["fields"][EF.NOTE] == "עודף שבועי 2026-10-11: נחסך" and marker["fields"][EF.AMOUNT] == 1870.97
-    assert dep["fields"][EF.GOAL] == ["recPen"] and dep["fields"][EF.KIND] == "one_time" and dep["fields"][EF.AMOUNT] == 1870.97
-    assert dep["fields"][EF.NOTE].startswith(fd.SAVINGS_DEPOSIT_NOTE)
-
-
-def test_weekly_surplus_amount_can_be_lowered_but_not_raised_and_save_needs_a_savings_goal(no_model):
-    seed_week_surplus()
-    conv.start_intent(ELIYAHU, "weekly.surplus_use", None, today=FRI)
-    r = _fri_say("ערוך")
-    r = _fri_say("סכום 5000")
-    assert "גדול מהעודף" in r.message
-    r = _fri_say("סכום 500")
-    assert r.state == "review" and "₪500" in r.message
-    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
-    assert w["fields"][EF.AMOUNT] == 500
-    conv.complete_execution(ELIYAHU)
-    seed_week_surplus(with_savings=False)
-    assert conv.start_intent(ELIYAHU, "weekly.surplus_save", None, today=FRI).state == "clarify"
-
-
-def test_weekly_surplus_with_nothing_open_and_other_owners_data(no_model):
-    seed_week_surplus()
-    DB[Tables.FIN_EVENTS] = []
-    assert conv.start_intent(ELIYAHU, "weekly.surplus_carry", None, today=FRI).state == "info"
-    assert conv.start_intent(AVI_I, "weekly.surplus_use", None, today=FRI).state == "info"                # nothing of ELIYAHU's leaks to another owner
+def test_weekly_quota_decisions_move_use_or_save_a_surplus_and_hold_changes_nothing():
+    quota = 18000 / 31 * 7
+    base = _live(("2026-10-05", 9000, "one_time"))
+    note = lambda decision, amount, week="2026-10-04": calc.Event("note", amount, date(2026, 10, 9), False, None, calc.week_surplus_note(week, decision))
+    surplus = round(9000 - quota, 2)
+    assert calc.weekly_quota(18000, base + [note("hold", surplus)], date(2026, 10, 12))["held_total"] == surplus
+    carried = calc.weekly_quota(18000, base + [note("carry", 1000)], date(2026, 10, 12))
+    assert carried["carry_in"] == -1000 and carried["required"] == round(quota - 1000, 2) and carried["held_total"] == round(surplus - 1000, 2)
+    assert calc.weekly_quota(18000, base + [note("carry", 0)], date(2026, 10, 12))["carry_in"] == -surplus        # an old marker: the whole surplus moved
+    for word in ("use", "save"):
+        w = calc.weekly_quota(18000, base + [note(word, 2000)], date(2026, 10, 12))
+        assert w["carry_in"] == 0.0 and w["held_total"] == round(surplus - 2000, 2)
+    assert calc.weekly_quota(18000, base + [note("use", 99999)], date(2026, 10, 12))["held_total"] == 0.0           # never more than the surplus
 
 
 # ── The last income entries, so nothing is booked twice ───────────────────────────────────────────────────────────
@@ -3896,3 +3816,130 @@ def test_recent_incomes_lists_own_income_entries_newest_first_with_source_and_fl
     assert rows[0]["possible_duplicate"] and rows[1]["possible_duplicate"] and not rows[2]["possible_duplicate"] and rows[2]["kind"] == "direct_cost"
     assert "הכנסה של אבי" not in str(rows) and all(r["id"] != "e7" for r in rows)
     assert len(service.recent_incomes(DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] * 5, limit=3)) == 3
+
+
+# ── The weekly-surplus question: hold for the month end (default) / carry / use / save, and the month-end decision ──
+FRI = date(2026, 10, 16)
+SAT_LAST = date(2026, 10, 31)
+
+
+def seed_week_surplus(with_savings=True):
+    DB[Tables.FIN_GOALS] = [goal("recInc", "הכנסה חודשית", ELI, 18000, **{GF.CATEGORY: "income"})]
+    if with_savings:
+        DB[Tables.FIN_GOALS].append(goal("recPen", "תכנון פנסיוני", ELI, None, **{GF.CATEGORY: "long_term"}))
+        DB[Tables.FIN_GOALS][1]["fields"].pop(GF.TARGET_AMOUNT)
+    DB[Tables.FIN_EVENTS] = [event("recE1", "recInc", ELI, 9000, day="2026-10-05"), event("recE2", "recInc", ELI, 6000, day="2026-10-12")]
+    DB[Tables.TASKS] = []
+
+
+def _wk(today):
+    return service.overview(ELIYAHU, today)["summary"]["income"]["weekly"]
+
+
+def _yes(today=FRI):
+    return conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=today).snapshot["writes"]
+
+
+def _book(writes):
+    for i, w in enumerate(writes):
+        DB[Tables.FIN_EVENTS].append({"id": f"recMk{len(DB[Tables.FIN_EVENTS])}{i}", "fields": {**w["fields"], EF.FINANCIAL_OWNER: [ELI]}})
+
+
+def test_weekly_surplus_is_asked_when_the_week_closes_and_for_the_last_closed_week_until_answered():
+    seed_week_surplus()
+    quota = round(18000 / 31 * 7, 2)
+    fri = _wk(FRI)
+    assert fri["closing"]["kind"] == "week" and fri["closing"]["week_start"] == "2026-10-11" and fri["closing"]["goal_id"] == "recInc"
+    assert fri["closing"]["amount"] == fri["surplus"] == round(6000 - quota, 2)
+    assert fri["held_total"] == round(9000 - quota + 6000 - quota, 2) and fri["carry_in"] == 0.0                 # the picture mid-month; no netting
+    wed = _wk(date(2026, 10, 14))                                                                              # mid-week: the PREVIOUS week is the open question
+    assert wed["closing"]["week_start"] == "2026-10-04" and wed["closing"]["amount"] == round(9000 - quota, 2)
+    DB[Tables.FIN_EVENTS] = [DB[Tables.FIN_EVENTS][1]]                                                          # no surplus in the closed week -> no question
+    assert _wk(date(2026, 10, 14))["closing"] is None
+
+
+def test_weekly_surplus_hold_is_the_default_and_the_marker_only_stops_the_question(no_model):
+    seed_week_surplus()
+    quota = round(18000 / 31 * 7, 2)
+    before = _wk(FRI)
+    r = conv.start_intent(ELIYAHU, "weekly.surplus_hold", None, today=FRI)
+    assert r.state == "review" and "נשמרים להחלטה בסוף החודש" in r.message and "לא מקטינים" in r.message
+    (w,) = _yes()
+    f = w["fields"]
+    assert w["table"] == Tables.FIN_EVENTS and f[EF.KIND] == "note" and f[EF.NOTE] == "עודף שבועי 2026-10-11: נשמר" and f[EF.GOAL] == ["recInc"]
+    _book([w])
+    after = _wk(FRI)
+    assert after["closing"] is None and after["held_total"] == before["held_total"] and after["carry_in"] == before["carry_in"]
+    assert _wk(date(2026, 10, 18))["required"] == quota                                                          # the next week still needs its full quota
+
+
+def test_weekly_surplus_carry_lowers_the_next_week_and_use_or_save_leave_the_pot(no_model):
+    seed_week_surplus()
+    quota = round(18000 / 31 * 7, 2)
+    surplus = round(6000 - quota, 2)
+    conv.start_intent(ELIYAHU, "weekly.surplus_carry", None, today=FRI)
+    (w,) = _yes()
+    assert w["fields"][EF.NOTE] == "עודף שבועי 2026-10-11: הועבר" and w["fields"][EF.AMOUNT] == surplus
+    _book([w])
+    nxt = _wk(date(2026, 10, 18))
+    assert nxt["carry_in"] == -surplus and nxt["required"] == round(quota - surplus, 2)
+    conv.complete_execution(ELIYAHU)
+    seed_week_surplus()
+    held_before = _wk(FRI)["held_total"]
+    conv.start_intent(ELIYAHU, "weekly.surplus_use", None, today=FRI)
+    (w,) = _yes()
+    assert w["fields"][EF.NOTE] == "עודף שבועי 2026-10-11: נוצל" and w["fields"][EF.AMOUNT] == surplus
+    _book([w])
+    assert _wk(FRI)["held_total"] == round(held_before - surplus, 2) and _wk(date(2026, 10, 18))["carry_in"] == 0.0
+    conv.complete_execution(ELIYAHU)
+    seed_week_surplus()
+    r = conv.start_intent(ELIYAHU, "weekly.surplus_save", None, today=FRI)
+    assert r.state == "review" and "הפקדה לחיסכון" in r.message
+    marker, dep = _yes()
+    assert marker["fields"][EF.NOTE] == "עודף שבועי 2026-10-11: נחסך" and marker["fields"][EF.AMOUNT] == surplus
+    assert dep["fields"][EF.GOAL] == ["recPen"] and dep["fields"][EF.KIND] == "one_time" and dep["fields"][EF.AMOUNT] == surplus
+    assert dep["fields"][EF.NOTE].startswith(fd.SAVINGS_DEPOSIT_NOTE)
+
+
+def test_month_end_asks_about_the_whole_held_amount_and_only_use_or_save_are_offered(no_model):
+    seed_week_surplus()
+    quota = round(18000 / 31 * 7, 2)
+    held = round(9000 - quota + 6000 - quota, 2)
+    closing = _wk(SAT_LAST)["closing"]
+    assert closing["kind"] == "month" and closing["month"] == "2026-10" and closing["amount"] == held
+    assert _wk(date(2026, 11, 2))["closing"]["kind"] == "month"                                                  # still asked in the first days of the next month
+    assert _wk(date(2026, 11, 10))["closing"] is None
+    assert conv.start_intent(ELIYAHU, "weekly.surplus_use", None, today=SAT_LAST).state == "info"               # a weekly answer to a month question
+    r = conv.start_intent(ELIYAHU, "weekly.month_use", None, today=SAT_LAST)
+    assert r.state == "review" and "עודף החודש" in r.message
+    (w,) = _yes(SAT_LAST)
+    assert w["fields"][EF.NOTE] == "סיכום חודש 2026-10: נוצל" and w["fields"][EF.AMOUNT] == held
+    _book([w])
+    assert _wk(SAT_LAST)["closing"] is None and _wk(SAT_LAST)["held_total"] == 0.0
+    conv.complete_execution(ELIYAHU)
+    seed_week_surplus()
+    marker, dep = (conv.start_intent(ELIYAHU, "weekly.month_save", None, today=SAT_LAST), _yes(SAT_LAST))[1]
+    assert marker["fields"][EF.NOTE] == "סיכום חודש 2026-10: נחסך" and dep["fields"][EF.GOAL] == ["recPen"] and dep["fields"][EF.AMOUNT] == held
+    assert conv.start_intent(ELIYAHU, "weekly.month_use", None, today=FRI).state == "info"                      # a month answer to a weekly question
+
+
+def test_weekly_surplus_amount_can_be_lowered_but_not_raised_and_save_needs_a_savings_goal(no_model):
+    seed_week_surplus()
+    conv.start_intent(ELIYAHU, "weekly.surplus_use", None, today=FRI)
+    r = conv.handle_turn(ELIYAHU, "ערוך", extractor=conv.DeterministicExtractor(), today=FRI, scope="monthly")
+    r = conv.handle_turn(ELIYAHU, "סכום 5000", extractor=conv.DeterministicExtractor(), today=FRI, scope="monthly")
+    assert "גדול מהעודף" in r.message
+    r = conv.handle_turn(ELIYAHU, "סכום 500", extractor=conv.DeterministicExtractor(), today=FRI, scope="monthly")
+    assert r.state == "review" and "₪500" in r.message
+    (w,) = _yes()
+    assert w["fields"][EF.AMOUNT] == 500
+    conv.complete_execution(ELIYAHU)
+    seed_week_surplus(with_savings=False)
+    assert conv.start_intent(ELIYAHU, "weekly.surplus_save", None, today=FRI).state == "clarify"
+
+
+def test_weekly_surplus_with_nothing_open_and_other_owners_data(no_model):
+    seed_week_surplus()
+    DB[Tables.FIN_EVENTS] = []
+    assert conv.start_intent(ELIYAHU, "weekly.surplus_hold", None, today=FRI).state == "info"
+    assert conv.start_intent(AVI_I, "weekly.surplus_use", None, today=FRI).state == "info"                      # nothing of ELIYAHU's leaks to another owner

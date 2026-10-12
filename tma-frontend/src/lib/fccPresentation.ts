@@ -115,7 +115,8 @@ export function weeklyQuotaMetrics(w: FccWeekly | null | undefined): GoalMetric[
   const carry = Math.round(w.carry_in);
   return [
     { label: "הושג מתוך הנדרש השבוע", value: `${money(w.actual)} / ${money(w.required)}` },
-    w.surplus > 0 ? { label: "עודף — אפשר להעביר, להשתמש או לחסוך", value: money(w.surplus) } : { label: "חסר להשלמה השבוע", value: money(w.remaining) },
+    w.surplus > 0 ? { label: "עודף השבוע (נשמר להחלטה בסוף החודש)", value: money(w.surplus) } : { label: "חסר להשלמה השבוע", value: money(w.remaining) },
+    ...((w.held_total ?? 0) > 0 ? [{ label: "עודף שנשמר החודש עד כה", value: money(w.held_total) }] : []),
     { label: "מכסה שבועית קבועה", value: money(w.quota) },
     ...(carry !== 0 ? [{ label: carry > 0 ? "חסר שהועבר מקודם" : "עודף שהועבר מקודם", value: money(Math.abs(w.carry_in)) }] : []),
   ];
@@ -157,24 +158,40 @@ export function weeklyBreakdown(card: FccSummaryCard | undefined): string | unde
   return parts.length ? parts.join(" · ") : undefined;
 }
 
-/** The question about a closed week's surplus. It is asked once; the three answers are buttons, not a standing setting. */
+/** The question about a closed week's surplus (or, at the month end, the whole held amount). Asked once; the answers are buttons, never a standing
+ *  setting. Keeping it for the month-end decision is the default: without an answer nothing is netted against the next week. */
 export const WEEKLY_SURPLUS_CHOICES = [
+  { intent: "weekly.surplus_hold", label: "לשמור להחלטה בסוף החודש" },
   { intent: "weekly.surplus_carry", label: "להעביר לשבוע הבא" },
   { intent: "weekly.surplus_use", label: "להשתמש בו" },
   { intent: "weekly.surplus_save", label: "לחסוך" },
 ] as const;
 
+export const MONTH_SURPLUS_CHOICES = [
+  { intent: "weekly.month_use", label: "להשתמש בעודף החודש" },
+  { intent: "weekly.month_save", label: "לחסוך" },
+] as const;
+
+export function weeklySurplusChoices(w: FccWeekly | null | undefined) {
+  return w?.closing?.kind === "month" ? MONTH_SURPLUS_CHOICES : WEEKLY_SURPLUS_CHOICES;
+}
+
 export function weeklySurplusQuestion(w: FccWeekly | null | undefined): string | null {
   const c = w?.closing;
   if (!c) return null;
+  if (c.kind === "month") {
+    const [y, m] = (c.month ?? "").split("-");
+    return `החודש${y && m ? ` ${m}/${y}` : ""} נסגר עם עודף שנשמר ${money(c.amount)} — מה לעשות איתו?`;
+  }
   return `השבוע ${dmy(c.week_start)}–${dmy(c.week_end)} נסגר עם עודף ${money(c.amount)} — מה לעשות איתו?`;
 }
 
 export function weeklyQuotaHint(w: FccWeekly): string {
   const carry = Math.round(w.carry_in);
-  const state = w.surplus > 0 ? `עודף ${money(w.surplus)} — אפשר להעביר, להשתמש או לחסוך` : `חסר ${money(w.remaining)} להשלמה`;
+  const state = w.surplus > 0 ? `עודף ${money(w.surplus)} — נשמר להחלטה בסוף החודש` : `חסר ${money(w.remaining)} להשלמה`;
+  const held = (w.held_total ?? 0) > 0 ? ` · נשמר החודש ${money(w.held_total)}` : "";
   const base = `מכסה ${money(w.quota)}${carry !== 0 ? ` ${carry > 0 ? "+ חסר מקודם" : "− עודף מקודם"} ${money(Math.abs(w.carry_in))}` : ""}`;
-  return `${state} · ${base}`;
+  return `${state}${held} · ${base}`;
 }
 
 export interface HeaderCardModel { key: string; label: string; value: string; hint?: string }
