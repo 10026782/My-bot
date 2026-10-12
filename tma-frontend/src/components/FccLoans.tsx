@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FccLoans } from "../types";
 import {
-  ARRANGEMENT_BUTTON, AUTO_STEP_NOTE, BALANCE_BUTTON, balanceCardModel, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RATE_BUTTON, TERM_BUTTON, RECEIVED_BUTTON,
+  ARRANGEMENT_BUTTON, AUTO_STEP_NOTE, BALANCE_BUTTON, balanceCardModel, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RATE_BUTTON, TERM_BUTTON, ORIGINAL_BUTTON, RECEIVED_BUTTON,
   FILTERS, RANK_MODES, STATUS_UNKNOWN, UNKNOWN, actionRows, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards,
   receivableCardModel, receivableItems, receivablesSummary, sortLoans, togglePick, canClose,
   type ActionRow, type LoanFilter, type RankMode,
@@ -200,6 +200,8 @@ export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans
                                 disabled={actions.disabled} onClick={() => actions.onAction("loan.update_rate", l.id)}>{RATE_BUTTON}</button>
                         <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__actionbtn"
                                 disabled={actions.disabled} onClick={() => actions.onAction("loan.update_term", l.id)}>{TERM_BUTTON}</button>
+                        <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__actionbtn"
+                                disabled={actions.disabled} onClick={() => actions.onAction("loan.update_original", l.id)}>{ORIGINAL_BUTTON}</button>
                         <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__closebtn"
                                 disabled={actions.disabled} onClick={() => actions.onAction("loan.close", l.id)}>{CLOSE_BUTTON}</button>
                       </div>

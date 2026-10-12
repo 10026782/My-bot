@@ -163,7 +163,7 @@ def _render(d: BusinessDraft) -> TurnResult:
     missing = _missing(d)
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title, str(d.source_context.get("direction") or "")) if awaiting else "מה לעדכן?"
-    if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_RATE, fd.FCC_LOAN_TERM, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
+    if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_RATE, fd.FCC_LOAN_TERM, fd.FCC_LOAN_ORIGINAL, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
                                       fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW, fd.FCC_PRIME_CHANGE) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
@@ -472,8 +472,8 @@ def start_loan_close(identity, loan_id: str, *, store=None, today: date | None =
 
 
 _LOAN_CURRENT = {fd.FCC_LOAN_BALANCE: LF.EARLY_CLOSURE, fd.FCC_LOAN_PAYMENT: LF.MONTHLY_PAYMENT,
-                 fd.FCC_LOAN_RATE: LF.INTEREST_RATE, fd.FCC_LOAN_TERM: LF.PAYMENTS_LEFT}
-_LOAN_CURRENT_SHOWN = {fd.FCC_LOAN_RATE: "rate", fd.FCC_LOAN_TERM: "payments_left"}      # the display name of the stored value (default: a money amount)
+                 fd.FCC_LOAN_RATE: LF.INTEREST_RATE, fd.FCC_LOAN_TERM: LF.PAYMENTS_LEFT, fd.FCC_LOAN_ORIGINAL: LF.AMOUNT}
+_LOAN_CURRENT_SHOWN = {fd.FCC_LOAN_RATE: "rate", fd.FCC_LOAN_TERM: "payments_left", fd.FCC_LOAN_ORIGINAL: "original"}      # the display name of the stored value (default: a money amount)
 
 
 def _start_loan_intent(identity, ids, entity, entity_id, store, today) -> TurnResult:
@@ -896,7 +896,7 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return _start_goal_action(identity, ids, intent_id, spec, entity_id, store, today)
     if intent_id == "loan.next_step":
         return _start_loan_step(identity, ids, entity_id, store, today)
-    if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_RATE, fd.FCC_LOAN_TERM, fd.FCC_LOAN_NEW, fd.FCC_LOAN_PARTIAL, fd.FCC_LOAN_ARRANGEMENT,
+    if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_RATE, fd.FCC_LOAN_TERM, fd.FCC_LOAN_ORIGINAL, fd.FCC_LOAN_NEW, fd.FCC_LOAN_PARTIAL, fd.FCC_LOAN_ARRANGEMENT,
                           fd.FCC_RECEIVABLE_NEW):
         return _start_loan_intent(identity, ids, spec["entity"], entity_id, store, today)
     if spec.get("target") == "task":

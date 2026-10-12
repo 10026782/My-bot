@@ -3978,3 +3978,16 @@ def test_loan_rate_is_owner_scoped_and_rejects_a_negative_value(no_model):
     assert intent("loan.update_rate", "recRx").state == "denied" and intent("loan.update_rate").state == "clarify"
     intent("loan.update_rate", "recR")
     assert _say("-3", scope="loans").awaiting == "rate"
+
+
+def test_loan_original_amount_is_a_one_field_update_that_must_be_positive(no_model):
+    seed_rate_loan()
+    r = intent("loan.update_original", "recR")
+    assert r.state == "ask" and r.awaiting == "original" and "היום: ₪2,800" in r.message
+    assert _say("0", scope="loans").awaiting == "original"
+    r = _say("3000", scope="loans")
+    assert r.state == "review" and "עדכון סכום מקורי" in r.message
+    (w,) = _confirm_one()
+    assert w["table"] == Tables.LOANS and w["record_id"] == "recR" and w["fields"] == {LF.AMOUNT: 3000}
+    conv.complete_execution(ELIYAHU)
+    assert intent("loan.update_original", "recRx").state == "denied"
