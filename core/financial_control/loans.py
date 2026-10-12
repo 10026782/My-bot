@@ -8,6 +8,7 @@ non-numeric. Sums/averages skip unknown values and report how many loans they co
 
 from __future__ import annotations
 
+import calendar
 import re
 from datetime import date
 
@@ -91,6 +92,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     left = _num(f.get(LF.PAYMENTS_LEFT))
     end = _iso_date(f.get(LF.END_DATE))
     fee_amount, fee_known = parse_fee(f.get(LF.EARLY_FEE))
+    next_due = _iso_date(f.get(LF.NEXT_PAYMENT))
     direction = OWED_TO_ME if str(_sel(f.get(LF.DIRECTION)) or "").strip() == DIRECTION_TO_ME_STORED else OWED_BY_ME      # tolerant of a stray space in the choice name
 
     months = int(left) if left is not None else (_months_between(today, end) if end else None)
@@ -121,6 +123,8 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "direction": direction,
         # how the debt is repaid: a standing monthly amount, a deadline, or nothing recorded yet (None = ask the owner)
         "arrangement": "monthly" if monthly else "deadline" if end else None,
+        "next_payment_due": next_due.isoformat() if next_due else None,
+        "payments_done": left == 0,                   # every instalment paid: the owner confirms the closing (never closed automatically)
         "status_unknown": status_unknown(f),
         # derived
         "months_remaining": months,
@@ -196,6 +200,88 @@ def summarize(items: list[dict]) -> dict:
         "by_type": {k: _bucket(v) for k, v in by_type.items()},
         "by_asset": [{"asset_id": aid, "asset_name": v[0]["related_asset_name"], **_bucket(v)} for aid, v in by_asset.items()],
     }
+
+
+# ── Monthly auto-step: the balance follows the loan's own schedule ───────────────────────────────────────────────────
+def _due_on(year: int, month: int, day: int) -> date:
+    """The due day of a month, clamped to the month's last day (a 31st becomes the 30th / 28th)."""
+    return date(year, month, min(day, calendar.monthrange(year, month)[1]))
+
+
+def _plus_month(d: date, day: int) -> date:
+    year, month = (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
+    return _due_on(year, month, day)
+
+
+def _shekel(x: float) -> str:
+    return f"₪{x:,.2f}"
+
+
+def advance_due(fields: dict, today: date) -> str | None:
+    """After the owner corrects the balance ("as of today") while its due date has already passed: the date the monthly job should
+    wait for instead — the first due day after today — so the instalment already inside the corrected balance is not applied again.
+    None when there is nothing to move (no / future ``Next Payment Due``, or no usable ``Monthly Due Day``)."""
+    nd, day = _iso_date(fields.get(LF.NEXT_PAYMENT)), _num(fields.get(LF.DUE_DAY))
+    if nd is None or nd > today or day is None or not 1 <= day <= 31:
+        return None
+    this = _due_on(today.year, today.month, int(day))
+    return (this if this > today else _plus_month(this, int(day))).isoformat()
+
+
+AUTO_MAX_STEPS = 12          # a longer gap (the job was off for a year) is applied in slices, never in one leap
+
+
+def auto_step(record: dict, today: date) -> dict | None:
+    """What the monthly job does for ONE of the owner's loans, or None when nothing is due.
+
+    On each due date the instalment is applied in the standard way: ``balance × (1 + annual rate / 12) − payment``, the number of
+    payments remaining drops by one and ``Next Payment Due`` moves a month on (the last payment brings the balance to 0). The loan is
+    NOT closed here — a finished schedule only shows "payments done". ``Next Payment Due`` is also the idempotency key: a loan is
+    touched only when it is due, so a second run the same day writes nothing. The first time (no ``Next Payment Due``) the job only
+    sets it from ``Monthly Due Day``, because the stored balance is already as of today.
+    Returns ``{"action": "init" | "step" | "skip", "fields": {...}, ...}``. A loan with a missing input, or a payment that does not even
+    cover the interest, is skipped with a reason — a balance is never invented."""
+    f = record.get("fields") or {}
+    owed_to_me = str(_sel(f.get(LF.DIRECTION)) or "").strip() == DIRECTION_TO_ME_STORED
+    if not is_active(f) or owed_to_me:
+        return None                                               # closed loans and debts owed TO the owner are not stepped
+    balance, rate, pay = _num(f.get(LF.EARLY_CLOSURE)), _num(f.get(LF.INTEREST_RATE)), _num(f.get(LF.MONTHLY_PAYMENT))
+    left, due_day, next_due = _num(f.get(LF.PAYMENTS_LEFT)), _num(f.get(LF.DUE_DAY)), _iso_date(f.get(LF.NEXT_PAYMENT))
+    name = f.get(LF.NAME) or record.get("id")
+    base = {"id": record.get("id"), "name": name}
+
+    def skip(reason: str) -> dict:
+        return {**base, "action": "skip", "reason": reason, "fields": {}}
+
+    day = int(due_day) if due_day is not None and 1 <= due_day <= 31 else None
+    if next_due is None:                                           # first run: only learn the next due date
+        if day is None:
+            return skip("no_due_day")
+        this = _due_on(today.year, today.month, day)
+        nxt = this if this >= today else _plus_month(this, day)
+        return {**base, "action": "init", "fields": {LF.NEXT_PAYMENT: nxt.isoformat()}, "next_due": nxt.isoformat()}
+    if next_due > today:
+        return None                                                # not due yet
+    if left is not None and left <= 0 or balance is not None and balance <= 0:
+        return None                                                # schedule finished: shown as "payments done"
+    if balance is None or rate is None or pay is None or pay <= 0:
+        return skip("missing_input")
+    monthly = rate / 100.0 / 12.0
+    if pay <= balance * monthly:
+        return skip("payment_below_interest")                      # would grow the balance: the data needs a look, not a step
+    bal, lp, nd, steps = balance, left, next_due, 0
+    while nd <= today and steps < AUTO_MAX_STEPS and bal > 0 and (lp is None or lp > 0):
+        bal = 0.0 if lp == 1 else round(max(bal * (1 + monthly) - pay, 0.0), 2)
+        lp = lp - 1 if lp is not None else None
+        nd = _plus_month(nd, day or nd.day)
+        steps += 1
+    line = f"עדכון אוטומטי ({today.isoformat()}): {steps} תשלומים — יתרה {_shekel(balance)} ← {_shekel(bal)}"
+    notes = "\n".join(x for x in (str(f.get(LF.NOTES) or "").strip(), line) if x)
+    fields = {LF.EARLY_CLOSURE: bal, LF.NEXT_PAYMENT: nd.isoformat(), LF.NOTES: notes}
+    if lp is not None:
+        fields[LF.PAYMENTS_LEFT] = int(lp)
+    return {**base, "action": "step", "fields": fields, "steps": steps, "before": balance, "after": bal, "payments_left": lp,
+            "next_due": nd.isoformat(), "behind": nd <= today}
 
 
 def debt_balance(items: list[dict]) -> dict:

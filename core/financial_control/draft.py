@@ -416,7 +416,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     if entity == FCC_LOAN_CLOSE:
         lines.append(f"ההלוואה תסומן {LOAN_PAID_OFF} ותצא מהחובות הפעילים.")
     if entity in (FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT):
-        lines.append("יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
+        lines.append("יתעדכנו רק הנתון הזה ותאריך החיוב הבא (כמצוין); שאר נתוני ההלוואה לא ייגעו." if "תאריך החיוב הבא" in note
+                     else "יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
     if entity == FCC_LOAN_NEW:
         lines.append("תיווצר הלוואה פעילה בבעלותך.")
     if entity == FCC_SOURCE_NEW:
@@ -514,7 +515,10 @@ def field_update_writes(entity: str, values: Mapping[str, Any], source: Mapping[
     if not record_id:
         raise UnsupportedOperationError(f"{entity} without a record")
     table, name, field, audit = _FIELD_UPDATES[entity]
-    return [{"op": "patch", "table": table, "record_id": record_id, "fields": {field: values[name]},
+    fields = {field: values[name]}
+    if entity == FCC_LOAN_BALANCE and source.get("advance_next_due"):      # see conversation: the passed due date is already inside the new balance
+        fields[LF.NEXT_PAYMENT] = source["advance_next_due"]
+    return [{"op": "patch", "table": table, "record_id": record_id, "fields": fields,
              "audit_action": audit, "audit_details": f"{record_id}:{name}"}]
 
 

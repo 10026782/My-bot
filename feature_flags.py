@@ -92,6 +92,7 @@ INTEGRATIONS:
   CONTACT_RESOLVER            - פתרון אנשי קשר אוטומטי
   LLM_FALLBACK                - fallback ל-OpenAI כש-Anthropic מחזיר שגיאה/timeout (ברירת מחדל: כבוי)
   FEATURE_FINANCIAL_CONTROL_CENTER - Private Financial Control Center (/api/fcc/*, core/financial_control); owner-of-record only; default OFF
+  FEATURE_FCC_LOAN_AUTO_STEP  - FCC: scheduler (05:20) מחיל תשלום חודשי על הלוואות הבעלים בכל תאריך חיוב (יתרה, תשלומים שנותרו, Next Payment Due); דורש FEATURE_FINANCIAL_CONTROL_CENTER + FCC_CANARY_USER_IDS; כותב ל-Loans דרך airtable_gateway; לא סוגר הלוואות; default OFF
   FEATURE_BUSINESS_UPDATE     - /update command (Business Memory log); default OFF
   FEATURE_WEEKLY_SUMMARY      - Weekly Business Memory digest (C22, scheduler.py); default OFF
   FEATURE_VOICE_NOTES         - Telegram voice note -> STT -> Drive + Media Files (F16); default OFF

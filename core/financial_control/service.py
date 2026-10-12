@@ -378,7 +378,39 @@ def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict
     except Exception:
         logger.exception("[fcc] loan next actions read failed")
         tasks = []
-    return fcc_loans.build(records, today, {k: v for k, v in names.items() if v}, debt_goal, tasks)
+    payload = fcc_loans.build(records, today, {k: v for k, v in names.items() if v}, debt_goal, tasks)
+    payload["auto_step"] = loan_auto_step_enabled()          # the screen says balances follow their schedule only when the job is on
+    return payload
+
+
+LOAN_AUTO_STEP_FLAG = "FEATURE_FCC_LOAN_AUTO_STEP"        # default OFF: the monthly job writes to the owner's loans
+
+
+def loan_auto_step_enabled() -> bool:
+    import feature_flags
+    return feature_flags.is_enabled(LOAN_AUTO_STEP_FLAG)
+
+
+def auto_step_identities() -> list:
+    """The owners the monthly job may act for: registry identities with the OWNER role that the FCC gate (flag + canary allowlist) admits.
+    Nobody else's loans are ever read or written."""
+    import identity as identity_module
+    from core.financial_control import gate
+    found, seen = [], set()
+    for key in list(identity_module._REGISTRY):
+        channel, _, external_id = str(key).partition(":")
+        who = identity_module.resolve_identity(channel, external_id)
+        if who.role == identity_module.Role.OWNER and who.user_id not in seen and gate.enabled_for(who):
+            seen.add(who.user_id)
+            found.append(who)
+    return found
+
+
+def plan_loan_auto_step(identity, today: date | None = None) -> list[dict]:
+    """READ-ONLY plan of the monthly job for ONE owner: every due instalment of the owner's own loans (``loans.auto_step``).
+    The writes are executed by the scheduler job through the Airtable gateway — this package never writes."""
+    today = today or date.today()
+    return [step for step in (fcc_loans.auto_step(rec, today) for rec in my_loans(identity)) if step is not None]
 
 
 def assets_overview(identity, loan_items: list[dict]) -> dict:
