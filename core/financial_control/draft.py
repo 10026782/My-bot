@@ -50,9 +50,11 @@ FCC_RECEIVABLE_NEW = "fcc_receivable_new"        # a debt owed TO the owner (Loa
 FCC_PRIME_CHANGE = "fcc_prime_change"            # the prime rate moved by X points: every loan's rate (and monthly payment) follows
 FCC_SOURCE_NEW = "fcc_source_new"                # a new income SOURCE inside the total income goal (a goal with "Contributes To")
 SOURCE_PERIODS = ("monthly", "weekly")
+FCC_GOAL_STATUS = "fcc_goal_status"        # an ACTION goal (no amount target): done / paused — Financial Goals.Status only, never an amount
+GOAL_STATUSES = ("done", "paused")
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
-FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
+FCC_ENTITIES = (FCC_GOAL, FCC_GOAL_STATUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
                 FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_PRIME_CHANGE, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
@@ -71,6 +73,10 @@ INTENTS: dict[str, dict] = {
     "monthly.direct_cost":       {"tab": "monthly", "entity": "fcc_event", "kind": "direct_cost", "target": "goal", "goal_filter": "income"},
     "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
     "monthly.goal_new":          {"tab": "monthly", "entity": "fcc_goal"},
+    # an ACTION goal (sell a property, realise a holding: no amount target) is moved by actions and status, never by amounts
+    "monthly.goal_followup":     {"tab": "monthly", "entity": "fcc_followup", "target": "goal", "target_required": True},
+    "monthly.goal_done":         {"tab": "monthly", "entity": "fcc_goal_status", "target": "goal", "target_required": True, "goal_status": "done"},
+    "monthly.goal_pause":        {"tab": "monthly", "entity": "fcc_goal_status", "target": "goal", "target_required": True, "goal_status": "paused"},
     "monthly.source_new":        {"tab": "monthly", "entity": "fcc_source_new"},
     "monthly.obligation":        {"tab": "monthly", "entity": "fcc_obligation"},
     "savings.deposit":           {"tab": "monthly", "entity": "fcc_event", "kind": "one_time", "target": "savings"},      # amount prefilled by the server
@@ -87,6 +93,7 @@ INTENTS: dict[str, dict] = {
     "asset.update_value":        {"tab": "assets", "entity": "fcc_asset_value", "target": "asset", "target_required": True},
     "asset.update_mortgage":     {"tab": "assets", "entity": "fcc_asset_mortgage", "target": "asset", "target_required": True},
     "asset.next_step":           {"tab": "assets", "entity": "fcc_asset_step", "target": "asset", "target_required": True},
+    "asset.adopt_step":          {"tab": "assets", "entity": "fcc_asset_step", "target": "asset", "target_required": True, "adopt": True},
     # a card action on ONE open next action (entity_id = the Task): the same review -> אשר flow
     "asset.step_edit":           {"tab": "assets", "entity": "fcc_asset_step_edit", "target": "task", "target_required": True},
     "asset.step_start":          {"tab": "assets", "entity": "fcc_asset_step_status", "target": "task", "target_required": True, "mode": "start"},
@@ -138,6 +145,9 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("end_date", GF.END_DATE, InputType.DATE, required=RequiredMode.CONDITIONAL, when=_CUM,
            example="2026-12-31"),
         _f("start_date", GF.START_DATE, InputType.DATE),
+    )),
+    FCC_GOAL_STATUS: EntityContract(FCC_GOAL_STATUS, (
+        _f("goal_status", GF.STATUS, InputType.SELECT, required=RequiredMode.ALWAYS, choices=GOAL_STATUSES),
     )),
     FCC_EVENT: EntityContract(FCC_EVENT, (
         _f("goal", EF.GOAL, InputType.LINK, required=RequiredMode.ALWAYS),
@@ -256,7 +266,7 @@ LABELS = {
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
     "balance": "יתרה לסגירה מוקדמת", "payment": "החזר חודשי", "loan_type": "סוג", "rate": "ריבית שנתית", "lender": "מלווה",
     "original": "סכום מקורי", "payments_left": "תשלומים שנותרו", "arrangement": "הסדר פירעון", "delta": "שינוי ריבית",
-    "sale_date": "תאריך מכירה", "sale_amount": "מחיר מכירה (100%)", "value": "שווי נוכחי", "mortgage": "יתרת משכנתא", "step": "פעולה הבאה", "step_owner": "אחראי",
+    "goal_status": "מצב היעד", "sale_date": "תאריך מכירה", "sale_amount": "מחיר מכירה (100%)", "value": "שווי נוכחי", "mortgage": "יתרת משכנתא", "step": "פעולה הבאה", "step_owner": "אחראי",
 }
 _STEP_LABELS = {"step": "הפעולה", "due_date": "תאריך יעד"}
 _ARRANGEMENT_LABELS = {"payment": "פירעון חודשי", "end_date": "מועד פירעון"}
@@ -274,6 +284,7 @@ VALUE_LABELS = {
     "period_type": {"monthly": "חודשי", "weekly": "שבועי", "custom": "מותאם"},
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
     "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
+    "goal_status": {"done": "הושלם", "paused": "מושהה"},
     "scope": {"household": "ביתי", "business": "עסקי", "personal": "אישי"},
     "loan_type": {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"},
     "step_owner": {o: o for o in STEP_OWNERS},
@@ -332,6 +343,8 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         return {"arrangement": f"איך {who} אמור להיפרע? פירעון חודשי קבוע / מועד פירעון / אין הסדר",
                 "payment": f"כמה לחודש בפירעון של {who}?",
                 "end_date": f"עד איזה תאריך {who} אמור להיפרע?"}[field]
+    if entity == FCC_FOLLOWUP and field == "title" and goal_title:
+        return f"מה הפעולה הבאה ב{goal_title}?"
     if entity == FCC_PRIME_CHANGE:
         return "בכמה השתנה הפריים? (נקודות אחוז, למשל: +0.25 או -0.5)"
     if entity == FCC_SOURCE_NEW:
@@ -399,7 +412,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     """Full final business payload, shown before confirmation."""
     order = [f.field_name for f in FCC_CONTRACTS[entity].fields]
     lines: list[str] = []
-    head = {FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
+    head = {FCC_GOAL_STATUS: "עדכון מצב יעד", FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
             FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה",
             FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה",
@@ -411,6 +424,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append(note)
     if entity == FCC_EVENT and goal_title:
         lines.append(f"• {record_noun(entity, fields)}: {goal_title}")
+    if entity == FCC_GOAL_STATUS and goal_title:
+        lines.append(f"• יעד: {goal_title}")
     if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT) and goal_title:
         lines.append(f"• הלוואה / חוב: {goal_title}")
     if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD) and goal_title:
@@ -440,6 +455,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append("יתעדכנו רק פרטי הפירעון של החוב (ושורה בהערות); שאר נתוני ההלוואה לא ייגעו.")
     if entity == FCC_LOAN_PARTIAL:
         lines.append("יתעדכנו היתרה ושורת היסטוריה בהערות ההלוואה. ההחזר החודשי ומספר התשלומים לא משתנים — לעדכון: ״שינוי החזר״.")
+    if entity == FCC_GOAL_STATUS:
+        lines.append("יתעדכן רק מצב היעד; לא נרשם סכום, וההיסטוריה של היעד נשמרת.")
     if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE):
         lines.append("יתעדכן שדה אחד בלבד; שאר נתוני הנכס לא ייגעו.")
     if entity == FCC_ASSET_MORTGAGE:
@@ -516,6 +533,7 @@ def loan_close_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source:
 _FIELD_UPDATES = {
     FCC_LOAN_BALANCE: (Tables.LOANS, "balance", LF.EARLY_CLOSURE, "fcc_loan_update"),
     FCC_LOAN_PAYMENT: (Tables.LOANS, "payment", LF.MONTHLY_PAYMENT, "fcc_loan_update"),
+    FCC_GOAL_STATUS: (Tables.FIN_GOALS, "goal_status", GF.STATUS, "fcc_goal_status"),
     FCC_ASSET_VALUE: ("Assets", "value", AF.VALUE, "fcc_asset_update"),
     FCC_ASSET_MORTGAGE: ("Assets", "mortgage", AF.MORTGAGE, "fcc_asset_update"),
 }
@@ -566,7 +584,11 @@ def asset_step_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> l
               TaskFields.OWNER: [source["profile_id"]], TaskFields.TOPIC: FCC_TASK_TOPIC}
     if values.get("due_date") not in (None, ""):
         fields[TaskFields.DUE_DATE] = values["due_date"]
-    return [{"op": "post", "table": Tables.TASKS, "fields": fields, "audit_action": "fcc_asset_step", "audit_details": asset_id}]
+    writes = [{"op": "post", "table": Tables.TASKS, "fields": fields, "audit_action": "fcc_asset_step", "audit_details": asset_id}]
+    if source.get("clear_legacy_step"):        # adopting the old single-text "Next Step": it now lives as a Task, so the old field is emptied
+        writes.append({"op": "patch", "table": "Assets", "record_id": str(source.get("record_id") or asset_id), "fields": {AF.NEXT_STEP: ""},
+                       "audit_action": "fcc_asset_step_adopt", "audit_details": asset_id})
+    return writes
 
 
 def asset_step_edit_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:

@@ -552,7 +552,7 @@ _ASSET_CURRENT = {fd.FCC_ASSET_VALUE: AF.VALUE, fd.FCC_ASSET_MORTGAGE: AF.MORTGA
 _ASSET_GONE = ("נמכר", "לא פעיל")      # live Assets.Status choices that mean the asset is no longer held
 
 
-def _start_asset_intent(identity, ids, entity, entity_id, store, today) -> TurnResult:
+def _start_asset_intent(identity, ids, entity, entity_id, store, today, adopt: bool = False) -> TurnResult:
     """update value / mortgage / next step of ONE of the caller's own assets. The asset is chosen by id (never typed),
     not found == not yours, and a sold asset has nothing to update. The review shows today's stored value."""
     if not entity_id:
@@ -568,6 +568,16 @@ def _start_asset_intent(identity, ids, entity, entity_id, store, today) -> TurnR
     if entity == fd.FCC_ASSET_SOLD:
         return _start_asset_sale(identity, ids, asset, name, store, today)
     current = f.get(_ASSET_CURRENT[entity])
+    if adopt:                                                  # the old single "Next Step" text becomes a real open action
+        legacy = str(f.get(AF.NEXT_STEP) or "").strip()
+        if not legacy:
+            return TurnResult("info", "אין פעולה ישנה להעביר בנכס הזה.")
+        owner = service._sel(f.get(AF.NEXT_STEP_OWNER))
+        d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=f"intent:asset.adopt_step#{uuid.uuid4().hex[:8]}", today=today,
+                       extra_ctx={"record_id": asset["id"], "asset_id": asset["id"], "asset_name": name, "goal_title": name,
+                                  "clear_legacy_step": True, "review_note": "הפעולה הישנה תועבר לרשימת הפעולות הפתוחות, ותימחק מהשדה הישן."})
+        d, _rej = _set_fields(d, {"step": legacy, **({"step_owner": owner} if owner in fd.STEP_OWNERS else {})}, strict=False)
+        return _persist_new(store, ids, d)
     if entity == fd.FCC_ASSET_STEP:
         open_n = sum(1 for t in service.asset_tasks(identity) if t["asset_id"] == asset["id"])
         note = f"פעולות פתוחות בנכס כרגע: {open_n}" if open_n else "אין פעולות פתוחות בנכס"
@@ -666,6 +676,33 @@ def _sale_note(d: BusinessDraft) -> str:
     if d.source_context.get("sale_warnings"):
         lines.append(d.source_context["sale_warnings"])
     return "\n".join(lines)
+
+
+def _is_action_goal(g: dict) -> bool:
+    """An ACTION goal (sell a property, realise a holding): no amount target and no numeric category. It is moved by actions and a
+    status, never by amounts — the same test the screen uses to render it as a project card."""
+    f = g.get("fields") or {}
+    return calc._num(f.get(GF.TARGET_AMOUNT)) is None and service._category_key(f.get(GF.CATEGORY)) is None
+
+
+def _start_goal_action(identity, ids, intent_id: str, spec: dict, goal_id: str | None, store, today) -> TurnResult:
+    """Next action / done / pause on ONE action goal. Nothing is written here; a follow-up task or a Status patch goes through the usual
+    review -> אשר. A goal that is not the caller's is answered like a missing one."""
+    if not goal_id:
+        return TurnResult("clarify", "בחרו קודם את היעד.")
+    goal = next((g for g in service.my_goals(identity) if g["id"] == goal_id), None)
+    if goal is None:
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    title = goal["fields"].get(GF.TITLE, "")
+    raw = f"intent:{intent_id}#{uuid.uuid4().hex[:8]}"
+    if intent_id == "monthly.goal_followup":
+        d = _new_draft(identity, ids, fd.FCC_FOLLOWUP, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx={"goal_title": title})
+        d, _rej = _set_fields(d, {"goal": goal["id"]}, strict=False)
+    else:
+        d = _new_draft(identity, ids, fd.FCC_GOAL_STATUS, DraftOperation.CREATE, fields={}, raw_text=raw, today=today,
+                       extra_ctx={"record_id": goal["id"], "goal_title": title})
+        d, _rej = _set_fields(d, {"goal_status": spec["goal_status"]}, strict=False)
+    return _persist_new(store, ids, d)
 
 
 def _is_income_goal(g: dict) -> bool:
@@ -814,6 +851,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return _start_prime_change(identity, ids, store, today)
     if intent_id == "monthly.source_new":
         return _start_source_new(identity, ids, store, today)
+    if intent_id in ("monthly.goal_followup", "monthly.goal_done", "monthly.goal_pause"):
+        return _start_goal_action(identity, ids, intent_id, spec, entity_id, store, today)
     if intent_id == "loan.next_step":
         return _start_loan_step(identity, ids, entity_id, store, today)
     if spec["entity"] in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_NEW, fd.FCC_LOAN_PARTIAL, fd.FCC_LOAN_ARRANGEMENT,
@@ -822,7 +861,7 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     if spec.get("target") == "task":
         return _start_task_intent(identity, ids, intent_id, spec, entity_id, store, today)
     if spec["entity"] in _ASSET_CURRENT:
-        return _start_asset_intent(identity, ids, spec["entity"], entity_id, store, today)
+        return _start_asset_intent(identity, ids, spec["entity"], entity_id, store, today, adopt=bool(spec.get("adopt")))
     if intent_id in ("savings.deposit", "savings.gap_reason"):
         return _start_savings_intent(identity, ids, intent_id, store, today)
     goals = service.my_goals(identity) if spec.get("target") == "goal" else []
@@ -841,6 +880,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return _persist_new(store, ids, d)
 
     if entity == fd.FCC_GOAL:                                 # update of an existing goal: ask what to change
+        if _is_action_goal(chosen):
+            return TurnResult("clarify", "זה יעד של פעולה, לא של סכום. השתמשו ב״פעולה הבאה״, ״הושלם״ או ״השהה״ בכרטיס היעד.")
         original = _goal_original(identity, chosen)
         d = _new_draft(identity, ids, entity, DraftOperation.UPDATE, fields=dict(original), raw_text=raw, today=today,
                        extra_ctx={"record_id": chosen["id"], "goal_title": chosen["fields"].get(GF.TITLE, "")},

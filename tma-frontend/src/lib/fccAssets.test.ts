@@ -2,7 +2,7 @@
 import type { FccAssetItem, FccAssets } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AssetsSection, NextActionPrompt } from "../components/FccAssets";
+import { ADOPT_INTENT, ADOPT_LABEL, AssetsSection, NextActionPrompt } from "../components/FccAssets";
 import { UNKNOWN } from "./fccLoans";
 import { ASSET_GONE, UNTYPED, actionRows, personalEquityModel, askNextAction, assetCardModel, soldCardModel, soldNote, assetsHeaderCards, debtLines } from "./fccAssets";
 
@@ -95,14 +95,19 @@ const assetsSummary = { count: 2, total_value: null, total_mortgage: null, total
 
 test("asset cards: value / mortgage / next-step buttons on a live asset only; next step line rendered; no input", () => {
   const html = withActions(false);
-  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 4);
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 5);              // 4 asset actions + the adopt button of the old text
   assert.ok(html.includes("עדכון שווי") && html.includes("עדכון משכנתא") && html.includes("פעולה הבאה") && html.includes(">נמכר<") && html.includes("לדבר עם המתווך ביום ראשון"));
   assert.ok(!html.includes("<textarea"));
 });
 
+test("the old single-text next step offers one button that adopts it as an open action", () => {
+  const html = withActions(false, () => undefined);
+  assert.ok(html.includes(`>${ADOPT_LABEL}<`) && ADOPT_INTENT === "asset.adopt_step");
+});
+
 test("while the shared writer holds a draft every asset action is disabled; without actions no buttons render", () => {
   const locked = withActions(true);
-  assert.equal((locked.match(/fcc-loan__actionbtn[^>]*disabled=""|disabled=""[^>]*fcc-loan__actionbtn/g) || []).length, 4);
+  assert.equal((locked.match(/fcc-loan__actionbtn[^>]*disabled=""|disabled=""[^>]*fcc-loan__actionbtn/g) || []).length, 5);
   assert.ok(!renderToStaticMarkup(createElement(AssetsSection, { assets: { items: [withStep], summary: assetsSummary } })).includes("fcc-loan__actions"));
 });
 
@@ -133,7 +138,7 @@ test("totals are labelled ACTIVE; once something is sold the screen says it is n
 test("sold assets render apart (collapsed section, 'שנמכרו'), never among the actionable cards; all-sold still renders", () => {
   const html = renderToStaticMarkup(createElement(AssetsSection, { assets: withSold(), actions: { onAction: () => undefined, disabled: false } }));
   assert.ok(html.includes("<details") && html.includes("נכסים שנמכרו (1)") && html.includes("החלק שלי (50%)") && html.includes("הלוואות שעדיין פתוחות"));
-  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 4, "only the ONE active asset has actions");
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, 5, "only the ONE active asset has actions (4 + adopt)");
   const allSold = renderToStaticMarkup(createElement(AssetsSection, { assets: { items: [], summary: assetsSummary, sold: { count: 1, items: [soldA] } } }));
   assert.ok(allSold.includes("אין נכסים פעילים") && allSold.includes("נכסים שנמכרו (1)"));
   assert.ok(!renderToStaticMarkup(createElement(AssetsSection, { assets: withSold(0) })).includes("<details"));
@@ -160,7 +165,7 @@ test("open actions markup: start button only while waiting; done / cancel / edit
   assert.equal((html.match(/>בתהליך</g) || []).length, 1 + 1, "one start button (waiting action) + one status tag (running action)");
   const count = (re: RegExp) => (html.match(re) || []).length;
   assert.equal(count(/>בוצע</g) === 2 && count(/>בוטל</g) === 2 && count(/>ערוך</g) === 2, true);
-  assert.equal(html.includes("פעולה קודמת (ישנה):") && html.includes("ישן"), true);
+  assert.equal(html.includes("פעולה ישנה (טרם הועברה):") && html.includes("ישן"), true);
   const disabled = renderToStaticMarkup(createElement(AssetsSection, { assets: { ...assets, items: [a] }, actions: { onAction: () => undefined, disabled: true } }));
   assert.equal(disabled.includes('disabled=""'), true);
   const readonly = renderToStaticMarkup(createElement(AssetsSection, { assets: { ...assets, items: [a] } }));
