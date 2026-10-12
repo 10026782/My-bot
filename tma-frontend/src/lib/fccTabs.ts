@@ -67,6 +67,7 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
     chips: [
       { intent: "loan.update_balance", label: "עדכון יתרה", pick: "loan" },
       { intent: "loan.update_payment", label: "שינוי החזר", pick: "loan" },
+      { intent: "loan.prime_change", label: "שינוי פריים" },                      // one number: every loan's rate and payment follow
       { intent: "loan.partial_payment", label: "פרעון חלקי", pick: "loan" },
       { intent: "loan.arrangement", label: "הסדר פירעון", pick: "loan" },
       { intent: "loan.next_step", label: "פעולה הבאה", pick: "loan" },

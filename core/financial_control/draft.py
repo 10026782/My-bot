@@ -47,12 +47,13 @@ LOAN_TASK_TAG = "[FCC-LOAN:"                     # the same for a loan / a debt 
 FCC_LOAN_PARTIAL = "fcc_loan_partial"            # a partial repayment: new balance + where the money went / came from (+ a debt-goal event for own debts)
 FCC_LOAN_ARRANGEMENT = "fcc_loan_arrangement"    # how a debt is repaid: monthly amount / a deadline / no arrangement
 FCC_RECEIVABLE_NEW = "fcc_receivable_new"        # a debt owed TO the owner (Loans.Direction = חייבים לי)
+FCC_PRIME_CHANGE = "fcc_prime_change"            # the prime rate moved by X points: every loan's rate (and monthly payment) follows
 FCC_SOURCE_NEW = "fcc_source_new"                # a new income SOURCE inside the total income goal (a goal with "Contributes To")
 SOURCE_PERIODS = ("monthly", "weekly")
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
 FCC_ENTITIES = (FCC_GOAL, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
-                FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
+                FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_PRIME_CHANGE, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
 LOAN_TYPE_STORED = {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"}   # the live Loans."Loan Type" choices
@@ -82,6 +83,7 @@ INTENTS: dict[str, dict] = {
     "loan.arrangement":          {"tab": "loans", "entity": "fcc_loan_arrangement", "target": "loan", "target_required": True},
     "loan.receivable_new":       {"tab": "loans", "entity": "fcc_receivable_new"},
     "loan.next_step":            {"tab": "loans", "entity": "fcc_asset_step", "target": "loan", "target_required": True},
+    "loan.prime_change":         {"tab": "loans", "entity": "fcc_prime_change"},
     "asset.update_value":        {"tab": "assets", "entity": "fcc_asset_value", "target": "asset", "target_required": True},
     "asset.update_mortgage":     {"tab": "assets", "entity": "fcc_asset_mortgage", "target": "asset", "target_required": True},
     "asset.next_step":           {"tab": "assets", "entity": "fcc_asset_step", "target": "asset", "target_required": True},
@@ -185,6 +187,10 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.CONDITIONAL, when=_MONTHLY, validation="positive"),
         _f("end_date", LF.END_DATE, InputType.DATE, required=RequiredMode.CONDITIONAL, when=_DEADLINE),
     )),
+    # The change in points (e.g. +0.25 / -0.5), never an absolute rate: the loans themselves live in source_context (prime_rows).
+    FCC_PRIME_CHANGE: EntityContract(FCC_PRIME_CHANGE, (
+        _f("delta", LF.INTEREST_RATE, InputType.NUMBER, required=RequiredMode.ALWAYS, example="+0.25"),
+    )),
     # A new income source: its parent (the total income goal) lives in source_context, never an editable field.
     FCC_SOURCE_NEW: EntityContract(FCC_SOURCE_NEW, (
         _f("title", GF.TITLE, InputType.TEXT, required=RequiredMode.ALWAYS, example="אבי"),
@@ -249,7 +255,7 @@ LABELS = {
     "name": "התחייבות", "scope": "שייכות", "frequency": "תדירות", "review_status": "החלטה", "saving": "חיסכון חודשי פוטנציאלי",
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
     "balance": "יתרה לסגירה מוקדמת", "payment": "החזר חודשי", "loan_type": "סוג", "rate": "ריבית שנתית", "lender": "מלווה",
-    "original": "סכום מקורי", "payments_left": "תשלומים שנותרו", "arrangement": "הסדר פירעון",
+    "original": "סכום מקורי", "payments_left": "תשלומים שנותרו", "arrangement": "הסדר פירעון", "delta": "שינוי ריבית",
     "sale_date": "תאריך מכירה", "sale_amount": "מחיר מכירה (100%)", "value": "שווי נוכחי", "mortgage": "יתרת משכנתא", "step": "פעולה הבאה", "step_owner": "אחראי",
 }
 _STEP_LABELS = {"step": "הפעולה", "due_date": "תאריך יעד"}
@@ -291,6 +297,8 @@ def display_value(field: str, value: Any) -> str:
         return VALUE_LABELS[field].get(value, str(value))
     if field == "rate" and isinstance(value, (int, float)):
         return f"{value:g}%"
+    if field == "delta" and isinstance(value, (int, float)):
+        return f"{value:+g}%"
     if field in ("target_amount", "amount", "saving", "balance", "payment", "original", "value", "mortgage", "sale_amount") and isinstance(value, (int, float)):
         digits = 2 if round(float(value), 2) != round(float(value)) else 0       # agorot are shown when they exist (what is stored = what is reviewed)
         return f"-₪{abs(value):,.{digits}f}" if value < 0 else f"₪{value:,.{digits}f}"
@@ -324,6 +332,8 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         return {"arrangement": f"איך {who} אמור להיפרע? פירעון חודשי קבוע / מועד פירעון / אין הסדר",
                 "payment": f"כמה לחודש בפירעון של {who}?",
                 "end_date": f"עד איזה תאריך {who} אמור להיפרע?"}[field]
+    if entity == FCC_PRIME_CHANGE:
+        return "בכמה השתנה הפריים? (נקודות אחוז, למשל: +0.25 או -0.5)"
     if entity == FCC_SOURCE_NEW:
         return {"title": "איך לקרוא למקור ההכנסה? (למשל: אבי, תיווכים)",
                 "target_amount": f"מה היעד של {fields.get('title') or 'המקור'} לתקופה?",
@@ -395,7 +405,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה",
             FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: f"פעולה הבאה ב{subject}", FCC_ASSET_STEP_EDIT: f"עריכת פעולה ב{subject}",
             FCC_ASSET_STEP_STATUS: f"עדכון סטטוס פעולה ב{subject}", FCC_ASSET_SOLD: "סימון נכס כנמכר",
-            FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי", FCC_SOURCE_NEW: "מקור הכנסה חדש"}[entity]
+            FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי", FCC_SOURCE_NEW: "מקור הכנסה חדש", FCC_PRIME_CHANGE: "שינוי ריבית פריים"}[entity]
     lines.append(f"📋 {head}")
     if note and entity != FCC_ASSET_SOLD:
         lines.append(note)
@@ -420,6 +430,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
                      else "יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
     if entity == FCC_LOAN_NEW:
         lines.append("תיווצר הלוואה פעילה בבעלותך.")
+    if entity == FCC_PRIME_CHANGE:
+        lines.append("יתעדכנו הריבית וההחזר החודשי של כל ההלוואות שלך (לא חובות שחייבים לך) + שורת היסטוריה בהערות. אחרי שהבנק מפרסם את ההחזר שלו אפשר לתקן הלוואה: ״שינוי החזר״.")
     if entity == FCC_SOURCE_NEW:
         lines.append("ייווצר מקור הכנסה פעיל בתוך יעד ההכנסה הכולל — הוא נספר בתוכו ולא מעליו.")
     if entity == FCC_RECEIVABLE_NEW:
@@ -636,6 +648,30 @@ def source_new_write(values: Mapping[str, Any], source: Mapping[str, Any]) -> di
             "audit_action": "fcc_source_create", "audit_details": str(values.get("title", ""))[:80]}
 
 
+def prime_change_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """ONE patch per affected loan (new rate, new monthly payment when it can be derived, a dated history line in its Notes). The plan is the
+    same pure function the review used, over the numbers captured when the draft opened."""
+    from core.financial_control import loans as fcc_loans
+    rows = list(source.get("prime_rows") or [])
+    delta = float(values["delta"])
+    notes = {r["id"]: r.get("notes", "") for r in rows}
+    writes = []
+    for p in fcc_loans.prime_plan(rows, delta):
+        if p["skip"]:
+            continue
+        line = f"שינוי פריים ({source.get('today', '')}) {delta:+g}%: ריבית {p['old_rate']:g}% ← {p['new_rate']:g}%"
+        fields: dict[str, Any] = {LF.INTEREST_RATE: p["new_rate"]}
+        if p["new_payment"] is not None:
+            fields[LF.MONTHLY_PAYMENT] = p["new_payment"]
+            line += f", החזר {display_value('payment', p['old_payment'])} ← {display_value('payment', p['new_payment'])}"
+        fields[LF.NOTES] = _note_line(notes.get(p["id"]), line)
+        writes.append({"op": "patch", "table": Tables.LOANS, "record_id": p["id"], "fields": fields,
+                       "audit_action": "fcc_prime_change", "audit_details": p["id"]})
+    if not writes:
+        raise UnsupportedOperationError("prime change affects no loan")
+    return writes
+
+
 def receivable_new_write(values: Mapping[str, Any], source: Mapping[str, Any]) -> dict:
     """A debt owed TO the owner: a Loans row marked Direction = חייבים לי (the debtor is the Lender), active, with its repayment mechanism."""
     line = f"הסדר פירעון ({source.get('today', '')}): {_arrangement_text(values)}"
@@ -755,6 +791,8 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": [receivable_new_write(values, writer.source_context)]}
         if entity == FCC_SOURCE_NEW:
             return {"writes": [source_new_write(values, writer.source_context)]}
+        if entity == FCC_PRIME_CHANGE:
+            return {"writes": prime_change_writes(values, writer.source_context)}
         if entity == FCC_FOLLOWUP:
             tag = f"[FCC:{values.get('goal') or 'none'}]"
             fields = {TaskFields.NAME: values["title"], TaskFields.STATUS: "ממתין",

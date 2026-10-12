@@ -3588,3 +3588,90 @@ def test_correcting_a_balance_after_its_due_date_moves_the_next_due_date_so_the_
     _say("2500", scope="loans")
     (w,) = _confirm_one()
     assert w["fields"] == {LF.EARLY_CLOSURE: 2500}
+
+
+# ═══ Prime-rate change: one number moves every loan's rate and payment together ═══
+def seed_prime():
+    DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] = [], []
+    DB[Tables.LOANS] = [
+        loan("recA", **{LF.NAME: "כאל 60,700", LF.EARLY_CLOSURE: 55000, LF.INTEREST_RATE: 12.05, LF.MONTHLY_PAYMENT: 1182.65, LF.PAYMENTS_LEFT: 63, LF.NOTES: "לכל מטרה"}),
+        loan("recB", **{LF.NAME: "מקס", LF.EARLY_CLOSURE: 94549.56, LF.INTEREST_RATE: 6.96, LF.MONTHLY_PAYMENT: 1378.22, LF.PAYMENTS_LEFT: 86}),
+        loan("recC", **{LF.NAME: "ללא החזר", LF.EARLY_CLOSURE: 1000, LF.INTEREST_RATE: 8}),                       # rate only: payment cannot be derived
+        loan("recD", **{LF.NAME: "ללא ריבית", LF.EARLY_CLOSURE: 1000, LF.MONTHLY_PAYMENT: 100, LF.PAYMENTS_LEFT: 10}),   # no rate: not touched
+        loan("recR", **{LF.NAME: "חייב לי", LF.EARLY_CLOSURE: 5000, LF.INTEREST_RATE: 5, LF.DIRECTION: "חייבים לי"}),
+        loan("recP", **{LF.NAME: "נפרעה", LF.EARLY_CLOSURE: 0, LF.INTEREST_RATE: 5, LF.STATUS: "Paid Off"}),
+        loan("recX", owner=AVI, **{LF.NAME: "של אבי", LF.EARLY_CLOSURE: 777, LF.INTEREST_RATE: 5, LF.MONTHLY_PAYMENT: 50, LF.PAYMENTS_LEFT: 20}),
+    ]
+
+
+def test_prime_plan_scales_the_banks_own_payment_over_the_remaining_term():
+    seed_prime()
+    rows = fcc_loans.prime_rows(service.my_loans(ELIYAHU), TODAY)             # the owner's own rows only (another owner's never arrive)
+    assert [r["id"] for r in rows] == ["recA", "recB", "recC"]            # not: no rate, owed TO the owner, closed
+    up = {p["id"]: p for p in fcc_loans.prime_plan(rows, 0.25)}
+    down = {p["id"]: p for p in fcc_loans.prime_plan(rows, -0.5)}
+    assert up["recA"]["new_rate"] == 12.3 and up["recA"]["new_payment"] > 1182.65 and down["recA"]["new_payment"] < 1182.65
+    assert abs(up["recA"]["new_payment"] - 1182.65) < 12                  # a quarter point over 63 months moves the payment by a few shekels
+    assert up["recC"]["new_payment"] is None and up["recC"]["new_rate"] == 8.25      # no payment on file: only the rate follows
+    assert fcc_loans.prime_plan(rows, -9)[2]["skip"] == "negative_rate"
+    assert fcc_loans.prime_plan(rows, 0.0)[0]["new_payment"] == 1182.65            # no change keeps the bank's number exactly
+
+
+def test_prime_change_flow_asks_one_number_reviews_every_loan_and_patches_each(no_model):
+    seed_prime()
+    r = intent("loan.prime_change")
+    assert r.state == "ask" and r.awaiting == "delta" and "3 הלוואות" in r.message and "פריים" in r.message
+    r = _say("+0.25", scope="loans")
+    assert r.state == "review" and "שינוי ריבית: +0.25%" in r.message
+    assert "כאל 60,700: ריבית 12.05% ← 12.3%" in r.message and "מקס: ריבית 6.96% ← 7.21%" in r.message and "ההחזר לא מחושב" in r.message
+    assert "ללא ריבית" not in r.message and "חייב לי" not in r.message and "אבי" not in r.message
+    writes = _confirm_one()
+    assert [w["record_id"] for w in writes] == ["recA", "recB", "recC"] and all(w["op"] == "patch" and w["table"] == Tables.LOANS for w in writes)
+    a = writes[0]["fields"]
+    assert a[LF.INTEREST_RATE] == 12.3 and a[LF.MONTHLY_PAYMENT] > 1182.65 and a[LF.NOTES].startswith("לכל מטרה\nשינוי פריים (2026-10-08) +0.25%: ריבית 12.05% ← 12.3%")
+    assert set(writes[2]["fields"]) == {LF.INTEREST_RATE, LF.NOTES}               # the loan without a payment: rate + history only
+    assert LF.EARLY_CLOSURE not in a and LF.STATUS not in a and LF.NEXT_PAYMENT not in a
+
+
+def test_prime_change_accepts_signs_and_decimals_rejects_zero_typos_and_words(no_model):
+    seed_prime()
+    intent("loan.prime_change")
+    for bad in ("0", "7", "-6", "הרבה", ""):
+        r = _say(bad, scope="loans") if bad else None
+        if r is not None:
+            assert r.awaiting == "delta" and r.state in ("ask", "unrelated"), bad
+    assert _say("-0.5", scope="loans").state == "review"
+    conv.handle_turn(ELIYAHU, "בטל", extractor=conv.DeterministicExtractor(), today=TODAY)
+    intent("loan.prime_change")
+    assert _say("−0.25", scope="loans").state == "review"                         # a typographic minus works as a minus
+
+
+def test_prime_change_is_idempotent_owner_scoped_and_needs_loans_with_a_rate(no_model):
+    seed_prime()
+    intent("loan.prime_change"); _say("0.25", scope="loans")
+    writes = _confirm_one()
+    for w in writes:
+        next(r for r in DB[Tables.LOANS] if r["id"] == w["record_id"])["fields"].update(w["fields"])
+    assert all(conv._already_applied(ELIYAHU, w) for w in writes)                   # a retry after success writes nothing
+    assert all(w["record_id"] != "recX" for w in writes)
+    conv.complete_execution(ELIYAHU)
+    DB[Tables.LOANS] = [loan("recD", **{LF.NAME: "ללא ריבית", LF.EARLY_CLOSURE: 1000})]
+    assert intent("loan.prime_change").state == "clarify"
+
+
+def test_http_prime_change_executes_one_frozen_patch_per_loan(monkeypatch, no_model):
+    seed_prime()
+    sent = []
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute",
+                        lambda action, payload, identity, label: (sent.append(payload) or ("a", {"ok": True}, 200)))
+    c = http(monkeypatch, ELIYAHU)
+    assert c.post("/api/fcc/intent/start", json={"intent": "loan.prime_change"}, headers=H).get_json()["awaiting"] == "delta"
+    assert c.post("/api/fcc/write", json={"text": "+0.25", "scope": "loans"}, headers=H).get_json()["state"] == "review"
+    assert sent == []
+    done = c.post("/api/fcc/write", json={"text": "אשר", "scope": "loans"}, headers=H).get_json()
+    assert done["state"] == "executed" and [w["record_id"] for w in sent] == ["recA", "recB", "recC"]
+
+
+def test_prime_intent_is_registered_and_is_not_a_transition():
+    assert fd.INTENTS["loan.prime_change"]["entity"] == "fcc_prime_change" and "target_required" not in fd.INTENTS["loan.prime_change"]
+    assert not fd.INTENTS["loan.prime_change"].get("transition")
