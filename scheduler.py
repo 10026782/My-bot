@@ -227,6 +227,46 @@ def _job_payment_reminders():
 
 
 # ══════════════════════════════════════════════════
+# FCC — Loan balances follow their schedule (monthly instalment, applied on each due date)
+# ══════════════════════════════════════════════════
+
+def fcc_loan_auto_step_for(owner, today=None, *, dry_run: bool = False) -> dict:
+    """Apply the due instalments of ONE owner's own loans: one gateway patch per loan (``fcc_service.plan_loan_auto_step`` is the
+    read-only, owner-scoped plan). Idempotent (``Next Payment Due`` moves on); never closes a loan."""
+    from core.financial_control import service as fcc_service
+    from tools.airtable_gateway import airtable_patch
+    out = {"stepped": [], "initialized": [], "skipped": [], "failed": [], "dry_run": dry_run}
+    for step in fcc_service.plan_loan_auto_step(owner, today):
+        if step["action"] == "skip":
+            out["skipped"].append({"id": step["id"], "name": step["name"], "reason": step["reason"]})
+            continue
+        ok = True if dry_run else airtable_patch("Loans", step["id"], step["fields"], source="fcc_loan_auto")
+        slot = "initialized" if step["action"] == "init" else "stepped"
+        out[slot if ok else "failed"].append({k: step[k] for k in ("id", "name", "action", "next_due", "before", "after", "steps", "behind") if k in step})
+        logger.info("[FccLoanAutoStep] %s loan=%s ok=%s dry_run=%s", step["action"], step["id"], ok, dry_run)
+    return out
+
+
+def _job_fcc_loan_auto_step():
+    """Daily: for each FCC owner (flag + canary allowlist) apply every due instalment of the owner's own loans. Silent — no message.
+    Flag: FEATURE_FCC_LOAN_AUTO_STEP (default OFF)."""
+    try:
+        from core.financial_control import service as fcc_service
+        if not fcc_service.loan_auto_step_enabled():
+            return
+        for owner in fcc_service.auto_step_identities():
+            result = fcc_loan_auto_step_for(owner)
+            logger.info(
+                "[FccLoanAutoStep] user=%s stepped=%d initialized=%d skipped=%d failed=%d",
+                owner.user_id, len(result["stepped"]), len(result["initialized"]), len(result["skipped"]), len(result["failed"]),
+            )
+            for bad in result["failed"]:
+                logger.error("[FccLoanAutoStep] write failed loan=%s", bad.get("id"))
+    except Exception as e:
+        logger.error(f"[FccLoanAutoStep] job error: {e}")
+
+
+# ══════════════════════════════════════════════════
 # F01 — Lead Recovery
 # ══════════════════════════════════════════════════
 
@@ -943,6 +983,7 @@ def start_scheduler() -> threading.Thread:
     schedule.every(cleanup_interval).minutes.do(_automation_guard(_job_cleanup_pending, name="cleanup_pending"))
     schedule.every(2).minutes.do(_automation_guard(_job_external_execution_poll, name="external_execution_poll"))
     schedule.every().day.at("00:05").do(_automation_guard(_job_overdue_payments, name="overdue_payments"))
+    schedule.every().day.at("05:20").do(_automation_guard(_job_fcc_loan_auto_step, name="fcc_loan_auto_step"))                           # FCC loans — flag: FEATURE_FCC_LOAN_AUTO_STEP
     schedule.every(10).minutes.do(_automation_guard(job_flush_lead_memory, name="flush_lead_memory"))                                          # N01
     schedule.every(followup_interval).minutes.do(shabbat_safe(_automation_guard(_job_followup_scan, name="followup_scan")))               # N02
     schedule.every().day.at(payment_reminder_time).do(shabbat_safe(_automation_guard(_job_payment_reminders, name="payment_reminders")))      # N04

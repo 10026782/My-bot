@@ -4,7 +4,7 @@ import type { FccLoan, FccLoans } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LoansSection } from "../components/FccLoans";
-import { balanceCardModel, BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, NO_ARRANGEMENT, UNKNOWN, canClose, receivableCardModel, receivableItems, receivablesSummary, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
+import { AUTO_STEP_NOTE, PAYMENTS_DONE, balanceCardModel, BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, NO_ARRANGEMENT, UNKNOWN, canClose, receivableCardModel, receivableItems, receivablesSummary, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -266,6 +266,16 @@ test("balance card shows only when something is owed to the owner, in the loans 
   assert.equal(balanceCardModel(bal({ receivables_count: 0 })), null);
   const html = renderToStaticMarkup(createElement(LoansSection, { loans: bal({}) }));
   assert.ok(html.includes("חייבים לי מול החובות שלי") && html.includes("נכס פיננסי נטו"));
+});
+
+test("loan card: next instalment date and 'all paid — close?' show only when known; the auto-step note only when the job is on", () => {
+  const m = loanCardModel({ ...full, next_payment_due: "2026-11-15", payments_done: true });
+  assert.ok(m.metaRows.some((r) => r.label === "תשלום הבא" && r.value === "15/11/2026"));
+  assert.ok(m.tags.some((t) => t.text === PAYMENTS_DONE));
+  const plain = loanCardModel(full);
+  assert.ok(!plain.metaRows.some((r) => r.label === "תשלום הבא") && !plain.tags.some((t) => t.text === PAYMENTS_DONE));
+  assert.ok(!renderToStaticMarkup(createElement(LoansSection, { loans })).includes("מתעדכנות אוטומטית"));
+  assert.ok(renderToStaticMarkup(createElement(LoansSection, { loans: { ...loans, auto_step: true } })).includes(AUTO_STEP_NOTE));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

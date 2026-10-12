@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FccLoans } from "../types";
 import {
-  ARRANGEMENT_BUTTON, BALANCE_BUTTON, balanceCardModel, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RECEIVED_BUTTON,
+  ARRANGEMENT_BUTTON, AUTO_STEP_NOTE, BALANCE_BUTTON, balanceCardModel, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RECEIVED_BUTTON,
   FILTERS, RANK_MODES, STATUS_UNKNOWN, UNKNOWN, actionRows, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards,
   receivableCardModel, receivableItems, receivablesSummary, sortLoans, togglePick, canClose,
   type ActionRow, type LoanFilter, type RankMode,
@@ -125,6 +125,7 @@ export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans
           <div className="fcc-kpis">
             {loanHeaderCards(loans).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
           </div>
+          {loans.auto_step && <p className="fcc-goal__note" role="note">{AUTO_STEP_NOTE}</p>}
           {loans.summary.unknown_status_count > 0 && (
             <p className="fcc-goal__note">{loans.summary.unknown_status_count} הלוואות עם {STATUS_UNKNOWN} (Active Loan לא מסומן) — כלולות בסיכומים.</p>
           )}

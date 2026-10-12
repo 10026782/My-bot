@@ -483,8 +483,12 @@ def _start_loan_intent(identity, ids, entity, entity_id, store, today) -> TurnRe
         return _persist_new(store, ids, d)
     current = calc._num(f.get(_LOAN_CURRENT[entity]))
     note = f"היום: {fd.display_value('balance', current)}" if current is not None else "היום: לא הוגדר"
-    d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today,
-                   extra_ctx={"record_id": loan["id"], "loan_name": name, "goal_title": name, "review_note": note})
+    extra = {"record_id": loan["id"], "loan_name": name, "goal_title": name, "review_note": note}
+    moved = fcc_loans.advance_due(f, today) if entity == fd.FCC_LOAN_BALANCE else None
+    if moved:                                                    # the corrected balance is as of today: its passed due date must not be applied again
+        extra["advance_next_due"] = moved
+        extra["review_note"] = f"{note}\nתאריך החיוב הבא יעודכן ל־{fd.display_value('end_date', moved)} (היתרה החדשה כבר כוללת את החיוב שחלף)."
+    d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
     return _persist_new(store, ids, d)
 
 

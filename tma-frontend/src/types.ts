@@ -553,6 +553,9 @@ export interface FccLoan {
   direction?: "owed_by_me" | "owed_to_me";
   /** How the debt is repaid: a standing monthly amount, a deadline, or null (nothing recorded yet). */
   arrangement?: "monthly" | "deadline" | null;
+  /** Next instalment date (the monthly auto-step moves it on) and "every instalment paid" (the owner confirms the closing). */
+  next_payment_due?: string | null;
+  payments_done?: boolean;
   /** The OPEN next actions of this loan / debt (Tasks tagged with the loan). */
   actions?: FccAssetAction[];
   /** Active Loan unchecked and not Paid Off: shown and counted, flagged for confirmation. */
@@ -651,6 +654,8 @@ export interface FccLoans {
   receivables?: { count: number; total_balance: number | null; coverage: number; no_arrangement: number };
   /** Owed TO the owner vs owed BY him (asset-linked loans left out: that debt is already inside the asset's equity). */
   balance?: FccDebtBalance;
+  /** True when the monthly job is on: balances follow their schedule on each due date (an estimate to correct now and then). */
+  auto_step?: boolean;
 }
 
 export interface FccDebtBalance {

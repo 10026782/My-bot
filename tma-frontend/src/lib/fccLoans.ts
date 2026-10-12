@@ -27,6 +27,8 @@ export function actionRows(i: { actions?: FccAssetAction[] }): ActionRow[] {
 }
 
 export const UNKNOWN = "לא הוגדר";
+export const PAYMENTS_DONE = "כל התשלומים שולמו — לסגור?";
+export const AUTO_STEP_NOTE = "היתרות מתעדכנות אוטומטית בכל תאריך חיוב (חישוב לפי ריבית והחזר) — זו הערכה. כדאי לתקן מול הבנק מדי פעם ב״עדכון יתרה״.";
 export const UNCLASSIFIED = "לא סווג";
 export const STATUS_UNKNOWN = "סטטוס לא הוגדר";
 
@@ -112,11 +114,13 @@ export function loanCardModel(l: FccLoan): LoanCardModel {
   const metaRows: LoanRow[] = [
     { label: "תשלומים שנותרו", value: months(l.payments_remaining) },
     { label: "תאריך סיום", value: dmy(l.end_date) || UNKNOWN },
+    ...(l.next_payment_due ? [{ label: "תשלום הבא", value: dmy(l.next_payment_due) }] : []),
   ];
   const typeLabel = l.loan_type ?? UNCLASSIFIED;
   const tags: LoanTag[] = [{ text: typeLabel, tone: l.loan_type ? "plain" : "muted" }];
   if (l.status_unknown) tags.push({ text: STATUS_UNKNOWN, tone: "muted" });
   if (isPartial(l)) tags.push({ text: "נתונים חלקיים", tone: "muted" });
+  if (l.payments_done) tags.push({ text: PAYMENTS_DONE, tone: "muted" });
   const freed = l.monthly_cash_freed_if_closed;
   return {
     title: l.name || UNKNOWN,

@@ -3441,3 +3441,150 @@ def test_a_source_cannot_hang_under_another_persons_goal():
 
 def test_source_intent_is_registered_and_is_not_a_transition():
     assert fd.INTENTS["monthly.source_new"]["entity"] == "fcc_source_new" and "target_required" not in fd.INTENTS["monthly.source_new"]
+
+
+# ═══ Monthly auto-step: the loan balance follows its own schedule; the owner only corrects now and then ═══
+def _auto_loan(**f):
+    base = {LF.NAME: "מקס", LF.EARLY_CLOSURE: 3060.71, LF.INTEREST_RATE: 12.85, LF.MONTHLY_PAYMENT: 784.24, LF.PAYMENTS_LEFT: 4,
+            LF.DUE_DAY: 15, LF.NEXT_PAYMENT: "2026-10-15"}
+    base.update(f)
+    return loan("recAuto", **{k: v for k, v in base.items() if v is not None})
+
+
+def test_nothing_happens_before_the_due_date_and_one_instalment_is_applied_on_it():
+    assert fcc_loans.auto_step(_auto_loan(), date(2026, 10, 14)) is None
+    s = fcc_loans.auto_step(_auto_loan(), date(2026, 10, 16))
+    assert s["action"] == "step" and s["steps"] == 1
+    f = s["fields"]
+    assert f[LF.EARLY_CLOSURE] == 2309.25            # 3060.71 × (1 + 12.85%/12) − 784.24
+    assert f[LF.PAYMENTS_LEFT] == 3 and f[LF.NEXT_PAYMENT] == "2026-11-15"
+    assert "עדכון אוטומטי (2026-10-16): 1 תשלומים — יתרה ₪3,060.71 ← ₪2,309.25" in f[LF.NOTES]
+
+
+def test_a_missed_stretch_is_caught_up_instalment_by_instalment_and_the_old_notes_are_kept():
+    s = fcc_loans.auto_step(_auto_loan(**{LF.NEXT_PAYMENT: "2026-08-15", LF.NOTES: "לכל מטרה"}), date(2026, 10, 16))
+    assert s["steps"] == 3 and s["fields"][LF.NEXT_PAYMENT] == "2026-11-15" and s["fields"][LF.PAYMENTS_LEFT] == 1
+    assert s["fields"][LF.NOTES].startswith("לכל מטרה\nעדכון אוטומטי")
+
+
+def test_the_last_instalment_zeroes_the_balance_never_closes_the_loan_and_then_the_loan_is_left_alone():
+    rec = _auto_loan(**{LF.PAYMENTS_LEFT: 1, LF.EARLY_CLOSURE: 780})
+    s = fcc_loans.auto_step(rec, date(2026, 10, 16))
+    assert s["fields"][LF.EARLY_CLOSURE] == 0 and s["fields"][LF.PAYMENTS_LEFT] == 0 and LF.STATUS not in s["fields"]
+    rec["fields"].update(s["fields"])
+    assert fcc_loans.auto_step(rec, date(2026, 12, 1)) is None                  # finished: nothing more is written
+    assert fcc_loans.loan_item(rec, date(2026, 12, 1))["payments_done"] is True
+
+
+def test_the_first_run_only_learns_the_next_due_date_and_a_second_run_the_same_day_writes_nothing():
+    rec = _auto_loan(**{LF.NEXT_PAYMENT: None, LF.DUE_DAY: 27})
+    s = fcc_loans.auto_step(rec, date(2026, 10, 8))
+    assert s["action"] == "init" and s["fields"] == {LF.NEXT_PAYMENT: "2026-10-27"}      # the stored balance is as of today: no instalment now
+    assert fcc_loans.auto_step(_auto_loan(**{LF.NEXT_PAYMENT: None, LF.DUE_DAY: 5}), date(2026, 10, 8))["fields"] == {LF.NEXT_PAYMENT: "2026-11-05"}
+    assert fcc_loans.auto_step(_auto_loan(**{LF.NEXT_PAYMENT: None, LF.DUE_DAY: 8}), date(2026, 10, 8))["fields"] == {LF.NEXT_PAYMENT: "2026-10-08"}
+    rec["fields"].update(s["fields"])
+    assert fcc_loans.auto_step(rec, date(2026, 10, 8)) is None
+
+
+def test_inputs_that_would_make_a_wrong_number_are_skipped_with_a_reason_and_other_loans_are_not_stepped():
+    day = date(2026, 10, 16)
+    assert fcc_loans.auto_step(_auto_loan(**{LF.INTEREST_RATE: None}), day)["reason"] == "missing_input"
+    assert fcc_loans.auto_step(_auto_loan(**{LF.MONTHLY_PAYMENT: 10}), day)["reason"] == "payment_below_interest"   # would grow the balance
+    assert fcc_loans.auto_step(_auto_loan(**{LF.NEXT_PAYMENT: None, LF.DUE_DAY: None}), day)["reason"] == "no_due_day"
+    assert fcc_loans.auto_step(_auto_loan(**{LF.DIRECTION: "חייבים לי"}), day) is None                                # a debt owed TO the owner
+    assert fcc_loans.auto_step(_auto_loan(**{LF.STATUS: "Paid Off"}), day) is None
+
+
+def test_a_31st_due_day_clamps_to_the_month_end_and_the_schedule_reproduces_a_real_loan():
+    s = fcc_loans.auto_step(_auto_loan(**{LF.NEXT_PAYMENT: "2027-01-31", LF.DUE_DAY: 31}), date(2027, 2, 1))
+    assert s["fields"][LF.NEXT_PAYMENT] == "2027-02-28"
+    rate, pay, n = 12.05, 1182.65, 63                                   # a live loan: its balance equals the present value of its payments
+    i = rate / 100 / 12
+    pv = round(pay * (1 - (1 + i) ** -n) / i, 2)
+    assert abs(pv - 55342.78) < 400                                     # the stored balance matches the formula's own schedule (±0.7%)
+    rec = _auto_loan(**{LF.EARLY_CLOSURE: pv, LF.INTEREST_RATE: rate, LF.MONTHLY_PAYMENT: pay, LF.PAYMENTS_LEFT: n, LF.NEXT_PAYMENT: "2026-11-10", LF.DUE_DAY: 10})
+    day = date(2026, 11, 10)
+    for _ in range(n):
+        s = fcc_loans.auto_step(rec, day)
+        rec["fields"].update(s["fields"])
+        day = date.fromisoformat(s["fields"][LF.NEXT_PAYMENT])
+    assert rec["fields"][LF.EARLY_CLOSURE] == 0 and rec["fields"][LF.PAYMENTS_LEFT] == 0
+
+
+def test_the_job_patches_only_the_owners_loans_through_the_gateway_and_is_idempotent(monkeypatch):
+    import scheduler
+    seed_debts(with_goal=False)
+    DB[Tables.LOANS] = [_auto_loan(**{LF.NEXT_PAYMENT: "2026-10-01"}), loan("recX", owner=AVI, **{LF.NAME: "של אבי", LF.EARLY_CLOSURE: 777, LF.INTEREST_RATE: 5,
+                        LF.MONTHLY_PAYMENT: 50, LF.NEXT_PAYMENT: "2026-09-01", LF.DUE_DAY: 1}),
+                        loan("recNoRate", **{LF.NAME: "חסר", LF.EARLY_CLOSURE: 1000, LF.NEXT_PAYMENT: "2026-10-01", LF.MONTHLY_PAYMENT: 100})]
+    calls = []
+
+    def fake_patch(table, record_id, fields, source="unknown", **kw):
+        calls.append((table, record_id, source))
+        next(r for r in DB[table] if r["id"] == record_id)["fields"].update(fields)
+        return True
+    import tools.airtable_gateway as gw
+    monkeypatch.setattr(gw, "airtable_patch", fake_patch)
+    dry = scheduler.fcc_loan_auto_step_for(ELIYAHU, TODAY, dry_run=True)
+    assert calls == [] and [s["id"] for s in dry["stepped"]] == ["recAuto"] and dry["skipped"][0]["reason"] == "missing_input"
+    r = scheduler.fcc_loan_auto_step_for(ELIYAHU, TODAY)
+    assert calls == [(Tables.LOANS, "recAuto", "fcc_loan_auto")]                 # Avi's overdue loan is never touched
+    assert r["stepped"][0]["after"] < r["stepped"][0]["before"] and DB[Tables.LOANS][1]["fields"][LF.EARLY_CLOSURE] == 777
+    assert scheduler.fcc_loan_auto_step_for(ELIYAHU, TODAY)["stepped"] == [] and len(calls) == 1      # same day again: nothing due, nothing written
+
+
+def test_a_failed_write_is_reported_and_retried_on_the_next_run(monkeypatch):
+    import scheduler
+    seed_debts(with_goal=False)
+    DB[Tables.LOANS] = [_auto_loan(**{LF.NEXT_PAYMENT: "2026-10-01"})]
+    import tools.airtable_gateway as gw
+    monkeypatch.setattr(gw, "airtable_patch", lambda *a, **k: False)
+    r = scheduler.fcc_loan_auto_step_for(ELIYAHU, TODAY)
+    assert r["stepped"] == [] and r["failed"][0]["id"] == "recAuto"
+    assert scheduler.fcc_loan_auto_step_for(ELIYAHU, TODAY)["failed"][0]["id"] == "recAuto"           # nothing moved, so it is due again
+
+
+def test_the_scheduler_job_is_off_by_default_and_acts_only_for_fcc_owners(monkeypatch):
+    import scheduler
+    ran = []
+    monkeypatch.setattr(scheduler, "fcc_loan_auto_step_for", lambda who, *a, **k: (ran.append(who.user_id) or
+                        {"stepped": [], "initialized": [], "skipped": [], "failed": []}))
+    monkeypatch.delenv(service.LOAN_AUTO_STEP_FLAG, raising=False)
+    assert service.loan_auto_step_enabled() is False
+    scheduler._job_fcc_loan_auto_step()
+    assert ran == []
+    monkeypatch.setenv(service.LOAN_AUTO_STEP_FLAG, "true")
+    from core.financial_control import gate
+    monkeypatch.setattr(gate, "enabled_for", lambda who: who.user_id == "eliyahu")
+    scheduler._job_fcc_loan_auto_step()
+    assert ran == ["eliyahu"]                                                       # the partner (avi) is in the registry but not an FCC owner
+
+
+def test_the_loans_payload_says_whether_balances_follow_their_schedule_and_shows_the_next_due_date(monkeypatch):
+    seed_debts()
+    DB[Tables.LOANS][0]["fields"].update({LF.NEXT_PAYMENT: "2026-10-10", LF.PAYMENTS_LEFT: 0})
+    monkeypatch.delenv(service.LOAN_AUTO_STEP_FLAG, raising=False)
+    v = _loans_view()
+    assert v["auto_step"] is False
+    item = {i["id"]: i for i in v["items"]}["recM"]
+    assert item["next_payment_due"] == "2026-10-10" and item["payments_done"] is True
+    monkeypatch.setenv(service.LOAN_AUTO_STEP_FLAG, "true")
+    assert _loans_view()["auto_step"] is True
+
+
+def test_correcting_a_balance_after_its_due_date_moves_the_next_due_date_so_the_job_does_not_apply_it_again(no_model):
+    seed_debts(with_goal=False)
+    DB[Tables.LOANS] = [_auto_loan(**{LF.NEXT_PAYMENT: "2026-10-05", LF.DUE_DAY: 5})]      # due 5/10, today is 8/10
+    r = intent("loan.update_balance", "recAuto")
+    assert "תאריך החיוב הבא יעודכן" in r.message and "05/11/2026" in r.message
+    _say("2500", scope="loans")
+    (w,) = _confirm_one()
+    assert w["fields"] == {LF.EARLY_CLOSURE: 2500, LF.NEXT_PAYMENT: "2026-11-05"}
+    DB[Tables.LOANS][0]["fields"].update(w["fields"])
+    assert fcc_loans.auto_step(DB[Tables.LOANS][0], TODAY) is None                         # not due again until 5/11
+    conv.complete_execution(ELIYAHU)
+    DB[Tables.LOANS] = [_auto_loan()]                                                      # a FUTURE due date: only the balance is written
+    intent("loan.update_balance", "recAuto")
+    _say("2500", scope="loans")
+    (w,) = _confirm_one()
+    assert w["fields"] == {LF.EARLY_CLOSURE: 2500}
