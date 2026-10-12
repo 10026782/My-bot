@@ -3943,3 +3943,51 @@ def test_weekly_surplus_with_nothing_open_and_other_owners_data(no_model):
     DB[Tables.FIN_EVENTS] = []
     assert conv.start_intent(ELIYAHU, "weekly.surplus_hold", None, today=FRI).state == "info"
     assert conv.start_intent(AVI_I, "weekly.surplus_use", None, today=FRI).state == "info"                      # nothing of ELIYAHU's leaks to another owner
+
+
+# ── A loan's interest rate / remaining payments can be corrected on their own ────────────────────────────────────
+def seed_rate_loan():
+    DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] = [], []
+    DB[Tables.LOANS] = [loan("recR", **{LF.NAME: "אקספרס", LF.EARLY_CLOSURE: 2630.72, LF.MONTHLY_PAYMENT: 52.84, LF.AMOUNT: 2800}),
+                        loan("recRx", owner=AVI, **{LF.NAME: "של אבי", LF.INTEREST_RATE: 5})]
+
+
+def test_loan_rate_and_remaining_payments_are_one_field_updates_with_review(no_model):
+    seed_rate_loan()
+    r = intent("loan.update_rate", "recR")
+    assert r.state == "ask" and r.awaiting == "rate" and "אקספרס" in r.message and "לא הוגדר" in r.message          # no rate stored yet
+    r = _say("10.65", scope="loans")
+    assert r.state == "review" and "10.65%" in r.message and "עדכון ריבית הלוואה" in r.message
+    (w,) = _confirm_one()
+    assert w["op"] == "patch" and w["table"] == Tables.LOANS and w["record_id"] == "recR" and w["fields"] == {LF.INTEREST_RATE: 10.65}
+    DB[Tables.LOANS][0]["fields"].update(w["fields"])
+    assert conv._already_applied(ELIYAHU, w)                                                              # a retry writes nothing
+    conv.complete_execution(ELIYAHU)
+    r = intent("loan.update_rate", "recR")
+    assert "היום: 10.65%" in r.message
+    conv.handle_turn(ELIYAHU, "בטל", extractor=conv.DeterministicExtractor(), today=TODAY)
+    r = intent("loan.update_term", "recR")
+    assert r.awaiting == "payments_left" and "כמה תשלומים נותרו" in r.message
+    assert _say("66", scope="loans").state == "review"
+    (w,) = _confirm_one()
+    assert w["fields"] == {LF.PAYMENTS_LEFT: 66}
+
+
+def test_loan_rate_is_owner_scoped_and_rejects_a_negative_value(no_model):
+    seed_rate_loan()
+    assert intent("loan.update_rate", "recRx").state == "denied" and intent("loan.update_rate").state == "clarify"
+    intent("loan.update_rate", "recR")
+    assert _say("-3", scope="loans").awaiting == "rate"
+
+
+def test_loan_original_amount_is_a_one_field_update_that_must_be_positive(no_model):
+    seed_rate_loan()
+    r = intent("loan.update_original", "recR")
+    assert r.state == "ask" and r.awaiting == "original" and "היום: ₪2,800" in r.message
+    assert _say("0", scope="loans").awaiting == "original"
+    r = _say("3000", scope="loans")
+    assert r.state == "review" and "עדכון סכום מקורי" in r.message
+    (w,) = _confirm_one()
+    assert w["table"] == Tables.LOANS and w["record_id"] == "recR" and w["fields"] == {LF.AMOUNT: 3000}
+    conv.complete_execution(ELIYAHU)
+    assert intent("loan.update_original", "recRx").state == "denied"

@@ -197,7 +197,7 @@ const activeCount = loans.items.filter((l) => l.active).length;
 
 test("loan cards: balance / payment / partial / arrangement / next action / close buttons on every ACTIVE loan, none on closed ones; no input or panel in the list", () => {
   const html = withActions(false);
-  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, activeCount * 5);   // balance, payment + partial, arrangement, next action
+  assert.equal((html.match(/fcc-loan__actionbtn/g) || []).length, activeCount * 8);   // balance, payment, rate, remaining payments, original amount + partial, arrangement, next action
   assert.equal((html.match(/fcc-loan__closebtn/g) || []).length, activeCount);
   assert.ok(html.includes("עדכון יתרה") && html.includes("שינוי החזר") && html.includes("סגרתי את ההלוואה"));
   assert.ok(!html.includes("<textarea"));
@@ -205,7 +205,7 @@ test("loan cards: balance / payment / partial / arrangement / next action / clos
 
 test("while the shared writer holds a draft every card action is disabled; without actions no buttons render", () => {
   const locked = withActions(true);
-  assert.equal((locked.match(/fcc-loan__(actionbtn|closebtn)[^>]*disabled=""|disabled=""[^>]*fcc-loan__(actionbtn|closebtn)/g) || []).length, activeCount * 6);   // balance / payment / partial / arrangement / next action + close
+  assert.equal((locked.match(/fcc-loan__(actionbtn|closebtn)[^>]*disabled=""|disabled=""[^>]*fcc-loan__(actionbtn|closebtn)/g) || []).length, activeCount * 9);   // balance / payment / rate / remaining payments / original amount / partial / arrangement / next action + close
   assert.ok(!renderToStaticMarkup(createElement(LoansSection, { loans })).includes("fcc-loan__actions"));
 });
 
