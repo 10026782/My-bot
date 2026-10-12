@@ -3787,3 +3787,112 @@ def test_weekly_quota_is_on_monthly_goals_only_and_the_income_card_sums_it():
     DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] = [g], []
     card = service.overview(ELIYAHU, date(2026, 10, 14))["summary"]["income"]
     assert card["weekly"]["quota"] == row["weekly"]["quota"] and card["dynamic_target_per_week"] > 0
+
+
+# ── The weekly-surplus question: carry on / use / save, asked once per closed week ──────────────────────────────
+FRI = date(2026, 10, 16)
+
+
+def seed_week_surplus(with_savings=True):
+    DB[Tables.FIN_GOALS] = [goal("recInc", "הכנסה חודשית", ELI, 18000, **{GF.CATEGORY: "income"})]
+    if with_savings:
+        DB[Tables.FIN_GOALS].append(goal("recPen", "תכנון פנסיוני", ELI, None, **{GF.CATEGORY: "long_term"}))
+        DB[Tables.FIN_GOALS][1]["fields"].pop(GF.TARGET_AMOUNT)
+    DB[Tables.FIN_EVENTS] = [event("recE1", "recInc", ELI, 9000, day="2026-10-05"), event("recE2", "recInc", ELI, 1000, day="2026-10-12")]
+    DB[Tables.TASKS] = []
+
+
+def _wk(today):
+    return service.overview(ELIYAHU, today)["summary"]["income"]["weekly"]
+
+
+def _fri_say(text):
+    return conv.handle_turn(ELIYAHU, text, extractor=conv.DeterministicExtractor(), today=FRI, scope="monthly")
+
+
+def test_weekly_surplus_is_asked_when_the_week_closes_and_for_the_last_closed_week_until_answered():
+    seed_week_surplus()
+    fri = _wk(FRI)
+    assert fri["closing"]["week_start"] == "2026-10-11" and fri["closing"]["amount"] == 1870.97 and fri["closing"]["goal_id"] == "recInc"
+    assert fri["surplus"] == 1870.97 and fri["actual"] == 1000                       # headline numbers are unchanged
+    wed = _wk(date(2026, 10, 14))                                                    # mid-week: the PREVIOUS week is the open question
+    assert wed["closing"]["week_start"] == "2026-10-04" and wed["closing"]["amount"] == 4935.48
+    assert _wk(date(2026, 10, 30))["closing"] is None                                # last week of the month: the month-end flow covers it
+    DB[Tables.FIN_EVENTS] = [DB[Tables.FIN_EVENTS][1]]                               # no surplus -> no question
+    assert _wk(FRI)["closing"] is None
+
+
+def test_weekly_surplus_carry_writes_only_a_marker_and_the_question_is_not_asked_again(no_model):
+    seed_week_surplus()
+    r = conv.start_intent(ELIYAHU, "weekly.surplus_carry", None, today=FRI)
+    assert r.state == "review" and "₪1,870.97" in r.message and "ממשיכים לשבוע הבא" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
+    f = w["fields"]
+    assert w["table"] == Tables.FIN_EVENTS and f[EF.KIND] == "note" and f[EF.AMOUNT] == 0.0 and f[EF.NOTE] == "עודף שבועי 2026-10-11: הועבר"
+    assert f[EF.GOAL] == ["recInc"]
+    DB[Tables.FIN_EVENTS].append({"id": "recM", "fields": {**f, EF.FINANCIAL_OWNER: [ELI]}})
+    assert _wk(FRI)["closing"] is None and _wk(FRI)["surplus"] == 1870.97              # carried: the ledger is unchanged
+
+
+def test_weekly_surplus_use_takes_it_out_of_the_ledger_and_save_adds_one_savings_deposit(no_model):
+    seed_week_surplus()
+    conv.start_intent(ELIYAHU, "weekly.surplus_use", None, today=FRI)
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
+    assert w["fields"][EF.AMOUNT] == 1870.97 and w["fields"][EF.NOTE] == "עודף שבועי 2026-10-11: נוצל"
+    DB[Tables.FIN_EVENTS].append({"id": "recM", "fields": {**w["fields"], EF.FINANCIAL_OWNER: [ELI]}})
+    assert _wk(date(2026, 10, 18))["carry_in"] == 0.0                                       # the used surplus no longer lowers next week's need
+    assert _wk(FRI)["balance"] == 0.0 and _wk(FRI)["surplus"] == 0.0                      # used: nothing is left to carry
+    conv.complete_execution(ELIYAHU)
+    seed_week_surplus()
+    r = conv.start_intent(ELIYAHU, "weekly.surplus_save", None, today=FRI)
+    assert r.state == "review" and "הפקדה לחיסכון" in r.message
+    marker, dep = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
+    assert marker["fields"][EF.NOTE] == "עודף שבועי 2026-10-11: נחסך" and marker["fields"][EF.AMOUNT] == 1870.97
+    assert dep["fields"][EF.GOAL] == ["recPen"] and dep["fields"][EF.KIND] == "one_time" and dep["fields"][EF.AMOUNT] == 1870.97
+    assert dep["fields"][EF.NOTE].startswith(fd.SAVINGS_DEPOSIT_NOTE)
+
+
+def test_weekly_surplus_amount_can_be_lowered_but_not_raised_and_save_needs_a_savings_goal(no_model):
+    seed_week_surplus()
+    conv.start_intent(ELIYAHU, "weekly.surplus_use", None, today=FRI)
+    r = _fri_say("ערוך")
+    r = _fri_say("סכום 5000")
+    assert "גדול מהעודף" in r.message
+    r = _fri_say("סכום 500")
+    assert r.state == "review" and "₪500" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=FRI).snapshot["writes"]
+    assert w["fields"][EF.AMOUNT] == 500
+    conv.complete_execution(ELIYAHU)
+    seed_week_surplus(with_savings=False)
+    assert conv.start_intent(ELIYAHU, "weekly.surplus_save", None, today=FRI).state == "clarify"
+
+
+def test_weekly_surplus_with_nothing_open_and_other_owners_data(no_model):
+    seed_week_surplus()
+    DB[Tables.FIN_EVENTS] = []
+    assert conv.start_intent(ELIYAHU, "weekly.surplus_carry", None, today=FRI).state == "info"
+    assert conv.start_intent(AVI_I, "weekly.surplus_use", None, today=FRI).state == "info"                # nothing of ELIYAHU's leaks to another owner
+
+
+# ── The last income entries, so nothing is booked twice ───────────────────────────────────────────────────────────
+def test_recent_incomes_lists_own_income_entries_newest_first_with_source_and_flags_duplicates():
+    DB[Tables.FIN_GOALS] = [goal("recInc", "הכנסה חודשית", ELI, 18000, **{GF.CATEGORY: "income"}),
+                            goal("recSrc", "נסיעות", ELI, 2500, **{GF.CATEGORY: "income", GF.PERIOD_TYPE: "weekly"}),
+                            goal("recPen", "תכנון פנסיוני", ELI, None, **{GF.CATEGORY: "long_term"}),
+                            goal("recAvi", "הכנסה של אבי", AVI, 9000, **{GF.CATEGORY: "income"})]
+    DB[Tables.FIN_EVENTS] = [
+        event("e1", "recInc", ELI, 1500, day="2026-10-05"),
+        event("e2", "recSrc", ELI, 700, day="2026-10-07", **{EF.NOTE: "אבי"}),
+        event("e3", "recSrc", ELI, 700, day="2026-10-07", **{EF.NOTE: "אבי"}),
+        event("e4", "recInc", ELI, 80, kind="direct_cost", day="2026-10-06"),
+        event("e5", "recPen", ELI, 900, day="2026-10-06"),                      # a savings deposit: not an income entry
+        event("e6", "recInc", ELI, 5, kind="note", day="2026-10-06"),            # a marker note: not an income entry
+        event("e7", "recAvi", AVI, 4000, day="2026-10-06"),                      # another owner's
+        event("e8", "recInc", ELI, 300, day="2026-10-04", **{EF.SUPERSEDED_BY: ["e1"]}),
+    ]
+    rows = service.overview(ELIYAHU, TODAY)["recent_incomes"]
+    assert [r["id"] for r in rows] == ["e3", "e2", "e4", "e1"]
+    assert rows[0]["source"] == "נסיעות" and rows[0]["note"] == "אבי" and rows[0]["amount"] == 700
+    assert rows[0]["possible_duplicate"] and rows[1]["possible_duplicate"] and not rows[2]["possible_duplicate"] and rows[2]["kind"] == "direct_cost"
+    assert "הכנסה של אבי" not in str(rows) and all(r["id"] != "e7" for r in rows)
+    assert len(service.recent_incomes(DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] * 5, limit=3)) == 3

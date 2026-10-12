@@ -2,7 +2,7 @@
 // (`mode`) from existing data; this file only maps a family to the fields worth showing, so a
 // project never renders ₪0 / "—" and a cumulative or monthly-level goal never shows a weekly pace
 // it does not have. No fetching, no state.
-import type { FccGoalRow, FccOverview, FccSavingsRelease, FccSummaryCard, FccWeekly } from "../types";
+import type { FccGoalRow, FccOverview, FccRecentIncome, FccSavingsRelease, FccSummaryCard, FccWeekly } from "../types";
 
 const nf = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 });
 export const money = (n: number | null | undefined): string => (n == null ? "—" : `₪${nf.format(n)}`);
@@ -109,16 +109,15 @@ export function goalCardModel(g: FccGoalRow): GoalCardModel {
   ] };
 }
 
-/** The fixed weekly quota in words: this week's quota, what carries in, what was earned, and what is left (or the surplus). */
+/** The fixed weekly quota in words: earned / needed this week, the surplus (or what is missing), and where the need came from. */
 export function weeklyQuotaMetrics(w: FccWeekly | null | undefined): GoalMetric[] {
   if (!w) return [];
   const carry = Math.round(w.carry_in);
   return [
+    { label: "הושג מתוך הנדרש השבוע", value: `${money(w.actual)} / ${money(w.required)}` },
+    w.surplus > 0 ? { label: "עודף — אפשר להעביר, להשתמש או לחסוך", value: money(w.surplus) } : { label: "חסר להשלמה השבוע", value: money(w.remaining) },
     { label: "מכסה שבועית קבועה", value: money(w.quota) },
     ...(carry !== 0 ? [{ label: carry > 0 ? "חסר שהועבר מקודם" : "עודף שהועבר מקודם", value: money(Math.abs(w.carry_in)) }] : []),
-    { label: "נדרש השבוע", value: money(w.required) },
-    { label: "הושג השבוע", value: money(w.actual) },
-    w.surplus > 0 ? { label: "עודף השבוע (להתרווח / להפריש)", value: money(w.surplus) } : { label: "חסר להשלמה השבוע", value: money(w.remaining) },
   ];
 }
 
@@ -158,10 +157,24 @@ export function weeklyBreakdown(card: FccSummaryCard | undefined): string | unde
   return parts.length ? parts.join(" · ") : undefined;
 }
 
+/** The question about a closed week's surplus. It is asked once; the three answers are buttons, not a standing setting. */
+export const WEEKLY_SURPLUS_CHOICES = [
+  { intent: "weekly.surplus_carry", label: "להעביר לשבוע הבא" },
+  { intent: "weekly.surplus_use", label: "להשתמש בו" },
+  { intent: "weekly.surplus_save", label: "לחסוך" },
+] as const;
+
+export function weeklySurplusQuestion(w: FccWeekly | null | undefined): string | null {
+  const c = w?.closing;
+  if (!c) return null;
+  return `השבוע ${dmy(c.week_start)}–${dmy(c.week_end)} נסגר עם עודף ${money(c.amount)} — מה לעשות איתו?`;
+}
+
 export function weeklyQuotaHint(w: FccWeekly): string {
   const carry = Math.round(w.carry_in);
-  const parts = [`מכסה ${money(w.quota)}`, ...(carry !== 0 ? [`${carry > 0 ? "חסר מועבר" : "עודף מועבר"} ${money(Math.abs(w.carry_in))}`] : []), `הושג ${money(w.actual)}`];
-  return `${parts.join(" · ")} · ${w.surplus > 0 ? `עודף ${money(w.surplus)}` : `נשאר ${money(w.remaining)}`}`;
+  const state = w.surplus > 0 ? `עודף ${money(w.surplus)} — אפשר להעביר, להשתמש או לחסוך` : `חסר ${money(w.remaining)} להשלמה`;
+  const base = `מכסה ${money(w.quota)}${carry !== 0 ? ` ${carry > 0 ? "+ חסר מקודם" : "− עודף מקודם"} ${money(Math.abs(w.carry_in))}` : ""}`;
+  return `${state} · ${base}`;
 }
 
 export interface HeaderCardModel { key: string; label: string; value: string; hint?: string }
@@ -182,7 +195,7 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
     { key: "income_week", label: "קצב נדרש לשבוע (מעכשיו)",
       value: s.income ? money(s.income.dynamic_target_per_week) : "—",
       hint: s.income ? weeklyBreakdown(s.income) : "לא הוגדר יעד" },
-    ...(s.income?.weekly ? [{ key: "income_quota", label: "מכסה שבועית קבועה (עם העברות)", value: money(s.income.weekly.required),
+    ...(s.income?.weekly ? [{ key: "income_quota", label: "מכסה שבועית קבועה: הושג / נדרש", value: `${money(s.income.weekly.actual)} / ${money(s.income.weekly.required)}`,
       hint: weeklyQuotaHint(s.income.weekly) }] : []),
     { key: "savings", label: s.savings?.mode === "monthly_level" ? "הפרשה חודשית לחיסכון" : "חיסכון", ...savings,
       ...(s.savings?.mode === "monthly_level" ? { hint: savingsHint(s.savings) } : {}) },
@@ -242,4 +255,19 @@ export function savingsReleaseModel(r: FccSavingsRelease): SavingsReleaseModel {
 export function savingsFollowUp(r: FccSavingsRelease | null | undefined): { message: string; confirm: string } | null {
   if (!r || r.remaining <= 0) return null;
   return { message: `מתפנים לחיסכון ${money(r.remaining)} החודש. להפקיד?`, confirm: `הפקד ${money(r.remaining)}` };
+}
+
+export interface RecentIncomeRow { key: string; date: string; source: string; amount: string; note: string | null; cost: boolean; duplicate: boolean }
+
+/** "הכנסות אחרונות": one row per entry — when, on which source, how much, and a flag when the same entry appears twice. */
+export function recentIncomeRows(items: FccRecentIncome[] | undefined): RecentIncomeRow[] {
+  return (items ?? []).map((r, i) => ({
+    key: r.id ?? `${r.date}-${i}`,
+    date: dmy(r.date),
+    source: r.source ?? "הכנסה",
+    amount: r.kind === "direct_cost" ? `-${money(r.amount)}` : money(r.amount),
+    note: r.note,
+    cost: r.kind === "direct_cost",
+    duplicate: r.possible_duplicate,
+  }));
 }

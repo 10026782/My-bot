@@ -153,6 +153,7 @@ def _render(d: BusinessDraft) -> TurnResult:
             inferred=inferred, subject=str(d.source_context.get("subject_noun") or "נכס"),
             note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else _partial_note(d) if d.entity_type == fd.FCC_LOAN_PARTIAL
                   else _prime_note(d) if d.entity_type == fd.FCC_PRIME_CHANGE
+                  else _week_surplus_note(d) if d.entity_type == fd.FCC_WEEK_SURPLUS
                   else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
             d.entity_type, None, _view(d))
     if d.source_context.get("ask_kind") and d.fields.get("goal") and not d.source_context.get("ask_source"):
@@ -705,6 +706,39 @@ def _start_goal_action(identity, ids, intent_id: str, spec: dict, goal_id: str |
     return _persist_new(store, ids, d)
 
 
+def _week_surplus_note(d: BusinessDraft) -> str:
+    """Review note of the weekly-surplus decision: what each answer does (the amount shown is the one that will be written)."""
+    amount = d.fields.get("amount")
+    money = fd.display_value("amount", amount) if amount not in (None, "") else "העודף"
+    return {"carry": f"{money} ממשיכים לשבוע הבא ומקטינים את מה שנדרש בו. זה גם המצב אם לא עושים כלום.",
+            "use": f"{money} יוצאים מהחשבון: בשבוע הבא נדרשת שוב המכסה המלאה. לא נרשמת הוצאה.",
+            "save": f"{money} יירשמו כהפקדה לחיסכון, ויוצאו מהחשבון השבועי."}.get(str(d.fields.get("decision")), "")
+
+
+def _start_week_surplus(identity, ids, intent_id: str, spec: dict, store, today) -> TurnResult:
+    """The answer to the weekly-surplus question. The week and the amount come from the fresh overview (never from the client); nothing is
+    written here — the marker (and, for "save", the savings deposit) goes through the usual review -> אשר."""
+    ov = service.overview(identity, today)
+    closing = ((ov.get("summary") or {}).get("income") or {}).get("weekly", {}).get("closing")
+    if not closing or not closing.get("goal_id"):
+        return TurnResult("info", "אין עודף שבועי פתוח לשאלה.")
+    decision = spec["week_decision"]
+    extra = {"income_goal_id": closing["goal_id"], "week_start": closing["week_start"], "week_end": closing["week_end"],
+             "max_amount": closing["amount"], "goal_title": "העודף השבועי"}
+    if decision == "save":
+        dests = [g for g in service.my_goals(identity)
+                 if str((g.get("fields") or {}).get(GF.STATUS) or "active").lower() in ("active", "פעיל")
+                 and service._raw_category((g.get("fields") or {}).get(GF.CATEGORY)) == service.SAVINGS_DESTINATION_CATEGORY]
+        if len(dests) != 1:
+            return TurnResult("clarify", "אין יעד חיסכון ברור להפקדה — אפשר להעביר או להשתמש בעודף.")
+        extra["savings_goal_id"] = dests[0]["id"]
+    d = _new_draft(identity, ids, fd.FCC_WEEK_SURPLUS, DraftOperation.CREATE, fields={}, raw_text=f"intent:{intent_id}#{uuid.uuid4().hex[:8]}",
+                   today=today, extra_ctx=extra)
+    d, _rej = _set_fields(d, {"decision": decision, "amount": closing["amount"]}, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": ["amount"]})
+    return _persist_new(store, ids, d)
+
+
 def _is_income_goal(g: dict) -> bool:
     return service._category_key((g.get("fields") or {}).get(GF.CATEGORY)) == "income"
 
@@ -851,6 +885,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return _start_prime_change(identity, ids, store, today)
     if intent_id == "monthly.source_new":
         return _start_source_new(identity, ids, store, today)
+    if intent_id.startswith("weekly.surplus_"):
+        return _start_week_surplus(identity, ids, intent_id, spec, store, today)
     if intent_id in ("monthly.goal_followup", "monthly.goal_done", "monthly.goal_pause"):
         return _start_goal_action(identity, ids, intent_id, spec, entity_id, store, today)
     if intent_id == "loan.next_step":
@@ -1097,6 +1133,10 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
     if (d.entity_type == fd.FCC_LOAN_PARTIAL and before is not None and d2.fields.get("amount") not in (None, "")
             and float(d2.fields["amount"]) > float(before)):                  # more than is owed: that is a full repayment, not a partial one
         return replace_result(_render(d), message=f"הסכום גדול מהיתרה ({fd.display_value('balance', before)}). לפרעון מלא השתמשו ב״סגירת הלוואה״.\n{_render(d).message}")
+    cap = d.source_context.get("max_amount")
+    if (d.entity_type == fd.FCC_WEEK_SURPLUS and cap is not None and d2.fields.get("amount") not in (None, "")
+            and float(d2.fields["amount"]) > float(cap) + 0.005):             # more than the week's surplus
+        return replace_result(_render(d), message=f"הסכום גדול מהעודף ({fd.display_value('amount', cap)}).\n{_render(d).message}")
     answered = bool(updates) and (awaiting is None or awaiting in updates) and awaiting not in rejected
     if not answered or (d2.fields == d.fields and d2.lifecycle_state is d.lifecycle_state and awaiting != "goal"):
         return _not_an_answer(d, awaiting, invalid=det_failed or fill_failed or (awaiting in rejected))

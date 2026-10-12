@@ -1,5 +1,5 @@
-import type { FccSavingsRelease } from "../types";
-import { savingsFollowUp, savingsReleaseModel } from "../lib/fccPresentation";
+import type { FccSavingsRelease, FccWeekly } from "../types";
+import { savingsFollowUp, savingsReleaseModel, WEEKLY_SURPLUS_CHOICES, weeklySurplusQuestion } from "../lib/fccPresentation";
 import { Surface } from "./ui/Surface";
 
 export function KpiCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -30,6 +30,23 @@ export function SavingsReleaseCard({ release, onStart, disabled }: { release: Fc
           <button type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={disabled}
                   onClick={() => onStart("savings.gap_reason")}>תעד סיבה לפער</button>
         )}
+      </div>
+    </Surface>
+  );
+}
+
+/** "מה עושים בעודף השבועי?": shown only while a closed week has an open surplus; answering writes a marker, so it is asked once. */
+export function WeeklySurplusCard({ weekly, onStart, disabled }: { weekly: FccWeekly | null | undefined; onStart: (intent: string) => void; disabled: boolean }) {
+  const question = weeklySurplusQuestion(weekly);
+  if (!question) return null;
+  return (
+    <Surface variant="subtle" padding="compact" className="fcc-release" role="status" aria-label="עודף שבועי">
+      <p className="fcc-quick__message">{question}</p>
+      <div className="fcc-quick__choices">
+        {WEEKLY_SURPLUS_CHOICES.map((c) => (
+          <button key={c.intent} type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={disabled}
+                  onClick={() => onStart(c.intent)}>{c.label}</button>
+        ))}
       </div>
     </Surface>
   );

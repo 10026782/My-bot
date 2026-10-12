@@ -521,6 +521,19 @@ export interface FccWeekly {
   /** actual - (quota + carry_in): > 0 a surplus to relax with or set aside, < 0 a shortfall that moves on. */
   balance: number;
   history?: { week_start: string; week_end: string; quota: number; actual: number; balance: number }[];
+  /** The open question "what to do with the week's surplus?" (null = nothing to ask). The server finds the week and the amount. */
+  closing?: { week_start: string; week_end: string; amount: number; goal_id?: string } | null;
+}
+
+export interface FccRecentIncome {
+  id: string | null;
+  date: string;
+  goal_id: string;
+  source: string | null;
+  kind: "one_time" | "direct_cost";
+  amount: number;
+  note: string | null;
+  possible_duplicate: boolean;
 }
 
 export interface FccSource {
@@ -755,6 +768,8 @@ export interface FccOverview {
   household?: { month_total: number };
   receipts?: { missing_count: number; missing_amount: number };
   obligations?: { total_monthly: number; flagged_count: number; flagged_monthly: number; cancel_pending?: number; potential_saving: number; count: number };
+  /** Latest income entries (own only), newest first, so nothing is booked twice. */
+  recent_incomes?: FccRecentIncome[];
   recent_events: { goal_ids: string[]; Amount: number | null; Kind: string | null; "Occurred At": string | null; Note: string | null }[];
   as_of: string;
   draft: FccTurn | null;

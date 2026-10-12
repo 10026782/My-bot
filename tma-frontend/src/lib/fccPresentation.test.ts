@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`); same conventions as commandCenterPresentation.test.ts.
 import type { FccGoalRow, FccSavingsRelease } from "../types";
-import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
+import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, weeklySurplusQuestion, WEEKLY_SURPLUS_CHOICES, recentIncomeRows, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -218,16 +218,38 @@ test("an action goal is moved by next action / done / pause — never by an amou
   assert.equal(goalCardModel(g).kind, "project");
 });
 
-test("weekly quota: fixed quota, carry in, earned and what is left or the surplus — next to the dynamic pace, which stays", () => {
-  const w = { week_start: "2026-10-11", week_end: "2026-10-17", quota: 3387.1, carry_in: 612.9, required: 4000, actual: 1000, remaining: 3000, surplus: 0, balance: -3000 };
-  const labels = weeklyQuotaMetrics(w).map((m) => m.label);
-  assert.deepEqual(labels, ["מכסה שבועית קבועה", "חסר שהועבר מקודם", "נדרש השבוע", "הושג השבוע", "חסר להשלמה השבוע"]);
-  const over = weeklyQuotaMetrics({ ...w, carry_in: -500, required: 2887.1, actual: 4000, remaining: 0, surplus: 1112.9, balance: 1112.9 });
-  assert.equal(over[1].label, "עודף שהועבר מקודם");
-  assert.equal(over[over.length - 1].label, "עודף השבוע (להתרווח / להפריש)");
+test("weekly quota: the headline is earned / needed with the surplus (or the gap) stated, and where the need came from", () => {
+  const w = { week_start: "2026-10-11", week_end: "2026-10-17", quota: 4065, carry_in: -2517, required: 1547, actual: 1660, remaining: 0, surplus: 113, balance: 113 };
+  assert.deepEqual(weeklyQuotaMetrics(w).map((m) => m.label),
+    ["הושג מתוך הנדרש השבוע", "עודף — אפשר להעביר, להשתמש או לחסוך", "מכסה שבועית קבועה", "עודף שהועבר מקודם"]);
+  assert.equal(weeklyQuotaMetrics(w)[0].value, "₪1,660 / ₪1,547");
+  const short = weeklyQuotaMetrics({ ...w, carry_in: 612, required: 4677, actual: 1000, remaining: 3677, surplus: 0, balance: -3677 });
+  assert.equal(short[1].label, "חסר להשלמה השבוע");
+  assert.equal(short[3].label, "חסר שהועבר מקודם");
   assert.deepEqual(weeklyQuotaMetrics(null), []);
-  const cards = headerCards({ monthly_cash_improvement: 0, summary: { income: { target: 15000, actual: 1000, remaining: 14000, dynamic_target_per_week: 4000, goals: 1, weekly: w } } });
+  const cards = headerCards({ monthly_cash_improvement: 0, summary: { income: { target: 18000, actual: 1660, remaining: 16340, dynamic_target_per_week: 4000, goals: 1, weekly: w } } });
+  const q = cards.find((c) => c.key === "income_quota");
   assert.equal(cards.some((c) => c.key === "income_week"), true);
-  assert.equal(cards.find((c) => c.key === "income_quota")?.value, "₪4,000");
-  assert.equal((cards.find((c) => c.key === "income_quota")?.hint ?? "").includes("נשאר ₪3,000"), true);
+  assert.equal(q?.value, "₪1,660 / ₪1,547");
+  assert.equal((q?.hint ?? "").includes("עודף ₪113 — אפשר להעביר, להשתמש או לחסוך"), true);
+  assert.equal((q?.hint ?? "").includes("מכסה ₪4,065 − עודף מקודם ₪2,517"), true);
+});
+
+test("weekly surplus question: asked only while a closed week has an open surplus; three answers as buttons", () => {
+  const base = { week_start: "2026-10-11", week_end: "2026-10-17", quota: 4065, carry_in: 0, required: 4065, actual: 5000, remaining: 0, surplus: 935, balance: 935 };
+  assert.equal(weeklySurplusQuestion(base), null);
+  assert.equal(weeklySurplusQuestion(undefined), null);
+  const q = weeklySurplusQuestion({ ...base, closing: { week_start: "2026-10-11", week_end: "2026-10-17", amount: 1870.97, goal_id: "g" } });
+  assert.equal(q, "השבוע 11/10/2026–17/10/2026 נסגר עם עודף ₪1,871 — מה לעשות איתו?");
+  assert.deepEqual(WEEKLY_SURPLUS_CHOICES.map((c) => c.intent), ["weekly.surplus_carry", "weekly.surplus_use", "weekly.surplus_save"]);
+});
+
+test("recent incomes: date, amount, source and note per entry; a cost is negative; a repeated entry is flagged", () => {
+  const rows = recentIncomeRows([
+    { id: "a", date: "2026-10-07", goal_id: "g", source: "נסיעות", kind: "one_time", amount: 700, note: "אבי", possible_duplicate: true },
+    { id: "b", date: "2026-10-06", goal_id: "g2", source: null, kind: "direct_cost", amount: 80, note: null, possible_duplicate: false },
+  ]);
+  assert.deepEqual(rows.map((r) => [r.date, r.amount, r.source, r.note, r.cost, r.duplicate]),
+    [["07/10/2026", "₪700", "נסיעות", "אבי", false, true], ["06/10/2026", "-₪80", "הכנסה", null, true, false]]);
+  assert.deepEqual(recentIncomeRows(undefined), []);
 });
