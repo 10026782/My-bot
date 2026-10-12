@@ -3675,3 +3675,73 @@ def test_http_prime_change_executes_one_frozen_patch_per_loan(monkeypatch, no_mo
 def test_prime_intent_is_registered_and_is_not_a_transition():
     assert fd.INTENTS["loan.prime_change"]["entity"] == "fcc_prime_change" and "target_required" not in fd.INTENTS["loan.prime_change"]
     assert not fd.INTENTS["loan.prime_change"].get("transition")
+
+
+# ── Action goals (no amount) move by actions / status; the old single "Next Step" becomes a real open action ───────
+def seed_action_goals():
+    DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS], DB[Tables.TASKS] = [
+        goal("recY", "מכירת יבנאל", ELI, None, **{GF.CATEGORY: "other"}),
+        goal("recM", "הכנסה חודשית", ELI, 15000, **{GF.CATEGORY: "income"}),
+        goal("recYX", "יעד של אבי", AVI, None, **{GF.CATEGORY: "other"}),
+    ], [], []
+
+
+def test_action_goal_amount_update_is_refused_and_numeric_goal_still_updates(no_model):
+    seed_action_goals()
+    r = intent("monthly.goal_update", "recY")
+    assert r.state == "clarify" and "יעד של פעולה" in r.message
+    assert intent("monthly.goal_update", "recM").state == "ask"
+
+
+def test_action_goal_done_and_pause_are_a_status_patch_only(no_model):
+    seed_action_goals()
+    r = intent("monthly.goal_done", "recY")
+    assert r.state == "review" and "הושלם" in r.message and "מכירת יבנאל" in r.message
+    (w,) = _confirm_one()
+    assert w["op"] == "patch" and w["table"] == Tables.FIN_GOALS and w["record_id"] == "recY" and w["fields"] == {GF.STATUS: "done"}
+    conv.complete_execution(ELIYAHU)
+    intent("monthly.goal_pause", "recY")
+    (w,) = _confirm_one()
+    assert w["fields"] == {GF.STATUS: "paused"}
+
+
+def test_action_goal_next_action_creates_a_goal_tagged_followup_task(no_model):
+    seed_action_goals()
+    r = intent("monthly.goal_followup", "recY")
+    assert r.state == "ask" and r.awaiting == "title" and "מכירת יבנאל" in r.message
+    assert _say("לתאם עורך דין", scope="monthly").state == "review"
+    (w,) = _confirm_one()
+    assert w["op"] == "post" and w["table"] == Tables.TASKS and w["fields"][TaskFields.NAME] == "לתאם עורך דין"
+    assert "[FCC:recY]" in w["fields"][TaskFields.DESCRIPTION]
+
+
+def test_action_goal_intents_are_owner_scoped(no_model):
+    seed_action_goals()
+    for iid in ("monthly.goal_done", "monthly.goal_pause", "monthly.goal_followup"):
+        assert intent(iid, "recYX").state == "denied"
+        assert intent(iid).state == "clarify"
+
+
+def seed_legacy_step():
+    DB["Assets"] = [asset("recAH", "קרית ספר", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 1000000, AF.NEXT_STEP: "לבדוק מימוש", AF.NEXT_STEP_OWNER: {"name": "אהרן"}}),
+                    asset("recAN", "ללא פעולה ישנה", **{AF.STATUS: {"name": "פעיל"}, AF.VALUE: 5})]
+    DB[Tables.TASKS], DB[Tables.LOANS] = [], []
+
+
+def test_legacy_next_step_is_adopted_as_an_open_action_and_the_old_field_is_emptied(no_model):
+    seed_legacy_step()
+    r = intent("asset.adopt_step", "recAH")
+    assert r.state == "review" and "לבדוק מימוש" in r.message and "אהרן" in r.message
+    post, clear = _confirm_one()
+    assert post["op"] == "post" and post["table"] == Tables.TASKS and post["fields"][TaskFields.NAME] == "לבדוק מימוש"
+    assert "[FCC-ASSET:recAH]" in post["fields"][TaskFields.DESCRIPTION] and "אחראי: אהרן" in post["fields"][TaskFields.DESCRIPTION]
+    assert clear["op"] == "patch" and clear["table"] == "Assets" and clear["record_id"] == "recAH" and clear["fields"] == {AF.NEXT_STEP: ""}
+    DB["Assets"][0]["fields"][AF.NEXT_STEP] = ""                                     # applied: a retry writes nothing
+    assert conv._already_applied(ELIYAHU, clear)
+
+
+def test_adopting_needs_a_legacy_step_and_an_owned_asset(no_model):
+    seed_legacy_step()
+    assert intent("asset.adopt_step", "recAN").state == "info"
+    assert intent("asset.adopt_step", "recZZ").state == "denied"
+    assert intent("asset.adopt_step").state == "clarify"

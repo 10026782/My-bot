@@ -19,6 +19,9 @@ export const STEP_ACTIONS = [
   { intent: "asset.step_edit", label: "ערוך" },
 ] as const;
 
+export const ADOPT_INTENT = "asset.adopt_step";
+export const ADOPT_LABEL = "העבר לפעולות פתוחות";
+
 export const ASSET_ACTIONS = [
   { intent: "asset.update_value", label: "עדכון שווי" },
   { intent: "asset.update_mortgage", label: "עדכון משכנתא" },
@@ -95,7 +98,17 @@ export function AssetsSection({ assets, actions }: { assets: FccAssets; actions?
                     ))}
                   </div>
                 )}
-                {m.nextStep && <p className="fcc-asset__step fcc-loan__meta"><strong>פעולה קודמת (ישנה):</strong> {m.nextStep}</p>}
+                {m.nextStep && (
+                  <div className="fcc-asset__step">
+                    <p className="fcc-loan__meta"><strong>פעולה ישנה (טרם הועברה):</strong> {m.nextStep}</p>
+                    {actions && m.actionable && (
+                      <div className="fcc-loan__actions">
+                        <button type="button" className="boss-button boss-button--quiet boss-bubble--action fcc-loan__actionbtn"
+                                disabled={actions.disabled} onClick={() => actions.onAction(ADOPT_INTENT, m.id)}>{ADOPT_LABEL}</button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {m.linkedLoans.length > 0 && (
                   <div className="fcc-asset__loans">
                     <p className="fcc-loan__meta"><strong>הלוואות מקושרות</strong></p>

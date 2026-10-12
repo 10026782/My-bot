@@ -49,6 +49,13 @@ export function goalPickLabel(g: Pick<FccGoalRow, "title" | "target">): string {
   return g.target != null ? `${title} · ${money(g.target)}` : title;
 }
 
+/** Buttons of an ACTION goal (no amount target): it moves by actions and a status, never by amounts. */
+export const GOAL_ACTION_BUTTONS = [
+  { intent: "monthly.goal_followup", label: "פעולה הבאה" },
+  { intent: "monthly.goal_done", label: "הושלם" },
+  { intent: "monthly.goal_pause", label: "השהה" },
+] as const;
+
 export function goalCardModel(g: FccGoalRow): GoalCardModel {
   if (g.mode === "project" || g.status === "project") {
     const na = g.next_action;

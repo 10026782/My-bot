@@ -3235,3 +3235,4 @@
 .fcc-loan__close { margin-block: 8px; }
 .fcc-loan__close .fcc-quick__message { white-space: pre-wrap; }
 .fcc-goal__update { align-self: flex-start; margin-block-start: 4px; }
+.fcc-goal__actions { display: flex; flex-wrap: wrap; gap: 6px; }
