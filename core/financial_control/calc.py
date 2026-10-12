@@ -135,6 +135,36 @@ def parent_goal_id(fields: dict, gf) -> str | None:
     return value if isinstance(value, str) and value.startswith("rec") else None
 
 
+def weekly_quota(target: float | None, live: list, today: date) -> dict | None:
+    """The TRUE weekly quota of a monthly goal, next to the dynamic pace: target / days-in-month × 7, each day at its OWN month's rate (a week
+    that crosses a month end takes its last days from the next month's rate). Sunday-start weeks. What a week fell short of (or went over)
+    is carried to the next one, so the week's real position is always visible. The ledger starts at the first Sunday of the month of the
+    current week's Sunday (the days before it belong to the previous month's last week); today's effective target is used for every week."""
+    if not target or target <= 0:
+        return None
+    rate = lambda day: target / calendar.monthrange(day.year, day.month)[1]
+    net = lambda a, b: sum(e.amount for e in live if e.kind == ONE_TIME and a <= e.occurred <= b) \
+        - sum(abs(e.amount) for e in live if e.kind == DIRECT_COST and a <= e.occurred <= b)
+    sunday = lambda day: day - timedelta(days=(day.weekday() + 1) % 7)
+    this_week = sunday(today)
+    first = this_week.replace(day=1)
+    start, carry, history = first + timedelta(days=(6 - first.weekday()) % 7), 0.0, []
+    while True:
+        end = start + timedelta(days=6)
+        quota = sum(rate(start + timedelta(days=i)) for i in range(7))
+        actual = net(start, end)
+        required = quota + carry
+        balance = actual - required                      # > 0 surplus, < 0 shortfall: both move on to the next week
+        if start == this_week:
+            return {"week_start": start.isoformat(), "week_end": end.isoformat(), "quota": round(quota, 2), "carry_in": round(carry, 2),
+                    "required": round(max(required, 0.0), 2), "actual": round(actual, 2),
+                    "remaining": round(max(required - actual, 0.0), 2), "surplus": round(max(balance, 0.0), 2),
+                    "balance": round(balance, 2), "history": history}
+        history.append({"week_start": start.isoformat(), "week_end": end.isoformat(), "quota": round(quota, 2),
+                        "actual": round(actual, 2), "balance": round(balance, 2)})
+        carry, start = -balance, start + timedelta(days=7)
+
+
 def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
     """Derived view of one goal. ``goal`` is an Airtable record, ``gf`` its field names."""
     f = goal.get("fields") or {}
@@ -210,6 +240,7 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         "remaining": None if remaining is None else round(remaining, 2),
         "remaining_periods": periods,
         "dynamic_target_per_week": dynamic,
+        "weekly": weekly_quota(target, live, today) if method == PERIOD_SUM and period_type == "monthly" else None,
         "status": status,
     }
 

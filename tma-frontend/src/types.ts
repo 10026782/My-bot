@@ -495,6 +495,7 @@ export interface FccGoalRow {
   remaining: number | null;
   remaining_periods: number | null;
   dynamic_target_per_week: number | null;
+  weekly?: FccWeekly | null;
   status: "in_progress" | "achieved" | "overdue" | "missing_target" | "project";
   next_action?: { title: string | null; due_date: string | null } | null;
   period_type?: string;
@@ -504,6 +505,22 @@ export interface FccGoalRow {
   sources?: FccSource[];
   weekly_sources_required?: number;
   other_sources_needed?: number | null;
+}
+
+/** The fixed weekly quota of a monthly goal (target / days-in-month × 7, per-day month rates) with the carry from earlier weeks. */
+export interface FccWeekly {
+  week_start: string;
+  week_end: string;
+  quota: number;
+  /** Shortfall carried from earlier weeks (negative = a surplus that lowers this week's need). */
+  carry_in: number;
+  required: number;
+  actual: number;
+  remaining: number;
+  surplus: number;
+  /** actual - (quota + carry_in): > 0 a surplus to relax with or set aside, < 0 a shortfall that moves on. */
+  balance: number;
+  history?: { week_start: string; week_end: string; quota: number; actual: number; balance: number }[];
 }
 
 export interface FccSource {
@@ -528,6 +545,7 @@ export interface FccSummaryCard {
   direct_costs?: number;
   net?: number;
   dynamic_target_per_week: number;
+  weekly?: FccWeekly;
   goals: number;
   sources?: FccSource[];
   weekly_sources_required?: number;

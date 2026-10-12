@@ -92,7 +92,7 @@ def classify_row(row: dict, next_action: dict | None) -> dict:
     amounts are blanked (no ₪0 / dead "—" cells) and the card carries the next action instead."""
     if row.get("target") is None and _category_key(row.get("category")) is None:
         row.update(mode="project", status="project", actual=None, remaining=None, direct_costs=None, net=None,
-                   remaining_periods=None, dynamic_target_per_week=None, next_action=next_action)
+                   remaining_periods=None, dynamic_target_per_week=None, weekly=None, next_action=next_action)
     return row
 
 
@@ -189,6 +189,12 @@ def _accumulate(out: dict, rows: list[dict], cards: dict) -> None:
                 if field in ("deposited_month", "gap_month", "gap_last_month") and field not in row:
                     continue
                 card[field] = round(card.get(field, 0.0) + (row.get(field) or 0.0), 2)
+            wk = row.get("weekly")
+            if wk:                                                    # the fixed weekly quota: same week for every goal, so the parts add up
+                tot = card.setdefault("weekly", {"week_start": wk["week_start"], "week_end": wk["week_end"], "quota": 0.0, "carry_in": 0.0,
+                                                 "required": 0.0, "actual": 0.0, "remaining": 0.0, "surplus": 0.0, "balance": 0.0})
+                for k in ("quota", "carry_in", "required", "actual", "remaining", "surplus", "balance"):
+                    tot[k] = round(tot[k] + wk[k], 2)
 
 
 def summarize(rows: list[dict]) -> dict:

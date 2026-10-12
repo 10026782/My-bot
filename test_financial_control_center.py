@@ -3745,3 +3745,45 @@ def test_adopting_needs_a_legacy_step_and_an_owned_asset(no_model):
     assert intent("asset.adopt_step", "recAN").state == "info"
     assert intent("asset.adopt_step", "recZZ").state == "denied"
     assert intent("asset.adopt_step").state == "clarify"
+
+
+# ── The fixed weekly quota: target / days-in-month × 7, per-day month rates, carry between weeks ──────────────────
+def _live(*pairs):
+    return [calc.Event(k, a, date.fromisoformat(d), False, None) for d, a, k in pairs]
+
+
+def test_weekly_quota_uses_each_days_own_month_rate_and_carries_the_gap_forward():
+    live = _live(("2026-10-05", 3000, "one_time"), ("2026-10-06", 1000, "one_time"))
+    w = calc.weekly_quota(15000, live, date(2026, 10, 12))
+    assert w["week_start"] == "2026-10-11" and w["week_end"] == "2026-10-17"
+    assert w["quota"] == round(15000 / 31 * 7, 2)                      # 3,387.10
+    assert [h["week_start"] for h in w["history"]] == ["2026-10-04"]    # Oct 1-3 belong to September's last week
+    assert w["history"][0]["balance"] == round(4000 - 15000 / 31 * 7, 2)
+    assert w["carry_in"] == -w["history"][0]["balance"] and w["surplus"] == 0.0     # last week went over -> it lowers this week's need
+    assert abs(w["required"] - (w["quota"] + w["carry_in"])) < 0.02 and w["remaining"] == w["required"] and abs(w["balance"] + w["required"]) < 0.02
+
+
+def test_weekly_quota_week_that_crosses_a_month_takes_the_next_months_rate_for_its_last_days():
+    w = calc.weekly_quota(14000, [], date(2026, 10, 28))               # 25/10 - 31/10 stays in October
+    assert w["quota"] == round(14000 / 31 * 7, 2)
+    w = calc.weekly_quota(15000, [], date(2026, 11, 29))               # 29/11 - 5/12: 2 days of November (30d) + 5 days of December (31d)
+    assert w["week_start"] == "2026-11-29" and w["quota"] == round(15000 / 30 * 2 + 15000 / 31 * 5, 2)
+
+
+def test_weekly_quota_surplus_and_costs_and_no_target():
+    live = _live(("2026-10-12", 9000, "one_time"), ("2026-10-13", 500, "direct_cost"))
+    w = calc.weekly_quota(15000, live, date(2026, 10, 14))
+    assert w["actual"] == 8500 and w["surplus"] > 0 and w["remaining"] == 0.0 and w["balance"] == w["surplus"]
+    assert calc.weekly_quota(None, [], date(2026, 10, 14)) is None and calc.weekly_quota(0, [], date(2026, 10, 14)) is None
+
+
+def test_weekly_quota_is_on_monthly_goals_only_and_the_income_card_sums_it():
+    g = goal("recW", "הכנסה חודשית", ELI, 15000, **{GF.CATEGORY: "income"})
+    row = calc.compute_goal(g, [], date(2026, 10, 14), GF)
+    assert row["weekly"]["quota"] == round(15000 / 31 * 7, 2) and row["dynamic_target_per_week"] is not None      # the dynamic pace stays
+    cum = calc.compute_goal(goal("recC", "קרן", ELI, 60000, **{GF.CALC_METHOD: "cumulative", GF.START_DATE: "2026-01-01", GF.END_DATE: "2026-12-31"}),
+                            [], date(2026, 10, 14), GF)
+    assert cum["weekly"] is None
+    DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] = [g], []
+    card = service.overview(ELIYAHU, date(2026, 10, 14))["summary"]["income"]
+    assert card["weekly"]["quota"] == row["weekly"]["quota"] and card["dynamic_target_per_week"] > 0
