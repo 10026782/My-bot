@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { fetchFccLoanScenario, fetchFccOverview, postFccIntent, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
-import { CATEGORY_LABEL, GOAL_ACTION_BUTTONS, goalCardModel, goalPickLabel, headerCards, money } from "../lib/fccPresentation";
+import { CATEGORY_LABEL, GOAL_ACTION_BUTTONS, goalCardModel, goalPickLabel, headerCards, money, recentIncomeRows } from "../lib/fccPresentation";
 import { KpiCard, SavingsFollowUp, SavingsReleaseCard, WeeklySurplusCard } from "./FccKpiCard";
 import { AssetsSection, NextActionPrompt } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
@@ -208,6 +208,25 @@ export function FinancialControlCenter({ onBack }: Props) {
           <div className="fcc-list">{data.goals.map((g) => <GoalCard key={g.goal_id} goal={g} disabled={writer.busy || writer.turn != null}
                                                           onUpdate={(id) => void writer.start("monthly.goal_update", id)}
                                                           onAction={(intent, id) => void writer.start(intent, id)} />)}</div>
+        )}
+      </section>
+
+      <section className="fcc-section" aria-labelledby="fcc-incomes-heading">
+        <h2 id="fcc-incomes-heading" className="fcc-section__heading">הכנסות אחרונות שנרשמו</h2>
+        {recentIncomeRows(data.recent_incomes).length === 0 ? (
+          <ScreenState state="empty" title="עוד לא נרשמו הכנסות" />
+        ) : (
+          <div className="fcc-list">
+            {recentIncomeRows(data.recent_incomes).map((r) => (
+              <div key={r.key} className="fcc-event">
+                <span>{r.date}</span>
+                <strong>{r.amount}</strong>
+                <span>{r.source}{r.note ? ` · ${r.note}` : ""}</span>
+                {r.cost && <StatusBadge tone="warning">הוצאה ישירה</StatusBadge>}
+                {r.duplicate && <StatusBadge tone="danger">ייתכן כפילות</StatusBadge>}
+              </div>
+            ))}
+          </div>
         )}
       </section>
 

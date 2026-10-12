@@ -525,6 +525,17 @@ export interface FccWeekly {
   closing?: { week_start: string; week_end: string; amount: number; goal_id?: string } | null;
 }
 
+export interface FccRecentIncome {
+  id: string | null;
+  date: string;
+  goal_id: string;
+  source: string | null;
+  kind: "one_time" | "direct_cost";
+  amount: number;
+  note: string | null;
+  possible_duplicate: boolean;
+}
+
 export interface FccSource {
   goal_id: string;
   title: string | null;
@@ -757,6 +768,8 @@ export interface FccOverview {
   household?: { month_total: number };
   receipts?: { missing_count: number; missing_amount: number };
   obligations?: { total_monthly: number; flagged_count: number; flagged_monthly: number; cancel_pending?: number; potential_saving: number; count: number };
+  /** Latest income entries (own only), newest first, so nothing is booked twice. */
+  recent_incomes?: FccRecentIncome[];
   recent_events: { goal_ids: string[]; Amount: number | null; Kind: string | null; "Occurred At": string | null; Note: string | null }[];
   as_of: string;
   draft: FccTurn | null;

@@ -2,7 +2,7 @@
 // (`mode`) from existing data; this file only maps a family to the fields worth showing, so a
 // project never renders ₪0 / "—" and a cumulative or monthly-level goal never shows a weekly pace
 // it does not have. No fetching, no state.
-import type { FccGoalRow, FccOverview, FccSavingsRelease, FccSummaryCard, FccWeekly } from "../types";
+import type { FccGoalRow, FccOverview, FccRecentIncome, FccSavingsRelease, FccSummaryCard, FccWeekly } from "../types";
 
 const nf = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 });
 export const money = (n: number | null | undefined): string => (n == null ? "—" : `₪${nf.format(n)}`);
@@ -255,4 +255,19 @@ export function savingsReleaseModel(r: FccSavingsRelease): SavingsReleaseModel {
 export function savingsFollowUp(r: FccSavingsRelease | null | undefined): { message: string; confirm: string } | null {
   if (!r || r.remaining <= 0) return null;
   return { message: `מתפנים לחיסכון ${money(r.remaining)} החודש. להפקיד?`, confirm: `הפקד ${money(r.remaining)}` };
+}
+
+export interface RecentIncomeRow { key: string; date: string; source: string; amount: string; note: string | null; cost: boolean; duplicate: boolean }
+
+/** "הכנסות אחרונות": one row per entry — when, on which source, how much, and a flag when the same entry appears twice. */
+export function recentIncomeRows(items: FccRecentIncome[] | undefined): RecentIncomeRow[] {
+  return (items ?? []).map((r, i) => ({
+    key: r.id ?? `${r.date}-${i}`,
+    date: dmy(r.date),
+    source: r.source ?? "הכנסה",
+    amount: r.kind === "direct_cost" ? `-${money(r.amount)}` : money(r.amount),
+    note: r.note,
+    cost: r.kind === "direct_cost",
+    duplicate: r.possible_duplicate,
+  }));
 }

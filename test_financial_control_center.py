@@ -3872,3 +3872,27 @@ def test_weekly_surplus_with_nothing_open_and_other_owners_data(no_model):
     DB[Tables.FIN_EVENTS] = []
     assert conv.start_intent(ELIYAHU, "weekly.surplus_carry", None, today=FRI).state == "info"
     assert conv.start_intent(AVI_I, "weekly.surplus_use", None, today=FRI).state == "info"                # nothing of ELIYAHU's leaks to another owner
+
+
+# ── The last income entries, so nothing is booked twice ───────────────────────────────────────────────────────────
+def test_recent_incomes_lists_own_income_entries_newest_first_with_source_and_flags_duplicates():
+    DB[Tables.FIN_GOALS] = [goal("recInc", "הכנסה חודשית", ELI, 18000, **{GF.CATEGORY: "income"}),
+                            goal("recSrc", "נסיעות", ELI, 2500, **{GF.CATEGORY: "income", GF.PERIOD_TYPE: "weekly"}),
+                            goal("recPen", "תכנון פנסיוני", ELI, None, **{GF.CATEGORY: "long_term"}),
+                            goal("recAvi", "הכנסה של אבי", AVI, 9000, **{GF.CATEGORY: "income"})]
+    DB[Tables.FIN_EVENTS] = [
+        event("e1", "recInc", ELI, 1500, day="2026-10-05"),
+        event("e2", "recSrc", ELI, 700, day="2026-10-07", **{EF.NOTE: "אבי"}),
+        event("e3", "recSrc", ELI, 700, day="2026-10-07", **{EF.NOTE: "אבי"}),
+        event("e4", "recInc", ELI, 80, kind="direct_cost", day="2026-10-06"),
+        event("e5", "recPen", ELI, 900, day="2026-10-06"),                      # a savings deposit: not an income entry
+        event("e6", "recInc", ELI, 5, kind="note", day="2026-10-06"),            # a marker note: not an income entry
+        event("e7", "recAvi", AVI, 4000, day="2026-10-06"),                      # another owner's
+        event("e8", "recInc", ELI, 300, day="2026-10-04", **{EF.SUPERSEDED_BY: ["e1"]}),
+    ]
+    rows = service.overview(ELIYAHU, TODAY)["recent_incomes"]
+    assert [r["id"] for r in rows] == ["e3", "e2", "e4", "e1"]
+    assert rows[0]["source"] == "נסיעות" and rows[0]["note"] == "אבי" and rows[0]["amount"] == 700
+    assert rows[0]["possible_duplicate"] and rows[1]["possible_duplicate"] and not rows[2]["possible_duplicate"] and rows[2]["kind"] == "direct_cost"
+    assert "הכנסה של אבי" not in str(rows) and all(r["id"] != "e7" for r in rows)
+    assert len(service.recent_incomes(DB[Tables.FIN_GOALS], DB[Tables.FIN_EVENTS] * 5, limit=3)) == 3

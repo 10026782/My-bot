@@ -452,6 +452,36 @@ FIXED_INCOME_CATEGORY = "fixed_income"        # live Financial Goals.Category ch
 SAVINGS_DESTINATION_CATEGORY = "long_term"    # the pension portfolio goal: the one active goal of this category receives deposits
 
 
+RECENT_INCOMES = 12
+
+
+def recent_incomes(goals: list[dict], events: list[dict], limit: int = RECENT_INCOMES) -> list[dict]:
+    """The latest income entries the owner booked (one-time income and its direct costs), newest first, each with the source / goal it was
+    booked on, so a second entry is never made by mistake. The same goal + kind + amount + day shown twice is flagged as a possible duplicate.
+    Own rows only (the callers pass the owner-scoped goals / events); superseded rows and non-income goals never appear."""
+    income = {g["id"]: (g.get("fields") or {}).get(FinGoalFields.TITLE) for g in goals
+              if _category_key((g.get("fields") or {}).get(FinGoalFields.CATEGORY)) == "income"}
+    rows = []
+    for ev in events:
+        f = ev.get("fields") or {}
+        kind = _sel(f.get(FinEventFields.KIND))
+        gid = next((g for g in _goal_ids_of(ev) if g in income), None)
+        day, amount = calc._d(f.get(FinEventFields.OCCURRED_AT)), calc._num(f.get(FinEventFields.AMOUNT))
+        if kind not in (calc.ONE_TIME, calc.DIRECT_COST) or gid is None or day is None or amount is None or f.get(FinEventFields.SUPERSEDED_BY):
+            continue
+        rows.append({"id": ev.get("id"), "date": day.isoformat(), "goal_id": gid, "source": income[gid], "kind": kind,
+                     "amount": abs(amount), "note": (f.get(FinEventFields.NOTE) or "").strip() or None})
+    rows.sort(key=lambda r: (r["date"], str(r["id"])), reverse=True)
+    rows = rows[:limit]
+    seen: dict[tuple, int] = {}
+    for r in rows:
+        key = (r["goal_id"], r["kind"], r["amount"], r["date"])
+        seen[key] = seen.get(key, 0) + 1
+    for r in rows:
+        r["possible_duplicate"] = seen[(r["goal_id"], r["kind"], r["amount"], r["date"])] > 1
+    return rows
+
+
 def savings_release_view(rows: list[dict], summary: dict, own: dict[str, list[calc.Event]], goals: list[dict],
                          active_ids: set[str], today: date) -> dict | None:
     """The monthly "freed for savings" picture, or None when it cannot be derived (no income goal / no fixed income).
@@ -518,6 +548,7 @@ def overview(identity, today: date | None = None) -> dict:
         "savings_release": savings_release_view(rows, summary, own, goals, active_ids, today),
         "loans": loans_payload,
         "assets": assets_overview(identity, loans_payload["items"]),
+        "recent_incomes": recent_incomes(goals, events),
         "household": {"month_total": calc.household_month_total(all_events, today)},
         "receipts": receipts_overview(identity),
         "obligations": obligations_overview(identity),

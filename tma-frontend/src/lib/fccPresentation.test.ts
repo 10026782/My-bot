@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`); same conventions as commandCenterPresentation.test.ts.
 import type { FccGoalRow, FccSavingsRelease } from "../types";
-import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, weeklySurplusQuestion, WEEKLY_SURPLUS_CHOICES, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
+import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, weeklySurplusQuestion, WEEKLY_SURPLUS_CHOICES, recentIncomeRows, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -242,4 +242,14 @@ test("weekly surplus question: asked only while a closed week has an open surplu
   const q = weeklySurplusQuestion({ ...base, closing: { week_start: "2026-10-11", week_end: "2026-10-17", amount: 1870.97, goal_id: "g" } });
   assert.equal(q, "השבוע 11/10/2026–17/10/2026 נסגר עם עודף ₪1,871 — מה לעשות איתו?");
   assert.deepEqual(WEEKLY_SURPLUS_CHOICES.map((c) => c.intent), ["weekly.surplus_carry", "weekly.surplus_use", "weekly.surplus_save"]);
+});
+
+test("recent incomes: date, amount, source and note per entry; a cost is negative; a repeated entry is flagged", () => {
+  const rows = recentIncomeRows([
+    { id: "a", date: "2026-10-07", goal_id: "g", source: "נסיעות", kind: "one_time", amount: 700, note: "אבי", possible_duplicate: true },
+    { id: "b", date: "2026-10-06", goal_id: "g2", source: null, kind: "direct_cost", amount: 80, note: null, possible_duplicate: false },
+  ]);
+  assert.deepEqual(rows.map((r) => [r.date, r.amount, r.source, r.note, r.cost, r.duplicate]),
+    [["07/10/2026", "₪700", "נסיעות", "אבי", false, true], ["06/10/2026", "-₪80", "הכנסה", null, true, false]]);
+  assert.deepEqual(recentIncomeRows(undefined), []);
 });
