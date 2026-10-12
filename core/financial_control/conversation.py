@@ -152,6 +152,7 @@ def _render(d: BusinessDraft) -> TurnResult:
             d.entity_type, d.fields, goal_title=goal_title, operation=d.operation.value, changed=changed,
             inferred=inferred, subject=str(d.source_context.get("subject_noun") or "נכס"),
             note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else _partial_note(d) if d.entity_type == fd.FCC_LOAN_PARTIAL
+                  else _prime_note(d) if d.entity_type == fd.FCC_PRIME_CHANGE
                   else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
             d.entity_type, None, _view(d))
     if d.source_context.get("ask_kind") and d.fields.get("goal") and not d.source_context.get("ask_source"):
@@ -162,7 +163,7 @@ def _render(d: BusinessDraft) -> TurnResult:
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title, str(d.source_context.get("direction") or "")) if awaiting else "מה לעדכן?"
     if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
-                                      fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW) and d.source_context.get("review_note"):
+                                      fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW, fd.FCC_PRIME_CHANGE) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
 
@@ -185,6 +186,22 @@ def _partial_note(d: BusinessDraft) -> str:
     else:
         lines.append("לא נמצא יעד חוב פעיל אחד — יתעדכנו רק ההלוואה וההערות, בלי אירוע התקדמות.")
     lines.append("הכסף עצמו לא מועבר לחיסכון / לנכס — מתועד כאן בלבד.")
+    return "\n".join(lines)
+
+
+def _prime_note(d: BusinessDraft) -> str:
+    """Review note of a prime change: each affected loan with its old -> new rate and payment, and the loans that stay untouched."""
+    rows, delta = d.source_context.get("prime_rows") or [], d.fields.get("delta")
+    if delta in (None, ""):
+        return ""
+    lines = []
+    for p in fcc_loans.prime_plan(rows, float(delta)):
+        if p["skip"]:
+            lines.append(f"• {p['name']}: לא מתעדכנת — הריבית הייתה יורדת מתחת ל־0")
+            continue
+        pay = (f" · החזר {fd.display_value('payment', p['old_payment'])} ← {fd.display_value('payment', p['new_payment'])}"
+               if p["new_payment"] is not None else " · ההחזר לא מחושב (חסרה יתרה / החזר / תשלומים שנותרו)")
+        lines.append(f"• {p['name']}: ריבית {p['old_rate']:g}% ← {p['new_rate']:g}%{pay}")
     return "\n".join(lines)
 
 
@@ -276,7 +293,7 @@ def _one_line(text: str) -> str:
 
 
 # value-shaped fields (the contract input types CURRENCY / NUMBER / PERCENT / DATE), parsed by rule
-_NUMERIC_FIELDS = ("target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount")
+_NUMERIC_FIELDS = ("delta", "target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount")
 _DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date")
 
 
@@ -292,7 +309,7 @@ def _deterministic_answer(field_name: str, text: str):
     if vocab and t in vocab:
         return vocab[t]
     if field_name in _NUMERIC_FIELDS:
-        cleaned = t.replace(",", "").replace("%", "").replace("₪", "").replace("ש\"ח", "").replace("שח", "").strip()
+        cleaned = t.replace("−", "-").replace("–", "-").replace(",", "").replace("%", "").replace("₪", "").replace("ש\"ח", "").replace("שח", "").strip()
         try:
             float(cleaned)
             return cleaned
@@ -753,6 +770,17 @@ def _choices_for(d: BusinessDraft, goals: list[dict]) -> list[dict]:
     return cands
 
 
+def _start_prime_change(identity, ids, store, today) -> TurnResult:
+    """"The prime moved": one number (points), then a review of EVERY loan's new rate and payment, then אשר. Opens only when the owner has
+    loans with a known rate; the rows are captured now so the review and the writes agree."""
+    rows = fcc_loans.prime_rows(service.my_loans(identity), today)
+    if not rows:
+        return TurnResult("clarify", "אין הלוואות פעילות עם ריבית ידועה — אין מה לעדכן.")
+    d = _new_draft(identity, ids, fd.FCC_PRIME_CHANGE, DraftOperation.CREATE, fields={}, raw_text=f"intent:loan.prime_change#{uuid.uuid4().hex[:8]}",
+                   today=today, extra_ctx={"prime_rows": rows, "review_note": f"יושפעו {len(rows)} הלוואות (כולן צמודות פריים)."})
+    return _persist_new(store, ids, d)
+
+
 def _start_source_new(identity, ids, store, today) -> TurnResult:
     """A new income SOURCE (e.g. a person or a business line) inside the owner's total income goal: it asks name, target and period,
     then the usual review -> אשר. The parent is the caller's own single root income goal — without exactly one there is nothing to attach to."""
@@ -782,6 +810,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     store, ids, stop = _open_slot(identity, store, "פעולה חדשה")
     if stop is not None:
         return stop
+    if intent_id == "loan.prime_change":
+        return _start_prime_change(identity, ids, store, today)
     if intent_id == "monthly.source_new":
         return _start_source_new(identity, ids, store, today)
     if intent_id == "loan.next_step":
@@ -1018,6 +1048,10 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                     fill_failed = True
 
     d2, rejected = _set_fields(d, updates, strict=False) if updates else (d, [])
+    if d.entity_type == fd.FCC_PRIME_CHANGE and d2.fields.get("delta") not in (None, ""):
+        step = float(d2.fields["delta"])
+        if step == 0 or abs(step) > fcc_loans.PRIME_MAX_STEP:                    # no change, or a typo (more than 5 points at once)
+            return replace_result(_render(d), message=f"שינוי הפריים חייב להיות שונה מ־0 ולא יותר מ־{fcc_loans.PRIME_MAX_STEP:g} נקודות.\n{_render(d).message}")
     before = d.source_context.get("balance_before")
     if (d.entity_type == fd.FCC_LOAN_PARTIAL and before is not None and d2.fields.get("amount") not in (None, "")
             and float(d2.fields["amount"]) > float(before)):                  # more than is owed: that is a full repayment, not a partial one

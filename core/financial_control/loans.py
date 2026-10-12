@@ -284,6 +284,49 @@ def auto_step(record: dict, today: date) -> dict | None:
             "next_due": nd.isoformat(), "behind": nd <= today}
 
 
+# ── Prime-rate change: every prime-linked loan of the owner moves together ───────────────────────────────────────────
+PRIME_MAX_STEP = 5.0         # a single change larger than this (in percentage points) is a typo, not a decision
+
+
+def _pmt(balance: float, rate: float, n: int) -> float:
+    """Instalment that repays ``balance`` in ``n`` months at an annual ``rate`` (%)."""
+    i = rate / 1200.0
+    return balance / n if i == 0 else balance * i / (1 - (1 + i) ** -n)
+
+
+def prime_rows(records: list[dict], today: date) -> list[dict]:
+    """The owner's loans a prime change touches: active, his own debts (not owed TO him), with a known rate. Captured when the
+    draft opens, so the review and the writes use the same numbers. All the owner's loans are prime-linked (owner decision)."""
+    rows = []
+    for rec in records:
+        item = loan_item(rec, today)
+        if not item["active"] or item["direction"] != OWED_BY_ME or item["interest_rate"] is None:
+            continue
+        rows.append({"id": item["id"], "name": item["name"], "rate": item["interest_rate"], "payment": item["monthly_payment"],
+                     "balance": item["early_closure_balance"], "left": item["payments_remaining"],
+                     "notes": str((rec.get("fields") or {}).get(LF.NOTES) or "")})
+    return rows
+
+
+def prime_plan(rows: list[dict], delta: float) -> list[dict]:
+    """Per loan: the new rate and — when the loan has a balance, a payment and payments remaining — the new monthly payment, i.e. the
+    SAME payment scaled by the instalment ratio at the new vs the old rate over the remaining term (the end date stays; the bank's own
+    baseline is kept, not a generic formula). Missing inputs leave the payment alone (rate only); a rate that would go negative skips."""
+    out = []
+    for r in rows:
+        new_rate = round(r["rate"] + delta, 2)
+        entry = {"id": r["id"], "name": r["name"], "old_rate": r["rate"], "new_rate": new_rate, "old_payment": r["payment"],
+                 "new_payment": None, "skip": None}
+        if new_rate < 0:
+            entry["skip"] = "negative_rate"
+        elif r["payment"] and r["balance"] and r["left"] and r["left"] >= 1:
+            base, moved = _pmt(r["balance"], r["rate"], int(r["left"])), _pmt(r["balance"], new_rate, int(r["left"]))
+            if base > 0:
+                entry["new_payment"] = round(r["payment"] * moved / base, 2)
+        out.append(entry)
+    return out
+
+
 def debt_balance(items: list[dict]) -> dict:
     """What is owed TO the owner against what the owner owes: ``net`` > 0 is a net financial asset, ``net`` < 0 is not an asset
     (it still reduces the personal equity). The owner's loans that are linked to an asset (``Related Asset``) are left out of the
