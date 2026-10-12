@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`); same conventions as commandCenterPresentation.test.ts.
 import type { FccGoalRow, FccSavingsRelease } from "../types";
-import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
+import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -216,4 +216,18 @@ test("an action goal is moved by next action / done / pause — never by an amou
   assert.deepEqual(GOAL_ACTION_BUTTONS.map((b) => b.intent), ["monthly.goal_followup", "monthly.goal_done", "monthly.goal_pause"]);
   const g = { goal_id: "g", title: "מכירת יבנאל", mode: "project", status: "project", target: null } as unknown as FccGoalRow;
   assert.equal(goalCardModel(g).kind, "project");
+});
+
+test("weekly quota: fixed quota, carry in, earned and what is left or the surplus — next to the dynamic pace, which stays", () => {
+  const w = { week_start: "2026-10-11", week_end: "2026-10-17", quota: 3387.1, carry_in: 612.9, required: 4000, actual: 1000, remaining: 3000, surplus: 0, balance: -3000 };
+  const labels = weeklyQuotaMetrics(w).map((m) => m.label);
+  assert.deepEqual(labels, ["מכסה שבועית קבועה", "חסר שהועבר מקודם", "נדרש השבוע", "הושג השבוע", "חסר להשלמה השבוע"]);
+  const over = weeklyQuotaMetrics({ ...w, carry_in: -500, required: 2887.1, actual: 4000, remaining: 0, surplus: 1112.9, balance: 1112.9 });
+  assert.equal(over[1].label, "עודף שהועבר מקודם");
+  assert.equal(over[over.length - 1].label, "עודף השבוע (להתרווח / להפריש)");
+  assert.deepEqual(weeklyQuotaMetrics(null), []);
+  const cards = headerCards({ monthly_cash_improvement: 0, summary: { income: { target: 15000, actual: 1000, remaining: 14000, dynamic_target_per_week: 4000, goals: 1, weekly: w } } });
+  assert.equal(cards.some((c) => c.key === "income_week"), true);
+  assert.equal(cards.find((c) => c.key === "income_quota")?.value, "₪4,000");
+  assert.equal((cards.find((c) => c.key === "income_quota")?.hint ?? "").includes("נשאר ₪3,000"), true);
 });
