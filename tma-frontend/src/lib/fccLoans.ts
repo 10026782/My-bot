@@ -239,6 +239,8 @@ export function receivablesSummary(loans: FccLoans): string | null {
 }
 export const BALANCE_BUTTON = "עדכון יתרה";
 export const PAYMENT_BUTTON = "שינוי החזר";
+export const RATE_BUTTON = "עדכון ריבית";
+export const TERM_BUTTON = "תשלומים שנותרו";
 
 /** Only an active loan can be closed; the flows themselves (``loan.close`` / ``loan.update_balance`` / ``loan.update_payment``) run in the shared contextual writer. */
 export const canClose = (loan: { active: boolean }): boolean => loan.active;

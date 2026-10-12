@@ -37,6 +37,8 @@ FCC_LOAN_CLOSE = "fcc_loan_close"   # closing a loan: Loans.Payment Status = Pai
 FCC_LOAN_BALANCE = "fcc_loan_balance"   # one field of an existing loan: Outstanding Principal for Early Closure (the "יתרה" the screen shows)
 FCC_LOAN_PAYMENT = "fcc_loan_payment"   # one field of an existing loan: Current Monthly Payment
 FCC_LOAN_NEW = "fcc_loan_new"           # a new loan (owner-scoped create)
+FCC_LOAN_RATE = "fcc_loan_rate"         # one field of an existing loan: Interest Rate (%)
+FCC_LOAN_TERM = "fcc_loan_term"         # one field of an existing loan: Payments Remaining
 FCC_ASSET_VALUE = "fcc_asset_value"        # one field of an existing asset: Current Value
 FCC_ASSET_MORTGAGE = "fcc_asset_mortgage"  # one field of an existing asset: Mortgage Balance (on the asset itself)
 FCC_ASSET_STEP = "fcc_asset_step"          # Next Step (free text) + optional Next Step Owner (live select)
@@ -56,7 +58,7 @@ FCC_WEEK_SURPLUS = "fcc_week_surplus"      # what to do with a closed week's sur
 WEEK_DECISIONS = ("hold", "carry", "use", "save", "month_use", "month_save")
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
-FCC_ENTITIES = (FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
+FCC_ENTITIES = (FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_RATE, FCC_LOAN_TERM, FCC_LOAN_NEW,
                 FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_PRIME_CHANGE, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
@@ -93,6 +95,8 @@ INTENTS: dict[str, dict] = {
     "loan.close":                {"tab": "loans", "entity": "fcc_loan_close", "target": "loan", "target_required": True, "transition": True},
     "loan.update_balance":       {"tab": "loans", "entity": "fcc_loan_balance", "target": "loan", "target_required": True},
     "loan.update_payment":       {"tab": "loans", "entity": "fcc_loan_payment", "target": "loan", "target_required": True},
+    "loan.update_rate":          {"tab": "loans", "entity": "fcc_loan_rate", "target": "loan", "target_required": True},
+    "loan.update_term":          {"tab": "loans", "entity": "fcc_loan_term", "target": "loan", "target_required": True},
     "loan.create":               {"tab": "loans", "entity": "fcc_loan_new"},
     "loan.partial_payment":      {"tab": "loans", "entity": "fcc_loan_partial", "target": "loan", "target_required": True},
     "loan.arrangement":          {"tab": "loans", "entity": "fcc_loan_arrangement", "target": "loan", "target_required": True},
@@ -198,6 +202,12 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
     )),
     FCC_LOAN_PAYMENT: EntityContract(FCC_LOAN_PAYMENT, (
         _f("payment", LF.MONTHLY_PAYMENT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
+    )),
+    FCC_LOAN_RATE: EntityContract(FCC_LOAN_RATE, (
+        _f("rate", LF.INTEREST_RATE, InputType.PERCENT, required=RequiredMode.ALWAYS, validation="non_negative"),
+    )),
+    FCC_LOAN_TERM: EntityContract(FCC_LOAN_TERM, (
+        _f("payments_left", LF.PAYMENTS_LEFT, InputType.NUMBER, required=RequiredMode.ALWAYS, validation="non_negative_integer"),
     )),
     # A partial repayment: the loan, its balance before and the destination of the money live in source_context (never editable
     # fields) — an edit can change the amount or the date, never WHICH loan or what it was before.
@@ -388,6 +398,10 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         return f"מה היתרה לסגירה מוקדמת של {goal_title or 'ההלוואה'}?"
     if entity == FCC_LOAN_PAYMENT:
         return f"מה ההחזר החודשי של {goal_title or 'ההלוואה'}?"
+    if entity == FCC_LOAN_RATE:
+        return f"מה הריבית השנתית של {goal_title or 'ההלוואה'}? (באחוזים, למשל 10.65)"
+    if entity == FCC_LOAN_TERM:
+        return f"כמה תשלומים נותרו ב{goal_title or 'הלוואה'}?"
     if entity == FCC_ASSET_VALUE:
         return f"מה השווי הנוכחי של {goal_title or 'הנכס'}?"
     if entity == FCC_ASSET_MORTGAGE:
@@ -431,6 +445,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
             FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה",
             FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה",
+            FCC_LOAN_RATE: "עדכון ריבית הלוואה", FCC_LOAN_TERM: "עדכון תשלומים שנותרו",
             FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: f"פעולה הבאה ב{subject}", FCC_ASSET_STEP_EDIT: f"עריכת פעולה ב{subject}",
             FCC_ASSET_STEP_STATUS: f"עדכון סטטוס פעולה ב{subject}", FCC_ASSET_SOLD: "סימון נכס כנמכר",
             FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי", FCC_SOURCE_NEW: "מקור הכנסה חדש", FCC_PRIME_CHANGE: "שינוי ריבית פריים"}[entity]
@@ -441,7 +456,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append(f"• {record_noun(entity, fields)}: {goal_title}")
     if entity == FCC_GOAL_STATUS and goal_title:
         lines.append(f"• יעד: {goal_title}")
-    if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT) and goal_title:
+    if entity in (FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_RATE, FCC_LOAN_TERM, FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT) and goal_title:
         lines.append(f"• הלוואה / חוב: {goal_title}")
     if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD) and goal_title:
         lines.append(f"• {subject}: {goal_title}")
@@ -455,6 +470,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append(f"• {label(entity, name)}: {display_value(name, value)}{mark}")
     if entity == FCC_LOAN_CLOSE:
         lines.append(f"ההלוואה תסומן {LOAN_PAID_OFF} ותצא מהחובות הפעילים.")
+    if entity in (FCC_LOAN_RATE, FCC_LOAN_TERM):
+        lines.append("יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו. החזר חודשי ויתרה לא מחושבים מחדש — לשינוי כזה: ״שינוי פריים״ / ״עדכון החזר״.")
     if entity in (FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT):
         lines.append("יתעדכנו רק הנתון הזה ותאריך החיוב הבא (כמצוין); שאר נתוני ההלוואה לא ייגעו." if "תאריך החיוב הבא" in note
                      else "יתעדכן שדה אחד בלבד; שאר נתוני ההלוואה לא ייגעו.")
@@ -576,6 +593,8 @@ def loan_close_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source:
 _FIELD_UPDATES = {
     FCC_LOAN_BALANCE: (Tables.LOANS, "balance", LF.EARLY_CLOSURE, "fcc_loan_update"),
     FCC_LOAN_PAYMENT: (Tables.LOANS, "payment", LF.MONTHLY_PAYMENT, "fcc_loan_update"),
+    FCC_LOAN_RATE: (Tables.LOANS, "rate", LF.INTEREST_RATE, "fcc_loan_update"),
+    FCC_LOAN_TERM: (Tables.LOANS, "payments_left", LF.PAYMENTS_LEFT, "fcc_loan_update"),
     FCC_GOAL_STATUS: (Tables.FIN_GOALS, "goal_status", GF.STATUS, "fcc_goal_status"),
     FCC_ASSET_VALUE: ("Assets", "value", AF.VALUE, "fcc_asset_update"),
     FCC_ASSET_MORTGAGE: ("Assets", "mortgage", AF.MORTGAGE, "fcc_asset_update"),
