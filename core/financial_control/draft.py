@@ -53,7 +53,7 @@ SOURCE_PERIODS = ("monthly", "weekly")
 FCC_GOAL_STATUS = "fcc_goal_status"        # an ACTION goal (no amount target): done / paused — Financial Goals.Status only, never an amount
 GOAL_STATUSES = ("done", "paused")
 FCC_WEEK_SURPLUS = "fcc_week_surplus"      # what to do with a closed week's surplus: carry on / use it / save it (+ a marker note event)
-WEEK_DECISIONS = ("carry", "use", "save")
+WEEK_DECISIONS = ("hold", "carry", "use", "save", "month_use", "month_save")
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
 FCC_ENTITIES = (FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
@@ -76,7 +76,10 @@ INTENTS: dict[str, dict] = {
     "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
     "monthly.goal_new":          {"tab": "monthly", "entity": "fcc_goal"},
     # the weekly-surplus question (asked on the screen, never a standing choice): the server finds the week and the amount
+    "weekly.surplus_hold":       {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "hold"},
     "weekly.surplus_carry":      {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "carry"},
+    "weekly.month_use":          {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "month_use"},
+    "weekly.month_save":         {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "month_save"},
     "weekly.surplus_use":        {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "use"},
     "weekly.surplus_save":       {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "save"},
     # an ACTION goal (sell a property, realise a holding: no amount target) is moved by actions and status, never by amounts
@@ -295,7 +298,8 @@ VALUE_LABELS = {
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
     "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
     "goal_status": {"done": "הושלם", "paused": "מושהה"},
-    "decision": {"carry": "להעביר לשבוע הבא", "use": "להשתמש בו", "save": "לחסוך"},
+    "decision": {"hold": "לשמור להחלטה בסוף החודש", "carry": "להעביר לשבוע הבא", "use": "להשתמש בו", "save": "לחסוך",
+                 "month_use": "להשתמש בעודף החודש", "month_save": "לחסוך את עודף החודש"},
     "scope": {"household": "ביתי", "business": "עסקי", "personal": "אישי"},
     "loan_type": {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"},
     "step_owner": {o: o for o in STEP_OWNERS},
@@ -519,24 +523,28 @@ def _ob_value(name: str, value):
 
 
 def week_surplus_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
-    """The weekly-surplus decision = a MARKER note on the income goal (the question is never asked twice and the ledger reads the used /
-    saved amount back from it) and, for "save", one ordinary savings deposit on the savings goal. Nothing else is written."""
+    """The weekly-surplus decision = a MARKER note on the income goal (the question is never asked twice and the ledger reads the moved / used /
+    saved amount back from it) and, for "save" (a week's surplus or the month-end pot), one ordinary savings deposit on the savings goal.
+    "hold" only records that the surplus waits for the month-end decision. Nothing else is written."""
     from core.financial_control import calc
     goal, week, decision = str(source.get("income_goal_id") or ""), str(source.get("week_start") or ""), str(values["decision"])
-    if not goal or not week:
+    month_level = decision.startswith("month_")
+    key = str(source.get("month") or "") if month_level else week
+    if not goal or not key:
         raise UnsupportedOperationError("weekly surplus without its week")
     amount = float(values["amount"])
     day = str(source.get("today") or week)
-    marker = _event_write({"goal": goal, "kind": "note", "amount": 0.0 if decision == "carry" else amount, "occurred_at": day,
-                           "note": calc.week_surplus_note(week, decision)}, ctx, f"week_surplus:{week}")
+    note = calc.month_summary_note(key, decision[6:]) if month_level else calc.week_surplus_note(key, decision)
+    marker = _event_write({"goal": goal, "kind": "note", "amount": amount, "occurred_at": day, "note": note}, ctx, f"week_surplus:{key}:{decision}")
     marker["audit_action"] = "fcc_week_surplus"
     writes = [marker]
-    if decision == "save":
+    if decision in ("save", "month_save"):
         savings = str(source.get("savings_goal_id") or "")
         if not savings:
             raise UnsupportedOperationError("weekly surplus saving without a savings goal")
+        label = f"{calc.MONTH_SUMMARY_NOTE} {key}" if month_level else f"{calc.WEEK_SURPLUS_NOTE} {key}"
         dep = _event_write({"goal": savings, "kind": "one_time", "amount": amount, "occurred_at": day,
-                            "note": f"{SAVINGS_DEPOSIT_NOTE} — {calc.WEEK_SURPLUS_NOTE} {week}"}, ctx, f"week_surplus_save:{week}")
+                            "note": f"{SAVINGS_DEPOSIT_NOTE} — {label}"}, ctx, f"week_surplus_save:{key}:{decision}")
         dep["audit_action"] = "fcc_week_surplus_save"
         writes.append(dep)
     return writes

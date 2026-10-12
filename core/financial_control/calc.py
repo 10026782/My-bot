@@ -138,12 +138,20 @@ def parent_goal_id(fields: dict, gf) -> str | None:
 
 
 WEEK_SURPLUS_NOTE = "עודף שבועי"
-WEEK_DECISION_WORDS = {"carry": "הועבר", "use": "נוצל", "save": "נחסך"}      # how a closed week's surplus was settled
-_WEEK_NOTE_RE = re.compile(r"^" + WEEK_SURPLUS_NOTE + r" (\d{4}-\d{2}-\d{2}): (הועבר|נוצל|נחסך)")
+MONTH_SUMMARY_NOTE = "סיכום חודש"
+# how a closed week's surplus was settled: moved to the next week / kept for the month-end decision / spent / saved
+WEEK_DECISION_WORDS = {"carry": "הועבר", "hold": "נשמר", "use": "נוצל", "save": "נחסך"}
+MONTH_DECISION_WORDS = {"use": "נוצל", "save": "נחסך"}
+_WEEK_NOTE_RE = re.compile(r"^" + WEEK_SURPLUS_NOTE + r" (\d{4}-\d{2}-\d{2}): (הועבר|נשמר|נוצל|נחסך)")
+_MONTH_NOTE_RE = re.compile(r"^" + MONTH_SUMMARY_NOTE + r" (\d{4}-\d{2}): (נוצל|נחסך)")
 
 
 def week_surplus_note(week_start: str, decision: str) -> str:
     return f"{WEEK_SURPLUS_NOTE} {week_start}: {WEEK_DECISION_WORDS[decision]}"
+
+
+def month_summary_note(month: str, decision: str) -> str:
+    return f"{MONTH_SUMMARY_NOTE} {month}: {MONTH_DECISION_WORDS[decision]}"
 
 
 def week_decisions(live: list) -> dict[str, list[tuple[str, float]]]:
@@ -156,53 +164,86 @@ def week_decisions(live: list) -> dict[str, list[tuple[str, float]]]:
     return out
 
 
+def month_decisions(live: list) -> dict[str, float]:
+    """YYYY-MM -> the amount of the pot already used / saved at the month-end decision."""
+    out: dict[str, float] = {}
+    for e in live:
+        m = _MONTH_NOTE_RE.match(e.note or "") if e.kind == NOTE else None
+        if m:
+            out[m.group(1)] = out.get(m.group(1), 0.0) + e.amount
+    return out
+
+
 def weekly_quota(target: float | None, live: list, today: date) -> dict | None:
     """The TRUE weekly quota of a monthly goal, next to the dynamic pace: target / days-in-month × 7, each day at its OWN month's rate (a week
-    that crosses a month end takes its last days from the next month's rate). Sunday-start weeks. What a week fell short of (or went over)
-    is carried to the next one, so the week's real position is always visible. The ledger starts at the first Sunday of the month of the
-    current week's Sunday (the days before it belong to the previous month's last week); today's effective target is used for every week."""
+    that crosses a month end takes its last days from the next month's rate). Sunday-start weeks; the ledger starts at the first Sunday of the
+    month of the current week's Sunday (the days before it belong to the previous month's last week); today's effective target is used for every week.
+
+    Every week has its own quota. A SHORTFALL carries to the next week (it is still owed). A SURPLUS does not lower the next week by itself:
+    unless the owner moved it to the next week, spent it or saved it, it is HELD for the month-end decision, and the held amount is visible all month
+    (``held_total``). Decisions are read back from marker notes (see ``week_decisions`` / ``month_decisions``)."""
     if not target or target <= 0:
         return None
     rate = lambda day: target / calendar.monthrange(day.year, day.month)[1]
     net = lambda a, b: sum(e.amount for e in live if e.kind == ONE_TIME and a <= e.occurred <= b) \
         - sum(abs(e.amount) for e in live if e.kind == DIRECT_COST and a <= e.occurred <= b)
     sunday = lambda day: day - timedelta(days=(day.weekday() + 1) % 7)
-    decided = week_decisions(live)
-    taken = lambda wk: sum(a for word, a in decided.get(wk, []) if word in ("נוצל", "נחסך"))     # surplus used / saved leaves the ledger
+    decided, month_done = week_decisions(live), month_decisions(live)
     this_week = sunday(today)
     first = this_week.replace(day=1)
-    start, carry, history = first + timedelta(days=(6 - first.weekday()) % 7), 0.0, []
+    start, carry, history, held_prior = first + timedelta(days=(6 - first.weekday()) % 7), 0.0, [], 0.0
     while True:
         end = start + timedelta(days=6)
         quota = sum(rate(start + timedelta(days=i)) for i in range(7))
         actual = net(start, end)
         required = quota + carry
-        balance = actual - required - taken(start.isoformat())       # > 0 surplus, < 0 shortfall: both move on to the next week
+        balance = actual - required                              # > 0 surplus, < 0 shortfall
+        surplus = max(balance, 0.0)
+        words = decided.get(start.isoformat(), [])
+        moved = sum((a or surplus) for w, a in words if w == "הועבר")        # an old marker without an amount moved the whole surplus
+        moved = min(moved, surplus)
+        spent = min(sum(a for w, a in words if w in ("נוצל", "נחסך")), surplus - moved)
+        held = round(surplus - moved - spent, 2)
         if start == this_week:
-            return {"closing": _week_closing(start, end, balance, history, today, decided),
+            month = start.strftime("%Y-%m")
+            held_total = max(round(held_prior + held - month_done.get(month, 0.0), 2), 0.0)
+            return {"closing": _week_closing(start, end, surplus, held_total, history, today, decided, month_done, live, target),
                     "week_start": start.isoformat(), "week_end": end.isoformat(), "quota": round(quota, 2), "carry_in": round(carry, 2),
                     "required": round(max(required, 0.0), 2), "actual": round(actual, 2),
-                    "remaining": round(max(required - actual, 0.0), 2), "surplus": round(max(balance, 0.0), 2),
-                    "balance": round(balance, 2), "history": history}
+                    "remaining": round(max(required - actual, 0.0), 2), "surplus": held,
+                    "balance": round(balance, 2), "held_total": held_total, "history": history}
         history.append({"week_start": start.isoformat(), "week_end": end.isoformat(), "quota": round(quota, 2),
-                        "actual": round(actual, 2), "balance": round(balance, 2)})
-        carry, start = -balance, start + timedelta(days=7)
+                        "actual": round(actual, 2), "balance": round(balance, 2), "surplus": round(surplus, 2), "held": held})
+        held_prior += held
+        carry = (-balance if balance < 0 else 0.0) - moved
+        start = start + timedelta(days=7)
 
 
-def _week_closing(start: date, end: date, balance: float, history: list[dict], today: date, decided: dict) -> dict | None:
-    """The question "what to do with the surplus?": about the week that is closing (Friday / Saturday) or, until it is answered, the one
-    that just closed. Never for the last week of a month (the month-end savings question covers it), never twice for the same week."""
-    if today.weekday() in (4, 5):
-        cand = {"week_start": start, "week_end": end, "balance": balance}
+def _week_closing(start: date, end: date, surplus: float, held_total: float, history: list[dict], today: date, decided: dict,
+                  month_done: dict, live: list, target: float) -> dict | None:
+    """The open question about a closed week's surplus. ``kind`` "week": what to do with THIS week's surplus (hold it for the month end — the
+    default —, move it to the next week, spend it or save it); asked for the week that is closing (Friday / Saturday) or, until answered, the one
+    that just closed. ``kind`` "month": the last week of a month, or the first days after it, asks what to do with the whole held amount (spend / save).
+    Never twice for the same week or month."""
+    month = start.strftime("%Y-%m")
+    last_of_month = (start + timedelta(days=7)).month != start.month
+    if last_of_month and (today.weekday() in (4, 5) or today > end):
+        if month in month_done or held_total < 1:
+            return None
+        return {"kind": "month", "month": month, "week_start": start.isoformat(), "week_end": end.isoformat(), "amount": round(held_total, 2)}
+    if today.weekday() in (4, 5) and not last_of_month:
+        cand = {"week_start": start, "week_end": end, "surplus": surplus}
     elif history:
         h = history[-1]
-        cand = {"week_start": date.fromisoformat(h["week_start"]), "week_end": date.fromisoformat(h["week_end"]), "balance": h["balance"]}
+        cand = {"week_start": date.fromisoformat(h["week_start"]), "week_end": date.fromisoformat(h["week_end"]), "surplus": h["surplus"]}
     else:
-        return None
+        previous = weekly_quota(target, live, start - timedelta(days=1)) if start.day <= 7 else None
+        c = (previous or {}).get("closing")
+        return c if c and c["kind"] == "month" else None
     ws = cand["week_start"]
-    if (ws + timedelta(days=7)).month != ws.month or ws.isoformat() in decided or cand["balance"] < 1:
+    if ws.isoformat() in decided or cand["surplus"] < 1:
         return None
-    return {"week_start": ws.isoformat(), "week_end": cand["week_end"].isoformat(), "amount": round(cand["balance"], 2)}
+    return {"kind": "week", "week_start": ws.isoformat(), "week_end": cand["week_end"].isoformat(), "amount": round(cand["surplus"], 2)}
 
 
 def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:

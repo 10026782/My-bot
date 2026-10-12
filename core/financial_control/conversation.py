@@ -710,27 +710,30 @@ def _week_surplus_note(d: BusinessDraft) -> str:
     """Review note of the weekly-surplus decision: what each answer does (the amount shown is the one that will be written)."""
     amount = d.fields.get("amount")
     money = fd.display_value("amount", amount) if amount not in (None, "") else "העודף"
-    return {"carry": f"{money} ממשיכים לשבוע הבא ומקטינים את מה שנדרש בו. זה גם המצב אם לא עושים כלום.",
-            "use": f"{money} יוצאים מהחשבון: בשבוע הבא נדרשת שוב המכסה המלאה. לא נרשמת הוצאה.",
-            "save": f"{money} יירשמו כהפקדה לחיסכון, ויוצאו מהחשבון השבועי."}.get(str(d.fields.get("decision")), "")
+    return {"hold": f"{money} נשמרים להחלטה בסוף החודש. הם לא מקטינים את מה שנדרש בשבוע הבא, והסכום המצטבר מוצג כל החודש.",
+            "carry": f"{money} ממשיכים לשבוע הבא ומקטינים את מה שנדרש בו.",
+            "use": f"{money} יוצאים מהעודף השבועי. לא נרשמת הוצאה.",
+            "save": f"{money} יירשמו כהפקדה לחיסכון ויוצאו מהעודף השבועי.",
+            "month_use": f"{money} מעודף החודש נוצלו. לא נרשמת הוצאה.",
+            "month_save": f"{money} מעודף החודש יירשמו כהפקדה לחיסכון."}.get(str(d.fields.get("decision")), "")
 
 
 def _start_week_surplus(identity, ids, intent_id: str, spec: dict, store, today) -> TurnResult:
-    """The answer to the weekly-surplus question. The week and the amount come from the fresh overview (never from the client); nothing is
-    written here — the marker (and, for "save", the savings deposit) goes through the usual review -> אשר."""
+    """The answer to the weekly-surplus question. The week (or month), the kind of question and the amount come from the fresh overview (never from
+    the client); nothing is written here — the marker (and, for a saving, the savings deposit) goes through the usual review -> אשר."""
     ov = service.overview(identity, today)
     closing = ((ov.get("summary") or {}).get("income") or {}).get("weekly", {}).get("closing")
-    if not closing or not closing.get("goal_id"):
-        return TurnResult("info", "אין עודף שבועי פתוח לשאלה.")
     decision = spec["week_decision"]
+    if not closing or not closing.get("goal_id") or (closing.get("kind") == "month") != decision.startswith("month_"):
+        return TurnResult("info", "אין עודף פתוח לשאלה הזו.")
     extra = {"income_goal_id": closing["goal_id"], "week_start": closing["week_start"], "week_end": closing["week_end"],
-             "max_amount": closing["amount"], "goal_title": "העודף השבועי"}
-    if decision == "save":
+             "month": closing.get("month"), "max_amount": closing["amount"], "goal_title": "העודף"}
+    if decision in ("save", "month_save"):
         dests = [g for g in service.my_goals(identity)
                  if str((g.get("fields") or {}).get(GF.STATUS) or "active").lower() in ("active", "פעיל")
                  and service._raw_category((g.get("fields") or {}).get(GF.CATEGORY)) == service.SAVINGS_DESTINATION_CATEGORY]
         if len(dests) != 1:
-            return TurnResult("clarify", "אין יעד חיסכון ברור להפקדה — אפשר להעביר או להשתמש בעודף.")
+            return TurnResult("clarify", "אין יעד חיסכון ברור להפקדה — אפשר לשמור, להעביר או להשתמש בעודף.")
         extra["savings_goal_id"] = dests[0]["id"]
     d = _new_draft(identity, ids, fd.FCC_WEEK_SURPLUS, DraftOperation.CREATE, fields={}, raw_text=f"intent:{intent_id}#{uuid.uuid4().hex[:8]}",
                    today=today, extra_ctx=extra)
@@ -885,7 +888,7 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         return _start_prime_change(identity, ids, store, today)
     if intent_id == "monthly.source_new":
         return _start_source_new(identity, ids, store, today)
-    if intent_id.startswith("weekly.surplus_"):
+    if intent_id.startswith(("weekly.surplus_", "weekly.month_")):
         return _start_week_surplus(identity, ids, intent_id, spec, store, today)
     if intent_id in ("monthly.goal_followup", "monthly.goal_done", "monthly.goal_pause"):
         return _start_goal_action(identity, ids, intent_id, spec, entity_id, store, today)

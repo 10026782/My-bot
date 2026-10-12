@@ -192,8 +192,8 @@ def _accumulate(out: dict, rows: list[dict], cards: dict) -> None:
             wk = row.get("weekly")
             if wk:                                                    # the fixed weekly quota: same week for every goal, so the parts add up
                 tot = card.setdefault("weekly", {"week_start": wk["week_start"], "week_end": wk["week_end"], "quota": 0.0, "carry_in": 0.0,
-                                                 "required": 0.0, "actual": 0.0, "remaining": 0.0, "surplus": 0.0, "balance": 0.0, "closing": None})
-                for k in ("quota", "carry_in", "required", "actual", "remaining", "surplus", "balance"):
+                                                 "required": 0.0, "actual": 0.0, "remaining": 0.0, "surplus": 0.0, "balance": 0.0, "held_total": 0.0, "closing": None})
+                for k in ("quota", "carry_in", "required", "actual", "remaining", "surplus", "balance", "held_total"):
                     tot[k] = round(tot[k] + wk[k], 2)
                 if wk.get("closing"):                                 # the open question: same week for every goal, amounts add up
                     cl = tot.get("closing")

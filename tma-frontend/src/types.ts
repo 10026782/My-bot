@@ -522,7 +522,9 @@ export interface FccWeekly {
   balance: number;
   history?: { week_start: string; week_end: string; quota: number; actual: number; balance: number }[];
   /** The open question "what to do with the week's surplus?" (null = nothing to ask). The server finds the week and the amount. */
-  closing?: { week_start: string; week_end: string; amount: number; goal_id?: string } | null;
+  closing?: { kind: "week" | "month"; month?: string; week_start: string; week_end: string; amount: number; goal_id?: string } | null;
+  /** Surplus kept for the month-end decision, all weeks of the month so far (the mid-month picture). */
+  held_total?: number;
 }
 
 export interface FccRecentIncome {
