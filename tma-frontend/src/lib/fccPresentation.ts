@@ -157,6 +157,19 @@ export function weeklyBreakdown(card: FccSummaryCard | undefined): string | unde
   return parts.length ? parts.join(" · ") : undefined;
 }
 
+/** The question about a closed week's surplus. It is asked once; the three answers are buttons, not a standing setting. */
+export const WEEKLY_SURPLUS_CHOICES = [
+  { intent: "weekly.surplus_carry", label: "להעביר לשבוע הבא" },
+  { intent: "weekly.surplus_use", label: "להשתמש בו" },
+  { intent: "weekly.surplus_save", label: "לחסוך" },
+] as const;
+
+export function weeklySurplusQuestion(w: FccWeekly | null | undefined): string | null {
+  const c = w?.closing;
+  if (!c) return null;
+  return `השבוע ${dmy(c.week_start)}–${dmy(c.week_end)} נסגר עם עודף ${money(c.amount)} — מה לעשות איתו?`;
+}
+
 export function weeklyQuotaHint(w: FccWeekly): string {
   const carry = Math.round(w.carry_in);
   const state = w.surplus > 0 ? `עודף ${money(w.surplus)} — אפשר להעביר, להשתמש או לחסוך` : `חסר ${money(w.remaining)} להשלמה`;

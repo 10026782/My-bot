@@ -521,6 +521,8 @@ export interface FccWeekly {
   /** actual - (quota + carry_in): > 0 a surplus to relax with or set aside, < 0 a shortfall that moves on. */
   balance: number;
   history?: { week_start: string; week_end: string; quota: number; actual: number; balance: number }[];
+  /** The open question "what to do with the week's surplus?" (null = nothing to ask). The server finds the week and the amount. */
+  closing?: { week_start: string; week_end: string; amount: number; goal_id?: string } | null;
 }
 
 export interface FccSource {

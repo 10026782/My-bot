@@ -52,9 +52,11 @@ FCC_SOURCE_NEW = "fcc_source_new"                # a new income SOURCE inside th
 SOURCE_PERIODS = ("monthly", "weekly")
 FCC_GOAL_STATUS = "fcc_goal_status"        # an ACTION goal (no amount target): done / paused — Financial Goals.Status only, never an amount
 GOAL_STATUSES = ("done", "paused")
+FCC_WEEK_SURPLUS = "fcc_week_surplus"      # what to do with a closed week's surplus: carry on / use it / save it (+ a marker note event)
+WEEK_DECISIONS = ("carry", "use", "save")
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
-FCC_ENTITIES = (FCC_GOAL, FCC_GOAL_STATUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
+FCC_ENTITIES = (FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_NEW,
                 FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_PRIME_CHANGE, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
@@ -73,6 +75,10 @@ INTENTS: dict[str, dict] = {
     "monthly.direct_cost":       {"tab": "monthly", "entity": "fcc_event", "kind": "direct_cost", "target": "goal", "goal_filter": "income"},
     "monthly.goal_update":       {"tab": "monthly", "entity": "fcc_goal", "target": "goal", "target_required": True},
     "monthly.goal_new":          {"tab": "monthly", "entity": "fcc_goal"},
+    # the weekly-surplus question (asked on the screen, never a standing choice): the server finds the week and the amount
+    "weekly.surplus_carry":      {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "carry"},
+    "weekly.surplus_use":        {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "use"},
+    "weekly.surplus_save":       {"tab": "monthly", "entity": "fcc_week_surplus", "week_decision": "save"},
     # an ACTION goal (sell a property, realise a holding: no amount target) is moved by actions and status, never by amounts
     "monthly.goal_followup":     {"tab": "monthly", "entity": "fcc_followup", "target": "goal", "target_required": True},
     "monthly.goal_done":         {"tab": "monthly", "entity": "fcc_goal_status", "target": "goal", "target_required": True, "goal_status": "done"},
@@ -145,6 +151,10 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("end_date", GF.END_DATE, InputType.DATE, required=RequiredMode.CONDITIONAL, when=_CUM,
            example="2026-12-31"),
         _f("start_date", GF.START_DATE, InputType.DATE),
+    )),
+    FCC_WEEK_SURPLUS: EntityContract(FCC_WEEK_SURPLUS, (
+        _f("decision", EF.NOTE, InputType.SELECT, required=RequiredMode.ALWAYS, choices=WEEK_DECISIONS),
+        _f("amount", EF.AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
     )),
     FCC_GOAL_STATUS: EntityContract(FCC_GOAL_STATUS, (
         _f("goal_status", GF.STATUS, InputType.SELECT, required=RequiredMode.ALWAYS, choices=GOAL_STATUSES),
@@ -266,7 +276,7 @@ LABELS = {
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
     "balance": "יתרה לסגירה מוקדמת", "payment": "החזר חודשי", "loan_type": "סוג", "rate": "ריבית שנתית", "lender": "מלווה",
     "original": "סכום מקורי", "payments_left": "תשלומים שנותרו", "arrangement": "הסדר פירעון", "delta": "שינוי ריבית",
-    "goal_status": "מצב היעד", "sale_date": "תאריך מכירה", "sale_amount": "מחיר מכירה (100%)", "value": "שווי נוכחי", "mortgage": "יתרת משכנתא", "step": "פעולה הבאה", "step_owner": "אחראי",
+    "goal_status": "מצב היעד", "decision": "מה עושים בעודף", "sale_date": "תאריך מכירה", "sale_amount": "מחיר מכירה (100%)", "value": "שווי נוכחי", "mortgage": "יתרת משכנתא", "step": "פעולה הבאה", "step_owner": "אחראי",
 }
 _STEP_LABELS = {"step": "הפעולה", "due_date": "תאריך יעד"}
 _ARRANGEMENT_LABELS = {"payment": "פירעון חודשי", "end_date": "מועד פירעון"}
@@ -285,6 +295,7 @@ VALUE_LABELS = {
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
     "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
     "goal_status": {"done": "הושלם", "paused": "מושהה"},
+    "decision": {"carry": "להעביר לשבוע הבא", "use": "להשתמש בו", "save": "לחסוך"},
     "scope": {"household": "ביתי", "business": "עסקי", "personal": "אישי"},
     "loan_type": {"private": "פרטית", "business": "עסקית", "mortgage": "משכנתא"},
     "step_owner": {o: o for o in STEP_OWNERS},
@@ -412,7 +423,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
     """Full final business payload, shown before confirmation."""
     order = [f.field_name for f in FCC_CONTRACTS[entity].fields]
     lines: list[str] = []
-    head = {FCC_GOAL_STATUS: "עדכון מצב יעד", FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
+    head = {FCC_WEEK_SURPLUS: "עודף שבועי", FCC_GOAL_STATUS: "עדכון מצב יעד", FCC_GOAL: "יעד חדש" if operation == "CREATE" else "עדכון יעד",
             FCC_OBLIGATION: "התחייבות חדשה" if operation == "CREATE" else "עדכון התחייבות",
             FCC_EVENT: "רישום התקדמות", FCC_FOLLOWUP: "משימת המשך", FCC_LOAN_CLOSE: "סגירת הלוואה",
             FCC_LOAN_BALANCE: "עדכון יתרת הלוואה", FCC_LOAN_PAYMENT: "עדכון החזר חודשי", FCC_LOAN_NEW: "הלוואה חדשה",
@@ -505,6 +516,30 @@ def _event_write(values: Mapping[str, Any], ctx: Mapping[str, Any], raw_text: st
 def _ob_value(name: str, value):
     """``status`` is a select in the draft but a checkbox in storage."""
     return value == "active" if name == "status" else value
+
+
+def week_surplus_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """The weekly-surplus decision = a MARKER note on the income goal (the question is never asked twice and the ledger reads the used /
+    saved amount back from it) and, for "save", one ordinary savings deposit on the savings goal. Nothing else is written."""
+    from core.financial_control import calc
+    goal, week, decision = str(source.get("income_goal_id") or ""), str(source.get("week_start") or ""), str(values["decision"])
+    if not goal or not week:
+        raise UnsupportedOperationError("weekly surplus without its week")
+    amount = float(values["amount"])
+    day = str(source.get("today") or week)
+    marker = _event_write({"goal": goal, "kind": "note", "amount": 0.0 if decision == "carry" else amount, "occurred_at": day,
+                           "note": calc.week_surplus_note(week, decision)}, ctx, f"week_surplus:{week}")
+    marker["audit_action"] = "fcc_week_surplus"
+    writes = [marker]
+    if decision == "save":
+        savings = str(source.get("savings_goal_id") or "")
+        if not savings:
+            raise UnsupportedOperationError("weekly surplus saving without a savings goal")
+        dep = _event_write({"goal": savings, "kind": "one_time", "amount": amount, "occurred_at": day,
+                            "note": f"{SAVINGS_DEPOSIT_NOTE} — {calc.WEEK_SURPLUS_NOTE} {week}"}, ctx, f"week_surplus_save:{week}")
+        dep["audit_action"] = "fcc_week_surplus_save"
+        writes.append(dep)
+    return writes
 
 
 def loan_close_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
@@ -795,6 +830,8 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": loan_close_writes(values, ctx, writer.source_context)}
         if entity in _FIELD_UPDATES:
             return {"writes": field_update_writes(entity, values, writer.source_context)}
+        if entity == FCC_WEEK_SURPLUS:
+            return {"writes": week_surplus_writes(values, ctx, writer.source_context)}
         if entity == FCC_ASSET_STEP:
             return {"writes": asset_step_writes(values, {**writer.source_context, "profile_id": ctx["profile_id"]})}
         if entity == FCC_ASSET_STEP_EDIT:

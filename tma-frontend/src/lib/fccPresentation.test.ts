@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`); same conventions as commandCenterPresentation.test.ts.
 import type { FccGoalRow, FccSavingsRelease } from "../types";
-import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
+import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, weeklySurplusQuestion, WEEKLY_SURPLUS_CHOICES, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -233,4 +233,13 @@ test("weekly quota: the headline is earned / needed with the surplus (or the gap
   assert.equal(q?.value, "₪1,660 / ₪1,547");
   assert.equal((q?.hint ?? "").includes("עודף ₪113 — אפשר להעביר, להשתמש או לחסוך"), true);
   assert.equal((q?.hint ?? "").includes("מכסה ₪4,065 − עודף מקודם ₪2,517"), true);
+});
+
+test("weekly surplus question: asked only while a closed week has an open surplus; three answers as buttons", () => {
+  const base = { week_start: "2026-10-11", week_end: "2026-10-17", quota: 4065, carry_in: 0, required: 4065, actual: 5000, remaining: 0, surplus: 935, balance: 935 };
+  assert.equal(weeklySurplusQuestion(base), null);
+  assert.equal(weeklySurplusQuestion(undefined), null);
+  const q = weeklySurplusQuestion({ ...base, closing: { week_start: "2026-10-11", week_end: "2026-10-17", amount: 1870.97, goal_id: "g" } });
+  assert.equal(q, "השבוע 11/10/2026–17/10/2026 נסגר עם עודף ₪1,871 — מה לעשות איתו?");
+  assert.deepEqual(WEEKLY_SURPLUS_CHOICES.map((c) => c.intent), ["weekly.surplus_carry", "weekly.surplus_use", "weekly.surplus_save"]);
 });

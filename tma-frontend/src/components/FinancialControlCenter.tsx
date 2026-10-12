@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { fetchFccLoanScenario, fetchFccOverview, postFccIntent, postFccWrite } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, GOAL_ACTION_BUTTONS, goalCardModel, goalPickLabel, headerCards, money } from "../lib/fccPresentation";
-import { KpiCard, SavingsFollowUp, SavingsReleaseCard } from "./FccKpiCard";
+import { KpiCard, SavingsFollowUp, SavingsReleaseCard, WeeklySurplusCard } from "./FccKpiCard";
 import { AssetsSection, NextActionPrompt } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
 import { LoansSection } from "./FccLoans";
@@ -177,6 +177,8 @@ export function FinancialControlCenter({ onBack }: Props) {
       <div className="fcc-kpis">
         {headerCards(data).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
       </div>
+
+      <WeeklySurplusCard weekly={data.summary.income?.weekly} onStart={(i) => void writer.start(i)} disabled={writer.busy || writer.turn != null} />
 
       {data.savings_release && (
         <SavingsReleaseCard release={data.savings_release} onStart={(i) => void writer.start(i)} disabled={writer.busy || writer.turn != null} />
