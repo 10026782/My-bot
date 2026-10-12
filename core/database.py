@@ -83,16 +83,44 @@ def get_pool():
         return None
 
 
-def get_conn():
-    """Get a connection from the pool. Returns None if pool unavailable."""
-    pool = get_pool()
-    if pool is None:
-        return None
+def _conn_is_alive(conn) -> bool:
+    """Cheap liveness probe for a pooled connection (one round trip)."""
     try:
-        return pool.getconn()
-    except Exception as e:
-        logger.error(f"Failed to get connection from pool: {e}")
-        return None
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        conn.rollback()
+        return True
+    except Exception:
+        return False
+
+
+def get_conn():
+    """Get a validated connection from the pool. Returns None if unavailable.
+
+    SimpleConnectionPool does not notice a connection the server closed (e.g.
+    Neon scale-to-zero after idle). Without this check the first claim after an
+    idle gap fails with "server closed the connection unexpectedly". A dead
+    connection is discarded and ONE fresh one is tried; if that also fails the
+    result is None — the callers' existing "unavailable -> fail closed" contract.
+    """
+    for _attempt in range(2):
+        pool = get_pool()
+        if pool is None:
+            return None
+        try:
+            conn = pool.getconn()
+        except Exception as e:
+            logger.error(f"Failed to get connection from pool: {e}")
+            return None
+        if _conn_is_alive(conn):
+            return conn
+        logger.warning("Discarding dead pooled PostgreSQL connection (server closed it)")
+        try:
+            pool.putconn(conn, close=True)
+        except Exception as e:
+            logger.error(f"Failed to discard dead connection: {e}")
+    logger.error("No live PostgreSQL connection after retry — failing closed")
+    return None
 
 
 def release_conn(conn):
