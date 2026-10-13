@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Lab — סימולטור צבירת הון</title>
+<style nonce="__NONCE__">
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2430;--mute:#5d6878;--line:#dfe3e8;--accent:#1f5fbf;--warn:#8a5a00;--warnbg:#fff7e0}
+@media (prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1b212a;--ink:#e8ecf1;--mute:#9aa6b6;--line:#2c3542;--accent:#6aa3f5;--warn:#f1c66a;--warnbg:#2c2410}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:8px 0 4px}h2{font-size:16px;margin:0 0 10px}
+.sub{color:var(--mute);margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.banner{background:var(--warnbg);color:var(--warn);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:14px}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+label{display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:3px}
+input,select,button{font:inherit;padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+button{background:var(--accent);color:#fff;border:0;cursor:pointer;padding:9px 18px}
+.check{flex-direction:row;align-items:center;gap:6px;color:var(--ink)}
+.check input{width:auto}
+fieldset{border:1px solid var(--line);border-radius:8px;margin:10px 0 0;padding:8px 12px}
+legend{color:var(--mute);font-size:13px;padding:0 6px}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:10px}
+.kpi b{display:block;font-size:18px;direction:ltr;text-align:right}
+.kpi span{font-size:12px;color:var(--mute)}
+.tag{font-size:11px;color:var(--warn);background:var(--warnbg);border-radius:4px;padding:1px 5px;margin-inline-start:4px}
+.charts{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(380px,1fr))}
+@media (max-width:480px){.charts{grid-template-columns:1fr}main{padding:10px}main .hint{display:block}.card{padding:10px}th,td{padding:6px 5px;font-size:13px}}
+svg{width:100%;height:auto;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--mute);margin-top:4px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-inline-end:4px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right}
+td.n{direction:ltr;text-align:right;white-space:nowrap}
+.scroll{overflow-x:auto}
+ul{margin:0;padding-inline-start:20px}li{margin-bottom:6px}
+#err{color:#c0392b;margin:8px 0;min-height:1.2em}
+.base{margin-top:8px;max-width:260px}
+.hint{display:none}
+.charts .card:last-child:nth-child(odd){grid-column:1/-1}
+.small{font-size:12px;color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+<h1>Portfolio Lab — סימולטור צבירת הון</h1>
+<p class="sub">מסך פנימי, מקומי, למחקר בלבד. כל החישוב נעשה במנוע <code>portfolio_lab</code>; אין מסחר, אין המלצה ואין נתוני שוק.</p>
+<div class="banner"><b>נתוני הדגמה (DEMO).</b> כל הקלטים, התשואות ותשואות הרכיבים הם הנחות (assumption-based) ולא נתוני שוק; התוצאות אינן תחזית ואינן המלצה. תוצאות מס, אם מוצגות, הן תיאורטיות בלבד אלא אם אומתו חיצונית.</div>
+
+<form id="f" class="card" autocomplete="off">
+<h2>קלטים</h2>
+<div class="grid">
+<label>סכום התחלתי (₪)<input name="initial" type="number" min="0" step="1000" value="0"></label>
+<label>הפקדה חודשית (₪)<input name="monthly_contribution" type="number" min="0" step="100" value="8000"></label>
+<label>מספר שנים (10–100)<input name="years" type="number" min="10" max="100" step="1" value="30"></label>
+<label>תשואה שנתית ברוטו (%)<input name="annual_return_pct" type="number" step="0.1" value="8"></label>
+<label>דמי ניהול שנתיים (%)<input name="annual_fee_pct" type="number" min="0" step="0.01" value="0.15"></label>
+<label>אינפלציה שנתית (%)<input name="inflation_pct" type="number" step="0.1" value="2"></label>
+<label>תזמון הפקדה<select name="deposit_timing"><option value="end">סוף חודש</option><option value="begin">תחילת חודש</option></select></label>
+<label class="check"><input name="index_contributions" type="checkbox"> הצמדת הפקדות לאינפלציה</label>
+</div>
+<fieldset><legend>השוואת אסטרטגיות</legend>
+<div class="grid" id="strategies"></div>
+<label class="base">אסטרטגיית בסיס (נכללת תמיד)<select name="baseline" id="baseline"></select></label>
+</fieldset>
+<fieldset><legend>תרחיש משבר (אופציונלי)</legend>
+<div class="grid">
+<label class="check"><input type="checkbox" id="crisisOn"> הפעל תרחיש משבר</label>
+<label>ירידה<select id="crisisDecline"></select></label>
+<label>שנת המשבר<input id="crisisYear" type="number" min="1" step="1" value="5"></label>
+<label>התאוששות<select id="crisisRecovery"><option value="fast">מהירה (שנה)</option><option value="prolonged">ממושכת (3 שנים)</option></select></label>
+</div></fieldset>
+<p><button type="submit">חשב</button></p>
+<div id="err" role="alert"></div>
+</form>
+
+<div id="out" hidden>
+<section class="card"><h2>תוצאות מרכזיות <span class="tag">מבוסס הנחות</span></h2><div class="grid" id="kpis"></div></section>
+<section class="charts">
+<div class="card"><h2>צבירת הון לאורך זמן <span class="tag">הדגמה</span></h2><div id="cGrowth"></div></div>
+<div class="card"><h2>השוואת אסטרטגיות <span class="tag">הדגמה</span></h2><div id="cCompare"></div></div>
+<div class="card"><h2>חלוקת התוצאה <span class="tag">הדגמה</span></h2><div id="cBreak"></div></div>
+<div class="card"><h2>רגישות להפקדה חודשית <span class="tag">הדגמה</span></h2><div id="cSensC"></div></div>
+<div class="card"><h2>רגישות לאורך זמן <span class="tag">הדגמה</span></h2><div id="cSensD"></div></div>
+</section>
+<section class="card"><h2>טבלת השוואה <span class="tag">הדגמה</span></h2><p class="small">תשואות רכיבי האסטרטגיות (פרט לקרן העולמית) הן הנחות להמחשה — לא דירוג של קרנות אמיתיות.</p><p class="small hint">בנייד: גללו הצידה לראות את כל העמודות.</p><div class="scroll"><table id="tbl"></table></div></section>
+<section class="card"><h2>תובנות אוטומטיות <span class="tag">מבוסס הנחות</span></h2><ul id="ins"></ul></section>
+<section class="card"><h2>הנחות ואזהרות</h2><ul id="asm"></ul><ul id="wrn" class="small"></ul>
+<p class="small" id="meta"></p></section>
+</div>
+</main>
+<script nonce="__NONCE__">
+"use strict";
+const COLORS=["#1f5fbf","#d9822b","#2a9d8f","#9b59b6","#c0392b"];
+const NF=new Intl.NumberFormat("he-IL",{maximumFractionDigits:0});
+const ils=v=>v==null?"—":NF.format(v)+" ₪";
+const pct=v=>v==null?"—":(v*100).toFixed(2)+"%";
+const compact=v=>Math.abs(v)>=1e6?(v/1e6).toFixed(1)+"M":Math.abs(v)>=1e3?(v/1e3).toFixed(0)+"K":String(Math.round(v));
+const $=id=>document.getElementById(id);
+const NS="http://www.w3.org/2000/svg";
+function el(tag,attrs,text){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;return e}
+function mkSvg(w,h){return el("svg",{viewBox:`0 0 ${w} ${h}`,role:"img"})}
+const W=520,H=280,P={l:58,r:12,t:12,b:34};
+function axes(svg,xmin,xmax,ymax,xlab){
+  const iw=W-P.l-P.r,ih=H-P.t-P.b;
+  for(let i=0;i<=4;i++){const y=P.t+ih-ih*i/4;
+    svg.append(el("line",{x1:P.l,x2:W-P.r,y1:y,y2:y,stroke:"currentColor","stroke-opacity":.12}));
+    svg.append(el("text",{x:P.l-6,y:y+4,"text-anchor":"end","font-size":13,fill:"currentColor","fill-opacity":.7},compact(ymax*i/4)))}
+  for(let i=0;i<=4;i++){const v=xmin+(xmax-xmin)*i/4;
+    svg.append(el("text",{x:P.l+iw*i/4,y:H-14,"text-anchor":"middle","font-size":13,fill:"currentColor","fill-opacity":.7},Math.round(v)))}
+  svg.append(el("text",{x:W/2,y:H-2,"text-anchor":"middle","font-size":13,fill:"currentColor","fill-opacity":.7},xlab));
+  return {x:v=>P.l+iw*(v-xmin)/((xmax-xmin)||1),y:v=>P.t+ih-ih*v/(ymax||1)}
+}
+function lineChart(host,lines,xlab){
+  host.replaceChildren();
+  const all=lines.flatMap(l=>l.pts);const xs=all.map(p=>p[0]),ys=all.map(p=>p[1]);
+  const svg=mkSvg(W,H);const s=axes(svg,Math.min(...xs),Math.max(...xs),Math.max(...ys)*1.05,xlab);
+  lines.forEach((l,i)=>{const c=l.color||COLORS[i%COLORS.length];
+    svg.append(el("polyline",{points:l.pts.map(p=>s.x(p[0])+","+s.y(p[1])).join(" "),fill:"none",stroke:c,"stroke-width":2,"stroke-dasharray":l.dash||""}));
+    if(l.pts.length<=12)l.pts.forEach(p=>svg.append(el("circle",{cx:s.x(p[0]),cy:s.y(p[1]),r:3,fill:c})))});
+  host.append(svg);legend(host,lines.map((l,i)=>[l.name,l.color||COLORS[i%COLORS.length]]));
+}
+function legend(host,items){const d=document.createElement("div");d.className="legend";
+  items.forEach(([n,c])=>{const s=document.createElement("span");const i=document.createElement("i");i.style.background=c;s.append(i,n);d.append(s)});host.append(d)}
+function barChart(host,labels,series,fmtX){
+  host.replaceChildren();
+  const ymax=Math.max(...series.flatMap(s=>s.values))*1.05;
+  const svg=mkSvg(W,H);const iw=W-P.l-P.r,ih=H-P.t-P.b;
+  const s=axes(svg,0,0,ymax,"");svg.querySelectorAll("text").forEach(t=>{if(t.getAttribute("text-anchor")==="middle")t.remove()});
+  const gw=iw/labels.length,bw=gw*0.7/series.length;
+  labels.forEach((lab,i)=>{
+    series.forEach((se,j)=>{const v=se.values[i],h=ih*v/ymax;
+      svg.append(el("rect",{x:P.l+gw*i+gw*0.15+bw*j,y:P.t+ih-h,width:bw,height:h,fill:se.color,rx:2}))});
+    svg.append(el("text",{x:P.l+gw*(i+.5),y:H-14,"text-anchor":"middle","font-size":13,fill:"currentColor","fill-opacity":.7},fmtX(lab)))});
+  host.append(svg);legend(host,series.map(s=>[s.name,s.color]));
+}
+function stackBar(host,parts){
+  host.replaceChildren();
+  const svg=mkSvg(W,90);let x=10;
+  parts.forEach(p=>{const w=(W-20)*Math.max(p.share,0);
+    svg.append(el("rect",{x,y:14,width:w,height:36,fill:p.color}));x+=w});
+  host.append(svg);
+  const t=document.createElement("table");
+  parts.forEach(p=>{const r=t.insertRow();const a=r.insertCell();const i=document.createElement("i");
+    i.style.cssText=`display:inline-block;width:10px;height:10px;border-radius:2px;margin-inline-end:6px;background:${p.color}`;a.append(i,p.name);
+    const b=r.insertCell();b.className="n";b.textContent=ils(p.value)+" ("+(p.share*100).toFixed(1)+"%)"});
+  host.append(t);
+}
+function tdn(r,v){const c=r.insertCell();c.className="n";c.textContent=v;return c}
+
+const LABELS={global:"100% קרן עולמית",world_em:"World + EM",three_funds:"השילוש",experimental_90_10:"90/10"};
+Object.entries(LABELS).forEach(([k,v],i)=>{
+  const l=document.createElement("label");l.className="check";const c=document.createElement("input");
+  c.type="checkbox";c.value=k;c.checked=true;l.append(c,v);$("strategies").append(l);
+  const o=document.createElement("option");o.value=k;o.textContent=v;$("baseline").append(o)});
+[10,20,30,40,50].forEach(d=>{const o=document.createElement("option");o.value=d;o.textContent=d+"%";if(d===30)o.selected=true;$("crisisDecline").append(o)});
+
+function collect(){
+  const f=$("f"),g=n=>f.elements[n];
+  const p={initial:+g("initial").value,monthly_contribution:+g("monthly_contribution").value,years:parseInt(g("years").value,10),
+    annual_return_pct:+g("annual_return_pct").value,annual_fee_pct:+g("annual_fee_pct").value,inflation_pct:+g("inflation_pct").value,
+    deposit_timing:g("deposit_timing").value,index_contributions:g("index_contributions").checked,baseline:$("baseline").value,
+    strategies:[...$("strategies").querySelectorAll("input:checked")].map(i=>i.value)};
+  if($("crisisOn").checked)p.crisis={decline_pct:+$("crisisDecline").value,year:parseInt($("crisisYear").value,10),recovery:$("crisisRecovery").value};
+  return p}
+
+function render(v){
+  $("out").hidden=false;
+  const k=v.kpis,cards=[
+    ["שווי סופי נומינלי",ils(k.final_nominal)],["שווי סופי ריאלי",ils(k.final_real)],["סך הפקדות",ils(k.contributions)],
+    ["רווח נומינלי",ils(k.nominal_profit)],["רווח ריאלי",ils(k.real_profit)],["דמי ניהול ששולמו",ils(k.management_fees_paid)],
+    ["השפעה כוללת של העלויות",ils(k.total_cost_impact)],["תשואה שנתית אפקטיבית נטו",pct(k.net_effective_annual_return)],
+    ["שווי אחרי מס",k.after_tax.display||ils(k.after_tax.value),k.after_tax.note]];
+  $("kpis").replaceChildren(...cards.map(([t,val,note])=>{const d=document.createElement("div");d.className="kpi";
+    const b=document.createElement("b");b.textContent=val;const s=document.createElement("span");s.textContent=t+(note?" — "+note:"");d.append(b,s);return d}));
+  const g=v.charts.growth,lines=[
+    {name:"נומינלי",pts:g.series.map(r=>[r.year,r.nominal])},{name:"ריאלי",pts:g.series.map(r=>[r.year,r.real]),color:COLORS[2]},
+    {name:"הפקדות מצטברות",pts:g.series.map(r=>[r.year,r.contributions]),color:"#8892a0",dash:"4 3"}];
+  if(g.crisis.applied)lines.push({name:"נומינלי עם משבר (תרחיש)",pts:g.crisis.series.map(r=>[r.year,r.nominal]),color:COLORS[4]});
+  lineChart($("cGrowth"),lines,"שנים");
+  if(g.crisis.applied){const p=document.createElement("p");p.className="small";
+    p.textContent="תרחיש משבר: הפרש בשווי הסופי "+ils(g.crisis.delta_vs_no_crisis)+". "+g.crisis.note+(g.crisis.recovery_truncated_by_horizon?" ההתאוששות נחתכה בגלל אופק ההשקעה.":"");
+    $("cGrowth").append(p)}
+  lineChart($("cCompare"),Object.entries(v.charts.strategy_comparison).map(([n,s])=>({name:v.labels.strategies[n],pts:s.map(r=>[r.year,r.nominal])})),"שנים");
+  const b=v.charts.breakdown;
+  stackBar($("cBreak"),[{name:"הפקדות",value:b.contributions,share:b.shares.contributions,color:COLORS[0]},{name:"רווח נטו",value:b.profit_net,share:b.shares.profit_net,color:COLORS[2]},{name:"עלויות",value:b.costs,share:b.shares.costs,color:COLORS[4]}]);
+  const sc=v.charts.sensitivity.monthly_contribution;
+  barChart($("cSensC"),sc.map(r=>r.monthly_contribution),[{name:"נומינלי",values:sc.map(r=>r.final_nominal),color:COLORS[0]},{name:"ריאלי",values:sc.map(r=>r.final_real),color:COLORS[2]}],x=>NF.format(x));
+  const sd=v.charts.sensitivity.duration;
+  barChart($("cSensD"),sd.map(r=>r.years),[{name:"נומינלי",values:sd.map(r=>r.final_nominal),color:COLORS[0]},{name:"ריאלי",values:sd.map(r=>r.final_real),color:COLORS[2]}],x=>x+" ש׳");
+  const t=$("tbl");t.replaceChildren();
+  const hr=t.createTHead().insertRow();["אסטרטגיה","שווי סופי","שווי ריאלי","סך הפקדות","רווח נטו","עלויות","פער מול בסיס"].forEach(h=>{const c=document.createElement("th");c.textContent=h;hr.append(c)});
+  const tb=t.createTBody();
+  v.comparison_table.forEach(r=>{const row=tb.insertRow();row.insertCell().textContent=r.label+(r.is_baseline?" (בסיס)":"");
+    [r.final_nominal,r.final_real,r.contributions,r.net_profit,r.costs].forEach(x=>tdn(row,ils(x)));
+    tdn(row,r.is_baseline?"—":(r.gap_vs_baseline>0?"+":"")+ils(r.gap_vs_baseline))});
+  $("ins").replaceChildren(...v.insights.map(i=>{const li=document.createElement("li");li.textContent=i.text;return li}));
+  $("asm").replaceChildren(...v.assumptions.map(a=>{const li=document.createElement("li");li.textContent=a.text;
+    if(a.assumption_based){const s=document.createElement("span");s.className="tag";s.textContent="assumption-based";li.append(s)}return li}));
+  $("wrn").replaceChildren(...v.warnings.map(w=>{const li=document.createElement("li");li.dir="auto";li.textContent=w;return li}));
+  $("meta").textContent=`מנוע portfolio_lab v${v.engine_version} · סוג תוצאה: ${v.result_type} · digest ${v.replay_digest.slice(0,12)}`;
+}
+async function run(e){
+  if(e)e.preventDefault();$("err").textContent="";
+  try{const r=await fetch("/api/simulate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);render(d)}
+  catch(x){$("err").textContent="שגיאה: "+x.message}
+}
+$("f").addEventListener("submit",run);run();
+</script>
+</body>
+</html>

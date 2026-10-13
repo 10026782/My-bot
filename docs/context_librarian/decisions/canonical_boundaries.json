@@ -1538,10 +1538,14 @@
         "portfolio_lab/__init__.py",
         "portfolio_lab/__main__.py",
         "portfolio_lab/engine.py",
-        "portfolio_lab/models.py"
+        "portfolio_lab/models.py",
+        "portfolio_lab/simulator_view.py",
+        "portfolio_lab/ui.py",
+        "portfolio_lab/ui_page.html"
       ],
       "test_paths": [
-        "test_portfolio_lab.py"
+        "test_portfolio_lab.py",
+        "test_portfolio_lab_ui.py"
       ],
       "canonical_docs": [
         {

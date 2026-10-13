@@ -6,6 +6,8 @@ Local research library; no trades, broker connection, bot routes or external I/O
 
 ## Run
 
+מסך סימולטור מקומי: ראו [UI.md](UI.md) (`python3 -m portfolio_lab.ui`).
+
 From the repository root, Python 3.10+; standard library only:
 
 ```bash
