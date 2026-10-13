@@ -208,12 +208,15 @@ def _series(result):
 def _breakdown(final):
     gross = final["value_before_costs"]
     costs = final["cost_impact"]
-    return {
+    parts = {
         "contributions": final["contributions"],
         "profit_net": final["value_after_costs"] - final["contributions"],
         "costs": costs,
-        "total_before_costs": gross,
     }
+    # שיעורים מחושבים כאן (לא ב-JS) כדי שה-UI יציג בלבד
+    parts["shares"] = {k: (v / gross if gross else 0.0) for k, v in parts.items()}
+    parts["total_before_costs"] = gross
+    return parts
 
 
 def _sensitivity(p, base_final):
@@ -254,8 +257,15 @@ def _crisis_block(p, base_scenario, base_final):
     }
 
 
+RLM = "\u200f"  # מונע בלבול כיווניות של % ו-₪ בתוך טקסט עברי
+
+
 def _money(value):
-    return f"{value:,.0f} ₪"
+    return f"{value:,.0f} ₪{RLM}"
+
+
+def _pct(fraction, digits=1):
+    return f"{fraction * 100:.{digits}f}%{RLM}"
 
 
 def _insights(p, base_scenario, base_final, sensitivity):
@@ -264,21 +274,21 @@ def _insights(p, base_scenario, base_final, sensitivity):
     up = next(x for x in sensitivity["monthly_contribution"] if x["factor"] == 1.25)
     if p["monthly_contribution"] > 0:
         insights.append({"topic": "contribution", "text": (
-            f"הגדלת ההפקדה החודשית ב-25% ל-{_money(up['monthly_contribution'])} מעלה את השווי הסופי הנומינלי "
-            f"ב-{_money(up['final_nominal'] - base)} ({(up['final_nominal'] / base - 1) * 100:.1f}%), לפי ההנחות שהוזנו.")})
+            f"הגדלת ההפקדה החודשית ב-25%{RLM} ל-{_money(up['monthly_contribution'])} מעלה את השווי הסופי הנומינלי "
+            f"ב-{_money(up['final_nominal'] - base)} ({_pct(up['final_nominal'] / base - 1)}), לפי ההנחות שהוזנו.")})
     longer = min(p["years"] + 5, 100)
     if longer > p["years"]:
         extended = _final(replace(base_scenario, years=longer, monthly_contribution=base_scenario.monthly_contribution,
                                   inflation=base_scenario.inflation))
         insights.append({"topic": "duration", "text": (
             f"הארכת התקופה מ-{p['years']} ל-{longer} שנים מוסיפה {_money(extended['value_after_costs'] - base)} "
-            f"({(extended['value_after_costs'] / base - 1) * 100:.1f}%) לשווי הנומינלי; חלק מהתוספת הוא הפקדות נוספות.")})
+            f"({_pct(extended['value_after_costs'] / base - 1)}) לשווי הנומינלי; חלק מהתוספת הוא הפקדות נוספות.")})
     higher_fee = replace(base_scenario, assets=tuple(replace(a, annual_fee=min(a.annual_fee + 0.005, 0.99)) for a in base_scenario.assets))
     fee_final = _final(higher_fee)
     gap = base - fee_final["value_after_costs"]
     insights.append({"topic": "fees", "text": (
         f"דמי ניהול ששולמו בפועל: {_money(base_final['management_cost'])}. העלאה של 0.5 נקודות אחוז בדמי הניהול "
-        f"הייתה מקטינה את השווי הסופי ב-{_money(gap)} ({gap / base * 100:.1f}%).")})
+        f"הייתה מקטינה את השווי הסופי ב-{_money(gap)} ({_pct(gap / base)}).")})
     early_year = max(1, round(p["years"] * EARLY_LATE_SPLIT[0]))
     late_year = max(early_year + 1, round(p["years"] * EARLY_LATE_SPLIT[1]))
     decline = (p["crisis"] or {}).get("decline_pct", DEFAULT_CRISIS_DECLINE)
@@ -288,12 +298,12 @@ def _insights(p, base_scenario, base_final, sensitivity):
         crisis = {"decline_pct": decline, "year": year, "recovery": recovery}
         outcomes[label] = _final(_with_crisis(base_scenario, crisis))["value_after_costs"]
     insights.append({"topic": "crisis_timing", "text": (
-        f"תרחיש הדגמה של ירידה של {decline}% עם התאוששות {'מהירה' if recovery == 'fast' else 'ממושכת'}: "
+        f"תרחיש הדגמה של ירידה של {decline}%{RLM} עם התאוששות {'מהירה' if recovery == 'fast' else 'ממושכת'}: "
         f"בשנה {early_year} השווי הסופי {_money(outcomes['early'])}, בשנה {late_year} — {_money(outcomes['late'])}. "
         f"תלוי בהנחות המודל ובהפקדה השוטפת; אינו תחזית.")})
     real_share = base_final["real_value"] / base
     insights.append({"topic": "inflation", "text": (
-        f"הכוח הקנייתי של השווי הסופי הוא {real_share * 100:.1f}% מהערך הנומינלי, לפי אינפלציה של {p['inflation'] * 100:.1f}% בשנה.")})
+        f"הכוח הקנייתי של השווי הסופי הוא {_pct(real_share)} מהערך הנומינלי, לפי אינפלציה של {_pct(p['inflation'])} בשנה.")})
     return insights[:5]
 
 
