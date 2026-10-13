@@ -1,0 +1,192 @@
+{
+  "strategies": {
+    "global": {
+      "years": 60,
+      "initial": 0,
+      "monthly_contribution": [
+        8000
+      ],
+      "inflation": [
+        0.02
+      ],
+      "index_contributions": false,
+      "deposit_timing": "end",
+      "start_date": "2026-01-01",
+      "assets": [
+        {
+          "name": "global_accumulating",
+          "weight": 1.0,
+          "annual_return": [
+            0.08
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        }
+      ],
+      "result_type": "assumption_based_projection",
+      "sources": [
+        {
+          "reference": "unverified-demonstration",
+          "as_of": "2026-10-13",
+          "description": "Illustrative return assumptions; not historical observations or recommendations"
+        }
+      ]
+    },
+    "world_em": {
+      "years": 60,
+      "initial": 0,
+      "monthly_contribution": [
+        8000
+      ],
+      "inflation": [
+        0.02
+      ],
+      "index_contributions": false,
+      "deposit_timing": "end",
+      "start_date": "2026-01-01",
+      "assets": [
+        {
+          "name": "msci_world",
+          "weight": 0.9,
+          "annual_return": [
+            0.075
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        },
+        {
+          "name": "emerging_markets",
+          "weight": 0.1,
+          "annual_return": [
+            0.065
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        }
+      ],
+      "result_type": "assumption_based_projection",
+      "sources": [
+        {
+          "reference": "unverified-demonstration",
+          "as_of": "2026-10-13",
+          "description": "Illustrative return assumptions; not historical observations or recommendations"
+        }
+      ]
+    },
+    "three_funds": {
+      "years": 60,
+      "initial": 0,
+      "monthly_contribution": [
+        8000
+      ],
+      "inflation": [
+        0.02
+      ],
+      "index_contributions": false,
+      "deposit_timing": "end",
+      "start_date": "2026-01-01",
+      "assets": [
+        {
+          "name": "sp500",
+          "weight": 0.6,
+          "annual_return": [
+            0.085
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        },
+        {
+          "name": "europe",
+          "weight": 0.2,
+          "annual_return": [
+            0.07
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        },
+        {
+          "name": "emerging_markets",
+          "weight": 0.2,
+          "annual_return": [
+            0.065
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        }
+      ],
+      "result_type": "assumption_based_projection",
+      "sources": [
+        {
+          "reference": "unverified-demonstration",
+          "as_of": "2026-10-13",
+          "description": "Illustrative return assumptions; not historical observations or recommendations"
+        }
+      ]
+    },
+    "experimental_90_10": {
+      "years": 60,
+      "initial": 0,
+      "monthly_contribution": [
+        8000
+      ],
+      "inflation": [
+        0.02
+      ],
+      "index_contributions": false,
+      "deposit_timing": "end",
+      "start_date": "2026-01-01",
+      "assets": [
+        {
+          "name": "global_accumulating",
+          "weight": 0.9,
+          "annual_return": [
+            0.08
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        },
+        {
+          "name": "selected_stocks",
+          "weight": 0.1,
+          "annual_return": [
+            0.06
+          ],
+          "return_convention": "effective_annual",
+          "return_basis": "gross",
+          "annual_fee": 0.0015,
+          "buy_fee": 0.0,
+          "sell_fee": 0.0
+        }
+      ],
+      "result_type": "assumption_based_projection",
+      "sources": [
+        {
+          "reference": "unverified-demonstration",
+          "as_of": "2026-10-13",
+          "description": "Illustrative return assumptions; not historical observations or recommendations"
+        }
+      ]
+    }
+  }
+}

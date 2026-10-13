@@ -1,0 +1,8 @@
+{
+  "years": 60,
+  "initial": 0,
+  "monthly_contribution": 8000,
+  "inflation": 0.02,
+  "assets": [{"name": "global_accumulating", "annual_return": 0.08, "annual_fee": 0.0015}],
+  "sources": [{"reference": "owner-scenario", "as_of": "2026-10-13", "description": "Hypothetical owner inputs; not market data or a forecast validated against history"}]
+}
