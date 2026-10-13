@@ -1521,6 +1521,87 @@
         }
       },
       "last_observed_commit": "6e3e203d67b4de187c63e752f5027c8272184d51"
+    },
+    {
+      "id": "decision.portfolio_lab_local_research",
+      "name": "Portfolio Lab PL-1 — owner-reviewed standalone local research sources",
+      "type": "decision",
+      "status": "candidate",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "Exact PL-1 standalone calculation code, simulation fixtures and local test snapshot only",
+        "precedence": "No BOSS routing, approval, execution, persistence, CRM, tax-law or production-verification authority; main and existing canonical contracts remain authoritative"
+      },
+      "owner": "portfolio_lab",
+      "code_paths": [
+        "portfolio_lab/__init__.py",
+        "portfolio_lab/__main__.py",
+        "portfolio_lab/engine.py",
+        "portfolio_lab/models.py"
+      ],
+      "test_paths": [
+        "test_portfolio_lab.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/portfolio_lab/REVIEW_DECISIONS.md",
+          "role": "owner-authorized exact source-classification decision and governance verification ledger",
+          "status": "active"
+        },
+        {
+          "path": "docs/portfolio_lab/README.md",
+          "role": "local engine assumptions, limitations and branch-only implementation status",
+          "status": "candidate"
+        },
+        {
+          "path": "docs/portfolio_lab/SPEC.md",
+          "role": "PL-1 standalone research scope and local contract",
+          "status": "candidate"
+        },
+        {
+          "path": "docs/portfolio_lab/base.json",
+          "role": "unverified simulation inputs only; no market-data or runtime authority",
+          "status": "candidate"
+        },
+        {
+          "path": "docs/portfolio_lab/comparison.json",
+          "role": "unverified multi-strategy simulation inputs only; no market-data or runtime authority",
+          "status": "candidate"
+        },
+        {
+          "path": "docs/portfolio_lab/crises.json",
+          "role": "hypothetical annual-return simulation inputs only; no historical-data or runtime authority",
+          "status": "candidate"
+        },
+        {
+          "path": "docs/portfolio_lab/EVIDENCE.json",
+          "role": "local numerical/test snapshot only; never production or BOSS evidence-finalizer proof",
+          "status": "historical"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-10-13",
+      "last_verified_commit": "5e20e6069e558e6e4a8bb8712c7b49a30177da08",
+      "last_semantic_review_commit": "b34186e4f6eac8b1c367eb9d8a38a957580cc94a",
+      "confidence": 0.95,
+      "notes": [
+        "Owner instruction 2026-10-13, Portfolio Lab PL-1 — Governance Resolution & CI Verification (PR #1310), accepts REVIEW_DECISIONS.md as the classification basis and authorizes only exact limited registration allowed by current main policy.",
+        "RECONCILIATION.md section F permits owner-reviewed direct catalog registration in the same PR. This entry registers exact files only; no policy_registry change, wildcard, auto-registration permission or approval of future sources.",
+        "Four Python files are standalone mathematical code with stdin/stdout CLI only; three JSON fixtures are simulation data; EVIDENCE.json is a local-test snapshot, not production evidence.",
+        "last_verified_commit records the canonical-main policy baseline inspected for this registration, NOT verification that the new PL-1 implementation is on main. last_semantic_review_commit identifies the exact previously reviewed PL-1 source revision. Implementation is branch-only; merge/deployment/runtime remain unverified.",
+        "No caller or import in app, core, tools, TMA, CRM or Airtable consumes Portfolio Lab; no BOSS execution layer or existing authority is replaced. Any future runtime wiring or new source requires a separate review."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "standalone_local_research",
+          "authority": false,
+          "purpose": "exact owner-reviewed registration of PL-1 calculations and local simulation/test artifacts",
+          "runtime_consumed": false
+        }
+      }
     }
   ],
   "edges": [

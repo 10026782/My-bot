@@ -29,7 +29,7 @@ program status is summarized here from the canonical Active Work Registry in
 ## Portfolio Lab — branch proposal (13/10/2026)
 
 PL-1 is a new standalone research initiative authorized by the owner. Current
-branch evidence: CODE_DONE + STATIC_VERIFIED (51 local unit/CLI tests), **not
+branch evidence: CODE_DONE + STATIC_VERIFIED (55 local unit/CLI tests), **not
 merged, wired or deployed**. Entry and next-step authority:
 `BOSS_UNIFIED_MASTER_PLAN.md` §3.5 PORTFOLIO_LAB and `ROADMAP.md` PORTFOLIO_LAB.
 Implementation/assumptions/evidence: `docs/portfolio_lab/README.md`.

@@ -247,3 +247,52 @@ def test_import_has_no_bot_dependencies():
     code = "import sys; import portfolio_lab; assert not any(x in sys.modules for x in ('core', 'flask', 'requests', 'numpy', 'airtable', 'anthropic'))"
     run = subprocess.run([sys.executable, "-S", "-c", code], text=True, capture_output=True)
     assert run.returncode == 0, run.stderr
+
+
+def test_equivalent_nominal_and_effective_inputs():
+    nominal = 0.08
+    effective = (1 + nominal / 12) ** 12 - 1
+    a = Scenario(assets=(Asset(annual_return=nominal, return_convention="nominal_annual_monthly"),))
+    b = replace(a, assets=(Asset(annual_return=effective),))
+    assert simulate(a)["final"]["value_after_costs"] == pytest.approx(simulate(b)["final"]["value_after_costs"], rel=1e-12)
+    assert effective > nominal
+
+
+def test_60_year_management_fees_independent_sum():
+    growth = 1.08 ** (1 / 12)
+    retention = 0.9985 ** (1 / 12)
+    q = growth * retention
+    n = 720
+    # Sum of opening balances for an end-month annuity; fees precede each deposit.
+    opening_balance_sum = 8000 / (q - 1) * ((q ** n - 1) / (q - 1) - n)
+    expected_paid = opening_balance_sum * growth * (1 - retention)
+    f = simulate(Scenario())["final"]
+    assert f["management_cost"] == pytest.approx(expected_paid, rel=1e-12)
+    assert f["management_cost"] == pytest.approx(2201761.1480555823)
+    assert f["cost_impact"] > f["management_cost"]
+
+
+def test_diverging_assets_are_not_automatically_rebalanced():
+    assets = (Asset(name="growth", weight=0.5, annual_return=0.1, annual_fee=0), Asset(name="flat", weight=0.5, annual_return=0, annual_fee=0))
+    s = Scenario(years=60, initial=1000, monthly_contribution=0, assets=assets)
+    f = simulate(s)["final"]
+    buy_hold = 500 * 1.1 ** 60 + 500
+    annually_rebalanced = 1000 * 1.05 ** 60
+    assert f["value_after_costs"] == pytest.approx(buy_hold, rel=1e-12)
+    assert f["value_after_costs"] != pytest.approx(annually_rebalanced)
+    assert f["nominal_annualized_twr_before_costs"] == pytest.approx((buy_hold / 1000) ** (1 / 60) - 1)
+
+
+def test_fixture_means_provenance_and_unassessed_tax():
+    from pathlib import Path
+    data = json.loads(Path("docs/portfolio_lab/crises.json").read_text())
+    result = compare({name: Scenario.from_dict(s) for name, s in data["strategies"].items()})
+    for output in result["strategies"].values():
+        stats = output["input_return_statistics"]["global_accumulating"]
+        assert stats["arithmetic_mean_effective_annual"] == pytest.approx(0.0864)
+        assert stats["geometric_mean_effective_annual"] == pytest.approx(0.08)
+        assert output["result_type"] == "assumption_based_projection"
+        assert output["inputs"]["sources"][0]["reference"] == "unverified-demonstration"
+        assert output["final"]["tax_status"] == "not_assessed"
+        assert output["final"]["proceeds_after_tax"] is None
+        assert any("assumptions" in warning for warning in output["warnings"])

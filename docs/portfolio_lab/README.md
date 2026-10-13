@@ -108,7 +108,7 @@ and intra-year observations belong to the next crisis phase.
 
 ## Verification and limits
 
-51 unit/CLI tests passed locally. Independent annuity formulas verify beginning
+55 unit/CLI tests passed locally (the initial EVIDENCE.json snapshot records 51). Independent annuity formulas verify beginning
 and end deposits, nominal/effective conversion, and the base fee-adjusted result.
 Zero return uses direct cash-flow sums. Cost identities, purchase-unit valuations,
 CPI-adjusted deposits and independent sleeves provide additional oracles.
@@ -163,8 +163,10 @@ Dependencies considered and rejected for this phase are recorded in [SPEC.md](SP
 - AGENTS.md: isolated worktree, explicit staging, pre-session gate, review-only PR;
   no main merge and no production success claim.
 
-Pre-merge gate evidence: STATUS-SYNC passed; Context Librarian returned
-OWNER_DECISION_REQUIRED for eight unregistered new sources. The exact proposed
-roles and authority exclusions are in [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md).
-This is a source-classification review blocker, not a numerical-test failure.
-No catalog registration or policy approval is claimed.
+Pre-merge governance follow-up (2026-10-13): the owner authorized bounded
+registration of the eight previously unregistered sources. One candidate,
+non-authoritative REGISTER_SUPPORTING catalog node now references only their
+exact paths; no policy or future-source permission changed. Local reconcile-pr
+is CLEAN; 323 focused calculation/status/catalog/reconciliation tests passed.
+The decision and verification ledger are in [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md).
+Hosted CI must be checked at the pushed head; merge/production remain unverified.
