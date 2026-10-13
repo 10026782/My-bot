@@ -1,7 +1,10 @@
 # SPEC — Insight → Decision → Task (השלמת Decision Hub, שני PRs)
 
-**סטטוס: SPEC DRAFT — NOT IMPLEMENTED**
-**גרסה:** v2 (13/10/2026) — מחליפה את v1 (commit `79b4213d`) אחרי החלטות בעלים O1–O6 ושבעת תיקוני החובה.
+**סטטוס (שלב אמיתי, 13/10/2026):**
+- **PR1 (`/decision from-insight`): CODE DONE, NOT VERIFIED — טיוטת PR לביקורת, לא מוזג, לא נפרס, לא הופעל flag.** הקוד והבדיקות קיימים; אין הוכחת פרודקשן ואין אימות מצב `FEATURE_DECISION_HUB`.
+- **PR2 (`/decision close` + משימת המשך): SPEC DRAFT — NOT IMPLEMENTED.** מותנה בפערים G2 (חלקית הוכח, ראו §8) ו-G3 (הוחלט, ראו §0).
+
+**גרסה:** v3 (13/10/2026) — v2 אושר עקרונית; נוספו: החלטת G3, ממצאי G2, הערות As-Built ל-PR1. (v2 = commit `94afe660`, v1 = `79b4213d`.)
 **בסיס Truth Reset:** `origin/main` @ `5e20e60` (נבדק מחדש 13/10/2026; אין commits חדשים מאז האודיט).
 **מסמך אב:** `docs/specs/DECISION_HUB_MASTER_SPEC.md` — ספק זה הוא חלוקת משנה ל-Stage 0 (Inbox) ו-Stage 6 (Closure) שבו. בסתירה — המסמך האב קובע.
 **מה אסור לעשות לפי ספק זה לפני אישור נפרד:** שינוי Airtable, מימוש, פתיחת PR, הפעלת Feature Flags.
@@ -18,6 +21,7 @@
 | O4 | לא מוסיפים `Research Status` לפני בדיקת השדה הקיים | §4 — נבדק, `Outcome` הקיים מספיק, אין שדה חדש |
 | O5 | חוות דעת מייעצים נשמרות כ-Decision Events; אין פיתוח עדכון Stakeholder | מחוץ לתחום |
 | O6 | לאמת `FEATURE_DECISION_HUB` לפני הפעלה | §9, תנאי הפעלה (לא אומת עד כה) |
+| G3 | **לא** להוסיף `REVIEW` לסכמה. למפות `REVIEW`→`NOT_READY` **בשמירה בלבד**, ולהציג למשתמש את סיבת הדרישה לבדיקה | **הוחלט; לא מומש ב-PR1** (מחוץ לתחום `from-insight`). משויך ל-PR2 (או ל-PR זעיר נפרד אם הבעלים יבקש). `_persist_readiness` ב-`cmd_decision.py` הוא נקודת המימוש |
 
 ## 1. Truth Reset — תיקונים לגרסה 1
 
@@ -158,7 +162,29 @@
 - אירוע שמקורו תובנה מקבל תווית בכרטיס: **"מקור: תובנה פנימית — לא אומת מול מקור חיצוני"**. הוא ממשיך להיכנס ל-`run_pipeline` הקיים (Trust/Delta) אך ראו §6.2 להבחנה בין Readiness לאימות.
 - אין חישוב/מחקר חדש ואין פנייה ל-LLM בצעד זה.
 
-### 5.6 קבצים (צפוי)
+### 5.6a As-built — PR1 (13/10/2026) והבדלים מהתכנון
+
+מומש ב: `decision_insight_source.py` (חדש, קריאה בלבד), `cmd_decision.py` (subcommand `from-insight`, callbacks `dec_ins_pick|target|retarget|confirm|cancel`, `_execute_insight_link`), `decision_ports.py` (`add_with_outcome` additive), `airtable_schema.py` (קבועי `LearningFields` לקריאה בלבד), `feature_flags.py` (רישום בדוקסטרינג בלבד), `test_decision_from_insight.py`.
+
+| נושא | נקבע בפועל | הבדל/הערה |
+|---|---|---|
+| Flag | `FEATURE_DECISION_HUB` הקיים, ללא flag חדש | כמתוכנן |
+| Airtable | אפס שינויים; `LearningFields.TENANT_ID` **לא** נוסף (לא חי) — נקרא הגנתית כמחרוזת בלבד | מונע drift מול סכמה חיה |
+| Tenant | `HOME_TENANT_ID` נגזר מברירת המחדל של `Identity.tenant_id`; Learnings ללא `tenant_id`/עם ערך ריק = tenant הבית בלבד; ערך זר → דחייה; ערך ריק לעולם אינו wildcard | הוכח בבדיקות (§7) |
+| Partner | נבדק `identity.can_access_domain(<DecisionDomain ממופה>)`; partner ללא `allowed_domains` לא רואה תובנות | fail-closed |
+| תובנה ↔ החלטה | **החלטה אחת לתובנה** בשלב זה (Inbox אחד לכל תובנה; Linked → "כבר משויכת"). "החלטה נוספת" לא נתמכת | **צמצום** לעומת §2.4 של v2 (שהתיר זאת בבחירה מפורשת) |
+| אירוע ראיה | נכתב **בלי** Trust Level/Confidence ובלי הרצת `run_pipeline`, עם תווית "לא אומת מול מקור חיצוני" | החלטה מכוונת: אירוע פנימי לא נספר כראיה מהותית (T2+) ב-Readiness. ראו G10 |
+| סדר כתיבה | W1 Inbox → W2 החלטה (+pre-link של Inbox) → W3 אירוע → W4 קישור+אימות קריאה חוזרת | כמתוכנן |
+| `outcome_unknown` | חיפוש סמן; נמצא → ממשיכים; לא נמצא → retry יחיד; שוב לא ידוע → עצירה עם הודעה מפורשת | כמתוכנן |
+| כפילות במרוץ | אחרי יצירה: חיפוש חוזר, בחירת הרשומה הוותיקה (`canonical_record`) — התכנסות, **לא מניעה** | הכפילויות נשארות גלויות (אין מחיקה) |
+| החלטה חדשה | נחסמת אם קיימת החלטה פתוחה באותה כותרת (בתנאי scope) — מציעים לבחור אותה כיעד | הגנה על חלון: החלטה נוצרה והקישור ל-Inbox לא |
+| נעילות | claim אטומי של ה-state לפני כתיבה + נעילת כתיבה בתהליך (gunicorn: `workers=1`, `gthread`) | נעילת תהליך אינה הגנה בין תהליכים |
+| טקסט | הכרטיסים נשלחים ללא Markdown (תוכן תובנה חופשי) | מונע כשל פרסור |
+| קובץ שלא תוכנן | `decision_insight_source.py` מכיל גם סינון scope/התכנסות; ה-I/O לכתיבה נשאר ב-`cmd_decision.py` | כמתוכנן (שער 1) |
+
+**מה הוכח בבדיקות ומה לא:** ראו §7 "As-built — כיסוי". לא הוכח: התנהגות Airtable אמיתית, ריצה בפרודקשן, אידמפוטנטיות בין תהליכים.
+
+### 5.6 קבצים (צפוי — תכנון מקורי)
 `cmd_decision.py` (subcommand+callbacks), `decision_insight_source.py` (חדש, קריאה בלבד: שליפת תובנות+כרטיס+סמן; ללא import של שכבת כתיבה), `decision_ports.py` (שיטה additive `add_with_outcome`), `airtable_schema.py` (קבועי `LearningFields` נוספים לקריאה: `NEXT_ACTION`, `OUTCOME`, `ALT_TITLE="title"`, `ALT_SUMMARY="summary"`), בדיקות.
 
 ---
@@ -257,6 +283,25 @@
 
 **PR2:** לא-owner → נדחה | החלטה לא READY (בזיכרון) ללא override → חסומה | Exposure FINANCIAL/LEGAL בלי הצהרת בדיקה → רק דחייה/ביטול/override | `REVIEW` readiness לא נכתב כשער | כישלון ב-S1/S2/S3 → resume משלים, payload מה-Journal | החלטה טרמינלית עם תוכן שונה → סירוב | סגירה כפולה/שני קליקים → תיעוד אחד, BM אחד | סגירה לא יוצרת משימה לפני אישור נפרד | אישור משימה → payload שאושר = payload שנכתב | `Linked Tasks` קיים → נדרש "משימה נוספת" | דחיית משימה משאירה סגירה שלמה | grep: אין `airtable_create(Tables.TASKS` בקוד החדש.
 
+### As-built — כיסוי בדיקות PR1 (`test_decision_from_insight.py`, 39 בדיקות, שכבה: unit + integration מול Airtable בזיכרון)
+
+| דרישה | בדיקה (שם מקוצר) | הוכחת רגישות |
+|---|---|---|
+| אפס כתיבות לפני אישור; ביטול/פקיעה/שינוי יעד/שלב שגוי | `no_writes_before_confirm…`, `confirm_after_cancel…`, `retarget_invalidates…`, `expired_state…`, `confirm_requires_current_review_step…` | — |
+| תובנה שהשתנתה בין הצגה לאישור | `insight_changed_after_display…` | מוטציה (הסרת בדיקת fingerprint) נכשלה כנדרש |
+| claim אטומי, לחיצה כפולה/מקבילה | `double_click_claims_state_atomically…`, `parallel_double_click…`, `two_sessions_same_insight…` | מוטציה (הסרת consume) נכשלה בבדיקת הספירה |
+| כפילויות/retries/ריסטארט/המשך | `failure_at_event_then_restart_then_resume…`, `resume_as_new_decision_reuses…`, `lost_link_write…`, `second_run_after_complete…` | מוטציות (התעלמות מחיפוש Inbox/Event) נכשלו |
+| `outcome_unknown` | `outcome_unknown_but_stored…`, `…lost_retries_exactly_once`, `…twice_stops…` | — |
+| כשל קריאה = לא "לא נמצא" | `dedup_lookup_failure_aborts…`, `lookup_failure_at_pick…` | — |
+| אימות קישור בקריאה חוזרת | `link_verification_mismatch…` | מוטציה (הסרת האימות) נכשלה |
+| התכנסות במרוץ | `duplicate_inbox_created_by_rival_converges_but_is_not_prevented` | מראה במפורש שכפילות *לא* נמנעת |
+| בידוד tenant / רשומה ללא tenant_id | `other_tenant_identity_is_denied_before_any_airtable_access`, `scope_record_without_tenant_id…`, `scope_record_with_foreign_tenant_id…`, `scope_blank_tenant_id…`, `list_excludes_out_of_scope…`, `confirm_rechecks_identity_tenant`, `partner_without_domain_access…`, `unauthorized_role…` | — |
+| סמן זר בתוך טקסט תובנה / חריגה באמצע כתיבה / כשל עריכת הודעה | `foreign_marker_inside_insight_text…`, `unexpected_exception_during_write…`, `failed_edit_message_falls_back…` | מוטציה (הסרת סינון שורה אחרונה) נכשלה |
+| אין עקיפת Gateway/כתיבת Tasks בקוד החדש | `no_gateway_bypass_or_task_write_in_new_code` | grep על המקור |
+| אירוע ללא Trust Level + תווית | `insight_event_has_no_trust_level…` | — |
+
+**לא נבדק:** Airtable אמיתי; ריצה בפרודקשן; תהליכים מרובים; `sort` ב-`list_records` מול Airtable אמיתי.
+
 **Definition of Done:** `CODE_EXISTS` = בדיקות ירוקות + `python3 smoke_tests.py` + CI. `RUNTIME_VERIFIED` = הרצה בסביבה אמיתית אחרי שהבעלים הפעיל flag (O6) — עד אז 🟡 CODE DONE, NOT VERIFIED.
 
 **תרחיש בדיקה תיאורטי (קרן ההון, ללא רשומות אמיתיות וללא עסקאות):** תובנה "מימוש הפסדי הון לקיזוז מס" → `from-insight` → החלטה (Exposure=FINANCIAL) → Events עם חוות דעת רו"ח (`Source Reliability=רו"ח`) → סגירה: הצהרה `בוצעה — מקור: חוות דעת רו"ח מתאריך …` → `אשר בדיקה מוגדרת בלבד` → BM מקשר תובנה+החלטה → כרטיס משימה נפרד «לקבל חוות דעת מסכמת לפני כל פעולה» → אישור Gateway → בלוק ביצוע בכרטיס. המערכת לא ממליצה ולא מבצעת פעולה פיננסית.
@@ -265,14 +310,31 @@
 
 | PR | פריט | דרך הוכחה |
 |---|---|---|
-| 1 | אין התנגשות prefix `dec_ins_*` ב-dispatcher של callbacks | grep ב-`app.py` + קריאת הקוד |
-| 1 | `add_with_outcome` לא שובר מימושי `StoragePort` אחרים | grep מימושים/fakes בבדיקות |
-| 1 | מקור הערך `"boss_hq"` ב-home-tenant: קבוע משותף ולא literal שנייה | grep `identity.py`/`config.py` |
-| 2 | **נתיב אישור המשימה** (אפשרות (i) מול (ii)), כולל כיצד עובר contract שנוצר מ-callback של Telegram לממשק האישורים הקיים | קריאת `app.py::_queue_approval*` + `_handle_approval_callback` + בדיקת integration |
+| 1 | אין התנגשות prefix `dec_ins_*` ב-dispatcher של callbacks | grep ב-`app.py` + קריאת הקוד — **הוכח (13/10/2026)**: callbacks מנותבים ב-`_webhook_telegram_impl` רק ל-`approve:|reject:|lead_draft_*|commercial_completion:`; כל השאר ל-handlers של telebot עם `startswith(prefix:)`; אין catch-all ואין prefix קיים שמתחיל ב-`dec_ins_`/`dec_close_`/`dec_task_` |
+| 1 | `add_with_outcome` לא שובר מימושי `StoragePort` אחרים | שיטה additive מחוץ ל-Protocol; הקוד משתמש ב-`getattr` ונופל חזרה ל-`add()` — **הוכח בדיקות** |
+| 1 | מקור הערך `"boss_hq"` ב-home-tenant: קבוע משותף ולא literal שנייה | **הוכח**: נגזר מ-`dataclasses.fields(Identity)` (ברירת המחדל), בלי literal חדש |
+| 2 | **נתיב אישור המשימה** (אפשרות (i) מול (ii)), כולל כיצד עובר contract שנוצר מ-callback של Telegram לממשק האישורים הקיים | **הוכח חלקית (G2, §8a)** — נדרשת הכרעת תכנון + בדיקת integration |
 | 2 | ערך `trusted_source` ל-Hub: האם נדרש רישום ב-`classify_approval_policy`/`tool_registry` או ש-`airtable_add` מספיק | קריאת `core/action_gateway.py:203-290`, `tool_registry.py` |
 | 2 | `LINKED_RECORD_FIELDS[Tasks]` ו-`_TASK_WRITE_FIELDS` כוללים `Decisions` או שמספיק list | קריאת `tools/airtable_gateway.py:95` ו-`core/router/task_builders.py` |
 | 2 | קונפליקט prefix `dec_close_*`/`dec_task_*` | כמו PR1 |
 | 2 | האם `FEATURE_ACTION_CONTRACT_PERSISTENCE`/`FEATURE_ATOMIC_CLAIMS` נדרשים לנתיב הנבחר ומה מצבם ב-Render | `feature_flags.py` + אימות בעלים (O6-ממשיך) |
+
+### 8a. ממצאי G2 — נתיב אישור משימה מתוך Telegram (בדיקת קריאה בלבד, 13/10/2026) — **PARTIALLY PROVEN**
+
+הנתונים מדוח סוכן-בדיקה (Explore) שקרא את הקוד ב-checkout; מספרי שורות משוערים — לאמת מחדש לפני PR2. ערכי flags בפרודקשן **לא ניתנים לאימות מהקוד**.
+
+| שאלה | ממצא |
+|---|---|
+| האם הצגת האישור כבולה ל-Agent loop? | **לא.** `app._queue_approval_detailed(tool, inputs, chat_id, channel, user_text, trusted_source=…)` (`app.py:1796`) נקרא גם ממסלולים דטרמיניסטיים (`deterministic_create_task`, `deterministic_commercial_*`). הוא מבצע dedup לפי fingerprint → `propose_action` → `bus.request_approval` → שולח לבעלים כרטיס עם כפתורי ✅/↩️ (`approve:{id}[:{contract}]`, מגבלת 64 בתים) |
+| האם קיימת פונקציה שמציגה כרטיס לפי `contract_id` בלבד? | **לא.** קיימים רק מסלול A (`_queue_approval_detailed`, ייבוא עצל כי `app.py` מייבא את `cmd_decision`) ומסלול B (precedent ב-`media_handler.py:405-480`: `propose_gated` + `bus.request_approval` + מקלדת עצמאית) |
+| מי מאשר בפועל? | `_handle_approval_callback` (`app.py:3561/4700`) דורש `is_owner` או `can("actions.approve")` ומפעיל `approve_with_lifecycle_result` עם **המשתמש שלחץ**. הכרטיס נשלח ל-`OWNER_TELEGRAM_ID` (env), לא ליוזם |
+| `trusted_source` חדש (למשל `decision_hub`) | לא ידוע ל-`classify_approval_policy` ⇒ מדיניות `APPROVAL` מחמירה (מצריכה owner/`actions.approve`). אינו דורש רישום. אין לו חריג re-propose אחרי דחייה (קיים רק ל-`deterministic_create_task`). מדלג על אימות-קישורים של מקור `agent` ⇒ ה-Hub חייב לאמת בעצמו את `decision_id` |
+| `tool_registry` | `airtable_add` מספיק (owner ב-`_INTERNAL`, `requires_approval`, `tenant_scoped`); אין צורך ב-`ToolMeta` חדש. אסור `fingerprint_payload` שונה ממה שנשלח (הוכחת הביצוע ב-dispatcher בודקת התאמה) |
+| Flags | `FEATURE_ACTION_GATEWAY` כבוי: `propose_action` רץ ב-shadow והכרטיס עדיין נשלח. `FEATURE_ACTION_CONTRACT_PERSISTENCE` כבוי: ledger ב-RAM בלבד — כרטיס ממתין אובד בריסטארט. `FEATURE_ATOMIC_CLAIMS` דלוק (טענה ב-docs בלבד): ביצוע דורש claim ב-PostgreSQL + שלמות זהות. **ערכי פרודקשן לא אומתו** |
+| התנגשות prefix | `dec_ins_*`, `dec_close_*`, `dec_task_*` **אינם** מתנגשים עם אף handler קיים; אין catch-all |
+| תופעת לוואי חשובה | שער ה-ingress (`_apply_ingress_context_gate`, `app.py:~8741`) מסמן `context_interrupted` על contracts ממתינים של המשתמש בכל callback שאינו ברשימת הפטורים (`approve:`, `reject:`, `lead_draft_*`, `commercial_completion:`). לחיצה על כל כפתור `dec_*` — **כולל הקיימים וכולל PR1** — משפיעה על אישורים ממתינים אחרים של אותו משתמש (כפתור `approve:` עצמו ממשיך לעבוד; "כן" טקסטואלי יידרש לאישור חוזר) |
+
+**מה חסר להוכחה מלאה (חוסם PR2):** (1) `cmd_decision.py` אינו קורא היום ל-Gateway ולכן ייבוא עצל של `_queue_approval_detailed` (או רצף media_handler) דורש הכרעה והוכחה בבדיקת integration; (2) ערכי flags בפרודקשן; (3) הכרעה בין אפשרות (i) כרטיס אישור רגיל לבעלים (מועדף, מקיים O2 במלואו) לבין (ii) אישור inline בלחיצת ה-owner (precedent: `lead_draft_*`) — שתיהן דורשות Security review; (4) החלטה כיצד מתנהג ה-Hub כשהכרטיס נשלח לבעלים אך היוזם הוא manager.
 
 ## 9. תנאי הפעלה (מחוץ לספק זה, בידי הבעלים)
 1. אימות מצב `FEATURE_DECISION_HUB` ב-Render (O6) — **לא אומת**.
@@ -285,14 +347,18 @@
 | # | פער | סטטוס |
 |---|---|---|
 | G1 | אין אימות תוכן אמיתי של ראיות (`VerifierPort` stub). הספק מונע הטעיה אך לא מוסיף verifier | מחוץ לתחום |
-| G2 | נתיב אישור המשימה ל-Gateway מ-Telegram לא הוכח (§8) — חוסם PR2 | לפני PR2 |
-| G3 | `DecisionReadiness.REVIEW` לא קיים חי; ערך שמור ייחסם. נדרש: אפשרות חדשה ב-Airtable (החלטת בעלים) **או** מיפוי `REVIEW→NOT_READY` בשמירה | החלטת בעלים |
+| G2 | נתיב אישור המשימה ל-Gateway מ-Telegram: **PARTIALLY PROVEN** (§8a) — קיים מסלול בטוח (`_queue_approval_detailed`) אך אינו מחובר ל-`cmd_decision` ולא נבדק integration; ערכי flags בפרודקשן לא אומתו | חוסם PR2 |
+| G3 | `DecisionReadiness.REVIEW` לא קיים חי. **הוחלט (13/10/2026):** לא להוסיף לסכמה; למפות `REVIEW→NOT_READY` בשמירה בלבד ולהציג למשתמש את סיבת הדרישה לבדיקה | הוחלט, **לא מומש** (PR2 / PR זעיר נפרד) |
 | G4 | אין ניווט ישיר Learning→Decision לפני סגירה (רק סמן טקסטואלי) | מקובל בשלב ראשון |
 | G5 | `tenant_id` לתובנות לא קיים — נפתר רק ע"י כלל home-tenant; multi-tenant דורש עבודה נפרדת | מחוץ לתחום |
 | G6 | עמדות מייעצים (Stakeholder) לא מתעדכנות (O5) | מחוץ לתחום |
 | G7 | `Learnings.Outcome` לא מתעדכן אוטומטית (O3) | מחוץ לתחום |
 | G8 | הערות מיושנות בקוד על "silent drop" ו"שדות Stage 2 לא קיימים" | ניקוי תיעוד קטן, יכלל ב-PR1 רק אם בעלים יאשר |
-| G9 | ROADMAP: טרם הוקצה מזהה, ו-`עודכן:` לא עודכן; חובה ב-PR הראשון (`AGENTS.md`) | לפני PR1 |
+| G9 | ROADMAP: הוקצה `DECISION-HUB-INSIGHT-1` ו-`עודכן:` עודכן (13/10/2026) בענף PR1. `BOSS_CURRENT_STATE.md`/`AI_CONTEXT.md` **לא עודכנו** — מתאימים רק אחרי deploy ואימות | נסגר חלקית |
+| G10 | `detect_missing_evidence` בודק מילות מפתח ב-`Raw Content` של אירועים פעילים — טקסט של תובנה יכול "לספק" פריט ראיה נדרש בלי שמקור חיצוני קיים. Trust Level ריק מונע ספירה כראיה מהותית, אך לא את בדיקת ה-keywords | מוכר; נוגע ל-G1 |
+| G11 | כל לחיצת `dec_*` (כולל PR1) מסמנת `context_interrupted` על אישורים ממתינים של המשתמש (שער ingress) | מוכר; התנהגות קיימת של כל כפתורי ה-Hub |
+| G12 | תובנה ↔ החלטה אחת ב-PR1; "החלטה נוספת" לאותה תובנה לא נתמכת | צמצום מכוון |
+| G13 | אידמפוטנטיות בין תהליכים/instances אינה מובטחת (אין אילוץ ייחודיות ב-Airtable); מוכחת התכנסות דטרמיניסטית ושלמות ריצה סדרתית/ריסטארט/threads בתהליך אחד | מוכר |
 
 ---
 
@@ -316,6 +382,10 @@
 4. נקודת מגע ל-Gateway לפי תוצאת Rule 00 (אישור נפרד, Golden Writer).
 5. בדיקות integration ל-Gateway + grep guards (§7).
 6. PR עם `Cross-Layer Impact: FULL` + Matrix + Security checklist. **Flag נשאר כבוי.**
+
+### סטטוס ביצוע (13/10/2026)
+- PR1: קוד + בדיקות קיימים בענף `ccr-ce194097-x9zatu`; טיוטת PR לביקורת בלבד; אין merge. תנאי הכניסה של §8 (שורות PR1) — ראו הטבלה.
+- PR2: **לא התחיל.**
 
 ### אחרי שני ה-PRs (בידי הבעלים)
 אימות O6 → merge+deploy → הפעלת flag → canary → אימות בפרודקשן → רק אז עדכון סטטוס ל-RUNTIME_VERIFIED.

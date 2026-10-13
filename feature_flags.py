@@ -152,7 +152,9 @@ F52 STAGE 1 (safe refactors):
                                  never affects return values or control flow. default OFF.
 
 DECISION HUB (Stage 0):
-  FEATURE_DECISION_HUB         - /decision new|update|status + forward→Inbox (decision_pipeline.py, cmd_decision.py); default OFF
+  FEATURE_DECISION_HUB         - /decision new|update|status|from-insight + forward→Inbox (decision_pipeline.py, cmd_decision.py,
+                                 decision_insight_source.py); default OFF. from-insight (PR1) reads Learnings & Insights read-only and writes
+                                 Inbox/Decision/Event only after an explicit per-link confirmation.
 
   FEATURE_DECISION_AUTO_INGESTION - auto route WhatsApp/email/document/voice input to Decision Inbox only; default OFF
 
