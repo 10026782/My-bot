@@ -162,3 +162,9 @@ Dependencies considered and rejected for this phase are recorded in [SPEC.md](SP
 - Remaining Work: review/merge, CI outcome, then deferred phases above.
 - AGENTS.md: isolated worktree, explicit staging, pre-session gate, review-only PR;
   no main merge and no production success claim.
+
+Pre-merge gate evidence: STATUS-SYNC passed; Context Librarian returned
+OWNER_DECISION_REQUIRED for eight unregistered new sources. The exact proposed
+roles and authority exclusions are in [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md).
+This is a source-classification review blocker, not a numerical-test failure.
+No catalog registration or policy approval is claimed.
