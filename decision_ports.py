@@ -70,6 +70,14 @@ class _AirtableStorageAdapter:
         record = airtable_create(table, fields, source=source)
         return record.get("id") if record else None
 
+    def add_with_outcome(self, table: str, fields: dict, source: str):
+        """Additive (לא חלק מ-StoragePort): יצירה עם סיווג created/failed/outcome_unknown.
+
+        נועד לקוראים שחייבים להבחין בין "נכשל" ל"לא ידוע" לפני retry (SPEC §5.3).
+        """
+        from tools.airtable_gateway import airtable_create
+        return airtable_create(table, fields, source=source, return_outcome=True)
+
     def get(self, table: str, filter_formula: str = "") -> list:
         try:
             from tools.airtable_read_adapter import AirtableReadError, list_records

@@ -7,6 +7,7 @@
 
 import logging
 import re
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,7 +24,12 @@ from decision_matching import (
     DECISION_ALLOWED_ROLES, decision_in_scope, find_matching_decision,
     has_decision_capability, list_open_decisions,
 )
-from core.query_contract import all_of, array_contains, contains, equals
+from core.query_contract import all_of, any_of, array_contains, contains, equals
+from decision_insight_source import (
+    HOME_TENANT_ID, SOURCE_LABEL, build_insight_view, canonical_record,
+    compose_event_content, excerpt, insight_marker, search_insights, read_insight,
+    search_query_for_marker,
+)
 from core.draft_flow import DraftSpec, resolve_draft_reply
 from tma_api import record_fields as _record_fields, record_id as _record_id
 from tools.airtable_read_adapter import AirtableReadError, get_record, list_records
@@ -162,10 +168,13 @@ def register_decision_command(bot, get_identity):
                 return
             bot.send_message(msg.chat.id, _format_decision_card(decision, identity), parse_mode="Markdown")
 
+        elif sub == "from-insight":
+            _start_insight_flow(bot, msg, identity, arg.strip(), uid)
+
         else:
             bot.send_message(
                 msg.chat.id,
-                "שימוש:\n`/decision new`\n`/decision update <id>`\n`/decision status <id>`",
+                "שימוש:\n`/decision new`\n`/decision update <id>`\n`/decision status <id>`\n`/decision from-insight [חיפוש]`",
                 parse_mode="Markdown",
             )
 
@@ -304,6 +313,27 @@ def register_decision_command(bot, get_identity):
             call.message.chat.id, call.message.message_id,
         )
         bot.answer_callback_query(call.id)
+
+    # ── inline: /decision from-insight — תובנה → החלטה ──────────
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_ins_pick:"))
+    def cb_insight_pick(call):
+        _insight_cb_pick(bot, call, get_identity)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_ins_target:"))
+    def cb_insight_target(call):
+        _insight_cb_target(bot, call, get_identity)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_ins_retarget:"))
+    def cb_insight_retarget(call):
+        _insight_cb_retarget(bot, call, get_identity)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_ins_confirm:"))
+    def cb_insight_confirm(call):
+        _insight_cb_confirm(bot, call, get_identity)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("dec_ins_cancel:"))
+    def cb_insight_cancel(call):
+        _insight_cb_cancel(bot, call, get_identity)
 
     # ── לכידת טקסט חופשי (new/update flows) ──────────────────────
     @bot.message_handler(
@@ -959,6 +989,573 @@ def _link_inbox_to_decision(bot, call, inbox_id: str, decision_id: str, identity
     text = _format_pipeline_outcome(title, outcome, event)
     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
     bot.answer_callback_query(call.id)
+
+
+# ── /decision from-insight — תובנה (Learnings) → החלטה ───────────
+# SPEC_Insight_to_Decision_to_Task.md §5 (PR1). אין כתיבה לפני ✅ על כרטיס אחד
+# שמציג את השיוך המדויק; כתיבות דרך DecisionPorts בלבד; אידמפוטנטיות לפי סמן
+# טקסטואלי קבוע ב-Airtable (לא לפי זיכרון תהליך). לא טוענים אידמפוטנטיות מלאה:
+# ל-Airtable אין אילוץ ייחודיות, ולכן ההתכנסות היא דטרמיניסטית (canonical_record),
+# לא מניעה מוחלטת של כפילות בין תהליכים.
+
+_INSIGHT_STATE_LOCK = threading.Lock()   # claim אטומי של state לפני כתיבה
+_INSIGHT_WRITE_LOCK = threading.Lock()   # gunicorn: workers=1, gthread → נעילה בתהליך אפקטיבית
+_INSIGHT_PICK_LIMIT = 5
+_INSIGHT_OPTION_LIMIT = 4
+
+_STEP_LABELS = {
+    "inbox": "Decision Inbox",
+    "decision": "החלטה",
+    "event": "אירוע ראיה",
+    "link": "קישור Inbox↔החלטה↔אירוע",
+}
+_STEP_ICONS = {"ok": "✅", "reused": "♻️", "failed": "❌", "skipped": "⏳"}
+
+
+@dataclass(frozen=True)
+class InsightLinkResult:
+    """תוצאת שיוך: צעד→(status, detail). complete רק אם כל ארבעת הצעדים ok/reused."""
+
+    steps: tuple = ()
+    decision_id: str | None = None
+    inbox_id: str | None = None
+    event_id: str | None = None
+
+    @property
+    def complete(self) -> bool:
+        return len(self.steps) == len(_STEP_LABELS) and all(s[1] in ("ok", "reused") for s in self.steps)
+
+
+def _insight_identity_ok(identity) -> bool:
+    return bool(has_decision_capability(identity) and getattr(identity, "tenant_id", None) == HOME_TENANT_ID)
+
+
+def _insight_plain_edit(bot, call, text: str, markup=None) -> None:
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+    except Exception as exc:  # הודעה שלא נערכה לעולם לא מסתירה תוצאת כתיבה
+        logger.warning("[DecisionHub] from-insight edit_message failed (%s); sending a new message", exc)
+        bot.send_message(call.message.chat.id, text, reply_markup=markup)
+
+
+def _last_line_is_marker(text, marker: str) -> bool:
+    """הסמן נכתב תמיד כשורה אחרונה; טקסט תובנה חופשי שמכיל סמן של תובנה אחרת אינו נחשב."""
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    return bool(lines) and lines[-1] == marker
+
+
+def _insight_new_state(identity, candidates: list) -> dict:
+    return {
+        "command": "insight", "step": "insight_pick", "token": uuid.uuid4().hex[:12],
+        "identity": identity, "created_at": _now_ts(), "candidates": candidates,
+    }
+
+
+def _claim_insight_state(uid: str, token: str, step: str, *, consume: bool) -> dict | None:
+    """מחזיר state רק אם הטוקן והשלב תואמים; consume=True מוחק אטומית (claim יחיד)."""
+    with _INSIGHT_STATE_LOCK:
+        state = _get_valid_state(uid)
+        if not state or state.get("command") != "insight" or state.get("token") != token or state.get("step") != step:
+            return None
+        if consume:
+            _pending.pop(uid, None)
+        return state
+
+
+def _start_insight_flow(bot, msg, identity, hint: str, uid: str) -> None:
+    if not _insight_identity_ok(identity):
+        bot.send_message(msg.chat.id, "תובנות אינן זמינות עבור המשתמש/ה הזה.")
+        return
+    try:
+        found = search_insights(identity, hint, limit=_INSIGHT_PICK_LIMIT)
+    except AirtableReadError as exc:
+        logger.warning("[DecisionHub] from-insight list failed: %s", exc.cause or exc)
+        bot.send_message(msg.chat.id, "⚠️ לא ניתן לקרוא תובנות כרגע. לא נכתב דבר.")
+        return
+    views = [v for v in (build_insight_view(r) for r in found.records) if v]
+    if not views:
+        if found.truncated:
+            bot.send_message(msg.chat.id, f"לא נמצאו תובנות מתאימות ב-{found.scanned} התובנות האחרונות. נסה/י רמז ממוקד יותר: /decision from-insight <מילה>")
+        else:
+            bot.send_message(msg.chat.id, "לא נמצאו תובנות מתאימות.")
+        return
+    state = _insight_new_state(identity, views)
+    _pending[uid] = state
+    bot.send_message(
+        msg.chat.id,
+        "📚 בחר תובנה לשיוך להחלטה (לא נכתב דבר עד אישור):"
+        + (f"\n(נסרקו {found.scanned} תובנות אחרונות — ייתכנו ישנות יותר; צמצם/י עם רמז)" if found.truncated else ""),
+        reply_markup=_insight_pick_keyboard(state["token"], views),
+    )
+
+
+def _insight_pick_keyboard(token: str, views: list):
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=1)
+    for i, view in enumerate(views):
+        markup.add(InlineKeyboardButton(view.title[:48], callback_data=f"dec_ins_pick:{token}:{i}"))
+    markup.add(InlineKeyboardButton("↩️ ביטול", callback_data=f"dec_ins_cancel:{token}"))
+    return markup
+
+
+def _insight_target_keyboard(token: str, options: list):
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=1)
+    for i, decision in enumerate(options):
+        title = _record_fields(decision).get(DecisionFields.TITLE, "?")
+        markup.add(InlineKeyboardButton(f"🔗 {title}"[:48], callback_data=f"dec_ins_target:{token}:{i}"))
+    markup.add(InlineKeyboardButton("➕ החלטה חדשה", callback_data=f"dec_ins_target:{token}:new"))
+    markup.add(InlineKeyboardButton("↩️ ביטול", callback_data=f"dec_ins_cancel:{token}"))
+    return markup
+
+
+def _insight_review_keyboard(token: str):
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("✅ אשר שיוך", callback_data=f"dec_ins_confirm:{token}"),
+        InlineKeyboardButton("✏️ שנה יעד", callback_data=f"dec_ins_retarget:{token}"),
+        InlineKeyboardButton("↩️ ביטול", callback_data=f"dec_ins_cancel:{token}"),
+    )
+    return markup
+
+
+def _find_insight_inboxes(insight_id: str, tenant_id: str) -> list:
+    """חיפוש לפי סמן. מעלה AirtableReadError — כשל קריאה אינו 'לא נמצא' (מונע כפילות)."""
+    marker = insight_marker(insight_id)
+    rows = list_records(
+        Tables.DECISION_INBOX,
+        search_query_for_marker(DecisionInboxFields.RAW_INPUT, marker, tenant_id),
+        limit=10, paginate=False, timeout=10,
+    )
+    return [r for r in rows if _last_line_is_marker(_record_fields(r).get(DecisionInboxFields.RAW_INPUT), marker)]
+
+
+def _find_insight_events(insight_id: str, decision_id: str, tenant_id: str) -> list:
+    marker = insight_marker(insight_id)
+    rows = list_records(
+        Tables.DECISION_EVENTS,
+        search_query_for_marker(DecisionEventFields.RAW_CONTENT, marker, tenant_id),
+        limit=10, paginate=False, timeout=10,
+    )
+    return [
+        r for r in rows
+        if decision_id in (_record_fields(r).get(DecisionEventFields.DECISION) or [])
+        and _last_line_is_marker(_record_fields(r).get(DecisionEventFields.RAW_CONTENT), marker)
+    ]
+
+
+def _insight_target_options(identity, view, inbox: dict | None) -> list:
+    """מועמדי יעד: שיוך חלקי קודם (אם יש) → התאמת כותרת → פתוחות. הכל בסקופ."""
+    options: list = []
+    seen: set = set()
+
+    def add(decision):
+        if decision and _decision_in_scope(decision, identity):
+            did = _record_id(decision)
+            if did and did not in seen and len(options) < _INSIGHT_OPTION_LIMIT:
+                seen.add(did)
+                options.append(decision)
+
+    if inbox:
+        for did in _record_fields(inbox).get(DecisionInboxFields.SUGGESTED_DECISION) or []:
+            add(_at_get_record(Tables.DECISIONS, did))
+    open_decisions = _list_open_decisions(limit=_INSIGHT_OPTION_LIMIT + 1, identity=identity)
+    match, score = find_matching_decision(view.match_text, open_decisions, identity)
+    if match and score > 60:
+        add(match)
+    for decision in open_decisions:
+        add(decision)
+    return options
+
+
+def _insight_card(view, target_label: str) -> str:
+    lines = ["🔗 שיוך תובנה להחלטה", "", f"תובנה: {view.title}"]
+    if view.description:
+        lines.append(excerpt(view))
+    if view.next_action:
+        lines.append(f"פעולה הבאה (מהתובנה): {view.next_action}")
+    lines += ["", f"⟶ {target_label}", "", SOURCE_LABEL, "לא נכתב דבר עד אישור."]
+    return "\n".join(lines)
+
+
+def _insight_cb_common(bot, call, get_identity):
+    """(identity, uid, token, parts) או None אחרי דחייה. אין כתיבה בנתיב זה."""
+    identity = _callback_identity(get_identity, call)
+    if not identity or not _insight_identity_ok(identity):
+        _reject_callback(bot, call)
+        return None
+    parts = (call.data or "").split(":")
+    if len(parts) < 2:
+        _reject_callback(bot, call)
+        return None
+    return identity, str(call.from_user.id), parts[1], parts
+
+
+def _insight_stale(bot, call) -> None:
+    bot.answer_callback_query(call.id, "ℹ️ התהליך כבר אינו זמין.")
+
+
+def _insight_cb_cancel(bot, call, get_identity) -> None:
+    common = _insight_cb_common(bot, call, get_identity)
+    if not common:
+        return
+    _, uid, token, _ = common
+    with _INSIGHT_STATE_LOCK:
+        state = _get_valid_state(uid)
+        if not state or state.get("command") != "insight" or state.get("token") != token:
+            _insight_stale(bot, call)
+            return
+        _pending.pop(uid, None)
+    bot.answer_callback_query(call.id, "✅ התקבל")
+    _insight_plain_edit(bot, call, "↩️ בוטל. לא נכתב דבר.")
+
+
+def _insight_cb_pick(bot, call, get_identity) -> None:
+    common = _insight_cb_common(bot, call, get_identity)
+    if not common:
+        return
+    identity, uid, token, parts = common
+    state = _claim_insight_state(uid, token, "insight_pick", consume=False)
+    if not state or len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) >= len(state["candidates"]):
+        _insight_stale(bot, call)
+        return
+    chosen = state["candidates"][int(parts[2])]
+    try:
+        _, view = read_insight(chosen.record_id, identity)
+        if view is None:
+            _reject_callback(bot, call)
+            return
+        inboxes = _find_insight_inboxes(view.record_id, identity.tenant_id)
+    except AirtableReadError as exc:
+        logger.warning("[DecisionHub] from-insight pick read failed: %s", exc.cause or exc)
+        _insight_plain_edit(bot, call, "⚠️ לא ניתן לאמת את התובנה/הכפילויות כרגע. לא נכתב דבר.")
+        bot.answer_callback_query(call.id)
+        return
+    inbox = canonical_record(inboxes)
+    if inbox:
+        status = _record_fields(inbox).get(DecisionInboxFields.STATUS)
+        linked = _record_fields(inbox).get(DecisionInboxFields.SUGGESTED_DECISION) or []
+        if status == DecisionInboxStatus.REJECTED:
+            _pending.pop(uid, None)
+            _insight_plain_edit(bot, call, "התובנה סומנה בעבר כנדחית ב-Decision Inbox. לא נכתב דבר.")
+            bot.answer_callback_query(call.id)
+            return
+        if status == DecisionInboxStatus.LINKED and linked:
+            decision = _at_get_record(Tables.DECISIONS, linked[0])
+            title = _record_fields(decision).get(DecisionFields.TITLE, linked[0]) if decision and _decision_in_scope(decision, identity) else linked[0]
+            _pending.pop(uid, None)
+            _insight_plain_edit(bot, call, f"התובנה כבר משויכת להחלטה: {title}\nלא נכתב דבר.")
+            bot.answer_callback_query(call.id)
+            return
+    state.update({
+        "step": "insight_target", "view": view, "partial_inbox": inbox,
+        "options": _insight_target_options(identity, view, inbox),
+    })
+    state["token"] = uuid.uuid4().hex[:12]
+    _pending[uid] = state
+    note = "\n\n⚠️ נמצא שיוך חלקי קודם לתובנה זו — האישור ישלים את החסר." if inbox else ""
+    _insight_plain_edit(
+        bot, call, f"תובנה: {view.title}\n\nלאיזו החלטה לשייך?{note}",
+        _insight_target_keyboard(state["token"], state["options"]),
+    )
+    bot.answer_callback_query(call.id)
+
+
+def _insight_render_target(state) -> tuple[str, str]:
+    view = state["view"]
+    target = state["target"]
+    if target["kind"] == "new":
+        label = f"החלטה חדשה: «{view.title[:120]}» (דומיין: {view.decision_domain})"
+    else:
+        label = f"החלטה: «{_record_fields(target['decision']).get(DecisionFields.TITLE, '?')}»"
+    return _insight_card(view, label), label
+
+
+def _insight_cb_target(bot, call, get_identity) -> None:
+    common = _insight_cb_common(bot, call, get_identity)
+    if not common:
+        return
+    identity, uid, token, parts = common
+    state = _claim_insight_state(uid, token, "insight_target", consume=False)
+    if not state or len(parts) != 3:
+        _insight_stale(bot, call)
+        return
+    choice = parts[2]
+    if choice == "new":
+        state["target"] = {"kind": "new"}
+    elif choice.isdigit() and int(choice) < len(state["options"]):
+        state["target"] = {"kind": "existing", "decision": state["options"][int(choice)]}
+    else:
+        _insight_stale(bot, call)
+        return
+    state["step"] = "insight_review"
+    state["token"] = uuid.uuid4().hex[:12]
+    _pending[uid] = state
+    text, _ = _insight_render_target(state)
+    _insight_plain_edit(bot, call, text, _insight_review_keyboard(state["token"]))
+    bot.answer_callback_query(call.id)
+
+
+def _insight_cb_retarget(bot, call, get_identity) -> None:
+    common = _insight_cb_common(bot, call, get_identity)
+    if not common:
+        return
+    identity, uid, token, _ = common
+    state = _claim_insight_state(uid, token, "insight_review", consume=False)
+    if not state:
+        _insight_stale(bot, call)
+        return
+    state["step"] = "insight_target"
+    state["token"] = uuid.uuid4().hex[:12]   # הטוקן הישן (כפתור ✅ קודם) מתבטל
+    state.pop("target", None)
+    _pending[uid] = state
+    _insight_plain_edit(
+        bot, call, f"תובנה: {state['view'].title}\n\nלאיזו החלטה לשייך?",
+        _insight_target_keyboard(state["token"], state["options"]),
+    )
+    bot.answer_callback_query(call.id)
+
+
+def _insight_cb_confirm(bot, call, get_identity) -> None:
+    common = _insight_cb_common(bot, call, get_identity)
+    if not common:
+        return
+    identity, uid, token, _ = common
+    # claim אטומי: לחיצה שנייה/מקבילה מקבלת "אינו זמין" ולא כותבת
+    state = _claim_insight_state(uid, token, "insight_review", consume=True)
+    if not state:
+        _insight_stale(bot, call)
+        return
+    view = state["view"]
+    target = state["target"]
+    try:
+        _, fresh = read_insight(view.record_id, identity)
+        if fresh is None:
+            _insight_plain_edit(bot, call, "התובנה אינה נגישה עוד. לא נכתב דבר.")
+            bot.answer_callback_query(call.id)
+            return
+        if fresh.fingerprint != view.fingerprint:
+            _insight_plain_edit(bot, call, "התובנה שונתה מאז שהוצגה — האישור אינו תקף. הרץ שוב /decision from-insight. לא נכתב דבר.")
+            bot.answer_callback_query(call.id)
+            return
+        if target["kind"] == "existing":
+            decision = _at_get_record(Tables.DECISIONS, _record_id(target["decision"], required=True))
+            open_ok = decision and _record_fields(decision).get(DecisionFields.STATUS) in (DecisionStatus.OPEN, DecisionStatus.PENDING_INPUT)
+            if not decision or not _decision_in_scope(decision, identity) or not open_ok:
+                _insight_plain_edit(bot, call, "ההחלטה אינה זמינה לשיוך (נעלמה/נסגרה/מחוץ להרשאה). לא נכתב דבר.")
+                bot.answer_callback_query(call.id)
+                return
+            target = {"kind": "existing", "decision": decision}
+    except AirtableReadError as exc:
+        logger.warning("[DecisionHub] from-insight confirm re-read failed: %s", exc.cause or exc)
+        _insight_plain_edit(bot, call, "⚠️ לא ניתן לאמת את הנתונים לפני כתיבה. לא נכתב דבר.")
+        bot.answer_callback_query(call.id)
+        return
+    bot.answer_callback_query(call.id, "✅ התקבל")
+    try:
+        with _INSIGHT_WRITE_LOCK:
+            result = _execute_insight_link(identity, fresh, target)
+    except Exception:
+        logger.exception("[DecisionHub] from-insight unexpected failure insight=%s", fresh.record_id)
+        _insight_plain_edit(
+            bot, call,
+            "⚠️ אירעה שגיאה בלתי צפויה במהלך השיוך — ייתכן שנשמר חלק מהרשומות. "
+            "הרץ שוב /decision from-insight ובחר את אותה תובנה (ימשיך מהחסר). לא נטען שהשיוך הושלם.",
+        )
+        return
+    _insight_plain_edit(bot, call, _format_insight_result(fresh, result))
+
+
+def _storage_add_outcome(storage, table: str, fields: dict, source: str):
+    """(status, record_id|None). created | failed | outcome_unknown."""
+    adder = getattr(storage, "add_with_outcome", None)
+    if adder is None:
+        record_id = storage.add(table, fields, source=source)
+        return ("created", record_id) if record_id else ("failed", None)
+    outcome = adder(table, fields, source=source)
+    record = getattr(outcome, "record", None) or {}
+    return getattr(outcome, "status", "failed"), record.get("id")
+
+
+def _execute_insight_link(identity, view, target: dict) -> InsightLinkResult:
+    """W1 Inbox → W2 החלטה → W3 אירוע → W4 קישור. כל צעד בודק קיום לפי סמן לפני כתיבה;
+    כשל = עצירה עם דיווח מדויק; מה שנכתב נשאר (אין מחיקה). הרצה חוזרת ממשיכה מהחסר."""
+    storage = _decision_storage()
+    tenant = identity.tenant_id
+    source_tag = f"cmd_decision:insight:{tenant}:{identity.user_id}"
+    steps: list = []
+    ids: dict = {"decision_id": None, "inbox_id": None, "event_id": None}
+
+    def stop(name: str, detail: str) -> InsightLinkResult:
+        steps.append((name, "failed", detail))
+        for later in list(_STEP_LABELS)[len(steps):]:
+            steps.append((later, "skipped", ""))
+        return InsightLinkResult(tuple(steps), **ids)
+
+    content = compose_event_content(view)
+
+    # ── W1: Decision Inbox ─────────────────────────────────────
+    try:
+        inbox = canonical_record(_find_insight_inboxes(view.record_id, tenant))
+    except AirtableReadError:
+        return stop("inbox", "לא ניתן לבדוק כפילות לפני כתיבה")
+    if inbox and _record_fields(inbox).get(DecisionInboxFields.STATUS) == DecisionInboxStatus.REJECTED:
+        return stop("inbox", "התובנה סומנה בעבר כנדחית")
+    if inbox:
+        ids["inbox_id"] = _record_id(inbox)
+        steps.append(("inbox", "reused", ""))
+    else:
+        fields = {
+            DecisionInboxFields.RAW_INPUT: content,
+            DecisionInboxFields.CHANNEL: DecisionInboxChannel.MANUAL,
+            DecisionInboxFields.RECEIVED: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
+            DecisionInboxFields.STATUS: DecisionInboxStatus.PENDING,
+            DecisionInboxFields.TENANT_ID: tenant,
+        }
+        status, record_id = _storage_add_outcome(storage, Tables.DECISION_INBOX, fields, source_tag)
+        if status == "outcome_unknown":
+            # אין retry עיוור: קודם בודקים אם הרשומה בכל זאת נכתבה
+            try:
+                found = canonical_record(_find_insight_inboxes(view.record_id, tenant))
+            except AirtableReadError:
+                found = None
+            if found:
+                status, record_id = "created", _record_id(found)
+            else:
+                status, record_id = _storage_add_outcome(storage, Tables.DECISION_INBOX, fields, source_tag)
+        if status != "created" or not record_id:
+            detail = "תוצאת הכתיבה לא ידועה — בדוק Decision Inbox לפני ניסיון נוסף" if status == "outcome_unknown" else "הכתיבה נכשלה"
+            return stop("inbox", detail)
+        ids["inbox_id"] = record_id
+        steps.append(("inbox", "ok", ""))
+        try:  # התכנסות: אם נוצרה כפילות במקביל — כולם בוחרים את אותה רשומה
+            winner = canonical_record(_find_insight_inboxes(view.record_id, tenant))
+            if winner and _record_id(winner) != record_id:
+                logger.warning("[DecisionHub] from-insight duplicate Inbox detected; converging on %s", _record_id(winner))
+                ids["inbox_id"] = _record_id(winner)
+                inbox = winner
+        except AirtableReadError:
+            pass
+    inbox_suggested = list(_record_fields(inbox).get(DecisionInboxFields.SUGGESTED_DECISION) or []) if inbox else []
+
+    # ── W2: החלטה ──────────────────────────────────────────────
+    if target["kind"] == "existing":
+        decision_id = _record_id(target["decision"], required=True)
+        if inbox_suggested and decision_id not in inbox_suggested:
+            return stop("decision", "קיים שיוך חלקי קודם להחלטה אחרת — בחר בה או טפל ידנית")
+        ids["decision_id"] = decision_id
+        steps.append(("decision", "reused", ""))
+    else:
+        decision_id = None
+        if inbox_suggested:
+            prior = _at_get_record(Tables.DECISIONS, inbox_suggested[0])
+            if not prior or not _decision_in_scope(prior, identity):
+                return stop("decision", "לא ניתן לאמת את ההחלטה מהשיוך החלקי הקודם")
+            decision_id = inbox_suggested[0]
+            steps.append(("decision", "reused", ""))
+        else:
+            title = view.title[:120]
+            try:
+                same = list_records(
+                    Tables.DECISIONS,
+                    all_of(
+                        equals(DecisionFields.TITLE, title), equals(DecisionFields.TENANT_ID, tenant),
+                        any_of(equals(DecisionFields.STATUS, DecisionStatus.OPEN), equals(DecisionFields.STATUS, DecisionStatus.PENDING_INPUT)),
+                    ),
+                    limit=5, paginate=False, timeout=10,
+                )
+            except AirtableReadError:
+                return stop("decision", "לא ניתן לבדוק החלטה קיימת בשם זהה")
+            if any(_decision_in_scope(d, identity) for d in same):
+                return stop("decision", "כבר קיימת החלטה פתוחה בשם זהה — בחר אותה כיעד במקום ליצור חדשה")
+            created = _create_decision(identity, title, view.decision_domain, 0.0, [])
+            if not created.ok or not created.record_id:
+                return stop("decision", "יצירת ההחלטה נכשלה")
+            decision_id = created.record_id
+            steps.append(("decision", "ok", ""))
+            if not storage.update(
+                Tables.DECISION_INBOX, ids["inbox_id"],
+                {DecisionInboxFields.SUGGESTED_DECISION: [decision_id]}, source=f"{source_tag}:pre_link",
+            ):
+                logger.warning("[DecisionHub] from-insight pre-link failed inbox=%s decision=%s", ids["inbox_id"], decision_id)
+        ids["decision_id"] = decision_id
+
+    # ── W3: Decision Event (ללא Trust Level — לא נספר כראיה מהותית ב-Readiness) ──
+    try:
+        event = canonical_record(_find_insight_events(view.record_id, decision_id, tenant))
+    except AirtableReadError:
+        return stop("event", "לא ניתן לבדוק כפילות אירוע לפני כתיבה")
+    if event:
+        ids["event_id"] = _record_id(event)
+        steps.append(("event", "reused", ""))
+    else:
+        fields = {
+            DecisionEventFields.DECISION: [decision_id],
+            DecisionEventFields.EVENT_DATE: datetime.now(ZoneInfo("Asia/Jerusalem")).date().isoformat(),
+            DecisionEventFields.CHANNEL: DecisionEventChannel.MANUAL,
+            DecisionEventFields.RAW_CONTENT: content,
+            DecisionEventFields.STATUS: DecisionEventStatus.LOGGED,
+            DecisionEventFields.TENANT_ID: tenant,
+        }
+        status, record_id = _storage_add_outcome(storage, Tables.DECISION_EVENTS, fields, source_tag)
+        if status == "outcome_unknown":
+            try:
+                found = canonical_record(_find_insight_events(view.record_id, decision_id, tenant))
+            except AirtableReadError:
+                found = None
+            if found:
+                status, record_id = "created", _record_id(found)
+            else:
+                status, record_id = _storage_add_outcome(storage, Tables.DECISION_EVENTS, fields, source_tag)
+        if status != "created" or not record_id:
+            detail = "תוצאת הכתיבה לא ידועה — בדוק Decision Events לפני ניסיון נוסף" if status == "outcome_unknown" else "הכתיבה נכשלה"
+            return stop("event", detail)
+        steps.append(("event", "ok", ""))
+        ids["event_id"] = record_id
+        try:
+            winner = canonical_record(_find_insight_events(view.record_id, decision_id, tenant))
+            if winner and _record_id(winner) != record_id:
+                logger.warning("[DecisionHub] from-insight duplicate Event detected; converging on %s", _record_id(winner))
+                ids["event_id"] = _record_id(winner)
+        except AirtableReadError:
+            pass
+
+    # ── W4: קישור Inbox ↔ החלטה ↔ אירוע + אימות בקריאה חוזרת ──────
+    patch = {
+        DecisionInboxFields.STATUS: DecisionInboxStatus.LINKED,
+        DecisionInboxFields.SUGGESTED_DECISION: [decision_id],
+        DecisionInboxFields.LINKED_EVENT: [ids["event_id"]],
+    }
+    if not storage.update(Tables.DECISION_INBOX, ids["inbox_id"], patch, source=f"{source_tag}:link"):
+        return stop("link", "עדכון ה-Inbox נכשל")
+    verify = _at_get_record(Tables.DECISION_INBOX, ids["inbox_id"])
+    vf = _record_fields(verify) if verify else {}
+    if not (
+        vf.get(DecisionInboxFields.STATUS) == DecisionInboxStatus.LINKED
+        and decision_id in (vf.get(DecisionInboxFields.SUGGESTED_DECISION) or [])
+        and ids["event_id"] in (vf.get(DecisionInboxFields.LINKED_EVENT) or [])
+    ):
+        return stop("link", "הקישור לא אומת בקריאה חוזרת")
+    steps.append(("link", "ok", ""))
+    return InsightLinkResult(tuple(steps), **ids)
+
+
+def _format_insight_result(view, result: InsightLinkResult) -> str:
+    lines = []
+    for name, status, detail in result.steps:
+        line = f"{_STEP_ICONS.get(status, '•')} {_STEP_LABELS[name]}"
+        if detail:
+            line += f" — {detail}"
+        lines.append(line)
+    if result.complete:
+        head = f"✅ התובנה «{view.title}» שויכה להחלטה.\n{SOURCE_LABEL}"
+    else:
+        head = (
+            f"⚠️ השיוך של «{view.title}» לא הושלם. מה שנשמר נשאר.\n"
+            "להשלמה: הרץ שוב /decision from-insight ובחר את אותה תובנה (ימשיך מהחסר)."
+        )
+    return head + "\n\n" + "\n".join(lines)
 
 
 # ── Stage 0.5 — File/Voice Precedence Routing ──────────────────

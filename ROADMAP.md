@@ -2,6 +2,15 @@
 
 עודכן: 13/10/2026
 
+## DECISION-HUB-INSIGHT-1 — `/decision from-insight` (PR1 מתוך SPEC_Insight_to_Decision_to_Task) — CODE DONE, NOT VERIFIED IN PROD — 13/10/2026
+
+מצב נוכחי: קוד + בדיקות (unit/integration מול Airtable בזיכרון) בלבד; PR טיוטה לביקורת — לא מוזג, לא נפרס, `FEATURE_DECISION_HUB` לא אומת ב-Render. PR2 (`/decision close` + משימת המשך) **לא התחיל**.
+
+- **מה**: פקודת `/decision from-insight` ממחזרת Learnings & Insights כמקור, בלי טבלה/שדה Airtable חדשים. כרטיס אישור אחד עם השיוך המדויק; אפס כתיבות לפני ✅; כתיבות דרך `DecisionPorts` בלבד (Inbox → החלטה → אירוע → קישור) עם סמן `[insight:<recId>]`, אימות בקריאה חוזרת ודיווח כישלון חלקי עם המשך.
+- **Tenant**: ל-Learnings אין `tenant_id` — נגישות fail-closed ל-tenant הבית בלבד; רשומה עם `tenant_id` זר נדחית.
+- **גבולות**: האירוע נכתב בלי Trust Level ועם תווית "לא אומת מול מקור חיצוני"; אידמפוטנטיות מתכנסת ולא מוחלטת (אין אילוץ ייחודיות ב-Airtable); תובנה אחת ↔ החלטה אחת בשלב זה.
+- **צעדים הבאים**: ביקורת על ה-PR → merge → deploy → אימות `FEATURE_DECISION_HUB` ב-Render (החלטת בעלים) → canary על תובנה אחת. PR2 מותנה בהוכחת G2 (נתיב אישור משימה) — ראו `docs/specs/SPEC_Insight_to_Decision_to_Task.md` §8/§10.
+
 ## PIPELINE-1 — Experience Status אוטומטי ביצירת ליד — CODE DONE, NOT VERIFIED IN PROD — 04/10/2026
 
 המשך ל-PR #1268 (מוזג ופרוס ב-`51b3d95`). מצב נוכחי: קוד + בדיקות (47/47 ב-`test_lead_experience_inference.py`) בלבד; לא מוזג, לא נפרס, לא אומת ב-Render.

@@ -1191,6 +1191,13 @@ class LearningFields:
     TITLE           = "כותרת התובנה"
     DESCRIPTION     = "תיאור"
     DATE            = "תאריך יצירה"
+    # שדות חיים נוספים (אומתו מול Airtable MCP, 13/10/2026) — נקראים בלבד ע"י
+    # Decision Hub (/decision from-insight); אין כתיבה מהקוד (SPEC O3).
+    ALT_TITLE       = "title"           # כותרת חלופית (רשומות שנוצרו ע"י Interaction Log)
+    ALT_SUMMARY     = "summary"         # תיאור חלופי
+    NEXT_ACTION     = "Next Action"
+    OUTCOME         = "Outcome"         # singleSelect: Archived|Decision Made (רווח סופי!)|Insight Only|Action Required
+    DOMAIN          = "domain"          # singleSelect: General|Real Estate (רווח סופי)|SaaS (רווח סופי)|Recruitment|Import
 
 
 # ══════════════════════════════════════════════════
