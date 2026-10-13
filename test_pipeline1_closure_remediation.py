@@ -302,7 +302,8 @@ def _filter_fixture_at_list(table, formula="", max_records=None, strict=False,
                              measurement_label=None, paginate=False):
     return [
         {
-            "id": "recA", "createdTime": _iso(_now - timedelta(hours=1)),
+            # Keep the today fixture on the same UTC date, including the first hour after midnight.
+            "id": "recA", "createdTime": _iso(_now),
             "fields": {
                 "Name": "Alice Cohen", "phone": "0501111111", "status": "active",
                 "Score": 70, "domain": "real_estate", "source": "telegram",

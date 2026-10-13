@@ -81,3 +81,24 @@ Verification ledger / context expansion:
 Hosted CI must still be verified at the newly pushed head. No merge/deployment or
 production validation is represented by this local ledger. Original proposal and
 local EVIDENCE.json snapshot above remain historical, not overwritten proof.
+
+### Hosted CI discovery: pre-existing midnight fixture
+
+Run `38329296463` on `1b379d1a`: Context Librarian and Status Sync passed;
+Backend CI stopped at `test_pipeline1_closure_remediation.py` with 71/72 checks.
+Only failing check: `date_range=today keeps only records created today`.
+The unchanged main test sets recA.createdTime to UTC now minus one hour, so
+between 00:00 and 01:00 UTC it incorrectly creates yesterday's record while
+expecting the today filter to include it. This is unrelated to PL-1 calculation
+or catalog code and is reproducible against origin/main's exact test source.
+
+Minimal test-only correction: recA uses UTC now; all older-record fixtures and
+assertions stay intact. No TMA/CRM runtime, date-filter policy or CI exemption
+changes. Frozen-clock verification with external network blocked:
+- unchanged main source at 00:30 UTC: expected failure, 71/72;
+- corrected source at 00:30 UTC: 72/72;
+- corrected source at 12:30 UTC: 72/72.
+
+This existing-test fixture correction is included solely to complete the user's
+Backend CI verification request. A new hosted run must verify the final head;
+no existing failure was skipped, ignored or added to an allowlist.
