@@ -53,6 +53,7 @@ class FakeAirtable:
         self.fail_reads: set[str] = set()
         self.reads: list[str] = []
         self.stale_get: set[str] = set()      # table -> get_record מחזיר רשומה לא מעודכנת
+        self.list_kwargs: list[dict] = []
         self._lock = threading.Lock()
 
     def add_record(self, table: str, fields: dict, rec_id: str | None = None) -> dict:
@@ -68,6 +69,9 @@ class FakeAirtable:
         if table in self.fail_reads:
             raise AirtableReadError("boom", cause=RuntimeError("down"))
         rows = [r for r in self.tables.get(table, []) if formula == "" or _eval(formula, r)]
+        self.list_kwargs.append(kwargs)
+        if kwargs.get("sort"):  # ממוין מהחדשה לישנה (createdTime משמש כ-Date בבדיקות)
+            rows = sorted(rows, key=lambda r: r["createdTime"], reverse=True)
         limit = kwargs.get("limit")
         return [dict(r, fields=dict(r["fields"])) for r in (rows[:limit] if isinstance(limit, int) else rows)]
 
@@ -602,6 +606,59 @@ def test_list_excludes_out_of_scope_and_unusable_records():
     store.add_record(Tables.LEARNINGS, {"domain": "General"}, rid(3))          # בלי תוכן
     with hub(store=store, learnings=False) as (bot, _, storage):
         assert [r["id"] for r in src.list_insights(owner())] == [rid(1)]
+
+
+def _fill_learnings(store, foreign: int, mine_old: int, mine_title="תובנה ישנה"):
+    """mine_old רשומות בתחום (ישנות, נוצרו ראשונות) ואחריהן foreign רשומות זרות (חדשות)."""
+    for i in range(mine_old):
+        store.add_record(Tables.LEARNINGS, insight_fields(**{"כותרת התובנה": f"{mine_title} {i}"}), rid(1000 + i))
+    for i in range(foreign):
+        store.add_record(Tables.LEARNINGS, insight_fields(**{"כותרת התובנה": f"זר {i}"}, tenant_id="tenant-b"), rid(5000 + i))
+
+
+def test_search_finds_in_scope_insight_beyond_first_50_records():
+    store = FakeAirtable()
+    _fill_learnings(store, foreign=120, mine_old=3)     # 120 חדשות זרות מסתירות את שלוש שלנו
+    with hub(store=store, learnings=False):
+        found = src.search_insights(owner())
+    assert [r["id"] for r in found.records] == [rid(1002), rid(1001), rid(1000)]
+    assert found.truncated is False and found.scanned == 123
+    kwargs = store.list_kwargs[-1]
+    assert kwargs["paginate"] is True and kwargs["limit"] == src._SCAN_CAP     # לא עוד 50 בלי דפדוף
+
+
+def test_search_hint_matches_old_record_deep_in_the_table():
+    store = FakeAirtable()
+    _fill_learnings(store, foreign=0, mine_old=1, mine_title="נדיר")
+    for i in range(300):
+        store.add_record(Tables.LEARNINGS, insight_fields(**{"כותרת התובנה": f"שגרתי {i}"}), rid(2000 + i))
+    with hub(store=store, learnings=False):
+        found = src.search_insights(owner(), hint="נדיר")
+    assert [r["id"] for r in found.records] == [rid(1000)]
+
+
+def test_search_scan_cap_is_reported_not_silent_and_leaks_no_foreign_data():
+    store = FakeAirtable()
+    _fill_learnings(store, foreign=src._SCAN_CAP + 20, mine_old=2)   # שלנו מחוץ לתקרת הסריקה
+    with hub(store=store, learnings=False) as (bot, _, storage):
+        found = src.search_insights(owner())
+        assert found.records == [] and found.truncated is True and found.scanned == src._SCAN_CAP
+        start(bot)
+        text = " ".join(bot.texts)
+        assert "התובנות האחרונות" in text and "זר " not in text      # מדווח על הגבלה, ואין חשיפת tenant זר
+        assert storage.writes == []
+
+
+def test_search_read_failure_mid_scan_is_an_error_not_empty():
+    store = FakeAirtable()
+    _fill_learnings(store, foreign=5, mine_old=2)
+    store.fail_reads.add(Tables.LEARNINGS)
+    with hub(store=store, learnings=False):
+        try:
+            src.search_insights(owner())
+        except src.AirtableReadError:
+            return
+    raise AssertionError("read failure must raise, not return empty")
 
 
 def test_confirm_rechecks_identity_tenant():

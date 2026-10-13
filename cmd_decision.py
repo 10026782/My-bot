@@ -27,7 +27,7 @@ from decision_matching import (
 from core.query_contract import all_of, any_of, array_contains, contains, equals
 from decision_insight_source import (
     HOME_TENANT_ID, SOURCE_LABEL, build_insight_view, canonical_record,
-    compose_event_content, excerpt, insight_marker, list_insights, read_insight,
+    compose_event_content, excerpt, insight_marker, search_insights, read_insight,
     search_query_for_marker,
 )
 from core.draft_flow import DraftSpec, resolve_draft_reply
@@ -1067,20 +1067,24 @@ def _start_insight_flow(bot, msg, identity, hint: str, uid: str) -> None:
         bot.send_message(msg.chat.id, "תובנות אינן זמינות עבור המשתמש/ה הזה.")
         return
     try:
-        records = list_insights(identity, hint, limit=_INSIGHT_PICK_LIMIT)
+        found = search_insights(identity, hint, limit=_INSIGHT_PICK_LIMIT)
     except AirtableReadError as exc:
         logger.warning("[DecisionHub] from-insight list failed: %s", exc.cause or exc)
         bot.send_message(msg.chat.id, "⚠️ לא ניתן לקרוא תובנות כרגע. לא נכתב דבר.")
         return
-    views = [v for v in (build_insight_view(r) for r in records) if v]
+    views = [v for v in (build_insight_view(r) for r in found.records) if v]
     if not views:
-        bot.send_message(msg.chat.id, "לא נמצאו תובנות מתאימות.")
+        if found.truncated:
+            bot.send_message(msg.chat.id, f"לא נמצאו תובנות מתאימות ב-{found.scanned} התובנות האחרונות. נסה/י רמז ממוקד יותר: /decision from-insight <מילה>")
+        else:
+            bot.send_message(msg.chat.id, "לא נמצאו תובנות מתאימות.")
         return
     state = _insight_new_state(identity, views)
     _pending[uid] = state
     bot.send_message(
         msg.chat.id,
-        "📚 בחר תובנה לשיוך להחלטה (לא נכתב דבר עד אישור):",
+        "📚 בחר תובנה לשיוך להחלטה (לא נכתב דבר עד אישור):"
+        + (f"\n(נסרקו {found.scanned} תובנות אחרונות — ייתכנו ישנות יותר; צמצם/י עם רמז)" if found.truncated else ""),
         reply_markup=_insight_pick_keyboard(state["token"], views),
     )
 

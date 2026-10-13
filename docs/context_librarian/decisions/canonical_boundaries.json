@@ -1521,6 +1521,58 @@
         }
       },
       "last_observed_commit": "6e3e203d67b4de187c63e752f5027c8272184d51"
+    },
+    {
+      "id": "decision.decision_hub_insight_source_readonly",
+      "name": "Decision Hub insight source (read-only Learnings reader)",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "Read-only access to Learnings & Insights records for /decision from-insight: scope check (capability + tenant + domain), view building, marker/canonical-record helpers.",
+        "precedence": "Carries no write authority. All writes stay in cmd_decision.py through DecisionPorts; Tasks stay behind ActionGateway/Golden Writer. Reads go only through tools.airtable_read_adapter. Live Airtable schema and tenant policy remain authoritative."
+      },
+      "owner": "decision_hub",
+      "code_paths": [
+        "decision_insight_source.py"
+      ],
+      "test_paths": [
+        "test_decision_from_insight.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/specs/SPEC_Insight_to_Decision_to_Task.md",
+          "role": "PR1 scope and as-built record",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [
+        {
+          "name": "FEATURE_DECISION_HUB",
+          "default_state": "off",
+          "documented_state": "environment-dependent; repository alone is not current production proof",
+          "evidence_scope": "code default (feature_flags.py)"
+        }
+      ],
+      "valid_from": "2026-10-13",
+      "last_verified_commit": "5e20e6069e558e6e4a8bb8712c7b49a30177da08",
+      "confidence": 0.8,
+      "notes": [
+        "Owner-approved registration (PR #1311 review remediation) after the pre-merge Context Librarian gate reported NO_POLICY_MATCH for decision_insight_source.py.",
+        "Registered as a read-only supporting source: imports no write layer (grep-guarded in test_decision_from_insight.py). Exact-file registration only; cmd_decision.py and the other Decision Hub modules are deliberately not registered here.",
+        "Must not be broadened to write or Tasks authority without separate owner approval."
+      ],
+      "extensions": {
+        "context_librarian.registration": {
+          "classification": "REGISTER_SUPPORTING",
+          "role": "decision_hub_insight_source_readonly",
+          "authority": false,
+          "purpose": "read-only Learnings insight reader and scope check for /decision from-insight",
+          "runtime_consumed": true
+        }
+      }
     }
   ],
   "edges": [

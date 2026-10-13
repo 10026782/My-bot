@@ -33,7 +33,9 @@ _REC_ID_RE = re.compile(r"^rec[A-Za-z0-9]{14}$")
 SOURCE_LABEL = "מקור: תובנה פנימית (Learnings & Insights) — לא אומת מול מקור חיצוני"
 
 _MAX_DESCRIPTION_CHARS = 600
-_LIST_FETCH_LIMIT = 50
+# תקרת סריקה (מדורגת): עד 5 עמודי Airtable (100 לעמוד), מהחדשה לישנה. מעבר לתקרה
+# התוצאה מסומנת truncated והמשתמש מתבקש לצמצם עם רמז — לא "אין תובנות".
+_SCAN_CAP = 500
 
 # Learnings.domain החי -> DecisionDomain (ערכים חיים עם רווח סופי: מנרמלים בהשוואה בלבד)
 _DOMAIN_MAP = {
@@ -123,13 +125,22 @@ def insight_in_scope(record: dict | None, identity) -> bool:
     return bool(identity.can_access_domain(view.decision_domain))
 
 
-def list_insights(identity, hint: str = "", limit: int = 5) -> list[dict]:
-    """תובנות בתחום ה-identity. מעלה AirtableReadError — קריאה שנכשלה אינה 'אין תוצאות'."""
+@dataclass(frozen=True)
+class InsightSearch:
+    records: list
+    scanned: int
+    truncated: bool  # הסריקה הגיעה לתקרה — ייתכנו תובנות ישנות יותר שלא נבדקו
+
+
+def search_insights(identity, hint: str = "", limit: int = 5, scan_cap: int = _SCAN_CAP) -> InsightSearch:
+    """תובנות בתחום ה-identity, מהחדשה לישנה, עם דפדוף עד scan_cap רשומות.
+    סינון הרשאות (capability+tenant+domain) והרמז מתבצעים לכל רשומה שנסרקה — לא רק ל-50 הראשונות.
+    מעלה AirtableReadError — קריאה שנכשלה אינה 'אין תוצאות'."""
     records = list_records(
         Tables.LEARNINGS,
         "",
-        limit=_LIST_FETCH_LIMIT,
-        paginate=False,
+        limit=scan_cap,
+        paginate=True,
         sort=[{"field": LearningFields.DATE, "direction": "desc"}],
         timeout=10,
     )
@@ -144,7 +155,11 @@ def list_insights(identity, hint: str = "", limit: int = 5) -> list[dict]:
         selected.append(record)
         if len(selected) >= limit:
             break
-    return selected
+    return InsightSearch(selected, len(records), len(records) >= scan_cap and len(selected) < limit)
+
+
+def list_insights(identity, hint: str = "", limit: int = 5) -> list[dict]:
+    return search_insights(identity, hint, limit).records
 
 
 def read_insight(record_id: str, identity) -> tuple[dict | None, InsightView | None]:
@@ -192,8 +207,8 @@ def search_query_for_marker(field: str, marker: str, tenant_id: str) -> Query:
 
 
 __all__ = [
-    "AirtableReadError", "HOME_TENANT_ID", "InsightView", "SOURCE_LABEL",
+    "AirtableReadError", "HOME_TENANT_ID", "InsightSearch", "InsightView", "SOURCE_LABEL",
     "build_insight_view", "canonical_record", "compose_event_content", "excerpt",
     "insight_in_scope", "insight_marker", "list_insights", "map_domain",
-    "marker_ids", "read_insight", "search_query_for_marker",
+    "marker_ids", "read_insight", "search_insights", "search_query_for_marker",
 ]
