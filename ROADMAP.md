@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 04/10/2026
+עודכן: 13/10/2026
 
 ## PIPELINE-1 — Experience Status אוטומטי ביצירת ליד — CODE DONE, NOT VERIFIED IN PROD — 04/10/2026
 
@@ -1145,6 +1145,7 @@ runtime-only item is represented here as static code work.
 
 | ID | Canonical Name | Status | Evidence | Next | Canonical Source |
 |---|---|---|---|---|---|
+| PORTFOLIO_LAB | Portfolio Lab / PL-1 | IN_PROGRESS | CODE_DONE + STATIC_VERIFIED on isolated PR branch only; 55 unit/CLI tests; no bot wiring or production claim | Review local accumulation/comparison engine; monthly crisis paths next | [`Portfolio Lab`](docs/portfolio_lab/README.md) |
 | TURN_COORDINATOR_PROGRAM | Turn Coordinator | IN_PROGRESS | MERGED_STATIC — TC7-B/RP5 paths recorded | RP5 activation decision and deployed-SHA verification | [`HORIZON.md`](docs/governance/HORIZON.md) |
 | UNIFIED_APPROVAL_ACTIONGATEWAY | Unified Approval / ActionGateway | IN_PROGRESS | RUNTIME_VERIFIED — controlled-staging Gateway canary passed 02/09/2026 on `a45f304`; cutover verification closed | Post-cutover soak/monitoring | [`HORIZON.md`](docs/governance/HORIZON.md) |
 | F52 | F52 Unified Approval Runtime — Unified User Messages | IN_PROGRESS | R4, R4.1 and R6.1–R6.6 MERGED / STATIC VERIFIED; R5 GATE_COMPLETE; R7.1–R7.2 MERGED / STATIC VERIFIED (`3c45a87`, `1ff1cee`) | Continue with the next gated WhatsApp adapter sequence or separately gated runtime/deployment work | [`SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md`](docs/architecture/f52-unified-approval-runtime/rollout/SINGLE_SPEAKER_APPROVAL_UX_UNIFIED_TELEGRAM_WHATSAPP_PLAN.md) |

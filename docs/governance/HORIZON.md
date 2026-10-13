@@ -26,6 +26,16 @@ program status is summarized here from the canonical Active Work Registry in
 
 > **RECONCILIATION ADDENDUM (01/09/2026, `a45f304`):** `BOSS_UNIFIED_MASTER_PLAN.md` §3.5's DECISION_HUB and MEDIA_LAYER_F16 rows were corrected this date — `FEATURE_DECISION_HUB`/`FEATURE_MEDIA_UPLOAD`/`FEATURE_VOICE_NOTES` are confirmed `true` in live Render env, not off. Also new: `WHATSAPP_CANONICAL_LEAD_WRITE`/`VOICE_CANONICAL_LEAD_WRITE` are blocked by an empty `config.py::OWNER_USER_ID_MAPPINGS`, a prerequisite not previously tracked here or in the N18 rows below. Current authority for both: `BOSS_CURRENT_STATE.md` TR-21–TR-27.
 
+## Portfolio Lab — branch proposal (13/10/2026)
+
+PL-1 is a new standalone research initiative authorized by the owner. Current
+branch evidence: CODE_DONE + STATIC_VERIFIED (55 local unit/CLI tests), **not
+merged, wired or deployed**. Entry and next-step authority:
+`BOSS_UNIFIED_MASTER_PLAN.md` §3.5 PORTFOLIO_LAB and `ROADMAP.md` PORTFOLIO_LAB.
+Implementation/assumptions/evidence: `docs/portfolio_lab/README.md`.
+No production operational state is changed. Review the PR before merge; next
+bounded increment is monthly crisis paths, not a stock-selection engine.
+
 ## CURRENT MAJOR PROGRAM MAP
 
 This is a concise owner-facing projection of §3.5, not a second registry.
