@@ -788,3 +788,46 @@ export interface FccTurn {
   follow_up?: "savings" | null;     // executed income: the screen offers to put the freed amount away
   follow_up_asset?: string | null;  // executed finish / cancel of a next action: the asset to ask "what is the next action?" for
 }
+
+
+// ── Portfolio Lab ("מעבדת העתיד"): the server's view of build_simulator_view (schema 1.0). The client only renders it. ──
+export interface PlSeriesRow { year: number; nominal: number; real: number; contributions: number }
+export interface PlKpis {
+  final_nominal: number; final_real: number; contributions: number; nominal_profit: number; real_profit: number;
+  management_fees_paid: number; total_cost_impact: number | null; net_effective_annual_return: number; real_effective_annual_return: number;
+  after_tax: { value: number | null; display: string | null; note: string };
+}
+export interface PlCrisis {
+  applied: boolean; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[];
+  recovery_truncated_by_horizon?: boolean; note?: string;
+}
+export interface PlBreakdown {
+  contributions: number; profit_net: number; costs: number; total_before_costs: number;
+  shares: { contributions: number; profit_net: number; costs: number };
+}
+export interface PortfolioLabView {
+  schema_version: string; source: "portfolio_lab"; engine_version: string; result_type: string; currency: "ILS";
+  primary_strategy: { id: string; label: string };
+  kpis: PlKpis;
+  charts: {
+    growth: { series: PlSeriesRow[]; crisis: PlCrisis };
+    strategy_comparison: Record<string, PlSeriesRow[]>;
+    breakdown: PlBreakdown;
+    sensitivity: {
+      monthly_contribution: { factor: number; monthly_contribution: number; final_nominal: number; final_real: number }[];
+      duration: { years: number; final_nominal: number; final_real: number; contributions: number }[];
+    };
+  };
+  comparison_table: { strategy: string; label: string; is_baseline: boolean; final_nominal: number; final_real: number;
+                      contributions: number; net_profit: number; costs: number; gap_vs_baseline: number }[];
+  insights: { topic: string; text: string }[];
+  assumptions: { id: string; text: string; assumption_based: boolean }[];
+  warnings: string[];
+  labels: { strategies: Record<string, string>; components: Record<string, string> };
+  replay_digest: string;
+}
+export interface PortfolioLabParams {
+  initial: number; monthly_contribution: number; years: number; annual_return_pct: number; annual_fee_pct: number; inflation_pct: number;
+  deposit_timing: "begin" | "end"; index_contributions: boolean; baseline: string; strategies: string[];
+  crisis?: { decline_pct: number; year: number; recovery: "fast" | "prolonged" };
+}

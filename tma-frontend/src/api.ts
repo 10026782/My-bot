@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccScenarios, FccTurn } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -455,5 +455,21 @@ export async function postFccWrite(body: { text: string; goal_id?: string; scope
   });
   const data = (await r.json().catch(() => ({}))) as FccTurn & { error?: string };
   if (!r.ok && !data.state) throw new Error(data.error || `API ${r.status}`);
+  return data;
+}
+
+/** "מעבדת העתיד": read-only simulation (server runs portfolio_lab; FCC flag + canary + owner). Nothing is stored or written. */
+export async function postPortfolioLabSimulate(params: PortfolioLabParams): Promise<PortfolioLabView> {
+  const r = await fetch(`${BASE}/api/portfolio-lab/simulate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(params),
+  });
+  const data = (await r.json().catch(() => ({}))) as PortfolioLabView & { error?: string };
+  if (!r.ok) {
+    const error = new Error(data.error || `API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
   return data;
 }

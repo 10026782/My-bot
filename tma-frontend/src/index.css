@@ -3236,3 +3236,32 @@
 .fcc-loan__close .fcc-quick__message { white-space: pre-wrap; }
 .fcc-goal__update { align-self: flex-start; margin-block-start: 4px; }
 .fcc-goal__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ── Family wealth: "תכנון חיסכון לטווח ארוך" + Portfolio Lab panel ── */
+.fw-card { display: grid; gap: 4px; justify-items: center; }
+.pl-banner { font-size: 13px; line-height: 1.5; color: var(--boss-color-text-secondary); }
+.pl-form { display: grid; gap: var(--boss-space-3); }
+.pl-form label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--boss-color-text-muted); min-inline-size: 0; }
+.pl-form input:not([type="checkbox"]), .pl-form select {
+  font: inherit; font-size: 16px; padding: 8px; border: 1px solid var(--boss-color-border); border-radius: 8px;
+  background: var(--boss-color-surface); color: var(--boss-color-text); min-inline-size: 0;
+}
+.pl-form fieldset { border: 1px solid var(--boss-color-border); border-radius: 10px; margin: 0; padding: 8px 12px; min-inline-size: 0; }
+.pl-form legend { font-size: 13px; color: var(--boss-color-text-muted); padding: 0 6px; }
+.pl-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.pl-form .pl-check { flex-direction: row; align-items: center; gap: 6px; color: var(--boss-color-text); }
+.pl-form .pl-base { margin-block-start: 8px; max-inline-size: 260px; }
+.pl-chart { inline-size: 100%; max-inline-size: 560px; margin-inline: auto; block-size: auto; display: block; color: var(--boss-color-text); }
+.pl-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--boss-color-text-muted); margin-block-start: 4px; }
+.pl-legend i, .pl-stack__rows i { display: inline-block; inline-size: 10px; block-size: 10px; border-radius: 2px; margin-inline-end: 4px; }
+.pl-stack { display: flex; block-size: 36px; border-radius: 6px; overflow: hidden; margin-block-end: 10px; }
+.pl-stack__rows { display: grid; gap: 4px; margin: 0; }
+.pl-stack__rows > div { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; border-block-end: 1px solid var(--boss-color-border); padding-block: 4px; }
+.pl-stack__rows dt, .pl-stack__rows dd { margin: 0; }
+.pl-scroll { overflow-x: auto; }
+.pl-table { inline-size: 100%; border-collapse: collapse; font-size: 14px; }
+.pl-table th, .pl-table td { padding: 6px 8px; text-align: start; border-block-end: 1px solid var(--boss-color-border); }
+.pl-table .pl-num { direction: ltr; text-align: end; white-space: nowrap; }
+.pl-list { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; }
+.pl-list--small { font-size: 12px; color: var(--boss-color-text-muted); margin-block-start: 8px; }
+@media (max-width: 480px) { .pl-table th, .pl-table td { padding: 6px 5px; font-size: 13px; } }
