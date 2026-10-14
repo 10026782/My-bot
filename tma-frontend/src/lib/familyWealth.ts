@@ -5,6 +5,10 @@ import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
 
+// Every place that names the screen derives from SCREEN_TITLE: entry card, screen title, open button, tab-strip label.
+export const OPEN_LABEL = `פתח: ${SCREEN_TITLE}`;
+export const TABS_ARIA_LABEL = `אזורי ${SCREEN_TITLE}`;
+
 export type FamilyTabKey = "savings" | "lab";
 export const FAMILY_TABS: { key: FamilyTabKey; label: string }[] = [
   { key: "savings", label: "החיסכון שלי" },

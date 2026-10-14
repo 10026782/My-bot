@@ -8,7 +8,7 @@ import { LineChart, StackBar } from "../components/PortfolioLabCharts";
 import type { FccOverview, PortfolioLabView } from "../types";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
-  BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, SCREEN_TITLE, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
+  BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
   labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
@@ -101,6 +101,20 @@ test("form -> request: percentages stay as typed, blank/invalid is an error (nev
   assert.ok(c.ok && c.params.crisis?.decline_pct === 40 && c.params.crisis?.year === 7 && c.params.crisis?.recovery === "prolonged");
   const none = labParams({ ...DEFAULT_LAB_FORM, strategies: [] });
   assert.ok(none.ok && none.params.strategies.join() === "global", "the baseline is always included");
+});
+
+test("one name everywhere: entry card, open button, screen title and tab-strip label all derive from SCREEN_TITLE", () => {
+  const card = renderToStaticMarkup(createElement(FamilyWealthCard, { data: overview, onOpen: () => undefined }));
+  assert.ok(card.includes(`aria-label="${SCREEN_TITLE}"`), "card aria-label");
+  assert.ok(card.includes(`aria-label="${OPEN_LABEL}"`) && OPEN_LABEL.endsWith(SCREEN_TITLE), "open button");
+  const screen = renderToStaticMarkup(createElement(FamilyWealth, { data: overview, onBack: () => undefined }));
+  assert.ok(screen.includes(`>${SCREEN_TITLE}</h1>`) || screen.includes(SCREEN_TITLE), "screen title");
+  assert.ok(screen.includes(`aria-label="${TABS_ARIA_LABEL}"`) && TABS_ARIA_LABEL.endsWith(SCREEN_TITLE), "tab strip label");
+  const fs = require("fs");
+  for (const file of ["src/components/FamilyWealth.tsx", "src/components/PortfolioLabPanel.tsx", "src/components/PortfolioLabCharts.tsx", "src/components/FinancialControlCenter.tsx", "src/App.tsx"]) {
+    const text = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    assert.ok(!/תכנון חיסכון|ההון המשפחתי|הון משפחתי/.test(text), `${file} hard-codes a screen name instead of using SCREEN_TITLE`);
+  }
 });
 
 const view = {

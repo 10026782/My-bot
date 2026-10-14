@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FccOverview } from "../types";
-import { FAMILY_TABS, FAMILY_TAB_PREFIX, SCREEN_TITLE, familyCardModel, savingsTabModel, type FamilyTabKey } from "../lib/familyWealth";
+import { FAMILY_TABS, FAMILY_TAB_PREFIX, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, familyCardModel, savingsTabModel, type FamilyTabKey } from "../lib/familyWealth";
 import { panelId, tabId } from "../lib/fccTabs";
 import { FccTabBar } from "./FccTabBar";
 import { KpiCard } from "./FccKpiCard";
@@ -17,7 +17,7 @@ export function FamilyWealthCard({ data, onOpen }: { data: Pick<FccOverview, "su
       <p className="fcc-kpi__label">{m.title}</p>
       <p className="fcc-kpi__value">{m.value}</p>
       <p className="fcc-kpi__hint">{m.hint}</p>
-      <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onOpen}>פתח</button>
+      <button type="button" className="boss-button boss-button--quiet boss-bubble--action" aria-label={OPEN_LABEL} onClick={onOpen}>פתח</button>
     </Surface>
   );
 }
@@ -41,7 +41,7 @@ export function FamilyWealth({ data, onBack }: { data: Pick<FccOverview, "summar
       <div className="ventures-shell">
         <PageHeader onBack={onBack} title={SCREEN_TITLE} eyebrow="BOSS · אישי" subtitle={`נכון ל-${data.as_of}`} />
         <div className="fcc-stack">
-          <FccTabBar active={tab} onChange={setTab} tabs={FAMILY_TABS} idPrefix={FAMILY_TAB_PREFIX} ariaLabel="אזורי תכנון החיסכון" />
+          <FccTabBar active={tab} onChange={setTab} tabs={FAMILY_TABS} idPrefix={FAMILY_TAB_PREFIX} ariaLabel={TABS_ARIA_LABEL} />
           <div role="tabpanel" id={panelId("savings", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("savings", FAMILY_TAB_PREFIX)} hidden={tab !== "savings"}>
             <SavingsPanel data={data} />
           </div>
