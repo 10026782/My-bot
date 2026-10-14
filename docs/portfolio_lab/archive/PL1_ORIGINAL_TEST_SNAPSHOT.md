@@ -1,0 +1,160 @@
+# PL-1 original local test snapshot
+
+Historical local evidence only; no production authority. Original JSON bytes are preserved inside the code block.
+
+```json
+{
+  "verification_date": "2026-10-13",
+  "base_main": "5e20e6069e558e6e4a8bb8712c7b49a30177da08",
+  "engine_version": "1.0.0",
+  "base_inputs": {
+    "years": 60,
+    "initial": 0,
+    "monthly_contribution": [
+      8000
+    ],
+    "inflation": [
+      0.02
+    ],
+    "index_contributions": false,
+    "deposit_timing": "end",
+    "start_date": "2026-01-01",
+    "assets": [
+      {
+        "name": "global_accumulating",
+        "weight": 1.0,
+        "annual_return": [
+          0.08
+        ],
+        "return_convention": "effective_annual",
+        "return_basis": "gross",
+        "annual_fee": 0.0015,
+        "buy_fee": 0.0,
+        "sell_fee": 0.0
+      }
+    ],
+    "result_type": "assumption_based_projection",
+    "sources": [
+      {
+        "reference": "owner-scenario",
+        "as_of": "2026-10-13",
+        "description": "Hypothetical owner inputs; not market data or a forecast validated against history"
+      }
+    ]
+  },
+  "base_final": {
+    "year": 60,
+    "as_of": "2085-12-31",
+    "value_before_costs": 124658494.85079506,
+    "value_after_costs": 116085877.60503255,
+    "real_value": 35380916.880350806,
+    "contributions": 5760000.0,
+    "real_contributions": 3367525.3297316465,
+    "nominal_profit": 110325877.60503255,
+    "real_profit": 32013391.55061916,
+    "management_cost": 2201761.1480555823,
+    "buy_cost": 0.0,
+    "costs_paid": 2201761.1480555823,
+    "cost_impact": 8572617.245762512,
+    "cpi": 3.281030788365526,
+    "sale_cost": 0.0,
+    "proceeds_before_tax": 116085877.60503255,
+    "tax_during_accumulation": 0.0,
+    "nominal_annualized_twr_before_costs": 0.07999999999999963,
+    "nominal_annualized_twr_after_recurring_costs": 0.07837999999999834,
+    "real_annualized_twr_after_recurring_costs": 0.05723529411764483,
+    "total_costs_if_sold": 2201761.1480555823,
+    "nominal_profit_after_sale_before_tax": 110325877.60503255,
+    "tax": null,
+    "proceeds_after_tax": null,
+    "nominal_profit_after_tax": null,
+    "tax_status": "not_assessed"
+  },
+  "base_replay_digest": "58a7d394403cd71efbdf89fbc3100bceac3cf9b3811acd4d93fd5da9a25b2876",
+  "comparison_assumptions": {
+    "global_accumulating": {
+      "annual_return": 0.08,
+      "annual_fee": 0.0015
+    },
+    "msci_world": {
+      "annual_return": 0.075,
+      "annual_fee": 0.0015
+    },
+    "emerging_markets": {
+      "annual_return": 0.065,
+      "annual_fee": 0.0015
+    },
+    "sp500": {
+      "annual_return": 0.085,
+      "annual_fee": 0.0015
+    },
+    "europe": {
+      "annual_return": 0.07,
+      "annual_fee": 0.0015
+    },
+    "selected_stocks": {
+      "annual_return": 0.06,
+      "annual_fee": 0.0015
+    }
+  },
+  "comparison": {
+    "global": {
+      "final": 116085877.60503255,
+      "gap": 0.0
+    },
+    "world_em": {
+      "final": 90061627.74935634,
+      "gap": -26024249.855676204
+    },
+    "three_funds": {
+      "final": 113987036.50309558,
+      "gap": -2098841.101936966
+    },
+    "experimental_90_10": {
+      "final": 109394595.53401124,
+      "gap": -6691282.071021304
+    }
+  },
+  "crises": {
+    "1": {
+      "final": 122041227.68872626,
+      "statistics": {
+        "global_accumulating": {
+          "basis": "gross",
+          "arithmetic_mean_effective_annual": 0.0864,
+          "geometric_mean_effective_annual": 0.08
+        }
+      }
+    },
+    "30": {
+      "final": 116753489.9832403,
+      "statistics": {
+        "global_accumulating": {
+          "basis": "gross",
+          "arithmetic_mean_effective_annual": 0.0864,
+          "geometric_mean_effective_annual": 0.08
+        }
+      }
+    },
+    "40": {
+      "final": 116399788.31517687,
+      "statistics": {
+        "global_accumulating": {
+          "basis": "gross",
+          "arithmetic_mean_effective_annual": 0.0864,
+          "geometric_mean_effective_annual": 0.08
+        }
+      }
+    }
+  },
+  "crisis_definition": "40% annual decline followed by 94.4% annual recovery replaces two 8% years: .6*1.944=1.08**2; all geometric means equal, arithmetic mean differs from constant baseline; identical across crisis timings. Smoothed monthly within each year.",
+  "unit_cli_tests": 51,
+  "external_calculator": {
+    "url": "https://www.calculator.net/investment-calculator.html?ctype=endamount&ctargetamountv=1000000&cstartingprinciplev=0&cyearsv=60&cinterestratev=8&ccompound=monthly&ccontributeamountv=8000&cadditionat1=end&ciadditionat1=monthly&printit=0&x=Calculate",
+    "result": 142308219.78,
+    "convention": "8% nominal APR, compounded monthly; fee=0; end-month deposits; no currency conversion"
+  },
+  "investor_gov": "HTTP 403 on direct access; no numerical verification claimed"
+}
+
+```
