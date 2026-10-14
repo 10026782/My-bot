@@ -21,7 +21,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
 /** Plan vs actual for the standing-order savings card; a missed month is a visible gap, not an automatic catch-up. */
 function savingsHint(card: { deposited_month?: number; gap_month?: number; gap_last_month?: number }): string {
   const parts = ["הוראת קבע מול יעד · לא מתאפס"];
-  if (card.deposited_month != null) parts.push(`הופקד החודש ${money(card.deposited_month)}${card.gap_month ? ` · פער ${money(card.gap_month)}` : ""}`);
+  if (card.deposited_month != null) parts.push(`הופקד החודש ${money(card.deposited_month)} (דיווח עצמי)${card.gap_month ? ` · פער ${money(card.gap_month)}` : ""}`);
   if (card.gap_last_month) parts.push(`פער בחודש שעבר ${money(card.gap_last_month)} — אפשר לכתוב ״משימת המשך לפער בחיסכון״`);
   return parts.join(" · ");
 }
@@ -256,7 +256,7 @@ export function savingsReleaseModel(r: FccSavingsRelease): SavingsReleaseModel {
   lines.push(r.shortfall > 0
     ? `חסרים ${money(r.shortfall)} ליעד — מהכנסות נוף הגליל נשארים ${money(r.from_fixed)} מתוך ${money(r.fixed_level)}`
     : `יעד ההכנסה הושג — מתפנים ${money(r.fixed_level)} מנוף הגליל${r.extra > 0 ? ` ועוד ${money(r.extra)} מעל היעד` : ""}`);
-  lines.push(`הופקדו החודש ${money(r.deposited)} · נשארו להפקדה ${money(r.remaining)}`);
+  lines.push(`הופקדו החודש ${money(r.deposited)} (דיווח עצמי) · נשארו להפקדה ${money(r.remaining)}`);
   return {
     headline: money(r.available),
     lines,

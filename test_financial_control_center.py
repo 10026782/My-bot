@@ -2671,6 +2671,33 @@ def test_recent_events_never_show_balance_snapshots_transfers_or_fees_as_progres
     assert all(e[EF.AMOUNT] < 500000 for e in out)
     assert out[0][EF.OCCURRED_AT] == "2026-09-19"
 
+def test_savings_history_is_derived_from_existing_events_and_marks_gaps():
+    from datetime import date
+    from core.financial_control import calc
+    E = calc.Event
+    dep = [E(calc.ONE_TIME, 1000, date(2026, 8, 3)), E(calc.ONE_TIME, 500, date(2026, 9, 2)),
+           E(calc.ONE_TIME, 700, date(2026, 10, 1)), E(calc.ONE_TIME, 999, date(2026, 10, 2), superseded=True),
+           E(calc.ONE_TIME, 400, date(2026, 12, 1))]                       # future-dated: ignored
+    plan = [E(calc.MONTHLY_RECURRING, 1000, date(2026, 1, 1))]
+    h = calc.deposit_history(dep, plan, date(2026, 10, 14))
+    assert (h["ytd"], h["months_elapsed"], h["monthly_average"]) == (2200, 10, 220)
+    assert (h["ytd_plan"], h["ytd_gap"], h["streak"], h["deposit_count"]) == (10000, 7800, 3, 3)
+    assert h["last_deposit"] == "2026-10-01" and len(h["recent"]) == 12 and h["recent"][-1] == {"month": "2026-10", "deposited": 700, "plan": 1000}
+    # no deposit yet this month: the streak still counts through last month; a missed month breaks it
+    assert calc.deposit_history(dep[:2], plan, date(2026, 10, 14))["streak"] == 2
+    assert calc.deposit_history([E(calc.ONE_TIME, 1, date(2026, 8, 1))], plan, date(2026, 10, 14))["streak"] == 0
+    # nothing recorded
+    z = calc.deposit_history([], [], date(2026, 1, 5))
+    assert (z["ytd"], z["monthly_average"], z["streak"], z["last_deposit"]) == (0, 0, 0, None)
+
+
+def test_savings_history_in_overview_needs_one_unambiguous_destination():
+    seed_release([17000], deposits=[4000])
+    h = service.overview(ELIYAHU, TODAY)["savings_history"]
+    assert h["ytd"] == 4000 and h["deposit_count"] == 1 and h["streak"] == 1
+    DB[Tables.FIN_GOALS].append(goal("recPen2", "קרן נוספת", ELI, None, **{GF.CATEGORY: "long_term"}))
+    assert service.overview(ELIYAHU, TODAY)["savings_history"] is None
+
 
 def test_release_formula_shortfall_comes_out_of_the_fixed_income_and_excess_is_extra():
     for net, avail in ((0, 0), (7000, 0), (10000, 3000), (15000, 8000), (17000, 10000)):

@@ -518,6 +518,20 @@ def savings_release_view(rows: list[dict], summary: dict, own: dict[str, list[ca
     return out
 
 
+def savings_history_view(goals: list[dict], own: dict[str, list[calc.Event]], active_ids: set[str], today: date) -> dict | None:
+    """Self-reported deposit history of the single long-term destination goal vs the standing level of the active savings
+    goal(s). None when there is no unambiguous destination. Pure derivation from existing events — nothing is written."""
+    dests = [g for g in goals if g["id"] in active_ids
+             and _raw_category((g.get("fields") or {}).get(FinGoalFields.CATEGORY)) == SAVINGS_DESTINATION_CATEGORY]
+    if len(dests) != 1:
+        return None
+    plan: list[calc.Event] = []
+    for g in goals:
+        if g["id"] in active_ids and _category_key((g.get("fields") or {}).get(FinGoalFields.CATEGORY)) == "savings":
+            plan.extend(own.get(g["id"], []))
+    return calc.deposit_history(own.get(dests[0]["id"], []), plan, today)
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()
@@ -563,6 +577,7 @@ def overview(identity, today: date | None = None) -> dict:
         "goals": rows,
         "summary": summary,
         "savings_release": savings_release_view(rows, summary, own, goals, active_ids, today),
+        "savings_history": savings_history_view(goals, own, active_ids, today),
         "loans": loans_payload,
         "assets": assets_overview(identity, loans_payload["items"]),
         "recent_incomes": recent_incomes(goals, events),

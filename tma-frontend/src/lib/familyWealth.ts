@@ -25,7 +25,7 @@ export interface SavingsTabModel { rows: SavingsRow[]; notes: string[]; hasData:
 
 /** The savings tab from data the FCC overview already carries. Plan = the standing level of the savings goal(s); actual =
  *  this month's recorded deposits on the long-term goal; "צפוי להתפנות" is derived from income and is NOT a plan. */
-export function savingsTabModel(data: Pick<FccOverview, "summary" | "savings_release">): SavingsTabModel {
+export function savingsTabModel(data: Pick<FccOverview, "summary" | "savings_release" | "savings_history">): SavingsTabModel {
   const plan = data.summary.savings;
   const release = data.savings_release ?? null;
   const rows: SavingsRow[] = [];
@@ -39,16 +39,24 @@ export function savingsTabModel(data: Pick<FccOverview, "summary" | "savings_rel
     rows.push({ key: "expected", label: "צפוי להתפנות", value: money(release.expected),
                 hint: "נגזר מההכנסה החודשית — אינו הפקדה מתוכננת" });
   }
+  const h = data.savings_history ?? null;
+  if (h) {
+    rows.push({ key: "ytd", label: "הופקד מתחילת השנה", value: money(h.ytd), hint: `${h.deposit_count} הפקדות · ${SELF_REPORTED}` });
+    rows.push({ key: "average", label: "ממוצע חודשי", value: money(h.monthly_average), hint: `על פני ${h.months_elapsed} חודשים מתחילת השנה` });
+    rows.push({ key: "streak", label: "רצף חודשים עם הפקדה", value: String(h.streak), hint: h.last_deposit ? `הפקדה אחרונה: ${h.last_deposit}` : "עוד לא נרשמה הפקדה" });
+    rows.push({ key: "ytd_gap", label: "פער מול התכנון מתחילת השנה", value: money(h.ytd_gap),
+                hint: `תכנון מצטבר ${money(h.ytd_plan)} · פער נרשם ואינו מתמלא אוטומטית` });
+  }
   rows.push({ key: "balance", label: "יתרת תיק", value: "לא זמינה", hint: BALANCE_PLACEHOLDER });
   return {
     rows,
-    notes: ["סיכומי שנה, ממוצע חודשי ורצף חודשים יתווספו בשלב הבא.", "אין כאן הבטחת תשואה — המספרים הם דיווח והנחות בלבד."],
-    hasData: Boolean(plan || release),
+    notes: ["אין כאן הבטחת תשואה — המספרים הם דיווח והנחות בלבד."],
+    hasData: Boolean(plan || release || h),
   };
 }
 
 /** Entry card on the monthly FCC tab: one short line, only from what the overview already has. */
-export function familyCardModel(data: Pick<FccOverview, "summary" | "savings_release">): { title: string; value: string; hint: string } {
+export function familyCardModel(data: Pick<FccOverview, "summary" | "savings_release" | "savings_history">): { title: string; value: string; hint: string } {
   const release = data.savings_release ?? null;
   return {
     title: SCREEN_TITLE,
