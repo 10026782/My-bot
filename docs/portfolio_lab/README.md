@@ -1,7 +1,7 @@
 # Portfolio Lab — PL-1
 
-**Evidence level: STATIC_VERIFIED on `codex/portfolio-lab-phase1` only.**
-Implementation is not merged, wired, deployed or verified in production.
+**Evidence level: MERGED (PR #1310, 13/10/2026); STATIC_VERIFIED.** Index and current status of both work tracks: [MASTER_PLAN.md](MASTER_PLAN.md).
+The local engine is not bot-wired; its only runtime consumer is the read-only TMA endpoint `POST /api/portfolio-lab/simulate` (see [UI.md](UI.md)). Production deployment and runtime behaviour are not verified by this document.
 Local research library; no trades, broker connection, bot routes or external I/O.
 
 ## Run
