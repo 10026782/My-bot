@@ -482,6 +482,23 @@ def recent_incomes(goals: list[dict], events: list[dict], limit: int = RECENT_IN
     return rows
 
 
+RECENT_EVENTS = 10
+
+
+def recent_progress_events(events: list[dict], limit: int = RECENT_EVENTS) -> list[dict]:
+    """The "התקדמות אחרונה" list: the latest goal-progress events, newest first. Allow-list of the known goal-event kinds
+    (``calc.EVENT_KINDS``), applied BEFORE the cut to ``limit``: any other kind (a balance snapshot, withdrawal, fee, transfer ...)
+    is never shown as progress and never pushes a real progress event out of the list. Fail-closed for kinds added later."""
+    def kind_of(e: dict) -> str | None:
+        k = (e.get("fields") or {}).get(FinEventFields.KIND)
+        return k.get("name") if isinstance(k, dict) else k
+
+    shown = [e for e in events if kind_of(e) in calc.EVENT_KINDS]
+    shown.sort(key=lambda e: str((e.get("fields") or {}).get(FinEventFields.OCCURRED_AT) or ""), reverse=True)
+    return [{"goal_ids": _goal_ids_of(e), **{k: (e.get("fields") or {}).get(k) for k in (
+        FinEventFields.AMOUNT, FinEventFields.KIND, FinEventFields.OCCURRED_AT, FinEventFields.NOTE)}} for e in shown[:limit]]
+
+
 def savings_release_view(rows: list[dict], summary: dict, own: dict[str, list[calc.Event]], goals: list[dict],
                          active_ids: set[str], today: date) -> dict | None:
     """The monthly "freed for savings" picture, or None when it cannot be derived (no income goal / no fixed income).
@@ -554,12 +571,7 @@ def overview(identity, today: date | None = None) -> dict:
         "obligations": obligations_overview(identity),
         "tasks": tasks,
         "monthly_cash_improvement": calc.monthly_cash_improvement(all_events, today),
-        "recent_events": [
-            {"goal_ids": _goal_ids_of(e), **{k: (e.get("fields") or {}).get(k) for k in (
-                FinEventFields.AMOUNT, FinEventFields.KIND, FinEventFields.OCCURRED_AT, FinEventFields.NOTE)}}
-            for e in sorted(events, key=lambda e: str((e.get("fields") or {}).get(FinEventFields.OCCURRED_AT) or ""),
-                            reverse=True)[:10]
-        ],
+        "recent_events": recent_progress_events(events),
         "as_of": today.isoformat(),
     }
 
