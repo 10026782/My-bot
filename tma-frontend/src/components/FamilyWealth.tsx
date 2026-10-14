@@ -11,7 +11,7 @@ import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
 
 /** Entry card on the FCC monthly tab. Wording only: every value is already in the overview. */
-export function FamilyWealthCard({ data, onOpen }: { data: Pick<FccOverview, "summary" | "savings_release">; onOpen: () => void }) {
+export function FamilyWealthCard({ data, onOpen }: { data: Pick<FccOverview, "summary" | "savings_release" | "savings_history">; onOpen: () => void }) {
   const m = familyCardModel(data);
   return (
     <Surface variant="subtle" padding="compact" className="fcc-kpi fw-card" aria-label={m.title}>
@@ -23,7 +23,7 @@ export function FamilyWealthCard({ data, onOpen }: { data: Pick<FccOverview, "su
   );
 }
 
-function SavingsPanel({ data }: { data: Pick<FccOverview, "summary" | "savings_release"> }) {
+function SavingsPanel({ data }: { data: Pick<FccOverview, "summary" | "savings_release" | "savings_history"> }) {
   const m = savingsTabModel(data);
   return (
     <div className="fcc-stack">
@@ -34,7 +34,7 @@ function SavingsPanel({ data }: { data: Pick<FccOverview, "summary" | "savings_r
   );
 }
 
-type SavingsData = Pick<FccOverview, "summary" | "savings_release" | "as_of">;
+type SavingsData = Pick<FccOverview, "summary" | "savings_release" | "savings_history" | "as_of">;
 export type OverviewState = { status: "loading" } | { status: "ok"; data: SavingsData } | { status: "error"; code?: number };
 
 /** The savings tab's three states. The lab tab does not depend on this: it has its own call and its own states. */

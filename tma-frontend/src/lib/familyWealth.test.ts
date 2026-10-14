@@ -44,7 +44,18 @@ test("savings tab: plan = standing level, actual labelled as self-reported, expe
   assert.ok(by.expected.hint?.includes("אינו הפקדה מתוכננת"));
   assert.equal(by.balance.value, "לא זמינה");
   assert.equal(by.balance.hint, BALANCE_PLACEHOLDER);
-  assert.ok(!m.rows.some((r) => /פער/.test(r.label + (r.hint ?? ""))), "no gap is shown in this PR (it would be client arithmetic)");
+  assert.ok(!m.rows.some((r) => /פער|שנה|רצף/.test(r.label)), "no history rows without server history (nothing is computed here)");
+});
+
+test("savings tab: history rows are server numbers only, labelled self-reported, gap stays visible", () => {
+  const history = { ytd: 2200, ytd_plan: 10000, ytd_gap: 7800, months_elapsed: 10, monthly_average: 220, streak: 3,
+    last_deposit: "2026-10-01", deposit_count: 3, recent: [] };
+  const m = savingsTabModel({ ...overview, savings_history: history } as unknown as FccOverview);
+  const by = Object.fromEntries(m.rows.map((r) => [r.key, r]));
+  assert.ok(by.ytd.value.includes("2,200") && by.ytd.hint?.includes(SELF_REPORTED));
+  assert.ok(by.average.value.includes("220") && by.streak.value === "3");
+  assert.ok(by.ytd_gap.value.includes("7,800") && by.ytd_gap.hint?.includes("10,000"));
+  assert.equal(m.rows.map((r) => r.key).join(","), "plan,deposited,expected,ytd,average,streak,ytd_gap,balance");
 });
 
 test("savings tab: missing data stays missing (never 0, never made up)", () => {
