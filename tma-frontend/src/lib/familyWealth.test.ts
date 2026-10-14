@@ -67,7 +67,7 @@ test("entry card: short, from the overview only, labelled", () => {
 });
 
 test("family screen renders both tabs, starts on the savings tab and does not mount the lab until opened", () => {
-  const html = renderToStaticMarkup(createElement(FamilyWealth, { data: overview, onBack: () => undefined }));
+  const html = renderToStaticMarkup(createElement(FamilyWealth, { overview: { status: "ok", data: overview }, onBack: () => undefined, onRetry: () => undefined }));
   assert.ok(html.includes("החיסכון שלי") && html.includes("מעבדת העתיד"));
   assert.ok(html.includes('role="tablist"') && html.includes('id="fw-tab-savings"') && html.includes('id="fw-panel-lab"'));
   assert.ok(!html.includes("נתוני הדגמה"), "the lab (and its simulation call) is not mounted on the savings tab");
@@ -107,7 +107,7 @@ test("one name everywhere: entry card, open button, screen title and tab-strip l
   const card = renderToStaticMarkup(createElement(FamilyWealthCard, { data: overview, onOpen: () => undefined }));
   assert.ok(card.includes(`aria-label="${SCREEN_TITLE}"`), "card aria-label");
   assert.ok(card.includes(`aria-label="${OPEN_LABEL}"`) && OPEN_LABEL.endsWith(SCREEN_TITLE), "open button");
-  const screen = renderToStaticMarkup(createElement(FamilyWealth, { data: overview, onBack: () => undefined }));
+  const screen = renderToStaticMarkup(createElement(FamilyWealth, { overview: { status: "ok", data: overview }, onBack: () => undefined, onRetry: () => undefined }));
   assert.ok(screen.includes(`>${SCREEN_TITLE}</h1>`) || screen.includes(SCREEN_TITLE), "screen title");
   assert.ok(screen.includes(`aria-label="${TABS_ARIA_LABEL}"`) && TABS_ARIA_LABEL.endsWith(SCREEN_TITLE), "tab strip label");
   const fs = require("fs");
@@ -176,12 +176,31 @@ test("no financial engine in the client: no compounding / annuity / power math i
   }
 });
 
-test("the screen is never reachable without the existing FCC gate: it is only opened from inside FinancialControlCenter", () => {
+test("a screen of its own: opened from the hub (owners only) and via the FCC card shortcut — never nested inside the FCC", () => {
   const fs = require("fs");
   const app = fs.readFileSync("src/App.tsx", "utf8");
-  assert.ok(!app.includes("FamilyWealth") && !app.includes("PortfolioLab"), "App.tsx must not open it directly");
+  assert.ok(app.includes("if (familyOpen)") && app.includes("<FamilyWealthScreen"), "App opens the screen itself");
+  assert.ok(/canShowOwnerControl && \(\s*<button[\s\S]{0,120}setFamilyOpen\(true\)/.test(app), "hub entry is owner-only");
+  assert.ok(app.includes("aria-label={SCREEN_TITLE}"), "hub button is named by SCREEN_TITLE");
+  assert.ok(app.includes("onOpenFamilyWealth="), "the FCC card is a shortcut owned by App");
   const fcc = fs.readFileSync("src/components/FinancialControlCenter.tsx", "utf8");
-  assert.ok(fcc.includes("familyOpen") && fcc.includes("<FamilyWealthCard"));
+  assert.ok(!fcc.includes("<FamilyWealth ") && !fcc.includes("familyOpen"), "the FCC no longer renders the screen");
+  assert.ok(fcc.includes("onOpenFamilyWealth && <FamilyWealthCard"), "no card without the shortcut");
+});
+
+test("the screen loads its own data: loading/error states, and the lab tab does not depend on the overview", () => {
+  const states = [
+    [{ status: "loading" as const }, "טוען את נתוני החיסכון"],
+    [{ status: "error" as const, code: 404 }, "המסך עדיין לא פעיל"],
+    [{ status: "error" as const, code: 403 }, "אין הרשאה"],
+    [{ status: "error" as const, code: 500 }, "נסו שוב"],
+  ] as const;
+  for (const [overview, text] of states) {
+    const html = renderToStaticMarkup(createElement(FamilyWealth, { overview, onBack: () => undefined, onRetry: () => undefined }));
+    assert.ok(html.includes(text), `savings tab shows "${text}"`);
+    assert.ok(html.includes(SCREEN_TITLE) && html.includes('id="fw-tab-lab"'), "header and both tabs are always there");
+    assert.ok(!html.includes("הפקדה חודשית מתוכננת"), "no savings numbers without data");
+  }
 });
 
 if (failures) throw new Error(`${failures} test(s) failed`);

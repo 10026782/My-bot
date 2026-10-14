@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- fix(family-wealth): the long-term savings screen is a screen of its own (owner decision 14/10/2026) — hub entry button, loads its own FCC overview (loading/error states; the lab tab is independent of it), the FCC card is only a shortcut. Frontend only; the server gate (FCC flag + canary + owner) is unchanged.
+
 - feat(family-wealth): "תכנון חיסכון לטווח ארוך" TMA screen (PR-1) — entry card in the FCC monthly tab, two tabs (savings from existing overview data only; future lab = Portfolio Lab via the new read-only `POST /api/portfolio-lab/simulate`, FCC flag + canary + owner, rate-limited, size-capped). No new table, no writes, no client-side financial math; the standalone local server is not deployed. Draft PR, not merged.
 
 - feat(portfolio-lab): Phase 1.5 local simulator screen — `portfolio_lab/simulator_view.py` (structured view over the existing engine), `portfolio_lab/ui.py` + `ui_page.html` (loopback stdlib server, SVG charts), `test_portfolio_lab_ui.py`; no bot/Airtable/LLM wiring; not merged/deployed.
