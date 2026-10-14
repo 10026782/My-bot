@@ -6,20 +6,24 @@ import {
 } from "../lib/fccTabs";
 import { Surface } from "./ui/Surface";
 
-export function FccTabBar({ active, onChange }: { active: FccTabKey; onChange: (key: FccTabKey) => void }) {
+/** The FCC tab strip; reused (with its own ``tabs`` / ``idPrefix`` / ``ariaLabel``) by other screens so tabs look and behave the same. */
+export function FccTabBar<K extends string = FccTabKey>({ active, onChange, tabs, idPrefix = "fcc", ariaLabel = "אזורי המרכז הכלכלי" }: {
+  active: K; onChange: (key: K) => void; tabs?: readonly { key: K; label: string }[]; idPrefix?: string; ariaLabel?: string;
+}) {
+  const list = (tabs ?? FCC_TABS) as unknown as readonly { key: K; label: string }[];
   // roving tabindex: only the selected tab is in the Tab order, so the arrows must reach the others
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
-    const next = tabForKey(active, e.key, rtl);
+    const next = tabForKey(active, e.key, rtl, list);
     if (!next) return;
     e.preventDefault();
     onChange(next);
-    document.getElementById(tabId(next))?.focus();
+    document.getElementById(tabId(next, idPrefix))?.focus();
   };
   return (
-    <div className="fcc-tabs" role="tablist" aria-label="אזורי המרכז הכלכלי" onKeyDown={onKeyDown}>
-      {FCC_TABS.map((t) => (
-        <button key={t.key} type="button" role="tab" id={tabId(t.key)} aria-selected={active === t.key} aria-controls={panelId(t.key)}
+    <div className="fcc-tabs" role="tablist" aria-label={ariaLabel} onKeyDown={onKeyDown}>
+      {list.map((t) => (
+        <button key={t.key} type="button" role="tab" id={tabId(t.key, idPrefix)} aria-selected={active === t.key} aria-controls={panelId(t.key, idPrefix)}
                 tabIndex={active === t.key ? 0 : -1} className={`fcc-tab ${active === t.key ? "fcc-tab--on" : ""}`}
                 onClick={() => onChange(t.key)}>{t.label}</button>
       ))}

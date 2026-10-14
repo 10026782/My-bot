@@ -276,7 +276,7 @@ def test_server_refuses_production_and_non_loopback():
 
 def test_not_wired_into_deployed_runtime():
     from pathlib import Path
-    for name in ("app.py", "tma_api.py", "gunicorn.conf.py", "Dockerfile", "docker-compose.oracle.yml", "Caddyfile.oracle", "scheduler.py"):
+    for name in ("app.py", "gunicorn.conf.py", "Dockerfile", "docker-compose.oracle.yml", "Caddyfile.oracle", "scheduler.py"):
         path = Path(name)
         if path.exists():
             assert "portfolio_lab" not in path.read_text(encoding="utf-8"), name

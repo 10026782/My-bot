@@ -7,6 +7,7 @@ import { AssetsSection, NextActionPrompt } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
 import { LoansSection } from "./FccLoans";
 import { ContextualComposer, FccTabBar } from "./FccTabBar";
+import { FamilyWealth, FamilyWealthCard } from "./FamilyWealth";
 import { initialTab, nextWriterState, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
@@ -125,6 +126,7 @@ function GoalCard({ goal, onUpdate, onAction, disabled }: { goal: FccGoalRow; on
 export function FinancialControlCenter({ onBack }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [tab, setTab] = useState<FccTabKey>(initialTab);       // remembered while the app stays open; a fresh open starts on "monthly"
+  const [familyOpen, setFamilyOpen] = useState(false);          // "תכנון חיסכון לטווח ארוך" opens from the monthly tab card
   const changeTab = (key: FccTabKey) => { rememberTab(key); setTab(key); };
 
   const load = () => {
@@ -172,11 +174,14 @@ export function FinancialControlCenter({ onBack }: Props) {
   }
 
   const { data } = state;
+  if (familyOpen) return <FamilyWealth data={data} onBack={() => setFamilyOpen(false)} />;
   const monthly = (
     <div className="fcc-stack">
       <div className="fcc-kpis">
         {headerCards(data).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
       </div>
+
+      <FamilyWealthCard data={data} onOpen={() => setFamilyOpen(true)} />
 
       <WeeklySurplusCard weekly={data.summary.income?.weekly} onStart={(i) => void writer.start(i)} disabled={writer.busy || writer.turn != null} />
 
