@@ -759,8 +759,15 @@ export interface FccSavingsRelease {
   month: string; closing: boolean; destination: { id: string; title: string | null } | null;
 }
 
+/** Self-reported deposit history (server-derived from existing events; nothing stored, nothing verified against a bank or fund). */
+export interface FccSavingsHistory {
+  ytd: number; ytd_plan: number; ytd_gap: number; months_elapsed: number; monthly_average: number; streak: number;
+  last_deposit: string | null; deposit_count: number; recent: { month: string; deposited: number; plan: number }[];
+}
+
 export interface FccOverview {
   goals: FccGoalRow[];
+  savings_history?: FccSavingsHistory | null;
   savings_release?: FccSavingsRelease | null;
   loans?: FccLoans;
   assets?: FccAssets;

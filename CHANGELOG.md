@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- feat(family-wealth): PR-2 — "החיסכון שלי" with deposit history: new server-derived `savings_history` in the FCC overview (`calc.deposit_history`: YTD, monthly average, streak, gap vs the standing plan; from existing events only, no table, no writes), shown in the savings tab; deposits labelled "דיווח עצמי" in the FCC savings cards. Portfolio balance stays "לא זמינה" (needs an owner schema decision). Draft PR, not merged.
+
 - fix(family-wealth): the long-term savings screen is a screen of its own (owner decision 14/10/2026) — hub entry button, loads its own FCC overview (loading/error states; the lab tab is independent of it), the FCC card is only a shortcut. Frontend only; the server gate (FCC flag + canary + owner) is unchanged.
 
 - feat(family-wealth): "תכנון חיסכון לטווח ארוך" TMA screen (PR-1) — entry card in the FCC monthly tab, two tabs (savings from existing overview data only; future lab = Portfolio Lab via the new read-only `POST /api/portfolio-lab/simulate`, FCC flag + canary + owner, rate-limited, size-capped). No new table, no writes, no client-side financial math; the standalone local server is not deployed. Draft PR, not merged.

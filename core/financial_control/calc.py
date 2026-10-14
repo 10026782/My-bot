@@ -420,6 +420,46 @@ def deposits_in_month(events: list[Event], today: date) -> float:
     return round(sum(e.amount for e in events if not e.superseded and e.kind == ONE_TIME and start <= e.occurred <= end), 2)
 
 
+def _month_index(d: date) -> int:
+    return d.year * 12 + d.month - 1
+
+
+def deposit_history(deposits: list[Event], plan: list[Event], today: date, months: int = 12) -> dict:
+    """Self-reported deposit history from existing events only (nothing stored): deposits = one_time events on the long-term
+    goal, plan = monthly_recurring events of the savings goal(s) (the standing level in force at each month's end).
+    YTD covers January..the current month; the average is over those calendar months (a missed month counts as 0);
+    the streak counts consecutive months with a deposit, ending this month (or last month while this one has none yet).
+    Superseded events are ignored; a missed month is a gap, never caught up."""
+    live = [e for e in deposits if not e.superseded and e.kind == ONE_TIME and e.occurred <= today]
+    plans = [e for e in plan if not e.superseded and e.kind == MONTHLY_RECURRING]
+    per_month: dict[int, float] = {}
+    for e in live:
+        per_month[_month_index(e.occurred)] = per_month.get(_month_index(e.occurred), 0.0) + e.amount
+    now = _month_index(today)
+
+    def level_at(idx: int) -> float:
+        return sum(e.amount for e in plans if _month_index(e.occurred) <= idx)
+
+    elapsed = today.month
+    ytd_idx = range(now - elapsed + 1, now + 1)
+    ytd = sum(per_month.get(i, 0.0) for i in ytd_idx)
+    ytd_plan = sum(max(level_at(i), 0.0) for i in ytd_idx)
+    start = now if per_month.get(now, 0.0) > 0 else now - 1
+    streak, i = 0, start
+    while per_month.get(i, 0.0) > 0:
+        streak += 1
+        i -= 1
+    recent = []
+    for i in range(now - months + 1, now + 1):
+        y, m = divmod(i, 12)
+        recent.append({"month": f"{y:04d}-{m + 1:02d}", "deposited": round(per_month.get(i, 0.0), 2),
+                       "plan": round(max(level_at(i), 0.0), 2)})
+    last = max((e.occurred for e in live), default=None)
+    return {"ytd": round(ytd, 2), "ytd_plan": round(ytd_plan, 2), "ytd_gap": round(max(ytd_plan - ytd, 0.0), 2),
+            "months_elapsed": elapsed, "monthly_average": round(ytd / elapsed, 2), "streak": streak,
+            "last_deposit": last.isoformat() if last else None, "deposit_count": len(live), "recent": recent}
+
+
 def month_closing(today: date, window: int = 7) -> bool:
     """The last ``window`` days of the calendar month: the "how much did you put away?" question is due."""
     return calendar.monthrange(today.year, today.month)[1] - today.day < window
