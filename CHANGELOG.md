@@ -4,6 +4,8 @@ All notable repository-level changes should be recorded here.
 
 ## Unreleased
 
+- fix(fcc): `recent_events` ("התקדמות אחרונה") shows only the known goal-event kinds (`calc.EVENT_KINDS`), filtered before the cut to 10 — prerequisite for any new Financial Progress Events kind (balance snapshot, withdrawal, fee, transfer) so it can never appear as savings progress (FAMILY_WEALTH_ACCOUNTS_SPEC step 1). No schema change; existing kinds unchanged.
+
 - feat(family-wealth): PR-2 — "החיסכון שלי" with deposit history: new server-derived `savings_history` in the FCC overview (`calc.deposit_history`: YTD, monthly average, streak, gap vs the standing plan; from existing events only, no table, no writes), shown in the savings tab; deposits labelled "דיווח עצמי" in the FCC savings cards. Portfolio balance stays "לא זמינה" (needs an owner schema decision). Draft PR, not merged.
 
 - fix(family-wealth): the long-term savings screen is a screen of its own (owner decision 14/10/2026) — hub entry button, loads its own FCC overview (loading/error states; the lab tab is independent of it), the FCC card is only a shortcut. Frontend only; the server gate (FCC flag + canary + owner) is unchanged.

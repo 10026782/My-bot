@@ -2649,6 +2649,28 @@ def release(**kw):
     return service.overview(ELIYAHU, TODAY)["savings_release"]
 
 
+def test_recent_events_show_every_existing_kind_exactly_as_before():
+    kinds = ("one_time", "monthly_recurring", "target_change", "note", "direct_cost", "household_expense")
+    seed_release([], deposits=[])
+    DB[Tables.FIN_EVENTS] = [event(f"recK{i}", "recPen", ELI, 100 + i, kind=k, day=f"2026-10-0{i + 1}") for i, k in enumerate(kinds)]
+    out = service.overview(ELIYAHU, TODAY)["recent_events"]
+    assert [e[EF.KIND] for e in out] == list(reversed(kinds))                       # all six, newest first
+    assert set(out[0]) == {"goal_ids", EF.AMOUNT, EF.KIND, EF.OCCURRED_AT, EF.NOTE} and out[0]["goal_ids"] == ["recPen"]
+    DB[Tables.FIN_EVENTS][0]["fields"][EF.KIND] = {"name": "one_time"}              # Airtable select object form
+    assert len(service.overview(ELIYAHU, TODAY)["recent_events"]) == 6
+
+
+def test_recent_events_never_show_balance_snapshots_transfers_or_fees_as_progress():
+    seed_release([], deposits=[])
+    real = [event(f"recR{i}", "recPen", ELI, 50 + i, day=f"2026-09-{10 + i:02d}") for i in range(10)]     # 10 real events, older
+    hidden = [event(f"recH{i}", "recPen", ELI, 500000, kind=k, day=f"2026-10-1{i}")                        # newer, would take the slots
+              for i, k in enumerate(("balance_snapshot", "withdrawal", "fee", "transfer", "deposit"))]
+    DB[Tables.FIN_EVENTS] = real + hidden + [event("recN", "recPen", ELI, 1, kind=None, day="2026-10-13")]
+    out = service.overview(ELIYAHU, TODAY)["recent_events"]
+    assert len(out) == 10 and all(e[EF.KIND] == "one_time" for e in out)            # filtered BEFORE the cut: real events keep their slots
+    assert all(e[EF.AMOUNT] < 500000 for e in out)
+    assert out[0][EF.OCCURRED_AT] == "2026-09-19"
+
 def test_savings_history_is_derived_from_existing_events_and_marks_gaps():
     from datetime import date
     from core.financial_control import calc
