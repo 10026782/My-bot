@@ -183,3 +183,75 @@ def test_field_names_match_the_live_schema():
                                "Closed At", "Notes", "Created At"]
     assert (EF.ACCOUNT, EF.COUNTER_ACCOUNT, EF.VERIFICATION) == ("Account", "Counter Account", "Verification")
     assert Tables.FIN_ACCOUNTS == "Financial Accounts"
+
+
+# ═══════════════ step 4: no full account / policy numbers in code write paths ═══════════════
+
+LONG = ["1234567890", "1234-5678-9012", "1234 5678 9012", "12 345 678", "1234 - 5678", "חשבון 123456789 בבנק",
+        "פוליסה מס' 12-345-6789", "נפתח 2026-10-15 חשבון 12-345-6789", "15000000"]
+SAFE = ["2026-10-15", "נפתח 15/10/2026", "נפתח ב-2026-10-15", "1,500,000", "₪ 250,000", "0.75%", "****1234",
+        "ending 1234", "אחרונות 1234", "1234567", "סניף 123", "קרן פנסיה מקיפה", "", None, 12345678, ["12345678"]]
+
+
+def test_digit_guard_detects_full_numbers_and_spares_dates_amounts_and_last_four():
+    assert all(policy.contains_long_number(v) for v in LONG)
+    assert not any(policy.contains_long_number(v) for v in SAFE)
+
+
+@pytest.mark.parametrize("field", [AF.NAME, AF.INSTITUTION, AF.HOLDER_NAMES, AF.TAX_NOTES, AF.NOTES])
+def test_account_text_fields_reject_long_numbers_on_create_and_update(field):
+    for bad in LONG:
+        with pytest.raises(policy.PersonalDataAccessDenied) as exc:
+            policy.scope_new_record_fields(Tables.FIN_ACCOUNTS, {AF.NAME: "x", field: bad}, ELIYAHU)
+        assert exc.value.args[0] == policy.LONG_NUMBER_MESSAGE
+        with pytest.raises(TenantScopeViolation):
+            enforce_tenant_scope("airtable_add", ELIYAHU, {"table": Tables.FIN_ACCOUNTS, "fields": {field: bad}})
+        with pytest.raises(TenantScopeViolation):
+            enforce_tenant_scope("airtable_update", ELIYAHU, {"table": Tables.FIN_ACCOUNTS, "record_id": "recAccE",
+                                                              "fields": {field: bad}})
+    for ok in ("2026-10-15", "1,500,000", "****1234", "ending 1234", "סניף 123"):
+        policy.scope_new_record_fields(Tables.FIN_ACCOUNTS, {AF.NAME: "x", field: ok}, ELIYAHU)
+        enforce_tenant_scope("airtable_update", ELIYAHU, {"table": Tables.FIN_ACCOUNTS, "record_id": "recAccE",
+                                                          "fields": {field: ok}})
+
+
+def test_unguarded_account_fields_and_other_tables_are_untouched():
+    # numeric / date / select fields are not text-guarded; a long value there is a type problem, not a privacy one
+    policy.scope_new_record_fields(Tables.FIN_ACCOUNTS, {AF.NAME: "x", AF.MANAGEMENT_FEE: 12345678.0, AF.LIQUID_FROM: "2026-10-15"}, ELIYAHU)
+    # other FCC tables keep today's behaviour: long digits in a goal note or a plain event note are accepted
+    assert policy.scope_new_record_fields(Tables.FIN_GOALS, {"Title": "g", "Notes": "ref 123456789012"}, ELIYAHU)["Notes"]
+    plain = policy.scope_new_record_fields(Tables.FIN_EVENTS, {EF.KIND: "one_time", EF.AMOUNT: 5, EF.NOTE: "אסמכתא 123456789"}, ELIYAHU)
+    assert plain[EF.NOTE] == "אסמכתא 123456789"
+
+
+@pytest.mark.parametrize("link", [EF.ACCOUNT, EF.COUNTER_ACCOUNT])
+def test_events_that_carry_an_account_reject_long_numbers_in_their_text(link):
+    for text_field in (EF.NOTE, EF.RAW_TEXT):
+        with pytest.raises(policy.PersonalDataAccessDenied) as exc:
+            policy.scope_new_record_fields(Tables.FIN_EVENTS, {EF.KIND: "balance_snapshot", EF.AMOUNT: 1, link: ["recAccE"],
+                                                               text_field: "חשבון 123456789"}, ELIYAHU)
+        assert exc.value.args[0] == policy.LONG_NUMBER_MESSAGE
+        with pytest.raises(TenantScopeViolation):
+            enforce_tenant_scope("airtable_update", ELIYAHU, {"table": Tables.FIN_EVENTS, "record_id": "recEv",
+                                                              "fields": {link: ["recAccE"], text_field: "123-456-789"}})
+    ok = policy.scope_new_record_fields(Tables.FIN_EVENTS, {EF.KIND: "balance_snapshot", EF.AMOUNT: 1, link: ["recAccE"],
+                                                            EF.NOTE: "מדו\"ח 2026-09-30, ****1234"}, ELIYAHU)
+    assert ok[EF.NOTE].endswith("****1234")
+
+
+def test_text_only_edit_of_an_already_account_linked_event_is_guarded_too(monkeypatch):
+    linked = {EF.FINANCIAL_OWNER: [ELI], EF.ACCOUNT: ["recAccE"]}
+    orig = __import__("tools.airtable_read_adapter", fromlist=["x"]).get_record_fields
+
+    def get_fields(table, rid, **k):
+        return dict(linked) if (table, rid) == (Tables.FIN_EVENTS, "recEvLinked") else orig(table, rid, **k)
+
+    monkeypatch.setattr("tools.airtable_read_adapter.get_record_fields", get_fields)
+    with pytest.raises(TenantScopeViolation):
+        enforce_tenant_scope("airtable_update", ELIYAHU, {"table": Tables.FIN_EVENTS, "record_id": "recEvLinked",
+                                                          "fields": {EF.NOTE: "פוליסה 123456789"}})
+    enforce_tenant_scope("airtable_update", ELIYAHU, {"table": Tables.FIN_EVENTS, "record_id": "recEvLinked",
+                                                      "fields": {EF.NOTE: "תיקון, ****1234"}})
+    # an ordinary (unlinked) event keeps today's behaviour
+    enforce_tenant_scope("airtable_update", ELIYAHU, {"table": Tables.FIN_EVENTS, "record_id": "recEv",
+                                                      "fields": {EF.NOTE: "אסמכתא 123456789"}})
