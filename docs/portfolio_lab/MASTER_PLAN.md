@@ -15,7 +15,7 @@
 | מנוע PL-1: תכנון, חוזים, מתמטיקה | [SPEC.md](SPEC.md), [README.md](README.md), [EVIDENCE.json](EVIDENCE.json) |
 | החלטות סיווג מקורות ושחרור PL-1 | [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md) |
 | מסך הסימולטור, חיבור ל-TMA, אבטחה, PR-2 | [UI.md](UI.md) |
-| מודל חשבונות להון משפחתי (תשתית משותפת D1) | [FAMILY_WEALTH_ACCOUNTS_SPEC.md](FAMILY_WEALTH_ACCOUNTS_SPEC.md) |
+| מודל חשבונות להון משפחתי (תשתית משותפת D1) | [FAMILY_WEALTH_ACCOUNTS_SPEC.md](FAMILY_WEALTH_ACCOUNTS_SPEC.md); בקשת שינוי סכמה לשלב 2: [D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md); הוראת יצירה: [D1_AIRTABLE_CREATION_INSTRUCTIONS.md](D1_AIRTABLE_CREATION_INSTRUCTIONS.md) |
 | סטטוס תוכנית-על | שורת `PORTFOLIO_LAB` ב-[BOSS_UNIFIED_MASTER_PLAN.md](../governance/BOSS_UNIFIED_MASTER_PLAN.md); שורת `PORTFOLIO_LAB` ב-[ROADMAP.md](../../ROADMAP.md) |
 | תלות חיצונית — Decision Hub (ראו סעיף 4) | [DECISION_HUB_MASTER_SPEC.md](../specs/DECISION_HUB_MASTER_SPEC.md), [SPEC_Insight_to_Decision_to_Task.md](../specs/SPEC_Insight_to_Decision_to_Task.md) |
 
@@ -83,8 +83,8 @@
 | שלב SPEC | נושא | סטטוס |
 | --- | --- | --- |
 | 1 | תיקון `recent_events` | **ממוזג** (#1318, 14/10/2026) |
-| 2 | reconcile חי נוסף + בקשת אישור סכמה | טרם בוצע; נדרש אישור נפרד |
-| 3 | סכמה בפועל + מדיניות גישה `OWNER_SCOPED` + בדיקות אבטחה | לא אושר |
+| 2 | reconcile חי נוסף + בקשת אישור סכמה | **בוצע (תיעוד בלבד, 14/10/2026):** reconcile נקי ובקשה ב-[D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md); המלצה `READY FOR SCHEMA APPROVAL` לאפשרות M מצומצמת — **אושר ע"י הבעלים (15/10/2026): **אפשרות F**, סדר מתוקן; הוראת יצירה ב-[D1_AIRTABLE_CREATION_INSTRUCTIONS.md](D1_AIRTABLE_CREATION_INSTRUCTIONS.md). **הסכמה נוצרה ע"י הבעלים ואומתה בקריאה בלבד (15/10/2026): MATCH עם סטיות שאינן חוסמות** (קישורי `Account`/`Counter Account` מרובי-רשומות, שדה הפוך `Incoming Transfers`) — ראו [בקשת השינוי](D1_SCHEMA_CHANGE_REQUEST.md). הטבלה ריקה |
+| 3 | סכמה בפועל (**נוצרה ואומתה**, F) + מדיניות גישה `OWNER_SCOPED` + בדיקות אבטחה (שלב 3א, קוד: **אושר להתחלה 15/10/2026, בעבודה**; חייב להתמזג לפני הזנת נתונים) | חלקית |
 | 4 | אכיפת "אין מספרי חשבון/פוליסה" (8+ ספרות) | לא אושר |
 | 5 | `accounts_overview` (קריאה בלבד) | לא אושר |
 | 6 | הרחבת `deposit_history` ל-`one_time ∪ deposit` | לא אושר |
@@ -125,7 +125,7 @@
 | G2 | סעיף `DECISION-HUB-INSIGHT-1` ב-ROADMAP תיאר את #1311 כ"טיוטה, לא מוזג" | **תוקן ב-PR זה** (שורת סטטוס בלבד: ממוזג; פריסה/flag לא אומתו) |
 | G3 | `SPEC_Insight_to_Decision_to_Task.md` מציג "PR1 … טיוטת PR, לא מוזג" וה-`CHANGELOG.md` מכיל ניסוחים "Not merged" לרשומות שמוזגו | **לא שונה:** SPEC מאושר, CHANGELOG הוא append-only. מסומן כדי שלא יוסק ממנו סטטוס; נדרשת החלטת בעלי תוכנית Decision Hub אם לעדכן |
 | G4 | `docs/portfolio_lab/archive/README.md` ו-`ORIGINAL_PROGRAMME.md` מציינים בכוונה ניסוח היסטורי | לא שונה (ארכיון) |
-| G5 | רענון Context Librarian (`refresh-after-merge`) אחרי #1312–#1315 לא בוצע | פתוח; ללא הוראה |
+| G5 | רענון Context Librarian אחרי המיזוגים | נבדק ב-14/10/2026 (`refresh-after-merge --check` מול `73be4af6`): `CHANGES_REQUIRED` — 37 צמתים עם provenance מיושן (כולל שכבות שאינן קשורות: approvals, core_reasoning, tools, ux_f52) ו-345 מקורות חדשים שאינם רשומים (סיווג `WARNING`/review). `--write` לא הורץ: הוא ייגע בקטלוג ב-`main` מעבר להיקף ויקבע אימות של שכבות שלא נבדקו. נדרש PR תחזוקה ייעודי ובדיקת בעלים; ב-`main` פועלת בדיקת CI אוטומטית |
 | G6 | `UI.md` עדיין מציין "יתרה משוערת … PR-2, דורש החלטת סכמה" בפסקת PR-1, ואילו PR-2 מימש רק היסטוריית הפקדות | לא שונה (תיעוד היסטורי בתוך המסמך; PR-2 מתואר ממש אחריו) |
 | G7 | אימות אחרי פריסה: הבעלים דיווח "עובד תקין" על המסך; לא אומת על ידי סוכן ואין ראיית `DEPLOYED` | פתוח; נדרש אימות בפרודקשן אם רוצים לסמן `RUNTIME_VERIFIED` |
 
