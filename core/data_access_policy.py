@@ -33,7 +33,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from airtable_schema import TABLE_ALIASES, FinGoalFields, Tables, TaskFields
+from airtable_schema import TABLE_ALIASES, FinAccountFields, FinEventFields, FinGoalFields, Tables, TaskFields
 from core import owner_resolution
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ class PersonalDataAccessDenied(PermissionError):
 DENIED_MESSAGE = "❌ גישה נחסמה: נתונים אישיים זמינים רק לבעל הרשומה."
 UNRESOLVED_MESSAGE = "❌ גישה נחסמה: לא ניתן לאמת את זהותך מול רשומה אישית."
 SYSTEM_STATE_MESSAGE = "❌ גישה נחסמה: זה מצב פנימי של המערכת ואינו זמין דרך כלי הנתונים."
+SINGLE_LINK_MESSAGE = "❌ ניתן לקשר רשומה אחת בלבד בשדה זה."
 RAW_TABLE_ID_MESSAGE = "❌ גישה נחסמה: יש לפנות לטבלה לפי שם, לא לפי מזהה."
 
 
@@ -65,6 +66,8 @@ class TablePolicy:
     # (link field, target table): a record may only link to rows the actor owns
     # (cross-owner link guard, checked on create and on update).
     linked_owner_checks: tuple[tuple[str, str], ...] = ()
+    # link fields that must hold at most ONE record although Airtable allows several (Airtable cannot be told otherwise).
+    single_links: tuple[str, ...] = ()
 
 
 # Proposed (NOT yet in the live schema): Tasks."Visibility" = "Private". The
@@ -83,9 +86,15 @@ _POLICIES: dict[str, TablePolicy] = {
         Tables.REC_OBLIGATIONS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,
         linked_owner_checks=(("Related Goal", Tables.FIN_GOALS),),
     ),
+    # Financial Accounts (D1): where money is held. Owner-of-record only; business roles grant nothing. Registered BEFORE
+    # any row exists so the table is never reachable through the generic role rules (an unregistered table is).
+    Tables.FIN_ACCOUNTS: TablePolicy(Tables.FIN_ACCOUNTS, OWNER_SCOPED, owner_field=FinAccountFields.FINANCIAL_OWNER),
     Tables.FIN_EVENTS: TablePolicy(
         Tables.FIN_EVENTS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,
-        linked_owner_checks=(("Goal", Tables.FIN_GOALS),),
+        linked_owner_checks=(("Goal", Tables.FIN_GOALS),
+                             (FinEventFields.ACCOUNT, Tables.FIN_ACCOUNTS),
+                             (FinEventFields.COUNTER_ACCOUNT, Tables.FIN_ACCOUNTS)),   # an event cannot hang under another person's account
+        single_links=(FinEventFields.ACCOUNT, FinEventFields.COUNTER_ACCOUNT),
     ),
     # Sessions hold per-person working state (lead-qualifier answers, BusinessDraft incl. FCC financial
     # drafts). Only session_store (its own sanctioned internal I/O) may touch them — never a generic
@@ -253,6 +262,10 @@ def scope_new_record_fields(table: object, fields: dict, identity) -> dict:
 
 
 def _check_linked_owners(policy: TablePolicy, fields: dict | None, actor: ActorScope) -> None:
+    for single in policy.single_links:
+        value = (fields or {}).get(single)
+        if isinstance(value, (list, tuple)) and len(value) > 1:
+            raise PersonalDataAccessDenied(SINGLE_LINK_MESSAGE)
     for link_field, target in policy.linked_owner_checks:
         ids = (fields or {}).get(link_field)
         if isinstance(ids, str):
