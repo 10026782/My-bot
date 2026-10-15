@@ -4041,3 +4041,63 @@ def test_loan_original_amount_is_a_one_field_update_that_must_be_positive(no_mod
     assert w["table"] == Tables.LOANS and w["record_id"] == "recR" and w["fields"] == {LF.AMOUNT: 3000}
     conv.complete_execution(ELIYAHU)
     assert intent("loan.update_original", "recRx").state == "denied"
+
+
+# ═══ D1 step 7 / B1: read-only accounts tab (/api/fcc/accounts) ═══
+from airtable_schema import FinAccountFields as ACF   # noqa: E402
+
+
+def seed_accounts():
+    def acct(aid, owner, name, **extra):
+        f = {ACF.NAME: name, ACF.ACCOUNT_TYPE: "study_fund", ACF.STATUS: "active", ACF.FINANCIAL_OWNER: [owner],
+             ACF.NOTES: f"הערה פרטית {aid}", ACF.TAX_NOTES: f"מס {aid}"}
+        f.update(extra)
+        return {"id": aid, "fields": f}
+
+    def mv(eid, kind, amount, day, account, owner=ELI):
+        return {"id": eid, "fields": {EF.KIND: kind, EF.AMOUNT: amount, EF.OCCURRED_AT: day, EF.ACCOUNT: [account],
+                                      EF.FINANCIAL_OWNER: [owner]}}
+    DB[Tables.FIN_ACCOUNTS] = [acct("recAE", ELI, "קרן השתלמות"), acct("recAA", AVI, "החשבון של אבי")]
+    DB[Tables.FIN_EVENTS] = DB[Tables.FIN_EVENTS] + [
+        mv("recS1", "balance_snapshot", 100000, "2026-10-01", "recAE"), mv("recD1", "deposit", 5000, "2026-10-05", "recAE"),
+        mv("recS2", "balance_snapshot", 777777, "2026-10-01", "recAA", AVI)]
+
+
+def test_accounts_view_returns_only_own_accounts_and_never_free_text():
+    seed_accounts()
+    view = service.accounts_view(ELIYAHU, TODAY)
+    assert [a["id"] for a in view["accounts"]] == ["recAE"]
+    assert view["totals"]["consolidated_value"] == 100000.0 and view["totals"]["estimated_value"] == 105000.0
+    text = str(view)
+    assert "777777" not in text and "החשבון של אבי" not in text and "הערה פרטית" not in text and "מס rec" not in text
+    assert [a["id"] for a in service.accounts_view(AVI_I, TODAY)["accounts"]] == ["recAA"]
+
+
+def test_accounts_view_unresolved_identity_is_denied():
+    seed_accounts()
+    with pytest.raises(policy.PersonalDataAccessDenied):
+        service.accounts_view(ident("nobody", Role.MANAGER), TODAY)
+
+
+def test_http_accounts_flag_off_and_non_owner_get_404(monkeypatch):
+    seed_accounts()
+    assert http(monkeypatch, ELIYAHU, flag=False).get("/api/fcc/accounts", headers=H).status_code == 404
+    assert http(monkeypatch, AVI_I).get("/api/fcc/accounts", headers=H).status_code == 404          # partner: not the owner role
+
+
+def test_http_accounts_owner_gets_own_view_only(monkeypatch):
+    seed_accounts()
+    r = http(monkeypatch, ELIYAHU).get("/api/fcc/accounts", headers=H)
+    body = r.get_json()
+    assert r.status_code == 200 and [a["id"] for a in body["accounts"]] == ["recAE"]
+    assert "777777" not in str(body) and "הערה פרטית" not in str(body)
+
+
+def test_http_accounts_unresolved_identity_403_and_read_only(monkeypatch):
+    seed_accounts()
+    who = ident("nobody", Role.OWNER)
+    assert http(monkeypatch, who).get("/api/fcc/accounts", headers=H).status_code == 403
+    c = http(monkeypatch, ELIYAHU)
+    for method in ("post", "put", "patch", "delete"):
+        assert getattr(c, method)("/api/fcc/accounts", headers=H, json={}).status_code == 405        # no write path
+    assert len(DB[Tables.FIN_ACCOUNTS]) == 2

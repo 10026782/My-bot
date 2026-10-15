@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccOverview, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsView, FccOverview, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -9,9 +9,10 @@ export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // 
 export const OPEN_LABEL = `פתח: ${SCREEN_TITLE}`;
 export const TABS_ARIA_LABEL = `אזורי ${SCREEN_TITLE}`;
 
-export type FamilyTabKey = "savings" | "lab";
+export type FamilyTabKey = "savings" | "accounts" | "lab";
 export const FAMILY_TABS: { key: FamilyTabKey; label: string }[] = [
   { key: "savings", label: "החיסכון שלי" },
+  { key: "accounts", label: "החשבונות" },
   { key: "lab", label: "מעבדת העתיד" },
 ];
 export const FAMILY_TAB_PREFIX = "fw";
@@ -62,6 +63,57 @@ export function familyCardModel(data: Pick<FccOverview, "summary" | "savings_rel
     title: SCREEN_TITLE,
     value: release ? `הופקד החודש ${money(release.deposited)}` : "אין עדיין נתון לחודש",
     hint: release ? SELF_REPORTED : "פתחו את המסך לתכנון ולמעבדת העתיד",
+  };
+}
+
+// ── Accounts tab (D1 step 7 / B1): wording + layout of what the server derived. No sums, no estimates computed here. ──
+export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  pension: "קרן פנסיה", study_fund: "קרן השתלמות", provident_investment: "קופת גמל להשקעה", managers_insurance: "ביטוח מנהלים",
+  brokerage: "חשבון השקעות", liquid: "נזיל", other: "אחר",
+};
+export const LIQUIDITY_LABELS: Record<string, string> = {
+  immediate: "נזיל מיד", locked_until_date: "נעול עד תאריך", age_based: "לפי גיל", unknown: "לא ידוע",
+};
+export const BALANCE_FACT_NOTE = "השווי הוא היתרה האחרונה שדווחה — עובדה. ההערכה מתווספת בנפרד ואינה נכללת בסכום המאוחד.";
+export const NO_SNAPSHOT = "אין יתרה שדווחה";
+export const NO_ACCOUNTS_TITLE = "עוד אין חשבונות";
+export const NO_ACCOUNTS_MESSAGE = "חשבונות פנסיה, השתלמות והשקעות יוצגו כאן אחרי שיוזנו. אפשר יהיה להוסיף יתרה בשלב הבא.";
+
+const verificationNote = (v: string | null | undefined): string =>
+  v === "self_reported" ? SELF_REPORTED : v === "statement" ? "לפי דוח" : v === "bank_or_fund_confirmed" ? "מאומת מול בנק או קרן" : "";
+
+export interface AccountRow { id: string; title: string; subtitle: string; value: string; hint: string; estimate?: string; closed: boolean }
+export interface AccountsTabModel { hasAccounts: boolean; total: SavingsRow; extras: SavingsRow[]; rows: AccountRow[]; notes: string[] }
+
+export function accountRow(a: FccAccount): AccountRow {
+  const kind = a.account_type ? ACCOUNT_TYPE_LABELS[a.account_type] ?? a.account_type : "";
+  const subtitle = [kind, a.institution, a.holder_names].filter(Boolean).join(" · ");
+  const liquidity = a.liquidity ? (LIQUIDITY_LABELS[a.liquidity] ?? a.liquidity) : "";
+  const b = a.balance;
+  return {
+    id: a.id, title: a.name || "חשבון ללא שם", subtitle, closed: a.status === "closed",
+    value: b ? money(b.value) : NO_SNAPSHOT,
+    hint: b ? [`נכון ל-${b.as_of}`, verificationNote(b.verification), liquidity].filter(Boolean).join(" · ") : [liquidity, "הוסיפו יתרה כדי לראות שווי"].filter(Boolean).join(" · "),
+    estimate: b && b.estimate.movement_count > 0 ? `הערכה בעקבות ${b.estimate.movement_count} תנועות מאז: ${money(b.estimate.value)}` : undefined,
+  };
+}
+
+/** The accounts tab from the server view: the consolidated value is the server's sum of snapshots; closed accounts are listed, not counted. */
+export function accountsTabModel(view: FccAccountsView): AccountsTabModel {
+  const t = view.totals;
+  const total: SavingsRow = t.consolidated_value == null
+    ? { key: "total", label: "שווי מאוחד", value: "לא זמין", hint: "עוד אין יתרה שדווחה באף חשבון פעיל" }
+    : { key: "total", label: "שווי מאוחד", value: money(t.consolidated_value),
+        hint: `${t.accounts_with_value} חשבונות עם יתרה${t.oldest_snapshot ? ` · העדכון הישן ביותר: ${t.oldest_snapshot}` : ""}${t.all_self_reported ? ` · ${SELF_REPORTED}` : ""}` };
+  const extras: SavingsRow[] = [];
+  if (t.estimated_value != null && t.estimated_value !== t.consolidated_value) {
+    extras.push({ key: "estimate", label: "הערכה לפי תנועות מאז", value: money(t.estimated_value), hint: "הערכה בלבד — אינה חלק מהשווי המאוחד" });
+  }
+  if (t.accounts_without_snapshot > 0) extras.push({ key: "missing", label: "חשבונות בלי יתרה", value: String(t.accounts_without_snapshot), hint: "אינם נספרים בשווי המאוחד" });
+  if (t.closed_accounts > 0) extras.push({ key: "closed", label: "חשבונות סגורים", value: String(t.closed_accounts), hint: "מוצגים ברשימה, לא נכללים בסכום" });
+  return {
+    hasAccounts: view.accounts.length > 0, total, extras, rows: view.accounts.map(accountRow),
+    notes: [BALANCE_FACT_NOTE, "אין כאן הבטחת תשואה — המספרים הם דיווח בלבד."],
   };
 }
 

@@ -533,6 +533,20 @@ def savings_history_view(goals: list[dict], own: dict[str, list[calc.Event]], ac
     return calc.deposit_history(own.get(dests[0]["id"], []), plan, today)
 
 
+def accounts_view(identity, today: date | None = None) -> dict:
+    """The "החשבונות" tab (D1 step 7 / B1): the caller's own financial accounts + the consolidated value, read-only.
+    Both tables go through the owner-scoped policy (``filter_records``); ``accounts_overview`` additionally filters on the
+    resolved owner (defence in depth). Nothing is written. An unresolved identity raises PersonalDataAccessDenied."""
+    from core.financial_control import accounts as fcc_accounts
+    today = today or date.today()
+    mine = policy.filter_records(Tables.FIN_ACCOUNTS, _read(Tables.FIN_ACCOUNTS), identity)
+    events = my_events(identity)
+    actor = policy.resolve_actor(identity)
+    if not actor.resolved:
+        raise policy.PersonalDataAccessDenied(policy.UNRESOLVED_MESSAGE)
+    return fcc_accounts.accounts_overview(mine, events, today, owner_id=actor.profile_id)
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()

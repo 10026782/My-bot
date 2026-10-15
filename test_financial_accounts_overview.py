@@ -164,9 +164,11 @@ def test_free_text_notes_never_leave_the_model():
 
 # ═══ backward compatibility ═══
 
-def test_not_wired_into_any_runtime_path_and_goal_kinds_untouched():
+def test_wired_only_into_the_read_only_accounts_view_and_goal_kinds_untouched():
     root = pathlib.Path(__file__).parent
-    for name in ("core/financial_control/service.py", "core/financial_control/conversation.py", "core/financial_control/draft.py",
+    service_text = (root / "core/financial_control/service.py").read_text(encoding="utf-8")       # D1 step 7 / B1: the one read-only consumer
+    assert service_text.count("financial_control import accounts") == 1 and "def accounts_view" in service_text
+    for name in ("core/financial_control/conversation.py", "core/financial_control/draft.py",
                  "core/financial_control/chat.py", "tma_api.py", "app.py"):
         text = (root / name).read_text(encoding="utf-8")
         assert "financial_control.accounts" not in text and "import accounts" not in text, name
