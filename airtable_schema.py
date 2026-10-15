@@ -74,6 +74,7 @@ class Tables:
     FIN_GOALS       = "Financial Goals"            # FCC — live: tblQPUteMKe13tvlr (created 04/10/2026)
     REC_OBLIGATIONS = "Recurring Obligations"      # FCC — live: tblAvpGNDWs1tNoKG (created 06/10/2026), owner-scoped commitments (NOT an expense ledger)
     FIN_EVENTS      = "Financial Progress Events"  # FCC — live: tblqNvcyK34zVjcXP (created 04/10/2026), append-only
+    FIN_ACCOUNTS    = "Financial Accounts"         # FCC/D1 — live: tblhV9f86iXMIwKx1 (created 15/10/2026), owner-scoped, EMPTY until the access policy is merged
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
@@ -935,6 +936,33 @@ class FinEventFields:
     IDEMPOTENCY_KEY = "Idempotency Key"
     SUPERSEDED_BY   = "Superseded By"
     FINANCIAL_OWNER = "Financial Owner"  # multipleRecordLinks -> Profile
+    # D1 (live 15/10/2026, nothing writes them yet): the account an event belongs to. Both are multi-record links in
+    # Airtable; the access policy enforces a single record. New Kind values (deposit|withdrawal|fee|transfer|balance_snapshot)
+    # are deliberately NOT in calc.EVENT_KINDS, so every existing consumer keeps skipping/hiding them.
+    ACCOUNT         = "Account"           # link -> Financial Accounts (single record, enforced in data_access_policy)
+    COUNTER_ACCOUNT = "Counter Account"   # link -> Financial Accounts (transfer destination; single record)
+    VERIFICATION    = "Verification"      # singleSelect self_reported|statement|bank_or_fund_confirmed
+
+
+class FinAccountFields:
+    """Financial Accounts (FCC/D1) — LIVE (tblhV9f86iXMIwKx1), owner-scoped via FINANCIAL_OWNER. A financial PRODUCT
+    (where money is held), never a goal. Descriptive tax/liquidity traits only. NEVER store full account/policy numbers."""
+    NAME            = "Name"
+    ACCOUNT_TYPE    = "Account Type"      # pension|study_fund|provident_investment|managers_insurance|brokerage|liquid|other
+    INSTITUTION     = "Institution"
+    FINANCIAL_OWNER = "Financial Owner"   # multipleRecordLinks -> Profile (PERMISSION only; ownership of money is HOLDER_NAMES)
+    HOLDER_NAMES    = "Holder Names"      # text — economic holders; readable only through the owner-scoped table
+    STATUS          = "Status"            # active|closed
+    LIQUIDITY       = "Liquidity"         # immediate|locked_until_date|age_based|unknown
+    LIQUID_FROM     = "Liquid From"       # date
+    TAX_TREATMENT   = "Tax Treatment"     # taxable|tax_advantaged|pension_rules|unknown — descriptive, no tax calculation
+    TAX_NOTES       = "Tax Notes"
+    MANAGEMENT_FEE  = "Management Fee %"  # annual %, as reported (0.75 = 0.75%)
+    OPENED_AT       = "Opened At"
+    CLOSED_AT       = "Closed At"
+    NOTES           = "Notes"             # NO full account/policy numbers
+    CREATED_AT      = "Created At"        # createdTime
+    # reverse links created by Airtable (not read by code): "Financial Progress Events", "Incoming Transfers"
 
 
 class RecObFields:
