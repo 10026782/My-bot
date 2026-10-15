@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsView, FccOverview, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastParams, FccOverview, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -114,6 +114,63 @@ export function accountsTabModel(view: FccAccountsView): AccountsTabModel {
   return {
     hasAccounts: view.accounts.length > 0, total, extras, rows: view.accounts.map(accountRow),
     notes: [BALANCE_FACT_NOTE, "אין כאן הבטחת תשואה — המספרים הם דיווח בלבד."],
+  };
+}
+
+// ── Accounts forecast (D1 step 7 / A1): the form is strings while typing; every number shown comes from the server's engine run. ──
+export interface ForecastForm { years: string; returnPct: string; feePct: string; inflationPct: string; deposits: Record<string, string> }
+export const DEFAULT_FORECAST_FORM: ForecastForm = { years: "20", returnPct: "6", feePct: "0.15", inflationPct: "2", deposits: {} };
+export const FORECAST_TITLE = "תחזית לפי הנחות";
+export const FORECAST_NOTE = "תחזית מבוססת הנחות בלבד — לא הבטחת תשואה ולא המלצה. נקודת המוצא היא היתרה האחרונה שדווחה בכל חשבון; ההפקדה החודשית היא הנחה שלך (ברירת מחדל 0).";
+export const FORECAST_ACCOUNT_HEAD = ["חשבון", "יתרת פתיחה", "הפקדה חודשית", "דמי ניהול", "שווי סופי", "שווי ריאלי"];
+
+/** Typed text -> request body. Blank / non-numeric input is an error shown on the form, never silently 0. A blank deposit means "no deposit". */
+export function forecastParams(form: ForecastForm): { ok: true; params: FccForecastParams } | { ok: false; error: string } {
+  const num = (text: string, name: string): number | string => {
+    const v = text.trim() === "" ? NaN : Number(text);
+    return Number.isFinite(v) ? v : `${name}: יש להזין מספר`;
+  };
+  const f = { years: num(form.years, "מספר שנים"), ret: num(form.returnPct, "תשואה"), fee: num(form.feePct, "דמי ניהול"), infl: num(form.inflationPct, "אינפלציה") };
+  for (const v of Object.values(f)) if (typeof v === "string") return { ok: false, error: v };
+  const n = f as Record<keyof typeof f, number>;
+  if (!Number.isInteger(n.years)) return { ok: false, error: "מספר שנים: יש להזין מספר שלם" };
+  const deposits: Record<string, number> = {};
+  for (const [id, text] of Object.entries(form.deposits)) {
+    if (text.trim() === "") continue;
+    const v = Number(text);
+    if (!Number.isFinite(v) || v < 0) return { ok: false, error: "הפקדה חודשית: יש להזין מספר שאינו שלילי" };
+    if (v > 0) deposits[id] = v;
+  }
+  return { ok: true, params: { years: n.years, annual_return_pct: n.ret, annual_fee_pct: n.fee, inflation_pct: n.infl, monthly_contributions: deposits } };
+}
+
+export interface ForecastModel {
+  total: SavingsRow[]; head: string[]; rows: { id: string; cells: string[]; feeHint: string }[]; chart: ReturnType<typeof lineChartModel> | null; notes: string[];
+}
+/** Wording + layout of the server's forecast: totals are the server's consolidated numbers; the chart only scales them. */
+export function forecastModel(view: FccAccountsForecast): ForecastModel {
+  const c = view.consolidated;
+  const total: SavingsRow[] = c.final_nominal == null ? [] : [
+    { key: "start", label: "שווי פתיחה מאוחד", value: money(c.start_value), hint: `${c.accounts} חשבונות · היתרות האחרונות שדווחו${view.all_self_reported ? ` · ${SELF_REPORTED}` : ""}` },
+    { key: "final", label: `שווי מאוחד בעוד ${view.years} שנים`, value: money(c.final_nominal), hint: "נומינלי, אחרי דמי ניהול · הנחות בלבד" },
+    { key: "real", label: "שווי מאוחד ריאלי", value: money(c.final_real), hint: `אחרי אינפלציה של ${view.assumptions.inflation_pct}% בשנה` },
+    { key: "invested", label: "סך שהושקע", value: money(c.invested), hint: "כולל את יתרת הפתיחה וההפקדות שהוזנו" },
+  ];
+  const notes = [...view.warnings];
+  if (view.excluded.without_snapshot > 0) notes.push(`${view.excluded.without_snapshot} חשבונות בלי יתרה שדווחה אינם בתחזית.`);
+  if (view.excluded.closed > 0) notes.push(`${view.excluded.closed} חשבונות סגורים אינם בתחזית.`);
+  return {
+    total, head: FORECAST_ACCOUNT_HEAD, notes,
+    rows: view.accounts.map((a) => ({
+      id: a.id, feeHint: a.fee_source === "account" ? "דמי הניהול של החשבון" : "ברירת המחדל מהקלט",
+      cells: [a.name || "חשבון ללא שם", money(a.start_value), a.monthly_contribution ? money(a.monthly_contribution) : "—",
+              `${a.fee_pct}%${a.fee_source === "default" ? " (ברירת מחדל)" : ""}`, money(a.final_nominal), money(a.final_real)],
+    })),
+    chart: view.accounts.length ? lineChartModel([
+      { name: "מאוחד (נומינלי)", pts: c.series.map((r): [number, number] => [r.year, r.nominal]) },
+      { name: "מאוחד (ריאלי)", pts: c.series.map((r): [number, number] => [r.year, r.real]), color: CHART_COLORS[2] },
+      { name: "סך שהושקע", pts: c.series.map((r): [number, number] => [r.year, r.invested]), color: "#8892a0", dash: "4 3" },
+    ]) : null,
   };
 }
 
