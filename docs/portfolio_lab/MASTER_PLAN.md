@@ -15,7 +15,7 @@
 | מנוע PL-1: תכנון, חוזים, מתמטיקה | [SPEC.md](SPEC.md), [README.md](README.md), [EVIDENCE.json](EVIDENCE.json) |
 | החלטות סיווג מקורות ושחרור PL-1 | [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md) |
 | מסך הסימולטור, חיבור ל-TMA, אבטחה, PR-2 | [UI.md](UI.md) |
-| מודל חשבונות להון משפחתי (תשתית משותפת D1) | [FAMILY_WEALTH_ACCOUNTS_SPEC.md](FAMILY_WEALTH_ACCOUNTS_SPEC.md); בקשת שינוי סכמה לשלב 2: [D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md) |
+| מודל חשבונות להון משפחתי (תשתית משותפת D1) | [FAMILY_WEALTH_ACCOUNTS_SPEC.md](FAMILY_WEALTH_ACCOUNTS_SPEC.md); בקשת שינוי סכמה לשלב 2: [D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md); הוראת יצירה: [D1_AIRTABLE_CREATION_INSTRUCTIONS.md](D1_AIRTABLE_CREATION_INSTRUCTIONS.md) |
 | סטטוס תוכנית-על | שורת `PORTFOLIO_LAB` ב-[BOSS_UNIFIED_MASTER_PLAN.md](../governance/BOSS_UNIFIED_MASTER_PLAN.md); שורת `PORTFOLIO_LAB` ב-[ROADMAP.md](../../ROADMAP.md) |
 | תלות חיצונית — Decision Hub (ראו סעיף 4) | [DECISION_HUB_MASTER_SPEC.md](../specs/DECISION_HUB_MASTER_SPEC.md), [SPEC_Insight_to_Decision_to_Task.md](../specs/SPEC_Insight_to_Decision_to_Task.md) |
 
@@ -83,8 +83,8 @@
 | שלב SPEC | נושא | סטטוס |
 | --- | --- | --- |
 | 1 | תיקון `recent_events` | **ממוזג** (#1318, 14/10/2026) |
-| 2 | reconcile חי נוסף + בקשת אישור סכמה | **בוצע (תיעוד בלבד, 14/10/2026):** reconcile נקי ובקשה ב-[D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md); המלצה `READY FOR SCHEMA APPROVAL` לאפשרות M מצומצמת — **ממתין לאישור הבעלים**, לא נוצרה סכמה |
-| 3 | סכמה בפועל + מדיניות גישה `OWNER_SCOPED` + בדיקות אבטחה | לא אושר |
+| 2 | reconcile חי נוסף + בקשת אישור סכמה | **בוצע (תיעוד בלבד, 14/10/2026):** reconcile נקי ובקשה ב-[D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md); המלצה `READY FOR SCHEMA APPROVAL` לאפשרות M מצומצמת — **אושר ע"י הבעלים (15/10/2026): **אפשרות F**, סדר מתוקן, יצירה על ידי הבעלים; הוראת יצירה ב-[D1_AIRTABLE_CREATION_INSTRUCTIONS.md](D1_AIRTABLE_CREATION_INSTRUCTIONS.md); **טרם נוצרה סכמה** |
+| 3 | סכמה בפועל (אושרה, אפשרות F, יצירה ע"י הבעלים — **טרם בוצעה**) + מדיניות גישה `OWNER_SCOPED` + בדיקות אבטחה (שלב 3א, קוד: **ממתין להוראת התחלה**; אושר שיתמזג לפני הזנת נתונים) | חלקית |
 | 4 | אכיפת "אין מספרי חשבון/פוליסה" (8+ ספרות) | לא אושר |
 | 5 | `accounts_overview` (קריאה בלבד) | לא אושר |
 | 6 | הרחבת `deposit_history` ל-`one_time ∪ deposit` | לא אושר |
