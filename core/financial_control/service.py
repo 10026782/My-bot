@@ -487,13 +487,14 @@ RECENT_EVENTS = 10
 
 def recent_progress_events(events: list[dict], limit: int = RECENT_EVENTS) -> list[dict]:
     """The "התקדמות אחרונה" list: the latest goal-progress events, newest first. Allow-list of the known goal-event kinds
-    (``calc.EVENT_KINDS``), applied BEFORE the cut to ``limit``: any other kind (a balance snapshot, withdrawal, fee, transfer ...)
+    (``calc.EVENT_KINDS``), applied BEFORE the cut to ``limit``: any other kind (a balance snapshot, withdrawal, fee, transfer, or a deposit with no goal link ...)
     is never shown as progress and never pushes a real progress event out of the list. Fail-closed for kinds added later."""
     def kind_of(e: dict) -> str | None:
         k = (e.get("fields") or {}).get(FinEventFields.KIND)
         return k.get("name") if isinstance(k, dict) else k
 
-    shown = [e for e in events if kind_of(e) in calc.EVENT_KINDS]
+    shown = [e for e in events if kind_of(e) in calc.EVENT_KINDS
+             and (kind_of(e) != calc.DEPOSIT or _goal_ids_of(e))]       # an account deposit is goal progress only when linked to a goal
     shown.sort(key=lambda e: str((e.get("fields") or {}).get(FinEventFields.OCCURRED_AT) or ""), reverse=True)
     return [{"goal_ids": _goal_ids_of(e), **{k: (e.get("fields") or {}).get(k) for k in (
         FinEventFields.AMOUNT, FinEventFields.KIND, FinEventFields.OCCURRED_AT, FinEventFields.NOTE)}} for e in shown[:limit]]

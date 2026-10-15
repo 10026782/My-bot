@@ -165,7 +165,7 @@ def test_existing_goal_link_guard_is_unchanged():
 
 
 def test_new_event_kinds_stay_outside_every_existing_consumer():
-    new = {"deposit", "withdrawal", "fee", "transfer", "balance_snapshot"}
+    new = {"withdrawal", "fee", "transfer", "balance_snapshot"}          # "deposit" joined EVENT_KINDS deliberately in D1 step 6
     assert not new & set(calc.EVENT_KINDS)
     records = [{"id": f"rec{k}", "fields": {EF.KIND: k, EF.AMOUNT: 500000, EF.OCCURRED_AT: "2026-10-01"}} for k in sorted(new)]
     assert calc.parse_events(records, EF) == []          # no existing calculation counts them

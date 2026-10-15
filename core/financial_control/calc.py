@@ -27,7 +27,10 @@ TARGET_CHANGE = "target_change"
 DIRECT_COST = "direct_cost"
 HOUSEHOLD_EXPENSE = "household_expense"   # private household spend: shown separately, never part of income/net
 NOTE = "note"
-EVENT_KINDS = (ONE_TIME, MONTHLY_RECURRING, TARGET_CHANGE, DIRECT_COST, HOUSEHOLD_EXPENSE, NOTE)
+DEPOSIT = "deposit"                       # a deposit into a financial account, linked to a goal (D1 step 6); counted ONLY as a deposit
+EVENT_KINDS = (ONE_TIME, MONTHLY_RECURRING, TARGET_CHANGE, DIRECT_COST, HOUSEHOLD_EXPENSE, NOTE, DEPOSIT)
+# Kinds that count as "a deposit made": the existing self-reported one_time, plus an account deposit. Never both for one event.
+DEPOSIT_KINDS = (ONE_TIME, DEPOSIT)
 
 # calc_method values (data, not an enum the code branches business meaning on)
 PERIOD_SUM = "period_sum"          # one_time events inside the current period
@@ -365,6 +368,21 @@ def monthly_level_now(events: list[Event], today: date) -> float:
                      if e.kind == MONTHLY_RECURRING and not e.superseded and e.occurred <= today), 2)
 
 
+def _deposits(events: list[Event]) -> list[Event]:
+    """Live deposits (one_time or deposit), each Airtable record once: the same ``ref`` is never counted twice."""
+    seen: set[str] = set()
+    out: list[Event] = []
+    for e in events:
+        if e.superseded or e.kind not in DEPOSIT_KINDS:
+            continue
+        if e.ref:
+            if e.ref in seen:
+                continue
+            seen.add(e.ref)
+        out.append(e)
+    return out
+
+
 def deposit_status(events: list[Event], today: date) -> dict:
     """Standing-order savings: PLAN (the standing level) vs ACTUAL (one_time deposits recorded in the month).
     A missed month is a recorded gap, never an automatic catch-up: next month's target is not inflated; a make-up
@@ -375,8 +393,9 @@ def deposit_status(events: list[Event], today: date) -> dict:
     last_start = last_end.replace(day=1)
     level = sum(e.amount for e in live if e.kind == MONTHLY_RECURRING and e.occurred <= today)
     level_last = sum(e.amount for e in live if e.kind == MONTHLY_RECURRING and e.occurred <= last_end)
-    dep = sum(e.amount for e in live if e.kind == ONE_TIME and this_start <= e.occurred <= today)
-    dep_last = sum(e.amount for e in live if e.kind == ONE_TIME and last_start <= e.occurred <= last_end)
+    deps = _deposits(events)
+    dep = sum(e.amount for e in deps if this_start <= e.occurred <= today)
+    dep_last = sum(e.amount for e in deps if last_start <= e.occurred <= last_end)
     return {"level": round(level, 2), "deposited_month": round(dep, 2),
             "gap_month": round(max(level - dep, 0.0), 2),
             "deposited_last_month": round(dep_last, 2), "level_last_month": round(level_last, 2),
@@ -417,7 +436,7 @@ def deposits_in_month(events: list[Event], today: date) -> float:
     """one_time deposits recorded in the current calendar month (superseded ones ignored)."""
     start = today.replace(day=1)
     end = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-    return round(sum(e.amount for e in events if not e.superseded and e.kind == ONE_TIME and start <= e.occurred <= end), 2)
+    return round(sum(e.amount for e in _deposits(events) if start <= e.occurred <= end), 2)
 
 
 def _month_index(d: date) -> int:
@@ -425,12 +444,12 @@ def _month_index(d: date) -> int:
 
 
 def deposit_history(deposits: list[Event], plan: list[Event], today: date, months: int = 12) -> dict:
-    """Self-reported deposit history from existing events only (nothing stored): deposits = one_time events on the long-term
+    """Self-reported deposit history from existing events only (nothing stored): deposits = one_time / deposit events on the long-term
     goal, plan = monthly_recurring events of the savings goal(s) (the standing level in force at each month's end).
     YTD covers January..the current month; the average is over those calendar months (a missed month counts as 0);
     the streak counts consecutive months with a deposit, ending this month (or last month while this one has none yet).
     Superseded events are ignored; a missed month is a gap, never caught up."""
-    live = [e for e in deposits if not e.superseded and e.kind == ONE_TIME and e.occurred <= today]
+    live = [e for e in _deposits(deposits) if e.occurred <= today]
     plans = [e for e in plan if not e.superseded and e.kind == MONTHLY_RECURRING]
     per_month: dict[int, float] = {}
     for e in live:
