@@ -1,6 +1,6 @@
 # D1 — הוראת יצירה ב-Airtable (אפשרות F, באישור הבעלים 15/10/2026)
 
-**זהו נוסח הוראה בלבד. לא בוצע ב-Airtable על ידי הסוכן.** היוצר: הבעלים. מקור סמכות: [FAMILY_WEALTH_ACCOUNTS_SPEC.md](FAMILY_WEALTH_ACCOUNTS_SPEC.md) §3 ו-[D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md).
+**זהו נוסח הוראה בלבד. לא בוצע ב-Airtable על ידי הסוכן; הבעלים ביצע ב-15/10/2026 והתוצאה אומתה בבקשת השינוי (סעיף "תוצאת היצירה והתאמה").** היוצר: הבעלים. מקור סמכות: [FAMILY_WEALTH_ACCOUNTS_SPEC.md](FAMILY_WEALTH_ACCOUNTS_SPEC.md) §3 ו-[D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md).
 
 - בסיס: `app4bcgoX7t0HUVnm`.
 - החלטות בעלים (15/10/2026): אפשרות **F** (מלאה) · הסדר המתוקן (מדיניות לפני נתונים) · הבעלים יוצר את הסכמה · אושרו השדה ההפוך ב-`Profile` ורשימות הערכים.

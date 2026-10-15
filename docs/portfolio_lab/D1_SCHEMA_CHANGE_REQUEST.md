@@ -141,6 +141,28 @@ M: שדה אחד חדש + 4 ערכי `Kind` מול 3 שדות + 5 ערכים ב-
 
 **השפעת הבחירה ב-F:** ל-`Events` שני קישורים ל-`Financial Accounts`, ולכן יש לקבוע במפורש את השדות ההפוכים (`Account` → הפוך `Financial Progress Events`; `Counter Account` → ללא הפוך) — מפורט בהוראת היצירה. `linked_owner_checks` יורחב ב-`Account` **וגם** ב-`Counter Account`. הסיכון של שדות ללא צרכן עד B3 (`Verification`, `Counter Account`, `transfer`) התקבל במודע; אין כתיבה אליהם לפני B3.
 
+### תוצאת היצירה והתאמה (15/10/2026, קריאה בלבד)
+
+הבעלים יצר את הסכמה (באמצעות סוכן Airtable). reconcile חי מול `list_tables_for_base`/`get_table_schema`:
+
+| פריט | תוצאה |
+| --- | --- |
+| טבלאות | 56 → **57**; נוספה רק `Financial Accounts` (`tblhV9f86iXMIwKx1`); אף טבלה לא הוסרה |
+| `Financial Accounts` | 15 שדות שהוזמנו — שמות, סוגים וערכי select **זהים** להוראה (`Account Type` 7, `Status` 2, `Liquidity` 4, `Tax Treatment` 4; תאריכי ISO; `Management Fee %` precision 2; `Created At` createdTime) + 2 שדות הפוכים אוטומטיים (`Financial Progress Events`, `Incoming Transfers`) = 17 |
+| `Financial Progress Events` | 13 → 16: נוספו `Account`, `Counter Account`, `Verification` (3 ערכים תואמים); `Kind` = 11 ערכים, ששת הקיימים עם אותם מזהים |
+| `Profile` | 17 → 18: נוסף רק `Financial Accounts` (שדה הפוך, כאושר) |
+| `Financial Goals` / `Assets` / `Recurring Obligations` | 21 / 21 / 19 — **ללא שינוי**; אף שדה אחר בבסיס לא השתנה |
+
+**סטיות מההוראה (לא חוסמות; מטופלות בקוד):**
+
+1. `Account` ו-`Counter Account` מוגדרים כקישור **למספר רשומות** (`prefersSingleRecordLink=false`), לא לרשומה אחת — הכלי לא תומך בהגבלה. **הקוד ייאכף רשומה אחת** (ולידציה בכתיבה, ו-`linked_owner_checks`); הגבלה ב-UI אופציונלית ("Allow linking to multiple records" → כבוי).
+2. ל-`Counter Account` נוצר שדה הפוך `Incoming Transfers` (הוראת הגיבוי). מקובל; אינו נקרא בקוד.
+3. אין Description לטבלה (המלצה בלבד, ללא השפעה).
+4. אין שדה Description המזהיר מפני מספרי חשבון ב-`Notes` — האכיפה היא בקוד (שלב 4) ובהנחיה למשתמש.
+5. הבעלים דיווח "14 שדות"; בפועל 15 (כולל `Created At`) כפי שהוזמן.
+
+**סטטוס:** סכמה קיימת ומותאמת; **הטבלה ריקה; אין כתיבת נתונים עד מיזוג 3א** (מדיניות `OWNER_SCOPED`).
+
 ## 9. המלצה
 
 **READY FOR SCHEMA APPROVAL — לאפשרות M.** נימוקים: reconcile חי נקי וללא סטייה בטבלאות הרלוונטיות; אין טבלה קיימת מתאימה; תאימות לאחור אומתה בקוד; השינוי תוספתי ובר-חזרה; ההרשאה ממומשת לפני יצירת הטבלה.
