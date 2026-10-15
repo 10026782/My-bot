@@ -730,6 +730,7 @@
         "tma-frontend/src/lib/fccPayoff.ts",
         "core/financial_control/payoff.py",
         "core/financial_control/assets.py",
+        "core/financial_control/accounts.py",
         "tma-frontend/src/lib/fccTabs.ts",
         "tma-frontend/src/lib/fccAssets.ts",
         "tma-frontend/src/components/FccTabBar.tsx",
@@ -740,7 +741,8 @@
         "tma-frontend/src/lib/fccLoans.test.ts",
         "tma-frontend/src/lib/fccPayoff.test.ts",
         "tma-frontend/src/lib/fccTabs.test.ts",
-        "tma-frontend/src/lib/fccAssets.test.ts"
+        "tma-frontend/src/lib/fccAssets.test.ts",
+        "test_financial_accounts_overview.py"
       ],
       "canonical_docs": [],
       "production_evidence": [],
@@ -750,7 +752,8 @@
       "confidence": 0.9,
       "notes": [
         "Registered to resolve a Context Librarian REVIEW_REQUIRED finding (new runtime source, NO_POLICY_MATCH) for the FCC goal-families change; follows decision.command_center_presentation_helper precedent. Requires owner approval at review.",
-        "Pure by construction: synchronous transforms over FccGoalRow/FccOverview only."
+        "Pure by construction: synchronous transforms over FccGoalRow/FccOverview only.",
+        "D1 accounts read model (PR #1323, 15/10/2026): owner explicitly approved \"APPROVE EXISTING NODE: decision.fcc_presentation_helper\" for core/financial_control/accounts.py and its test test_financial_accounts_overview.py. accounts.py is a pure, read-only derivation (latest valid balance snapshots, labelled estimate, transfers netting to zero) over already owner-scoped rows, like assets.py and payoff.py; no I/O, no writes, not wired to any route, screen or flag. Bounded to those two paths; no new node, no policy change, no new production authority."
       ],
       "extensions": {
         "context_librarian.registration": {
