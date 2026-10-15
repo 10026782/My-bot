@@ -2664,7 +2664,7 @@ def test_recent_events_never_show_balance_snapshots_transfers_or_fees_as_progres
     seed_release([], deposits=[])
     real = [event(f"recR{i}", "recPen", ELI, 50 + i, day=f"2026-09-{10 + i:02d}") for i in range(10)]     # 10 real events, older
     hidden = [event(f"recH{i}", "recPen", ELI, 500000, kind=k, day=f"2026-10-1{i}")                        # newer, would take the slots
-              for i, k in enumerate(("balance_snapshot", "withdrawal", "fee", "transfer", "deposit"))]
+              for i, k in enumerate(("balance_snapshot", "withdrawal", "fee", "transfer"))]
     DB[Tables.FIN_EVENTS] = real + hidden + [event("recN", "recPen", ELI, 1, kind=None, day="2026-10-13")]
     out = service.overview(ELIYAHU, TODAY)["recent_events"]
     assert len(out) == 10 and all(e[EF.KIND] == "one_time" for e in out)            # filtered BEFORE the cut: real events keep their slots

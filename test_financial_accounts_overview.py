@@ -170,5 +170,5 @@ def test_not_wired_into_any_runtime_path_and_goal_kinds_untouched():
                  "core/financial_control/chat.py", "tma_api.py", "app.py"):
         text = (root / name).read_text(encoding="utf-8")
         assert "financial_control.accounts" not in text and "import accounts" not in text, name
-    assert not set(acc.ACCOUNT_KINDS) & set(calc.EVENT_KINDS)
+    assert set(acc.ACCOUNT_KINDS) & set(calc.EVENT_KINDS) == {"deposit"}      # only deposit, deliberately (D1 step 6)
     assert calc.parse_events([ev("s", "balance_snapshot", 5, "2026-10-01", "recA")], EF) == []
