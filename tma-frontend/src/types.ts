@@ -765,6 +765,21 @@ export interface FccSavingsHistory {
   last_deposit: string | null; deposit_count: number; recent: { month: string; deposited: number; plan: number }[];
 }
 
+/** One financial account as the server derives it (D1 step 5/7). The value is the latest dated balance snapshot (a FACT); the
+ *  `estimate` is a separate, labelled projection from movements after it. No free-text notes ever arrive here. */
+export interface FccAccount {
+  id: string; name: string | null; account_type: string | null; institution: string | null; holder_names: string | null;
+  status: string | null; liquidity: string | null; liquid_from: string | null; tax_treatment: string | null; management_fee_pct: number | null;
+  balance: { value: number; as_of: string; verification: string; estimate: { value: number; movements_since: number; movement_count: number; label: "estimate" } } | null;
+}
+export interface FccAccountsView {
+  accounts: FccAccount[];
+  totals: { consolidated_value: number | null; estimated_value: number | null; accounts_with_value: number; accounts_without_snapshot: number;
+            closed_accounts: number; oldest_snapshot: string | null; all_self_reported: boolean | null };
+  skipped_events: number;
+  as_of: string;
+}
+
 export interface FccOverview {
   goals: FccGoalRow[];
   savings_history?: FccSavingsHistory | null;

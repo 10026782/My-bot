@@ -4854,6 +4854,7 @@ def _fcc_enabled(identity=None) -> bool:
 
 
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/accounts", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/write", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/loans/scenario", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/intent/start", methods=["OPTIONS"])
@@ -4874,6 +4875,23 @@ def fcc_overview(identity):
         return jsonify(view)
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
+
+
+@tma_api.route("/api/fcc/accounts", methods=["GET"])
+@require_tma_auth
+def fcc_accounts(identity):
+    """Read-only financial accounts + consolidated value (D1 step 7 / B1). Same rollout gate as the FCC (flag AND canary) AND owner:
+    404 (not 403) for everyone else, so the screen does not exist for them. No write path, no financial arithmetic in the client."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    from core.financial_control import service as fcc_service
+    try:
+        return jsonify(fcc_service.accounts_view(identity))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001 — never leak internals
+        logger.exception("[fcc] accounts_view failed")
+        return jsonify({"error": "internal error"}), 500
 
 
 @tma_api.route("/api/fcc/loans/scenario", methods=["GET"])

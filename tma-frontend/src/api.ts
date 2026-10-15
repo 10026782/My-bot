@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView } from "./types";
+import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -420,6 +420,17 @@ export async function fetchFccOverview(): Promise<FccOverview> {
     throw error;
   }
   return r.json() as Promise<FccOverview>;
+}
+
+/** Financial accounts + consolidated value (read-only; owner-only, same gate as the FCC). Errors carry the HTTP status. */
+export async function fetchFccAccounts(): Promise<FccAccountsView> {
+  const r = await fetch(`${BASE}/api/fcc/accounts`, { headers: authHeaders() });
+  if (!r.ok) {
+    const error = new Error(`API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
+  return r.json() as Promise<FccAccountsView>;
 }
 
 /** The ONE FCC conversation endpoint (shared with chat): the server keeps the draft and replies with the

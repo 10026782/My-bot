@@ -5,11 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FamilyWealth, FamilyWealthCard } from "../components/FamilyWealth";
 import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
-import type { FccOverview, PortfolioLabView } from "../types";
+import type { FccAccountsView, FccOverview, PortfolioLabView } from "../types";
+import { AccountsPanel } from "../components/FamilyWealth";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  accountsTabModel, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -28,9 +29,9 @@ const release = { income_net: 10000, income_target: 15000, fixed_level: 8000, sh
 const plan = { mode: "monthly_level", target: 8000, actual: 5000, remaining: 3000, dynamic_target_per_week: 0, goals: 2 };
 const overview = { summary: { savings: plan }, savings_release: release, as_of: "2026-10-14" } as unknown as FccOverview;
 
-test("screen name and the two tabs are the agreed ones", () => {
+test("screen name and the three tabs are the agreed ones", () => {
   assert.equal(SCREEN_TITLE, "תכנון חיסכון לטווח ארוך");
-  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | מעבדת העתיד");
+  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מעבדת העתיד");
 });
 
 test("savings tab: plan = standing level, actual labelled as self-reported, expected is NOT a plan, balance is not invented", () => {
@@ -91,7 +92,8 @@ test("the FCC tab strip is reused unchanged for FCC and works for other tab sets
   assert.equal(tabId("x"), "fcc-tab-x");
   assert.equal(panelId("x", "fw"), "fw-panel-x");
   assert.equal(tabForKey("monthly", "ArrowLeft", true), "loans");
-  assert.equal(tabForKey("savings" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
+  assert.equal(tabForKey("savings" as const, "ArrowLeft", true, FAMILY_TABS), "accounts");
+  assert.equal(tabForKey("accounts" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
   assert.equal(tabForKey("lab" as const, "Home", false, FAMILY_TABS), "savings");
   assert.equal(FCC_TABS.length, 3);
 });
@@ -212,6 +214,53 @@ test("the screen loads its own data: loading/error states, and the lab tab does 
     assert.ok(html.includes(SCREEN_TITLE) && html.includes('id="fw-tab-lab"'), "header and both tabs are always there");
     assert.ok(!html.includes("הפקדה חודשית מתוכננת"), "no savings numbers without data");
   }
+});
+
+// ── D1 step 7 / B1: accounts tab ──
+const snap = (value: number, estimateValue = value, count = 0) =>
+  ({ value, as_of: "2026-10-01", verification: "self_reported", estimate: { value: estimateValue, movements_since: estimateValue - value, movement_count: count, label: "estimate" as const } });
+const acct = (id: string, extra: Record<string, unknown> = {}) =>
+  ({ id, name: id, account_type: "study_fund", institution: "בנק", holder_names: null, status: "active", liquidity: "immediate", liquid_from: null,
+     tax_treatment: null, management_fee_pct: null, balance: null, ...extra });
+const accountsView = (accounts: unknown[], totals: Record<string, unknown> = {}) => ({
+  accounts, skipped_events: 0, as_of: "2026-10-15",
+  totals: { consolidated_value: null, estimated_value: null, accounts_with_value: 0, accounts_without_snapshot: 0, closed_accounts: 0, oldest_snapshot: null, all_self_reported: null, ...totals },
+}) as unknown as FccAccountsView;
+
+test("accounts tab: the consolidated value is the server's number, the estimate is separate and labelled, nothing is summed here", () => {
+  const v = accountsView([acct("a", { balance: snap(100000, 105000, 1) })], { consolidated_value: 100000, estimated_value: 105000, accounts_with_value: 1, oldest_snapshot: "2026-10-01", all_self_reported: true });
+  const m = accountsTabModel(v);
+  assert.ok(m.total.value.includes("100,000") && m.total.hint?.includes(SELF_REPORTED));
+  assert.ok(m.extras.some((r) => r.key === "estimate" && r.value.includes("105,000") && r.hint?.includes("אינה חלק מהשווי המאוחד")));
+  assert.ok(m.rows[0].estimate?.includes("הערכה") && m.rows[0].value.includes("100,000"));
+});
+
+test("accounts tab: no snapshot is never shown as 0; closed and missing are counted, not hidden", () => {
+  const v = accountsView([acct("a"), acct("b", { status: "closed", balance: snap(5) })], { accounts_without_snapshot: 1, closed_accounts: 1 });
+  const m = accountsTabModel(v);
+  assert.equal(m.total.value, "לא זמין");
+  assert.equal(m.rows[0].value, "אין יתרה שדווחה");
+  assert.ok(m.rows[1].closed && m.extras.map((r) => r.key).join() === "missing,closed");
+  assert.ok(!m.rows[0].value.includes("₪0"));
+});
+
+test("accounts panel: empty / loading / error states, and the rows render", () => {
+  const render = (state: Parameters<typeof AccountsPanel>[0]["state"]) => renderToStaticMarkup(createElement(AccountsPanel, { state, onRetry: () => undefined }));
+  assert.ok(render({ status: "loading" }).includes("טוען את החשבונות"));
+  assert.ok(render({ status: "error", code: 404 }).includes("המסך עדיין לא פעיל"));
+  assert.ok(render({ status: "error", code: 403 }).includes("אין הרשאה"));
+  assert.ok(render({ status: "error", code: 500 }).includes("נסו שוב"));
+  assert.ok(render({ status: "ok", data: accountsView([]) }).includes("עוד אין חשבונות"));
+  const html = render({ status: "ok", data: accountsView([acct("קרן א", { balance: snap(100000) })], { consolidated_value: 100000, estimated_value: 100000, accounts_with_value: 1 }) });
+  assert.ok(html.includes("קרן א") && html.includes("שווי מאוחד") && html.includes("קרן השתלמות"));
+});
+
+test("the accounts tab is not mounted (no fetch) until opened, and the screen has no write control", () => {
+  const html = renderToStaticMarkup(createElement(FamilyWealth, { overview: { status: "loading" }, onBack: () => undefined, onRetry: () => undefined }));
+  assert.ok(html.includes('id="fw-tab-accounts"') && html.includes('id="fw-panel-accounts"'));
+  assert.ok(!html.includes("טוען את החשבונות"), "the accounts call is not made while another tab is open");
+  const src = require("fs").readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  assert.ok(!/postFcc|method:\s*"(POST|PUT|PATCH|DELETE)"/.test(src), "no write call from the family screen");
 });
 
 if (failures) throw new Error(`${failures} test(s) failed`);
