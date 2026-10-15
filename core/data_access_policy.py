@@ -52,6 +52,7 @@ class PersonalDataAccessDenied(PermissionError):
 DENIED_MESSAGE = "❌ גישה נחסמה: נתונים אישיים זמינים רק לבעל הרשומה."
 UNRESOLVED_MESSAGE = "❌ גישה נחסמה: לא ניתן לאמת את זהותך מול רשומה אישית."
 SYSTEM_STATE_MESSAGE = "❌ גישה נחסמה: זה מצב פנימי של המערכת ואינו זמין דרך כלי הנתונים."
+LONG_NUMBER_MESSAGE = "❌ לא שומרים מספר חשבון או פוליסה מלא. יש להשאיר רק את ארבע הספרות האחרונות."
 SINGLE_LINK_MESSAGE = "❌ ניתן לקשר רשומה אחת בלבד בשדה זה."
 RAW_TABLE_ID_MESSAGE = "❌ גישה נחסמה: יש לפנות לטבלה לפי שם, לא לפי מזהה."
 
@@ -68,6 +69,10 @@ class TablePolicy:
     linked_owner_checks: tuple[tuple[str, str], ...] = ()
     # link fields that must hold at most ONE record although Airtable allows several (Airtable cannot be told otherwise).
     single_links: tuple[str, ...] = ()
+    # free-text fields that must never hold a full account / policy number (see ``contains_long_number``). When
+    # ``digit_guard_when_linked`` is set, the guard applies only if one of those link fields is present in the write.
+    digit_guard: tuple[str, ...] = ()
+    digit_guard_when_linked: tuple[str, ...] = ()
 
 
 # Proposed (NOT yet in the live schema): Tasks."Visibility" = "Private". The
@@ -88,13 +93,19 @@ _POLICIES: dict[str, TablePolicy] = {
     ),
     # Financial Accounts (D1): where money is held. Owner-of-record only; business roles grant nothing. Registered BEFORE
     # any row exists so the table is never reachable through the generic role rules (an unregistered table is).
-    Tables.FIN_ACCOUNTS: TablePolicy(Tables.FIN_ACCOUNTS, OWNER_SCOPED, owner_field=FinAccountFields.FINANCIAL_OWNER),
+    Tables.FIN_ACCOUNTS: TablePolicy(
+        Tables.FIN_ACCOUNTS, OWNER_SCOPED, owner_field=FinAccountFields.FINANCIAL_OWNER,
+        digit_guard=(FinAccountFields.NAME, FinAccountFields.INSTITUTION, FinAccountFields.HOLDER_NAMES,
+                     FinAccountFields.TAX_NOTES, FinAccountFields.NOTES),
+    ),
     Tables.FIN_EVENTS: TablePolicy(
         Tables.FIN_EVENTS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,
         linked_owner_checks=(("Goal", Tables.FIN_GOALS),
                              (FinEventFields.ACCOUNT, Tables.FIN_ACCOUNTS),
                              (FinEventFields.COUNTER_ACCOUNT, Tables.FIN_ACCOUNTS)),   # an event cannot hang under another person's account
         single_links=(FinEventFields.ACCOUNT, FinEventFields.COUNTER_ACCOUNT),
+        digit_guard=(FinEventFields.NOTE, FinEventFields.RAW_TEXT),                     # only for events that carry an account
+        digit_guard_when_linked=(FinEventFields.ACCOUNT, FinEventFields.COUNTER_ACCOUNT),
     ),
     # Sessions hold per-person working state (lead-qualifier answers, BusinessDraft incl. FCC financial
     # drafts). Only session_store (its own sanctioned internal I/O) may touch them — never a generic
@@ -256,9 +267,37 @@ def scope_new_record_fields(table: object, fields: dict, identity) -> dict:
     if refs and set(refs) != {actor.profile_id}:
         raise PersonalDataAccessDenied(DENIED_MESSAGE)
     _check_linked_owners(policy, fields, actor)
+    _check_text_guards(policy, fields)
     scoped = dict(fields)
     scoped[policy.owner_field] = [actor.profile_id]
     return scoped
+
+
+# 8+ digits in a row, up to 3 spaces/hyphens allowed between digits ("1234 5678 9012", "12-345-6789", "1234 - 5678"). Best-effort
+# guard against accidental storage, not a boundary against deliberate evasion. ISO dates are
+# removed first; commas, dots and slashes are NOT separators, so "1,500,000", "0.75" and "15/10/2026" are never blocked.
+_ISO_DATE_RE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
+_LONG_NUMBER_RE = re.compile(r"(?<!\d)\d(?:[ \-]{0,3}\d){7,}(?!\d)")
+
+
+def contains_long_number(value: object) -> bool:
+    """True when free text holds what looks like a full account / policy number (8+ digits, even if grouped)."""
+    if not isinstance(value, str):
+        return False
+    return bool(_LONG_NUMBER_RE.search(_ISO_DATE_RE.sub(" ", value)))
+
+
+def _check_text_guards(policy: TablePolicy, fields: dict | None, existing: dict | None = None) -> None:
+    """Refuse a write that would store a full account / policy number in a guarded text field (create AND update).
+    ``existing`` (the stored record, on update) lets a text-only edit of an already account-linked event be guarded too."""
+    if not policy.digit_guard or not isinstance(fields, dict):
+        return
+    if policy.digit_guard_when_linked and not any(
+            fields.get(link) or (existing or {}).get(link) for link in policy.digit_guard_when_linked):
+        return
+    for name in policy.digit_guard:
+        if contains_long_number(fields.get(name)):
+            raise PersonalDataAccessDenied(LONG_NUMBER_MESSAGE)
 
 
 def _check_linked_owners(policy: TablePolicy, fields: dict | None, actor: ActorScope) -> None:
@@ -318,6 +357,8 @@ def enforce_table_access(tool_name: str, identity, params: dict) -> None:
             raise PersonalDataAccessDenied(UNRESOLVED_MESSAGE)
     if policy.linked_owner_checks and tool_name in ("airtable_add", "airtable_update"):
         _check_linked_owners(policy, params.get("fields"), actor or resolve_actor(identity))
+    if policy.digit_guard and tool_name in ("airtable_add", "airtable_update"):
+        _check_text_guards(policy, params.get("fields"))
     if needs_record_check:
         from tools.airtable_read_adapter import get_record_fields
         try:
@@ -330,6 +371,8 @@ def enforce_table_access(tool_name: str, identity, params: dict) -> None:
         actor = actor or resolve_actor(identity)
         if not record_visible(policy.table, existing, actor):
             raise PersonalDataAccessDenied(DENIED_MESSAGE)
+        if policy.digit_guard_when_linked:
+            _check_text_guards(policy, params.get("fields"), existing)
 
 
 # ══════════════════════════════════════════════════
