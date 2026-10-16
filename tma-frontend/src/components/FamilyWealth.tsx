@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { fetchFccAccounts, fetchFccOverview } from "../api";
-import type { FccAccountsView, FccOverview } from "../types";
-import { FAMILY_TABS, FAMILY_TAB_PREFIX, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, savingsTabModel, type FamilyTabKey } from "../lib/familyWealth";
+import { useEffect, useRef, useState } from "react";
+import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast } from "../api";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview } from "../types";
+import { LineChart } from "./PortfolioLabCharts";
+import { DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
 import { panelId, tabId } from "../lib/fccTabs";
 import { FccTabBar } from "./FccTabBar";
 import { KpiCard } from "./FccKpiCard";
@@ -89,6 +90,81 @@ export function AccountsPanel({ state, onRetry }: { state: AccountsState; onRetr
         ))}
       </ul>
       {m.notes.map((n) => <p key={n} className="fcc-goal__note">{n}</p>)}
+      <ForecastSection accounts={state.data.accounts.filter((a) => a.status !== "closed" && a.balance)} />
+    </div>
+  );
+}
+
+type ForecastState = { status: "idle" } | { status: "loading" } | { status: "ok"; view: FccAccountsForecast } | { status: "error"; message: string; code?: number };
+
+/** A1: assumptions -> POST /api/fcc/accounts/forecast -> render. Runs only when asked; every number shown is the server's engine result. */
+function ForecastSection({ accounts }: { accounts: FccAccount[] }) {
+  const [form, setForm] = useState<ForecastForm>(DEFAULT_FORECAST_FORM);
+  const [state, setState] = useState<ForecastState>({ status: "idle" });
+  const [formError, setFormError] = useState<string | null>(null);
+  const latest = useRef(0);
+  if (accounts.length === 0) return null;
+  const set = <K extends keyof ForecastForm>(key: K, value: ForecastForm[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const run = () => {
+    const parsed = forecastParams(form);
+    if (!parsed.ok) { setFormError(parsed.error); return; }
+    setFormError(null);
+    const id = ++latest.current;                       // a slower, older answer must never overwrite a newer one
+    setState({ status: "loading" });
+    postFccAccountsForecast(parsed.params)
+      .then((view) => { if (id === latest.current) setState({ status: "ok", view }); })
+      .catch((e: Error & { status?: number }) => { if (id === latest.current) setState({ status: "error", message: e.message, code: e.status }); });
+  };
+  return (
+    <section className="fcc-section" aria-labelledby="fw-forecast">
+      <h2 id="fw-forecast" className="fcc-section__heading">{FORECAST_TITLE}</h2>
+      <p className="fcc-goal__note">{FORECAST_NOTE}</p>
+      <form className="pl-form" onSubmit={(e) => { e.preventDefault(); run(); }} aria-label="הנחות התחזית">
+        <div className="pl-grid">
+          <label>מספר שנים (10–100)<input inputMode="numeric" value={form.years} onChange={(e) => set("years", e.target.value)} /></label>
+          <label>תשואה שנתית ברוטו (%)<input inputMode="decimal" value={form.returnPct} onChange={(e) => set("returnPct", e.target.value)} /></label>
+          <label>דמי ניהול ברירת מחדל (%)<input inputMode="decimal" value={form.feePct} onChange={(e) => set("feePct", e.target.value)} /></label>
+          <label>אינפלציה שנתית (%)<input inputMode="decimal" value={form.inflationPct} onChange={(e) => set("inflationPct", e.target.value)} /></label>
+        </div>
+        <fieldset>
+          <legend>הפקדה חודשית לכל חשבון (₪, אופציונלי)</legend>
+          <div className="pl-grid">
+            {accounts.map((a) => (
+              <label key={a.id}>{a.name || "חשבון ללא שם"}
+                <input inputMode="decimal" placeholder="0" value={form.deposits[a.id] ?? ""}
+                       onChange={(e) => set("deposits", { ...form.deposits, [a.id]: e.target.value })} />
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <button type="submit" className="boss-button boss-button--primary boss-bubble--action" disabled={state.status === "loading"}>
+          {state.status === "loading" ? "מחשב…" : "חשב תחזית"}
+        </button>
+        {formError && <p className="fcc-quick__error" role="alert">⚠️ {formError}</p>}
+      </form>
+      {state.status === "loading" && <ScreenState state="loading" title="מחשב" message="המנוע מריץ את התחזית…" />}
+      {state.status === "error" && (
+        <ScreenState state="error" title={state.code === 404 ? "המסך עדיין לא פעיל" : state.code === 429 ? "יותר מדי חישובים" : "החישוב נכשל"}
+                     message={state.code === 404 ? "התחזית אינה זמינה בחשבון הזה." : state.code === 429 ? "אפשר לנסות שוב בעוד דקה." : state.message} />
+      )}
+      {state.status === "ok" && <ForecastResult view={state.view} />}
+    </section>
+  );
+}
+
+export function ForecastResult({ view }: { view: FccAccountsForecast }) {
+  const m = forecastModel(view);
+  return (
+    <div className="fcc-stack">
+      <div className="fcc-kpis">{m.total.map((r) => <KpiCard key={r.key} label={r.label} value={r.value} hint={r.hint} />)}</div>
+      {m.chart && <Surface padding="compact"><LineChart model={m.chart} xLabel="שנים" title="תחזית מאוחדת" /></Surface>}
+      {m.rows.length > 0 && (
+        <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+          <thead><tr>{m.head.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{m.rows.map((r) => <tr key={r.id}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""} title={i === 3 ? r.feeHint : undefined}>{c}</td>)}</tr>)}</tbody>
+        </table></div></Surface>
+      )}
+      <ul className="pl-list pl-list--small" dir="auto">{m.notes.map((n) => <li key={n}>{n}</li>)}</ul>
     </div>
   );
 }

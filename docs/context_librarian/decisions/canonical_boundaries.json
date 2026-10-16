@@ -1547,6 +1547,7 @@
       "code_paths": [
         "portfolio_lab/__init__.py",
         "portfolio_lab/__main__.py",
+        "portfolio_lab/accounts_forecast.py",
         "portfolio_lab/engine.py",
         "portfolio_lab/models.py",
         "portfolio_lab/simulator_view.py",
@@ -1554,6 +1555,7 @@
         "portfolio_lab/ui_page.html"
       ],
       "test_paths": [
+        "test_accounts_forecast.py",
         "test_portfolio_lab.py",
         "test_portfolio_lab_ui.py"
       ],
@@ -1605,7 +1607,8 @@
         "RECONCILIATION.md section F permits owner-reviewed direct catalog registration in the same PR. This entry registers exact files only; no policy_registry change, wildcard, auto-registration permission or approval of future sources.",
         "Four Python files are standalone mathematical code with stdin/stdout CLI only; three JSON fixtures are simulation data; EVIDENCE.json is a local-test snapshot, not production evidence.",
         "last_verified_commit records the canonical-main policy baseline inspected for this registration, NOT verification that the new PL-1 implementation is on main. last_semantic_review_commit identifies the exact previously reviewed PL-1 source revision. Implementation is branch-only; merge/deployment/runtime remain unverified.",
-        "No caller or import in app, core, tools, TMA, CRM or Airtable consumes Portfolio Lab; no BOSS execution layer or existing authority is replaced. Any future runtime wiring or new source requires a separate review."
+        "No caller or import in app, core, tools, TMA, CRM or Airtable consumes Portfolio Lab; no BOSS execution layer or existing authority is replaced. Any future runtime wiring or new source requires a separate review.",
+        "D1 step 7 / A1 (PR #1326, 15-16/10/2026): owner explicitly approved \"APPROVE EXISTING NODE: decision.portfolio_lab_local_research\" for exactly portfolio_lab/accounts_forecast.py and its test test_accounts_forecast.py. The module is pure (no I/O, Airtable, LLM or writes): it only composes the unchanged engine.simulate per account from an already owner-scoped accounts_overview and sums the engine results. It is consumed only by the owner-gated POST /api/fcc/accounts/forecast (FCC flag + canary + owner). No new node, no policy change, no new production authority, no approval of future sources."
       ],
       "extensions": {
         "context_librarian.registration": {

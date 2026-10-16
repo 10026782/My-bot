@@ -780,6 +780,25 @@ export interface FccAccountsView {
   as_of: string;
 }
 
+/** Assumption-based forecast per account + consolidated (D1 step 7 / A1). Server-derived by the unchanged portfolio_lab engine. */
+export interface FccForecastParams {
+  years: number; annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; monthly_contributions: Record<string, number>;
+}
+export interface FccForecastPoint { year: number; nominal: number; real: number; invested: number }
+export interface FccForecastAccount {
+  id: string; name: string | null; account_type: string | null; start_value: number; start_as_of: string; verification: string | null;
+  monthly_contribution: number; fee_pct: number; fee_source: "account" | "default";
+  final_nominal: number; final_real: number; invested: number; nominal_profit: number; costs_paid: number; series: FccForecastPoint[];
+}
+export interface FccAccountsForecast {
+  schema_version: string; engine_version: string; result_type: string; start_date: string; years: number;
+  assumptions: { annual_return_pct: number; annual_fee_pct_default: number; inflation_pct: number; deposit_timing: string };
+  accounts: FccForecastAccount[];
+  consolidated: { accounts: number; start_value: number; final_nominal: number | null; final_real: number | null; invested: number | null; series: FccForecastPoint[] };
+  excluded: { without_snapshot: number; closed: number };
+  all_self_reported: boolean | null; warnings: string[]; as_of: string;
+}
+
 export interface FccOverview {
   goals: FccGoalRow[];
   savings_history?: FccSavingsHistory | null;

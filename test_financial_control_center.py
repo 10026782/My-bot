@@ -4101,3 +4101,46 @@ def test_http_accounts_unresolved_identity_403_and_read_only(monkeypatch):
     for method in ("post", "put", "patch", "delete"):
         assert getattr(c, method)("/api/fcc/accounts", headers=H, json={}).status_code == 405        # no write path
     assert len(DB[Tables.FIN_ACCOUNTS]) == 2
+
+
+# ═══ D1 step 7 / A1: POST /api/fcc/accounts/forecast ═══
+def forecast(c, body=None, raw=None):
+    import json as _json
+    data = raw if raw is not None else _json.dumps(body if body is not None else {"years": 10})
+    return c.post("/api/fcc/accounts/forecast", data=data, headers={**H, "Content-Type": "application/json"})
+
+
+def test_http_forecast_flag_off_and_non_owner_get_404(monkeypatch):
+    seed_accounts()
+    assert forecast(http(monkeypatch, ELIYAHU, flag=False)).status_code == 404
+    assert forecast(http(monkeypatch, AVI_I)).status_code == 404
+
+
+def test_http_forecast_uses_only_the_callers_own_accounts_and_snapshots(monkeypatch):
+    seed_accounts()
+    r = forecast(http(monkeypatch, ELIYAHU), {"years": 10, "monthly_contributions": {"recAE": 500}})
+    body = r.get_json()
+    assert r.status_code == 200 and [a["id"] for a in body["accounts"]] == ["recAE"]
+    assert body["accounts"][0]["start_value"] == 100000 and body["consolidated"]["start_value"] == 100000
+    assert "777777" not in str(body) and "החשבון של אבי" not in str(body) and "הערה פרטית" not in str(body)
+    # another owner's account id cannot be forecast
+    bad = forecast(http(monkeypatch, ELIYAHU), {"monthly_contributions": {"recAA": 500}})
+    assert bad.status_code == 400 and "777777" not in str(bad.get_json())
+
+
+def test_http_forecast_validation_and_transport_errors(monkeypatch):
+    seed_accounts()
+    c = http(monkeypatch, ELIYAHU)
+    assert forecast(c, {"years": 5}).status_code == 400
+    assert forecast(c, raw="not json").status_code == 400
+    assert c.post("/api/fcc/accounts/forecast", data="{}", headers={**H, "Content-Type": "text/plain"}).status_code == 415
+    assert c.post("/api/fcc/accounts/forecast", data="x" * (70 * 1024), headers={**H, "Content-Type": "application/json"}).status_code == 413
+    assert c.get("/api/fcc/accounts/forecast", headers=H).status_code == 405
+
+
+def test_http_forecast_unresolved_identity_403_and_nothing_is_written(monkeypatch):
+    seed_accounts()
+    assert forecast(http(monkeypatch, ident("nobody", Role.OWNER))).status_code == 403
+    before = (len(DB[Tables.FIN_ACCOUNTS]), len(DB[Tables.FIN_EVENTS]))
+    assert forecast(http(monkeypatch, ELIYAHU)).status_code == 200
+    assert (len(DB[Tables.FIN_ACCOUNTS]), len(DB[Tables.FIN_EVENTS])) == before

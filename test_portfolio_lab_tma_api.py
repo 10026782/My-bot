@@ -123,7 +123,8 @@ def test_concurrency_gate_returns_503_when_busy(monkeypatch):
 def test_read_only_and_only_the_pure_view_is_imported():
     text = Path("tma_api.py").read_text(encoding="utf-8")
     imports = re.findall(r"^\s*(?:from|import)\s+(portfolio_lab[\w.]*)", text, re.M)
-    assert imports == ["portfolio_lab.simulator_view"]                               # the one edge, nothing else
+    # the two pure edges, nothing else: the simulator view and (D1 step 7 / A1) the pure per-account forecast assembly
+    assert sorted(imports) == ["portfolio_lab.accounts_forecast", "portfolio_lab.simulator_view"]
     assert "portfolio_lab.ui" not in text                                            # the local server is never served from here
     block = text.split("# Portfolio Lab", 1)[1]
     for forbidden in ("airtable", "_queue_or_owner_execute", "dispatch_tool", "call_anthropic", "filter_records", "_gw_create", "_gw_patch"):

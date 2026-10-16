@@ -5,12 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FamilyWealth, FamilyWealthCard } from "../components/FamilyWealth";
 import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
-import type { FccAccountsView, FccOverview, PortfolioLabView } from "../types";
-import { AccountsPanel } from "../components/FamilyWealth";
+import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView } from "../types";
+import { AccountsPanel, ForecastResult } from "../components/FamilyWealth";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  accountsTabModel, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, accountsTabModel, forecastModel, forecastParams, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -260,7 +260,58 @@ test("the accounts tab is not mounted (no fetch) until opened, and the screen ha
   assert.ok(html.includes('id="fw-tab-accounts"') && html.includes('id="fw-panel-accounts"'));
   assert.ok(!html.includes("טוען את החשבונות"), "the accounts call is not made while another tab is open");
   const src = require("fs").readFileSync("src/components/FamilyWealth.tsx", "utf8");
-  assert.ok(!/postFcc|method:\s*"(POST|PUT|PATCH|DELETE)"/.test(src), "no write call from the family screen");
+  assert.ok(!/postFccWrite|postFccIntent|method:\s*"(POST|PUT|PATCH|DELETE)"/.test(src), "no write call from the family screen (the forecast POST only carries assumptions)");
+});
+
+// ── D1 step 7 / A1: accounts forecast ──
+const fPoint = (year: number, nominal: number, real: number, invested: number) => ({ year, nominal, real, invested });
+const forecastView = {
+  schema_version: "1.0", engine_version: "1.0.0", result_type: "assumption_based_projection", start_date: "2026-10-01", years: 10,
+  assumptions: { annual_return_pct: 6, annual_fee_pct_default: 0.15, inflation_pct: 2, deposit_timing: "end" },
+  accounts: [
+    { id: "recA", name: "קרן א", account_type: "study_fund", start_value: 100000, start_as_of: "2026-10-01", verification: "self_reported", monthly_contribution: 1000,
+      fee_pct: 0.5, fee_source: "account", final_nominal: 328448, final_real: 270000, invested: 220000, nominal_profit: 108448, costs_paid: 5000, series: [fPoint(1, 1, 1, 1)] },
+    { id: "recB", name: "נזיל", account_type: "liquid", start_value: 50000, start_as_of: "2026-10-02", verification: "self_reported", monthly_contribution: 0,
+      fee_pct: 0.15, fee_source: "default", final_nominal: 88208, final_real: 72000, invested: 50000, nominal_profit: 38208, costs_paid: 900, series: [fPoint(1, 1, 1, 1)] },
+  ],
+  consolidated: { accounts: 2, start_value: 150000, final_nominal: 416656, final_real: 342000, invested: 270000, series: [fPoint(1, 150000, 150000, 150000), fPoint(10, 416656, 342000, 270000)] },
+  excluded: { without_snapshot: 1, closed: 1 }, all_self_reported: true, warnings: ["תחזית מבוססת הנחות — לא הבטחת תשואה ולא המלצת השקעה."], as_of: "2026-10-15",
+} as unknown as FccAccountsForecast;
+
+test("forecast form: typed text -> request body; blank deposit means none; bad input is an error, never silently 0", () => {
+  const ok = forecastParams({ ...DEFAULT_FORECAST_FORM, deposits: { recA: "1,000".replace(",", ""), recB: "  ", recC: "0" } });
+  assert.ok(ok.ok && ok.params.years === 20 && ok.params.annual_return_pct === 6 && ok.params.annual_fee_pct === 0.15);
+  assert.equal(JSON.stringify(ok.ok ? ok.params.monthly_contributions : null), JSON.stringify({ recA: 1000 }));
+  for (const bad of [{ years: "" }, { years: "20.5" }, { returnPct: "abc" }, { feePct: "" }, { deposits: { recA: "-5" } }, { deposits: { recA: "x" } }]) {
+    assert.equal(forecastParams({ ...DEFAULT_FORECAST_FORM, ...bad }).ok, false, JSON.stringify(bad));
+  }
+});
+
+test("forecast model: server totals only, fee source shown, excluded accounts counted, nothing summed here", () => {
+  const m = forecastModel(forecastView);
+  assert.ok(m.total.find((r) => r.key === "final")?.value.includes("416,656"));
+  assert.ok(m.total.find((r) => r.key === "invested")?.hint?.includes("כולל את יתרת הפתיחה"));
+  assert.ok(m.rows[1].cells[3].includes("ברירת מחדל") && !m.rows[0].cells[3].includes("ברירת מחדל"));
+  assert.ok(m.notes.some((n) => n.includes("1 חשבונות בלי יתרה")) && m.notes.some((n) => n.includes("חשבונות סגורים")));
+  assert.ok(m.chart && m.chart.lines.length === 3);
+});
+
+test("forecast result renders labelled as assumptions, and with no eligible account there is no fake total", () => {
+  const html = renderToStaticMarkup(createElement(ForecastResult, { view: forecastView }));
+  assert.ok(html.includes("שווי מאוחד בעוד 10 שנים") && html.includes("הבטחת תשואה") && html.includes("קרן א"));
+  const none = { ...forecastView, accounts: [], consolidated: { accounts: 0, start_value: 0, final_nominal: null, final_real: null, invested: null, series: [] } } as unknown as FccAccountsForecast;
+  const m = forecastModel(none);
+  assert.equal(m.total.length, 0);
+  assert.equal(m.chart, null);
+});
+
+test("forecast is not requested until asked, and only the assumptions are posted (no balances from the client)", () => {
+  const src = require("fs").readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  assert.ok(src.includes("postFccAccountsForecast(parsed.params)") && !/useEffect\([^)]*run\(/.test(src));
+  const api = require("fs").readFileSync("src/api.ts", "utf8");
+  assert.ok(api.includes("/api/fcc/accounts/forecast") && api.includes("export async function postFccAccountsForecast(params: FccForecastParams)"));
+  const accountsOnly = renderToStaticMarkup(createElement(AccountsPanel, { state: { status: "ok", data: { accounts: [], totals: {}, skipped_events: 0, as_of: "x" } as unknown as FccAccountsView }, onRetry: () => undefined }));
+  assert.ok(!accountsOnly.includes("חשב תחזית"), "no forecast form without an account that has a balance");
 });
 
 if (failures) throw new Error(`${failures} test(s) failed`);
