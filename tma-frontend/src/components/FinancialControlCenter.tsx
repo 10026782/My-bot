@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
-import { fetchFccLoanScenario, fetchFccOverview, postFccIntent, postFccWrite } from "../api";
+import { fetchFccLoanScenario, fetchFccOverview } from "../api";
 import type { FccGoalRow, FccOverview, FccTurn } from "../types";
 import { CATEGORY_LABEL, GOAL_ACTION_BUTTONS, goalCardModel, goalPickLabel, headerCards, money, recentIncomeRows } from "../lib/fccPresentation";
 import { KpiCard, SavingsFollowUp, SavingsReleaseCard, WeeklySurplusCard } from "./FccKpiCard";
 import { AssetsSection, NextActionPrompt } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
 import { LoansSection } from "./FccLoans";
-import { ContextualComposer, FccTabBar } from "./FccTabBar";
+import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FamilyWealthCard } from "./FamilyWealth";
-import { initialTab, nextWriterState, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
+import { initialTab, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -32,50 +32,6 @@ const GOAL_STATUS: Record<FccGoalRow["status"], { label: string; tone: "info" | 
   missing_target: { label: "חסר יעד", tone: "warning" },
   project: { label: "פעיל", tone: "info" },
 };
-
-/** The single shared writer state (one draft slot per person): the composer in every tab renders THIS, so a half-finished
- *  draft is never forked by a tab switch. All logic is the server's; this only calls it and keeps the latest turn. */
-function useFccWriter(initial: FccTurn | null, tab: FccTabKey, onDone: () => void) {
-  const [turn, setTurn] = useState<FccTurn | null>(initial);
-  const [receipt, setReceipt] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [followUp, setFollowUp] = useState(false);
-  const [followUpAsset, setFollowUpAsset] = useState<string | null>(null);
-  // the overview (and a draft opened in chat) arrives after the first render: adopt it unless this screen is already showing something
-  useEffect(() => { if (initial && !turn && !receipt) setTurn(initial); }, [initial]);   // eslint-disable-line react-hooks/exhaustive-deps
-
-  const run = async (call: () => Promise<FccTurn>) => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await call();
-      const next = nextWriterState(result);
-      setTurn(next.turn);
-      setReceipt(next.receipt);
-      if (result.state === "partial_failure") setError(result.message);
-      setFollowUp(result.state === "executed" && result.follow_up === "savings");
-      setFollowUpAsset(result.state === "executed" ? result.follow_up_asset ?? null : null);
-      if (next.refresh) onDone();
-    } catch (e) {
-      setError((e as Error).message || "הפעולה נכשלה");
-    } finally {
-      setBusy(false);
-    }
-  };
-  const start = (intent: string, entityId?: string) => run(async () => {
-    const result = await postFccIntent(intent, entityId);
-    if (result.state !== "info" || !result.entity) return result;
-    // another draft is already open: show IT (the server's own latest turn) instead of a dead-end message
-    const open = await fetchFccOverview().then((o) => o.draft).catch(() => null);
-    return open ?? result;
-  });
-  const send = (text: string, goalId?: string) => run(() => postFccWrite({ text, scope: tab, ...(goalId ? { goal_id: goalId } : {}) }));
-  const dismiss = () => { setTurn(null); setReceipt(null); setError(null); };
-  return { turn, receipt, error, busy, start, send, dismiss, followUp, clearFollowUp: () => setFollowUp(false),
-           followUpAsset, clearFollowUpAsset: () => setFollowUpAsset(null) };
-}
 
 function GoalCard({ goal, onUpdate, onAction, disabled }: { goal: FccGoalRow; onUpdate: (goalId: string) => void; onAction: (intent: string, goalId: string) => void; disabled: boolean }) {
   const st = GOAL_STATUS[goal.status];

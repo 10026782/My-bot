@@ -27,7 +27,7 @@ from core.business_draft import (
 )
 from core.draft_flow import CANCEL_WORDS, CONFIRM_WORDS, EDIT_WORDS, SKIP_WORDS
 from core.financial_control import calc, draft as fd, loans as fcc_loans, service, writer
-from airtable_schema import AssetFields as AF, FinEventFields as EF, FinGoalFields as GF, LoanFields as LF, RecObFields as RF, TaskFields, Tables
+from airtable_schema import AssetFields as AF, FinAccountFields as AF_ACCOUNT, FinEventFields as EF, FinGoalFields as GF, LoanFields as LF, RecObFields as RF, TaskFields, Tables
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +156,9 @@ def _render(d: BusinessDraft) -> TurnResult:
                   else _week_surplus_note(d) if d.entity_type == fd.FCC_WEEK_SURPLUS
                   else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
             d.entity_type, None, _view(d))
+    if d.source_context.get("ask_count"):                      # D1 step 8: a deposit is counted in a goal's history only by an explicit choice
+        return TurnResult("ask", f"לספור את ההפקדה גם בהיסטוריית ההפקדות של {d.source_context.get('count_goal_title') or 'היעד'}?", d.entity_type,
+                          "count", _view(d), candidates=[{"goal_id": "count", "title": "כן, לספור"}, {"goal_id": "skip", "title": "לא, רק בחשבון"}])
     if d.source_context.get("ask_kind") and d.fields.get("goal") and not d.source_context.get("ask_source"):
         return TurnResult("ask", "איזה סוג הכנסה זו?", d.entity_type, "kind", _view(d), candidates=list(KIND_CHOICES))
     if d.source_context.get("ask_source"):                    # "מקור אחר": the source's name comes before the amount
@@ -164,7 +167,8 @@ def _render(d: BusinessDraft) -> TurnResult:
     awaiting = missing[0] if missing else None
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title, str(d.source_context.get("direction") or "")) if awaiting else "מה לעדכן?"
     if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_RATE, fd.FCC_LOAN_TERM, fd.FCC_LOAN_ORIGINAL, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
-                                      fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW, fd.FCC_PRIME_CHANGE) and d.source_context.get("review_note"):
+                                      fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW, fd.FCC_PRIME_CHANGE,
+                                      fd.FCC_ACCOUNT_BALANCE) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
 
@@ -846,6 +850,49 @@ def _choices_for(d: BusinessDraft, goals: list[dict]) -> list[dict]:
     return cands
 
 
+_ACCOUNT_ENTITIES = (fd.FCC_ACCOUNT_BALANCE, fd.FCC_ACCOUNT_DEPOSIT)
+
+
+def _intent_token() -> str:
+    """The draft's synthetic id (8 chars). Digits are mapped to letters: an event that carries an account is guarded against long numbers,
+    and 8 hex characters are all digits about once in forty drafts."""
+    return uuid.uuid4().hex[:8].translate(str.maketrans("0123456789", "ghijklmnop"))
+
+
+def _start_account_intent(identity, ids, entity, entity_id, store, today) -> TurnResult:
+    """A balance update / a deposit for ONE of the caller's own accounts. The accounts screen is owner-only, so is this. The account is
+    chosen by id (never typed), not found == not yours, and a closed account has nothing to update. Accounts themselves are not created here."""
+    if not getattr(identity, "is_owner", False):
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    if not entity_id:
+        return TurnResult("clarify", "בחרו קודם את החשבון לעדכון.")
+    account = next((a for a in service.my_accounts(identity) if a["id"] == str(entity_id)), None)
+    if account is None:
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    f = account.get("fields") or {}
+    if service._sel(f.get(AF_ACCOUNT.STATUS)) == "closed":
+        return TurnResult("info", "החשבון סגור — אין מה לעדכן בו.")
+    name = f.get(AF_ACCOUNT.NAME) or "החשבון"
+    extra = {"record_id": account["id"], "account_id": account["id"], "account_name": name, "goal_title": name, "subject_noun": "חשבון"}
+    intent = "account.update_balance" if entity == fd.FCC_ACCOUNT_BALANCE else "account.deposit"
+    raw = f"intent:{intent}#{_intent_token()}"
+    if entity == fd.FCC_ACCOUNT_BALANCE:
+        row = next((r for r in service.accounts_view(identity, today)["accounts"] if r["id"] == account["id"]), None)
+        bal = (row or {}).get("balance")
+        extra["review_note"] = (f"היתרה האחרונה: {fd.display_value('balance', bal['value'])} (נכון ל-{fd.display_value('occurred_at', bal['as_of'])})"
+                                if bal else "עוד לא דווחה יתרה לחשבון הזה")
+    else:
+        goals = service.my_goals(identity)
+        dests = [g for g in goals if str((g.get("fields") or {}).get(GF.STATUS) or "active").lower() in ("active", "פעיל")
+                 and service._raw_category((g.get("fields") or {}).get(GF.CATEGORY)) == service.SAVINGS_DESTINATION_CATEGORY]
+        if len(dests) == 1:
+            extra.update(ask_count=True, count_goal_id=dests[0]["id"], count_goal_title=(dests[0].get("fields") or {}).get(GF.TITLE, ""))
+    d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
+    d, _rej = _set_fields(d, {"occurred_at": today.isoformat()}, strict=False)
+    d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
+    return _persist_new(store, ids, d)
+
+
 def _start_prime_change(identity, ids, store, today) -> TurnResult:
     """"The prime moved": one number (points), then a review of EVERY loan's new rate and payment, then אשר. Opens only when the owner has
     loans with a known rate; the rows are captured now so the review and the writes agree."""
@@ -886,6 +933,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
     store, ids, stop = _open_slot(identity, store, "פעולה חדשה")
     if stop is not None:
         return stop
+    if spec.get("target") == "account":
+        return _start_account_intent(identity, ids, spec["entity"], entity_id, store, today)
     if intent_id == "loan.prime_change":
         return _start_prime_change(identity, ids, store, today)
     if intent_id == "monthly.source_new":
@@ -1048,6 +1097,19 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         d2, _rej = _set_fields(d, {"note": f"מקור: {name[:80]}"}, strict=False)
         d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_source"})
         return _render(_save(store, ids, d2, expected=expected))
+    if d.source_context.get("ask_count") and d.lifecycle_state not in (DraftState.READY_FOR_REVIEW, DraftState.EDITING):
+        answer = goal_id if goal_id in ("count", "skip") else {"כן, לספור": "count", "כן": "count", "לספור": "count",
+                                                            "לא, רק בחשבון": "skip", "לא": "skip", "דלג": "skip"}.get(text.strip())
+        if answer is None:
+            return replace_result(_render(d), message=f"בחרו: לספור ביעד או לא.\n{_render(d).message}")
+        rest = {k: v for k, v in d.source_context.items() if k not in ("ask_count",)}
+        d2 = d
+        if answer == "count":
+            d2, _rej = _set_fields(d, {"goal": d.source_context["count_goal_id"]}, strict=False)
+            rest["review_note"] = f"תיספר בהיסטוריית ההפקדות של {d.source_context.get('count_goal_title') or 'היעד'}."
+        else:
+            rest["review_note"] = "לא תיספר בהיסטוריית ההפקדות של אף יעד."
+        return _render(_save(store, ids, replace(d2, source_context=rest), expected=expected))
     if (d.source_context.get("ask_kind") and d.fields.get("goal")
             and d.lifecycle_state not in (DraftState.READY_FOR_REVIEW, DraftState.EDITING)):
         kind = goal_id if goal_id in ("one_time", "monthly_recurring") else _KIND_WORDS.get(text.strip())
@@ -1130,6 +1192,8 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                     fill_failed = True
 
     d2, rejected = _set_fields(d, updates, strict=False) if updates else (d, [])
+    if d.entity_type in _ACCOUNT_ENTITIES and str(d2.fields.get("occurred_at") or "") > today.isoformat():
+        return replace_result(_render(d), message=f"התאריך לא יכול להיות עתידי.\n{_render(d).message}")      # a future snapshot would be ignored by the read model
     if d.entity_type == fd.FCC_PRIME_CHANGE and d2.fields.get("delta") not in (None, ""):
         step = float(d2.fields["delta"])
         if step == 0 or abs(step) > fcc_loans.PRIME_MAX_STEP:                    # no change, or a typo (more than 5 points at once)
@@ -1170,6 +1234,13 @@ def _already_applied(identity, write: dict) -> bool:
     fields = write.get("fields") or {}
     if write["op"] == "post" and write["table"] == "Financial Progress Events":
         key = fields.get(EF.IDEMPOTENCY_KEY)
+        if fields.get(EF.KIND) == "balance_snapshot":          # the same account, day and amount already stands: nothing to add
+            same = [e.get("fields") or {} for e in service.my_events(identity)]
+            if any(f.get(EF.IDEMPOTENCY_KEY) == key or (
+                    (f.get(EF.KIND).get("name") if isinstance(f.get(EF.KIND), dict) else f.get(EF.KIND)) == "balance_snapshot"
+                    and f.get(EF.ACCOUNT) == fields.get(EF.ACCOUNT) and str(f.get(EF.OCCURRED_AT) or "")[:10] == fields.get(EF.OCCURRED_AT)
+                    and calc._num(f.get(EF.AMOUNT)) == calc._num(fields.get(EF.AMOUNT)) and not f.get(EF.SUPERSEDED_BY)) for f in same):
+                return True
         return any((e.get("fields") or {}).get(EF.IDEMPOTENCY_KEY) == key for e in service.my_events(identity))
     if write["op"] == "post" and write["table"] == "Recurring Obligations":
         name = writer._norm(fields.get(RF.NAME, ""))
@@ -1209,7 +1280,29 @@ def _already_applied(identity, write: dict) -> bool:
     return False
 
 
+def _snapshot_conflict(identity, d: BusinessDraft) -> str | None:
+    """A balance snapshot is a dated fact. Another live snapshot of the SAME account on the SAME date with a different amount would make
+    "the latest" ambiguous (same-day ordering is not defined), so it is refused with the way out; the same amount is just a duplicate."""
+    if d.entity_type != fd.FCC_ACCOUNT_BALANCE:
+        return None
+    account, day, amount = str(d.source_context.get("record_id") or ""), str(d.fields.get("occurred_at") or ""), calc._num(d.fields.get("balance"))
+    for e in service.my_events(identity):
+        f = e.get("fields") or {}
+        acct = f.get(EF.ACCOUNT)
+        acct = acct[0] if isinstance(acct, list) and acct else acct
+        kind = f.get(EF.KIND)
+        kind = kind.get("name") if isinstance(kind, dict) else kind
+        if (kind == "balance_snapshot" and acct == account and str(f.get(EF.OCCURRED_AT) or "")[:10] == day
+                and not f.get(EF.SUPERSEDED_BY) and calc._num(f.get(EF.AMOUNT)) != amount):
+            return (f"כבר קיימת יתרה מדווחת לחשבון הזה בתאריך {fd.display_value('occurred_at', day)} "
+                    f"({fd.display_value('balance', calc._num(f.get(EF.AMOUNT)))}). בחרו תאריך אחר (ערוך › נכון לתאריך), או תקנו את הרשומה ב-Airtable.")
+    return None
+
+
 def _confirm(identity, ids, d: BusinessDraft, store) -> TurnResult:
+    conflict = _snapshot_conflict(identity, d)
+    if conflict:
+        return TurnResult("clarify", f"❌ {conflict}", d.entity_type)
     try:
         confirmed, snapshot = d.confirm(adapter=fd.ADAPTER)
     except _VALIDATION_ERRORS as exc:

@@ -40,7 +40,7 @@ export function tabForKey<K extends string = FccTabKey>(
 // ── Contextual composer (one writer engine on the server, one draft slot; each tab only changes its title and chips) ──
 /** A chip only names an intent (+ which kind of record it is about when that record must be chosen first). It never
  *  writes: the server opens the draft (POST /api/fcc/intent/start) and the usual review -> אשר flow follows. */
-export interface ComposerChip { intent: string; label: string; pick?: "goal" | "loan" | "asset" }
+export interface ComposerChip { intent: string; label: string; pick?: "goal" | "loan" | "asset" | "account" }
 export interface ComposerConfig {
   title: string;
   chips: ComposerChip[];
@@ -94,6 +94,18 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
     freeText: false,
     hint: "בחרו פעולה — המערכת תשאל רק מה שחסר. סימון נכס כנמכר מציג סקירה מלאה ודורש אישור נפרד.",
   },
+};
+
+/** The accounts tab of the family-wealth screen (D1 step 8): the same writer engine, dressed with the two account actions. Accounts themselves
+ *  are created by hand in Airtable — no chip creates one. */
+export const ACCOUNTS_COMPOSER: ComposerConfig = {
+  title: "עדכון חשבון",
+  chips: [
+    { intent: "account.update_balance", label: "עדכון יתרה", pick: "account" },
+    { intent: "account.deposit", label: "הפקדה לחשבון", pick: "account" },
+  ],
+  freeText: false,
+  hint: "בחרו פעולה — המערכת תשאל רק מה שחסר ותציג סקירה לפני כל רישום. החשבונות עצמם מוגדרים ידנית.",
 };
 
 export const WRITER_WORDS = { confirm: "אשר", edit: "ערוך", cancel: "בטל" } as const;

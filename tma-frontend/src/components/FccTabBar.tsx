@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { fetchFccOverview, postFccIntent, postFccWrite } from "../api";
 import type { FccTurn } from "../types";
 import {
-  COMPOSER, FCC_TABS, WRITER_WORDS, chipsEnabled, inputVisible, panelId, tabForKey, tabId, writerView,
-  type ComposerChip, type FccTabKey,
+  COMPOSER, DEFAULT_TAB, FCC_TABS, WRITER_WORDS, chipsEnabled, inputVisible, nextWriterState, panelId, tabForKey, tabId, writerView,
+  type ComposerChip, type ComposerConfig, type FccTabKey,
 } from "../lib/fccTabs";
 import { Surface } from "./ui/Surface";
 
@@ -31,16 +32,16 @@ export function FccTabBar<K extends string = FccTabKey>({ active, onChange, tabs
   );
 }
 
-export interface ComposerTargets { goals: { id: string; title: string }[]; loans: { id: string; title: string }[]; assets: { id: string; title: string }[] }
+export interface ComposerTargets { goals: { id: string; title: string }[]; loans: { id: string; title: string }[]; assets: { id: string; title: string }[]; accounts?: { id: string; title: string }[] }
 
 /** ONE writer for the whole screen, dressed per tab (title + chips). The draft/turn state lives in the parent — a single
  *  shared draft slot — so switching tabs never forks it. Chips and card actions only name an intent; every answer,
  *  review and confirmation is the server's (the same BusinessDraft flow as free text). */
-export function ContextualComposer({ tab, turn, receipt, error, busy, targets, onStart, onSend, onDismiss }: {
-  tab: FccTabKey; turn: FccTurn | null; receipt: string | null; error: string | null; busy: boolean; targets: ComposerTargets;
+export function ContextualComposer({ tab, config, turn, receipt, error, busy, targets, onStart, onSend, onDismiss }: {
+  tab?: FccTabKey; config?: ComposerConfig; turn: FccTurn | null; receipt: string | null; error: string | null; busy: boolean; targets: ComposerTargets;
   onStart: (intent: string, entityId?: string) => void; onSend: (text: string, goalId?: string) => void; onDismiss: () => void;
 }) {
-  const cfg = COMPOSER[tab];
+  const cfg = config ?? COMPOSER[tab ?? DEFAULT_TAB];
   const view = writerView(turn, receipt);
   const [text, setText] = useState("");
   const [picking, setPicking] = useState<ComposerChip | null>(null);
@@ -54,7 +55,7 @@ export function ContextualComposer({ tab, turn, receipt, error, busy, targets, o
   useEffect(() => { if (turn) setPicking(null); }, [turn]);
 
   const canPick = chipsEnabled(view, busy);
-  const options = picking?.pick === "loan" ? targets.loans : picking?.pick === "asset" ? targets.assets : targets.goals;
+  const options = picking?.pick === "loan" ? targets.loans : picking?.pick === "asset" ? targets.assets : picking?.pick === "account" ? (targets.accounts ?? []) : targets.goals;
   const active = turn != null || receipt != null || picking != null;     // compact while idle, expanded only for an active draft
   const submit = () => { const value = text.trim(); if (value) { onSend(value); setText(""); } };
   // mobile: a button press blurs the textarea, the keyboard closes and the click is lost — keep the focus
@@ -75,9 +76,9 @@ export function ContextualComposer({ tab, turn, receipt, error, busy, targets, o
         )}
         {picking && (
           <div className="fcc-quick__turn">
-            <p className="fcc-quick__message">{picking.pick === "loan" ? "איזו הלוואה?" : picking.pick === "asset" ? "איזה נכס?" : "איזה יעד?"}</p>
+            <p className="fcc-quick__message">{picking.pick === "loan" ? "איזו הלוואה?" : picking.pick === "asset" ? "איזה נכס?" : picking.pick === "account" ? "איזה חשבון?" : "איזה יעד?"}</p>
             {options.length === 0 ? (
-              <p className="fcc-goal__note">{picking.pick === "loan" ? "אין הלוואות פעילות." : picking.pick === "asset" ? "אין נכסים לעדכון." : "אין יעדים פעילים."}</p>
+              <p className="fcc-goal__note">{picking.pick === "loan" ? "אין הלוואות פעילות." : picking.pick === "asset" ? "אין נכסים לעדכון." : picking.pick === "account" ? "אין חשבונות פעילים לעדכון." : "אין יעדים פעילים."}</p>
             ) : (
               <div className="fcc-quick__choices">
                 {options.map((o) => (
@@ -135,4 +136,48 @@ export function ContextualComposer({ tab, turn, receipt, error, busy, targets, o
       </Surface>
     </section>
   );
+}
+
+/** The single shared writer state (one draft slot per person): the composer in every tab renders THIS, so a half-finished
+ *  draft is never forked by a tab switch. All logic is the server's; this only calls it and keeps the latest turn. */
+export function useFccWriter(initial: FccTurn | null, tab: string, onDone: () => void) {
+  const [turn, setTurn] = useState<FccTurn | null>(initial);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [followUp, setFollowUp] = useState(false);
+  const [followUpAsset, setFollowUpAsset] = useState<string | null>(null);
+  // the overview (and a draft opened in chat) arrives after the first render: adopt it unless this screen is already showing something
+  useEffect(() => { if (initial && !turn && !receipt) setTurn(initial); }, [initial]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const run = async (call: () => Promise<FccTurn>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await call();
+      const next = nextWriterState(result);
+      setTurn(next.turn);
+      setReceipt(next.receipt);
+      if (result.state === "partial_failure") setError(result.message);
+      setFollowUp(result.state === "executed" && result.follow_up === "savings");
+      setFollowUpAsset(result.state === "executed" ? result.follow_up_asset ?? null : null);
+      if (next.refresh) onDone();
+    } catch (e) {
+      setError((e as Error).message || "הפעולה נכשלה");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const start = (intent: string, entityId?: string) => run(async () => {
+    const result = await postFccIntent(intent, entityId);
+    if (result.state !== "info" || !result.entity) return result;
+    // another draft is already open: show IT (the server's own latest turn) instead of a dead-end message
+    const open = await fetchFccOverview().then((o) => o.draft).catch(() => null);
+    return open ?? result;
+  });
+  const send = (text: string, goalId?: string) => run(() => postFccWrite({ text, scope: tab, ...(goalId ? { goal_id: goalId } : {}) }));
+  const dismiss = () => { setTurn(null); setReceipt(null); setError(null); };
+  return { turn, receipt, error, busy, start, send, dismiss, followUp, clearFollowUp: () => setFollowUp(false),
+           followUpAsset, clearFollowUpAsset: () => setFollowUpAsset(null) };
 }

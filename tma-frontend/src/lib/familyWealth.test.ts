@@ -7,6 +7,8 @@ import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
 import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView } from "../types";
 import { AccountsPanel, ForecastResult } from "../components/FamilyWealth";
+import { ContextualComposer } from "../components/FccTabBar";
+import { ACCOUNTS_COMPOSER, COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
@@ -312,6 +314,39 @@ test("forecast is not requested until asked, and only the assumptions are posted
   assert.ok(api.includes("/api/fcc/accounts/forecast") && api.includes("export async function postFccAccountsForecast(params: FccForecastParams)"));
   const accountsOnly = renderToStaticMarkup(createElement(AccountsPanel, { state: { status: "ok", data: { accounts: [], totals: {}, skipped_events: 0, as_of: "x" } as unknown as FccAccountsView }, onRetry: () => undefined }));
   assert.ok(!accountsOnly.includes("חשב תחזית"), "no forecast form without an account that has a balance");
+});
+
+// ── D1 step 8: account writes run in the shared contextual composer ──
+test("accounts composer: two chips that only name an intent + an account; no chip creates an account; the FCC tabs are unchanged", () => {
+  assert.equal(ACCOUNTS_COMPOSER.chips.map((c) => c.intent).join(), "account.update_balance,account.deposit");
+  assert.ok(ACCOUNTS_COMPOSER.chips.every((c) => c.pick === "account") && !ACCOUNTS_COMPOSER.freeText);
+  assert.ok(!ACCOUNTS_COMPOSER.chips.some((c) => /create|new/.test(c.intent)));
+  assert.equal(Object.keys(COMPOSER).join(), "monthly,loans,assets");
+});
+
+test("composer renders with the accounts config (no FCC tab needed) and shows the two account actions", () => {
+  const html = renderToStaticMarkup(createElement(ContextualComposer, {
+    config: ACCOUNTS_COMPOSER, turn: null, receipt: null, error: null, busy: false,
+    targets: { goals: [], loans: [], assets: [], accounts: [{ id: "recA", title: "קרן א" }] }, onStart: () => undefined, onSend: () => undefined, onDismiss: () => undefined,
+  }));
+  assert.ok(html.includes("עדכון חשבון") && html.includes("עדכון יתרה") && html.includes("הפקדה לחשבון"));
+  assert.ok(!html.includes("+ הכנסה"), "the monthly chips do not leak into the accounts composer");
+});
+
+test("an open review turn is rendered by the server's words with confirm / edit / cancel (accounts use the same engine)", () => {
+  const turn = { state: "review", message: "📋 עדכון יתרת חשבון\n• חשבון: קרן א\n• יתרה: ₪120,000", entity: "fcc_account_balance" } as unknown as import("../types").FccTurn;
+  const html = renderToStaticMarkup(createElement(ContextualComposer, {
+    config: ACCOUNTS_COMPOSER, turn, receipt: null, error: null, busy: false,
+    targets: { goals: [], loans: [], assets: [], accounts: [] }, onStart: () => undefined, onSend: () => undefined, onDismiss: () => undefined,
+  }));
+  assert.ok(html.includes("עדכון יתרת חשבון") && html.includes("אשר ורשום") && html.includes("ערוך") && html.includes("בטל"));
+});
+
+test("the family screen has no write call of its own: writes go only through the shared writer hook (intent/start + write)", () => {
+  const screen = require("fs").readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  assert.ok(screen.includes("useFccWriter(null, \"accounts\"") && !/postFccIntent|postFccWrite/.test(screen));
+  const bar = require("fs").readFileSync("src/components/FccTabBar.tsx", "utf8");
+  assert.ok(bar.includes("export function useFccWriter") && bar.includes("postFccIntent") && bar.includes("postFccWrite") && !/\bfetch\(/.test(bar), "the hook only calls the API module");
 });
 
 if (failures) throw new Error(`${failures} test(s) failed`);
