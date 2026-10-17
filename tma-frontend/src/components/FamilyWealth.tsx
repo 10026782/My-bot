@@ -3,8 +3,8 @@ import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast } from "../
 import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
 import { DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
-import { panelId, tabId } from "../lib/fccTabs";
-import { FccTabBar } from "./FccTabBar";
+import { ACCOUNTS_COMPOSER, panelId, tabId } from "../lib/fccTabs";
+import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { KpiCard } from "./FccKpiCard";
 import { PortfolioLabPanel } from "./PortfolioLabPanel";
 import { PageHeader } from "./ui/PageHeader";
@@ -169,7 +169,8 @@ export function ForecastResult({ view }: { view: FccAccountsForecast }) {
   );
 }
 
-/** Own call, own states; mounted only when the tab is opened (nothing is fetched in the background). */
+/** Own call, own states; mounted only when the tab is opened (nothing is fetched in the background). The two account actions (D1 step 8) run in
+ *  the shared contextual composer: a chip only names the intent + the account, the server asks / reviews / waits for "אשר"; a landed write reloads. */
 function AccountsSection() {
   const [state, setState] = useState<AccountsState>({ status: "loading" });
   const load = () => {
@@ -179,7 +180,19 @@ function AccountsSection() {
       .catch((e: unknown) => setState({ status: "error", code: (e as { status?: number }).status }));
   };
   useEffect(load, []);
-  return <AccountsPanel state={state} onRetry={load} />;
+  const refresh = () => { fetchFccAccounts().then((data) => setState({ status: "ok", data })).catch(() => undefined); };
+  const writer = useFccWriter(null, "accounts", refresh);
+  const editable = state.status === "ok" ? state.data.accounts.filter((a) => a.status !== "closed") : [];
+  return (
+    <div className="fcc-stack">
+      {editable.length > 0 && (
+        <ContextualComposer config={ACCOUNTS_COMPOSER} turn={writer.turn} receipt={writer.receipt} error={writer.error} busy={writer.busy}
+                            targets={{ goals: [], loans: [], assets: [], accounts: editable.map((a) => ({ id: a.id, title: a.name || "חשבון ללא שם" })) }}
+                            onStart={(i, id) => void writer.start(i, id)} onSend={(t, g) => void writer.send(t, g)} onDismiss={writer.dismiss} />
+      )}
+      <AccountsPanel state={state} onRetry={load} />
+    </div>
+  );
 }
 
 /** "תכנון חיסכון לטווח ארוך": a screen of its own (opened from the hub; the FCC card is only a shortcut). Two tabs. Read-only;

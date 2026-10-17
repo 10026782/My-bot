@@ -59,7 +59,10 @@ FCC_WEEK_SURPLUS = "fcc_week_surplus"      # what to do with a closed week's sur
 WEEK_DECISIONS = ("hold", "carry", "use", "save", "month_use", "month_save")
 FCC_ASSET_SOLD = "fcc_asset_sold"          # TRANSITION: Status=נמכר + Sale Date + Sale Amount in ONE atomic patch (review + approval)
 ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
-FCC_ENTITIES = (FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_RATE, FCC_LOAN_TERM, FCC_LOAN_ORIGINAL, FCC_LOAN_NEW,
+FCC_ACCOUNT_BALANCE = "fcc_account_balance"  # a dated balance snapshot of ONE of the owner's accounts (Kind=balance_snapshot): a reported FACT
+FCC_ACCOUNT_DEPOSIT = "fcc_account_deposit"  # a deposit into ONE account (Kind=deposit), optionally counted in the savings history of a goal
+ACCOUNT_VERIFICATIONS = ("self_reported", "statement", "bank_or_fund_confirmed")   # the live Financial Progress Events."Verification" choices
+FCC_ENTITIES = (FCC_ACCOUNT_BALANCE, FCC_ACCOUNT_DEPOSIT, FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_RATE, FCC_LOAN_TERM, FCC_LOAN_ORIGINAL, FCC_LOAN_NEW,
                 FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_PRIME_CHANGE, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
@@ -114,6 +117,9 @@ INTENTS: dict[str, dict] = {
     "asset.step_start":          {"tab": "assets", "entity": "fcc_asset_step_status", "target": "task", "target_required": True, "mode": "start"},
     "asset.step_done":           {"tab": "assets", "entity": "fcc_asset_step_status", "target": "task", "target_required": True, "mode": "done"},
     "asset.step_cancel":         {"tab": "assets", "entity": "fcc_asset_step_status", "target": "task", "target_required": True, "mode": "cancel"},
+    # D1 step 8: the first account writes. A card action on ONE account (entity_id = the account); accounts themselves are created by hand.
+    "account.update_balance":    {"tab": "accounts", "entity": "fcc_account_balance", "target": "account", "target_required": True},
+    "account.deposit":           {"tab": "accounts", "entity": "fcc_account_deposit", "target": "account", "target_required": True},
     "asset.mark_sold":           {"tab": "assets", "entity": "fcc_asset_sold", "target": "asset", "target_required": True, "transition": True},
 }
 
@@ -278,6 +284,18 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("sale_date", AF.SALE_DATE, InputType.DATE, required=RequiredMode.ALWAYS),
         _f("sale_amount", AF.SALE_AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
     )),
+    # Accounts (D1 step 8): the account lives in source_context (never editable) — an edit changes the amount / date, never WHICH account.
+    # No free-text field: a long number can never reach these writes. "verification" defaults to self_reported (nothing is checked against a bank).
+    FCC_ACCOUNT_BALANCE: EntityContract(FCC_ACCOUNT_BALANCE, (
+        _f("balance", EF.AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="non_negative"),
+        _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
+        _f("verification", EF.VERIFICATION, InputType.SELECT, choices=ACCOUNT_VERIFICATIONS, default="self_reported"),
+    )),
+    FCC_ACCOUNT_DEPOSIT: EntityContract(FCC_ACCOUNT_DEPOSIT, (
+        _f("amount", EF.AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS, validation="positive"),
+        _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
+        _f("goal", EF.GOAL, InputType.LINK),          # set only by the explicit "count it in the goal's deposit history" choice
+    )),
     FCC_FOLLOWUP: EntityContract(FCC_FOLLOWUP, (
         _f("title", TaskFields.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("goal", EF.GOAL, InputType.LINK),
@@ -298,7 +316,9 @@ LABELS = {
 }
 _STEP_LABELS = {"step": "הפעולה", "due_date": "תאריך יעד"}
 _ARRANGEMENT_LABELS = {"payment": "פירעון חודשי", "end_date": "מועד פירעון"}
-LABELS_BY_ENTITY = {FCC_LOAN_NEW: {"name": "שם ההלוואה"}, FCC_ASSET_STEP: _STEP_LABELS, FCC_ASSET_STEP_EDIT: _STEP_LABELS,
+LABELS_BY_ENTITY = {FCC_ACCOUNT_BALANCE: {"balance": "יתרה", "occurred_at": "נכון לתאריך", "verification": "מקור הנתון"},
+                    FCC_ACCOUNT_DEPOSIT: {"amount": "סכום ההפקדה", "occurred_at": "תאריך ההפקדה"},
+                    FCC_LOAN_NEW: {"name": "שם ההלוואה"}, FCC_ASSET_STEP: _STEP_LABELS, FCC_ASSET_STEP_EDIT: _STEP_LABELS,
                     FCC_LOAN_PARTIAL: {"amount": "סכום הפרעון", "occurred_at": "תאריך"},
                     FCC_LOAN_ARRANGEMENT: _ARRANGEMENT_LABELS,
                     FCC_SOURCE_NEW: {"title": "שם המקור", "target_amount": "יעד לתקופה", "period_type": "תקופה"},
@@ -324,6 +344,7 @@ VALUE_LABELS = {
                         "loan_payment": "החזר הלוואה", "other": "אחר"},
     "essentiality": {"essential": "הכרחי", "useful": "שימושי", "optional": "אופציונלי", "review": "לבדיקה"},
     "arrangement": {"monthly": "פירעון חודשי קבוע", "deadline": "מועד פירעון", "none": "אין הסדר"},
+    "verification": {"self_reported": "דיווח עצמי", "statement": "לפי דוח", "bank_or_fund_confirmed": "מאומת מול בנק או קרן"},
     "kind": {"one_time": "חד-פעמי", "monthly_recurring": "חודשי קבוע", "target_change": "שינוי יעד", "direct_cost": "הוצאה ישירה", "household_expense": "הוצאה ביתית", "note": "הערה"},
 }
 # Closed answer vocabulary of the options we present (equivalent to buttons) — not NL parsing.
@@ -409,6 +430,11 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         return f"כמה תשלומים נותרו ב{goal_title or 'הלוואה'}?"
     if entity == FCC_LOAN_ORIGINAL:
         return f"מה סכום ההלוואה המקורי (הקרן) של {goal_title or 'ההלוואה'}?"
+    if entity == FCC_ACCOUNT_BALANCE:
+        return {"balance": f"מה היתרה הנוכחית של {goal_title or 'החשבון'}?",
+                "occurred_at": "נכון לאיזה תאריך הנתון?"}.get(field, f"מה {label(entity, field)}?")
+    if entity == FCC_ACCOUNT_DEPOSIT:
+        return {"amount": f"כמה הופקד ל{goal_title or 'חשבון'}?", "occurred_at": "באיזה תאריך הופקד?"}.get(field, f"מה {label(entity, field)}?")
     if entity == FCC_ASSET_VALUE:
         return f"מה השווי הנוכחי של {goal_title or 'הנכס'}?"
     if entity == FCC_ASSET_MORTGAGE:
@@ -455,6 +481,7 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             FCC_LOAN_RATE: "עדכון ריבית הלוואה", FCC_LOAN_TERM: "עדכון תשלומים שנותרו", FCC_LOAN_ORIGINAL: "עדכון סכום מקורי של הלוואה",
             FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: f"פעולה הבאה ב{subject}", FCC_ASSET_STEP_EDIT: f"עריכת פעולה ב{subject}",
             FCC_ASSET_STEP_STATUS: f"עדכון סטטוס פעולה ב{subject}", FCC_ASSET_SOLD: "סימון נכס כנמכר",
+            FCC_ACCOUNT_BALANCE: "עדכון יתרת חשבון", FCC_ACCOUNT_DEPOSIT: "הפקדה לחשבון",
             FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי", FCC_SOURCE_NEW: "מקור הכנסה חדש", FCC_PRIME_CHANGE: "שינוי ריבית פריים"}[entity]
     lines.append(f"📋 {head}")
     if note and entity != FCC_ASSET_SOLD:
@@ -467,8 +494,10 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append(f"• הלוואה / חוב: {goal_title}")
     if entity in (FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD) and goal_title:
         lines.append(f"• {subject}: {goal_title}")
+    if entity in (FCC_ACCOUNT_BALANCE, FCC_ACCOUNT_DEPOSIT) and goal_title:
+        lines.append(f"• חשבון: {goal_title}")
     for name in order:
-        if name == "goal" and entity == FCC_EVENT:
+        if name == "goal" and entity in (FCC_EVENT, FCC_ACCOUNT_DEPOSIT):
             continue
         value = fields.get(name)
         if value in (None, ""):
@@ -500,6 +529,10 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append("יתעדכן שדה אחד בלבד; שאר נתוני הנכס לא ייגעו.")
     if entity == FCC_ASSET_MORTGAGE:
         lines.append("זו יתרה הרשומה על הנכס עצמו — היא לא מסתנכרנת להלוואות המקושרות ולא נוספת אליהן.")
+    if entity == FCC_ACCOUNT_BALANCE:
+        lines.append("תירשם יתרה מדווחת חדשה (צילום). זו עובדה שדווחה על ידך — לא נבדקת מול בנק או קרן — והיא תחליף את היתרה הקודמת בשווי המאוחד. שאר נתוני החשבון לא ייגעו.")
+    if entity == FCC_ACCOUNT_DEPOSIT:
+        lines.append("תירשם הפקדה אחת בחשבון. היא לא משנה את היתרה המדווחת ולא את השווי המאוחד — רק יתרה חדשה משנה אותם. אם כבר רשמת אותה כ״הפקדה לחיסכון״ — אל תרשמו אותה שוב.")
     if entity == FCC_ASSET_STEP:
         lines.append("תיווצר משימת מעקב חדשה בסטטוס ״ממתין״. פעולות פתוחות אחרות של הנכס נשארות כמות שהן.")
     if entity == FCC_ASSET_STEP_EDIT:
@@ -620,6 +653,27 @@ def field_update_writes(entity: str, values: Mapping[str, Any], source: Mapping[
         fields[LF.NEXT_PAYMENT] = source["advance_next_due"]
     return [{"op": "patch", "table": table, "record_id": record_id, "fields": fields,
              "audit_action": audit, "audit_details": f"{record_id}:{name}"}]
+
+
+def account_event_write(kind: str, values: Mapping[str, Any], ctx: Mapping[str, Any], source: Mapping[str, Any]) -> dict:
+    """ONE account event (Kind=balance_snapshot | deposit): the account is the chosen record of the draft (never typed text), the key is
+    derived from the draft's own token — a retry or a double tap of THIS draft can never write it twice. No free text is stored:
+    Raw Text holds only the draft's synthetic token (the access policy's long-number guard applies to events that carry an account)."""
+    account_id = str(source.get("record_id") or "")
+    if not account_id:
+        raise UnsupportedOperationError("account event without an account record")
+    amount = values["balance"] if kind == "balance_snapshot" else values["amount"]
+    raw = str(source.get("raw_text") or "")
+    key = event_idempotency_key(ctx.get("profile_id", ""), f"account:{account_id}", kind, amount, values["occurred_at"], raw)
+    fields = {
+        EF.KIND: kind, EF.AMOUNT: amount, EF.OCCURRED_AT: values["occurred_at"], EF.ACCOUNT: [account_id],
+        EF.VERIFICATION: values.get("verification") or "self_reported",
+        EF.RECORDED_BY: ctx.get("user_id", ""), EF.SOURCE: SOURCE, EF.RAW_TEXT: raw[:200], EF.IDEMPOTENCY_KEY: key,
+    }
+    if kind == "deposit" and values.get("goal"):
+        fields[EF.GOAL] = [values["goal"]]
+    return {"op": "post", "table": Tables.FIN_EVENTS, "fields": fields,
+            "audit_action": "fcc_account_balance" if kind == "balance_snapshot" else "fcc_account_deposit", "audit_details": key}
 
 
 def asset_sold_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
@@ -875,6 +929,10 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": asset_step_status_writes(values, writer.source_context)}
         if entity == FCC_ASSET_SOLD:
             return {"writes": asset_sold_writes(values, writer.source_context)}
+        if entity == FCC_ACCOUNT_BALANCE:
+            return {"writes": [account_event_write("balance_snapshot", values, ctx, writer.source_context)]}
+        if entity == FCC_ACCOUNT_DEPOSIT:
+            return {"writes": [account_event_write("deposit", values, ctx, writer.source_context)]}
         if entity == FCC_LOAN_NEW:
             return {"writes": [loan_new_write(values)]}
         if entity == FCC_LOAN_PARTIAL:
