@@ -298,6 +298,13 @@ test("forecast model: server totals only, fee source shown, excluded accounts co
   assert.ok(m.chart && m.chart.lines.length === 3);
 });
 
+test("forecast model: missing account inputs are listed in the owner's words; an older server without data_gaps adds nothing", () => {
+  const withGaps = { ...forecastView, data_gaps: [{ id: "recB", name: "נזיל", missing: ["management_fee", "expected_return", "insurance_cost"] }] } as unknown as FccAccountsForecast;
+  const note = forecastModel(withGaps).notes.find((n) => n.startsWith("חסר לדיוק"));
+  assert.ok(note && note.includes("נזיל") && note.includes("דמי ניהול מהצבירה") && note.includes("תשואה צפויה") && note.includes("עלות ביטוח חודשית"));
+  assert.ok(!forecastModel(forecastView).notes.some((n) => n.startsWith("חסר לדיוק")));
+});
+
 test("forecast result renders labelled as assumptions, and with no eligible account there is no fake total", () => {
   const html = renderToStaticMarkup(createElement(ForecastResult, { view: forecastView }));
   assert.ok(html.includes("שווי מאוחד בעוד 10 שנים") && html.includes("הבטחת תשואה") && html.includes("קרן א"));

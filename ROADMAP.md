@@ -1,6 +1,6 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 16/10/2026
+עודכן: 18/10/2026
 
 ## DECISION-HUB-INSIGHT-1 — `/decision from-insight` (PR1 מתוך SPEC_Insight_to_Decision_to_Task) — CODE DONE, NOT VERIFIED IN PROD — 13/10/2026
 

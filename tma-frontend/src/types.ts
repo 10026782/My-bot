@@ -770,6 +770,9 @@ export interface FccSavingsHistory {
 export interface FccAccount {
   id: string; name: string | null; account_type: string | null; institution: string | null; holder_names: string | null;
   status: string | null; liquidity: string | null; liquid_from: string | null; tax_treatment: string | null; management_fee_pct: number | null;
+  /** Owner-entered forecast inputs (D1 step 9); null = not known, never invented. */
+  planned_monthly_deposit: number | null; deposit_fee_pct: number | null; investment_track: string | null; linkage: string | null;
+  linkage_notes: string | null; expected_return_pct: number | null; insurance_cost_monthly: number | null; insurance_cost_as_of: string | null;
   balance: { value: number; as_of: string; verification: string; estimate: { value: number; movements_since: number; movement_count: number; label: "estimate" } } | null;
 }
 export interface FccAccountsView {
@@ -787,7 +790,11 @@ export interface FccForecastParams {
 export interface FccForecastPoint { year: number; nominal: number; real: number; invested: number }
 export interface FccForecastAccount {
   id: string; name: string | null; account_type: string | null; start_value: number; start_as_of: string; verification: string | null;
-  monthly_contribution: number; fee_pct: number; fee_source: "account" | "default";
+  monthly_contribution: number; monthly_contribution_source: "typed" | "account" | "default"; fee_pct: number; fee_source: "account" | "default";
+  deposit_fee_pct: number; deposit_fee_known: boolean; return_pct: number; return_source: "account" | "default";
+  return_kind: "nominal" | "real_to_nominal"; linkage: string | null; investment_track: string | null;
+  insurance_cost_monthly: number; insurance_cost_known: boolean; insurance_cost_as_of: string | null;
+  deposit_fees_paid: number; insurance_paid: number; missing: string[];
   final_nominal: number; final_real: number; invested: number; nominal_profit: number; costs_paid: number; series: FccForecastPoint[];
 }
 export interface FccAccountsForecast {
@@ -796,6 +803,7 @@ export interface FccAccountsForecast {
   accounts: FccForecastAccount[];
   consolidated: { accounts: number; start_value: number; final_nominal: number | null; final_real: number | null; invested: number | null; series: FccForecastPoint[] };
   excluded: { without_snapshot: number; closed: number };
+  data_gaps?: { id: string; name: string | null; missing: string[] }[];
   all_self_reported: boolean | null; warnings: string[]; as_of: string;
 }
 

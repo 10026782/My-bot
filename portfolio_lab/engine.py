@@ -51,7 +51,7 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
     zero_cost = [0.0] * len(assets)
     prices = [1.0] * len(assets)
     lots = []
-    contributed = real_contributed = management_cost = buy_cost = 0.0
+    contributed = real_contributed = management_cost = buy_cost = fixed_cost = 0.0
     cpi = gross_index = net_index = 1.0
     rows = []
     gross_known = all(a.return_basis == "gross" for a in assets)
@@ -97,6 +97,12 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
             prices[i] *= factor * retained
             if not math.isfinite(prices[i]) or prices[i] <= 0:
                 raise ValueError("price overflow/underflow; inputs exceed supported numeric range")
+        if scenario.monthly_fixed_cost:      # עלות קבועה נומינלית (למשל ביטוח בפנסיה): יורדת מהיתרה אחרי צמיחה ודמי ניהול, בחלוקה יחסית
+            total = sum(balances)
+            charge = min(scenario.monthly_fixed_cost, total)
+            if total:
+                balances = [b - charge * b / total for b in balances]
+            fixed_cost += charge
         gross_index *= sum(w * f for w, f in zip(gross_weights, gross_factors))
         net_index *= sum(w * f for w, f in zip(weights, net_factors))
         cpi *= (1 + _year(scenario.inflation, year)) ** (1 / 12)
@@ -112,8 +118,8 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
                 "value_after_costs": value, "real_value": value / cpi,
                 "contributions": contributed, "real_contributions": real_contributed,
                 "nominal_profit": value - contributed, "real_profit": value / cpi - real_contributed,
-                "management_cost": management_cost, "buy_cost": buy_cost,
-                "costs_paid": management_cost + buy_cost,
+                "management_cost": management_cost, "buy_cost": buy_cost, "fixed_cost": fixed_cost,
+                "costs_paid": management_cost + buy_cost + fixed_cost,
                 "cost_impact": sum(zero_cost) - value if gross_known else None,
                 "cpi": cpi, "sale_cost": sale_cost, "proceeds_before_tax": value - sale_cost,
                 "tax_during_accumulation": 0.0,
@@ -123,7 +129,7 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
         "nominal_annualized_twr_before_costs": gross_index ** (1 / scenario.years) - 1 if gross_known else None,
         "nominal_annualized_twr_after_recurring_costs": net_index ** (1 / scenario.years) - 1,
         "real_annualized_twr_after_recurring_costs": (net_index / cpi) ** (1 / scenario.years) - 1,
-        "total_costs_if_sold": management_cost + buy_cost + sale_cost,
+        "total_costs_if_sold": management_cost + buy_cost + fixed_cost + sale_cost,
         "nominal_profit_after_sale_before_tax": value - sale_cost - contributed,
         "tax": None, "proceeds_after_tax": None, "nominal_profit_after_tax": None, "tax_status": "not_assessed",
     })

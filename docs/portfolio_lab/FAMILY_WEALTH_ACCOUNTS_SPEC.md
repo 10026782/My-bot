@@ -85,6 +85,23 @@ Planning Gate: **FULL** (persistence + authority + schema + multi-layer).
 - `linked_owner_checks` של `Financial Progress Events` מורחב ב-`Account` וב-`Counter Account`: אסור לקשר לחשבון של אדם אחר.
 - הוספה ל-`_TMA_WRITE_ALLOWED_TABLES` רק אם נכתב דרך זרימת ה-TMA; הכתיבה נשארת טיוטה ← "אשר", ללא כתיבה אוטומטית.
 
+### 3.4 תשומות תחזית לכל חשבון (שלב 9, אושר ע"י הבעלים 18/10/2026)
+
+שמונה שדות בטבלת `Financial Accounts`, כולם ערכי בעלים — ריק = לא ידוע ומוצג כ"חסר לדיוק", לעולם לא מומצא. הקוד קורא אותם ב-`accounts_overview` ואינו כותב אותם.
+
+| שדה | סוג | משמעות |
+|---|---|---|
+| `Planned Monthly Deposit` | number | הפקדה חודשית מתוכננת (₪); תכנון, לא הוראת קבע מאומתת. הקלדה במסך גוברת |
+| `Deposit Fee %` | number | דמי ניהול מההפקדה (%), מנוכים מכל הפקדה לפני המנוע; "הושקע" נשאר ברוטו |
+| `Investment Track` | singleSelect | `equities` / `bonds` / `mixed` / `index_tracking` / `money_market` / `unknown` — תיעוד |
+| `Linkage` | singleSelect | `none` / `cpi` / `sp500` / `other_index` / `fx` / `unknown` (הצמדה) |
+| `Linkage Notes` | text | איזה מדד/מטבע |
+| `Expected Return %` | number | תשואה שנתית צפויה לחשבון; **ריאלית** כש-`Linkage=cpi` (מומרת לנומינלית בהנחת האינפלציה), נומינלית אחרת |
+| `Insurance Cost Monthly` | number | עלות ביטוח חודשית (נכות+שאירים), נומינלית וקבועה |
+| `Insurance Cost As Of` | date | תאריך נכונות העלות |
+
+כללים: ערך חשבון תקף גובר על ברירת מחדל והמקור מסומן; ערך פגום/מחוץ לטווח נחשב חסר; הצמדה שאינה `cpi` אינה מדמה את המדד (תיעוד בלבד). המנוע קיבל `Scenario.monthly_fixed_cost` (ברירת מחדל 0 = ללא שינוי).
+
 ## 4. בעלות כלכלית מול הרשאות מערכת
 
 **ממצא מ-Contacts:**

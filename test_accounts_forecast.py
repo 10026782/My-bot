@@ -103,3 +103,85 @@ def test_module_is_pure_no_io_or_airtable_imports():
     text = (pathlib.Path(__file__).parent / "portfolio_lab/accounts_forecast.py").read_text(encoding="utf-8")
     for forbidden in ("import requests", "airtable", "core.financial_control", "open(", "os.environ", "anthropic"):
         assert forbidden not in text, forbidden
+
+
+# ── D1 step 9: per-account inputs (planned deposit, deposit fee, expected return + linkage, insurance cost) ──────────────
+def plan(view_accounts):
+    return {"accounts": view_accounts, "totals": {"all_self_reported": True}}
+
+
+def one(params=None, **extra):
+    return run(params, plan([acct("recA", 100000, **extra)]))["accounts"][0]
+
+
+def test_engine_fixed_monthly_cost_is_exact_and_zero_is_a_no_op():
+    base = dict(years=10, initial=100000.0, monthly_contribution=0.0, inflation=0.0, start_date="2026-10-01",
+                assets=(Asset(name="a", annual_return=0.0, annual_fee=0.0),))
+    assert simulate(Scenario(**base))["final"]["value_after_costs"] == pytest.approx(100000.0)
+    out = simulate(Scenario(monthly_fixed_cost=100.0, **base))["final"]
+    assert out["value_after_costs"] == pytest.approx(100000.0 - 100.0 * 120) and out["fixed_cost"] == pytest.approx(12000.0)
+    assert out["costs_paid"] == pytest.approx(12000.0)
+    drained = simulate(Scenario(monthly_fixed_cost=5000.0, **base))["final"]
+    assert drained["value_after_costs"] == 0 and drained["fixed_cost"] == pytest.approx(100000.0)      # never below zero
+    with pytest.raises(ValueError):
+        Scenario(monthly_fixed_cost=-1.0, **base)
+
+
+def test_planned_deposit_is_the_default_but_a_typed_value_wins_and_each_source_is_labelled():
+    assert (one(planned_monthly_deposit=1500)["monthly_contribution"], one(planned_monthly_deposit=1500)["monthly_contribution_source"]) == (1500, "account")
+    typed = run({"monthly_contributions": {"recA": 200}}, plan([acct("recA", 100000, planned_monthly_deposit=1500)]))["accounts"][0]
+    assert (typed["monthly_contribution"], typed["monthly_contribution_source"]) == (200, "typed")
+    none = one()
+    assert (none["monthly_contribution"], none["monthly_contribution_source"]) == (0.0, "default") and "monthly_deposit" in none["missing"]
+    assert one(planned_monthly_deposit=-5)["monthly_contribution_source"] == "default"          # corrupt value is not trusted
+
+
+def test_deposit_fee_is_taken_from_each_deposit_and_invested_stays_gross():
+    a = one({"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}, planned_monthly_deposit=1000, deposit_fee_pct=2.0)
+    assert a["invested"] == pytest.approx(100000 + 1000 * 120)
+    assert a["deposit_fees_paid"] == pytest.approx(1000 * 0.02 * 120)
+    assert a["final_nominal"] == pytest.approx(100000 + 980 * 120)
+    assert a["costs_paid"] == pytest.approx(a["deposit_fees_paid"]) and a["nominal_profit"] == pytest.approx(-a["deposit_fees_paid"])
+    assert one(planned_monthly_deposit=1000)["deposit_fee_known"] is False and "deposit_fee" in one()["missing"]
+
+
+def test_expected_return_overrides_the_global_and_cpi_linkage_converts_real_to_nominal():
+    g = {"annual_return_pct": 6, "inflation_pct": 2}
+    d = one(g)
+    assert (d["return_pct"], d["return_source"], d["return_kind"]) == (6.0, "default", "nominal") and "expected_return" in d["missing"]
+    n = one(g, expected_return_pct=4.0, linkage="sp500")
+    assert (n["return_pct"], n["return_source"], n["return_kind"]) == (4.0, "account", "nominal")
+    c = one(g, expected_return_pct=4.0, linkage="cpi")
+    assert c["return_kind"] == "real_to_nominal" and c["return_pct"] == pytest.approx((1.04 * 1.02 - 1) * 100, abs=1e-3)
+    assert one(g, expected_return_pct=900)["return_source"] == "default"                         # implausible value is not trusted
+
+
+def test_insurance_cost_reduces_the_result_and_is_reported_separately():
+    g = {"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}
+    a = one(g, insurance_cost_monthly=200, insurance_cost_as_of="2026-01-01")
+    assert a["insurance_paid"] == pytest.approx(24000) and a["final_nominal"] == pytest.approx(100000 - 24000)
+    assert a["insurance_cost_known"] is True and "insurance_cost" not in a["missing"] and "insurance_cost_date" not in a["missing"]
+    assert "insurance_cost_date" in one(g, insurance_cost_monthly=200)["missing"]
+    unknown = one(g)
+    assert unknown["insurance_paid"] == 0 and unknown["insurance_cost_known"] is False and "insurance_cost" in unknown["missing"]
+
+
+def test_data_gaps_list_every_account_with_missing_inputs_and_an_unknown_choice_counts_as_missing():
+    full = acct("recA", 100000, fee=0.5, planned_monthly_deposit=500, deposit_fee_pct=1, expected_return_pct=5, investment_track="mixed",
+                linkage="none", insurance_cost_monthly=0, insurance_cost_as_of="2026-01-01")
+    out = run(None, plan([full, acct("recB", 1000, investment_track="unknown", linkage="unknown")]))
+    assert out["accounts"][0]["missing"] == [] and [g["id"] for g in out["data_gaps"]] == ["recB"]
+    assert {"investment_track", "linkage", "management_fee"} <= set(out["data_gaps"][0]["missing"])
+    assert run(None, plan([full]))["data_gaps"] == []
+
+
+def test_accounts_overview_reads_the_new_fields_and_tolerates_their_absence():
+    from core.financial_control import accounts as fa
+    from airtable_schema import FinAccountFields as F
+    rec = {"id": "recA", "fields": {F.NAME: "x", F.PLANNED_MONTHLY_DEPOSIT: 2154, F.DEPOSIT_FEE: 1.88, F.INVESTMENT_TRACK: {"name": "mixed"},
+                                    F.LINKAGE: {"name": "cpi"}, F.LINKAGE_NOTES: "מדד", F.EXPECTED_RETURN: 3.5,
+                                    F.INSURANCE_COST_MONTHLY: 120, F.INSURANCE_COST_AS_OF: "2026-09-30"}}
+    row = fa.accounts_overview([rec, {"id": "recB", "fields": {F.NAME: "bare"}}], [], TODAY)["accounts"]
+    assert (row[0]["planned_monthly_deposit"], row[0]["deposit_fee_pct"], row[0]["investment_track"], row[0]["linkage"]) == (2154.0, 1.88, "mixed", "cpi")
+    assert (row[0]["expected_return_pct"], row[0]["insurance_cost_monthly"], row[0]["insurance_cost_as_of"]) == (3.5, 120.0, "2026-09-30")
+    assert all(row[1][k] is None for k in ("planned_monthly_deposit", "deposit_fee_pct", "investment_track", "linkage", "expected_return_pct", "insurance_cost_monthly"))
