@@ -4286,3 +4286,99 @@ def test_http_confirm_executes_the_frozen_write_through_the_gateway(monkeypatch)
     assert scoped[EF.FINANCIAL_OWNER] == [ELI]
     with pytest.raises(policy.PersonalDataAccessDenied):
         policy.scope_new_record_fields(Tables.FIN_EVENTS, {**sent[0]["fields"], EF.ACCOUNT: ["recAA"]}, ELIYAHU)
+
+
+# ── D1 step 8 review follow-ups: one_time overlap warning, concurrent confirm, audit hand-off ──
+def test_deposit_review_warns_when_the_same_goal_amount_and_day_already_stand_as_a_one_time():
+    seed_account_writes()
+    DB[Tables.FIN_EVENTS].append(event("recOT", "recPenD", ELI, 3000, kind="one_time", day=TODAY.isoformat()))      # booked by hand as a savings deposit
+    intent("account.deposit", "recAE")
+    conv.handle_turn(ELIYAHU, "כן, לספור", goal_id="count", extractor=Ex(), today=TODAY)
+    r = say("3000", amount=3000)
+    assert r.state == "review" and "כבר רשומה בהיסטוריית היעד הפקדה חד-פעמית" in r.message and "אם זו אותה הפקדה — בטלו" in r.message
+    assert "לא תיספר" not in r.message and "תיספר בהיסטוריית ההפקדות" in r.message
+    # not the same money -> no warning, but the standing "do not register twice" line stays on every deposit review
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    intent("account.deposit", "recAE")
+    conv.handle_turn(ELIYAHU, "כן, לספור", goal_id="count", extractor=Ex(), today=TODAY)
+    r = say("3500", amount=3500)
+    assert "כבר רשומה" not in r.message and "אל תרשמו אותה שוב" in r.message
+    # an edit that makes it match raises the warning, and one that moves it away removes it again
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "סכום ההפקדה 3000", extractor=conv.DeterministicExtractor(), today=TODAY)
+    assert "כבר רשומה" in r.message
+    conv.handle_turn(ELIYAHU, "ערוך", extractor=Ex(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "סכום ההפקדה 3100", extractor=conv.DeterministicExtractor(), today=TODAY)
+    assert "כבר רשומה" not in r.message
+    # a deposit that is not counted in a goal can never overlap a goal one_time
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    intent("account.deposit", "recAE")
+    conv.handle_turn(ELIYAHU, "לא, רק בחשבון", goal_id="skip", extractor=Ex(), today=TODAY)
+    assert "כבר רשומה" not in say("3000", amount=3000).message
+
+
+def test_concurrent_confirms_never_yield_two_different_writes(mem_store):
+    """Several "אשר" racing on ONE draft: the draft store's compare-and-swap lets exactly one READY -> CONFIRMED transition win; every result that
+    still carries a snapshot carries the SAME frozen write (same Idempotency Key), so the ActionGateway's request fingerprint collapses them."""
+    import threading
+    seed_account_writes()
+    intent("account.update_balance", "recAE"); say("99", balance=99)
+    barrier, results, errors = threading.Barrier(6), [], []
+
+    def confirm():
+        try:
+            barrier.wait()
+            results.append(conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY))
+        except Exception as exc:                                   # a lost CAS may surface as an exception: also "no second write"
+            errors.append(exc)
+    threads = [threading.Thread(target=confirm) for _ in range(6)]
+    [t.start() for t in threads]; [t.join() for t in threads]
+    snaps = [r.snapshot for r in results if r.snapshot]
+    assert snaps, "one of the racers must win"
+    assert len({str(s["writes"]) for s in snaps}) == 1                  # byte-identical frozen payload: one Idempotency Key
+    assert len({s["writes"][0]["fields"][EF.IDEMPOTENCY_KEY] for s in snaps}) == 1
+    assert all(len(s["writes"]) == 1 for s in snaps)
+    assert all(r.state in ("confirmed", "clarify", "info", "duplicate", "unrelated", "ask", "review") for r in results)
+
+
+def test_the_hand_off_to_the_gateway_carries_our_audit_action_into_the_audit_trail(monkeypatch):
+    """Not an Airtable round trip (that needs a live base): it proves WHAT we hand to the executor and that the executor audits it by that label."""
+    seed_account_writes()
+    intent("account.update_balance", "recAE"); say("88", balance=88)
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["audit_action"] == "fcc_account_balance" and w["audit_details"] == w["fields"][EF.IDEMPOTENCY_KEY]
+    audited = []
+    monkeypatch.setattr(tma_api, "_queue_tma_write_approval", lambda action, payload, identity, label: ("recApproval", {"contract_id": "c1"}, 202))
+    monkeypatch.setattr(tma_api, "_claim_and_execute_approval", lambda approval_id, identity: {"ok": True, "execution_result": {"executed": 1}})
+    monkeypatch.setattr(tma_api, "_audit", lambda action, identity, details="": audited.append((action, details)))
+    approval_id, result, status = tma_api._queue_or_owner_execute("tma_fcc_write", w, ELIYAHU, f"FCC: {w.get('audit_action', 'write')}")
+    assert status == 200 and result["status"] == "executed" and result["approval_id"] == "recApproval"
+    assert audited == [("tma_fcc_write_owner_autoapprove", "FCC: fcc_account_balance")]            # who/what is in the trail
+    dep_audit = {"account.deposit": "fcc_account_deposit"}
+    conv.complete_execution(ELIYAHU)
+    intent("account.deposit", "recAE"); conv.handle_turn(ELIYAHU, "לא, רק בחשבון", goal_id="skip", extractor=Ex(), today=TODAY); say("5", amount=5)
+    (d,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert d["audit_action"] == dep_audit["account.deposit"]
+
+
+def test_the_same_frozen_write_proposed_many_times_reaches_the_real_gateway_as_one_contract():
+    """The other half of the concurrency answer: the draft layer may hand the SAME frozen write to several racers, and the REAL ActionGateway
+    (in-memory ledger) collapses identical requests into one contract — one pending approval, so at most one execution."""
+    import threading
+    from core.action_gateway import ActionGateway, ExecutionLedger
+    seed_account_writes()
+    intent("account.deposit", "recAE"); conv.handle_turn(ELIYAHU, "לא, רק בחשבון", goal_id="skip", extractor=Ex(), today=TODAY); say("42", amount=42)
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    tool_inputs = {**{k: v for k, v in w.items() if k not in ("op", "table", "action", "requested_by")},        # exactly as _queue_tma_write_approval builds it
+                   "op": w["op"], "table": w["table"], "action": "tma_fcc_write", "requested_by": "tg:1"}
+    gw = ActionGateway(ledger=ExecutionLedger())
+    barrier, results = threading.Barrier(6), []
+
+    def propose():
+        barrier.wait()
+        results.append(gw.propose_action(tenant_id="boss_hq", canonical_user_id="boss_hq:eliyahu", tool_name="tma_write", tool_inputs=dict(tool_inputs),
+                                         origin_channel="tma", origin_chat_id="1", requires_approval=True))
+    threads = [threading.Thread(target=propose) for _ in range(6)]
+    [t.start() for t in threads]; [t.join() for t in threads]
+    assert sum(1 for r in results if r.ok) == 1                                       # exactly one new contract
+    assert len({r.contract_id for r in results if r.contract_id}) == 1                # everyone else got that same contract back

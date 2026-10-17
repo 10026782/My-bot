@@ -1099,7 +1099,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         return _render(_save(store, ids, d2, expected=expected))
     if d.source_context.get("ask_count") and d.lifecycle_state not in (DraftState.READY_FOR_REVIEW, DraftState.EDITING):
         answer = goal_id if goal_id in ("count", "skip") else {"כן, לספור": "count", "כן": "count", "לספור": "count",
-                                                            "לא, רק בחשבון": "skip", "לא": "skip", "דלג": "skip"}.get(text.strip())
+                                                            "לא, רק בחשבון": "skip", "דלג": "skip"}.get(text.strip())      # a bare "לא" is a cancel word: it cancels the draft
         if answer is None:
             return replace_result(_render(d), message=f"בחרו: לספור ביעד או לא.\n{_render(d).message}")
         rest = {k: v for k, v in d.source_context.items() if k not in ("ask_count",)}
@@ -1209,7 +1209,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
     answered = bool(updates) and (awaiting is None or awaiting in updates) and awaiting not in rejected
     if not answered or (d2.fields == d.fields and d2.lifecycle_state is d.lifecycle_state and awaiting != "goal"):
         return _not_an_answer(d, awaiting, invalid=det_failed or fill_failed or (awaiting in rejected))
-    saved = _save(store, ids, d2, expected=expected)
+    saved = _save(store, ids, _deposit_overlap_note(identity, d2), expected=expected)
     return _render(saved)
 
 
@@ -1278,6 +1278,31 @@ def _already_applied(identity, write: dict) -> bool:
         title = writer._norm(fields.get(GF.TITLE, ""))
         return any(writer._norm((g.get("fields") or {}).get(GF.TITLE, "")) == title for g in service.my_goals(identity))
     return False
+
+
+OVERLAP_PREFIX = "⚠️ "
+
+
+def _deposit_overlap_note(identity, d: BusinessDraft) -> BusinessDraft:
+    """A deposit counted in a goal's history must not also stand there as a ``one_time`` the owner booked by hand ("הפקדה לחיסכון"): the two are
+    different records for the same money, so no key can tell them apart. The one thing that can be seen is the same goal + amount + day — the review
+    says so, loudly. (A different amount or day is not detected: the warning on every deposit review stays.) Never blocks, never rewrites anything."""
+    if d.entity_type != fd.FCC_ACCOUNT_DEPOSIT:
+        return d
+    note = str(d.source_context.get("review_note") or "")
+    note = note.split(OVERLAP_PREFIX)[0].rstrip()
+    goal, amount, day = d.fields.get("goal"), calc._num(d.fields.get("amount")), str(d.fields.get("occurred_at") or "")
+    if goal and amount is not None and day:
+        for e in service.my_events(identity):
+            f = e.get("fields") or {}
+            kind = f.get(EF.KIND)
+            kind = kind.get("name") if isinstance(kind, dict) else kind
+            if (kind == "one_time" and goal in (f.get(EF.GOAL) or []) and not f.get(EF.SUPERSEDED_BY)
+                    and calc._num(f.get(EF.AMOUNT)) == amount and str(f.get(EF.OCCURRED_AT) or "")[:10] == day):
+                note = (note + "\n" if note else "") + (f"{OVERLAP_PREFIX}כבר רשומה בהיסטוריית היעד הפקדה חד-פעמית של {fd.display_value('amount', amount)} "
+                                                       f"ב-{fd.display_value('occurred_at', day)}. אם זו אותה הפקדה — בטלו; אישור ירשום אותה פעם שנייה.")
+                break
+    return replace(d, source_context={**d.source_context, "review_note": note})
 
 
 def _snapshot_conflict(identity, d: BusinessDraft) -> str | None:
