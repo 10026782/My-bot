@@ -599,6 +599,25 @@ def allocations_for_forecast(identity) -> list[dict]:
     return out
 
 
+def funding_inputs(identity, today: date | None = None) -> dict:
+    """Goal Funding Planner (step 1): everything the pure planner needs, from the caller's OWN rows only. Read-only (nothing here writes);
+    every read goes through the owner-scoped readers above, so an unresolved identity raises PersonalDataAccessDenied and another person's
+    goals, accounts, loans, assets or obligations never reach the planner."""
+    today = today or date.today()
+    ov = overview(identity, today)
+    summary = ov.get("summary") or {}
+    income, savings = summary.get("income") or {}, summary.get("savings") or {}
+    return {
+        "goals": goals_for_forecast(identity), "accounts_view": accounts_view(identity, today), "allocations": allocations_for_forecast(identity),
+        "goal_rows": [{k: r.get(k) for k in ("goal_id", "parent_id", "method", "net", "actual", "remaining", "status")} for r in ov.get("goals") or []],
+        "loans": (ov.get("loans") or {}).get("items") or [], "assets": (ov.get("assets") or {}).get("items") or [],
+        "obligations": ov.get("obligations"),
+        "income": {k: income.get(k) for k in ("target", "actual", "remaining")} if income else None,
+        "savings_plan": {k: savings.get(k) for k in ("target", "actual")} if savings else {},
+        "savings_release": ov.get("savings_release"), "monthly_cash_improvement": ov.get("monthly_cash_improvement"),
+    }
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()

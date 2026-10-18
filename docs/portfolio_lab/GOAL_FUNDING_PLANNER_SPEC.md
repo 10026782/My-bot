@@ -1,7 +1,7 @@
 # SPEC — מתכנן מימון יעד (Goal Funding Planner)
 
-**סטטוס (18/10/2026): SPEC בלבד — אושר ע"י הבעלים לכתיבת מסמך ("מאשר SPEC למתכנן מימון יעד"). אין קוד, אין סכמה, אין flag, אין פריסה.**
-כל שלב מימוש (§12) דורש אישור בעלים נפרד. המסמך אינו מחליף את `FAMILY_WEALTH_ACCOUNTS_SPEC.md`; בסתירה — הקוד ב-`main` והמסמך הקנוני קובעים.
+**סטטוס (18/10/2026): SPEC אושר (#1333 ממוזג). שלב 1 אושר להתחלה ("ותתחיל בשלב הראשון") ונמצא בקוד ב-PR (מנוע טהור + `POST /api/fcc/funding/plan`, קריאה בלבד); אין סכמה, אין flag חדש, אין פריסה.**
+שלבים 1ב–4 (§12) דורשים אישור בעלים נפרד. המסמך אינו מחליף את `FAMILY_WEALTH_ACCOUNTS_SPEC.md`; בסתירה — הקוד ב-`main` והמסמך הקנוני קובעים.
 **בסיס:** `origin/main` @ `9aa7ac3c`.
 
 ## 0. החלטות בעלים שנקלטו
@@ -75,7 +75,7 @@ warnings, missing_inputs, as_of
 **כלל חפיפה מול התקדמות FCC (חדש, מהסקירה ב-§15):** ב-FCC מטרה מצטברת (`cumulative`) סופרת הפקדות שדווחו כאירועי `one_time` (`calc.compute_goal`: `actual`, `remaining`). אותו כסף עשוי להיות גם בחשבון שהוקצה למטרה. לכן `need.covered_by_existing` נקבע לפי **בסיס אחד**: אם קיימת הקצאה — בסיס הקצאה (יתרת חשבון נגישה); אחרת — `actual` מאירועי FCC. הבסיס האחר מוצג כמידע בלבד (`progress_events_actual`), **אין חיבור ביניהם**, ו-`risks` כולל `event_allocation_overlap` כששניהם קיימים.
 
 ### 4.2 `new_deposits` — הפקדות חדשות (חיסכון / קרן השתלמות חדשה / חשבון ייעודי)
-פתרון להפקדה חודשית נדרשת: חיפוש בינארי דטרמיניסטי מעל `portfolio_lab.simulate` (המנוע ללא שינוי), עם הנחות החשבון (תשואה, דמי ניהול, דמי הפקדה). גבולות: `hi` מתחיל ב-`gap` ומוכפל עד 40 פעמים; אם עדיין לא מכסה → `feasible=false`, `reason=unreachable_under_assumptions`. סבילות ₪1, עד 60 איטרציות. מקור ההנחות: חשבון קיים (לפי מזהה) או **חשבון היפותטי** עם `expected_return_pct`, `fee_pct`, `deposit_fee_pct`, ו-`liquid_from` שהוזנו. כשרות: `Liquid From` (או `immediate`) לפני תאריך היעד, אחרת `not_accessible_by_due`. קרן השתלמות חדשה = חשבון היפותטי עם `liquid_from` שהבעלים מזין; המערכת אינה מניחה כללי שחרור.
+פתרון להפקדה חודשית נדרשת: חיפוש בינארי דטרמיניסטי מעל `portfolio_lab.simulate` (המנוע ללא שינוי), עם הנחות החשבון (תשואה, דמי ניהול, דמי הפקדה). גבולות: `hi` מתחיל ב-`gap` ומוכפל עד 40 פעמים; אם עדיין לא מכסה → `feasible=false`, `reason=unreachable_under_assumptions`. סבילות ₪0.005, עד 60 איטרציות. מקור ההנחות: חשבון קיים (לפי מזהה) או **חשבון היפותטי** עם `expected_return_pct`, `fee_pct`, `deposit_fee_pct`, ו-`liquid_from` שהוזנו. כשרות (עקבית עם A2 — אין הסקת זכאות מתאריך): `immediate` שאינו מוצר פרישה = נגיש. תאריך שחרור שהגיע (`Liquid From` ≤ תאריך היעד) הוא `conditional` בלבד: `feasible="unknown"`, `reason=release_not_verified`, תנאים `liquid_from_reached` + `release_rules_confirmed`, ודאות `uncertain` — אלא אם הבעלים סימן `release_confirmed: true` (אז `true` וודאות `expected`). נעול, חסר תאריך שחרור, או מוצר פרישה (גם עם `release_confirmed`) → `not_accessible_by_due`; נזילות לא מאומתת → `unknown` (`liquidity_unverified`). קרן השתלמות חדשה = חשבון היפותטי עם `liquid_from` שהבעלים מזין; המערכת אינה מניחה כללי שחרור. ההפקדה הנדרשת מעוגלת **כלפי מעלה** לאגורה, כך שתמיד מגיעה ליעד (מומש כך; הסבילות ₪0.005).
 
 ### 4.3 `asset_sale` — מכירת נכס
 קלט: `asset_id` (אופציונלי) + **`net_proceeds` שהוזן** + `expected_date`. מהנכס הקיים מוצגים בלבד (בלי חישוב): `Current Value`, `Ownership %`, `Mortgage Balance`, הלוואות מקושרות, `Monthly Income` שתיעלם. חוב הנכס וההלוואות המקושרות עלולים לתאר אותו חוב — לעולם לא מחוברים (כלל `assets.py`); `risks` כולל `debt_overlap_unresolved`. `feasible=false` אם `expected_date` אחרי התאריך. `Sale Amount` הקיים הוא מחיר מלא לפני עלויות ומס — אינו נטו ואינו משמש כברירת מחדל.
@@ -160,7 +160,7 @@ warnings, missing_inputs, as_of
 
 | שלב | תוכן | סכמה | הערה |
 | --- | --- | --- | --- |
-| 1 | מנוע טהור + `POST /api/fcc/funding/plan`, אפשרויות §4, בריכות §6, מבט תיק §7 | אין | Cross-Layer: `SINGLE-LAYER` |
+| 1 | מנוע טהור + `POST /api/fcc/funding/plan`, אפשרויות §4, בריכות §6, מבט תיק §7 | אין | **בקוד (PR):** `portfolio_lab/funding_plan.py`, `service.funding_inputs`, `loans.pmt` (שם ציבורי ל-`_pmt`), בדיקות `test_funding_plan.py` + 6 בדיקות HTTP. Cross-Layer: `SINGLE-LAYER`. רישום Context Librarian מוצע ב-PR וממתין לאישור מפורש |
 | 1ב | ממשק קריאה בלבד ב-TMA (טופס אפשרויות, השוואה), ללא חישוב בלקוח | אין | מוצג מספרים מהשרת |
 | 2 | שמירת תוכנית שנבחרה | **טבלה חדשה `Funding Plans` — דורש אישור** | כולל מדיניות `OWNER_SCOPED` לפני שורה ראשונה |
 | 3 | חיבור ל-Decision Hub (§10) | אולי ערך `Domain` | `FULL`; תלוי ב-PR2 של Hub |
@@ -169,7 +169,7 @@ warnings, missing_inputs, as_of
 ## 13. שאלות פתוחות (עם ברירת מחדל מוצעת)
 1. **אפשרויות מכירה והלוואה — האם להזין אותן בבקשה או לשמור בטבלה?** ברירת מחדל: בבקשה (שלב 1), שמירה רק בשלב 2.
 2. **יכולת חיסכון חודשית (§7):** ברירת מחדל — רמת יעד החיסכון החודשי הקיים; לא מחושבת מהכנסות/הוצאות.
-3. **קובץ חדש תחת `portfolio_lab/`:** יפעיל `OWNER_DECISION_REQUIRED` ב-Context Librarian. חלופה: לשכן בקובץ רשום (`accounts_forecast.py`), אך הוא כבר גדול. ברירת מחדל: קובץ חדש + רישום באישור בעלים.
+3. **קובץ חדש תחת `portfolio_lab/`:** יפעיל `OWNER_DECISION_REQUIRED` ב-Context Librarian. **יושם:** קובץ חדש `funding_plan.py`; הרישום נוסף ב-`canonical_boundaries.json` כהצעה (בלי לטעון לאישור מפורש) וממתין לביטוי האישור של הבעלים.
 4. **ערך `Domain` חדש ב-Decision Hub:** ברירת מחדל — `כללי` עד שיאושר שינוי.
 5. **קרן השתלמות חדשה:** האם להגדיר תבנית חשבון היפותטי קבועה (תשואה/דמי ניהול ברירת מחדל)? ברירת מחדל: לא; כל ערך מוזן.
 
