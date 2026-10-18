@@ -1,4 +1,4 @@
-import type { ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView } from "./types";
+import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -441,6 +441,22 @@ export async function postFccAccountsForecast(params: FccForecastParams): Promis
     body: JSON.stringify(params),
   });
   const data = (await r.json().catch(() => ({}))) as FccAccountsForecast & { error?: string };
+  if (!r.ok) {
+    const error = new Error(data.error || `API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
+  return data;
+}
+
+/** Goal Funding Planner (step 1b): typed options -> POST /api/fcc/funding/plan. Read-only on the server; the page shows only what comes back. */
+export async function postFccFundingPlan(body: FundingRequestBody): Promise<FundingPlan> {
+  const r = await fetch(`${BASE}/api/fcc/funding/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  const data = (await r.json().catch(() => ({}))) as FundingPlan & { error?: string };
   if (!r.ok) {
     const error = new Error(data.error || `API ${r.status}`) as Error & { status?: number };
     error.status = r.status;

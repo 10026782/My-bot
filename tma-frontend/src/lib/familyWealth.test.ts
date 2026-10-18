@@ -6,13 +6,13 @@ import { FamilyWealth, FamilyWealthCard } from "../components/FamilyWealth";
 import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
 import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView } from "../types";
-import { AccountsPanel, ForecastResult } from "../components/FamilyWealth";
+import { AccountsPanel, ForecastResult, FundingResult, FundingSection } from "../components/FamilyWealth";
 import { ContextualComposer } from "../components/FccTabBar";
 import { ACCOUNTS_COMPOSER, COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, accountsTabModel, forecastModel, forecastParams, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -20,6 +20,10 @@ const assert = {
     if (actual !== expected) throw new Error(message ?? `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   },
   ok(v: unknown, message?: string) { if (!v) throw new Error(message ?? "expected truthy"); },
+  deepEqual(actual: unknown, expected: unknown, message?: string) {
+    const canon = (v: unknown): unknown => (Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as object).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, canon(x)])) : v);
+    if (JSON.stringify(canon(actual)) !== JSON.stringify(canon(expected))) throw new Error(message ?? `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  },
 };
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -31,9 +35,9 @@ const release = { income_net: 10000, income_target: 15000, fixed_level: 8000, sh
 const plan = { mode: "monthly_level", target: 8000, actual: 5000, remaining: 3000, dynamic_target_per_week: 0, goals: 2 };
 const overview = { summary: { savings: plan }, savings_release: release, as_of: "2026-10-14" } as unknown as FccOverview;
 
-test("screen name and the three tabs are the agreed ones", () => {
+test("screen name and the four tabs are the agreed ones", () => {
   assert.equal(SCREEN_TITLE, "תכנון חיסכון לטווח ארוך");
-  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מעבדת העתיד");
+  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מימון יעד | מעבדת העתיד");
 });
 
 test("savings tab: plan = standing level, actual labelled as self-reported, expected is NOT a plan, balance is not invented", () => {
@@ -95,7 +99,8 @@ test("the FCC tab strip is reused unchanged for FCC and works for other tab sets
   assert.equal(panelId("x", "fw"), "fw-panel-x");
   assert.equal(tabForKey("monthly", "ArrowLeft", true), "loans");
   assert.equal(tabForKey("savings" as const, "ArrowLeft", true, FAMILY_TABS), "accounts");
-  assert.equal(tabForKey("accounts" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
+  assert.equal(tabForKey("accounts" as const, "ArrowLeft", true, FAMILY_TABS), "funding");
+  assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
   assert.equal(tabForKey("lab" as const, "Home", false, FAMILY_TABS), "savings");
   assert.equal(FCC_TABS.length, 3);
 });
@@ -487,6 +492,137 @@ test("B2 UI: read-only — no allocation write path or client money math in the 
   const start = lib.indexOf("export function allocationsModel");
   const model = lib.slice(start, lib.indexOf("// ── Future lab form") > start ? lib.indexOf("// ── Future lab form") : undefined);
   assert.ok(start > 0 && !/\.reduce\(|Math\.(round|min|max)\(|\bfetch/.test(model), "the allocation model only formats the server's numbers");
+});
+
+
+// ── Goal Funding Planner, step 1b: typed options -> request, and a neutral comparison of the server's numbers ──
+function fundingForm(patch: Partial<FundingForm> = {}): FundingForm { return { ...DEFAULT_FUNDING_FORM, goalId: "recG1", ...patch }; }
+function draft(type: Parameters<typeof newFundingOption>[0], values: Record<string, string>, use = "", n = 1) { return { ...newFundingOption(type, n), values: { ...newFundingOption(type, n).values, ...values }, use }; }
+
+test("funding request: needs a goal; blank required fields are errors, never silently 0", () => {
+  const none = fundingRequest(fundingForm({ goalId: "" }));
+  assert.ok(!none.ok && none.error.includes("יעד"));
+  const loan = fundingRequest(fundingForm({ options: [draft("loan", { amount: "100000", annual_rate_pct: "6", term_months: "60" })] }));
+  assert.ok(!loan.ok && loan.error.includes("תאריך קבלת הכסף"), "available_by is required");
+  const badNumber = fundingRequest(fundingForm({ options: [draft("loan", { amount: "abc", annual_rate_pct: "6", term_months: "60", available_by: "2029-01-01" })] }));
+  assert.ok(!badNumber.ok && badNumber.error.includes("מספר") && !badNumber.error.includes("abc"));
+  const badAssumption = fundingRequest(fundingForm({ returnPct: "" }));
+  assert.ok(!badAssumption.ok && badAssumption.error.includes("תשואה"));
+});
+
+test("funding request: typed text becomes numbers once; optional blanks are omitted; the API's shapes are produced", () => {
+  const r = fundingRequest(fundingForm({ options: [
+    draft("new_deposits", { source: "hypothetical", liquidity: "immediate", expected_return_pct: "4", fee_pct: "0.3" }, "50000", 1),
+    draft("loan", { amount: "100000", annual_rate_pct: "6", term_months: "60", available_by: "2029-01-01", approved: "true" }, "", 2),
+    draft("asset_sale", { net_proceeds: "300000", expected_date: "2030-03-01" }, "", 3),
+    draft("custom", { label: " מענק ", amount: "40000" }, "", 4),
+    draft("new_deposits", { source: "hypothetical", liquidity: "date", liquid_from: "2030-01-01", release_confirmed: "true" }, "", 5),
+    draft("new_deposits", { source: "account", account_id: "recA1" }, "", 6),
+  ] }));
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.deepEqual(r.body.assumptions, { annual_return_pct: 6, annual_fee_pct: 0.15, inflation_pct: 2 });
+  const [dep, loan, sale, custom, dated, account] = r.body.options;
+  assert.deepEqual(dep, { id: "new_deposits_1", type: "new_deposits", hypothetical: { immediate: true, expected_return_pct: 4, fee_pct: 0.3 } });
+  assert.deepEqual(loan, { id: "loan_2", type: "loan", amount: 100000, annual_rate_pct: 6, term_months: 60, available_by: "2029-01-01", approved: true });
+  assert.deepEqual(sale, { id: "asset_sale_3", type: "asset_sale", net_proceeds: 300000, expected_date: "2030-03-01" });
+  assert.deepEqual(custom, { id: "custom_4", type: "custom", label: "מענק", amount: 40000 });
+  assert.deepEqual(dated, { id: "new_deposits_5", type: "new_deposits", hypothetical: { liquid_from: "2030-01-01" }, release_confirmed: true });
+  assert.deepEqual(account, { id: "new_deposits_6", type: "new_deposits", account_id: "recA1" });
+  assert.deepEqual(r.body.allocation_plan, [{ goal_id: "recG1", option_id: "new_deposits_1", amount: 50000 }], "only non-blank 'use' amounts enter the plan");
+  const badUse = fundingRequest(fundingForm({ options: [draft("custom", { label: "x", amount: "5" }, "-3")] }));
+  assert.ok(!badUse.ok && badUse.error.includes("סכום לשימוש"));
+});
+
+test("funding request: the form never contains a field that writes, a tax rule or a score", () => {
+  const all = JSON.stringify(Object.values(FUNDING_FIELDS).flat().map((f) => [f.key, f.label]));
+  assert.ok(!/tax|score|rank|מס\b|ציון|דירוג|המלצ/.test(all));
+  assert.equal(Object.keys(FUNDING_FIELDS).length, 7, "existing_balance is automatic (server-derived), not typed");
+  assert.equal(FUNDING_TYPE_LABELS.existing_balance, "כסף קיים (הקצאות)");
+});
+
+const option = (over: Record<string, unknown>) => ({ id: "x", type: "custom", feasible: true, reason: null, covers_amount: null, available_by: null, monthly_cash_effect: null, one_time_cost: null,
+  total_cost: null, new_liabilities: null, time_to_realize_months: null, certainty: "expected", conditions: [], risks: [], assumptions: [], missing_inputs: [], provenance: {}, details: {}, ...over });
+const fundingView = {
+  schema_version: "1.0", result_type: "funding_plan_comparison", as_of: "2026-10-18", assumptions: { annual_return_pct: 6, annual_fee_pct: 0.15, inflation_pct: 2, horizon_years: 10 },
+  goals: [{
+    need: { goal_id: "recG1", title: "חתונה", category: "savings", target: 200000, due: "2038-06-30", months_to_due: 140, reason: null, sizing_basis: "target_minus_confirmed",
+            confirmed_existing: 20000, expected_existing: 5000, progress_events_actual: null, gap: 180000, gap_after_expected: 175000 },
+    options: [
+      option({ id: "existing_balance", type: "existing_balance", feasible: true, covers_amount: 25000, certainty: "confirmed" }),
+      option({ id: "dep", type: "new_deposits", covers_amount: 180000, monthly_cash_effect: -1154.06, total_cost: 6369.41, available_by: "2038-06-30", time_to_realize_months: 140,
+               details: { required_monthly: 1154.06 }, conditions: ["owner_confirms_deposits"], risks: ["depends_on_assumed_return"], assumptions: ["growth_as_assumed"] }),
+      option({ id: "loan", type: "loan", covers_amount: 100000, certainty: "uncertain", monthly_cash_effect: -1933.28, total_cost: 15996.81, new_liabilities: { amount: 100000, monthly_payment: 1933.28, term_months: 60 },
+               conditions: ["loan_approved"], risks: ["terms_unverified", "brand_new_code"] }),
+      option({ id: "owed", type: "receivable_collection", feasible: "unknown", reason: "no_arrangement", covers_amount: 100000, certainty: "uncertain", conditions: ["debtor_arrangement"], risks: ["receivable_no_arrangement"] }),
+    ],
+    plan: { allocations: [{ option_id: "owed", amount: 100000, certainty: "uncertain", available_by: "2029-01-01", conditions: ["debtor_arrangement"] }],
+            covered: { confirmed: 20000, expected: 5000, uncertain: 100000, unknown: 0 }, earliest_available_by: "2029-01-01", remaining_after_confirmed: 180000,
+            remaining_after_confirmed_and_expected: 175000, monthly_burden: 0, monthly_release: 0, note: "coverage is split by certainty and is never summed into one 'available' figure" },
+  }],
+  portfolio: { monthly_burden_in_plan: 1154.06, planned_monthly_savings: 1000, shortfall: 154.06, capacity_known: true, plan_chosen: true, over_committed: ["loan"] },
+  warnings: ["השוואה בין אפשרויות בלבד — לא המלצה ולא בחירה עבורך."],
+} as unknown as Parameters<typeof fundingModel>[0];
+
+test("funding model: server numbers only, server order, certainty and conditions shown, nothing ranked or highlighted", () => {
+  const m = fundingModel(fundingView, "recG1", { owed: "גביית חוב" })!;
+  assert.equal(m.options.map((o) => o.id).join(","), "existing_balance,dep,loan,owed", "the server's order is kept");
+  const need = Object.fromEntries(m.needRows.map((r) => [r.label, r.value]));
+  assert.ok(need["כסף קיים מאושר למטרה"].includes("20,000") && need["כסף קיים צפוי (לא מאושר)"].includes("5,000") && need["פער לפי הכסף המאושר בלבד"].includes("180,000"));
+  const dep = m.options[1], loan = m.options[2], owed = m.options[3];
+  assert.ok(dep.rows[0].label === "הפקדה חודשית נדרשת" && dep.rows[0].value.includes("1,154"));
+  assert.ok(dep.verdict.startsWith("אפשרי עד התאריך") && dep.certainty === "צפוי" && dep.lists.some((l) => l.label === "תנאים למימוש" && l.items.includes("הבעלים מאשר את ההפקדות")));
+  assert.ok(loan.rows.some((r) => r.label === "התחייבות חדשה" && r.value.includes("1,933") && r.value.includes("60 חודשים")));
+  assert.ok(loan.lists.find((l) => l.label === "סיכונים")!.items.includes("brand_new_code"), "an unknown server code is shown as it is, never hidden");
+  assert.ok(owed.verdict.includes("לא ידוע") && owed.verdict.includes("אין הסדר החזר רשום") && owed.certainty === "לא ודאי" && owed.title === "גביית חוב");
+  assert.ok(m.options.every((o) => !/מומלץ|הכי טוב|מנצח|ציון|דירוג/.test(JSON.stringify(o))));
+});
+
+test("funding model: the plan is split by certainty — a debt owed to me is not 'available money'", () => {
+  const m = fundingModel(fundingView, "recG1")!;
+  const plan = Object.fromEntries(m.plan!.rows.map((r) => [r.label, r.value]));
+  assert.ok(plan["מאושר"].includes("20,000") && plan["צפוי"].includes("5,000") && plan["לא ודאי"].includes("100,000"));
+  assert.ok(plan["נותר אחרי המאושר בלבד"].includes("180,000") && plan["נותר אחרי מאושר וצפוי"].includes("175,000"));
+  assert.ok(!m.plan!.rows.some((r) => /זמין|סה"כ/.test(r.label)), "no single 'available' or total figure");
+  assert.ok(m.plan!.allocations[0].includes("לא ודאי") && m.plan!.allocations[0].includes("01/01/2029"));
+  const pf = Object.fromEntries(m.portfolio!.rows.map((r) => [r.label, r.value]));
+  assert.ok(pf["חוסר מול החיסכון המתוכנן"].includes("154") && pf["מקור שהוקצה ליותר מסכומו"] === "loan");
+  assert.equal(fundingModel({ ...fundingView, portfolio: { ...fundingView.portfolio, plan_chosen: false } }, "recG1")!.portfolio, null);
+});
+
+test("funding model: a goal that cannot be planned says why; nothing is invented", () => {
+  const blocked = { ...fundingView, goals: [{ need: { ...fundingView.goals[0].need, reason: "missing_date", due: null, gap: null }, options: [], plan: null }] } as unknown as Parameters<typeof fundingModel>[0];
+  const m = fundingModel(blocked, "recG1")!;
+  assert.equal(m.needReason, "חסר תאריך יעד");
+  assert.equal(m.options.length, 0);
+  assert.ok(m.needRows.some((r) => r.label === "פער לפי הכסף המאושר בלבד" && r.value === "—"));
+});
+
+test("funding screen: renders the intro, the principle and the controls; the result block shows the comparison", () => {
+  const overview = { status: "ok", data: { summary: {}, as_of: "2026-10-18", goals: [{ goal_id: "recG1", title: "חתונה", target: 200000, end_date: "2038-06-30", mode: "cumulative" },
+    { goal_id: "recP", title: "פרויקט", target: null, end_date: null, mode: "project" }], assets: { items: [] }, loans: { items: [] } } } as unknown as Parameters<typeof FundingSection>[0]["overview"];
+  const html = renderToStaticMarkup(createElement(FundingSection, { overview }));
+  assert.ok(html.includes("מימון יעד") && html.includes("לא המלצה") && html.includes("כסף צפוי אינו כסף קיים"));
+  assert.ok(html.includes("חתונה") && !html.includes("פרויקט"), "only goals with an amount and a date can be planned");
+  for (const label of ["הלוואה", "מכירת נכס", "הפקדות חדשות", "גביית חוב שחייבים לי"]) assert.ok(html.includes(label), label);
+  assert.ok(html.includes("השווה אפשרויות"));
+  const loading = renderToStaticMarkup(createElement(FundingSection, { overview: { status: "loading" } }));
+  assert.ok(loading.includes("טוען"));
+  const result = renderToStaticMarkup(createElement(FundingResult, { model: fundingModel(fundingView, "recG1")! }));
+  assert.ok(result.includes("הפקדה חודשית נדרשת") && result.includes("התוכנית שהוזנה") && result.includes("מבט תיק") && result.includes("fw-option"));
+});
+
+test("funding: read-only plumbing — one POST route, run only on submit, no client arithmetic", () => {
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const api = fs.readFileSync("src/api.ts", "utf8");
+  assert.ok(api.includes("/api/fcc/funding/plan") && api.includes("export async function postFccFundingPlan(body: FundingRequestBody)"));
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("/** Own call, own states; mounted only when the tab is opened"));
+  assert.ok(section.includes("postFccFundingPlan(parsed.body)") && !/useEffect\([^)]*run\(/.test(section), "the comparison runs only when asked");
+  assert.ok(!/\.reduce\(|Math\./.test(section), "no arithmetic in the funding component");
+  const lib = fs.readFileSync("src/lib/familyWealth.ts", "utf8");
+  const model = lib.slice(lib.indexOf("export function fundingModel"));
+  assert.ok(!/\.reduce\(|Math\.|\bfetch\(/.test(model), "the funding model only words and lays out the server's numbers");
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
