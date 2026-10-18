@@ -131,6 +131,10 @@ Planning Gate: **FULL** (persistence + authority + schema + multi-layer).
 
 מגבלה: בלי שדה אימות נזילות, `accessible` = `immediate` בלבד; קרנות השתלמות ופנסיות יופיעו `conditional` גם אחרי תאריך השחרור.
 
+
+### 3.6 הקצאת חשבון למטרה — `Goal Allocations` (B2, אושר ע"י הבעלים 18/10/2026, שלב 2: סכמה ומדיניות בלבד)
+
+טבלה חדשה `Goal Allocations` (`tblZgqHiBbSeyRTCA`), ריקה, `OWNER_SCOPED` לפי `Financial Owner`; שדות: `Name`, `Goal`, `Account` (קישור יחיד נאכף במדיניות, ושניהם חייבים להיות של המשתמש), `Financial Owner`, `Mode` (`percent` / `fixed_amount`), `Percent`, `Amount`, `Status` (`active` / `ended`), `Effective From`, `Notes`, `Created At`. הזנה ידנית; הקוד אינו כותב לטבלה. כללי החישוב (אחוז מכלל שווי החשבון, חריגה מסומנת ולא מקוצצת, מטרה בלי הקצאה נשארת עם כיסוי A2) ב-[B2_GOAL_ALLOCATIONS_SCHEMA_REQUEST.md](B2_GOAL_ALLOCATIONS_SCHEMA_REQUEST.md); מודל הקריאה וה-UI — שלבים 3-4, באישור נפרד.
 ## 4. בעלות כלכלית מול הרשאות מערכת
 
 **ממצא מ-Contacts:**
