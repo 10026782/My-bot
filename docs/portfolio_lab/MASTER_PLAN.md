@@ -16,6 +16,7 @@
 | החלטות סיווג מקורות ושחרור PL-1 | [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md) |
 | מסך הסימולטור, חיבור ל-TMA, אבטחה, PR-2 | [UI.md](UI.md) |
 | מודל חשבונות להון משפחתי (תשתית משותפת D1) | [FAMILY_WEALTH_ACCOUNTS_SPEC.md](FAMILY_WEALTH_ACCOUNTS_SPEC.md); בקשת שינוי סכמה לשלב 2: [D1_SCHEMA_CHANGE_REQUEST.md](D1_SCHEMA_CHANGE_REQUEST.md); הוראת יצירה: [D1_AIRTABLE_CREATION_INSTRUCTIONS.md](D1_AIRTABLE_CREATION_INSTRUCTIONS.md) |
+| השוואה לטורבי ופערים מועמדים (לא מאושרים) | [TURBI_COMPARISON_AND_CANDIDATES.md](TURBI_COMPARISON_AND_CANDIDATES.md) |
 | סטטוס תוכנית-על | שורת `PORTFOLIO_LAB` ב-[BOSS_UNIFIED_MASTER_PLAN.md](../governance/BOSS_UNIFIED_MASTER_PLAN.md); שורת `PORTFOLIO_LAB` ב-[ROADMAP.md](../../ROADMAP.md) |
 | תלות חיצונית — Decision Hub (ראו סעיף 4) | [DECISION_HUB_MASTER_SPEC.md](../specs/DECISION_HUB_MASTER_SPEC.md), [SPEC_Insight_to_Decision_to_Task.md](../specs/SPEC_Insight_to_Decision_to_Task.md) |
 
