@@ -160,7 +160,7 @@ warnings, missing_inputs, as_of
 
 | שלב | תוכן | סכמה | הערה |
 | --- | --- | --- | --- |
-| 1 | מנוע טהור + `POST /api/fcc/funding/plan`, אפשרויות §4, בריכות §6, מבט תיק §7 | אין | **בקוד (PR):** `portfolio_lab/funding_plan.py`, `service.funding_inputs`, `loans.pmt` (שם ציבורי ל-`_pmt`), בדיקות `test_funding_plan.py` + 6 בדיקות HTTP. Cross-Layer: `SINGLE-LAYER`. רישום Context Librarian מוצע ב-PR וממתין לאישור מפורש |
+| 1 | מנוע טהור + `POST /api/fcc/funding/plan`, אפשרויות §4, בריכות §6, מבט תיק §7 | אין | **בקוד (PR):** `portfolio_lab/funding_plan.py`, `service.funding_inputs`, `loans.pmt` (שם ציבורי ל-`_pmt`), בדיקות `test_funding_plan.py` + 6 בדיקות HTTP. Cross-Layer: `SINGLE-LAYER`. רישום Context Librarian אושר במפורש ע"י הבעלים (18/10/2026) |
 | 1ב | ממשק קריאה בלבד ב-TMA (טופס אפשרויות, השוואה), ללא חישוב בלקוח | אין | מוצג מספרים מהשרת |
 | 2 | שמירת תוכנית שנבחרה | **טבלה חדשה `Funding Plans` — דורש אישור** | כולל מדיניות `OWNER_SCOPED` לפני שורה ראשונה |
 | 3 | חיבור ל-Decision Hub (§10) | אולי ערך `Domain` | `FULL`; תלוי ב-PR2 של Hub |
@@ -169,7 +169,7 @@ warnings, missing_inputs, as_of
 ## 13. שאלות פתוחות (עם ברירת מחדל מוצעת)
 1. **אפשרויות מכירה והלוואה — האם להזין אותן בבקשה או לשמור בטבלה?** ברירת מחדל: בבקשה (שלב 1), שמירה רק בשלב 2.
 2. **יכולת חיסכון חודשית (§7):** ברירת מחדל — רמת יעד החיסכון החודשי הקיים; לא מחושבת מהכנסות/הוצאות.
-3. **קובץ חדש תחת `portfolio_lab/`:** יפעיל `OWNER_DECISION_REQUIRED` ב-Context Librarian. **יושם:** קובץ חדש `funding_plan.py`; הרישום נוסף ב-`canonical_boundaries.json` כהצעה (בלי לטעון לאישור מפורש) וממתין לביטוי האישור של הבעלים.
+3. **קובץ חדש תחת `portfolio_lab/`:** יפעיל `OWNER_DECISION_REQUIRED` ב-Context Librarian. **יושם:** קובץ חדש `funding_plan.py`; הרישום נוסף ב-`canonical_boundaries.json` ואושר במפורש ע"י הבעלים (18/10/2026) לשני הקבצים בלבד.
 4. **ערך `Domain` חדש ב-Decision Hub:** ברירת מחדל — `כללי` עד שיאושר שינוי.
 5. **קרן השתלמות חדשה:** האם להגדיר תבנית חשבון היפותטי קבועה (תשואה/דמי ניהול ברירת מחדל)? ברירת מחדל: לא; כל ערך מוזן.
 
