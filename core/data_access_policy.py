@@ -33,7 +33,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from airtable_schema import TABLE_ALIASES, FinAccountFields, FinEventFields, FinGoalFields, Tables, TaskFields
+from airtable_schema import TABLE_ALIASES, FinAccountFields, FinEventFields, FinGoalFields, GoalAllocationFields, Tables, TaskFields
 from core import owner_resolution
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,15 @@ _POLICIES: dict[str, TablePolicy] = {
         Tables.FIN_ACCOUNTS, OWNER_SCOPED, owner_field=FinAccountFields.FINANCIAL_OWNER,
         digit_guard=(FinAccountFields.NAME, FinAccountFields.INSTITUTION, FinAccountFields.HOLDER_NAMES,
                      FinAccountFields.TAX_NOTES, FinAccountFields.NOTES),
+    ),
+    # Goal Allocations (B2): which part of an account funds which goal. Owner-of-record only; both links must be the
+    # caller's own and a single record, so an allocation can never hang a goal under another person's account.
+    Tables.GOAL_ALLOCATIONS: TablePolicy(
+        Tables.GOAL_ALLOCATIONS, OWNER_SCOPED, owner_field=GoalAllocationFields.FINANCIAL_OWNER,
+        linked_owner_checks=((GoalAllocationFields.GOAL, Tables.FIN_GOALS),
+                             (GoalAllocationFields.ACCOUNT, Tables.FIN_ACCOUNTS)),
+        single_links=(GoalAllocationFields.GOAL, GoalAllocationFields.ACCOUNT),
+        digit_guard=(GoalAllocationFields.NAME, GoalAllocationFields.NOTES),
     ),
     Tables.FIN_EVENTS: TablePolicy(
         Tables.FIN_EVENTS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,

@@ -75,6 +75,7 @@ class Tables:
     REC_OBLIGATIONS = "Recurring Obligations"      # FCC — live: tblAvpGNDWs1tNoKG (created 06/10/2026), owner-scoped commitments (NOT an expense ledger)
     FIN_EVENTS      = "Financial Progress Events"  # FCC — live: tblqNvcyK34zVjcXP (created 04/10/2026), append-only
     FIN_ACCOUNTS    = "Financial Accounts"         # FCC/D1 — live: tblhV9f86iXMIwKx1 (created 15/10/2026), owner-scoped, EMPTY until the access policy is merged
+    GOAL_ALLOCATIONS = "Goal Allocations"          # FCC/B2 — live: tblZgqHiBbSeyRTCA (created 18/10/2026), owner-scoped, EMPTY (manual entry)
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
@@ -972,6 +973,23 @@ class FinAccountFields:
     INSURANCE_COST_MONTHLY = "Insurance Cost Monthly"  # number, ₪/month (disability + survivors); nominal, held flat
     INSURANCE_COST_AS_OF = "Insurance Cost As Of"      # date
     # reverse links created by Airtable (not read by code): "Financial Progress Events", "Incoming Transfers"
+
+
+class GoalAllocationFields:
+    """Goal Allocations (FCC/B2) — LIVE (tblZgqHiBbSeyRTCA). Allocates part of ONE account's latest verified value to ONE goal.
+    Owner-scoped via FINANCIAL_OWNER. Entered manually; the code never writes it. NEVER store account/policy numbers."""
+    NAME            = "Name"
+    GOAL            = "Goal"              # link -> Financial Goals (single record, enforced in data_access_policy)
+    ACCOUNT         = "Account"           # link -> Financial Accounts (single record, enforced in data_access_policy)
+    FINANCIAL_OWNER = "Financial Owner"   # multipleRecordLinks -> Profile (PERMISSION only)
+    MODE            = "Mode"              # singleSelect: percent|fixed_amount
+    PERCENT         = "Percent"           # number 0-100, share of the account's whole latest value (Mode=percent)
+    AMOUNT          = "Amount"            # number, nominal ₪ (Mode=fixed_amount)
+    STATUS          = "Status"            # singleSelect: active|ended
+    EFFECTIVE_FROM  = "Effective From"    # date; empty = immediate
+    NOTES           = "Notes"
+    CREATED_AT      = "Created At"        # createdTime
+    # reverse links created by Airtable (not read by code): "Goal Allocations" on Financial Goals / Financial Accounts / Profile
 
 
 class RecObFields:
