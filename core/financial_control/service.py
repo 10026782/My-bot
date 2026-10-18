@@ -12,7 +12,7 @@ import logging
 import re
 from datetime import date
 
-from airtable_schema import FinEventFields, FinGoalFields, LoanFields, Tables
+from airtable_schema import FinEventFields, FinGoalFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
 from core.financial_control import assets as fcc_assets, calc, loans as fcc_loans
 
@@ -570,6 +570,31 @@ def goals_for_forecast(identity) -> list[dict]:
             "status": str(f.get(FinGoalFields.STATUS) or "active").lower(),
             "target_amount": calc._num(f.get(FinGoalFields.TARGET_AMOUNT)),
             "end_date": (calc._d(f.get(FinGoalFields.END_DATE)).isoformat() if calc._d(f.get(FinGoalFields.END_DATE)) else None),
+        })
+    return out
+
+
+def _single_link(value):
+    """One linked record id, or None when the link is empty or holds several (a row that must not be guessed at)."""
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], str):
+        return value[0]
+    return None
+
+
+def allocations_for_forecast(identity) -> list[dict]:
+    """B2: the caller's own ``Goal Allocations`` rows, reduced to what the read model needs. Read-only (nothing here writes).
+    Owner-scoped through the table policy (unresolved identity -> PersonalDataAccessDenied); the pure model then keeps only rows whose
+    goal AND account are among the caller's own, so a link to someone else's record never contributes or leaks a name."""
+    out = []
+    for r in policy.filter_records(Tables.GOAL_ALLOCATIONS, _read(Tables.GOAL_ALLOCATIONS), identity):
+        f = r.get("fields") or {}
+        out.append({
+            "id": r.get("id"), "goal_id": _single_link(f.get(GoalAllocationFields.GOAL)),
+            "account_id": _single_link(f.get(GoalAllocationFields.ACCOUNT)),
+            "mode": str(f.get(GoalAllocationFields.MODE) or "").lower() or None,
+            "percent": calc._num(f.get(GoalAllocationFields.PERCENT)), "amount": calc._num(f.get(GoalAllocationFields.AMOUNT)),
+            "status": str(f.get(GoalAllocationFields.STATUS) or "").lower() or None,
+            "effective_from": (calc._d(f.get(GoalAllocationFields.EFFECTIVE_FROM)).isoformat() if calc._d(f.get(GoalAllocationFields.EFFECTIVE_FROM)) else None),
         })
     return out
 

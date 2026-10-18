@@ -156,18 +156,29 @@ def test_nothing_writes_allocations_from_code():
     assert Tables.GOAL_ALLOCATIONS not in getattr(approval_actions, "_TMA_WRITE_ALLOWED_TABLES", ())
 
 
-def test_no_module_reads_or_writes_allocations_yet():
-    """An allocation is a label on money, not a movement: until the read model (step 3) is approved nothing in the
-    runtime may touch the table, so it cannot change a balance, create a deposit/withdrawal or bypass ActionGateway."""
+def test_only_the_read_only_forecast_reader_touches_allocations():
+    """An allocation is a label on money, not a movement. Step 3 adds exactly one runtime reader (``service.allocations_for_forecast``);
+    nothing else may reference the table, so it cannot change a balance, create a deposit/withdrawal or bypass ActionGateway."""
+    import inspect
     import pathlib
     import re
 
-    allowed = {"airtable_schema.py", "core/data_access_policy.py"}
+    from core.financial_control import service
+
+    allowed = {"airtable_schema.py", "core/data_access_policy.py", "core/financial_control/service.py", "portfolio_lab/accounts_forecast.py"}
+    pattern = re.compile(r"GOAL_ALLOCATIONS|GoalAllocationFields|Goal Allocations")
     offenders = []
     for path in pathlib.Path(".").rglob("*.py"):
         rel = path.as_posix()
         if rel.startswith(("test_", "tma-frontend", "node_modules", ".git")) or "/test_" in rel or rel in allowed:
             continue
-        if re.search(r"GOAL_ALLOCATIONS|GoalAllocationFields|Goal Allocations", path.read_text(encoding="utf-8", errors="ignore")):
+        if pattern.search(path.read_text(encoding="utf-8", errors="ignore")):
             offenders.append(rel)
     assert offenders == []
+    text = pathlib.Path("core/financial_control/service.py").read_text(encoding="utf-8")
+    reader = inspect.getsource(service.allocations_for_forecast)
+    body = "\n".join(l for l in text.split("\n") if not l.startswith("from airtable_schema import"))   # the import line is not a use
+    assert len(pattern.findall(body)) == len(pattern.findall(reader))                       # every use lives in the reader
+    pure = pathlib.Path("portfolio_lab/accounts_forecast.py").read_text(encoding="utf-8")
+    assert not re.search(r"^(import|from) .*(airtable|requests|tools\.|core\.|tma_api)", pure, re.MULTILINE)     # the model stays pure: no I/O, no writes
+    assert not re.search(r"\b(create_record|update_record|delete_record|airtable_add|airtable_update|writer\.)", reader)

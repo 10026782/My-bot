@@ -4457,3 +4457,119 @@ def test_the_same_frozen_write_proposed_many_times_reaches_the_real_gateway_as_o
     [t.start() for t in threads]; [t.join() for t in threads]
     assert sum(1 for r in results if r.ok) == 1                                       # exactly one new contract
     assert len({r.contract_id for r in results if r.contract_id}) == 1                # everyone else got that same contract back
+
+
+# ═══ B2 step 3: Goal Allocations in the forecast — owner scope, read-only ═══
+from airtable_schema import GoalAllocationFields as GAF   # noqa: E402
+
+
+def alloc_row(rid, owner, goal_id, account_id, mode="percent", value=30, status="active"):
+    f = {GAF.NAME: f"x-{rid}", GAF.GOAL: [goal_id], GAF.ACCOUNT: [account_id], GAF.FINANCIAL_OWNER: [owner], GAF.MODE: mode, GAF.STATUS: status}
+    f[GAF.PERCENT if mode == "percent" else GAF.AMOUNT] = value
+    return {"id": rid, "fields": f}
+
+
+FLAT_PARAMS = {"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}
+
+
+def test_http_forecast_with_an_empty_allocations_table_is_unchanged_and_shows_zero(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    DB[Tables.GOAL_ALLOCATIONS] = []
+    body = forecast(http(monkeypatch, ELIYAHU), FLAT_PARAMS).get_json()
+    assert body["allocations"]["has_allocations"] is False and body["allocations"]["totals"]["allocated"] == 0.0
+    assert body["allocations"]["totals"]["unallocated"] == 100000.0 and body["allocations"]["goals"] == []
+    DB.pop(Tables.GOAL_ALLOCATIONS)                           # a base where the table has no rows at all behaves the same
+    assert forecast(http(monkeypatch, ELIYAHU), FLAT_PARAMS).get_json()["allocations"]["count"] == 0
+
+
+def test_http_forecast_uses_only_the_callers_allocations_and_ignores_links_to_other_peoples_records(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGM", "מטרה שלי", ELI, 40000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"}),
+        goal("recGV", "מטרה של אבי", AVI, 5, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"})]
+    DB[Tables.GOAL_ALLOCATIONS] = [
+        alloc_row("recAL1", ELI, "recGM", "recAE", "percent", 50),                 # mine
+        alloc_row("recAL2", AVI, "recGV", "recAA", "percent", 80),                 # Avi's own row: never read
+        alloc_row("recAL3", ELI, "recGM", "recAA", "fixed_amount", 123456),        # my row, but it links Avi's account
+        alloc_row("recAL4", ELI, "recGV", "recAE", "fixed_amount", 654321)]        # my row, but it links Avi's goal
+    import copy as _copy
+    before = _copy.deepcopy(DB)
+    body = forecast(http(monkeypatch, ELIYAHU), FLAT_PARAMS).get_json()
+    a = body["allocations"]
+    assert a["count"] == 1 and a["skipped"]["unknown_link"] == 2
+    assert a["totals"]["allocated"] == 50000.0 and a["totals"]["unallocated"] == 50000.0
+    assert [x["id"] for x in a["goals"]] == ["recGM"] and a["goals"][0]["accessible"] == 50000.0
+    mine = [g for g in body["goals"] if g["id"] == "recGM"][0]
+    assert (mine["basis"], mine["allocated_value"], mine["verdict"], mine["gap"]) == ("allocation", 50000.0, "covered", None)
+    text = str(body)
+    for hidden in ("מטרה של אבי", "החשבון של אבי", "123456", "654321", "777777", "recAA", "recGV"):
+        assert hidden not in text, hidden
+    assert DB == before                                                                     # nothing was written, anywhere
+
+
+def test_http_allocation_reader_is_owner_scoped_and_read_only(monkeypatch):
+    seed_accounts()
+    DB[Tables.GOAL_ALLOCATIONS] = [alloc_row("recAL1", ELI, "recGE", "recAE"), alloc_row("recAL2", AVI, "recGA", "recAA")]
+    rows = service.allocations_for_forecast(ELIYAHU)
+    assert [r["id"] for r in rows] == ["recAL1"] and rows[0]["goal_id"] == "recGE" and rows[0]["account_id"] == "recAE"
+    assert set(rows[0]) == {"id", "goal_id", "account_id", "mode", "percent", "amount", "status", "effective_from"}      # no names, no free text
+    with pytest.raises(policy.PersonalDataAccessDenied):
+        service.allocations_for_forecast(None)
+    multi = {"id": "recAL9", "fields": {GAF.GOAL: ["recGE", "recGA"], GAF.ACCOUNT: ["recAE"], GAF.FINANCIAL_OWNER: [ELI], GAF.MODE: "percent", GAF.PERCENT: 5}}
+    DB[Tables.GOAL_ALLOCATIONS].append(multi)
+    assert [r for r in service.allocations_for_forecast(ELIYAHU) if r["id"] == "recAL9"][0]["goal_id"] is None       # several links are never guessed at
+
+
+def test_http_over_allocation_is_reported_through_the_endpoint(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [goal("recGM", "מטרה שלי", ELI, 40000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"})]
+    DB[Tables.GOAL_ALLOCATIONS] = [alloc_row("recAL1", ELI, "recGM", "recAE", "fixed_amount", 70000), alloc_row("recAL2", ELI, "recGM", "recAE", "fixed_amount", 50000)]
+    body = forecast(http(monkeypatch, ELIYAHU), FLAT_PARAMS).get_json()
+    acct_row = body["allocations"]["accounts"][0]
+    assert acct_row["over_allocated"] is True and acct_row["over_by"] == 20000.0 and acct_row["unallocated"] == 0.0
+    assert [g["reason"] for g in body["goals"]] == ["over_allocated"]
+
+
+def test_http_other_peoples_allocation_rows_never_change_the_callers_totals_or_leak_through_aggregates(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGM", "מטרה שלי", ELI, 40000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"}),
+        goal("recGV", "מטרה של אבי", AVI, 5, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"})]
+    mine = [alloc_row("recAL1", ELI, "recGM", "recAE", "percent", 25)]
+    DB[Tables.GOAL_ALLOCATIONS] = list(mine)
+    c = http(monkeypatch, ELIYAHU)
+    baseline = forecast(c, FLAT_PARAMS).get_json()
+    # Avi's rows: one on Avi's own goal/account, and rows that try to claim MY goal / MY account (so they would move my totals if they were read)
+    DB[Tables.GOAL_ALLOCATIONS] = mine + [
+        alloc_row("recAL2", AVI, "recGV", "recAA", "fixed_amount", 777000),
+        alloc_row("recAL3", AVI, "recGV", "recAE", "percent", 60),                    # Avi claims 60% of MY account for his goal
+        alloc_row("recAL4", AVI, "recGM", "recAE", "fixed_amount", 90000)]            # Avi claims 90,000 of MY account for MY goal
+    tma_api._PL_LIMITER = None
+    out = forecast(c, FLAT_PARAMS).get_json()
+    assert out["allocations"] == baseline["allocations"] and out["goals"] == baseline["goals"]
+    assert out["allocations"]["totals"] == {"accounts_value": 100000.0, "allocated": 25000.0, "unallocated": 75000.0, "over_allocated": 0.0}
+    for hidden in ("777000", "777777", "recAA", "recGV", "מטרה של אבי", "החשבון של אבי"):
+        assert hidden not in str(out), hidden
+
+
+def test_a_co_owned_row_never_exposes_the_other_owners_account_or_goal_to_the_second_owner(monkeypatch):
+    from portfolio_lab.accounts_forecast import build_accounts_forecast
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [goal("recGM", "מטרה שלי", ELI, 40000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"})]
+    row = alloc_row("recALX", ELI, "recGM", "recAE", "percent", 25)
+    row["fields"][GAF.FINANCIAL_OWNER] = [ELI, AVI]                                   # a row listing both people as owners
+    DB[Tables.GOAL_ALLOCATIONS] = [row]
+    rows_for_avi = service.allocations_for_forecast(AVI_I)
+    assert [r["id"] for r in rows_for_avi] == ["recALX"]                              # the policy lets a listed owner read the row...
+    out = build_accounts_forecast(service.accounts_view(AVI_I), FLAT_PARAMS, goals=service.goals_for_forecast(AVI_I), allocations=rows_for_avi)
+    assert out["allocations"]["count"] == 0 and out["allocations"]["skipped"]["unknown_link"] == 1      # ...but its links are not Avi's, so nothing contributes
+    assert out["allocations"]["totals"]["allocated"] == 0.0
+    for hidden in ("קרן השתלמות", "מטרה שלי", "100000", "recAE", "recGM"):
+        assert hidden not in str(out), hidden
