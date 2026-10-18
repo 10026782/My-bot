@@ -174,7 +174,7 @@ def test_effective_from_in_the_future_is_not_counted_today_but_counts_from_that_
     out = run(accounts, [goal("early", target=1, end="2027-01-31"), goal("late", target=1, end="2027-12-31")],
               [al("1", "early", "recI", "percent", 20, eff="2027-06-01"), al("2", "late", "recI", "percent", 20, eff="2027-06-01")])
     assert out["allocations"]["skipped"]["not_yet_effective"] == 2 and out["allocations"]["totals"]["allocated"] == 0.0
-    assert (g(out, "early")["verdict"], g(out, "early")["reason"]) == ("not_comparable", "allocation_not_yet_effective")
+    assert (g(out, "early")["verdict"], g(out, "early")["reason"]) == ("not_comparable", "allocation_effective_after_due")      # effective only after the goal's due date
     assert (g(out, "late")["verdict"], g(out, "late")["allocated_value"]) == ("covered", 200.0)
 
 
@@ -213,3 +213,78 @@ def test_inputs_are_not_mutated():
     snapshot = copy.deepcopy((accounts, goals, rows))
     run(accounts, goals, rows)
     assert (accounts, goals, rows) == snapshot
+
+
+# ═══ PR review follow-ups: planned vs effective, potential caveat, Effective From vs due date ═══
+
+def test_planned_allocation_is_preserved_and_effective_and_gap_are_shown_separately_when_the_account_shrinks():
+    accounts = [cash("recI", 1000, insurance_cost_monthly=50)]
+    rows = [al("1", "a", "recI", "fixed_amount", 500), al("2", "b", "recI", "fixed_amount", 500)]
+    before = copy.deepcopy(rows)
+    out = run(accounts, [goal("a", target=1, end="2027-12-31"), goal("b", target=1, end="2027-12-31")], rows)
+    a, b = g(out, "a"), g(out, "b")
+    assert (a["planned_allocated_value"], b["planned_allocated_value"]) == (500.0, 500.0)               # the entered amount is never reduced
+    assert a["allocated_value"] < 500.0 and b["allocated_value"] < 500.0                                 # effective: bounded by the shrunken account
+    assert a["allocation_gap"] == pytest.approx(a["planned_allocated_value"] - a["allocated_value"], abs=0.01) and a["allocation_gap"] > 0
+    assert a["allocated_value"] + b["allocated_value"] <= 1000.0 and a["allocation_capped"] is True
+    assert rows == before                                                                                # the stored rows are untouched
+    now = acc(out, "recI")                                                                               # today's snapshot view still shows exactly what was entered
+    assert [x["amount"] for x in now["allocations"]] == [500.0, 500.0] and [x["resolved_amount"] for x in now["allocations"]] == [500.0, 500.0]
+
+
+def test_when_the_account_does_not_shrink_effective_equals_planned_and_the_gap_is_zero():
+    out = run([cash("recI", 1000)], [goal("a", target=1)], [al("1", "a", "recI", "fixed_amount", 500), al("2", "a", "recI", "percent", 10)])
+    a = g(out, "a")
+    assert (a["planned_allocated_value"], a["allocated_value"], a["allocation_gap"], a["allocation_capped"]) == (600.0, 600.0, 0.0, False)
+
+
+def test_percent_allocations_never_open_a_gap():
+    out = run([cash("recI", 1000, insurance_cost_monthly=50)], [goal("a", target=1, end="2027-12-31")], [al("1", "a", "recI", "percent", 100)])
+    assert g(out, "a")["allocation_gap"] == 0.0 and g(out, "a")["allocation_capped"] is False
+
+
+def test_potential_coverage_is_caveated_when_the_same_accessible_money_is_allocated_elsewhere():
+    out = run([cash(value=1000)], [goal("a", target=1), goal("p", target=900)], [al("1", "a", "recI", "fixed_amount", 600)])
+    p = g(out, "p")
+    assert p["basis"] == "potential" and p["accessible_value"] == 1000.0 and p["verdict"] == "covered"      # the A2 number itself is unchanged...
+    assert (p["allocated_elsewhere_accessible"], p["unallocated_accessible_value"], p["potential_caveat"]) == (600.0, 400.0, "allocated_elsewhere")   # ...but never unqualified
+    assert "אינו כסף פנוי" in " ".join(out["warnings"])
+
+
+def test_potential_caveat_treats_an_over_allocated_accessible_account_as_fully_claimed():
+    out = run([cash(value=1000)], [goal("a", target=1), goal("p", target=900)], [al("1", "a", "recI", "percent", 70), al("2", "a", "recI", "percent", 50)])
+    p = g(out, "p")
+    assert (p["allocated_elsewhere_accessible"], p["unallocated_accessible_value"], p["potential_caveat"]) == (1000.0, 0.0, "allocated_elsewhere")
+
+
+def test_no_caveat_and_no_extra_numbers_without_allocations():
+    p = g(run([cash(value=1000)], [goal("p", target=900)], []), "p")
+    assert (p["potential_caveat"], p["unallocated_accessible_value"], p["allocated_elsewhere_accessible"]) == (None, None, 0.0)
+
+
+def test_non_accessible_allocations_do_not_caveat_a_potential_goal_that_uses_accessible_money_only():
+    pension = acct("recP", 90000, liquidity="immediate", account_type="pension")
+    out = run([cash("recI", 1000), pension], [goal("a", "long_term", target=1), goal("p", target=900)], [al("1", "a", "recP", "percent", 100)])
+    assert g(out, "p")["potential_caveat"] is None and g(out, "p")["allocated_elsewhere_accessible"] == 0.0
+
+
+def test_effective_from_mid_month_is_not_counted_before_it_starts_nor_against_an_earlier_due_date():
+    accounts = [cash(value=1000)]
+    goals = [goal("before", target=1, end="2027-06-10"), goal("eom", target=1, end="2027-06-30"), goal("after", target=1, end="2027-07-05"),
+             goal("same_month", target=1, end="2027-06-20")]
+    rows = [al(f"r{i}", gid, "recI", "percent", 10, eff="2027-06-15") for i, gid in enumerate(["before", "eom", "after", "same_month"])]
+    out = run(accounts, goals, rows)
+    assert (g(out, "before")["verdict"], g(out, "before")["reason"]) == ("not_comparable", "allocation_effective_after_due")     # due 10/6 < effective 15/6
+    assert (g(out, "eom")["verdict"], g(out, "eom")["allocated_value"]) == ("covered", 100.0)                                       # month-end 30/6 >= effective
+    assert (g(out, "after")["verdict"], g(out, "after")["allocated_value"]) == ("covered", 100.0)                                   # read at end of June
+    assert g(out, "same_month")["reason"] == "allocation_not_yet_effective"       # effective 15/6 but due 20/6: read at 31/5, so conservatively not counted
+    assert g(out, "same_month")["allocated_value"] == 0.0 and g(out, "same_month")["verdict"] == "not_comparable"
+
+
+def test_effective_from_today_counts_but_later_this_month_does_not():
+    accounts = [cash(value=1000)]
+    out_today = run(accounts, [goal("a", target=1)], [al("1", "a", "recI", "percent", 10, eff=TODAY.isoformat())])
+    assert out_today["allocations"]["totals"]["allocated"] == 100.0 and out_today["allocations"]["skipped"]["not_yet_effective"] == 0
+    later = run(accounts, [goal("a", target=1)], [al("1", "a", "recI", "percent", 10, eff="2026-10-20")])
+    assert later["allocations"]["totals"]["allocated"] == 0.0 and later["allocations"]["skipped"]["not_yet_effective"] == 1
+    assert later["allocations"]["accounts"][0]["unallocated"] == 1000.0

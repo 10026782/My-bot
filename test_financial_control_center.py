@@ -4532,3 +4532,44 @@ def test_http_over_allocation_is_reported_through_the_endpoint(monkeypatch):
     acct_row = body["allocations"]["accounts"][0]
     assert acct_row["over_allocated"] is True and acct_row["over_by"] == 20000.0 and acct_row["unallocated"] == 0.0
     assert [g["reason"] for g in body["goals"]] == ["over_allocated"]
+
+
+def test_http_other_peoples_allocation_rows_never_change_the_callers_totals_or_leak_through_aggregates(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGM", "מטרה שלי", ELI, 40000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"}),
+        goal("recGV", "מטרה של אבי", AVI, 5, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"})]
+    mine = [alloc_row("recAL1", ELI, "recGM", "recAE", "percent", 25)]
+    DB[Tables.GOAL_ALLOCATIONS] = list(mine)
+    c = http(monkeypatch, ELIYAHU)
+    baseline = forecast(c, FLAT_PARAMS).get_json()
+    # Avi's rows: one on Avi's own goal/account, and rows that try to claim MY goal / MY account (so they would move my totals if they were read)
+    DB[Tables.GOAL_ALLOCATIONS] = mine + [
+        alloc_row("recAL2", AVI, "recGV", "recAA", "fixed_amount", 777000),
+        alloc_row("recAL3", AVI, "recGV", "recAE", "percent", 60),                    # Avi claims 60% of MY account for his goal
+        alloc_row("recAL4", AVI, "recGM", "recAE", "fixed_amount", 90000)]            # Avi claims 90,000 of MY account for MY goal
+    tma_api._PL_LIMITER = None
+    out = forecast(c, FLAT_PARAMS).get_json()
+    assert out["allocations"] == baseline["allocations"] and out["goals"] == baseline["goals"]
+    assert out["allocations"]["totals"] == {"accounts_value": 100000.0, "allocated": 25000.0, "unallocated": 75000.0, "over_allocated": 0.0}
+    for hidden in ("777000", "777777", "recAA", "recGV", "מטרה של אבי", "החשבון של אבי"):
+        assert hidden not in str(out), hidden
+
+
+def test_a_co_owned_row_never_exposes_the_other_owners_account_or_goal_to_the_second_owner(monkeypatch):
+    from portfolio_lab.accounts_forecast import build_accounts_forecast
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [goal("recGM", "מטרה שלי", ELI, 40000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"})]
+    row = alloc_row("recALX", ELI, "recGM", "recAE", "percent", 25)
+    row["fields"][GAF.FINANCIAL_OWNER] = [ELI, AVI]                                   # a row listing both people as owners
+    DB[Tables.GOAL_ALLOCATIONS] = [row]
+    rows_for_avi = service.allocations_for_forecast(AVI_I)
+    assert [r["id"] for r in rows_for_avi] == ["recALX"]                              # the policy lets a listed owner read the row...
+    out = build_accounts_forecast(service.accounts_view(AVI_I), FLAT_PARAMS, goals=service.goals_for_forecast(AVI_I), allocations=rows_for_avi)
+    assert out["allocations"]["count"] == 0 and out["allocations"]["skipped"]["unknown_link"] == 1      # ...but its links are not Avi's, so nothing contributes
+    assert out["allocations"]["totals"]["allocated"] == 0.0
+    for hidden in ("קרן השתלמות", "מטרה שלי", "100000", "recAE", "recGM"):
+        assert hidden not in str(out), hidden

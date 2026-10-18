@@ -192,7 +192,7 @@ def _allocation_context(valid: list, flags: dict, info: dict, month_totals: list
     """הקצאות לחישוב כיסוי בעתיד: לכל חודש הסכום המוקצה של כל חשבון מוגבל לשווי החשבון באותו חודש (חיתוך יחסי + דגל `capped`, לא הסתרה).
     חשבונות בהקצאת יתר ביום הצילום לא נכנסים — המטרות שלהם מסומנות `over_allocated`. מחזיר None כשאין הקצאות תקינות ולא חסומות."""
     healthy = [al for al in valid if al["account_id"] not in flags["over"]]
-    if not healthy and not flags["blocked_goals"]:
+    if not healthy and not flags["blocked_goals"] and not flags["over"]:
         return None
     by_goal: dict[str, list] = {}
     for al in healthy:
@@ -205,36 +205,45 @@ def _allocation_context(valid: list, flags: dict, info: dict, month_totals: list
         as_of = date.fromisoformat(month_totals[slot]["as_of"])
         per_acct: dict[str, list] = {}
         for al in healthy:
-            if al["effective_from"] is None or al["effective_from"] <= as_of:
+            if al["effective_from"] is None or al["effective_from"] <= as_of:       # הקצאה עתידית נכנסת רק מסוף החודש שבו נכנסה לתוקף
                 per_acct.setdefault(al["account_id"], []).append(al)
         out = {"as_of": month_totals[slot]["as_of"], "items": {}}
         for aid, items in per_acct.items():
             value = info[aid]["values"][slot]
-            raws = [(al, _alloc_raw(al, value)) for al in items]
+            raws = [(al, _alloc_raw(al, value)) for al in items]            # הסכום המתוכנן (planned) נשמר כפי שהוזן — לא משתנה
             total = sum(r for _, r in raws)
             capped = total > value + 0.005
-            factor = value / total if capped and total > 0 else 1.0
+            factor = value / total if capped and total > 0 else 1.0           # הסכום האפקטיבי (effective) קטן ממנו רק כשהחשבון קטן מסך ההקצאות
             state = _state_at(info[aid]["profile"], as_of)
             for al, r in raws:
-                out["items"][al["id"]] = {"goal_id": al["goal_id"], "amount": r * factor, "state": state, "capped": capped}
+                out["items"][al["id"]] = {"goal_id": al["goal_id"], "planned": r, "amount": r * factor, "state": state, "capped": capped}
         cache[slot] = out
         return out
 
     def bucket(slot: int, goal_id: str) -> dict:
         data = shares(slot)
         mine = {al["id"] for al in by_goal.get(goal_id, [])}
-        b = {"as_of": data["as_of"], "allocated": 0.0, "accessible": 0.0, "conditional": 0.0, "locked": 0.0, "capped": False}
+        b = {"as_of": data["as_of"], "planned": 0.0, "allocated": 0.0, "accessible": 0.0, "conditional": 0.0, "locked": 0.0, "capped": False}
         for aid, it in data["items"].items():
             if aid in mine:
+                b["planned"] += it["planned"]
                 b["allocated"] += it["amount"]
                 b[it["state"]] += it["amount"]
                 b["capped"] = b["capped"] or it["capped"]
         return b
 
     def total_accessible(slot: int) -> float:
-        return sum(it["amount"] for it in shares(slot)["items"].values() if it["state"] == "accessible")
+        """כסף נגיש שכבר "תפוס" במטרות אחרות: הקצאות אפקטיביות + כל שווי חשבון בהקצאת יתר שנגיש (נתפס ביתר — לא מניחים שהוא פנוי)."""
+        data = shares(slot)
+        claimed = sum(it["amount"] for it in data["items"].values() if it["state"] == "accessible")
+        as_of = date.fromisoformat(data["as_of"])
+        for aid in flags["over"]:
+            if aid in info and _state_at(info[aid]["profile"], as_of) == "accessible":
+                claimed += info[aid]["values"][slot]
+        return claimed
 
-    return {"by_goal": by_goal, "blocked_goals": flags["blocked_goals"], "bucket": bucket, "total_accessible": total_accessible}
+    return {"by_goal": by_goal, "blocked_goals": flags["blocked_goals"], "bucket": bucket, "total_accessible": total_accessible,
+            "active": True}
 
 
 def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], immediate_totals: list[float], has_accessible: bool, has_immediate: bool, alloc=None):
@@ -251,7 +260,8 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
             continue
         item = {"id": g.get("id"), "title": g.get("title"), "category": g.get("category"), "target_amount": None, "due_month": None,
                 "verdict": "not_comparable", "reason": None, "gap": None, "value_as_of": None, "accessible_value": None, "conditional_value": None, "locked_value": None,
-                "basis": "potential", "allocated_value": None, "allocation_capped": False, "allocated_elsewhere_accessible": 0.0}
+                "basis": "potential", "planned_allocated_value": None, "allocated_value": None, "allocation_gap": None, "allocation_capped": False,
+                "allocated_elsewhere_accessible": 0.0, "unallocated_accessible_value": None, "potential_caveat": None}
         target, due = _goal_number(g.get("target_amount")), _iso_date(g.get("end_date"))
         item["target_amount"] = target
         if due is not None:
@@ -272,10 +282,13 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
             item.update(basis="allocation", reason="over_allocated")           # אחד החשבונות המזינים בהקצאת יתר: מוצג במפורש, לא מחושב
         elif alloc and g.get("id") in alloc["by_goal"]:
             b = alloc["bucket"](slot, g["id"])                                  # כיסוי לפי ההקצאה בלבד, מפוצל לפי נזילות החשבון המקצה
-            item.update(basis="allocation", value_as_of=b["as_of"], allocated_value=round(b["allocated"], 2), accessible_value=round(b["accessible"], 2),
+            item.update(basis="allocation", value_as_of=b["as_of"], planned_allocated_value=round(b["planned"], 2), allocated_value=round(b["allocated"], 2),
+                        allocation_gap=round(b["planned"] - b["allocated"], 2), accessible_value=round(b["accessible"], 2),
                         conditional_value=round(b["conditional"], 2), locked_value=round(b["locked"], 2), allocation_capped=b["capped"])
             if b["allocated"] <= 0.005:
-                item["reason"] = "allocation_not_yet_effective"
+                # כל ההקצאות נכנסות לתוקף אחרי תאריך היעד, או בחודש שטרם הושלם בתאריך הקריאה (שמרני: לא סופרים הקצאה מוקדם מדי)
+                later = all(al["effective_from"] is not None and al["effective_from"] > due for al in alloc["by_goal"][g["id"]])
+                item["reason"] = "allocation_effective_after_due" if later else "allocation_not_yet_effective"
             elif b["accessible"] <= 0.005:
                 item["reason"] = "allocated_not_accessible"                     # הוקצה, אבל לא נזיל — אינו חסר ואינו מכוסה
             elif b["accessible"] + 0.005 >= target:
@@ -290,7 +303,11 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
             row = month_totals[slot]
             accessible = immediate_totals[slot] if emergency else row["accessible"]
             if alloc:
-                item["allocated_elsewhere_accessible"] = round(alloc["total_accessible"](slot), 2)   # מידע: כסף נגיש שכבר הוקצה למטרות אחרות
+                elsewhere = min(alloc["total_accessible"](slot), accessible)
+                item["allocated_elsewhere_accessible"] = round(elsewhere, 2)         # כסף נגיש שכבר תפוס בהקצאות למטרות אחרות
+                if elsewhere > 0.005:                                                # כיסוי פוטנציאלי אינו כסף פנוי: מציגים את הפנוי באמת ומסמנים הסתייגות
+                    item["unallocated_accessible_value"] = round(accessible - elsewhere, 2)
+                    item["potential_caveat"] = "allocated_elsewhere"
             item.update(value_as_of=row["as_of"], accessible_value=round(accessible, 2), conditional_value=round(row["conditional"], 2), locked_value=round(row["locked"], 2))
             if accessible + 0.005 >= target:
                 item["verdict"] = "covered"
@@ -523,7 +540,7 @@ target_amount/end_date), passed in so this module stays free of I/O;
                      "תשואה שהוזנה בחשבון גוברת על ההנחה הכללית; בחשבון צמוד מדד היא ריאלית ומומרת לנומינלית בהנחת האינפלציה. הצמדה אחרת (מדד/מט״ח) אינה מדמה את המדד — תיעוד בלבד.",
                      "עלות ביטוח חודשית היא סכום נומינלי קבוע שהוזן; אינה מתעדכנת באינפלציה ואינה כוללת כיסוי משתנה לפי גיל.",
                      "נזילות היא סיווג בלבד: ״נגיש״ = חשבון שסומן נזיל מיד ואינו מוצר פרישה; ״מותנה״ = תאריך שחרור הגיע או שהנזילות לא אומתה — אין זכאות למשיכה מגיל או מתאריך בלבד; ״נעול״ = אחרת.",
-                     "הקצאת חשבון למטרה היא תווית על כסף קיים: אינה משנה יתרה, אינה הפקדה או משיכה ואינה הופכת חשבון לנזיל. ״הוקצה״ ו״נגיש״ הם שני דברים — מטרה שהוקצה לה כסף בפנסיה מציגה אותו כמוקצה, לא כמכוסה. הקצאת יתר מוצגת במפורש ואינה נחתכת.",
+                     "הקצאת חשבון למטרה היא תווית על כסף קיים: אינה משנה יתרה, אינה הפקדה או משיכה ואינה הופכת חשבון לנזיל. ״הוקצה״ ו״נגיש״ הם שני דברים — מטרה שהוקצה לה כסף בפנסיה מציגה אותו כמוקצה, לא כמכוסה. הקצאת יתר מוצגת במפורש ואינה נחתכת. הסכום שהוזן בהקצאה (מתוכנן) אינו משתנה; כשהחשבון קטן ממנו בעתיד מוצג הסכום האפקטיבי והפער ביניהם בנפרד. כיסוי פוטנציאלי של מטרה בלי הקצאה אינו כסף פנוי כשאותו כסף כבר הוקצה למטרות אחרות — ראו ״פנוי בפועל״.",
                      "כיסוי מטרה הוא כיסוי פוטנציאלי בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד (כסף שהופקד רק אחריו אינו נספר) ומתבסס על ״נגיש״ בלבד; מטרה בלי הקצאה היא כיסוי פוטנציאלי בלבד — אותו כסף עשוי להופיע בכיסוי של כמה מטרות כאלה; מטרה עם הקצאה מכוסה לפי ההקצאה בלבד. אין כאן המלצת השקעה או משיכה.",
                      "לא כולל מס ולא משיכות בפועל."],
         "as_of": today.isoformat(),
