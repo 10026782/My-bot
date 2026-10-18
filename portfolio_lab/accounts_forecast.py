@@ -15,6 +15,11 @@
 `immediate` ואינו מוצר פרישה), `conditional` (תאריך שחרור הגיע או נזילות לא מאומתת — אין להסיק זכאות למשיכה מגיל/תאריך בלבד),
 `locked`. תמיד `accessible + conditional + locked = שווי מאוחד`. כיסוי מטרה משתמש רק ב-`accessible`, בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד
 (שורות חודשיות מהמנוע; הפקדות וצמיחה שאחרי תאריך היעד אינן נספרות); זה כיסוי פוטנציאלי ולא הקצאה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות עד B2. ללא מס/משיכות (A3).
+
+הקצאת חשבון למטרה (B2 שלב 3, `Goal Allocations`): מודל קריאה בלבד מעל השורות של הבעלים עצמו. הקצאה היא תווית על כסף קיים — אינה משנה יתרה,
+אינה הפקדה/משיכה ואינה נזילות: `percent` = אחוז מכלל שווי החשבון בצילום האחרון, `fixed_amount` = סכום נומינלי. לכל חשבון: מוקצה / פנוי /
+הקצאת יתר (מוצגת במפורש, לא נחתכת לאפס); לכל מטרה: מה שהוקצה לה מפוצל לפי נזילות החשבון (`accessible` / `conditional` / `locked`).
+שורה שהמטרה או החשבון שלה אינם של הבעלים נדחית ללא חשיפת שם. מטרה עם הקצאה מכוסה לפי ההקצאה בלבד; מטרה בלי הקצאה נשארת עם הכיסוי הפוטנציאלי של A2.
 """
 
 from __future__ import annotations
@@ -183,7 +188,56 @@ def _goal_number(value):
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0 else None
 
 
-def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], immediate_totals: list[float], has_accessible: bool, has_immediate: bool):
+def _allocation_context(valid: list, flags: dict, info: dict, month_totals: list[dict]):
+    """הקצאות לחישוב כיסוי בעתיד: לכל חודש הסכום המוקצה של כל חשבון מוגבל לשווי החשבון באותו חודש (חיתוך יחסי + דגל `capped`, לא הסתרה).
+    חשבונות בהקצאת יתר ביום הצילום לא נכנסים — המטרות שלהם מסומנות `over_allocated`. מחזיר None כשאין הקצאות תקינות ולא חסומות."""
+    healthy = [al for al in valid if al["account_id"] not in flags["over"]]
+    if not healthy and not flags["blocked_goals"]:
+        return None
+    by_goal: dict[str, list] = {}
+    for al in healthy:
+        by_goal.setdefault(al["goal_id"], []).append(al)
+    cache: dict[int, dict] = {}
+
+    def shares(slot: int) -> dict:
+        if slot in cache:
+            return cache[slot]
+        as_of = date.fromisoformat(month_totals[slot]["as_of"])
+        per_acct: dict[str, list] = {}
+        for al in healthy:
+            if al["effective_from"] is None or al["effective_from"] <= as_of:
+                per_acct.setdefault(al["account_id"], []).append(al)
+        out = {"as_of": month_totals[slot]["as_of"], "items": {}}
+        for aid, items in per_acct.items():
+            value = info[aid]["values"][slot]
+            raws = [(al, _alloc_raw(al, value)) for al in items]
+            total = sum(r for _, r in raws)
+            capped = total > value + 0.005
+            factor = value / total if capped and total > 0 else 1.0
+            state = _state_at(info[aid]["profile"], as_of)
+            for al, r in raws:
+                out["items"][al["id"]] = {"goal_id": al["goal_id"], "amount": r * factor, "state": state, "capped": capped}
+        cache[slot] = out
+        return out
+
+    def bucket(slot: int, goal_id: str) -> dict:
+        data = shares(slot)
+        mine = {al["id"] for al in by_goal.get(goal_id, [])}
+        b = {"as_of": data["as_of"], "allocated": 0.0, "accessible": 0.0, "conditional": 0.0, "locked": 0.0, "capped": False}
+        for aid, it in data["items"].items():
+            if aid in mine:
+                b["allocated"] += it["amount"]
+                b[it["state"]] += it["amount"]
+                b["capped"] = b["capped"] or it["capped"]
+        return b
+
+    def total_accessible(slot: int) -> float:
+        return sum(it["amount"] for it in shares(slot)["items"].values() if it["state"] == "accessible")
+
+    return {"by_goal": by_goal, "blocked_goals": flags["blocked_goals"], "bucket": bucket, "total_accessible": total_accessible}
+
+
+def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], immediate_totals: list[float], has_accessible: bool, has_immediate: bool, alloc=None):
     """כיסוי פוטנציאלי לכל מטרה מאושרת. `accessible` בלבד; קרן חירום — רק חשבונות `immediate` מאומתים. לא הקצאה, לא המלצה."""
     items, skipped = [], {"other_category": 0, "inactive": 0}
     for g in goals or []:
@@ -196,7 +250,8 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
             skipped["other_category"] += 1
             continue
         item = {"id": g.get("id"), "title": g.get("title"), "category": g.get("category"), "target_amount": None, "due_month": None,
-                "verdict": "not_comparable", "reason": None, "gap": None, "value_as_of": None, "accessible_value": None, "conditional_value": None, "locked_value": None}
+                "verdict": "not_comparable", "reason": None, "gap": None, "value_as_of": None, "accessible_value": None, "conditional_value": None, "locked_value": None,
+                "basis": "potential", "allocated_value": None, "allocation_capped": False, "allocated_elsewhere_accessible": 0.0}
         target, due = _goal_number(g.get("target_amount")), _iso_date(g.get("end_date"))
         item["target_amount"] = target
         if due is not None:
@@ -213,6 +268,20 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
             item["reason"] = "past_date"
         elif idx >= years * 12:
             item["reason"] = "beyond_horizon"
+        elif alloc and g.get("id") in alloc["blocked_goals"]:
+            item.update(basis="allocation", reason="over_allocated")           # אחד החשבונות המזינים בהקצאת יתר: מוצג במפורש, לא מחושב
+        elif alloc and g.get("id") in alloc["by_goal"]:
+            b = alloc["bucket"](slot, g["id"])                                  # כיסוי לפי ההקצאה בלבד, מפוצל לפי נזילות החשבון המקצה
+            item.update(basis="allocation", value_as_of=b["as_of"], allocated_value=round(b["allocated"], 2), accessible_value=round(b["accessible"], 2),
+                        conditional_value=round(b["conditional"], 2), locked_value=round(b["locked"], 2), allocation_capped=b["capped"])
+            if b["allocated"] <= 0.005:
+                item["reason"] = "allocation_not_yet_effective"
+            elif b["accessible"] <= 0.005:
+                item["reason"] = "allocated_not_accessible"                     # הוקצה, אבל לא נזיל — אינו חסר ואינו מכוסה
+            elif b["accessible"] + 0.005 >= target:
+                item["verdict"] = "covered"
+            else:
+                item.update(verdict="short", gap=round(target - b["accessible"], 2))
         elif not (has_immediate if emergency else has_accessible):
             item["reason"] = "no_verified_accessible_account"
             row = month_totals[slot]                      # מידע בלבד: כמה מותנה/נעול בחודש הקריאה — אינו נספר לכיסוי
@@ -220,6 +289,8 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
         else:
             row = month_totals[slot]
             accessible = immediate_totals[slot] if emergency else row["accessible"]
+            if alloc:
+                item["allocated_elsewhere_accessible"] = round(alloc["total_accessible"](slot), 2)   # מידע: כסף נגיש שכבר הוקצה למטרות אחרות
             item.update(value_as_of=row["as_of"], accessible_value=round(accessible, 2), conditional_value=round(row["conditional"], 2), locked_value=round(row["locked"], 2))
             if accessible + 0.005 >= target:
                 item["verdict"] = "covered"
@@ -229,13 +300,120 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
     return items, skipped
 
 
+ALLOCATION_MODES = {"percent", "fixed_amount"}
+
+
+def _alloc_skip_template() -> dict:
+    return {"inactive": 0, "status_missing": 0, "invalid_link": 0, "unknown_link": 0, "invalid_value": 0,
+            "account_closed": 0, "no_snapshot": 0, "not_yet_effective": 0}
+
+
+def _classify_allocations(allocations, goal_titles: dict, accounts_by_id: dict, eligible_ids: set):
+    """שורות הקצאה גולמיות -> (תקינות, נדחו לפי סיבה). קישור למטרה/חשבון שאינם של הבעלים (לא ב-goal_titles/accounts_by_id) נדחה בלי לחשוף דבר."""
+    valid, skipped = [], _alloc_skip_template()
+    for a in allocations or []:
+        if not isinstance(a, dict):
+            continue
+        gid, aid = a.get("goal_id"), a.get("account_id")
+        if not isinstance(gid, str) or not isinstance(aid, str):
+            skipped["invalid_link"] += 1
+        elif gid not in goal_titles or aid not in accounts_by_id:
+            skipped["unknown_link"] += 1
+        elif a.get("status") != "active":
+            skipped["status_missing" if a.get("status") is None else "inactive"] += 1
+        elif accounts_by_id[aid].get("status") == "closed":
+            skipped["account_closed"] += 1
+        elif aid not in eligible_ids:
+            skipped["no_snapshot"] += 1
+        else:
+            mode, pct, amt = a.get("mode"), _goal_number(a.get("percent")), _goal_number(a.get("amount"))
+            eff = _iso_date(a.get("effective_from")) if a.get("effective_from") else None
+            if mode not in ALLOCATION_MODES or (a.get("effective_from") and eff is None) \
+                    or (mode == "percent" and (pct is None or pct > 100)) or (mode == "fixed_amount" and amt is None):
+                skipped["invalid_value"] += 1
+                continue
+            valid.append({"id": a.get("id"), "goal_id": gid, "account_id": aid, "mode": mode,
+                          "percent": pct if mode == "percent" else None, "amount": amt if mode == "fixed_amount" else None, "effective_from": eff})
+    return valid, skipped
+
+
+def _alloc_raw(al: dict, value: float) -> float:
+    return value * al["percent"] / 100 if al["mode"] == "percent" else al["amount"]
+
+
+def _allocations_now(valid: list, goal_titles: dict, info: dict, accounts_by_id: dict, today: date, skipped: dict) -> tuple[dict, dict]:
+    """תמונת ההקצאות בצילום האחרון (עובדה): לכל חשבון מוקצה/פנוי/הקצאת יתר, לכל מטרה סכום מפוצל לפי נזילות. ללא שינוי יתרות."""
+    current = [al for al in valid if al["effective_from"] is None or al["effective_from"] <= today]
+    skipped["not_yet_effective"] = len(valid) - len(current)
+    by_acct: dict[str, list] = {}
+    for al in current:
+        by_acct.setdefault(al["account_id"], []).append(al)
+    accounts, over_ids = [], set()
+    totals = {"accounts_value": 0.0, "allocated": 0.0, "unallocated": 0.0, "over_allocated": 0.0}
+    goals: dict[str, dict] = {}
+    blocked: dict[str, float] = {}
+    pairs: dict[tuple, int] = {}
+    for aid, inf in info.items():
+        value = inf["value"]
+        items = by_acct.get(aid, [])
+        raws = [(al, round(_alloc_raw(al, value), 2)) for al in items]
+        allocated = round(sum(r for _, r in raws), 2)
+        pct_sum = round(sum(al["percent"] for al in items if al["mode"] == "percent"), 4)
+        over_by = round(allocated - value, 2) if allocated > value + 0.005 else 0.0
+        over = over_by > 0 or pct_sum > 100
+        state = _state_at(inf["profile"], today)
+        acc = accounts_by_id[aid]
+        accounts.append({
+            "id": aid, "name": acc.get("name"), "value": round(value, 2), "as_of": inf["as_of"], "liquidity_state": state,
+            "allocated": allocated, "allocated_pct": round(allocated / value * 100, 2) if value else None,
+            "unallocated": 0.0 if over else round(value - allocated, 2), "over_allocated": over, "over_by": over_by,
+            "allocations": [{"id": al["id"], "goal_id": al["goal_id"], "goal_title": goal_titles.get(al["goal_id"]), "mode": al["mode"],
+                             "percent": al["percent"], "amount": al["amount"], "resolved_amount": r, "counted": not over} for al, r in raws]})
+        if over:
+            over_ids.add(aid)
+            totals["over_allocated"] += max(over_by, 0.0)
+            for al, r in raws:
+                blocked[al["goal_id"]] = round(blocked.get(al["goal_id"], 0.0) + r, 2)
+            continue                                    # יתרה של חשבון בהקצאת יתר לא נכנסת לסכומי "הוקצה/פנוי" — מוצגת בנפרד
+        totals["accounts_value"] += value
+        totals["allocated"] += allocated
+        totals["unallocated"] += value - allocated
+        for al, r in raws:
+            pairs[(al["goal_id"], aid)] = pairs.get((al["goal_id"], aid), 0) + 1
+            g = goals.setdefault(al["goal_id"], {"id": al["goal_id"], "title": goal_titles.get(al["goal_id"]), "allocated": 0.0,
+                                                 "accessible": 0.0, "conditional": 0.0, "locked": 0.0, "sources": [], "blocked_by_over_allocation": 0.0})
+            g["allocated"] += r
+            g[state] += r
+            g["sources"].append({"account_id": aid, "name": acc.get("name"), "allocation_id": al["id"], "mode": al["mode"], "amount": r, "liquidity_state": state})
+    for gid, amount in blocked.items():
+        g = goals.setdefault(gid, {"id": gid, "title": goal_titles.get(gid), "allocated": 0.0, "accessible": 0.0, "conditional": 0.0,
+                                   "locked": 0.0, "sources": [], "blocked_by_over_allocation": 0.0})
+        g["blocked_by_over_allocation"] = amount
+    goal_rows = []
+    for g in goals.values():
+        for k in ("allocated", "accessible", "conditional", "locked"):
+            g[k] = round(g[k], 2)
+        g["status"] = "blocked_over_allocation" if g["blocked_by_over_allocation"] and not g["sources"] else (
+            "partial_over_allocation" if g["blocked_by_over_allocation"] else "ok")
+        goal_rows.append(g)
+    duplicates = sorted({f"{gid}|{aid}" for (gid, aid), n in pairs.items() if n > 1})
+    overview = {
+        "as_of": today.isoformat(), "has_allocations": bool(valid), "count": len(current),
+        "totals": {k: round(v, 2) for k, v in totals.items()},
+        "accounts": accounts, "goals": goal_rows, "skipped": skipped,
+        "over_allocated_accounts": len(over_ids), "duplicate_goal_account_pairs": len(duplicates),
+    }
+    return overview, {"over": over_ids, "blocked_goals": set(blocked)}
+
+
 def _eligible(account: dict) -> bool:
     return account.get("status") != "closed" and bool(account.get("balance")) and account["balance"].get("value") is not None
 
 
-def build_accounts_forecast(view: dict, params: dict | None = None, today: date | None = None, goals: list | None = None) -> dict:
+def build_accounts_forecast(view: dict, params: dict | None = None, today: date | None = None, goals: list | None = None, allocations: list | None = None) -> dict:
     """``view`` = the owner's ``accounts_overview`` output (already owner-scoped); ``goals`` = the owner's own goals (id/title/category/status/
-target_amount/end_date), passed in so this module stays free of I/O. Raises ValueError on invalid params."""
+target_amount/end_date), passed in so this module stays free of I/O;
+``allocations`` = the owner's own ``Goal Allocations`` rows (B2, read-only; None/[] = none, A2 behaves as before). Raises ValueError on invalid params."""
     p = normalize_params(params)
     today = today or date.today()
     start = today.replace(day=1).isoformat()
@@ -252,6 +430,7 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
     immediate_totals = [0.0] * (months + 1)
     start_day = date.fromisoformat(start)
     has_accessible = has_immediate = False
+    info = {}
     for a in eligible:
         x = _account_inputs(a, p, p["monthly_contributions"])
         fee, fee_source, monthly = x["fee"], x["fee_source"], x["monthly"]
@@ -265,6 +444,8 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
         has_immediate = has_immediate or profile["basis"] == "immediate"
         points = [{"slot": 0, "as_of": today, "value": float(a["balance"]["value"])}] + [
             {"slot": m["month"] + 1, "as_of": date.fromisoformat(m["as_of"]), "value": m["value_after_costs"]} for m in result["monthly"]]
+        info[a["id"]] = {"profile": profile, "values": [pt["value"] for pt in points], "value": float(a["balance"]["value"]),
+                         "as_of": a["balance"].get("as_of")}
         for pt in points:
             row = month_totals[pt["slot"]]
             row[_state_at(profile, pt["as_of"])] += pt["value"]
@@ -312,7 +493,12 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
         if residue:
             parts[max(parts, key=parts.get)] = round(parts[max(parts, key=parts.get)] + residue, 2)
         point.update(parts)
-    goal_items, goals_skipped = _goal_coverage(goals, start_day, p["years"], month_totals, immediate_totals, has_accessible, has_immediate)
+    goal_titles = {g["id"]: g.get("title") for g in goals or [] if isinstance(g, dict) and g.get("id")}
+    accounts_by_id = {a["id"]: a for a in accounts if a.get("id")}
+    valid_alloc, alloc_skipped = _classify_allocations(allocations, goal_titles, accounts_by_id, {a["id"] for a in eligible})
+    alloc_overview, alloc_flags = _allocations_now(valid_alloc, goal_titles, info, accounts_by_id, today, alloc_skipped)
+    alloc_ctx = _allocation_context(valid_alloc, alloc_flags, info, month_totals)
+    goal_items, goals_skipped = _goal_coverage(goals, start_day, p["years"], month_totals, immediate_totals, has_accessible, has_immediate, alloc_ctx)
     last = total_series[-1] if total_series else None
     t = (view or {}).get("totals") or {}
     return {
@@ -329,7 +515,7 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
         "excluded": {"without_snapshot": sum(1 for a in accounts if a.get("status") != "closed" and not _eligible(a)),
                      "closed": sum(1 for a in accounts if a.get("status") == "closed")},
         "data_gaps": gaps,
-        "goals": goal_items, "goals_skipped": goals_skipped,
+        "goals": goal_items, "goals_skipped": goals_skipped, "allocations": alloc_overview,
         "all_self_reported": t.get("all_self_reported"),
         "warnings": ["תחזית מבוססת הנחות — לא הבטחת תשואה ולא המלצת השקעה.",
                      "נקודת המוצא היא היתרה האחרונה שדווחה בכל חשבון, בתאריך שלה; אין עדכון אוטומטי מבנק או מקרן.",
@@ -337,7 +523,8 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
                      "תשואה שהוזנה בחשבון גוברת על ההנחה הכללית; בחשבון צמוד מדד היא ריאלית ומומרת לנומינלית בהנחת האינפלציה. הצמדה אחרת (מדד/מט״ח) אינה מדמה את המדד — תיעוד בלבד.",
                      "עלות ביטוח חודשית היא סכום נומינלי קבוע שהוזן; אינה מתעדכנת באינפלציה ואינה כוללת כיסוי משתנה לפי גיל.",
                      "נזילות היא סיווג בלבד: ״נגיש״ = חשבון שסומן נזיל מיד ואינו מוצר פרישה; ״מותנה״ = תאריך שחרור הגיע או שהנזילות לא אומתה — אין זכאות למשיכה מגיל או מתאריך בלבד; ״נעול״ = אחרת.",
-                     "כיסוי מטרה הוא כיסוי פוטנציאלי בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד (כסף שהופקד רק אחריו אינו נספר) ומתבסס על ״נגיש״ בלבד; אינו הקצאת כספים למטרה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות, עד שייקבע ייעוד חשבונות. אין כאן המלצת השקעה או משיכה.",
+                     "הקצאת חשבון למטרה היא תווית על כסף קיים: אינה משנה יתרה, אינה הפקדה או משיכה ואינה הופכת חשבון לנזיל. ״הוקצה״ ו״נגיש״ הם שני דברים — מטרה שהוקצה לה כסף בפנסיה מציגה אותו כמוקצה, לא כמכוסה. הקצאת יתר מוצגת במפורש ואינה נחתכת.",
+                     "כיסוי מטרה הוא כיסוי פוטנציאלי בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד (כסף שהופקד רק אחריו אינו נספר) ומתבסס על ״נגיש״ בלבד; מטרה בלי הקצאה היא כיסוי פוטנציאלי בלבד — אותו כסף עשוי להופיע בכיסוי של כמה מטרות כאלה; מטרה עם הקצאה מכוסה לפי ההקצאה בלבד. אין כאן המלצת השקעה או משיכה.",
                      "לא כולל מס ולא משיכות בפועל."],
         "as_of": today.isoformat(),
     }

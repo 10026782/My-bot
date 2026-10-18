@@ -4926,6 +4926,7 @@ def fcc_accounts_forecast(identity):
         normalize_params(params)                              # reject bad input before any Airtable read
         view = fcc_service.accounts_view(identity)
         goals = fcc_service.goals_for_forecast(identity)      # the caller's own goals only (A2 coverage); read-only
+        allocations = fcc_service.allocations_for_forecast(identity)   # B2: own allocation rows only; read-only
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
     except (ValueError, TypeError, OverflowError) as error:
@@ -4936,7 +4937,7 @@ def fcc_accounts_forecast(identity):
     if not _PL_COMPUTE.acquire(timeout=5):
         return jsonify({"error": "busy"}), 503
     try:
-        return jsonify(build_accounts_forecast(view, params, goals=goals))
+        return jsonify(build_accounts_forecast(view, params, goals=goals, allocations=allocations))
     except (ValueError, TypeError, OverflowError, KeyError) as error:
         return jsonify({"error": str(error)}), 400
     except Exception:                                        # noqa: BLE001
