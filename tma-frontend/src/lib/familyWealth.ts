@@ -154,6 +154,7 @@ const MISSING_LABELS: Record<string, string> = {
   investment_track: "מסלול השקעה", linkage: "הצמדה", insurance_cost: "עלות ביטוח חודשית", insurance_cost_date: "תאריך עלות הביטוח",
   liquidity: "סוג נזילות", liquid_from: "תאריך שחרור",
 };
+const MAX_INCOMPARABLE_SHOWN = 4;
 export const GOAL_HEAD = ["מטרה", "יעד", "חודש יעד", "נגיש מאומת", "תוצאה"];
 const GOAL_REASONS: Record<string, string> = {
   missing_target: "חסר סכום יעד", missing_date: "חסר תאריך יעד", past_date: "תאריך היעד עבר", beyond_horizon: "מעבר לאופק התחזית",
@@ -187,7 +188,14 @@ export function forecastModel(view: FccAccountsForecast): ForecastModel {
   for (const g of view.data_gaps ?? []) {
     notes.push(`חסר לדיוק — ${g.name || "חשבון ללא שם"}: ${g.missing.map((k) => MISSING_LABELS[k] ?? k).join(", ")}.`);
   }
-  const goals = (view.goals ?? []).map((g, i) => ({
+  // Only goals that can actually be compared get a table row; the rest stay visible as ONE compact "missing for accuracy" line (capped), never a wall of empty rows.
+  const incomparable = (view.goals ?? []).filter((g) => g.verdict === "not_comparable");
+  if (incomparable.length > 0) {
+    const shown = incomparable.slice(0, MAX_INCOMPARABLE_SHOWN).map((g) => `${g.title || "מטרה ללא שם"} (${GOAL_REASONS[g.reason ?? ""] ?? "לא ניתן להשוואה"})`);
+    const more = incomparable.length - shown.length;
+    notes.push(`חסר לדיוק — ${incomparable.length} מטרות בלי השוואה: ${shown.join(", ")}${more > 0 ? ` ועוד ${more}` : ""}.`);
+  }
+  const goals = (view.goals ?? []).filter((g) => g.verdict !== "not_comparable").map((g, i) => ({
     id: g.id ?? `goal-${i}`, verdict: g.verdict,
     cells: [g.title || "מטרה ללא שם", g.target_amount == null ? "—" : money(g.target_amount), g.due_month ? g.due_month.split("-").reverse().join("/") : "—",
             g.accessible_value == null ? "—" : money(g.accessible_value),

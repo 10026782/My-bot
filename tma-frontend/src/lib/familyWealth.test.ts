@@ -378,10 +378,20 @@ const a2View = {
 
 test("A2 model: coverage wording is potential-only, gaps and reasons come from the server, nothing is recomputed", () => {
   const m = forecastModel(a2View);
-  assert.equal(m.goals.length, 3);
+  assert.equal(m.goals.length, 2, "only comparable goals get a table row");
   assert.ok(m.goals[0].cells[4].includes("מכוסה (פוטנציאלית)") && m.goals[0].cells[2] === "12/2027");
   assert.ok(m.goals[1].cells[4].includes("חסר") && m.goals[1].cells[4].includes("20,000"));
-  assert.ok(m.goals[2].cells[4] === "חסר סכום יעד" && m.goals[2].cells[3] === "—");
+  const gap = m.notes.find((n) => n.startsWith("חסר לדיוק — 1 מטרות"));
+  assert.ok(gap && gap.includes("השקעה") && gap.includes("חסר סכום יעד"), "the incomparable goal stays visible as a missing-data line");
+});
+
+test("A2 model: many incomparable goals collapse into one capped line, not a wall of rows", () => {
+  const many = Array.from({ length: 9 }, (_, i) => ({ id: `x${i}`, title: `מטרה ${i}`, category: "savings", target_amount: null, due_month: null, verdict: "not_comparable", reason: "missing_target", gap: null, accessible_value: null, conditional_value: null, locked_value: null }));
+  const m = forecastModel({ ...a2View, goals: many } as unknown as FccAccountsForecast);
+  assert.equal(m.goals.length, 0);
+  const lines = m.notes.filter((n) => n.startsWith("חסר לדיוק — 9 מטרות"));
+  assert.equal(lines.length, 1);
+  assert.ok(lines[0].includes("ועוד 5") && !lines[0].includes("מטרה 8"));
 });
 
 test("A2 model: chart gets accessible + conditional lines only when the server sends them; labels never promise a withdrawal right", () => {

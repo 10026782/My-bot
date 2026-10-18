@@ -13,13 +13,14 @@
 
 נזילות וכיסוי מטרות (D1 שלב 10 / A2): לכל חודש כל חשבון נמצא באחד משלושה מצבים — `accessible` (נזילות מאומתת: רק חשבון שסומן
 `immediate` ואינו מוצר פרישה), `conditional` (תאריך שחרור הגיע או נזילות לא מאומתת — אין להסיק זכאות למשיכה מגיל/תאריך בלבד),
-`locked`. תמיד `accessible + conditional + locked = שווי מאוחד`. כיסוי מטרה משתמש רק ב-`accessible`, בערך נומינלי בסוף חודש היעד
-(שורות חודשיות מהמנוע); זה כיסוי פוטנציאלי ולא הקצאה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות עד B2. ללא מס/משיכות (A3).
+`locked`. תמיד `accessible + conditional + locked = שווי מאוחד`. כיסוי מטרה משתמש רק ב-`accessible`, בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד
+(שורות חודשיות מהמנוע; הפקדות וצמיחה שאחרי תאריך היעד אינן נספרות); זה כיסוי פוטנציאלי ולא הקצאה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות עד B2. ללא מס/משיכות (A3).
 """
 
 from __future__ import annotations
 
 import math
+from calendar import monthrange
 from datetime import date
 
 from .engine import simulate
@@ -174,6 +175,10 @@ def _state_at(profile: dict, month_end: date) -> str:
     return profile["ceiling"]
 
 
+def _month_end(d: date) -> date:
+    return d.replace(day=monthrange(d.year, d.month)[1])
+
+
 def _goal_number(value):
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0 else None
 
@@ -191,12 +196,14 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
             skipped["other_category"] += 1
             continue
         item = {"id": g.get("id"), "title": g.get("title"), "category": g.get("category"), "target_amount": None, "due_month": None,
-                "verdict": "not_comparable", "reason": None, "gap": None, "accessible_value": None, "conditional_value": None, "locked_value": None}
+                "verdict": "not_comparable", "reason": None, "gap": None, "value_as_of": None, "accessible_value": None, "conditional_value": None, "locked_value": None}
         target, due = _goal_number(g.get("target_amount")), _iso_date(g.get("end_date"))
         item["target_amount"] = target
         if due is not None:
             item["due_month"] = due.strftime("%Y-%m")
         idx = None if due is None else (due.year - start.year) * 12 + (due.month - start.month)
+        # ערך הכיסוי נקרא מסוף החודש האחרון שהושלם עד תאריך היעד (שמרני): הפקדה/צמיחה שאחרי התאריך — גם באותו חודש — לא נספרות.
+        slot = None if due is None or idx < 0 or idx >= years * 12 else (idx + 1 if due >= _month_end(due) else idx)
         emergency = g.get("category") == "emergency_fund"
         if target is None:
             item["reason"] = "missing_target"
@@ -208,10 +215,12 @@ def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], imm
             item["reason"] = "beyond_horizon"
         elif not (has_immediate if emergency else has_accessible):
             item["reason"] = "no_verified_accessible_account"
+            row = month_totals[slot]                      # מידע בלבד: כמה מותנה/נעול בחודש הקריאה — אינו נספר לכיסוי
+            item.update(value_as_of=row["as_of"], conditional_value=round(row["conditional"], 2), locked_value=round(row["locked"], 2))
         else:
-            row = month_totals[idx]
-            accessible = immediate_totals[idx] if emergency else row["accessible"]
-            item.update(accessible_value=round(accessible, 2), conditional_value=round(row["conditional"], 2), locked_value=round(row["locked"], 2))
+            row = month_totals[slot]
+            accessible = immediate_totals[slot] if emergency else row["accessible"]
+            item.update(value_as_of=row["as_of"], accessible_value=round(accessible, 2), conditional_value=round(row["conditional"], 2), locked_value=round(row["locked"], 2))
             if accessible + 0.005 >= target:
                 item["verdict"] = "covered"
             else:
@@ -238,8 +247,9 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
     rows, series_total = [], {}
     gaps = []
     months = p["years"] * 12
-    month_totals = [{"accessible": 0.0, "conditional": 0.0, "locked": 0.0, "total": 0.0} for _ in range(months)]
-    immediate_totals = [0.0] * months
+    # אינדקס 0 = יתרת הפתיחה (לפני כל צמיחה/הפקדה), אינדקס k+1 = סוף חודש k של המנוע; כך אפשר לקרוא "סוף החודש האחרון שהושלם עד תאריך יעד"
+    month_totals = [{"accessible": 0.0, "conditional": 0.0, "locked": 0.0, "total": 0.0, "as_of": None} for _ in range(months + 1)]
+    immediate_totals = [0.0] * (months + 1)
     start_day = date.fromisoformat(start)
     has_accessible = has_immediate = False
     for a in eligible:
@@ -253,13 +263,15 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
         profile = _liquidity_profile(a)
         has_accessible = has_accessible or profile["ceiling"] == "accessible"
         has_immediate = has_immediate or profile["basis"] == "immediate"
-        for m in result["monthly"]:
-            state = _state_at(profile, date.fromisoformat(m["as_of"]))
-            row = month_totals[m["month"]]
-            row[state] += m["value_after_costs"]
-            row["total"] += m["value_after_costs"]
+        points = [{"slot": 0, "as_of": today, "value": float(a["balance"]["value"])}] + [
+            {"slot": m["month"] + 1, "as_of": date.fromisoformat(m["as_of"]), "value": m["value_after_costs"]} for m in result["monthly"]]
+        for pt in points:
+            row = month_totals[pt["slot"]]
+            row[_state_at(profile, pt["as_of"])] += pt["value"]
+            row["total"] += pt["value"]
+            row["as_of"] = pt["as_of"].isoformat()
             if profile["basis"] == "immediate":
-                immediate_totals[m["month"]] += m["value_after_costs"]
+                immediate_totals[pt["slot"]] += pt["value"]
         x["missing"] = x["missing"] + ([profile["gap"]] if profile["gap"] else [])
         initial = float(a["balance"]["value"])
         series = [{"year": r["year"], "nominal": r["value_after_costs"], "real": r["real_value"],
@@ -294,7 +306,7 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
             gaps.append({"id": a["id"], "name": a.get("name"), "missing": x["missing"]})
     total_series = [{k: (round(v, 2) if k != "year" else v) for k, v in series_total[y].items()} for y in sorted(series_total)]
     for point in total_series:                                  # יתרת הסכום מחושבת כך ש-נגיש + מותנה + נעול = מאוחד בדיוק של אגורה
-        row = month_totals[point["year"] * 12 - 1]
+        row = month_totals[point["year"] * 12]
         parts = {k: round(row[k], 2) for k in STATES}
         residue = round(point["nominal"] - sum(parts.values()), 2)          # at most an agora or two from independent rounding
         if residue:
@@ -325,7 +337,7 @@ target_amount/end_date), passed in so this module stays free of I/O. Raises Valu
                      "תשואה שהוזנה בחשבון גוברת על ההנחה הכללית; בחשבון צמוד מדד היא ריאלית ומומרת לנומינלית בהנחת האינפלציה. הצמדה אחרת (מדד/מט״ח) אינה מדמה את המדד — תיעוד בלבד.",
                      "עלות ביטוח חודשית היא סכום נומינלי קבוע שהוזן; אינה מתעדכנת באינפלציה ואינה כוללת כיסוי משתנה לפי גיל.",
                      "נזילות היא סיווג בלבד: ״נגיש״ = חשבון שסומן נזיל מיד ואינו מוצר פרישה; ״מותנה״ = תאריך שחרור הגיע או שהנזילות לא אומתה — אין זכאות למשיכה מגיל או מתאריך בלבד; ״נעול״ = אחרת.",
-                     "כיסוי מטרה הוא כיסוי פוטנציאלי בערך נומינלי בסוף חודש היעד ומתבסס על ״נגיש״ בלבד; אינו הקצאת כספים למטרה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות, עד שייקבע ייעוד חשבונות. אין כאן המלצת השקעה או משיכה.",
+                     "כיסוי מטרה הוא כיסוי פוטנציאלי בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד (כסף שהופקד רק אחריו אינו נספר) ומתבסס על ״נגיש״ בלבד; אינו הקצאת כספים למטרה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות, עד שייקבע ייעוד חשבונות. אין כאן המלצת השקעה או משיכה.",
                      "לא כולל מס ולא משיכות בפועל."],
         "as_of": today.isoformat(),
     }

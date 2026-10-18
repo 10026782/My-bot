@@ -296,3 +296,27 @@ def test_fixture_means_provenance_and_unassessed_tax():
         assert output["final"]["tax_status"] == "not_assessed"
         assert output["final"]["proceeds_after_tax"] is None
         assert any("assumptions" in warning for warning in output["warnings"])
+
+
+# ── replay_digest regression (D1 step 10): existing scenarios keep their digest; opt-in features change it only when used ──
+BASE_DIGEST = "a993cee736cb0cc3342f105ae7266cd175ff13ba9a03b3546fb25ed5a33b53c4"
+_BASE = dict(years=30, initial=0.0, monthly_contribution=8000.0, inflation=0.02, start_date="2026-01-01")
+
+
+def test_replay_digest_of_a_plain_scenario_is_pinned():
+    result = simulate(Scenario(assets=(Asset(),), **_BASE))
+    assert result["replay_digest"] == BASE_DIGEST
+    assert "monthly" not in result and "monthly_fixed_cost" not in result["inputs"]
+    assert all("fixed_cost" not in row for row in result["annual"])
+    assert simulate(Scenario(assets=(Asset(),), **_BASE))["replay_digest"] == BASE_DIGEST          # deterministic across calls
+
+
+def test_replay_digest_changes_only_when_a_fixed_cost_or_monthly_rows_are_used():
+    plain = simulate(Scenario(assets=(Asset(),), **_BASE))
+    zero_cost = simulate(Scenario(assets=(Asset(),), monthly_fixed_cost=0.0, **_BASE))
+    assert zero_cost["replay_digest"] == plain["replay_digest"] == BASE_DIGEST                      # an explicit 0 is the same scenario
+    with_cost = simulate(Scenario(assets=(Asset(),), monthly_fixed_cost=50.0, **_BASE))
+    assert with_cost["replay_digest"] != BASE_DIGEST and with_cost["inputs"]["monthly_fixed_cost"] == 50.0 and with_cost["annual"][0]["fixed_cost"] > 0
+    monthly = simulate(Scenario(assets=(Asset(),), **_BASE), monthly=True)
+    assert monthly["replay_digest"] != BASE_DIGEST and len(monthly["monthly"]) == 360             # the digest covers the extra rows when they are requested
+    assert monthly["final"] == plain["final"] and monthly["annual"] == plain["annual"]            # ... without changing a single number

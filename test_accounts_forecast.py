@@ -265,8 +265,9 @@ def test_each_account_lands_in_exactly_one_state_and_release_dates_apply_at_the_
                  acct("recP", 20000, liquidity="age_based", liquid_from="2040-03-15", account_type="pension"),
                  acct("recU", 300, liquidity="unknown"),
                  acct("recN", 700, liquidity="age_based")],
-                [goal("oct", target=1, end="2027-10-31"), goal("nov", target=1, end="2027-11-05")])
-    oct_, nov = item(out, "oct"), item(out, "nov")
+                [goal("oct", target=1, end="2027-10-31"), goal("nov", target=1, end="2027-11-30"), goal("mid", target=1, end="2027-11-15")])
+    oct_, nov, mid = item(out, "oct"), item(out, "nov"), item(out, "mid")
+    assert (mid["value_as_of"], mid["locked_value"]) == ("2027-10-31", 5000 + 20000 + 700)        # released on 28/11 but the due date 15/11 precedes it: still locked
     assert (oct_["accessible_value"], oct_["conditional_value"], oct_["locked_value"]) == (1000.0, 300.0, 5000 + 20000 + 700)     # Oct 2027: study fund still locked
     assert (nov["accessible_value"], nov["conditional_value"], nov["locked_value"]) == (1000.0, 300.0 + 5000, 20000 + 700)        # Nov 2027: released month -> conditional, NOT accessible
     by = {a["id"]: a["liquidity"] for a in out["accounts"]}
@@ -313,7 +314,7 @@ def test_goal_verdicts_covered_short_and_the_gap():
 
 
 def test_goal_value_is_read_at_the_due_month_from_monthly_rows_not_the_previous_year_end():
-    out = cover([acct("recI", 1000, liquidity="immediate")], [goal("mar", target=1, end="2027-03-31"), goal("dec", target=1, end="2026-12-10")],
+    out = cover([acct("recI", 1000, liquidity="immediate")], [goal("mar", target=1, end="2027-03-31"), goal("dec", target=1, end="2026-12-31")],
                 {"monthly_contributions": {"recI": 100}})
     assert item(out, "dec")["accessible_value"] == 1000 + 3 * 100          # Oct, Nov, Dec 2026 month-end deposits (start month = Oct 2026)
     assert item(out, "mar")["accessible_value"] == 1000 + 6 * 100          # Oct 2026 .. Mar 2027
@@ -389,3 +390,23 @@ def test_input_view_and_goals_are_not_mutated():
     before = copy.deepcopy((accounts, goals))
     cover(accounts, goals)
     assert (accounts, goals) == before
+
+
+def test_money_deposited_after_the_due_date_never_makes_a_goal_covered():
+    acc = [acct("recI", 1000, liquidity="immediate")]
+    deposits = {"monthly_contributions": {"recI": 500}}          # lands on the last day of each month
+    mid = item(cover(acc, [goal(target=1400, end="2026-10-20")], deposits))           # due mid-month, the 500 arrives on Oct 31
+    assert (mid["verdict"], mid["gap"]) == ("short", 400.0)
+    assert mid["accessible_value"] == 1000.0 and mid["value_as_of"] == "2026-10-15"       # the opening balance, as of the forecast day - nothing later
+    end = item(cover(acc, [goal(target=1400, end="2026-10-31")], deposits))           # due on the last day: that month's deposit is on or before the date
+    assert (end["verdict"], end["accessible_value"], end["value_as_of"]) == ("covered", 1500.0, "2026-10-31")
+    nxt = item(cover(acc, [goal(target=1900, end="2026-11-29")], deposits))           # due 29/11: only the Oct 31 deposit counts, not Nov 30
+    assert (nxt["verdict"], nxt["accessible_value"], nxt["value_as_of"]) == ("short", 1500.0, "2026-10-31")
+    assert item(cover(acc, [goal(target=1900, end="2026-11-30")], deposits))["verdict"] == "covered"
+
+
+def test_growth_after_the_due_date_inside_the_month_is_not_counted_either():
+    acc = [acct("recI", 1000, liquidity="immediate")]
+    out = cover(acc, [goal("a", target=1, end="2026-12-15"), goal("b", target=1, end="2026-12-31")], {"annual_return_pct": 12})
+    a, b = item(out, "a"), item(out, "b")
+    assert a["value_as_of"] == "2026-11-30" and b["value_as_of"] == "2026-12-31" and a["accessible_value"] < b["accessible_value"]

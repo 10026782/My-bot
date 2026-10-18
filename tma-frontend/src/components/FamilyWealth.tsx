@@ -166,7 +166,7 @@ export function ForecastResult({ view }: { view: FccAccountsForecast }) {
       )}
       {m.goals.length > 0 && (
         <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
-          <caption dir="auto">כיסוי מטרות — פוטנציאלי בלבד, לפי ״נגיש מאומת״, בערך נומינלי בחודש היעד. אותו כסף עשוי להופיע בכמה מטרות.</caption>
+          <caption dir="auto">כיסוי מטרות — פוטנציאלי בלבד, לפי ״נגיש מאומת״, בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד (כסף שהופקד אחריו לא נספר). אותו כסף עשוי להופיע בכמה מטרות.</caption>
           <thead><tr>{m.goalHead.map((h) => <th key={h}>{h}</th>)}</tr></thead>
           <tbody>{m.goals.map((g) => <tr key={g.id}>{g.cells.map((c, i) => <td key={i} className={i && i < 4 ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
         </table></div></Surface>
