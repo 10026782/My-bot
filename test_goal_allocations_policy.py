@@ -154,3 +154,20 @@ def test_text_fields_reject_long_numbers_and_other_tables_are_untouched():
 
 def test_nothing_writes_allocations_from_code():
     assert Tables.GOAL_ALLOCATIONS not in getattr(approval_actions, "_TMA_WRITE_ALLOWED_TABLES", ())
+
+
+def test_no_module_reads_or_writes_allocations_yet():
+    """An allocation is a label on money, not a movement: until the read model (step 3) is approved nothing in the
+    runtime may touch the table, so it cannot change a balance, create a deposit/withdrawal or bypass ActionGateway."""
+    import pathlib
+    import re
+
+    allowed = {"airtable_schema.py", "core/data_access_policy.py"}
+    offenders = []
+    for path in pathlib.Path(".").rglob("*.py"):
+        rel = path.as_posix()
+        if rel.startswith(("test_", "tma-frontend", "node_modules", ".git")) or "/test_" in rel or rel in allowed:
+            continue
+        if re.search(r"GOAL_ALLOCATIONS|GoalAllocationFields|Goal Allocations", path.read_text(encoding="utf-8", errors="ignore")):
+            offenders.append(rel)
+    assert offenders == []
