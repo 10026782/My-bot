@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast } from "../api";
 import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
-import { DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
+import { ALLOCATION_NOTE, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
 import { ACCOUNTS_COMPOSER, panelId, tabId } from "../lib/fccTabs";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { KpiCard } from "./FccKpiCard";
@@ -168,11 +168,42 @@ export function ForecastResult({ view }: { view: FccAccountsForecast }) {
         <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
           <caption dir="auto">כיסוי מטרות — פוטנציאלי בלבד, לפי ״נגיש מאומת״, בערך נומינלי בסוף החודש האחרון שהושלם עד תאריך היעד (כסף שהופקד אחריו לא נספר). אותו כסף עשוי להופיע בכמה מטרות.</caption>
           <thead><tr>{m.goalHead.map((h) => <th key={h}>{h}</th>)}</tr></thead>
-          <tbody>{m.goals.map((g) => <tr key={g.id}>{g.cells.map((c, i) => <td key={i} className={i && i < 4 ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+          <tbody>{m.goals.map((g) => <tr key={g.id}>{g.cells.map((c, i) => <td key={i} className={i && i < g.cells.length - 1 ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
         </table></div></Surface>
       )}
+      <AllocationsBlock model={m.allocations} present={view.allocations !== undefined} />
       <ul className="pl-list pl-list--small" dir="auto">{m.notes.map((n) => <li key={n}>{n}</li>)}</ul>
     </div>
+  );
+}
+
+/** B2: what the owner allocated per account and per goal, split by liquidity — every number is the server's, nothing is computed here. */
+function AllocationsBlock({ model, present }: { model: AllocationModel | null; present: boolean }) {
+  if (!present) return null;
+  if (!model) return <p className="fcc-goal__note" dir="auto">{NO_ALLOCATIONS_MESSAGE}</p>;
+  return (
+    <section className="fcc-section" aria-labelledby="fw-allocations">
+      <h3 id="fw-allocations" className="fcc-section__heading">{ALLOCATION_TITLE}</h3>
+      <p className="fcc-goal__note" dir="auto">{ALLOCATION_NOTE}</p>
+      <div className="fcc-kpis">{model.kpis.map((r) => <KpiCard key={r.key} label={r.label} value={r.value} hint={r.hint} />)}</div>
+      {model.accounts.length > 0 && (
+        <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+          <caption dir="auto">לפי חשבון</caption>
+          <thead><tr>{model.accountHead.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{model.accounts.map((a) => <tr key={a.id} className={a.over ? "pl-row--warn" : undefined}>{a.cells.map((c, i) => <td key={i} className={i > 0 && i < 4 ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+        </table></div></Surface>
+      )}
+      {model.goals.length > 0 && (
+        <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+          <caption dir="auto">לפי מטרה — מה שהוקצה, מפוצל לפי נזילות החשבון המקצה. כסף מותנה או נעול אינו נחשב נגיש.</caption>
+          <thead><tr>{model.goalHead.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{model.goals.map((g) => (
+            <tr key={g.id}>{g.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""} title={i === 0 && g.warn ? g.warn : undefined}>{i === 0 && g.warn ? `${c} ⚠ ${g.warn}` : c}</td>)}</tr>
+          ))}</tbody>
+        </table></div></Surface>
+      )}
+      <ul className="pl-list pl-list--small" dir="auto">{model.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+    </section>
   );
 }
 

@@ -401,3 +401,92 @@ test("A2 model: chart gets accessible + conditional lines only when the server s
   const rows = forecastModel(a2View).rows;
   assert.ok(rows[0].liquidity.includes("נגיש מיד") && rows[1].liquidity.includes("זכאות למשיכה לא אומתה") && rows[1].liquidity.includes("28/11/2027"));
 });
+
+// ── B2 step 4: allocations (every number is the server's; nothing is computed in the client) ──
+const goalBase = { category: "long_term", target_amount: 1000, due_month: "2030-06", gap: null, accessible_value: null, conditional_value: null, locked_value: null, reason: null };
+const allocView = {
+  ...a2View,
+  goals: [
+    { ...goalBase, id: "g1", title: "דירה", verdict: "covered", basis: "allocation", planned_allocated_value: 1200, allocated_value: 800, allocation_gap: 400, accessible_value: 800 },
+    { ...goalBase, id: "g2", title: "חירום", verdict: "short", gap: 300, basis: "potential", accessible_value: 700, potential_caveat: "allocated_elsewhere", allocated_elsewhere_accessible: 500, unallocated_accessible_value: 200 },
+    { ...goalBase, id: "g3", title: "פנסיה", verdict: "not_comparable", basis: "allocation", reason: "allocated_not_accessible", allocated_value: 5000 },
+    { ...goalBase, id: "g4", title: "יתר", verdict: "not_comparable", basis: "allocation", reason: "over_allocated" },
+  ],
+  allocations: {
+    as_of: "2026-10-18", has_allocations: true, count: 3,
+    totals: { accounts_value: 10000, allocated: 6000, unallocated: 4000, over_allocated: 1500 },
+    accounts: [
+      { id: "a1", name: "השקעות", value: 10000, as_of: "2026-10-01", liquidity_state: "accessible", allocated: 6000, allocated_pct: 60, unallocated: 4000, over_allocated: false, over_by: 0, allocations: [{ id: "x" }] },
+      { id: "a2", name: "קופה", value: 1000, as_of: "2026-10-01", liquidity_state: "locked", allocated: 2500, allocated_pct: 250, unallocated: 0, over_allocated: true, over_by: 1500, allocations: [{ id: "y" }] },
+      { id: "a3", name: "בלי הקצאה", value: 50, as_of: "2026-10-01", liquidity_state: "accessible", allocated: 0, allocated_pct: 0, unallocated: 50, over_allocated: false, over_by: 0, allocations: [] },
+    ],
+    goals: [
+      { id: "g1", title: "דירה", allocated: 6000, accessible: 6000, conditional: 0, locked: 0, blocked_by_over_allocation: 0, status: "ok" },
+      { id: "g4", title: "יתר", allocated: 0, accessible: 0, conditional: 0, locked: 0, blocked_by_over_allocation: 2500, status: "blocked_over_allocation" },
+    ],
+    skipped: { inactive: 2, unknown_link: 1, status_missing: 0 }, over_allocated_accounts: 1, duplicate_goal_account_pairs: 1,
+  },
+} as unknown as FccAccountsForecast;
+
+test("B2 UI: planned and effective allocation are shown separately, never one clipped number", () => {
+  const m = forecastModel(allocView);
+  assert.equal(m.goalHead.length, 6);
+  assert.ok(m.goalHead.includes("הוקצה"));
+  const g1 = m.goals.find((g) => g.id === "g1")!;
+  assert.equal(g1.cells.length, 6);
+  assert.ok(g1.cells[3].includes("בפועל") && g1.cells[3].includes("800") && g1.cells[3].includes("מתוכנן") && g1.cells[3].includes("1,200"));
+  assert.ok(g1.cells[5].includes("לפי ההקצאה"));
+});
+
+test("B2 UI: potential coverage carries the allocated-elsewhere caveat and the truly free amount", () => {
+  const g2 = forecastModel(allocView).goals.find((g) => g.id === "g2")!;
+  assert.equal(g2.cells[3], "—");
+  assert.ok(g2.cells[5].includes("כבר מוקצה למטרות אחרות") && g2.cells[5].includes("500") && g2.cells[5].includes("200"));
+});
+
+test("B2 UI: allocated-but-not-accessible and over-allocated goals stay visible with their reason", () => {
+  const note = forecastModel(allocView).notes.find((n) => n.startsWith("חסר לדיוק — 2 מטרות"))!;
+  assert.ok(note.includes("הוקצה, אך לא נגיש") && note.includes("5,000"));
+  assert.ok(note.includes("הקצאת יתר"));
+});
+
+test("B2 UI: over-allocation is explicit (amount + warning), excluded from healthy sums and not clipped to zero", () => {
+  const a = forecastModel(allocView).allocations!;
+  assert.equal(a.kpis.find((k) => k.key === "over")!.value.includes("1,500"), true);
+  const over = a.accounts.find((r) => r.id === "a2")!;
+  assert.equal(over.over, true);
+  assert.ok(over.cells[2].includes("2,500") && over.cells[2].includes("1,500") && over.cells[3] === "הקצאת יתר");
+  assert.ok(a.notes.some((n) => n.includes("בהקצאת יתר") && n.includes("אינם נכללים")));
+  assert.ok(a.goals.find((g) => g.id === "g4")!.warn.includes("2,500"));
+  assert.equal(a.accounts.some((r) => r.id === "a3"), false, "accounts without allocation rows are not listed");
+});
+
+test("B2 UI: liquidity split per goal and skipped/duplicate notes come from the server", () => {
+  const a = forecastModel(allocView).allocations!;
+  assert.equal(a.goalHead.join("|"), "מטרה|הוקצה|נגיש|מותנה|נעול");
+  assert.equal(a.accounts.find((r) => r.id === "a2")!.cells[4], "נעול");
+  assert.ok(a.notes.some((n) => n.includes("2 הקצאות שאינן פעילות") && n.includes("1 הקצאות שאינן שלך") && !n.includes("status")));
+  assert.ok(a.notes.some((n) => n.includes("זוגות מטרה+חשבון")));
+});
+
+test("B2 UI: empty table or older server — backwards compatible; the screen states what an allocation is and is not", () => {
+  assert.equal(forecastModel(a2View).allocations, null);
+  assert.equal(forecastModel(a2View).goalHead.length, 5, "no allocation basis -> the A2 table is unchanged");
+  const empty = { ...a2View, allocations: { as_of: "2026-10-18", has_allocations: false, count: 0, totals: { accounts_value: 0, allocated: 0, unallocated: 0, over_allocated: 0 }, accounts: [], goals: [], skipped: {}, over_allocated_accounts: 0, duplicate_goal_account_pairs: 0 } } as unknown as FccAccountsForecast;
+  assert.equal(forecastModel(empty).allocations, null);
+  assert.ok(renderToStaticMarkup(createElement(ForecastResult, { view: empty })).includes("לא הוזנו הקצאות"));
+  assert.ok(!renderToStaticMarkup(createElement(ForecastResult, { view: a2View })).includes("לא הוזנו הקצאות"), "older response without the key shows nothing");
+  const html = renderToStaticMarkup(createElement(ForecastResult, { view: allocView }));
+  assert.ok(html.includes("הקצאות מטרות") && html.includes("אינה העברה") && html.includes("אינה הופכת כסף לנזיל"));
+});
+
+test("B2 UI: read-only — no allocation write path or client money math in the frontend", () => {
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  assert.ok(!/goal.?allocations/i.test(fs.readFileSync("src/api.ts", "utf8")), "no client route to the allocations table");
+  const lib = fs.readFileSync("src/lib/familyWealth.ts", "utf8");
+  const start = lib.indexOf("export function allocationsModel");
+  const model = lib.slice(start, lib.indexOf("// ── Future lab form") > start ? lib.indexOf("// ── Future lab form") : undefined);
+  assert.ok(start > 0 && !/\.reduce\(|Math\.(round|min|max)\(|\bfetch/.test(model), "the allocation model only formats the server's numbers");
+});
+
+if (failures > 0) throw new Error(`${failures} test(s) failed`);
