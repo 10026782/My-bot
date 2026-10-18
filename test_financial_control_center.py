@@ -4171,6 +4171,56 @@ def test_http_forecast_reads_the_new_account_fields_but_a_scenario_cannot_write_
     assert DB[Tables.FIN_ACCOUNTS] == before                                                  # a scenario never changes the stored account
 
 
+def test_http_forecast_returns_goal_coverage_for_the_callers_own_goals_only(monkeypatch):
+    tma_api._PL_LIMITER = None                                # the 12/min limiter is process-wide; this test starts from a clean window
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_ACCOUNTS][1]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGA", "מטרה שלי", ELI, 90000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"}),
+        goal("recGB", "מטרה של אבי", AVI, 5, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"}),
+        goal("recGC", "הכנסה", ELI, 5, **{GF.CATEGORY: "income", GF.END_DATE: "2027-12-31"})]
+    import copy as _copy
+    before = _copy.deepcopy((DB[Tables.FIN_GOALS], DB[Tables.FIN_ACCOUNTS], DB[Tables.FIN_EVENTS]))
+    body = forecast(http(monkeypatch, ELIYAHU), {"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}).get_json()
+    mine = [g for g in body["goals"] if g["id"] == "recGA"][0]
+    assert [g["id"] for g in body["goals"]] == ["recGA"] and body["goals_skipped"]["other_category"] >= 1       # Avi's goal never shows; income is not a coverage goal
+    assert mine["verdict"] == "covered" and mine["accessible_value"] == 100000.0 and mine["due_month"] == "2027-12"
+    assert "מטרה של אבי" not in str(body) and "777777" not in str(body)
+    assert (DB[Tables.FIN_GOALS], DB[Tables.FIN_ACCOUNTS], DB[Tables.FIN_EVENTS]) == before                   # nothing was written
+
+
+def test_http_forecast_rejects_goals_or_liquidity_in_the_request_body(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    c = http(monkeypatch, ELIYAHU)
+    for field in ("goals", "liquidity", "liquid_from", "accessible"):
+        assert forecast(c, {"years": 10, field: [{"id": "x"}]}).status_code == 400
+
+
+def test_http_locked_until_date_account_is_locked_until_release_then_only_conditional(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"].update({ACF.LIQUIDITY: "locked_until_date", ACF.LIQUID_FROM: "2027-11-28"})
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGo", "לפני השחרור", ELI, 1, **{GF.CATEGORY: "savings", GF.END_DATE: "2027-10-31"}),
+        goal("recGm", "באמצע חודש השחרור", ELI, 1, **{GF.CATEGORY: "savings", GF.END_DATE: "2027-11-15"}),
+        goal("recGn", "בסוף חודש השחרור", ELI, 1, **{GF.CATEGORY: "savings", GF.END_DATE: "2027-11-30"})]
+    body = forecast(http(monkeypatch, ELIYAHU), {"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}).get_json()
+    acc = body["accounts"][0]
+    assert acc["liquidity"] == {"basis": "dated", "liquid_from": "2027-11-28", "state_now": "locked", "state_at_horizon": "conditional"}
+    goals = {g["id"]: g for g in body["goals"]}
+    before, mid, after = goals["recGo"], goals["recGm"], goals["recGn"]
+    assert (before["locked_value"], before["conditional_value"]) == (100000.0, 0.0)               # still locked on the last day before the release month
+    assert (mid["locked_value"], mid["conditional_value"], mid["value_as_of"]) == (100000.0, 0.0, "2027-10-31")      # due 15/11 < release 28/11
+    assert (after["locked_value"], after["conditional_value"]) == (0.0, 100000.0)                 # month end after the release: conditional - never accessible
+    for g in (before, mid, after):
+        assert g["accessible_value"] is None and g["verdict"] == "not_comparable" and g["reason"] == "no_verified_accessible_account"
+    series = body["consolidated"]["series"]
+    assert series[0]["locked"] == 100000.0 and series[0]["accessible"] == 0 and series[-1]["conditional"] == 100000.0 and series[-1]["locked"] == 0
+    assert all(p["accessible"] == 0 for p in series)
+
+
 # ═══ D1 step 8: account writes (balance snapshot / deposit) through the shared draft -> review -> אשר flow ═══
 def seed_account_writes():
     seed_accounts()

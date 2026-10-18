@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastParams, FccOverview, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -145,13 +145,34 @@ export function forecastParams(form: ForecastForm): { ok: true; params: FccForec
 }
 
 export interface ForecastModel {
-  total: SavingsRow[]; head: string[]; rows: { id: string; cells: string[]; feeHint: string }[]; chart: ReturnType<typeof lineChartModel> | null; notes: string[];
+  total: SavingsRow[]; head: string[]; rows: { id: string; cells: string[]; feeHint: string; liquidity: string }[]; chart: ReturnType<typeof lineChartModel> | null; notes: string[];
+  goalHead: string[]; goals: { id: string; cells: string[]; verdict: string }[];
 }
 /** What the server reports as missing per account, in the owner's words (a missing input is shown, never filled in). */
 const MISSING_LABELS: Record<string, string> = {
   management_fee: "דמי ניהול מהצבירה", deposit_fee: "דמי ניהול מההפקדה", expected_return: "תשואה צפויה", monthly_deposit: "הפקדה חודשית מתוכננת",
   investment_track: "מסלול השקעה", linkage: "הצמדה", insurance_cost: "עלות ביטוח חודשית", insurance_cost_date: "תאריך עלות הביטוח",
+  liquidity: "סוג נזילות", liquid_from: "תאריך שחרור",
 };
+const MAX_INCOMPARABLE_SHOWN = 4;
+export const GOAL_HEAD = ["מטרה", "יעד", "חודש יעד", "נגיש מאומת", "תוצאה"];
+const GOAL_REASONS: Record<string, string> = {
+  missing_target: "חסר סכום יעד", missing_date: "חסר תאריך יעד", past_date: "תאריך היעד עבר", beyond_horizon: "מעבר לאופק התחזית",
+  no_verified_accessible_account: "אין חשבון נגיש מאומת",
+};
+/** How an account's liquidity was classified, in words that never promise a right to withdraw. */
+export function liquidityLabel(a: FccForecastAccount): string {
+  const l = a.liquidity;
+  if (!l) return "";
+  const date = l.liquid_from ? l.liquid_from.split("-").reverse().join("/") : "";
+  switch (l.basis) {
+    case "immediate": return "נגיש מיד (כפי שסומן)";
+    case "retirement_immediate": return "מוצר פרישה — מותנה, לא נגיש";
+    case "dated": return `תאריך שחרור ${date} — מותנה, זכאות למשיכה לא אומתה`;
+    case "undated": return "נעול — חסר תאריך שחרור";
+    default: return "נזילות לא אומתה — מותנה";
+  }
+}
 /** Wording + layout of the server's forecast: totals are the server's consolidated numbers; the chart only scales them. */
 export function forecastModel(view: FccAccountsForecast): ForecastModel {
   const c = view.consolidated;
@@ -167,10 +188,24 @@ export function forecastModel(view: FccAccountsForecast): ForecastModel {
   for (const g of view.data_gaps ?? []) {
     notes.push(`חסר לדיוק — ${g.name || "חשבון ללא שם"}: ${g.missing.map((k) => MISSING_LABELS[k] ?? k).join(", ")}.`);
   }
+  // Only goals that can actually be compared get a table row; the rest stay visible as ONE compact "missing for accuracy" line (capped), never a wall of empty rows.
+  const incomparable = (view.goals ?? []).filter((g) => g.verdict === "not_comparable");
+  if (incomparable.length > 0) {
+    const shown = incomparable.slice(0, MAX_INCOMPARABLE_SHOWN).map((g) => `${g.title || "מטרה ללא שם"} (${GOAL_REASONS[g.reason ?? ""] ?? "לא ניתן להשוואה"})`);
+    const more = incomparable.length - shown.length;
+    notes.push(`חסר לדיוק — ${incomparable.length} מטרות בלי השוואה: ${shown.join(", ")}${more > 0 ? ` ועוד ${more}` : ""}.`);
+  }
+  const goals = (view.goals ?? []).filter((g) => g.verdict !== "not_comparable").map((g, i) => ({
+    id: g.id ?? `goal-${i}`, verdict: g.verdict,
+    cells: [g.title || "מטרה ללא שם", g.target_amount == null ? "—" : money(g.target_amount), g.due_month ? g.due_month.split("-").reverse().join("/") : "—",
+            g.accessible_value == null ? "—" : money(g.accessible_value),
+            g.verdict === "covered" ? "מכוסה (פוטנציאלית)" : g.verdict === "short" ? `חסר ${money(g.gap ?? 0)}` : (GOAL_REASONS[g.reason ?? ""] ?? "לא ניתן להשוואה")],
+  }));
+  const hasLiquidity = c.series.length > 0 && c.series[0].accessible !== undefined;
   return {
-    total, head: FORECAST_ACCOUNT_HEAD, notes,
+    total, head: FORECAST_ACCOUNT_HEAD, notes, goalHead: GOAL_HEAD, goals,
     rows: view.accounts.map((a) => ({
-      id: a.id, feeHint: a.fee_source === "account" ? "דמי הניהול של החשבון" : "ברירת המחדל מהקלט",
+      id: a.id, feeHint: a.fee_source === "account" ? "דמי הניהול של החשבון" : "ברירת המחדל מהקלט", liquidity: liquidityLabel(a),
       cells: [a.name || "חשבון ללא שם", money(a.start_value), a.monthly_contribution ? money(a.monthly_contribution) : "—",
               `${a.fee_pct}%${a.fee_source === "default" ? " (ברירת מחדל)" : ""}`, money(a.final_nominal), money(a.final_real)],
     })),
@@ -178,6 +213,10 @@ export function forecastModel(view: FccAccountsForecast): ForecastModel {
       { name: "מאוחד (נומינלי)", pts: c.series.map((r): [number, number] => [r.year, r.nominal]) },
       { name: "מאוחד (ריאלי)", pts: c.series.map((r): [number, number] => [r.year, r.real]), color: CHART_COLORS[2] },
       { name: "סך שהושקע", pts: c.series.map((r): [number, number] => [r.year, r.invested]), color: "#8892a0", dash: "4 3" },
+      ...(hasLiquidity ? [
+        { name: "נגיש מאומת", pts: c.series.map((r): [number, number] => [r.year, r.accessible ?? 0]), color: CHART_COLORS[3] },
+        { name: "מותנה", pts: c.series.map((r): [number, number] => [r.year, r.conditional ?? 0]), color: CHART_COLORS[1], dash: "2 3" },
+      ] : []),
     ]) : null,
   };
 }
