@@ -358,3 +358,46 @@ test("the family screen has no write call of its own: writes go only through the
 
 if (failures) throw new Error(`${failures} test(s) failed`);
 console.log("all familyWealth tests passed");
+
+// ── D1 step 10 / A2: liquidity states + goal coverage (server numbers only) ──
+const a2View = {
+  ...forecastView,
+  accounts: [
+    { ...(forecastView.accounts[0] as object), liquidity: { basis: "immediate", liquid_from: null, state_now: "accessible", state_at_horizon: "accessible" } },
+    { ...(forecastView.accounts[1] as object), liquidity: { basis: "dated", liquid_from: "2027-11-28", state_now: "locked", state_at_horizon: "conditional" } },
+  ],
+  consolidated: { ...forecastView.consolidated, series: [
+    { year: 1, nominal: 150000, real: 147000, invested: 150000, accessible: 100000, conditional: 0, locked: 50000 },
+    { year: 2, nominal: 160000, real: 150000, invested: 150000, accessible: 100000, conditional: 60000, locked: 0 }] },
+  goals: [
+    { id: "g1", title: "פנסיה", category: "long_term", target_amount: 90000, due_month: "2027-12", verdict: "covered", reason: null, gap: null, accessible_value: 100000, conditional_value: 0, locked_value: 0 },
+    { id: "g2", title: "קרן חירום", category: "emergency_fund", target_amount: 120000, due_month: "2027-12", verdict: "short", reason: null, gap: 20000, accessible_value: 100000, conditional_value: 0, locked_value: 0 },
+    { id: "g3", title: "השקעה", category: "investment", target_amount: null, due_month: null, verdict: "not_comparable", reason: "missing_target", gap: null, accessible_value: null, conditional_value: null, locked_value: null },
+  ],
+} as unknown as FccAccountsForecast;
+
+test("A2 model: coverage wording is potential-only, gaps and reasons come from the server, nothing is recomputed", () => {
+  const m = forecastModel(a2View);
+  assert.equal(m.goals.length, 2, "only comparable goals get a table row");
+  assert.ok(m.goals[0].cells[4].includes("מכוסה (פוטנציאלית)") && m.goals[0].cells[2] === "12/2027");
+  assert.ok(m.goals[1].cells[4].includes("חסר") && m.goals[1].cells[4].includes("20,000"));
+  const gap = m.notes.find((n) => n.startsWith("חסר לדיוק — 1 מטרות"));
+  assert.ok(gap && gap.includes("השקעה") && gap.includes("חסר סכום יעד"), "the incomparable goal stays visible as a missing-data line");
+});
+
+test("A2 model: many incomparable goals collapse into one capped line, not a wall of rows", () => {
+  const many = Array.from({ length: 9 }, (_, i) => ({ id: `x${i}`, title: `מטרה ${i}`, category: "savings", target_amount: null, due_month: null, verdict: "not_comparable", reason: "missing_target", gap: null, accessible_value: null, conditional_value: null, locked_value: null }));
+  const m = forecastModel({ ...a2View, goals: many } as unknown as FccAccountsForecast);
+  assert.equal(m.goals.length, 0);
+  const lines = m.notes.filter((n) => n.startsWith("חסר לדיוק — 9 מטרות"));
+  assert.equal(lines.length, 1);
+  assert.ok(lines[0].includes("ועוד 5") && !lines[0].includes("מטרה 8"));
+});
+
+test("A2 model: chart gets accessible + conditional lines only when the server sends them; labels never promise a withdrawal right", () => {
+  assert.equal(forecastModel(a2View).chart?.lines.length, 5);
+  assert.equal(forecastModel(forecastView).chart?.lines.length, 3, "an older response without liquidity renders as before");
+  assert.equal(forecastModel(forecastView).goals.length, 0);
+  const rows = forecastModel(a2View).rows;
+  assert.ok(rows[0].liquidity.includes("נגיש מיד") && rows[1].liquidity.includes("זכאות למשיכה לא אומתה") && rows[1].liquidity.includes("28/11/2027"));
+});

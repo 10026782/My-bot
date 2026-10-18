@@ -552,6 +552,28 @@ def accounts_view(identity, today: date | None = None) -> dict:
     return fcc_accounts.accounts_overview(mine, events, today, owner_id=actor.profile_id)
 
 
+def _raw_category(category) -> str | None:
+    """The stored category key as written (select name or text), lower-cased; unlike ``_category_key`` it does not collapse to the summary families."""
+    if isinstance(category, dict):
+        category = category.get("name")
+    return str(category or "").strip().casefold() or None
+
+
+def goals_for_forecast(identity) -> list[dict]:
+    """The caller's own goals, reduced to what the accounts forecast needs (A2): id, title, category, status, target amount, due date.
+    Goes through the owner-scoped ``my_goals`` (unresolved identity -> PersonalDataAccessDenied). Read-only; no free text beyond the title."""
+    out = []
+    for g in my_goals(identity):
+        f = g.get("fields") or {}
+        out.append({
+            "id": g.get("id"), "title": f.get(FinGoalFields.TITLE) or None, "category": _raw_category(f.get(FinGoalFields.CATEGORY)),
+            "status": str(f.get(FinGoalFields.STATUS) or "active").lower(),
+            "target_amount": calc._num(f.get(FinGoalFields.TARGET_AMOUNT)),
+            "end_date": (calc._d(f.get(FinGoalFields.END_DATE)).isoformat() if calc._d(f.get(FinGoalFields.END_DATE)) else None),
+        })
+    return out
+
+
 def overview(identity, today: date | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement."""
     today = today or date.today()
