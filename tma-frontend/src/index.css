@@ -3266,3 +3266,13 @@
 .pl-list { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; }
 .pl-list--small { font-size: 12px; color: var(--boss-color-text-muted); margin-block-start: 8px; }
 @media (max-width: 480px) { .pl-table th, .pl-table td { padding: 6px 5px; font-size: 13px; } }
+
+/* Goal Funding Planner: a neutral comparison — no colour implies "better" */
+.fw-rows { display: grid; gap: 4px; margin: 0; }
+.fw-rows__row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; border-block-end: 1px solid var(--boss-color-border); padding-block: 4px; }
+.fw-rows dt { color: var(--boss-color-text-muted); }
+.fw-rows dd { margin: 0; text-align: end; }
+.fw-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.fw-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--boss-color-border); color: var(--boss-color-text-muted); }
+.fw-add { display: flex; flex-wrap: wrap; gap: 6px; }
+.fw-option-form { display: grid; gap: 8px; }

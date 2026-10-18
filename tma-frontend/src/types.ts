@@ -913,3 +913,35 @@ export interface PortfolioLabParams {
   deposit_timing: "begin" | "end"; index_contributions: boolean; baseline: string; strategies: string[];
   crisis?: { decline_pct: number; year: number; recovery: "fast" | "prolonged" };
 }
+
+/** Goal Funding Planner (step 1b): a neutral comparison of ways to fund one goal. Every number is the server's; nothing here is a recommendation. */
+export type FundingOptionType = "existing_balance" | "new_deposits" | "asset_sale" | "loan" | "work_income" | "receivable_collection" | "obligations_reduction" | "custom";
+export type FundingCertainty = "confirmed" | "expected" | "uncertain" | "unknown";
+export interface FundingOptionResult {
+  id: string; type: FundingOptionType; feasible: boolean | "unknown"; reason: string | null; covers_amount: number | null; available_by: string | null;
+  monthly_cash_effect: number | null; one_time_cost: number | null; total_cost: number | null;
+  new_liabilities: { amount: number; monthly_payment: number; term_months: number } | null;
+  time_to_realize_months: number | null; certainty: FundingCertainty; conditions: string[]; risks: string[]; assumptions: string[]; missing_inputs: string[];
+  provenance: Record<string, string | null>; details: Record<string, unknown>;
+}
+export interface FundingNeed {
+  goal_id: string; title: string | null; category: string | null; target: number | null; due: string | null; months_to_due: number | null; reason: string | null;
+  sizing_basis: string; confirmed_existing: number; expected_existing: number; progress_events_actual: number | null; gap: number | null; gap_after_expected?: number;
+}
+export interface FundingPlanBlock {
+  allocations: { option_id: string; amount: number; certainty: FundingCertainty; available_by: string | null; conditions: string[] }[];
+  covered: Record<FundingCertainty, number>; earliest_available_by: string | null;
+  remaining_after_confirmed: number; remaining_after_confirmed_and_expected: number; monthly_burden: number; monthly_release: number; note: string;
+}
+export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null }
+export interface FundingPlan {
+  schema_version: string; result_type: string; as_of: string;
+  assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; horizon_years: number };
+  goals: FundingGoalResult[];
+  portfolio: { monthly_burden_in_plan: number | null; planned_monthly_savings: number | null; shortfall: number | null; capacity_known: boolean; plan_chosen: boolean; over_committed: string[] };
+  warnings: string[];
+}
+export interface FundingRequestBody {
+  goal_id: string; assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number };
+  options: Record<string, unknown>[]; allocation_plan: { goal_id: string; option_id: string; amount: number }[];
+}

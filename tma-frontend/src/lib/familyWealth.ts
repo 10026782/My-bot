@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -9,10 +9,11 @@ export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // 
 export const OPEN_LABEL = `פתח: ${SCREEN_TITLE}`;
 export const TABS_ARIA_LABEL = `אזורי ${SCREEN_TITLE}`;
 
-export type FamilyTabKey = "savings" | "accounts" | "lab";
+export type FamilyTabKey = "savings" | "accounts" | "funding" | "lab";
 export const FAMILY_TABS: { key: FamilyTabKey; label: string }[] = [
   { key: "savings", label: "החיסכון שלי" },
   { key: "accounts", label: "החשבונות" },
+  { key: "funding", label: "מימון יעד" },
   { key: "lab", label: "מעבדת העתיד" },
 ];
 export const FAMILY_TAB_PREFIX = "fw";
@@ -418,3 +419,213 @@ export function growthLines(view: PortfolioLabView) {
 }
 export const comparisonLines = (view: PortfolioLabView) =>
   Object.entries(view.charts.strategy_comparison).map(([id, rows]) => ({ name: view.labels.strategies[id] ?? id, pts: rows.map((r): [number, number] => [r.year, r.nominal]) }));
+
+
+// ── Goal Funding Planner (step 1b): typed options -> POST /api/fcc/funding/plan -> a neutral comparison. Presentation only: the page converts typed
+// text to numbers once on submit; every figure it shows (amounts, dates, certainty, costs) is the server's. No ranking, no "best", no total of "available". ──
+export const FUNDING_TITLE = "מימון יעד";
+export const FUNDING_INTRO = "בוחרים יעד, מוסיפים דרכים אפשריות למימון, והמערכת משווה ביניהן. זו השוואה בלבד — לא המלצה ולא בחירה עבורך, וכל המספרים מחושבים בשרת.";
+export const FUNDING_PRINCIPLE = "כסף צפוי אינו כסף קיים: חוב שחייבים לך או חיסכון עתידי מוצגים עם רמת ודאות ותנאים, ולא מצטרפים לסכום אחד של \"כסף זמין\".";
+
+export const FUNDING_TYPE_LABELS: Record<FundingOptionType, string> = {
+  existing_balance: "כסף קיים (הקצאות)", new_deposits: "הפקדות חדשות", asset_sale: "מכירת נכס", loan: "הלוואה", work_income: "הכנסה מעבודה",
+  receivable_collection: "גביית חוב שחייבים לי", obligations_reduction: "צמצום התחייבויות חוזרות", custom: "אפשרות מותאמת",
+};
+export const FUNDING_CERTAINTY_LABELS: Record<FundingCertainty, string> = { confirmed: "מאושר", expected: "צפוי", uncertain: "לא ודאי", unknown: "לא ידוע" };
+const FEASIBLE_LABELS: Record<string, string> = { true: "אפשרי עד התאריך", false: "לא אפשרי", unknown: "לא ידוע" };
+const FUNDING_REASONS: Record<string, string> = {
+  no_allocation: "אין הקצאה למטרה הזו", over_allocated: "חשבון מזין בהקצאת יתר", not_accessible_by_due: "לא נגיש עד תאריך היעד",
+  allocation_not_yet_effective: "ההקצאה טרם נכנסה לתוקף", allocation_effective_after_due: "ההקצאה נכנסת לתוקף אחרי תאריך היעד", no_coverage_basis: "חסר סכום או תאריך יעד",
+  release_not_verified: "תאריך השחרור הגיע אך הזכאות לא אומתה", liquidity_unverified: "נזילות לא אומתה", liquidity_unknown: "חסרה נזילות",
+  unreachable_under_assumptions: "לא ניתן להשגה לפי ההנחות", available_after_due: "הכסף זמין אחרי תאריך היעד", no_arrangement: "אין הסדר החזר רשום",
+  no_flagged_obligations: "אין התחייבויות שסומנו לצמצום", savings_not_confirmed: "החיסכון טרם אושר", income_not_confirmed: "ההכנסה הנוספת טרם אושרה",
+  based_on_missing: "חסרה אפשרות הפקדות לחישוב", based_on_not_feasible: "אפשרות ההפקדות אינה אפשרית", available_by_missing: "חסר תאריך זמינות",
+};
+const NEED_REASONS: Record<string, string> = {
+  missing_target: "חסר סכום יעד", missing_date: "חסר תאריך יעד", past_date: "תאריך היעד עבר", beyond_horizon: "מעבר לאופק החישוב",
+  due_this_month: "תאריך היעד בחודש הנוכחי, לפני סופו", parent_goal_rollup_not_supported: "מטרת אב עם מטרות־משנה — עדיין לא נתמכת", already_covered: "היעד כבר מכוסה בכסף מאושר",
+};
+const FUNDING_RISKS: Record<string, string> = {
+  not_accessible_by_due: "לא נגיש עד התאריך", timing_uncertain: "מועד לא ודאי", debt_overlap_unresolved: "חוב על הנכס עלול להיספר פעמיים — לא נפתר", lost_income: "הכנסה מהנכס תיעלם",
+  collateral_growth_not_modeled: "צמיחת הביטחון לא מחושבת", terms_unverified: "התנאים לא אומתו", unreachable_under_assumptions: "לא ניתן להשגה לפי ההנחות",
+  allocated_elsewhere: "הכסף הנגיש כבר מוקצה למטרות אחרות", over_committed_pool: "הקצאת יתר", depends_on_assumed_return: "תלוי בתשואה שהונחה",
+  self_reported_balance: "יתרה בדיווח עצמי", event_allocation_overlap: "יש גם הפקדות שדווחו וגם הקצאה — לא נספרו יחד", receivable_no_arrangement: "אין הסדר החזר",
+  release_not_verified: "זכאות לשחרור לא אומתה", parent_goal_rollup_not_supported: "מטרת אב לא נתמכת",
+};
+const FUNDING_CONDITIONS: Record<string, string> = {
+  owner_confirms_deposits: "הבעלים מאשר את ההפקדות", liquid_from_reached: "מגיע תאריך השחרור", release_rules_confirmed: "כללי השחרור אושרו", liquidity_verified: "הנזילות אומתה",
+  growth_as_assumed: "הצמיחה כפי שהונחה", loan_approved: "ההלוואה אושרה", sale_closes: "המכירה נסגרת", buyer_found: "נמצא קונה", debtor_arrangement: "נקבע הסדר עם החייב",
+  debtor_pays_on_schedule: "החייב משלם לפי הלוח", owner_confirms_savings: "הבעלים מאשר את החיסכון", extra_income_available: "קיימת הכנסה נוספת",
+};
+const MISSING_INPUT_LABELS: Record<string, string> = { liquidity: "נזילות", goal_allocation: "הקצאה למטרה", target_amount: "סכום יעד", end_date: "תאריך יעד", available_by: "תאריך זמינות", based_on: "אפשרות הפקדות", management_fee: "דמי ניהול", expected_return: "תשואה צפויה", deposit_fee: "דמי ניהול מההפקדה" };
+/** An unknown code is shown as it is (never hidden), so a new server code can never silently disappear from the page. */
+const word = (dict: Record<string, string>, code: string): string => dict[code] ?? code;
+
+export type FundingFieldKind = "number" | "date" | "text" | "bool" | "select";
+export interface FundingField { key: string; label: string; kind: FundingFieldKind; required?: boolean; hint?: string; options?: { value: string; label: string }[]; optionsFrom?: "accounts" | "assets" | "receivables" | "deposit_options"; when?: (v: Record<string, string>) => boolean }
+const T_ASSET_NONE = { value: "", label: "ללא נכס מזוהה" };
+export const FUNDING_FIELDS: Record<Exclude<FundingOptionType, "existing_balance">, FundingField[]> = {
+  new_deposits: [
+    { key: "source", label: "מקור ההנחות", kind: "select", required: true, options: [{ value: "hypothetical", label: "חשבון חדש (הנחות שאזין)" }, { value: "account", label: "חשבון קיים" }] },
+    { key: "account_id", label: "חשבון", kind: "select", required: true, optionsFrom: "accounts", when: (v) => v.source === "account" },
+    { key: "liquidity", label: "נזילות", kind: "select", required: true, options: [{ value: "immediate", label: "נזיל מיד" }, { value: "date", label: "נפתח בתאריך שחרור" }], when: (v) => v.source !== "account" },
+    { key: "liquid_from", label: "תאריך שחרור", kind: "date", required: true, when: (v) => v.source !== "account" && v.liquidity === "date" },
+    { key: "expected_return_pct", label: "תשואה שנתית צפויה (%)", kind: "number", when: (v) => v.source !== "account" },
+    { key: "fee_pct", label: "דמי ניהול שנתיים (%)", kind: "number", when: (v) => v.source !== "account" },
+    { key: "deposit_fee_pct", label: "דמי ניהול מההפקדה (%)", kind: "number", when: (v) => v.source !== "account" },
+    { key: "release_confirmed", label: "אני מאשר שכללי השחרור מאפשרים משיכה בתאריך", kind: "bool" },
+  ],
+  asset_sale: [
+    { key: "asset_id", label: "נכס", kind: "select", optionsFrom: "assets" },
+    { key: "net_proceeds", label: "תמורה נטו צפויה (₪)", kind: "number", required: true, hint: "אחרי עלויות ומס, כפי שאתה מעריך" },
+    { key: "expected_date", label: "תאריך משוער", kind: "date", required: true },
+    { key: "confirmed_buyer", label: "יש קונה מאושר", kind: "bool" },
+  ],
+  loan: [
+    { key: "amount", label: "סכום הלוואה (₪)", kind: "number", required: true },
+    { key: "annual_rate_pct", label: "ריבית שנתית (%)", kind: "number", required: true },
+    { key: "term_months", label: "תקופה (חודשים)", kind: "number", required: true },
+    { key: "available_by", label: "תאריך קבלת הכסף", kind: "date", required: true },
+    { key: "collateral", label: "ביטחון (טקסט קצר)", kind: "text" },
+    { key: "approved", label: "ההלוואה אושרה", kind: "bool" },
+    { key: "terms_verified", label: "התנאים אומתו מול הגוף המלווה", kind: "bool" },
+  ],
+  work_income: [{ key: "based_on", label: "מבוסס על אפשרות הפקדות", kind: "select", required: true, optionsFrom: "deposit_options" }],
+  receivable_collection: [
+    { key: "loan_id", label: "חוב שחייבים לי", kind: "select", required: true, optionsFrom: "receivables" },
+    { key: "expected_net", label: "סכום צפוי להיגבות (₪)", kind: "number", required: true },
+    { key: "expected_date", label: "תאריך משוער", kind: "date", required: true },
+  ],
+  obligations_reduction: [{ key: "monthly_amount", label: "חיסכון חודשי (₪, ריק = לפי התחייבויות שסומנו)", kind: "number" }],
+  custom: [
+    { key: "label", label: "שם", kind: "text", required: true },
+    { key: "amount", label: "סכום (₪)", kind: "number", required: true },
+    { key: "available_by", label: "תאריך זמינות", kind: "date" },
+    { key: "monthly_cost", label: "עלות חודשית (₪)", kind: "number" },
+    { key: "one_time_cost", label: "עלות חד־פעמית (₪)", kind: "number" },
+    { key: "certainty", label: "רמת ודאות", kind: "select", options: [{ value: "", label: "ברירת מחדל" }, { value: "expected", label: "צפוי" }, { value: "uncertain", label: "לא ודאי" }] },
+  ],
+};
+export const FUNDING_ADDABLE: Exclude<FundingOptionType, "existing_balance">[] = ["new_deposits", "asset_sale", "loan", "receivable_collection", "obligations_reduction", "work_income", "custom"];
+
+export interface FundingOptionDraft { id: string; type: Exclude<FundingOptionType, "existing_balance">; values: Record<string, string>; use: string }
+export interface FundingForm { goalId: string; returnPct: string; feePct: string; inflationPct: string; options: FundingOptionDraft[] }
+export const DEFAULT_FUNDING_FORM: FundingForm = { goalId: "", returnPct: "6", feePct: "0.15", inflationPct: "2", options: [] };
+
+/** A new draft with defaults that never invent money: only selects get a starting choice. */
+export function newFundingOption(type: FundingOptionDraft["type"], counter: number): FundingOptionDraft {
+  const values: Record<string, string> = {};
+  if (type === "new_deposits") { values.source = "hypothetical"; values.liquidity = "immediate"; }
+  return { id: `${type}_${counter}`, type, values, use: "" };
+}
+
+const isBlank = (t: string | undefined) => t == null || t.trim() === "";
+/** Typed text -> request body. A blank required field is an error shown on the form, never silently 0; the server re-validates everything. */
+export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequestBody } | { ok: false; error: string } {
+  if (isBlank(form.goalId)) return { ok: false, error: "יש לבחור יעד" };
+  const num = (text: string, name: string): number | string => { const v = text.trim() === "" ? NaN : Number(text); return Number.isFinite(v) ? v : `${name}: יש להזין מספר`; };
+  const a = { ret: num(form.returnPct, "תשואה"), fee: num(form.feePct, "דמי ניהול"), infl: num(form.inflationPct, "אינפלציה") };
+  for (const v of Object.values(a)) if (typeof v === "string") return { ok: false, error: v };
+  const options: Record<string, unknown>[] = [];
+  const plan: FundingRequestBody["allocation_plan"] = [];
+  for (const draft of form.options) {
+    const label = FUNDING_TYPE_LABELS[draft.type];
+    const out: Record<string, unknown> = { id: draft.id, type: draft.type };
+    const v = draft.values;
+    for (const field of FUNDING_FIELDS[draft.type]) {
+      if (field.when && !field.when(v)) continue;
+      const text = v[field.key];
+      if (field.kind === "bool") { if (text === "true") out[field.key] = true; continue; }
+      if (isBlank(text)) { if (field.required) return { ok: false, error: `${label}: ${field.label} — שדה חובה` }; continue; }
+      if (field.kind === "number") { const n = Number(text); if (!Number.isFinite(n)) return { ok: false, error: `${label}: ${field.label} — יש להזין מספר` }; out[field.key] = n; }
+      else out[field.key] = text.trim();
+    }
+    if (draft.type === "new_deposits") {                              // shape the typed form into the API's two sources
+      if (v.source !== "account") {
+        const hypo: Record<string, unknown> = {};
+        if (v.liquidity === "immediate") hypo.immediate = true; else hypo.liquid_from = out.liquid_from;
+        for (const k of ["expected_return_pct", "fee_pct", "deposit_fee_pct"]) if (k in out) hypo[k] = out[k];
+        for (const k of ["source", "liquidity", "liquid_from", "expected_return_pct", "fee_pct", "deposit_fee_pct"]) delete out[k];
+        out.hypothetical = hypo;
+      }
+      delete out.source;
+    }
+    options.push(out);
+    if (!isBlank(draft.use)) {
+      const amount = Number(draft.use);
+      if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: `${label}: סכום לשימוש — יש להזין מספר חיובי` };
+      plan.push({ goal_id: form.goalId, option_id: draft.id, amount });
+    }
+  }
+  return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan } };
+}
+
+export interface FundingOptionCard {
+  id: string; type: FundingOptionType; title: string; verdict: string; certainty: string; rows: { label: string; value: string }[];
+  lists: { label: string; items: string[] }[]; note: string;
+}
+export interface FundingPlanModel {
+  needTitle: string; needRows: { label: string; value: string }[]; needReason: string | null; options: FundingOptionCard[];
+  plan: { rows: { label: string; value: string }[]; allocations: string[]; note: string } | null;
+  portfolio: { rows: { label: string; value: string }[] } | null; warnings: string[];
+}
+const dmy = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "—");
+const optMoney = (v: number | null | undefined) => (v == null ? "—" : money(v));
+
+function optionCard(o: FundingOptionResult, titles: Record<string, string>): FundingOptionCard {
+  const rows: { label: string; value: string }[] = [
+    { label: "כמה מכסה", value: optMoney(o.covers_amount) },
+    { label: "זמין עד", value: dmy(o.available_by) },
+    { label: "השפעה על תזרים חודשי (מינוס = נטל)", value: optMoney(o.monthly_cash_effect) },
+    { label: "עלות כוללת", value: optMoney(o.total_cost) },
+  ];
+  if (o.one_time_cost != null) rows.push({ label: "עלות חד־פעמית", value: money(o.one_time_cost) });
+  if (o.new_liabilities) rows.push({ label: "התחייבות חדשה", value: `${money(o.new_liabilities.amount)} · החזר ${money(o.new_liabilities.monthly_payment)} לחודש · ${o.new_liabilities.term_months} חודשים` });
+  rows.push({ label: "זמן עד מימוש", value: o.time_to_realize_months == null ? "—" : `${o.time_to_realize_months} חודשים` });
+  const detailRequired = o.details && typeof o.details === "object" ? (o.details as Record<string, unknown>).required_monthly : undefined;
+  if (typeof detailRequired === "number") rows.unshift({ label: "הפקדה חודשית נדרשת", value: money(detailRequired) });
+  const lists = [
+    { label: "תנאים למימוש", items: o.conditions.map((c) => word(FUNDING_CONDITIONS, c)) },
+    { label: "סיכונים", items: o.risks.map((r) => word(FUNDING_RISKS, r)) },
+    { label: "חסר", items: o.missing_inputs.map((m) => word(MISSING_INPUT_LABELS, m)) },
+  ].filter((l) => l.items.length > 0);
+  const verdict = `${word(FEASIBLE_LABELS, String(o.feasible))}${o.reason ? ` — ${word(FUNDING_REASONS, o.reason)}` : ""}`;
+  return { id: o.id, type: o.type, title: titles[o.id] ?? FUNDING_TYPE_LABELS[o.type], verdict, certainty: word(FUNDING_CERTAINTY_LABELS, o.certainty), rows, lists, note: o.assumptions.join(" · ") };
+}
+
+/** Wording + layout of one goal's comparison. Options keep the server's order (fixed by type); nothing is sorted, scored or highlighted here. */
+export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<string, string> = {}): FundingPlanModel | null {
+  const g = plan.goals.find((x) => x.need.goal_id === goalId) ?? plan.goals[0];
+  if (!g) return null;
+  const n = g.need;
+  const needRows = [
+    { label: "יעד", value: optMoney(n.target) }, { label: "תאריך יעד", value: dmy(n.due) },
+    { label: "כסף קיים מאושר למטרה", value: money(n.confirmed_existing) },
+    { label: "כסף קיים צפוי (לא מאושר)", value: money(n.expected_existing) },
+    { label: "פער לפי הכסף המאושר בלבד", value: optMoney(n.gap) },
+  ];
+  const p = g.plan;
+  const planModel = p ? {
+    rows: [
+      { label: "מאושר", value: money(p.covered.confirmed) }, { label: "צפוי", value: money(p.covered.expected) },
+      { label: "לא ודאי", value: money(p.covered.uncertain) }, { label: "לא ידוע", value: money(p.covered.unknown) },
+      { label: "נותר אחרי המאושר בלבד", value: money(p.remaining_after_confirmed) },
+      { label: "נותר אחרי מאושר וצפוי", value: money(p.remaining_after_confirmed_and_expected) },
+      { label: "נטל חודשי בתוכנית", value: money(p.monthly_burden) }, { label: "שחרור חודשי בתוכנית", value: money(p.monthly_release) },
+      { label: "הזמינות המוקדמת ביותר", value: dmy(p.earliest_available_by) },
+    ],
+    allocations: p.allocations.map((a) => `${titles[a.option_id] ?? a.option_id}: ${money(a.amount)} · ${word(FUNDING_CERTAINTY_LABELS, a.certainty)}${a.available_by ? ` · עד ${dmy(a.available_by)}` : ""}`),
+    note: p.note,
+  } : null;
+  const pf = plan.portfolio;
+  const portfolio = pf.plan_chosen ? { rows: [
+    { label: "נטל חודשי בתוכנית", value: optMoney(pf.monthly_burden_in_plan) },
+    { label: "חיסכון חודשי מתוכנן", value: pf.capacity_known ? optMoney(pf.planned_monthly_savings) : "לא ידוע" },
+    { label: "חוסר מול החיסכון המתוכנן", value: pf.shortfall == null ? "לא ידוע" : money(pf.shortfall) },
+    ...(pf.over_committed.length ? [{ label: "מקור שהוקצה ליותר מסכומו", value: pf.over_committed.map((id) => titles[id] ?? id).join(", ") }] : []),
+  ] } : null;
+  return {
+    needTitle: n.title || "מטרה ללא שם", needRows, needReason: n.reason ? word(NEED_REASONS, n.reason) : null,
+    options: g.options.map((o) => optionCard(o, titles)), plan: planModel, portfolio, warnings: plan.warnings,
+  };
+}
