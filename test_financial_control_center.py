@@ -4760,20 +4760,20 @@ def test_http_funding_save_gate_validation_and_review(monkeypatch):
     monkeypatch.setattr(tma_api, "_PL_LIMITER", None)                                                 # this test makes more calls than one minute allows
     seed_saved_plans()
 
-    def save(c, body=None, raw=None):
+    def ask_review(c, body=None, raw=None):
         import json as _json
         return c.post("/api/fcc/funding/plan/save", data=raw if raw is not None else _json.dumps(body if body is not None else {}),
                       headers={**H, "Content-Type": "application/json"})
-    assert save(http(monkeypatch, ELIYAHU, flag=False), {"goal_id": "recGW", "selected": ["dep"]}).status_code == 404
-    assert save(http(monkeypatch, AVI_I), {"goal_id": "recGW", "selected": ["dep"]}).status_code == 404
+    assert ask_review(http(monkeypatch, ELIYAHU, flag=False), {"goal_id": "recGW", "selected": ["dep"]}).status_code == 404
+    assert ask_review(http(monkeypatch, AVI_I), {"goal_id": "recGW", "selected": ["dep"]}).status_code == 404
     assert http(monkeypatch, ELIYAHU).options("/api/fcc/funding/plan/save").status_code == 204
     c = http(monkeypatch, ELIYAHU)
-    assert save(c, raw="not json").status_code == 400
-    assert save(c, {"goal_id": "recGW", "options": [DEPOSIT]}).status_code == 400                    # selected required
-    r = save(c, {"goal_id": "recGX", "selected": ["existing"]})
+    assert ask_review(c, raw="not json").status_code == 400
+    assert ask_review(c, {"goal_id": "recGW", "options": [DEPOSIT]}).status_code == 400                    # selected required
+    r = ask_review(c, {"goal_id": "recGX", "selected": ["existing"]})
     assert r.status_code == 400 and "888888" not in str(r.get_json())                              # another owner's goal
     before = _copy.deepcopy(DB)
-    r = save(c, {"goal_id": "recGW", "options": [DEPOSIT], "selected": ["dep"]})
+    r = ask_review(c, {"goal_id": "recGW", "options": [DEPOSIT], "selected": ["dep"]})
     body = r.get_json()
     assert r.status_code == 200 and body["state"] == "review" and "שמירת תוכנית מימון" in body["message"]
     assert DB == before
