@@ -787,7 +787,15 @@ export interface FccAccountsView {
 export interface FccForecastParams {
   years: number; annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; monthly_contributions: Record<string, number>;
 }
-export interface FccForecastPoint { year: number; nominal: number; real: number; invested: number }
+export type FccLiquidityState = "accessible" | "conditional" | "locked";
+export interface FccForecastPoint { year: number; nominal: number; real: number; invested: number; accessible?: number; conditional?: number; locked?: number }
+/** Potential coverage of one goal at its due month (accessible only); the same money may appear in several goals until B2. */
+export interface FccGoalCoverage {
+  id: string | null; title: string | null; category: string; target_amount: number | null; due_month: string | null;
+  verdict: "covered" | "short" | "not_comparable";
+  reason: "missing_target" | "missing_date" | "past_date" | "beyond_horizon" | "no_verified_accessible_account" | null;
+  gap: number | null; accessible_value: number | null; conditional_value: number | null; locked_value: number | null;
+}
 export interface FccForecastAccount {
   id: string; name: string | null; account_type: string | null; start_value: number; start_as_of: string; verification: string | null;
   monthly_contribution: number; monthly_contribution_source: "typed" | "account" | "default"; fee_pct: number; fee_source: "account" | "default";
@@ -795,6 +803,9 @@ export interface FccForecastAccount {
   return_kind: "nominal" | "real_to_nominal"; linkage: string | null; investment_track: string | null;
   insurance_cost_monthly: number; insurance_cost_known: boolean; insurance_cost_as_of: string | null;
   deposit_fees_paid: number; insurance_paid: number; missing: string[];
+  /** A2: classification only, never an entitlement to withdraw. */
+  liquidity?: { basis: "immediate" | "retirement_immediate" | "dated" | "undated" | "unverified"; liquid_from: string | null;
+                state_now: FccLiquidityState; state_at_horizon: FccLiquidityState };
   final_nominal: number; final_real: number; invested: number; nominal_profit: number; costs_paid: number; series: FccForecastPoint[];
 }
 export interface FccAccountsForecast {
@@ -804,6 +815,7 @@ export interface FccAccountsForecast {
   consolidated: { accounts: number; start_value: number; final_nominal: number | null; final_real: number | null; invested: number | null; series: FccForecastPoint[] };
   excluded: { without_snapshot: number; closed: number };
   data_gaps?: { id: string; name: string | null; missing: string[] }[];
+  goals?: FccGoalCoverage[]; goals_skipped?: { other_category: number; inactive: number };
   all_self_reported: boolean | null; warnings: string[]; as_of: string;
 }
 

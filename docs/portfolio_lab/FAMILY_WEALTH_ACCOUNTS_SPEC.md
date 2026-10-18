@@ -117,6 +117,20 @@ Planning Gate: **FULL** (persistence + authority + schema + multi-layer).
 
 לפני היצירה אומת מול הסכמה החיה (`get_table_schema` + `list_tables_for_base`) ש-17 השדות הקיימים אינם מכילים אף אחד מהשמות; אחרי היצירה אומת מחדש. אף שדה קיים לא שונה.
 
+### 3.5 נזילות וכיסוי מטרות (A2, אושר ע"י הבעלים 18/10/2026, ללא שדות חדשים)
+
+שלושה מצבים לכל חשבון בכל חודש, מהשדות הקיימים בלבד (`Liquidity`, `Liquid From`, `Account Type`), ותמיד `accessible + conditional + locked = שווי מאוחד`:
+
+| מצב | מתי |
+|---|---|
+| `accessible` (נזילות מאומתת) | `Liquidity=immediate` ואינו מוצר פרישה (`pension`, `managers_insurance`) |
+| `conditional` | `locked_until_date`/`age_based` **אחרי** `Liquid From` (סוף החודש ≥ התאריך; זכאות למשיכה לא מוסקת מגיל/תאריך); `unknown`/ריק (לא אומת); מוצר פרישה גם אם סומן `immediate` |
+| `locked` | `locked_until_date`/`age_based` לפני `Liquid From`, או בלי תאריך |
+
+כיסוי מטרה (`long_term`, `emergency_fund`, `investment`, `savings`; פעילה בלבד): מטרה עם `Target Amount` ו-`End Date` תקפים → `covered` / `short` (+פער) / `not_comparable` (סיבה: חסר סכום, חסר תאריך, תאריך עבר, מעבר לאופק, אין חשבון נגיש מאומת). ההשוואה רק מול `accessible`, בערך נומינלי בסוף **חודש היעד** (שורות חודשיות מהמנוע, לא סוף השנה); קרן חירום — רק חשבונות `immediate` מאומתים. זה **כיסוי פוטנציאלי, לא הקצאה**: אותו כסף עשוי להופיע בכיסוי של כמה מטרות עד B2. ללא מס/משיכות (A3), ללא המלצה.
+
+מגבלה: בלי שדה אימות נזילות, `accessible` = `immediate` בלבד; קרנות השתלמות ופנסיות יופיעו `conditional` גם אחרי תאריך השחרור.
+
 ## 4. בעלות כלכלית מול הרשאות מערכת
 
 **ממצא מ-Contacts:**

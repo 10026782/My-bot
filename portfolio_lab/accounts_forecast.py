@@ -10,6 +10,11 @@
 תשומות לכל חשבון (D1 שלב 9) — ערך שהבעלים הזין בחשבון גובר על ברירת מחדל, וכל מקור מסומן; ריק = "חסר לדיוק", לא מומצא:
 הפקדה חודשית (הקלדה במסך > `Planned Monthly Deposit` > 0), דמי ניהול מהפקדה (מנוכים מההפקדה לפני המנוע; ה"הושקע" ברוטו),
 תשואה (`Expected Return %`; ריאלית כש־Linkage=cpi ואז מומרת לנומינלית בהנחת האינפלציה), עלות ביטוח חודשית קבועה (נומינלית).
+
+נזילות וכיסוי מטרות (D1 שלב 10 / A2): לכל חודש כל חשבון נמצא באחד משלושה מצבים — `accessible` (נזילות מאומתת: רק חשבון שסומן
+`immediate` ואינו מוצר פרישה), `conditional` (תאריך שחרור הגיע או נזילות לא מאומתת — אין להסיק זכאות למשיכה מגיל/תאריך בלבד),
+`locked`. תמיד `accessible + conditional + locked = שווי מאוחד`. כיסוי מטרה משתמש רק ב-`accessible`, בערך נומינלי בסוף חודש היעד
+(שורות חודשיות מהמנוע); זה כיסוי פוטנציאלי ולא הקצאה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות עד B2. ללא מס/משיכות (A3).
 """
 
 from __future__ import annotations
@@ -30,6 +35,9 @@ DEFAULTS = {
     "monthly_contributions": {},
 }
 _MAX_ACCOUNTS = 50
+GOAL_CATEGORIES = {"long_term", "emergency_fund", "investment", "savings"}
+RETIREMENT_TYPES = {"pension", "managers_insurance"}          # מוצרי פרישה: לעולם לא `accessible` כסכום חד-פעמי
+STATES = ("accessible", "conditional", "locked")
 LINKAGES = {"none", "cpi", "sp500", "other_index", "fx", "unknown"}
 TRACKS = {"equities", "bonds", "mixed", "index_tracking", "money_market", "unknown"}
 
@@ -132,12 +140,93 @@ def _account_inputs(account: dict, p: dict, typed: dict) -> dict:
             "insurance_known": insurance is not None, "insurance_as_of": as_of, "missing": missing}
 
 
+def _iso_date(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
+
+
+def _liquidity_profile(account: dict) -> dict:
+    """סיווג נזילות של חשבון מהשדות הקיימים בלבד (`Liquidity`, `Liquid From`, `Account Type`). טהור; לא מסיק זכאות."""
+    liq = account.get("liquidity")
+    released = _iso_date(account.get("liquid_from"))
+    retirement = account.get("account_type") in RETIREMENT_TYPES
+    if liq == "immediate":
+        basis = "retirement_immediate" if retirement else "immediate"
+        return {"basis": basis, "liquid_from": None, "gap": None, "ceiling": "conditional" if retirement else "accessible"}
+    if liq in ("locked_until_date", "age_based"):
+        if released is None:
+            return {"basis": "undated", "liquid_from": None, "gap": "liquid_from", "ceiling": "locked"}
+        return {"basis": "dated", "liquid_from": released, "gap": None, "ceiling": "conditional"}
+    return {"basis": "unverified", "liquid_from": None, "gap": "liquidity", "ceiling": "conditional"}
+
+
+def _state_at(profile: dict, month_end: date) -> str:
+    """מצב החשבון בסוף חודש: dated נפתח ל-conditional כשסוף החודש ≥ תאריך השחרור (לא accessible לעולם); undated נעול; unverified מותנה."""
+    basis = profile["basis"]
+    if basis == "immediate":
+        return "accessible"
+    if basis == "dated":
+        return "conditional" if month_end >= profile["liquid_from"] else "locked"
+    return profile["ceiling"]
+
+
+def _goal_number(value):
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0 else None
+
+
+def _goal_coverage(goals, start: date, years: int, month_totals: list[dict], immediate_totals: list[float], has_accessible: bool, has_immediate: bool):
+    """כיסוי פוטנציאלי לכל מטרה מאושרת. `accessible` בלבד; קרן חירום — רק חשבונות `immediate` מאומתים. לא הקצאה, לא המלצה."""
+    items, skipped = [], {"other_category": 0, "inactive": 0}
+    for g in goals or []:
+        if not isinstance(g, dict):
+            continue
+        if g.get("status") not in (None, "active"):
+            skipped["inactive"] += 1
+            continue
+        if g.get("category") not in GOAL_CATEGORIES:
+            skipped["other_category"] += 1
+            continue
+        item = {"id": g.get("id"), "title": g.get("title"), "category": g.get("category"), "target_amount": None, "due_month": None,
+                "verdict": "not_comparable", "reason": None, "gap": None, "accessible_value": None, "conditional_value": None, "locked_value": None}
+        target, due = _goal_number(g.get("target_amount")), _iso_date(g.get("end_date"))
+        item["target_amount"] = target
+        if due is not None:
+            item["due_month"] = due.strftime("%Y-%m")
+        idx = None if due is None else (due.year - start.year) * 12 + (due.month - start.month)
+        emergency = g.get("category") == "emergency_fund"
+        if target is None:
+            item["reason"] = "missing_target"
+        elif due is None:
+            item["reason"] = "missing_date"
+        elif idx < 0:
+            item["reason"] = "past_date"
+        elif idx >= years * 12:
+            item["reason"] = "beyond_horizon"
+        elif not (has_immediate if emergency else has_accessible):
+            item["reason"] = "no_verified_accessible_account"
+        else:
+            row = month_totals[idx]
+            accessible = immediate_totals[idx] if emergency else row["accessible"]
+            item.update(accessible_value=round(accessible, 2), conditional_value=round(row["conditional"], 2), locked_value=round(row["locked"], 2))
+            if accessible + 0.005 >= target:
+                item["verdict"] = "covered"
+            else:
+                item.update(verdict="short", gap=round(target - accessible, 2))
+        items.append(item)
+    return items, skipped
+
+
 def _eligible(account: dict) -> bool:
     return account.get("status") != "closed" and bool(account.get("balance")) and account["balance"].get("value") is not None
 
 
-def build_accounts_forecast(view: dict, params: dict | None = None, today: date | None = None) -> dict:
-    """``view`` = the owner's ``accounts_overview`` output (already owner-scoped). Raises ValueError on invalid params."""
+def build_accounts_forecast(view: dict, params: dict | None = None, today: date | None = None, goals: list | None = None) -> dict:
+    """``view`` = the owner's ``accounts_overview`` output (already owner-scoped); ``goals`` = the owner's own goals (id/title/category/status/
+target_amount/end_date), passed in so this module stays free of I/O. Raises ValueError on invalid params."""
     p = normalize_params(params)
     today = today or date.today()
     start = today.replace(day=1).isoformat()
@@ -148,6 +237,11 @@ def build_accounts_forecast(view: dict, params: dict | None = None, today: date 
         raise ValueError("monthly_contributions has an unknown account")
     rows, series_total = [], {}
     gaps = []
+    months = p["years"] * 12
+    month_totals = [{"accessible": 0.0, "conditional": 0.0, "locked": 0.0, "total": 0.0} for _ in range(months)]
+    immediate_totals = [0.0] * months
+    start_day = date.fromisoformat(start)
+    has_accessible = has_immediate = False
     for a in eligible:
         x = _account_inputs(a, p, p["monthly_contributions"])
         fee, fee_source, monthly = x["fee"], x["fee_source"], x["monthly"]
@@ -155,7 +249,18 @@ def build_accounts_forecast(view: dict, params: dict | None = None, today: date 
         result = simulate(Scenario(
             years=p["years"], initial=float(a["balance"]["value"]), monthly_contribution=net_monthly, inflation=p["inflation"],
             deposit_timing=p["deposit_timing"], start_date=start, monthly_fixed_cost=x["insurance"],
-            assets=(Asset(name="account", annual_return=x["annual_return"], annual_fee=fee),)))
+            assets=(Asset(name="account", annual_return=x["annual_return"], annual_fee=fee),)), monthly=True)
+        profile = _liquidity_profile(a)
+        has_accessible = has_accessible or profile["ceiling"] == "accessible"
+        has_immediate = has_immediate or profile["basis"] == "immediate"
+        for m in result["monthly"]:
+            state = _state_at(profile, date.fromisoformat(m["as_of"]))
+            row = month_totals[m["month"]]
+            row[state] += m["value_after_costs"]
+            row["total"] += m["value_after_costs"]
+            if profile["basis"] == "immediate":
+                immediate_totals[m["month"]] += m["value_after_costs"]
+        x["missing"] = x["missing"] + ([profile["gap"]] if profile["gap"] else [])
         initial = float(a["balance"]["value"])
         series = [{"year": r["year"], "nominal": r["value_after_costs"], "real": r["real_value"],
                    "invested": initial + monthly * 12 * r["year"]} for r in result["annual"]]
@@ -178,13 +283,24 @@ def build_accounts_forecast(view: dict, params: dict | None = None, today: date 
             "final_nominal": final["value_after_costs"], "final_real": final["real_value"],
             "invested": invested, "nominal_profit": final["value_after_costs"] - invested,
             "costs_paid": final["costs_paid"] + deposit_fees, "deposit_fees_paid": round(deposit_fees, 2),
-            "insurance_paid": round(final["fixed_cost"], 2),
+            "insurance_paid": round(final.get("fixed_cost", 0.0), 2),
+            "liquidity": {"basis": profile["basis"], "liquid_from": profile["liquid_from"].isoformat() if profile["liquid_from"] else None,
+                          "state_now": _state_at(profile, date.fromisoformat(result["monthly"][0]["as_of"])),
+                          "state_at_horizon": _state_at(profile, date.fromisoformat(result["monthly"][-1]["as_of"]))},
             "missing": x["missing"],
             "series": series,
         })
         if x["missing"]:
             gaps.append({"id": a["id"], "name": a.get("name"), "missing": x["missing"]})
     total_series = [{k: (round(v, 2) if k != "year" else v) for k, v in series_total[y].items()} for y in sorted(series_total)]
+    for point in total_series:                                  # יתרת הסכום מחושבת כך ש-נגיש + מותנה + נעול = מאוחד בדיוק של אגורה
+        row = month_totals[point["year"] * 12 - 1]
+        parts = {k: round(row[k], 2) for k in STATES}
+        residue = round(point["nominal"] - sum(parts.values()), 2)          # at most an agora or two from independent rounding
+        if residue:
+            parts[max(parts, key=parts.get)] = round(parts[max(parts, key=parts.get)] + residue, 2)
+        point.update(parts)
+    goal_items, goals_skipped = _goal_coverage(goals, start_day, p["years"], month_totals, immediate_totals, has_accessible, has_immediate)
     last = total_series[-1] if total_series else None
     t = (view or {}).get("totals") or {}
     return {
@@ -201,12 +317,15 @@ def build_accounts_forecast(view: dict, params: dict | None = None, today: date 
         "excluded": {"without_snapshot": sum(1 for a in accounts if a.get("status") != "closed" and not _eligible(a)),
                      "closed": sum(1 for a in accounts if a.get("status") == "closed")},
         "data_gaps": gaps,
+        "goals": goal_items, "goals_skipped": goals_skipped,
         "all_self_reported": t.get("all_self_reported"),
         "warnings": ["תחזית מבוססת הנחות — לא הבטחת תשואה ולא המלצת השקעה.",
                      "נקודת המוצא היא היתרה האחרונה שדווחה בכל חשבון, בתאריך שלה; אין עדכון אוטומטי מבנק או מקרן.",
                      "הפקדה חודשית פר חשבון היא הנחה: מה שהוקלד במסך, אחרת ״הפקדה חודשית מתוכננת״ שבחשבון, אחרת 0 — לא נגזרת מהפקדות בפועל. ״סך שהושקע״ כולל את נקודת המוצא ואת דמי הניהול מההפקדה.",
                      "תשואה שהוזנה בחשבון גוברת על ההנחה הכללית; בחשבון צמוד מדד היא ריאלית ומומרת לנומינלית בהנחת האינפלציה. הצמדה אחרת (מדד/מט״ח) אינה מדמה את המדד — תיעוד בלבד.",
                      "עלות ביטוח חודשית היא סכום נומינלי קבוע שהוזן; אינה מתעדכנת באינפלציה ואינה כוללת כיסוי משתנה לפי גיל.",
-                     "לא כולל מס, משיכות או אילוצי נזילות."],
+                     "נזילות היא סיווג בלבד: ״נגיש״ = חשבון שסומן נזיל מיד ואינו מוצר פרישה; ״מותנה״ = תאריך שחרור הגיע או שהנזילות לא אומתה — אין זכאות למשיכה מגיל או מתאריך בלבד; ״נעול״ = אחרת.",
+                     "כיסוי מטרה הוא כיסוי פוטנציאלי בערך נומינלי בסוף חודש היעד ומתבסס על ״נגיש״ בלבד; אינו הקצאת כספים למטרה — אותו כסף עשוי להופיע בכיסוי של כמה מטרות, עד שייקבע ייעוד חשבונות. אין כאן המלצת השקעה או משיכה.",
+                     "לא כולל מס ולא משיכות בפועל."],
         "as_of": today.isoformat(),
     }

@@ -4171,6 +4171,33 @@ def test_http_forecast_reads_the_new_account_fields_but_a_scenario_cannot_write_
     assert DB[Tables.FIN_ACCOUNTS] == before                                                  # a scenario never changes the stored account
 
 
+def test_http_forecast_returns_goal_coverage_for_the_callers_own_goals_only(monkeypatch):
+    tma_api._PL_LIMITER = None                                # the 12/min limiter is process-wide; this test starts from a clean window
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_ACCOUNTS][1]["fields"][ACF.LIQUIDITY] = "immediate"
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGA", "מטרה שלי", ELI, 90000, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"}),
+        goal("recGB", "מטרה של אבי", AVI, 5, **{GF.CATEGORY: "long_term", GF.END_DATE: "2027-12-31"}),
+        goal("recGC", "הכנסה", ELI, 5, **{GF.CATEGORY: "income", GF.END_DATE: "2027-12-31"})]
+    import copy as _copy
+    before = _copy.deepcopy((DB[Tables.FIN_GOALS], DB[Tables.FIN_ACCOUNTS], DB[Tables.FIN_EVENTS]))
+    body = forecast(http(monkeypatch, ELIYAHU), {"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}).get_json()
+    mine = [g for g in body["goals"] if g["id"] == "recGA"][0]
+    assert [g["id"] for g in body["goals"]] == ["recGA"] and body["goals_skipped"]["other_category"] >= 1       # Avi's goal never shows; income is not a coverage goal
+    assert mine["verdict"] == "covered" and mine["accessible_value"] == 100000.0 and mine["due_month"] == "2027-12"
+    assert "מטרה של אבי" not in str(body) and "777777" not in str(body)
+    assert (DB[Tables.FIN_GOALS], DB[Tables.FIN_ACCOUNTS], DB[Tables.FIN_EVENTS]) == before                   # nothing was written
+
+
+def test_http_forecast_rejects_goals_or_liquidity_in_the_request_body(monkeypatch):
+    tma_api._PL_LIMITER = None
+    seed_accounts()
+    c = http(monkeypatch, ELIYAHU)
+    for field in ("goals", "liquidity", "liquid_from", "accessible"):
+        assert forecast(c, {"years": 10, field: [{"id": "x"}]}).status_code == 400
+
+
 # ═══ D1 step 8: account writes (balance snapshot / deposit) through the shared draft -> review -> אשר flow ═══
 def seed_account_writes():
     seed_accounts()

@@ -41,8 +41,9 @@ def _dates(start, month):
     return first.isoformat(), date(year, zero_month + 1, monthrange(year, zero_month + 1)[1]).isoformat()
 
 
-def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
-    """כל הפקדה מתוזמנת בנפרד; המס מופעל רק במכירה המלאה ההיפותטית."""
+def simulate(scenario: Scenario, tax_model: TaxModel | None = None, *, monthly: bool = False) -> dict:
+    """כל הפקדה מתוזמנת בנפרד; המס מופעל רק במכירה המלאה ההיפותטית. `monthly=True` מוסיף שורה לכל חודש (סוף החודש) ל-`monthly`
+    ונכלל ב-digest; ברירת המחדל לא משנה דבר בתוצאה."""
     if not isinstance(scenario, Scenario):
         raise ValueError("simulate requires Scenario")
     start = date.fromisoformat(scenario.start_date)
@@ -54,6 +55,7 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
     contributed = real_contributed = management_cost = buy_cost = fixed_cost = 0.0
     cpi = gross_index = net_index = 1.0
     rows = []
+    month_rows = []
     gross_known = all(a.return_basis == "gross" for a in assets)
 
     def deposit(amount, purchased_on):
@@ -112,18 +114,22 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
             deposit(base * cpi if scenario.index_contributions else base, last)
         value = sum(balances)
         sale_cost = sum(b * a.sell_fee for b, a in zip(balances, assets))
+        if monthly:
+            month_rows.append({"month": month, "as_of": last, "value_after_costs": value, "real_value": value / cpi, "contributions": contributed})
         if (month + 1) % 12 == 0:
             rows.append({
                 "year": year + 1, "as_of": last, "value_before_costs": sum(zero_cost) if gross_known else None,
                 "value_after_costs": value, "real_value": value / cpi,
                 "contributions": contributed, "real_contributions": real_contributed,
                 "nominal_profit": value - contributed, "real_profit": value / cpi - real_contributed,
-                "management_cost": management_cost, "buy_cost": buy_cost, "fixed_cost": fixed_cost,
+                "management_cost": management_cost, "buy_cost": buy_cost,
                 "costs_paid": management_cost + buy_cost + fixed_cost,
                 "cost_impact": sum(zero_cost) - value if gross_known else None,
                 "cpi": cpi, "sale_cost": sale_cost, "proceeds_before_tax": value - sale_cost,
                 "tax_during_accumulation": 0.0,
             })
+            if scenario.monthly_fixed_cost:
+                rows[-1]["fixed_cost"] = fixed_cost
     final = dict(rows[-1])
     final.update({
         "nominal_annualized_twr_before_costs": gross_index ** (1 / scenario.years) - 1 if gross_known else None,
@@ -171,6 +177,8 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
             "geometric_mean_effective_annual": math.expm1(math.fsum(math.log1p(r) for r in effective) / scenario.years),
         }
     inputs = asdict(scenario)
+    if not scenario.monthly_fixed_cost:
+        inputs.pop("monthly_fixed_cost")           # שדה חדש מופיע רק כשנעשה בו שימוש — digest של תרחישים קיימים לא משתנה
     result = {
         "engine_version": ENGINE_VERSION, "currency": "ILS", "result_type": scenario.result_type,
         "inputs": inputs, "assumptions": {
@@ -188,6 +196,8 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None) -> dict:
         "purchase_lots": [asdict(lot) for lot in lots],
         "tax_assessment": asdict(assessment) if assessment else None,
     }
+    if monthly:
+        result["monthly"] = month_rows
     try:
         serialized = json.dumps(result, sort_keys=True, allow_nan=False, separators=(",", ":"))
     except (ValueError, TypeError, OverflowError) as error:

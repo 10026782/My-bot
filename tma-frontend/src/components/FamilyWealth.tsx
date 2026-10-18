@@ -161,7 +161,14 @@ export function ForecastResult({ view }: { view: FccAccountsForecast }) {
       {m.rows.length > 0 && (
         <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
           <thead><tr>{m.head.map((h) => <th key={h}>{h}</th>)}</tr></thead>
-          <tbody>{m.rows.map((r) => <tr key={r.id}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""} title={i === 3 ? r.feeHint : undefined}>{c}</td>)}</tr>)}</tbody>
+          <tbody>{m.rows.map((r) => <tr key={r.id}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""} title={i === 3 ? r.feeHint : i === 0 ? r.liquidity || undefined : undefined}>{c}</td>)}</tr>)}</tbody>
+        </table></div></Surface>
+      )}
+      {m.goals.length > 0 && (
+        <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+          <caption dir="auto">כיסוי מטרות — פוטנציאלי בלבד, לפי ״נגיש מאומת״, בערך נומינלי בחודש היעד. אותו כסף עשוי להופיע בכמה מטרות.</caption>
+          <thead><tr>{m.goalHead.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{m.goals.map((g) => <tr key={g.id}>{g.cells.map((c, i) => <td key={i} className={i && i < 4 ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
         </table></div></Surface>
       )}
       <ul className="pl-list pl-list--small" dir="auto">{m.notes.map((n) => <li key={n}>{n}</li>)}</ul>

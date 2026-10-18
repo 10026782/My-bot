@@ -168,7 +168,7 @@ def test_insurance_cost_reduces_the_result_and_is_reported_separately():
 
 def test_data_gaps_list_every_account_with_missing_inputs_and_an_unknown_choice_counts_as_missing():
     full = acct("recA", 100000, fee=0.5, planned_monthly_deposit=500, deposit_fee_pct=1, expected_return_pct=5, investment_track="mixed",
-                linkage="none", insurance_cost_monthly=0, insurance_cost_as_of="2026-01-01")
+                linkage="none", insurance_cost_monthly=0, insurance_cost_as_of="2026-01-01", liquidity="immediate")
     out = run(None, plan([full, acct("recB", 1000, investment_track="unknown", linkage="unknown")]))
     assert out["accounts"][0]["missing"] == [] and [g["id"] for g in out["data_gaps"]] == ["recB"]
     assert {"investment_track", "linkage", "management_fee"} <= set(out["data_gaps"][0]["missing"])
@@ -231,3 +231,161 @@ def test_historical_deposits_are_not_assumed_to_continue_and_a_snapshot_is_not_t
     assert view["accounts"][0]["balance"]["value"] == 100000 and view["accounts"][0]["balance"]["estimate"]["movements_since"] == 500    # the old deposit is inside the snapshot
     out = build_accounts_forecast(view, {"years": 10}, TODAY)["accounts"][0]
     assert out["start_value"] == 100000 and out["monthly_contribution"] == 0.0 and out["monthly_contribution_source"] == "default"    # no recurring deposit inferred
+
+
+# ═══ D1 step 10 / A2: three liquidity states + goal coverage (monthly, server side) ═══
+FLAT = {"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}      # constant balances: a state change is the only thing that moves a bucket
+
+
+def goal(gid="g1", category="savings", target=1000, end="2027-12-31", status="active", title="מטרה"):
+    return {"id": gid, "title": title, "category": category, "status": status, "target_amount": target, "end_date": end}
+
+
+def cover(accounts, goals, params=None):
+    return build_accounts_forecast(plan(accounts), {**FLAT, **(params or {})}, TODAY, goals=goals)
+
+
+def item(out, gid="g1"):
+    return next(g for g in out["goals"] if g["id"] == gid)
+
+
+def test_engine_monthly_rows_are_opt_in_and_default_digests_are_unchanged():
+    base = Scenario(years=30, initial=0.0, monthly_contribution=8000.0, inflation=0.02, start_date="2026-01-01", assets=(Asset(),))
+    default = simulate(base)
+    assert "monthly" not in default and "monthly_fixed_cost" not in default["inputs"] and "fixed_cost" not in default["annual"][0]
+    assert default["replay_digest"] == "a993cee736cb0cc3342f105ae7266cd175ff13ba9a03b3546fb25ed5a33b53c4"       # same as before the fixed-cost feature
+    m = simulate(base, monthly=True)
+    assert len(m["monthly"]) == 360 and m["monthly"][11]["value_after_costs"] == m["annual"][0]["value_after_costs"]
+    assert m["monthly"][0]["as_of"] == "2026-01-31" and m["final"] == default["final"]
+
+
+def test_each_account_lands_in_exactly_one_state_and_release_dates_apply_at_the_month_not_the_year():
+    out = cover([acct("recI", 1000, liquidity="immediate"),
+                 acct("recS", 5000, liquidity="locked_until_date", liquid_from="2027-11-28"),
+                 acct("recP", 20000, liquidity="age_based", liquid_from="2040-03-15", account_type="pension"),
+                 acct("recU", 300, liquidity="unknown"),
+                 acct("recN", 700, liquidity="age_based")],
+                [goal("oct", target=1, end="2027-10-31"), goal("nov", target=1, end="2027-11-05")])
+    oct_, nov = item(out, "oct"), item(out, "nov")
+    assert (oct_["accessible_value"], oct_["conditional_value"], oct_["locked_value"]) == (1000.0, 300.0, 5000 + 20000 + 700)     # Oct 2027: study fund still locked
+    assert (nov["accessible_value"], nov["conditional_value"], nov["locked_value"]) == (1000.0, 300.0 + 5000, 20000 + 700)        # Nov 2027: released month -> conditional, NOT accessible
+    by = {a["id"]: a["liquidity"] for a in out["accounts"]}
+    assert by["recS"] == {"basis": "dated", "liquid_from": "2027-11-28", "state_now": "locked", "state_at_horizon": "conditional"}
+    assert by["recP"]["state_at_horizon"] == "locked" and by["recU"]["basis"] == "unverified" and by["recN"]["basis"] == "undated"
+
+
+def test_accessible_plus_conditional_plus_locked_equals_the_consolidated_value_in_every_period():
+    out = cover([acct("recI", 1234.56, liquidity="immediate"), acct("recS", 7777.77, liquidity="locked_until_date", liquid_from="2029-06-30"),
+                 acct("recP", 98765.43, liquidity="age_based", liquid_from="2033-01-01", account_type="pension"), acct("recU", 55.55)],
+                [], {"annual_return_pct": 6.5, "annual_fee_pct": 0.4, "inflation_pct": 2.1, "years": 15, "monthly_contributions": {"recI": 333.33, "recS": 111.11}})
+    series = out["consolidated"]["series"]
+    assert len(series) == 15
+    for point in series:
+        assert point["accessible"] + point["conditional"] + point["locked"] == pytest.approx(point["nominal"], abs=0.005)
+        assert min(point["accessible"], point["conditional"], point["locked"]) >= 0
+    assert series[0]["locked"] > 0 and series[-1]["locked"] == 0         # the study fund and the pension are released by year 15; nothing is dropped
+
+
+def test_pension_and_unknown_are_never_accessible_even_when_marked_immediate_or_released():
+    out = cover([acct("recP", 90000, liquidity="immediate", account_type="pension", liquid_from="2020-01-01"),
+                 acct("recK", 40000, liquidity="locked_until_date", liquid_from="2020-01-01", account_type="study_fund"),
+                 acct("recU", 500, liquidity="unknown")], [goal(target=1, end="2027-12-31")])
+    g = item(out)
+    assert g["verdict"] == "not_comparable" and g["reason"] == "no_verified_accessible_account"            # no false "short" and no false "covered"
+    assert g["accessible_value"] is None
+    assert out["accounts"][0]["liquidity"]["basis"] == "retirement_immediate" and out["accounts"][0]["liquidity"]["state_now"] == "conditional"
+    assert all(p["accessible"] == 0 for p in out["consolidated"]["series"])
+
+
+def test_a_date_alone_never_makes_money_accessible():
+    out = cover([acct("recK", 40000, liquidity="locked_until_date", liquid_from="2026-01-01"), acct("recI", 10, liquidity="immediate")], [goal(target=39000)])
+    g = item(out)
+    assert g["verdict"] == "short" and g["accessible_value"] == 10.0 and g["conditional_value"] == 40000.0 and g["gap"] == 38990.0
+
+
+def test_goal_verdicts_covered_short_and_the_gap():
+    accounts = [acct("recI", 1000, liquidity="immediate")]
+    assert item(cover(accounts, [goal(target=1000)]))["verdict"] == "covered"
+    assert item(cover(accounts, [goal(target=999.99)]))["verdict"] == "covered"
+    short = item(cover(accounts, [goal(target=1500.5)]))
+    assert (short["verdict"], short["gap"], short["accessible_value"]) == ("short", 500.5, 1000.0)
+    assert short["due_month"] == "2027-12" and short["target_amount"] == 1500.5
+
+
+def test_goal_value_is_read_at_the_due_month_from_monthly_rows_not_the_previous_year_end():
+    out = cover([acct("recI", 1000, liquidity="immediate")], [goal("mar", target=1, end="2027-03-31"), goal("dec", target=1, end="2026-12-10")],
+                {"monthly_contributions": {"recI": 100}})
+    assert item(out, "dec")["accessible_value"] == 1000 + 3 * 100          # Oct, Nov, Dec 2026 month-end deposits (start month = Oct 2026)
+    assert item(out, "mar")["accessible_value"] == 1000 + 6 * 100          # Oct 2026 .. Mar 2027
+    year_end = out["consolidated"]["series"][0]["accessible"]
+    assert year_end == 1000 + 12 * 100 and item(out, "mar")["accessible_value"] != year_end
+
+
+def test_goal_is_not_comparable_with_a_named_reason_and_never_a_guess():
+    acc = [acct("recI", 1000, liquidity="immediate")]
+    assert item(cover(acc, [goal(target=None)]))["reason"] == "missing_target"
+    assert item(cover(acc, [goal(target=0)]))["reason"] == "missing_target"
+    assert item(cover(acc, [goal(end=None)]))["reason"] == "missing_date"
+    assert item(cover(acc, [goal(end="not a date")]))["reason"] == "missing_date"
+    assert item(cover(acc, [goal(end="2026-09-30")]))["reason"] == "past_date"
+    assert item(cover(acc, [goal(end="2036-10-31")]))["reason"] == "beyond_horizon"          # the horizon is 10 years from Oct 2026 (last month Sep 2036)
+    assert item(cover(acc, [goal(end="2036-09-30")]))["verdict"] == "covered"
+    for g in cover(acc, [goal(target=None)])["goals"]:
+        assert g["verdict"] == "not_comparable" and g["gap"] is None and g["accessible_value"] is None
+
+
+def test_only_the_approved_categories_and_active_goals_take_part():
+    acc = [acct("recI", 1000, liquidity="immediate")]
+    goals = [goal(f"g-{c}", c) for c in ("long_term", "emergency_fund", "investment", "savings")] + [
+        goal("inc", "income"), goal("debt", "debt"), goal("proj", "project"), goal("old", "savings", status="done"), goal("odd", None), "junk", None]
+    out = cover(acc, goals)
+    assert [g["id"] for g in out["goals"]] == ["g-long_term", "g-emergency_fund", "g-investment", "g-savings"]
+    assert out["goals_skipped"] == {"other_category": 4, "inactive": 1}
+
+
+def test_emergency_fund_is_checked_against_immediate_accounts_only():
+    out = cover([acct("recI", 800, liquidity="immediate"), acct("recK", 50000, liquidity="locked_until_date", liquid_from="2026-01-01"),
+                 acct("recU", 9000)], [goal("em", "emergency_fund", target=1000)])
+    em = item(out, "em")
+    assert (em["verdict"], em["accessible_value"], em["gap"]) == ("short", 800.0, 200.0)
+    only_conditional = cover([acct("recK", 50000, liquidity="locked_until_date", liquid_from="2026-01-01")], [goal("em", "emergency_fund", target=1000)])
+    assert item(only_conditional, "em")["reason"] == "no_verified_accessible_account"
+
+
+def test_the_same_money_may_cover_several_goals_and_nothing_is_allocated_or_recommended():
+    out = cover([acct("recI", 1000, liquidity="immediate")], [goal("a", "savings", target=800), goal("b", "long_term", target=900), goal("c", "investment", target=1000)])
+    assert [g["verdict"] for g in out["goals"]] == ["covered"] * 3 and {g["accessible_value"] for g in out["goals"]} == {1000.0}         # no allocation
+    text = " ".join(out["warnings"])
+    assert "אותו כסף" in text and "כיסוי פוטנציאלי" in text and "אין כאן המלצת השקעה או משיכה" in text
+    assert out["consolidated"]["series"][0]["accessible"] == 1000.0                              # the pool itself is not reduced by goals
+
+
+def test_no_money_is_counted_twice_across_states_or_by_the_deposit_fee():
+    out = cover([acct("recI", 1000, liquidity="immediate"), acct("recS", 2000, liquidity="locked_until_date", liquid_from="2026-12-31")],
+                [goal(target=1, end="2027-01-31")], {"monthly_contributions": {"recI": 100, "recS": 50}})
+    g = item(out)
+    total = g["accessible_value"] + g["conditional_value"] + g["locked_value"]
+    assert total == pytest.approx(1000 + 4 * 100 + 2000 + 4 * 50)                                  # Oct..Jan: each deposit lands once, in its own account's state
+    assert g["conditional_value"] == pytest.approx(2000 + 4 * 50)                                  # released in Dec 2026 -> conditional, not also accessible
+
+
+def test_without_goals_or_liquidity_fields_the_forecast_is_backward_compatible():
+    out = run({"years": 10})
+    assert out["goals"] == [] and out["goals_skipped"] == {"other_category": 0, "inactive": 0}
+    a = out["accounts"][0]
+    assert a["liquidity"]["basis"] == "unverified" and "liquidity" in a["missing"] and a["final_nominal"] > 0
+    assert all(p["accessible"] == 0 and p["locked"] == 0 and p["conditional"] == p["nominal"] for p in out["consolidated"]["series"])
+    assert {"final_nominal", "final_real", "invested", "costs_paid", "series", "monthly_contribution"} <= set(a)
+
+
+def test_liquidity_gaps_are_reported_as_missing_inputs():
+    out = cover([acct("recA", 10, liquidity="locked_until_date"), acct("recB", 10, liquidity="age_based", liquid_from="2040-01-01"), acct("recC", 10)], [])
+    miss = {a["id"]: a["missing"] for a in out["accounts"]}
+    assert "liquid_from" in miss["recA"] and "liquid_from" not in miss["recB"] and "liquidity" in miss["recC"]
+
+
+def test_input_view_and_goals_are_not_mutated():
+    accounts, goals = [acct("recI", 1000, liquidity="immediate")], [goal()]
+    before = copy.deepcopy((accounts, goals))
+    cover(accounts, goals)
+    assert (accounts, goals) == before
