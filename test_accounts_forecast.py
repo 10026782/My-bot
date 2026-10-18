@@ -185,3 +185,49 @@ def test_accounts_overview_reads_the_new_fields_and_tolerates_their_absence():
     assert (row[0]["planned_monthly_deposit"], row[0]["deposit_fee_pct"], row[0]["investment_track"], row[0]["linkage"]) == (2154.0, 1.88, "mixed", "cpi")
     assert (row[0]["expected_return_pct"], row[0]["insurance_cost_monthly"], row[0]["insurance_cost_as_of"]) == (3.5, 120.0, "2026-09-30")
     assert all(row[1][k] is None for k in ("planned_monthly_deposit", "deposit_fee_pct", "investment_track", "linkage", "expected_return_pct", "insurance_cost_monthly"))
+
+
+# ── D1 step 9 review gaps ───────────────────────────────────────────────────────────────────────────────────────────────
+def test_cpi_linkage_does_not_apply_inflation_twice():
+    g = {"years": 10, "annual_fee_pct": 0, "inflation_pct": 5}
+    a = one(g, expected_return_pct=4.0, linkage="cpi")
+    assert a["return_kind"] == "real_to_nominal"
+    assert a["final_real"] == pytest.approx(100000 * 1.04 ** 10, rel=1e-6)           # the real result is the owner's real return, nothing more
+    assert a["final_nominal"] == pytest.approx(100000 * (1.04 * 1.05) ** 10, rel=1e-6)
+    nominal = one(g, expected_return_pct=4.0, linkage="none")                       # same number, not CPI-linked: stays nominal, inflation erodes it
+    assert nominal["final_nominal"] == pytest.approx(100000 * 1.04 ** 10, rel=1e-6) and nominal["final_real"] < a["final_real"]
+
+
+def test_costs_are_counted_once_each_deposit_fee_management_fee_and_insurance():
+    g = {"years": 10, "annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}
+    a = one(g, planned_monthly_deposit=1000, deposit_fee_pct=2.0, insurance_cost_monthly=100, insurance_cost_as_of="2026-01-01")
+    assert a["deposit_fees_paid"] == pytest.approx(2400) and a["insurance_paid"] == pytest.approx(12000)
+    assert a["costs_paid"] == pytest.approx(2400 + 12000)                            # no management fee, no engine buy_fee: nothing counted twice
+    assert a["final_nominal"] == pytest.approx(100000 + 980 * 120 - 12000)
+    assert a["invested"] == pytest.approx(100000 + 1000 * 120)
+    d = simulate(Scenario(years=10, initial=100000.0, monthly_contribution=980.0, inflation=0.0, start_date="2026-10-01", monthly_fixed_cost=100.0,
+                          assets=(Asset(name="account", annual_return=0.0, annual_fee=0.0),)))["final"]
+    assert d["buy_cost"] == 0 and d["management_cost"] == 0                          # the deposit fee is not also an engine buy fee
+
+
+def test_empty_fields_stay_null_in_the_view_and_are_never_coerced_to_zero_by_the_forecast():
+    view = plan([acct("recA", 100000)])
+    before = copy.deepcopy(view)
+    a = run({"years": 10}, view)["accounts"][0]
+    assert view == before                                                            # nothing written back into the input
+    assert a["monthly_contribution_source"] == "default" and a["insurance_cost_known"] is False and a["deposit_fee_known"] is False
+    assert {"monthly_deposit", "deposit_fee", "expected_return", "insurance_cost", "management_fee"} <= set(a["missing"])
+
+
+def test_historical_deposits_are_not_assumed_to_continue_and_a_snapshot_is_not_topped_up():
+    from core.financial_control import accounts as fa
+    from airtable_schema import FinAccountFields as F, FinEventFields as E
+    acc = {"id": "recA", "fields": {F.NAME: "x", F.STATUS: "active"}}
+
+    def ev(rid, kind, amount, day):
+        return {"id": rid, "fields": {E.KIND: {"name": kind}, E.AMOUNT: amount, E.OCCURRED_AT: day, E.ACCOUNT: ["recA"]}}
+    events = [ev("recDold", "deposit", 700, "2026-08-01"), ev("recS", "balance_snapshot", 100000, "2026-10-01"), ev("recDnew", "deposit", 500, "2026-10-05")]
+    view = fa.accounts_overview([acc], events, TODAY)
+    assert view["accounts"][0]["balance"]["value"] == 100000 and view["accounts"][0]["balance"]["estimate"]["movements_since"] == 500    # the old deposit is inside the snapshot
+    out = build_accounts_forecast(view, {"years": 10}, TODAY)["accounts"][0]
+    assert out["start_value"] == 100000 and out["monthly_contribution"] == 0.0 and out["monthly_contribution_source"] == "default"    # no recurring deposit inferred

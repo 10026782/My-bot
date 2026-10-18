@@ -4146,6 +4146,31 @@ def test_http_forecast_unresolved_identity_403_and_nothing_is_written(monkeypatc
     assert (len(DB[Tables.FIN_ACCOUNTS]), len(DB[Tables.FIN_EVENTS])) == before
 
 
+def test_http_forecast_accounts_without_the_new_fields_still_work_and_list_what_is_missing(monkeypatch):
+    seed_accounts()
+    body = forecast(http(monkeypatch, ELIYAHU), {"years": 10}).get_json()
+    a = body["accounts"][0]
+    assert a["start_value"] == 100000 and a["monthly_contribution"] == 0.0 and a["monthly_contribution_source"] == "default"      # the 5000 deposit after the snapshot is not a plan
+    assert a["return_source"] == "default" and a["insurance_cost_known"] is False
+    assert body["data_gaps"] and body["data_gaps"][0]["id"] == "recAE" and "monthly_deposit" in body["data_gaps"][0]["missing"]
+
+
+def test_http_forecast_reads_the_new_account_fields_but_a_scenario_cannot_write_them_back(monkeypatch):
+    seed_accounts()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"].update({ACF.PLANNED_MONTHLY_DEPOSIT: 1500, ACF.EXPECTED_RETURN: 4.0, ACF.LINKAGE: {"name": "cpi"},
+                                                 ACF.INSURANCE_COST_MONTHLY: 120, ACF.INSURANCE_COST_AS_OF: "2026-09-30"})
+    import copy as _copy
+    before = _copy.deepcopy(DB[Tables.FIN_ACCOUNTS])
+    c = http(monkeypatch, ELIYAHU)
+    a = forecast(c, {"years": 10}).get_json()["accounts"][0]
+    assert (a["monthly_contribution"], a["monthly_contribution_source"], a["return_kind"], a["insurance_cost_monthly"]) == (1500.0, "account", "real_to_nominal", 120.0)
+    typed = forecast(c, {"years": 10, "monthly_contributions": {"recAE": 300}}).get_json()["accounts"][0]
+    assert (typed["monthly_contribution"], typed["monthly_contribution_source"]) == (300.0, "typed")
+    for field in ("planned_monthly_deposit", "expected_return_pct", "insurance_cost_monthly", "linkage"):
+        assert forecast(c, {"years": 10, field: 1}).status_code == 400                      # only assumptions are accepted, never account fields
+    assert DB[Tables.FIN_ACCOUNTS] == before                                                  # a scenario never changes the stored account
+
+
 # ═══ D1 step 8: account writes (balance snapshot / deposit) through the shared draft -> review -> אשר flow ═══
 def seed_account_writes():
     seed_accounts()
