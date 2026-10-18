@@ -3262,6 +3262,7 @@
 .pl-table { inline-size: 100%; border-collapse: collapse; font-size: 14px; }
 .pl-table th, .pl-table td { padding: 6px 8px; text-align: start; border-block-end: 1px solid var(--boss-color-border); }
 .pl-table .pl-num { direction: ltr; text-align: end; white-space: nowrap; }
+.pl-table .pl-row--warn td { background: color-mix(in srgb, var(--boss-color-warning, #d99a00) 14%, transparent); }
 .pl-list { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; }
 .pl-list--small { font-size: 12px; color: var(--boss-color-text-muted); margin-block-start: 8px; }
 @media (max-width: 480px) { .pl-table th, .pl-table td { padding: 6px 5px; font-size: 13px; } }

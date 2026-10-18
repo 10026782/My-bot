@@ -793,8 +793,28 @@ export interface FccForecastPoint { year: number; nominal: number; real: number;
 export interface FccGoalCoverage {
   id: string | null; title: string | null; category: string; target_amount: number | null; due_month: string | null;
   verdict: "covered" | "short" | "not_comparable";
-  reason: "missing_target" | "missing_date" | "past_date" | "beyond_horizon" | "no_verified_accessible_account" | null;
+  reason: "missing_target" | "missing_date" | "past_date" | "beyond_horizon" | "no_verified_accessible_account" | "over_allocated" | "allocated_not_accessible"
+        | "allocation_not_yet_effective" | "allocation_effective_after_due" | null;
   gap: number | null; accessible_value: number | null; conditional_value: number | null; locked_value: number | null;
+  /** B2: "allocation" = counted from the owner's allocation rows only; "potential" = A2 coverage of all accessible money. All numbers are the server's. */
+  basis?: "allocation" | "potential"; planned_allocated_value?: number | null; allocated_value?: number | null; allocation_gap?: number | null;
+  allocation_capped?: boolean; allocated_elsewhere_accessible?: number; unallocated_accessible_value?: number | null; potential_caveat?: "allocated_elsewhere" | null;
+}
+/** B2 allocation overview (server-computed, read-only). An allocation is a label on money, never a movement and never liquidity. */
+export interface FccAllocationAccount {
+  id: string; name: string | null; value: number; as_of: string | null; liquidity_state: FccLiquidityState; allocated: number; allocated_pct: number | null;
+  unallocated: number; over_allocated: boolean; over_by: number;
+  allocations: { id: string; goal_id: string; goal_title: string | null; mode: "percent" | "fixed_amount"; percent: number | null; amount: number | null; resolved_amount: number; counted: boolean }[];
+}
+export interface FccAllocationGoal {
+  id: string; title: string | null; allocated: number; accessible: number; conditional: number; locked: number;
+  blocked_by_over_allocation: number; status: "ok" | "partial_over_allocation" | "blocked_over_allocation";
+}
+export interface FccAllocations {
+  as_of: string; has_allocations: boolean; count: number;
+  totals: { accounts_value: number; allocated: number; unallocated: number; over_allocated: number };
+  accounts: FccAllocationAccount[]; goals: FccAllocationGoal[]; skipped: Record<string, number>;
+  over_allocated_accounts: number; duplicate_goal_account_pairs: number;
 }
 export interface FccForecastAccount {
   id: string; name: string | null; account_type: string | null; start_value: number; start_as_of: string; verification: string | null;
@@ -816,6 +836,7 @@ export interface FccAccountsForecast {
   excluded: { without_snapshot: number; closed: number };
   data_gaps?: { id: string; name: string | null; missing: string[] }[];
   goals?: FccGoalCoverage[]; goals_skipped?: { other_category: number; inactive: number };
+  allocations?: FccAllocations;
   all_self_reported: boolean | null; warnings: string[]; as_of: string;
 }
 

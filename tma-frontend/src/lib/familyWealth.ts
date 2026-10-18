@@ -147,6 +147,7 @@ export function forecastParams(form: ForecastForm): { ok: true; params: FccForec
 export interface ForecastModel {
   total: SavingsRow[]; head: string[]; rows: { id: string; cells: string[]; feeHint: string; liquidity: string }[]; chart: ReturnType<typeof lineChartModel> | null; notes: string[];
   goalHead: string[]; goals: { id: string; cells: string[]; verdict: string }[];
+  allocations: AllocationModel | null;
 }
 /** What the server reports as missing per account, in the owner's words (a missing input is shown, never filled in). */
 const MISSING_LABELS: Record<string, string> = {
@@ -159,7 +160,58 @@ export const GOAL_HEAD = ["מטרה", "יעד", "חודש יעד", "נגיש מ�
 const GOAL_REASONS: Record<string, string> = {
   missing_target: "חסר סכום יעד", missing_date: "חסר תאריך יעד", past_date: "תאריך היעד עבר", beyond_horizon: "מעבר לאופק התחזית",
   no_verified_accessible_account: "אין חשבון נגיש מאומת",
+  over_allocated: "חשבון מזין בהקצאת יתר — לא מחושב",
+  allocated_not_accessible: "הוקצה, אך לא נגיש (מותנה או נעול)",
+  allocation_not_yet_effective: "ההקצאה טרם נכנסה לתוקף בחודש הקריאה",
+  allocation_effective_after_due: "ההקצאה נכנסת לתוקף אחרי תאריך היעד",
 };
+const LIQUIDITY_STATE_LABELS: Record<string, string> = { accessible: "נגיש", conditional: "מותנה", locked: "נעול" };
+const SKIPPED_LABELS: Record<string, string> = {
+  inactive: "הקצאות שאינן פעילות", status_missing: "הקצאות בלי סטטוס", invalid_link: "הקצאות עם קישור לא תקין", unknown_link: "הקצאות שאינן שלך או שאינן מוכרות",
+  invalid_value: "הקצאות עם ערך לא תקין", account_closed: "הקצאות לחשבון סגור", no_snapshot: "הקצאות לחשבון בלי יתרה", not_yet_effective: "הקצאות שטרם נכנסו לתוקף",
+};
+export const ALLOCATION_TITLE = "הקצאות מטרות";
+export const ALLOCATION_NOTE = "הקצאה היא תווית על כסף שכבר קיים: היא אינה העברה, אינה הפקדה או משיכה, ואינה הופכת כסף לנזיל. הסכומים מחושבים בשרת מהשורות שהזנת ב-Airtable; המסך לא משנה אותן.";
+export const NO_ALLOCATIONS_MESSAGE = "לא הוזנו הקצאות. כיסוי המטרות מחושב כפוטנציאל לפי כל הכסף הנגיש (כפי שהוצג).";
+
+export interface AllocationModel {
+  kpis: SavingsRow[];
+  accountHead: string[]; accounts: { id: string; cells: string[]; over: boolean }[];
+  goalHead: string[]; goals: { id: string; cells: string[]; warn: string }[];
+  notes: string[];
+}
+const ALLOCATION_ACCOUNT_HEAD = ["חשבון", "שווי", "הוקצה", "לא מוקצה", "נזילות היום"];
+const ALLOCATION_GOAL_HEAD = ["מטרה", "הוקצה", "נגיש", "מותנה", "נעול"];
+/** The server's allocation overview as rows. Nothing is derived here beyond text: over-allocation is shown, never clipped to zero. */
+export function allocationsModel(view: FccAccountsForecast): AllocationModel | null {
+  const a = view.allocations;
+  if (!a || !a.has_allocations) return null;
+  const notes: string[] = [];
+  if (a.over_allocated_accounts > 0) notes.push(`${a.over_allocated_accounts} חשבונות בהקצאת יתר — מוצגים בנפרד ואינם נכללים בסכומי "הוקצה" ו"לא מוקצה"; מטרות שמוזנות מהם אינן מחושבות.`);
+  if (a.duplicate_goal_account_pairs > 0) notes.push(`${a.duplicate_goal_account_pairs} זוגות מטרה+חשבון עם יותר משורת הקצאה אחת — הסכומים נסכמו; כדאי לאחד.`);
+  const skipped = Object.entries(a.skipped ?? {}).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${SKIPPED_LABELS[k] ?? k}`);
+  if (skipped.length) notes.push(`לא נספרו: ${skipped.join(", ")}.`);
+  return {
+    kpis: [
+      { key: "value", label: "שווי החשבונות עם יתרה", value: money(a.totals.accounts_value), hint: `נכון ל-${a.as_of} · היתרות האחרונות שדווחו` },
+      { key: "allocated", label: "הוקצה למטרות", value: money(a.totals.allocated), hint: `${a.count} הקצאות בתוקף` },
+      { key: "unallocated", label: "לא מוקצה", value: money(a.totals.unallocated), hint: "בחשבונות שאינם בהקצאת יתר" },
+      { key: "over", label: "הקצאת יתר", value: money(a.totals.over_allocated), hint: a.totals.over_allocated > 0 ? "מוצגת במפורש, אינה מקוזזת" : "אין" },
+    ],
+    accountHead: ALLOCATION_ACCOUNT_HEAD,
+    accounts: a.accounts.filter((x) => x.allocations.length > 0 || x.over_allocated).map((x) => ({
+      id: x.id, over: x.over_allocated,
+      cells: [x.name || "חשבון ללא שם", money(x.value), x.over_allocated ? `${money(x.allocated)} (יתר ${money(x.over_by)})` : money(x.allocated),
+              x.over_allocated ? "הקצאת יתר" : money(x.unallocated), LIQUIDITY_STATE_LABELS[x.liquidity_state] ?? x.liquidity_state],
+    })),
+    goalHead: ALLOCATION_GOAL_HEAD,
+    goals: a.goals.map((g) => ({
+      id: g.id, cells: [g.title || "מטרה ללא שם", money(g.allocated), money(g.accessible), money(g.conditional), money(g.locked)],
+      warn: g.blocked_by_over_allocation > 0 ? `${money(g.blocked_by_over_allocation)} מוזנים מחשבון בהקצאת יתר` : "",
+    })),
+    notes,
+  };
+}
 /** How an account's liquidity was classified, in words that never promise a right to withdraw. */
 export function liquidityLabel(a: FccForecastAccount): string {
   const l = a.liquidity;
@@ -191,19 +243,28 @@ export function forecastModel(view: FccAccountsForecast): ForecastModel {
   // Only goals that can actually be compared get a table row; the rest stay visible as ONE compact "missing for accuracy" line (capped), never a wall of empty rows.
   const incomparable = (view.goals ?? []).filter((g) => g.verdict === "not_comparable");
   if (incomparable.length > 0) {
-    const shown = incomparable.slice(0, MAX_INCOMPARABLE_SHOWN).map((g) => `${g.title || "מטרה ללא שם"} (${GOAL_REASONS[g.reason ?? ""] ?? "לא ניתן להשוואה"})`);
+    const shown = incomparable.slice(0, MAX_INCOMPARABLE_SHOWN).map((g) => `${g.title || "מטרה ללא שם"} (${GOAL_REASONS[g.reason ?? ""] ?? "לא ניתן להשוואה"}${g.basis === "allocation" && g.allocated_value ? ` · הוקצה ${money(g.allocated_value)}` : ""})`);
     const more = incomparable.length - shown.length;
     notes.push(`חסר לדיוק — ${incomparable.length} מטרות בלי השוואה: ${shown.join(", ")}${more > 0 ? ` ועוד ${more}` : ""}.`);
   }
-  const goals = (view.goals ?? []).filter((g) => g.verdict !== "not_comparable").map((g, i) => ({
-    id: g.id ?? `goal-${i}`, verdict: g.verdict,
-    cells: [g.title || "מטרה ללא שם", g.target_amount == null ? "—" : money(g.target_amount), g.due_month ? g.due_month.split("-").reverse().join("/") : "—",
-            g.accessible_value == null ? "—" : money(g.accessible_value),
-            g.verdict === "covered" ? "מכוסה (פוטנציאלית)" : g.verdict === "short" ? `חסר ${money(g.gap ?? 0)}` : (GOAL_REASONS[g.reason ?? ""] ?? "לא ניתן להשוואה")],
-  }));
+  const comparable = (view.goals ?? []).filter((g) => g.verdict !== "not_comparable");
+  const anyAllocation = comparable.some((g) => g.basis === "allocation");
+  const goals = comparable.map((g, i) => {
+    const byAllocation = g.basis === "allocation";
+    // Planned (what the owner entered) and effective (what the account can carry) are shown separately; the entered amount is never reduced.
+    const allocated = !byAllocation ? "—" : (g.allocation_gap ?? 0) > 0.005 ? `בפועל ${money(g.allocated_value ?? 0)} מתוך מתוכנן ${money(g.planned_allocated_value ?? 0)}` : money(g.allocated_value ?? 0);
+    let result = g.verdict === "covered" ? (byAllocation ? "מכוסה לפי ההקצאה" : "מכוסה (פוטנציאלית)") : `חסר ${money(g.gap ?? 0)}${byAllocation ? " לפי ההקצאה" : ""}`;
+    if (!byAllocation && g.potential_caveat === "allocated_elsewhere") {
+      result += ` · ${money(g.allocated_elsewhere_accessible ?? 0)} מהכסף הנגיש כבר מוקצה למטרות אחרות; פנוי בפועל ${money(g.unallocated_accessible_value ?? 0)}`;
+    }
+    const cells = [g.title || "מטרה ללא שם", g.target_amount == null ? "—" : money(g.target_amount), g.due_month ? g.due_month.split("-").reverse().join("/") : "—",
+                   ...(anyAllocation ? [allocated] : []), g.accessible_value == null ? "—" : money(g.accessible_value), result];
+    return { id: g.id ?? `goal-${i}`, verdict: g.verdict, cells };
+  });
   const hasLiquidity = c.series.length > 0 && c.series[0].accessible !== undefined;
   return {
-    total, head: FORECAST_ACCOUNT_HEAD, notes, goalHead: GOAL_HEAD, goals,
+    total, head: FORECAST_ACCOUNT_HEAD, notes, goalHead: anyAllocation ? [...GOAL_HEAD.slice(0, 3), "הוקצה", ...GOAL_HEAD.slice(3)] : GOAL_HEAD, goals,
+    allocations: allocationsModel(view),
     rows: view.accounts.map((a) => ({
       id: a.id, feeHint: a.fee_source === "account" ? "דמי הניהול של החשבון" : "ברירת המחדל מהקלט", liquidity: liquidityLabel(a),
       cells: [a.name || "חשבון ללא שם", money(a.start_value), a.monthly_contribution ? money(a.monthly_contribution) : "—",
