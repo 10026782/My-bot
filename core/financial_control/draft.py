@@ -22,6 +22,7 @@ from airtable_schema import FinEventFields as EF
 from airtable_schema import AssetFields as AF
 from airtable_schema import LoanFields as LF
 from airtable_schema import FinGoalFields as GF
+from airtable_schema import FundingPlanFields as FPF
 from airtable_schema import RecObFields as RF
 from airtable_schema import TaskFields, Tables
 from commercial_completion import (
@@ -62,7 +63,9 @@ ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
 FCC_ACCOUNT_BALANCE = "fcc_account_balance"  # a dated balance snapshot of ONE of the owner's accounts (Kind=balance_snapshot): a reported FACT
 FCC_ACCOUNT_DEPOSIT = "fcc_account_deposit"  # a deposit into ONE account (Kind=deposit), optionally counted in the savings history of a goal
 ACCOUNT_VERIFICATIONS = ("self_reported", "statement", "bank_or_fund_confirmed")   # the live Financial Progress Events."Verification" choices
-FCC_ENTITIES = (FCC_ACCOUNT_BALANCE, FCC_ACCOUNT_DEPOSIT, FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_RATE, FCC_LOAN_TERM, FCC_LOAN_ORIGINAL, FCC_LOAN_NEW,
+FCC_FUNDING_PLAN = "fcc_funding_plan"      # funding planner step 2: a SAVED snapshot of the plan the owner chose for ONE goal (the numbers are server-built, never typed)
+FUNDING_PLAN_CHOSEN, FUNDING_PLAN_SUPERSEDED = "chosen", "superseded"   # the live Funding Plans.Status choices used by the code
+FCC_ENTITIES = (FCC_FUNDING_PLAN, FCC_ACCOUNT_BALANCE, FCC_ACCOUNT_DEPOSIT, FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_RATE, FCC_LOAN_TERM, FCC_LOAN_ORIGINAL, FCC_LOAN_NEW,
                 FCC_LOAN_PARTIAL, FCC_LOAN_ARRANGEMENT, FCC_RECEIVABLE_NEW, FCC_SOURCE_NEW, FCC_PRIME_CHANGE, FCC_ASSET_VALUE, FCC_ASSET_MORTGAGE, FCC_ASSET_STEP, FCC_ASSET_STEP_EDIT, FCC_ASSET_STEP_STATUS, FCC_ASSET_SOLD)
 STEP_OWNERS = ("אליהו", "אהרן", "אורי", "משפטי", "—")   # the LIVE Assets."Next Step Owner" choices (read 08/10/2026) — never invented
 LOAN_TYPES = ("private", "business", "mortgage")
@@ -296,6 +299,12 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
         _f("goal", EF.GOAL, InputType.LINK),          # set only by the explicit "count it in the goal's deposit history" choice
     )),
+    # Funding planner step 2. The goal, the options, the target and the snapshots live in source_context (built by the server from a fresh
+    # plan, never editable): the owner may add only a free-text reason and an optional re-check date.
+    FCC_FUNDING_PLAN: EntityContract(FCC_FUNDING_PLAN, (
+        _f("note", FPF.DECISION_NOTE, InputType.TEXT),
+        _f("review_by", FPF.REVIEW_BY, InputType.DATE, example="2027-01-31"),
+    )),
     FCC_FOLLOWUP: EntityContract(FCC_FOLLOWUP, (
         _f("title", TaskFields.NAME, InputType.TEXT, required=RequiredMode.ALWAYS),
         _f("goal", EF.GOAL, InputType.LINK),
@@ -316,7 +325,8 @@ LABELS = {
 }
 _STEP_LABELS = {"step": "הפעולה", "due_date": "תאריך יעד"}
 _ARRANGEMENT_LABELS = {"payment": "פירעון חודשי", "end_date": "מועד פירעון"}
-LABELS_BY_ENTITY = {FCC_ACCOUNT_BALANCE: {"balance": "יתרה", "occurred_at": "נכון לתאריך", "verification": "מקור הנתון"},
+LABELS_BY_ENTITY = {FCC_FUNDING_PLAN: {"note": "הערת החלטה", "review_by": "לבדוק שוב עד"},
+                    FCC_ACCOUNT_BALANCE: {"balance": "יתרה", "occurred_at": "נכון לתאריך", "verification": "מקור הנתון"},
                     FCC_ACCOUNT_DEPOSIT: {"amount": "סכום ההפקדה", "occurred_at": "תאריך ההפקדה"},
                     FCC_LOAN_NEW: {"name": "שם ההלוואה"}, FCC_ASSET_STEP: _STEP_LABELS, FCC_ASSET_STEP_EDIT: _STEP_LABELS,
                     FCC_LOAN_PARTIAL: {"amount": "סכום הפרעון", "occurred_at": "תאריך"},
@@ -364,7 +374,7 @@ def display_value(field: str, value: Any) -> str:
     if field in ("target_amount", "amount", "saving", "balance", "payment", "original", "value", "mortgage", "sale_amount") and isinstance(value, (int, float)):
         digits = 2 if round(float(value), 2) != round(float(value)) else 0       # agorot are shown when they exist (what is stored = what is reviewed)
         return f"-₪{abs(value):,.{digits}f}" if value < 0 else f"₪{value:,.{digits}f}"
-    if field in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date") \
+    if field in ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date", "review_by") \
             and isinstance(value, str) and len(value) >= 10:
         y, m, d = value[:10].split("-")
         return f"{d}/{m}/{y}"
@@ -482,7 +492,8 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
             FCC_ASSET_VALUE: "עדכון שווי נכס", FCC_ASSET_MORTGAGE: "עדכון משכנתא בנכס", FCC_ASSET_STEP: f"פעולה הבאה ב{subject}", FCC_ASSET_STEP_EDIT: f"עריכת פעולה ב{subject}",
             FCC_ASSET_STEP_STATUS: f"עדכון סטטוס פעולה ב{subject}", FCC_ASSET_SOLD: "סימון נכס כנמכר",
             FCC_ACCOUNT_BALANCE: "עדכון יתרת חשבון", FCC_ACCOUNT_DEPOSIT: "הפקדה לחשבון",
-            FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי", FCC_SOURCE_NEW: "מקור הכנסה חדש", FCC_PRIME_CHANGE: "שינוי ריבית פריים"}[entity]
+            FCC_LOAN_PARTIAL: "פרעון חלקי", FCC_LOAN_ARRANGEMENT: "הסדר פירעון", FCC_RECEIVABLE_NEW: "חוב חדש שחייבים לי", FCC_SOURCE_NEW: "מקור הכנסה חדש", FCC_PRIME_CHANGE: "שינוי ריבית פריים",
+            FCC_FUNDING_PLAN: "שמירת תוכנית מימון"}[entity]
     lines.append(f"📋 {head}")
     if note and entity != FCC_ASSET_SOLD:
         lines.append(note)
@@ -515,6 +526,9 @@ def render_review(entity: str, fields: Mapping[str, Any], *, goal_title: str = "
         lines.append("תיווצר הלוואה פעילה בבעלותך.")
     if entity == FCC_PRIME_CHANGE:
         lines.append("יתעדכנו הריבית וההחזר החודשי של כל ההלוואות שלך (לא חובות שחייבים לך) + שורת היסטוריה בהערות. אחרי שהבנק מפרסם את ההחזר שלו אפשר לתקן הלוואה: ״שינוי החזר״.")
+    if entity == FCC_FUNDING_PLAN:
+        lines.append("תישמר תמונת מצב של התוכנית כפי שמוצגת עכשיו (אפשרויות שנבחרו, סכומים, ודאות ותנאים). זו רשומת החלטה בלבד: "
+                     "היא לא מזיזה כסף, לא פותחת הלוואה או חשבון, לא מוכרת נכס ולא משנה הקצאות, יתרות או יעדים.")
     if entity == FCC_SOURCE_NEW:
         lines.append("ייווצר מקור הכנסה פעיל בתוך יעד ההכנסה הכולל — הוא נספר בתוכו ולא מעליו.")
     if entity == FCC_RECEIVABLE_NEW:
@@ -782,6 +796,28 @@ def loan_arrangement_writes(values: Mapping[str, Any], source: Mapping[str, Any]
              "audit_action": "fcc_loan_arrangement", "audit_details": loan_id}]
 
 
+def funding_plan_writes(values: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict]:
+    """Funding planner step 2: first the goal's earlier saved plans become ``superseded`` (a retry of this draft is idempotent on them), then
+    ONE new ``chosen`` snapshot. The goal, target, options and the three JSON snapshots were frozen into the draft by the server from a fresh
+    plan; the owner supplied only the reason and the re-check date. Nothing else is written — no allocation, deposit, loan or sale."""
+    goal_id = str(source.get("goal_id") or "")
+    if not goal_id or not source.get("selected_json"):
+        raise UnsupportedOperationError("funding plan without a goal or selected options")
+    writes = [{"op": "patch", "table": Tables.FUNDING_PLANS, "record_id": str(rid), "fields": {FPF.STATUS: FUNDING_PLAN_SUPERSEDED},
+               "audit_action": "fcc_funding_plan_supersede", "audit_details": str(rid)} for rid in source.get("supersede_ids") or []]
+    fields = {FPF.NAME: str(source.get("plan_name") or "")[:200], FPF.GOAL: [goal_id], FPF.STATUS: FUNDING_PLAN_CHOSEN,
+              FPF.AS_OF: source.get("as_of"), FPF.SELECTED_OPTIONS: source["selected_json"],
+              FPF.REQUEST_SNAPSHOT: source.get("request_json") or "", FPF.RESULT_SNAPSHOT: source.get("result_json") or ""}
+    if source.get("target_amount") is not None:
+        fields[FPF.TARGET_AMOUNT] = source["target_amount"]
+    for name, spec in (("note", FPF.DECISION_NOTE), ("review_by", FPF.REVIEW_BY)):
+        if values.get(name) not in (None, ""):
+            fields[spec] = values[name]
+    writes.append({"op": "post", "table": Tables.FUNDING_PLANS, "fields": fields,
+                   "audit_action": "fcc_funding_plan_save", "audit_details": goal_id})
+    return writes
+
+
 def source_new_write(values: Mapping[str, Any], source: Mapping[str, Any]) -> dict:
     """A new income SOURCE: an active ``income`` goal measured by period sum, linked to the total income goal ("Contributes To"), so it is
     counted inside it and never on top. The parent was validated as the caller's own when the draft opened and is checked again at execution."""
@@ -943,6 +979,8 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": [receivable_new_write(values, writer.source_context)]}
         if entity == FCC_SOURCE_NEW:
             return {"writes": [source_new_write(values, writer.source_context)]}
+        if entity == FCC_FUNDING_PLAN:
+            return {"writes": funding_plan_writes(values, writer.source_context)}
         if entity == FCC_PRIME_CHANGE:
             return {"writes": prime_change_writes(values, writer.source_context)}
         if entity == FCC_FOLLOWUP:

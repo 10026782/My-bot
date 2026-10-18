@@ -4857,6 +4857,7 @@ def _fcc_enabled(identity=None) -> bool:
 @tma_api.route("/api/fcc/accounts", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/accounts/forecast", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/funding/plan/save", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/write", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/loans/scenario", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/intent/start", methods=["OPTIONS"])
@@ -4948,56 +4949,97 @@ def fcc_accounts_forecast(identity):
         _PL_COMPUTE.release()
 
 
-@tma_api.route("/api/fcc/funding/plan", methods=["POST"])
-@require_tma_auth
-def fcc_funding_plan(identity):
-    """Goal Funding Planner (step 1, GOAL_FUNDING_PLANNER_SPEC): a goal -> a neutral comparison of ways to fund it. The body carries only the
-    goal ids, assumptions, typed options and an optional allocation plan; goals, accounts, assets, loans and obligations are read server-side
-    from the caller's own rows. Same gate as the forecast (flag AND canary AND owner, 404 for everyone else). Writes nothing."""
+def _funding_body(identity):
+    """Shared prelude of the funding-planner routes: gate (flag AND canary AND owner, 404 for everyone else), JSON size/limit checks, parsed body.
+    Returns ``(body, None)`` or ``(None, error_response)``."""
     global _PL_LIMITER
     if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
-        return jsonify({"error": "not found"}), 404
+        return None, (jsonify({"error": "not found"}), 404)
     if request.mimetype != "application/json":
-        return jsonify({"error": "Content-Type must be application/json"}), 415
+        return None, (jsonify({"error": "Content-Type must be application/json"}), 415)
     length = request.content_length
     if length is None:
-        return jsonify({"error": "Content-Length required"}), 411
+        return None, (jsonify({"error": "Content-Length required"}), 411)
     if not 0 < length <= _PL_MAX_BODY:
-        return jsonify({"error": "body too large"}), 413
+        return None, (jsonify({"error": "body too large"}), 413)
     if _PL_LIMITER is None:
         from guards.rate_limiter import RateLimiter  # noqa: PLC0415
         _PL_LIMITER = RateLimiter(max_per_minute=12)
     if not _PL_LIMITER.is_allowed(f"portfolio_lab:{identity.user_id}"):
-        return jsonify({"error": "too many requests"}), 429
+        return None, (jsonify({"error": "too many requests"}), 429)
     try:
-        body = json.loads(request.get_data(cache=False))
+        return json.loads(request.get_data(cache=False)), None
     except (ValueError, UnicodeDecodeError):
-        return jsonify({"error": "invalid JSON"}), 400
+        return None, (jsonify({"error": "invalid JSON"}), 400)
+
+
+def _funding_compute(identity, body):
+    """Normalise the request, read the caller's OWN data and build the plan. Returns ``(request, plan, None)`` or ``(None, None, error_response)``."""
     from core.financial_control import service as fcc_service  # noqa: PLC0415
     from portfolio_lab.funding_plan import build_funding_plan, normalize_request  # noqa: PLC0415
     try:
         funding_request = normalize_request(body)             # reject bad input before any Airtable read
         inputs = fcc_service.funding_inputs(identity)
     except data_access_policy.PersonalDataAccessDenied:
-        return jsonify({"error": "forbidden"}), 403
+        return None, None, (jsonify({"error": "forbidden"}), 403)
     except (ValueError, TypeError, OverflowError) as error:
-        return jsonify({"error": str(error)}), 400          # validation text only (no internals, no amounts)
+        return None, None, (jsonify({"error": str(error)}), 400)          # validation text only (no internals, no amounts)
     except Exception:                                        # noqa: BLE001 — never leak internals
         logger.exception("[fcc] funding plan read failed")
-        return jsonify({"error": "internal error"}), 500
+        return None, None, (jsonify({"error": "internal error"}), 500)
     if not _PL_COMPUTE.acquire(timeout=5):
-        return jsonify({"error": "busy"}), 503
+        return None, None, (jsonify({"error": "busy"}), 503)
     try:
-        return jsonify(build_funding_plan(inputs, funding_request))
+        return funding_request, build_funding_plan(inputs, funding_request), None
     except KeyError:
-        return jsonify({"error": "invalid request"}), 400
+        return None, None, (jsonify({"error": "invalid request"}), 400)
     except (ValueError, TypeError, OverflowError) as error:
-        return jsonify({"error": str(error)}), 400
+        return None, None, (jsonify({"error": str(error)}), 400)
     except Exception:                                        # noqa: BLE001
         logger.exception("[fcc] funding plan failed")
-        return jsonify({"error": "internal error"}), 500
+        return None, None, (jsonify({"error": "internal error"}), 500)
     finally:
         _PL_COMPUTE.release()
+
+
+@tma_api.route("/api/fcc/funding/plan", methods=["POST"])
+@require_tma_auth
+def fcc_funding_plan(identity):
+    """Goal Funding Planner (step 1, GOAL_FUNDING_PLANNER_SPEC): a goal -> a neutral comparison of ways to fund it. The body carries only the
+    goal ids, assumptions, typed options and an optional allocation plan; goals, accounts, assets, loans and obligations are read server-side
+    from the caller's own rows. Same gate as the forecast (flag AND canary AND owner, 404 for everyone else). Writes nothing."""
+    body, err = _funding_body(identity)
+    if err:
+        return err
+    _request, plan, err = _funding_compute(identity, body)
+    return err if err else jsonify(plan)
+
+
+@tma_api.route("/api/fcc/funding/plan/save", methods=["POST"])
+@require_tma_auth
+def fcc_funding_plan_save(identity):
+    """Funding planner step 2: body = the plan request for ONE goal + ``selected`` (option ids to keep). The server recomputes the plan from the
+    caller's own data (no client numbers are saved) and opens a draft; nothing is written here. The owner reviews it and confirms with "אשר"
+    on /api/fcc/write — the existing draft -> review -> ActionGateway path — which writes ONE row to Funding Plans (and marks the goal's
+    earlier saved plan superseded). Same gate as the planner."""
+    body, err = _funding_body(identity)
+    if err:
+        return err
+    if not isinstance(body, dict) or "selected" not in body:
+        return jsonify({"error": "selected required"}), 400
+    selected = body["selected"]
+    funding_request, plan, err = _funding_compute(identity, {k: v for k, v in body.items() if k != "selected"})
+    if err:
+        return err
+    from core.financial_control import conversation as fcc_conv  # noqa: PLC0415
+    try:
+        result = fcc_conv.start_funding_plan_save(identity, funding_request, plan, selected)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] funding plan save start failed")
+        return jsonify({"state": "clarify", "message": "לא הצלחתי לפתוח את שמירת התוכנית כרגע — נסו שוב."}), 200
+    return jsonify(result.to_dict()), (403 if result.state == "denied" else 200)
 
 
 @tma_api.route("/api/fcc/loans/scenario", methods=["GET"])

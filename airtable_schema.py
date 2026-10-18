@@ -75,6 +75,7 @@ class Tables:
     REC_OBLIGATIONS = "Recurring Obligations"      # FCC — live: tblAvpGNDWs1tNoKG (created 06/10/2026), owner-scoped commitments (NOT an expense ledger)
     FIN_EVENTS      = "Financial Progress Events"  # FCC — live: tblqNvcyK34zVjcXP (created 04/10/2026), append-only
     FIN_ACCOUNTS    = "Financial Accounts"         # FCC/D1 — live: tblhV9f86iXMIwKx1 (created 15/10/2026), owner-scoped, EMPTY until the access policy is merged
+    FUNDING_PLANS = "Funding Plans"                # FCC/funding planner step 2 — live: tbl98DXJJgLceESgr (created 18/10/2026), owner-scoped, written ONLY after the owner's אשר
     GOAL_ALLOCATIONS = "Goal Allocations"          # FCC/B2 — live: tblZgqHiBbSeyRTCA (created 18/10/2026), owner-scoped, EMPTY (manual entry)
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
@@ -990,6 +991,24 @@ class GoalAllocationFields:
     NOTES           = "Notes"
     CREATED_AT      = "Created At"        # createdTime
     # reverse links created by Airtable (not read by code): "Goal Allocations" on Financial Goals / Financial Accounts / Profile
+
+
+class FundingPlanFields:
+    """Funding Plans (FCC/funding planner step 2) — LIVE (tbl98DXJJgLceESgr). ONE saved snapshot of a plan the owner chose for ONE goal.
+    A record of a decision as it was shown, never a source of truth for balances. Owner-scoped via FINANCIAL_OWNER. NEVER store account/policy numbers."""
+    NAME            = "Name"
+    GOAL            = "Goal"              # link -> Financial Goals (single record, enforced in data_access_policy)
+    FINANCIAL_OWNER = "Financial Owner"   # multipleRecordLinks -> Profile (PERMISSION only)
+    STATUS          = "Status"            # singleSelect: chosen|superseded|abandoned
+    TARGET_AMOUNT   = "Target Amount"     # number, nominal ₪ as shown when saved
+    AS_OF           = "As Of"             # date the plan was computed
+    REVIEW_BY       = "Review By"         # date, optional
+    SELECTED_OPTIONS = "Selected Options" # JSON [{id,type,use_amount}]
+    REQUEST_SNAPSHOT = "Request Snapshot" # JSON, the planner request
+    RESULT_SNAPSHOT  = "Result Snapshot"  # JSON, the planner result for this goal (server numbers)
+    DECISION_NOTE   = "Decision Note"
+    CREATED_AT      = "Created At"        # createdTime
+    # reverse link created by Airtable (not read by code): "Funding Plans" on Financial Goals / Profile
 
 
 class RecObFields:

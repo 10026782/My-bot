@@ -448,7 +448,7 @@ def test_the_engine_has_no_io_and_only_the_reader_and_endpoint_use_it():
     assert not re.search(r"^\s*(import|from)\s+(requests|httpx|urllib|socket|airtable|tools|anthropic|openai|os|subprocess)\b", src, re.M)
     assert "airtable_gateway" not in src and "Tables." not in src and "propose_action" not in src
     users = sorted(str(p.relative_to(ROOT)) for p in ROOT.rglob("*.py") if "node_modules" not in p.parts and p.name != "funding_plan.py"
-                   and not p.name.startswith("test_") and "funding_plan" in p.read_text(encoding="utf-8"))
+                   and not p.name.startswith("test_") and re.search(r"portfolio_lab\.funding_plan|from portfolio_lab import funding_plan|import funding_plan", p.read_text(encoding="utf-8")))
     assert users == ["tma_api.py"]
     svc = (ROOT / "core" / "financial_control" / "service.py").read_text(encoding="utf-8")
     body = svc[svc.index("def funding_inputs"):svc.index("def overview(")]
