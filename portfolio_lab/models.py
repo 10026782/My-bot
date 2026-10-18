@@ -85,6 +85,7 @@ class Scenario:
     monthly_contribution: float | tuple[float, ...] = 8000.0
     inflation: float | tuple[float, ...] = 0.02
     index_contributions: bool = False
+    monthly_fixed_cost: float = 0.0
     deposit_timing: str = "end"
     start_date: str = "2026-01-01"
     assets: tuple[Asset, ...] = field(default_factory=lambda: (Asset(),))
@@ -95,6 +96,7 @@ class Scenario:
         if type(self.years) is not int or not 10 <= self.years <= 100:
             raise ValueError("years must be an integer from 10 to 100")
         number(self.initial, "initial", 0)
+        number(self.monthly_fixed_cost, "monthly_fixed_cost", 0)
         if type(self.index_contributions) is not bool:
             raise ValueError("index_contributions must be boolean")
         if self.deposit_timing not in {"begin", "end"}:

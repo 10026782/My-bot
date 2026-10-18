@@ -962,6 +962,15 @@ class FinAccountFields:
     CLOSED_AT       = "Closed At"
     NOTES           = "Notes"             # NO full account/policy numbers
     CREATED_AT      = "Created At"        # createdTime
+    # תשומות תחזית (D1 שלב 9) — ערכי הבעלים בלבד, שדה ריק = לא ידוע ולא מומצא; נקראים ב-accounts_overview, אינם נכתבים מהקוד
+    PLANNED_MONTHLY_DEPOSIT = "Planned Monthly Deposit"  # number, ₪/month — a plan, never a verified standing order
+    DEPOSIT_FEE     = "Deposit Fee %"     # number, % of each deposit (not of the balance)
+    INVESTMENT_TRACK = "Investment Track"  # singleSelect: equities|bonds|mixed|index_tracking|money_market|unknown
+    LINKAGE         = "Linkage"           # singleSelect: none|cpi|sp500|other_index|fx|unknown (הצמדה)
+    LINKAGE_NOTES   = "Linkage Notes"     # text — which index / currency
+    EXPECTED_RETURN = "Expected Return %"  # number, annual %; REAL when Linkage=cpi, NOMINAL otherwise
+    INSURANCE_COST_MONTHLY = "Insurance Cost Monthly"  # number, ₪/month (disability + survivors); nominal, held flat
+    INSURANCE_COST_AS_OF = "Insurance Cost As Of"      # date
     # reverse links created by Airtable (not read by code): "Financial Progress Events", "Incoming Transfers"
 
 

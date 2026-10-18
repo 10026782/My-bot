@@ -96,6 +96,13 @@ def accounts_overview(accounts: list[dict], events: list[dict], today: date, own
             "status": _sel(f.get(AF.STATUS)), "liquidity": _sel(f.get(AF.LIQUIDITY)),
             "liquid_from": f.get(AF.LIQUID_FROM) or None, "tax_treatment": _sel(f.get(AF.TAX_TREATMENT)),
             "management_fee_pct": calc._num(f.get(AF.MANAGEMENT_FEE)),
+            "planned_monthly_deposit": calc._num(f.get(AF.PLANNED_MONTHLY_DEPOSIT)),
+            "deposit_fee_pct": calc._num(f.get(AF.DEPOSIT_FEE)),
+            "investment_track": _sel(f.get(AF.INVESTMENT_TRACK)),
+            "linkage": _sel(f.get(AF.LINKAGE)), "linkage_notes": f.get(AF.LINKAGE_NOTES) or None,
+            "expected_return_pct": calc._num(f.get(AF.EXPECTED_RETURN)),
+            "insurance_cost_monthly": calc._num(f.get(AF.INSURANCE_COST_MONTHLY)),
+            "insurance_cost_as_of": f.get(AF.INSURANCE_COST_AS_OF) or None,
             "balance": None if last is None else {
                 "value": last["amount"], "as_of": last["day"].isoformat(), "verification": last["verification"],
                 "estimate": {"value": round(last["amount"] + moved, 2), "movements_since": moved, "movement_count": len(after),

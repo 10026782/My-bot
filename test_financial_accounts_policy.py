@@ -185,6 +185,16 @@ def test_field_names_match_the_live_schema():
     assert Tables.FIN_ACCOUNTS == "Financial Accounts"
 
 
+def test_step9_forecast_input_fields_match_the_live_schema_and_the_cache():
+    import json
+    names = [AF.PLANNED_MONTHLY_DEPOSIT, AF.DEPOSIT_FEE, AF.INVESTMENT_TRACK, AF.LINKAGE, AF.LINKAGE_NOTES, AF.EXPECTED_RETURN,
+             AF.INSURANCE_COST_MONTHLY, AF.INSURANCE_COST_AS_OF]
+    assert names == ["Planned Monthly Deposit", "Deposit Fee %", "Investment Track", "Linkage", "Linkage Notes", "Expected Return %",
+                     "Insurance Cost Monthly", "Insurance Cost As Of"]
+    cached = json.load(open("schema_cache.json"))["tables"]["Financial Accounts"]
+    assert set(names) <= set(cached)
+
+
 # ═══════════════ step 4: no full account / policy numbers in code write paths ═══════════════
 
 LONG = ["1234567890", "1234-5678-9012", "1234 5678 9012", "12 345 678", "1234 - 5678", "חשבון 123456789 בבנק",

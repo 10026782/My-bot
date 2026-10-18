@@ -85,6 +85,38 @@ Planning Gate: **FULL** (persistence + authority + schema + multi-layer).
 - `linked_owner_checks` של `Financial Progress Events` מורחב ב-`Account` וב-`Counter Account`: אסור לקשר לחשבון של אדם אחר.
 - הוספה ל-`_TMA_WRITE_ALLOWED_TABLES` רק אם נכתב דרך זרימת ה-TMA; הכתיבה נשארת טיוטה ← "אשר", ללא כתיבה אוטומטית.
 
+### 3.4 תשומות תחזית לכל חשבון (שלב 9, אושר ע"י הבעלים 18/10/2026)
+
+שמונה שדות בטבלת `Financial Accounts`, כולם ערכי בעלים — ריק = לא ידוע ומוצג כ"חסר לדיוק", לעולם לא מומצא. הקוד קורא אותם ב-`accounts_overview` ואינו כותב אותם.
+
+| שדה | סוג | משמעות |
+|---|---|---|
+| `Planned Monthly Deposit` | number | הפקדה חודשית מתוכננת (₪); תכנון, לא הוראת קבע מאומתת. הקלדה במסך גוברת |
+| `Deposit Fee %` | number | דמי ניהול מההפקדה (%), מנוכים מכל הפקדה לפני המנוע; "הושקע" נשאר ברוטו |
+| `Investment Track` | singleSelect | `equities` / `bonds` / `mixed` / `index_tracking` / `money_market` / `unknown` — תיעוד |
+| `Linkage` | singleSelect | `none` / `cpi` / `sp500` / `other_index` / `fx` / `unknown` (הצמדה) |
+| `Linkage Notes` | text | איזה מדד/מטבע |
+| `Expected Return %` | number | תשואה שנתית צפויה לחשבון; **ריאלית** כש-`Linkage=cpi` (מומרת לנומינלית בהנחת האינפלציה), נומינלית אחרת |
+| `Insurance Cost Monthly` | number | עלות ביטוח חודשית (נכות+שאירים), נומינלית וקבועה |
+| `Insurance Cost As Of` | date | תאריך נכונות העלות |
+
+כללים: ערך חשבון תקף גובר על ברירת מחדל והמקור מסומן; ערך פגום/מחוץ לטווח נחשב חסר; הצמדה שאינה `cpi` אינה מדמה את המדד (תיעוד בלבד). המנוע קיבל `Scenario.monthly_fixed_cost` (ברירת מחדל 0 = ללא שינוי).
+
+**נוצרו בפועל ב-Airtable (18/10/2026, באישור הבעלים, דרך Airtable MCP `create_field`; כולם ריקים בכל 5 הרשומות, ללא backfill):**
+
+| שדה | Field ID | טיפוס |
+|---|---|---|
+| `Planned Monthly Deposit` | `fldLer9VCD0VTAvtD` | number (2) |
+| `Deposit Fee %` | `fldlQR01XNk364cvY` | number (2) |
+| `Investment Track` | `fldvhl4k3PlbVxzH1` | singleSelect (6 אפשרויות כבטבלה) |
+| `Linkage` | `fldDjYCkbtInKuSFr` | singleSelect (6 אפשרויות כבטבלה) |
+| `Linkage Notes` | `fldeu0VKg6GJpg5ng` | singleLineText |
+| `Expected Return %` | `fldvFlFuqDdGDsB5V` | number (2) |
+| `Insurance Cost Monthly` | `fldCA8JgczUFBfMw0` | number (2) |
+| `Insurance Cost As Of` | `fldqoYL8IwnjPTrEY` | date (ISO) |
+
+לפני היצירה אומת מול הסכמה החיה (`get_table_schema` + `list_tables_for_base`) ש-17 השדות הקיימים אינם מכילים אף אחד מהשמות; אחרי היצירה אומת מחדש. אף שדה קיים לא שונה.
+
 ## 4. בעלות כלכלית מול הרשאות מערכת
 
 **ממצא מ-Contacts:**

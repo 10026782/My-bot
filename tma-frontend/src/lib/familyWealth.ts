@@ -147,6 +147,11 @@ export function forecastParams(form: ForecastForm): { ok: true; params: FccForec
 export interface ForecastModel {
   total: SavingsRow[]; head: string[]; rows: { id: string; cells: string[]; feeHint: string }[]; chart: ReturnType<typeof lineChartModel> | null; notes: string[];
 }
+/** What the server reports as missing per account, in the owner's words (a missing input is shown, never filled in). */
+const MISSING_LABELS: Record<string, string> = {
+  management_fee: "דמי ניהול מהצבירה", deposit_fee: "דמי ניהול מההפקדה", expected_return: "תשואה צפויה", monthly_deposit: "הפקדה חודשית מתוכננת",
+  investment_track: "מסלול השקעה", linkage: "הצמדה", insurance_cost: "עלות ביטוח חודשית", insurance_cost_date: "תאריך עלות הביטוח",
+};
 /** Wording + layout of the server's forecast: totals are the server's consolidated numbers; the chart only scales them. */
 export function forecastModel(view: FccAccountsForecast): ForecastModel {
   const c = view.consolidated;
@@ -159,6 +164,9 @@ export function forecastModel(view: FccAccountsForecast): ForecastModel {
   const notes = [...view.warnings];
   if (view.excluded.without_snapshot > 0) notes.push(`${view.excluded.without_snapshot} חשבונות בלי יתרה שדווחה אינם בתחזית.`);
   if (view.excluded.closed > 0) notes.push(`${view.excluded.closed} חשבונות סגורים אינם בתחזית.`);
+  for (const g of view.data_gaps ?? []) {
+    notes.push(`חסר לדיוק — ${g.name || "חשבון ללא שם"}: ${g.missing.map((k) => MISSING_LABELS[k] ?? k).join(", ")}.`);
+  }
   return {
     total, head: FORECAST_ACCOUNT_HEAD, notes,
     rows: view.accounts.map((a) => ({
