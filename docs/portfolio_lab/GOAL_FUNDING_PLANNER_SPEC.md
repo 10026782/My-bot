@@ -127,6 +127,8 @@ warnings, missing_inputs, as_of
 ## 9. API (שלב 1, מוצע)
 `POST /api/fcc/funding/plan` — אותו שער, מגבלת קצב ופורמט שגיאות כמו `POST /api/fcc/accounts/forecast`; גוף = `{goal_ids|goal_id, options, assumptions, allocation_plan?}`; **אין כתיבה, אין שדה Airtable חדש, אין flag חדש**; שגיאות קלט 400 ללא ערכים כספיים בהודעה. הקוד הטהור מוצע בקובץ חדש תחת `portfolio_lab/` (רישום Context Librarian נדרש — ראו §13, שאלה 3); הקריאה לשרת דרך `core/financial_control/service.py` הקיים, כמו `allocations_for_forecast`.
 
+`POST /api/fcc/funding/plan/save` (שלב 2) — גוף = בקשת התוכנית ליעד אחד + `selected` (מזהי אפשרויות). השרת מחשב מחדש מנתוני הבעלים; לא נשמרים מספרים מהלקוח; אפשרות `feasible: false` נדחית; פותח טיוטה בלבד.
+
 ## 10. שילוב עם Decision Hub (שלב 3, אופציונלי, אישור נפרד)
 
 המתכנן מחשב ומשווה; **Decision Hub מתעד את הבחירה**. אין תלות הדדית: המתכנן עובד ללא Decision Hub, ו-Decision Hub אינו מחשב כסף.
@@ -162,7 +164,7 @@ warnings, missing_inputs, as_of
 | --- | --- | --- | --- |
 | 1 | מנוע טהור + `POST /api/fcc/funding/plan`, אפשרויות §4, בריכות §6, מבט תיק §7 | אין | **בקוד (PR):** `portfolio_lab/funding_plan.py`, `service.funding_inputs`, `loans.pmt` (שם ציבורי ל-`_pmt`), בדיקות `test_funding_plan.py` + 6 בדיקות HTTP. Cross-Layer: `SINGLE-LAYER`. רישום Context Librarian אושר במפורש ע"י הבעלים (18/10/2026) |
 | 1ב | ממשק קריאה בלבד ב-TMA (טופס אפשרויות, השוואה), ללא חישוב בלקוח | אין | **אושר ע"י הבעלים (18/10/2026) ובקוד (PR):** לשונית "מימון יעד" במסך תכנון החיסכון (`FundingSection`, `fundingRequest`, `fundingModel`); הלקוח ממיר טקסט למספרים פעם אחת בשליחה ומציג מספרים מהשרת בלבד; אפשרויות בסדר השרת, בלי הדגשה/דירוג; תוכנית מפוצלת לפי ודאות |
-| 2 | שמירת תוכנית שנבחרה | **טבלה חדשה `Funding Plans` — דורש אישור** | כולל מדיניות `OWNER_SCOPED` לפני שורה ראשונה |
+| 2 | שמירת תוכנית שנבחרה | **טבלה חדשה `Funding Plans`** | **אושר ע"י הבעלים (18/10/2026) ובקוד (PR):** הטבלה נוצרה ב-Airtable (tbl98DXJJgLceESgr: Name, Goal, Financial Owner, Status chosen/superseded/abandoned, Target Amount, As Of, Review By, Selected Options, Request Snapshot, Result Snapshot, Decision Note, Created At — ריקה); מדיניות `OWNER_SCOPED` (קישור Goal יחיד שלי) נוספה לפני כל שורה; `POST /api/fcc/funding/plan/save` (אותו שער) מחשב את התוכנית מחדש בשרת ופותח טיוטה `fcc_funding_plan` — **אין כתיבה עד "אשר ורשום"** דרך הזרימה הקיימת (`/api/fcc/write` → Action Gateway); האישור כותב קודם סימון `superseded` לתוכנית הקודמת של היעד ואז שורה אחת `chosen` (ניסיון חוזר לא מכפיל). הבעלים מוסיף רק הערת החלטה ותאריך בדיקה חוזרת. צילום התוכנית נשמר בלי `details`, מוגבל ל-40,000 תווים. אין הקצאה, הפקדה, הלוואה או מכירה |
 | 3 | חיבור ל-Decision Hub (§10) | אולי ערך `Domain` | `FULL`; תלוי ב-PR2 של Hub |
 | 4 | משימות מהתוכנית | אין | דרך הפעולה הקיימת `follow_up` ב-FCC (טיוטה + "אשר" + Action Gateway); אין מנגנון משימות חדש |
 

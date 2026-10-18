@@ -12,6 +12,7 @@ Airtable; after ``confirm`` no extractor/classifier is called again and no field
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
@@ -27,7 +28,7 @@ from core.business_draft import (
 )
 from core.draft_flow import CANCEL_WORDS, CONFIRM_WORDS, EDIT_WORDS, SKIP_WORDS
 from core.financial_control import calc, draft as fd, loans as fcc_loans, service, writer
-from airtable_schema import AssetFields as AF, FinAccountFields as AF_ACCOUNT, FinEventFields as EF, FinGoalFields as GF, LoanFields as LF, RecObFields as RF, TaskFields, Tables
+from airtable_schema import AssetFields as AF, FinAccountFields as AF_ACCOUNT, FinEventFields as EF, FinGoalFields as GF, FundingPlanFields as FPF, LoanFields as LF, RecObFields as RF, TaskFields, Tables
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +300,7 @@ def _one_line(text: str) -> str:
 
 # value-shaped fields (the contract input types CURRENCY / NUMBER / PERCENT / DATE), parsed by rule
 _NUMERIC_FIELDS = ("delta", "target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount")
-_DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date")
+_DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date", "review_by")
 
 
 def _deterministic_answer(field_name: str, text: str):
@@ -901,6 +902,61 @@ def _start_prime_change(identity, ids, store, today) -> TurnResult:
         return TurnResult("clarify", "אין הלוואות פעילות עם ריבית ידועה — אין מה לעדכן.")
     d = _new_draft(identity, ids, fd.FCC_PRIME_CHANGE, DraftOperation.CREATE, fields={}, raw_text=f"intent:loan.prime_change#{uuid.uuid4().hex[:8]}",
                    today=today, extra_ctx={"prime_rows": rows, "review_note": f"יושפעו {len(rows)} הלוואות (כולן צמודות פריים)."})
+    return _persist_new(store, ids, d)
+
+
+_FUNDING_JSON_CAP = 40000        # the draft lives in one Sessions cell: a snapshot that does not fit is refused, never truncated
+
+
+def _compact_json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def start_funding_plan_save(identity, request: dict, plan: dict, selected: list, *, store=None, today: date | None = None) -> TurnResult:
+    """Funding planner step 2: open a draft that SAVES the plan the owner chose for ONE goal. ``plan`` is a fresh server-side result of
+    ``build_funding_plan`` for the caller's own data (never numbers sent by the client). Nothing is written here: the owner sees a review
+    and confirms with "אשר" on /api/fcc/write — the only path that executes the frozen writes. Only a free-text reason and a re-check date
+    are asked; the goal, the options and the snapshots are frozen from the plan."""
+    today = today or date.today()
+    if len(request.get("goal_ids") or []) != 1 or len(plan.get("goals") or []) != 1:
+        return TurnResult("clarify", "אפשר לשמור תוכנית ליעד אחד בכל פעם.")
+    out = plan["goals"][0]
+    need, options = out["need"], {o["id"]: o for o in out.get("options") or []}
+    if need.get("reason") is not None:
+        return TurnResult("clarify", "אי אפשר לשמור תוכנית ליעד שאין לו נתונים לחישוב (או שכבר מכוסה).")
+    if not isinstance(selected, list) or not 1 <= len(selected) <= 12 or len(set(map(str, selected))) != len(selected):
+        return TurnResult("clarify", "בחרו אפשרות אחת או יותר לשמירה.")
+    used = {e["option_id"]: e["amount"] for e in request.get("allocation_plan") or []}
+    chosen = []
+    for oid in selected:
+        opt = options.get(oid) if isinstance(oid, str) else None
+        if opt is None or opt.get("feasible") is False:
+            return TurnResult("clarify", "אפשר לשמור רק אפשרויות שהחישוב החזיר ושאינן לא-כשירות.")
+        chosen.append({"id": oid, "type": opt["type"], "use_amount": used.get(oid)})
+    goal_id = need["goal_id"]
+    mine = {g["id"]: g for g in service.my_goals(identity)}
+    if goal_id not in mine:                                   # not found == not yours
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    result_snapshot = {"as_of": plan.get("as_of"), "assumptions": plan.get("assumptions"), "need": need,
+                       "options": [{k: v for k, v in o.items() if k != "details"} for o in out.get("options") or []],
+                       "plan": out.get("plan")}
+    request_json, result_json, selected_json = _compact_json(request), _compact_json(result_snapshot), _compact_json(chosen)
+    if max(len(request_json), len(result_json)) > _FUNDING_JSON_CAP:
+        return TurnResult("clarify", "התוכנית גדולה מדי לשמירה — הקטינו את מספר האפשרויות.")
+    supersede = [r["id"] for r in service.my_funding_plans(identity)
+                 if (r.get("fields") or {}).get(FPF.GOAL) == [goal_id] and str((r.get("fields") or {}).get(FPF.STATUS) or "").lower() == fd.FUNDING_PLAN_CHOSEN]
+    store, ids, stop = _open_slot(identity, store, "שמירת תוכנית מימון")
+    if stop is not None:
+        return stop
+    title = (need.get("title") or "").strip() or "יעד"
+    note = f"יעד: {title} · סכום יעד: {fd.display_value('amount', need['target'])} · נבחרו {len(chosen)} אפשרויות"
+    if supersede:
+        note += f"\nתוכנית שמורה קודמת של היעד תסומן כמוחלפת ({len(supersede)})."
+    d = _new_draft(identity, ids, fd.FCC_FUNDING_PLAN, DraftOperation.CREATE, fields={}, raw_text=f"intent:funding.save_plan#{uuid.uuid4().hex[:8]}",
+                   today=today, extra_ctx={"goal_id": goal_id, "plan_name": f"תוכנית מימון — {title}"[:200], "target_amount": need["target"],
+                                           "as_of": plan.get("as_of") or today.isoformat(), "selected_json": selected_json,
+                                           "request_json": request_json, "result_json": result_json, "supersede_ids": supersede,
+                                           "goal_title": title, "review_note": note})
     return _persist_new(store, ids, d)
 
 

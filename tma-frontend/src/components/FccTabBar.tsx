@@ -178,6 +178,6 @@ export function useFccWriter(initial: FccTurn | null, tab: string, onDone: () =>
   });
   const send = (text: string, goalId?: string) => run(() => postFccWrite({ text, scope: tab, ...(goalId ? { goal_id: goalId } : {}) }));
   const dismiss = () => { setTurn(null); setReceipt(null); setError(null); };
-  return { turn, receipt, error, busy, start, send, dismiss, followUp, clearFollowUp: () => setFollowUp(false),
+  return { turn, receipt, error, busy, start, send, open: run, dismiss, followUp, clearFollowUp: () => setFollowUp(false),
            followUpAsset, clearFollowUpAsset: () => setFollowUpAsset(null) };
 }

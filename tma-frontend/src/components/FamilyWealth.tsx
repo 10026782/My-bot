@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast, postFccFundingPlan } from "../api";
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingPlan } from "../types";
+import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast, postFccFundingPlan, postFccFundingSave } from "../api";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingPlan, FundingRequestBody } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
 import { ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
-import { ACCOUNTS_COMPOSER, panelId, tabId } from "../lib/fccTabs";
+import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccTabs";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
+import { FUNDING_SAVE_NOTE } from "../lib/familyWealth";
 import { KpiCard } from "./FccKpiCard";
 import { PortfolioLabPanel } from "./PortfolioLabPanel";
 import { PageHeader } from "./ui/PageHeader";
@@ -207,7 +208,7 @@ function AllocationsBlock({ model, present }: { model: AllocationModel | null; p
   );
 }
 
-type FundingState = { status: "idle" } | { status: "loading" } | { status: "ok"; plan: FundingPlan; goalId: string; titles: Record<string, string> } | { status: "error"; message: string; code?: number };
+type FundingState = { status: "idle" } | { status: "loading" } | { status: "ok"; plan: FundingPlan; goalId: string; titles: Record<string, string>; body: FundingRequestBody } | { status: "error"; message: string; code?: number };
 
 /** Goal Funding Planner (step 1b): a goal -> typed funding options -> POST /api/fcc/funding/plan -> a neutral comparison. Runs only when asked; the page
  *  converts typed text to numbers once on submit and shows only what the server returns (no ranking, no recommendation, no client arithmetic). */
@@ -218,6 +219,8 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
   const [formError, setFormError] = useState<string | null>(null);
   const counter = useRef(0);
   const latest = useRef(0);
+  const [selected, setSelected] = useState<string[]>([]);
+  const writer = useFccWriter(null, "funding", () => undefined);
   useEffect(() => { fetchFccAccounts().then((v) => setAccounts(v.accounts.filter((a) => a.status !== "closed"))).catch(() => setAccounts([])); }, []);
   if (overview.status === "loading") return <ScreenState state="loading" title="טוען את היעדים" message="אוסף את התמונה העדכנית…" />;
   if (overview.status === "error") return <ScreenState state="error" title={overview.code === 404 ? "המסך עדיין לא פעיל" : "לא הצלחנו לטעון"} message="היעדים אינם זמינים כרגע." />;
@@ -246,8 +249,10 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
     const id = ++latest.current;                       // a slower, older answer must never overwrite a newer one
     const goalId = form.goalId, names = titles();
     setState({ status: "loading" });
+    setSelected([]);
+    writer.dismiss();
     postFccFundingPlan(parsed.body)
-      .then((plan) => { if (id === latest.current) setState({ status: "ok", plan, goalId, titles: names }); })
+      .then((plan) => { if (id === latest.current) setState({ status: "ok", plan, goalId, titles: names, body: parsed.body }); })
       .catch((e: Error & { status?: number }) => { if (id === latest.current) setState({ status: "error", message: e.message, code: e.status }); });
   };
   const model = state.status === "ok" ? fundingModel(state.plan, state.goalId, state.titles) : null;
@@ -320,7 +325,19 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
         <ScreenState state="error" title={state.code === 404 ? "המסך עדיין לא פעיל" : state.code === 429 ? "יותר מדי חישובים" : "ההשוואה נכשלה"}
                      message={state.code === 404 ? "ההשוואה אינה זמינה בחשבון הזה." : state.code === 429 ? "אפשר לנסות שוב בעוד דקה." : state.message} />
       )}
-      {model && <FundingResult model={model} />}
+      {model && <FundingResult model={model} selection={{ selected, onToggle: (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id])) }} />}
+      {model && state.status === "ok" && (
+        <div className="fcc-stack">
+          <p className="fcc-goal__note" dir="auto">{FUNDING_SAVE_NOTE}</p>
+          <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={selected.length === 0 || writer.busy || writer.turn != null}
+                  onClick={() => void writer.open(() => postFccFundingSave(state.body, selected))}>שמירת תוכנית</button>
+          {(writer.turn || writer.receipt || writer.error) && (
+            <ContextualComposer config={FUNDING_COMPOSER} turn={writer.turn} receipt={writer.receipt} error={writer.error} busy={writer.busy}
+                                targets={{ goals: [], loans: [], assets: [] }}
+                                onStart={() => undefined} onSend={(t, g) => void writer.send(t, g)} onDismiss={writer.dismiss} />
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -330,7 +347,7 @@ function Rows({ rows }: { rows: { label: string; value: string }[] }) {
 }
 
 /** The server's comparison, in the server's order (fixed by option type — never by outcome). Nothing is highlighted as better. */
-export function FundingResult({ model }: { model: NonNullable<ReturnType<typeof fundingModel>> }) {
+export function FundingResult({ model, selection }: { model: NonNullable<ReturnType<typeof fundingModel>>; selection?: { selected: string[]; onToggle: (id: string) => void } }) {
   return (
     <div className="fcc-stack" aria-label="השוואת אפשרויות מימון">
       <Surface padding="compact">
@@ -341,6 +358,9 @@ export function FundingResult({ model }: { model: NonNullable<ReturnType<typeof 
       {model.options.map((o) => (
         <Surface key={o.id} padding="compact" className="fw-option" aria-label={o.title}>
           <h3 className="fcc-section__heading">{o.title}</h3>
+          {selection && o.feasible !== false && (
+            <label className="pl-check"><input type="checkbox" checked={selection.selected.includes(o.id)} onChange={() => selection.onToggle(o.id)} />לשמור באפשרויות התוכנית</label>
+          )}
           <p className="fw-badges"><span className="fw-badge">{o.verdict}</span><span className="fw-badge">ודאות: {o.certainty}</span></p>
           <Rows rows={o.rows} />
           {o.lists.map((l) => <div key={l.label}><p className="fcc-goal__note">{l.label}:</p><ul className="pl-list pl-list--small" dir="auto">{l.items.map((i) => <li key={i}>{i}</li>)}</ul></div>)}

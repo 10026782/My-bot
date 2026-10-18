@@ -8,7 +8,7 @@ import { LineChart, StackBar } from "../components/PortfolioLabCharts";
 import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView } from "../types";
 import { AccountsPanel, ForecastResult, FundingResult, FundingSection } from "../components/FamilyWealth";
 import { ContextualComposer } from "../components/FccTabBar";
-import { ACCOUNTS_COMPOSER, COMPOSER } from "./fccTabs";
+import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
@@ -623,6 +623,28 @@ test("funding: read-only plumbing — one POST route, run only on submit, no cli
   const lib = fs.readFileSync("src/lib/familyWealth.ts", "utf8");
   const model = lib.slice(lib.indexOf("export function fundingModel"));
   assert.ok(!/\.reduce\(|Math\.|\bfetch\(/.test(model), "the funding model only words and lays out the server's numbers");
+});
+
+test("funding save: a checkbox only on options the server did not rule out, and no checkbox without a selection handler", () => {
+  const model = fundingModel(fundingView, "recG1")!;
+  const withSel = renderToStaticMarkup(createElement(FundingResult, { model, selection: { selected: [model.options[0].id], onToggle: () => undefined } }));
+  const boxes = (withSel.match(/type="checkbox"/g) ?? []).length;
+  assert.equal(boxes, model.options.filter((o) => o.feasible !== false).length);
+  assert.ok(withSel.includes("לשמור באפשרויות התוכנית"));
+  const readOnly = renderToStaticMarkup(createElement(FundingResult, { model }));
+  assert.ok(!readOnly.includes('type="checkbox"') && !readOnly.includes("לשמור באפשרויות התוכנית"));
+});
+
+test("funding save: plumbing — server recomputes, nothing is written before אשר, no client numbers are saved", () => {
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const api = fs.readFileSync("src/api.ts", "utf8");
+  const save = api.slice(api.indexOf("export async function postFccFundingSave"), api.indexOf("export async function postFccFundingPlan"));
+  assert.ok(save.includes("/api/fcc/funding/plan/save") && save.includes("selected") && !save.includes("/api/fcc/write"));
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("/** Own call, own states; mounted only when the tab is opened"));
+  assert.ok(section.includes("postFccFundingSave(state.body, selected)") && section.includes("ContextualComposer") && section.includes("FUNDING_COMPOSER"));
+  assert.ok(!/\.reduce\(|Math\./.test(section), "no arithmetic in the funding component");
+  assert.ok(FUNDING_COMPOSER.chips.length === 0 && !FUNDING_COMPOSER.freeText, "the draft is opened only by the save button; the review and אשר are the shared flow");
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

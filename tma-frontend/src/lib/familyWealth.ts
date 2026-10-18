@@ -423,6 +423,7 @@ export const comparisonLines = (view: PortfolioLabView) =>
 
 // ── Goal Funding Planner (step 1b): typed options -> POST /api/fcc/funding/plan -> a neutral comparison. Presentation only: the page converts typed
 // text to numbers once on submit; every figure it shows (amounts, dates, certainty, costs) is the server's. No ranking, no "best", no total of "available". ──
+export const FUNDING_SAVE_NOTE = "שמירה היא רישום של החלטה בלבד: היא לא מזיזה כסף, לא פותחת הלוואה או חשבון, לא מוכרת נכס ולא משנה הקצאות. השרת יחשב את התוכנית מחדש ויציג סקירה לפני כל רישום.";
 export const FUNDING_TITLE = "מימון יעד";
 export const FUNDING_INTRO = "בוחרים יעד, מוסיפים דרכים אפשריות למימון, והמערכת משווה ביניהן. זו השוואה בלבד — לא המלצה ולא בחירה עבורך, וכל המספרים מחושבים בשרת.";
 export const FUNDING_PRINCIPLE = "כסף צפוי אינו כסף קיים: חוב שחייבים לך או חיסכון עתידי מוצגים עם רמת ודאות ותנאים, ולא מצטרפים לסכום אחד של \"כסף זמין\".";
@@ -561,7 +562,7 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
 }
 
 export interface FundingOptionCard {
-  id: string; type: FundingOptionType; title: string; verdict: string; certainty: string; rows: { label: string; value: string }[];
+  id: string; type: FundingOptionType; title: string; verdict: string; feasible: boolean | "unknown"; certainty: string; rows: { label: string; value: string }[];
   lists: { label: string; items: string[] }[]; note: string;
 }
 export interface FundingPlanModel {
@@ -590,7 +591,7 @@ function optionCard(o: FundingOptionResult, titles: Record<string, string>): Fun
     { label: "חסר", items: o.missing_inputs.map((m) => word(MISSING_INPUT_LABELS, m)) },
   ].filter((l) => l.items.length > 0);
   const verdict = `${word(FEASIBLE_LABELS, String(o.feasible))}${o.reason ? ` — ${word(FUNDING_REASONS, o.reason)}` : ""}`;
-  return { id: o.id, type: o.type, title: titles[o.id] ?? FUNDING_TYPE_LABELS[o.type], verdict, certainty: word(FUNDING_CERTAINTY_LABELS, o.certainty), rows, lists, note: o.assumptions.join(" · ") };
+  return { id: o.id, type: o.type, title: titles[o.id] ?? FUNDING_TYPE_LABELS[o.type], verdict, feasible: o.feasible, certainty: word(FUNDING_CERTAINTY_LABELS, o.certainty), rows, lists, note: o.assumptions.join(" · ") };
 }
 
 /** Wording + layout of one goal's comparison. Options keep the server's order (fixed by type); nothing is sorted, scored or highlighted here. */

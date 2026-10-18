@@ -98,6 +98,14 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
 
 /** The accounts tab of the family-wealth screen (D1 step 8): the same writer engine, dressed with the two account actions. Accounts themselves
  *  are created by hand in Airtable — no chip creates one. */
+/** Funding planner step 2: no chips — the draft is opened by the "שמירת תוכנית" button of the comparison; the review and "אשר" are the shared flow. */
+export const FUNDING_COMPOSER: ComposerConfig = {
+  title: "שמירת תוכנית מימון",
+  chips: [],
+  freeText: false,
+  hint: "בחרו אפשרויות בהשוואה ולחצו ״שמירת תוכנית״ — תוצג סקירה ורק אחרי ״אשר ורשום״ תישמר תמונת המצב.",
+};
+
 export const ACCOUNTS_COMPOSER: ComposerConfig = {
   title: "עדכון חשבון",
   chips: [

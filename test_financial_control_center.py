@@ -4658,3 +4658,124 @@ def test_http_planner_reads_a_debt_owed_to_me_but_does_not_count_it_as_money(mon
     plan_ = body["goals"][0]["plan"]
     assert plan_["covered"]["uncertain"] == 100000 and plan_["covered"]["confirmed"] == 0 and plan_["remaining_after_confirmed"] == 200000
     assert body["goals"][0]["need"]["confirmed_existing"] == 0
+
+
+# ═══ Funding planner, step 2: saving the chosen plan — draft -> review -> אשר, one owner-scoped Funding Plans row ═══
+from airtable_schema import FundingPlanFields as FPF   # noqa: E402
+
+
+def seed_saved_plans():
+    seed_planner()
+    DB[Tables.FUNDING_PLANS] = [
+        {"id": "recFPold", "fields": {FPF.NAME: "ישנה", FPF.GOAL: ["recGW"], FPF.STATUS: "chosen", FPF.FINANCIAL_OWNER: [ELI]}},
+        {"id": "recFPdone", "fields": {FPF.NAME: "מוחלפת", FPF.GOAL: ["recGW"], FPF.STATUS: "superseded", FPF.FINANCIAL_OWNER: [ELI]}},
+        {"id": "recFPavi", "fields": {FPF.NAME: "של אבי", FPF.GOAL: ["recGX"], FPF.STATUS: "chosen", FPF.FINANCIAL_OWNER: [AVI]}},
+    ]
+
+
+def funding_plan_for(req):
+    from portfolio_lab.funding_plan import build_funding_plan, normalize_request
+    request_ = normalize_request(req)
+    return request_, build_funding_plan(service.funding_inputs(ELIYAHU), request_)
+
+
+def start_save(selected=("dep",), req=None):
+    request_, plan_ = funding_plan_for(req or {"goal_id": "recGW", "options": [DEPOSIT]})
+    return conv.start_funding_plan_save(ELIYAHU, request_, plan_, list(selected), today=TODAY)
+
+
+def test_funding_save_opens_a_review_and_writes_nothing():
+    import copy as _copy
+    seed_saved_plans()
+    before = _copy.deepcopy(DB)
+    r = start_save()
+    assert r.state == "review" and "שמירת תוכנית מימון" in r.message and "חתונה" in r.message
+    assert "לא מזיזה כסף" in r.message and "מוחלפת (1)" in r.message
+    assert DB == before                                                                               # a draft is not a write
+
+
+def test_funding_save_confirm_freezes_one_snapshot_and_supersedes_only_the_goals_chosen_plan():
+    import json as _json
+    seed_saved_plans()
+    start_save()
+    for text in ("ערוך", "הערת החלטה בחרנו להפקיד", "ערוך", "לבדוק שוב עד 2027-01-31"):
+        assert conv.handle_turn(ELIYAHU, text, extractor=conv.DeterministicExtractor(), today=TODAY).state in ("ask", "review")
+    writes = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    assert [w["op"] for w in writes] == ["patch", "post"]                                          # patches first: a retry never duplicates the row
+    patch_, post_ = writes
+    assert patch_["record_id"] == "recFPold" and patch_["fields"] == {FPF.STATUS: "superseded"} and patch_["table"] == Tables.FUNDING_PLANS
+    f = post_["fields"]
+    assert post_["table"] == Tables.FUNDING_PLANS and f[FPF.GOAL] == ["recGW"] and f[FPF.STATUS] == "chosen" and f[FPF.TARGET_AMOUNT] == 200000
+    assert f[FPF.NAME] == "תוכנית מימון — חתונה" and f[FPF.AS_OF] == date.today().isoformat()
+    assert f[FPF.DECISION_NOTE] == "בחרנו להפקיד" and f[FPF.REVIEW_BY] == "2027-01-31"
+    chosen = _json.loads(f[FPF.SELECTED_OPTIONS])
+    assert chosen == [{"id": "dep", "type": "new_deposits", "use_amount": None}]
+    assert _json.loads(f[FPF.REQUEST_SNAPSHOT])["goal_ids"] == ["recGW"]
+    result_ = _json.loads(f[FPF.RESULT_SNAPSHOT])
+    assert result_["need"]["target"] == 200000 and {o["type"] for o in result_["options"]} == {"existing_balance", "new_deposits"}
+    assert all("details" not in o for o in result_["options"])
+    text = str(writes)
+    for hidden in ("888888", "חתונה של אבי", "recFPavi", "recGX"):
+        assert hidden not in text, hidden
+    assert not any(k in text for k in ("score", "recommended", "rank"))                          # a record of a decision, not advice
+
+
+def test_funding_save_rejects_unknown_infeasible_or_empty_selection_and_foreign_goals():
+    seed_saved_plans()
+    for selected in ([], ["nope"], ["dep", "dep"], [7]):
+        assert start_save(selected).state == "clarify", selected
+    request_, plan_ = funding_plan_for({"goal_id": "recGW", "options": [DEPOSIT]})
+    next(o for o in plan_["goals"][0]["options"] if o["id"] == "dep")["feasible"] = False
+    assert conv.start_funding_plan_save(ELIYAHU, request_, plan_, ["dep"], today=TODAY).state == "clarify"
+    request_, plan_ = funding_plan_for({"goal_id": "recGW", "options": [DEPOSIT]})
+    plan_["goals"][0]["need"]["goal_id"] = "recGX"                                                # a goal that is not the caller's own
+    assert conv.start_funding_plan_save(ELIYAHU, request_, plan_, ["dep"], today=TODAY).state == "denied"
+
+
+def test_funding_save_needs_exactly_one_computable_goal():
+    seed_saved_plans()
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [goal("recGN", "בלי תאריך", ELI, 5000, **{GF.CATEGORY: "savings"})]
+    request_, plan_ = funding_plan_for({"goal_ids": ["recGW", "recGN"]})
+    assert conv.start_funding_plan_save(ELIYAHU, request_, plan_, ["existing"], today=TODAY).state == "clarify"
+    request_, plan_ = funding_plan_for({"goal_id": "recGN"})
+    assert conv.start_funding_plan_save(ELIYAHU, request_, plan_, ["existing"], today=TODAY).state == "clarify"
+
+
+def test_funding_plans_table_policy_is_owner_scoped_and_the_write_is_allowlisted():
+    seed_saved_plans()
+    own = {FPF.GOAL: ["recGW"], FPF.NAME: "x", FPF.STATUS: "chosen"}
+    stamped = policy.scope_new_record_fields(Tables.FUNDING_PLANS, dict(own), ELIYAHU)
+    assert stamped[FPF.FINANCIAL_OWNER] == [ELI]
+    with pytest.raises(policy.PersonalDataAccessDenied):
+        policy.scope_new_record_fields(Tables.FUNDING_PLANS, {**own, FPF.GOAL: ["recGX"]}, ELIYAHU)
+    with pytest.raises(policy.PersonalDataAccessDenied):
+        policy.scope_new_record_fields(Tables.FUNDING_PLANS, {**own, FPF.GOAL: ["recGW", "recGE"]}, ELIYAHU)     # a single goal only
+    assert [r["id"] for r in service.my_funding_plans(ELIYAHU)] == ["recFPold", "recFPdone"]
+    assert [r["id"] for r in service.my_funding_plans(AVI_I)] == ["recFPavi"]
+    assert "Funding Plans" in approval_actions._TMA_WRITE_ALLOWED_TABLES
+
+
+def test_http_funding_save_gate_validation_and_review(monkeypatch):
+    import copy as _copy
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)                                                 # this test makes more calls than one minute allows
+    seed_saved_plans()
+
+    def save(c, body=None, raw=None):
+        import json as _json
+        return c.post("/api/fcc/funding/plan/save", data=raw if raw is not None else _json.dumps(body if body is not None else {}),
+                      headers={**H, "Content-Type": "application/json"})
+    assert save(http(monkeypatch, ELIYAHU, flag=False), {"goal_id": "recGW", "selected": ["dep"]}).status_code == 404
+    assert save(http(monkeypatch, AVI_I), {"goal_id": "recGW", "selected": ["dep"]}).status_code == 404
+    assert http(monkeypatch, ELIYAHU).options("/api/fcc/funding/plan/save").status_code == 204
+    c = http(monkeypatch, ELIYAHU)
+    assert save(c, raw="not json").status_code == 400
+    assert save(c, {"goal_id": "recGW", "options": [DEPOSIT]}).status_code == 400                    # selected required
+    r = save(c, {"goal_id": "recGX", "selected": ["existing"]})
+    assert r.status_code == 400 and "888888" not in str(r.get_json())                              # another owner's goal
+    before = _copy.deepcopy(DB)
+    r = save(c, {"goal_id": "recGW", "options": [DEPOSIT], "selected": ["dep"]})
+    body = r.get_json()
+    assert r.status_code == 200 and body["state"] == "review" and "שמירת תוכנית מימון" in body["message"]
+    assert DB == before
+    for method in ("get", "put", "patch", "delete"):
+        assert getattr(c, method)("/api/fcc/funding/plan/save", headers=H).status_code == 405

@@ -33,7 +33,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from airtable_schema import TABLE_ALIASES, FinAccountFields, FinEventFields, FinGoalFields, GoalAllocationFields, Tables, TaskFields
+from airtable_schema import TABLE_ALIASES, FinAccountFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, Tables, TaskFields
 from core import owner_resolution
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,14 @@ _POLICIES: dict[str, TablePolicy] = {
                              (GoalAllocationFields.ACCOUNT, Tables.FIN_ACCOUNTS)),
         single_links=(GoalAllocationFields.GOAL, GoalAllocationFields.ACCOUNT),
         digit_guard=(GoalAllocationFields.NAME, GoalAllocationFields.NOTES),
+    ),
+    # Funding Plans (funding planner step 2): a saved plan snapshot for ONE of the owner's goals. Owner-of-record only; the goal link must be
+    # the caller's own and a single record. The snapshots are server-built JSON (not user text), so only the free-text fields are digit-guarded.
+    Tables.FUNDING_PLANS: TablePolicy(
+        Tables.FUNDING_PLANS, OWNER_SCOPED, owner_field=FundingPlanFields.FINANCIAL_OWNER,
+        linked_owner_checks=((FundingPlanFields.GOAL, Tables.FIN_GOALS),),
+        single_links=(FundingPlanFields.GOAL,),
+        digit_guard=(FundingPlanFields.NAME, FundingPlanFields.DECISION_NOTE),
     ),
     Tables.FIN_EVENTS: TablePolicy(
         Tables.FIN_EVENTS, OWNER_SCOPED, owner_field=FinGoalFields.FINANCIAL_OWNER,

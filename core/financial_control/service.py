@@ -290,6 +290,11 @@ def my_obligations(identity) -> list[dict]:
     return policy.filter_records(Tables.REC_OBLIGATIONS, _read(Tables.REC_OBLIGATIONS), identity)
 
 
+def my_funding_plans(identity) -> list[dict]:
+    """Funding planner step 2: the caller's OWN saved plan snapshots (owner-scoped table). Read-only; used to supersede an earlier plan of the same goal."""
+    return policy.filter_records(Tables.FUNDING_PLANS, _read(Tables.FUNDING_PLANS), identity)
+
+
 def _sel(value):
     return value.get("name") if isinstance(value, dict) else value
 

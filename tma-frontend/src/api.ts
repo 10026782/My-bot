@@ -449,6 +449,19 @@ export async function postFccAccountsForecast(params: FccForecastParams): Promis
   return data;
 }
 
+/** Funding planner step 2: the SAME request as the comparison + the option ids to keep. The server recomputes the plan from its own data and opens
+ *  a draft (nothing is written); the owner then reviews and confirms through postFccWrite("אשר"). */
+export async function postFccFundingSave(body: FundingRequestBody, selected: string[]): Promise<FccTurn> {
+  const r = await fetch(`${BASE}/api/fcc/funding/plan/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ...body, selected }),
+  });
+  const data = (await r.json().catch(() => ({}))) as FccTurn & { error?: string };
+  if (!r.ok && !data.state) throw new Error(data.error || `API ${r.status}`);
+  return data;
+}
+
 /** Goal Funding Planner (step 1b): typed options -> POST /api/fcc/funding/plan. Read-only on the server; the page shows only what comes back. */
 export async function postFccFundingPlan(body: FundingRequestBody): Promise<FundingPlan> {
   const r = await fetch(`${BASE}/api/fcc/funding/plan`, {
