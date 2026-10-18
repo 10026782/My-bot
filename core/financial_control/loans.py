@@ -294,6 +294,9 @@ def _pmt(balance: float, rate: float, n: int) -> float:
     return balance / n if i == 0 else balance * i / (1 - (1 + i) ** -n)
 
 
+pmt = _pmt                          # public name for other read models (the funding planner); one formula, no copy
+
+
 def prime_rows(records: list[dict], today: date) -> list[dict]:
     """The owner's loans a prime change touches: active, his own debts (not owed TO him), with a known rate. Captured when the
     draft opens, so the review and the writes use the same numbers. All the owner's loans are prime-linked (owner decision)."""

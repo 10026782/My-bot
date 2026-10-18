@@ -4573,3 +4573,88 @@ def test_a_co_owned_row_never_exposes_the_other_owners_account_or_goal_to_the_se
     assert out["allocations"]["totals"]["allocated"] == 0.0
     for hidden in ("קרן השתלמות", "מטרה שלי", "100000", "recAE", "recGM"):
         assert hidden not in str(out), hidden
+
+
+# ═══ Goal Funding Planner, step 1: POST /api/fcc/funding/plan — owner scope, read-only ═══
+def planner(c, body=None, raw=None):
+    import json as _json
+    data = raw if raw is not None else _json.dumps(body if body is not None else {})
+    return c.post("/api/fcc/funding/plan", data=data, headers={**H, "Content-Type": "application/json"})
+
+
+def seed_planner():
+    seed_accounts()
+    seed_loans()
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGW", "חתונה", ELI, 200000, **{GF.CATEGORY: "savings", GF.END_DATE: "2040-12-31", GF.CALC_METHOD: "cumulative"}),
+        goal("recGX", "חתונה של אבי", AVI, 888888, **{GF.CATEGORY: "savings", GF.END_DATE: "2040-12-31", GF.CALC_METHOD: "cumulative"})]
+
+
+DEPOSIT = {"id": "dep", "type": "new_deposits", "hypothetical": {"immediate": True, "expected_return_pct": 4}}
+
+
+def test_http_planner_flag_off_and_non_owner_get_404(monkeypatch):
+    seed_planner()
+    assert planner(http(monkeypatch, ELIYAHU, flag=False), {"goal_id": "recGW"}).status_code == 404
+    assert planner(http(monkeypatch, AVI_I), {"goal_id": "recGW"}).status_code == 404
+    assert http(monkeypatch, ELIYAHU).options("/api/fcc/funding/plan").status_code == 204
+
+
+def test_http_planner_compares_options_for_the_callers_own_goal_only(monkeypatch):
+    seed_planner()
+    r = planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGW", "options": [DEPOSIT]})
+    body = r.get_json()
+    assert r.status_code == 200 and body["goals"][0]["need"]["target"] == 200000 and body["goals"][0]["need"]["gap"] == 200000
+    assert {o["type"] for o in body["goals"][0]["options"]} == {"existing_balance", "new_deposits"}
+    dep = next(o for o in body["goals"][0]["options"] if o["type"] == "new_deposits")
+    assert dep["feasible"] is True and dep["certainty"] == "expected" and dep["monthly_cash_effect"] < 0
+    text = str(body)
+    for hidden in ("888888", "חתונה של אבי", "777777", "החשבון של אבי", "הערה פרטית", "999999", "77777"):
+        assert hidden not in text, hidden
+
+
+def test_http_planner_rejects_another_owners_goal_loan_asset_and_account_without_leaking(monkeypatch):
+    seed_planner()
+    c = http(monkeypatch, ELIYAHU)
+    for body in ({"goal_id": "recGX"},
+                 {"goal_id": "recGW", "options": [{"type": "receivable_collection", "loan_id": "recLX", "expected_net": 5, "expected_date": "2030-01-01"}]},
+                 {"goal_id": "recGW", "options": [{"type": "asset_sale", "asset_id": "recA2", "net_proceeds": 5, "expected_date": "2030-01-01"}]},
+                 {"goal_id": "recGW", "options": [{"type": "new_deposits", "account_id": "recAA"}]}):
+        r = planner(c, body)
+        assert r.status_code == 400, body
+        text = str(r.get_json())
+        assert "888888" not in text and "999999" not in text and "777777" not in text and "נכס של אבי" not in text
+
+
+def test_http_planner_validation_and_transport_errors_do_not_echo_amounts(monkeypatch):
+    seed_planner()
+    c = http(monkeypatch, ELIYAHU)
+    assert planner(c, raw="not json").status_code == 400
+    assert planner(c, {"goal_id": "recGW", "options": [{"type": "custom", "label": "x", "amount": -424242}]}).status_code == 400
+    r = planner(c, {"goal_id": "recGW", "options": [{"type": "custom", "label": "x", "amount": -424242}]})
+    assert "424242" not in str(r.get_json())
+    assert planner(c, {}).status_code == 400
+    assert c.post("/api/fcc/funding/plan", data="{}", headers={**H, "Content-Type": "text/plain"}).status_code == 415
+
+
+def test_http_planner_unresolved_identity_403_and_nothing_is_written(monkeypatch):
+    import copy as _copy
+    seed_planner()
+    assert planner(http(monkeypatch, ident("nobody", Role.OWNER)), {"goal_id": "recGW"}).status_code == 403
+    before = _copy.deepcopy(DB)
+    assert planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGW", "options": [DEPOSIT]}).status_code == 200
+    assert DB == before
+    c = http(monkeypatch, ELIYAHU)
+    for method in ("get", "put", "patch", "delete"):
+        assert getattr(c, method)("/api/fcc/funding/plan", headers=H).status_code == 405          # no write path
+
+
+def test_http_planner_reads_a_debt_owed_to_me_but_does_not_count_it_as_money(monkeypatch):
+    seed_planner()
+    DB[Tables.LOANS] = DB[Tables.LOANS] + [loan("recOW", **{LF.EARLY_CLOSURE: 100000, LF.DIRECTION: "חייבים לי"})]
+    body = planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGW", "options": [
+        {"id": "owed", "type": "receivable_collection", "loan_id": "recOW", "expected_net": 100000, "expected_date": "2030-01-01"}],
+        "allocation_plan": [{"goal_id": "recGW", "option_id": "owed", "amount": 100000}]}).get_json()
+    plan_ = body["goals"][0]["plan"]
+    assert plan_["covered"]["uncertain"] == 100000 and plan_["covered"]["confirmed"] == 0 and plan_["remaining_after_confirmed"] == 200000
+    assert body["goals"][0]["need"]["confirmed_existing"] == 0
