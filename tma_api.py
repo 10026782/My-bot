@@ -5044,8 +5044,9 @@ def _funding_body(identity):
         return None, (jsonify({"error": "invalid JSON"}), 400)
 
 
-def _funding_compute(identity, body):
-    """Normalise the request, read the caller's OWN data and build the plan. Returns ``(request, plan, None)`` or ``(None, None, error_response)``."""
+def _funding_compute(identity, body, with_sources=False):
+    """Normalise the request, read the caller's OWN data and build the plan. Returns ``(request, plan, None)`` or ``(None, None, error_response)``.
+    ``with_sources`` (the plan route only) adds the read-only ``suggested_sources`` candidate list; the save route never passes it, so a saved plan is unchanged."""
     from core.financial_control import service as fcc_service  # noqa: PLC0415
     from portfolio_lab.funding_plan import build_funding_plan, normalize_request  # noqa: PLC0415
     try:
@@ -5061,7 +5062,11 @@ def _funding_compute(identity, body):
     if not _PL_COMPUTE.acquire(timeout=5):
         return None, None, (jsonify({"error": "busy"}), 503)
     try:
-        return funding_request, build_funding_plan(inputs, funding_request), None
+        plan = build_funding_plan(inputs, funding_request)
+        if with_sources:
+            from portfolio_lab.funding_sources import build_suggested_sources  # noqa: PLC0415
+            plan["suggested_sources"] = build_suggested_sources(inputs, funding_request)
+        return funding_request, plan, None
     except KeyError:
         return None, None, (jsonify({"error": "invalid request"}), 400)
     except (ValueError, TypeError, OverflowError) as error:
@@ -5078,11 +5083,12 @@ def _funding_compute(identity, body):
 def fcc_funding_plan(identity):
     """Goal Funding Planner (step 1, GOAL_FUNDING_PLANNER_SPEC): a goal -> a neutral comparison of ways to fund it. The body carries only the
     goal ids, assumptions, typed options and an optional allocation plan; goals, accounts, assets, loans and obligations are read server-side
-    from the caller's own rows. Same gate as the forecast (flag AND canary AND owner, 404 for everyone else). Writes nothing."""
+    from the caller's own rows. The answer also carries ``suggested_sources`` (portfolio_lab.funding_sources): neutral per-goal candidates in five
+    separate categories, no totals. Same gate as the forecast (flag AND canary AND owner, 404 for everyone else). Writes nothing."""
     body, err = _funding_body(identity)
     if err:
         return err
-    _request, plan, err = _funding_compute(identity, body)
+    _request, plan, err = _funding_compute(identity, body, with_sources=True)
     return err if err else jsonify(plan)
 
 
