@@ -423,6 +423,28 @@ def _allocations_now(valid: list, goal_titles: dict, info: dict, accounts_by_id:
     return overview, {"over": over_ids, "blocked_goals": set(blocked)}
 
 
+def _simulate_account(a: dict, p: dict, start: str):
+    """(תשומות החשבון, תוצאת המנוע החודשית) — הריצה היחידה של חשבון; משמשת את התחזית ואת `account_value_points`. ללא שינוי חישוב."""
+    x = _account_inputs(a, p, p["monthly_contributions"])
+    net_monthly = x["monthly"] * (1 - x["deposit_fee"] / 100)
+    result = simulate(Scenario(
+        years=p["years"], initial=float(a["balance"]["value"]), monthly_contribution=net_monthly, inflation=p["inflation"],
+        deposit_timing=p["deposit_timing"], start_date=start, monthly_fixed_cost=x["insurance"],
+        assets=(Asset(name="account", annual_return=x["annual_return"], annual_fee=x["fee"]),)), monthly=True)
+    return x, result
+
+
+def account_value_points(account: dict, params: dict | None = None, today: date | None = None) -> list[float]:
+    """ערך נומינלי צפוי של חשבון (עם יתרה מדווחת) לפי אותן הנחות של התחזית: אינדקס 0 = היתרה המדווחת, k = סוף החודש ה-k (כמו `month_totals`).
+    הנחות בלבד — לא הבטחה. ValueError על הנחות לא תקפות או חשבון בלי צילום."""
+    if not _eligible(account):
+        raise ValueError("account has no balance snapshot")
+    p = normalize_params(params)
+    today = today or date.today()
+    _x, result = _simulate_account(account, p, today.replace(day=1).isoformat())
+    return [float(account["balance"]["value"])] + [float(m["value_after_costs"]) for m in result["monthly"]]
+
+
 def _eligible(account: dict) -> bool:
     return account.get("status") != "closed" and bool(account.get("balance")) and account["balance"].get("value") is not None
 
@@ -449,13 +471,8 @@ target_amount/end_date), passed in so this module stays free of I/O;
     has_accessible = has_immediate = False
     info = {}
     for a in eligible:
-        x = _account_inputs(a, p, p["monthly_contributions"])
+        x, result = _simulate_account(a, p, start)
         fee, fee_source, monthly = x["fee"], x["fee_source"], x["monthly"]
-        net_monthly = monthly * (1 - x["deposit_fee"] / 100)
-        result = simulate(Scenario(
-            years=p["years"], initial=float(a["balance"]["value"]), monthly_contribution=net_monthly, inflation=p["inflation"],
-            deposit_timing=p["deposit_timing"], start_date=start, monthly_fixed_cost=x["insurance"],
-            assets=(Asset(name="account", annual_return=x["annual_return"], annual_fee=fee),)), monthly=True)
         profile = _liquidity_profile(a)
         has_accessible = has_accessible or profile["ceiling"] == "accessible"
         has_immediate = has_immediate or profile["basis"] == "immediate"

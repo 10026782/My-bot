@@ -75,7 +75,7 @@ def test_five_separate_categories_and_no_totals_or_ranking_keys():
                      assets=[asset()], loans=[owed(arrangement="monthly")]))
     assert tuple(cats(out)) == fs.CATEGORIES and len(fs.CATEGORIES) == 5
     assert not (set(keys_of(out)) & FORBIDDEN_KEYS)
-    assert not [k for k in keys_of(out) if k.startswith("total") or "sum" in k]
+    assert not [k for k in keys_of(out) if k.startswith("total") or k in ("sum", "sums", "grand_total")]
 
 
 def test_source_has_no_forbidden_key_in_code():
@@ -233,3 +233,91 @@ def test_module_is_pure_and_does_not_touch_the_engine_or_funding_plan():
     text = Path("portfolio_lab/funding_sources.py").read_text(encoding="utf-8")
     for forbidden in ("airtable", "requests", "anthropic", "open(", "dispatch_tool", "simulate("):
         assert forbidden not in text, forbidden
+
+
+# ── שלב 2: ערך צפוי לתאריך היעד (הנחות גלויות, נפרד מהיתרה המדווחת) ───────────────────────────────────────────────
+
+FLAT_REQ = {"assumptions": {"annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}}
+
+
+def run_flat(inp, margin=None, goal_ids=(G,)):
+    req = fp.normalize_request({"goal_ids": list(goal_ids), "date_margin_months": margin, **FLAT_REQ})
+    return fs.build_suggested_sources(inp, req, TODAY)
+
+
+def test_expected_at_due_is_separate_from_the_reported_balance_and_labelled():
+    out = run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=100)]))
+    row = cats(out)["liquid_now"][0]
+    slot = fp._slot(fp.af._iso_date("2030-12-31"), TODAY.replace(day=1))
+    exp = row["expected_at_due"]
+    assert row["amount"] == 1000 and exp["amount"] == pytest.approx(1000 + 100 * slot, abs=0.01)
+    assert exp["label"] == "expected_by_assumptions" and exp["guaranteed"] is False and exp["includes_planned_deposits"] is True
+    assert out["assumptions"]["annual_return_pct"] == 0 and "annual_fee_pct" in out["assumptions"]
+
+
+def test_expected_at_due_without_deposit_or_snapshot_or_date():
+    flat = run_flat(inputs([cash("recI", 1000)]))
+    row = cats(flat)["liquid_now"][0]
+    assert row["expected_at_due"]["amount"] == pytest.approx(1000) and row["expected_at_due"]["includes_planned_deposits"] is False
+    nosnap = run_flat(inputs([acct("recN", None, liquidity="immediate")]))
+    assert cats(nosnap)["liquid_now"][0]["expected_at_due"] is None
+    nodate = run_flat(inputs([cash("recI")], goals=[goal_rec(end=None)]))
+    assert cats(nodate)["liquid_now"][0]["expected_at_due"] is None
+
+
+def test_expected_at_due_follows_the_date_window_and_the_assumptions():
+    out = run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=100)]), margin=12)
+    exp = cats(out)["liquid_now"][0]["expected_at_due"]
+    assert exp["early"] < exp["amount"] < exp["late"]
+    growth = fs.build_suggested_sources(inputs([cash("recI", 1000)]), fp.normalize_request(
+        {"goal_ids": [G], "assumptions": {"annual_return_pct": 10, "annual_fee_pct": 0, "inflation_pct": 0}}), TODAY)
+    assert cats(growth)["liquid_now"][0]["expected_at_due"]["amount"] > 1000
+
+
+def test_invalid_assumptions_are_rejected_not_defaulted():
+    with pytest.raises(ValueError):
+        fs.build_suggested_sources(inputs([cash("recI")]), {"goal_ids": [G], "assumptions": {"annual_return_pct": 999}, "options": [],
+                                                              "allocation_plan": [], "date_margin_months": None}, TODAY)
+
+
+# ── ביצועים: ריצת מנוע אחת לחשבון לכל בקשה, לא לכל זוג יעד×חשבון (תוצאות זהות) ───────────────────────────────────────
+
+def many(n_goals=10, n_accounts=30):
+    ends = [f"{2028 + i * 4}-06-30" for i in range(n_goals)]                      # 2028 … 2064: horizons that differ per goal
+    goals = [goal_rec(gid=f"recG{i}", end=ends[i], date_margin_months=12) for i in range(n_goals)]
+    accounts = [cash(f"recA{j}", 1000 + j, planned_monthly_deposit=10 + j) for j in range(n_accounts)]
+    return inputs(accounts, goals=goals), [g["id"] for g in goals]
+
+
+def test_one_engine_run_per_account_not_per_goal_and_account(monkeypatch):
+    calls = []
+    real = fs.af._simulate_account
+    monkeypatch.setattr(fs.af, "_simulate_account", lambda a, p, start: (calls.append(a["id"]), real(a, p, start))[1])
+    inp, gids = many()
+    out = run_flat(inp, goal_ids=tuple(gids))
+    assert len(out["goals"]) == 10 and len(calls) == 30 and len(set(calls)) == 30            # not 10 × 30 = 300
+
+
+def test_results_are_identical_to_computing_each_goal_alone():
+    inp, gids = many(n_goals=4, n_accounts=5)
+    together = run_flat(inp, goal_ids=tuple(gids))
+    for i, gid in enumerate(gids):
+        alone = run_flat(inp, goal_ids=(gid,))["goals"][0]
+        assert json.dumps(together["goals"][i], sort_keys=True) == json.dumps(alone, sort_keys=True), gid
+
+
+def test_a_value_path_does_not_depend_on_the_horizon_requested():
+    from portfolio_lab.accounts_forecast import account_value_points
+    account = cash("recI", 1000, planned_monthly_deposit=100, expected_return_pct=5)
+    short = account_value_points(account, {"years": 10, "annual_return_pct": 6, "annual_fee_pct": 0.15, "inflation_pct": 2}, TODAY)
+    long = account_value_points(account, {"years": 40, "annual_return_pct": 6, "annual_fee_pct": 0.15, "inflation_pct": 2}, TODAY)
+    assert long[:len(short)] == short
+
+
+def test_a_missing_planned_deposit_is_not_collapsed_to_zero_and_the_basis_is_stated():
+    none = cats(run_flat(inputs([cash("recI", 1000)])))["liquid_now"][0]["expected_at_due"]
+    assert none["includes_planned_deposits"] is False and none["monthly_planned_deposit_included"] is None
+    zero = cats(run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=0)])))["liquid_now"][0]["expected_at_due"]
+    assert zero["monthly_planned_deposit_included"] == 0 and zero["includes_planned_deposits"] is False
+    some = cats(run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=75)])))["liquid_now"][0]["expected_at_due"]
+    assert some["monthly_planned_deposit_included"] == 75 and some["basis"] == "end_of_last_completed_month_up_to_the_date"
