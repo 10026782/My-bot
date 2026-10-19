@@ -4856,6 +4856,7 @@ def _fcc_enabled(identity=None) -> bool:
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/accounts", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/accounts/forecast", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/pace", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/net-worth", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/save", methods=["OPTIONS"])
@@ -4963,6 +4964,56 @@ def fcc_accounts_forecast(identity):
         return jsonify({"error": str(error)}), 400
     except Exception:                                        # noqa: BLE001
         logger.exception("[fcc] accounts forecast failed")
+        return jsonify({"error": "internal error"}), 500
+    finally:
+        _PL_COMPUTE.release()
+
+
+@tma_api.route("/api/fcc/pace", methods=["POST"])
+@require_tma_auth
+def fcc_pace(identity):
+    """Actual accumulation pace vs the plan (C4): reported balances/deposits of the caller's OWN accounts, an updated assumption-based forecast and a
+    neutral course-correction illustration. The body carries only the assumptions typed on the screen (horizon, return, fee, inflation); all data is
+    read server-side, owner-scoped. Same gate as the rest of the family-wealth screen: flag AND canary AND owner, 404 for everyone else. Writes nothing."""
+    global _PL_LIMITER
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    if request.mimetype != "application/json":
+        return jsonify({"error": "Content-Type must be application/json"}), 415
+    length = request.content_length
+    if length is None:
+        return jsonify({"error": "Content-Length required"}), 411
+    if not 0 < length <= _PL_MAX_BODY:
+        return jsonify({"error": "body too large"}), 413
+    if _PL_LIMITER is None:
+        from guards.rate_limiter import RateLimiter  # noqa: PLC0415
+        _PL_LIMITER = RateLimiter(max_per_minute=12)
+    if not _PL_LIMITER.is_allowed(f"portfolio_lab:{identity.user_id}"):
+        return jsonify({"error": "too many requests"}), 429
+    try:
+        params = json.loads(request.get_data(cache=False))
+    except (ValueError, UnicodeDecodeError):
+        return jsonify({"error": "invalid JSON"}), 400
+    from core.financial_control import service as fcc_service  # noqa: PLC0415
+    from portfolio_lab.pace_tracker import build_pace_view, normalize_params  # noqa: PLC0415
+    try:
+        normalize_params(params)                              # reject bad input before any Airtable read
+        inputs = fcc_service.pace_inputs(identity)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except (ValueError, TypeError, OverflowError) as error:
+        return jsonify({"error": str(error)}), 400          # validation text only (no internals)
+    except Exception:                                        # noqa: BLE001 — never leak internals
+        logger.exception("[fcc] pace read failed")
+        return jsonify({"error": "internal error"}), 500
+    if not _PL_COMPUTE.acquire(timeout=5):
+        return jsonify({"error": "busy"}), 503
+    try:
+        return jsonify(build_pace_view(inputs, params))
+    except (ValueError, TypeError, OverflowError, KeyError) as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] pace view failed")
         return jsonify({"error": "internal error"}), 500
     finally:
         _PL_COMPUTE.release()

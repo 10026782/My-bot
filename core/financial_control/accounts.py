@@ -64,6 +64,22 @@ def _owned(fields: dict, owner_id: str | None, owner_field: str) -> bool:
     return owner_id is None or owner_id in _ids((fields or {}).get(owner_field))
 
 
+def account_events(accounts: list[dict], events: list[dict], owner_id: str | None = None) -> list[dict]:
+    """The well-formed account events (deposit/withdrawal/fee/transfer/balance_snapshot) of the caller's own accounts, in the same
+    shape ``accounts_overview`` works with (read-only pace tracking needs the history, not just the latest snapshot). Same filters:
+    owner (defence in depth), known accounts only, malformed rows dropped. Pure."""
+    known = {a.get("id") for a in accounts or [] if a.get("id") and _owned((a or {}).get("fields"), owner_id, AF.FINANCIAL_OWNER)}
+    out = []
+    for rec in events or []:
+        if not _owned((rec or {}).get("fields"), owner_id, EF.FINANCIAL_OWNER):
+            continue
+        ev = _event(rec)
+        if ev is None or ev["account"] not in known or (ev["counter"] and ev["counter"] not in known):
+            continue
+        out.append(ev)
+    return out
+
+
 def accounts_overview(accounts: list[dict], events: list[dict], today: date, owner_id: str | None = None) -> dict:
     """Read model over owner-scoped rows. ``owner_id`` (Profile record id) is defence in depth on top of the access policy:
     when given, accounts and events of anyone else are ignored even if the caller passed them in."""
