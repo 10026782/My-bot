@@ -7,6 +7,7 @@ import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccT
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
 import { KpiCard } from "./FccKpiCard";
+import { PortfolioLabPanel } from "./PortfolioLabPanel";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -461,6 +462,10 @@ export function FamilyWealth({ overview, onBack, onRetry }: { overview: Overview
           {/* funding planner: mounted only when opened; the comparison runs on demand, never in the background */}
           <div role="tabpanel" id={panelId("funding", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("funding", FAMILY_TAB_PREFIX)} hidden={tab !== "funding"}>
             {tab === "funding" && <FundingSection overview={overview} />}
+          </div>
+          {/* mounted only when opened: the simulation runs on demand, never in the background */}
+          <div role="tabpanel" id={panelId("lab", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("lab", FAMILY_TAB_PREFIX)} hidden={tab !== "lab"}>
+            {tab === "lab" && <PortfolioLabPanel />}
           </div>
         </div>
       </div>

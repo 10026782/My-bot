@@ -9,11 +9,12 @@ export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // 
 export const OPEN_LABEL = `פתח: ${SCREEN_TITLE}`;
 export const TABS_ARIA_LABEL = `אזורי ${SCREEN_TITLE}`;
 
-export type FamilyTabKey = "savings" | "accounts" | "funding";
+export type FamilyTabKey = "savings" | "accounts" | "funding" | "lab";
 export const FAMILY_TABS: { key: FamilyTabKey; label: string }[] = [
   { key: "savings", label: "החיסכון שלי" },
   { key: "accounts", label: "החשבונות" },
   { key: "funding", label: "מימון יעד" },
+  { key: "lab", label: "מעבדת העתיד" },
 ];
 export const FAMILY_TAB_PREFIX = "fw";
 

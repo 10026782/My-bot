@@ -35,9 +35,9 @@ const release = { income_net: 10000, income_target: 15000, fixed_level: 8000, sh
 const plan = { mode: "monthly_level", target: 8000, actual: 5000, remaining: 3000, dynamic_target_per_week: 0, goals: 2 };
 const overview = { summary: { savings: plan }, savings_release: release, as_of: "2026-10-14" } as unknown as FccOverview;
 
-test("screen name and the three tabs are the agreed ones (no standalone simulator tab)", () => {
+test("screen name and the four tabs are the agreed ones", () => {
   assert.equal(SCREEN_TITLE, "תכנון חיסכון לטווח ארוך");
-  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מימון יעד");
+  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מימון יעד | מעבדת העתיד");
 });
 
 test("savings tab: plan = standing level, actual labelled as self-reported, expected is NOT a plan, balance is not invented", () => {
@@ -84,11 +84,11 @@ test("entry card: short, from the overview only, labelled", () => {
   assert.ok(html.includes("פתח") && html.includes(SCREEN_TITLE));
 });
 
-test("family screen renders its tabs, starts on the savings tab and has no standalone simulator", () => {
+test("family screen renders both tabs, starts on the savings tab and does not mount the lab until opened", () => {
   const html = renderToStaticMarkup(createElement(FamilyWealth, { overview: { status: "ok", data: overview }, onBack: () => undefined, onRetry: () => undefined }));
-  assert.ok(html.includes("החיסכון שלי") && !html.includes("מעבדת העתיד"));
-  assert.ok(html.includes('role="tablist"') && html.includes('id="fw-tab-savings"') && !html.includes('id="fw-panel-lab"'));
-  assert.ok(!html.includes("נתוני הדגמה"), "no standalone simulator on the screen");
+  assert.ok(html.includes("החיסכון שלי") && html.includes("מעבדת העתיד"));
+  assert.ok(html.includes('role="tablist"') && html.includes('id="fw-tab-savings"') && html.includes('id="fw-panel-lab"'));
+  assert.ok(!html.includes("נתוני הדגמה"), "the lab (and its simulation call) is not mounted on the savings tab");
   assert.ok(html.includes("הפקדה חודשית מתוכננת") && html.includes("יתרת תיק"));
 });
 
@@ -100,8 +100,8 @@ test("the FCC tab strip is reused unchanged for FCC and works for other tab sets
   assert.equal(tabForKey("monthly", "ArrowLeft", true), "loans");
   assert.equal(tabForKey("savings" as const, "ArrowLeft", true, FAMILY_TABS), "accounts");
   assert.equal(tabForKey("accounts" as const, "ArrowLeft", true, FAMILY_TABS), "funding");
-  assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "savings");
-  assert.equal(tabForKey("funding" as const, "Home", false, FAMILY_TABS), "savings");
+  assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
+  assert.equal(tabForKey("lab" as const, "Home", false, FAMILY_TABS), "savings");
   assert.equal(FCC_TABS.length, 3);
 });
 
@@ -131,7 +131,7 @@ test("one name everywhere: entry card, open button, screen title and tab-strip l
   assert.ok(screen.includes(`>${SCREEN_TITLE}</h1>`) || screen.includes(SCREEN_TITLE), "screen title");
   assert.ok(screen.includes(`aria-label="${TABS_ARIA_LABEL}"`) && TABS_ARIA_LABEL.endsWith(SCREEN_TITLE), "tab strip label");
   const fs = require("fs");
-  for (const file of ["src/components/FamilyWealth.tsx", "src/components/PortfolioLabCharts.tsx", "src/components/FinancialControlCenter.tsx", "src/App.tsx"]) {
+  for (const file of ["src/components/FamilyWealth.tsx", "src/components/PortfolioLabPanel.tsx", "src/components/PortfolioLabCharts.tsx", "src/components/FinancialControlCenter.tsx", "src/App.tsx"]) {
     const text = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     assert.ok(!/תכנון חיסכון|ההון המשפחתי|הון משפחתי/.test(text), `${file} hard-codes a screen name instead of using SCREEN_TITLE`);
   }
@@ -188,7 +188,7 @@ test("chart geometry only scales: points stay inside the plot, the largest value
 
 test("no financial engine in the client: no compounding / annuity / power math in the new sources", () => {
   const fs = require("fs");
-  for (const file of ["src/lib/familyWealth.ts", "src/components/FamilyWealth.tsx", "src/components/PortfolioLabCharts.tsx"]) {
+  for (const file of ["src/lib/familyWealth.ts", "src/components/FamilyWealth.tsx", "src/components/PortfolioLabPanel.tsx", "src/components/PortfolioLabCharts.tsx"]) {
     const text = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     for (const bad of ["Math.pow", "**", "Math.exp", "Math.log", "reduce(", "/ 12", "* 12", "annuity", "compound", "1 +"]) {
       assert.ok(!text.includes(bad), `${file} contains "${bad}"`);
@@ -208,7 +208,7 @@ test("a screen of its own: opened from the hub (owners only) and via the FCC car
   assert.ok(fcc.includes("onOpenFamilyWealth && <FamilyWealthCard"), "no card without the shortcut");
 });
 
-test("the screen loads its own data: loading/error states, and the other tabs do not depend on the overview", () => {
+test("the screen loads its own data: loading/error states, and the lab tab does not depend on the overview", () => {
   const states = [
     [{ status: "loading" as const }, "טוען את נתוני החיסכון"],
     [{ status: "error" as const, code: 404 }, "המסך עדיין לא פעיל"],
@@ -218,7 +218,7 @@ test("the screen loads its own data: loading/error states, and the other tabs do
   for (const [overview, text] of states) {
     const html = renderToStaticMarkup(createElement(FamilyWealth, { overview, onBack: () => undefined, onRetry: () => undefined }));
     assert.ok(html.includes(text), `savings tab shows "${text}"`);
-    assert.ok(html.includes(SCREEN_TITLE) && html.includes('id="fw-tab-funding"'), "header and the tabs are always there");
+    assert.ok(html.includes(SCREEN_TITLE) && html.includes('id="fw-tab-lab"'), "header and both tabs are always there");
     assert.ok(!html.includes("הפקדה חודשית מתוכננת"), "no savings numbers without data");
   }
 });
