@@ -22,7 +22,6 @@
         "core/action_gateway.py",
         "core/approval_turn_metrics.py",
         "app.py",
-        "tma-frontend/src/components/Approvals.tsx",
         "core/evidence_message_adapter.py",
         "core/lifecycle_message_adapter.py",
         "core/message_surface_harness.py"
