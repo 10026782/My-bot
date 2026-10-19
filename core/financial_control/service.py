@@ -575,6 +575,7 @@ def goals_for_forecast(identity) -> list[dict]:
             "status": str(f.get(FinGoalFields.STATUS) or "active").lower(),
             "target_amount": calc._num(f.get(FinGoalFields.TARGET_AMOUNT)),
             "end_date": (calc._d(f.get(FinGoalFields.END_DATE)).isoformat() if calc._d(f.get(FinGoalFields.END_DATE)) else None),
+            "date_margin_months": calc.date_margin_months(f.get(FinGoalFields.DATE_MARGIN)),
         })
     return out
 

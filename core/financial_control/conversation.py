@@ -109,7 +109,7 @@ def _missing(d: BusinessDraft) -> list[str]:
 
 
 GOAL_FIELDS = {"target_amount": "סכום יעד", "title": "שם היעד", "category": "קטגוריה", "period_type": "תקופה",
-               "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה"}
+               "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה", "date_margin": "מרווח תאריך (± חודשים)"}
 GOAL_FIELD_CHOICES = [{"goal_id": k, "title": v} for k, v in GOAL_FIELDS.items()]
 
 
@@ -299,7 +299,7 @@ def _one_line(text: str) -> str:
 
 
 # value-shaped fields (the contract input types CURRENCY / NUMBER / PERCENT / DATE), parsed by rule
-_NUMERIC_FIELDS = ("delta", "target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount")
+_NUMERIC_FIELDS = ("delta", "target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount", "date_margin")
 _DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date", "review_by")
 
 
@@ -939,7 +939,7 @@ def start_funding_plan_save(identity, request: dict, plan: dict, selected: list,
         return TurnResult("denied", policy.DENIED_MESSAGE)
     result_snapshot = {"as_of": plan.get("as_of"), "assumptions": plan.get("assumptions"), "need": need,
                        "options": [{k: v for k, v in o.items() if k != "details"} for o in out.get("options") or []],
-                       "plan": out.get("plan")}
+                       "plan": out.get("plan"), "window": out.get("window")}
     request_json, result_json, selected_json = _compact_json(request), _compact_json(result_snapshot), _compact_json(chosen)
     if max(len(request_json), len(result_json)) > _FUNDING_JSON_CAP:
         return TurnResult("clarify", "התוכנית גדולה מדי לשמירה — הקטינו את מספר האפשרויות.")
@@ -1484,7 +1484,8 @@ def _goal_original(identity, goal: dict) -> dict:
     target = calc.effective_target(base, [e for e in events if not e.superseded], date.today())
     original = {"title": f.get(GF.TITLE), "target_amount": target, "category": sel(GF.CATEGORY),
                 "period_type": sel(GF.PERIOD_TYPE), "calc_method": sel(GF.CALC_METHOD),
-                "end_date": f.get(GF.END_DATE), "start_date": f.get(GF.START_DATE)}
+                "end_date": f.get(GF.END_DATE), "start_date": f.get(GF.START_DATE),
+                "date_margin": calc.date_margin_months(f.get(GF.DATE_MARGIN)) or None}
     return {k: v for k, v in original.items() if v not in (None, "")}
 
 

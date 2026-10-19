@@ -604,12 +604,23 @@ test("funding screen: renders the intro, the principle and the controls; the res
   const html = renderToStaticMarkup(createElement(FundingSection, { overview }));
   assert.ok(html.includes("מימון יעד") && html.includes("לא המלצה") && html.includes("כסף צפוי אינו כסף קיים"));
   assert.ok(html.includes("חתונה") && !html.includes("פרויקט"), "only goals with an amount and a date can be planned");
-  for (const label of ["הלוואה", "מכירת נכס", "הפקדות חדשות", "גביית חוב שחייבים לי"]) assert.ok(html.includes(label), label);
-  assert.ok(html.includes("השווה אפשרויות"));
+  // progressive disclosure: before a goal is chosen only the goal picker is on screen — no option buttons, no simulation assumptions, no submit
+  for (const label of ["הלוואה", "מכירת נכס", "הפקדות חדשות", "גביית חוב שחייבים לי", "השווה אפשרויות", "אינפלציה", "דמי ניהול", "אי־ודאות בתאריך"]) assert.ok(!html.includes(label), `${label} must wait for a goal`);
+  assert.ok(html.includes("בחרו יעד"));
+  const emptyGoals = renderToStaticMarkup(createElement(FundingSection, { overview: { status: "ok", data: { ...(overview as unknown as { data: object }).data, goals: [] } } as unknown as Parameters<typeof FundingSection>[0]["overview"] }));
+  assert.ok(emptyGoals.includes("אין יעד עם סכום ותאריך") && !emptyGoals.includes("אינפלציה") && !emptyGoals.includes("הלוואה"), "no goal: the empty message only");
   const loading = renderToStaticMarkup(createElement(FundingSection, { overview: { status: "loading" } }));
   assert.ok(loading.includes("טוען"));
   const result = renderToStaticMarkup(createElement(FundingResult, { model: fundingModel(fundingView, "recG1")! }));
   assert.ok(result.includes("הפקדה חודשית נדרשת") && result.includes("התוכנית שהוזנה") && result.includes("מבט תיק") && result.includes("fw-option"));
+});
+
+test("funding screen: the assumptions only exist for the deposits option and the option buttons only after a goal (source gates)", () => {
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("/** Own call, own states; mounted only when the tab is opened"));
+  assert.ok(section.includes("{hasGoal && hasDeposits && (") && section.includes("<details") && section.includes("{hasGoal && <div className=\"fw-add\""));
+  assert.ok(section.includes("{hasGoal && form.options.map"));
 });
 
 test("funding: read-only plumbing — one POST route, run only on submit, no client arithmetic", () => {
@@ -657,6 +668,26 @@ test("funding follow-up: a label for every option type; only type + goal go up; 
   const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("/** Own call, own states; mounted only when the tab is opened"));
   assert.ok(section.includes("postFccFundingFollowup(savedFor.goalId, t)") && section.includes("writer.receipt && !writer.turn"));
   assert.ok(!/\.reduce\(|Math\./.test(section), "no arithmetic in the funding component");
+});
+
+test("date window: the margin is typed text -> one whole number; the card shows the early and the late end from the server", () => {
+  const ok = (m: string) => fundingRequest({ ...DEFAULT_FUNDING_FORM, goalId: "recG1", marginMonths: m });
+  const good = ok("24");
+  assert.ok(good.ok && good.body.date_margin_months === 24);
+  const blank = ok("");
+  assert.ok(blank.ok && !("date_margin_months" in blank.body), "blank = the goal's own saved margin, nothing is sent");
+  for (const bad of ["2.5", "-1", "61", "abc"]) assert.ok(!ok(bad).ok, bad);
+  const end = (due: string, rm: number) => ({ due, reason: null, gap: 200000, months_to_due: 1, options: [{ id: "dep", type: "new_deposits", feasible: true, reason: null, covers_amount: 200000, available_by: null, monthly_cash_effect: -rm, certainty: "expected", time_to_realize_months: 1, required_monthly: rm }] });
+  const withWindow = { ...fundingView, goals: [{ ...fundingView.goals[0], need: { ...fundingView.goals[0].need, date_margin_months: 24 },
+    window: { margin_months: 24, early: end("2036-06-30", 4100), late: end("2040-06-30", 2200), note: "x" } }] } as unknown as Parameters<typeof fundingModel>[0];
+  const m = fundingModel(withWindow, "recG1")!;
+  assert.ok(m.windowNote && m.needRows.some((r) => r.label === "תאריך יעד (משוער)" && r.value.includes("± 24 חודשים")));
+  const card = m.options.find((o) => o.id === "dep")!;
+  assert.equal(card.windowRows.length, 2);
+  assert.ok(card.windowRows[0].label.includes("30/06/2036") && card.windowRows[0].value.includes("4,100"));
+  assert.ok(card.windowRows[1].label.includes("30/06/2040") && card.windowRows[1].value.includes("2,200"));
+  const firm = fundingModel(fundingView, "recG1")!;
+  assert.ok(firm.windowNote === null && firm.options.every((o) => o.windowRows.length === 0));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

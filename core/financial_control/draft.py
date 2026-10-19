@@ -180,6 +180,7 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("end_date", GF.END_DATE, InputType.DATE, required=RequiredMode.CONDITIONAL, when=_CUM,
            example="2026-12-31"),
         _f("start_date", GF.START_DATE, InputType.DATE),
+        _f("date_margin", GF.DATE_MARGIN, InputType.NUMBER, validation="non_negative_integer", example="24"),
     )),
     FCC_WEEK_SURPLUS: EntityContract(FCC_WEEK_SURPLUS, (
         _f("decision", EF.NOTE, InputType.SELECT, required=RequiredMode.ALWAYS, choices=WEEK_DECISIONS),
@@ -326,7 +327,7 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
 # ── Presentation (Hebrew): labels, display values, select-answer vocabulary ────────────────────
 LABELS = {
     "title": "יעד", "target_amount": "סכום", "category": "קטגוריה", "period_type": "תקופה",
-    "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה",
+    "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה", "date_margin": "מרווח תאריך (± חודשים)",
     "goal": "יעד", "kind": "סוג", "amount": "סכום", "occurred_at": "תאריך", "note": "הערה", "due_date": "לתאריך",
     "name": "התחייבות", "scope": "שייכות", "frequency": "תדירות", "review_status": "החלטה", "saving": "חיסכון חודשי פוטנציאלי",
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
@@ -947,7 +948,7 @@ class FccEntityAdapter(CommercialEntityAdapter):
             for name, spec in (("title", GF.TITLE), ("target_amount", GF.TARGET_AMOUNT),
                                ("category", GF.CATEGORY), ("period_type", GF.PERIOD_TYPE),
                                ("calc_method", GF.CALC_METHOD), ("end_date", GF.END_DATE),
-                               ("start_date", GF.START_DATE)):
+                               ("start_date", GF.START_DATE), ("date_margin", GF.DATE_MARGIN)):
                 if values.get(name) not in (None, ""):
                     fields[spec] = values[name]
             write = {"op": "post", "table": Tables.FIN_GOALS, "fields": fields,
@@ -1031,7 +1032,7 @@ class FccEntityAdapter(CommercialEntityAdapter):
         patch = {}
         for name, spec in (("title", GF.TITLE), ("category", GF.CATEGORY), ("period_type", GF.PERIOD_TYPE),
                            ("calc_method", GF.CALC_METHOD), ("end_date", GF.END_DATE),
-                           ("start_date", GF.START_DATE)):
+                           ("start_date", GF.START_DATE), ("date_margin", GF.DATE_MARGIN)):
             if name in changed:
                 patch[spec] = changed[name]
         if patch:
