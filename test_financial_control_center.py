@@ -511,7 +511,7 @@ def test_income_goal_infers_category_period_method_and_skips_end_date():
 
 # cumulative types need an end date; "other" never guesses period/method
 def test_required_matrix_cumulative_needs_end_date_and_other_asks_period_and_method():
-    for cat in ("emergency_fund", "debt"):
+    for cat in ("emergency_fund", "debt", "future_goal"):
         ex = Ex(classify={"g": {"action": "create_goal", "title": f"t-{cat}", "target": 1000, "category": cat}})
         r = run(ex, ELIYAHU, "g")
         assert r.awaiting == "end_date", cat
