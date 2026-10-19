@@ -889,6 +889,14 @@ export interface PlCrisis {
   applied: boolean; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[]; by_strategy?: PlCrisisStrategy[];
   recovery_truncated_by_horizon?: boolean; note?: string;
 }
+export interface PlCompareSide { label: string; assumptions: Record<string, number | string | boolean>; kpis: PlKpis; series: PlSeriesRow[] }
+export interface PlScenarioComparison {
+  applied: boolean; strategy?: { id: string; label: string };
+  changed_fields?: { field: string; label: string; a: number | string | boolean; b: number | string | boolean }[];
+  a?: PlCompareSide; b?: PlCompareSide;
+  gaps_b_minus_a?: Record<string, number> & { series: { year: number; nominal: number; real: number }[] };
+  note?: string;
+}
 export interface PlBreakdown {
   contributions: number; profit_net: number; costs: number; total_before_costs: number;
   shares: { contributions: number; profit_net: number; costs: number };
@@ -901,6 +909,7 @@ export interface PortfolioLabView {
     growth: { series: PlSeriesRow[]; crisis: PlCrisis };
     strategy_comparison: Record<string, PlSeriesRow[]>;
     breakdown: PlBreakdown;
+    scenario_comparison?: PlScenarioComparison;
     sensitivity: {
       monthly_contribution: { factor: number; monthly_contribution: number; final_nominal: number; final_real: number }[];
       duration: { years: number; final_nominal: number; final_real: number; contributions: number }[];
@@ -918,6 +927,7 @@ export interface PortfolioLabParams {
   initial: number; monthly_contribution: number; years: number; annual_return_pct: number; annual_fee_pct: number; inflation_pct: number;
   deposit_timing: "begin" | "end"; index_contributions: boolean; baseline: string; strategies: string[];
   crisis?: { decline_pct: number; year: number; recovery: "fast" | "prolonged" };
+  compare_to?: Partial<Pick<PortfolioLabParams, "initial" | "monthly_contribution" | "annual_return_pct" | "annual_fee_pct" | "inflation_pct">>;
 }
 
 /** Goal Funding Planner (step 1b): a neutral comparison of ways to fund one goal. Every number is the server's; nothing here is a recommendation. */
