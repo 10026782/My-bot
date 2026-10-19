@@ -462,6 +462,19 @@ export async function postFccFundingSave(body: FundingRequestBody, selected: str
   return data;
 }
 
+/** Funding planner step 4: a follow-up TASK for one option of the goal's SAVED plan. Only ids/type go up (the title is fixed on the server); the
+ *  server opens the existing follow-up draft and the owner confirms through postFccWrite("אשר"). */
+export async function postFccFundingFollowup(goalId: string, optionType: string): Promise<FccTurn> {
+  const r = await fetch(`${BASE}/api/fcc/funding/plan/followup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ goal_id: goalId, option_type: optionType }),
+  });
+  const data = (await r.json().catch(() => ({}))) as FccTurn & { error?: string };
+  if (!r.ok && !data.state) throw new Error(data.error || `API ${r.status}`);
+  return data;
+}
+
 /** Goal Funding Planner (step 1b): typed options -> POST /api/fcc/funding/plan. Read-only on the server; the page shows only what comes back. */
 export async function postFccFundingPlan(body: FundingRequestBody): Promise<FundingPlan> {
   const r = await fetch(`${BASE}/api/fcc/funding/plan`, {

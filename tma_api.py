@@ -4858,6 +4858,7 @@ def _fcc_enabled(identity=None) -> bool:
 @tma_api.route("/api/fcc/accounts/forecast", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/save", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/funding/plan/followup", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/write", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/loans/scenario", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/intent/start", methods=["OPTIONS"])
@@ -5039,6 +5040,27 @@ def fcc_funding_plan_save(identity):
     except Exception:                                        # noqa: BLE001
         logger.exception("[fcc] funding plan save start failed")
         return jsonify({"state": "clarify", "message": "לא הצלחתי לפתוח את שמירת התוכנית כרגע — נסו שוב."}), 200
+    return jsonify(result.to_dict()), (403 if result.state == "denied" else 200)
+
+
+@tma_api.route("/api/fcc/funding/plan/followup", methods=["POST"])
+@require_tma_auth
+def fcc_funding_plan_followup(identity):
+    """Funding planner step 4: body = ``{goal_id, option_type}``. Opens the existing follow-up-task draft for ONE option of the goal's saved plan
+    (fixed server-side title, own goal only); nothing is written until the owner confirms with "אשר" on /api/fcc/write. Same gate as the planner."""
+    body, err = _funding_body(identity)
+    if err:
+        return err
+    if not isinstance(body, dict) or set(body) != {"goal_id", "option_type"} or not all(isinstance(v, str) for v in body.values()):
+        return jsonify({"error": "goal_id and option_type required"}), 400
+    from core.financial_control import conversation as fcc_conv  # noqa: PLC0415
+    try:
+        result = fcc_conv.start_funding_followup(identity, body["goal_id"], body["option_type"])
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] funding follow-up start failed")
+        return jsonify({"state": "clarify", "message": "לא הצלחתי לפתוח את המשימה כרגע — נסו שוב."}), 200
     return jsonify(result.to_dict()), (403 if result.state == "denied" else 200)
 
 
