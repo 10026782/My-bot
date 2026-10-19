@@ -104,7 +104,7 @@
         }
       ],
       "valid_from": "2026-08-18",
-      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Phase 2 scope only: MemoryRetrievalRequest/MemorySnapshot contract + build_memory_snapshot() + a debug-only shadow-comparison helper.",
