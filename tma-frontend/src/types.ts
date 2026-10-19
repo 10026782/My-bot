@@ -881,8 +881,12 @@ export interface PlKpis {
   management_fees_paid: number; total_cost_impact: number | null; net_effective_annual_return: number; real_effective_annual_return: number;
   after_tax: { value: number | null; display: string | null; note: string };
 }
+export interface PlCrisisStrategy {
+  strategy: string; label: string; is_baseline: boolean; final_nominal: number; final_real: number;
+  final_nominal_no_crisis: number; delta_vs_no_crisis: number; gap_vs_baseline: number;
+}
 export interface PlCrisis {
-  applied: boolean; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[];
+  applied: boolean; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[]; by_strategy?: PlCrisisStrategy[];
   recovery_truncated_by_horizon?: boolean; note?: string;
 }
 export interface PlBreakdown {
