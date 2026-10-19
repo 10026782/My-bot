@@ -16,13 +16,12 @@ import { Surface } from "./ui/Surface";
 
 interface Props {
   onBack: () => void;
-  onOpenApprovals?: () => void;
   onOpenHealth?: () => void;
   onOpenMarketing?: () => void;
   onOpenVentures?: () => void;
 }
 
-type DestinationHandlers = Pick<Props, "onOpenApprovals" | "onOpenHealth" | "onOpenMarketing" | "onOpenVentures">;
+type DestinationHandlers = Pick<Props, "onOpenHealth" | "onOpenMarketing" | "onOpenVentures">;
 
 type State =
   | { status: "loading" }
@@ -71,7 +70,6 @@ function destinationAction(
   destination: string,
   handlers: DestinationHandlers,
 ): (() => void) | undefined {
-  if (destination === "approvals") return handlers.onOpenApprovals;
   if (destination === "system_health") return handlers.onOpenHealth;
   if (destination === "marketing") return handlers.onOpenMarketing;
   if (destination === "ventures") return handlers.onOpenVentures;
@@ -166,7 +164,7 @@ function Unavailable({ text }: { text: string }) {
   return <p className="command-center-unavailable">{text}</p>;
 }
 
-export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures }: Props) {
+export function OwnerControlCenter({ onBack, onOpenHealth, onOpenMarketing, onOpenVentures }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [expandedDevelopment, setExpandedDevelopment] = useState<Set<string>>(new Set());
@@ -217,7 +215,7 @@ export function OwnerControlCenter({ onBack, onOpenApprovals, onOpenHealth, onOp
   const systemState = data.system_status.state;
   const pendingEntries = attentionCurrent ? actionableApprovalEntries(data.pending_decisions) : [];
   const developmentItems = developmentCurrent ? buildDevelopmentList(data.development_status) : [];
-  const handlers = { onOpenApprovals, onOpenHealth, onOpenMarketing, onOpenVentures };
+  const handlers = { onOpenHealth, onOpenMarketing, onOpenVentures };
 
   function toggleDevelopmentItem(key: string) {
     setExpandedDevelopment((prev) => {
