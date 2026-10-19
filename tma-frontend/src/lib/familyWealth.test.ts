@@ -5,14 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FamilyWealth, FamilyWealthCard } from "../components/FamilyWealth";
 import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
-import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView } from "../types";
+import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView, PaceView } from "../types";
 import { AccountsPanel, ForecastResult, FundingResult, FundingSection } from "../components/FamilyWealth";
 import { ContextualComposer } from "../components/FccTabBar";
 import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -198,6 +198,54 @@ test("scenario comparison: only filled set-B fields go into the request; rows ar
   assert.ok(rows[0].cells[3].includes("200") && !rows[0].cells[3].startsWith("+") && rows[5].cells[3].startsWith("+"));
   assert.ok(rows[7].cells[3].includes("-2.00%"));
   assert.deepEqual(scenarioLines(cmp)[1].pts, [[1, 8]]);
+});
+
+const paceView = {
+  as_of: "2026-10-19", accounts: [
+    { id: "recA", name: "קרן", status: "compared", missing: [], latest_balance: { value: 150000, as_of: "2026-09-10" },
+      planned: { value_at_comparison: 128000 }, deviation: { vs_plan: 22000, vs_deposits_only: 26000, deposits_gap: 16000 },
+      return: { exact: null, status: "approximate_range", days: 243, documented_flow_count: 2, undocumented_flows_possible: true,
+                range: { low: 0.0714, high: 0.1 }, annualized_range: { low: 0.109, high: 0.154 } } },
+    { id: "recB", name: "פנסיה", status: "single_snapshot", missing: ["planned_monthly_deposit", "deposit_events"], latest_balance: { value: 50000, as_of: "2026-03-01" } },
+  ],
+  consolidated: { accounts_with_plan: 1, accounts_without_plan: 0, accounts_without_snapshot: 0, accounts_single_snapshot: 1, accounts_short_period: 0, accounts_compared: 1,
+    latest_balance: 150000, start_balance: 100000, planned: { value_at_comparison: 128000, deposits_total: 24000, value_deposits_only: 124000 },
+    flows: { deposits: 40000, deposits_complete: true, withdrawals: 0, fees: 0, transfers_in: 0, transfers_out: 0, net_documented: 40000 },
+    value_change: { total: 50000, documented_flows: 40000, unexplained: 10000 }, deviation: { vs_plan: 22000, vs_deposits_only: 26000, deposits_gap: 16000 } },
+  forecast: { applied: true, lines: { planned_pace: { monthly_deposit: 3000, final_nominal: 900, series: [{ year: 1, nominal: 5, real: 4, contributions: 1 }] },
+    actual_pace: { monthly_deposit: 5000, final_nominal: 1200, series: [{ year: 1, nominal: 6, real: 5, contributions: 1 }] }, goal_history_pace: null } },
+  course_correction: { applied: true, rows: [{ monthly_change: -500, monthly_deposit: 4500, final_nominal: 1100, delta_vs_updated_forecast: -100 },
+                                              { monthly_change: 500, monthly_deposit: 5500, final_nominal: 1300, delta_vs_updated_forecast: 100 }] },
+} as unknown as PaceView;
+
+test("pace tracker: wording of the server's numbers — signed deviation, no exact return, missing is 'חסר' never 0", () => {
+  const rows = paceSummaryRows(paceView);
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r.cells[1]]));
+  assert.ok(byKey.deviation.startsWith("+") && byKey.deviation.includes("22,000"));
+  assert.ok(byKey.unexplained.startsWith("+") && byKey.actual_deposits.includes("40,000"));
+  const accounts = paceAccountRows(paceView);
+  assert.ok(accounts[0].cells[5].includes("טווח משוער") && accounts[0].cells[5].includes("לא ניתן לחשב תשואה מדויקת"));
+  assert.ok(!/\b10\.00%\b/.test(accounts[0].cells[5].split("עד")[0]));          // the range is shown, not one made-up exact figure
+  assert.equal(accounts[1].cells[3], MISSING_LABEL);
+  assert.equal(accounts[1].cells[4], MISSING_LABEL);
+  assert.ok(accounts[1].missing.includes("הפקדה חודשית מתוכננת") && accounts[1].missing.includes("אירועי הפקדה"));
+  const short = paceReturnText({ ...paceView.accounts[0].return!, status: "period_too_short", range: null, annualized_range: null });
+  assert.ok(short.includes("30 יום") && !short.includes("%"));
+});
+
+test("pace tracker: lines are only those the server produced (no zero line for a missing pace); correction rows are signed and neutral", () => {
+  assert.deepEqual(paceForecastLines(paceView).map((l) => l.name), ["קצב מתוכנן", "קצב בפועל (אקסטרפולציה)"]);
+  const none = { ...paceView, forecast: { ...paceView.forecast, lines: { planned_pace: null, actual_pace: null, goal_history_pace: null } } } as unknown as PaceView;
+  assert.equal(paceForecastLines(none).length, 0);
+  const cc = paceCorrectionRows(paceView);
+  assert.ok(cc[0].cells[0].startsWith("-") && cc[1].cells[0].startsWith("+") && cc[0].cells[3].startsWith("-") && cc[1].cells[3].startsWith("+"));
+  assert.equal(paceCorrectionRows({ ...paceView, course_correction: { applied: false, reason: "no_actual_pace" } } as unknown as PaceView).length, 0);
+  assert.equal(paceSummaryRows({ ...paceView, consolidated: { ...paceView.consolidated, deviation: null } } as unknown as PaceView).length, 0);
+});
+
+test("pace tracker: assumptions are the lab form's typed numbers; an invalid form yields none", () => {
+  assert.deepEqual(paceAssumptions(DEFAULT_LAB_FORM), { annual_return_pct: 8, annual_fee_pct: 0.15, inflation_pct: 2 });
+  assert.equal(paceAssumptions({ ...DEFAULT_LAB_FORM, returnPct: "x" }), null);
 });
 
 test("breakdown shares come from the server (the client never divides)", () => {
