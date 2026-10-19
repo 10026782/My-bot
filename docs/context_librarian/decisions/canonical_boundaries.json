@@ -30,7 +30,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-06-30",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "A generated bundle or planning document cannot override main."
@@ -81,7 +81,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Legacy IDs may resolve an existing contract but never create, infer, or repair one."
@@ -151,7 +151,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "A code default is not evidence of the current deployed environment."
@@ -187,7 +187,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-06-30",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Without all three gates report Implemented but not yet verified."
@@ -218,7 +218,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.98,
       "notes": [
         "Preserve historical failures as evidence, but do not treat them as current state without re-verification."
@@ -255,7 +255,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Do not expose record IDs, contract IDs, payloads, credentials, or internal tool names."
@@ -342,7 +342,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "a605195c1d7bae2638f54685a5e24fcc57997949",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot (docs/governance/librarian/FIRST_REAL_CONSUMPTION_PILOT.md) found these five sources missing from cross_layer_architecture's mandatory tier despite being materially load-bearing for the recommendation.",
@@ -410,7 +410,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-07-30",
-      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Added after the first real Consumption Enforcement pilot found these sources missing from cross_layer_architecture's mandatory tier, despite Stage 3A's own recommendation resting on this exact contract.",
@@ -753,7 +753,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-10-06",
-      "last_verified_commit": "94342a10b230927813618634b9e0273fabcd1884",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.9,
       "notes": [
         "Registered to resolve a Context Librarian REVIEW_REQUIRED finding (new runtime source, NO_POLICY_MATCH) for the FCC goal-families change; follows decision.command_center_presentation_helper precedent. Requires owner approval at review.",
@@ -800,7 +800,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-19",
-      "last_verified_commit": "6baef325646fdd9dcc0a15f1c2b82cc4ebe589f5",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.9,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #749 (MY-WORK-1): MyWork.tsx is a new TMA screen component matching the TMA_FEATURE_SCREEN policy. Owner explicitly reviewed and approved this registration.",
@@ -855,7 +855,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-20",
-      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #785 (block_reason=NO_POLICY_MATCH): core/lead_service.py had no existing catalog owner across any of the 8 registered layers or 18 decision nodes as of this registration — owner decision was CREATE NEW NODE.",
@@ -897,7 +897,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-20",
-      "last_verified_commit": "a605195c1d7bae2638f54685a5e24fcc57997949",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.9,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that merges N18 Phase 2's first two slices — core/structured_command.py and core/draft_flow.py had no existing catalog owner. Explicitly anticipated by decision.canonical_lead_write_service's own registration notes: these primitives 'carry no Lead-specific authority themselves' — classified REGISTER_SUPPORTING, not a new authority node, matching the precedent set by decision.tma_screens for similar non-authority infrastructure.",
@@ -943,7 +943,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-21",
-      "last_verified_commit": "1d5ca86ae3883e1b664189c93cc70449a98b6262",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.85,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that merges N18 Phase 2's fifth (closing) slice — core/turn_result.py had no existing catalog owner. Classified REGISTER_SUPPORTING, not a new authority node, matching the identical precedent set by decision.n18_shared_write_primitives (same reasoning: pure data type, no I/O, no business semantics).",
@@ -1087,7 +1087,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-28",
-      "last_verified_commit": "0a4e41b376acc4da7676fc83e9f74d49ddb03c26",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.85,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #1095: all 8 files were new sources with no matching policy_registry.json entry (block_reason NO_POLICY_MATCH), classified REVIEW_REQUIRED/'new source with unknown role' by classify_new_sources() purely because none of Dockerfile/.yml/.sh/.example extensions match its .py/.md/image buckets.",
@@ -1141,7 +1141,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-01",
-      "last_verified_commit": "809ffc9054d68219cd1259b65b5ebc6f582e39cd",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.95,
       "notes": [
         "Owner-approved registration for PR #1166 after Context Librarian reported NO_POLICY_MATCH for this new runtime source.",
@@ -1206,7 +1206,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-03",
-      "last_verified_commit": "56c8d68d25f4ab25b6f0841bbf5f6cb0c8f20c8f",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.95,
       "notes": [
         "Owner-approved registration for PR #1187 after the pre-merge Context Librarian gate reported NO_POLICY_MATCH for commercial_completion.py, docs/architecture/commercial-completion/FIELD_COMPLETION_MATRIX.csv, and tools/commercial_model_simulation.py.",
@@ -1269,7 +1269,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-03",
-      "last_verified_commit": "23ab957e75961c7b50f929e263eddd3f0d6632c8",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.95,
       "notes": [
         "Owner-approved S2B classification after the pre-implementation gate found no production writer node for Organization, Charge, or Charge-required V2 Payment.",
@@ -1329,7 +1329,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-03",
-      "last_verified_commit": "2b51f8e81d368a5c9d47fbac2abffb603e753485",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.95,
       "notes": [
         "Owner-approved S2C classification: one production completion-routing authority, with foundation remaining pure and S2B remaining narrow mutation-only authority.",
@@ -1376,7 +1376,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-06",
-      "last_verified_commit": "902f723f6a1a4e22221ad496de61e1e15630217d",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.9,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding on PR #1222 (block_reason=NO_POLICY_MATCH): lead_deal_link.py is a new runtime source with no existing catalog node or policy_registry.json entry to match. Owner explicitly reviewed and chose CREATE NEW NODE over attaching it to decision.canonical_lead_write_service (rejected: that node is specifically Lead creation/update authority, and lead_deal_link.py never writes a Lead).",
@@ -1412,7 +1412,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-17",
-      "last_verified_commit": "d35b1149c8a093785a4997701b96ccb710481698",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.95,
       "notes": [
         "Owner-approved registration for PR #1244 after the pre-merge Context Librarian gate reported NO_POLICY_MATCH for core/recruitment_contracts.py; the owner explicitly requested fixing CI after approving Phase 1 and opening the PR.",
@@ -1474,7 +1474,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-17",
-      "last_verified_commit": "818b3912c04d4d514eeedbbc5d96e5296b8e92d4",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.95,
       "notes": [
         "Owner explicitly approved Phase 2 runtime writers after Phase 1 merged.",
@@ -1522,7 +1522,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-09-22",
-      "last_verified_commit": "7c53c4dc44434928bcaa99ea7f365025ffc3e59d",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.75,
       "notes": [
         "Registered to resolve a Context Librarian OWNER_DECISION_REQUIRED finding (block_reason=NO_POLICY_MATCH) on the PR that introduces core/business_draft.py -- the module had no existing catalog owner. Same classification and reasoning as decision.n18_shared_write_primitives (core/draft_flow.py / core/structured_command.py): REGISTER_SUPPORTING, not a new authority node -- this module is a direct continuation of that same N18 write-interaction-primitive generalization, one layer up (wrapping CommercialCompletionWriter's validation/completion contract rather than a plain dict).",
@@ -1616,7 +1616,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-10-13",
-      "last_verified_commit": "5e20e6069e558e6e4a8bb8712c7b49a30177da08",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "last_semantic_review_commit": "b34186e4f6eac8b1c367eb9d8a38a957580cc94a",
       "confidence": 0.95,
       "notes": [
@@ -1678,7 +1678,7 @@
         }
       ],
       "valid_from": "2026-10-13",
-      "last_verified_commit": "5e20e6069e558e6e4a8bb8712c7b49a30177da08",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.8,
       "notes": [
         "Owner-approved registration (PR #1311 review remediation) after the pre-merge Context Librarian gate reported NO_POLICY_MATCH for decision_insight_source.py.",
