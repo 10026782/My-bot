@@ -3,7 +3,6 @@ import { fetchProjects, fetchTmaAuth } from "./api";
 import { GlobalKpis } from "./components/GlobalKpis";
 import { ProjectCard } from "./components/ProjectCard";
 import { LeadPipeline } from "./components/LeadPipeline";
-import { Approvals } from "./components/Approvals";
 import { FinancePulse } from "./components/FinancePulse";
 import { PersonalMode } from "./components/PersonalMode";
 import { SystemHealth } from "./components/SystemHealth";
@@ -28,7 +27,6 @@ type HubState =
 export default function App() {
   const [hub, setHub] = useState<HubState>({ status: "loading" });
   const [selected, setSelected] = useState<TProjectCard | null>(null);
-  const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [financeOpen, setFinanceOpen] = useState(false);
   const [personalOpen, setPersonalOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
@@ -108,7 +106,6 @@ export default function App() {
     return (
       <OwnerControlCenter
         onBack={() => setOwnerControlOpen(false)}
-        onOpenApprovals={() => { setOwnerControlOpen(false); setApprovalsOpen(true); }}
         onOpenHealth={() => { setOwnerControlOpen(false); setHealthOpen(true); }}
         onOpenMarketing={() => { setOwnerControlOpen(false); setMarketingOpen(true); }}
         onOpenVentures={() => { setOwnerControlOpen(false); setVenturesOpen(true); }}
@@ -138,11 +135,6 @@ export default function App() {
   // ── Finance Pulse view ──────────────────────────────────────────
   if (financeOpen) {
     return <FinancePulse onBack={() => setFinanceOpen(false)} />;
-  }
-
-  // ── Approvals view ──────────────────────────────────────────────
-  if (approvalsOpen) {
-    return <Approvals onBack={() => setApprovalsOpen(false)} />;
   }
 
   // ── Lead Pipeline view ──────────────────────────────────────────
