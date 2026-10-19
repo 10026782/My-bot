@@ -69,6 +69,17 @@ test("accounts: current / stale / missing counts with the server's threshold; an
   assert.ok(m.net.hint.includes("לא מאומת"));
 });
 
+test("partial data: a linked loan without a balance is NOT reported as deducted; no accounts with a balance says so plainly", () => {
+  const a0 = base.assets.items[0];
+  const none = { ...a0, debt: null, counted: true, missing: [] as never[] };       // linked loan without a balance, the asset's own mortgage ignored
+  const m = netWorthModel({ ...base, net: null, partial: true, gaps: { ...base.gaps, debts_without_balance: 1 },
+    accounts: { ...base.accounts, total: null, items: [], missing: [{ id: "m", name: "x" }], oldest_as_of: null, freshness: { current: 0, stale: 0, missing: 1 } },
+    assets: { ...base.assets, items: [none] } });
+  assert.ok(!m.notes.some((n) => n.includes("נוכתה פעם אחת")), "no false 'deducted' claim");
+  assert.ok(m.notes.some((n) => n.includes("לא נוכתה (חסר)")));
+  assert.equal(m.rows[0].hint, "אין יתרה שדווחה · 1 חשבונות חסרים");
+});
+
 test("a sold asset and an overlapping mortgage are explained; no receivables card when there are none", () => {
   const m = netWorthModel({ ...base, receivables: { ...base.receivables, count: 0, total: null, items: [] } });
   assert.equal(m.receivables, null);
