@@ -604,12 +604,23 @@ test("funding screen: renders the intro, the principle and the controls; the res
   const html = renderToStaticMarkup(createElement(FundingSection, { overview }));
   assert.ok(html.includes("מימון יעד") && html.includes("לא המלצה") && html.includes("כסף צפוי אינו כסף קיים"));
   assert.ok(html.includes("חתונה") && !html.includes("פרויקט"), "only goals with an amount and a date can be planned");
-  for (const label of ["הלוואה", "מכירת נכס", "הפקדות חדשות", "גביית חוב שחייבים לי"]) assert.ok(html.includes(label), label);
-  assert.ok(html.includes("השווה אפשרויות"));
+  // progressive disclosure: before a goal is chosen only the goal picker is on screen — no option buttons, no simulation assumptions, no submit
+  for (const label of ["הלוואה", "מכירת נכס", "הפקדות חדשות", "גביית חוב שחייבים לי", "השווה אפשרויות", "אינפלציה", "דמי ניהול", "אי־ודאות בתאריך"]) assert.ok(!html.includes(label), `${label} must wait for a goal`);
+  assert.ok(html.includes("בחרו יעד"));
+  const emptyGoals = renderToStaticMarkup(createElement(FundingSection, { overview: { status: "ok", data: { ...(overview as unknown as { data: object }).data, goals: [] } } as unknown as Parameters<typeof FundingSection>[0]["overview"] }));
+  assert.ok(emptyGoals.includes("אין יעד עם סכום ותאריך") && !emptyGoals.includes("אינפלציה") && !emptyGoals.includes("הלוואה"), "no goal: the empty message only");
   const loading = renderToStaticMarkup(createElement(FundingSection, { overview: { status: "loading" } }));
   assert.ok(loading.includes("טוען"));
   const result = renderToStaticMarkup(createElement(FundingResult, { model: fundingModel(fundingView, "recG1")! }));
   assert.ok(result.includes("הפקדה חודשית נדרשת") && result.includes("התוכנית שהוזנה") && result.includes("מבט תיק") && result.includes("fw-option"));
+});
+
+test("funding screen: the assumptions only exist for the deposits option and the option buttons only after a goal (source gates)", () => {
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("/** Own call, own states; mounted only when the tab is opened"));
+  assert.ok(section.includes("{hasGoal && hasDeposits && (") && section.includes("<details") && section.includes("{hasGoal && <div className=\"fw-add\""));
+  assert.ok(section.includes("{hasGoal && form.options.map"));
 });
 
 test("funding: read-only plumbing — one POST route, run only on submit, no client arithmetic", () => {

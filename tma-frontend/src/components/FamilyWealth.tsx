@@ -256,6 +256,8 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
       .then((plan) => { if (id === latest.current) setState({ status: "ok", plan, goalId, titles: names, body: parsed.body }); })
       .catch((e: Error & { status?: number }) => { if (id === latest.current) setState({ status: "error", message: e.message, code: e.status }); });
   };
+  const hasGoal = form.goalId !== "";
+  const hasDeposits = form.options.some((o) => o.type === "new_deposits");
   const model = state.status === "ok" ? fundingModel(state.plan, state.goalId, state.titles) : null;
   return (
     <section className="fcc-section" aria-labelledby="fw-funding">
@@ -276,16 +278,23 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
             </select>
           </label>
         )}
+        {hasGoal && (
         <label>אי־ודאות בתאריך היעד (± חודשים, ריק = תאריך קבוע)
           <input inputMode="numeric" value={form.marginMonths} onChange={(e) => setForm((f) => ({ ...f, marginMonths: e.target.value }))} />
           <small>למשל 24 = ההערכה היא תאריך היעד, בטווח של שנתיים לכל כיוון. נשמר ביעד דרך ״עדכון יעד״ במרכז הכלכלי.</small>
         </label>
-        <div className="pl-grid">
+        )}
+        {hasGoal && hasDeposits && (
+          <details className="fw-assumptions">
+            <summary>הנחות לחישוב ההפקדות (תשואה, דמי ניהול, אינפלציה)</summary>
+          <div className="pl-grid">
           <label>תשואה שנתית ברירת מחדל (%)<input inputMode="decimal" value={form.returnPct} onChange={(e) => setForm((f) => ({ ...f, returnPct: e.target.value }))} /></label>
           <label>דמי ניהול ברירת מחדל (%)<input inputMode="decimal" value={form.feePct} onChange={(e) => setForm((f) => ({ ...f, feePct: e.target.value }))} /></label>
           <label>אינפלציה שנתית (%)<input inputMode="decimal" value={form.inflationPct} onChange={(e) => setForm((f) => ({ ...f, inflationPct: e.target.value }))} /></label>
-        </div>
-        {form.options.map((o) => (
+          </div>
+          </details>
+        )}
+        {hasGoal && form.options.map((o) => (
           <fieldset key={o.id} className="fw-option-form">
             <legend>{FUNDING_TYPE_LABELS[o.type]}</legend>
             <div className="pl-grid">
@@ -317,15 +326,17 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
             <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={() => setForm((f) => ({ ...f, options: f.options.filter((x) => x.id !== o.id) }))}>הסר אפשרות</button>
           </fieldset>
         ))}
-        <div className="fw-add" role="group" aria-label="הוספת אפשרות מימון">
+        {hasGoal && <div className="fw-add" role="group" aria-label="הוספת אפשרות מימון">
           {FUNDING_ADDABLE.map((t) => (
             <button key={t} type="button" className="boss-button boss-button--quiet boss-bubble--action"
                     onClick={() => setForm((f) => ({ ...f, options: [...f.options, newFundingOption(t, ++counter.current)] }))}>＋ {FUNDING_TYPE_LABELS[t]}</button>
           ))}
-        </div>
-        <button type="submit" className="boss-button boss-button--primary boss-bubble--action" disabled={state.status === "loading" || goals.length === 0}>
-          {state.status === "loading" ? "משווה…" : "השווה אפשרויות"}
-        </button>
+        </div>}
+        {hasGoal && (
+          <button type="submit" className="boss-button boss-button--primary boss-bubble--action" disabled={state.status === "loading"}>
+            {state.status === "loading" ? "משווה…" : "השווה אפשרויות"}
+          </button>
+        )}
         {formError && <p className="fcc-quick__error" role="alert">⚠️ {formError}</p>}
       </form>
       {state.status === "loading" && <ScreenState state="loading" title="משווה" message="המנוע מחשב את האפשרויות…" />}
