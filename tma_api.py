@@ -4998,21 +4998,22 @@ def fcc_pace(identity):
     from portfolio_lab.pace_tracker import build_pace_view, normalize_params  # noqa: PLC0415
     try:
         normalize_params(params)                              # reject bad input before any Airtable read
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400          # validation text only (it names the offending field, never internals)
+    try:
         inputs = fcc_service.pace_inputs(identity)
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
-    except (ValueError, TypeError, OverflowError) as error:
-        return jsonify({"error": str(error)}), 400          # validation text only (no internals)
-    except Exception:                                        # noqa: BLE001 — never leak internals
+    except Exception:                                        # noqa: BLE001 — never leak internals (no exception text to the client)
         logger.exception("[fcc] pace read failed")
         return jsonify({"error": "internal error"}), 500
     if not _PL_COMPUTE.acquire(timeout=5):
         return jsonify({"error": "busy"}), 503
     try:
         return jsonify(build_pace_view(inputs, params))
-    except (ValueError, TypeError, OverflowError, KeyError) as error:
+    except ValueError as error:                              # input validation raised by the pure view
         return jsonify({"error": str(error)}), 400
-    except Exception:                                        # noqa: BLE001
+    except Exception:                                        # noqa: BLE001 — KeyError/TypeError/OverflowError and the rest: generic 500, logged
         logger.exception("[fcc] pace view failed")
         return jsonify({"error": "internal error"}), 500
     finally:

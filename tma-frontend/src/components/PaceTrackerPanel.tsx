@@ -37,6 +37,7 @@ export function PaceTrackerPanel({ assumptions }: { assumptions: { annual_return
       <Surface variant="subtle" padding="compact" role="note">
         היתרות וההפקדות הן דיווח עצמי שלך, לא מאומתות מול בנק. ההשוואה היא לתוכנית ההפקדה שהוזנה בחשבונות; התחזית המעודכנת היא אקסטרפולציה של הקצב בפועל לפי ההנחות
         של המעבדה — לא תחזית ולא המלצה. שום דבר כאן לא נשמר.
+        <br /><strong>שימו לב:</strong> ההפקדה המתוכננת <strong>הנוכחית</strong> בחשבון משמשת להשוואה ההיסטורית לכל התקופה — לא התוכנית המקורית שהייתה בתוקף בכל חודש.
       </Surface>
       <div className="pl-grid">
         <label>אופק התחזית (שנים, 10–50)<input inputMode="numeric" value={years} onChange={(e) => setYears(e.target.value)} /></label>

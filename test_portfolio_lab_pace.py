@@ -335,3 +335,33 @@ def test_pace_module_is_pure_and_endpoint_block_is_read_only():
     for forbidden in ("_queue_or_owner_execute", "dispatch_tool", "call_anthropic", "_gw_create", "_gw_patch", "airtable"):
         assert forbidden not in block, forbidden
     assert re.findall(r"from portfolio_lab[\w.]* import", block) == ["from portfolio_lab.pace_tracker import"]
+
+
+@pytest.mark.parametrize("exc", [KeyError("secret-key"), TypeError("secret type"), OverflowError("secret overflow"), RuntimeError("secret runtime")])
+def test_http_non_validation_errors_in_the_view_are_generic_500(monkeypatch, seeded, exc):
+    import portfolio_lab.pace_tracker as pt
+    monkeypatch.setattr(pt, "build_pace_view", lambda *a, **k: (_ for _ in ()).throw(exc))
+    r = post(client(monkeypatch), {})
+    assert r.status_code == 500 and r.get_json() == {"error": "internal error"} and "secret" not in r.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("exc", [KeyError("secret-key"), TypeError("secret type"), OverflowError("secret overflow"), ValueError("secret read value")])
+def test_http_non_validation_errors_in_the_read_are_generic_500(monkeypatch, seeded, exc):
+    monkeypatch.setattr(service, "pace_inputs", lambda identity: (_ for _ in ()).throw(exc))
+    r = post(client(monkeypatch), {})
+    assert r.status_code == 500 and r.get_json() == {"error": "internal error"} and "secret" not in r.get_data(as_text=True)
+
+
+def test_http_validation_messages_may_be_returned_but_only_validation(monkeypatch, seeded):
+    r = post(client(monkeypatch), {"years": 5})
+    assert r.status_code == 400 and r.get_json() == {"error": "years must be an integer from 10 to 50"}
+    import portfolio_lab.pace_tracker as pt
+    monkeypatch.setattr(pt, "build_pace_view", lambda *a, **k: (_ for _ in ()).throw(ValueError("inputs must be an object")))
+    r = post(client(monkeypatch), {})
+    assert r.status_code == 400 and r.get_json() == {"error": "inputs must be an object"}
+
+
+def test_current_planned_deposit_assumption_is_visible_on_the_card_and_in_the_assumptions():
+    card = Path("tma-frontend/src/components/PaceTrackerPanel.tsx").read_text(encoding="utf-8")
+    assert "הפקדה המתוכננת <strong>הנוכחית</strong>" in card and "לא התוכנית המקורית" in card
+    assert any("הנוכחית" in a and "הפקדה חודשית מתוכננת" in a for a in view([acct()], BASE_EVENTS)["assumptions"])
