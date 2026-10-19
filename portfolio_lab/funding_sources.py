@@ -71,17 +71,16 @@ def _item(source_type: str, source_id, name, **fields) -> dict:
     return base
 
 
-def _expected_at(account: dict, points: dict, assumptions: dict, today: date) -> dict | None:
+def _expected_at(account: dict, points: dict, path) -> dict | None:
     """ערך צפוי של חשבון בתאריך היעד (ובקצוות החלון) לפי `accounts_forecast` והנחות גלויות — נפרד מהיתרה המדווחת ואינו מובטח.
-    כולל את ההפקדה החודשית המתוכננת של החשבון (אם יש) והתשואה/דמי הניהול כפי שהוזנו או כברירת מחדל. None = אין צילום יתרה או אין תאריך."""
+    כולל את ההפקדה החודשית המתוכננת של החשבון (אם יש) והתשואה/דמי הניהול כפי שהוזנו או כברירת מחדל. None = אין צילום יתרה או אין תאריך.
+    `path(account)` = מסלול הערכים של החשבון (ריצת מנוע אחת לחשבון בכל הבקשה, בלי תלות במספר היעדים)."""
     if not af._eligible(account):
         return None
     slots = {name: p["slot"] for name, p in points.items() if name != "now"}
-    known = [v for v in slots.values() if v is not None]
-    if not known:
+    if all(v is None for v in slots.values()):
         return None
-    years = min(max(10, math.ceil(max(known) / 12)), 100)
-    values = af.account_value_points(account, {"years": years, **assumptions}, today)
+    values = path(account)
 
     def at(slot):
         return None if slot is None or slot >= len(values) else round(values[slot], 2)
@@ -90,6 +89,20 @@ def _expected_at(account: dict, points: dict, assumptions: dict, today: date) ->
     return {"label": "expected_by_assumptions", "guaranteed": False, "amount": at(slots["due"]), "early": at(slots["early"]), "late": at(slots["late"]),
             "includes_planned_deposits": bool(planned), "monthly_planned_deposit_included": planned or 0.0,
             "note": "forecast value under the shown assumptions; separate from the reported balance, not an entitlement to withdraw"}
+
+
+def _goal_frame(goal: dict, request: dict, today: date) -> dict:
+    """תאריך היעד, הסיבה שאי אפשר לחשב לפיו, חלון התאריך והנקודות (עכשיו / יעד / מוקדם / מאוחר) של יעד אחד."""
+    due = af._iso_date(goal.get("end_date"))
+    reason = "missing_date" if due is None else ("past_date" if fp._months_between(today.replace(day=1), due) < 0 else None)
+    usable_due = due if reason is None else None
+    override = request.get("date_margin_months")
+    margin = override if override is not None else int(goal.get("date_margin_months") or 0)
+    window = bool(usable_due and margin > 0)
+    points = {"now": _point(today, today), "due": _point(usable_due, today),
+              "early": _point(fp._add_months(usable_due, -margin) if window else None, today),
+              "late": _point(fp._add_months(usable_due, margin) if window else None, today)}
+    return {"due": due, "reason": reason, "margin": margin, "window": window, "points": points}
 
 
 def _account_item(account: dict, goal_id: str, points: dict, alloc: dict, expected: dict | None) -> tuple[str, dict]:
@@ -186,23 +199,26 @@ def build_suggested_sources(inputs: dict, request: dict, today: date | None = No
     valid, skipped = af._classify_allocations(inputs.get("allocations") or [], titles, {a["id"]: a for a in accounts}, {a["id"] for a in eligible})
     overview, _flags = af._allocations_now(valid, titles, info, {a["id"]: a for a in accounts}, today, skipped)
     owed = [l for l in inputs.get("loans") or [] if l.get("direction") == fcc_loans.OWED_TO_ME and l.get("active")]
+    frames = {gid: _goal_frame(goals[gid], request, today) for gid in request["goal_ids"]}
+    slots_needed = [pt["slot"] for fr in frames.values() for name, pt in fr["points"].items() if name != "now" and pt["slot"] is not None]
+    years = min(max([10] + [math.ceil(v / 12) for v in slots_needed]), 100)         # one horizon for the whole request: each account is simulated once
+    paths: dict[str, list] = {}
+
+    def path(account):
+        if account["id"] not in paths:
+            paths[account["id"]] = af.account_value_points(account, {"years": years, **assumptions}, today)
+        return paths[account["id"]]
+
     outputs = []
     for gid in request["goal_ids"]:
         goal = goals[gid]
-        due = af._iso_date(goal.get("end_date"))
-        reason = "missing_date" if due is None else ("past_date" if fp._months_between(today.replace(day=1), due) < 0 else None)
-        usable_due = due if reason is None else None
-        override = request.get("date_margin_months")
-        margin = override if override is not None else int(goal.get("date_margin_months") or 0)
-        window = bool(usable_due and margin > 0)
-        points = {"now": _point(today, today), "due": _point(usable_due, today),
-                  "early": _point(fp._add_months(usable_due, -margin) if window else None, today),
-                  "late": _point(fp._add_months(usable_due, margin) if window else None, today)}
+        frame = frames[gid]
+        due, reason, margin, window, points = frame["due"], frame["reason"], frame["margin"], frame["window"], frame["points"]
         alloc = _allocation_view(overview, gid)
         cats: dict[str, list] = {c: [] for c in CATEGORIES}
         unavailable, gaps = [], []
         for account in live:
-            where, item = _account_item(account, gid, points, alloc, _expected_at(account, points, assumptions, today))
+            where, item = _account_item(account, gid, points, alloc, _expected_at(account, points, path))
             (unavailable if where == "not_available" else cats[where]).append(item)
             planned = af._valid(account.get("planned_monthly_deposit"), 0, 10_000_000)
             if planned is None:

@@ -278,3 +278,37 @@ def test_invalid_assumptions_are_rejected_not_defaulted():
     with pytest.raises(ValueError):
         fs.build_suggested_sources(inputs([cash("recI")]), {"goal_ids": [G], "assumptions": {"annual_return_pct": 999}, "options": [],
                                                               "allocation_plan": [], "date_margin_months": None}, TODAY)
+
+
+# ── ביצועים: ריצת מנוע אחת לחשבון לכל בקשה, לא לכל זוג יעד×חשבון (תוצאות זהות) ───────────────────────────────────────
+
+def many(n_goals=10, n_accounts=30):
+    ends = [f"{2028 + i * 4}-06-30" for i in range(n_goals)]                      # 2028 … 2064: horizons that differ per goal
+    goals = [goal_rec(gid=f"recG{i}", end=ends[i], date_margin_months=12) for i in range(n_goals)]
+    accounts = [cash(f"recA{j}", 1000 + j, planned_monthly_deposit=10 + j) for j in range(n_accounts)]
+    return inputs(accounts, goals=goals), [g["id"] for g in goals]
+
+
+def test_one_engine_run_per_account_not_per_goal_and_account(monkeypatch):
+    calls = []
+    real = fs.af._simulate_account
+    monkeypatch.setattr(fs.af, "_simulate_account", lambda a, p, start: (calls.append(a["id"]), real(a, p, start))[1])
+    inp, gids = many()
+    out = run_flat(inp, goal_ids=tuple(gids))
+    assert len(out["goals"]) == 10 and len(calls) == 30 and len(set(calls)) == 30            # not 10 × 30 = 300
+
+
+def test_results_are_identical_to_computing_each_goal_alone():
+    inp, gids = many(n_goals=4, n_accounts=5)
+    together = run_flat(inp, goal_ids=tuple(gids))
+    for i, gid in enumerate(gids):
+        alone = run_flat(inp, goal_ids=(gid,))["goals"][0]
+        assert json.dumps(together["goals"][i], sort_keys=True) == json.dumps(alone, sort_keys=True), gid
+
+
+def test_a_value_path_does_not_depend_on_the_horizon_requested():
+    from portfolio_lab.accounts_forecast import account_value_points
+    account = cash("recI", 1000, planned_monthly_deposit=100, expected_return_pct=5)
+    short = account_value_points(account, {"years": 10, "annual_return_pct": 6, "annual_fee_pct": 0.15, "inflation_pct": 2}, TODAY)
+    long = account_value_points(account, {"years": 40, "annual_return_pct": 6, "annual_fee_pct": 0.15, "inflation_pct": 2}, TODAY)
+    assert long[:len(short)] == short
