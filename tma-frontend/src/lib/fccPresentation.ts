@@ -14,7 +14,7 @@ export function dmy(iso: string | null | undefined): string {
 }
 
 export const CATEGORY_LABEL: Record<string, string> = {
-  income: "הכנסה", savings: "חיסכון", debt: "חוב", debt_repaid: "חוב", emergency_fund: "קרן חירום",
+  income: "הכנסה", savings: "חיסכון", debt: "חוב", debt_repaid: "חוב", emergency_fund: "קרן חירום", future_goal: "יעד עתידי",
   project: "פרויקט", business_project: "פרויקט עסקי", investment: "השקעות", other: "אחר",
 };
 

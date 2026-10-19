@@ -41,7 +41,7 @@ DEFAULTS = {
     "monthly_contributions": {},
 }
 _MAX_ACCOUNTS = 50
-GOAL_CATEGORIES = {"long_term", "emergency_fund", "investment", "savings"}
+GOAL_CATEGORIES = {"long_term", "emergency_fund", "investment", "savings", "future_goal"}
 RETIREMENT_TYPES = {"pension", "managers_insurance"}          # מוצרי פרישה: לעולם לא `accessible` כסכום חד-פעמי
 STATES = ("accessible", "conditional", "locked")
 LINKAGES = {"none", "cpi", "sp500", "other_index", "fx", "unknown"}
