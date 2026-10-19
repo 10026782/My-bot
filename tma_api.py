@@ -4853,6 +4853,30 @@ def _fcc_enabled(identity=None) -> bool:
     return gate.enabled_for(identity)
 
 
+# Fixed texts the pure planners raise (as ValueError) when a request is wrong about the caller's OWN data — e.g. an unknown goal / account /
+# asset / loan id. They carry no values, so they may be shown. Any other exception from a builder is an internal fault: generic 500, logged,
+# never echoed (a ValueError raised from a computation could otherwise carry data or internals). A new planner message must be added here
+# (test_fcc_error_hardening.py checks each one still exists in the source); until then it degrades safely to the generic 500.
+_FCC_BUILD_VALIDATION = frozenset({
+    "unknown goal", "unknown account in options", "unknown asset in options", "loan_id must be an active debt owed to you",
+    "allocation_plan refers to a goal without computed options", "allocation_plan uses an option that is not feasible for this goal",
+    "allocation_plan amount exceeds what the option covers", "monthly_contributions has an unknown account",
+})
+
+
+def _fcc_build_error(label: str):
+    """Response for an exception raised by a pure builder (call inside the ``except`` block): 400 + text only for a known validation
+    message, KeyError -> the textless "invalid request", everything else -> logged generic 500."""
+    import sys  # noqa: PLC0415
+    error = sys.exc_info()[1]
+    if isinstance(error, KeyError):
+        return jsonify({"error": "invalid request"}), 400
+    if isinstance(error, ValueError) and str(error) in _FCC_BUILD_VALIDATION:
+        return jsonify({"error": str(error)}), 400
+    logger.exception(label)
+    return jsonify({"error": "internal error"}), 500
+
+
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/accounts", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/accounts/forecast", methods=["OPTIONS"])
@@ -4946,25 +4970,23 @@ def fcc_accounts_forecast(identity):
     from portfolio_lab.accounts_forecast import build_accounts_forecast, normalize_params  # noqa: PLC0415
     try:
         normalize_params(params)                              # reject bad input before any Airtable read
+    except (ValueError, TypeError, OverflowError) as error:
+        return jsonify({"error": str(error)}), 400          # validation of the client's own input only (no internals)
+    try:
         view = fcc_service.accounts_view(identity)
         goals = fcc_service.goals_for_forecast(identity)      # the caller's own goals only (A2 coverage); read-only
         allocations = fcc_service.allocations_for_forecast(identity)   # B2: own allocation rows only; read-only
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403
-    except (ValueError, TypeError, OverflowError) as error:
-        return jsonify({"error": str(error)}), 400          # validation text only (no internals)
-    except Exception:                                        # noqa: BLE001 — never leak internals
+    except Exception:                                        # noqa: BLE001 — never leak internals (data errors are not validation)
         logger.exception("[fcc] accounts forecast read failed")
         return jsonify({"error": "internal error"}), 500
     if not _PL_COMPUTE.acquire(timeout=5):
         return jsonify({"error": "busy"}), 503
     try:
         return jsonify(build_accounts_forecast(view, params, goals=goals, allocations=allocations))
-    except (ValueError, TypeError, OverflowError, KeyError) as error:
-        return jsonify({"error": str(error)}), 400
-    except Exception:                                        # noqa: BLE001
-        logger.exception("[fcc] accounts forecast failed")
-        return jsonify({"error": "internal error"}), 500
+    except Exception:                                        # noqa: BLE001 — known validation texts -> 400, the rest a logged generic 500
+        return _fcc_build_error("[fcc] accounts forecast failed")
     finally:
         _PL_COMPUTE.release()
 
@@ -5048,15 +5070,18 @@ def _funding_compute(identity, body, with_sources=False):
     """Normalise the request, read the caller's OWN data and build the plan. Returns ``(request, plan, None)`` or ``(None, None, error_response)``.
     ``with_sources`` (the plan route only) adds the read-only ``suggested_sources`` candidate list; the save route never passes it, so a saved plan is unchanged."""
     from core.financial_control import service as fcc_service  # noqa: PLC0415
+    from portfolio_lab.accounts_forecast import normalize_params  # noqa: PLC0415
     from portfolio_lab.funding_plan import build_funding_plan, normalize_request  # noqa: PLC0415
     try:
         funding_request = normalize_request(body)             # reject bad input before any Airtable read
+        normalize_params({"years": 10, **funding_request["assumptions"]})     # the planners validate the assumptions the same way; fail it here, as validation
+    except (ValueError, TypeError, OverflowError) as error:
+        return None, None, (jsonify({"error": str(error)}), 400)          # validation of the client's own input only (no internals, no amounts)
+    try:
         inputs = fcc_service.funding_inputs(identity)
     except data_access_policy.PersonalDataAccessDenied:
         return None, None, (jsonify({"error": "forbidden"}), 403)
-    except (ValueError, TypeError, OverflowError) as error:
-        return None, None, (jsonify({"error": str(error)}), 400)          # validation text only (no internals, no amounts)
-    except Exception:                                        # noqa: BLE001 — never leak internals
+    except Exception:                                        # noqa: BLE001 — never leak internals (data errors are not validation)
         logger.exception("[fcc] funding plan read failed")
         return None, None, (jsonify({"error": "internal error"}), 500)
     if not _PL_COMPUTE.acquire(timeout=5):
@@ -5067,13 +5092,8 @@ def _funding_compute(identity, body, with_sources=False):
             from portfolio_lab.funding_sources import build_suggested_sources  # noqa: PLC0415
             plan["suggested_sources"] = build_suggested_sources(inputs, funding_request)
         return funding_request, plan, None
-    except KeyError:
-        return None, None, (jsonify({"error": "invalid request"}), 400)
-    except (ValueError, TypeError, OverflowError) as error:
-        return None, None, (jsonify({"error": str(error)}), 400)
-    except Exception:                                        # noqa: BLE001
-        logger.exception("[fcc] funding plan failed")
-        return None, None, (jsonify({"error": "internal error"}), 500)
+    except Exception:                                        # noqa: BLE001 — known validation texts -> 400, the rest a logged generic 500
+        return None, None, _fcc_build_error("[fcc] funding plan failed")
     finally:
         _PL_COMPUTE.release()
 
