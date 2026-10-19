@@ -353,6 +353,16 @@ export function labTableRows(view: PortfolioLabView): { key: string; cells: stri
             r.is_baseline ? "—" : `${r.gap_vs_baseline > 0 ? "+" : ""}${ils(r.gap_vs_baseline)}`],
   }));
 }
+/** Same crisis on every compared strategy: wording of the server's by_strategy rows only (empty when no crisis was applied). */
+export const CRISIS_TABLE_HEAD = ["אסטרטגיה", "שווי סופי עם משבר", "שווי סופי ריאלי", "הפרש מול ללא משבר", "פער מול בסיס"];
+export function crisisTableRows(view: PortfolioLabView): { key: string; cells: string[] }[] {
+  const rows = view.charts.growth.crisis.by_strategy ?? [];
+  const signed = (v: number) => `${v > 0 ? "+" : ""}${ils(v)}`;
+  return rows.map((r) => ({
+    key: r.strategy,
+    cells: [r.is_baseline ? `${r.label} (בסיס)` : r.label, ils(r.final_nominal), ils(r.final_real), signed(r.delta_vs_no_crisis), r.is_baseline ? "—" : signed(r.gap_vs_baseline)],
+  }));
+}
 export const LAB_TABLE_HEAD = ["אסטרטגיה", "שווי סופי", "שווי ריאלי", "סך הפקדות", "רווח נטו", "עלויות", "פער מול בסיס"];
 
 // ── Chart geometry: pure scaling of numbers the server already produced (no financial calculation) ──
