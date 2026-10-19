@@ -881,9 +881,28 @@ export interface PlKpis {
   management_fees_paid: number; total_cost_impact: number | null; net_effective_annual_return: number; real_effective_annual_return: number;
   after_tax: { value: number | null; display: string | null; note: string };
 }
+export interface PlCrisisStrategy {
+  strategy: string; label: string; is_baseline: boolean; final_nominal: number; final_real: number;
+  final_nominal_no_crisis: number; delta_vs_no_crisis: number; gap_vs_baseline: number;
+}
+export interface PlIntraYear {
+  month: number; year: number; recovery_months: number; recovery_truncated_by_horizon: boolean;
+  monthly_path: { month_index: number; t_years: number; year: number; month: number; nominal_no_crisis: number; nominal_crisis: number;
+                  real_no_crisis: number; real_crisis: number; contributions: number }[];
+  timing_by_month: { month: number; is_selected: boolean; final_nominal: number; final_real: number; delta_vs_no_crisis: number }[];
+  deposit_order_note: string; note: string;
+}
 export interface PlCrisis {
-  applied: boolean; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[];
+  applied: boolean; intra_year?: PlIntraYear; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[]; by_strategy?: PlCrisisStrategy[];
   recovery_truncated_by_horizon?: boolean; note?: string;
+}
+export interface PlCompareSide { label: string; assumptions: Record<string, number | string | boolean>; kpis: PlKpis; series: PlSeriesRow[] }
+export interface PlScenarioComparison {
+  applied: boolean; strategy?: { id: string; label: string };
+  changed_fields?: { field: string; label: string; a: number | string | boolean; b: number | string | boolean }[];
+  a?: PlCompareSide; b?: PlCompareSide;
+  gaps_b_minus_a?: Record<string, number> & { series: { year: number; nominal: number; real: number }[] };
+  note?: string;
 }
 export interface PlBreakdown {
   contributions: number; profit_net: number; costs: number; total_before_costs: number;
@@ -897,6 +916,7 @@ export interface PortfolioLabView {
     growth: { series: PlSeriesRow[]; crisis: PlCrisis };
     strategy_comparison: Record<string, PlSeriesRow[]>;
     breakdown: PlBreakdown;
+    scenario_comparison?: PlScenarioComparison;
     sensitivity: {
       monthly_contribution: { factor: number; monthly_contribution: number; final_nominal: number; final_real: number }[];
       duration: { years: number; final_nominal: number; final_real: number; contributions: number }[];
@@ -913,7 +933,8 @@ export interface PortfolioLabView {
 export interface PortfolioLabParams {
   initial: number; monthly_contribution: number; years: number; annual_return_pct: number; annual_fee_pct: number; inflation_pct: number;
   deposit_timing: "begin" | "end"; index_contributions: boolean; baseline: string; strategies: string[];
-  crisis?: { decline_pct: number; year: number; recovery: "fast" | "prolonged" };
+  crisis?: { decline_pct: number; year: number; recovery: "fast" | "prolonged"; month?: number };
+  compare_to?: Partial<Pick<PortfolioLabParams, "initial" | "monthly_contribution" | "annual_return_pct" | "annual_fee_pct" | "inflation_pct">>;
 }
 
 /** Goal Funding Planner (step 1b): a neutral comparison of ways to fund one goal. Every number is the server's; nothing here is a recommendation. */
@@ -956,3 +977,72 @@ export interface FundingRequestBody {
   /** The goal's date is an estimate, uncertain by ± this many whole months (0 = firm). Omitted = the goal's own saved margin. */
   date_margin_months?: number;
 }
+
+/** Unified net worth (C2, server-computed, read-only): accounts + assets − own debts. Receivables are shown apart and are NOT in `net`. */
+export interface FccNetWorthAsset {
+  id: string; name: string | null; asset_type: string | null; as_of: string | null; gross_value: number | null; ownership_pct: number | null;
+  value: number | null; debt_source: "linked_loans" | "asset_mortgage" | null; debt: number | null; debt_responsibility_known: boolean; unknown_debt_loans: number;
+  ignored_mortgage_balance: number | null; counted: boolean; missing: ("missing_value" | "missing_ownership")[];
+}
+export interface FccNetWorth {
+  as_of: string;
+  net: number | null;
+  partial: boolean;
+  gaps: { accounts_without_balance: number; assets_left_out: number; debts_without_balance: number; asset_debts_unverified: number };
+  accounts: { total: number | null; items: { id: string; name: string | null; value: number; as_of: string; verification: string; age_days: number | null; freshness: "current" | "stale" }[];
+              missing: { id: string; name: string | null }[]; oldest_as_of: string | null; stale_after_days: number;
+              freshness: { current: number; stale: number; missing: number } };
+  assets: { total: number | null; items: FccNetWorthAsset[]; sold_excluded: number; oldest_as_of: string | null; as_of_known: boolean };
+  liabilities: { total: number | null; on_assets: number | null; standalone: number | null;
+                 standalone_items: { id: string; name: string | null; loan_type: string | null; balance: number | null; as_of: string | null; note: string | null }[];
+                 oldest_as_of: string | null; as_of_known: boolean };
+  receivables: { in_net: false; label: "expected_uncertain"; count: number; total: number | null; coverage: number; items: { id: string; name: string | null; balance: number | null }[] };
+}
+
+
+/** C4 — actual accumulation pace vs the plan (POST /api/fcc/pace). Every number is the server's; self_reported data; null = missing (never 0). */
+export interface PaceReturnBlock {
+  exact: null; days: number; documented_flow_count: number; undocumented_flows_possible: boolean;
+  status: "approximate_range" | "period_too_short" | "start_balance_not_positive" | "undefined_denominator" | "not_computed_consolidated";
+  range: { low: number; high: number } | null; annualized_range: { low: number; high: number } | null;
+}
+export interface PaceAccountRow {
+  id: string; name: string | null; status: "no_snapshot" | "single_snapshot" | "short_period" | "compared"; missing: string[]; verification: string | null;
+  latest_balance?: { value: number; as_of: string }; start_balance?: { value: number; as_of: string };
+  window?: { from: string; to: string; months: number };
+  flows?: { deposits: number | null; deposit_count: number; withdrawals: number; fees: number; transfers_in: number; transfers_out: number;
+            net_documented: number; event_count: number; same_day_events: number };
+  value_change?: { total: number; documented_flows: number; unexplained: number; note: string };
+  return?: PaceReturnBlock;
+  planned?: { monthly_deposit: number; return_pct: number; return_source: string; fee_pct: number; fee_source: string; deposits_total: number;
+              value_at_comparison: number; value_deposits_only: number; value_to_date: number | null; to_date: string } | null;
+  deviation?: { vs_plan: number; vs_deposits_only: number; deposits_gap: number | null } | null;
+}
+export interface PaceLine { source: string; monthly_deposit: number; final_nominal: number; final_real: number; series: PlSeriesRow[] }
+export interface PaceView {
+  schema_version: string; source: "portfolio_lab"; engine_version: string; data_basis: "self_reported"; as_of: string;
+  accounts: PaceAccountRow[]; closed_accounts: number; skipped_events: number;
+  consolidated: {
+    accounts_compared: number; accounts_with_plan: number; accounts_without_plan: number; accounts_without_snapshot: number;
+    accounts_single_snapshot: number; accounts_short_period: number; window?: { from: string; to: string };
+    start_balance?: number; latest_balance?: number;
+    planned?: { deposits_total: number; value_at_comparison: number; value_deposits_only: number };
+    flows?: { deposits: number | null; deposits_complete: boolean; withdrawals: number; fees: number; transfers_in: number; transfers_out: number; net_documented: number };
+    value_change?: { total: number; documented_flows: number; unexplained: number };
+    deviation: { vs_plan: number; vs_deposits_only: number; deposits_gap: number | null } | null;
+  };
+  goal_level_history?: { ytd: number; ytd_plan: number; ytd_gap: number; months_elapsed: number; monthly_average: number; streak: number } | null;
+  forecast: {
+    applied: boolean; reason?: string; horizon_years?: number; starting_value?: number; oldest_snapshot?: string; label?: string;
+    assumptions?: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; note: string };
+    lines?: { planned_pace: PaceLine | null; actual_pace: PaceLine | null; goal_history_pace: PaceLine | null };
+    gaps?: Record<string, number>; actual_pace_unavailable_reason?: string | null;
+    coverage?: { accounts_with_balance: number; accounts_with_planned_deposit: number; accounts_with_actual_pace: number };
+  };
+  course_correction: {
+    applied: boolean; reason?: string; base_monthly_deposit?: number; monthly_change_to_match_planned_end?: number | null; note?: string;
+    rows?: { monthly_change: number; monthly_deposit: number; final_nominal: number; delta_vs_updated_forecast: number }[];
+  };
+  assumptions: string[];
+}
+export interface PaceParams { years?: number; annual_return_pct?: number; annual_fee_pct?: number; inflation_pct?: number }

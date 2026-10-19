@@ -31,7 +31,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-16",
-      "last_verified_commit": "1c23cc27900f326f2f8c039e03d5d755d3f1a8e1",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Read-only consumer; it does not write the Registry, runtime state, Airtable, caches, or persistence.",
@@ -76,7 +76,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-16",
-      "last_verified_commit": "1c23cc27900f326f2f8c039e03d5d755d3f1a8e1",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Development/governance maintenance only; deterministic and no LLM or network dependency.",
@@ -122,7 +122,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-16",
-      "last_verified_commit": "1c23cc27900f326f2f8c039e03d5d755d3f1a8e1",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Read-only development/governance validator; it does not own runtime state.",
@@ -165,7 +165,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-28",
-      "last_verified_commit": "1c23cc27900f326f2f8c039e03d5d755d3f1a8e1",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 1.0,
       "notes": [
         "Read-only CI/governance validator; it is not imported by app.py or any production execution path.",
@@ -330,7 +330,7 @@
         }
       ],
       "valid_from": "2026-07-23",
-      "last_verified_commit": "1c23cc27900f326f2f8c039e03d5d755d3f1a8e1",
+      "last_verified_commit": "11367f9f85dc61992fd9cdaeae739d5246aad56e",
       "confidence": 0.94,
       "notes": [
         "CI-only path classifier used by .github/workflows/ci.yml; it is not imported by app.py, tools/dispatcher.py, or any production execution path and does not define tool identity or authority.",
