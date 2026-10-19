@@ -788,6 +788,7 @@
         "tma-frontend/src/components/MyWork.tsx",
         "tma-frontend/src/components/FinancialControlCenter.tsx",
         "tma-frontend/src/components/FamilyWealth.tsx",
+        "tma-frontend/src/components/PaceTrackerPanel.tsx",
         "tma-frontend/src/components/PortfolioLabCharts.tsx",
         "tma-frontend/src/components/PortfolioLabPanel.tsx",
         "tma-frontend/src/lib/familyWealth.ts"
@@ -806,6 +807,7 @@
         "MyWork.tsx is a read-only My Work personal task queue screen (Mobile-first, RTL Hebrew, no mutations in V1). Stateful (useState for loading/ok/error), fetches from GET /api/owner/my-work, displays immediate and upcoming task categories. Uses TMA patterns (PageHeader, ScreenState sub-components, Tailwind styling, RTL-safe layout).",
         "FCC Slice 2 (05/10/2026): FinancialControlCenter.tsx is the private, owner-of-record Financial Control Center screen. Owner explicitly asked for this screen (\"תמשיך לSlice 2\"). Unlike MyWork.tsx it has one write entry point (quick update) but it holds no business authority: it only calls GET /api/fcc/overview and POST /api/fcc/write (preview then confirm), which route through the existing ActionGateway; no client-side parsing or Airtable access. Server side is flag-gated (FEATURE_FINANCIAL_CONTROL_CENTER) plus FCC_CANARY_USER_IDS.",
         "Family wealth screen (PR #1313, 14/10/2026): owner explicitly approved \"APPROVE EXISTING NODE: decision.tma_screens\" for exactly five paths — FamilyWealth.tsx, PortfolioLabCharts.tsx, PortfolioLabPanel.tsx, lib/familyWealth.ts, lib/familyWealth.test.ts. All are presentation (and its tests): they call only the existing FCC overview data and the read-only POST /api/portfolio-lab/simulate (FCC flag + canary + owner); no client-side financial calculation, no writes. familyWealth.ts / its test belong to the view layer, not to the portfolio_lab calculation engine. No new node, no policy change, no new production authority.",
+        "Portfolio Lab simulator lane 1d / C4 (PR #1347, 19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this registers exactly tma-frontend/src/components/PaceTrackerPanel.tsx — presentation only (calls the read-only owner-gated POST /api/fcc/pace, shows the server's numbers, no client-side financial calculation, no writes). No other file, no new node, no policy change, no new production authority.",
         "Future TMA screens (e.g. new domain-specific or owner-facing screens) should be evaluated individually against this node's scope and either registered here (if narrow/similar scope) or placed in a different decision node (if sufficiently different concerns)."
       ],
       "extensions": {
@@ -1557,6 +1559,7 @@
         "portfolio_lab/engine.py",
         "portfolio_lab/funding_plan.py",
         "portfolio_lab/models.py",
+        "portfolio_lab/pace_tracker.py",
         "portfolio_lab/simulator_view.py",
         "portfolio_lab/ui.py",
         "portfolio_lab/ui_page.html"
@@ -1565,6 +1568,7 @@
         "test_accounts_forecast.py",
         "test_funding_plan.py",
         "test_portfolio_lab.py",
+        "test_portfolio_lab_pace.py",
         "test_portfolio_lab_crisis.py",
         "test_portfolio_lab_crisis_monthly.py",
         "test_portfolio_lab_scenario_compare.py",
@@ -1623,6 +1627,7 @@
         "Goal Funding Planner step 1 (PR #1334, 18/10/2026): the owner explicitly approved registration of exactly portfolio_lab/funding_plan.py and test_funding_plan.py in this node (owner instruction 18/10/2026: \"מאשר את רישום funding_plan.py ו־test_funding_plan.py ב־canonical_boundaries.json\"). No other file, wildcard or future source is approved by this note. The module is pure (no I/O, Airtable, LLM or writes), reads nothing itself, and is consumed only by the owner-gated read-only endpoint POST /api/fcc/funding/plan in tma_api.py through core/financial_control/service.py::funding_inputs. It composes the unchanged portfolio_lab.engine.simulate and core.financial_control.loans.pmt; it is not an authority and recommends, scores and ranks nothing. Spec: docs/portfolio_lab/GOAL_FUNDING_PLANNER_SPEC.md.",
         "Portfolio Lab simulator lane 1a (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly test_portfolio_lab_crisis.py (crisis scenario across all compared strategies). No other file, no policy change, no new production authority.",
         "Portfolio Lab simulator lane 1c / C3 (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly test_portfolio_lab_scenario_compare.py (scenario comparison). No other file, no policy change, no new production authority.",
+        "Portfolio Lab simulator lane 1d / C4 (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly portfolio_lab/pace_tracker.py and test_portfolio_lab_pace.py (actual accumulation pace vs plan). The module is pure (no I/O, Airtable, LLM or writes) and composes the unchanged engine; it is consumed only by the owner-gated POST /api/fcc/pace (FCC flag + canary + owner), whose inputs come from the owner-scoped service.pace_inputs. No other file, no policy change, no new production authority.",
         "Portfolio Lab simulator lane 1b (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly test_portfolio_lab_crisis_monthly.py (intra-year crisis). No other file, no policy change, no new production authority."
       ],
       "extensions": {

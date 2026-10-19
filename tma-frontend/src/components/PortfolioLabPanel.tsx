@@ -3,9 +3,10 @@ import { postPortfolioLabSimulate } from "../api";
 import type { PortfolioLabView } from "../types";
 import {
   CRISIS_DECLINES, CRISIS_TABLE_HEAD, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, scenarioLines, scenarioRows, SCENARIO_TABLE_HEAD, crisisTableRows, intraYearLines, timingRows, TIMING_TABLE_HEAD, growthLines,
-  ils, labKpiCards, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
+  ils, labKpiCards, paceAssumptions, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
 } from "../lib/familyWealth";
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
+import { PaceTrackerPanel } from "./PaceTrackerPanel";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -123,6 +124,7 @@ export function PortfolioLabPanel() {
                      message={state.code === 404 ? "מעבדת העתיד אינה זמינה בחשבון הזה." : state.code === 429 ? "אפשר לנסות שוב בעוד דקה." : state.message} />
       )}
       {state.status === "ok" && <LabResult view={state.view} />}
+      <PaceTrackerPanel assumptions={paceAssumptions(form)} />
     </div>
   );
 }

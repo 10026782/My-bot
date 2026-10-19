@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { PlKpis, FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, FundingWindow, FundingWindowEnd, FundingWindowOption, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, FundingWindow, FundingWindowEnd, FundingWindowOption, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -421,6 +421,83 @@ export function intraYearLines(view: PortfolioLabView) {
     { name: "ללא משבר", pts: path.map((r): [number, number] => [r.t_years, r.nominal_no_crisis]) },
     { name: "עם משבר (תרחיש)", pts: path.map((r): [number, number] => [r.t_years, r.nominal_crisis]), color: CHART_COLORS[4] },
   ];
+}
+// ── C4: actual accumulation pace vs the plan. Wording/formatting of the server's numbers only; a missing value is "חסר", never 0. ──
+export const MISSING_LABEL = "חסר";
+/** The pace view shares the lab's typed assumptions (return / fee / inflation); null when the form has an invalid number (the pace call then omits them and the server defaults apply). */
+export function paceAssumptions(form: LabForm): { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number } | null {
+  const parsed = labParams(form);
+  return parsed.ok ? { annual_return_pct: parsed.params.annual_return_pct, annual_fee_pct: parsed.params.annual_fee_pct, inflation_pct: parsed.params.inflation_pct } : null;
+}
+export const PACE_MISSING_REASONS: Record<string, string> = {
+  planned_monthly_deposit: "הפקדה חודשית מתוכננת", expected_return: "תשואה צפויה", management_fee: "דמי ניהול", deposit_events: "אירועי הפקדה",
+};
+export const PACE_STATUS_LABELS: Record<PaceAccountRow["status"], string> = {
+  no_snapshot: "אין יתרה מדווחת", single_snapshot: "יתרה אחת בלבד — אין נקודת השוואה", short_period: "פחות מחודש בין היתרות", compared: "מושווה לתוכנית",
+};
+export const PACE_RETURN_REASONS: Record<string, string> = {
+  period_too_short: "התקופה קצרה מ-30 יום — לא ניתן לחשב תשואה", start_balance_not_positive: "יתרת הפתיחה אפס — לא ניתן לחשב תשואה",
+  undefined_denominator: "התנועות גדולות מהיתרה — לא ניתן לחשב תשואה", not_computed_consolidated: "אין תשואה מאוחדת מדויקת",
+};
+export const PACE_CORRECTION_REASONS: Record<string, string> = {
+  no_documented_flows: "אין תנועות מתועדות — אי אפשר להסיק קצב בפועל", negative_net_flow_not_modelled: "משיכות נטו — המנוע אינו מדמה משיכות, לא מוצג קו",
+  no_actual_pace: "אין קצב בפועל", no_forecast: "אין תחזית",
+};
+const orMissing = (value: number | null | undefined, f: (x: number) => string = ils) => (value == null ? MISSING_LABEL : f(value));
+const signed = (v: number | null | undefined) => (v == null ? MISSING_LABEL : v < 0 ? `-${ils(-v)}` : `${v > 0 ? "+" : ""}${ils(v)}`);
+
+/** The return as shown: an exact number is never shown — only a marked range, or the reason it cannot be computed. */
+export function paceReturnText(r: NonNullable<PaceAccountRow["return"]>): string {
+  if (r.status !== "approximate_range" || !r.range) return PACE_RETURN_REASONS[r.status] ?? "לא ניתן לחשב תשואה מדויקת";
+  const range = `${pct(r.range.low)} עד ${pct(r.range.high)} לתקופה`;
+  const annual = r.annualized_range ? ` · שנתי משוער ${pct(r.annualized_range.low)} עד ${pct(r.annualized_range.high)}` : "";
+  return `טווח משוער: ${range}${annual} (לא ניתן לחשב תשואה מדויקת; ייתכנו תנועות שלא תועדו)`;
+}
+export const PACE_SUMMARY_HEAD = ["מדד", "ערך"];
+export function paceSummaryRows(view: PaceView): { key: string; cells: string[] }[] {
+  const c = view.consolidated;
+  if (!c.deviation || c.latest_balance == null) return [];
+  const flows = c.flows;
+  return [
+    { key: "planned", cells: ["הון שהיה אמור להצטבר (בתאריך ההשוואה)", orMissing(c.planned?.value_at_comparison)] },
+    { key: "actual", cells: ["הון מדווח בפועל (יתרות אחרונות)", orMissing(c.latest_balance)] },
+    { key: "deviation", cells: ["סטייה מהתוכנית", signed(c.deviation.vs_plan)] },
+    { key: "deviation_deposits", cells: ["סטייה מהפקדות בלבד (ללא תשואה)", signed(c.deviation.vs_deposits_only)] },
+    { key: "planned_deposits", cells: ["הפקדות שתוכננו", orMissing(c.planned?.deposits_total)] },
+    { key: "actual_deposits", cells: ["הפקדות שתועדו", flows?.deposits_complete ? orMissing(flows.deposits) : `${MISSING_LABEL} (חשבון ללא אירועי הפקדה)`] },
+    { key: "deposits_gap", cells: ["פער הפקדות (תועד פחות תוכנן)", flows?.deposits_complete ? signed(c.deviation.deposits_gap) : MISSING_LABEL] },
+    { key: "value_change", cells: ["שינוי שווי בתקופה", signed(c.value_change?.total)] },
+    { key: "documented", cells: ["תנועות מתועדות נטו", signed(c.value_change?.documented_flows)] },
+    { key: "unexplained", cells: ["שינוי שאינו מוסבר (תשואה + תנועות שלא תועדו)", signed(c.value_change?.unexplained)] },
+  ];
+}
+export const PACE_ACCOUNT_HEAD = ["חשבון", "מצב", "יתרה אחרונה", "מתוכנן", "סטייה", "תשואה"];
+export function paceAccountRows(view: PaceView): { key: string; cells: string[]; missing: string }[] {
+  return view.accounts.map((a) => ({
+    key: a.id,
+    cells: [a.name ?? a.id, PACE_STATUS_LABELS[a.status],
+            a.latest_balance ? `${ils(a.latest_balance.value)} (${a.latest_balance.as_of})` : MISSING_LABEL,
+            a.planned ? ils(a.planned.value_at_comparison) : MISSING_LABEL, a.deviation ? signed(a.deviation.vs_plan) : MISSING_LABEL,
+            a.return ? paceReturnText(a.return) : MISSING_LABEL],
+    missing: a.missing.map((m) => PACE_MISSING_REASONS[m] ?? m).join(", "),
+  }));
+}
+export function paceForecastLines(view: PaceView) {
+  const l = view.forecast.lines;
+  if (!view.forecast.applied || !l) return [];
+  const out: { name: string; pts: [number, number][]; color?: string; dash?: string }[] = [];
+  if (l.planned_pace) out.push({ name: "קצב מתוכנן", pts: l.planned_pace.series.map((r): [number, number] => [r.year, r.nominal]) });
+  if (l.actual_pace) out.push({ name: "קצב בפועל (אקסטרפולציה)", pts: l.actual_pace.series.map((r): [number, number] => [r.year, r.nominal]), color: CHART_COLORS[1], dash: "4 3" });
+  if (l.goal_history_pace) out.push({ name: "ממוצע הפקדות ביעד (אקסטרפולציה)", pts: l.goal_history_pace.series.map((r): [number, number] => [r.year, r.nominal]), color: CHART_COLORS[3], dash: "2 3" });
+  return out;
+}
+export const PACE_CORRECTION_HEAD = ["שינוי בהפקדה החודשית", "הפקדה חודשית כוללת", "שווי בסוף האופק", "הפרש מהתחזית המעודכנת"];
+export function paceCorrectionRows(view: PaceView): { key: number; cells: string[] }[] {
+  const c = view.course_correction;
+  if (!c.applied || !c.rows) return [];
+  return c.rows.map((r) => [r.monthly_change, r] as const).map(([k, r]) => ({
+    key: k, cells: [signed(r.monthly_change), ils(r.monthly_deposit), ils(r.final_nominal), signed(r.delta_vs_updated_forecast)],
+  }));
 }
 export const LAB_TABLE_HEAD = ["אסטרטגיה", "שווי סופי", "שווי ריאלי", "סך הפקדות", "רווח נטו", "עלויות", "פער מול בסיס"];
 

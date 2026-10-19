@@ -543,18 +543,49 @@ def savings_history_view(goals: list[dict], own: dict[str, list[calc.Event]], ac
     return calc.deposit_history(own.get(dests[0]["id"], []), plan, today)
 
 
-def accounts_view(identity, today: date | None = None) -> dict:
-    """The "החשבונות" tab (D1 step 7 / B1): the caller's own financial accounts + the consolidated value, read-only.
-    Both tables go through the owner-scoped policy (``filter_records``); ``accounts_overview`` additionally filters on the
-    resolved owner (defence in depth). Nothing is written. An unresolved identity raises PersonalDataAccessDenied."""
+def _own_accounts_data(identity):
+    """The caller's own account rows and events (both through the owner-scoped policy) + the resolved actor + the pure accounts module.
+    Shared by the read-only accounts view and the pace inputs. An unresolved identity raises PersonalDataAccessDenied."""
     from core.financial_control import accounts as fcc_accounts
-    today = today or date.today()
     mine = policy.filter_records(Tables.FIN_ACCOUNTS, _read(Tables.FIN_ACCOUNTS), identity)
     events = my_events(identity)
     actor = policy.resolve_actor(identity)
     if not actor.resolved:
         raise policy.PersonalDataAccessDenied(policy.UNRESOLVED_MESSAGE)
+    return fcc_accounts, mine, events, actor
+
+
+def accounts_view(identity, today: date | None = None) -> dict:
+    """The "החשבונות" tab (D1 step 7 / B1): the caller's own financial accounts + the consolidated value, read-only.
+    Both tables go through the owner-scoped policy (``filter_records``); ``accounts_overview`` additionally filters on the
+    resolved owner (defence in depth). Nothing is written. An unresolved identity raises PersonalDataAccessDenied."""
+    today = today or date.today()
+    fcc_accounts, mine, events, actor = _own_accounts_data(identity)
     return fcc_accounts.accounts_overview(mine, events, today, owner_id=actor.profile_id)
+
+
+def pace_inputs(identity, today: date | None = None) -> dict:
+    """C4 (actual accumulation pace vs plan): everything the pure pace tracker needs, from the caller's OWN rows only. Read-only (nothing
+    here writes). Accounts and events go through the owner-scoped policy (an unresolved identity raises PersonalDataAccessDenied); the goal-level
+    deposit history is the existing ``savings_history_view`` derivation (self-reported, nothing stored)."""
+    today = today or date.today()
+    fcc_accounts, mine, events, actor = _own_accounts_data(identity)
+    overview_rows = fcc_accounts.accounts_overview(mine, events, today, owner_id=actor.profile_id)
+    goals = my_goals(identity)
+    by_goal: dict[str, list[dict]] = {}
+    for ev in events:
+        for gid in _goal_ids_of(ev):
+            by_goal.setdefault(gid, []).append(ev)
+    active_ids = {g["id"] for g in goals if str((g.get("fields") or {}).get(FinGoalFields.STATUS) or "active").lower() in ("active", "פעיל")}
+    own = {g["id"]: calc.parse_events(by_goal.get(g["id"], []), FinEventFields) for g in goals}
+    return {
+        "as_of": today.isoformat(),
+        "accounts": [{k: r.get(k) for k in ("id", "name", "status", "planned_monthly_deposit", "expected_return_pct", "management_fee_pct")}
+                     for r in overview_rows["accounts"]],
+        "events": fcc_accounts.account_events(mine, events, owner_id=actor.profile_id),
+        "skipped_events": overview_rows["skipped_events"],
+        "savings_history": savings_history_view(goals, own, active_ids, today),
+    }
 
 
 def net_worth_view(identity, today: date | None = None) -> dict:

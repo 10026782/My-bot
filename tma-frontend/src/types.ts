@@ -998,3 +998,51 @@ export interface FccNetWorth {
                  oldest_as_of: string | null; as_of_known: boolean };
   receivables: { in_net: false; label: "expected_uncertain"; count: number; total: number | null; coverage: number; items: { id: string; name: string | null; balance: number | null }[] };
 }
+
+
+/** C4 — actual accumulation pace vs the plan (POST /api/fcc/pace). Every number is the server's; self_reported data; null = missing (never 0). */
+export interface PaceReturnBlock {
+  exact: null; days: number; documented_flow_count: number; undocumented_flows_possible: boolean;
+  status: "approximate_range" | "period_too_short" | "start_balance_not_positive" | "undefined_denominator" | "not_computed_consolidated";
+  range: { low: number; high: number } | null; annualized_range: { low: number; high: number } | null;
+}
+export interface PaceAccountRow {
+  id: string; name: string | null; status: "no_snapshot" | "single_snapshot" | "short_period" | "compared"; missing: string[]; verification: string | null;
+  latest_balance?: { value: number; as_of: string }; start_balance?: { value: number; as_of: string };
+  window?: { from: string; to: string; months: number };
+  flows?: { deposits: number | null; deposit_count: number; withdrawals: number; fees: number; transfers_in: number; transfers_out: number;
+            net_documented: number; event_count: number; same_day_events: number };
+  value_change?: { total: number; documented_flows: number; unexplained: number; note: string };
+  return?: PaceReturnBlock;
+  planned?: { monthly_deposit: number; return_pct: number; return_source: string; fee_pct: number; fee_source: string; deposits_total: number;
+              value_at_comparison: number; value_deposits_only: number; value_to_date: number | null; to_date: string } | null;
+  deviation?: { vs_plan: number; vs_deposits_only: number; deposits_gap: number | null } | null;
+}
+export interface PaceLine { source: string; monthly_deposit: number; final_nominal: number; final_real: number; series: PlSeriesRow[] }
+export interface PaceView {
+  schema_version: string; source: "portfolio_lab"; engine_version: string; data_basis: "self_reported"; as_of: string;
+  accounts: PaceAccountRow[]; closed_accounts: number; skipped_events: number;
+  consolidated: {
+    accounts_compared: number; accounts_with_plan: number; accounts_without_plan: number; accounts_without_snapshot: number;
+    accounts_single_snapshot: number; accounts_short_period: number; window?: { from: string; to: string };
+    start_balance?: number; latest_balance?: number;
+    planned?: { deposits_total: number; value_at_comparison: number; value_deposits_only: number };
+    flows?: { deposits: number | null; deposits_complete: boolean; withdrawals: number; fees: number; transfers_in: number; transfers_out: number; net_documented: number };
+    value_change?: { total: number; documented_flows: number; unexplained: number };
+    deviation: { vs_plan: number; vs_deposits_only: number; deposits_gap: number | null } | null;
+  };
+  goal_level_history?: { ytd: number; ytd_plan: number; ytd_gap: number; months_elapsed: number; monthly_average: number; streak: number } | null;
+  forecast: {
+    applied: boolean; reason?: string; horizon_years?: number; starting_value?: number; oldest_snapshot?: string; label?: string;
+    assumptions?: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; note: string };
+    lines?: { planned_pace: PaceLine | null; actual_pace: PaceLine | null; goal_history_pace: PaceLine | null };
+    gaps?: Record<string, number>; actual_pace_unavailable_reason?: string | null;
+    coverage?: { accounts_with_balance: number; accounts_with_planned_deposit: number; accounts_with_actual_pace: number };
+  };
+  course_correction: {
+    applied: boolean; reason?: string; base_monthly_deposit?: number; monthly_change_to_match_planned_end?: number | null; note?: string;
+    rows?: { monthly_change: number; monthly_deposit: number; final_nominal: number; delta_vs_updated_forecast: number }[];
+  };
+  assumptions: string[];
+}
+export interface PaceParams { years?: number; annual_return_pct?: number; annual_fee_pct?: number; inflation_pct?: number }
