@@ -5,6 +5,7 @@
 (מכירת נכס, אימות נזילות); (4) `expected_not_guaranteed` צפוי שאינו מובטח (גביית חוב); (5) `future_deposits` הפקדות מתוכננות שטרם בוצעו.
 
 לכל חשבון מוצג גם `expected_at_due` — ערך תחזית לפי הנחות גלויות (`accounts_forecast.account_value_points`), נפרד מהיתרה המדווחת ואינו מובטח.
+שלב 3: `build_saved_plan_comparison` — "מה השתנה מאז השמירה": השוואה בלבד בין תוכנית שמורה (צילום) לבין אותה בקשה שחושבה מחדש היום מהנתונים הנוכחיים; הרשומה השמורה לא משתנה ושום החלטה לא משתנה.
 אין המלצה, אין ציון, אין דירוג, אין `total_available`: כל שורה מציגה סכום (או "חסר"), תנאים, מועדים והשפעה על יתרת ההון — ללא סיכום בין
 קטגוריות. נתון חסר נשאר `None` + `missing_inputs`, לא 0. בלי מס ובלי הערכת שווי או תמורה של נכס; זמן מכירה ידני של הבעלים. `Liquid From` אינו
 זכאות: מצב הנזילות נגזר מ-`accounts_forecast` (`_liquidity_profile` / `_state_at`) ללא שינוי. חשבון שהוקצה ליעד אחר מסומן `allocated_elsewhere`
@@ -251,3 +252,76 @@ def build_suggested_sources(inputs: dict, request: dict, today: date | None = No
                      "הפקדה מתוכננת שכבר נכללת בתחזית אינה נוספת ליתרה הקיימת (included_in_forecast).",
                      "״צפוי לפי הנחות״ הוא ערך תחזית (כולל הפקדה מתוכננת של החשבון) ונפרד מהיתרה המדווחת; אינו מובטח ואינו זכאות למשיכה."],
     }
+
+
+# ── שלב 3: מה השתנה מאז השמירה (השוואה בלבד) ──────────────────────────────────────────────────────────────────────────
+
+COMPARISON_SCHEMA_VERSION = "1.0"
+_NEED_FIELDS = ("target", "due", "confirmed_existing", "expected_existing", "gap")
+_OPTION_FIELDS = ("feasible", "reason", "covers_amount", "available_by", "certainty", "monthly_cash_effect")
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, (int, float)) and not isinstance(a, bool) and isinstance(b, (int, float)) and not isinstance(b, bool):
+        return abs(float(a) - float(b)) <= 0.005
+    return a == b
+
+
+def _pairs(fields, saved: dict, today_: dict) -> list[dict]:
+    """לכל שדה: מה נשמר, מה היום, והאם שונה. חסר נשאר None (חסר ≠ 0); None מול ערך נחשב שינוי."""
+    return [{"field": f, "saved": saved.get(f), "today": today_.get(f), "changed": not _same(saved.get(f), today_.get(f))} for f in fields]
+
+
+def _unavailable(goal_id: str, reason: str) -> dict:
+    return {"goal_id": goal_id, "status": "unavailable", "reason": reason}
+
+
+def build_saved_plan_comparison(inputs: dict, request: dict, today: date | None = None) -> dict:
+    """"מה השתנה מאז השמירה" לכל יעד שנבחר: התוכנית השמורה האחרונה (`chosen`) של הבעלים עצמו מול אותה בקשה שנשמרה, מחושבת מחדש מהנתונים
+    הנוכחיים (בלי חלון תאריך). השוואה בלבד: הרשומה אינה מתעדכנת, ההחלטה אינה משתנה, ושום דבר אינו נכתב. `inputs["saved_plans"]` מגיע מ-
+    `service.saved_plans_for_funding` (טבלה מסוננת לפי הבעלים). דטרמיניסטי; שדה שחסר באחד הצדדים הוא שינוי, לא 0."""
+    today = today or date.today()
+    by_goal: dict[str, list] = {}
+    for sp in inputs.get("saved_plans") or []:
+        if isinstance(sp, dict) and sp.get("goal_id") in request["goal_ids"]:
+            by_goal.setdefault(sp["goal_id"], []).append(sp)
+    goals = []
+    for gid in request["goal_ids"]:
+        rows = sorted(by_goal.get(gid, []), key=lambda r: (r.get("as_of") or "", r.get("saved_at") or "", str(r.get("id"))))
+        if not rows:
+            goals.append({"goal_id": gid, "status": "no_saved_plan"})
+            continue
+        sp = rows[-1]
+        result, saved_request, selected = sp.get("result"), sp.get("request"), sp.get("selected")
+        if not isinstance(result, dict) or not isinstance(saved_request, dict) or not isinstance(selected, list):
+            goals.append(_unavailable(gid, "snapshot_unreadable"))
+            continue
+        try:
+            replay = fp.normalize_request(saved_request)
+            if replay["goal_ids"] != [gid]:
+                raise ValueError("saved request is for another goal")
+            fresh = fp.build_funding_plan(inputs, {**replay, "date_margin_months": 0}, today)
+        except (ValueError, KeyError, TypeError):
+            goals.append(_unavailable(gid, "saved_request_no_longer_valid"))        # e.g. a saved asset or debt that is no longer there
+            continue
+        now_goal = fresh["goals"][0]
+        saved_options = {o.get("id"): o for o in result.get("options") or [] if isinstance(o, dict)}
+        now_options = {o.get("id"): o for o in now_goal.get("options") or []}
+        ids = ["existing_balance"] + [o.get("id") for o in selected if isinstance(o, dict) and o.get("id") not in (None, "existing_balance")]
+        options = []
+        for oid in dict.fromkeys(ids):
+            was, now = saved_options.get(oid), now_options.get(oid)
+            if was is None:
+                continue
+            fields = _pairs(_OPTION_FIELDS, was, now or {})
+            options.append({"id": oid, "type": was.get("type"), "present_today": now is not None, "fields": fields,
+                            "changed": now is None or any(x["changed"] for x in fields)})
+        need = _pairs(_NEED_FIELDS, result.get("need") or {}, now_goal["need"])
+        goals.append({
+            "goal_id": gid, "status": "ok", "plan_id": sp.get("id"),
+            "saved": {"as_of": sp.get("as_of"), "saved_at": sp.get("saved_at"), "plans_found": len(rows)},
+            "today_reason": now_goal["need"].get("reason"), "need": need, "options": options,
+            "any_change": any(x["changed"] for x in need) or any(o["changed"] for o in options),
+        })
+    return {"schema_version": COMPARISON_SCHEMA_VERSION, "result_type": "saved_plan_comparison", "as_of": today.isoformat(), "goals": goals,
+            "note": "comparison only: the saved plan is a record of a decision as it was shown; it is not updated and no decision changes"}

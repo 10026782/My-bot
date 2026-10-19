@@ -992,8 +992,19 @@ export interface FundingSources {
   assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; note: string };
   category_labels: Record<FundingSourceCategory, string>; warnings: string[];
 }
+/** Funding sources step 3: "what changed since the saved plan" — the saved snapshot beside the same request recomputed today (server values; comparison only). */
+export type SavedPlanValue = string | number | boolean | null;
+export interface SavedPlanPair { field: string; saved: SavedPlanValue; today: SavedPlanValue; changed: boolean }
+export interface SavedPlanOptionChange { id: string; type: FundingOptionType | null; present_today: boolean; fields: SavedPlanPair[]; changed: boolean }
+export interface SavedPlanGoalComparison {
+  goal_id: string; status: "ok" | "no_saved_plan" | "unavailable"; reason?: string; plan_id?: string;
+  saved?: { as_of: string | null; saved_at: string | null; plans_found: number }; today_reason?: string | null;
+  need?: SavedPlanPair[]; options?: SavedPlanOptionChange[]; any_change?: boolean;
+}
+export interface SavedPlanComparison { schema_version: string; result_type: string; as_of: string; goals: SavedPlanGoalComparison[]; note: string }
 export interface FundingPlan {
   suggested_sources?: FundingSources;
+  saved_plan_comparison?: SavedPlanComparison;
   schema_version: string; result_type: string; as_of: string;
   assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; horizon_years: number };
   goals: FundingGoalResult[];

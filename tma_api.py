@@ -5068,7 +5068,7 @@ def _funding_body(identity):
 
 def _funding_compute(identity, body, with_sources=False):
     """Normalise the request, read the caller's OWN data and build the plan. Returns ``(request, plan, None)`` or ``(None, None, error_response)``.
-    ``with_sources`` (the plan route only) adds the read-only ``suggested_sources`` candidate list; the save route never passes it, so a saved plan is unchanged."""
+    ``with_sources`` (the plan route only) adds the read-only ``suggested_sources`` candidate list and ``saved_plan_comparison`` (what changed since the goal's saved plan — comparison only); the save route never passes it, so a saved plan is unchanged."""
     from core.financial_control import service as fcc_service  # noqa: PLC0415
     from portfolio_lab.accounts_forecast import normalize_params  # noqa: PLC0415
     from portfolio_lab.funding_plan import build_funding_plan, normalize_request  # noqa: PLC0415
@@ -5089,8 +5089,9 @@ def _funding_compute(identity, body, with_sources=False):
     try:
         plan = build_funding_plan(inputs, funding_request)
         if with_sources:
-            from portfolio_lab.funding_sources import build_suggested_sources  # noqa: PLC0415
+            from portfolio_lab.funding_sources import build_saved_plan_comparison, build_suggested_sources  # noqa: PLC0415
             plan["suggested_sources"] = build_suggested_sources(inputs, funding_request)
+            plan["saved_plan_comparison"] = build_saved_plan_comparison(inputs, funding_request)
         return funding_request, plan, None
     except Exception:                                        # noqa: BLE001 — known validation texts -> 400, the rest a logged generic 500
         return None, None, _fcc_build_error("[fcc] funding plan failed")

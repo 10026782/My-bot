@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingLiquidityState, FundingPlan, FundingRequestBody, FundingSourceCategory, FundingSourceItem, FundingSources, FundingWindow, FundingWindowEnd, FundingWindowOption, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingLiquidityState, FundingPlan, FundingRequestBody, FundingSourceCategory, FundingSourceItem, FundingSources, SavedPlanComparison, SavedPlanPair, SavedPlanValue, FundingWindow, FundingWindowEnd, FundingWindowOption, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -941,5 +941,54 @@ export function sourcesModel(src: FundingSources, goalId: string): SourcesModel 
     gaps: g.gaps.future_deposits.map((x) => `${x.name || "חשבון ללא שם"}: חסר ${x.missing.map((m) => word(SOURCE_MISSING, m)).join(", ")}`),
     assumptions: `הנחות ל״צפוי״: תשואה ${a.annual_return_pct}% · דמי ניהול ${a.annual_fee_pct}% · אינפלציה ${a.inflation_pct}% — ערכים שהוזנו בחשבון עצמו גוברים עליהן.`,
     warnings: src.warnings,
+  };
+}
+
+
+// ── Funding sources step 3: "what changed since the saved plan" — the frozen snapshot beside the same request recomputed today. Comparison only: nothing
+// here updates the saved plan or changes a decision; a missing value is "חסר" (never 0); no difference is computed in the page. ──
+export const SAVED_TITLE = "מה השתנה מאז השמירה";
+export const SAVED_NOTE = "השוואה בלבד: התוכנית השמורה היא תיעוד של החלטה כפי שהוצגה, והיא אינה מתעדכנת. ״היום״ הוא אותה בקשה שחושבה מחדש מהנתונים הנוכחיים.";
+const SAVED_UNAVAILABLE: Record<string, string> = {
+  snapshot_unreadable: "אי אפשר להשוות — הצילום השמור אינו קריא.",
+  saved_request_no_longer_valid: "אי אפשר להשוות — משהו מהבקשה השמורה (למשל נכס או חוב) כבר אינו קיים.",
+};
+const SAVED_FIELD_LABELS: Record<string, string> = {
+  target: "סכום יעד", due: "תאריך יעד", confirmed_existing: "כסף קיים מאושר", expected_existing: "כסף קיים צפוי", gap: "פער לפי המאושר בלבד",
+  feasible: "אפשרות", reason: "סיבה", covers_amount: "כמה מכסה", available_by: "זמין עד", certainty: "ודאות", monthly_cash_effect: "השפעה על תזרים חודשי",
+};
+const SAVED_MONEY = new Set(["target", "confirmed_existing", "expected_existing", "gap", "covers_amount", "monthly_cash_effect"]);
+
+function savedValue(field: string, v: SavedPlanValue): string {
+  if (v === null || v === undefined) return field === "reason" ? "—" : MISSING_LABEL;
+  if (SAVED_MONEY.has(field) && typeof v === "number") return money(v);
+  if ((field === "due" || field === "available_by") && typeof v === "string") return dmy(v);
+  if (field === "certainty") return word(FUNDING_CERTAINTY_LABELS, String(v));
+  if (field === "feasible") return word(FEASIBLE_LABELS, String(v));
+  if (field === "reason") return word({ ...FUNDING_REASONS, ...NEED_REASONS }, String(v));
+  return String(v);
+}
+const savedRow = (p: SavedPlanPair) => ({ label: word(SAVED_FIELD_LABELS, p.field), saved: savedValue(p.field, p.saved), today: savedValue(p.field, p.today), changed: p.changed });
+
+export interface SavedChangeRow { label: string; saved: string; today: string; changed: boolean }
+export interface SavedChangesModel {
+  status: "ok" | "unavailable"; headline: string; unavailable: string | null; savedLine: string | null; todayNote: string | null;
+  need: SavedChangeRow[]; options: { id: string; title: string; changed: boolean; presentToday: boolean; rows: SavedChangeRow[] }[]; note: string;
+}
+
+/** null = no saved plan for this goal (nothing to show). Option titles come from the type labels; the page shows the server's values only. */
+export function savedChangesModel(cmp: SavedPlanComparison | null | undefined, goalId: string): SavedChangesModel | null {
+  const g = cmp?.goals.find((x) => x.goal_id === goalId);
+  if (!g || g.status === "no_saved_plan") return null;
+  if (g.status === "unavailable") {
+    return { status: "unavailable", headline: SAVED_TITLE, unavailable: word(SAVED_UNAVAILABLE, g.reason ?? ""), savedLine: null, todayNote: null, need: [], options: [], note: SAVED_NOTE };
+  }
+  const when = g.saved?.saved_at ?? g.saved?.as_of ?? null;
+  return {
+    status: "ok", headline: `${SAVED_TITLE} — ${g.any_change ? "יש שינויים" : "ללא שינוי"}`, unavailable: null,
+    savedLine: when ? `נשמר ב-${dmy(when)}` : "נשמר (תאריך לא ידוע)", todayNote: g.today_reason ? word(NEED_REASONS, g.today_reason) : null,
+    need: (g.need ?? []).map(savedRow),
+    options: (g.options ?? []).map((o) => ({ id: o.id, title: o.type ? word(FUNDING_TYPE_LABELS, o.type) : o.id, changed: o.changed, presentToday: o.present_today, rows: o.fields.map(savedRow) })),
+    note: SAVED_NOTE,
   };
 }
