@@ -57,6 +57,12 @@ DEFAULTS = {
     "baseline": "global",
     "crisis": None,
 }
+# שדות שסט ההנחות השני (compare_to) רשאי לשנות; אופק, אסטרטגיות ורכיבים זהים בשני הסטים
+COMPARE_FIELDS = {
+    "initial": "סכום התחלתי", "monthly_contribution": "הפקדה חודשית", "annual_return_pct": "תשואה שנתית ברוטו (%)",
+    "annual_fee_pct": "דמי ניהול שנתיים (%)", "inflation_pct": "אינפלציה שנתית (%)",
+    "deposit_timing": "תזמון הפקדה", "index_contributions": "הצמדת הפקדות לאינפלציה",
+}
 
 
 def _num(params, key, minimum=None, maximum=None):
@@ -74,7 +80,7 @@ def normalize_params(params):
     """קלט גולמי (אחוזים כפי שמוצגים במסך) → קלט מנורמל; ValueError על קלט לא תקף."""
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    unknown = set(params) - set(DEFAULTS) - {"component_returns_pct"}
+    unknown = set(params) - set(DEFAULTS) - {"component_returns_pct", "compare_to"}
     if unknown:
         raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
     years = params.get("years", DEFAULTS["years"])
@@ -118,7 +124,9 @@ def normalize_params(params):
         crisis = {"decline_pct": crisis["decline_pct"], "year": year, "recovery": crisis["recovery"]}
         if month is not None:
             crisis["month"] = month
+    compare = _normalize_compare(params)
     return {
+        "compare": compare,
         "initial": _num(params, "initial", 0),
         "monthly_contribution": _num(params, "monthly_contribution", 0),
         "years": years,
@@ -131,6 +139,27 @@ def normalize_params(params):
         "components": components,
         "crisis": crisis,
     }
+
+
+def _normalize_compare(params):
+    """סט הנחות שני: דורס רק שדות מותרים מתוך הסט הראשון; אותה ולידציה כמו לסט הראשון. ללא משבר בהשוואה."""
+    override = params.get("compare_to")
+    if override is None:
+        return None
+    if not isinstance(override, dict) or not override or set(override) - set(COMPARE_FIELDS):
+        raise ValueError("compare_to must be a nonempty object of: " + ", ".join(sorted(COMPARE_FIELDS)))
+    base_raw = {k: v for k, v in params.items() if k not in {"compare_to", "crisis"}}
+    base = normalize_params(base_raw)
+    other = normalize_params({**base_raw, **override})
+    changed = [k for k in override if _compare_value(base, k) != _compare_value(other, k)]
+    if not changed:
+        raise ValueError("compare_to must differ from the base assumptions")
+    return {"fields": changed, "params": other}
+
+
+def _compare_value(p, key):
+    mapped = {"annual_return_pct": "annual_return", "annual_fee_pct": "annual_fee", "inflation_pct": "inflation"}
+    return p[mapped.get(key, key)]
 
 
 def _assumptions(p):
@@ -404,6 +433,37 @@ def _insights(p, base_scenario, base_final, sensitivity):
     return insights[:5]
 
 
+def _compare_side(q, name, label):
+    result = simulate(_scenario(q, name))
+    return {"label": label, "assumptions": {
+        "initial": q["initial"], "monthly_contribution": q["monthly_contribution"], "annual_return_pct": q["annual_return"] * 100,
+        "annual_fee_pct": q["annual_fee"] * 100, "inflation_pct": q["inflation"] * 100,
+        "deposit_timing": q["deposit_timing"], "index_contributions": q["index_contributions"]},
+        "kpis": _kpis(result), "series": _series(result)}
+
+
+def _scenario_comparison(p):
+    """C3: שני סטי הנחות על האסטרטגיה הראשית, אותו אופק; פער = סט ב' פחות סט א'. ללא דירוג — הפרשים בלבד."""
+    compare = p["compare"]
+    if compare is None:
+        return {"applied": False}
+    name = p["strategies"][0]
+    base = {k: v for k, v in p.items() if k not in {"crisis", "compare"}}
+    a = _compare_side({**base, "crisis": None}, name, "סט הנחות א (הנוכחי)")
+    b = _compare_side(compare["params"], name, "סט הנחות ב")
+    numeric = ("final_nominal", "final_real", "contributions", "nominal_profit", "real_profit", "management_fees_paid",
+               "total_cost_impact", "net_effective_annual_return", "real_effective_annual_return")
+    gaps = {k: b["kpis"][k] - a["kpis"][k] for k in numeric}
+    gaps["series"] = [{"year": ra["year"], "nominal": rb["nominal"] - ra["nominal"], "real": rb["real"] - ra["real"]}
+                      for ra, rb in zip(a["series"], b["series"])]
+    return {
+        "applied": True, "strategy": {"id": name, "label": STRATEGY_LABELS[name]},
+        "changed_fields": [{"field": f, "label": COMPARE_FIELDS[f], "a": a["assumptions"][f], "b": b["assumptions"][f]} for f in compare["fields"]],
+        "a": a, "b": b, "gaps_b_minus_a": gaps,
+        "note": "שני סטי הנחות על אותה אסטרטגיה ואותו אופק; הפער הוא סט ב' פחות סט א' לפי ההנחות בלבד — אינו ציון, דירוג או המלצה ואינו תחזית. תרחיש המשבר אינו חל על ההשוואה.",
+    }
+
+
 def _assumption_list(p):
     items = [
         {"id": "return", "text": f"תשואה ברוטו אפקטיבית שנתית של {p['annual_return'] * 100:.2f}% לקרן העולמית", "assumption_based": True},
@@ -456,7 +516,7 @@ def build_simulator_view(params=None, tax_model=None):
     return {
         "schema_version": VIEW_SCHEMA_VERSION, "source": "portfolio_lab", "engine_version": ENGINE_VERSION,
         "result_type": primary["result_type"], "currency": "ILS",
-        "inputs": {k: v for k, v in p.items() if k not in {"components"}},
+        "inputs": {k: v for k, v in p.items() if k not in {"components", "compare"}},
         "primary_strategy": {"id": primary_name, "label": STRATEGY_LABELS[primary_name]},
         "kpis": _kpis(primary),
         "charts": {
@@ -464,6 +524,7 @@ def build_simulator_view(params=None, tax_model=None):
             "strategy_comparison": {name: _series(comparison["strategies"][name]) for name in p["strategies"]},
             "breakdown": _breakdown(base_final),
             "sensitivity": sensitivity,
+            "scenario_comparison": _scenario_comparison(p),
         },
         "comparison_table": table,
         "insights": _insights(p, base_scenario, base_final, sensitivity),

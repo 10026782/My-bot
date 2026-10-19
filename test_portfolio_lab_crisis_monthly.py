@@ -169,3 +169,14 @@ def test_existing_scenario_digest_unchanged_from_main():
     assert build_simulator_view({})["replay_digest"] == "a993cee736cb0cc3342f105ae7266cd175ff13ba9a03b3546fb25ed5a33b53c4"
     crisis = build_simulator_view({"years": 20, "crisis": _crisis()})
     assert crisis["replay_digest"] == "98cae07130c512ee4eedeec30ba89883659263a315a30d685c2cf4138f788209"
+
+
+# ── שילוב עם C3 (#1345): compare_to לא מתנגש עם crisis.month ──
+def test_compare_to_and_crisis_month_coexist_and_the_comparison_ignores_the_crisis():
+    both = build_simulator_view({**BASE, "crisis": _crisis(8), "compare_to": {"annual_return_pct": 6}})
+    only_compare = build_simulator_view({**BASE, "compare_to": {"annual_return_pct": 6}})
+    assert both["charts"]["scenario_comparison"] == only_compare["charts"]["scenario_comparison"]
+    assert both["charts"]["growth"]["crisis"]["intra_year"]["month"] == 8 and both["charts"]["growth"]["crisis"]["by_strategy"]
+    assert both["inputs"]["crisis"]["month"] == 8 and "compare" not in both["inputs"]
+    with pytest.raises(ValueError):
+        build_simulator_view({**BASE, "crisis": _crisis(13), "compare_to": {"annual_return_pct": 6}})

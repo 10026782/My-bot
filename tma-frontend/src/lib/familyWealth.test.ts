@@ -12,7 +12,7 @@ import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, crisisTableRows, intraYearLines, timingRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, intraYearLines, timingRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -177,6 +177,27 @@ test("crisis table: the server's by_strategy rows, worded and signed; empty with
   const rows = crisisTableRows(withCrisis);
   assert.ok(rows[0].cells[0].includes("(בסיס)") && rows[0].cells[4] === "—" && rows[0].cells[3].startsWith("+"));
   assert.ok(!rows[1].cells[4].startsWith("+") && rows[1].cells[4].includes("150"));
+});
+
+test("scenario comparison: only filled set-B fields go into the request; rows are the server's A, B and gap, signed and neutral", () => {
+  const off = labParams(DEFAULT_LAB_FORM);
+  assert.ok(off.ok && off.params.compare_to === undefined);
+  const on = labParams({ ...DEFAULT_LAB_FORM, compareOn: true, cmpReturnPct: "6", cmpMonthly: " " });
+  assert.ok(on.ok && JSON.stringify(on.params.compare_to) === JSON.stringify({ annual_return_pct: 6 }));
+  assert.ok(!labParams({ ...DEFAULT_LAB_FORM, compareOn: true }).ok);
+  assert.ok(!labParams({ ...DEFAULT_LAB_FORM, compareOn: true, cmpFeePct: "abc" }).ok);
+  assert.equal(scenarioRows(view).length, 0);
+  const kpi = (n: number) => ({ final_nominal: n, final_real: n / 2, contributions: 100, nominal_profit: n - 100, real_profit: 1, management_fees_paid: 5, total_cost_impact: 6, net_effective_annual_return: 0.07, real_effective_annual_return: 0.05 });
+  const gap = { final_nominal: -200, final_real: -100, contributions: 0, nominal_profit: -200, real_profit: 0, management_fees_paid: 1, total_cost_impact: 0, net_effective_annual_return: -0.02, real_effective_annual_return: 0, series: [] };
+  const cmp = { ...view, charts: { ...view.charts, scenario_comparison: { applied: true,
+    a: { label: "א", assumptions: {}, kpis: kpi(1000), series: [{ year: 1, nominal: 10, real: 9, contributions: 1 }] },
+    b: { label: "ב", assumptions: {}, kpis: { ...kpi(800), net_effective_annual_return: 0.05 }, series: [{ year: 1, nominal: 8, real: 7, contributions: 1 }] },
+    gaps_b_minus_a: gap } } } as unknown as PortfolioLabView;
+  const rows = scenarioRows(cmp);
+  assert.equal(rows.length, 8);
+  assert.ok(rows[0].cells[3].includes("200") && !rows[0].cells[3].startsWith("+") && rows[5].cells[3].startsWith("+"));
+  assert.ok(rows[7].cells[3].includes("-2.00%"));
+  assert.deepEqual(scenarioLines(cmp)[1].pts, [[1, 8]]);
 });
 
 test("intra-year crisis: month goes into the request only when chosen; timing rows and path are the server's numbers", () => {
