@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import calendar
 import math
 import re
 from datetime import date
@@ -24,6 +25,7 @@ FUNDING_SCHEMA_VERSION = "1.0"
 OPTION_TYPES = ("existing_balance", "new_deposits", "asset_sale", "loan", "work_income", "receivable_collection", "obligations_reduction", "custom")
 CERTAINTIES = ("confirmed", "expected", "uncertain", "unknown")
 _MAX_GOALS, _MAX_OPTIONS, _MAX_PLAN = 10, 20, 60
+_MAX_MARGIN_MONTHS = 60
 _MAX_MONEY = 10_000_000_000.0
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 _REC = re.compile(r"^rec[A-Za-z0-9]{1,37}$")
@@ -159,7 +161,7 @@ def normalize_request(body) -> dict:
     """גוף הבקשה הגולמי -> קלט מנורמל; ValueError על קלט לא תקף. מזהי הרשומות נבדקים מול הנתונים של הבעלים ב-`build_funding_plan`."""
     if not isinstance(body, dict):
         raise ValueError("body must be an object")
-    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan"}
+    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan", "date_margin_months"}
     if unknown:
         raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
     goal_ids = body.get("goal_ids")
@@ -193,13 +195,48 @@ def normalize_request(body) -> dict:
         plan.append({"goal_id": entry["goal_id"], "option_id": entry["option_id"], "amount": _money(entry["amount"], "amount")})
     if len({(e["goal_id"], e["option_id"]) for e in plan}) != len(plan):
         raise ValueError("allocation_plan has a duplicate goal/option pair")
-    return {"goal_ids": goal_ids, "assumptions": assumptions, "options": options, "allocation_plan": plan}
+    margin = body.get("date_margin_months")
+    if margin is not None and (isinstance(margin, bool) or not isinstance(margin, int) or not 0 <= margin <= _MAX_MARGIN_MONTHS):
+        raise ValueError(f"date_margin_months must be a whole number of months 0 to {_MAX_MARGIN_MONTHS}")
+    return {"goal_ids": goal_ids, "assumptions": assumptions, "options": options, "allocation_plan": plan, "date_margin_months": margin}
 
 
 # ── עזרים ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _months_between(start: date, end: date) -> int:
     return (end.year - start.year) * 12 + (end.month - start.month)
+
+
+def _add_months(day: date, months: int) -> date:
+    index = day.year * 12 + (day.month - 1) + months
+    year, month = divmod(index, 12)
+    return date(year, month + 1, min(day.day, calendar.monthrange(year, month + 1)[1]))
+
+
+def _compact_variant(plan: dict) -> dict:
+    """One end of a date window: the goal's need and, per option, only the fields that move with the date (server numbers, no details)."""
+    out = plan["goals"][0]
+    need = out["need"]
+    return {"due": need["due"], "reason": need["reason"], "gap": need.get("gap"), "months_to_due": need["months_to_due"],
+            "options": [{k: o.get(k) for k in ("id", "type", "feasible", "reason", "covers_amount", "available_by", "monthly_cash_effect", "certainty",
+                                               "time_to_realize_months")} | {"required_monthly": (o.get("details") or {}).get("required_monthly")}
+                        for o in out.get("options") or []]}
+
+
+def _date_window(inputs: dict, request: dict, goal: dict, margin: int, today: date) -> dict | None:
+    """The goal's date is an ESTIMATE (± ``margin`` months): the same options recomputed at the early and the late end. The point estimate stays the
+    main answer; the window only shows how much each option moves. Allocations are not carried into the variants."""
+    due = af._iso_date(goal.get("end_date"))
+    if due is None or margin <= 0:
+        return None
+    ends = {}
+    for name, shift in (("early", -margin), ("late", margin)):
+        moved = {**inputs, "goals": [{**g, "end_date": _add_months(due, shift).isoformat()} if g.get("id") == goal["id"] else g
+                                     for g in inputs.get("goals") or []]}
+        ends[name] = _compact_variant(build_funding_plan(moved, {**request, "goal_ids": [goal["id"]], "allocation_plan": [], "date_margin_months": 0},
+                                                         today, _window_variant=True))
+    return {"margin_months": margin, **ends,
+            "note": "the date is an estimate: each end is the same options recomputed at the earliest / latest date; nothing here picks a date for you"}
 
 
 def _slot(due: date, start: date) -> int | None:
@@ -526,7 +563,7 @@ def _certainty_counts(entries: list) -> dict:
 
 # ── בניית התוכנית ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-def build_funding_plan(inputs: dict, request: dict, today: date | None = None) -> dict:
+def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *, _window_variant: bool = False) -> dict:
     """`inputs` = נתוני הבעלים עצמו בלבד (מוכנים בשרת דרך `service.funding_inputs`); `request` = פלט `normalize_request`."""
     today = today or date.today()
     p = af.normalize_params({"years": 10, **request["assumptions"]})
@@ -661,6 +698,14 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None) -
         "info": {"savings_release": inputs.get("savings_release"), "monthly_cash_improvement": inputs.get("monthly_cash_improvement")},
         "over_committed": over,
     }
+    if not _window_variant:
+        for out in goal_outputs:
+            need = out["need"]
+            override = request.get("date_margin_months")
+            margin = override if override is not None else int(goals[need["goal_id"]].get("date_margin_months") or 0)
+            need["date_margin_months"] = margin
+            if need["reason"] is None and margin > 0:
+                out["window"] = _date_window(inputs, request, goals[need["goal_id"]], margin, today)
     warnings = ["השוואה בין אפשרויות בלבד — לא המלצה ולא בחירה עבורך.", "כסף צפוי או לא ודאי אינו כסף קיים: הכיסוי מפוצל לפי ודאות.",
                 "אין מודל מס; תמורה נטו, ריבית ותקופה הם כפי שהוזנו ('תנאים לא אומתו' אלא אם סומן אחרת)."]
     return {"schema_version": FUNDING_SCHEMA_VERSION, "result_type": "funding_plan_comparison", "as_of": today.isoformat(),

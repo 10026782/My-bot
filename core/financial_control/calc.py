@@ -55,6 +55,14 @@ def _d(value) -> date | None:
     return None
 
 
+def date_margin_months(value) -> int:
+    """The goal's End Date uncertainty in whole months (0 = firm). Anything that is not a whole number of months 1..60 reads as firm — never guessed."""
+    num = _num(value)
+    if num is None or isinstance(value, bool) or num != int(num) or not 1 <= int(num) <= 60:
+        return 0
+    return int(num)
+
+
 def _num(value) -> float | None:
     if isinstance(value, bool):
         return None
@@ -315,6 +323,7 @@ def compute_goal(goal: dict, events: list[Event], today: date, gf) -> dict:
         "method": method,
         "mode": MODE_BY_METHOD.get(method, "recurring"),
         "end_date": end.isoformat() if end else None,
+        "date_margin_months": date_margin_months(f.get(gf.DATE_MARGIN)),
         "period_start": p_start.isoformat(),
         "period_end": (horizon_end or p_end).isoformat(),
         "target": target,

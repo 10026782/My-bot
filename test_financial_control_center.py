@@ -4845,3 +4845,80 @@ def test_http_funding_followup_gate_validation_and_review(monkeypatch):
     assert ask(c, {"goal_id": "recGX", "option_type": "new_deposits"}).status_code == 403
     for method in ("get", "put", "patch", "delete"):
         assert getattr(c, method)("/api/fcc/funding/plan/followup", headers=H).status_code == 405
+
+
+# ═══ Funding planner: the goal's date is an ESTIMATE (± months) — a window of two ends, never a guessed date ═══
+def seed_window(margin=12):
+    seed_planner()
+    for g in DB[Tables.FIN_GOALS]:
+        if g["id"] == "recGW" and margin is not None:
+            g["fields"][GF.DATE_MARGIN] = margin
+
+
+def planned(req=None):
+    request_, plan_ = funding_plan_for(req or {"goal_id": "recGW", "options": [DEPOSIT]})
+    return plan_["goals"][0]
+
+
+def test_date_margin_reads_only_whole_months_1_to_60():
+    from core.financial_control import calc as _calc
+    for good, want in ((12, 12), ("24", 24), (1, 1), (60, 60)):
+        assert _calc.date_margin_months(good) == want
+    for bad in (None, "", 0, -3, 61, 2.5, True, "abc"):
+        assert _calc.date_margin_months(bad) == 0, bad
+
+
+def test_a_goal_with_a_margin_gets_an_early_and_a_late_end_and_the_point_estimate_is_unchanged():
+    seed_window()
+    with_margin = planned()
+    seed_window(margin=None)
+    firm = planned()
+    assert "window" not in firm and firm["need"]["date_margin_months"] == 0
+    w = with_margin["window"]
+    assert w["margin_months"] == 12 and with_margin["need"]["date_margin_months"] == 12
+    assert w["early"]["due"] == "2039-12-31" and w["late"]["due"] == "2041-12-31"
+    assert with_margin["need"] == {**firm["need"], "date_margin_months": 12} and with_margin["options"] == firm["options"]     # the main answer does not move
+    early = next(o for o in w["early"]["options"] if o["id"] == "dep")
+    late = next(o for o in w["late"]["options"] if o["id"] == "dep")
+    assert early["required_monthly"] > late["required_monthly"] > 0                                                           # sooner = more per month
+    assert not any(k in str(w) for k in ("score", "recommended", "rank", "best"))
+
+
+def test_the_request_can_override_the_goals_margin_and_bad_margins_are_rejected():
+    from portfolio_lab.funding_plan import normalize_request
+    seed_window(margin=None)
+    assert planned({"goal_id": "recGW", "options": [DEPOSIT], "date_margin_months": 6})["window"]["early"]["due"] == "2040-06-30"
+    seed_window(margin=12)
+    assert "window" not in planned({"goal_id": "recGW", "options": [DEPOSIT], "date_margin_months": 0})                          # an explicit 0 = firm
+    for bad in (-1, 61, 1.5, "12", True):
+        with pytest.raises(ValueError):
+            normalize_request({"goal_id": "recGW", "date_margin_months": bad})
+
+
+def test_an_early_end_that_is_too_close_says_why_and_the_window_carries_no_allocation():
+    seed_window(margin=12)
+    DB[Tables.FIN_GOALS] = [dict(g, fields={**g["fields"], GF.END_DATE: "2027-03-31"}) if g["id"] == "recGW" else g for g in DB[Tables.FIN_GOALS]]
+    out = planned({"goal_id": "recGW", "options": [DEPOSIT]})
+    assert out["window"]["early"]["reason"] in ("past_date", "due_this_month") and out["window"]["early"]["options"] == []
+    assert out["window"]["late"]["reason"] is None and out["window"]["late"]["options"]
+
+
+def test_the_saved_snapshot_keeps_the_window_and_the_margin_is_editable_on_the_goal():
+    import json as _json
+    seed_window(margin=12)
+    seed_saved_plans()
+    for g in DB[Tables.FIN_GOALS]:
+        if g["id"] == "recGW":
+            g["fields"][GF.DATE_MARGIN] = 12
+    start_save()
+    writes = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    result_ = _json.loads(writes[-1]["fields"][FPF.RESULT_SNAPSHOT])
+    assert result_["window"]["margin_months"] == 12 and result_["window"]["early"]["due"] == "2039-12-31"
+    conv.complete_execution(ELIYAHU, "fcc_funding_plan")
+    # the goal edit flow: pick the field, type the value -> a patch of Date Margin Months only
+    assert conv.start_intent(ELIYAHU, "monthly.goal_update", "recGW", today=TODAY).state == "ask"
+    conv.handle_turn(ELIYAHU, "מרווח תאריך (± חודשים)", extractor=conv.DeterministicExtractor(), today=TODAY)
+    review = conv.handle_turn(ELIYAHU, "24", extractor=conv.DeterministicExtractor(), today=TODAY)
+    assert review.state == "review" and "24" in review.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    assert w["op"] == "patch" and w["table"] == Tables.FIN_GOALS and w["fields"] == {GF.DATE_MARGIN: 24}

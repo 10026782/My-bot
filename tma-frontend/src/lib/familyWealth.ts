@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, FundingWindow, FundingWindowEnd, FundingWindowOption, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -9,12 +9,11 @@ export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // 
 export const OPEN_LABEL = `פתח: ${SCREEN_TITLE}`;
 export const TABS_ARIA_LABEL = `אזורי ${SCREEN_TITLE}`;
 
-export type FamilyTabKey = "savings" | "accounts" | "funding" | "lab";
+export type FamilyTabKey = "savings" | "accounts" | "funding";
 export const FAMILY_TABS: { key: FamilyTabKey; label: string }[] = [
   { key: "savings", label: "החיסכון שלי" },
   { key: "accounts", label: "החשבונות" },
   { key: "funding", label: "מימון יעד" },
-  { key: "lab", label: "מעבדת העתיד" },
 ];
 export const FAMILY_TAB_PREFIX = "fw";
 
@@ -435,6 +434,7 @@ export const FUNDING_FOLLOWUP_LABELS: Record<FundingOptionType, string> = {
   custom: "ביצוע האפשרות שנבחרה",
 };
 export const FUNDING_FOLLOWUP_NOTE = "משימת המשך נפתחת כטיוטה בלבד — תוצג סקירה ורק אחרי ״אשר ורשום״ היא נוצרת. לא נוצרת פעולה אחרת.";
+export const FUNDING_WINDOW_NOTE = "התאריך הוא הערכה: כל אפשרות מוצגת גם בקצה המוקדם וגם בקצה המאוחר של החלון. אף תאריך לא נבחר עבורך.";
 export const FUNDING_SAVE_NOTE = "שמירה היא רישום של החלטה בלבד: היא לא מזיזה כסף, לא פותחת הלוואה או חשבון, לא מוכרת נכס ולא משנה הקצאות. השרת יחשב את התוכנית מחדש ויציג סקירה לפני כל רישום.";
 export const FUNDING_TITLE = "מימון יעד";
 export const FUNDING_INTRO = "בוחרים יעד, מוסיפים דרכים אפשריות למימון, והמערכת משווה ביניהן. זו השוואה בלבד — לא המלצה ולא בחירה עבורך, וכל המספרים מחושבים בשרת.";
@@ -522,8 +522,8 @@ export const FUNDING_FIELDS: Record<Exclude<FundingOptionType, "existing_balance
 export const FUNDING_ADDABLE: Exclude<FundingOptionType, "existing_balance">[] = ["new_deposits", "asset_sale", "loan", "receivable_collection", "obligations_reduction", "work_income", "custom"];
 
 export interface FundingOptionDraft { id: string; type: Exclude<FundingOptionType, "existing_balance">; values: Record<string, string>; use: string }
-export interface FundingForm { goalId: string; returnPct: string; feePct: string; inflationPct: string; options: FundingOptionDraft[] }
-export const DEFAULT_FUNDING_FORM: FundingForm = { goalId: "", returnPct: "6", feePct: "0.15", inflationPct: "2", options: [] };
+export interface FundingForm { goalId: string; marginMonths: string; returnPct: string; feePct: string; inflationPct: string; options: FundingOptionDraft[] }
+export const DEFAULT_FUNDING_FORM: FundingForm = { goalId: "", marginMonths: "", returnPct: "6", feePct: "0.15", inflationPct: "2", options: [] };
 
 /** A new draft with defaults that never invent money: only selects get a starting choice. */
 export function newFundingOption(type: FundingOptionDraft["type"], counter: number): FundingOptionDraft {
@@ -539,6 +539,11 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
   const num = (text: string, name: string): number | string => { const v = text.trim() === "" ? NaN : Number(text); return Number.isFinite(v) ? v : `${name}: יש להזין מספר`; };
   const a = { ret: num(form.returnPct, "תשואה"), fee: num(form.feePct, "דמי ניהול"), infl: num(form.inflationPct, "אינפלציה") };
   for (const v of Object.values(a)) if (typeof v === "string") return { ok: false, error: v };
+  let margin: number | undefined;
+  if (!isBlank(form.marginMonths)) {                                 // typed text -> one whole number, once, on submit
+    margin = Number(form.marginMonths);
+    if (!Number.isInteger(margin) || margin < 0 || margin > 60) return { ok: false, error: "אי־ודאות בתאריך: יש להזין מספר חודשים שלם בין 0 ל־60" };
+  }
   const options: Record<string, unknown>[] = [];
   const plan: FundingRequestBody["allocation_plan"] = [];
   for (const draft of form.options) {
@@ -570,22 +575,35 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
       plan.push({ goal_id: form.goalId, option_id: draft.id, amount });
     }
   }
-  return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan } };
+  return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan, ...(margin !== undefined ? { date_margin_months: margin } : {}) } };
 }
 
 export interface FundingOptionCard {
   id: string; type: FundingOptionType; title: string; verdict: string; feasible: boolean | "unknown"; certainty: string; rows: { label: string; value: string }[];
   lists: { label: string; items: string[] }[]; note: string;
+  /** Date window: the same option at the earliest / latest date (rows are the server's numbers; empty when the date is firm). */
+  windowRows: { label: string; value: string }[];
 }
 export interface FundingPlanModel {
-  needTitle: string; needRows: { label: string; value: string }[]; needReason: string | null; options: FundingOptionCard[];
+  needTitle: string; needRows: { label: string; value: string }[]; needReason: string | null; windowNote: string | null; options: FundingOptionCard[];
   plan: { rows: { label: string; value: string }[]; allocations: string[]; note: string } | null;
   portfolio: { rows: { label: string; value: string }[] } | null; warnings: string[];
 }
 const dmy = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "—");
 const optMoney = (v: number | null | undefined) => (v == null ? "—" : money(v));
 
-function optionCard(o: FundingOptionResult, titles: Record<string, string>): FundingOptionCard {
+function windowCell(e: FundingWindowEnd, o: FundingWindowOption | undefined): string {
+  if (e.reason) return word(NEED_REASONS, e.reason);
+  if (!o) return "—";
+  const parts = [`${word(FEASIBLE_LABELS, String(o.feasible))}${o.reason ? ` — ${word(FUNDING_REASONS, o.reason)}` : ""}`];
+  if (o.required_monthly != null) parts.push(`הפקדה חודשית נדרשת ${money(o.required_monthly)}`);
+  else if (o.covers_amount != null) parts.push(`מכסה ${money(o.covers_amount)}`);
+  if (o.monthly_cash_effect != null) parts.push(`תזרים חודשי ${money(o.monthly_cash_effect)}`);
+  if (o.available_by) parts.push(`זמין עד ${dmy(o.available_by)}`);
+  return parts.join(" · ");
+}
+
+function optionCard(o: FundingOptionResult, titles: Record<string, string>, win?: FundingWindow | null): FundingOptionCard {
   const rows: { label: string; value: string }[] = [
     { label: "כמה מכסה", value: optMoney(o.covers_amount) },
     { label: "זמין עד", value: dmy(o.available_by) },
@@ -603,7 +621,11 @@ function optionCard(o: FundingOptionResult, titles: Record<string, string>): Fun
     { label: "חסר", items: o.missing_inputs.map((m) => word(MISSING_INPUT_LABELS, m)) },
   ].filter((l) => l.items.length > 0);
   const verdict = `${word(FEASIBLE_LABELS, String(o.feasible))}${o.reason ? ` — ${word(FUNDING_REASONS, o.reason)}` : ""}`;
-  return { id: o.id, type: o.type, title: titles[o.id] ?? FUNDING_TYPE_LABELS[o.type], verdict, feasible: o.feasible, certainty: word(FUNDING_CERTAINTY_LABELS, o.certainty), rows, lists, note: o.assumptions.join(" · ") };
+  const windowRows = win ? [
+    { label: `אם התאריך מוקדם (${dmy(win.early.due)})`, value: windowCell(win.early, win.early.options.find((x) => x.id === o.id)) },
+    { label: `אם התאריך מאוחר (${dmy(win.late.due)})`, value: windowCell(win.late, win.late.options.find((x) => x.id === o.id)) },
+  ] : [];
+  return { id: o.id, type: o.type, title: titles[o.id] ?? FUNDING_TYPE_LABELS[o.type], verdict, feasible: o.feasible, certainty: word(FUNDING_CERTAINTY_LABELS, o.certainty), rows, lists, note: o.assumptions.join(" · "), windowRows };
 }
 
 /** Wording + layout of one goal's comparison. Options keep the server's order (fixed by type); nothing is sorted, scored or highlighted here. */
@@ -612,7 +634,7 @@ export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<s
   if (!g) return null;
   const n = g.need;
   const needRows = [
-    { label: "יעד", value: optMoney(n.target) }, { label: "תאריך יעד", value: dmy(n.due) },
+    { label: "יעד", value: optMoney(n.target) }, { label: n.date_margin_months ? "תאריך יעד (משוער)" : "תאריך יעד", value: n.date_margin_months ? `${dmy(n.due)} ± ${n.date_margin_months} חודשים` : dmy(n.due) },
     { label: "כסף קיים מאושר למטרה", value: money(n.confirmed_existing) },
     { label: "כסף קיים צפוי (לא מאושר)", value: money(n.expected_existing) },
     { label: "פער לפי הכסף המאושר בלבד", value: optMoney(n.gap) },
@@ -639,6 +661,7 @@ export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<s
   ] } : null;
   return {
     needTitle: n.title || "מטרה ללא שם", needRows, needReason: n.reason ? word(NEED_REASONS, n.reason) : null,
-    options: g.options.map((o) => optionCard(o, titles)), plan: planModel, portfolio, warnings: plan.warnings,
+    windowNote: g.window ? FUNDING_WINDOW_NOTE : null,
+    options: g.options.map((o) => optionCard(o, titles, g.window)), plan: planModel, portfolio, warnings: plan.warnings,
   };
 }

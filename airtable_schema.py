@@ -915,6 +915,7 @@ class FinGoalFields:
     PERIOD_TYPE     = "Period Type"       # monthly|weekly|custom
     START_DATE      = "Start Date"
     END_DATE        = "End Date"
+    DATE_MARGIN     = "Date Margin Months"  # number (whole months 0-60): End Date is an ESTIMATE, uncertain by +/- this many months; empty/0 = firm (created 19/10/2026)
     TARGET_AMOUNT   = "Target Amount"
     MIN_AMOUNT      = "Min Amount"
     MAX_AMOUNT      = "Max Amount"

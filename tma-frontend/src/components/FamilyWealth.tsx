@@ -7,7 +7,6 @@ import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccT
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
 import { KpiCard } from "./FccKpiCard";
-import { PortfolioLabPanel } from "./PortfolioLabPanel";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -268,12 +267,19 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
           <ScreenState state="empty" title="אין יעד עם סכום ותאריך" message="הגדירו יעד (למשל חתונה של ילד) עם סכום ותאריך במרכז הכלכלי." />
         ) : (
           <label>יעד
-            <select value={form.goalId} onChange={(e) => setForm((f) => ({ ...f, goalId: e.target.value }))}>
+            <select value={form.goalId} onChange={(e) => {
+              const picked = goals.find((g) => g.goal_id === e.target.value);
+              setForm((f) => ({ ...f, goalId: e.target.value, marginMonths: picked?.date_margin_months ? String(picked.date_margin_months) : "" }));
+            }}>
               <option value="">בחרו יעד…</option>
               {goals.map((g) => <option key={g.goal_id} value={g.goal_id}>{g.title || "מטרה ללא שם"}</option>)}
             </select>
           </label>
         )}
+        <label>אי־ודאות בתאריך היעד (± חודשים, ריק = תאריך קבוע)
+          <input inputMode="numeric" value={form.marginMonths} onChange={(e) => setForm((f) => ({ ...f, marginMonths: e.target.value }))} />
+          <small>למשל 24 = ההערכה היא תאריך היעד, בטווח של שנתיים לכל כיוון. נשמר ביעד דרך ״עדכון יעד״ במרכז הכלכלי.</small>
+        </label>
         <div className="pl-grid">
           <label>תשואה שנתית ברירת מחדל (%)<input inputMode="decimal" value={form.returnPct} onChange={(e) => setForm((f) => ({ ...f, returnPct: e.target.value }))} /></label>
           <label>דמי ניהול ברירת מחדל (%)<input inputMode="decimal" value={form.feePct} onChange={(e) => setForm((f) => ({ ...f, feePct: e.target.value }))} /></label>
@@ -368,6 +374,7 @@ export function FundingResult({ model, selection }: { model: NonNullable<ReturnT
         <h3 className="fcc-section__heading">{model.needTitle}</h3>
         <Rows rows={model.needRows} />
         {model.needReason && <p className="fcc-goal__note" dir="auto">{model.needReason}</p>}
+        {model.windowNote && <p className="fcc-goal__note" dir="auto">{model.windowNote}</p>}
       </Surface>
       {model.options.map((o) => (
         <Surface key={o.id} padding="compact" className="fw-option" aria-label={o.title}>
@@ -377,6 +384,7 @@ export function FundingResult({ model, selection }: { model: NonNullable<ReturnT
           )}
           <p className="fw-badges"><span className="fw-badge">{o.verdict}</span><span className="fw-badge">ודאות: {o.certainty}</span></p>
           <Rows rows={o.rows} />
+          {o.windowRows.length > 0 && <Rows rows={o.windowRows} />}
           {o.lists.map((l) => <div key={l.label}><p className="fcc-goal__note">{l.label}:</p><ul className="pl-list pl-list--small" dir="auto">{l.items.map((i) => <li key={i}>{i}</li>)}</ul></div>)}
           {o.note && <p className="fcc-goal__note" dir="auto">{o.note}</p>}
         </Surface>
@@ -442,10 +450,6 @@ export function FamilyWealth({ overview, onBack, onRetry }: { overview: Overview
           {/* funding planner: mounted only when opened; the comparison runs on demand, never in the background */}
           <div role="tabpanel" id={panelId("funding", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("funding", FAMILY_TAB_PREFIX)} hidden={tab !== "funding"}>
             {tab === "funding" && <FundingSection overview={overview} />}
-          </div>
-          {/* mounted only when opened: the simulation runs on demand, never in the background */}
-          <div role="tabpanel" id={panelId("lab", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("lab", FAMILY_TAB_PREFIX)} hidden={tab !== "lab"}>
-            {tab === "lab" && <PortfolioLabPanel />}
           </div>
         </div>
       </div>

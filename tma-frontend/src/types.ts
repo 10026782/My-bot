@@ -485,6 +485,8 @@ export interface FccGoalRow {
   /** Goal family: recurring (period sum) | monthly_level (run-rate change) | cumulative | project (no amount). */
   mode: "recurring" | "monthly_level" | "cumulative" | "project";
   end_date: string | null;
+  /** The End Date is an estimate, uncertain by ± this many whole months (0 = firm). */
+  date_margin_months?: number;
   period_start: string;
   period_end: string;
   target: number | null;
@@ -926,14 +928,21 @@ export interface FundingOptionResult {
 }
 export interface FundingNeed {
   goal_id: string; title: string | null; category: string | null; target: number | null; due: string | null; months_to_due: number | null; reason: string | null;
-  sizing_basis: string; confirmed_existing: number; expected_existing: number; progress_events_actual: number | null; gap: number | null; gap_after_expected?: number;
+  sizing_basis: string; date_margin_months?: number; confirmed_existing: number; expected_existing: number; progress_events_actual: number | null; gap: number | null; gap_after_expected?: number;
 }
 export interface FundingPlanBlock {
   allocations: { option_id: string; amount: number; certainty: FundingCertainty; available_by: string | null; conditions: string[] }[];
   covered: Record<FundingCertainty, number>; earliest_available_by: string | null;
   remaining_after_confirmed: number; remaining_after_confirmed_and_expected: number; monthly_burden: number; monthly_release: number; note: string;
 }
-export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null }
+/** One end of the date window: the same options recomputed at the earliest / latest date (server numbers). */
+export interface FundingWindowOption {
+  id: string; type: FundingOptionType; feasible: boolean | "unknown"; reason: string | null; covers_amount: number | null; available_by: string | null;
+  monthly_cash_effect: number | null; certainty: FundingCertainty; time_to_realize_months: number | null; required_monthly: number | null;
+}
+export interface FundingWindowEnd { due: string | null; reason: string | null; gap: number | null; months_to_due: number | null; options: FundingWindowOption[] }
+export interface FundingWindow { margin_months: number; early: FundingWindowEnd; late: FundingWindowEnd; note: string }
+export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null; window?: FundingWindow | null }
 export interface FundingPlan {
   schema_version: string; result_type: string; as_of: string;
   assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; horizon_years: number };
@@ -944,4 +953,6 @@ export interface FundingPlan {
 export interface FundingRequestBody {
   goal_id: string; assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number };
   options: Record<string, unknown>[]; allocation_plan: { goal_id: string; option_id: string; amount: number }[];
+  /** The goal's date is an estimate, uncertain by ± this many whole months (0 = firm). Omitted = the goal's own saved margin. */
+  date_margin_months?: number;
 }
