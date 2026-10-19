@@ -67,7 +67,7 @@
         }
       ],
       "valid_from": "2026-07-28",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "1c23cc27900f326f2f8c039e03d5d755d3f1a8e1",
       "confidence": 0.93,
       "notes": [
         "Read-only projection; must not own tool execution or writes.",
@@ -108,7 +108,7 @@
       "production_evidence": [],
       "feature_flags": [],
       "valid_from": "2026-08-16",
-      "last_verified_commit": "202af6063525957c6997bc738590219684fc288b",
+      "last_verified_commit": "1c23cc27900f326f2f8c039e03d5d755d3f1a8e1",
       "confidence": 1.0,
       "notes": [
         "Read-only owner API composition; no writes, approvals, state transitions, persistence, cache, or LLM calls.",
