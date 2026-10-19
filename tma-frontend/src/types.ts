@@ -885,8 +885,15 @@ export interface PlCrisisStrategy {
   strategy: string; label: string; is_baseline: boolean; final_nominal: number; final_real: number;
   final_nominal_no_crisis: number; delta_vs_no_crisis: number; gap_vs_baseline: number;
 }
+export interface PlIntraYear {
+  month: number; year: number; recovery_months: number; recovery_truncated_by_horizon: boolean;
+  monthly_path: { month_index: number; t_years: number; year: number; month: number; nominal_no_crisis: number; nominal_crisis: number;
+                  real_no_crisis: number; real_crisis: number; contributions: number }[];
+  timing_by_month: { month: number; is_selected: boolean; final_nominal: number; final_real: number; delta_vs_no_crisis: number }[];
+  deposit_order_note: string; note: string;
+}
 export interface PlCrisis {
-  applied: boolean; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[]; by_strategy?: PlCrisisStrategy[];
+  applied: boolean; intra_year?: PlIntraYear; delta_vs_no_crisis?: number; final_nominal?: number; series?: PlSeriesRow[]; by_strategy?: PlCrisisStrategy[];
   recovery_truncated_by_horizon?: boolean; note?: string;
 }
 export interface PlCompareSide { label: string; assumptions: Record<string, number | string | boolean>; kpis: PlKpis; series: PlSeriesRow[] }
@@ -926,7 +933,7 @@ export interface PortfolioLabView {
 export interface PortfolioLabParams {
   initial: number; monthly_contribution: number; years: number; annual_return_pct: number; annual_fee_pct: number; inflation_pct: number;
   deposit_timing: "begin" | "end"; index_contributions: boolean; baseline: string; strategies: string[];
-  crisis?: { decline_pct: number; year: number; recovery: "fast" | "prolonged" };
+  crisis?: { decline_pct: number; year: number; recovery: "fast" | "prolonged"; month?: number };
   compare_to?: Partial<Pick<PortfolioLabParams, "initial" | "monthly_contribution" | "annual_return_pct" | "annual_fee_pct" | "inflation_pct">>;
 }
 

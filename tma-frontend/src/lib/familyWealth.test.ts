@@ -12,7 +12,7 @@ import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -198,6 +198,24 @@ test("scenario comparison: only filled set-B fields go into the request; rows ar
   assert.ok(rows[0].cells[3].includes("200") && !rows[0].cells[3].startsWith("+") && rows[5].cells[3].startsWith("+"));
   assert.ok(rows[7].cells[3].includes("-2.00%"));
   assert.deepEqual(scenarioLines(cmp)[1].pts, [[1, 8]]);
+});
+
+test("intra-year crisis: month goes into the request only when chosen; timing rows and path are the server's numbers", () => {
+  const base = { ...DEFAULT_LAB_FORM, crisisOn: true };
+  const annual = labParams(base);
+  assert.ok(annual.ok && annual.params.crisis && annual.params.crisis.month === undefined);
+  const monthly = labParams({ ...base, crisisMonth: "7" });
+  assert.ok(monthly.ok && monthly.params.crisis?.month === 7);
+  assert.equal(timingRows(view).length, 0);
+  const withIntra = { ...view, charts: { ...view.charts, growth: { ...view.charts.growth, crisis: { applied: true, intra_year: {
+    timing_by_month: [{ month: 1, is_selected: false, final_nominal: 1000, final_real: 500, delta_vs_no_crisis: 10 },
+                      { month: 2, is_selected: true, final_nominal: 990, final_real: 495, delta_vs_no_crisis: -5 }],
+    monthly_path: [{ t_years: 0.5, nominal_no_crisis: 10, nominal_crisis: 8 }, { t_years: 1, nominal_no_crisis: 12, nominal_crisis: 11 }],
+  } } } } } as unknown as PortfolioLabView;
+  const rows = timingRows(withIntra);
+  assert.ok(rows[1].selected && rows[1].cells[0].includes("נבחר") && rows[0].cells[3].startsWith("+") && !rows[1].cells[3].startsWith("+"));
+  const lines = intraYearLines(withIntra);
+  assert.deepEqual(lines[1].pts, [[0.5, 8], [1, 11]]);
 });
 
 const paceView = {

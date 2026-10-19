@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { postPortfolioLabSimulate } from "../api";
 import type { PortfolioLabView } from "../types";
 import {
-  CRISIS_DECLINES, CRISIS_TABLE_HEAD, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, scenarioLines, scenarioRows, SCENARIO_TABLE_HEAD, crisisTableRows, growthLines,
+  CRISIS_DECLINES, CRISIS_TABLE_HEAD, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, scenarioLines, scenarioRows, SCENARIO_TABLE_HEAD, crisisTableRows, intraYearLines, timingRows, TIMING_TABLE_HEAD, growthLines,
   ils, labKpiCards, paceAssumptions, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
 } from "../lib/familyWealth";
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
@@ -84,6 +84,12 @@ export function PortfolioLabPanel() {
               </select>
             </label>
             <label>שנת המשבר<input inputMode="numeric" value={form.crisisYear} onChange={(e) => set("crisisYear", e.target.value)} /></label>
+            <label>חודש בתוך השנה
+              <select value={form.crisisMonth} onChange={(e) => set("crisisMonth", e.target.value)}>
+                <option value="">ללא (מסלול שנתי)</option>
+                {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={String(i + 1)}>חודש {i + 1}</option>)}
+              </select>
+            </label>
             <label>התאוששות
               <select value={form.crisisRecovery} onChange={(e) => set("crisisRecovery", e.target.value as LabForm["crisisRecovery"])}>
                 <option value="fast">מהירה (שנה)</option><option value="prolonged">ממושכת (3 שנים)</option>
@@ -142,6 +148,16 @@ function LabResult({ view }: { view: PortfolioLabView }) {
             <p className="fcc-goal__note">תרחיש משבר: הפרש בשווי הסופי {ils(g.crisis.delta_vs_no_crisis)}. {g.crisis.note}
               {g.crisis.recovery_truncated_by_horizon ? " ההתאוששות נחתכה בגלל אופק ההשקעה." : ""}</p>
           )}</Surface></section>
+      {g.crisis.applied && g.crisis.intra_year && (
+        <section className="fcc-section"><h2 className="fcc-section__heading">משבר תוך-שנתי: העיתוי מול ההפקדות {DEMO}</h2>
+          <p className="fcc-goal__note">{g.crisis.intra_year.deposit_order_note} {g.crisis.intra_year.note}
+            {g.crisis.intra_year.recovery_truncated_by_horizon ? " ההתאוששות נחתכה בגלל אופק ההשקעה." : ""}</p>
+          <Surface padding="compact"><LineChart model={lineChartModel(intraYearLines(view))} xLabel="שנים" title="מסלול חודשי סביב המשבר" /></Surface>
+          <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+            <thead><tr>{TIMING_TABLE_HEAD.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>{timingRows(view).map((r) => <tr key={r.key}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+          </table></div></Surface></section>
+      )}
       {view.charts.scenario_comparison?.applied && (
         <section className="fcc-section"><h2 className="fcc-section__heading">השוואת תרחישים {DEMO}</h2>
           <p className="fcc-goal__note">{view.charts.scenario_comparison.note}</p>
