@@ -4809,6 +4809,36 @@ def test_funding_save_confirm_freezes_one_snapshot_and_supersedes_only_the_goals
     assert not any(k in text for k in ("score", "recommended", "rank"))                          # a record of a decision, not advice
 
 
+CUSTOM_DATED = {"id": "gift", "type": "custom", "label": "מתנה", "amount": 5000, "available_by": "2029-01-01"}
+
+
+def test_a_plan_with_a_dated_option_can_be_saved_through_draft_and_אשר():
+    """Regression: a normalised funding request holds datetime.date values (asset sale, receivable, loan, custom, liquid_from); saving such a plan raised
+    TypeError (dates are not JSON) and the route answered "could not open the save". Dates are now stored as ISO text that normalize_request reads back."""
+    import json as _json
+    seed_saved_plans()
+    start_save(("gift",), {"goal_id": "recGW", "options": [CUSTOM_DATED]})
+    for text in ("ערוך", "הערת החלטה x", "ערוך", "לבדוק שוב עד 2027-01-31"):
+        assert conv.handle_turn(ELIYAHU, text, extractor=conv.DeterministicExtractor(), today=TODAY).state in ("ask", "review")
+    writes = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    post_ = next(w for w in writes if w["op"] == "post")
+    f = post_["fields"]
+    request_ = _json.loads(f[FPF.REQUEST_SNAPSHOT])
+    assert request_["options"][0]["available_by"] == "2029-01-01"                       # ISO text, not a date object
+    assert _json.loads(f[FPF.SELECTED_OPTIONS]) == [{"id": "gift", "type": "custom", "use_amount": None}]
+    from portfolio_lab.funding_plan import normalize_request
+    again = normalize_request(request_)                                                  # the stored request reads back unchanged
+    assert str(again["options"][0]["available_by"]) == "2029-01-01"
+
+
+def test_other_non_json_values_are_still_an_error_not_silently_stringified():
+    import pytest as _pytest
+    from core.financial_control.conversation import _compact_json
+    assert _compact_json({"d": date(2030, 1, 1)}) == '{"d":"2030-01-01"}'
+    with _pytest.raises(TypeError):
+        _compact_json({"x": object()})
+
+
 def test_funding_save_rejects_unknown_infeasible_or_empty_selection_and_foreign_goals():
     seed_saved_plans()
     for selected in ([], ["nope"], ["dep", "dep"], [7]):

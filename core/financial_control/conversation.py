@@ -908,8 +908,16 @@ def _start_prime_change(identity, ids, store, today) -> TurnResult:
 _FUNDING_JSON_CAP = 40000        # the draft lives in one Sessions cell: a snapshot that does not fit is refused, never truncated
 
 
+def _json_default(value):
+    """A normalised funding request/plan holds dates (asset sale, receivable, loan, liquid_from ...): they are stored as ISO text, which
+    ``funding_plan.normalize_request`` reads back unchanged. Anything else that is not JSON stays an error."""
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def _compact_json(value) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=_json_default)
 
 
 def start_funding_plan_save(identity, request: dict, plan: dict, selected: list, *, store=None, today: date | None = None) -> TurnResult:
