@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast, postFccFundingFollowup, postFccFundingPlan, postFccFundingSave } from "../api";
+import { fetchFccAccounts, fetchFccNetWorth, fetchFccOverview, postFccAccountsForecast, postFccFundingFollowup, postFccFundingPlan, postFccFundingSave } from "../api";
 import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
 import { ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
@@ -7,6 +7,7 @@ import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccT
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
 import { KpiCard } from "./FccKpiCard";
+import { NetWorthCard, type NetWorthState } from "./FccNetWorth";
 import { PortfolioLabPanel } from "./PortfolioLabPanel";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
@@ -426,7 +427,12 @@ function AccountsSection() {
       .catch((e: unknown) => setState({ status: "error", code: (e as { status?: number }).status }));
   };
   useEffect(load, []);
-  const refresh = () => { fetchFccAccounts().then((data) => setState({ status: "ok", data })).catch(() => undefined); };
+  const [netWorth, setNetWorth] = useState<NetWorthState>({ status: "loading" });
+  const loadNetWorth = () => {
+    fetchFccNetWorth().then((data) => setNetWorth({ status: "ok", data })).catch((e: unknown) => setNetWorth({ status: "error", code: (e as { status?: number }).status }));
+  };
+  useEffect(loadNetWorth, []);
+  const refresh = () => { fetchFccAccounts().then((data) => setState({ status: "ok", data })).catch(() => undefined); loadNetWorth(); };
   const writer = useFccWriter(null, "accounts", refresh);
   const editable = state.status === "ok" ? state.data.accounts.filter((a) => a.status !== "closed") : [];
   return (
@@ -436,6 +442,7 @@ function AccountsSection() {
                             targets={{ goals: [], loans: [], assets: [], accounts: editable.map((a) => ({ id: a.id, title: a.name || "חשבון ללא שם" })) }}
                             onStart={(i, id) => void writer.start(i, id)} onSend={(t, g) => void writer.send(t, g)} onDismiss={writer.dismiss} />
       )}
+      <NetWorthCard state={netWorth} onRetry={() => { setNetWorth({ status: "loading" }); loadNetWorth(); }} />
       <AccountsPanel state={state} onRetry={load} />
     </div>
   );
