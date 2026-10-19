@@ -50,6 +50,16 @@ test("a missing total is 'חסר', never 0; partial says so and every gap is not
   assert.ok(m.notes.some((n) => n.includes("2 חשבונות")) && m.notes.some((n) => n.includes("1 נכסים")) && m.notes.some((n) => n.includes("3 הלוואות")));
 });
 
+test("an asset without a value is named on the card: 'חסר שווי — יש להזין', and the result stays partial", () => {
+  const gone = { ...base.assets.items[0], id: "g", name: "מגרש", gross_value: null, value: null, counted: false, missing: ["missing_value" as const] };
+  const own = { ...base.assets.items[0], id: "o", name: "משרד", ownership_pct: null, value: null, counted: false, missing: ["missing_ownership" as const] };
+  const v = { ...base, partial: true, gaps: { ...base.gaps, assets_left_out: 2 }, assets: { ...base.assets, items: [...base.assets.items, gone, own] } };
+  const m = netWorthModel(v);
+  assert.ok(m.notes.includes("מגרש — חסר שווי — יש להזין") && m.notes.includes("משרד — חסר אחוז בעלות — יש להזין"));
+  assert.ok(m.partial && m.net.hint.startsWith("חלקי"));
+  assert.ok(renderToStaticMarkup(createElement(NetWorthCard, { state: { status: "ok", data: v }, onRetry: () => undefined })).includes("מגרש — חסר שווי — יש להזין"));
+});
+
 test("a sold asset and an overlapping mortgage are explained; no receivables card when there are none", () => {
   const m = netWorthModel({ ...base, receivables: { ...base.receivables, count: 0, total: null, items: [] } });
   assert.equal(m.receivables, null);

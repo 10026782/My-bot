@@ -20,6 +20,11 @@ export function netWorthModel(v: FccNetWorth): NetWorthModel {
   if (g.accounts_without_balance > 0) notes.push(`${g.accounts_without_balance} חשבונות בלי יתרה שדווחה — אינם נספרים בשווי הנקי.`);
   if (g.assets_left_out > 0) notes.push(`${g.assets_left_out} נכסים בלי שווי או אחוז בעלות — הוצאו מהחישוב (ולא הוערכו).`);
   if (g.debts_without_balance > 0) notes.push(`${g.debts_without_balance} הלוואות בלי יתרה — אינן מנוכות.`);
+  for (const a of v.assets.items) {                       // each left-out asset by name, with what the owner has to enter (the system never guesses a value)
+    const name = a.name || "נכס ללא שם";
+    if (a.missing.includes("missing_value")) notes.push(`${name} — חסר שווי — יש להזין`);
+    if (a.missing.includes("missing_ownership")) notes.push(`${name} — חסר אחוז בעלות — יש להזין`);
+  }
   if (v.assets.sold_excluded > 0) notes.push(`${v.assets.sold_excluded} נכסים שנמכרו אינם נכללים.`);
   const kept = v.assets.items.filter((a) => a.ignored_mortgage_balance != null).length;
   if (kept > 0) notes.push(`ב-${kept} נכסים יתרת המשכנתא שבנכס זהה להלוואה המקושרת — נוכתה פעם אחת.`);
