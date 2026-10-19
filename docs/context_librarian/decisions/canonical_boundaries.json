@@ -1558,6 +1558,7 @@
         "portfolio_lab/accounts_forecast.py",
         "portfolio_lab/engine.py",
         "portfolio_lab/funding_plan.py",
+        "portfolio_lab/funding_sources.py",
         "portfolio_lab/models.py",
         "portfolio_lab/pace_tracker.py",
         "portfolio_lab/simulator_view.py",
@@ -1567,6 +1568,7 @@
       "test_paths": [
         "test_accounts_forecast.py",
         "test_funding_plan.py",
+        "test_funding_sources.py",
         "test_portfolio_lab.py",
         "test_portfolio_lab_pace.py",
         "test_portfolio_lab_crisis.py",
@@ -1626,6 +1628,7 @@
         "D1 step 7 / A1 (PR #1326, 15-16/10/2026): owner explicitly approved \"APPROVE EXISTING NODE: decision.portfolio_lab_local_research\" for exactly portfolio_lab/accounts_forecast.py and its test test_accounts_forecast.py. The module is pure (no I/O, Airtable, LLM or writes): it only composes the unchanged engine.simulate per account from an already owner-scoped accounts_overview and sums the engine results. It is consumed only by the owner-gated POST /api/fcc/accounts/forecast (FCC flag + canary + owner). No new node, no policy change, no new production authority, no approval of future sources.",
         "Goal Funding Planner step 1 (PR #1334, 18/10/2026): the owner explicitly approved registration of exactly portfolio_lab/funding_plan.py and test_funding_plan.py in this node (owner instruction 18/10/2026: \"מאשר את רישום funding_plan.py ו־test_funding_plan.py ב־canonical_boundaries.json\"). No other file, wildcard or future source is approved by this note. The module is pure (no I/O, Airtable, LLM or writes), reads nothing itself, and is consumed only by the owner-gated read-only endpoint POST /api/fcc/funding/plan in tma_api.py through core/financial_control/service.py::funding_inputs. It composes the unchanged portfolio_lab.engine.simulate and core.financial_control.loans.pmt; it is not an authority and recommends, scores and ranks nothing. Spec: docs/portfolio_lab/GOAL_FUNDING_PLANNER_SPEC.md.",
         "Portfolio Lab simulator lane 1a (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly test_portfolio_lab_crisis.py (crisis scenario across all compared strategies). No other file, no policy change, no new production authority.",
+        "Goal funding sources step 1 (draft PR, 19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly portfolio_lab/funding_sources.py and test_funding_sources.py. The module is pure (no I/O, Airtable, LLM or writes), composes only the unchanged accounts_forecast liquidity helpers and funding_plan date helpers, and is attached as a read-only `suggested_sources` field to the owner-gated POST /api/fcc/funding/plan (flag + canary + owner; the save route does not carry it). It lists candidate sources in five separate categories with no totals, recommendation, score or rank. Spec: docs/portfolio_lab/GOAL_FUNDING_SOURCES_SPEC.md (on the coordination branch, not yet on main). No other file, wildcard or future source is approved by this note.",
         "Portfolio Lab simulator lane 1c / C3 (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly test_portfolio_lab_scenario_compare.py (scenario comparison). No other file, no policy change, no new production authority.",
         "Portfolio Lab simulator lane 1d / C4 (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly portfolio_lab/pace_tracker.py and test_portfolio_lab_pace.py (actual accumulation pace vs plan). The module is pure (no I/O, Airtable, LLM or writes) and composes the unchanged engine; it is consumed only by the owner-gated POST /api/fcc/pace (FCC flag + canary + owner), whose inputs come from the owner-scoped service.pace_inputs. No other file, no policy change, no new production authority.",
         "Portfolio Lab simulator lane 1b (19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this PR registers exactly test_portfolio_lab_crisis_monthly.py (intra-year crisis). No other file, no policy change, no new production authority."

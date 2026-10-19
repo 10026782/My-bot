@@ -142,7 +142,7 @@ FCC_CHANNEL = "fcc"                 # one draft slot per person, shared by TMA a
 SOURCE = "fcc_free_text"
 FCC_TASK_TOPIC = "כספים"            # existing Tasks.Topic choice (FCC-origin marker with [FCC:<goal>])
 
-CATEGORIES = ("income", "savings", "emergency_fund", "debt", "other")
+CATEGORIES = ("income", "savings", "emergency_fund", "debt", "future_goal", "other")
 PERIOD_TYPES = ("monthly", "weekly", "custom")
 CALC_METHODS = ("period_sum", "cumulative", "recurring_level")
 EVENT_KINDS = ("one_time", "monthly_recurring", "target_change", "direct_cost", "household_expense", "note")
@@ -159,6 +159,7 @@ INFERENCE: dict[str, dict[str, str]] = {
     "income": {"period_type": "monthly", "calc_method": "period_sum"},
     "savings": {"period_type": "monthly", "calc_method": "recurring_level"},   # a standing monthly allocation (like a standing order) vs a target; never resets. A one-time pot is an emergency fund
     "emergency_fund": {"calc_method": "cumulative"},
+    "future_goal": {"calc_method": "cumulative"},     # a one-off future need with a target and an (estimated) date, e.g. a wedding; not an emergency fund
     "debt": {"calc_method": "cumulative"},
 }
 
@@ -350,7 +351,7 @@ LABELS_BY_ENTITY = {FCC_FUNDING_PLAN: {"note": "הערת החלטה", "review_by
 def label(entity: str, field: str) -> str:
     return LABELS_BY_ENTITY.get(entity, {}).get(field) or LABELS.get(field, field)
 VALUE_LABELS = {
-    "category": {"income": "הכנסה", "savings": "חיסכון חודשי", "emergency_fund": "קרן חירום", "debt": "חוב", "other": "אחר"},
+    "category": {"income": "הכנסה", "savings": "חיסכון חודשי", "emergency_fund": "קרן חירום", "debt": "חוב", "future_goal": "יעד עתידי", "other": "אחר"},
     "period_type": {"monthly": "חודשי", "weekly": "שבועי", "custom": "מותאם"},
     "calc_method": {"period_sum": "סכום בתקופה", "cumulative": "מצטבר", "recurring_level": "שינוי קבוע בחודש"},
     "status": {"active": "פעיל", "inactive": "לא פעיל (בוטל בפועל)"},
