@@ -27,11 +27,15 @@ export function netWorthModel(v: FccNetWorth): NetWorthModel {
   }
   if (g.asset_debts_unverified > 0) notes.push(`${g.asset_debts_unverified} נכסים עם יתרת משכנתא בשדה הנכס בלי הלוואה מקושרת — מנוכה במלואה; שיעור האחריות לחוב לא ידוע.`);
   if (v.assets.sold_excluded > 0) notes.push(`${v.assets.sold_excluded} נכסים שנמכרו אינם נכללים.`);
-  const kept = v.assets.items.filter((a) => a.ignored_mortgage_balance != null).length;
-  if (kept > 0) notes.push(`ב-${kept} נכסים יתרת המשכנתא שבנכס זהה להלוואה המקושרת — נוכתה פעם אחת.`);
+  const withLoan = v.assets.items.filter((a) => a.ignored_mortgage_balance != null);
+  const deducted = withLoan.filter((a) => a.debt != null).length, noBalance = withLoan.length - deducted;
+  if (deducted > 0) notes.push(`ב-${deducted} נכסים יתרת המשכנתא שבנכס זהה להלוואה המקושרת — נוכתה פעם אחת.`);
+  if (noBalance > 0) notes.push(`ב-${noBalance} נכסים ההלוואה המקושרת בלי יתרה — יתרת המשכנתא שבשדה הנכס לא נוכתה (חסר).`);
   const fr = v.accounts.freshness;
-  const accountsHint = [`${fr.current} עדכניים · ${fr.stale} ישנים (מעל ${v.accounts.stale_after_days} יום) · ${fr.missing} חסרים`,
-                        v.accounts.oldest_as_of ? `עדכון ישן ביותר: ${v.accounts.oldest_as_of}` : NO_DATE].join(" · ");
+  const accountsHint = fr.current + fr.stale === 0
+    ? `אין יתרה שדווחה${fr.missing > 0 ? ` · ${fr.missing} חשבונות חסרים` : ""}`
+    : [`${fr.current} עדכניים · ${fr.stale} ישנים (מעל ${v.accounts.stale_after_days} יום) · ${fr.missing} חסרים`,
+       v.accounts.oldest_as_of ? `עדכון ישן ביותר: ${v.accounts.oldest_as_of}` : NO_DATE].join(" · ");
   const rows: NetWorthRow[] = [
     { key: "accounts", label: "חשבונות", value: val(v.accounts.total), hint: accountsHint },
     { key: "assets", label: "נכסים", value: val(v.assets.total), hint: [`${v.assets.items.filter((a) => a.counted).length} נכסים`, v.assets.as_of_known ? "" : NO_DATE].filter(Boolean).join(" · ") },

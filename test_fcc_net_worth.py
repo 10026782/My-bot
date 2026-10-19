@@ -283,3 +283,18 @@ def test_http_owner_gets_own_view_only_and_it_is_read_only(monkeypatch):
 
 def test_http_unresolved_identity_403(monkeypatch):
     assert http(monkeypatch, ident("nobody", Role.OWNER)).get("/api/fcc/net-worth", headers=H).status_code == 403
+
+
+def test_http_partial_data_is_stable_and_exposes_the_stale_threshold(monkeypatch):
+    # an asset without a value + a linked loan without a balance (+ the asset's own mortgage) + an account without a balance + a stale one
+    DB[Tables.FIN_ACCOUNTS] = [acct("recOld", "ישן"), acct("recNone", "בלי יתרה")]
+    DB[Tables.FIN_EVENTS] = [snap("recS", "recOld", 5_000, "2026-01-01")]
+    DB["Assets"] = [asset("recH", "מגרש", None, mortgage=90_000)]
+    DB[Tables.LOANS] = [loan("recL", "הלוואה בלי יתרה", None, asset_id="recH")]
+    r = http(monkeypatch, ELIYAHU).get("/api/fcc/net-worth", headers=H)
+    body = r.get_json()
+    assert r.status_code == 200 and body["partial"] is True
+    assert body["accounts"]["stale_after_days"] == 90 and body["accounts"]["freshness"] == {"current": 0, "stale": 1, "missing": 1}
+    assert body["net"] == 5_000 and body["assets"]["total"] is None and body["liabilities"]["total"] is None       # unknown stays unknown, not 0
+    assert body["gaps"]["debts_without_balance"] == 1 and body["assets"]["items"][0]["ignored_mortgage_balance"] == 90_000
+    assert body["assets"]["items"][0]["missing"] == ["missing_value"]
