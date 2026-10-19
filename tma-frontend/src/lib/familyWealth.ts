@@ -818,7 +818,7 @@ export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<s
 // only: every figure is the server's; a missing figure is "חסר" (never 0); nothing is ranked, scored or recommended. ──
 export const SOURCES_TITLE = "מקורות אפשריים ליעד";
 export const SOURCES_INTRO = "רשימת מועמדים מהנתונים שלך — לא המלצה ולא בחירה עבורך. כל קטגוריה נפרדת ואינה מצטרפת לסכום אחד של ״כסף זמין״.";
-export const SOURCES_EXPECTED_LABEL = "צפוי לתאריך היעד (לפי הנחות, לא מובטח)";
+export const SOURCES_EXPECTED_LABEL = "צפוי בסוף החודש האחרון שהושלם עד תאריך היעד (לפי הנחות, לא מובטח)";
 export const SOURCES_CATEGORY_ORDER: FundingSourceCategory[] = ["liquid_now", "liquid_by_due_date", "conditional_on_action", "expected_not_guaranteed", "future_deposits"];
 const SOURCES_CATEGORY_TITLES: Record<FundingSourceCategory, string> = {
   liquid_now: "כסף נזיל עכשיו", liquid_by_due_date: "כסף שיהפוך לנגיש עד תאריך היעד", conditional_on_action: "מותנה בפעולה",
@@ -857,6 +857,21 @@ export interface SourceCategoryModel { key: FundingSourceCategory; title: string
 export interface SourcesModel {
   title: string; reason: string | null; dueNote: string | null; categories: SourceCategoryModel[]; unavailable: SourceCard[]; gaps: string[];
   assumptions: string; warnings: string[];
+}
+
+/** The answer of a slower, older request must never overwrite the sources of the goal that is on screen now. */
+export const isCurrentGoal = (currentGoalId: string, answerGoalId: string): boolean => currentGoalId !== "" && currentGoalId === answerGoalId;
+export const SOURCES_DEBOUNCE_MS = 400;
+/** A cached answer is reused only for the very same request (goal + margin + assumptions). */
+export const sourcesCacheKey = (body: unknown): string => JSON.stringify(body);
+/** One message per failure: 404 (screen off), 429 (rate limit), 503 (busy), -1 (older server, no sources in the answer), no status (network), anything else. */
+export function sourcesErrorText(code?: number): string {
+  if (code === 404) return "המסך עדיין לא פעיל — המקורות האפשריים אינם זמינים בחשבון הזה.";
+  if (code === 429) return "יותר מדי חישובים — אפשר לנסות שוב בעוד דקה.";
+  if (code === 503) return "השרת עסוק כרגע — נסו שוב בעוד רגע.";
+  if (code === -1) return "השרת עדיין לא תומך ברשימת המקורות האפשריים.";
+  if (code == null) return "אין חיבור לשרת — בדקו את הרשת ונסו שוב.";
+  return "לא הצלחנו לטעון את המקורות האפשריים.";
 }
 
 const stateText = (st: FundingLiquidityState | null | undefined): string => (st ? word(LIQUIDITY_STATE_LABELS, st) : MISSING_LABEL);

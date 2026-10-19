@@ -973,7 +973,7 @@ export interface FundingSourceItem {
   conditions: string[]; risks: string[]; missing_inputs: string[]; balance_effect: string | null;
   liquidity?: { basis: string; liquid_from: string | null; state_at: Record<"now" | "due" | "early" | "late", FundingLiquidityState | null> };
   allocation?: { allocated_to_this_goal: number | null; allocated_elsewhere_amount: number | null; allocated_elsewhere: boolean; over_allocated: boolean; amount_not_allocated_elsewhere: number | null };
-  expected_at_due?: { label: string; guaranteed: false; amount: number | null; early: number | null; late: number | null; includes_planned_deposits: boolean; monthly_planned_deposit_included: number; note: string } | null;
+  expected_at_due?: { label: string; guaranteed: false; amount: number | null; early: number | null; late: number | null; includes_planned_deposits: boolean; monthly_planned_deposit_included: number | null; basis?: string; note: string } | null;
   asset?: { asset_type: string | null; recorded_value: number | null; ownership_pct: number | null; mortgage_balance: number | null; linked_debt: number | null; linked_loan_names: (string | null)[]; monthly_income: number | null };
   receivable?: { arrangement: string | null; next_payment_due: string | null; end_date: string | null };
   deposit?: { monthly_planned: number; months_until_due: number | null; deposit_fee_pct: number | null; state_at: Record<"now" | "due" | "early" | "late", FundingLiquidityState | null> };

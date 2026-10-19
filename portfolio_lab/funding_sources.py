@@ -87,8 +87,9 @@ def _expected_at(account: dict, points: dict, path) -> dict | None:
 
     planned = af._valid(account.get("planned_monthly_deposit"), 0, 10_000_000)
     return {"label": "expected_by_assumptions", "guaranteed": False, "amount": at(slots["due"]), "early": at(slots["early"]), "late": at(slots["late"]),
-            "includes_planned_deposits": bool(planned), "monthly_planned_deposit_included": planned or 0.0,
-            "note": "forecast value under the shown assumptions; separate from the reported balance, not an entitlement to withdraw"}
+            "includes_planned_deposits": bool(planned), "monthly_planned_deposit_included": planned,          # None = no planned deposit entered (the gap is in gaps.future_deposits)
+            "basis": "end_of_last_completed_month_up_to_the_date",
+            "note": "forecast value under the shown assumptions at the end of the last completed month up to the date (as A2 coverage); separate from the reported balance, not an entitlement to withdraw"}
 
 
 def _goal_frame(goal: dict, request: dict, today: date) -> dict:

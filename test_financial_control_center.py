@@ -4737,6 +4737,18 @@ def test_http_planner_does_not_break_on_an_empty_calc_method_and_counts_progress
     assert body["suggested_sources"]["goals"][0]["goal_id"] == "recGF"
 
 
+def test_empty_calc_method_is_cumulative_for_funding_by_category_incl_hebrew_names_and_not_for_the_rest():
+    seed_planner()
+    cats = {"recK1": "future_goal", "recK2": "debt", "recK3": "חוב", "recK4": "debt_repaid", "recK5": "emergency_fund", "recK6": "קרן חירום",
+            "recK7": "long_term", "recK8": "investment", "recK9": "other", "recKA": None, "recKB": "savings", "recKC": "income"}
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [goal(gid, "יעד", ELI, 1000, **{GF.CATEGORY: c, GF.CALC_METHOD: None}) for gid, c in cats.items()]
+    rows = {r["goal_id"]: r["method"] for r in service.funding_inputs(ELIYAHU, TODAY)["goal_rows"]}
+    for gid in ("recK1", "recK2", "recK3", "recK4", "recK5", "recK6"):
+        assert rows[gid] == "cumulative", (gid, cats[gid])
+    for gid in ("recK7", "recK8", "recK9", "recKA", "recKB", "recKC"):
+        assert rows[gid] == "period_sum", (gid, cats[gid])                          # everything else keeps calc.compute_goal's default
+
+
 # ═══ Funding planner, step 2: saving the chosen plan — draft -> review -> אשר, one owner-scoped Funding Plans row ═══
 from airtable_schema import FundingPlanFields as FPF   # noqa: E402
 

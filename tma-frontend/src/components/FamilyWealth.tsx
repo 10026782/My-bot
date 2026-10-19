@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchFccAccounts, fetchFccNetWorth, fetchFccOverview, postFccAccountsForecast, postFccFundingFollowup, postFccFundingPlan, postFccFundingSave } from "../api";
 import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody, FundingSources } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
-import { SOURCES_INTRO, SOURCES_TITLE, sourcesModel, type SourceAddOption, type SourcesModel, ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
+import { SOURCES_DEBOUNCE_MS, SOURCES_INTRO, SOURCES_TITLE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, sourcesModel, type SourceAddOption, type SourcesModel, ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
 import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccTabs";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
@@ -228,18 +228,31 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
   const [sources, setSources] = useState<SourcesState>({ status: "idle" });
   const [addedNote, setAddedNote] = useState<string | null>(null);
   const sourcesLatest = useRef(0);
-  // Candidate sources: one read-only call when a goal is chosen (the same endpoint with no options), never in the background and never before a goal.
+  const goalRef = useRef(form.goalId);                                     // the goal on screen now: an older goal's late answer is dropped
+  const sourcesCache = useRef(new Map<string, FundingSources>());          // the same request (goal + margin + assumptions) is not asked twice
+  // Candidate sources: one read-only call when a goal is chosen (debounced; the same endpoint with no options), never in the background and never before a goal.
   useEffect(() => {
+    goalRef.current = form.goalId;
     const id = ++sourcesLatest.current;
     setAddedNote(null);
-    if (form.goalId === "") { setSources({ status: "idle" }); return; }
+    if (form.goalId === "") { setSources({ status: "idle" }); return undefined; }
     const parsed = fundingRequest({ ...form, options: [] });
-    if (!parsed.ok) { setSources({ status: "idle" }); return; }
+    if (!parsed.ok) { setSources({ status: "idle" }); return undefined; }
+    const goalId = form.goalId, key = sourcesCacheKey(parsed.body);
+    const cached = sourcesCache.current.get(key);
+    if (cached) { setSources({ status: "ok", data: cached, goalId }); return undefined; }
     setSources({ status: "loading" });
-    const goalId = form.goalId;
-    postFccFundingPlan(parsed.body)
-      .then((plan) => { if (id === sourcesLatest.current) setSources(plan.suggested_sources ? { status: "ok", data: plan.suggested_sources, goalId } : { status: "error" }); })
-      .catch((e: Error & { status?: number }) => { if (id === sourcesLatest.current) setSources({ status: "error", code: e.status }); });
+    const timer = setTimeout(() => {
+      postFccFundingPlan(parsed.body)
+        .then((plan) => {
+          if (id !== sourcesLatest.current || !isCurrentGoal(goalRef.current, goalId)) return;
+          if (!plan.suggested_sources) { setSources({ status: "error", code: -1 }); return; }
+          sourcesCache.current.set(key, plan.suggested_sources);
+          setSources({ status: "ok", data: plan.suggested_sources, goalId });
+        })
+        .catch((e: Error & { status?: number }) => { if (id === sourcesLatest.current && isCurrentGoal(goalRef.current, goalId)) setSources({ status: "error", code: e.status }); });
+    }, SOURCES_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.goalId]);
   useEffect(() => { fetchFccAccounts().then((v) => setAccounts(v.accounts.filter((a) => a.status !== "closed"))).catch(() => setAccounts([])); }, []);
@@ -277,7 +290,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
       .then((plan) => {
         if (id !== latest.current) return;
         setState({ status: "ok", plan, goalId, titles: names, body: parsed.body });
-        if (plan.suggested_sources) setSources({ status: "ok", data: plan.suggested_sources, goalId });     // same answer, the assumptions just typed
+        if (plan.suggested_sources && isCurrentGoal(goalRef.current, goalId)) setSources({ status: "ok", data: plan.suggested_sources, goalId });     // same answer, the assumptions just typed — only for the goal on screen
       })
       .catch((e: Error & { status?: number }) => { if (id === latest.current) setState({ status: "error", message: e.message, code: e.status }); });
   };
@@ -409,7 +422,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
  *  "הוסף כאפשרות" only fills a typed option in the form below — the comparison engine and the request are the existing ones. */
 export function FundingSourcesList({ state, model, addedKeys, addedNote, onAdd }: { state: SourcesState; model: SourcesModel | null; addedKeys: string[]; addedNote: string | null; onAdd: (a: SourceAddOption) => void }) {
   if (state.status === "loading") return <p className="fcc-goal__note" role="status">טוען מקורות אפשריים…</p>;
-  if (state.status === "error") return <p className="fcc-goal__note" role="status">{state.code === 429 ? "יותר מדי חישובים — אפשר לנסות שוב בעוד דקה." : "לא הצלחנו לטעון את המקורות האפשריים."}</p>;
+  if (state.status === "error") return <p className="fcc-goal__note" role="status">{sourcesErrorText(state.code)}</p>;
   if (!model) return null;
   return (
     <div className="fcc-stack" aria-label={SOURCES_TITLE}>

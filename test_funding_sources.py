@@ -312,3 +312,12 @@ def test_a_value_path_does_not_depend_on_the_horizon_requested():
     short = account_value_points(account, {"years": 10, "annual_return_pct": 6, "annual_fee_pct": 0.15, "inflation_pct": 2}, TODAY)
     long = account_value_points(account, {"years": 40, "annual_return_pct": 6, "annual_fee_pct": 0.15, "inflation_pct": 2}, TODAY)
     assert long[:len(short)] == short
+
+
+def test_a_missing_planned_deposit_is_not_collapsed_to_zero_and_the_basis_is_stated():
+    none = cats(run_flat(inputs([cash("recI", 1000)])))["liquid_now"][0]["expected_at_due"]
+    assert none["includes_planned_deposits"] is False and none["monthly_planned_deposit_included"] is None
+    zero = cats(run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=0)])))["liquid_now"][0]["expected_at_due"]
+    assert zero["monthly_planned_deposit_included"] == 0 and zero["includes_planned_deposits"] is False
+    some = cats(run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=75)])))["liquid_now"][0]["expected_at_due"]
+    assert some["monthly_planned_deposit_included"] == 75 and some["basis"] == "end_of_last_completed_month_up_to_the_date"

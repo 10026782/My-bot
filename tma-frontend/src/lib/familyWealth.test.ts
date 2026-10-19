@@ -12,7 +12,7 @@ import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, sourcesModel, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, sourcesModel, isCurrentGoal, sourcesCacheKey, sourcesErrorText, SOURCES_DEBOUNCE_MS, SOURCES_EXPECTED_LABEL, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -842,7 +842,7 @@ test("funding sources model: 'now' beside 'at the due date' (and the window ends
   assert.equal(row("נזילות עכשיו"), "נגיש");
   assert.equal(row("נזילות בתאריך היעד"), "נגיש");
   assert.equal(row("אם התאריך מוקדם"), "נגיש");
-  assert.equal(row("צפוי לתאריך היעד (לפי הנחות, לא מובטח)"), "₪5,600");
+  assert.equal(row(SOURCES_EXPECTED_LABEL), "₪5,600");
   assert.equal(row("צפוי אם התאריך מוקדם / מאוחר"), "₪5,300 / ₪5,900");
   assert.equal(row("הוקצה ליעדים אחרים"), "₪400");
   assert.ok(card.lists.some((l) => l.items.includes("הכסף הנגיש כבר מוקצה למטרות אחרות")), "allocated elsewhere is flagged");
@@ -861,7 +861,7 @@ test("funding sources model: missing is 'חסר' (never 0) and an asset shows no
   const m = sourcesModel(sourcesView, "recG1")!;
   const nobal = m.categories[2].cards.find((c) => c.title === "ללא יתרה")!;
   assert.equal(nobal.rows.find((r) => r.label.startsWith("יתרה מדווחת"))?.value, "חסר");
-  assert.equal(nobal.rows.find((r) => r.label.startsWith("צפוי לתאריך היעד"))?.value, "חסר");
+  assert.equal(nobal.rows.find((r) => r.label === SOURCES_EXPECTED_LABEL)?.value, "חסר");
   assert.equal(nobal.rows.find((r) => r.label === "נזילות בתאריך היעד")?.value, "חסר");
   assert.ok(nobal.lists.some((l) => l.label === "חסר" && l.items.includes("יתרה מדווחת")));
   const asset = m.categories[2].cards.find((c) => c.title === "דירה")!;
@@ -925,4 +925,30 @@ test("funding sources: shown only after a goal is chosen, one read-only call per
   assert.ok(!/\.reduce\(|Math\.|\bfetch\(/.test(model), "the sources model only words and lays out the server's numbers");
   const before = renderToStaticMarkup(createElement(FundingSection, { overview: { status: "ok", data: { summary: {}, as_of: "2026-10-18", goals: [{ goal_id: "recG1", title: "חתונה", target: 200000, end_date: "2038-06-30", mode: "cumulative" }], assets: { items: [] }, loans: { items: [] } } } as unknown as Parameters<typeof FundingSection>[0]["overview"] }));
   assert.ok(!before.includes("מקורות אפשריים ליעד"), "nothing about sources before a goal is chosen");
+});
+
+
+test("funding sources: a late answer for another goal is dropped, the same request is cached, the call is debounced, every failure has its own message", () => {
+  assert.ok(isCurrentGoal("recB", "recB") && !isCurrentGoal("recB", "recA") && !isCurrentGoal("", ""), "A's late answer must not overwrite B's sources");
+  const body = { goal_id: "recG1", assumptions: { annual_return_pct: 6, annual_fee_pct: 0.15, inflation_pct: 2 }, options: [], allocation_plan: [] };
+  assert.equal(sourcesCacheKey(body), sourcesCacheKey({ ...body }));
+  assert.ok(sourcesCacheKey(body) !== sourcesCacheKey({ ...body, goal_id: "recG2" }) && sourcesCacheKey(body) !== sourcesCacheKey({ ...body, date_margin_months: 12 }));
+  assert.ok(SOURCES_DEBOUNCE_MS >= 300 && SOURCES_DEBOUNCE_MS <= 600);
+  const texts = [404, 429, 503, -1, undefined, 500].map((c) => sourcesErrorText(c));
+  assert.equal(new Set(texts).size, 6, "404 / 429 / 503 / older server / network / other each say something different");
+  assert.ok(sourcesErrorText(undefined).includes("חיבור") && sourcesErrorText(503).includes("עסוק"));
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("export function FundingSourcesList"));
+  assert.ok(section.includes("isCurrentGoal(goalRef.current, goalId)"), "both the effect and the compare answer check the goal on screen");
+  assert.ok(section.includes("setTimeout(") && section.includes("clearTimeout(timer)") && section.includes("sourcesCache.current"), "debounced, cancellable, cached");
+  assert.ok((section.match(/isCurrentGoal\(goalRef\.current, goalId\)/g) ?? []).length >= 3, "effect then + catch and the compare answer");
+});
+
+test("funding sources: the expected figure says it is the end of the last completed month, and a missing planned deposit stays missing", () => {
+  assert.ok(SOURCES_EXPECTED_LABEL.includes("סוף החודש האחרון שהושלם") && SOURCES_EXPECTED_LABEL.includes("לא מובטח"));
+  const noDeposit = JSON.parse(JSON.stringify(sourcesView));
+  noDeposit.goals[0].categories.liquid_now[0].expected_at_due = { ...noDeposit.goals[0].categories.liquid_now[0].expected_at_due, includes_planned_deposits: false, monthly_planned_deposit_included: null };
+  const card = sourcesModel(noDeposit, "recG1")!.categories[0].cards[0];
+  assert.ok(!card.rows.some((r) => r.label === "כולל הפקדה חודשית מתוכננת"), "no planned deposit entered: nothing is claimed as included");
 });

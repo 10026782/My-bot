@@ -87,6 +87,13 @@ def _category_key(category) -> str | None:
     return None
 
 
+def _cumulative_by_default(category) -> bool:
+    """The categories draft.INFERENCE gives a cumulative Calc Method: future_goal by its raw key; debt / emergency_fund also by their Hebrew and legacy
+    names (SUMMARY_CATEGORIES: "חוב", "debt_repaid", "קרן חירום"). Every other category (long_term / investment / savings / income / other / empty)
+    with an empty method stays period_sum, exactly as on every other screen."""
+    return _raw_category(category) == "future_goal" or _category_key(category) in ("debt", "emergency_fund")
+
+
 def classify_row(row: dict, next_action: dict | None) -> dict:
     """Decide the goal family. No amount target + not a numeric category => project/milestone:
     amounts are blanked (no ₪0 / dead "—" cells) and the card carries the next action instead."""
@@ -458,7 +465,6 @@ def _raw_category(category) -> str:
     return str((category.get("name") if isinstance(category, dict) else category) or "").strip().casefold()
 
 
-CUMULATIVE_BY_DEFAULT = ("future_goal", "emergency_fund", "debt")      # categories whose draft default Calc Method is cumulative (draft.py); income / savings keep theirs
 FIXED_INCOME_CATEGORY = "fixed_income"        # live Financial Goals.Category choice (a standing income, not part of the income goal)
 SAVINGS_DESTINATION_CATEGORY = "long_term"    # the pension portfolio goal: the one active goal of this category receives deposits
 
@@ -698,7 +704,7 @@ def overview(identity, today: date | None = None, default_method: str | None = N
             continue
         gf = goal.get("fields") or {}
         # parent goal = its own events + every descendant source's events, each event once (roll-up)
-        if default_method and not gf.get(FinGoalFields.CALC_METHOD) and _raw_category(gf.get(FinGoalFields.CATEGORY)) in CUMULATIVE_BY_DEFAULT:
+        if default_method and not gf.get(FinGoalFields.CALC_METHOD) and _cumulative_by_default(gf.get(FinGoalFields.CATEGORY)):
             goal = {**goal, "fields": {**gf, FinGoalFields.CALC_METHOD: default_method}}
         row = calc.compute_goal(goal, _rolled_up(goal["id"], own, parent_of), today, FinGoalFields)
         row["category"] = gf.get(FinGoalFields.CATEGORY)
