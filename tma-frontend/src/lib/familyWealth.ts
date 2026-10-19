@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, FundingWindow, FundingWindowEnd, FundingWindowOption, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { PlKpis, FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, FundingWindow, FundingWindowEnd, FundingWindowOption, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -288,6 +288,7 @@ export interface LabForm {
   initial: string; monthly: string; years: string; returnPct: string; feePct: string; inflationPct: string;
   timing: "begin" | "end"; indexed: boolean; baseline: string; strategies: string[];
   crisisOn: boolean; crisisDecline: string; crisisYear: string; crisisRecovery: "fast" | "prolonged";
+  compareOn: boolean; cmpMonthly: string; cmpReturnPct: string; cmpFeePct: string; cmpInflationPct: string; // set B: blank = same as set A
 }
 export const STRATEGY_OPTIONS: { key: string; label: string }[] = [
   { key: "global", label: "100% קרן עולמית" }, { key: "world_em", label: "World + EM" },
@@ -298,6 +299,7 @@ export const DEFAULT_LAB_FORM: LabForm = {
   initial: "0", monthly: "8000", years: "30", returnPct: "8", feePct: "0.15", inflationPct: "2",
   timing: "end", indexed: false, baseline: "global", strategies: STRATEGY_OPTIONS.map((s) => s.key),
   crisisOn: false, crisisDecline: "30", crisisYear: "5", crisisRecovery: "fast",
+  compareOn: false, cmpMonthly: "", cmpReturnPct: "", cmpFeePct: "", cmpInflationPct: "",
 };
 
 /** Typed text -> request body. Blank / non-numeric input is an error shown on the form, never silently 0. */
@@ -322,6 +324,21 @@ export function labParams(form: LabForm): { ok: true; params: PortfolioLabParams
     const year = num(form.crisisYear, "שנת המשבר");
     if (typeof year === "string") return { ok: false, error: year };
     params.crisis = { decline_pct: Number(form.crisisDecline), year, recovery: form.crisisRecovery };
+  }
+  if (form.compareOn) {
+    const override: NonNullable<PortfolioLabParams["compare_to"]> = {};
+    const entries: [string, keyof typeof override, string][] = [
+      [form.cmpMonthly, "monthly_contribution", "הפקדה חודשית (סט ב׳)"], [form.cmpReturnPct, "annual_return_pct", "תשואה (סט ב׳)"],
+      [form.cmpFeePct, "annual_fee_pct", "דמי ניהול (סט ב׳)"], [form.cmpInflationPct, "inflation_pct", "אינפלציה (סט ב׳)"],
+    ];
+    for (const [text, key, name] of entries) {
+      if (text.trim() === "") continue;
+      const v = num(text, name);
+      if (typeof v === "string") return { ok: false, error: v };
+      override[key] = v;
+    }
+    if (Object.keys(override).length === 0) return { ok: false, error: "השוואת תרחישים: יש למלא לפחות הנחה אחת בסט ב׳" };
+    params.compare_to = override;
   }
   return { ok: true, params };
 }
@@ -362,6 +379,30 @@ export function crisisTableRows(view: PortfolioLabView): { key: string; cells: s
     key: r.strategy,
     cells: [r.is_baseline ? `${r.label} (בסיס)` : r.label, ils(r.final_nominal), ils(r.final_real), signed(r.delta_vs_no_crisis), r.is_baseline ? "—" : signed(r.gap_vs_baseline)],
   }));
+}
+/** C3 scenario comparison: words the server's two result sets and their gap (B minus A). Neutral — no "better", no ranking. */
+export const SCENARIO_TABLE_HEAD = ["מדד", "סט א׳", "סט ב׳", "פער (ב׳ פחות א׳)"];
+export function scenarioRows(view: PortfolioLabView): { key: string; cells: string[] }[] {
+  const c = view.charts.scenario_comparison;
+  if (!c || !c.applied || !c.a || !c.b || !c.gaps_b_minus_a) return [];
+  const g = c.gaps_b_minus_a;
+  const sign = (v: number, f: (x: number) => string) => `${v > 0 ? "+" : ""}${f(v)}`;
+  const defs: [string, keyof PlKpis, (x: number | null) => string][] = [
+    ["שווי סופי נומינלי", "final_nominal", ils], ["שווי סופי ריאלי", "final_real", ils], ["סך הפקדות", "contributions", ils],
+    ["רווח נומינלי", "nominal_profit", ils], ["רווח ריאלי", "real_profit", ils], ["דמי ניהול ששולמו", "management_fees_paid", ils],
+    ["השפעה כוללת של העלויות", "total_cost_impact", ils], ["תשואה שנתית אפקטיבית נטו", "net_effective_annual_return", (x) => pct(x)],
+  ];
+  return defs.map(([label, key, fmt]) => ({
+    key, cells: [label, fmt(c.a!.kpis[key] as number), fmt(c.b!.kpis[key] as number), sign(g[key] as number, (x) => fmt(x))],
+  }));
+}
+export function scenarioLines(view: PortfolioLabView) {
+  const c = view.charts.scenario_comparison;
+  if (!c || !c.applied || !c.a || !c.b) return [];
+  return [
+    { name: "סט הנחות א׳ (נומינלי)", pts: c.a.series.map((r): [number, number] => [r.year, r.nominal]) },
+    { name: "סט הנחות ב׳ (נומינלי)", pts: c.b.series.map((r): [number, number] => [r.year, r.nominal]), color: CHART_COLORS[1] },
+  ];
 }
 export const LAB_TABLE_HEAD = ["אסטרטגיה", "שווי סופי", "שווי ריאלי", "סך הפקדות", "רווח נטו", "עלויות", "פער מול בסיס"];
 
