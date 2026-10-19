@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { postPortfolioLabSimulate } from "../api";
 import type { PortfolioLabView } from "../types";
 import {
-  CRISIS_DECLINES, CRISIS_TABLE_HEAD, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, crisisTableRows, growthLines,
+  CRISIS_DECLINES, CRISIS_TABLE_HEAD, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, scenarioLines, scenarioRows, SCENARIO_TABLE_HEAD, crisisTableRows, growthLines,
   ils, labKpiCards, paceAssumptions, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
 } from "../lib/familyWealth";
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
@@ -91,6 +91,21 @@ export function PortfolioLabPanel() {
             </label>
           </div>
         </fieldset>
+        <fieldset>
+          <legend>השוואת תרחישים (אופציונלי)</legend>
+          <label className="pl-check"><input type="checkbox" checked={form.compareOn} onChange={(e) => set("compareOn", e.target.checked)} />השווה לסט הנחות שני</label>
+          {form.compareOn && (
+            <>
+              <p className="fcc-goal__note">סט ב׳: מלאו רק את ההנחות שרוצים לשנות; שדה ריק = כמו בסט א׳. האופק והאסטרטגיה זהים.</p>
+              <div className="pl-grid">
+                <label>הפקדה חודשית (₪)<input inputMode="decimal" value={form.cmpMonthly} onChange={(e) => set("cmpMonthly", e.target.value)} /></label>
+                <label>תשואה שנתית ברוטו (%)<input inputMode="decimal" value={form.cmpReturnPct} onChange={(e) => set("cmpReturnPct", e.target.value)} /></label>
+                <label>דמי ניהול שנתיים (%)<input inputMode="decimal" value={form.cmpFeePct} onChange={(e) => set("cmpFeePct", e.target.value)} /></label>
+                <label>אינפלציה שנתית (%)<input inputMode="decimal" value={form.cmpInflationPct} onChange={(e) => set("cmpInflationPct", e.target.value)} /></label>
+              </div>
+            </>
+          )}
+        </fieldset>
         <button type="submit" className="boss-button boss-button--primary boss-bubble--action" disabled={state.status === "loading"}>
           {state.status === "loading" ? "מחשב…" : "חשב"}
         </button>
@@ -127,6 +142,16 @@ function LabResult({ view }: { view: PortfolioLabView }) {
             <p className="fcc-goal__note">תרחיש משבר: הפרש בשווי הסופי {ils(g.crisis.delta_vs_no_crisis)}. {g.crisis.note}
               {g.crisis.recovery_truncated_by_horizon ? " ההתאוששות נחתכה בגלל אופק ההשקעה." : ""}</p>
           )}</Surface></section>
+      {view.charts.scenario_comparison?.applied && (
+        <section className="fcc-section"><h2 className="fcc-section__heading">השוואת תרחישים {DEMO}</h2>
+          <p className="fcc-goal__note">{view.charts.scenario_comparison.note}</p>
+          <Surface padding="compact"><ul className="pl-list">{(view.charts.scenario_comparison.changed_fields ?? []).map((f) => <li key={f.field}>{f.label}: סט א׳ {String(f.a)} · סט ב׳ {String(f.b)}</li>)}</ul></Surface>
+          <Surface padding="compact"><LineChart model={lineChartModel(scenarioLines(view))} xLabel="שנים" title="השוואת תרחישים" /></Surface>
+          <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+            <thead><tr>{SCENARIO_TABLE_HEAD.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>{scenarioRows(view).map((r) => <tr key={r.key}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+          </table></div></Surface></section>
+      )}
       <section className="fcc-section"><h2 className="fcc-section__heading">השוואת אסטרטגיות {DEMO}</h2>
         <Surface padding="compact"><LineChart model={lineChartModel(comparisonLines(view))} xLabel="שנים" title="השוואת אסטרטגיות" /></Surface></section>
       {g.crisis.applied && crisisTableRows(view).length > 1 && (
