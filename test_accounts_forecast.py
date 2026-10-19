@@ -410,3 +410,23 @@ def test_growth_after_the_due_date_inside_the_month_is_not_counted_either():
     out = cover(acc, [goal("a", target=1, end="2026-12-15"), goal("b", target=1, end="2026-12-31")], {"annual_return_pct": 12})
     a, b = item(out, "a"), item(out, "b")
     assert a["value_as_of"] == "2026-11-30" and b["value_as_of"] == "2026-12-31" and a["accessible_value"] < b["accessible_value"]
+
+
+# ── funding sources step 2: the per-account value path is the forecast's own run, exposed (no second calculation) ──
+
+def test_account_value_points_are_the_forecast_run_itself():
+    from portfolio_lab.accounts_forecast import account_value_points
+    account = acct("recA", 100000, fee=0.5, planned_monthly_deposit=300, expected_return_pct=5)
+    params = {"years": 10, "annual_return_pct": 6, "annual_fee_pct": 0.15, "inflation_pct": 2}
+    points = account_value_points(account, params, TODAY)
+    row = run(params, plan([account]))["accounts"][0]
+    assert len(points) == 10 * 12 + 1 and points[0] == 100000.0
+    assert points[-1] == pytest.approx(row["final_nominal"]) and points == account_value_points(account, params, TODAY)
+
+
+def test_account_value_points_need_a_snapshot_and_valid_assumptions():
+    from portfolio_lab.accounts_forecast import account_value_points
+    with pytest.raises(ValueError, match="no balance snapshot"):
+        account_value_points(acct("recN", None), {"years": 10}, TODAY)
+    with pytest.raises(ValueError):
+        account_value_points(acct("recA", 1), {"years": 3}, TODAY)

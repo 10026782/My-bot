@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchFccAccounts, fetchFccNetWorth, fetchFccOverview, postFccAccountsForecast, postFccFundingFollowup, postFccFundingPlan, postFccFundingSave } from "../api";
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody, FundingSources } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
-import { ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
+import { SOURCES_INTRO, SOURCES_TITLE, sourcesModel, type SourceAddOption, type SourcesModel, ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
 import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccTabs";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
@@ -211,6 +211,8 @@ function AllocationsBlock({ model, present }: { model: AllocationModel | null; p
 
 type FundingState = { status: "idle" } | { status: "loading" } | { status: "ok"; plan: FundingPlan; goalId: string; titles: Record<string, string>; body: FundingRequestBody } | { status: "error"; message: string; code?: number };
 
+type SourcesState = { status: "idle" } | { status: "loading" } | { status: "ok"; data: FundingSources; goalId: string } | { status: "error"; code?: number };
+
 /** Goal Funding Planner (step 1b): a goal -> typed funding options -> POST /api/fcc/funding/plan -> a neutral comparison. Runs only when asked; the page
  *  converts typed text to numbers once on submit and shows only what the server returns (no ranking, no recommendation, no client arithmetic). */
 export function FundingSection({ overview }: { overview: OverviewState }) {
@@ -223,6 +225,23 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [savedFor, setSavedFor] = useState<{ goalId: string; types: FundingOptionType[] } | null>(null);
   const writer = useFccWriter(null, "funding", () => undefined);
+  const [sources, setSources] = useState<SourcesState>({ status: "idle" });
+  const [addedNote, setAddedNote] = useState<string | null>(null);
+  const sourcesLatest = useRef(0);
+  // Candidate sources: one read-only call when a goal is chosen (the same endpoint with no options), never in the background and never before a goal.
+  useEffect(() => {
+    const id = ++sourcesLatest.current;
+    setAddedNote(null);
+    if (form.goalId === "") { setSources({ status: "idle" }); return; }
+    const parsed = fundingRequest({ ...form, options: [] });
+    if (!parsed.ok) { setSources({ status: "idle" }); return; }
+    setSources({ status: "loading" });
+    const goalId = form.goalId;
+    postFccFundingPlan(parsed.body)
+      .then((plan) => { if (id === sourcesLatest.current) setSources(plan.suggested_sources ? { status: "ok", data: plan.suggested_sources, goalId } : { status: "error" }); })
+      .catch((e: Error & { status?: number }) => { if (id === sourcesLatest.current) setSources({ status: "error", code: e.status }); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.goalId]);
   useEffect(() => { fetchFccAccounts().then((v) => setAccounts(v.accounts.filter((a) => a.status !== "closed"))).catch(() => setAccounts([])); }, []);
   if (overview.status === "loading") return <ScreenState state="loading" title="טוען את היעדים" message="אוסף את התמונה העדכנית…" />;
   if (overview.status === "error") return <ScreenState state="error" title={overview.code === 404 ? "המסך עדיין לא פעיל" : "לא הצלחנו לטעון"} message="היעדים אינם זמינים כרגע." />;
@@ -255,9 +274,19 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
     setSavedFor(null);
     writer.dismiss();
     postFccFundingPlan(parsed.body)
-      .then((plan) => { if (id === latest.current) setState({ status: "ok", plan, goalId, titles: names, body: parsed.body }); })
+      .then((plan) => {
+        if (id !== latest.current) return;
+        setState({ status: "ok", plan, goalId, titles: names, body: parsed.body });
+        if (plan.suggested_sources) setSources({ status: "ok", data: plan.suggested_sources, goalId });     // same answer, the assumptions just typed
+      })
       .catch((e: Error & { status?: number }) => { if (id === latest.current) setState({ status: "error", message: e.message, code: e.status }); });
   };
+  const addFromSource = (add: SourceAddOption) => {
+    setForm((f) => ({ ...f, options: [...f.options, { ...newFundingOption(add.type, ++counter.current), values: { ...newFundingOption(add.type, 0).values, ...add.prefill } }] }));
+    setAddedNote(`נוספה אפשרות ״${add.label}״ לטופס למטה${add.mustEnter.length ? ` — יש להשלים: ${add.mustEnter.join(", ")}` : ""}.`);
+  };
+  const sourceModel = sources.status === "ok" ? sourcesModel(sources.data, sources.goalId) : null;
+  const addedKeys = form.options.map((o) => `${o.type}:${o.values.asset_id ?? o.values.loan_id ?? o.values.account_id ?? ""}`);
   const hasGoal = form.goalId !== "";
   const hasDeposits = form.options.some((o) => o.type === "new_deposits");
   const model = state.status === "ok" ? fundingModel(state.plan, state.goalId, state.titles) : null;
@@ -286,6 +315,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
           <small>למשל 24 = ההערכה היא תאריך היעד, בטווח של שנתיים לכל כיוון. נשמר ביעד דרך ״עדכון יעד״ במרכז הכלכלי.</small>
         </label>
         )}
+        {hasGoal && <FundingSourcesList state={sources} model={sourceModel} addedKeys={addedKeys} addedNote={addedNote} onAdd={addFromSource} />}
         {hasGoal && hasDeposits && (
           <details className="fw-assumptions">
             <summary>הנחות לחישוב ההפקדות (תשואה, דמי ניהול, אינפלציה)</summary>
@@ -372,6 +402,49 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** The candidate sources of the chosen goal: five separate, collapsed categories (a count each), "now" beside "at the due date", every figure the server's.
+ *  "הוסף כאפשרות" only fills a typed option in the form below — the comparison engine and the request are the existing ones. */
+export function FundingSourcesList({ state, model, addedKeys, addedNote, onAdd }: { state: SourcesState; model: SourcesModel | null; addedKeys: string[]; addedNote: string | null; onAdd: (a: SourceAddOption) => void }) {
+  if (state.status === "loading") return <p className="fcc-goal__note" role="status">טוען מקורות אפשריים…</p>;
+  if (state.status === "error") return <p className="fcc-goal__note" role="status">{state.code === 429 ? "יותר מדי חישובים — אפשר לנסות שוב בעוד דקה." : "לא הצלחנו לטעון את המקורות האפשריים."}</p>;
+  if (!model) return null;
+  return (
+    <div className="fcc-stack" aria-label={SOURCES_TITLE}>
+      <h3 className="fcc-section__heading">{SOURCES_TITLE}</h3>
+      <p className="fcc-goal__note" dir="auto">{SOURCES_INTRO}</p>
+      {model.reason && <p className="fcc-goal__note" dir="auto">{model.reason}</p>}
+      {model.dueNote && <p className="fcc-goal__note" dir="auto">{model.dueNote}</p>}
+      {model.categories.map((c) => (
+        <details key={c.key} className="fw-assumptions">
+          <summary>{c.title} ({c.count})</summary>
+          <p className="fcc-goal__note" dir="auto">{c.note}</p>
+          {c.cards.map((card) => (
+            <Surface key={card.key} padding="compact" className="fw-option" aria-label={card.title}>
+              <h4 className="fcc-section__heading">{card.title} <span className="fw-badge">{card.typeLabel}</span></h4>
+              <Rows rows={card.rows} />
+              {card.lists.map((l) => <div key={l.label}><p className="fcc-goal__note">{l.label}:</p><ul className="pl-list pl-list--small" dir="auto">{l.items.map((i) => <li key={i}>{i}</li>)}</ul></div>)}
+              {card.add && (
+                <button type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={addedKeys.includes(card.add.key)}
+                        onClick={() => card.add && onAdd(card.add)}>{addedKeys.includes(card.add.key) ? "נוסף לטופס" : "הוסף כאפשרות"}</button>
+              )}
+            </Surface>
+          ))}
+        </details>
+      ))}
+      {model.unavailable.length > 0 && (
+        <details className="fw-assumptions">
+          <summary>לא זמינים עד תאריך היעד ({model.unavailable.length})</summary>
+          {model.unavailable.map((card) => <Surface key={card.key} padding="compact" className="fw-option" aria-label={card.title}><h4 className="fcc-section__heading">{card.title}</h4><Rows rows={card.rows} /></Surface>)}
+        </details>
+      )}
+      {model.gaps.length > 0 && <ul className="pl-list pl-list--small" dir="auto">{model.gaps.map((g) => <li key={g}>{g}</li>)}</ul>}
+      <p className="fcc-goal__note" dir="auto">{model.assumptions}</p>
+      <ul className="pl-list pl-list--small" dir="auto">{model.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+      {addedNote && <p className="fcc-goal__note" role="status" dir="auto">{addedNote}</p>}
+    </div>
   );
 }
 

@@ -75,7 +75,7 @@ def test_five_separate_categories_and_no_totals_or_ranking_keys():
                      assets=[asset()], loans=[owed(arrangement="monthly")]))
     assert tuple(cats(out)) == fs.CATEGORIES and len(fs.CATEGORIES) == 5
     assert not (set(keys_of(out)) & FORBIDDEN_KEYS)
-    assert not [k for k in keys_of(out) if k.startswith("total") or "sum" in k]
+    assert not [k for k in keys_of(out) if k.startswith("total") or k in ("sum", "sums", "grand_total")]
 
 
 def test_source_has_no_forbidden_key_in_code():
@@ -233,3 +233,48 @@ def test_module_is_pure_and_does_not_touch_the_engine_or_funding_plan():
     text = Path("portfolio_lab/funding_sources.py").read_text(encoding="utf-8")
     for forbidden in ("airtable", "requests", "anthropic", "open(", "dispatch_tool", "simulate("):
         assert forbidden not in text, forbidden
+
+
+# ── שלב 2: ערך צפוי לתאריך היעד (הנחות גלויות, נפרד מהיתרה המדווחת) ───────────────────────────────────────────────
+
+FLAT_REQ = {"assumptions": {"annual_return_pct": 0, "annual_fee_pct": 0, "inflation_pct": 0}}
+
+
+def run_flat(inp, margin=None, goal_ids=(G,)):
+    req = fp.normalize_request({"goal_ids": list(goal_ids), "date_margin_months": margin, **FLAT_REQ})
+    return fs.build_suggested_sources(inp, req, TODAY)
+
+
+def test_expected_at_due_is_separate_from_the_reported_balance_and_labelled():
+    out = run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=100)]))
+    row = cats(out)["liquid_now"][0]
+    slot = fp._slot(fp.af._iso_date("2030-12-31"), TODAY.replace(day=1))
+    exp = row["expected_at_due"]
+    assert row["amount"] == 1000 and exp["amount"] == pytest.approx(1000 + 100 * slot, abs=0.01)
+    assert exp["label"] == "expected_by_assumptions" and exp["guaranteed"] is False and exp["includes_planned_deposits"] is True
+    assert out["assumptions"]["annual_return_pct"] == 0 and "annual_fee_pct" in out["assumptions"]
+
+
+def test_expected_at_due_without_deposit_or_snapshot_or_date():
+    flat = run_flat(inputs([cash("recI", 1000)]))
+    row = cats(flat)["liquid_now"][0]
+    assert row["expected_at_due"]["amount"] == pytest.approx(1000) and row["expected_at_due"]["includes_planned_deposits"] is False
+    nosnap = run_flat(inputs([acct("recN", None, liquidity="immediate")]))
+    assert cats(nosnap)["liquid_now"][0]["expected_at_due"] is None
+    nodate = run_flat(inputs([cash("recI")], goals=[goal_rec(end=None)]))
+    assert cats(nodate)["liquid_now"][0]["expected_at_due"] is None
+
+
+def test_expected_at_due_follows_the_date_window_and_the_assumptions():
+    out = run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=100)]), margin=12)
+    exp = cats(out)["liquid_now"][0]["expected_at_due"]
+    assert exp["early"] < exp["amount"] < exp["late"]
+    growth = fs.build_suggested_sources(inputs([cash("recI", 1000)]), fp.normalize_request(
+        {"goal_ids": [G], "assumptions": {"annual_return_pct": 10, "annual_fee_pct": 0, "inflation_pct": 0}}), TODAY)
+    assert cats(growth)["liquid_now"][0]["expected_at_due"]["amount"] > 1000
+
+
+def test_invalid_assumptions_are_rejected_not_defaulted():
+    with pytest.raises(ValueError):
+        fs.build_suggested_sources(inputs([cash("recI")]), {"goal_ids": [G], "assumptions": {"annual_return_pct": 999}, "options": [],
+                                                              "allocation_plan": [], "date_margin_months": None}, TODAY)

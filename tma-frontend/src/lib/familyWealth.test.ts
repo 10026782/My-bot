@@ -6,13 +6,13 @@ import { FamilyWealth, FamilyWealthCard } from "../components/FamilyWealth";
 import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
 import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView, PaceView } from "../types";
-import { AccountsPanel, ForecastResult, FundingResult, FundingSection } from "../components/FamilyWealth";
+import { AccountsPanel, ForecastResult, FundingResult, FundingSection, FundingSourcesList } from "../components/FamilyWealth";
 import { ContextualComposer } from "../components/FccTabBar";
 import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, sourcesModel, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -789,3 +789,140 @@ test("date window: the margin is typed text -> one whole number; the card shows 
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
+
+
+// ── Funding sources (step 2): the five separate categories, "now" beside "at the due date", the expected figure labelled and apart, missing = "חסר" ──
+const noState = { now: null, due: null, early: null, late: null };
+const srcItem = (patch: Record<string, unknown>) => ({ source_type: "account", source_id: "recA", name: "קרן", amount: 5000, amount_status: "reported", as_of: "2026-10-01", certainty: "uncertain",
+  conditions: [], risks: [], missing_inputs: [], balance_effect: "uses_existing_balance", option_template: null, owner_must_enter: [], ...patch });
+const sourcesView = {
+  schema_version: "1.0", result_type: "goal_funding_sources", as_of: "2026-10-19", category_labels: {}, warnings: ["רשימת מועמדים בלבד"],
+  assumptions: { annual_return_pct: 6, annual_fee_pct: 0.15, inflation_pct: 2, note: "n" },
+  goals: [{
+    goal_id: "recG1", title: "חתונה", target_amount: 250000, due: "2028-06-30", reason: null,
+    date_window: { margin_months: 12, early: "2027-06-30", late: "2029-06-30", note: "n" },
+    counts: { liquid_now: 1, liquid_by_due_date: 0, conditional_on_action: 3, expected_not_guaranteed: 1, future_deposits: 1 },
+    categories: {
+      liquid_now: [srcItem({ source_id: "recC", name: "מזומן", certainty: "confirmed", liquidity: { basis: "immediate", liquid_from: null, state_at: { now: "accessible", due: "accessible", early: "accessible", late: "accessible" } },
+        expected_at_due: { label: "expected_by_assumptions", guaranteed: false, amount: 5600, early: 5300, late: 5900, includes_planned_deposits: true, monthly_planned_deposit_included: 100, note: "n" },
+        allocation: { allocated_to_this_goal: 0, allocated_elsewhere_amount: 400, allocated_elsewhere: true, over_allocated: false, amount_not_allocated_elsewhere: 4600 }, risks: ["allocated_elsewhere"] })],
+      liquid_by_due_date: [],
+      conditional_on_action: [
+        srcItem({ source_id: "recD", name: "קרן עם תאריך", liquidity: { basis: "dated", liquid_from: "2027-01-01", state_at: { now: "locked", due: "conditional", early: "conditional", late: "conditional" } }, expected_at_due: null,
+          conditions: ["liquid_from_reached_eligibility_unverified"] }),
+        srcItem({ source_type: "account", source_id: "recN", name: "ללא יתרה", amount: null, amount_status: "missing", as_of: null, missing_inputs: ["balance_snapshot", "liquidity"], liquidity: { basis: "unverified", liquid_from: null, state_at: { ...noState, now: "conditional" } }, expected_at_due: null }),
+        srcItem({ source_type: "asset", source_id: "recAS1", name: "דירה", amount: null, amount_status: "missing", certainty: "uncertain", conditions: ["owner_decides_to_sell", "sale_closes"], risks: ["debt_overlap_unresolved"],
+          missing_inputs: ["net_proceeds", "expected_sale_date"], balance_effect: "converts_asset_to_cash", asset: { asset_type: "Residential", recorded_value: 2000000, ownership_pct: 100, mortgage_balance: null, linked_debt: null, linked_loan_names: [], monthly_income: null },
+          option_template: { type: "asset_sale", asset_id: "recAS1" }, owner_must_enter: ["net_proceeds", "expected_date"] }),
+      ],
+      expected_not_guaranteed: [srcItem({ source_type: "receivable", source_id: "recOW1", name: "חוב", amount: 100000, amount_status: "recorded_balance", conditions: ["debtor_arrangement"], risks: ["timing_uncertain"],
+        receivable: { arrangement: null, next_payment_due: null, end_date: null }, option_template: { type: "receivable_collection", loan_id: "recOW1" }, owner_must_enter: ["expected_net", "expected_date"], balance_effect: "converts_receivable_to_cash" })],
+      future_deposits: [srcItem({ source_type: "planned_deposit", source_id: "recC", name: "מזומן", amount: 2000, amount_status: "planned_nominal", certainty: "expected", forecast_inclusion: "included_in_forecast",
+        deposit: { monthly_planned: 100, months_until_due: 20, deposit_fee_pct: null, state_at: { now: "accessible", due: "accessible", early: "accessible", late: "accessible" } },
+        window: { early: { months: 8, amount: 800 }, late: { months: 32, amount: 3200 } }, balance_effect: "adds_future_deposits_to_account", option_template: { type: "new_deposits", account_id: "recC" }, missing_inputs: ["deposit_fee"] })],
+    },
+    not_available_by_due_date: [srcItem({ source_id: "recK", name: "נעול", liquidity: { basis: "undated", liquid_from: null, state_at: { now: "locked", due: "locked", early: "locked", late: "locked" } } })],
+    gaps: { future_deposits: [{ account_id: "recX", name: "חשבון בלי הפקדה", missing: ["planned_monthly_deposit"] }] },
+  }],
+} as unknown as Parameters<typeof sourcesModel>[0];
+
+test("funding sources model: five separate categories in a fixed order, each with its count, and no total anywhere", () => {
+  const m = sourcesModel(sourcesView, "recG1")!;
+  assert.deepEqual(m.categories.map((c) => c.key), ["liquid_now", "liquid_by_due_date", "conditional_on_action", "expected_not_guaranteed", "future_deposits"]);
+  assert.deepEqual(m.categories.map((c) => c.count), [1, 0, 3, 1, 1]);
+  const text = JSON.stringify(m);
+  for (const bad of ["סך הכל זמין", "סה״כ זמין", "total_available", "המומלץ", "הטוב ביותר", "ציון", "דירוג"]) assert.ok(!text.includes(bad), `no '${bad}'`);
+  assert.ok(m.dueNote?.includes("± 12 חודשים") && m.dueNote.includes("אף תאריך לא נבחר"));
+});
+
+test("funding sources model: 'now' beside 'at the due date' (and the window ends); the expected figure is labelled and apart from the reported balance", () => {
+  const card = sourcesModel(sourcesView, "recG1")!.categories[0].cards[0];
+  const row = (label: string) => card.rows.find((r) => r.label.startsWith(label))?.value;
+  assert.equal(row("יתרה מדווחת"), "₪5,000");
+  assert.equal(row("נזילות עכשיו"), "נגיש");
+  assert.equal(row("נזילות בתאריך היעד"), "נגיש");
+  assert.equal(row("אם התאריך מוקדם"), "נגיש");
+  assert.equal(row("צפוי לתאריך היעד (לפי הנחות, לא מובטח)"), "₪5,600");
+  assert.equal(row("צפוי אם התאריך מוקדם / מאוחר"), "₪5,300 / ₪5,900");
+  assert.equal(row("הוקצה ליעדים אחרים"), "₪400");
+  assert.ok(card.lists.some((l) => l.items.includes("הכסף הנגיש כבר מוקצה למטרות אחרות")), "allocated elsewhere is flagged");
+});
+
+test("funding sources model: category 2 says why it is empty; a release date is conditional, never accessible", () => {
+  const m = sourcesModel(sourcesView, "recG1")!;
+  assert.ok(m.categories[1].note.includes("תאריך שחרור אינו זכאות") && m.categories[1].cards.length === 0);
+  const dated = m.categories[2].cards.find((c) => c.title === "קרן עם תאריך")!;
+  assert.equal(dated.rows.find((r) => r.label === "נזילות עכשיו")?.value, "נעול");
+  assert.equal(dated.rows.find((r) => r.label === "נזילות בתאריך היעד")?.value, "מותנה");
+  assert.ok(dated.lists[0].items.some((i) => i.includes("הזכאות למשיכה לא אומתה")));
+});
+
+test("funding sources model: missing is 'חסר' (never 0) and an asset shows no proceeds or sale date of its own", () => {
+  const m = sourcesModel(sourcesView, "recG1")!;
+  const nobal = m.categories[2].cards.find((c) => c.title === "ללא יתרה")!;
+  assert.equal(nobal.rows.find((r) => r.label.startsWith("יתרה מדווחת"))?.value, "חסר");
+  assert.equal(nobal.rows.find((r) => r.label.startsWith("צפוי לתאריך היעד"))?.value, "חסר");
+  assert.equal(nobal.rows.find((r) => r.label === "נזילות בתאריך היעד")?.value, "חסר");
+  assert.ok(nobal.lists.some((l) => l.label === "חסר" && l.items.includes("יתרה מדווחת")));
+  const asset = m.categories[2].cards.find((c) => c.title === "דירה")!;
+  assert.ok(asset.rows.some((r) => r.label === "שווי רשום (ברוטו — לא תמורה)" && r.value === "₪2,000,000"));
+  assert.ok(asset.rows.some((r) => r.label === "תמורה נטו" && r.value.startsWith("חסר")) && asset.rows.some((r) => r.label === "מועד מכירה" && r.value.startsWith("חסר")));
+  assert.ok(asset.rows.some((r) => r.label === "השפעה על יתרת ההון"));
+});
+
+test("funding sources model: planned deposits are apart, marked as in the forecast, and a debt owed to me is expected, not liquid", () => {
+  const m = sourcesModel(sourcesView, "recG1")!;
+  const dep = m.categories[4].cards[0];
+  assert.ok(dep.rows.some((r) => r.label === "ספירה בתחזית" && r.value.includes("אל תוסיפו ליתרה הקיימת")));
+  assert.equal(dep.rows.find((r) => r.label.startsWith("אם התאריך מוקדם"))?.value, "₪800 / ₪3,200");
+  assert.ok(m.gaps[0].includes("חסר הפקדה חודשית מתוכננת"));
+  const owed = m.categories[3].cards[0];
+  assert.equal(owed.typeLabel, "חוב שחייבים לי");
+  assert.ok(m.categories[0].cards.every((c) => c.typeLabel !== "חוב שחייבים לי"));
+  assert.equal(m.unavailable.length, 1);
+});
+
+test("funding sources model: 'add as option' only fills an existing option type (asset sale / debt collection / deposits) and lists what the owner must enter", () => {
+  const m = sourcesModel(sourcesView, "recG1")!;
+  const asset = m.categories[2].cards.find((c) => c.title === "דירה")!.add!;
+  assert.deepEqual(asset.prefill, { asset_id: "recAS1" });
+  assert.equal(asset.type, "asset_sale");
+  assert.deepEqual(asset.mustEnter, ["תמורה נטו", "תאריך משוער"]);
+  const owed = m.categories[3].cards[0].add!;
+  assert.deepEqual(owed.prefill, { loan_id: "recOW1" });
+  assert.equal(owed.type, "receivable_collection");
+  const dep = m.categories[4].cards[0].add!;
+  assert.deepEqual(dep.prefill, { source: "account", account_id: "recC" });
+  assert.equal(m.categories[0].cards[0].add, null, "existing balance is automatic — no add button");
+  const draft = newFundingOption(asset.type, 1);
+  const filled = fundingRequest({ ...DEFAULT_FUNDING_FORM, goalId: "recG1", options: [{ ...draft, values: { ...draft.values, ...asset.prefill, net_proceeds: "900000", expected_date: "2027-01-01" } }] });
+  assert.ok(filled.ok && (filled.body.options[0] as { asset_id?: string }).asset_id === "recAS1", "the prefilled option feeds the existing request unchanged");
+});
+
+test("funding sources list: collapsed categories with counts, 'now' states, the add button once, and the loading / error states", () => {
+  const model = sourcesModel(sourcesView, "recG1")!;
+  const html = renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "ok", data: sourcesView, goalId: "recG1" }, model, addedKeys: [], addedNote: null, onAdd: () => undefined }));
+  assert.ok(html.includes("מקורות אפשריים ליעד") && html.includes("כסף נזיל עכשיו (1)") && html.includes("כסף שיהפוך לנגיש עד תאריך היעד (0)") && html.includes("הפקדות עתידיות שטרם בוצעו (1)"));
+  assert.ok(!html.includes("<details open"), "categories start collapsed — the screen is not flooded");
+  assert.equal((html.match(/הוסף כאפשרות/g) ?? []).length, 3);
+  const added = renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "ok", data: sourcesView, goalId: "recG1" }, model, addedKeys: ["asset_sale:recAS1"], addedNote: "נוספה אפשרות", onAdd: () => undefined }));
+  assert.equal((added.match(/הוסף כאפשרות/g) ?? []).length, 2);
+  assert.ok(added.includes("נוסף לטופס") && added.includes("נוספה אפשרות"));
+  assert.ok(renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "loading" }, model: null, addedKeys: [], addedNote: null, onAdd: () => undefined })).includes("טוען מקורות"));
+  assert.ok(renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "error", code: 429 }, model: null, addedKeys: [], addedNote: null, onAdd: () => undefined })).includes("יותר מדי חישובים"));
+});
+
+test("funding sources: shown only after a goal is chosen, one read-only call per goal, no client arithmetic", () => {
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("export function FundingSourcesList"));
+  assert.ok(section.includes("{hasGoal && <FundingSourcesList"), "gated on a chosen goal");
+  assert.ok(section.includes("[form.goalId]") && section.includes("options: []"), "one call when the goal changes, with no options");
+  const list = comp.slice(comp.indexOf("export function FundingSourcesList"), comp.indexOf("function Rows("));
+  assert.ok(!/\.reduce\(|Math\.|\bfetch\(/.test(section + list), "no arithmetic and no direct fetch");
+  const lib = fs.readFileSync("src/lib/familyWealth.ts", "utf8");
+  const model = lib.slice(lib.indexOf("export function sourcesModel") - 3000);
+  assert.ok(!/\.reduce\(|Math\.|\bfetch\(/.test(model), "the sources model only words and lays out the server's numbers");
+  const before = renderToStaticMarkup(createElement(FundingSection, { overview: { status: "ok", data: { summary: {}, as_of: "2026-10-18", goals: [{ goal_id: "recG1", title: "חתונה", target: 200000, end_date: "2038-06-30", mode: "cumulative" }], assets: { items: [] }, loans: { items: [] } } } as unknown as Parameters<typeof FundingSection>[0]["overview"] }));
+  assert.ok(!before.includes("מקורות אפשריים ליעד"), "nothing about sources before a goal is chosen");
+});

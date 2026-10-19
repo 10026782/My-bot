@@ -458,6 +458,7 @@ def _raw_category(category) -> str:
     return str((category.get("name") if isinstance(category, dict) else category) or "").strip().casefold()
 
 
+CUMULATIVE_BY_DEFAULT = ("future_goal", "emergency_fund", "debt")      # categories whose draft default Calc Method is cumulative (draft.py); income / savings keep theirs
 FIXED_INCOME_CATEGORY = "fixed_income"        # live Financial Goals.Category choice (a standing income, not part of the income goal)
 SAVINGS_DESTINATION_CATEGORY = "long_term"    # the pension portfolio goal: the one active goal of this category receives deposits
 
@@ -653,7 +654,7 @@ def funding_inputs(identity, today: date | None = None) -> dict:
     every read goes through the owner-scoped readers above, so an unresolved identity raises PersonalDataAccessDenied and another person's
     goals, accounts, loans, assets or obligations never reach the planner."""
     today = today or date.today()
-    ov = overview(identity, today)
+    ov = overview(identity, today, default_method=calc.CUMULATIVE)       # a goal saved without a Calc Method is a cumulative pot for funding (never period_sum)
     summary = ov.get("summary") or {}
     income, savings = summary.get("income") or {}, summary.get("savings") or {}
     return {
@@ -667,8 +668,9 @@ def funding_inputs(identity, today: date | None = None) -> dict:
     }
 
 
-def overview(identity, today: date | None = None) -> dict:
-    """Private screen payload: goals with derived numbers + monthly cash improvement."""
+def overview(identity, today: date | None = None, default_method: str | None = None) -> dict:
+    """Private screen payload: goals with derived numbers + monthly cash improvement. ``default_method`` (funding planner only) is the Calc Method
+    assumed for a goal whose own field is empty; None keeps ``calc.compute_goal``'s default (period_sum) for every other screen."""
     today = today or date.today()
     goals = my_goals(identity)
     events = my_events(identity)
@@ -696,6 +698,8 @@ def overview(identity, today: date | None = None) -> dict:
             continue
         gf = goal.get("fields") or {}
         # parent goal = its own events + every descendant source's events, each event once (roll-up)
+        if default_method and not gf.get(FinGoalFields.CALC_METHOD) and _raw_category(gf.get(FinGoalFields.CATEGORY)) in CUMULATIVE_BY_DEFAULT:
+            goal = {**goal, "fields": {**gf, FinGoalFields.CALC_METHOD: default_method}}
         row = calc.compute_goal(goal, _rolled_up(goal["id"], own, parent_of), today, FinGoalFields)
         row["category"] = gf.get(FinGoalFields.CATEGORY)
         row["priority"] = gf.get(FinGoalFields.PRIORITY)
