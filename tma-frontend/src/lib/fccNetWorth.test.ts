@@ -18,10 +18,11 @@ function test(name: string, fn: () => void) {
 }
 
 const base: FccNetWorth = {
-  as_of: "2026-10-19", net: 1060000, partial: false, gaps: { accounts_without_balance: 0, assets_left_out: 0, debts_without_balance: 0 },
-  accounts: { total: 100000, items: [{ id: "a", name: "חשבון", value: 100000, as_of: "2026-10-01", verification: "self_reported" }], missing: [], oldest_as_of: "2026-10-01" },
+  as_of: "2026-10-19", net: 1060000, partial: false, gaps: { accounts_without_balance: 0, assets_left_out: 0, debts_without_balance: 0, asset_debts_unverified: 0 },
+  accounts: { total: 100000, items: [{ id: "a", name: "חשבון", value: 100000, as_of: "2026-10-01", verification: "self_reported", age_days: 18, freshness: "current" }], missing: [],
+              oldest_as_of: "2026-10-01", stale_after_days: 90, freshness: { current: 1, stale: 0, missing: 0 } },
   assets: { total: 1000000, items: [{ id: "h", name: "דירה", asset_type: null, as_of: null, gross_value: 1000000, ownership_pct: 100, value: 1000000, debt_source: "linked_loans",
-    debt: 40000, debt_gross: 40000, unknown_debt_loans: 0, ignored_mortgage_balance: 40000, counted: true, missing: [] }], sold_excluded: 1, oldest_as_of: null, as_of_known: false },
+    debt: 40000, debt_responsibility_known: true, unknown_debt_loans: 0, ignored_mortgage_balance: 40000, counted: true, missing: [] }], sold_excluded: 1, oldest_as_of: null, as_of_known: false },
   liabilities: { total: 40000, on_assets: 40000, standalone: null, standalone_items: [], oldest_as_of: null, as_of_known: false },
   receivables: { in_net: false, label: "expected_uncertain", count: 1, total: 25000, coverage: 1, items: [{ id: "r", name: "חבר", balance: 25000 }] },
 };
@@ -41,7 +42,7 @@ test("receivables are a separate, labelled expected/uncertain card — not a row
 });
 
 test("a missing total is 'חסר', never 0; partial says so and every gap is noted", () => {
-  const m = netWorthModel({ ...base, net: null, partial: true, gaps: { accounts_without_balance: 2, assets_left_out: 1, debts_without_balance: 3 },
+  const m = netWorthModel({ ...base, net: null, partial: true, gaps: { accounts_without_balance: 2, assets_left_out: 1, debts_without_balance: 3, asset_debts_unverified: 0 },
     accounts: { ...base.accounts, total: null }, liabilities: { ...base.liabilities, total: null } });
   assert.equal(m.net.value, MISSING);
   assert.equal(m.rows[0].value, MISSING);
@@ -58,6 +59,14 @@ test("an asset without a value is named on the card: 'חסר שווי — יש �
   assert.ok(m.notes.includes("מגרש — חסר שווי — יש להזין") && m.notes.includes("משרד — חסר אחוז בעלות — יש להזין"));
   assert.ok(m.partial && m.net.hint.startsWith("חלקי"));
   assert.ok(renderToStaticMarkup(createElement(NetWorthCard, { state: { status: "ok", data: v }, onRetry: () => undefined })).includes("מגרש — חסר שווי — יש להזין"));
+});
+
+test("accounts: current / stale / missing counts with the server's threshold; an unverified asset debt is explained", () => {
+  const m = netWorthModel({ ...base, partial: true, gaps: { ...base.gaps, asset_debts_unverified: 1 },
+    accounts: { ...base.accounts, freshness: { current: 2, stale: 1, missing: 3 }, stale_after_days: 90 } });
+  assert.ok(m.rows[0].hint.includes("2 עדכניים") && m.rows[0].hint.includes("1 ישנים (מעל 90 יום)") && m.rows[0].hint.includes("3 חסרים"));
+  assert.ok(m.notes.some((n) => n.includes("שיעור האחריות לחוב לא ידוע")));
+  assert.ok(m.net.hint.includes("לא מאומת"));
 });
 
 test("a sold asset and an overlapping mortgage are explained; no receivables card when there are none", () => {

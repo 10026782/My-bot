@@ -960,16 +960,17 @@ export interface FundingRequestBody {
 /** Unified net worth (C2, server-computed, read-only): accounts + assets − own debts. Receivables are shown apart and are NOT in `net`. */
 export interface FccNetWorthAsset {
   id: string; name: string | null; asset_type: string | null; as_of: string | null; gross_value: number | null; ownership_pct: number | null;
-  value: number | null; debt_source: "linked_loans" | "asset_mortgage" | null; debt: number | null; debt_gross: number | null; unknown_debt_loans: number;
+  value: number | null; debt_source: "linked_loans" | "asset_mortgage" | null; debt: number | null; debt_responsibility_known: boolean; unknown_debt_loans: number;
   ignored_mortgage_balance: number | null; counted: boolean; missing: ("missing_value" | "missing_ownership")[];
 }
 export interface FccNetWorth {
   as_of: string;
   net: number | null;
   partial: boolean;
-  gaps: { accounts_without_balance: number; assets_left_out: number; debts_without_balance: number };
-  accounts: { total: number | null; items: { id: string; name: string | null; value: number; as_of: string; verification: string }[];
-              missing: { id: string; name: string | null }[]; oldest_as_of: string | null };
+  gaps: { accounts_without_balance: number; assets_left_out: number; debts_without_balance: number; asset_debts_unverified: number };
+  accounts: { total: number | null; items: { id: string; name: string | null; value: number; as_of: string; verification: string; age_days: number | null; freshness: "current" | "stale" }[];
+              missing: { id: string; name: string | null }[]; oldest_as_of: string | null; stale_after_days: number;
+              freshness: { current: number; stale: number; missing: number } };
   assets: { total: number | null; items: FccNetWorthAsset[]; sold_excluded: number; oldest_as_of: string | null; as_of_known: boolean };
   liabilities: { total: number | null; on_assets: number | null; standalone: number | null;
                  standalone_items: { id: string; name: string | null; loan_type: string | null; balance: number | null; as_of: string | null; note: string | null }[];

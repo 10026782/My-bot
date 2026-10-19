@@ -110,10 +110,20 @@ def test_asset_debt_linked_loan_and_asset_mortgage_are_deducted_once():
     assert row["debt_source"] == "linked_loans" and row["ignored_mortgage_balance"] == 400_000
 
 
-def test_asset_mortgage_used_only_when_no_linked_loan_has_a_balance():
+def test_linked_loan_without_balance_stays_missing_even_when_the_asset_has_a_mortgage_balance():
     v = view([], [], [asset("recH", "דירה", 1_000_000, mortgage=300_000)], [loan("recM", "משכנתא ללא יתרה", None, asset_id="recH")])
-    assert v["liabilities"]["total"] == 300_000 and v["assets"]["items"][0]["debt_source"] == "asset_mortgage"
-    assert v["gaps"]["debts_without_balance"] == 1 and v["partial"] is True             # the unknown loan is reported, not a silent 0
+    row = v["assets"]["items"][0]
+    assert v["liabilities"]["total"] is None and row["debt"] is None and row["debt_source"] == "linked_loans"      # no silent fall back to the asset's field
+    assert row["ignored_mortgage_balance"] == 300_000 and v["net"] == 1_000_000
+    assert v["gaps"]["debts_without_balance"] == 1 and v["partial"] is True
+
+
+def test_asset_mortgage_without_a_loan_is_a_separate_debt_deducted_in_full_and_unverified():
+    v = view([], [], [asset("recH", "דירה", 1_000_000, pct=50, mortgage=200_000)], [])
+    row = v["assets"]["items"][0]
+    assert v["assets"]["total"] == 500_000 and v["liabilities"]["total"] == 200_000 and v["net"] == 300_000       # NOT 400_000: no split by ownership
+    assert row["debt_source"] == "asset_mortgage" and row["debt_responsibility_known"] is False
+    assert v["gaps"]["asset_debts_unverified"] == 1 and v["partial"] is True
 
 
 def test_two_linked_loans_sum_and_unlinked_loan_stands_alone():
@@ -123,9 +133,11 @@ def test_two_linked_loans_sum_and_unlinked_loan_stands_alone():
     assert v["liabilities"]["total"] == 350_000 and v["net"] == 650_000
 
 
-def test_ownership_share_applies_to_asset_and_its_debt():
-    v = view([], [], [asset("recH", "דירה", 1_000_000, pct=50, mortgage=200_000)], [])
-    assert v["assets"]["total"] == 500_000 and v["liabilities"]["total"] == 100_000 and v["net"] == 400_000
+def test_partial_ownership_scales_the_value_but_a_recorded_loan_is_deducted_in_full():
+    # owner example: asset 2,000,000 at 50% + a 600,000 loan in his name => 400,000 (not 700,000)
+    v = view([], [], [asset("recH", "דירה", 2_000_000, pct=50)], [loan("recM", "משכנתא", 600_000, asset_id="recH")])
+    assert v["assets"]["total"] == 1_000_000 and v["liabilities"]["total"] == 600_000 and v["net"] == 400_000
+    assert v["partial"] is False and v["assets"]["items"][0]["debt_responsibility_known"] is True
 
 
 def test_sold_asset_leaves_but_its_open_loan_stays_a_liability():
@@ -152,10 +164,34 @@ def test_missing_data_is_missing_not_zero():
     v = view([acct("recA1", "עו״ש"), acct("recA2", "בלי יתרה")], [snap("recS", "recA1", 1000)],
              [asset("recX", "בלי שווי", None), asset("recY", "בלי בעלות", 500_000, pct=None, mortgage=100_000)], [])
     assert v["accounts"]["total"] == 1000 and v["accounts"]["missing"] == [{"id": "recA2", "name": "בלי יתרה"}]
-    assert v["assets"]["total"] is None and v["liabilities"]["total"] is None          # nothing counted: None, not 0
-    assert v["gaps"] == {"accounts_without_balance": 1, "assets_left_out": 2, "debts_without_balance": 0} and v["partial"] is True
+    assert v["assets"]["total"] is None                                               # nothing counted: None, not 0
+    assert v["liabilities"]["total"] == 100_000                                       # the known debt is NOT dropped with its asset
+    assert v["gaps"] == {"accounts_without_balance": 1, "assets_left_out": 2, "debts_without_balance": 0, "asset_debts_unverified": 1} and v["partial"] is True
     assert {a["id"]: a["missing"] for a in v["assets"]["items"]} == {"recX": ["missing_value"], "recY": ["missing_ownership"]}
-    assert v["net"] == 1000
+    assert v["net"] == 1000 - 100_000
+
+
+def test_asset_without_value_keeps_its_linked_debt_so_the_net_is_never_inflated():
+    v = view([acct("recA1", "עו״ש")], [snap("recS", "recA1", 50_000)], [asset("recH", "מגרש", None)], [loan("recM", "משכנתא", 300_000, asset_id="recH")])
+    row = v["assets"]["items"][0]
+    assert row["counted"] is False and row["missing"] == ["missing_value"] and row["value"] is None and row["debt"] == 300_000
+    assert v["assets"]["total"] is None and v["liabilities"]["total"] == 300_000 and v["net"] == -250_000
+    assert v["partial"] is True and v["gaps"]["assets_left_out"] == 1
+
+
+def test_asset_without_ownership_keeps_its_linked_debt_too():
+    v = view([], [], [asset("recH", "דירה", 1_000_000, pct=None)], [loan("recM", "משכנתא", 400_000, asset_id="recH")])
+    assert v["assets"]["total"] is None and v["liabilities"]["total"] == 400_000 and v["net"] == -400_000 and v["partial"] is True
+
+
+def test_account_freshness_current_stale_missing_with_an_exposed_threshold():
+    v = view([acct("recA1", "טרי"), acct("recA2", "ישן"), acct("recA3", "בלי יתרה")],
+             [snap("recS1", "recA1", 10, "2026-10-10"), snap("recS2", "recA2", 20, "2026-01-01")], [], [])
+    acc = v["accounts"]
+    assert acc["stale_after_days"] == nw.STALE_AFTER_DAYS == 90
+    assert {i["id"]: i["freshness"] for i in acc["items"]} == {"recA1": "current", "recA2": "stale"}
+    assert acc["freshness"] == {"current": 1, "stale": 1, "missing": 1}
+    assert v["assets"]["as_of_known"] is False and v["liabilities"]["as_of_known"] is False
 
 
 def test_nothing_known_gives_no_net():
