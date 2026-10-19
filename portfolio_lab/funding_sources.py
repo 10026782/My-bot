@@ -4,6 +4,7 @@
 (1) `liquid_now` כסף נזיל עכשיו; (2) `liquid_by_due_date` כסף שיהפוך לנגיש עד תאריך היעד; (3) `conditional_on_action` מותנה בפעולה
 (מכירת נכס, אימות נזילות); (4) `expected_not_guaranteed` צפוי שאינו מובטח (גביית חוב); (5) `future_deposits` הפקדות מתוכננות שטרם בוצעו.
 
+לכל חשבון מוצג גם `expected_at_due` — ערך תחזית לפי הנחות גלויות (`accounts_forecast.account_value_points`), נפרד מהיתרה המדווחת ואינו מובטח.
 אין המלצה, אין ציון, אין דירוג, אין `total_available`: כל שורה מציגה סכום (או "חסר"), תנאים, מועדים והשפעה על יתרת ההון — ללא סיכום בין
 קטגוריות. נתון חסר נשאר `None` + `missing_inputs`, לא 0. בלי מס ובלי הערכת שווי או תמורה של נכס; זמן מכירה ידני של הבעלים. `Liquid From` אינו
 זכאות: מצב הנזילות נגזר מ-`accounts_forecast` (`_liquidity_profile` / `_state_at`) ללא שינוי. חשבון שהוקצה ליעד אחר מסומן `allocated_elsewhere`
@@ -12,6 +13,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date
 
 from core.financial_control import loans as fcc_loans
@@ -69,7 +71,42 @@ def _item(source_type: str, source_id, name, **fields) -> dict:
     return base
 
 
-def _account_item(account: dict, goal_id: str, points: dict, alloc: dict) -> tuple[str, dict]:
+def _expected_at(account: dict, points: dict, path) -> dict | None:
+    """ערך צפוי של חשבון בתאריך היעד (ובקצוות החלון) לפי `accounts_forecast` והנחות גלויות — נפרד מהיתרה המדווחת ואינו מובטח.
+    כולל את ההפקדה החודשית המתוכננת של החשבון (אם יש) והתשואה/דמי הניהול כפי שהוזנו או כברירת מחדל. None = אין צילום יתרה או אין תאריך.
+    `path(account)` = מסלול הערכים של החשבון (ריצת מנוע אחת לחשבון בכל הבקשה, בלי תלות במספר היעדים)."""
+    if not af._eligible(account):
+        return None
+    slots = {name: p["slot"] for name, p in points.items() if name != "now"}
+    if all(v is None for v in slots.values()):
+        return None
+    values = path(account)
+
+    def at(slot):
+        return None if slot is None or slot >= len(values) else round(values[slot], 2)
+
+    planned = af._valid(account.get("planned_monthly_deposit"), 0, 10_000_000)
+    return {"label": "expected_by_assumptions", "guaranteed": False, "amount": at(slots["due"]), "early": at(slots["early"]), "late": at(slots["late"]),
+            "includes_planned_deposits": bool(planned), "monthly_planned_deposit_included": planned,          # None = no planned deposit entered (the gap is in gaps.future_deposits)
+            "basis": "end_of_last_completed_month_up_to_the_date",
+            "note": "forecast value under the shown assumptions at the end of the last completed month up to the date (as A2 coverage); separate from the reported balance, not an entitlement to withdraw"}
+
+
+def _goal_frame(goal: dict, request: dict, today: date) -> dict:
+    """תאריך היעד, הסיבה שאי אפשר לחשב לפיו, חלון התאריך והנקודות (עכשיו / יעד / מוקדם / מאוחר) של יעד אחד."""
+    due = af._iso_date(goal.get("end_date"))
+    reason = "missing_date" if due is None else ("past_date" if fp._months_between(today.replace(day=1), due) < 0 else None)
+    usable_due = due if reason is None else None
+    override = request.get("date_margin_months")
+    margin = override if override is not None else int(goal.get("date_margin_months") or 0)
+    window = bool(usable_due and margin > 0)
+    points = {"now": _point(today, today), "due": _point(usable_due, today),
+              "early": _point(fp._add_months(usable_due, -margin) if window else None, today),
+              "late": _point(fp._add_months(usable_due, margin) if window else None, today)}
+    return {"due": due, "reason": reason, "margin": margin, "window": window, "points": points}
+
+
+def _account_item(account: dict, goal_id: str, points: dict, alloc: dict, expected: dict | None) -> tuple[str, dict]:
     profile = af._liquidity_profile(account)
     states = _states(profile, points)
     amount, as_of = _balance_amount(account)
@@ -78,6 +115,7 @@ def _account_item(account: dict, goal_id: str, points: dict, alloc: dict) -> tup
         certainty="confirmed" if states["now"] == "accessible" else "uncertain", conditions=list(_BASIS_CONDITIONS[profile["basis"]]),
         risks=["self_reported_balance"] if amount is not None else [], missing_inputs=([] if amount is not None else ["balance_snapshot"]) + ([profile["gap"]] if profile["gap"] else []),
         balance_effect="uses_existing_balance", provenance={"amount": "reported_balance_snapshot", "liquidity": "account_fields"},
+        expected_at_due=expected,
         liquidity={"basis": profile["basis"], "liquid_from": profile["liquid_from"].isoformat() if profile["liquid_from"] else None, "state_at": states},
         allocation=alloc.get(account.get("id")) or {"allocated_to_this_goal": None, "allocated_elsewhere_amount": None, "allocated_elsewhere": False,
                                                       "over_allocated": False, "amount_not_allocated_elsewhere": None},
@@ -152,6 +190,8 @@ def build_suggested_sources(inputs: dict, request: dict, today: date | None = No
     for gid in request["goal_ids"]:
         if gid not in goals:
             raise ValueError("unknown goal")
+    assumptions = dict(request.get("assumptions") or {})
+    p = af.normalize_params({"years": 10, **assumptions})                 # ValueError on invalid assumptions, same as the plan
     accounts = [a for a in (inputs.get("accounts_view") or {}).get("accounts") or [] if isinstance(a, dict) and a.get("id")]
     live = [a for a in accounts if a.get("status") != "closed"]
     eligible = [a for a in accounts if af._eligible(a)]
@@ -160,23 +200,26 @@ def build_suggested_sources(inputs: dict, request: dict, today: date | None = No
     valid, skipped = af._classify_allocations(inputs.get("allocations") or [], titles, {a["id"]: a for a in accounts}, {a["id"] for a in eligible})
     overview, _flags = af._allocations_now(valid, titles, info, {a["id"]: a for a in accounts}, today, skipped)
     owed = [l for l in inputs.get("loans") or [] if l.get("direction") == fcc_loans.OWED_TO_ME and l.get("active")]
+    frames = {gid: _goal_frame(goals[gid], request, today) for gid in request["goal_ids"]}
+    slots_needed = [pt["slot"] for fr in frames.values() for name, pt in fr["points"].items() if name != "now" and pt["slot"] is not None]
+    years = min(max([10] + [math.ceil(v / 12) for v in slots_needed]), 100)         # one horizon for the whole request: each account is simulated once
+    paths: dict[str, list] = {}
+
+    def path(account):
+        if account["id"] not in paths:
+            paths[account["id"]] = af.account_value_points(account, {"years": years, **assumptions}, today)
+        return paths[account["id"]]
+
     outputs = []
     for gid in request["goal_ids"]:
         goal = goals[gid]
-        due = af._iso_date(goal.get("end_date"))
-        reason = "missing_date" if due is None else ("past_date" if fp._months_between(today.replace(day=1), due) < 0 else None)
-        usable_due = due if reason is None else None
-        override = request.get("date_margin_months")
-        margin = override if override is not None else int(goal.get("date_margin_months") or 0)
-        window = bool(usable_due and margin > 0)
-        points = {"now": _point(today, today), "due": _point(usable_due, today),
-                  "early": _point(fp._add_months(usable_due, -margin) if window else None, today),
-                  "late": _point(fp._add_months(usable_due, margin) if window else None, today)}
+        frame = frames[gid]
+        due, reason, margin, window, points = frame["due"], frame["reason"], frame["margin"], frame["window"], frame["points"]
         alloc = _allocation_view(overview, gid)
         cats: dict[str, list] = {c: [] for c in CATEGORIES}
         unavailable, gaps = [], []
         for account in live:
-            where, item = _account_item(account, gid, points, alloc)
+            where, item = _account_item(account, gid, points, alloc, _expected_at(account, points, path))
             (unavailable if where == "not_available" else cats[where]).append(item)
             planned = af._valid(account.get("planned_monthly_deposit"), 0, 10_000_000)
             if planned is None:
@@ -198,10 +241,13 @@ def build_suggested_sources(inputs: dict, request: dict, today: date | None = No
             "categories": cats, "counts": {c: len(cats[c]) for c in CATEGORIES}, "not_available_by_due_date": unavailable, "gaps": {"future_deposits": gaps}})
     return {
         "schema_version": SOURCES_SCHEMA_VERSION, "result_type": "goal_funding_sources", "as_of": today.isoformat(), "goals": outputs,
+        "assumptions": {"annual_return_pct": round(p["annual_return"] * 100, 4), "annual_fee_pct": round(p["annual_fee"] * 100, 4),
+                        "inflation_pct": round(p["inflation"] * 100, 4), "note": "account-level return, fee and planned deposit, when entered, override these defaults"},
         "category_labels": {"liquid_now": "כסף נזיל עכשיו", "liquid_by_due_date": "כסף שיהפוך לנגיש עד תאריך היעד", "conditional_on_action": "מותנה בפעולה",
                             "expected_not_guaranteed": "צפוי ואינו מובטח", "future_deposits": "הפקדות עתידיות שטרם בוצעו"},
         "warnings": ["רשימת מועמדים בלבד — לא המלצה, לא ציון ולא בחירה עבורך; הקטגוריות אינן מסוכמות זו עם זו.",
                      "יתרות הן הצילום האחרון שדווח, לא תחזית. ״מותנה״ אינו נגיש: תאריך שחרור אינו זכאות למשיכה.",
                      "נכס אינו מוצע כמכירה מובטחת: תמורה נטו ומועד מזין הבעלים; אין הערכת שווי ואין מס.",
-                     "הפקדה מתוכננת שכבר נכללת בתחזית אינה נוספת ליתרה הקיימת (included_in_forecast)."],
+                     "הפקדה מתוכננת שכבר נכללת בתחזית אינה נוספת ליתרה הקיימת (included_in_forecast).",
+                     "״צפוי לפי הנחות״ הוא ערך תחזית (כולל הפקדה מתוכננת של החשבון) ונפרד מהיתרה המדווחת; אינו מובטח ואינו זכאות למשיכה."],
     }

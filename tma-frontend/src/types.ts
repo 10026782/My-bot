@@ -964,7 +964,36 @@ export interface FundingWindowOption {
 export interface FundingWindowEnd { due: string | null; reason: string | null; gap: number | null; months_to_due: number | null; options: FundingWindowOption[] }
 export interface FundingWindow { margin_months: number; early: FundingWindowEnd; late: FundingWindowEnd; note: string }
 export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null; window?: FundingWindow | null }
+/** Funding sources step 2: candidate sources for one goal, in five SEPARATE categories (server numbers; no totals, no ranking). Missing = null. */
+export type FundingSourceCategory = "liquid_now" | "liquid_by_due_date" | "conditional_on_action" | "expected_not_guaranteed" | "future_deposits";
+export type FundingLiquidityState = "accessible" | "conditional" | "locked";
+export interface FundingSourceItem {
+  source_type: "account" | "asset" | "receivable" | "planned_deposit"; source_id: string; name: string | null;
+  amount: number | null; amount_status: string; as_of: string | null; certainty: FundingCertainty;
+  conditions: string[]; risks: string[]; missing_inputs: string[]; balance_effect: string | null;
+  liquidity?: { basis: string; liquid_from: string | null; state_at: Record<"now" | "due" | "early" | "late", FundingLiquidityState | null> };
+  allocation?: { allocated_to_this_goal: number | null; allocated_elsewhere_amount: number | null; allocated_elsewhere: boolean; over_allocated: boolean; amount_not_allocated_elsewhere: number | null };
+  expected_at_due?: { label: string; guaranteed: false; amount: number | null; early: number | null; late: number | null; includes_planned_deposits: boolean; monthly_planned_deposit_included: number | null; basis?: string; note: string } | null;
+  asset?: { asset_type: string | null; recorded_value: number | null; ownership_pct: number | null; mortgage_balance: number | null; linked_debt: number | null; linked_loan_names: (string | null)[]; monthly_income: number | null };
+  receivable?: { arrangement: string | null; next_payment_due: string | null; end_date: string | null };
+  deposit?: { monthly_planned: number; months_until_due: number | null; deposit_fee_pct: number | null; state_at: Record<"now" | "due" | "early" | "late", FundingLiquidityState | null> };
+  window?: Record<"early" | "late", { months: number | null; amount: number | null }>;
+  forecast_inclusion?: "included_in_forecast" | "not_included"; forecast_inclusion_note?: string;
+  option_template: { type: "asset_sale" | "receivable_collection" | "new_deposits"; asset_id?: string; loan_id?: string; account_id?: string } | null; owner_must_enter: string[];
+}
+export interface FundingSourcesGoal {
+  goal_id: string; title: string | null; target_amount: number | null; due: string | null; reason: string | null;
+  date_window: { margin_months: number; early: string | null; late: string | null; note: string } | null;
+  categories: Record<FundingSourceCategory, FundingSourceItem[]>; counts: Record<FundingSourceCategory, number>;
+  not_available_by_due_date: FundingSourceItem[]; gaps: { future_deposits: { account_id: string; name: string | null; missing: string[] }[] };
+}
+export interface FundingSources {
+  schema_version: string; result_type: string; as_of: string; goals: FundingSourcesGoal[];
+  assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; note: string };
+  category_labels: Record<FundingSourceCategory, string>; warnings: string[];
+}
 export interface FundingPlan {
+  suggested_sources?: FundingSources;
   schema_version: string; result_type: string; as_of: string;
   assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; horizon_years: number };
   goals: FundingGoalResult[];

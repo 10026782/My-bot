@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingPlan, FundingRequestBody, FundingWindow, FundingWindowEnd, FundingWindowOption, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingLiquidityState, FundingPlan, FundingRequestBody, FundingSourceCategory, FundingSourceItem, FundingSources, FundingWindow, FundingWindowEnd, FundingWindowOption, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -810,5 +810,136 @@ export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<s
     needTitle: n.title || "מטרה ללא שם", needRows, needReason: n.reason ? word(NEED_REASONS, n.reason) : null,
     windowNote: g.window ? FUNDING_WINDOW_NOTE : null,
     options: g.options.map((o) => optionCard(o, titles, g.window)), plan: planModel, portfolio, warnings: plan.warnings,
+  };
+}
+
+
+// ── Funding sources (step 2): the candidate list the server derives from the owner's own data — FIVE separate categories, never summed. Presentation
+// only: every figure is the server's; a missing figure is "חסר" (never 0); nothing is ranked, scored or recommended. ──
+export const SOURCES_TITLE = "מקורות אפשריים ליעד";
+export const SOURCES_INTRO = "רשימת מועמדים מהנתונים שלך — לא המלצה ולא בחירה עבורך. כל קטגוריה נפרדת ואינה מצטרפת לסכום אחד של ״כסף זמין״.";
+export const SOURCES_EXPECTED_LABEL = "צפוי בסוף החודש האחרון שהושלם עד תאריך היעד (לפי הנחות, לא מובטח)";
+export const SOURCES_CATEGORY_ORDER: FundingSourceCategory[] = ["liquid_now", "liquid_by_due_date", "conditional_on_action", "expected_not_guaranteed", "future_deposits"];
+const SOURCES_CATEGORY_TITLES: Record<FundingSourceCategory, string> = {
+  liquid_now: "כסף נזיל עכשיו", liquid_by_due_date: "כסף שיהפוך לנגיש עד תאריך היעד", conditional_on_action: "מותנה בפעולה",
+  expected_not_guaranteed: "צפוי ואינו מובטח", future_deposits: "הפקדות עתידיות שטרם בוצעו",
+};
+const SOURCES_CATEGORY_NOTES: Record<FundingSourceCategory, string> = {
+  liquid_now: "חשבונות שסומנו נזילים מיד. היתרה היא הצילום האחרון שדווח.",
+  liquid_by_due_date: "תאריך שחרור אינו זכאות למשיכה, ולכן חשבון עם תאריך שחרור מופיע תחת ״מותנה בפעולה״ ולא כאן. הקטגוריה ריקה כל עוד אין חשבון שיהפוך נגיש מבלי שנדרשת פעולה.",
+  conditional_on_action: "כסף שנדרשת פעולה כדי להגיע אליו: מכירת נכס (תמורה ומועד מזין הבעלים), או אימות נזילות של חשבון.",
+  expected_not_guaranteed: "חוב שחייבים לך. אינו חלק מהיתרה הנזילה, והגבייה אינה מובטחת.",
+  future_deposits: "הפקדות מתוכננות שעדיין לא בוצעו — בנפרד מהכסף הקיים. הפקדה שכבר נכללת בתחזית אינה נוספת ליתרה.",
+};
+const SOURCE_TYPE_LABELS: Record<FundingSourceItem["source_type"], string> = { account: "חשבון", asset: "נכס", receivable: "חוב שחייבים לי", planned_deposit: "הפקדה מתוכננת" };
+const LIQUIDITY_BASIS_LABELS: Record<string, string> = { immediate: "נזיל מיד", retirement_immediate: "מוצר פרישה", dated: "נפתח בתאריך שחרור", undated: "נעול ללא תאריך שחרור", unverified: "נזילות לא אומתה" };
+const SOURCE_CONDITIONS: Record<string, string> = {
+  retirement_product_not_one_time_cash: "מוצר פרישה — לא כסף חד־פעמי", liquid_from_reached_eligibility_unverified: "תאריך השחרור הגיע, אך הזכאות למשיכה לא אומתה",
+  liquid_from_missing: "חסר תאריך שחרור", liquidity_unverified: "הנזילות לא אומתה", owner_decides_to_sell: "הבעלים מחליט למכור", sale_closes: "המכירה נסגרת",
+  debtor_pays_on_schedule: "החייב משלם לפי הלוח", debtor_arrangement: "נקבע הסדר עם החייב", deposits_actually_made: "ההפקדות מתבצעות בפועל",
+};
+const SOURCE_RISKS: Record<string, string> = { over_allocated: "החשבון בהקצאת יתר", not_yet_deposited: "טרם הופקד" };
+const SOURCE_MISSING: Record<string, string> = {
+  balance_snapshot: "יתרה מדווחת", liquid_from: "תאריך שחרור", liquidity: "נזילות", net_proceeds: "תמורה נטו", expected_sale_date: "מועד מכירה", recorded_balance: "יתרה רשומה",
+  arrangement: "הסדר החזר", goal_date: "תאריך יעד", planned_monthly_deposit: "הפקדה חודשית מתוכננת", deposit_fee: "דמי ניהול מההפקדה",
+};
+const BALANCE_EFFECTS: Record<string, string> = {
+  uses_existing_balance: "משתמש ביתרה הקיימת של החשבון", converts_asset_to_cash: "הופך נכס למזומן (הנכס יורד מהחזקות)", converts_receivable_to_cash: "הופך חוב שחייבים לך למזומן",
+  adds_future_deposits_to_account: "מוסיף הפקדות עתידיות לחשבון (עוד לא בוצעו)",
+};
+const OWNER_MUST_ENTER: Record<string, string> = { net_proceeds: "תמורה נטו", expected_date: "תאריך משוער", expected_net: "סכום צפוי להיגבות" };
+const FORECAST_INCLUSION: Record<string, string> = { included_in_forecast: "כלול כבר בתחזית — אל תוסיפו ליתרה הקיימת", not_included: "לא כלול בתחזית" };
+const SOURCE_TEMPLATE_LABELS: Record<NonNullable<FundingSourceItem["option_template"]>["type"], string> = { asset_sale: "מכירת נכס", receivable_collection: "גביית חוב", new_deposits: "הפקדות חדשות" };
+
+export interface SourceAddOption { type: Exclude<FundingOptionType, "existing_balance">; label: string; prefill: Record<string, string>; mustEnter: string[]; key: string }
+export interface SourceCard { key: string; title: string; typeLabel: string; rows: { label: string; value: string }[]; lists: { label: string; items: string[] }[]; add: SourceAddOption | null }
+export interface SourceCategoryModel { key: FundingSourceCategory; title: string; note: string; count: number; cards: SourceCard[] }
+export interface SourcesModel {
+  title: string; reason: string | null; dueNote: string | null; categories: SourceCategoryModel[]; unavailable: SourceCard[]; gaps: string[];
+  assumptions: string; warnings: string[];
+}
+
+/** The answer of a slower, older request must never overwrite the sources of the goal that is on screen now. */
+export const isCurrentGoal = (currentGoalId: string, answerGoalId: string): boolean => currentGoalId !== "" && currentGoalId === answerGoalId;
+export const SOURCES_DEBOUNCE_MS = 400;
+/** A cached answer is reused only for the very same request (goal + margin + assumptions). */
+export const sourcesCacheKey = (body: unknown): string => JSON.stringify(body);
+/** One message per failure: 404 (screen off), 429 (rate limit), 503 (busy), -1 (older server, no sources in the answer), no status (network), anything else. */
+export function sourcesErrorText(code?: number): string {
+  if (code === 404) return "המסך עדיין לא פעיל — המקורות האפשריים אינם זמינים בחשבון הזה.";
+  if (code === 429) return "יותר מדי חישובים — אפשר לנסות שוב בעוד דקה.";
+  if (code === 503) return "השרת עסוק כרגע — נסו שוב בעוד רגע.";
+  if (code === -1) return "השרת עדיין לא תומך ברשימת המקורות האפשריים.";
+  if (code == null) return "אין חיבור לשרת — בדקו את הרשת ונסו שוב.";
+  return "לא הצלחנו לטעון את המקורות האפשריים.";
+}
+
+const stateText = (st: FundingLiquidityState | null | undefined): string => (st ? word(LIQUIDITY_STATE_LABELS, st) : MISSING_LABEL);
+const money0 = (n: number | null | undefined): string => (n == null ? MISSING_LABEL : money(n));
+
+function sourceCard(item: FundingSourceItem, window: boolean): SourceCard {
+  const rows: { label: string; value: string }[] = [];
+  if (item.source_type === "account") {
+    rows.push({ label: `יתרה מדווחת${item.as_of ? ` (נכון ל-${dmy(item.as_of)})` : ""}`, value: money0(item.amount) });
+    const st = item.liquidity?.state_at;
+    rows.push({ label: "נזילות עכשיו", value: stateText(st?.now) }, { label: "נזילות בתאריך היעד", value: stateText(st?.due) });
+    if (window && st) rows.push({ label: "אם התאריך מוקדם", value: stateText(st.early) }, { label: "אם התאריך מאוחר", value: stateText(st.late) });
+    if (item.liquidity) rows.push({ label: "סוג נזילות", value: word(LIQUIDITY_BASIS_LABELS, item.liquidity.basis) });
+    const ex = item.expected_at_due;
+    rows.push({ label: SOURCES_EXPECTED_LABEL, value: ex ? money0(ex.amount) : MISSING_LABEL });
+    if (ex && window) rows.push({ label: "צפוי אם התאריך מוקדם / מאוחר", value: `${money0(ex.early)} / ${money0(ex.late)}` });
+    if (ex?.includes_planned_deposits) rows.push({ label: "כולל הפקדה חודשית מתוכננת", value: money(ex.monthly_planned_deposit_included) });
+    const al = item.allocation;
+    if (al?.allocated_elsewhere) rows.push({ label: "הוקצה ליעדים אחרים", value: money0(al.allocated_elsewhere_amount) });
+    if (al && al.allocated_to_this_goal) rows.push({ label: "הוקצה ליעד הזה", value: money(al.allocated_to_this_goal) });
+    if (al?.allocated_elsewhere && al.amount_not_allocated_elsewhere != null) rows.push({ label: "לא מוקצה ליעדים אחרים", value: money(al.amount_not_allocated_elsewhere) });
+  } else if (item.source_type === "asset") {
+    const a = item.asset;
+    rows.push({ label: "שווי רשום (ברוטו — לא תמורה)", value: money0(a?.recorded_value) }, { label: "אחוז בעלות", value: a?.ownership_pct == null ? MISSING_LABEL : `${a.ownership_pct}%` });
+    if (a?.mortgage_balance) rows.push({ label: "יתרת משכנתא", value: money(a.mortgage_balance) });
+    if (a?.linked_debt) rows.push({ label: "חוב מקושר", value: money(a.linked_debt) });
+    rows.push({ label: "תמורה נטו", value: `${MISSING_LABEL} — מזין הבעלים` }, { label: "מועד מכירה", value: `${MISSING_LABEL} — ידני` });
+  } else if (item.source_type === "receivable") {
+    const r = item.receivable;
+    rows.push({ label: "יתרה רשומה (לא סכום צפוי)", value: money0(item.amount) }, { label: "הסדר החזר", value: r?.arrangement === "monthly" ? "תשלום חודשי" : r?.arrangement === "deadline" ? "עד תאריך" : MISSING_LABEL });
+    rows.push({ label: "תשלום קרוב", value: r?.next_payment_due ? dmy(r.next_payment_due) : MISSING_LABEL }, { label: "תאריך סיום", value: r?.end_date ? dmy(r.end_date) : MISSING_LABEL });
+  } else {
+    const d = item.deposit;
+    rows.push({ label: "הפקדה חודשית מתוכננת", value: money0(d?.monthly_planned) }, { label: "חודשים עד תאריך היעד", value: d?.months_until_due == null ? MISSING_LABEL : String(d.months_until_due) });
+    rows.push({ label: "סך מתוכנן עד התאריך (ללא תשואה)", value: money0(item.amount) });
+    if (window && item.window) rows.push({ label: "אם התאריך מוקדם / מאוחר", value: `${money0(item.window.early.amount)} / ${money0(item.window.late.amount)}` });
+    rows.push({ label: "נזילות החשבון בתאריך היעד", value: stateText(d?.state_at.due) });
+    if (item.forecast_inclusion) rows.push({ label: "ספירה בתחזית", value: word(FORECAST_INCLUSION, item.forecast_inclusion) });
+  }
+  if (item.balance_effect) rows.push({ label: "השפעה על יתרת ההון", value: word(BALANCE_EFFECTS, item.balance_effect) });
+  const lists = [
+    { label: "תנאים", items: item.conditions.map((c) => word(SOURCE_CONDITIONS, c)) },
+    { label: "סיכונים", items: item.risks.map((r) => word({ ...FUNDING_RISKS, ...SOURCE_RISKS }, r)) },
+    { label: "חסר", items: item.missing_inputs.map((m) => word(SOURCE_MISSING, m)) },
+  ].filter((l) => l.items.length > 0);
+  const t = item.option_template;
+  const prefill: Record<string, string> = {};
+  if (t?.type === "asset_sale" && t.asset_id) prefill.asset_id = t.asset_id;
+  if (t?.type === "receivable_collection" && t.loan_id) prefill.loan_id = t.loan_id;
+  if (t?.type === "new_deposits" && t.account_id) { prefill.source = "account"; prefill.account_id = t.account_id; }
+  const add = t ? { type: t.type, label: SOURCE_TEMPLATE_LABELS[t.type], prefill, mustEnter: item.owner_must_enter.map((k) => word(OWNER_MUST_ENTER, k)), key: `${t.type}:${t.asset_id ?? t.loan_id ?? t.account_id ?? ""}` } : null;
+  return { key: `${item.source_type}:${item.source_id}`, title: item.name || "ללא שם", typeLabel: SOURCE_TYPE_LABELS[item.source_type], rows, lists, add };
+}
+
+/** Wording + layout of one goal's candidate sources. Categories keep the fixed order; items keep the server's order (by type, then name). No totals. */
+export function sourcesModel(src: FundingSources, goalId: string): SourcesModel | null {
+  const g = src.goals.find((x) => x.goal_id === goalId) ?? src.goals[0];
+  if (!g) return null;
+  const window = g.date_window != null;
+  const a = src.assumptions;
+  return {
+    title: g.title || "מטרה ללא שם",
+    reason: g.reason ? word(NEED_REASONS, g.reason) : null,
+    dueNote: window ? `תאריך היעד משוער (± ${g.date_window?.margin_months} חודשים): ${dmy(g.date_window?.early ?? null)} – ${dmy(g.date_window?.late ?? null)}. אף תאריך לא נבחר עבורך.` : null,
+    categories: SOURCES_CATEGORY_ORDER.map((key) => ({ key, title: SOURCES_CATEGORY_TITLES[key], note: SOURCES_CATEGORY_NOTES[key], count: g.categories[key].length, cards: g.categories[key].map((i) => sourceCard(i, window)) })),
+    unavailable: g.not_available_by_due_date.map((i) => sourceCard(i, window)),
+    gaps: g.gaps.future_deposits.map((x) => `${x.name || "חשבון ללא שם"}: חסר ${x.missing.map((m) => word(SOURCE_MISSING, m)).join(", ")}`),
+    assumptions: `הנחות ל״צפוי״: תשואה ${a.annual_return_pct}% · דמי ניהול ${a.annual_fee_pct}% · אינפלציה ${a.inflation_pct}% — ערכים שהוזנו בחשבון עצמו גוברים עליהן.`,
+    warnings: src.warnings,
   };
 }
