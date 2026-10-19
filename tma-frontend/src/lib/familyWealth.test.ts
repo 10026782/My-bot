@@ -12,7 +12,7 @@ import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, intraYearLines, timingRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, crisisTableRows, intraYearLines, timingRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -166,6 +166,17 @@ test("comparison table: baseline marked, gap signed, taken from the server", () 
   const rows = labTableRows(view);
   assert.ok(rows[0].baseline && rows[0].cells[0].includes("(בסיס)") && rows[0].cells[6] === "—");
   assert.ok(rows[1].cells[6].includes("100") && !rows[1].cells[6].startsWith("+"));
+});
+
+test("crisis table: the server's by_strategy rows, worded and signed; empty without a crisis", () => {
+  assert.equal(crisisTableRows(view).length, 0);
+  const withCrisis = { ...view, charts: { ...view.charts, growth: { ...view.charts.growth, crisis: { applied: true, by_strategy: [
+    { strategy: "global", label: "100% קרן עולמית", is_baseline: true, final_nominal: 1100, final_real: 550, final_nominal_no_crisis: 1000, delta_vs_no_crisis: 100, gap_vs_baseline: 0 },
+    { strategy: "world_em", label: "World + EM", is_baseline: false, final_nominal: 950, final_real: 470, final_nominal_no_crisis: 900, delta_vs_no_crisis: 50, gap_vs_baseline: -150 },
+  ] } } } } as unknown as PortfolioLabView;
+  const rows = crisisTableRows(withCrisis);
+  assert.ok(rows[0].cells[0].includes("(בסיס)") && rows[0].cells[4] === "—" && rows[0].cells[3].startsWith("+"));
+  assert.ok(!rows[1].cells[4].startsWith("+") && rows[1].cells[4].includes("150"));
 });
 
 test("intra-year crisis: month goes into the request only when chosen; timing rows and path are the server's numbers", () => {

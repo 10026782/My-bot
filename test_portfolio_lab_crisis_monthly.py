@@ -134,3 +134,38 @@ def test_deterministic_and_no_probability_fields():
     a = _view(crisis=_crisis(4)); b = _view(crisis=_crisis(4))
     assert a == b and "probab" not in str(a["charts"]).lower() and "success" not in str(a["charts"]).lower()
     assert not any("intra-year crash timing is not modelled" in w for w in a["warnings"])
+
+
+# ── שילוב עם #1341: crisis.by_strategy מכבד את crisis.month ──
+def test_by_strategy_honors_the_selected_month_and_matches_independent_engine_runs():
+    params = {"years": 20, "crisis": _crisis(7)}
+    rows = build_simulator_view(params)["charts"]["growth"]["crisis"]["by_strategy"]
+    assert [r["strategy"] for r in rows][0] == "global" and len(rows) == 4
+    p = normalize_params(params)
+    for r in rows:
+        shocked = simulate(_with_crisis(_scenario(p, r["strategy"]), p["crisis"]))["final"]
+        assert r["final_nominal"] == shocked["value_after_costs"] and r["final_real"] == shocked["real_value"]
+    annual = build_simulator_view({"years": 20, "crisis": _crisis()})["charts"]["growth"]["crisis"]["by_strategy"]
+    assert [round(r["final_nominal"]) for r in rows] != [round(r["final_nominal"]) for r in annual]       # חודש 7 ≠ מסלול שנתי
+    head = build_simulator_view(params)["charts"]["growth"]["crisis"]
+    assert rows[0]["final_nominal"] == head["final_nominal"] and rows[0]["gap_vs_baseline"] == 0.0
+
+
+def test_by_strategy_month_changes_with_the_month_not_only_the_depth():
+    def final(month):
+        rows = build_simulator_view({"years": 20, "crisis": _crisis(month)})["charts"]["growth"]["crisis"]["by_strategy"]
+        return {r["strategy"]: r["final_nominal"] for r in rows}
+    jan, dec = final(1), final(12)
+    assert all(jan[k] != dec[k] for k in jan)
+
+
+def test_intra_year_crisis_rejects_a_per_year_return_path():
+    with pytest.raises(ValueError):
+        crisis_asset_monthly(Asset(annual_return=(0.05, 0.06) * 5), 0.3, 2, 6, 1, 10)
+
+
+def test_existing_scenario_digest_unchanged_from_main():
+    # ערך שנמדד על origin/main (a2c0b8bf) לפני הוספת Asset.monthly_returns
+    assert build_simulator_view({})["replay_digest"] == "a993cee736cb0cc3342f105ae7266cd175ff13ba9a03b3546fb25ed5a33b53c4"
+    crisis = build_simulator_view({"years": 20, "crisis": _crisis()})
+    assert crisis["replay_digest"] == "98cae07130c512ee4eedeec30ba89883659263a315a30d685c2cf4138f788209"

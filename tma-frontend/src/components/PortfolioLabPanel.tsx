@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { postPortfolioLabSimulate } from "../api";
 import type { PortfolioLabView } from "../types";
 import {
-  CRISIS_DECLINES, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, growthLines, intraYearLines, timingRows, TIMING_TABLE_HEAD,
+  CRISIS_DECLINES, CRISIS_TABLE_HEAD, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, crisisTableRows, growthLines, intraYearLines, timingRows, TIMING_TABLE_HEAD,
   ils, labKpiCards, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
 } from "../lib/familyWealth";
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
@@ -143,6 +143,14 @@ function LabResult({ view }: { view: PortfolioLabView }) {
       )}
       <section className="fcc-section"><h2 className="fcc-section__heading">השוואת אסטרטגיות {DEMO}</h2>
         <Surface padding="compact"><LineChart model={lineChartModel(comparisonLines(view))} xLabel="שנים" title="השוואת אסטרטגיות" /></Surface></section>
+      {g.crisis.applied && crisisTableRows(view).length > 1 && (
+        <section className="fcc-section"><h2 className="fcc-section__heading">תרחיש המשבר על כל האסטרטגיות {DEMO}</h2>
+          <p className="fcc-goal__note">אותו משבר מוחל על כל אסטרטגיה בהשוואה. תוצאת מודל לפי ההנחות — לא תחזית.</p>
+          <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+            <thead><tr>{CRISIS_TABLE_HEAD.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>{crisisTableRows(view).map((r) => <tr key={r.key}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+          </table></div></Surface></section>
+      )}
       <section className="fcc-section"><h2 className="fcc-section__heading">חלוקת התוצאה {DEMO}</h2>
         <Surface padding="compact"><StackBar parts={breakdownParts(view)} formatValue={ils} formatShare={(s) => pct(s, 1)} /></Surface></section>
       <section className="fcc-section"><h2 className="fcc-section__heading">רגישות להפקדה חודשית {DEMO}</h2>

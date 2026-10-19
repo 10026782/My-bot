@@ -1,4 +1,4 @@
-import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView } from "./types";
+import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -431,6 +431,17 @@ export async function fetchFccAccounts(): Promise<FccAccountsView> {
     throw error;
   }
   return r.json() as Promise<FccAccountsView>;
+}
+
+/** Unified net worth (read-only; owner-only, same gate as the FCC). Every number is the server's. Errors carry the HTTP status. */
+export async function fetchFccNetWorth(): Promise<FccNetWorth> {
+  const r = await fetch(`${BASE}/api/fcc/net-worth`, { headers: authHeaders() });
+  if (!r.ok) {
+    const error = new Error(`API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
+  return r.json() as Promise<FccNetWorth>;
 }
 
 /** Per-account + consolidated forecast. The body carries only the assumptions typed on the screen; starting values come from the server. */

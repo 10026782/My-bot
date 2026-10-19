@@ -174,9 +174,12 @@ def crisis_asset_monthly(asset, decline, year, month, recovery_years, years_coun
 
     ההתאוששות פרוסה על 12·`recovery_years` החודשים שאחרי חודש הירידה בצמיחה חודשית קבועה g עד לנתיב המגמה:
     (1-d)·g^R = f^(R+1), כש-f הוא גורם המגמה החודשי (1+r)^(1/12) ו-R=12·n. חודשים שמחוץ לאופק נחתכים.
+    הסימולטור מעביר לכל נכס תשואה שנתית אחת (לא מסלול לפי שנה) — מסלול לפי שנה נדחה במפורש.
     סדר מול ההפקדה נקבע ע"י `deposit_timing` של התרחיש (ראו _intra_year_order_note): הפקדת סוף חודש נקנית אחרי הירידה,
     הפקדת תחילת חודש חשופה לה. הנחה מודלית, לא תחזית.
     """
+    if len(asset.annual_return) != 1:
+        raise ValueError("intra-year crisis needs a single annual return value (not a per-year path)")
     rate = asset.annual_return[0]
     f = (1 + rate) ** (1 / 12)
     start = (year - 1) * 12 + (month - 1)
@@ -272,11 +275,34 @@ def _sensitivity(p, base_final):
     return {"monthly_contribution": contribution, "duration": duration}
 
 
-def _crisis_block(p, base_scenario, base_final):
-    """משבר אחד שנבחר + תחנות הזמן של התובנות מחושבים על האסטרטגיה הראשית."""
+def _crisis_by_strategy(p, scenarios, comparison, primary_shocked_final):
+    """אותו משבר על כל האסטרטגיות בהשוואה — דטרמיניסטי, מהמנוע בלבד. הפער מול הבסיס הוא בתרחיש המשבר."""
+    crisis = p["crisis"]
+    base_name = p["strategies"][0]
+    finals = {}
+    for name, scenario in scenarios.items():
+        finals[name] = primary_shocked_final if name == base_name else _final(_with_crisis(scenario, crisis))
+    rows = []
+    for name in p["strategies"]:
+        f = finals[name]
+        no_crisis = comparison["strategies"][name]["final"]["value_after_costs"]
+        rows.append({
+            "strategy": name, "label": STRATEGY_LABELS[name], "is_baseline": name == base_name,
+            "final_nominal": f["value_after_costs"], "final_real": f["real_value"],
+            "final_nominal_no_crisis": no_crisis,
+            "delta_vs_no_crisis": f["value_after_costs"] - no_crisis,
+            "gap_vs_baseline": f["value_after_costs"] - finals[base_name]["value_after_costs"],
+        })
+    return rows
+
+
+def _crisis_block(p, scenarios, comparison):
+    """משבר אחד שנבחר מחושב על כל האסטרטגיות; הבלוק הראשי (סדרה, דלתא) נשאר של האסטרטגיה הראשית."""
     crisis = p["crisis"]
     if crisis is None:
         return {"applied": False}
+    base_scenario = scenarios[p["strategies"][0]]
+    base_final = comparison["strategies"][p["strategies"][0]]["final"]
     shocked = simulate(_with_crisis(base_scenario, crisis))
     f = shocked["final"]
     month = crisis.get("month")
@@ -289,6 +315,7 @@ def _crisis_block(p, base_scenario, base_final):
         "final_nominal": f["value_after_costs"], "final_real": f["real_value"],
         "delta_vs_no_crisis": f["value_after_costs"] - base_final["value_after_costs"],
         "series": _series(shocked),
+        "by_strategy": _crisis_by_strategy(p, scenarios, comparison, f),
         "recovery_truncated_by_horizon": truncated,
         "note": "ההתאוששות מחזירה לנתיב המגמה בלי המשבר, וההפקדה השוטפת קונה בזול בזמן הירידה — "
                 "לכן השווי הסופי עשוי לעלות בהשוואה לנתיב ללא משבר. זו תוצאה של הנחות המודל, לא תחזית.",
@@ -433,7 +460,7 @@ def build_simulator_view(params=None, tax_model=None):
         "primary_strategy": {"id": primary_name, "label": STRATEGY_LABELS[primary_name]},
         "kpis": _kpis(primary),
         "charts": {
-            "growth": {"series": _series(primary), "crisis": _crisis_block(p, base_scenario, base_final)},
+            "growth": {"series": _series(primary), "crisis": _crisis_block(p, scenarios, comparison)},
             "strategy_comparison": {name: _series(comparison["strategies"][name]) for name in p["strategies"]},
             "breakdown": _breakdown(base_final),
             "sensitivity": sensitivity,
