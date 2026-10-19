@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { postPortfolioLabSimulate } from "../api";
 import type { PortfolioLabView } from "../types";
 import {
-  CRISIS_DECLINES, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, growthLines,
-  ils, labKpiCards, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
+  CRISIS_DECLINES, CRISIS_TABLE_HEAD, DEFAULT_LAB_FORM, LAB_TABLE_HEAD, STRATEGY_OPTIONS, barChartModel, breakdownParts, comparisonLines, scenarioLines, scenarioRows, SCENARIO_TABLE_HEAD, crisisTableRows, intraYearLines, timingRows, TIMING_TABLE_HEAD, growthLines,
+  ils, labKpiCards, paceAssumptions, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
 } from "../lib/familyWealth";
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
+import { PaceTrackerPanel } from "./PaceTrackerPanel";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -83,12 +84,33 @@ export function PortfolioLabPanel() {
               </select>
             </label>
             <label>שנת המשבר<input inputMode="numeric" value={form.crisisYear} onChange={(e) => set("crisisYear", e.target.value)} /></label>
+            <label>חודש בתוך השנה
+              <select value={form.crisisMonth} onChange={(e) => set("crisisMonth", e.target.value)}>
+                <option value="">ללא (מסלול שנתי)</option>
+                {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={String(i + 1)}>חודש {i + 1}</option>)}
+              </select>
+            </label>
             <label>התאוששות
               <select value={form.crisisRecovery} onChange={(e) => set("crisisRecovery", e.target.value as LabForm["crisisRecovery"])}>
                 <option value="fast">מהירה (שנה)</option><option value="prolonged">ממושכת (3 שנים)</option>
               </select>
             </label>
           </div>
+        </fieldset>
+        <fieldset>
+          <legend>השוואת תרחישים (אופציונלי)</legend>
+          <label className="pl-check"><input type="checkbox" checked={form.compareOn} onChange={(e) => set("compareOn", e.target.checked)} />השווה לסט הנחות שני</label>
+          {form.compareOn && (
+            <>
+              <p className="fcc-goal__note">סט ב׳: מלאו רק את ההנחות שרוצים לשנות; שדה ריק = כמו בסט א׳. האופק והאסטרטגיה זהים.</p>
+              <div className="pl-grid">
+                <label>הפקדה חודשית (₪)<input inputMode="decimal" value={form.cmpMonthly} onChange={(e) => set("cmpMonthly", e.target.value)} /></label>
+                <label>תשואה שנתית ברוטו (%)<input inputMode="decimal" value={form.cmpReturnPct} onChange={(e) => set("cmpReturnPct", e.target.value)} /></label>
+                <label>דמי ניהול שנתיים (%)<input inputMode="decimal" value={form.cmpFeePct} onChange={(e) => set("cmpFeePct", e.target.value)} /></label>
+                <label>אינפלציה שנתית (%)<input inputMode="decimal" value={form.cmpInflationPct} onChange={(e) => set("cmpInflationPct", e.target.value)} /></label>
+              </div>
+            </>
+          )}
         </fieldset>
         <button type="submit" className="boss-button boss-button--primary boss-bubble--action" disabled={state.status === "loading"}>
           {state.status === "loading" ? "מחשב…" : "חשב"}
@@ -102,6 +124,7 @@ export function PortfolioLabPanel() {
                      message={state.code === 404 ? "מעבדת העתיד אינה זמינה בחשבון הזה." : state.code === 429 ? "אפשר לנסות שוב בעוד דקה." : state.message} />
       )}
       {state.status === "ok" && <LabResult view={state.view} />}
+      <PaceTrackerPanel assumptions={paceAssumptions(form)} />
     </div>
   );
 }
@@ -125,8 +148,36 @@ function LabResult({ view }: { view: PortfolioLabView }) {
             <p className="fcc-goal__note">תרחיש משבר: הפרש בשווי הסופי {ils(g.crisis.delta_vs_no_crisis)}. {g.crisis.note}
               {g.crisis.recovery_truncated_by_horizon ? " ההתאוששות נחתכה בגלל אופק ההשקעה." : ""}</p>
           )}</Surface></section>
+      {g.crisis.applied && g.crisis.intra_year && (
+        <section className="fcc-section"><h2 className="fcc-section__heading">משבר תוך-שנתי: העיתוי מול ההפקדות {DEMO}</h2>
+          <p className="fcc-goal__note">{g.crisis.intra_year.deposit_order_note} {g.crisis.intra_year.note}
+            {g.crisis.intra_year.recovery_truncated_by_horizon ? " ההתאוששות נחתכה בגלל אופק ההשקעה." : ""}</p>
+          <Surface padding="compact"><LineChart model={lineChartModel(intraYearLines(view))} xLabel="שנים" title="מסלול חודשי סביב המשבר" /></Surface>
+          <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+            <thead><tr>{TIMING_TABLE_HEAD.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>{timingRows(view).map((r) => <tr key={r.key}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+          </table></div></Surface></section>
+      )}
+      {view.charts.scenario_comparison?.applied && (
+        <section className="fcc-section"><h2 className="fcc-section__heading">השוואת תרחישים {DEMO}</h2>
+          <p className="fcc-goal__note">{view.charts.scenario_comparison.note}</p>
+          <Surface padding="compact"><ul className="pl-list">{(view.charts.scenario_comparison.changed_fields ?? []).map((f) => <li key={f.field}>{f.label}: סט א׳ {String(f.a)} · סט ב׳ {String(f.b)}</li>)}</ul></Surface>
+          <Surface padding="compact"><LineChart model={lineChartModel(scenarioLines(view))} xLabel="שנים" title="השוואת תרחישים" /></Surface>
+          <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+            <thead><tr>{SCENARIO_TABLE_HEAD.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>{scenarioRows(view).map((r) => <tr key={r.key}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+          </table></div></Surface></section>
+      )}
       <section className="fcc-section"><h2 className="fcc-section__heading">השוואת אסטרטגיות {DEMO}</h2>
         <Surface padding="compact"><LineChart model={lineChartModel(comparisonLines(view))} xLabel="שנים" title="השוואת אסטרטגיות" /></Surface></section>
+      {g.crisis.applied && crisisTableRows(view).length > 1 && (
+        <section className="fcc-section"><h2 className="fcc-section__heading">תרחיש המשבר על כל האסטרטגיות {DEMO}</h2>
+          <p className="fcc-goal__note">אותו משבר מוחל על כל אסטרטגיה בהשוואה. תוצאת מודל לפי ההנחות — לא תחזית.</p>
+          <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+            <thead><tr>{CRISIS_TABLE_HEAD.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>{crisisTableRows(view).map((r) => <tr key={r.key}>{r.cells.map((c, i) => <td key={i} className={i ? "pl-num" : ""}>{c}</td>)}</tr>)}</tbody>
+          </table></div></Surface></section>
+      )}
       <section className="fcc-section"><h2 className="fcc-section__heading">חלוקת התוצאה {DEMO}</h2>
         <Surface padding="compact"><StackBar parts={breakdownParts(view)} formatValue={ils} formatShare={(s) => pct(s, 1)} /></Surface></section>
       <section className="fcc-section"><h2 className="fcc-section__heading">רגישות להפקדה חודשית {DEMO}</h2>

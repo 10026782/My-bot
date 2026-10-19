@@ -57,9 +57,24 @@ class Asset:
     annual_fee: float = 0.0015
     buy_fee: float = 0.0
     sell_fee: float = 0.0
+    # החלפה נקודתית של תשואת חודש בודד (אינדקס מוחלט מ-0, תשואה חודשית אפקטיבית) — למשבר תוך-שנתי. ריק = ללא שינוי בתוצאות קיימות.
+    monthly_returns: tuple[tuple[int, float], ...] = ()
 
     def __post_init__(self):
         text(self.name, "asset.name")
+        pairs = tuple((p[0], p[1]) for p in self.monthly_returns) if isinstance(self.monthly_returns, (list, tuple)) and all(
+            isinstance(p, (list, tuple)) and len(p) == 2 for p in self.monthly_returns) else None
+        if pairs is None:
+            raise ValueError("monthly_returns must be pairs of (month index, monthly return)")
+        for index, rate in pairs:
+            if type(index) is not int or index < 0:
+                raise ValueError("monthly_returns index must be a non-negative integer")
+            number(rate, "monthly_returns rate")
+            if rate <= -1:
+                raise ValueError("monthly_returns rate must be > -1")
+        if len({i for i, _ in pairs}) != len(pairs):
+            raise ValueError("monthly_returns indexes must be unique")
+        object.__setattr__(self, "monthly_returns", tuple(sorted(pairs)))
         number(self.weight, "weight", 0, 1)
         for name in ("annual_fee", "buy_fee", "sell_fee"):
             number(getattr(self, name), name, 0)
@@ -128,6 +143,8 @@ class Scenario:
         for asset in assets:
             if len(asset.annual_return) not in {1, self.years}:
                 raise ValueError("annual_return needs one value or exactly years values")
+            if any(i >= self.years * 12 for i, _ in asset.monthly_returns):
+                raise ValueError("monthly_returns index must be within the horizon")
         object.__setattr__(self, "assets", assets)
         object.__setattr__(self, "sources", sources)
         object.__setattr__(self, "monthly_contribution", contributions)
