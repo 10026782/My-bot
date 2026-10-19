@@ -126,7 +126,8 @@ def test_read_only_and_only_the_pure_view_is_imported():
     # the pure edges, nothing else: the simulator view, (D1 step 7 / A1) the pure per-account forecast assembly and
     # (Goal Funding Planner step 1) the pure funding-option comparison — each reached only by an owner-gated read-only endpoint
     # and (funding sources step 1) the pure per-goal candidate list, attached to the same funding endpoint
-    assert sorted(imports) == ["portfolio_lab.accounts_forecast", "portfolio_lab.funding_plan", "portfolio_lab.funding_sources",
+    # (a module may be imported in several routes — the guard is about WHICH modules, hence set())
+    assert sorted(set(imports)) == ["portfolio_lab.accounts_forecast", "portfolio_lab.funding_plan", "portfolio_lab.funding_sources",
                                "portfolio_lab.pace_tracker", "portfolio_lab.simulator_view"]
     assert "portfolio_lab.ui" not in text                                            # the local server is never served from here
     block = text.split("# Portfolio Lab", 1)[1]
