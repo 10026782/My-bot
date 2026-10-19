@@ -279,7 +279,7 @@ def _unavailable(goal_id: str, reason: str) -> dict:
 def build_saved_plan_comparison(inputs: dict, request: dict, today: date | None = None) -> dict:
     """"מה השתנה מאז השמירה" לכל יעד שנבחר: התוכנית השמורה האחרונה (`chosen`) של הבעלים עצמו מול אותה בקשה שנשמרה, מחושבת מחדש מהנתונים
     הנוכחיים (בלי חלון תאריך). השוואה בלבד: הרשומה אינה מתעדכנת, ההחלטה אינה משתנה, ושום דבר אינו נכתב. `inputs["saved_plans"]` מגיע מ-
-    `service.saved_plans_for_funding` (טבלה מסוננת לפי הבעלים). דטרמיניסטי; שדה שחסר באחד הצדדים הוא שינוי, לא 0."""
+    `service.chosen_plan_snapshots_for_funding` (טבלה מסוננת לפי הבעלים). דטרמיניסטי; שדה שחסר באחד הצדדים הוא שינוי, לא 0."""
     today = today or date.today()
     by_goal: dict[str, list] = {}
     for sp in inputs.get("saved_plans") or []:

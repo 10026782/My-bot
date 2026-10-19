@@ -313,7 +313,7 @@ def _json_field(value):
         return None
 
 
-def saved_plans_for_funding(identity) -> list[dict]:
+def chosen_plan_snapshots_for_funding(identity) -> list[dict]:
     """Funding planner step 3: the caller's OWN ``chosen`` saved plans (owner-scoped table, read-only), reduced to what the pure comparison needs:
     goal, date computed / saved, the frozen selected options, request and result snapshots. Nothing here is written back."""
     out = []
@@ -698,7 +698,7 @@ def funding_inputs(identity, today: date | None = None) -> dict:
         "income": {k: income.get(k) for k in ("target", "actual", "remaining")} if income else None,
         "savings_plan": {k: savings.get(k) for k in ("target", "actual")} if savings else {},
         "savings_release": ov.get("savings_release"), "monthly_cash_improvement": ov.get("monthly_cash_improvement"),
-        "saved_plans": saved_plans_for_funding(identity),
+        "saved_plans": chosen_plan_snapshots_for_funding(identity),
     }
 
 
