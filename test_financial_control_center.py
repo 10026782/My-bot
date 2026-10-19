@@ -4660,6 +4660,57 @@ def test_http_planner_reads_a_debt_owed_to_me_but_does_not_count_it_as_money(mon
     assert body["goals"][0]["need"]["confirmed_existing"] == 0
 
 
+def test_http_planner_returns_suggested_sources_for_the_callers_own_data_only_and_writes_nothing(monkeypatch):
+    import copy as _copy
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)                                                 # the 12/min limiter is process-wide
+    seed_planner()
+    DB[Tables.LOANS] = DB[Tables.LOANS] + [loan("recOW", **{LF.EARLY_CLOSURE: 100000, LF.DIRECTION: "חייבים לי"})]
+    before = _copy.deepcopy(DB)
+    r = planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGW"})
+    body = r.get_json()
+    assert r.status_code == 200 and DB == before
+    sources = body["suggested_sources"]["goals"][0]
+    assert sources["goal_id"] == "recGW" and set(sources["categories"]) == set(__import__("portfolio_lab.funding_sources", fromlist=["x"]).CATEGORIES)
+    assert [row["source_id"] for row in sources["categories"]["expected_not_guaranteed"]] == ["recOW"]
+    text = str(body["suggested_sources"])
+    for hidden in ("888888", "חתונה של אבי", "777777", "החשבון של אבי", "הערה פרטית", "999999", "77777", "נכס של אבי"):
+        assert hidden not in text, hidden
+    def walk(v):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                yield k
+                yield from walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                yield from walk(x)
+    assert not {"recommended", "score", "rank", "total_available"} & set(walk(body["suggested_sources"]))
+
+
+def test_http_planner_sources_failure_is_a_generic_internal_error(monkeypatch):
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)
+    seed_planner()
+    import portfolio_lab.funding_sources as fsrc
+
+    def boom(*_a, **_k):
+        raise RuntimeError("secret 424242 detail")
+    monkeypatch.setattr(fsrc, "build_suggested_sources", boom)
+    r = planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGW"})
+    assert r.status_code == 500 and r.get_json() == {"error": "internal error"}
+
+
+def test_http_planner_sources_flag_off_and_non_owner_get_404(monkeypatch):
+    seed_planner()
+    assert planner(http(monkeypatch, ELIYAHU, flag=False), {"goal_id": "recGW"}).status_code == 404
+    assert planner(http(monkeypatch, AVI_I), {"goal_id": "recGW"}).status_code == 404
+
+
+def test_funding_save_does_not_carry_suggested_sources(monkeypatch):
+    seed_planner()
+    from core.financial_control import service
+    from portfolio_lab.funding_plan import build_funding_plan, normalize_request
+    assert "suggested_sources" not in build_funding_plan(service.funding_inputs(ELIYAHU), normalize_request({"goal_id": "recGW"}))
+
+
 # ═══ Funding planner, step 2: saving the chosen plan — draft -> review -> אשר, one owner-scoped Funding Plans row ═══
 from airtable_schema import FundingPlanFields as FPF   # noqa: E402
 
