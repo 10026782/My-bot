@@ -557,6 +557,18 @@ def accounts_view(identity, today: date | None = None) -> dict:
     return fcc_accounts.accounts_overview(mine, events, today, owner_id=actor.profile_id)
 
 
+def net_worth_view(identity, today: date | None = None) -> dict:
+    """The unified net worth card (C2): accounts + assets − own debts, broken down, read-only. Every table goes through the
+    owner-scoped policy; unlike the other tabs a read failure is NOT degraded to an empty section here (an empty loans list would
+    silently inflate the net worth), so it propagates. Nothing is written. An unresolved identity raises PersonalDataAccessDenied."""
+    from core.financial_control import net_worth as fcc_net_worth
+    today = today or date.today()
+    accounts = accounts_view(identity, today)
+    assets = policy.filter_records("Assets", _read("Assets"), identity)
+    loan_items = [fcc_loans.loan_item(r, today) for r in my_loans(identity)]
+    return fcc_net_worth.net_worth(accounts, assets, loan_items, today)
+
+
 def _raw_category(category) -> str | None:
     """The stored category key as written (select name or text), lower-cased; unlike ``_category_key`` it does not collapse to the summary families."""
     if isinstance(category, dict):

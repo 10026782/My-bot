@@ -4856,6 +4856,7 @@ def _fcc_enabled(identity=None) -> bool:
 @tma_api.route("/api/fcc/overview", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/accounts", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/accounts/forecast", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/net-worth", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/save", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/followup", methods=["OPTIONS"])
@@ -4895,6 +4896,23 @@ def fcc_accounts(identity):
         return jsonify({"error": "forbidden"}), 403
     except Exception:                                        # noqa: BLE001 — never leak internals
         logger.exception("[fcc] accounts_view failed")
+        return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/net-worth", methods=["GET"])
+@require_tma_auth
+def fcc_net_worth(identity):
+    """Unified net worth, broken down (accounts / assets / liabilities / net), read-only (C2). Same gate as /api/fcc/accounts: flag AND
+    canary AND owner, 404 (not 403) for everyone else. No write path, no financial arithmetic in the client."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    from core.financial_control import service as fcc_service
+    try:
+        return jsonify(fcc_service.net_worth_view(identity))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001 — never leak internals
+        logger.exception("[fcc] net_worth_view failed")
         return jsonify({"error": "internal error"}), 500
 
 
