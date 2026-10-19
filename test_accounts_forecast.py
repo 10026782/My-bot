@@ -337,10 +337,10 @@ def test_goal_is_not_comparable_with_a_named_reason_and_never_a_guess():
 
 def test_only_the_approved_categories_and_active_goals_take_part():
     acc = [acct("recI", 1000, liquidity="immediate")]
-    goals = [goal(f"g-{c}", c) for c in ("long_term", "emergency_fund", "investment", "savings")] + [
+    goals = [goal(f"g-{c}", c) for c in ("long_term", "emergency_fund", "investment", "savings", "future_goal")] + [
         goal("inc", "income"), goal("debt", "debt"), goal("proj", "project"), goal("old", "savings", status="done"), goal("odd", None), "junk", None]
     out = cover(acc, goals)
-    assert [g["id"] for g in out["goals"]] == ["g-long_term", "g-emergency_fund", "g-investment", "g-savings"]
+    assert [g["id"] for g in out["goals"]] == ["g-long_term", "g-emergency_fund", "g-investment", "g-savings", "g-future_goal"]
     assert out["goals_skipped"] == {"other_category": 4, "inactive": 1}
 
 
