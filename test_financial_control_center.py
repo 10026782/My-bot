@@ -4812,6 +4812,33 @@ def test_funding_save_confirm_freezes_one_snapshot_and_supersedes_only_the_goals
 CUSTOM_DATED = {"id": "gift", "type": "custom", "label": "מתנה", "amount": 5000, "available_by": "2029-01-01"}
 
 
+def test_a_plan_with_a_dated_option_can_be_saved_through_draft_and_אשר():
+    """Regression: a normalised funding request holds datetime.date values (asset sale, receivable, loan, custom, liquid_from); saving such a plan raised
+    TypeError (dates are not JSON) and the route answered "could not open the save". Dates are now stored as ISO text that normalize_request reads back."""
+    import json as _json
+    seed_saved_plans()
+    start_save(("gift",), {"goal_id": "recGW", "options": [CUSTOM_DATED]})
+    for text in ("ערוך", "הערת החלטה x", "ערוך", "לבדוק שוב עד 2027-01-31"):
+        assert conv.handle_turn(ELIYAHU, text, extractor=conv.DeterministicExtractor(), today=TODAY).state in ("ask", "review")
+    writes = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    post_ = next(w for w in writes if w["op"] == "post")
+    f = post_["fields"]
+    request_ = _json.loads(f[FPF.REQUEST_SNAPSHOT])
+    assert request_["options"][0]["available_by"] == "2029-01-01"                       # ISO text, not a date object
+    assert _json.loads(f[FPF.SELECTED_OPTIONS]) == [{"id": "gift", "type": "custom", "use_amount": None}]
+    from portfolio_lab.funding_plan import normalize_request
+    again = normalize_request(request_)                                                  # the stored request reads back unchanged
+    assert str(again["options"][0]["available_by"]) == "2029-01-01"
+
+
+def test_other_non_json_values_are_still_an_error_not_silently_stringified():
+    import pytest as _pytest
+    from core.financial_control.conversation import _compact_json
+    assert _compact_json({"d": date(2030, 1, 1)}) == '{"d":"2030-01-01"}'
+    with _pytest.raises(TypeError):
+        _compact_json({"x": object()})
+
+
 def _saved_row_from_real_save(pid="recFPreal", goal="recGW"):
     """Run the real save flow (draft -> אשר) for a plan that contains a DATED option and turn its frozen write into a stored row."""
     start_save(("gift",), {"goal_id": goal, "options": [CUSTOM_DATED]})
@@ -4820,15 +4847,6 @@ def _saved_row_from_real_save(pid="recFPreal", goal="recGW"):
     writes = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
     post_ = next(w for w in writes if w["op"] == "post")
     return {"id": pid, "fields": {**post_["fields"], FPF.FINANCIAL_OWNER: [ELI]}}
-
-
-def test_a_plan_with_a_dated_option_can_now_be_saved_and_is_stored_as_iso_text():
-    import json as _json
-    seed_saved_plans()
-    row = _saved_row_from_real_save()
-    request_ = _json.loads(row["fields"][FPF.REQUEST_SNAPSHOT])
-    assert request_["options"][0]["available_by"] == "2029-01-01"                       # was a TypeError before: dates were not serialisable
-    assert _json.loads(row["fields"][FPF.SELECTED_OPTIONS]) == [{"id": "gift", "type": "custom", "use_amount": None}]
 
 
 def test_http_planner_returns_what_changed_since_the_saved_plan_and_never_updates_it(monkeypatch):
