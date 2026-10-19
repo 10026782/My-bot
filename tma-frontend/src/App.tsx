@@ -8,6 +8,7 @@ import { FinancePulse } from "./components/FinancePulse";
 import { PersonalMode } from "./components/PersonalMode";
 import { SystemHealth } from "./components/SystemHealth";
 import { GameScreen } from "./components/GameScreen";
+import { BossCheckin } from "./components/BossCheckin";
 import { OwnerControlCenter } from "./components/OwnerControlCenter";
 import { Ventures } from "./components/Ventures";
 import { MarketingStatus } from "./components/MarketingStatus";
@@ -32,6 +33,7 @@ export default function App() {
   const [personalOpen, setPersonalOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
+  const [checkinOpen, setCheckinOpen] = useState(false);
   const [ownerControlOpen, setOwnerControlOpen] = useState(false);
   const [venturesOpen, setVenturesOpen] = useState(false);
   const [marketingOpen, setMarketingOpen] = useState(false);
@@ -90,6 +92,11 @@ export default function App() {
   // ── My Work ──────────────────────────────────────────────────────
   if (myWorkOpen) {
     return <MyWork onBack={() => setMyWorkOpen(false)} />;
+  }
+
+  // ── Boss Daily Check-in (BOSS Layer) ────────────────────────────
+  if (checkinOpen) {
+    return <BossCheckin onBack={() => setCheckinOpen(false)} />;
   }
 
   // ── Game view ───────────────────────────────────────────────────
@@ -201,6 +208,7 @@ export default function App() {
           <button type="button" onClick={() => setLeadsOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="לידים">🧲</button>
           <button type="button" onClick={() => setFinanceOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="פינאנס">💰</button>
           <button type="button" onClick={() => setPersonalOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="נכסים">🏠</button>
+          <button type="button" onClick={() => setCheckinOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="צ'ק-אין יומי">✅</button>
           <button type="button" onClick={() => setGameOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="גיים">🎮</button>
           {canShowOwnerControl && (
             <button type="button" onClick={() => setOwnerControlOpen(true)} className="hub-quick-action hub-quick-action--strong boss-bubble--action" aria-label="מרכז השליטה">מרכז</button>
