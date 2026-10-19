@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 import re
+import json
 from datetime import date
 
-from airtable_schema import FinEventFields, FinGoalFields, GoalAllocationFields, LoanFields, Tables
+from airtable_schema import FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
 from core.financial_control import assets as fcc_assets, calc, loans as fcc_loans
 
@@ -300,6 +301,32 @@ def my_obligations(identity) -> list[dict]:
 def my_funding_plans(identity) -> list[dict]:
     """Funding planner step 2: the caller's OWN saved plan snapshots (owner-scoped table). Read-only; used to supersede an earlier plan of the same goal."""
     return policy.filter_records(Tables.FUNDING_PLANS, _read(Tables.FUNDING_PLANS), identity)
+
+
+def _json_field(value):
+    """A saved snapshot cell -> parsed JSON, or None when empty / not valid JSON (the comparison then says it cannot compare)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return json.loads(value)
+    except ValueError:
+        return None
+
+
+def chosen_plan_snapshots_for_funding(identity) -> list[dict]:
+    """Funding planner step 3: the caller's OWN ``chosen`` saved plans (owner-scoped table, read-only), reduced to what the pure comparison needs:
+    goal, date computed / saved, the frozen selected options, request and result snapshots. Nothing here is written back."""
+    out = []
+    for r in my_funding_plans(identity):
+        f = r.get("fields") or {}
+        goal = f.get(FundingPlanFields.GOAL)
+        if str(_sel(f.get(FundingPlanFields.STATUS)) or "").lower() != "chosen" or not (isinstance(goal, list) and len(goal) == 1 and isinstance(goal[0], str)):
+            continue
+        out.append({"id": r.get("id"), "goal_id": goal[0], "as_of": str(f.get(FundingPlanFields.AS_OF) or "")[:10] or None,
+                    "saved_at": str(f.get(FundingPlanFields.CREATED_AT) or "")[:10] or None,
+                    "selected": _json_field(f.get(FundingPlanFields.SELECTED_OPTIONS)), "request": _json_field(f.get(FundingPlanFields.REQUEST_SNAPSHOT)),
+                    "result": _json_field(f.get(FundingPlanFields.RESULT_SNAPSHOT))})
+    return out
 
 
 def _sel(value):
@@ -671,6 +698,7 @@ def funding_inputs(identity, today: date | None = None) -> dict:
         "income": {k: income.get(k) for k in ("target", "actual", "remaining")} if income else None,
         "savings_plan": {k: savings.get(k) for k in ("target", "actual")} if savings else {},
         "savings_release": ov.get("savings_release"), "monthly_cash_improvement": ov.get("monthly_cash_improvement"),
+        "saved_plans": chosen_plan_snapshots_for_funding(identity),
     }
 
 

@@ -6,13 +6,13 @@ import { FamilyWealth, FamilyWealthCard } from "../components/FamilyWealth";
 import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
 import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView, PaceView } from "../types";
-import { AccountsPanel, ForecastResult, FundingResult, FundingSection, FundingSourcesList } from "../components/FamilyWealth";
+import { AccountsPanel, ForecastResult, FundingResult, FundingSection, FundingSourcesList, SavedPlanChanges } from "../components/FamilyWealth";
 import { ContextualComposer } from "../components/FccTabBar";
 import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, sourcesModel, isCurrentGoal, sourcesCacheKey, sourcesErrorText, SOURCES_DEBOUNCE_MS, SOURCES_EXPECTED_LABEL, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, sourcesModel, savedChangesModel, SAVED_TITLE, SAVED_NOTE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, SOURCES_DEBOUNCE_MS, SOURCES_EXPECTED_LABEL, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -901,11 +901,11 @@ test("funding sources model: 'add as option' only fills an existing option type 
 
 test("funding sources list: collapsed categories with counts, 'now' states, the add button once, and the loading / error states", () => {
   const model = sourcesModel(sourcesView, "recG1")!;
-  const html = renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "ok", data: sourcesView, goalId: "recG1" }, model, addedKeys: [], addedNote: null, onAdd: () => undefined }));
+  const html = renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "ok", data: sourcesView, goalId: "recG1", saved: null }, model, addedKeys: [], addedNote: null, onAdd: () => undefined }));
   assert.ok(html.includes("מקורות אפשריים ליעד") && html.includes("כסף נזיל עכשיו (1)") && html.includes("כסף שיהפוך לנגיש עד תאריך היעד (0)") && html.includes("הפקדות עתידיות שטרם בוצעו (1)"));
   assert.ok(!html.includes("<details open"), "categories start collapsed — the screen is not flooded");
   assert.equal((html.match(/הוסף כאפשרות/g) ?? []).length, 3);
-  const added = renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "ok", data: sourcesView, goalId: "recG1" }, model, addedKeys: ["asset_sale:recAS1"], addedNote: "נוספה אפשרות", onAdd: () => undefined }));
+  const added = renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "ok", data: sourcesView, goalId: "recG1", saved: null }, model, addedKeys: ["asset_sale:recAS1"], addedNote: "נוספה אפשרות", onAdd: () => undefined }));
   assert.equal((added.match(/הוסף כאפשרות/g) ?? []).length, 2);
   assert.ok(added.includes("נוסף לטופס") && added.includes("נוספה אפשרות"));
   assert.ok(renderToStaticMarkup(createElement(FundingSourcesList, { state: { status: "loading" }, model: null, addedKeys: [], addedNote: null, onAdd: () => undefined })).includes("טוען מקורות"));
@@ -951,4 +951,79 @@ test("funding sources: the expected figure says it is the end of the last comple
   noDeposit.goals[0].categories.liquid_now[0].expected_at_due = { ...noDeposit.goals[0].categories.liquid_now[0].expected_at_due, includes_planned_deposits: false, monthly_planned_deposit_included: null };
   const card = sourcesModel(noDeposit, "recG1")!.categories[0].cards[0];
   assert.ok(!card.rows.some((r) => r.label === "כולל הפקדה חודשית מתוכננת"), "no planned deposit entered: nothing is claimed as included");
+});
+
+
+// ── Funding sources step 3: "what changed since the saved plan" — saved beside today, comparison only, missing = "חסר", nothing computed in the page ──
+const cmpView = {
+  schema_version: "1.0", result_type: "saved_plan_comparison", as_of: "2026-10-19", note: "n",
+  goals: [
+    { goal_id: "recG1", status: "ok", plan_id: "recFP1", saved: { as_of: "2026-09-01", saved_at: "2026-09-02", plans_found: 1 }, today_reason: null, any_change: true,
+      need: [{ field: "target", saved: 250000, today: 250000, changed: false }, { field: "due", saved: "2028-06-30", today: "2028-06-30", changed: false },
+        { field: "confirmed_existing", saved: 400, today: 1000, changed: true }, { field: "gap", saved: 249600, today: null, changed: true }],
+      options: [
+        { id: "existing_balance", type: "existing_balance", present_today: true, changed: true, fields: [
+          { field: "feasible", saved: true, today: true, changed: false }, { field: "covers_amount", saved: 400, today: 1000, changed: true },
+          { field: "certainty", saved: "confirmed", today: "expected", changed: true }, { field: "available_by", saved: null, today: null, changed: false },
+          { field: "reason", saved: null, today: null, changed: false }] },
+        { id: "sale", type: "asset_sale", present_today: false, changed: true, fields: [{ field: "covers_amount", saved: 90000, today: null, changed: true }] },
+      ] },
+    { goal_id: "recG2", status: "no_saved_plan" },
+    { goal_id: "recG3", status: "unavailable", reason: "saved_request_no_longer_valid" },
+  ],
+} as unknown as Parameters<typeof savedChangesModel>[0];
+
+test("saved plan changes: saved beside today, the changed rows marked, missing is 'חסר' and a reason that is absent is '—'", () => {
+  const m = savedChangesModel(cmpView, "recG1")!;
+  assert.equal(m.status, "ok");
+  assert.ok(m.headline.startsWith(SAVED_TITLE) && m.headline.includes("יש שינויים"));
+  assert.ok(m.savedLine?.includes("02/09/2026"));
+  const need = (label: string) => m.need.find((r) => r.label === label)!;
+  assert.deepEqual([need("כסף קיים מאושר").saved, need("כסף קיים מאושר").today, need("כסף קיים מאושר").changed], ["₪400", "₪1,000", true]);
+  assert.deepEqual([need("סכום יעד").changed, need("תאריך יעד").today], [false, "30/06/2028"]);
+  assert.equal(need("פער לפי המאושר בלבד").today, "חסר");
+  const ex = m.options[0];
+  assert.equal(ex.title, "כסף קיים (הקצאות)");
+  assert.equal(ex.rows.find((r) => r.label === "ודאות")?.saved, "מאושר");
+  assert.equal(ex.rows.find((r) => r.label === "ודאות")?.today, "צפוי");
+  assert.equal(ex.rows.find((r) => r.label === "אפשרות")?.today, "אפשרי עד התאריך");
+  assert.equal(ex.rows.find((r) => r.label === "זמין עד")?.today, "חסר");
+  assert.equal(ex.rows.find((r) => r.label === "סיבה")?.today, "—");
+  const gone = m.options[1];
+  assert.ok(!gone.presentToday && gone.rows[0].today === "חסר" && gone.rows[0].saved === "₪90,000");
+});
+
+test("saved plan changes: nothing for a goal without a saved plan, a plain sentence when it cannot be compared, no advice words", () => {
+  assert.equal(savedChangesModel(cmpView, "recG2"), null);
+  assert.equal(savedChangesModel(cmpView, "recZZ"), null);
+  assert.equal(savedChangesModel(undefined, "recG1"), null);
+  const u = savedChangesModel(cmpView, "recG3")!;
+  assert.equal(u.status, "unavailable");
+  assert.ok(u.unavailable?.includes("אינו קיים") && u.need.length === 0 && u.options.length === 0);
+  const text = JSON.stringify(savedChangesModel(cmpView, "recG1"));
+  for (const bad of ["עדיף", "מומלץ", "כדאי", "הטוב ביותר", "ציון", "דירוג", "החלטה חדשה"]) assert.ok(!text.includes(bad), `no '${bad}'`);
+  assert.ok(SAVED_NOTE.includes("אינה מתעדכנת") && SAVED_NOTE.includes("השוואה בלבד"));
+});
+
+test("saved plan changes: the card is collapsed, marks what changed, and says the saved plan is not updated", () => {
+  const html = renderToStaticMarkup(createElement(SavedPlanChanges, { model: savedChangesModel(cmpView, "recG1")! }));
+  assert.ok(html.includes("<details") && !html.includes("<details open"));
+  assert.ok(html.includes("נשמר: ₪400 · היום: ₪1,000 · השתנה") && html.includes("האפשרות אינה מופיעה בחישוב של היום") && html.includes("אינה מתעדכנת"));
+  assert.ok(!html.includes("<button"), "nothing to click: a comparison has no action");
+  const un = renderToStaticMarkup(createElement(SavedPlanChanges, { model: savedChangesModel(cmpView, "recG3")! }));
+  assert.ok(un.includes("אי אפשר להשוות"));
+});
+
+test("saved plan changes: shown only after a goal is chosen, from the same single call; the page computes no difference", () => {
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("export function FundingSourcesList"));
+  assert.ok(section.includes("{hasGoal && savedModel && <SavedPlanChanges"), "gated on a chosen goal and on a saved plan");
+  assert.ok(section.includes("plan.saved_plan_comparison"), "the comparison rides on the sources answer — no extra call");
+  assert.equal((section.match(/postFccFundingPlan\(/g) ?? []).length, 2, "still only the sources call and the compare call");
+  const lib = fs.readFileSync("src/lib/familyWealth.ts", "utf8");
+  const model = lib.slice(lib.indexOf("export function savedChangesModel") - 2500);
+  assert.ok(!/\.reduce\(|Math\.|\bfetch\(|\bsaved\s*-\s*|\btoday\s*-\s*/.test(model), "the saved-plan model only words and lays out the server's values");
+  const types = fs.readFileSync("src/types.ts", "utf8");
+  assert.ok(!/delta|difference|better|worse/.test(types.slice(types.indexOf("export type SavedPlanValue"), types.indexOf("export interface FundingPlan {"))));
 });
