@@ -960,6 +960,42 @@ def start_funding_plan_save(identity, request: dict, plan: dict, selected: list,
     return _persist_new(store, ids, d)
 
 
+def start_funding_followup(identity, goal_id: str, option_type: str, *, store=None, today: date | None = None) -> TurnResult:
+    """Funding planner step 4: a follow-up TASK for one option of the goal's SAVED plan. It rides the existing ``fcc_followup`` draft
+    (review -> אשר -> Action Gateway; no new writer). The title is fixed server-side from the option type, the goal must be the caller's own
+    and its ``chosen`` saved plan must contain that option type — nothing is written here, and an identical open task is not created twice."""
+    today = today or date.today()
+    title_text = fd.FUNDING_TASK_TITLES.get(str(option_type or ""))
+    if title_text is None:
+        return TurnResult("clarify", "סוג האפשרות לא מוכר.")
+    goals = {g["id"]: g for g in service.my_goals(identity)}
+    goal = goals.get(str(goal_id or ""))
+    if goal is None:                                          # not found == not yours
+        return TurnResult("denied", policy.DENIED_MESSAGE)
+    saved = [r for r in service.my_funding_plans(identity)
+             if (r.get("fields") or {}).get(FPF.GOAL) == [goal["id"]] and str((r.get("fields") or {}).get(FPF.STATUS) or "").lower() == fd.FUNDING_PLAN_CHOSEN]
+    chosen_types = set()
+    for r in saved:
+        try:
+            chosen_types |= {o.get("type") for o in json.loads((r.get("fields") or {}).get(FPF.SELECTED_OPTIONS) or "[]") if isinstance(o, dict)}
+        except ValueError:
+            continue
+    if option_type not in chosen_types:
+        return TurnResult("clarify", "אין תוכנית שמורה ליעד הזה שכוללת את האפשרות הזו. שמרו קודם את התוכנית.")
+    goal_title = (goal["fields"].get(GF.TITLE) or "").strip() or "יעד"
+    title = f"{goal_title}: {title_text}"[:120]
+    for rec in service.open_followups(identity, goal["id"]):
+        if writer._norm(rec["fields"].get(TaskFields.NAME, "")) == writer._norm(title):
+            return TurnResult("duplicate", "משימה פתוחה זהה כבר קיימת.", fd.FCC_FOLLOWUP)
+    store, ids, stop = _open_slot(identity, store, "משימת המשך לתוכנית מימון")
+    if stop is not None:
+        return stop
+    d = _new_draft(identity, ids, fd.FCC_FOLLOWUP, DraftOperation.CREATE, fields={}, raw_text=f"intent:funding.followup#{uuid.uuid4().hex[:8]}",
+                   today=today, extra_ctx={"goal_title": goal_title})
+    d, _rej = _set_fields(d, {"title": title, "goal": goal["id"]}, strict=False)
+    return _persist_new(store, ids, d)
+
+
 def _start_source_new(identity, ids, store, today) -> TurnResult:
     """A new income SOURCE (e.g. a person or a business line) inside the owner's total income goal: it asks name, target and period,
     then the usual review -> אשר. The parent is the caller's own single root income goal — without exactly one there is nothing to attach to."""

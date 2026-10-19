@@ -12,7 +12,7 @@ import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, accountsTabModel, forecastModel, forecastParams, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
 } from "./familyWealth";
 
 const assert = {
@@ -645,6 +645,18 @@ test("funding save: plumbing — server recomputes, nothing is written before א
   assert.ok(section.includes("postFccFundingSave(state.body, selected)") && section.includes("ContextualComposer") && section.includes("FUNDING_COMPOSER"));
   assert.ok(!/\.reduce\(|Math\./.test(section), "no arithmetic in the funding component");
   assert.ok(FUNDING_COMPOSER.chips.length === 0 && !FUNDING_COMPOSER.freeText, "the draft is opened only by the save button; the review and אשר are the shared flow");
+});
+
+test("funding follow-up: a label for every option type; only type + goal go up; the draft is the shared flow", () => {
+  assert.equal(Object.keys(FUNDING_FOLLOWUP_LABELS).sort().join(), Object.keys(FUNDING_TYPE_LABELS).sort().join());
+  const fs = require("node:fs") as unknown as { readFileSync(p: string, e: string): string };
+  const api = fs.readFileSync("src/api.ts", "utf8");
+  const call = api.slice(api.indexOf("export async function postFccFundingFollowup"), api.indexOf("export async function postFccFundingPlan"));
+  assert.ok(call.includes("/api/fcc/funding/plan/followup") && call.includes("goal_id: goalId, option_type: optionType") && !call.includes("title"));
+  const comp = fs.readFileSync("src/components/FamilyWealth.tsx", "utf8");
+  const section = comp.slice(comp.indexOf("export function FundingSection"), comp.indexOf("/** Own call, own states; mounted only when the tab is opened"));
+  assert.ok(section.includes("postFccFundingFollowup(savedFor.goalId, t)") && section.includes("writer.receipt && !writer.turn"));
+  assert.ok(!/\.reduce\(|Math\./.test(section), "no arithmetic in the funding component");
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

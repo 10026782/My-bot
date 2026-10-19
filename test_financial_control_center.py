@@ -4779,3 +4779,69 @@ def test_http_funding_save_gate_validation_and_review(monkeypatch):
     assert DB == before
     for method in ("get", "put", "patch", "delete"):
         assert getattr(c, method)("/api/fcc/funding/plan/save", headers=H).status_code == 405
+
+
+# ═══ Funding planner, step 4: follow-up tasks for the options of a SAVED plan — the existing fcc_followup draft, no new writer ═══
+def seed_saved_options(types=("new_deposits", "loan")):
+    import json as _json
+    seed_saved_plans()
+    DB[Tables.FUNDING_PLANS][0]["fields"][FPF.SELECTED_OPTIONS] = _json.dumps([{"id": t, "type": t, "use_amount": None} for t in types])
+
+
+def test_funding_followup_opens_the_existing_task_draft_with_a_fixed_title_and_writes_nothing():
+    import copy as _copy
+    seed_saved_options()
+    before = _copy.deepcopy(DB)
+    r = conv.start_funding_followup(ELIYAHU, "recGW", "new_deposits", today=TODAY)
+    assert r.state == "review" and "משימת המשך" in r.message and "חתונה: להגדיר הפקדה חודשית קבועה" in r.message
+    assert DB == before
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    assert w["table"] == Tables.TASKS and w["op"] == "post"
+    assert w["fields"][TaskFields.NAME] == "חתונה: להגדיר הפקדה חודשית קבועה" and "[FCC:recGW]" in w["fields"][TaskFields.DESCRIPTION]
+    assert w["fields"][TaskFields.OWNER] == [ELI]
+
+
+def test_funding_followup_only_for_options_of_the_callers_saved_plan_and_own_goals():
+    seed_saved_options(("new_deposits",))
+    assert conv.start_funding_followup(ELIYAHU, "recGW", "loan", today=TODAY).state == "clarify"            # not in the saved plan
+    assert conv.start_funding_followup(ELIYAHU, "recGW", "nonsense", today=TODAY).state == "clarify"
+    assert conv.start_funding_followup(ELIYAHU, "recGX", "new_deposits", today=TODAY).state == "denied"     # another owner's goal
+    DB[Tables.FUNDING_PLANS][0]["fields"][FPF.STATUS] = "superseded"
+    assert conv.start_funding_followup(ELIYAHU, "recGW", "new_deposits", today=TODAY).state == "clarify"    # only the chosen plan counts
+    DB[Tables.FUNDING_PLANS][0]["fields"][FPF.STATUS] = "chosen"
+    DB[Tables.FUNDING_PLANS][0]["fields"][FPF.SELECTED_OPTIONS] = "not json"
+    assert conv.start_funding_followup(ELIYAHU, "recGW", "new_deposits", today=TODAY).state == "clarify"    # a corrupt cell grants nothing
+
+
+def test_funding_followup_does_not_duplicate_an_open_identical_task():
+    seed_saved_options()
+    DB[Tables.TASKS] = [{"id": "recT1", "fields": {TaskFields.NAME: "חתונה: להגדיר הפקדה חודשית קבועה", TaskFields.STATUS: "ממתין",
+                                                     TaskFields.DESCRIPTION: "[FCC:recGW] x", TaskFields.OWNER: [ELI]}}]
+    assert conv.start_funding_followup(ELIYAHU, "recGW", "new_deposits", today=TODAY).state == "duplicate"
+    assert conv.start_funding_followup(ELIYAHU, "recGW", "loan", today=TODAY).state == "review"
+
+
+def test_http_funding_followup_gate_validation_and_review(monkeypatch):
+    import copy as _copy
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)
+    seed_saved_options()
+
+    def ask(c, body=None, raw=None):
+        import json as _json
+        return c.post("/api/fcc/funding/plan/followup", data=raw if raw is not None else _json.dumps(body if body is not None else {}),
+                      headers={**H, "Content-Type": "application/json"})
+    good = {"goal_id": "recGW", "option_type": "new_deposits"}
+    assert ask(http(monkeypatch, ELIYAHU, flag=False), good).status_code == 404
+    assert ask(http(monkeypatch, AVI_I), good).status_code == 404
+    assert http(monkeypatch, ELIYAHU).options("/api/fcc/funding/plan/followup").status_code == 204
+    c = http(monkeypatch, ELIYAHU)
+    for bad in ({}, {"goal_id": "recGW"}, {**good, "title": "free text"}, {"goal_id": 5, "option_type": "loan"}):
+        assert ask(c, bad).status_code == 400, bad
+    assert ask(c, raw="nope").status_code == 400
+    before = _copy.deepcopy(DB)
+    r = ask(c, good)
+    assert r.status_code == 200 and r.get_json()["state"] == "review" and "להגדיר הפקדה חודשית קבועה" in r.get_json()["message"]
+    assert DB == before
+    assert ask(c, {"goal_id": "recGX", "option_type": "new_deposits"}).status_code == 403
+    for method in ("get", "put", "patch", "delete"):
+        assert getattr(c, method)("/api/fcc/funding/plan/followup", headers=H).status_code == 405

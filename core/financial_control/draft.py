@@ -63,6 +63,17 @@ ASSET_SOLD_STATUS = "נמכר"                 # live Assets.Status choice
 FCC_ACCOUNT_BALANCE = "fcc_account_balance"  # a dated balance snapshot of ONE of the owner's accounts (Kind=balance_snapshot): a reported FACT
 FCC_ACCOUNT_DEPOSIT = "fcc_account_deposit"  # a deposit into ONE account (Kind=deposit), optionally counted in the savings history of a goal
 ACCOUNT_VERIFICATIONS = ("self_reported", "statement", "bank_or_fund_confirmed")   # the live Financial Progress Events."Verification" choices
+# Funding planner step 4: the follow-up task of a SAVED plan's option. Titles are fixed here (never client text) and ride the existing fcc_followup draft.
+FUNDING_TASK_TITLES = {
+    "existing_balance": "לאשר מול הגוף המנהל שהכסף הקיים נגיש בתאריך היעד",
+    "new_deposits": "להגדיר הפקדה חודשית קבועה",
+    "asset_sale": "לברר שווי נטו ומועד מכירה לנכס",
+    "loan": "לבקש הצעת הלוואה ולאמת את התנאים",
+    "work_income": "להגדיר מקור הכנסה ייעודי",
+    "receivable_collection": "להסדיר בכתב מועד גבייה לחוב",
+    "obligations_reduction": "לבדוק צמצום התחייבות",
+    "custom": "לבצע את האפשרות שנבחרה בתוכנית",
+}
 FCC_FUNDING_PLAN = "fcc_funding_plan"      # funding planner step 2: a SAVED snapshot of the plan the owner chose for ONE goal (the numbers are server-built, never typed)
 FUNDING_PLAN_CHOSEN, FUNDING_PLAN_SUPERSEDED = "chosen", "superseded"   # the live Funding Plans.Status choices used by the code
 FCC_ENTITIES = (FCC_FUNDING_PLAN, FCC_ACCOUNT_BALANCE, FCC_ACCOUNT_DEPOSIT, FCC_GOAL, FCC_GOAL_STATUS, FCC_WEEK_SURPLUS, FCC_EVENT, FCC_FOLLOWUP, FCC_OBLIGATION, FCC_LOAN_CLOSE, FCC_LOAN_BALANCE, FCC_LOAN_PAYMENT, FCC_LOAN_RATE, FCC_LOAN_TERM, FCC_LOAN_ORIGINAL, FCC_LOAN_NEW,

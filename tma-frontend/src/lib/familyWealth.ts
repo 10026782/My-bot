@@ -423,6 +423,18 @@ export const comparisonLines = (view: PortfolioLabView) =>
 
 // ── Goal Funding Planner (step 1b): typed options -> POST /api/fcc/funding/plan -> a neutral comparison. Presentation only: the page converts typed
 // text to numbers once on submit; every figure it shows (amounts, dates, certainty, costs) is the server's. No ranking, no "best", no total of "available". ──
+/** Step 4: the label of the follow-up task offered per saved option type (display only — the task title itself is fixed on the server). */
+export const FUNDING_FOLLOWUP_LABELS: Record<FundingOptionType, string> = {
+  existing_balance: "אישור נגישות הכסף הקיים",
+  new_deposits: "הגדרת הפקדה חודשית קבועה",
+  asset_sale: "בירור שווי נטו ומועד מכירה",
+  loan: "בקשת הצעת הלוואה",
+  work_income: "הגדרת מקור הכנסה ייעודי",
+  receivable_collection: "הסדרת מועד גבייה בכתב",
+  obligations_reduction: "בדיקת צמצום התחייבות",
+  custom: "ביצוע האפשרות שנבחרה",
+};
+export const FUNDING_FOLLOWUP_NOTE = "משימת המשך נפתחת כטיוטה בלבד — תוצג סקירה ורק אחרי ״אשר ורשום״ היא נוצרת. לא נוצרת פעולה אחרת.";
 export const FUNDING_SAVE_NOTE = "שמירה היא רישום של החלטה בלבד: היא לא מזיזה כסף, לא פותחת הלוואה או חשבון, לא מוכרת נכס ולא משנה הקצאות. השרת יחשב את התוכנית מחדש ויציג סקירה לפני כל רישום.";
 export const FUNDING_TITLE = "מימון יעד";
 export const FUNDING_INTRO = "בוחרים יעד, מוסיפים דרכים אפשריות למימון, והמערכת משווה ביניהן. זו השוואה בלבד — לא המלצה ולא בחירה עבורך, וכל המספרים מחושבים בשרת.";

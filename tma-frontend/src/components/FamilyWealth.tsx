@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast, postFccFundingPlan, postFccFundingSave } from "../api";
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingPlan, FundingRequestBody } from "../types";
+import { fetchFccAccounts, fetchFccOverview, postFccAccountsForecast, postFccFundingFollowup, postFccFundingPlan, postFccFundingSave } from "../api";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
 import { ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
 import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccTabs";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
-import { FUNDING_SAVE_NOTE } from "../lib/familyWealth";
+import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
 import { KpiCard } from "./FccKpiCard";
 import { PortfolioLabPanel } from "./PortfolioLabPanel";
 import { PageHeader } from "./ui/PageHeader";
@@ -220,6 +220,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
   const counter = useRef(0);
   const latest = useRef(0);
   const [selected, setSelected] = useState<string[]>([]);
+  const [savedFor, setSavedFor] = useState<{ goalId: string; types: FundingOptionType[] } | null>(null);
   const writer = useFccWriter(null, "funding", () => undefined);
   useEffect(() => { fetchFccAccounts().then((v) => setAccounts(v.accounts.filter((a) => a.status !== "closed"))).catch(() => setAccounts([])); }, []);
   if (overview.status === "loading") return <ScreenState state="loading" title="טוען את היעדים" message="אוסף את התמונה העדכנית…" />;
@@ -250,6 +251,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
     const goalId = form.goalId, names = titles();
     setState({ status: "loading" });
     setSelected([]);
+    setSavedFor(null);
     writer.dismiss();
     postFccFundingPlan(parsed.body)
       .then((plan) => { if (id === latest.current) setState({ status: "ok", plan, goalId, titles: names, body: parsed.body }); })
@@ -330,7 +332,19 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
         <div className="fcc-stack">
           <p className="fcc-goal__note" dir="auto">{FUNDING_SAVE_NOTE}</p>
           <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={selected.length === 0 || writer.busy || writer.turn != null}
-                  onClick={() => void writer.open(() => postFccFundingSave(state.body, selected))}>שמירת תוכנית</button>
+                  onClick={() => { setSavedFor({ goalId: state.goalId, types: (model?.options ?? []).filter((o) => selected.includes(o.id)).map((o) => o.type) }); void writer.open(() => postFccFundingSave(state.body, selected)); }}>שמירת תוכנית</button>
+          {savedFor && writer.receipt && !writer.turn && (
+            <Surface padding="compact" aria-label="משימות המשך">
+              <h3 className="fcc-section__heading">משימות המשך לתוכנית</h3>
+              <p className="fcc-goal__note" dir="auto">{FUNDING_FOLLOWUP_NOTE}</p>
+              <div className="fcc-quick__choices">
+                {Array.from(new Set(savedFor.types)).map((t) => (
+                  <button key={t} type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={writer.busy}
+                          onClick={() => void writer.open(() => postFccFundingFollowup(savedFor.goalId, t))}>{FUNDING_FOLLOWUP_LABELS[t]}</button>
+                ))}
+              </div>
+            </Surface>
+          )}
           {(writer.turn || writer.receipt || writer.error) && (
             <ContextualComposer config={FUNDING_COMPOSER} turn={writer.turn} receipt={writer.receipt} error={writer.error} busy={writer.busy}
                                 targets={{ goals: [], loans: [], assets: [] }}
