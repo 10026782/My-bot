@@ -4711,6 +4711,44 @@ def test_funding_save_does_not_carry_suggested_sources(monkeypatch):
     assert "suggested_sources" not in build_funding_plan(service.funding_inputs(ELIYAHU), normalize_request({"goal_id": "recGW"}))
 
 
+def seed_empty_method_goals():
+    seed_planner()
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [
+        goal("recGF", "חתונה", ELI, 250000, **{GF.CATEGORY: "future_goal", GF.END_DATE: "2028-06-30", GF.CALC_METHOD: None}),
+        goal("recGI", "הכנסה", ELI, 9000, **{GF.CATEGORY: "income", GF.CALC_METHOD: None})]
+    DB[Tables.FIN_EVENTS] = DB[Tables.FIN_EVENTS] + [event("recEF", "recGF", ELI, 5000, day="2026-10-02")]
+
+
+def test_funding_inputs_treat_an_empty_calc_method_as_cumulative_only_for_cumulative_categories():
+    seed_empty_method_goals()
+    rows = {r["goal_id"]: r for r in service.funding_inputs(ELIYAHU, TODAY)["goal_rows"]}
+    assert rows["recGF"]["method"] == "cumulative" and rows["recGF"]["net"] == 5000
+    assert rows["recGI"]["method"] == "period_sum"                                  # income keeps its own default
+    plain = {r["goal_id"]: r for r in service.overview(ELIYAHU, TODAY)["goals"]}
+    assert plain["recGF"]["method"] == "period_sum"                                 # every other screen is unchanged
+
+
+def test_http_planner_does_not_break_on_an_empty_calc_method_and_counts_progress_as_a_pot(monkeypatch):
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)
+    seed_empty_method_goals()
+    r = planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGF"})
+    body = r.get_json()
+    assert r.status_code == 200 and body["goals"][0]["need"]["progress_events_actual"] == 5000
+    assert body["suggested_sources"]["goals"][0]["goal_id"] == "recGF"
+
+
+def test_empty_calc_method_is_cumulative_for_funding_by_category_incl_hebrew_names_and_not_for_the_rest():
+    seed_planner()
+    cats = {"recK1": "future_goal", "recK2": "debt", "recK3": "חוב", "recK4": "debt_repaid", "recK5": "emergency_fund", "recK6": "קרן חירום",
+            "recK7": "long_term", "recK8": "investment", "recK9": "other", "recKA": None, "recKB": "savings", "recKC": "income"}
+    DB[Tables.FIN_GOALS] = DB[Tables.FIN_GOALS] + [goal(gid, "יעד", ELI, 1000, **{GF.CATEGORY: c, GF.CALC_METHOD: None}) for gid, c in cats.items()]
+    rows = {r["goal_id"]: r["method"] for r in service.funding_inputs(ELIYAHU, TODAY)["goal_rows"]}
+    for gid in ("recK1", "recK2", "recK3", "recK4", "recK5", "recK6"):
+        assert rows[gid] == "cumulative", (gid, cats[gid])
+    for gid in ("recK7", "recK8", "recK9", "recKA", "recKB", "recKC"):
+        assert rows[gid] == "period_sum", (gid, cats[gid])                          # everything else keeps calc.compute_goal's default
+
+
 # ═══ Funding planner, step 2: saving the chosen plan — draft -> review -> אשר, one owner-scoped Funding Plans row ═══
 from airtable_schema import FundingPlanFields as FPF   # noqa: E402
 

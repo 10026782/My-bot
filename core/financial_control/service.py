@@ -87,6 +87,13 @@ def _category_key(category) -> str | None:
     return None
 
 
+def _cumulative_by_default(category) -> bool:
+    """The categories draft.INFERENCE gives a cumulative Calc Method: future_goal by its raw key; debt / emergency_fund also by their Hebrew and legacy
+    names (SUMMARY_CATEGORIES: "חוב", "debt_repaid", "קרן חירום"). Every other category (long_term / investment / savings / income / other / empty)
+    with an empty method stays period_sum, exactly as on every other screen."""
+    return _raw_category(category) == "future_goal" or _category_key(category) in ("debt", "emergency_fund")
+
+
 def classify_row(row: dict, next_action: dict | None) -> dict:
     """Decide the goal family. No amount target + not a numeric category => project/milestone:
     amounts are blanked (no ₪0 / dead "—" cells) and the card carries the next action instead."""
@@ -653,7 +660,7 @@ def funding_inputs(identity, today: date | None = None) -> dict:
     every read goes through the owner-scoped readers above, so an unresolved identity raises PersonalDataAccessDenied and another person's
     goals, accounts, loans, assets or obligations never reach the planner."""
     today = today or date.today()
-    ov = overview(identity, today)
+    ov = overview(identity, today, default_method=calc.CUMULATIVE)       # a goal saved without a Calc Method is a cumulative pot for funding (never period_sum)
     summary = ov.get("summary") or {}
     income, savings = summary.get("income") or {}, summary.get("savings") or {}
     return {
@@ -667,8 +674,9 @@ def funding_inputs(identity, today: date | None = None) -> dict:
     }
 
 
-def overview(identity, today: date | None = None) -> dict:
-    """Private screen payload: goals with derived numbers + monthly cash improvement."""
+def overview(identity, today: date | None = None, default_method: str | None = None) -> dict:
+    """Private screen payload: goals with derived numbers + monthly cash improvement. ``default_method`` (funding planner only) is the Calc Method
+    assumed for a goal whose own field is empty; None keeps ``calc.compute_goal``'s default (period_sum) for every other screen."""
     today = today or date.today()
     goals = my_goals(identity)
     events = my_events(identity)
@@ -696,6 +704,8 @@ def overview(identity, today: date | None = None) -> dict:
             continue
         gf = goal.get("fields") or {}
         # parent goal = its own events + every descendant source's events, each event once (roll-up)
+        if default_method and not gf.get(FinGoalFields.CALC_METHOD) and _cumulative_by_default(gf.get(FinGoalFields.CATEGORY)):
+            goal = {**goal, "fields": {**gf, FinGoalFields.CALC_METHOD: default_method}}
         row = calc.compute_goal(goal, _rolled_up(goal["id"], own, parent_of), today, FinGoalFields)
         row["category"] = gf.get(FinGoalFields.CATEGORY)
         row["priority"] = gf.get(FinGoalFields.PRIORITY)
