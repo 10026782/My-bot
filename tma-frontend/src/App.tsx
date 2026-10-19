@@ -3,14 +3,11 @@ import { fetchProjects, fetchTmaAuth } from "./api";
 import { GlobalKpis } from "./components/GlobalKpis";
 import { ProjectCard } from "./components/ProjectCard";
 import { LeadPipeline } from "./components/LeadPipeline";
-import { ActivityFeed } from "./components/ActivityFeed";
 import { Approvals } from "./components/Approvals";
 import { FinancePulse } from "./components/FinancePulse";
 import { PersonalMode } from "./components/PersonalMode";
 import { SystemHealth } from "./components/SystemHealth";
 import { GameScreen } from "./components/GameScreen";
-import { BossCheckin } from "./components/BossCheckin";
-import { BossDigest } from "./components/BossDigest";
 import { OwnerControlCenter } from "./components/OwnerControlCenter";
 import { Ventures } from "./components/Ventures";
 import { MarketingStatus } from "./components/MarketingStatus";
@@ -30,14 +27,11 @@ type HubState =
 export default function App() {
   const [hub, setHub] = useState<HubState>({ status: "loading" });
   const [selected, setSelected] = useState<TProjectCard | null>(null);
-  const [activityOpen, setActivityOpen] = useState(false);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [financeOpen, setFinanceOpen] = useState(false);
   const [personalOpen, setPersonalOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
-  const [checkinOpen, setCheckinOpen] = useState(false);
-  const [digestOpen,  setDigestOpen]  = useState(false);
   const [ownerControlOpen, setOwnerControlOpen] = useState(false);
   const [venturesOpen, setVenturesOpen] = useState(false);
   const [marketingOpen, setMarketingOpen] = useState(false);
@@ -98,16 +92,6 @@ export default function App() {
     return <MyWork onBack={() => setMyWorkOpen(false)} />;
   }
 
-  // ── Boss Daily Check-in ─────────────────────────────────────────
-  if (checkinOpen) {
-    return <BossCheckin onBack={() => setCheckinOpen(false)} />;
-  }
-
-  // ── Boss Daily Digest ───────────────────────────────────────────
-  if (digestOpen) {
-    return <BossDigest onBack={() => setDigestOpen(false)} />;
-  }
-
   // ── Game view ───────────────────────────────────────────────────
   if (gameOpen) {
     return <GameScreen onBack={() => setGameOpen(false)} />;
@@ -152,11 +136,6 @@ export default function App() {
   // ── Approvals view ──────────────────────────────────────────────
   if (approvalsOpen) {
     return <Approvals onBack={() => setApprovalsOpen(false)} />;
-  }
-
-  // ── Activity Feed view ──────────────────────────────────────────
-  if (activityOpen) {
-    return <ActivityFeed onBack={() => setActivityOpen(false)} />;
   }
 
   // ── Lead Pipeline view ──────────────────────────────────────────
@@ -220,12 +199,8 @@ export default function App() {
 
         <div className="hub-quick-actions" role="toolbar" aria-label="ניווט מהיר">
           <button type="button" onClick={() => setLeadsOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="לידים">🧲</button>
-          <button type="button" onClick={() => setApprovalsOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="אישורים">✅</button>
           <button type="button" onClick={() => setFinanceOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="פינאנס">💰</button>
           <button type="button" onClick={() => setPersonalOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="נכסים">🏠</button>
-          <button type="button" onClick={() => setActivityOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="פעילות">📋</button>
-          <button type="button" onClick={() => setDigestOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="Daily Digest">📊</button>
-          <button type="button" onClick={() => setCheckinOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="צ'ק-אין יומי">✅</button>
           <button type="button" onClick={() => setGameOpen(true)} className="hub-quick-action boss-bubble--action" aria-label="גיים">🎮</button>
           {canShowOwnerControl && (
             <button type="button" onClick={() => setOwnerControlOpen(true)} className="hub-quick-action hub-quick-action--strong boss-bubble--action" aria-label="מרכז השליטה">מרכז</button>
