@@ -103,8 +103,8 @@ def normalize_params(params):
         components[name] = pct / 100
     crisis = params.get("crisis")
     if crisis is not None:
-        if not isinstance(crisis, dict) or set(crisis) - {"decline_pct", "year", "recovery"}:
-            raise ValueError("crisis must contain decline_pct, year, recovery")
+        if not isinstance(crisis, dict) or set(crisis) - {"decline_pct", "year", "recovery", "month"}:
+            raise ValueError("crisis must contain decline_pct, year, recovery and optionally month")
         if crisis.get("decline_pct") not in CRISIS_DECLINES:
             raise ValueError("crisis decline_pct must be one of 10/20/30/40/50")
         if crisis.get("recovery") not in RECOVERY_YEARS:
@@ -112,7 +112,12 @@ def normalize_params(params):
         year = crisis.get("year")
         if isinstance(year, bool) or not isinstance(year, int) or not 1 <= year <= years:
             raise ValueError("crisis year must be an integer within the horizon")
+        month = crisis.get("month")
+        if month is not None and (isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12):
+            raise ValueError("crisis month must be an integer from 1 to 12")
         crisis = {"decline_pct": crisis["decline_pct"], "year": year, "recovery": crisis["recovery"]}
+        if month is not None:
+            crisis["month"] = month
     return {
         "initial": _num(params, "initial", 0),
         "monthly_contribution": _num(params, "monthly_contribution", 0),
@@ -164,11 +169,40 @@ def crisis_asset(asset, decline, year, recovery_years, years_count):
     return replace(asset, annual_return=tuple(path))
 
 
+def crisis_asset_monthly(asset, decline, year, month, recovery_years, years_count):
+    """משבר תוך-שנתי: בחודש `month` (1-12) של שנה `year` הנכס יורד בבת אחת ב-`decline` (במקום צמיחת המגמה של אותו חודש).
+
+    ההתאוששות פרוסה על 12·`recovery_years` החודשים שאחרי חודש הירידה בצמיחה חודשית קבועה g עד לנתיב המגמה:
+    (1-d)·g^R = f^(R+1), כש-f הוא גורם המגמה החודשי (1+r)^(1/12) ו-R=12·n. חודשים שמחוץ לאופק נחתכים.
+    סדר מול ההפקדה נקבע ע"י `deposit_timing` של התרחיש (ראו _intra_year_order_note): הפקדת סוף חודש נקנית אחרי הירידה,
+    הפקדת תחילת חודש חשופה לה. הנחה מודלית, לא תחזית.
+    """
+    rate = asset.annual_return[0]
+    f = (1 + rate) ** (1 / 12)
+    start = (year - 1) * 12 + (month - 1)
+    total = years_count * 12
+    months = 12 * recovery_years
+    g = ((f ** (months + 1)) / (1 - decline)) ** (1 / months)
+    overrides = [(start, -decline)] + [(start + j, g - 1) for j in range(1, months + 1) if start + j < total]
+    return replace(asset, monthly_returns=tuple(overrides))
+
+
 def _with_crisis(scenario, crisis):
     decline = crisis["decline_pct"] / 100
     n = RECOVERY_YEARS[crisis["recovery"]]
-    assets = tuple(crisis_asset(a, decline, crisis["year"], n, scenario.years) for a in scenario.assets)
+    if crisis.get("month") is not None:
+        assets = tuple(crisis_asset_monthly(a, decline, crisis["year"], crisis["month"], n, scenario.years) for a in scenario.assets)
+    else:
+        assets = tuple(crisis_asset(a, decline, crisis["year"], n, scenario.years) for a in scenario.assets)
     return replace(scenario, assets=assets)
+
+
+def _intra_year_order_note(timing, month):
+    if timing == "begin":
+        return (f"הפקדות בתחילת החודש: ההפקדה של חודש {month} נעשית לפני הירידה ולכן נחשפת אליה; "
+                "ההפקדות מהחודש שאחריו נקנות במחיר שאחרי הירידה.")
+    return (f"הפקדות בסוף החודש: ההפקדה של חודש {month} נעשית אחרי הירידה ולכן נקנית במחיר הנמוך; "
+            "רק היתרה שנצברה עד אז נחשפת לירידה.")
 
 
 def _final(scenario):
@@ -245,8 +279,12 @@ def _crisis_block(p, base_scenario, base_final):
         return {"applied": False}
     shocked = simulate(_with_crisis(base_scenario, crisis))
     f = shocked["final"]
-    truncated = crisis["year"] - 1 + RECOVERY_YEARS[crisis["recovery"]] >= p["years"]
-    return {
+    month = crisis.get("month")
+    if month is None:
+        truncated = crisis["year"] - 1 + RECOVERY_YEARS[crisis["recovery"]] >= p["years"]
+    else:
+        truncated = (crisis["year"] - 1) * 12 + (month - 1) + 12 * RECOVERY_YEARS[crisis["recovery"]] >= p["years"] * 12
+    block = {
         "applied": True, "settings": crisis,
         "final_nominal": f["value_after_costs"], "final_real": f["real_value"],
         "delta_vs_no_crisis": f["value_after_costs"] - base_final["value_after_costs"],
@@ -254,6 +292,38 @@ def _crisis_block(p, base_scenario, base_final):
         "recovery_truncated_by_horizon": truncated,
         "note": "ההתאוששות מחזירה לנתיב המגמה בלי המשבר, וההפקדה השוטפת קונה בזול בזמן הירידה — "
                 "לכן השווי הסופי עשוי לעלות בהשוואה לנתיב ללא משבר. זו תוצאה של הנחות המודל, לא תחזית.",
+    }
+    if month is not None:
+        block["intra_year"] = _intra_year_block(p, base_scenario, crisis, base_final, truncated)
+    return block
+
+
+def _intra_year_block(p, scenario, crisis, base_final, truncated):
+    """משבר תוך-שנתי: מסלול חודשי סביב המשבר + אותו משבר בכל אחד מ-12 חודשי השנה (איך העיתוי מול ההפקדות משנה את התוצאה)."""
+    month = crisis["month"]
+    n = RECOVERY_YEARS[crisis["recovery"]]
+    total = p["years"] * 12
+    start = (crisis["year"] - 1) * 12 + (month - 1)
+    first = max(0, start - 12)
+    last = min(total - 1, start + 12 * n + 12)
+    plain = simulate(scenario, monthly=True)["monthly"]
+    shocked = simulate(_with_crisis(scenario, crisis), monthly=True)["monthly"]
+    path = [{"month_index": i, "t_years": (i + 1) / 12, "year": i // 12 + 1, "month": i % 12 + 1,
+             "nominal_no_crisis": plain[i]["value_after_costs"], "nominal_crisis": shocked[i]["value_after_costs"],
+             "real_no_crisis": plain[i]["real_value"], "real_crisis": shocked[i]["real_value"],
+             "contributions": plain[i]["contributions"]} for i in range(first, last + 1)]
+    by_month = []
+    for m in range(1, 13):
+        alt = {**crisis, "month": m}
+        f = _final(_with_crisis(scenario, alt))
+        by_month.append({"month": m, "is_selected": m == month, "final_nominal": f["value_after_costs"], "final_real": f["real_value"],
+                         "delta_vs_no_crisis": f["value_after_costs"] - base_final["value_after_costs"]})
+    return {
+        "month": month, "year": crisis["year"], "recovery_months": 12 * n, "recovery_truncated_by_horizon": truncated,
+        "monthly_path": path, "timing_by_month": by_month,
+        "deposit_order_note": _intra_year_order_note(p["deposit_timing"], month),
+        "note": ("הירידה מוחלת בבת אחת על חודש אחד; ההתאוששות פרוסה בצמיחה חודשית קבועה עד לנתיב המגמה. "
+                 "ההפקדות ממשיכות כרגיל, ולכן עיתוי המשבר מול ההפקדות (לא רק עומק הירידה) משנה את התוצאה. תוצאת מודל, לא תחזית."),
     }
 
 
@@ -322,8 +392,9 @@ def _assumption_list(p):
     ]
     if p["crisis"]:
         c = p["crisis"]
+        month_text = "" if c.get("month") is None else f", בחודש {c['month']} של השנה (ירידה בבת אחת)"
         items.append({"id": "crisis", "text": (
-            f"תרחיש משבר: ירידה של {c['decline_pct']}% בשנה {c['year']}, התאוששות {'מהירה (שנה)' if c['recovery'] == 'fast' else 'ממושכת (3 שנים)'} "
+            f"תרחיש משבר: ירידה של {c['decline_pct']}% בשנה {c['year']}{month_text}, התאוששות {'מהירה (שנה)' if c['recovery'] == 'fast' else 'ממושכת (3 שנים)'} "
             "לנתיב המגמה; תרחיש מודלי בלבד"), "assumption_based": True})
     return items
 
@@ -349,6 +420,10 @@ def build_simulator_view(params=None, tax_model=None):
             "costs": f["costs_paid"], "gap_vs_baseline": gaps[name]["after_costs"],
         })
     warnings = list(primary["warnings"])
+    if (p["crisis"] or {}).get("month") is not None:
+        smoothed = "Annual returns are smoothed across 12 months; intra-year crash timing is not modelled."
+        warnings = [w for w in warnings if w != smoothed]
+        warnings.append("Only the selected crisis month is modelled as a one-month drop; all other months follow the annual smoothing. Model scenario, not a forecast.")
     if p["strategies"] != ["global"] and len(p["strategies"]) > 1:
         warnings.append("השוואת אסטרטגיות מבוססת על הנחות תשואה להמחשה; אינה דירוג של קרנות אמיתיות.")
     return {

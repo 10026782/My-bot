@@ -57,6 +57,7 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None, *, monthly: 
     rows = []
     month_rows = []
     gross_known = all(a.return_basis == "gross" for a in assets)
+    overrides = [dict(a.monthly_returns) for a in assets]
 
     def deposit(amount, purchased_on):
         nonlocal contributed, real_contributed, buy_cost
@@ -88,6 +89,8 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None, *, monthly: 
         for i, asset in enumerate(assets):
             rate = _year(asset.annual_return, year)
             factor = (1 + rate) ** (1 / 12) if asset.return_convention == "effective_annual" else 1 + rate / 12
+            if month in overrides[i]:
+                factor = 1 + overrides[i][month]
             retained = (1 - asset.annual_fee) ** (1 / 12)
             gross_factors.append(factor)
             net_factors.append(factor * retained)
@@ -177,6 +180,9 @@ def simulate(scenario: Scenario, tax_model: TaxModel | None = None, *, monthly: 
             "geometric_mean_effective_annual": math.expm1(math.fsum(math.log1p(r) for r in effective) / scenario.years),
         }
     inputs = asdict(scenario)
+    for asset_inputs in inputs["assets"]:
+        if not asset_inputs["monthly_returns"]:
+            asset_inputs.pop("monthly_returns")    # שדה חדש מופיע רק כשנעשה בו שימוש — digest של תרחישים קיימים לא משתנה
     if not scenario.monthly_fixed_cost:
         inputs.pop("monthly_fixed_cost")           # שדה חדש מופיע רק כשנעשה בו שימוש — digest של תרחישים קיימים לא משתנה
     result = {

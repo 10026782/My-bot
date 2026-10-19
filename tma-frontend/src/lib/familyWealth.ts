@@ -288,6 +288,7 @@ export interface LabForm {
   initial: string; monthly: string; years: string; returnPct: string; feePct: string; inflationPct: string;
   timing: "begin" | "end"; indexed: boolean; baseline: string; strategies: string[];
   crisisOn: boolean; crisisDecline: string; crisisYear: string; crisisRecovery: "fast" | "prolonged";
+  crisisMonth: string; // "" = annual crisis (the whole-year path); "1".."12" = a one-month drop inside the year
 }
 export const STRATEGY_OPTIONS: { key: string; label: string }[] = [
   { key: "global", label: "100% קרן עולמית" }, { key: "world_em", label: "World + EM" },
@@ -297,7 +298,7 @@ export const CRISIS_DECLINES = [10, 20, 30, 40, 50];
 export const DEFAULT_LAB_FORM: LabForm = {
   initial: "0", monthly: "8000", years: "30", returnPct: "8", feePct: "0.15", inflationPct: "2",
   timing: "end", indexed: false, baseline: "global", strategies: STRATEGY_OPTIONS.map((s) => s.key),
-  crisisOn: false, crisisDecline: "30", crisisYear: "5", crisisRecovery: "fast",
+  crisisOn: false, crisisDecline: "30", crisisYear: "5", crisisRecovery: "fast", crisisMonth: "",
 };
 
 /** Typed text -> request body. Blank / non-numeric input is an error shown on the form, never silently 0. */
@@ -322,6 +323,7 @@ export function labParams(form: LabForm): { ok: true; params: PortfolioLabParams
     const year = num(form.crisisYear, "שנת המשבר");
     if (typeof year === "string") return { ok: false, error: year };
     params.crisis = { decline_pct: Number(form.crisisDecline), year, recovery: form.crisisRecovery };
+    if (form.crisisMonth !== "") params.crisis.month = Number(form.crisisMonth);
   }
   return { ok: true, params };
 }
@@ -352,6 +354,22 @@ export function labTableRows(view: PortfolioLabView): { key: string; cells: stri
     cells: [r.is_baseline ? `${r.label} (בסיס)` : r.label, ils(r.final_nominal), ils(r.final_real), ils(r.contributions), ils(r.net_profit), ils(r.costs),
             r.is_baseline ? "—" : `${r.gap_vs_baseline > 0 ? "+" : ""}${ils(r.gap_vs_baseline)}`],
   }));
+}
+/** Intra-year crisis (server's numbers): the same crisis in each month of the year, and the monthly path around it. Empty for an annual crisis. */
+export const TIMING_TABLE_HEAD = ["חודש המשבר", "שווי סופי נומינלי", "שווי סופי ריאלי", "הפרש מול ללא משבר"];
+export function timingRows(view: PortfolioLabView): { key: number; selected: boolean; cells: string[] }[] {
+  const rows = view.charts.growth.crisis.intra_year?.timing_by_month ?? [];
+  return rows.map((r) => ({
+    key: r.month, selected: r.is_selected,
+    cells: [r.is_selected ? `${r.month} (נבחר)` : String(r.month), ils(r.final_nominal), ils(r.final_real), `${r.delta_vs_no_crisis > 0 ? "+" : ""}${ils(r.delta_vs_no_crisis)}`],
+  }));
+}
+export function intraYearLines(view: PortfolioLabView) {
+  const path = view.charts.growth.crisis.intra_year?.monthly_path ?? [];
+  return [
+    { name: "ללא משבר", pts: path.map((r): [number, number] => [r.t_years, r.nominal_no_crisis]) },
+    { name: "עם משבר (תרחיש)", pts: path.map((r): [number, number] => [r.t_years, r.nominal_crisis]), color: CHART_COLORS[4] },
+  ];
 }
 export const LAB_TABLE_HEAD = ["אסטרטגיה", "שווי סופי", "שווי ריאלי", "סך הפקדות", "רווח נטו", "עלויות", "פער מול בסיס"];
 
