@@ -4438,6 +4438,80 @@ def test_the_hand_off_to_the_gateway_carries_our_audit_action_into_the_audit_tra
     assert d["audit_action"] == dep_audit["account.deposit"]
 
 
+# ═══ account plan: the planned monthly deposit / expected return of ONE account (one field, never a free text) ═══
+def test_account_plan_intents_are_registered_and_patch_exactly_one_field_of_the_chosen_account():
+    for iid, ent, name, field in (("account.update_planned_deposit", "fcc_account_plan_deposit", "planned_deposit", ACF.PLANNED_MONTHLY_DEPOSIT),
+                                  ("account.update_expected_return", "fcc_account_plan_return", "expected_return", ACF.EXPECTED_RETURN)):
+        assert fd.INTENTS[iid]["entity"] == ent and fd.INTENTS[iid]["target"] == "account" and fd.INTENTS[iid]["target_required"]
+        assert [f.field_name for f in fd.FCC_CONTRACTS[ent].fields] == [name] and fd.FCC_CONTRACTS[ent].fields[0].airtable_field == field
+        assert fd._FIELD_UPDATES[ent][0] == Tables.FIN_ACCOUNTS
+
+
+def test_planned_deposit_flow_shows_old_to_new_and_writes_one_patch_on_the_account():
+    seed_account_writes()
+    DB[Tables.FIN_ACCOUNTS][0]["fields"][ACF.PLANNED_MONTHLY_DEPOSIT] = 1000
+    r = intent("account.update_planned_deposit", "recAE")
+    assert r.state == "ask" and r.awaiting == "planned_deposit" and "קרן השתלמות" in r.message and "היום רשום: ₪1,000" in r.message
+    r = say("1,059.56", planned_deposit=1059.56)
+    assert r.state == "review" and "עדכון הפקדה חודשית מתוכננת" in r.message and "₪1,059.56" in r.message and "קרן השתלמות" in r.message
+    assert "לא הוראת קבע מאומתת" in r.message and r.snapshot is None
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w == {"op": "patch", "table": Tables.FIN_ACCOUNTS, "record_id": "recAE", "fields": {ACF.PLANNED_MONTHLY_DEPOSIT: 1059.56},
+                 "audit_action": "fcc_account_plan", "audit_details": "recAE:planned_deposit"}
+
+
+def test_expected_return_flow_writes_one_patch_and_says_real_vs_nominal_and_zero_deposit_is_allowed():
+    seed_account_writes()
+    r = intent("account.update_expected_return", "recAE")
+    assert r.state == "ask" and r.awaiting == "expected_return" and "עוד לא הוגדר" in r.message
+    r = say("5.5", expected_return=5.5)
+    assert r.state == "review" and "5.5%" in r.message and "ריאלית" in r.message and "נומינלית" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["op"] == "patch" and w["table"] == Tables.FIN_ACCOUNTS and w["fields"] == {ACF.EXPECTED_RETURN: 5.5} and w["audit_details"] == "recAE:expected_return"
+    conv.complete_execution(ELIYAHU)
+    intent("account.update_planned_deposit", "recAE")
+    assert say("0", planned_deposit=0).state == "review"                      # "no deposit planned" (Harel) is a real answer, not a missing one
+
+
+def test_account_plan_refuses_negative_or_out_of_range_numbers_and_keeps_the_draft():
+    seed_account_writes()
+    intent("account.update_expected_return", "recAE")
+    for bad in ("-1", "51", "60"):
+        r = say(bad, expected_return=float(bad))
+        assert r.state in ("ask", "unrelated") and r.awaiting == "expected_return", bad
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    intent("account.update_planned_deposit", "recAE")
+    assert say("10000001", planned_deposit=10000001).awaiting == "planned_deposit"
+
+
+def test_account_plan_is_owner_only_and_never_reaches_another_persons_or_a_closed_account():
+    seed_account_writes()
+    for iid in ("account.update_planned_deposit", "account.update_expected_return"):
+        assert intent(iid, "recAA").state == "denied" and intent(iid).state == "clarify" and intent(iid, "recAC").state == "info"
+        assert intent(iid, "recGE").state == "denied" and intent(iid, "recAE", who=AVI_I).state == "denied"
+
+
+def test_account_plan_write_table_is_in_the_tma_allow_list_and_the_policy_still_guards_the_owner():
+    from tools.approval_actions import _TMA_WRITE_ALLOWED_TABLES
+    assert Tables.FIN_ACCOUNTS in _TMA_WRITE_ALLOWED_TABLES
+    assert policy.policy_for(Tables.FIN_ACCOUNTS).owner_field == ACF.FINANCIAL_OWNER
+
+
+def test_the_executor_re_checks_the_owner_of_record_before_patching_an_account(monkeypatch):
+    """The stored approval is never trusted: at execution the account's own Financial Owner is read again (owner ok, partner denied)."""
+    from tools import airtable_read_adapter, approval_actions
+    seed_account_writes()
+    monkeypatch.setattr(airtable_read_adapter, "get_record_fields",
+                        lambda table, rid: next(r["fields"] for r in DB[table] if r["id"] == rid))
+    patch = {ACF.PLANNED_MONTHLY_DEPOSIT: 1500.0}
+    fields, denied = approval_actions._enforce_personal_data_policy("patch", Tables.FIN_ACCOUNTS, "recAE", dict(patch), ELIYAHU)
+    assert denied is None and fields == patch
+    _, denied = approval_actions._enforce_personal_data_policy("patch", Tables.FIN_ACCOUNTS, "recAA", dict(patch), ELIYAHU)      # Avi's account
+    assert denied is not None
+    _, denied = approval_actions._enforce_personal_data_policy("patch", Tables.FIN_ACCOUNTS, "recAE", dict(patch), AVI_I)         # the partner
+    assert denied is not None
+
+
 def test_the_same_frozen_write_proposed_many_times_reaches_the_real_gateway_as_one_contract():
     """The other half of the concurrency answer: the draft layer may hand the SAME frozen write to several racers, and the REAL ActionGateway
     (in-memory ledger) collapses identical requests into one contract — one pending approval, so at most one execution."""

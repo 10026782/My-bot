@@ -429,7 +429,8 @@ test("forecast is not requested until asked, and only the assumptions are posted
 
 // ── D1 step 8: account writes run in the shared contextual composer ──
 test("accounts composer: two chips that only name an intent + an account; no chip creates an account; the FCC tabs are unchanged", () => {
-  assert.equal(ACCOUNTS_COMPOSER.chips.map((c) => c.intent).join(), "account.update_balance,account.deposit");
+  assert.equal(ACCOUNTS_COMPOSER.chips.map((c) => c.intent).join(), "account.update_balance,account.deposit,account.update_planned_deposit,account.update_expected_return");
+  assert.ok(ACCOUNTS_COMPOSER.chips.every((c) => c.pick === "account"), "every account action starts from ONE chosen account");
   assert.ok(ACCOUNTS_COMPOSER.chips.every((c) => c.pick === "account") && !ACCOUNTS_COMPOSER.freeText);
   assert.ok(!ACCOUNTS_COMPOSER.chips.some((c) => /create|new/.test(c.intent)));
   assert.equal(Object.keys(COMPOSER).join(), "monthly,loans,assets");

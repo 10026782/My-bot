@@ -169,7 +169,7 @@ def _render(d: BusinessDraft) -> TurnResult:
     msg = fd.prompt_for(d.entity_type, awaiting, d.fields, goal_title, str(d.source_context.get("direction") or "")) if awaiting else "מה לעדכן?"
     if awaiting and d.entity_type in (fd.FCC_LOAN_BALANCE, fd.FCC_LOAN_PAYMENT, fd.FCC_LOAN_RATE, fd.FCC_LOAN_TERM, fd.FCC_LOAN_ORIGINAL, fd.FCC_ASSET_VALUE, fd.FCC_ASSET_MORTGAGE,
                                       fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW, fd.FCC_PRIME_CHANGE,
-                                      fd.FCC_ACCOUNT_BALANCE) and d.source_context.get("review_note"):
+                                      fd.FCC_ACCOUNT_BALANCE, *fd.ACCOUNT_PLAN_ENTITIES) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
 
@@ -851,7 +851,7 @@ def _choices_for(d: BusinessDraft, goals: list[dict]) -> list[dict]:
     return cands
 
 
-_ACCOUNT_ENTITIES = (fd.FCC_ACCOUNT_BALANCE, fd.FCC_ACCOUNT_DEPOSIT)
+_ACCOUNT_ENTITIES = (fd.FCC_ACCOUNT_BALANCE, fd.FCC_ACCOUNT_DEPOSIT)       # dated events; the plan entities below are single-field patches of the account
 
 
 def _intent_token() -> str:
@@ -875,9 +875,15 @@ def _start_account_intent(identity, ids, entity, entity_id, store, today) -> Tur
         return TurnResult("info", "החשבון סגור — אין מה לעדכן בו.")
     name = f.get(AF_ACCOUNT.NAME) or "החשבון"
     extra = {"record_id": account["id"], "account_id": account["id"], "account_name": name, "goal_title": name, "subject_noun": "חשבון"}
-    intent = "account.update_balance" if entity == fd.FCC_ACCOUNT_BALANCE else "account.deposit"
+    intent = {fd.FCC_ACCOUNT_BALANCE: "account.update_balance", fd.FCC_ACCOUNT_PLAN_DEPOSIT: "account.update_planned_deposit",
+              fd.FCC_ACCOUNT_PLAN_RETURN: "account.update_expected_return"}.get(entity, "account.deposit")
     raw = f"intent:{intent}#{_intent_token()}"
-    if entity == fd.FCC_ACCOUNT_BALANCE:
+    if entity in fd.ACCOUNT_PLAN_ENTITIES:                       # one field of the account, shown old -> new; the plan is the owner's, nothing is verified
+        planned = entity == fd.FCC_ACCOUNT_PLAN_DEPOSIT
+        stored = calc._num(f.get(AF_ACCOUNT.PLANNED_MONTHLY_DEPOSIT if planned else AF_ACCOUNT.EXPECTED_RETURN))
+        shown = fd.display_value("planned_deposit" if planned else "expected_return", stored) if stored is not None else None
+        extra["review_note"] = (f"היום רשום: {shown}" if shown else "עוד לא הוגדר לחשבון הזה")
+    elif entity == fd.FCC_ACCOUNT_BALANCE:
         row = next((r for r in service.accounts_view(identity, today)["accounts"] if r["id"] == account["id"]), None)
         bal = (row or {}).get("balance")
         extra["review_note"] = (f"היתרה האחרונה: {fd.display_value('balance', bal['value'])} (נכון ל-{fd.display_value('occurred_at', bal['as_of'])})"
@@ -889,8 +895,9 @@ def _start_account_intent(identity, ids, entity, entity_id, store, today) -> Tur
         if len(dests) == 1:
             extra.update(ask_count=True, count_goal_id=dests[0]["id"], count_goal_title=(dests[0].get("fields") or {}).get(GF.TITLE, ""))
     d = _new_draft(identity, ids, entity, DraftOperation.CREATE, fields={}, raw_text=raw, today=today, extra_ctx=extra)
-    d, _rej = _set_fields(d, {"occurred_at": today.isoformat()}, strict=False)
-    d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
+    if entity not in fd.ACCOUNT_PLAN_ENTITIES:
+        d, _rej = _set_fields(d, {"occurred_at": today.isoformat()}, strict=False)
+        d = replace(d, source_context={**d.source_context, "inferred": ["occurred_at"]})
     return _persist_new(store, ids, d)
 
 
@@ -1294,6 +1301,10 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
     d2, rejected = _set_fields(d, updates, strict=False) if updates else (d, [])
     if d.entity_type in _ACCOUNT_ENTITIES and str(d2.fields.get("occurred_at") or "") > today.isoformat():
         return replace_result(_render(d), message=f"התאריך לא יכול להיות עתידי.\n{_render(d).message}")      # a future snapshot would be ignored by the read model
+    for entity, name, cap, unit in ((fd.FCC_ACCOUNT_PLAN_DEPOSIT, "planned_deposit", fd.ACCOUNT_PLAN_MAX_DEPOSIT, "₪"),
+                                    (fd.FCC_ACCOUNT_PLAN_RETURN, "expected_return", fd.ACCOUNT_PLAN_MAX_RETURN, "%")):
+        if d.entity_type == entity and d2.fields.get(name) not in (None, "") and float(d2.fields[name]) > cap:       # the forecast would silently ignore it
+            return replace_result(_render(d), message=f"הערך גדול מדי — עד {cap:,}{unit}.\n{_render(d).message}")
     if d.entity_type == fd.FCC_PRIME_CHANGE and d2.fields.get("delta") not in (None, ""):
         step = float(d2.fields["delta"])
         if step == 0 or abs(step) > fcc_loans.PRIME_MAX_STEP:                    # no change, or a typo (more than 5 points at once)

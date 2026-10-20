@@ -111,6 +111,8 @@ export const ACCOUNTS_COMPOSER: ComposerConfig = {
   chips: [
     { intent: "account.update_balance", label: "עדכון יתרה", pick: "account" },
     { intent: "account.deposit", label: "הפקדה לחשבון", pick: "account" },
+    { intent: "account.update_planned_deposit", label: "הפקדה חודשית מתוכננת", pick: "account" },
+    { intent: "account.update_expected_return", label: "תשואה צפויה", pick: "account" },
   ],
   freeText: false,
   hint: "בחרו פעולה — המערכת תשאל רק מה שחסר ותציג סקירה לפני כל רישום. החשבונות עצמם מוגדרים ידנית.",
