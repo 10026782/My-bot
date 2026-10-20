@@ -963,7 +963,15 @@ export interface FundingWindowOption {
 }
 export interface FundingWindowEnd { due: string | null; reason: string | null; gap: number | null; months_to_due: number | null; options: FundingWindowOption[] }
 export interface FundingWindow { margin_months: number; early: FundingWindowEnd; late: FundingWindowEnd; note: string }
-export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null; window?: FundingWindow | null }
+/** "How much to put aside each month to reach the gap by the date" — the server's engine call, read only (REQUIRED_MONTHLY_DEPOSIT_CARD_SPEC). `amount` null = no figure (see `reason`). */
+export interface RequiredMonthlyCard {
+  amount: number | null; reason: string | null; gap?: number | null; months?: number; due?: string | null; total_deposits?: number | null;
+  assumptions?: { annual_return_pct: number; fee_pct: number; deposit_fee_pct: number; inflation_pct: number; sources: Record<string, "owner" | "default"> };
+  basis?: "assumptions"; sensitivity?: { label: "low" | "base" | "high"; annual_return_pct: number; amount: number | null }[];
+  scenarios?: { basis: "after_confirmed" | "after_confirmed_and_expected" | "after_all_selected"; remaining: number; amount: number | null }[];
+  planned_monthly_savings?: number | null; note?: string;
+}
+export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null; window?: FundingWindow | null; required_monthly_card?: RequiredMonthlyCard }
 /** Funding sources step 2: candidate sources for one goal, in five SEPARATE categories (server numbers; no totals, no ranking). Missing = null. */
 export type FundingSourceCategory = "liquid_now" | "liquid_by_due_date" | "conditional_on_action" | "expected_not_guaranteed" | "future_deposits";
 export type FundingLiquidityState = "accessible" | "conditional" | "locked";
