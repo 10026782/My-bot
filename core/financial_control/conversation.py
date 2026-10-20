@@ -17,7 +17,8 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field, replace
-from datetime import date
+import calendar
+from datetime import date, timedelta
 from typing import Any
 
 from commercial_completion import CompletionError
@@ -58,7 +59,7 @@ class DeterministicExtractor:
         return None                                           # no free-text start: drafts open from chips / card actions
 
     def fill(self, text: str, awaiting: str | None, fields: dict, entity: str, today: date) -> dict:
-        return _parse_edit(entity, text) if awaiting is None else {}
+        return _parse_edit(entity, text, today) if awaiting is None else {}
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────
@@ -303,7 +304,47 @@ _NUMERIC_FIELDS = ("delta", "target_amount", "amount", "saving", "balance", "pay
 _DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date", "review_by")
 
 
-def _deterministic_answer(field_name: str, text: str):
+_UNIT_MONTHS = {"חודש": 1, "חודשים": 1, "חודשי": 1, "חודשיים": 1, "שנה": 12, "שנים": 12, "שנתיים": 12}
+_UNIT_DAYS = {"יום": 1, "ימים": 1, "יומיים": 1, "שבוע": 7, "שבועות": 7, "שבועיים": 7}
+_WORD_NUMS = {"חצי": 0.5, "אחד": 1, "אחת": 1, "שתי": 2, "שני": 2, "שניים": 2, "שלוש": 3, "שלושה": 3, "ארבע": 4, "ארבעה": 4, "חמש": 5, "חמישה": 5,
+              "שש": 6, "שישה": 6, "שבע": 7, "שבעה": 7, "שמונה": 8, "תשע": 9, "תשעה": 9, "עשר": 10, "עשרה": 10}
+_REL_DATE = re.compile(r"^(?:בעוד|עוד|תוך)?\s*(?:(\d+(?:[.,]\d+)?|[א-ת]+)\s+)?(חודשיים|חודשים|חודשי|חודש|שנתיים|שנים|שנה|יומיים|ימים|יום|שבועיים|שבועות|שבוע)(\s+וחצי)?$")
+
+
+def _add_months(day: date, months: int) -> date:
+    y, m = divmod(day.month - 1 + months, 12)
+    year, month = day.year + y, m + 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
+def _relative_date(text: str, today: date) -> str | None:
+    """A span from today ("24 חודשים", "שנתיים", "600 ימים", "בעוד 3.5 שנים", "שנה וחצי") as an ISO date; None when it is not one."""
+    t = " ".join((text or "").split())
+    m = _REL_DATE.match(t)
+    if not m:
+        return None
+    qty, unit, half = m.group(1), m.group(2), m.group(3)
+    if qty is None:
+        n = 2.0 if unit in ("חודשיים", "שנתיים", "יומיים", "שבועיים") else 1.0
+    else:
+        try:
+            n = float(qty.replace(",", "."))
+        except ValueError:
+            n = float(_WORD_NUMS.get(qty, 0))
+        if unit in ("חודשיים", "שנתיים", "יומיים", "שבועיים"):
+            return None                                       # "3 שנתיים" is not a span
+    n += 0.5 if half else 0.0
+    if n <= 0:
+        return None
+    try:
+        if unit in _UNIT_MONTHS:
+            return _add_months(today, round(n * _UNIT_MONTHS[unit])).isoformat()
+        return (today + timedelta(days=round(n * _UNIT_DAYS[unit]))).isoformat()
+    except (OverflowError, ValueError):
+        return None
+
+
+def _deterministic_answer(field_name: str, text: str, today: date | None = None):
     """Every answer is parsed by rule: a number / percent, a date, one of the presented choices, or — for the free-text fields in
     ``_VERBATIM_FIELDS`` (titles, names, notes, a next step) — the user's own words exactly as written. Nothing is guessed."""
     t = text.strip()
@@ -321,15 +362,19 @@ def _deterministic_answer(field_name: str, text: str):
             return cleaned
         except ValueError:
             return None
-    if field_name in _DATE_FIELDS and any(ch.isdigit() for ch in t):
-        return t
+    if field_name in _DATE_FIELDS:
+        span = _relative_date(t, today or date.today())
+        if span:
+            return span
+        if any(ch.isdigit() for ch in t):
+            return t
     return None
 
 
 _EDIT_ALIASES = {fd.FCC_GOAL: {"סכום יעד": "target_amount", "שם היעד": "title", "שם": "title"}}   # what the owner naturally types
 
 
-def _parse_edit(entity: str, text: str) -> dict:
+def _parse_edit(entity: str, text: str, today: date | None = None) -> dict:
     """An edit is "<field label> <value>" (the labels the review shows: "סכום יעד 80000", "קטגוריה חיסכון", "שם נטפליקס").
     Numbers, dates and presented choices are parsed by rule, free text is taken as written. Anything else -> {} (not understood)."""
     contract = fd.FCC_CONTRACTS.get(entity)
@@ -347,7 +392,7 @@ def _parse_edit(entity: str, text: str) -> dict:
                 return {}
             if name in _VERBATIM_FIELDS:
                 return {name: (rest if name == "note" else _one_line(rest))[:_VERBATIM_FIELDS[name]]}
-            value = _deterministic_answer(name, rest)
+            value = _deterministic_answer(name, rest, today)
             return {name: value} if value is not None else {}
     return {}
 
@@ -1162,7 +1207,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
     step = _goal_update_step(d)
     if step == "field":                                      # which field of the goal to change: one of the presented buttons
         key = goal_id if goal_id in GOAL_FIELDS else next((k for k, t in GOAL_FIELDS.items() if t == text.strip()), None)
-        typed = _parse_edit(d.entity_type, text) if key is None else {}          # "סכום 18000" / "18000" skips the field question
+        typed = _parse_edit(d.entity_type, text, today) if key is None else {}          # "סכום 18000" / "18000" skips the field question
         if typed:
             try:
                 d2, _rej = _set_fields(d, typed, strict=True)
@@ -1177,7 +1222,7 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
         return _render(_save(store, ids, replace(d, source_context={**rest, "edit_field": key}), expected=d.idempotency_key))
     if step == "value":                                      # its new value, parsed by rule; a bad value re-asks the same field
         name = str(d.source_context["edit_field"])
-        value = _deterministic_answer(name, text)
+        value = _deterministic_answer(name, text, today)
         try:
             d2, _rej = _set_fields(d, {name: value}, strict=True) if value is not None else (d, [name])
         except _VALIDATION_ERRORS:
@@ -1269,13 +1314,13 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                 if (owner_m.group(1) or "").strip() in fd.STEP_OWNERS:
                     updates["step_owner"] = owner_m.group(1).strip()
             elif due_m:
-                value = _deterministic_answer("due_date", due_m.group(1) or "")
+                value = _deterministic_answer("due_date", due_m.group(1) or "", today)
                 if value is not None:
                     updates["due_date"] = value
             else:
                 updates["step"] = _one_line(t)[:_VERBATIM_FIELDS["step"]]
         if awaiting:
-            value = _deterministic_answer(awaiting, text)
+            value = _deterministic_answer(awaiting, text, today)
             if value is not None:
                 try:
                     _set_fields(d, {awaiting: value}, strict=True)   # valid number / ISO date / presented choice

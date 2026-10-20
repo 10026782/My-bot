@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingLiquidityState, FundingPlan, FundingRequestBody, FundingSourceCategory, FundingSourceItem, FundingSources, SavedPlanComparison, SavedPlanPair, SavedPlanValue, FundingWindow, FundingWindowEnd, FundingWindowOption, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingLiquidityState, FundingPlan, FundingRequestBody, FundingSourceCategory, FundingSourceItem, FundingSources, SavedPlanComparison, SavedPlanPair, SavedPlanValue, FundingWindow, FundingWindowEnd, FundingWindowOption, RequiredMonthlyCard, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -731,6 +731,7 @@ const SERVER_NOTES_HE: [string, string][] = [
   ["coverage is split by certainty", "הכיסוי מפוצל לפי ודאות ואינו מסוכם ל״כסף זמין״ אחד."],
   ["net proceeds as entered", "תמורה נטו כפי שהוזנה; סכום המכירה שברשומת הנכס הוא ברוטו ואינו בשימוש."],
   ["collected money is not income", "כסף שנגבה אינו הכנסה ואינו התחייבות שלך."],
+  ["new money only (existing balances", "כסף חדש בלבד (יתרות קיימות אינן נספרות); לא מחולק בין יעדים; החיסכון המתוכנן הוא התכנית הקבועה של המשפחה, מוצג לצדו ואינו מקוזז."],
   ["new money only", "כסף חדש בלבד (היתרה הקיימת בחשבון אינה נספרת)."],
   ["annual rate", "ריבית חודשית לפי הריבית השנתית, החזר קבוע; ללא הצמדה, עמלות או עלות פירעון מוקדם."],
   ["a commitment is not an actual expense", "התחייבות אינה הוצאה בפועל; החיסכון פוטנציאלי עד שהבעלים מאשר."],
@@ -745,9 +746,49 @@ export interface FundingOptionCard {
   windowRows: { label: string; value: string }[];
 }
 export interface FundingPlanModel {
-  needTitle: string; needRows: { label: string; value: string }[]; needReason: string | null; windowNote: string | null; options: FundingOptionCard[];
+  needTitle: string; needRows: { label: string; value: string }[]; needReason: string | null; requiredCard: RequiredCardModel | null; windowNote: string | null; options: FundingOptionCard[];
   plan: { rows: { label: string; value: string }[]; allocations: string[]; note: string } | null;
   portfolio: { rows: { label: string; value: string }[] } | null; warnings: string[];
+}
+export interface RequiredCardModel { title: string; headline: string; subtitle: string | null; rows: { label: string; value: string }[]; sensitivity: { label: string; value: string }[]; scenarios: { label: string; value: string }[]; note: string }
+const CARD_TITLE = "הפקדה חודשית נדרשת";
+const CARD_REASONS: Record<string, string> = {
+  unreachable_under_assumptions: "לא ניתן להשיג בהנחות האלה — אפשר לשנות תאריך, תשואה או סכום.",
+  no_gap: "אין פער: היעד כבר מכוסה בכסף המאושר.",
+};
+const CARD_SOURCE: Record<string, string> = { owner: "הנחת בעלים", default: "ברירת מחדל מערכתית" };
+const CARD_SCENARIOS: Record<string, string> = {
+  after_confirmed: "אחרי המאושר בלבד", after_confirmed_and_expected: "אחרי מאושר וצפוי", after_all_selected: "אחרי כל התוכנית (כולל לא ודאי)",
+};
+const pctText = (v: number) => `${v}%`;
+
+/** The server's number for "how much to deposit each month", with every assumption and its source. Display only: nothing is computed here. */
+export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredCardModel | null {
+  if (!c) return null;
+  if (c.amount == null) {
+    return { title: CARD_TITLE, headline: "אין סכום להצגה", subtitle: c.reason ? (CARD_REASONS[c.reason] ?? word(NEED_REASONS, c.reason)) : null, rows: [], sensitivity: [], scenarios: [], note: "" };
+  }
+  const a = c.assumptions;
+  const rows: { label: string; value: string }[] = [];
+  if (a) {
+    rows.push(
+      { label: "תשואה שנתית", value: `${pctText(a.annual_return_pct)} · ${CARD_SOURCE[a.sources.annual_return_pct] ?? "—"}` },
+      { label: "דמי ניהול שנתיים", value: `${pctText(a.fee_pct)} · ${CARD_SOURCE[a.sources.annual_fee_pct] ?? "—"}` },
+      { label: "אינפלציה", value: `${pctText(a.inflation_pct)} · ${CARD_SOURCE[a.sources.inflation_pct] ?? "—"}` },
+    );
+  }
+  if (c.total_deposits != null) rows.push({ label: "סך ההפקדות עד התאריך", value: money(c.total_deposits) });
+  rows.push({ label: "חיסכון חודשי מתוכנן במשפחה (התכנית הקבועה; לא מחולק בין יעדים)", value: c.planned_monthly_savings == null ? "לא ידוע" : money(c.planned_monthly_savings) });
+  const SENS: Record<string, string> = { low: "תשואה נמוכה", base: "תשואה לפי ההנחה", high: "תשואה גבוהה" };
+  return {
+    title: CARD_TITLE,
+    headline: `${money(c.amount)} לחודש`,
+    subtitle: `כדי להגיע ל־${optMoney(c.gap)} עד ${dmy(c.due ?? null)} · ${c.months ?? "—"} חודשי הפקדה · כסף חדש בלבד`,
+    rows,
+    sensitivity: (c.sensitivity ?? []).map((s) => ({ label: `${SENS[s.label] ?? s.label} (${pctText(s.annual_return_pct)})`, value: s.amount == null ? "לא ניתן להשגה" : money(s.amount) })),
+    scenarios: (c.scenarios ?? []).map((s) => ({ label: `${CARD_SCENARIOS[s.basis] ?? s.basis}: נותרו ${money(s.remaining)}`, value: s.amount == null ? "לא ניתן להשגה" : `${money(s.amount)} לחודש` })),
+    note: c.note ? serverNote(c.note) : "",
+  };
 }
 const dmy = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "—");
 const optMoney = (v: number | null | undefined) => (v == null ? "—" : money(v));
@@ -823,7 +864,7 @@ export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<s
     ...(pf.over_committed.length ? [{ label: "מקור שהוקצה ליותר מסכומו", value: pf.over_committed.map((id) => titles[id] ?? id).join(", ") }] : []),
   ] } : null;
   return {
-    needTitle: n.title || "מטרה ללא שם", needRows, needReason: n.reason ? word(NEED_REASONS, n.reason) : null,
+    needTitle: n.title || "מטרה ללא שם", needRows, needReason: n.reason ? word(NEED_REASONS, n.reason) : null, requiredCard: requiredCardModel(g.required_monthly_card),
     windowNote: g.window ? FUNDING_WINDOW_NOTE : null,
     options: g.options.map((o) => optionCard(o, titles, g.window)), plan: planModel, portfolio, warnings: plan.warnings,
   };

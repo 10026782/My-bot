@@ -883,6 +883,20 @@ def test_unrelated_text_is_not_saved_as_amount_and_draft_is_untouched(mem_store)
     assert run(ex2, ELIYAHU, "מה מצב הלידים שלי?").awaiting == "target_amount"
 
 
+# a span ("24 חודשים", "שנתיים", "600 ימים") is a valid end date: counted from today, stored as ISO, shown in the review
+def test_end_date_accepts_spans_from_today(mem_store):
+    cases = {"24 חודשים": "2028-10-08", "24 חודש": "2028-10-08", "שנתיים": "2028-10-08", "600 ימים": "2028-05-30",
+             "בעוד 3.5 שנים": "2030-04-08", "שנה וחצי": "2028-04-08", "שלוש שנים": "2029-10-08"}
+    for text, iso in cases.items():
+        assert conv._deterministic_answer("end_date", text, TODAY) == iso, text
+    for bad in ("מתישהו", "0 חודשים", "3 שנתיים", "24"):
+        assert conv._deterministic_answer("end_date", bad, TODAY) in (None, bad)           # never turned into a date
+    ex = Ex(classify={"x": EF_GOAL})
+    run(ex, ELIYAHU, "x"); run(ex, ELIYAHU, "60000")
+    r = run(ex, ELIYAHU, "24 חודשים")
+    assert r.state == "review" and fd.display_value("end_date", "2028-10-08") in r.message and "ערך לא תקין" not in r.message
+
+
 # 6 + 7 — an invalid date keeps the draft on the same field; the next valid reply continues the same draft
 def test_invalid_date_reasks_same_field_then_valid_reply_continues(mem_store):
     ex = Ex(classify={"x": EF_GOAL}, fill={"31/02/2026": {"end_date": "31/02/2026"}})

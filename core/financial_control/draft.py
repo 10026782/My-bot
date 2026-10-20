@@ -455,7 +455,7 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
     if field == "end_date":
         target = fields.get("target_amount")
         goal = f" ל-{display_value('target_amount', target)}" if target else ""
-        return f"עד מתי אתה רוצה להגיע{goal}?"
+        return f"עד מתי אתה רוצה להגיע{goal}? (תאריך כמו 19/10/2028, או משך כמו \"24 חודשים\" / \"שנתיים\")"
     if entity == FCC_LOAN_CLOSE and field == "amount":
         return f"כמה שילמת בפועל לסגירת {goal_title or 'ההלוואה'}?"
     if entity == FCC_LOAN_BALANCE:

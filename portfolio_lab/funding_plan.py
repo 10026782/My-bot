@@ -561,6 +561,45 @@ def _certainty_counts(entries: list) -> dict:
     return {k: round(v, 2) for k, v in out.items()}
 
 
+_SENSITIVITY_PP = 2.0                                    # ±נקודות אחוז סביב התשואה הנחשבת (Q-R2; טווח מותאם — שלב נפרד)
+
+
+def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: dict, planned_monthly) -> dict:
+    """הפקדה חודשית נדרשת ליעד (REQUIRED_MONTHLY_DEPOSIT_CARD_SPEC): כמה כסף **חדש** להפקיד כל חודש כדי להגיע לפער עד התאריך, לפי הנחות גלויות
+    ובעלות מקור. אותו חיפוש בינארי מעל המנוע כמו `required_monthly` — אין נוסחה חדשה; קריאה בלבד, לא כותב ולא משנה "נותר" או "מבט תיק".
+    `scenarios` = אותה הפקדה על שארית שונה (אחרי מאושר / אחרי מאושר וצפוי / אחרי כל התוכנית) — כל אחת מסומנת, ואף אחת אינה "הכסף הזמין"."""
+    if need["reason"] not in (None, "already_covered"):
+        return {"amount": None, "reason": need["reason"]}
+    if need["reason"] == "already_covered":
+        return {"amount": 0.0, "reason": "no_gap", "gap": need.get("gap")}
+    p, start, years, slot = ctx["p"], ctx["start"], ctx["years"], need["slot"]
+    fee, deposit_fee = p["annual_fee"], 0.0
+
+    def amount(remaining: float, annual_return: float):
+        return required_monthly(remaining, slot, years=years, annual_return=annual_return, fee=fee, deposit_fee_pct=deposit_fee, p=p, start=start)
+
+    base_return, gap = p["annual_return"], need["gap"]
+    main = amount(gap, base_return)
+    sources = {k: ("owner" if k in request["assumptions"] else "default") for k in ("annual_return_pct", "annual_fee_pct", "inflation_pct")}
+    sensitivity = [{"label": label, "annual_return_pct": round((base_return + shift) * 100, 4), "amount": amount(gap, base_return + shift)}
+                   for label, shift in (("low", -_SENSITIVITY_PP / 100), ("base", 0.0), ("high", _SENSITIVITY_PP / 100))
+                   if -0.5 <= base_return + shift <= 0.5]
+    scenarios = []
+    if plan:
+        target = need["target"]
+        for basis, remaining in (("after_confirmed", plan["remaining_after_confirmed"]),
+                                 ("after_confirmed_and_expected", plan["remaining_after_confirmed_and_expected"]),
+                                 ("after_all_selected", round(max(target - plan["allocated_total"], 0.0), 2))):
+            scenarios.append({"basis": basis, "remaining": remaining, "amount": amount(remaining, base_return)})
+    return {"amount": main, "reason": None if main is not None else "unreachable_under_assumptions", "gap": gap, "months": slot, "due": need["due"],
+            "total_deposits": round(main * slot, 2) if main is not None else None,
+            "assumptions": {"annual_return_pct": round(base_return * 100, 4), "fee_pct": round(fee * 100, 4), "deposit_fee_pct": deposit_fee,
+                            "inflation_pct": round(p["inflation"] * 100, 4), "sources": sources},
+            "basis": "assumptions", "sensitivity": sensitivity, "scenarios": scenarios,
+            "planned_monthly_savings": planned_monthly,
+            "note": "new money only (existing balances are not counted); not split between goals; the planned figure is the family's standing plan, shown beside it and never netted"}
+
+
 # ── בניית התוכנית ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *, _window_variant: bool = False) -> dict:
@@ -705,6 +744,11 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *
         "over_committed": over,
     }
     if not _window_variant:
+        for out in goal_outputs:
+            gid = out["need"]["goal_id"]
+            out["need"]["slot"] = slots.get(gid)
+            out["required_monthly_card"] = _required_monthly_card(out["need"], out["plan"], ctx, request, planned)
+            out["need"].pop("slot", None)
         for out in goal_outputs:
             need = out["need"]
             override = request.get("date_margin_months")

@@ -1051,3 +1051,43 @@ test("funding model: server notes written in English are shown in Hebrew; an unl
   assert.equal(serverNote("collected money is not income and is not a liability of yours"), "כסף שנגבה אינו הכנסה ואינו התחייבות שלך.");
   assert.equal(serverNote("some future note"), "some future note");
 });
+
+const requiredCard = {
+  amount: 9859.84, reason: null, gap: 250000, months: 24, due: "2028-10-19", total_deposits: 236636.16,
+  assumptions: { annual_return_pct: 6, fee_pct: 0.15, deposit_fee_pct: 0, inflation_pct: 2, sources: { annual_return_pct: "default", annual_fee_pct: "default", inflation_pct: "owner" } },
+  basis: "assumptions",
+  sensitivity: [{ label: "low", annual_return_pct: 4, amount: 10200 }, { label: "base", annual_return_pct: 6, amount: 9859.84 }, { label: "high", annual_return_pct: 8, amount: 9500 }],
+  scenarios: [{ basis: "after_all_selected", remaining: 15000, amount: 591.59 }],
+  planned_monthly_savings: 13000,
+  note: "new money only (existing balances are not counted); not split between goals; the planned figure is the family's standing plan, shown beside it and never netted",
+};
+
+test("required monthly card: the server's amount, every assumption with its source, the range, and the planned savings beside it (never netted)", () => {
+  const withCard = { ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: requiredCard }] } as unknown as Parameters<typeof fundingModel>[0];
+  const c = fundingModel(withCard, "recG1")!.requiredCard!;
+  assert.equal(c.title, "הפקדה חודשית נדרשת");
+  assert.ok(c.headline.includes("9,860") || c.headline.includes("9,859"), c.headline);
+  assert.ok(c.subtitle!.includes("250,000") && c.subtitle!.includes("19/10/2028") && c.subtitle!.includes("24 חודשי הפקדה") && c.subtitle!.includes("כסף חדש בלבד"));
+  const rows = Object.fromEntries(c.rows.map((r) => [r.label, r.value]));
+  assert.ok(rows["תשואה שנתית"].includes("6%") && rows["תשואה שנתית"].includes("ברירת מחדל מערכתית") && rows["אינפלציה"].includes("הנחת בעלים"));
+  assert.ok(Object.entries(rows).some(([k, v]) => k.startsWith("חיסכון חודשי מתוכנן") && v.includes("13,000")));
+  assert.deepEqual(c.sensitivity.map((s) => s.label), ["תשואה נמוכה (4%)", "תשואה לפי ההנחה (6%)", "תשואה גבוהה (8%)"]);
+  assert.ok(c.scenarios[0].label.includes("אחרי כל התוכנית (כולל לא ודאי)") && c.scenarios[0].label.includes("15,000") && c.scenarios[0].value.includes("592"));
+  assert.ok(!/[A-Za-z]{4,}/.test(c.note), "the server's English note is shown in Hebrew");
+});
+
+test("required monthly card: no amount is said plainly — never an invented figure", () => {
+  const view = (card: object) => fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: card }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!.requiredCard!;
+  const unreachable = view({ amount: null, reason: "unreachable_under_assumptions" });
+  assert.equal(unreachable.headline, "אין סכום להצגה");
+  assert.ok(unreachable.subtitle!.includes("לא ניתן להשיג") && unreachable.rows.length === 0 && unreachable.sensitivity.length === 0);
+  assert.ok(view({ amount: 0, reason: "no_gap" }).headline.length > 0);
+  assert.equal(fundingModel(fundingView, "recG1")!.requiredCard, null, "an old server answer without the card shows no card");
+});
+
+test("required monthly card is rendered above the options and carries no recommendation wording", () => {
+  const withCard = { ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: requiredCard }] } as unknown as Parameters<typeof fundingModel>[0];
+  const html = renderToStaticMarkup(createElement(FundingResult, { model: fundingModel(withCard, "recG1")! }));
+  assert.ok(html.indexOf("הפקדה חודשית נדרשת") > -1 && html.indexOf("fw-required") < html.indexOf("fw-option"));
+  assert.ok(!/מומלץ|כדאי|הטוב ביותר|המלצה/.test(html.replace("לא המלצה", "")));
+});
