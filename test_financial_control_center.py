@@ -4560,6 +4560,30 @@ def test_http_other_peoples_allocation_rows_never_change_the_callers_totals_or_l
         assert hidden not in str(out), hidden
 
 
+def test_goals_for_forecast_uses_the_effective_target_not_the_frozen_base_field():
+    """A goal whose target the owner changed keeps its first value in the base field and the new one as a `target_change` event (history is never rewritten).
+    The funding planner / forecast must plan against the CURRENT target, like the overview does: latest change on/before today wins, a superseded or
+    future-dated change does not apply, and a goal with no change keeps its base target."""
+    DB[Tables.FIN_GOALS] = [
+        goal("recW1", "חתונה א", ELI, 250000, **{GF.CATEGORY: "future_goal", GF.END_DATE: "2028-10-19"}),
+        goal("recW2", "חתונה ב", ELI, 250000, **{GF.CATEGORY: "future_goal", GF.END_DATE: "2030-01-19"}),
+        goal("recW3", "חתונה ג", ELI, 250000, **{GF.CATEGORY: "future_goal", GF.END_DATE: "2031-04-19"}),
+        goal("recW4", "חתונה ד", ELI, 250000, **{GF.CATEGORY: "future_goal", GF.END_DATE: "2035-04-19"}),
+    ]
+    DB[Tables.FIN_EVENTS] = [
+        event("recE1", "recW1", ELI, 200000, kind="target_change", day="2026-09-01"),
+        event("recE2", "recW1", ELI, 300000, kind="target_change", day="2026-10-01"),                      # the latest on/before today wins
+        event("recE3", "recW2", ELI, 999999, kind="target_change", day="2026-10-02", **{EF.SUPERSEDED_BY: "recEX"}),   # superseded: ignored
+        event("recE4", "recW3", ELI, 888888, kind="target_change", day="2027-01-01"),                      # not yet in force: ignored
+    ]
+    by_id = {g["id"]: g for g in service.goals_for_forecast(ELIYAHU, TODAY)}
+    assert by_id["recW1"]["target_amount"] == 300000
+    assert by_id["recW2"]["target_amount"] == 250000
+    assert by_id["recW3"]["target_amount"] == 250000
+    assert by_id["recW4"]["target_amount"] == 250000
+    assert service.funding_inputs(ELIYAHU, TODAY)["goals"][0]["target_amount"] == 300000      # the funding planner reads the same figure
+
+
 def test_a_co_owned_row_never_exposes_the_other_owners_account_or_goal_to_the_second_owner(monkeypatch):
     from portfolio_lab.accounts_forecast import build_accounts_forecast
     seed_accounts()

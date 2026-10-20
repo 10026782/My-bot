@@ -641,16 +641,25 @@ def _raw_category(category) -> str | None:
     return str(category or "").strip().casefold() or None
 
 
-def goals_for_forecast(identity) -> list[dict]:
+def goals_for_forecast(identity, today: date | None = None) -> list[dict]:
     """The caller's own goals, reduced to what the accounts forecast needs (A2): id, title, category, status, target amount, due date.
-    Goes through the owner-scoped ``my_goals`` (unresolved identity -> PersonalDataAccessDenied). Read-only; no free text beyond the title."""
+    Goes through the owner-scoped ``my_goals`` (unresolved identity -> PersonalDataAccessDenied). Read-only; no free text beyond the title.
+    The target is the EFFECTIVE one — the latest ``target_change`` event on/before today wins over the base field, exactly as on the overview — so a
+    goal whose target the owner changed (the base field keeps its first value, history stays in the events) is planned against its current target."""
+    today = today or date.today()
+    goals = my_goals(identity)
+    by_goal: dict[str, list[dict]] = {}
+    for ev in my_events(identity):
+        for gid in _goal_ids_of(ev):
+            by_goal.setdefault(gid, []).append(ev)
     out = []
-    for g in my_goals(identity):
+    for g in goals:
         f = g.get("fields") or {}
+        events = calc.parse_events(by_goal.get(g.get("id"), []), FinEventFields)
         out.append({
             "id": g.get("id"), "title": f.get(FinGoalFields.TITLE) or None, "category": _raw_category(f.get(FinGoalFields.CATEGORY)),
             "status": str(f.get(FinGoalFields.STATUS) or "active").lower(),
-            "target_amount": calc._num(f.get(FinGoalFields.TARGET_AMOUNT)),
+            "target_amount": calc.effective_target(calc._num(f.get(FinGoalFields.TARGET_AMOUNT)), [e for e in events if not e.superseded], today),
             "end_date": (calc._d(f.get(FinGoalFields.END_DATE)).isoformat() if calc._d(f.get(FinGoalFields.END_DATE)) else None),
             "date_margin_months": calc.date_margin_months(f.get(FinGoalFields.DATE_MARGIN)),
         })
@@ -691,7 +700,7 @@ def funding_inputs(identity, today: date | None = None) -> dict:
     summary = ov.get("summary") or {}
     income, savings = summary.get("income") or {}, summary.get("savings") or {}
     return {
-        "goals": goals_for_forecast(identity), "accounts_view": accounts_view(identity, today), "allocations": allocations_for_forecast(identity),
+        "goals": goals_for_forecast(identity, today), "accounts_view": accounts_view(identity, today), "allocations": allocations_for_forecast(identity),
         "goal_rows": [{k: r.get(k) for k in ("goal_id", "parent_id", "method", "net", "actual", "remaining", "status")} for r in ov.get("goals") or []],
         "loans": (ov.get("loans") or {}).get("items") or [], "assets": (ov.get("assets") or {}).get("items") or [],
         "obligations": ov.get("obligations"),
