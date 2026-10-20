@@ -680,6 +680,7 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *
             "remaining_after_confirmed": round(max(target - covered["confirmed"], 0.0), 2),
             "remaining_after_confirmed_and_expected": round(max(target - covered["confirmed"] - covered["expected"], 0.0), 2),
             "monthly_burden": round(monthly_burden, 2), "monthly_release": round(monthly_release, 2),
+            "allocated_total": round(sum(covered.values()), 2), "over_target_by": round(max(sum(covered.values()) - target, 0.0), 2),
             "note": "coverage is split by certainty and is never summed into one 'available' figure"}
     pool_totals = {}
     for gid, opts in results.items():
@@ -689,12 +690,17 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *
     over = sorted(oid for oid, used in pool_use.items() if oid in pool_totals and used > pool_totals[oid] + 0.005)
 
     savings = inputs.get("savings_plan") or {}
-    capacity = savings.get("actual") if isinstance(savings.get("actual"), (int, float)) else None
+    # two different figures, never mixed: the standing PLAN (`target`, looking forward) and what was ACTUALLY put aside (`actual`, how far we got)
+    planned = savings.get("target") if isinstance(savings.get("target"), (int, float)) else None
+    actual = savings.get("actual") if isinstance(savings.get("actual"), (int, float)) else None
     total_burden = round(sum(o["plan"]["monthly_burden"] for o in goal_outputs if o["plan"]), 2) if any(o["plan"] for o in goal_outputs) else None
+
+    def _short(base):
+        return round(max(total_burden - base, 0.0), 2) if total_burden is not None and base is not None else None
     portfolio = {
-        "monthly_burden_in_plan": total_burden, "planned_monthly_savings": capacity,
-        "shortfall": (round(max(total_burden - capacity, 0.0), 2) if total_burden is not None and capacity is not None else None),
-        "capacity_known": capacity is not None, "plan_chosen": total_burden is not None,
+        "monthly_burden_in_plan": total_burden, "planned_monthly_savings": planned, "actual_monthly_savings": actual,
+        "shortfall_vs_planned": _short(planned), "shortfall_vs_actual": _short(actual),
+        "planned_known": planned is not None, "actual_known": actual is not None, "plan_chosen": total_burden is not None,
         "info": {"savings_release": inputs.get("savings_release"), "monthly_cash_improvement": inputs.get("monthly_cash_improvement")},
         "over_committed": over,
     }

@@ -13,6 +13,7 @@ import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
   DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, sourcesModel, savedChangesModel, SAVED_TITLE, SAVED_NOTE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, SOURCES_DEBOUNCE_MS, SOURCES_EXPECTED_LABEL, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  serverNote,
 } from "./familyWealth";
 
 const assert = {
@@ -658,7 +659,7 @@ const fundingView = {
             covered: { confirmed: 20000, expected: 5000, uncertain: 100000, unknown: 0 }, earliest_available_by: "2029-01-01", remaining_after_confirmed: 180000,
             remaining_after_confirmed_and_expected: 175000, monthly_burden: 0, monthly_release: 0, note: "coverage is split by certainty and is never summed into one 'available' figure" },
   }],
-  portfolio: { monthly_burden_in_plan: 1154.06, planned_monthly_savings: 1000, shortfall: 154.06, capacity_known: true, plan_chosen: true, over_committed: ["loan"] },
+  portfolio: { monthly_burden_in_plan: 1154.06, planned_monthly_savings: 5000, actual_monthly_savings: 1000, shortfall_vs_planned: 0, shortfall_vs_actual: 154.06, planned_known: true, actual_known: true, plan_chosen: true, over_committed: ["loan"] },
   warnings: ["השוואה בין אפשרויות בלבד — לא המלצה ולא בחירה עבורך."],
 } as unknown as Parameters<typeof fundingModel>[0];
 
@@ -684,7 +685,14 @@ test("funding model: the plan is split by certainty — a debt owed to me is not
   assert.ok(!m.plan!.rows.some((r) => /זמין|סה"כ/.test(r.label)), "no single 'available' or total figure");
   assert.ok(m.plan!.allocations[0].includes("לא ודאי") && m.plan!.allocations[0].includes("01/01/2029"));
   const pf = Object.fromEntries(m.portfolio!.rows.map((r) => [r.label, r.value]));
-  assert.ok(pf["חוסר מול החיסכון המתוכנן"].includes("154") && pf["מקור שהוקצה ליותר מסכומו"] === "loan");
+  assert.ok(pf["מקור שהוקצה ליותר מסכומו"] === "loan");
+  // planned (the standing plan) and actual (how far we got) are two separate lines, each under its own name with its own shortfall
+  assert.ok(pf["חיסכון חודשי מתוכנן (התכנית הקבועה)"].includes("5,000") && pf["חיסכון חודשי בפועל (מה שהופרש עד היום)"].includes("1,000"));
+  assert.ok(pf["חוסר מול החיסכון המתוכנן"].includes("0") && pf["חוסר מול החיסכון בפועל"].includes("154"));
+  const unknownSavings = fundingModel({ ...fundingView, portfolio: { ...fundingView.portfolio, planned_known: false, planned_monthly_savings: null, shortfall_vs_planned: null } } as unknown as Parameters<typeof fundingModel>[0], "recG1")!;
+  const pfu = Object.fromEntries(unknownSavings.portfolio!.rows.map((r) => [r.label, r.value]));
+  assert.equal(pfu["חיסכון חודשי מתוכנן (התכנית הקבועה)"], "לא ידוע", "a missing plan is 'unknown', never 0 and never the actual");
+  assert.equal(pfu["חוסר מול החיסכון המתוכנן"], "לא ידוע");
   assert.equal(fundingModel({ ...fundingView, portfolio: { ...fundingView.portfolio, plan_chosen: false } }, "recG1")!.portfolio, null);
 });
 
@@ -1026,4 +1034,19 @@ test("saved plan changes: shown only after a goal is chosen, from the same singl
   assert.ok(!/\.reduce\(|Math\.|\bfetch\(|\bsaved\s*-\s*|\btoday\s*-\s*/.test(model), "the saved-plan model only words and lays out the server's values");
   const types = fs.readFileSync("src/types.ts", "utf8");
   assert.ok(!/delta|difference|better|worse/.test(types.slice(types.indexOf("export type SavedPlanValue"), types.indexOf("export interface FundingPlan {"))));
+});
+
+test("funding model: an allocation above the target is shown as a display-only excess; an exact fit shows no excess row", () => {
+  const over = { ...fundingView, goals: [{ ...fundingView.goals[0], plan: { ...fundingView.goals[0].plan, allocated_total: 275000, over_target_by: 25000 } }] } as unknown as Parameters<typeof fundingModel>[0];
+  const rows = Object.fromEntries(fundingModel(over, "recG1")!.plan!.rows.map((r) => [r.label, r.value]));
+  assert.ok(rows["הוקצה מעבר ליעד (להצגה בלבד — התוכנית לא שונתה)"].includes("25,000"));
+  assert.ok(!fundingModel(fundingView, "recG1")!.plan!.rows.some((r) => r.label.startsWith("הוקצה מעבר ליעד")));
+});
+
+test("funding model: server notes written in English are shown in Hebrew; an unlisted note is shown as written, never hidden", () => {
+  const m = fundingModel(fundingView, "recG1")!;
+  assert.equal(m.plan!.note, "הכיסוי מפוצל לפי ודאות ואינו מסוכם ל״כסף זמין״ אחד.");
+  assert.equal(serverNote("net proceeds as entered; sale amount on record is gross and is not used"), "תמורה נטו כפי שהוזנה; סכום המכירה שברשומת הנכס הוא ברוטו ואינו בשימוש.");
+  assert.equal(serverNote("collected money is not income and is not a liability of yours"), "כסף שנגבה אינו הכנסה ואינו התחייבות שלך.");
+  assert.equal(serverNote("some future note"), "some future note");
 });

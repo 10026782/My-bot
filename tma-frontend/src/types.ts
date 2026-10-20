@@ -954,7 +954,7 @@ export interface FundingNeed {
 export interface FundingPlanBlock {
   allocations: { option_id: string; amount: number; certainty: FundingCertainty; available_by: string | null; conditions: string[] }[];
   covered: Record<FundingCertainty, number>; earliest_available_by: string | null;
-  remaining_after_confirmed: number; remaining_after_confirmed_and_expected: number; monthly_burden: number; monthly_release: number; note: string;
+  remaining_after_confirmed: number; remaining_after_confirmed_and_expected: number; monthly_burden: number; monthly_release: number; allocated_total?: number; over_target_by?: number; note: string;
 }
 /** One end of the date window: the same options recomputed at the earliest / latest date (server numbers). */
 export interface FundingWindowOption {
@@ -1008,7 +1008,7 @@ export interface FundingPlan {
   schema_version: string; result_type: string; as_of: string;
   assumptions: { annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; horizon_years: number };
   goals: FundingGoalResult[];
-  portfolio: { monthly_burden_in_plan: number | null; planned_monthly_savings: number | null; shortfall: number | null; capacity_known: boolean; plan_chosen: boolean; over_committed: string[] };
+  portfolio: { monthly_burden_in_plan: number | null; planned_monthly_savings: number | null; actual_monthly_savings: number | null; shortfall_vs_planned: number | null; shortfall_vs_actual: number | null; planned_known: boolean; actual_known: boolean; plan_chosen: boolean; over_committed: string[] };
   warnings: string[];
 }
 export interface FundingRequestBody {
