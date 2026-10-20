@@ -4809,6 +4809,77 @@ def test_funding_save_confirm_freezes_one_snapshot_and_supersedes_only_the_goals
     assert not any(k in text for k in ("score", "recommended", "rank"))                          # a record of a decision, not advice
 
 
+CUSTOM_DATED = {"id": "gift", "type": "custom", "label": "מתנה", "amount": 5000, "available_by": "2029-01-01"}
+
+
+def test_a_plan_with_a_dated_option_can_be_saved_through_draft_and_אשר():
+    """Regression: a normalised funding request holds datetime.date values (asset sale, receivable, loan, custom, liquid_from); saving such a plan raised
+    TypeError (dates are not JSON) and the route answered "could not open the save". Dates are now stored as ISO text that normalize_request reads back."""
+    import json as _json
+    seed_saved_plans()
+    start_save(("gift",), {"goal_id": "recGW", "options": [CUSTOM_DATED]})
+    for text in ("ערוך", "הערת החלטה x", "ערוך", "לבדוק שוב עד 2027-01-31"):
+        assert conv.handle_turn(ELIYAHU, text, extractor=conv.DeterministicExtractor(), today=TODAY).state in ("ask", "review")
+    writes = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    post_ = next(w for w in writes if w["op"] == "post")
+    f = post_["fields"]
+    request_ = _json.loads(f[FPF.REQUEST_SNAPSHOT])
+    assert request_["options"][0]["available_by"] == "2029-01-01"                       # ISO text, not a date object
+    assert _json.loads(f[FPF.SELECTED_OPTIONS]) == [{"id": "gift", "type": "custom", "use_amount": None}]
+    from portfolio_lab.funding_plan import normalize_request
+    again = normalize_request(request_)                                                  # the stored request reads back unchanged
+    assert str(again["options"][0]["available_by"]) == "2029-01-01"
+
+
+def test_other_non_json_values_are_still_an_error_not_silently_stringified():
+    import pytest as _pytest
+    from core.financial_control.conversation import _compact_json
+    assert _compact_json({"d": date(2030, 1, 1)}) == '{"d":"2030-01-01"}'
+    with _pytest.raises(TypeError):
+        _compact_json({"x": object()})
+
+
+def _saved_row_from_real_save(pid="recFPreal", goal="recGW"):
+    """Run the real save flow (draft -> אשר) for a plan that contains a DATED option and turn its frozen write into a stored row."""
+    start_save(("gift",), {"goal_id": goal, "options": [CUSTOM_DATED]})
+    for text in ("ערוך", "הערת החלטה x", "ערוך", "לבדוק שוב עד 2027-01-31"):
+        assert conv.handle_turn(ELIYAHU, text, extractor=conv.DeterministicExtractor(), today=TODAY).state in ("ask", "review")
+    writes = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
+    post_ = next(w for w in writes if w["op"] == "post")
+    return {"id": pid, "fields": {**post_["fields"], FPF.FINANCIAL_OWNER: [ELI]}}
+
+
+def test_http_planner_returns_what_changed_since_the_saved_plan_and_never_updates_it(monkeypatch):
+    import copy as _copy
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)
+    seed_saved_plans()
+    DB[Tables.FUNDING_PLANS] = [r for r in DB[Tables.FUNDING_PLANS] if r["id"] != "recFPold"] + [_saved_row_from_real_save()]
+    before = _copy.deepcopy(DB)
+    body = planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGW"}).get_json()
+    cmp_ = body["saved_plan_comparison"]["goals"][0]
+    assert cmp_["goal_id"] == "recGW" and cmp_["status"] == "ok" and cmp_["plan_id"] == "recFPreal"
+    assert {o["id"] for o in cmp_["options"]} == {"existing_balance", "gift"} and cmp_["any_change"] is False       # nothing moved since it was saved
+    assert DB == before, "the saved row is not touched and nothing is written"
+    assert "recFPavi" not in str(body) and "888888" not in str(body) and "של אבי" not in str(body)
+
+
+def test_http_planner_comparison_is_owner_scoped_and_unreadable_rows_are_unavailable(monkeypatch):
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)
+    seed_saved_plans()                                    # recFPold (mine, no snapshots), recFPavi (another owner's goal), recFPdone (superseded)
+    body = planner(http(monkeypatch, ELIYAHU), {"goal_id": "recGW"}).get_json()
+    assert body["saved_plan_comparison"]["goals"][0] == {"goal_id": "recGW", "status": "unavailable", "reason": "snapshot_unreadable"}
+    only_mine = service.funding_inputs(ELIYAHU)["saved_plans"]
+    assert [r["id"] for r in only_mine] == ["recFPold"]                                  # chosen only, and only the caller's own
+    assert planner(http(monkeypatch, AVI_I), {"goal_id": "recGW"}).status_code == 404
+
+
+def test_funding_save_route_still_carries_no_comparison():
+    seed_saved_plans()
+    from portfolio_lab.funding_plan import build_funding_plan, normalize_request
+    plan_ = build_funding_plan(service.funding_inputs(ELIYAHU), normalize_request({"goal_id": "recGW"}))
+    assert "saved_plan_comparison" not in plan_ and "suggested_sources" not in plan_
+
+
 def test_funding_save_rejects_unknown_infeasible_or_empty_selection_and_foreign_goals():
     seed_saved_plans()
     for selected in ([], ["nope"], ["dep", "dep"], [7]):

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchFccAccounts, fetchFccNetWorth, fetchFccOverview, postFccAccountsForecast, postFccFundingFollowup, postFccFundingPlan, postFccFundingSave } from "../api";
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody, FundingSources } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody, FundingSources, SavedPlanComparison } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
-import { SOURCES_DEBOUNCE_MS, SOURCES_INTRO, SOURCES_TITLE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, sourcesModel, type SourceAddOption, type SourcesModel, ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
+import { SAVED_NOTE, savedChangesModel, type SavedChangesModel, SOURCES_DEBOUNCE_MS, SOURCES_INTRO, SOURCES_TITLE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, sourcesModel, type SourceAddOption, type SourcesModel, ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
 import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccTabs";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
@@ -211,7 +211,7 @@ function AllocationsBlock({ model, present }: { model: AllocationModel | null; p
 
 type FundingState = { status: "idle" } | { status: "loading" } | { status: "ok"; plan: FundingPlan; goalId: string; titles: Record<string, string>; body: FundingRequestBody } | { status: "error"; message: string; code?: number };
 
-type SourcesState = { status: "idle" } | { status: "loading" } | { status: "ok"; data: FundingSources; goalId: string } | { status: "error"; code?: number };
+type SourcesState = { status: "idle" } | { status: "loading" } | { status: "ok"; data: FundingSources; goalId: string; saved: SavedPlanComparison | null } | { status: "error"; code?: number };
 
 /** Goal Funding Planner (step 1b): a goal -> typed funding options -> POST /api/fcc/funding/plan -> a neutral comparison. Runs only when asked; the page
  *  converts typed text to numbers once on submit and shows only what the server returns (no ranking, no recommendation, no client arithmetic). */
@@ -229,7 +229,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
   const [addedNote, setAddedNote] = useState<string | null>(null);
   const sourcesLatest = useRef(0);
   const goalRef = useRef(form.goalId);                                     // the goal on screen now: an older goal's late answer is dropped
-  const sourcesCache = useRef(new Map<string, FundingSources>());          // the same request (goal + margin + assumptions) is not asked twice
+  const sourcesCache = useRef(new Map<string, { sources: FundingSources; saved: SavedPlanComparison | null }>());          // the same request (goal + margin + assumptions) is not asked twice
   // Candidate sources: one read-only call when a goal is chosen (debounced; the same endpoint with no options), never in the background and never before a goal.
   useEffect(() => {
     goalRef.current = form.goalId;
@@ -240,15 +240,16 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
     if (!parsed.ok) { setSources({ status: "idle" }); return undefined; }
     const goalId = form.goalId, key = sourcesCacheKey(parsed.body);
     const cached = sourcesCache.current.get(key);
-    if (cached) { setSources({ status: "ok", data: cached, goalId }); return undefined; }
+    if (cached) { setSources({ status: "ok", data: cached.sources, goalId, saved: cached.saved }); return undefined; }
     setSources({ status: "loading" });
     const timer = setTimeout(() => {
       postFccFundingPlan(parsed.body)
         .then((plan) => {
           if (id !== sourcesLatest.current || !isCurrentGoal(goalRef.current, goalId)) return;
           if (!plan.suggested_sources) { setSources({ status: "error", code: -1 }); return; }
-          sourcesCache.current.set(key, plan.suggested_sources);
-          setSources({ status: "ok", data: plan.suggested_sources, goalId });
+          const saved = plan.saved_plan_comparison ?? null;
+          sourcesCache.current.set(key, { sources: plan.suggested_sources, saved });
+          setSources({ status: "ok", data: plan.suggested_sources, goalId, saved });
         })
         .catch((e: Error & { status?: number }) => { if (id === sourcesLatest.current && isCurrentGoal(goalRef.current, goalId)) setSources({ status: "error", code: e.status }); });
     }, SOURCES_DEBOUNCE_MS);
@@ -290,7 +291,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
       .then((plan) => {
         if (id !== latest.current) return;
         setState({ status: "ok", plan, goalId, titles: names, body: parsed.body });
-        if (plan.suggested_sources && isCurrentGoal(goalRef.current, goalId)) setSources({ status: "ok", data: plan.suggested_sources, goalId });     // same answer, the assumptions just typed — only for the goal on screen
+        if (plan.suggested_sources && isCurrentGoal(goalRef.current, goalId)) setSources({ status: "ok", data: plan.suggested_sources, goalId, saved: plan.saved_plan_comparison ?? null });     // same answer, the assumptions just typed — only for the goal on screen
       })
       .catch((e: Error & { status?: number }) => { if (id === latest.current) setState({ status: "error", message: e.message, code: e.status }); });
   };
@@ -299,6 +300,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
     setAddedNote(`נוספה אפשרות ״${add.label}״ לטופס למטה${add.mustEnter.length ? ` — יש להשלים: ${add.mustEnter.join(", ")}` : ""}.`);
   };
   const sourceModel = sources.status === "ok" ? sourcesModel(sources.data, sources.goalId) : null;
+  const savedModel = sources.status === "ok" ? savedChangesModel(sources.saved, sources.goalId) : null;
   const addedKeys = form.options.map((o) => `${o.type}:${o.values.asset_id ?? o.values.loan_id ?? o.values.account_id ?? ""}`);
   const hasGoal = form.goalId !== "";
   const hasDeposits = form.options.some((o) => o.type === "new_deposits");
@@ -329,6 +331,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
         </label>
         )}
         {hasGoal && <FundingSourcesList state={sources} model={sourceModel} addedKeys={addedKeys} addedNote={addedNote} onAdd={addFromSource} />}
+        {hasGoal && savedModel && <SavedPlanChanges model={savedModel} />}
         {hasGoal && hasDeposits && (
           <details className="fw-assumptions">
             <summary>הנחות לחישוב ההפקדות (תשואה, דמי ניהול, אינפלציה)</summary>
@@ -394,7 +397,7 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
         <div className="fcc-stack">
           <p className="fcc-goal__note" dir="auto">{FUNDING_SAVE_NOTE}</p>
           <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={selected.length === 0 || writer.busy || writer.turn != null}
-                  onClick={() => { setSavedFor({ goalId: state.goalId, types: (model?.options ?? []).filter((o) => selected.includes(o.id)).map((o) => o.type) }); void writer.open(() => postFccFundingSave(state.body, selected)); }}>שמירת תוכנית</button>
+                  onClick={() => { sourcesCache.current.clear(); setSavedFor({ goalId: state.goalId, types: (model?.options ?? []).filter((o) => selected.includes(o.id)).map((o) => o.type) }); void writer.open(() => postFccFundingSave(state.body, selected)); }}>שמירת תוכנית</button>
           {savedFor && writer.receipt && !writer.turn && (
             <Surface padding="compact" aria-label="משימות המשך">
               <h3 className="fcc-section__heading">משימות המשך לתוכנית</h3>
@@ -458,6 +461,31 @@ export function FundingSourcesList({ state, model, addedKeys, addedNote, onAdd }
       <ul className="pl-list pl-list--small" dir="auto">{model.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
       {addedNote && <p className="fcc-goal__note" role="status" dir="auto">{addedNote}</p>}
     </div>
+  );
+}
+
+/** "What changed since the saved plan": the frozen snapshot beside today's recomputation of the same request. Collapsed; comparison only — nothing here
+ *  updates the saved plan or changes a decision, and the page computes no difference of its own. */
+export function SavedPlanChanges({ model }: { model: SavedChangesModel }) {
+  const line = (r: { label: string; saved: string; today: string; changed: boolean }) => (
+    <div key={r.label} className="fw-rows__row"><dt>{r.label}</dt><dd dir="auto">נשמר: {r.saved} · היום: {r.today}{r.changed ? " · השתנה" : ""}</dd></div>
+  );
+  return (
+    <details className="fw-assumptions" aria-label={model.headline}>
+      <summary>{model.headline}</summary>
+      {model.unavailable && <p className="fcc-goal__note" role="status" dir="auto">{model.unavailable}</p>}
+      {model.savedLine && <p className="fcc-goal__note" dir="auto">{model.savedLine}</p>}
+      {model.todayNote && <p className="fcc-goal__note" dir="auto">{model.todayNote}</p>}
+      {model.need.length > 0 && <dl className="fw-rows">{model.need.map(line)}</dl>}
+      {model.options.map((o) => (
+        <Surface key={o.id} padding="compact" className="fw-option" aria-label={o.title}>
+          <h4 className="fcc-section__heading">{o.title}{o.changed ? " — השתנה" : ""}</h4>
+          {!o.presentToday && <p className="fcc-goal__note" dir="auto">האפשרות אינה מופיעה בחישוב של היום.</p>}
+          <dl className="fw-rows">{o.rows.map(line)}</dl>
+        </Surface>
+      ))}
+      <p className="fcc-goal__note" dir="auto">{model.note || SAVED_NOTE}</p>
+    </details>
   );
 }
 

@@ -6,6 +6,7 @@ Five separate categories, no totals, nothing recommended, scored or ranked; miss
 from __future__ import annotations
 
 import copy
+from datetime import date
 import json
 import re
 from pathlib import Path
@@ -321,3 +322,109 @@ def test_a_missing_planned_deposit_is_not_collapsed_to_zero_and_the_basis_is_sta
     assert zero["monthly_planned_deposit_included"] == 0 and zero["includes_planned_deposits"] is False
     some = cats(run_flat(inputs([cash("recI", 1000, planned_monthly_deposit=75)])))["liquid_now"][0]["expected_at_due"]
     assert some["monthly_planned_deposit_included"] == 75 and some["basis"] == "end_of_last_completed_month_up_to_the_date"
+
+
+# ── שלב 3: מה השתנה מאז השמירה (השוואה בלבד, בקשה שנשמרה מחושבת מחדש) ─────────────────────────────────────────────────
+
+def snapshot(inp, options=(), selected=("existing_balance",), goal_id=G, today=TODAY, plan_id="recFP1", status="chosen"):
+    """A saved-plan row exactly as the save flow freezes it (conversation.start_funding_plan_save): request + result + selected, as JSON text."""
+    from core.financial_control.conversation import _compact_json
+    req = fp.normalize_request({"goal_ids": [goal_id], "options": list(options), "assumptions": FLAT_REQ["assumptions"]})
+    plan_ = fp.build_funding_plan(inp, req, today)
+    out = plan_["goals"][0]
+    result = {"as_of": plan_["as_of"], "assumptions": plan_["assumptions"], "need": out["need"],
+              "options": [{k: v for k, v in o.items() if k != "details"} for o in out["options"]], "plan": out["plan"], "window": out["window"] if "window" in out else None}
+    chosen = [{"id": i, "type": "x", "use_amount": None} for i in selected]
+    return {"id": plan_id, "goal_id": goal_id, "as_of": today.isoformat(), "saved_at": today.isoformat(),
+            "selected": json.loads(_compact_json(chosen)), "request": json.loads(_compact_json(req)), "result": json.loads(_compact_json(result))}
+
+
+def compare(inp, goal_ids=(G,)):
+    return fs.build_saved_plan_comparison(inp, fp.normalize_request({"goal_ids": list(goal_ids)}), TODAY)
+
+
+def with_saved(inp, *rows):
+    return {**inp, "saved_plans": list(rows)}
+
+
+def alloc_inputs(value=1000, **extra):
+    return inputs([cash("recI", value)], allocations=[al("a1", G, "recI", "fixed_amount", 400)], **extra)
+
+
+def test_no_saved_plan_says_so_and_nothing_else():
+    out = compare(alloc_inputs())
+    assert out["goals"] == [{"goal_id": G, "status": "no_saved_plan"}]
+    assert "never" not in json.dumps(out) and out["result_type"] == "saved_plan_comparison"
+
+
+def test_unchanged_data_shows_no_change():
+    base = alloc_inputs()
+    out = compare(with_saved(base, snapshot(base)))["goals"][0]
+    assert out["status"] == "ok" and out["any_change"] is False and out["plan_id"] == "recFP1"
+    assert all(not x["changed"] for x in out["need"]) and all(not o["changed"] for o in out["options"])
+
+
+def test_a_changed_balance_shows_saved_and_today_side_by_side():
+    old = alloc_inputs(1000)
+    saved = snapshot(old)
+    new = with_saved(inputs([cash("recI", 2000)], allocations=[al("a1", G, "recI", "percent", 50)]), saved)         # 50% of 2000 = 1000 vs 400 saved
+    out = compare(new)["goals"][0]
+    ex = next(o for o in out["options"] if o["id"] == "existing_balance")
+    cov = next(f for f in ex["fields"] if f["field"] == "covers_amount")
+    assert out["any_change"] is True and ex["changed"] is True and cov["changed"] is True and cov["saved"] == 400 and cov["today"] == 1000
+    need = {x["field"]: x for x in out["need"]}
+    assert need["confirmed_existing"]["changed"] and need["target"]["changed"] is False
+    assert saved["result"]["options"][0]["covers_amount"] == 400                                             # the saved record itself is untouched
+
+
+def test_missing_is_not_zero_in_either_direction():
+    assert fs._pairs(("covers_amount",), {"covers_amount": None}, {"covers_amount": 0.0})[0]["changed"] is True
+    assert fs._pairs(("covers_amount",), {"covers_amount": 0.0}, {"covers_amount": None})[0]["changed"] is True
+    assert fs._pairs(("covers_amount",), {"covers_amount": None}, {"covers_amount": None})[0]["changed"] is False
+    assert fs._pairs(("covers_amount",), {"covers_amount": 10.001}, {"covers_amount": 10.0})[0]["changed"] is False       # a rounding crumb is not a change
+
+
+def test_a_dated_option_survives_the_save_round_trip():
+    inp = inputs([cash("recI", 1000)])
+    custom = {"id": "extra", "type": "custom", "label": "מתנה", "amount": 5000, "available_by": "2029-01-01"}
+    saved = snapshot(inp, options=[custom], selected=("existing_balance", "extra"))
+    assert saved["request"]["options"][0]["available_by"] == "2029-01-01"                                    # ISO text, not a date object
+    out = compare(with_saved(inp, saved))["goals"][0]
+    assert out["status"] == "ok" and out["any_change"] is False and {o["id"] for o in out["options"]} == {"existing_balance", "extra"}
+
+
+def test_an_option_that_is_gone_today_is_marked_not_dropped():
+    inp = inputs([cash("recI", 1000)], assets=[asset()])
+    sale = {"id": "sale", "type": "asset_sale", "asset_id": "recAS1", "net_proceeds": 90000, "expected_date": "2029-01-01"}
+    saved = snapshot(inp, options=[sale], selected=("sale",))
+    gone = compare(with_saved(inputs([cash("recI", 1000)], assets=[]), saved))["goals"][0]
+    assert gone["status"] == "unavailable" and gone["reason"] == "saved_request_no_longer_valid"           # the saved asset no longer exists: no guessing
+
+
+def test_unreadable_or_foreign_snapshots_are_unavailable_never_guessed():
+    base = alloc_inputs()
+    good = snapshot(base)
+    for broken in ({**good, "result": None}, {**good, "request": "not a dict"}, {**good, "selected": None}):
+        assert compare(with_saved(base, broken))["goals"][0] == {"goal_id": G, "status": "unavailable", "reason": "snapshot_unreadable"}
+    other_goal = {**good, "goal_id": G2}
+    assert compare(with_saved(base, other_goal))["goals"][0]["status"] == "no_saved_plan"                   # a plan of another goal is never used
+    wrong = {**good, "request": {**good["request"], "goal_ids": [G2]}}
+    assert compare(with_saved(base, wrong))["goals"][0]["reason"] == "saved_request_no_longer_valid"
+
+
+def test_the_latest_saved_plan_is_used_and_the_window_is_ignored():
+    base = alloc_inputs()
+    old = snapshot(base, plan_id="recOld", today=date(2026, 9, 1))
+    new = snapshot(base, plan_id="recNew")
+    out = compare(with_saved(inputs([cash("recI", 1000)], allocations=[al("a1", G, "recI", "fixed_amount", 400)], goals=[goal_rec(date_margin_months=12)]), old, new))["goals"][0]
+    assert out["plan_id"] == "recNew" and out["saved"]["plans_found"] == 2
+    assert "window" not in json.dumps(out)
+
+
+def test_comparison_is_deterministic_read_only_and_neutral():
+    base = alloc_inputs()
+    inp = with_saved(base, snapshot(base))
+    before = copy.deepcopy(inp)
+    first = json.dumps(compare(inp), sort_keys=True)
+    assert first == json.dumps(compare(inp), sort_keys=True) and inp == before
+    assert not (set(keys_of(json.loads(first))) & (FORBIDDEN_KEYS | {"delta", "difference", "better", "worse"}))
