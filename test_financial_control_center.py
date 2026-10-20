@@ -5120,4 +5120,3 @@ def test_a_target_change_event_from_the_free_text_flow_mirrors_the_cell_but_othe
     assert [w["op"] for w in other] == ["post"]                                           # a deposit / income / note never touches the target cell
     backdated = ADAPTER.build_create_payload(W(goal="recG", kind="target_change", amount=18000, occurred_at="2026-10-01"))["writes"]
     assert [w["op"] for w in backdated] == ["post"]                                       # the event is kept, the cell is not guessed
-
