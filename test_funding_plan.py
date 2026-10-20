@@ -473,3 +473,74 @@ def test_a_plan_that_allocates_more_than_the_target_shows_the_excess_and_changes
     assert plan_["allocated_total"] == 275000 and plan_["over_target_by"] == 25000
     exact = run(inputs(goals=goals, assets=[asset()]), request(sale(), allocation_plan=[{"goal_id": G, "option_id": "sale", "amount": 250000}]))
     assert exact["goals"][0]["plan"]["over_target_by"] == 0.0
+
+
+# ═══ required monthly deposit card (REQUIRED_MONTHLY_DEPOSIT_CARD_SPEC) ═══
+
+def card(out, index=0):
+    return out["goals"][index]["required_monthly_card"]
+
+
+def test_the_card_answers_how_much_per_month_without_an_account_or_an_option():
+    out = run(inputs(), request())
+    c = card(out)
+    assert c["amount"] == pytest.approx(120000 / 51, abs=0.01) and c["months"] == 51 and c["due"] == "2030-12-31" and c["gap"] == 120000
+    assert c["basis"] == "assumptions" and c["total_deposits"] == pytest.approx(c["amount"] * 51, abs=0.01)
+    assert out["goals"][0]["options"] and "slot" not in out["goals"][0]["need"]
+
+
+def test_the_card_equals_the_direct_required_monthly_call():
+    out = run(inputs(), request(deposit_option(expected_return_pct=4, fee_pct=0.3), assumptions={"annual_return_pct": 4, "annual_fee_pct": 0.3, "inflation_pct": 0}))
+    assert card(out)["amount"] == opts(out)["dep"]["details"]["required_monthly"]
+    p = fp.af.normalize_params({"years": 10, "annual_return_pct": 4, "annual_fee_pct": 0.3, "inflation_pct": 0})
+    assert card(out)["amount"] == fp.required_monthly(120000, 51, years=10, annual_return=0.04, fee=0.003, deposit_fee_pct=0.0, p=p, start="2026-10-01")
+
+
+def test_the_card_shows_each_assumption_with_its_source():
+    owner = card(run(inputs(), request()))["assumptions"]["sources"]
+    assert owner == {"annual_return_pct": "owner", "annual_fee_pct": "owner", "inflation_pct": "owner"}
+    mixed = card(run(inputs(), request(assumptions={"annual_return_pct": 5})))
+    assert mixed["assumptions"]["annual_return_pct"] == 5 and mixed["assumptions"]["sources"] == {
+        "annual_return_pct": "owner", "annual_fee_pct": "default", "inflation_pct": "default"}
+
+
+def test_the_sensitivity_range_is_two_points_each_way_and_monotonic():
+    c = card(run(inputs(), request(assumptions={"annual_return_pct": 5, "annual_fee_pct": 0, "inflation_pct": 0})))
+    low, base, high = c["sensitivity"]
+    assert (low["annual_return_pct"], base["annual_return_pct"], high["annual_return_pct"]) == (3.0, 5.0, 7.0)
+    assert low["amount"] >= base["amount"] >= high["amount"] and base["amount"] == c["amount"]
+
+
+def test_unreachable_under_the_assumptions_gives_no_number(monkeypatch):
+    monkeypatch.setattr(fp, "_value_at", lambda *a, **k: 0.0)
+    c = card(run(inputs(), request()))
+    assert c["amount"] is None and c["reason"] == "unreachable_under_assumptions" and c["total_deposits"] is None
+
+
+def test_a_goal_that_cannot_be_sized_says_why_and_a_covered_goal_needs_nothing():
+    assert card(run(inputs(goals=[goal_rec(end=None)]), request())) == {"amount": None, "reason": "missing_date"}
+    covered = card(run(inputs([cash(value=500000)], allocations=[al("a1", G, "recI", "fixed_amount", 130000)]), request()))
+    assert covered["amount"] == 0.0 and covered["reason"] == "no_gap"
+
+
+def test_a_plan_adds_the_same_deposit_for_each_remainder_and_changes_nothing_else():
+    plan_req = request(sale(), allocation_plan=[{"goal_id": G, "option_id": "sale", "amount": 90000}])
+    out = run(inputs(assets=[asset()]), plan_req)
+    c = card(out)
+    by = {s["basis"]: s for s in c["scenarios"]}
+    assert by["after_confirmed"]["remaining"] == 120000 and by["after_confirmed_and_expected"]["remaining"] == 120000
+    assert by["after_all_selected"]["remaining"] == 30000 and by["after_all_selected"]["amount"] == pytest.approx(30000 / 51, abs=0.01)
+    plan_ = out["goals"][0]["plan"]
+    assert plan_["monthly_burden"] == 0.0 and out["portfolio"]["monthly_burden_in_plan"] == 0.0          # the card is a question, not a commitment
+    assert plan_["remaining_after_confirmed"] == 120000 and plan_["covered"]["uncertain"] == 90000
+
+
+def test_the_planned_savings_sit_beside_the_required_deposit_and_are_never_netted():
+    c = card(run(inputs(savings_plan={"target": 13000, "actual": 0}), request()))
+    assert c["planned_monthly_savings"] == 13000 and c["amount"] == pytest.approx(120000 / 51, abs=0.01)
+    assert card(run(inputs(), request()))["planned_monthly_savings"] is None
+
+
+def test_the_card_has_no_recommendation_score_or_ranking():
+    text = json.dumps(card(run(inputs(), request())), ensure_ascii=False).lower()
+    assert not re.search(r"recommend|score|rank|המלצה|ציון|דירוג|best|cheapest", text)

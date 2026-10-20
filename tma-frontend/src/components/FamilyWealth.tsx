@@ -503,6 +503,17 @@ export function FundingResult({ model, selection }: { model: NonNullable<ReturnT
         {model.needReason && <p className="fcc-goal__note" dir="auto">{model.needReason}</p>}
         {model.windowNote && <p className="fcc-goal__note" dir="auto">{model.windowNote}</p>}
       </Surface>
+      {model.requiredCard && (
+        <Surface padding="compact" className="fw-required" aria-label={model.requiredCard.title}>
+          <h3 className="fcc-section__heading">{model.requiredCard.title}</h3>
+          <p className="fw-required__amount" dir="auto"><strong>{model.requiredCard.headline}</strong></p>
+          {model.requiredCard.subtitle && <p className="fcc-goal__note" dir="auto">{model.requiredCard.subtitle}</p>}
+          {model.requiredCard.rows.length > 0 && <Rows rows={model.requiredCard.rows} />}
+          {model.requiredCard.sensitivity.length > 0 && <><p className="fcc-goal__note">אותה הפקדה בתשואות שונות (±2 נקודות):</p><Rows rows={model.requiredCard.sensitivity} /></>}
+          {model.requiredCard.scenarios.length > 0 && <><p className="fcc-goal__note">לפי מה שנותר בתוכנית שהוזנה:</p><Rows rows={model.requiredCard.scenarios} /></>}
+          {model.requiredCard.note && <p className="fcc-goal__note" dir="auto">{model.requiredCard.note}</p>}
+        </Surface>
+      )}
       {model.options.map((o) => (
         <Surface key={o.id} padding="compact" className="fw-option" aria-label={o.title}>
           <h3 className="fcc-section__heading">{o.title}</h3>
