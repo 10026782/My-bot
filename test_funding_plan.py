@@ -419,14 +419,23 @@ def test_the_order_of_goals_does_not_change_pool_results():
     assert a["portfolio"]["over_committed"] == b["portfolio"]["over_committed"] == ["sale"]
 
 
-def test_portfolio_shows_the_monthly_burden_and_the_shortfall_against_the_planned_savings():
+def test_portfolio_shows_planned_and_actual_savings_as_two_separate_figures():
+    """The standing PLAN (`target`) and what was ACTUALLY put aside (`actual`) are different questions (forward-looking vs how far we got):
+    each has its own figure and its own shortfall; neither is ever presented under the other's name."""
     plan_ = [{"goal_id": G, "option_id": "dep", "amount": 120000}]
     out = run(inputs(savings_plan={"target": 5000, "actual": 1000}), request(deposit_option(), allocation_plan=plan_))
     p = out["portfolio"]
-    assert p["plan_chosen"] and p["monthly_burden_in_plan"] == pytest.approx(120000 / 51, abs=0.01)
-    assert p["planned_monthly_savings"] == 1000 and p["shortfall"] == pytest.approx(120000 / 51 - 1000, abs=0.01)
+    burden = 120000 / 51
+    assert p["plan_chosen"] and p["monthly_burden_in_plan"] == pytest.approx(burden, abs=0.01)
+    assert p["planned_monthly_savings"] == 5000 and p["actual_monthly_savings"] == 1000
+    assert p["shortfall_vs_planned"] == 0.0 and p["shortfall_vs_actual"] == pytest.approx(burden - 1000, abs=0.01)
+    assert p["planned_known"] is True and p["actual_known"] is True
+    only_actual = run(inputs(savings_plan={"actual": 1000}), request(deposit_option(), allocation_plan=plan_))["portfolio"]
+    assert only_actual["planned_known"] is False and only_actual["planned_monthly_savings"] is None and only_actual["shortfall_vs_planned"] is None
+    assert only_actual["actual_known"] is True
     unknown = run(inputs(), request(deposit_option(), allocation_plan=plan_))["portfolio"]
-    assert unknown["capacity_known"] is False and unknown["shortfall"] is None
+    assert unknown["planned_known"] is False and unknown["actual_known"] is False
+    assert unknown["shortfall_vs_planned"] is None and unknown["shortfall_vs_actual"] is None
     nothing = run(inputs(), request(deposit_option()))["portfolio"]
     assert nothing["plan_chosen"] is False and nothing["monthly_burden_in_plan"] is None
 
@@ -453,3 +462,14 @@ def test_the_engine_has_no_io_and_only_the_reader_and_endpoint_use_it():
     svc = (ROOT / "core" / "financial_control" / "service.py").read_text(encoding="utf-8")
     body = svc[svc.index("def funding_inputs"):svc.index("def overview(")]
     assert "propose_action" not in body and "airtable_gateway" not in body and "_write" not in body
+
+
+def test_a_plan_that_allocates_more_than_the_target_shows_the_excess_and_changes_nothing():
+    """Display only: the excess over the goal is reported (`over_target_by`), nothing is trimmed or rewritten, and an exact fit shows 0."""
+    goals = [goal_rec(target=250000)]
+    over = run(inputs(goals=goals, assets=[asset()]), request(sale(), allocation_plan=[{"goal_id": G, "option_id": "sale", "amount": 275000}]))
+    plan_ = over["goals"][0]["plan"]
+    assert plan_["allocations"][0]["amount"] == 275000                                   # the owner's number is kept as entered
+    assert plan_["allocated_total"] == 275000 and plan_["over_target_by"] == 25000
+    exact = run(inputs(goals=goals, assets=[asset()]), request(sale(), allocation_plan=[{"goal_id": G, "option_id": "sale", "amount": 250000}]))
+    assert exact["goals"][0]["plan"]["over_target_by"] == 0.0

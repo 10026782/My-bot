@@ -725,6 +725,19 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
   return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan, ...(margin !== undefined ? { date_margin_months: margin } : {}) } };
 }
 
+/** Notes the server writes in English (planner assumptions / plan note), shown in Hebrew. Matched by the note's opening words; a note that is not
+ *  listed is shown as the server wrote it (never hidden). */
+const SERVER_NOTES_HE: [string, string][] = [
+  ["coverage is split by certainty", "הכיסוי מפוצל לפי ודאות ואינו מסוכם ל״כסף זמין״ אחד."],
+  ["net proceeds as entered", "תמורה נטו כפי שהוזנה; סכום המכירה שברשומת הנכס הוא ברוטו ואינו בשימוש."],
+  ["collected money is not income", "כסף שנגבה אינו הכנסה ואינו התחייבות שלך."],
+  ["new money only", "כסף חדש בלבד (היתרה הקיימת בחשבון אינה נספרת)."],
+  ["annual rate", "ריבית חודשית לפי הריבית השנתית, החזר קבוע; ללא הצמדה, עמלות או עלות פירעון מוקדם."],
+  ["a commitment is not an actual expense", "התחייבות אינה הוצאה בפועל; החיסכון פוטנציאלי עד שהבעלים מאשר."],
+  ["extra net monthly income", "הכנסה נטו חודשית נוספת השווה להפקדה הנדרשת באפשרות המוזכרת; אין הנחה שיש עבודה זמינה."],
+];
+export const serverNote = (s: string): string => SERVER_NOTES_HE.find(([prefix]) => s.startsWith(prefix))?.[1] ?? s;
+
 export interface FundingOptionCard {
   id: string; type: FundingOptionType; title: string; verdict: string; feasible: boolean | "unknown"; certainty: string; rows: { label: string; value: string }[];
   lists: { label: string; items: string[] }[]; note: string;
@@ -772,7 +785,7 @@ function optionCard(o: FundingOptionResult, titles: Record<string, string>, win?
     { label: `אם התאריך מוקדם (${dmy(win.early.due)})`, value: windowCell(win.early, win.early.options.find((x) => x.id === o.id)) },
     { label: `אם התאריך מאוחר (${dmy(win.late.due)})`, value: windowCell(win.late, win.late.options.find((x) => x.id === o.id)) },
   ] : [];
-  return { id: o.id, type: o.type, title: titles[o.id] ?? FUNDING_TYPE_LABELS[o.type], verdict, feasible: o.feasible, certainty: word(FUNDING_CERTAINTY_LABELS, o.certainty), rows, lists, note: o.assumptions.join(" · "), windowRows };
+  return { id: o.id, type: o.type, title: titles[o.id] ?? FUNDING_TYPE_LABELS[o.type], verdict, feasible: o.feasible, certainty: word(FUNDING_CERTAINTY_LABELS, o.certainty), rows, lists, note: o.assumptions.map(serverNote).join(" · "), windowRows };
 }
 
 /** Wording + layout of one goal's comparison. Options keep the server's order (fixed by type); nothing is sorted, scored or highlighted here. */
@@ -795,15 +808,18 @@ export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<s
       { label: "נותר אחרי מאושר וצפוי", value: money(p.remaining_after_confirmed_and_expected) },
       { label: "נטל חודשי בתוכנית", value: money(p.monthly_burden) }, { label: "שחרור חודשי בתוכנית", value: money(p.monthly_release) },
       { label: "הזמינות המוקדמת ביותר", value: dmy(p.earliest_available_by) },
+      ...(p.over_target_by ? [{ label: "הוקצה מעבר ליעד (להצגה בלבד — התוכנית לא שונתה)", value: money(p.over_target_by) }] : []),
     ],
     allocations: p.allocations.map((a) => `${titles[a.option_id] ?? a.option_id}: ${money(a.amount)} · ${word(FUNDING_CERTAINTY_LABELS, a.certainty)}${a.available_by ? ` · עד ${dmy(a.available_by)}` : ""}`),
-    note: p.note,
+    note: serverNote(p.note),
   } : null;
   const pf = plan.portfolio;
   const portfolio = pf.plan_chosen ? { rows: [
     { label: "נטל חודשי בתוכנית", value: optMoney(pf.monthly_burden_in_plan) },
-    { label: "חיסכון חודשי מתוכנן", value: pf.capacity_known ? optMoney(pf.planned_monthly_savings) : "לא ידוע" },
-    { label: "חוסר מול החיסכון המתוכנן", value: pf.shortfall == null ? "לא ידוע" : money(pf.shortfall) },
+    { label: "חיסכון חודשי מתוכנן (התכנית הקבועה)", value: pf.planned_known ? optMoney(pf.planned_monthly_savings) : "לא ידוע" },
+    { label: "חוסר מול החיסכון המתוכנן", value: pf.shortfall_vs_planned == null ? "לא ידוע" : money(pf.shortfall_vs_planned) },
+    { label: "חיסכון חודשי בפועל (מה שהופרש עד היום)", value: pf.actual_known ? optMoney(pf.actual_monthly_savings) : "לא ידוע" },
+    { label: "חוסר מול החיסכון בפועל", value: pf.shortfall_vs_actual == null ? "לא ידוע" : money(pf.shortfall_vs_actual) },
     ...(pf.over_committed.length ? [{ label: "מקור שהוקצה ליותר מסכומו", value: pf.over_committed.map((id) => titles[id] ?? id).join(", ") }] : []),
   ] } : null;
   return {
