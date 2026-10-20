@@ -601,6 +601,22 @@ def _event_write(values: Mapping[str, Any], ctx: Mapping[str, Any], raw_text: st
             "audit_action": "fcc_event", "audit_details": key}
 
 
+def target_mirror_patch(goal_id: str, amount, occurred_at: str, today: str) -> list[dict]:
+    """A target change is an append-only event and the CURRENT target is always derived from the events (``calc.effective_target``). The goal's own
+    ``Target Amount`` cell keeps its first value, which reads as stale in Airtable. For a change that takes effect today the cell is mirrored to the
+    new value (owner decision 20/10/2026: "שיציג את הערך העדכני") in the same review -> אשר. A change dated any other day is not mirrored: an older
+    date could overwrite a newer target, a future date is not in force yet — for those the events stay the only truth. The planner and the overview
+    never read the cell when an event exists, so mirroring cannot change any number."""
+    if not goal_id or not occurred_at or occurred_at != today:
+        return []
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        return []
+    return [{"op": "patch", "table": Tables.FIN_GOALS, "record_id": goal_id, "fields": {GF.TARGET_AMOUNT: value},
+             "audit_action": "fcc_goal_target_mirror", "audit_details": goal_id}]
+
+
 def _ob_value(name: str, value):
     """``status`` is a select in the draft but a checkbox in storage."""
     return value == "active" if name == "status" else value
@@ -963,7 +979,11 @@ class FccEntityAdapter(CommercialEntityAdapter):
             return {"writes": [{"op": "post", "table": Tables.REC_OBLIGATIONS, "fields": fields,
                                 "audit_action": "fcc_obligation_create", "audit_details": str(values.get("name", ""))[:80]}]}
         if entity == FCC_EVENT:
-            return {"writes": [_event_write(values, ctx, raw)]}
+            writes = [_event_write(values, ctx, raw)]
+            if values.get("kind") == "target_change":
+                writes += target_mirror_patch(str(values.get("goal") or ""), values.get("amount"), str(values.get("occurred_at") or ""),
+                                              str(writer.source_context.get("today") or ""))
+            return {"writes": writes}
         if entity == FCC_LOAN_CLOSE:
             return {"writes": loan_close_writes(values, ctx, writer.source_context)}
         if entity in _FIELD_UPDATES:
@@ -1040,10 +1060,12 @@ class FccEntityAdapter(CommercialEntityAdapter):
             writes.append({"op": "patch", "table": Tables.FIN_GOALS, "record_id": record_id, "fields": patch,
                            "audit_action": "fcc_goal_update", "audit_details": record_id})
         if "target_amount" in changed:
+            today = str(writer.source_context.get("today") or "")
             writes.append(_event_write({"goal": record_id, "kind": "target_change",
                                         "amount": changed["target_amount"],
-                                        "occurred_at": str(writer.source_context.get("today") or "")},
+                                        "occurred_at": today},
                                        ctx, raw))
+            writes += target_mirror_patch(record_id, changed["target_amount"], today, today)
         return {"writes": writes}
 
 

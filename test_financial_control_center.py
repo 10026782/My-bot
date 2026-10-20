@@ -2875,8 +2875,9 @@ def test_goal_update_edit_is_label_then_value_without_a_model(no_model):
     assert r.state == "ask"
     r = _say("סכום 75000")
     assert r.state == "review" and "₪75,000" in r.message
-    (w,) = _say("אשר").snapshot["writes"]
+    w, mirror = _say("אשר").snapshot["writes"]
     assert w["table"] == Tables.FIN_EVENTS and w["fields"][EF.AMOUNT] == 75000 and w["fields"][EF.KIND] == "target_change"
+    assert mirror["op"] == "patch" and mirror["table"] == Tables.FIN_GOALS and mirror["fields"] == {GF.TARGET_AMOUNT: 75000.0}   # the cell shows the current value
 
 
 # ── Asset next actions are TASKS: several open, a life cycle (בתהליך / בוצע / בוטלה), edit; the legacy text stays ───────
@@ -3336,7 +3337,8 @@ def test_goal_update_asks_which_field_by_buttons_then_the_value_then_reviews(no_
     r = _say("90,000")
     assert r.state == "review" and "₪90,000" in r.message
     writes = _confirm_one()
-    assert [w["fields"].get("Kind") for w in writes] == ["target_change"] and writes[0]["fields"]["Amount"] == 90000
+    assert [w["fields"].get("Kind") for w in writes[:1]] == ["target_change"] and writes[0]["fields"]["Amount"] == 90000
+    assert len(writes) == 2 and writes[1]["op"] == "patch" and writes[1]["fields"] == {GF.TARGET_AMOUNT: 90000.0}
 
 
 def test_goal_update_value_step_rejects_a_non_value_and_asks_the_same_field_again(no_model):
@@ -5082,3 +5084,40 @@ def test_the_saved_snapshot_keeps_the_window_and_the_margin_is_editable_on_the_g
     assert review.state == "review" and "24" in review.message
     (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=conv.DeterministicExtractor(), today=TODAY).snapshot["writes"]
     assert w["op"] == "patch" and w["table"] == Tables.FIN_GOALS and w["fields"] == {GF.DATE_MARGIN: 24}
+
+
+# ── The goal's own Target Amount cell mirrors a target change that takes effect today (owner decision 20/10/2026), and only that ──
+def test_target_mirror_patch_only_for_a_change_that_takes_effect_today():
+    from core.financial_control.draft import target_mirror_patch
+    (w,) = target_mirror_patch("recG", 18000, "2026-10-20", "2026-10-20")
+    assert w == {"op": "patch", "table": Tables.FIN_GOALS, "record_id": "recG", "fields": {GF.TARGET_AMOUNT: 18000.0},
+                 "audit_action": "fcc_goal_target_mirror", "audit_details": "recG"}
+    assert target_mirror_patch("recG", 18000, "2026-10-01", "2026-10-20") == []          # an older date could overwrite a newer target
+    assert target_mirror_patch("recG", 18000, "2027-01-01", "2026-10-20") == []          # a future date is not in force yet
+    assert target_mirror_patch("", 18000, "2026-10-20", "2026-10-20") == []              # no goal -> nothing
+    assert target_mirror_patch("recG", None, "2026-10-20", "2026-10-20") == []           # no amount -> nothing
+    assert target_mirror_patch("recG", "abc", "2026-10-20", "2026-10-20") == []          # not a number -> nothing, never a guess
+    assert target_mirror_patch("recG", 18000, "", "2026-10-20") == []
+
+
+def test_a_target_change_event_from_the_free_text_flow_mirrors_the_cell_but_other_event_kinds_do_not():
+    from core.financial_control.draft import ADAPTER, FCC_EVENT
+
+    class W:
+        target_entity = FCC_EVENT
+        identity = {"profile_id": ELI, "user_id": "u1"}
+        source_context = {"raw_text": "היעד הוא 18000", "today": "2026-10-20"}
+
+        def __init__(self, **v):
+            self._v = v
+
+        def resolved_values(self):
+            return dict(self._v)
+    change = ADAPTER.build_create_payload(W(goal="recG", kind="target_change", amount=18000, occurred_at="2026-10-20"))["writes"]
+    assert [w["op"] for w in change] == ["post", "patch"]
+    assert change[0]["fields"][EF.KIND] == "target_change" and change[1]["fields"] == {GF.TARGET_AMOUNT: 18000.0} and change[1]["record_id"] == "recG"
+    other = ADAPTER.build_create_payload(W(goal="recG", kind="one_time", amount=500, occurred_at="2026-10-20"))["writes"]
+    assert [w["op"] for w in other] == ["post"]                                           # a deposit / income / note never touches the target cell
+    backdated = ADAPTER.build_create_payload(W(goal="recG", kind="target_change", amount=18000, occurred_at="2026-10-01"))["writes"]
+    assert [w["op"] for w in backdated] == ["post"]                                       # the event is kept, the cell is not guessed
+
