@@ -171,8 +171,19 @@ def test_new_event_kinds_stay_outside_every_existing_consumer():
     assert calc.parse_events(records, EF) == []          # no existing calculation counts them
 
 
-def test_nothing_writes_accounts_yet():
-    assert Tables.FIN_ACCOUNTS not in getattr(approval_actions, "_TMA_WRITE_ALLOWED_TABLES", ())
+def test_the_only_account_write_is_one_planned_deposit_or_expected_return_field_patch():
+    """Owner-approved 20/10/2026 ("תכין את הכפתור לעדכון הפקדה חודשית ותשואה"): the table joined the TMA write allow-list for ONE reason. The only
+    FCC write that targets it is a single-field PATCH of those two forecast inputs; accounts are never created, closed or renamed from code, and
+    no balance, holder, note or tax field is ever written."""
+    from core.financial_control import draft as fd
+    assert Tables.FIN_ACCOUNTS in approval_actions._TMA_WRITE_ALLOWED_TABLES
+    targets = {entity: spec for entity, spec in fd._FIELD_UPDATES.items() if spec[0] == Tables.FIN_ACCOUNTS}
+    assert {spec[2] for spec in targets.values()} == {AF.PLANNED_MONTHLY_DEPOSIT, AF.EXPECTED_RETURN}
+    for entity, (_table, name, _field, _audit) in targets.items():
+        (write,) = fd.field_update_writes(entity, {name: 1.0}, {"record_id": "recAccE"})
+        assert write["op"] == "patch" and write["table"] == Tables.FIN_ACCOUNTS and write["record_id"] == "recAccE" and len(write["fields"]) == 1
+    # no other draft entity writes to the accounts table (events carry only a LINK to an account, in Financial Progress Events)
+    assert not [e for e in fd.FCC_ENTITIES if e not in targets and "account" in e and e in fd._FIELD_UPDATES]
 
 
 def test_field_names_match_the_live_schema():
