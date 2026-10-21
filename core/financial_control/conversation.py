@@ -300,7 +300,7 @@ def _one_line(text: str) -> str:
 
 
 # value-shaped fields (the contract input types CURRENCY / NUMBER / PERCENT / DATE), parsed by rule
-_NUMERIC_FIELDS = ("delta", "target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount", "date_margin")
+_NUMERIC_FIELDS = ("delta", "target_amount", "amount", "saving", "balance", "payment", "rate", "value", "mortgage", "original", "payments_left", "sale_amount", "date_margin", "planned_deposit", "expected_return")
 _DATE_FIELDS = ("end_date", "start_date", "occurred_at", "due_date", "next_charge_date", "sale_date", "review_by")
 
 
@@ -356,7 +356,7 @@ def _deterministic_answer(field_name: str, text: str, today: date | None = None)
     if vocab and t in vocab:
         return vocab[t]
     if field_name in _NUMERIC_FIELDS:
-        cleaned = t.replace("−", "-").replace("–", "-").replace(",", "").replace("%", "").replace("₪", "").replace("ש\"ח", "").replace("שח", "").strip()
+        cleaned = t.replace("−", "-").replace("–", "-").replace(",", "").replace("%", "").replace("₪", "").replace("ש\"ח", "").replace("ש״ח", "").replace("שח", "").strip()
         try:
             float(cleaned)
             return cleaned
