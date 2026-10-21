@@ -4487,6 +4487,30 @@ def test_expected_return_flow_writes_one_patch_and_says_real_vs_nominal_and_zero
     assert say("0", planned_deposit=0).state == "review"                      # "no deposit planned" (Harel) is a real answer, not a missing one
 
 
+def test_account_plan_answers_are_parsed_from_what_the_owner_actually_types():
+    """The first release only passed because the tests injected a ready value: the rule parser did not know the two fields, so "2154" was
+    "לא הבנתי" in production (owner-reported 21/10/2026). These type the real text, with no extractor help."""
+    seed_account_writes()
+    for typed, value in (("2154", 2154.0), ("2154 ₪", 2154.0), ("₪2,154", 2154.0), ("2154 ש\"ח", 2154.0), ("2154 ש״ח", 2154.0), ("0", 0.0)):
+        intent("account.update_planned_deposit", "recAE")
+        r = conv.handle_turn(ELIYAHU, typed, extractor=Ex(), today=TODAY)
+        assert r.state == "review" and r.awaiting is None, typed
+        (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+        assert w["fields"] == {ACF.PLANNED_MONTHLY_DEPOSIT: value}, typed
+        conv.complete_execution(ELIYAHU)
+    for typed, value in (("5.5", 5.5), ("5.5%", 5.5), ("5,5", None), ("אפס", None)):
+        intent("account.update_expected_return", "recAE")
+        r = conv.handle_turn(ELIYAHU, typed, extractor=Ex(), today=TODAY)
+        if value is None:
+            assert r.awaiting == "expected_return", typed                       # not a number: asked again, nothing stored
+            conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+            continue
+        assert r.state == "review", typed
+        (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+        assert w["fields"] == {ACF.EXPECTED_RETURN: value}, typed
+        conv.complete_execution(ELIYAHU)
+
+
 def test_account_plan_refuses_negative_or_out_of_range_numbers_and_keeps_the_draft():
     seed_account_writes()
     intent("account.update_expected_return", "recAE")
