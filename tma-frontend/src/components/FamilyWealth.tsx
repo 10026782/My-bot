@@ -522,6 +522,7 @@ export function FundingResult({ model, selection }: { model: NonNullable<ReturnT
           {model.requiredCard.subtitle && <p className="fcc-goal__note" dir="auto">{model.requiredCard.subtitle}</p>}
           {model.requiredCard.rows.length > 0 && <Rows rows={model.requiredCard.rows} />}
           {model.requiredCard.arrival.length > 0 && <><p className="fcc-goal__note">מתי מגיעים ליעד (שתי תחזיות נפרדות, ללא חיבור ביניהן):</p><Rows rows={model.requiredCard.arrival} /></>}
+          {model.requiredCard.window.length > 0 && <><p className="fcc-goal__note">התאריך הוא הערכה — אותה הפקדה בשני קצוות החלון (ההערכה עצמה נשארת התשובה הראשית):</p><Rows rows={model.requiredCard.window} /></>}
           {model.requiredCard.routes.map((blk) => (
             <div key={blk.heading} className="fw-routes">
               <p className="fcc-goal__note"><strong>{blk.heading}</strong></p>

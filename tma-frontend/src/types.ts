@@ -974,8 +974,11 @@ export interface RequiredMonthlyCard {
     | { basis: "entered"; monthly: number; reached: boolean; reach_date: string | null; months_vs_due: number | null })[];
   /** C4 of the funding chain: where the required deposit sits — routes A / B / C(ד׳) side by side, per remainder. Server numbers only; missing = null. */
   alternatives?: FundingAlternatives[];
+  /** The goal date is an estimate (± months): the same required deposit at each end. An end that already passed has no amount (`reason: "past_date"`). */
+  window?: { margin_months: number; early: RequiredCardWindowEnd; late: RequiredCardWindowEnd };
   planned_monthly_savings?: number | null; note?: string;
 }
+export interface RequiredCardWindowEnd { due: string; amount: number | null; reason: string | null }
 export interface FundingRoute {
   key: "A" | "B" | "C"; feasible: boolean | "unknown"; reason: string | null;
   income_need_before?: number | null; income_need_after?: number | null; planned_before?: number | null; planned_after?: number | null;

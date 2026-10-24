@@ -1152,3 +1152,16 @@ test("funding request: the amount from existing deposits is sent once, positive,
   assert.ok(none.ok && !("from_existing" in none.body));
   for (const bad of ["abc", "0", "-1"]) assert.equal(fundingRequest({ ...base, fromExisting: bad }).ok, false, bad);
 });
+
+test("required monthly card: the same deposit at both ends of the date window; an end that already passed says so (never 'the goal date passed' next to a number)", () => {
+  const withCard = (card: object) => fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: card }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!.requiredCard!;
+  const c = withCard({ ...requiredCard, window: { margin_months: 12, early: { due: "2027-10-19", amount: 12000, reason: null }, late: { due: "2029-10-19", amount: 8000, reason: null } } });
+  assert.equal(c.window.length, 2);
+  assert.ok(c.window[0].label === "אם התאריך מוקדם (19/10/2027)" && c.window[0].value.includes("12,000") && c.window[1].value.includes("8,000"));
+  const past = withCard({ ...requiredCard, window: { margin_months: 24, early: { due: "2025-06-30", amount: null, reason: "past_date" }, late: { due: "2029-06-30", amount: 3636.37, reason: null } } });
+  assert.ok(past.window[0].value.includes("כבר עבר") && !past.window[0].value.includes("תאריך היעד עבר") && past.window[1].value.includes("3,636"));
+  assert.deepEqual(withCard(requiredCard).window, [], "no window without a margin");
+  const opt = fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], window: { margin_months: 24,
+    early: { due: "2025-06-30", reason: "past_date", gap: null, months_to_due: 0, options: [] }, late: { due: "2029-06-30", reason: null, gap: 1, months_to_due: 30, options: [] } } }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!;
+  assert.ok(opt.options[1].windowRows[0].value.includes("כבר עבר") && !opt.options[1].windowRows[0].value.includes("תאריך היעד עבר"));
+});

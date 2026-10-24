@@ -225,6 +225,7 @@ def _compact_variant(plan: dict) -> dict:
     out = plan["goals"][0]
     need = out["need"]
     return {"due": need["due"], "reason": need["reason"], "gap": need.get("gap"), "months_to_due": need["months_to_due"],
+            "required_card": out.get("required_monthly_card"),
             "options": [{k: o.get(k) for k in ("id", "type", "feasible", "reason", "covers_amount", "available_by", "monthly_cash_effect", "certainty",
                                                "time_to_realize_months")} | {"required_monthly": (o.get("details") or {}).get("required_monthly")}
                         for o in out.get("options") or []]}
@@ -623,7 +624,7 @@ def _alternatives(required: float, income_target, planned, from_existing) -> dic
             "note": "side by side, in a fixed order; a route that lowers the planned deposits may lower a fund's deposit — that is your explicit choice"}
 
 
-def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: dict, planned_monthly, today: date) -> dict:
+def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: dict, planned_monthly, today: date, *, light: bool = False) -> dict:
     """הפקדה חודשית נדרשת ליעד (REQUIRED_MONTHLY_DEPOSIT_CARD_SPEC): כמה כסף **חדש** להפקיד כל חודש כדי להגיע לפער עד התאריך, לפי הנחות גלויות
     ובעלות מקור. אותו חיפוש בינארי מעל המנוע כמו `required_monthly` — אין נוסחה חדשה; קריאה בלבד, לא כותב ולא משנה "נותר" או "מבט תיק".
     `scenarios` = אותה הפקדה על שארית שונה (אחרי מאושר / אחרי מאושר וצפוי / אחרי כל התוכנית) — כל אחת מסומנת, ואף אחת אינה "הכסף הזמין"."""
@@ -639,6 +640,8 @@ def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: di
 
     base_return, gap = p["annual_return"], need["gap"]
     main = amount(gap, base_return)
+    if light:                                          # a window end / the schedule: only the amount (same search), none of the extras
+        return {"amount": main, "reason": None if main is not None else "unreachable_under_assumptions", "gap": gap, "months": slot, "due": need["due"]}
     sources = {k: ("owner" if k in request["assumptions"] else "default") for k in ("annual_return_pct", "annual_fee_pct", "inflation_pct")}
     sensitivity = [{"label": label, "annual_return_pct": round((base_return + shift) * 100, 4), "amount": amount(gap, base_return + shift)}
                    for label, shift in (("low", -_SENSITIVITY_PP / 100), ("base", 0.0), ("high", _SENSITIVITY_PP / 100))
@@ -811,12 +814,12 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *
         "info": {"savings_release": inputs.get("savings_release"), "monthly_cash_improvement": inputs.get("monthly_cash_improvement")},
         "over_committed": over,
     }
+    for out in goal_outputs:
+        gid = out["need"]["goal_id"]
+        out["need"]["slot"] = slots.get(gid)
+        out["required_monthly_card"] = _required_monthly_card(out["need"], out["plan"], ctx, request, planned, today, light=_window_variant)
+        out["need"].pop("slot", None)
     if not _window_variant:
-        for out in goal_outputs:
-            gid = out["need"]["goal_id"]
-            out["need"]["slot"] = slots.get(gid)
-            out["required_monthly_card"] = _required_monthly_card(out["need"], out["plan"], ctx, request, planned, today)
-            out["need"].pop("slot", None)
         for out in goal_outputs:
             need = out["need"]
             override = request.get("date_margin_months")
@@ -824,6 +827,11 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *
             need["date_margin_months"] = margin
             if need["reason"] is None and margin > 0:
                 out["window"] = _date_window(inputs, request, goals[need["goal_id"]], margin, today)
+                if out["window"]:                      # the same required deposit at each end of the date estimate (read from the variants, not recomputed here)
+                    out["required_monthly_card"]["window"] = {"margin_months": margin, **{
+                        end: {"due": out["window"][end]["due"], "amount": (out["window"][end].get("required_card") or {}).get("amount"),
+                              "reason": (out["window"][end].get("required_card") or {}).get("reason") or out["window"][end]["reason"]}
+                        for end in ("early", "late")}}
     warnings = ["השוואה בין אפשרויות בלבד — לא המלצה ולא בחירה עבורך.", "כסף צפוי או לא ודאי אינו כסף קיים: הכיסוי מפוצל לפי ודאות.",
                 "אין מודל מס; תמורה נטו, ריבית ותקופה הם כפי שהוזנו ('תנאים לא אומתו' אלא אם סומן אחרת)."]
     return {"schema_version": FUNDING_SCHEMA_VERSION, "result_type": "funding_plan_comparison", "as_of": today.isoformat(),

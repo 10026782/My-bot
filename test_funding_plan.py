@@ -743,3 +743,33 @@ def test_every_server_note_and_assumption_is_translated_by_a_prefix_in_the_clien
                 texts.add(g["required_monthly_card"]["note"])
     untranslated = sorted(t for t in texts if not any(t.startswith(p) for p in prefixes))
     assert not untranslated, f"English shown as written on the Hebrew screen: {untranslated}"
+
+
+# ═══ the date is an estimate: the required deposit at each end of the window, inside the card (SPEC §3 / O4) ═══
+
+def windowed(end="2030-12-31", margin=12):
+    return card(run(inputs(goals=[{**goal_rec(end=end), "date_margin_months": margin}]), request()))
+
+
+def test_the_card_shows_the_required_deposit_at_both_ends_of_the_date_window_and_the_point_estimate_stays():
+    c = windowed()
+    point = card(run(inputs(), request()))["amount"]
+    assert c["amount"] == point                                             # the point estimate is unchanged by the window
+    w = c["window"]
+    assert w["margin_months"] == 12 and w["early"]["due"] == "2029-12-31" and w["late"]["due"] == "2031-12-31"
+    assert w["early"]["amount"] > c["amount"] > w["late"]["amount"]         # an earlier date needs more per month, a later one less (server numbers)
+    p = fp.af.normalize_params({"years": 10, **FLAT_ASSUMPTIONS})
+    assert w["late"]["amount"] == fp.required_monthly(120000, 63, years=10, annual_return=0.0, fee=0.0, deposit_fee_pct=0.0, p=p, start="2026-10-01")
+
+
+def test_a_window_end_that_already_passed_says_so_and_has_no_number():
+    w = windowed(end="2027-06-30", margin=24)["window"]
+    assert w["early"]["reason"] == "past_date" and w["early"]["amount"] is None
+    assert w["late"]["amount"] is not None and w["late"]["reason"] is None
+
+
+def test_no_window_without_a_margin_and_the_variants_do_not_recurse_into_a_window():
+    assert "window" not in card(run(inputs(), request()))
+    out = run(inputs(goals=[{**goal_rec(), "date_margin_months": 6}]), request())
+    early = out["goals"][0]["window"]["early"]
+    assert early["required_card"]["amount"] is not None and "window" not in early["required_card"] and "alternatives" not in early["required_card"]

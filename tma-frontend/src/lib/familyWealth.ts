@@ -761,7 +761,7 @@ export interface FundingPlanModel {
   plan: { rows: { label: string; value: string }[]; allocations: string[]; note: string } | null;
   portfolio: { rows: { label: string; value: string }[] } | null; warnings: string[];
 }
-export interface RequiredCardModel { title: string; headline: string; subtitle: string | null; rows: { label: string; value: string }[]; arrival: { label: string; value: string }[]; sensitivity: { label: string; value: string }[]; routes: RouteBlockModel[]; scenarios: { label: string; value: string }[]; note: string }
+export interface RequiredCardModel { title: string; headline: string; subtitle: string | null; rows: { label: string; value: string }[]; arrival: { label: string; value: string }[]; sensitivity: { label: string; value: string }[]; window: { label: string; value: string }[]; routes: RouteBlockModel[]; scenarios: { label: string; value: string }[]; note: string }
 const CARD_TITLE = "הפקדה חודשית נדרשת";
 const CARD_REASONS: Record<string, string> = {
   unreachable_under_assumptions: "לא ניתן להשיג בהנחות האלה — אפשר לשנות תאריך, תשואה או סכום.",
@@ -812,7 +812,7 @@ function arrivalRow(x: NonNullable<RequiredMonthlyCard["arrival"]>[number]): { l
 export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredCardModel | null {
   if (!c) return null;
   if (c.amount == null) {
-    return { title: CARD_TITLE, headline: "אין סכום להצגה", subtitle: c.reason ? (CARD_REASONS[c.reason] ?? word(NEED_REASONS, c.reason)) : null, rows: [], arrival: [], routes: [], sensitivity: [], scenarios: [], note: "" };
+    return { title: CARD_TITLE, headline: "אין סכום להצגה", subtitle: c.reason ? (CARD_REASONS[c.reason] ?? word(NEED_REASONS, c.reason)) : null, rows: [], arrival: [], routes: [], window: [], sensitivity: [], scenarios: [], note: "" };
   }
   const a = c.assumptions;
   const rows: { label: string; value: string }[] = [];
@@ -834,6 +834,10 @@ export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredC
     rows,
     arrival: (c.arrival ?? []).map(arrivalRow),
     routes: (c.alternatives ?? []).map(routeBlock),
+    window: c.window ? ([["early", "אם התאריך מוקדם"], ["late", "אם התאריך מאוחר"]] as const).map(([k, label]) => {
+      const e = c.window![k];
+      return { label: `${label} (${dmy(e.due)})`, value: e.reason === "past_date" ? WINDOW_END_PASSED : e.amount == null ? (e.reason ? word(CARD_REASONS, e.reason) : "אין סכום להצגה") : `${money(e.amount)} לחודש` };
+    }) : [],
     sensitivity: (c.sensitivity ?? []).map((s) => ({ label: `${SENS[s.label] ?? s.label} (${pctText(s.annual_return_pct)})`, value: s.amount == null ? "לא ניתן להשגה" : money(s.amount) })),
     scenarios: (c.scenarios ?? []).map((s) => ({ label: `${CARD_SCENARIOS[s.basis] ?? s.basis}: נותרו ${money(s.remaining)}`, value: s.amount == null ? "לא ניתן להשגה" : `${money(s.amount)} לחודש` })),
     note: c.note ? serverNote(c.note) : "",
@@ -842,7 +846,9 @@ export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredC
 const dmy = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "—");
 const optMoney = (v: number | null | undefined) => (v == null ? "—" : money(v));
 
+const WINDOW_END_PASSED = "הקצה הזה של החלון כבר עבר — לא מחושב";        // never "תאריך היעד עבר" beside an option that is still being computed (O4)
 function windowCell(e: FundingWindowEnd, o: FundingWindowOption | undefined): string {
+  if (e.reason === "past_date") return WINDOW_END_PASSED;
   if (e.reason) return word(NEED_REASONS, e.reason);
   if (!o) return "—";
   const parts = [`${word(FEASIBLE_LABELS, String(o.feasible))}${o.reason ? ` — ${word(FUNDING_REASONS, o.reason)}` : ""}`];
