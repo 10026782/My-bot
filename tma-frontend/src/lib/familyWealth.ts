@@ -1,6 +1,6 @@
 // "תכנון חיסכון לטווח ארוך" (family wealth) — presentation only. No fetching, no storage, no financial arithmetic:
 // every number shown comes from the server (FCC overview / portfolio_lab view); this only words and lays them out.
-import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingLiquidityState, FundingPlan, FundingRequestBody, FundingSourceCategory, FundingSourceItem, FundingSources, SavedPlanComparison, SavedPlanPair, SavedPlanValue, FundingWindow, FundingWindowEnd, FundingWindowOption, RequiredMonthlyCard, FundingAlternatives, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
+import type { FccAccount, FccAccountsForecast, FccAccountsView, FccForecastAccount, FccForecastParams, FccOverview, FundingCertainty, FundingOptionResult, FundingOptionType, FundingLiquidityState, FundingPlan, FundingRequestBody, FundingSourceCategory, FundingSourceItem, FundingSources, SavedPlanComparison, SavedPlanPair, SavedPlanValue, FundingWindow, FundingWindowEnd, FundingWindowOption, RequiredMonthlyCard, CommitmentsSchedule, FundingAlternatives, PaceAccountRow, PaceParams, PaceView, PlKpis, PortfolioLabParams, PortfolioLabView } from "../types";
 import { money } from "./fccPresentation";
 
 export const SCREEN_TITLE = "תכנון חיסכון לטווח ארוך";   // owner's choice (14/10/2026); one constant so the name can change in one place
@@ -669,8 +669,8 @@ export const FUNDING_FIELDS: Record<Exclude<FundingOptionType, "existing_balance
 export const FUNDING_ADDABLE: Exclude<FundingOptionType, "existing_balance">[] = ["new_deposits", "asset_sale", "loan", "receivable_collection", "obligations_reduction", "work_income", "custom"];
 
 export interface FundingOptionDraft { id: string; type: Exclude<FundingOptionType, "existing_balance">; values: Record<string, string>; use: string }
-export interface FundingForm { goalId: string; marginMonths: string; cardMonthly: string; fromExisting: string; returnPct: string; feePct: string; inflationPct: string; options: FundingOptionDraft[] }
-export const DEFAULT_FUNDING_FORM: FundingForm = { goalId: "", marginMonths: "", cardMonthly: "", fromExisting: "", returnPct: "6", feePct: "0.15", inflationPct: "2", options: [] };
+export interface FundingForm { goalId: string; marginMonths: string; cardMonthly: string; fromExisting: string; showSchedule: boolean; scheduleOnly: string[] | null; returnPct: string; feePct: string; inflationPct: string; options: FundingOptionDraft[] }
+export const DEFAULT_FUNDING_FORM: FundingForm = { goalId: "", marginMonths: "", cardMonthly: "", fromExisting: "", showSchedule: false, scheduleOnly: null, returnPct: "6", feePct: "0.15", inflationPct: "2", options: [] };
 
 /** A new draft with defaults that never invent money: only selects get a starting choice. */
 export function newFundingOption(type: FundingOptionDraft["type"], counter: number): FundingOptionDraft {
@@ -732,7 +732,7 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
       plan.push({ goal_id: form.goalId, option_id: draft.id, amount });
     }
   }
-  return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan, ...(margin !== undefined ? { date_margin_months: margin } : {}), ...(cardMonthly !== undefined ? { card_monthly: cardMonthly } : {}), ...(fromExisting !== undefined ? { from_existing: fromExisting } : {}) } };
+  return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan, ...(margin !== undefined ? { date_margin_months: margin } : {}), ...(cardMonthly !== undefined ? { card_monthly: cardMonthly } : {}), ...(fromExisting !== undefined ? { from_existing: fromExisting } : {}), ...(form.showSchedule ? { schedule: true, ...(form.scheduleOnly ? { schedule_goal_ids: form.scheduleOnly } : {}) } : {}) } };
 }
 
 /** Notes the server writes in English (planner assumptions / plan note), shown in Hebrew. Matched by the note's opening words; a note that is not
@@ -757,7 +757,7 @@ export interface FundingOptionCard {
   windowRows: { label: string; value: string }[];
 }
 export interface FundingPlanModel {
-  needTitle: string; needRows: { label: string; value: string }[]; needReason: string | null; requiredCard: RequiredCardModel | null; windowNote: string | null; options: FundingOptionCard[];
+  needTitle: string; needRows: { label: string; value: string }[]; needReason: string | null; requiredCard: RequiredCardModel | null; schedule: ScheduleModel | null; windowNote: string | null; options: FundingOptionCard[];
   plan: { rows: { label: string; value: string }[]; allocations: string[]; note: string } | null;
   portfolio: { rows: { label: string; value: string }[] } | null; warnings: string[];
 }
@@ -843,6 +843,42 @@ export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredC
     note: c.note ? serverNote(c.note) : "",
   };
 }
+export interface ScheduleModel {
+  title: string; intro: string; rows: { goalId: string; label: string; value: string; selected: boolean }[]; steps: { label: string; value: string; warning: boolean }[];
+  releases: { label: string; value: string }[]; summary: { label: string; value: string }[]; excluded: string[]; notes: string[];
+}
+const SCHEDULE_TITLE = "לוח התחייבויות חודשי";
+const SCHEDULE_INTRO = "כל יעד פעיל עם סכום ותאריך: ההפקדה הנדרשת מהחודש הנוכחי ועד חודש היעד. הנטל יורד ככל שהפקדות מסתיימות — יעדים עוקבים אינם מסוכמים כאילו הם במקביל. קריאה בלבד: לא נשמר ולא מוקצה.";
+const SCHEDULE_EXCLUDED: Record<string, string> = {
+  missing_target: "חסר סכום יעד", missing_date: "חסר תאריך יעד", past_date: "תאריך היעד עבר", no_gap: "אין פער — כבר מכוסה",
+  unreachable_under_assumptions: "לא ניתן להשיג בהנחות האלה", parent_goal_rollup_not_supported: "יעד אב — עדיין לא נתמך", beyond_horizon: "מעבר לאופק החישוב", due_this_month: "התאריך בחודש הנוכחי",
+};
+const SCHEDULE_NOTES: Record<string, string> = {
+  read_only: "הלוח מחושב ולא נשמר; הוא אינו משנה את ״נותר״, ״מבט תיק״ או התוכנית.",
+  one_date_per_goal: "לכל יעד נלקח תאריך ההערכה (לא קצות החלון).",
+  no_capacity_allocation: "אין כאן הקצאת קיבולת בין יעדים — הלוח מראה, הבחירה אצלך.",
+  not_continuing_deposits: "הפקדות מתמשכות (בלי תאריך סיום) עדיין אינן נתמכות בלוח.",
+};
+const monthYear = (iso: string) => dmy(iso).slice(3);
+
+/** The server's schedule, worded. Every amount and every month is the server's; nothing is added up or compared here. */
+export function scheduleModel(sc: CommitmentsSchedule | undefined): ScheduleModel | null {
+  if (!sc) return null;
+  return {
+    title: SCHEDULE_TITLE, intro: SCHEDULE_INTRO,
+    rows: sc.rows.map((r) => ({ goalId: r.goal_id, selected: r.selected, label: r.title || "מטרה ללא שם", value: `${money(r.amount)} לחודש · ${monthYear(r.start)}–${monthYear(r.end)} · ${r.months} חודשים` })),
+    steps: sc.steps.map((st) => ({ label: `${monthYear(st.from)}–${monthYear(st.to)} · ${st.goal_ids.length} יעדים`, warning: (st.shortfall_vs_planned ?? 0) > 0,
+      value: `${money(st.burden)} לחודש${st.shortfall_vs_planned == null ? " · חיסכון מתוכנן חסר" : st.shortfall_vs_planned > 0 ? ` · חוסר מול המתוכנן ${money(st.shortfall_vs_planned)}` : " · בתוך החיסכון המתוכנן"}` })),
+    releases: sc.releases.map((x) => ({ label: `${x.title || "מטרה ללא שם"} — מתפנה מ־${monthYear(x.released_from)}`, value: `${money(x.amount)} לחודש (קו, לא הבטחה)` })),
+    summary: [
+      { label: "הנטל הגבוה ביותר", value: sc.steps.length ? `${money(sc.peak_burden)} לחודש` : "אין יעדים נבחרים" },
+      { label: "חיסכון חודשי מתוכנן (התכנית הקבועה)", value: sc.planned_monthly_savings == null ? "לא ידוע" : money(sc.planned_monthly_savings) },
+      ...(sc.peak_shortfall ? [{ label: "חוסר בשיא מול המתוכנן", value: money(sc.peak_shortfall) }] : []),
+    ],
+    excluded: [...sc.excluded.map((e) => `${e.title || "מטרה ללא שם"} — ${word(SCHEDULE_EXCLUDED, e.reason)}`), ...(sc.truncated ? ["יש יותר מ־10 יעדים — מוצגים 10 לפי תאריך"] : [])],
+    notes: sc.notes.map((n) => word(SCHEDULE_NOTES, n)),
+  };
+}
 const dmy = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "—");
 const optMoney = (v: number | null | undefined) => (v == null ? "—" : money(v));
 
@@ -919,7 +955,7 @@ export function fundingModel(plan: FundingPlan, goalId: string, titles: Record<s
     ...(pf.over_committed.length ? [{ label: "מקור שהוקצה ליותר מסכומו", value: pf.over_committed.map((id) => titles[id] ?? id).join(", ") }] : []),
   ] } : null;
   return {
-    needTitle: n.title || "מטרה ללא שם", needRows, needReason: n.reason ? word(NEED_REASONS, n.reason) : null, requiredCard: requiredCardModel(g.required_monthly_card),
+    needTitle: n.title || "מטרה ללא שם", needRows, needReason: n.reason ? word(NEED_REASONS, n.reason) : null, requiredCard: requiredCardModel(g.required_monthly_card), schedule: scheduleModel(plan.schedule),
     windowNote: g.window ? FUNDING_WINDOW_NOTE : null,
     options: g.options.map((o) => optionCard(o, titles, g.window)), plan: planModel, portfolio, warnings: plan.warnings,
   };

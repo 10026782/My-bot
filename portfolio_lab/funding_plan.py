@@ -161,7 +161,7 @@ def normalize_request(body) -> dict:
     """גוף הבקשה הגולמי -> קלט מנורמל; ValueError על קלט לא תקף. מזהי הרשומות נבדקים מול הנתונים של הבעלים ב-`build_funding_plan`."""
     if not isinstance(body, dict):
         raise ValueError("body must be an object")
-    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan", "date_margin_months", "card_monthly", "from_existing"}
+    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan", "date_margin_months", "card_monthly", "from_existing", "schedule", "schedule_goal_ids"}
     if unknown:
         raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
     goal_ids = body.get("goal_ids")
@@ -204,8 +204,15 @@ def normalize_request(body) -> dict:
     from_existing = body.get("from_existing")
     if from_existing is not None:
         from_existing = _money(from_existing, "from_existing")                       # route ד׳: how much of the deposit comes from existing deposits (a typed amount)
+    schedule = body.get("schedule", False)
+    if not isinstance(schedule, bool):
+        raise ValueError("schedule must be true or false")
+    schedule_ids = body.get("schedule_goal_ids")
+    if schedule_ids is not None:
+        if not isinstance(schedule_ids, list) or len(schedule_ids) > _MAX_GOALS or not all(isinstance(i, str) and _REC.match(i) for i in schedule_ids):
+            raise ValueError(f"schedule_goal_ids must list at most {_MAX_GOALS} goal ids")
     return {"goal_ids": goal_ids, "assumptions": assumptions, "options": options, "allocation_plan": plan, "date_margin_months": margin,
-            "card_monthly": card_monthly, "from_existing": from_existing}
+            "card_monthly": card_monthly, "from_existing": from_existing, "schedule": schedule, "schedule_goal_ids": schedule_ids}
 
 
 # ── עזרים ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -671,6 +678,62 @@ def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: di
             "note": "new money only (existing balances are not counted); not split between goals; the planned figure is the family's standing plan, shown beside it and never netted"}
 
 
+def build_commitments_schedule(inputs: dict, request: dict, today: date) -> dict:
+    """לוח התחייבויות חודשי (GOAL_FUNDING_CHAIN_SPEC §4, Q-C5/Q-C6/Q-C7): לכל יעד פעיל עם סכום ותאריך — ההפקדה החודשית הנדרשת (אותו חיפוש בינארי מעל המנוע,
+    על הפער, בהנחות הבקשה), מהחודש הנוכחי ועד חודש היעד; ועקומת הנטל החודשי **בזמן**: יעדים עוקבים לא מסוכמים כמקבילים, והפקדה שמסתיימת מוצגת כשורת שחרור
+    נפרדת (קו, לא הבטחה). קריאה בלבד: לא נשמר, לא מקצה קיבולת בין יעדים, לא משנה "נותר"/"מבט תיק". חסר = ברשימת ההשמטות, לא 0. תאריך אחד לכל יעד (נקודת ההערכה)."""
+    start = today.replace(day=1)
+    planned = (inputs.get("savings_plan") or {}).get("target")
+    planned = float(planned) if isinstance(planned, (int, float)) and not isinstance(planned, bool) else None
+    active = [g for g in inputs.get("goals") or [] if isinstance(g, dict) and g.get("id") and str(g.get("status") or "active").lower() in ("active", "פעיל")]
+    candidates, excluded = [], []
+    for g in active:
+        target, due = af._goal_number(g.get("target_amount")), af._iso_date(g.get("end_date"))
+        title = g.get("title")
+        if target is None and due is None:
+            continue                                                     # not a funding goal at all (e.g. a project): nothing half-defined to report
+        reason = "missing_target" if target is None else "missing_date" if due is None else "past_date" if due < start else None
+        (excluded if reason else candidates).append({"goal_id": g["id"], "title": title, "reason": reason} if reason else {"goal_id": g["id"], "title": title, "due": due})
+    candidates.sort(key=lambda c: (c["due"], c["goal_id"]))
+    truncated = len(candidates) > _MAX_GOALS
+    chosen = candidates[:_MAX_GOALS]
+    rows = []
+    if chosen:
+        sub = {**request, "goal_ids": [c["goal_id"] for c in chosen], "options": [], "allocation_plan": [], "date_margin_months": 0, "card_monthly": None,
+               "from_existing": None, "schedule": False, "schedule_goal_ids": None}
+        plan = build_funding_plan(inputs, sub, today, _window_variant=True)
+        title_of = {c["goal_id"]: c["title"] for c in chosen}
+        for out in plan["goals"]:
+            need, card = out["need"], out["required_monthly_card"]
+            gid = need["goal_id"]
+            if card.get("amount") is None or need["reason"] not in (None, "already_covered") or card.get("reason") == "no_gap":
+                excluded.append({"goal_id": gid, "title": title_of.get(gid), "reason": card.get("reason") or need["reason"]})
+            elif card["amount"] > 0:
+                months = int(card["months"])
+                rows.append({"goal_id": gid, "title": title_of.get(gid), "amount": card["amount"], "months": months, "due": need["due"],
+                             "start": start.isoformat(), "end": _add_months(start, months - 1).isoformat(), "released_from": _add_months(start, months).isoformat()})
+    wanted = request.get("schedule_goal_ids")
+    for r in rows:
+        r["selected"] = wanted is None or r["goal_id"] in wanted
+    sel = [r for r in rows if r["selected"]]
+    breaks = sorted({0} | {r["months"] for r in sel})
+    steps = []
+    for lo, hi in zip(breaks, breaks[1:]):
+        live = [r for r in sel if r["months"] > lo]
+        burden = round(sum(r["amount"] for r in live), 2)
+        steps.append({"from": _add_months(start, lo).isoformat(), "to": _add_months(start, hi - 1).isoformat(), "burden": burden,
+                      "goal_ids": [r["goal_id"] for r in live], "shortfall_vs_planned": round(max(burden - planned, 0.0), 2) if planned is not None else None})
+    peak = max((st["burden"] for st in steps), default=0.0)
+    releases = sorted(({"goal_id": r["goal_id"], "title": r["title"], "amount": r["amount"], "released_from": r["released_from"]} for r in sel),
+                      key=lambda x: (x["released_from"], x["goal_id"]))
+    return {"as_of": today.isoformat(), "start": start.isoformat(), "rows": rows, "steps": steps, "releases": releases, "peak_burden": peak,
+            "planned_monthly_savings": planned,
+            "peak_shortfall": round(max(peak - planned, 0.0), 2) if planned is not None else None,
+            "excluded": excluded[:20], "truncated": truncated,
+            "assumptions": dict(request.get("assumptions") or {}),
+            "notes": ["read_only", "one_date_per_goal", "no_capacity_allocation", "not_continuing_deposits"]}
+
+
 # ── בניית התוכנית ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *, _window_variant: bool = False) -> dict:
@@ -832,9 +895,10 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *
                         end: {"due": out["window"][end]["due"], "amount": (out["window"][end].get("required_card") or {}).get("amount"),
                               "reason": (out["window"][end].get("required_card") or {}).get("reason") or out["window"][end]["reason"]}
                         for end in ("early", "late")}}
+    schedule = build_commitments_schedule(inputs, request, today) if request.get("schedule") and not _window_variant else None
     warnings = ["השוואה בין אפשרויות בלבד — לא המלצה ולא בחירה עבורך.", "כסף צפוי או לא ודאי אינו כסף קיים: הכיסוי מפוצל לפי ודאות.",
                 "אין מודל מס; תמורה נטו, ריבית ותקופה הם כפי שהוזנו ('תנאים לא אומתו' אלא אם סומן אחרת)."]
     return {"schema_version": FUNDING_SCHEMA_VERSION, "result_type": "funding_plan_comparison", "as_of": today.isoformat(),
             "assumptions": {"annual_return_pct": p["annual_return"] * 100, "annual_fee_pct": p["annual_fee"] * 100, "inflation_pct": p["inflation"] * 100,
                             "horizon_years": years},
-            "goals": goal_outputs, "portfolio": portfolio, "warnings": warnings}
+            "goals": goal_outputs, "portfolio": portfolio, "warnings": warnings, **({"schedule": schedule} if schedule is not None else {})}

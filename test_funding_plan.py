@@ -773,3 +773,104 @@ def test_no_window_without_a_margin_and_the_variants_do_not_recurse_into_a_windo
     out = run(inputs(goals=[{**goal_rec(), "date_margin_months": 6}]), request())
     early = out["goals"][0]["window"]["early"]
     assert early["required_card"]["amount"] is not None and "window" not in early["required_card"] and "alternatives" not in early["required_card"]
+
+
+# ═══ monthly commitments schedule (GOAL_FUNDING_CHAIN_SPEC §4: Q-C5 read-only, Q-C6 all active goals with a filter, Q-C7 a release is its own row) ═══
+
+G3 = "recG3"
+
+
+def sched_goals():
+    return [goal_rec(G, 120000, "2028-10-19", title="אלחנן"), goal_rec(G2, 120000, "2030-01-19", title="נתנאל"), goal_rec(G3, 120000, "2031-04-19", title="יוסף"),
+            goal_rec("recG4", None, None, title="פרויקט ללא סכום ותאריך"), goal_rec("recG5", 50000, None, title="חצי מוגדר"),
+            {**goal_rec("recG6", 9000, "2029-01-01", title="הושלם"), "status": "done"}]
+
+
+def schedule(goals=None, *, planned=13000, only=None, assumptions=None):
+    body = {"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS if assumptions is None else assumptions, "schedule": True}
+    if only is not None:
+        body["schedule_goal_ids"] = only
+    inp = inputs(goals=goals if goals is not None else sched_goals(), savings_plan={"target": planned} if planned is not None else {})
+    return run(inp, fp.normalize_request(body))["schedule"]
+
+
+def test_successive_goals_are_not_summed_as_if_parallel_and_a_finished_deposit_is_released_in_its_own_row():
+    sc = schedule()
+    rows = {r["goal_id"]: r for r in sc["rows"]}
+    assert [st["goal_ids"] for st in sc["steps"]] == [[G, G2, G3], [G2, G3], [G3]]                  # the burden steps DOWN as deposits end
+    assert [st["burden"] for st in sc["steps"]] == [round(sum(r["amount"] for r in rows.values()), 2),
+                                                    round(rows[G2]["amount"] + rows[G3]["amount"], 2), rows[G3]["amount"]]
+    assert sc["peak_burden"] == sc["steps"][0]["burden"]
+    assert [(x["goal_id"], x["released_from"]) for x in sc["releases"]] == [(G, "2028-10-01"), (G2, "2030-01-01"), (G3, "2031-04-01")]
+    assert all(x["amount"] == rows[x["goal_id"]]["amount"] for x in sc["releases"])
+
+
+def test_each_amount_is_the_same_required_monthly_search_on_the_goals_own_gap_and_months():
+    sc = schedule()
+    p = fp.af.normalize_params({"years": 10, **FLAT_ASSUMPTIONS})
+    r = next(x for x in sc["rows"] if x["goal_id"] == G2)
+    assert r["months"] == 39 and r["start"] == "2026-10-01" and r["end"] == "2029-12-01"        # due 19/01/2030: the last COMPLETED month is 12/2029 (A2)
+    assert r["amount"] == fp.required_monthly(120000, 39, years=10, annual_return=0.0, fee=0.0, deposit_fee_pct=0.0, p=p, start="2026-10-01")
+    assert r["amount"] == card(run(inputs(goals=sched_goals()), request(goal_ids=(G2,))))["amount"]
+
+
+def test_the_filter_recomputes_the_curve_for_the_chosen_goals_only_and_keeps_the_others_listed():
+    sc = schedule(only=[G2])
+    assert [r["selected"] for r in sc["rows"]] == [False, True, False] and [st["goal_ids"] for st in sc["steps"]] == [[G2]]
+    assert [x["goal_id"] for x in sc["releases"]] == [G2] and sc["peak_burden"] == next(r["amount"] for r in sc["rows"] if r["goal_id"] == G2)
+    assert schedule(only=[])["steps"] == [] and schedule(only=[])["peak_burden"] == 0.0
+
+
+def test_goals_that_cannot_be_scheduled_are_listed_with_why_never_zero_and_inactive_goals_are_not_included():
+    sc = schedule()
+    ex = {e["goal_id"]: e["reason"] for e in sc["excluded"]}
+    assert ex == {"recG5": "missing_date"}                                    # "פרויקט" (nothing defined) is not a funding goal; "הושלם" is not active
+    assert "recG4" not in {r["goal_id"] for r in sc["rows"]} and "recG6" not in {r["goal_id"] for r in sc["rows"]}
+
+
+def test_a_covered_goal_has_no_deposit_row_and_a_missing_planned_figure_is_missing():
+    covered = inputs([cash(value=500000)], allocations=[al("a1", G, "recI", "fixed_amount", 130000)], goals=sched_goals(), savings_plan={})
+    sc = fp.build_funding_plan(covered, fp.normalize_request({"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS, "schedule": True}), TODAY)["schedule"]
+    assert G not in {r["goal_id"] for r in sc["rows"]} and {e["goal_id"]: e["reason"] for e in sc["excluded"]}[G] == "no_gap"
+    assert sc["planned_monthly_savings"] is None and all(st["shortfall_vs_planned"] is None for st in sc["steps"]) and sc["peak_shortfall"] is None
+
+
+def test_the_shortfall_against_the_planned_savings_is_per_step_and_never_negative():
+    sc = schedule(planned=9000)
+    assert [st["shortfall_vs_planned"] for st in sc["steps"]] == [round(max(st["burden"] - 9000, 0.0), 2) for st in sc["steps"]]
+    assert sc["steps"][0]["shortfall_vs_planned"] > 0 and sc["steps"][-1]["shortfall_vs_planned"] == 0.0 and sc["peak_shortfall"] == sc["steps"][0]["shortfall_vs_planned"]
+    assert schedule(planned=100000)["peak_shortfall"] == 0.0                         # never negative
+
+
+def test_more_than_ten_goals_is_said_not_silently_dropped_and_the_schedule_is_off_by_default():
+    many = [goal_rec(G, 10000, "2029-01-15")] + [goal_rec(f"recM{i:02d}", 10000, f"2030-0{1 + i % 9}-15", title=f"יעד {i}") for i in range(11)]
+    sc = schedule(goals=many)
+    assert sc["truncated"] is True and len(sc["rows"]) == 10
+    assert "schedule" not in run(inputs(goals=sched_goals()), request())
+    with pytest.raises(ValueError):
+        fp.normalize_request({"goal_ids": [G], "schedule": "yes"})
+    with pytest.raises(ValueError):
+        fp.normalize_request({"goal_ids": [G], "schedule_goal_ids": ["bad id"]})
+
+
+def test_the_schedule_changes_nothing_else_and_carries_no_recommendation_or_english_prose():
+    body = {"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS}
+    a = run(inputs(goals=sched_goals(), savings_plan={"target": 13000}), fp.normalize_request({**body, "schedule": True}))
+    b = run(inputs(goals=sched_goals(), savings_plan={"target": 13000}), fp.normalize_request(body))
+    assert {k: v for k, v in a.items() if k != "schedule"} == b
+    text = json.dumps(a["schedule"], ensure_ascii=False).lower()
+    assert not re.search(r"recommend|score|rank|best|המלצה|ציון|דירוג|כדאי", text)
+    assert all(re.fullmatch(r"[a-z_]+", n) for n in a["schedule"]["notes"])        # codes only; the Hebrew wording lives in the client
+
+
+def test_every_schedule_reason_and_note_has_a_hebrew_entry_in_the_client():
+    goals = sched_goals() + [goal_rec("recG7", 50000, "2020-01-01", title="עבר"), goal_rec("recG8", None, "2029-01-01", title="בלי סכום")]
+    seen_reasons, seen_notes = set(), set()
+    for sc in (schedule(goals=goals), schedule(goals=goals, planned=None)):
+        seen_reasons |= {e["reason"] for e in sc["excluded"]}
+        seen_notes |= set(sc["notes"])
+    covered = run(inputs([cash(value=500000)], allocations=[al("a1", G, "recI", "fixed_amount", 130000)], goals=sched_goals()),
+                  fp.normalize_request({"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS, "schedule": True}))["schedule"]
+    seen_reasons |= {e["reason"] for e in covered["excluded"]}
+    assert {"missing_date", "missing_target", "past_date", "no_gap"} <= seen_reasons
+    assert seen_reasons <= _client_keys("SCHEDULE_EXCLUDED") and seen_notes <= _client_keys("SCHEDULE_NOTES") and seen_notes

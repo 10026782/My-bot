@@ -1025,7 +1025,16 @@ export interface SavedPlanGoalComparison {
   need?: SavedPlanPair[]; options?: SavedPlanOptionChange[]; any_change?: boolean;
 }
 export interface SavedPlanComparison { schema_version: string; result_type: string; as_of: string; goals: SavedPlanGoalComparison[]; note: string }
+/** The monthly commitments schedule (GOAL_FUNDING_CHAIN_SPEC §4): the required deposit of every active funding goal over time, read-only. Server numbers only. */
+export interface ScheduleRow { goal_id: string; title: string | null; amount: number; months: number; due: string; start: string; end: string; released_from: string; selected: boolean }
+export interface ScheduleStep { from: string; to: string; burden: number; goal_ids: string[]; shortfall_vs_planned: number | null }
+export interface CommitmentsSchedule {
+  as_of: string; start: string; rows: ScheduleRow[]; steps: ScheduleStep[]; releases: { goal_id: string; title: string | null; amount: number; released_from: string }[];
+  peak_burden: number; planned_monthly_savings: number | null; peak_shortfall: number | null;
+  excluded: { goal_id: string; title: string | null; reason: string }[]; truncated: boolean; notes: string[];
+}
 export interface FundingPlan {
+  schedule?: CommitmentsSchedule;
   suggested_sources?: FundingSources;
   saved_plan_comparison?: SavedPlanComparison;
   schema_version: string; result_type: string; as_of: string;
@@ -1043,6 +1052,9 @@ export interface FundingRequestBody {
   card_monthly?: number;
   /** Route ד׳: how much of the required deposit comes from the existing planned deposits (a typed amount; the percent is computed by the server). */
   from_existing?: number;
+  /** Ask for the monthly commitments schedule (all active funding goals); `schedule_goal_ids` limits the curve to the chosen goals. */
+  schedule?: boolean;
+  schedule_goal_ids?: string[];
 }
 
 /** Unified net worth (C2, server-computed, read-only): accounts + assets − own debts. Receivables are shown apart and are NOT in `net`. */
