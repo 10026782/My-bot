@@ -544,3 +544,58 @@ def test_the_planned_savings_sit_beside_the_required_deposit_and_are_never_nette
 def test_the_card_has_no_recommendation_score_or_ranking():
     text = json.dumps(card(run(inputs(), request())), ensure_ascii=False).lower()
     assert not re.search(r"recommend|score|rank|המלצה|ציון|דירוג|best|cheapest", text)
+
+
+# ═══ required monthly deposit card: when does each deposit reach the goal (Q-R8: two SEPARATE forecasts) ═══
+
+def arrival(out, basis, index=0):
+    return next(a for a in card(out, index)["arrival"] if a["basis"] == basis)
+
+
+def with_card(monthly=None, **extra):
+    body = {"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS}
+    if monthly is not None:
+        body["card_monthly"] = monthly
+    return fp.normalize_request({**body, **extra})
+
+
+def test_two_separate_arrival_forecasts_planned_and_entered_never_combined():
+    out = run(inputs(savings_plan={"target": 13000}), with_card(5000))
+    planned, entered = arrival(out, "planned"), arrival(out, "entered")
+    assert (planned["monthly"], planned["reach_date"], planned["months_vs_due"]) == (13000.0, "2027-07-31", -41)       # 120000 / 13000 -> 10th month
+    assert (entered["monthly"], entered["reach_date"], entered["months_vs_due"]) == (5000.0, "2028-09-30", -27)        # 120000 / 5000 -> 24th month
+    assert [a["basis"] for a in card(out)["arrival"]] == ["planned", "entered"]                                       # no third, combined forecast
+
+
+def test_the_required_deposit_arrives_in_the_due_month_not_later_and_one_cent_less_does_not():
+    c = card(run(inputs(), with_card()))
+    on_time = card(run(inputs(), with_card(c["amount"])))
+    assert arrival({"goals": [{"required_monthly_card": on_time}]}, "entered")["months_vs_due"] <= 0
+    short = card(run(inputs(), with_card(c["amount"] - 1)))
+    assert arrival({"goals": [{"required_monthly_card": short}]}, "entered")["months_vs_due"] > 0
+
+
+def test_no_arrival_within_the_horizon_is_said_plainly_with_no_invented_date():
+    out = run(inputs(goals=[goal_rec(target=10_000_000)]), with_card(1))
+    a = arrival(out, "entered")
+    assert a["reached"] is False and a["reach_date"] is None and a["months_vs_due"] is None
+
+
+def test_a_missing_planned_figure_is_missing_not_zero_and_no_entered_figure_means_no_second_forecast():
+    out = run(inputs(), with_card())
+    assert card(out)["arrival"] == [{"basis": "planned", "monthly": None}]
+    assert arrival(run(inputs(savings_plan={"target": 0}), with_card()), "planned") == {"basis": "planned", "monthly": None}
+
+
+@pytest.mark.parametrize("bad", [0, -5, "5000", True, float("nan"), 10**11])
+def test_the_figure_typed_on_the_card_must_be_a_positive_amount(bad):
+    with pytest.raises(ValueError):
+        with_card(bad)
+
+
+def test_arrival_is_deterministic_and_does_not_change_the_rest_of_the_answer():
+    a = run(inputs(savings_plan={"target": 13000}), with_card(5000))
+    assert a == run(inputs(savings_plan={"target": 13000}), with_card(5000))
+    b = run(inputs(savings_plan={"target": 13000}), with_card())
+    assert a["goals"][0]["need"] == b["goals"][0]["need"] and a["portfolio"] == b["portfolio"]
+    assert {k: v for k, v in card(a).items() if k != "arrival"} == {k: v for k, v in card(b).items() if k != "arrival"}
