@@ -685,3 +685,61 @@ def test_routes_are_also_given_for_each_plan_remainder_and_nothing_else_changes(
 def test_the_amount_from_existing_deposits_must_be_a_positive_amount(bad):
     with pytest.raises(ValueError):
         with_existing(bad)
+
+
+# ═══ no English on the Hebrew screen: every code / note the server can emit has a Hebrew entry in the client (drift guard) ═══
+
+def _client_keys(map_name: str) -> set:
+    src = Path("tma-frontend/src/lib/familyWealth.ts").read_text(encoding="utf-8")
+    block = re.search(rf"const {map_name}[^=]*=\s*\{{(.*?)\n\}};|const {map_name}[^=]*=\s*\{{(.*?)\}};", src, re.S)
+    body = (block.group(1) or block.group(2)) if block else ""
+    return set(re.findall(r"(?:^|[,{\s])([A-Za-z_][A-Za-z0-9_]*)\s*:", body))
+
+
+def _rich_runs():
+    runs = []
+    for kwargs, opts in (
+        ({"savings_plan": {"target": 13000, "actual": 0}, "income": INCOME, "loans": [receivable()], "assets": [asset()], "obligations": {"potential_saving": 100}},
+         [{"id": "c", "type": "custom", "label": "x", "amount": 5}, {"id": "cut", "type": "obligations_reduction"}, loan_option(), deposit_option(expected_return_pct=4), collect(), sale(),
+          {"id": "wi", "type": "work_income", "based_on": "dep"}]),
+        ({"savings_plan": {}}, [{"id": "dep", "type": "new_deposits", "hypothetical": {"liquid_from": "2031-06-01"}}]),
+        ({"savings_plan": {}, "assets": [asset()]}, [sale(expected_date="2031-01-01"), loan_option(available_by="2031-06-01")]),
+    ):
+        runs.append(run(inputs(**kwargs), request(*opts)))
+    runs.append(run(inputs(goals=[goal_rec(end=None)]), request()))
+    runs.append(run(inputs(goals=[goal_rec(end="2020-01-01")]), request()))
+    runs.append(run(inputs(), request(deposit_option(), allocation_plan=[{"goal_id": G, "option_id": "dep", "amount": 1000}])))
+    return runs
+
+
+def test_every_code_the_server_emits_has_a_hebrew_label_in_the_client():
+    codes = {"conditions": set(), "risks": set(), "missing_inputs": set(), "reasons": set(), "need_reasons": set()}
+    for out in _rich_runs():
+        for g in out["goals"]:
+            if g["need"]["reason"]:
+                codes["need_reasons"].add(g["need"]["reason"])
+            for o in g["options"]:
+                codes["conditions"] |= set(o["conditions"]); codes["risks"] |= set(o["risks"]); codes["missing_inputs"] |= set(o["missing_inputs"])
+                if o["reason"]:
+                    codes["reasons"].add(o["reason"])
+    known = {"conditions": _client_keys("FUNDING_CONDITIONS"), "risks": _client_keys("FUNDING_RISKS"), "missing_inputs": _client_keys("MISSING_INPUT_LABELS"),
+             "reasons": _client_keys("FUNDING_REASONS"), "need_reasons": _client_keys("NEED_REASONS")}
+    assert all(known.values()) and all(codes[k] for k in ("conditions", "risks", "reasons")), "the guard must see both sides (not vacuous)"
+    missing = {k: sorted(codes[k] - known[k]) for k in codes if codes[k] - known[k]}
+    assert not missing, f"codes shown raw (English) on the Hebrew screen: {missing}"
+
+
+def test_every_server_note_and_assumption_is_translated_by_a_prefix_in_the_client():
+    src = Path("tma-frontend/src/lib/familyWealth.ts").read_text(encoding="utf-8")
+    prefixes = re.findall(r'^\s*\["([^"]+)",\s*"', src[src.index("const SERVER_NOTES_HE"):src.index("export const serverNote")], re.M)
+    assert prefixes
+    texts = set()
+    for out in _rich_runs():
+        for g in out["goals"]:
+            texts |= {a for o in g["options"] for a in o["assumptions"]}
+            if g.get("plan"):
+                texts.add(g["plan"]["note"])
+            if g.get("required_monthly_card", {}).get("note"):
+                texts.add(g["required_monthly_card"]["note"])
+    untranslated = sorted(t for t in texts if not any(t.startswith(p) for p in prefixes))
+    assert not untranslated, f"English shown as written on the Hebrew screen: {untranslated}"

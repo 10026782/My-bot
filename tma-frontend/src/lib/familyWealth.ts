@@ -738,6 +738,7 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
 /** Notes the server writes in English (planner assumptions / plan note), shown in Hebrew. Matched by the note's opening words; a note that is not
  *  listed is shown as the server wrote it (never hidden). */
 const SERVER_NOTES_HE: [string, string][] = [
+  ["growth_as_assumed", "הצמיחה כפי שהונחה (תשואה אינה מובטחת)."],
   ["coverage is split by certainty", "הכיסוי מפוצל לפי ודאות ואינו מסוכם ל״כסף זמין״ אחד."],
   ["net proceeds as entered", "תמורה נטו כפי שהוזנה; סכום המכירה שברשומת הנכס הוא ברוטו ואינו בשימוש."],
   ["collected money is not income", "כסף שנגבה אינו הכנסה ואינו התחייבות שלך."],
