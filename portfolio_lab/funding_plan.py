@@ -161,7 +161,7 @@ def normalize_request(body) -> dict:
     """גוף הבקשה הגולמי -> קלט מנורמל; ValueError על קלט לא תקף. מזהי הרשומות נבדקים מול הנתונים של הבעלים ב-`build_funding_plan`."""
     if not isinstance(body, dict):
         raise ValueError("body must be an object")
-    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan", "date_margin_months"}
+    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan", "date_margin_months", "card_monthly"}
     if unknown:
         raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
     goal_ids = body.get("goal_ids")
@@ -198,7 +198,11 @@ def normalize_request(body) -> dict:
     margin = body.get("date_margin_months")
     if margin is not None and (isinstance(margin, bool) or not isinstance(margin, int) or not 0 <= margin <= _MAX_MARGIN_MONTHS):
         raise ValueError(f"date_margin_months must be a whole number of months 0 to {_MAX_MARGIN_MONTHS}")
-    return {"goal_ids": goal_ids, "assumptions": assumptions, "options": options, "allocation_plan": plan, "date_margin_months": margin}
+    card_monthly = body.get("card_monthly")
+    if card_monthly is not None:
+        card_monthly = _money(card_monthly, "card_monthly")                         # a figure typed on the card: a positive amount per month, never inferred
+    return {"goal_ids": goal_ids, "assumptions": assumptions, "options": options, "allocation_plan": plan, "date_margin_months": margin,
+            "card_monthly": card_monthly}
 
 
 # ── עזרים ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -561,10 +565,27 @@ def _certainty_counts(entries: list) -> dict:
     return {k: round(v, 2) for k, v in out.items()}
 
 
+def _reach(gap: float, monthly: float, ctx: dict, due: date, today: date) -> dict:
+    """מתי הכסף **החדש** שמופקד `monthly` כל חודש מגיע ל-`gap` — קריאה בלבד מאותו מנוע (אותה `_value_at` / `simulate`, חיפוש לפי חודשים,
+    לא נוסחה חדשה). לא מגיע באופק החישוב -> `reached: False` ואין תאריך מומצא. `months_vs_due`: שלילי = לפני התאריך, חיובי = אחריו."""
+    p, start, years = ctx["p"], ctx["start"], ctx["years"]
+    out = {"monthly": round(monthly, 2), "reached": False, "reach_date": None, "months_vs_due": None}
+    if monthly <= 0:
+        return out
+    series = simulate(Scenario(years=years, initial=0.0, monthly_contribution=monthly, inflation=p["inflation"], deposit_timing=p["deposit_timing"],
+                               start_date=start, assets=(Asset(name="account", annual_return=p["annual_return"], annual_fee=p["annual_fee"]),)), monthly=True)["monthly"]
+    first = next((i for i, row in enumerate(series) if float(row["value_after_costs"]) >= gap), None)
+    if first is None:
+        return out
+    day = af._month_end(_add_months(af._iso_date(start), first))
+    out.update(reached=True, reach_date=day.isoformat(), months_vs_due=_months_between(due, day))
+    return out
+
+
 _SENSITIVITY_PP = 2.0                                    # ±נקודות אחוז סביב התשואה הנחשבת (Q-R2; טווח מותאם — שלב נפרד)
 
 
-def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: dict, planned_monthly) -> dict:
+def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: dict, planned_monthly, today: date) -> dict:
     """הפקדה חודשית נדרשת ליעד (REQUIRED_MONTHLY_DEPOSIT_CARD_SPEC): כמה כסף **חדש** להפקיד כל חודש כדי להגיע לפער עד התאריך, לפי הנחות גלויות
     ובעלות מקור. אותו חיפוש בינארי מעל המנוע כמו `required_monthly` — אין נוסחה חדשה; קריאה בלבד, לא כותב ולא משנה "נותר" או "מבט תיק".
     `scenarios` = אותה הפקדה על שארית שונה (אחרי מאושר / אחרי מאושר וצפוי / אחרי כל התוכנית) — כל אחת מסומנת, ואף אחת אינה "הכסף הזמין"."""
@@ -591,7 +612,13 @@ def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: di
                                  ("after_confirmed_and_expected", plan["remaining_after_confirmed_and_expected"]),
                                  ("after_all_selected", round(max(target - plan["allocated_total"], 0.0), 2))):
             scenarios.append({"basis": basis, "remaining": remaining, "amount": amount(remaining, base_return)})
+    # two SEPARATE forecasts of the arrival date — never combined (Q-R8): the family's standing planned savings and the figure typed on the card
+    due = af._iso_date(need["due"])
+    arrival = [{"basis": "planned", **(_reach(gap, float(planned_monthly), ctx, due, today) if planned_monthly else {"monthly": None})}]
+    if request.get("card_monthly"):
+        arrival.append({"basis": "entered", **_reach(gap, float(request["card_monthly"]), ctx, due, today)})
     return {"amount": main, "reason": None if main is not None else "unreachable_under_assumptions", "gap": gap, "months": slot, "due": need["due"],
+            "arrival": arrival,
             "total_deposits": round(main * slot, 2) if main is not None else None,
             "assumptions": {"annual_return_pct": round(base_return * 100, 4), "fee_pct": round(fee * 100, 4), "deposit_fee_pct": deposit_fee,
                             "inflation_pct": round(p["inflation"] * 100, 4), "sources": sources},
@@ -747,7 +774,7 @@ def build_funding_plan(inputs: dict, request: dict, today: date | None = None, *
         for out in goal_outputs:
             gid = out["need"]["goal_id"]
             out["need"]["slot"] = slots.get(gid)
-            out["required_monthly_card"] = _required_monthly_card(out["need"], out["plan"], ctx, request, planned)
+            out["required_monthly_card"] = _required_monthly_card(out["need"], out["plan"], ctx, request, planned, today)
             out["need"].pop("slot", None)
         for out in goal_outputs:
             need = out["need"]

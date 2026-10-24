@@ -1058,6 +1058,7 @@ const requiredCard = {
   basis: "assumptions",
   sensitivity: [{ label: "low", annual_return_pct: 4, amount: 10200 }, { label: "base", annual_return_pct: 6, amount: 9859.84 }, { label: "high", annual_return_pct: 8, amount: 9500 }],
   scenarios: [{ basis: "after_all_selected", remaining: 15000, amount: 591.59 }],
+  arrival: [{ basis: "planned", monthly: 13000, reached: true, reach_date: "2027-07-31", months_vs_due: -15 }, { basis: "entered", monthly: 5000, reached: false, reach_date: null, months_vs_due: null }],
   planned_monthly_savings: 13000,
   note: "new money only (existing balances are not counted); not split between goals; the planned figure is the family's standing plan, shown beside it and never netted",
 };
@@ -1090,4 +1091,28 @@ test("required monthly card is rendered above the options and carries no recomme
   const html = renderToStaticMarkup(createElement(FundingResult, { model: fundingModel(withCard, "recG1")! }));
   assert.ok(html.indexOf("הפקדה חודשית נדרשת") > -1 && html.indexOf("fw-required") < html.indexOf("fw-option"));
   assert.ok(!/מומלץ|כדאי|הטוב ביותר|המלצה/.test(html.replace("לא המלצה", "")));
+});
+
+test("required monthly card: two separate arrival forecasts, a missing figure is missing, no arrival is said plainly, return is labelled a simulation", () => {
+  const withCard = (card: object) => fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: card }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!.requiredCard!;
+  const c = withCard(requiredCard);
+  assert.equal(c.arrival.length, 2, "two forecasts, never a combined third");
+  assert.ok(c.arrival[0].label.includes("אם כולו מופנה ליעד הזה") && c.arrival[0].label.includes("13,000"));
+  assert.ok(c.arrival[0].value.includes("07/2027") && c.arrival[0].value.includes("15 חודשים לפני תאריך היעד"), c.arrival[0].value);
+  assert.ok(c.arrival[1].label.includes("שהוזנה בכרטיס") && c.arrival[1].value === "לא מגיעים ליעד באופק החישוב בהפקדה זו");
+  assert.ok(c.rows.some((r) => r.label === "סוג התשואה" && r.value.includes("הנחת סימולציה")));
+  const missing = withCard({ ...requiredCard, arrival: [{ basis: "planned", monthly: null }] });
+  assert.ok(missing.arrival[0].value.startsWith("חסר"), "missing is missing, not 0");
+  const late = withCard({ ...requiredCard, arrival: [{ basis: "entered", monthly: 3000, reached: true, reach_date: "2029-03-31", months_vs_due: 5 }] });
+  assert.ok(late.arrival[0].value.includes("5 חודשים אחרי תאריך היעד"));
+  assert.deepEqual(withCard({ amount: null, reason: "unreachable_under_assumptions" }).arrival, []);
+});
+
+test("funding request: the figure typed on the card is sent once as a positive number, or refused on the form", () => {
+  const base = { ...DEFAULT_FUNDING_FORM, goalId: "recG1" };
+  const ok = fundingRequest({ ...base, cardMonthly: "₪5,000" });
+  assert.ok(ok.ok && ok.body.card_monthly === 5000);
+  const none = fundingRequest(base);
+  assert.ok(none.ok && !("card_monthly" in none.body), "blank = no second forecast");
+  for (const bad of ["abc", "0", "-5"]) assert.equal(fundingRequest({ ...base, cardMonthly: bad }).ok, false, bad);
 });

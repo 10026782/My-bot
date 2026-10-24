@@ -669,8 +669,8 @@ export const FUNDING_FIELDS: Record<Exclude<FundingOptionType, "existing_balance
 export const FUNDING_ADDABLE: Exclude<FundingOptionType, "existing_balance">[] = ["new_deposits", "asset_sale", "loan", "receivable_collection", "obligations_reduction", "work_income", "custom"];
 
 export interface FundingOptionDraft { id: string; type: Exclude<FundingOptionType, "existing_balance">; values: Record<string, string>; use: string }
-export interface FundingForm { goalId: string; marginMonths: string; returnPct: string; feePct: string; inflationPct: string; options: FundingOptionDraft[] }
-export const DEFAULT_FUNDING_FORM: FundingForm = { goalId: "", marginMonths: "", returnPct: "6", feePct: "0.15", inflationPct: "2", options: [] };
+export interface FundingForm { goalId: string; marginMonths: string; cardMonthly: string; returnPct: string; feePct: string; inflationPct: string; options: FundingOptionDraft[] }
+export const DEFAULT_FUNDING_FORM: FundingForm = { goalId: "", marginMonths: "", cardMonthly: "", returnPct: "6", feePct: "0.15", inflationPct: "2", options: [] };
 
 /** A new draft with defaults that never invent money: only selects get a starting choice. */
 export function newFundingOption(type: FundingOptionDraft["type"], counter: number): FundingOptionDraft {
@@ -690,6 +690,11 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
   if (!isBlank(form.marginMonths)) {                                 // typed text -> one whole number, once, on submit
     margin = Number(form.marginMonths);
     if (!Number.isInteger(margin) || margin < 0 || margin > 60) return { ok: false, error: "אי־ודאות בתאריך: יש להזין מספר חודשים שלם בין 0 ל־60" };
+  }
+  let cardMonthly: number | undefined;
+  if (!isBlank(form.cardMonthly)) {
+    cardMonthly = Number(form.cardMonthly.replace(/[,₪\s]/g, ""));
+    if (!Number.isFinite(cardMonthly) || cardMonthly <= 0) return { ok: false, error: "הפקדה חודשית לבדיקה: יש להזין סכום חיובי" };
   }
   const options: Record<string, unknown>[] = [];
   const plan: FundingRequestBody["allocation_plan"] = [];
@@ -722,7 +727,7 @@ export function fundingRequest(form: FundingForm): { ok: true; body: FundingRequ
       plan.push({ goal_id: form.goalId, option_id: draft.id, amount });
     }
   }
-  return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan, ...(margin !== undefined ? { date_margin_months: margin } : {}) } };
+  return { ok: true, body: { goal_id: form.goalId, assumptions: { annual_return_pct: a.ret as number, annual_fee_pct: a.fee as number, inflation_pct: a.infl as number }, options, allocation_plan: plan, ...(margin !== undefined ? { date_margin_months: margin } : {}), ...(cardMonthly !== undefined ? { card_monthly: cardMonthly } : {}) } };
 }
 
 /** Notes the server writes in English (planner assumptions / plan note), shown in Hebrew. Matched by the note's opening words; a note that is not
@@ -750,7 +755,7 @@ export interface FundingPlanModel {
   plan: { rows: { label: string; value: string }[]; allocations: string[]; note: string } | null;
   portfolio: { rows: { label: string; value: string }[] } | null; warnings: string[];
 }
-export interface RequiredCardModel { title: string; headline: string; subtitle: string | null; rows: { label: string; value: string }[]; sensitivity: { label: string; value: string }[]; scenarios: { label: string; value: string }[]; note: string }
+export interface RequiredCardModel { title: string; headline: string; subtitle: string | null; rows: { label: string; value: string }[]; arrival: { label: string; value: string }[]; sensitivity: { label: string; value: string }[]; scenarios: { label: string; value: string }[]; note: string }
 const CARD_TITLE = "הפקדה חודשית נדרשת";
 const CARD_REASONS: Record<string, string> = {
   unreachable_under_assumptions: "לא ניתן להשיג בהנחות האלה — אפשר לשנות תאריך, תשואה או סכום.",
@@ -762,11 +767,21 @@ const CARD_SCENARIOS: Record<string, string> = {
 };
 const pctText = (v: number) => `${v}%`;
 
+const ARRIVAL_BASIS: Record<string, string> = { planned: "לפי החיסכון המתוכנן של המשפחה, אם כולו מופנה ליעד הזה", entered: "לפי ההפקדה שהוזנה בכרטיס" };
+function arrivalRow(x: NonNullable<RequiredMonthlyCard["arrival"]>[number]): { label: string; value: string } {
+  const label = `${ARRIVAL_BASIS[x.basis] ?? x.basis}${x.monthly != null ? ` (${money(x.monthly)} לחודש)` : ""}`;
+  if (x.monthly == null) return { label, value: "חסר — לא הוגדר חיסכון מתוכנן" };
+  if (!x.reached || !x.reach_date) return { label, value: "לא מגיעים ליעד באופק החישוב בהפקדה זו" };
+  const gap = x.months_vs_due ?? 0;
+  const vs = gap === 0 ? "בחודש היעד" : gap < 0 ? `${-gap} חודשים לפני תאריך היעד` : `${gap} חודשים אחרי תאריך היעד`;
+  return { label, value: `${dmy(x.reach_date).slice(3)} · ${vs}` };
+}
+
 /** The server's number for "how much to deposit each month", with every assumption and its source. Display only: nothing is computed here. */
 export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredCardModel | null {
   if (!c) return null;
   if (c.amount == null) {
-    return { title: CARD_TITLE, headline: "אין סכום להצגה", subtitle: c.reason ? (CARD_REASONS[c.reason] ?? word(NEED_REASONS, c.reason)) : null, rows: [], sensitivity: [], scenarios: [], note: "" };
+    return { title: CARD_TITLE, headline: "אין סכום להצגה", subtitle: c.reason ? (CARD_REASONS[c.reason] ?? word(NEED_REASONS, c.reason)) : null, rows: [], arrival: [], sensitivity: [], scenarios: [], note: "" };
   }
   const a = c.assumptions;
   const rows: { label: string; value: string }[] = [];
@@ -777,6 +792,7 @@ export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredC
       { label: "אינפלציה", value: `${pctText(a.inflation_pct)} · ${CARD_SOURCE[a.sources.inflation_pct] ?? "—"}` },
     );
   }
+  if (a) rows.push({ label: "סוג התשואה", value: "הנחת סימולציה — לא נתון היסטורי מאומת" });
   if (c.total_deposits != null) rows.push({ label: "סך ההפקדות עד התאריך", value: money(c.total_deposits) });
   rows.push({ label: "חיסכון חודשי מתוכנן במשפחה (התכנית הקבועה; לא מחולק בין יעדים)", value: c.planned_monthly_savings == null ? "לא ידוע" : money(c.planned_monthly_savings) });
   const SENS: Record<string, string> = { low: "תשואה נמוכה", base: "תשואה לפי ההנחה", high: "תשואה גבוהה" };
@@ -785,6 +801,7 @@ export function requiredCardModel(c: RequiredMonthlyCard | undefined): RequiredC
     headline: `${money(c.amount)} לחודש`,
     subtitle: `כדי להגיע ל־${optMoney(c.gap)} עד ${dmy(c.due ?? null)} · ${c.months ?? "—"} חודשי הפקדה · כסף חדש בלבד`,
     rows,
+    arrival: (c.arrival ?? []).map(arrivalRow),
     sensitivity: (c.sensitivity ?? []).map((s) => ({ label: `${SENS[s.label] ?? s.label} (${pctText(s.annual_return_pct)})`, value: s.amount == null ? "לא ניתן להשגה" : money(s.amount) })),
     scenarios: (c.scenarios ?? []).map((s) => ({ label: `${CARD_SCENARIOS[s.basis] ?? s.basis}: נותרו ${money(s.remaining)}`, value: s.amount == null ? "לא ניתן להשגה" : `${money(s.amount)} לחודש` })),
     note: c.note ? serverNote(c.note) : "",

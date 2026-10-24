@@ -969,6 +969,9 @@ export interface RequiredMonthlyCard {
   assumptions?: { annual_return_pct: number; fee_pct: number; deposit_fee_pct: number; inflation_pct: number; sources: Record<string, "owner" | "default"> };
   basis?: "assumptions"; sensitivity?: { label: "low" | "base" | "high"; annual_return_pct: number; amount: number | null }[];
   scenarios?: { basis: "after_confirmed" | "after_confirmed_and_expected" | "after_all_selected"; remaining: number; amount: number | null }[];
+  /** When each deposit reaches the gap — two SEPARATE forecasts, never combined. `reached: false` = not within the calculation horizon (no date). `months_vs_due` < 0 = earlier than the goal date. */
+  arrival?: ({ basis: "planned"; monthly: number | null; reached?: boolean; reach_date?: string | null; months_vs_due?: number | null }
+    | { basis: "entered"; monthly: number; reached: boolean; reach_date: string | null; months_vs_due: number | null })[];
   planned_monthly_savings?: number | null; note?: string;
 }
 export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null; window?: FundingWindow | null; required_monthly_card?: RequiredMonthlyCard }
@@ -1024,6 +1027,8 @@ export interface FundingRequestBody {
   options: Record<string, unknown>[]; allocation_plan: { goal_id: string; option_id: string; amount: number }[];
   /** The goal's date is an estimate, uncertain by ± this many whole months (0 = firm). Omitted = the goal's own saved margin. */
   date_margin_months?: number;
+  /** A monthly amount typed on the required-deposit card: asks "when would THIS deposit reach the goal". Omitted = no second forecast. */
+  card_monthly?: number;
 }
 
 /** Unified net worth (C2, server-computed, read-only): accounts + assets − own debts. Receivables are shown apart and are NOT in `net`. */
