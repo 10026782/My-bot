@@ -179,6 +179,9 @@
 | E1d | כרטיס TMA | E1c |
 | E1e | חיבור ל-`funding_plan.loan` (העברת `collateral`) | החלטת בעלים |
 
+### סטטוס E1a (24/10/2026) — בקוד ב-PR זה, לא מחובר
+`portfolio_lab/liquidity_stress.py` + `test_portfolio_lab_liquidity_stress.py`; ללא endpoint, flag, UI או Airtable. סטיות מכוונות מהמפרט: `recovery_years` שלם 1–10 (ברירת מחדל 2 = 24 חודשים) במקום `custom_months`, כי `crisis_asset_monthly` פועל בשנים שלמות; `cash_buckets.free` נגזר ממצב הכרית ונדחה כקלט; `loan`/`cushion_basis` נדחים בשגיאה עד E1b.
+
 ## 10. שאלות פתוחות — נסגרו ב-24/10/2026 (סעיף 0); נשמר לתיעוד
 
 1. כרית נמדדת בסיס `net_burn` (מומלץ) או `support_only` (כמו במחקר)?
