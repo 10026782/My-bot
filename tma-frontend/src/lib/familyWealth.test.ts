@@ -1059,6 +1059,10 @@ const requiredCard = {
   sensitivity: [{ label: "low", annual_return_pct: 4, amount: 10200 }, { label: "base", annual_return_pct: 6, amount: 9859.84 }, { label: "high", annual_return_pct: 8, amount: 9500 }],
   scenarios: [{ basis: "after_all_selected", remaining: 15000, amount: 591.59 }],
   arrival: [{ basis: "planned", monthly: 13000, reached: true, reach_date: "2027-07-31", months_vs_due: -15 }, { basis: "entered", monthly: 5000, reached: false, reach_date: null, months_vs_due: null }],
+  alternatives: [{ basis: "after_all_selected", remaining: 15000, required: 591.59, note: "n", routes: [
+    { key: "A", feasible: true, reason: null, income_need_before: 18000, income_need_after: 18591.59, planned_before: 13000, planned_after: 13000, reduces_planned_deposits: false, top_up_income: 591.59, from_existing: 0 },
+    { key: "B", feasible: true, reason: null, income_need_before: 18000, income_need_after: 18000, planned_before: 13000, planned_after: 12408.41, reduces_planned_deposits: true, top_up_income: 0, from_existing: 591.59 },
+    { key: "C", feasible: true, reason: null, income_need_before: 18000, income_need_after: 18091.59, planned_before: 13000, planned_after: 12500, reduces_planned_deposits: true, top_up_income: 91.59, from_existing: 500, existing_share_pct: 84.5, over_required_by: null }] }],
   planned_monthly_savings: 13000,
   note: "new money only (existing balances are not counted); not split between goals; the planned figure is the family's standing plan, shown beside it and never netted",
 };
@@ -1115,4 +1119,36 @@ test("funding request: the figure typed on the card is sent once as a positive n
   const none = fundingRequest(base);
   assert.ok(none.ok && !("card_monthly" in none.body), "blank = no second forecast");
   for (const bad of ["abc", "0", "-5"]) assert.equal(fundingRequest({ ...base, cardMonthly: bad }).ok, false, bad);
+});
+
+test("funding chain routes: A / B / ד׳ side by side in a fixed order, server numbers, a prominent warning when planned deposits are reduced", () => {
+  const withCard = (card: object) => fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: card }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!.requiredCard!;
+  const [block] = withCard(requiredCard).routes;
+  assert.ok(block.heading.includes("אחרי כל התוכנית (כולל לא ודאי)") && block.heading.includes("15,000") && block.heading.includes("592"));
+  assert.deepEqual(block.routes.map((r) => r.key), ["A", "B", "C"]);
+  const [a, b, c] = block.routes;
+  const val = (r: typeof a, label: string) => r.rows.find((x) => x.label === label)?.value ?? "";
+  assert.ok(val(a, "הכנסה חודשית נדרשת").includes("18,000") && val(a, "הכנסה חודשית נדרשת").includes("18,592") && a.warning === null);
+  assert.ok(val(b, "הפקדה מתוכננת שנותרת").includes("12,408") && b.warning!.includes("מצמצם את ההפקדה המתוכננת") && b.warning!.includes("קרנות הילדים"));
+  assert.ok(val(c, "מההפקדות הקיימות").includes("500") && val(c, "מההפקדות הקיימות").includes("84.5%") && val(c, "השלמה בהכנסה").includes("92") && c.warning !== null);
+  assert.ok(!/מומלץ|כדאי|הטוב ביותר/.test(JSON.stringify(block)), "no recommendation wording");
+});
+
+test("funding chain routes: not possible is said with the shortfall; missing and not-entered are said, never 0", () => {
+  const route = (r: object) => fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: { ...requiredCard, alternatives: [{ basis: "gap", remaining: 100, required: 10, note: "n", routes: [r] }] } }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!.requiredCard!.routes[0].routes[0];
+  const no = route({ key: "B", feasible: false, reason: "exceeds_planned", income_need_before: 18000, income_need_after: 18000, planned_before: 800, planned_after: null, shortfall: 200, reduces_planned_deposits: true });
+  assert.ok(no.verdict.startsWith("אינה אפשרית") && no.rows.some((x) => x.value === "חוסר ₪200"), JSON.stringify(no));
+  const missing = route({ key: "A", feasible: true, reason: null, income_need_before: null, income_need_after: null, planned_before: null, planned_after: null, reduces_planned_deposits: false });
+  assert.ok(missing.rows.every((x) => x.value === "חסר"), JSON.stringify(missing.rows));
+  const notEntered = route({ key: "C", feasible: "unknown", reason: "amount_not_entered" });
+  assert.ok(notEntered.verdict.includes("יש להזין") && notEntered.rows.length === 0);
+});
+
+test("funding request: the amount from existing deposits is sent once, positive, or refused on the form", () => {
+  const base = { ...DEFAULT_FUNDING_FORM, goalId: "recG1" };
+  const ok = fundingRequest({ ...base, fromExisting: "₪1,000" });
+  assert.ok(ok.ok && ok.body.from_existing === 1000);
+  const none = fundingRequest(base);
+  assert.ok(none.ok && !("from_existing" in none.body));
+  for (const bad of ["abc", "0", "-1"]) assert.equal(fundingRequest({ ...base, fromExisting: bad }).ok, false, bad);
 });

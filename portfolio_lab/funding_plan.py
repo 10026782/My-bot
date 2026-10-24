@@ -161,7 +161,7 @@ def normalize_request(body) -> dict:
     """גוף הבקשה הגולמי -> קלט מנורמל; ValueError על קלט לא תקף. מזהי הרשומות נבדקים מול הנתונים של הבעלים ב-`build_funding_plan`."""
     if not isinstance(body, dict):
         raise ValueError("body must be an object")
-    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan", "date_margin_months", "card_monthly"}
+    unknown = set(body) - {"goal_id", "goal_ids", "assumptions", "options", "allocation_plan", "date_margin_months", "card_monthly", "from_existing"}
     if unknown:
         raise ValueError(f"unknown fields: {', '.join(sorted(unknown))}")
     goal_ids = body.get("goal_ids")
@@ -201,8 +201,11 @@ def normalize_request(body) -> dict:
     card_monthly = body.get("card_monthly")
     if card_monthly is not None:
         card_monthly = _money(card_monthly, "card_monthly")                         # a figure typed on the card: a positive amount per month, never inferred
+    from_existing = body.get("from_existing")
+    if from_existing is not None:
+        from_existing = _money(from_existing, "from_existing")                       # route ד׳: how much of the deposit comes from existing deposits (a typed amount)
     return {"goal_ids": goal_ids, "assumptions": assumptions, "options": options, "allocation_plan": plan, "date_margin_months": margin,
-            "card_monthly": card_monthly}
+            "card_monthly": card_monthly, "from_existing": from_existing}
 
 
 # ── עזרים ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -585,6 +588,41 @@ def _reach(gap: float, monthly: float, ctx: dict, due: date, today: date) -> dic
 _SENSITIVITY_PP = 2.0                                    # ±נקודות אחוז סביב התשואה הנחשבת (Q-R2; טווח מותאם — שלב נפרד)
 
 
+def _alternatives(required: float, income_target, planned, from_existing) -> dict:
+    """איפה ההפקדה הנדרשת `required` יושבת (GOAL_FUNDING_CHAIN_SPEC §1.2, שלב C4) — שלוש חלופות זו לצד זו, בסדר קבוע, בלי דירוג ובלי המלצה.
+    חיבור וחיסור של מספרים מוצגים בלבד (לא נוסחה כספית חדשה); כל מה שחסר נאמר כ"חסר" ולא כ-0; הקצאת הפקדה בפועל — רק דרך "אשר" הקיים.
+    A: כולה נוספת לצורך ההכנסה החודשית. B: כולה על חשבון ההפקדה המתוכננת (מצמצמת אותה — אזהרה, Q-C12). C (מסלול ד׳): הבעלים מזין כמה בא
+    מההפקדות הקיימות והשאר משלים את ההכנסה הנדרשת; האחוז מחושב כאן ומוצג בלבד (Q-C4)."""
+    inc = float(income_target) if isinstance(income_target, (int, float)) and not isinstance(income_target, bool) else None
+    pln = float(planned) if isinstance(planned, (int, float)) and not isinstance(planned, bool) else None
+    r = round(required, 2)
+
+    def row(key, *, income_after, planned_after, reduces, **extra):
+        return {"key": key, "feasible": True, "reason": None, "income_need_before": inc, "income_need_after": income_after,
+                "planned_before": pln, "planned_after": planned_after, "shortfall": None, "reduces_planned_deposits": reduces, **extra}
+
+    a = row("A", income_after=round(inc + r, 2) if inc is not None else None, planned_after=pln, reduces=False, top_up_income=r, from_existing=0.0)
+    b = row("B", income_after=inc, planned_after=round(pln - r, 2) if pln is not None else None, reduces=True, top_up_income=0.0, from_existing=r)
+    if pln is None:
+        b["feasible"], b["reason"] = "unknown", "planned_missing"
+    elif r > pln + 0.005:
+        b.update(feasible=False, reason="exceeds_planned", shortfall=round(r - pln, 2), planned_after=None)
+    if from_existing is None:
+        c = {"key": "C", "feasible": "unknown", "reason": "amount_not_entered"}
+    else:
+        f = round(float(from_existing), 2)
+        top = round(max(r - f, 0.0), 2)
+        c = row("C", income_after=round(inc + top, 2) if inc is not None else None, planned_after=round(pln - f, 2) if pln is not None else None,
+                reduces=True, top_up_income=top, from_existing=f, existing_share_pct=round(min(f / r * 100, 100.0), 1) if r > 0 else None,
+                over_required_by=round(f - r, 2) if f > r + 0.005 else None)
+        if pln is None:
+            c["feasible"], c["reason"] = "unknown", "planned_missing"
+        elif f > pln + 0.005:
+            c.update(feasible=False, reason="exceeds_planned", shortfall=round(f - pln, 2), planned_after=None)
+    return {"required": r, "routes": [a, b, c],
+            "note": "side by side, in a fixed order; a route that lowers the planned deposits may lower a fund's deposit — that is your explicit choice"}
+
+
 def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: dict, planned_monthly, today: date) -> dict:
     """הפקדה חודשית נדרשת ליעד (REQUIRED_MONTHLY_DEPOSIT_CARD_SPEC): כמה כסף **חדש** להפקיד כל חודש כדי להגיע לפער עד התאריך, לפי הנחות גלויות
     ובעלות מקור. אותו חיפוש בינארי מעל המנוע כמו `required_monthly` — אין נוסחה חדשה; קריאה בלבד, לא כותב ולא משנה "נותר" או "מבט תיק".
@@ -619,6 +657,9 @@ def _required_monthly_card(need: dict, plan: dict | None, ctx: dict, request: di
         arrival.append({"basis": "entered", **_reach(gap, float(request["card_monthly"]), ctx, due, today)})
     return {"amount": main, "reason": None if main is not None else "unreachable_under_assumptions", "gap": gap, "months": slot, "due": need["due"],
             "arrival": arrival,
+            "alternatives": [{"basis": basis, "remaining": remaining, **_alternatives(value, (ctx.get("income") or {}).get("target"), planned_monthly, request.get("from_existing"))}
+                             for basis, remaining, value in [("gap", gap, main)] + [(sc["basis"], sc["remaining"], sc["amount"]) for sc in scenarios if sc["remaining"] != gap]
+                             if value is not None and remaining > 0],
             "total_deposits": round(main * slot, 2) if main is not None else None,
             "assumptions": {"annual_return_pct": round(base_return * 100, 4), "fee_pct": round(fee * 100, 4), "deposit_fee_pct": deposit_fee,
                             "inflation_pct": round(p["inflation"] * 100, 4), "sources": sources},
