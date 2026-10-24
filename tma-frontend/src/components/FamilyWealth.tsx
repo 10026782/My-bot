@@ -336,6 +336,12 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
           <small>מתי מגיעים ליעד אם מפקידים סכום כזה כל חודש. מוצג בכרטיס ״הפקדה חודשית נדרשת״ בנפרד מהחיסכון המתוכנן.</small>
         </label>
         )}
+        {hasGoal && (
+        <label>מתוך ההפקדות הקיימות (אופציונלי, מסלול ד׳) — ₪ לחודש
+          <input inputMode="decimal" value={form.fromExisting} onChange={(e) => setForm((f) => ({ ...f, fromExisting: e.target.value }))} />
+          <small>כמה מההפקדה הנדרשת תבוא מההפקדות המתוכננות הקיימות; השאר יוצג כתוספת להכנסה הנדרשת. האחוז מחושב לבד.</small>
+        </label>
+        )}
         {hasGoal && <FundingSourcesList state={sources} model={sourceModel} addedKeys={addedKeys} addedNote={addedNote} onAdd={addFromSource} />}
         {hasGoal && savedModel && <SavedPlanChanges model={savedModel} />}
         {hasGoal && hasDeposits && (
@@ -516,6 +522,15 @@ export function FundingResult({ model, selection }: { model: NonNullable<ReturnT
           {model.requiredCard.subtitle && <p className="fcc-goal__note" dir="auto">{model.requiredCard.subtitle}</p>}
           {model.requiredCard.rows.length > 0 && <Rows rows={model.requiredCard.rows} />}
           {model.requiredCard.arrival.length > 0 && <><p className="fcc-goal__note">מתי מגיעים ליעד (שתי תחזיות נפרדות, ללא חיבור ביניהן):</p><Rows rows={model.requiredCard.arrival} /></>}
+          {model.requiredCard.routes.map((blk) => (
+            <div key={blk.heading} className="fw-routes">
+              <p className="fcc-goal__note"><strong>{blk.heading}</strong></p>
+              {blk.routes.map((r) => (
+                <div key={r.key} className="fw-route"><p className="fcc-goal__note">{r.title} — {r.verdict}</p>{r.rows.length > 0 && <Rows rows={r.rows} />}{r.warning && <p className="fcc-goal__note fw-route__warn" role="alert" dir="auto">{r.warning}</p>}</div>
+              ))}
+              <p className="fcc-goal__note" dir="auto">{blk.note}</p>
+            </div>
+          ))}
           {model.requiredCard.sensitivity.length > 0 && <><p className="fcc-goal__note">אותה הפקדה בתשואות שונות (±2 נקודות):</p><Rows rows={model.requiredCard.sensitivity} /></>}
           {model.requiredCard.scenarios.length > 0 && <><p className="fcc-goal__note">לפי מה שנותר בתוכנית שהוזנה:</p><Rows rows={model.requiredCard.scenarios} /></>}
           {model.requiredCard.note && <p className="fcc-goal__note" dir="auto">{model.requiredCard.note}</p>}

@@ -599,3 +599,89 @@ def test_arrival_is_deterministic_and_does_not_change_the_rest_of_the_answer():
     b = run(inputs(savings_plan={"target": 13000}), with_card())
     assert a["goals"][0]["need"] == b["goals"][0]["need"] and a["portfolio"] == b["portfolio"]
     assert {k: v for k, v in card(a).items() if k != "arrival"} == {k: v for k, v in card(b).items() if k != "arrival"}
+
+
+# ═══ the chain's C4: where the required deposit sits — routes A / B / C(ד׳) side by side (GOAL_FUNDING_CHAIN_SPEC §1.2) ═══
+
+INCOME = {"target": 18000, "actual": 9000, "remaining": 9000}
+
+
+def routes(out, index=0, basis="gap"):
+    alt = next(a for a in card(out, index)["alternatives"] if a["basis"] == basis)
+    return alt["required"], {r["key"]: r for r in alt["routes"]}
+
+
+def with_existing(amount=None, **extra):
+    body = {"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS, **extra}
+    if amount is not None:
+        body["from_existing"] = amount
+    return fp.normalize_request(body)
+
+
+def test_route_a_adds_the_whole_deposit_to_the_required_income_and_leaves_the_planned_deposits_alone():
+    required, r = routes(run(inputs(savings_plan={"target": 13000}, income=INCOME), with_existing()))
+    a = r["A"]
+    assert required == card(run(inputs(), with_existing()))["amount"]
+    assert (a["income_need_before"], a["income_need_after"]) == (18000.0, round(18000 + required, 2))
+    assert (a["planned_before"], a["planned_after"], a["reduces_planned_deposits"], a["feasible"]) == (13000.0, 13000.0, False, True)
+
+
+def test_route_b_takes_the_whole_deposit_out_of_the_planned_deposits_and_warns_that_it_reduces_them():
+    required, r = routes(run(inputs(savings_plan={"target": 13000}, income=INCOME), with_existing()))
+    b = r["B"]
+    assert (b["income_need_after"], b["planned_after"], b["feasible"]) == (18000.0, round(13000 - required, 2), True)
+    assert b["reduces_planned_deposits"] is True                                  # the UI must show the prominent warning (Q-C12): never silent
+
+
+def test_route_b_is_not_possible_when_the_deposit_is_bigger_than_the_planned_deposits_and_says_by_how_much():
+    required, r = routes(run(inputs(savings_plan={"target": 1000}, income=INCOME), with_existing()))
+    b = r["B"]
+    assert b["feasible"] is False and b["reason"] == "exceeds_planned" and b["shortfall"] == round(required - 1000, 2) and b["planned_after"] is None
+    assert r["A"]["feasible"] is True                                              # the other route is still shown, not hidden
+
+
+def test_route_d_splits_the_deposit_between_existing_deposits_and_more_income_and_the_percent_is_computed():
+    required, r = routes(run(inputs(savings_plan={"target": 13000}, income=INCOME), with_existing(1000)))
+    c = r["C"]
+    assert c["from_existing"] == 1000.0 and c["top_up_income"] == round(required - 1000, 2)
+    assert c["income_need_after"] == round(18000 + required - 1000, 2) and c["planned_after"] == 12000.0
+    assert c["existing_share_pct"] == round(1000 / required * 100, 1) and c["reduces_planned_deposits"] is True and c["feasible"] is True
+
+
+def test_route_d_edges_more_than_required_more_than_planned_and_nothing_entered():
+    required, r = routes(run(inputs(savings_plan={"target": 13000}, income=INCOME), with_existing(5000)))
+    assert r["C"]["top_up_income"] == 0.0 and r["C"]["over_required_by"] == round(5000 - required, 2) and r["C"]["existing_share_pct"] == 100.0
+    _, r = routes(run(inputs(savings_plan={"target": 800}, income=INCOME), with_existing(1000)))
+    assert r["C"]["feasible"] is False and r["C"]["reason"] == "exceeds_planned" and r["C"]["shortfall"] == 200.0
+    _, r = routes(run(inputs(savings_plan={"target": 13000}, income=INCOME), with_existing()))
+    assert r["C"] == {"key": "C", "feasible": "unknown", "reason": "amount_not_entered"}
+
+
+def test_missing_income_or_planned_savings_is_missing_never_zero():
+    required, r = routes(run(inputs(), with_existing(1000)))
+    assert r["A"]["income_need_before"] is None and r["A"]["income_need_after"] is None and r["A"]["planned_before"] is None
+    assert r["B"]["feasible"] == "unknown" and r["B"]["reason"] == "planned_missing" and r["B"]["planned_after"] is None
+    assert r["C"]["feasible"] == "unknown" and r["C"]["income_need_after"] is None
+
+
+def test_routes_are_in_a_fixed_order_and_carry_no_ranking_or_recommendation():
+    out = run(inputs(savings_plan={"target": 13000}, income=INCOME), with_existing(1000))
+    alt = card(out)["alternatives"][0]
+    assert [x["key"] for x in alt["routes"]] == ["A", "B", "C"]
+    text = json.dumps(alt, ensure_ascii=False).lower()
+    assert not re.search(r"recommend|score|rank|best|cheapest|המלצה|ציון|דירוג|כדאי", text)
+
+
+def test_routes_are_also_given_for_each_plan_remainder_and_nothing_else_changes():
+    plan_req = with_existing(1000, options=[{"id": "sale", "type": "asset_sale", "net_proceeds": 90000, "expected_date": "2027-06-01", "confirmed_buyer": False}],
+                             allocation_plan=[{"goal_id": G, "option_id": "sale", "amount": 90000}])
+    out = run(inputs(assets=[asset()], savings_plan={"target": 13000}, income=INCOME), plan_req)
+    bases = {a["basis"]: a for a in card(out)["alternatives"]}
+    assert bases["after_all_selected"]["remaining"] == 30000.0 and bases["after_all_selected"]["required"] == pytest.approx(30000 / 51, abs=0.01)
+    assert out["goals"][0]["plan"]["remaining_after_confirmed"] == 120000 and out["portfolio"]["monthly_burden_in_plan"] == 0.0
+
+
+@pytest.mark.parametrize("bad", [0, -1, "1000", True, float("inf"), 10**11])
+def test_the_amount_from_existing_deposits_must_be_a_positive_amount(bad):
+    with pytest.raises(ValueError):
+        with_existing(bad)

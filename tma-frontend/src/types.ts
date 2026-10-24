@@ -972,8 +972,17 @@ export interface RequiredMonthlyCard {
   /** When each deposit reaches the gap — two SEPARATE forecasts, never combined. `reached: false` = not within the calculation horizon (no date). `months_vs_due` < 0 = earlier than the goal date. */
   arrival?: ({ basis: "planned"; monthly: number | null; reached?: boolean; reach_date?: string | null; months_vs_due?: number | null }
     | { basis: "entered"; monthly: number; reached: boolean; reach_date: string | null; months_vs_due: number | null })[];
+  /** C4 of the funding chain: where the required deposit sits — routes A / B / C(ד׳) side by side, per remainder. Server numbers only; missing = null. */
+  alternatives?: FundingAlternatives[];
   planned_monthly_savings?: number | null; note?: string;
 }
+export interface FundingRoute {
+  key: "A" | "B" | "C"; feasible: boolean | "unknown"; reason: string | null;
+  income_need_before?: number | null; income_need_after?: number | null; planned_before?: number | null; planned_after?: number | null;
+  shortfall?: number | null; reduces_planned_deposits?: boolean; top_up_income?: number; from_existing?: number;
+  existing_share_pct?: number | null; over_required_by?: number | null;
+}
+export interface FundingAlternatives { basis: "gap" | "after_confirmed" | "after_confirmed_and_expected" | "after_all_selected"; remaining: number; required: number; routes: FundingRoute[]; note: string }
 export interface FundingGoalResult { need: FundingNeed; options: FundingOptionResult[]; plan: FundingPlanBlock | null; window?: FundingWindow | null; required_monthly_card?: RequiredMonthlyCard }
 /** Funding sources step 2: candidate sources for one goal, in five SEPARATE categories (server numbers; no totals, no ranking). Missing = null. */
 export type FundingSourceCategory = "liquid_now" | "liquid_by_due_date" | "conditional_on_action" | "expected_not_guaranteed" | "future_deposits";
@@ -1029,6 +1038,8 @@ export interface FundingRequestBody {
   date_margin_months?: number;
   /** A monthly amount typed on the required-deposit card: asks "when would THIS deposit reach the goal". Omitted = no second forecast. */
   card_monthly?: number;
+  /** Route ד׳: how much of the required deposit comes from the existing planned deposits (a typed amount; the percent is computed by the server). */
+  from_existing?: number;
 }
 
 /** Unified net worth (C2, server-computed, read-only): accounts + assets − own debts. Receivables are shown apart and are NOT in `net`. */
