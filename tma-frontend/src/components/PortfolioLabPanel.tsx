@@ -7,6 +7,7 @@ import {
 } from "../lib/familyWealth";
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
 import { PaceTrackerPanel } from "./PaceTrackerPanel";
+import { LiquidityStressPanel } from "./LiquidityStressPanel";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -125,6 +126,7 @@ export function PortfolioLabPanel() {
       )}
       {state.status === "ok" && <LabResult view={state.view} />}
       <PaceTrackerPanel assumptions={paceAssumptions(form)} />
+      <LiquidityStressPanel />
     </div>
   );
 }
