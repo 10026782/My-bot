@@ -185,6 +185,10 @@
 ### סטטוס E1b (25/10/2026) — בקוד ב-PR זה, לא מחובר
 הלוואה (ריבית בלבד או שפיצר), `max_ltv_pct` חובה כקלט (אין ברירת מחדל), `terms_verified` ברירת מחדל `false`, `use_proceeds` (`none` | `asset_income`), דרישת בטוחות ותיקונה לפי `cure_order`. סטיות מכוונות מהמפרט: `collateral` הוא `risky_and_pledged` (ברירת מחדל) או `risky_only` — מזומן חופשי אינו בטוחה, בהתאם לתיקון הבעלים; מכירה כפויה נושאת `cause` (`cashflow` | `collateral_call`); `initial_collateral`/`initial_ltv`/`trigger_decline_pct` מחושבים לכל מצב כרית (כרית חופשית יוצאת מהבטוחה); חוסר מזומן להחזר הלוואה מצטבר לחוב (שמרני: החזר ההלוואה מכוסה לפני התמיכה). הנכס שנרכש בתמורה (אם הוזן) קבוע נומינלית, אינו בטוחה ואינו מושפע מהמשבר. עדיין ללא endpoint, flag, UI או Airtable; `funding_plan.loan` לא חובר (E1e).
 
+### סטטוס E1c (25/10/2026) — בקוד ב-PR, endpoint בלבד
+`POST /api/portfolio-lab/liquidity-stress` ב-`tma_api.py`, זהה ל-`/simulate` בשער ובמגבלות: אימות TMA (`require_tma_auth`), שער FCC (flag AND canary) AND בעלים, 404 לכל אחר, 415/411/413, מגביל 12/דקה לכל משתמש (מפתח נפרד מ-`/simulate`), semaphore ל-503, שגיאות ולידציה בלבד כ-400 ו-500 גנרי. **סטייה מכוונת מסעיף 7:** אין דגל חדש — השער הקיים של FCC משמש (כמו `/api/fcc/accounts/forecast`, `/api/fcc/pace`), כך שהנתיב כבוי לכל מי שמחוץ ל-canary של הבעלים ואין שינוי ב-`feature_flags.py`; דגל נפרד יתווסף רק בהחלטת בעלים. הגוף מכיל הנחות בלבד; הון ילדים מתקבל כסכום להצגה ונדחה בשגיאה כל ניסיון לשעבד אותו. ללא Airtable, LLM, כתיבה, dispatcher או ActionGateway. עדיין ללא UI (E1d).
+**סקירת אבטחה (SECURITY_CHECKLIST, endpoint חדש):** auth + identity מוגדרים דרך `require_tma_auth` ו-`_fcc_enabled`/`is_owner`; אין import של פונקציות כלי; אין קלט שנכתב או נקרא מ-Airtable; גבולות גוף/קצב/מקביליות; בדיקות עוינות (ערכים אדירים, שדות לא מוכרים, טיפוסים שגויים) אינן מחזירות 500 או traceback.
+
 ## 10. שאלות פתוחות — נסגרו ב-24/10/2026 (סעיף 0); נשמר לתיעוד
 
 1. כרית נמדדת בסיס `net_burn` (מומלץ) או `support_only` (כמו במחקר)?
