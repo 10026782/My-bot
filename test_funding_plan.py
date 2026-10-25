@@ -685,3 +685,192 @@ def test_routes_are_also_given_for_each_plan_remainder_and_nothing_else_changes(
 def test_the_amount_from_existing_deposits_must_be_a_positive_amount(bad):
     with pytest.raises(ValueError):
         with_existing(bad)
+
+
+# ═══ no English on the Hebrew screen: every code / note the server can emit has a Hebrew entry in the client (drift guard) ═══
+
+def _client_keys(map_name: str) -> set:
+    src = Path("tma-frontend/src/lib/familyWealth.ts").read_text(encoding="utf-8")
+    block = re.search(rf"const {map_name}[^=]*=\s*\{{(.*?)\n\}};|const {map_name}[^=]*=\s*\{{(.*?)\}};", src, re.S)
+    body = (block.group(1) or block.group(2)) if block else ""
+    return set(re.findall(r"(?:^|[,{\s])([A-Za-z_][A-Za-z0-9_]*)\s*:", body))
+
+
+def _rich_runs():
+    runs = []
+    for kwargs, opts in (
+        ({"savings_plan": {"target": 13000, "actual": 0}, "income": INCOME, "loans": [receivable()], "assets": [asset()], "obligations": {"potential_saving": 100}},
+         [{"id": "c", "type": "custom", "label": "x", "amount": 5}, {"id": "cut", "type": "obligations_reduction"}, loan_option(), deposit_option(expected_return_pct=4), collect(), sale(),
+          {"id": "wi", "type": "work_income", "based_on": "dep"}]),
+        ({"savings_plan": {}}, [{"id": "dep", "type": "new_deposits", "hypothetical": {"liquid_from": "2031-06-01"}}]),
+        ({"savings_plan": {}, "assets": [asset()]}, [sale(expected_date="2031-01-01"), loan_option(available_by="2031-06-01")]),
+    ):
+        runs.append(run(inputs(**kwargs), request(*opts)))
+    runs.append(run(inputs(goals=[goal_rec(end=None)]), request()))
+    runs.append(run(inputs(goals=[goal_rec(end="2020-01-01")]), request()))
+    runs.append(run(inputs(), request(deposit_option(), allocation_plan=[{"goal_id": G, "option_id": "dep", "amount": 1000}])))
+    return runs
+
+
+def test_every_code_the_server_emits_has_a_hebrew_label_in_the_client():
+    codes = {"conditions": set(), "risks": set(), "missing_inputs": set(), "reasons": set(), "need_reasons": set()}
+    for out in _rich_runs():
+        for g in out["goals"]:
+            if g["need"]["reason"]:
+                codes["need_reasons"].add(g["need"]["reason"])
+            for o in g["options"]:
+                codes["conditions"] |= set(o["conditions"]); codes["risks"] |= set(o["risks"]); codes["missing_inputs"] |= set(o["missing_inputs"])
+                if o["reason"]:
+                    codes["reasons"].add(o["reason"])
+    known = {"conditions": _client_keys("FUNDING_CONDITIONS"), "risks": _client_keys("FUNDING_RISKS"), "missing_inputs": _client_keys("MISSING_INPUT_LABELS"),
+             "reasons": _client_keys("FUNDING_REASONS"), "need_reasons": _client_keys("NEED_REASONS")}
+    assert all(known.values()) and all(codes[k] for k in ("conditions", "risks", "reasons")), "the guard must see both sides (not vacuous)"
+    missing = {k: sorted(codes[k] - known[k]) for k in codes if codes[k] - known[k]}
+    assert not missing, f"codes shown raw (English) on the Hebrew screen: {missing}"
+
+
+def test_every_server_note_and_assumption_is_translated_by_a_prefix_in_the_client():
+    src = Path("tma-frontend/src/lib/familyWealth.ts").read_text(encoding="utf-8")
+    prefixes = re.findall(r'^\s*\["([^"]+)",\s*"', src[src.index("const SERVER_NOTES_HE"):src.index("export const serverNote")], re.M)
+    assert prefixes
+    texts = set()
+    for out in _rich_runs():
+        for g in out["goals"]:
+            texts |= {a for o in g["options"] for a in o["assumptions"]}
+            if g.get("plan"):
+                texts.add(g["plan"]["note"])
+            if g.get("required_monthly_card", {}).get("note"):
+                texts.add(g["required_monthly_card"]["note"])
+    untranslated = sorted(t for t in texts if not any(t.startswith(p) for p in prefixes))
+    assert not untranslated, f"English shown as written on the Hebrew screen: {untranslated}"
+
+
+# ═══ the date is an estimate: the required deposit at each end of the window, inside the card (SPEC §3 / O4) ═══
+
+def windowed(end="2030-12-31", margin=12):
+    return card(run(inputs(goals=[{**goal_rec(end=end), "date_margin_months": margin}]), request()))
+
+
+def test_the_card_shows_the_required_deposit_at_both_ends_of_the_date_window_and_the_point_estimate_stays():
+    c = windowed()
+    point = card(run(inputs(), request()))["amount"]
+    assert c["amount"] == point                                             # the point estimate is unchanged by the window
+    w = c["window"]
+    assert w["margin_months"] == 12 and w["early"]["due"] == "2029-12-31" and w["late"]["due"] == "2031-12-31"
+    assert w["early"]["amount"] > c["amount"] > w["late"]["amount"]         # an earlier date needs more per month, a later one less (server numbers)
+    p = fp.af.normalize_params({"years": 10, **FLAT_ASSUMPTIONS})
+    assert w["late"]["amount"] == fp.required_monthly(120000, 63, years=10, annual_return=0.0, fee=0.0, deposit_fee_pct=0.0, p=p, start="2026-10-01")
+
+
+def test_a_window_end_that_already_passed_says_so_and_has_no_number():
+    w = windowed(end="2027-06-30", margin=24)["window"]
+    assert w["early"]["reason"] == "past_date" and w["early"]["amount"] is None
+    assert w["late"]["amount"] is not None and w["late"]["reason"] is None
+
+
+def test_no_window_without_a_margin_and_the_variants_do_not_recurse_into_a_window():
+    assert "window" not in card(run(inputs(), request()))
+    out = run(inputs(goals=[{**goal_rec(), "date_margin_months": 6}]), request())
+    early = out["goals"][0]["window"]["early"]
+    assert early["required_card"]["amount"] is not None and "window" not in early["required_card"] and "alternatives" not in early["required_card"]
+
+
+# ═══ monthly commitments schedule (GOAL_FUNDING_CHAIN_SPEC §4: Q-C5 read-only, Q-C6 all active goals with a filter, Q-C7 a release is its own row) ═══
+
+G3 = "recG3"
+
+
+def sched_goals():
+    return [goal_rec(G, 120000, "2028-10-19", title="אלחנן"), goal_rec(G2, 120000, "2030-01-19", title="נתנאל"), goal_rec(G3, 120000, "2031-04-19", title="יוסף"),
+            goal_rec("recG4", None, None, title="פרויקט ללא סכום ותאריך"), goal_rec("recG5", 50000, None, title="חצי מוגדר"),
+            {**goal_rec("recG6", 9000, "2029-01-01", title="הושלם"), "status": "done"}]
+
+
+def schedule(goals=None, *, planned=13000, only=None, assumptions=None):
+    body = {"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS if assumptions is None else assumptions, "schedule": True}
+    if only is not None:
+        body["schedule_goal_ids"] = only
+    inp = inputs(goals=goals if goals is not None else sched_goals(), savings_plan={"target": planned} if planned is not None else {})
+    return run(inp, fp.normalize_request(body))["schedule"]
+
+
+def test_successive_goals_are_not_summed_as_if_parallel_and_a_finished_deposit_is_released_in_its_own_row():
+    sc = schedule()
+    rows = {r["goal_id"]: r for r in sc["rows"]}
+    assert [st["goal_ids"] for st in sc["steps"]] == [[G, G2, G3], [G2, G3], [G3]]                  # the burden steps DOWN as deposits end
+    assert [st["burden"] for st in sc["steps"]] == [round(sum(r["amount"] for r in rows.values()), 2),
+                                                    round(rows[G2]["amount"] + rows[G3]["amount"], 2), rows[G3]["amount"]]
+    assert sc["peak_burden"] == sc["steps"][0]["burden"]
+    assert [(x["goal_id"], x["released_from"]) for x in sc["releases"]] == [(G, "2028-10-01"), (G2, "2030-01-01"), (G3, "2031-04-01")]
+    assert all(x["amount"] == rows[x["goal_id"]]["amount"] for x in sc["releases"])
+
+
+def test_each_amount_is_the_same_required_monthly_search_on_the_goals_own_gap_and_months():
+    sc = schedule()
+    p = fp.af.normalize_params({"years": 10, **FLAT_ASSUMPTIONS})
+    r = next(x for x in sc["rows"] if x["goal_id"] == G2)
+    assert r["months"] == 39 and r["start"] == "2026-10-01" and r["end"] == "2029-12-01"        # due 19/01/2030: the last COMPLETED month is 12/2029 (A2)
+    assert r["amount"] == fp.required_monthly(120000, 39, years=10, annual_return=0.0, fee=0.0, deposit_fee_pct=0.0, p=p, start="2026-10-01")
+    assert r["amount"] == card(run(inputs(goals=sched_goals()), request(goal_ids=(G2,))))["amount"]
+
+
+def test_the_filter_recomputes_the_curve_for_the_chosen_goals_only_and_keeps_the_others_listed():
+    sc = schedule(only=[G2])
+    assert [r["selected"] for r in sc["rows"]] == [False, True, False] and [st["goal_ids"] for st in sc["steps"]] == [[G2]]
+    assert [x["goal_id"] for x in sc["releases"]] == [G2] and sc["peak_burden"] == next(r["amount"] for r in sc["rows"] if r["goal_id"] == G2)
+    assert schedule(only=[])["steps"] == [] and schedule(only=[])["peak_burden"] == 0.0
+
+
+def test_goals_that_cannot_be_scheduled_are_listed_with_why_never_zero_and_inactive_goals_are_not_included():
+    sc = schedule()
+    ex = {e["goal_id"]: e["reason"] for e in sc["excluded"]}
+    assert ex == {"recG5": "missing_date"}                                    # "פרויקט" (nothing defined) is not a funding goal; "הושלם" is not active
+    assert "recG4" not in {r["goal_id"] for r in sc["rows"]} and "recG6" not in {r["goal_id"] for r in sc["rows"]}
+
+
+def test_a_covered_goal_has_no_deposit_row_and_a_missing_planned_figure_is_missing():
+    covered = inputs([cash(value=500000)], allocations=[al("a1", G, "recI", "fixed_amount", 130000)], goals=sched_goals(), savings_plan={})
+    sc = fp.build_funding_plan(covered, fp.normalize_request({"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS, "schedule": True}), TODAY)["schedule"]
+    assert G not in {r["goal_id"] for r in sc["rows"]} and {e["goal_id"]: e["reason"] for e in sc["excluded"]}[G] == "no_gap"
+    assert sc["planned_monthly_savings"] is None and all(st["shortfall_vs_planned"] is None for st in sc["steps"]) and sc["peak_shortfall"] is None
+
+
+def test_the_shortfall_against_the_planned_savings_is_per_step_and_never_negative():
+    sc = schedule(planned=9000)
+    assert [st["shortfall_vs_planned"] for st in sc["steps"]] == [round(max(st["burden"] - 9000, 0.0), 2) for st in sc["steps"]]
+    assert sc["steps"][0]["shortfall_vs_planned"] > 0 and sc["steps"][-1]["shortfall_vs_planned"] == 0.0 and sc["peak_shortfall"] == sc["steps"][0]["shortfall_vs_planned"]
+    assert schedule(planned=100000)["peak_shortfall"] == 0.0                         # never negative
+
+
+def test_more_than_ten_goals_is_said_not_silently_dropped_and_the_schedule_is_off_by_default():
+    many = [goal_rec(G, 10000, "2029-01-15")] + [goal_rec(f"recM{i:02d}", 10000, f"2030-0{1 + i % 9}-15", title=f"יעד {i}") for i in range(11)]
+    sc = schedule(goals=many)
+    assert sc["truncated"] is True and len(sc["rows"]) == 10
+    assert "schedule" not in run(inputs(goals=sched_goals()), request())
+    with pytest.raises(ValueError):
+        fp.normalize_request({"goal_ids": [G], "schedule": "yes"})
+    with pytest.raises(ValueError):
+        fp.normalize_request({"goal_ids": [G], "schedule_goal_ids": ["bad id"]})
+
+
+def test_the_schedule_changes_nothing_else_and_carries_no_recommendation_or_english_prose():
+    body = {"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS}
+    a = run(inputs(goals=sched_goals(), savings_plan={"target": 13000}), fp.normalize_request({**body, "schedule": True}))
+    b = run(inputs(goals=sched_goals(), savings_plan={"target": 13000}), fp.normalize_request(body))
+    assert {k: v for k, v in a.items() if k != "schedule"} == b
+    text = json.dumps(a["schedule"], ensure_ascii=False).lower()
+    assert not re.search(r"recommend|score|rank|best|המלצה|ציון|דירוג|כדאי", text)
+    assert all(re.fullmatch(r"[a-z_]+", n) for n in a["schedule"]["notes"])        # codes only; the Hebrew wording lives in the client
+
+
+def test_every_schedule_reason_and_note_has_a_hebrew_entry_in_the_client():
+    goals = sched_goals() + [goal_rec("recG7", 50000, "2020-01-01", title="עבר"), goal_rec("recG8", None, "2029-01-01", title="בלי סכום")]
+    seen_reasons, seen_notes = set(), set()
+    for sc in (schedule(goals=goals), schedule(goals=goals, planned=None)):
+        seen_reasons |= {e["reason"] for e in sc["excluded"]}
+        seen_notes |= set(sc["notes"])
+    covered = run(inputs([cash(value=500000)], allocations=[al("a1", G, "recI", "fixed_amount", 130000)], goals=sched_goals()),
+                  fp.normalize_request({"goal_ids": [G], "options": [], "allocation_plan": [], "assumptions": FLAT_ASSUMPTIONS, "schedule": True}))["schedule"]
+    seen_reasons |= {e["reason"] for e in covered["excluded"]}
+    assert {"missing_date", "missing_target", "past_date", "no_gap"} <= seen_reasons
+    assert seen_reasons <= _client_keys("SCHEDULE_EXCLUDED") and seen_notes <= _client_keys("SCHEDULE_NOTES") and seen_notes

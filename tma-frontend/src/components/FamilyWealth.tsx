@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchFccAccounts, fetchFccNetWorth, fetchFccOverview, postFccAccountsForecast, postFccFundingFollowup, postFccFundingPlan, postFccFundingSave } from "../api";
 import type { FccAccount, FccAccountsForecast, FccAccountsView, FccOverview, FundingOptionType, FundingPlan, FundingRequestBody, FundingSources, SavedPlanComparison } from "../types";
 import { LineChart } from "./PortfolioLabCharts";
-import { SAVED_NOTE, savedChangesModel, type SavedChangesModel, SOURCES_DEBOUNCE_MS, SOURCES_INTRO, SOURCES_TITLE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, sourcesModel, type SourceAddOption, type SourcesModel, ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
+import { SAVED_NOTE, savedChangesModel, type SavedChangesModel, SOURCES_DEBOUNCE_MS, SOURCES_INTRO, SOURCES_TITLE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, sourcesModel, type SourceAddOption, type SourcesModel, ALLOCATION_NOTE, DEFAULT_FUNDING_FORM, FUNDING_ADDABLE, FUNDING_FIELDS, FUNDING_INTRO, FUNDING_PRINCIPLE, FUNDING_TITLE, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, scheduleModel, newFundingOption, type FundingForm, type FundingOptionDraft, ALLOCATION_TITLE, NO_ALLOCATIONS_MESSAGE, type AllocationModel, DEFAULT_FORECAST_FORM, FAMILY_TABS, FAMILY_TAB_PREFIX, FORECAST_NOTE, FORECAST_TITLE, NO_ACCOUNTS_MESSAGE, NO_ACCOUNTS_TITLE, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, accountsTabModel, familyCardModel, forecastModel, forecastParams, savingsTabModel, type FamilyTabKey, type ForecastForm } from "../lib/familyWealth";
 import { ACCOUNTS_COMPOSER, FUNDING_COMPOSER, panelId, tabId } from "../lib/fccTabs";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } from "../lib/familyWealth";
@@ -337,6 +337,10 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
         </label>
         )}
         {hasGoal && (
+        <label className="pl-check"><input type="checkbox" checked={form.showSchedule} onChange={(e) => setForm((f) => ({ ...f, showSchedule: e.target.checked }))} />
+          הצג לוח התחייבויות חודשי (כל היעדים הפעילים)</label>
+        )}
+        {hasGoal && (
         <label>מתוך ההפקדות הקיימות (אופציונלי, מסלול ד׳) — ₪ לחודש
           <input inputMode="decimal" value={form.fromExisting} onChange={(e) => setForm((f) => ({ ...f, fromExisting: e.target.value }))} />
           <small>כמה מההפקדה הנדרשת תבוא מההפקדות המתוכננות הקיימות; השאר יוצג כתוספת להכנסה הנדרשת. האחוז מחושב לבד.</small>
@@ -404,6 +408,12 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
         <ScreenState state="error" title={state.code === 404 ? "המסך עדיין לא פעיל" : state.code === 429 ? "יותר מדי חישובים" : "ההשוואה נכשלה"}
                      message={state.code === 404 ? "ההשוואה אינה זמינה בחשבון הזה." : state.code === 429 ? "אפשר לנסות שוב בעוד דקה." : state.message} />
       )}
+      {model?.schedule && <ScheduleBlock model={model.schedule} onToggle={(goalId) => {
+        const all = model.schedule!.rows.map((r) => r.goalId);
+        const current = form.scheduleOnly ?? all;
+        const next = current.includes(goalId) ? current.filter((x) => x !== goalId) : [...current, goalId];
+        setForm((f) => ({ ...f, scheduleOnly: next.length === all.length ? null : next }));
+      }} />}
       {model && <FundingResult model={model} selection={{ selected, onToggle: (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id])) }} />}
       {model && state.status === "ok" && (
         <div className="fcc-stack">
@@ -506,6 +516,30 @@ function Rows({ rows }: { rows: { label: string; value: string }[] }) {
 }
 
 /** The server's comparison, in the server's order (fixed by option type — never by outcome). Nothing is highlighted as better. */
+/** The monthly commitments schedule: server numbers, a per-goal filter (re-run to refresh the curve), releases as their own lines. Read-only. */
+export function ScheduleBlock({ model, onToggle }: { model: NonNullable<ReturnType<typeof scheduleModel>>; onToggle?: (goalId: string) => void }) {
+  return (
+    <Surface padding="compact" className="fw-schedule" aria-label={model.title}>
+      <h3 className="fcc-section__heading">{model.title}</h3>
+      <p className="fcc-goal__note" dir="auto">{model.intro}</p>
+      <ul className="pl-list pl-list--small" aria-label="יעדים בלוח">
+        {model.rows.map((r) => (
+          <li key={r.goalId}>
+            <label className="pl-check"><input type="checkbox" checked={r.selected} disabled={!onToggle} onChange={() => onToggle?.(r.goalId)} />{r.label}: {r.value}</label>
+          </li>
+        ))}
+      </ul>
+      {onToggle && <p className="fcc-goal__note">שינוי הסימון מתעדכן בלחיצה נוספת על החישוב.</p>}
+      <p className="fcc-goal__note">הנטל החודשי לאורך הזמן:</p>
+      <Rows rows={model.steps} />
+      {model.releases.length > 0 && <><p className="fcc-goal__note">הפקדות שמסתיימות ומתפנות:</p><Rows rows={model.releases} /></>}
+      <Rows rows={model.summary} />
+      {model.excluded.length > 0 && <><p className="fcc-goal__note">לא נכללו בלוח:</p><ul className="pl-list pl-list--small" dir="auto">{model.excluded.map((e) => <li key={e}>{e}</li>)}</ul></>}
+      {model.notes.map((n) => <p key={n} className="fcc-goal__note" dir="auto">{n}</p>)}
+    </Surface>
+  );
+}
+
 export function FundingResult({ model, selection }: { model: NonNullable<ReturnType<typeof fundingModel>>; selection?: { selected: string[]; onToggle: (id: string) => void } }) {
   return (
     <div className="fcc-stack" aria-label="השוואת אפשרויות מימון">
@@ -522,6 +556,7 @@ export function FundingResult({ model, selection }: { model: NonNullable<ReturnT
           {model.requiredCard.subtitle && <p className="fcc-goal__note" dir="auto">{model.requiredCard.subtitle}</p>}
           {model.requiredCard.rows.length > 0 && <Rows rows={model.requiredCard.rows} />}
           {model.requiredCard.arrival.length > 0 && <><p className="fcc-goal__note">מתי מגיעים ליעד (שתי תחזיות נפרדות, ללא חיבור ביניהן):</p><Rows rows={model.requiredCard.arrival} /></>}
+          {model.requiredCard.window.length > 0 && <><p className="fcc-goal__note">התאריך הוא הערכה — אותה הפקדה בשני קצוות החלון (ההערכה עצמה נשארת התשובה הראשית):</p><Rows rows={model.requiredCard.window} /></>}
           {model.requiredCard.routes.map((blk) => (
             <div key={blk.heading} className="fw-routes">
               <p className="fcc-goal__note"><strong>{blk.heading}</strong></p>

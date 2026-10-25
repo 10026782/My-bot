@@ -6,13 +6,13 @@ import { FamilyWealth, FamilyWealthCard } from "../components/FamilyWealth";
 import { FccTabBar } from "../components/FccTabBar";
 import { LineChart, StackBar } from "../components/PortfolioLabCharts";
 import type { FccAccountsForecast, FccAccountsView, FccOverview, PortfolioLabView, PaceView } from "../types";
-import { AccountsPanel, ForecastResult, FundingResult, FundingSection, FundingSourcesList, SavedPlanChanges } from "../components/FamilyWealth";
+import { AccountsPanel, ForecastResult, FundingResult, FundingSection, ScheduleBlock, FundingSourcesList, SavedPlanChanges } from "../components/FamilyWealth";
 import { ContextualComposer } from "../components/FccTabBar";
 import { ACCOUNTS_COMPOSER, COMPOSER, FUNDING_COMPOSER } from "./fccTabs";
 import { FCC_TABS, panelId, tabForKey, tabId } from "./fccTabs";
 import {
   BALANCE_PLACEHOLDER, DEFAULT_LAB_FORM, FAMILY_TABS, OPEN_LABEL, SCREEN_TITLE, TABS_ARIA_LABEL, SELF_REPORTED, barChartModel, breakdownParts, familyCardModel,
-  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, newFundingOption, sourcesModel, savedChangesModel, SAVED_TITLE, SAVED_NOTE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, SOURCES_DEBOUNCE_MS, SOURCES_EXPECTED_LABEL, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
+  DEFAULT_FORECAST_FORM, DEFAULT_FUNDING_FORM, FUNDING_FIELDS, FUNDING_FOLLOWUP_LABELS, FUNDING_TYPE_LABELS, fundingModel, fundingRequest, scheduleModel, newFundingOption, sourcesModel, savedChangesModel, SAVED_TITLE, SAVED_NOTE, isCurrentGoal, sourcesCacheKey, sourcesErrorText, SOURCES_DEBOUNCE_MS, SOURCES_EXPECTED_LABEL, type FundingForm, accountsTabModel, intraYearLines, timingRows, MISSING_LABEL, paceAccountRows, paceAssumptions, paceCorrectionRows, paceForecastLines, paceReturnText, paceSummaryRows, forecastModel, forecastParams, scenarioLines, scenarioRows, crisisTableRows, labKpiCards, labParams, labTableRows, lineChartModel, savingsTabModel,
   serverNote,
 } from "./familyWealth";
 
@@ -1151,4 +1151,69 @@ test("funding request: the amount from existing deposits is sent once, positive,
   const none = fundingRequest(base);
   assert.ok(none.ok && !("from_existing" in none.body));
   for (const bad of ["abc", "0", "-1"]) assert.equal(fundingRequest({ ...base, fromExisting: bad }).ok, false, bad);
+});
+
+test("required monthly card: the same deposit at both ends of the date window; an end that already passed says so (never 'the goal date passed' next to a number)", () => {
+  const withCard = (card: object) => fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], required_monthly_card: card }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!.requiredCard!;
+  const c = withCard({ ...requiredCard, window: { margin_months: 12, early: { due: "2027-10-19", amount: 12000, reason: null }, late: { due: "2029-10-19", amount: 8000, reason: null } } });
+  assert.equal(c.window.length, 2);
+  assert.ok(c.window[0].label === "אם התאריך מוקדם (19/10/2027)" && c.window[0].value.includes("12,000") && c.window[1].value.includes("8,000"));
+  const past = withCard({ ...requiredCard, window: { margin_months: 24, early: { due: "2025-06-30", amount: null, reason: "past_date" }, late: { due: "2029-06-30", amount: 3636.37, reason: null } } });
+  assert.ok(past.window[0].value.includes("כבר עבר") && !past.window[0].value.includes("תאריך היעד עבר") && past.window[1].value.includes("3,636"));
+  assert.deepEqual(withCard(requiredCard).window, [], "no window without a margin");
+  const opt = fundingModel({ ...fundingView, goals: [{ ...fundingView.goals[0], window: { margin_months: 24,
+    early: { due: "2025-06-30", reason: "past_date", gap: null, months_to_due: 0, options: [] }, late: { due: "2029-06-30", reason: null, gap: 1, months_to_due: 30, options: [] } } }] } as unknown as Parameters<typeof fundingModel>[0], "recG1")!;
+  assert.ok(opt.options[1].windowRows[0].value.includes("כבר עבר") && !opt.options[1].windowRows[0].value.includes("תאריך היעד עבר"));
+});
+
+const scheduleFixture = {
+  as_of: "2026-10-24", start: "2026-10-01",
+  rows: [
+    { goal_id: "recG1", title: "חתונה — אלחנן", amount: 10416.68, months: 24, due: "2028-10-19", start: "2026-10-01", end: "2028-09-01", released_from: "2028-10-01", selected: true },
+    { goal_id: "recG2", title: "חתונה — נתנאל", amount: 6410.26, months: 39, due: "2030-01-19", start: "2026-10-01", end: "2029-12-01", released_from: "2030-01-01", selected: false },
+  ],
+  steps: [{ from: "2026-10-01", to: "2028-09-01", burden: 10416.68, goal_ids: ["recG1"], shortfall_vs_planned: 0 }, { from: "2028-10-01", to: "2029-12-01", burden: 20000, goal_ids: ["recG1", "recG2"], shortfall_vs_planned: 7000 }],
+  releases: [{ goal_id: "recG1", title: "חתונה — אלחנן", amount: 10416.68, released_from: "2028-10-01" }],
+  peak_burden: 20000, planned_monthly_savings: 13000, peak_shortfall: 7000,
+  excluded: [{ goal_id: "recG5", title: "חצי מוגדר", reason: "missing_date" }, { goal_id: "recG9", title: "אחר", reason: "brand_new_code" }], truncated: true,
+  notes: ["read_only", "one_date_per_goal", "no_capacity_allocation", "not_continuing_deposits"],
+} as unknown as Parameters<typeof scheduleModel>[0];
+
+test("commitments schedule: server months and amounts, a step down as deposits end, releases as their own lines, shortfall only where it exists", () => {
+  const m = scheduleModel(scheduleFixture)!;
+  assert.equal(m.title, "לוח התחייבויות חודשי");
+  assert.ok(m.rows[0].value.includes("10,417") && m.rows[0].value.includes("10/2026–09/2028") && m.rows[0].value.includes("24 חודשים") && m.rows[0].selected && !m.rows[1].selected);
+  assert.ok(m.steps[0].value.includes("בתוך החיסכון המתוכנן") && !m.steps[0].warning);
+  assert.ok(m.steps[1].value.includes("חוסר מול המתוכנן") && m.steps[1].value.includes("7,000") && m.steps[1].warning);
+  assert.ok(m.releases[0].label.includes("מתפנה מ־10/2028") && m.releases[0].value.includes("קו, לא הבטחה"));
+  assert.ok(m.summary[0].value.includes("20,000") && m.summary.some((r) => r.label.startsWith("חוסר בשיא") && r.value.includes("7,000")));
+  assert.ok(m.excluded.includes("חצי מוגדר — חסר תאריך יעד") && m.excluded.some((e) => e.includes("יותר מ־10 יעדים")));
+  assert.ok(m.notes.every((n) => /[\u0590-\u05FF]/.test(n)), "every note is Hebrew");
+  assert.equal(scheduleModel(undefined), null);
+});
+
+test("commitments schedule: a missing planned figure is missing (never 0) and an empty selection says so; no recommendation wording", () => {
+  const m = scheduleModel({ ...scheduleFixture!, planned_monthly_savings: null, peak_shortfall: null, steps: [{ from: "2026-10-01", to: "2028-09-01", burden: 100, goal_ids: ["recG1"], shortfall_vs_planned: null }] })!;
+  assert.ok(m.steps[0].value.includes("חיסכון מתוכנן חסר") && m.summary[1].value === "לא ידוע");
+  assert.equal(scheduleModel({ ...scheduleFixture!, steps: [], peak_burden: 0 })!.summary[0].value, "אין יעדים נבחרים");
+  assert.ok(!/מומלץ|כדאי|הטוב ביותר/.test(JSON.stringify(m)));
+});
+
+test("commitments schedule: the form asks for it only when checked and sends the chosen goals only when a subset is chosen", () => {
+  const base = { ...DEFAULT_FUNDING_FORM, goalId: "recG1" };
+  const off = fundingRequest(base);
+  assert.ok(off.ok && !("schedule" in off.body) && !("schedule_goal_ids" in off.body));
+  const all = fundingRequest({ ...base, showSchedule: true });
+  assert.ok(all.ok && all.body.schedule === true && !("schedule_goal_ids" in all.body), "no subset = all goals");
+  const some = fundingRequest({ ...base, showSchedule: true, scheduleOnly: ["recG2"] });
+  assert.ok(some.ok && some.body.schedule === true && JSON.stringify(some.body.schedule_goal_ids) === JSON.stringify(["recG2"]));
+});
+
+test("commitments schedule block: renders the filter checkboxes only when it can be toggled, and its text stays Hebrew", () => {
+  const model = scheduleModel(scheduleFixture)!;
+  const live = renderToStaticMarkup(createElement(ScheduleBlock, { model, onToggle: () => undefined }));
+  const frozen = renderToStaticMarkup(createElement(ScheduleBlock, { model }));
+  assert.ok(live.includes("לוח התחייבויות חודשי") && live.includes("מתעדכן בלחיצה נוספת") && !frozen.includes("מתעדכן בלחיצה נוספת"));
+  assert.equal((live.match(/type="checkbox"/g) ?? []).length, 2);
+  assert.ok(!/read_only|one_date_per_goal|missing_date/.test(live), "no raw server codes");
 });
