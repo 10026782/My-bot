@@ -293,3 +293,143 @@ def test_loan_run_deterministic_and_wording_clean():
     assert a == b
     text = json.dumps(a, ensure_ascii=False).lower()
     assert not re.search(r"probabilit|success_rate|chance|recommend|\bsafe\b|הסתברות", text)
+
+
+# ── E1c: POST /api/portfolio-lab/liquidity-stress (שער, מגבלות, שגיאות; קריאה בלבד) ──
+from pathlib import Path
+from types import SimpleNamespace
+
+from flask import Flask
+
+import tma_api
+
+_URL = "/api/portfolio-lab/liquidity-stress"
+_H = {"X-Telegram-Init-Data": "valid"}
+_OWNER = SimpleNamespace(user_id="eliyahu", is_owner=True)
+_PARTNER = SimpleNamespace(user_id="avi", is_owner=False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_limiter(monkeypatch):
+    monkeypatch.setattr(tma_api, "_PL_LIMITER", None)
+
+
+def _client(monkeypatch, who=_OWNER, gate=True, valid_init=True):
+    app = Flask(__name__)
+    app.register_blueprint(tma_api.tma_api)
+    monkeypatch.setattr(tma_api, "_validate_initdata", (lambda _: {"id": getattr(who, "user_id", "x")}) if valid_init else (lambda _: None))
+    monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: who)
+    monkeypatch.setattr(tma_api, "_fcc_enabled", lambda identity=None: gate)
+    return app.test_client()
+
+
+def _post(c, body, headers=_H, ctype="application/json"):
+    data = body if isinstance(body, (bytes, str)) else json.dumps(body)
+    return c.post(_URL, data=data, headers=headers, content_type=ctype)
+
+
+def test_api_requires_valid_telegram_auth(monkeypatch):
+    assert _post(_client(monkeypatch), {}, headers={}).status_code == 401
+    assert _post(_client(monkeypatch, valid_init=False), {}).status_code == 401
+
+
+def test_api_gate_flag_canary_and_owner(monkeypatch):
+    assert _post(_client(monkeypatch, gate=False), {}).status_code == 404
+    assert _post(_client(monkeypatch, who=_PARTNER), {}).status_code == 404
+    assert _post(_client(monkeypatch, who=None), {}).status_code == 404
+    assert _post(_client(monkeypatch), {}).status_code == 200
+
+
+def test_api_real_fcc_gate_is_used_not_a_copy(monkeypatch):
+    import feature_flags
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda n, *a, **k: n == "FEATURE_FINANCIAL_CONTROL_CENTER")
+    monkeypatch.setenv("FCC_CANARY_USER_IDS", "eliyahu")
+    app = Flask(__name__)
+    app.register_blueprint(tma_api.tma_api)
+    monkeypatch.setattr(tma_api, "_validate_initdata", lambda _: {"id": "x"})
+    monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: _OWNER)
+    assert _post(app.test_client(), {}).status_code == 200
+    monkeypatch.delenv("FCC_CANARY_USER_IDS")
+    assert _post(app.test_client(), {}).status_code == 404  # הדגל לבדו לא חושף דבר
+
+
+def test_api_only_post_and_preflight(monkeypatch):
+    c = _client(monkeypatch)
+    assert c.get(_URL, headers=_H).status_code == 405
+    assert c.open(_URL, method="OPTIONS").status_code == 204
+
+
+def test_api_returns_the_pure_view(monkeypatch):
+    body = {"crisis": CRISIS, "loan": LOAN}
+    r = _post(_client(monkeypatch), body)
+    assert r.status_code == 200
+    expected = build_stress_view(body)
+    assert r.get_json()["replay_digest"] == expected["replay_digest"]
+    assert r.get_json()["result_type"] == "stress_scenario_under_stated_assumptions"
+
+
+def test_api_limits_and_errors(monkeypatch):
+    c = _client(monkeypatch)
+    assert _post(c, {}, ctype="text/plain").status_code == 415
+    assert _post(c, b"x" * (64 * 1024 + 1)).status_code == 413
+    assert _post(c, b"").status_code in (411, 413)
+    assert _post(c, b"{not json").status_code == 400
+    assert _post(c, {"surprise": 1}).status_code == 400
+    assert _post(c, {"loan": {"amount": 1}}).status_code == 400
+    r = _post(c, [])
+    assert r.status_code == 400 and "Traceback" not in r.get_data(as_text=True)
+
+
+def test_api_child_capital_cannot_be_pledged_through_the_endpoint(monkeypatch):
+    r = _post(_client(monkeypatch), {"protected_capital": {"amount": 1, "in_collateral": True}})
+    assert r.status_code == 400 and "in_collateral" in r.get_json()["error"]
+
+
+@pytest.mark.parametrize("payload", [
+    {"fund_value": 10 ** 400}, {"fund_value": 1e300, "monthly_support": 1e9}, {"annual_return_pct": 100, "horizon_months": 360},
+    {"cushion_modes": [0] * 5000}, {"loan": {"amount": 1, "annual_rate_pct": 100, "max_ltv_pct": 5}}, {"crisis": [1]},
+    {"loan": "x"}, {"cash_buckets": []}, None, 5, "x",
+])
+def test_api_hostile_payloads_never_500(monkeypatch, payload):
+    r = _post(_client(monkeypatch), payload)
+    assert r.status_code in (200, 400)
+    assert "Traceback" not in r.get_data(as_text=True)
+
+
+def test_api_unexpected_exception_is_generic_500(monkeypatch):
+    import portfolio_lab.liquidity_stress as ls
+    monkeypatch.setattr(ls, "build_stress_view", lambda p: (_ for _ in ()).throw(RuntimeError("secret internals")))
+    r = _post(_client(monkeypatch), {})
+    assert r.status_code == 500 and r.get_json() == {"error": "internal error"}
+
+
+def test_api_rate_limit_per_user_separate_from_simulate(monkeypatch):
+    c = _client(monkeypatch)
+    codes = [_post(c, {"horizon_months": 12}).status_code for _ in range(14)]
+    assert codes[:12] == [200] * 12 and codes[12:] == [429, 429]
+    assert tma_api._PL_LIMITER.is_allowed("portfolio_lab:eliyahu")  # מפתח נפרד מ-/simulate
+
+
+def test_api_concurrency_gate_returns_503_when_busy(monkeypatch):
+    class Busy:
+        def acquire(self, timeout=None): return False
+        def release(self): raise AssertionError("must not release an unacquired slot")
+    monkeypatch.setattr(tma_api, "_PL_COMPUTE", Busy())
+    assert _post(_client(monkeypatch), {}).status_code == 503
+
+
+def test_api_worst_case_is_fast_and_bounded(monkeypatch):
+    import time
+    body = {"horizon_months": 360, "cushion_modes": [0, 6, 12, 24, 36], "crisis": CRISIS, "loan": {**LOAN, "interest_only": False, "term_months": 360}}
+    t = time.perf_counter()
+    r = _post(_client(monkeypatch), body)
+    assert r.status_code == 200 and time.perf_counter() - t < 3
+    assert len(r.get_data()) < 4 * 1024 * 1024
+
+
+def test_api_block_is_read_only():
+    text = Path("tma_api.py").read_text(encoding="utf-8")
+    block = text.split("# ── E1c: liquidity stress test", 1)[1].split("\n@tma_api.route", 3)
+    code = "\n".join(block[:3])
+    for forbidden in ("airtable", "_queue_or_owner_execute", "dispatch_tool", "call_anthropic", "filter_records", "_gw_create", "_gw_patch"):
+        assert forbidden not in code, forbidden
