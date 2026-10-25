@@ -3,7 +3,7 @@ import { postLiquidityStress } from "../api";
 import type { StressView } from "../types";
 import { ils, lineChartModel } from "../lib/familyWealth";
 import {
-  DEFAULT_STRESS_FORM, STRESS_NOTE, STRESS_SEEDED_NOTE, applySeed, type StressSeed, STRESS_PROTECTED_NOTE, STRESS_TITLE, burnRows, netWorthLines, stressHead, stressParams, stressRows, type StressForm,
+  DEFAULT_STRESS_FORM, STRESS_NOTE, STRESS_SEEDED_NOTE, STRESS_STALE_NOTE, applySeed, isStale, stressKey, type StressSeed, STRESS_PROTECTED_NOTE, STRESS_TITLE, burnRows, netWorthLines, stressHead, stressParams, stressRows, type StressForm,
 } from "../lib/liquidityStress";
 import { LineChart } from "./PortfolioLabCharts";
 import { ScreenState } from "./ui/ScreenState";
@@ -17,6 +17,7 @@ type State = { status: "idle" } | { status: "loading" } | { status: "ok"; view: 
 export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}) {
   const [form, setForm] = useState<StressForm>(DEFAULT_STRESS_FORM);
   const [seeded, setSeeded] = useState(false);
+  const [ranKey, setRanKey] = useState<string | null>(null);   // the request the shown answer belongs to
   const root = useRef<HTMLElement | null>(null);
   const [state, setState] = useState<State>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
@@ -32,6 +33,7 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
     setForm((f) => applySeed(f, seed));
     setSeeded(true);
     setState({ status: "idle" });
+    setRanKey(null);
     setFormError(null);
     latest.current += 1;                              // an answer still in flight belongs to the previous inputs
     if (typeof root.current?.scrollIntoView === "function") root.current.scrollIntoView({ block: "start" });
@@ -43,8 +45,9 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
     setFormError(null);
     const id = ++latest.current;                     // a slower, older answer must never overwrite a newer one
     setState({ status: "loading" });
+    const key = stressKey(form);
     postLiquidityStress(parsed.params)
-      .then((view) => { if (id === latest.current) setState({ status: "ok", view }); })
+      .then((view) => { if (id === latest.current) { setState({ status: "ok", view }); setRanKey(key); } })
       .catch((e: Error & { status?: number }) => { if (id === latest.current) setState({ status: "error", message: e.message, code: e.status }); });
   };
 
@@ -99,12 +102,12 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
                 <label className="pl-check"><input type="checkbox" checked={form.loanVerified} onChange={(e) => set("loanVerified", e.target.checked)} />התנאים אומתו מול הבנק</label>
                 <label>הבטוחה
                   <select value={form.collateral} onChange={(e) => set("collateral", e.target.value as StressForm["collateral"])}>
-                    <option value="risky_and_pledged">נכס סיכון + מזומן משועבד</option><option value="risky_only">נכס סיכון בלבד</option>
+                    <option value="risky_and_pledged">נכס סיכון + משועבד</option><option value="risky_only">נכס סיכון בלבד</option>
                   </select>
                 </label>
                 <label>תיקון דרישת בטוחות
                   <select value={form.cureFirst} onChange={(e) => set("cureFirst", e.target.value as StressForm["cureFirst"])}>
-                    <option value="cushion">קודם מהמזומן החופשי, אחר כך מכירה</option><option value="risky_sale">קודם מכירה, אחר כך מזומן</option>
+                    <option value="cushion">קודם מזומן, אחר כך מכירה</option><option value="risky_sale">קודם מכירה, אחר כך מזומן</option>
                   </select>
                 </label>
                 <label>תמורת ההלוואה
@@ -128,6 +131,7 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
         <ScreenState state="error" title={state.code === 404 ? "המסך עדיין לא פעיל" : state.code === 429 ? "יותר מדי חישובים" : "החישוב נכשל"}
                      message={state.code === 404 ? "מבחן הלחץ אינו זמין בחשבון הזה." : state.code === 429 ? "אפשר לנסות שוב בעוד דקה." : state.message} />
       )}
+      {state.status === "ok" && isStale(form, ranKey) && <Surface variant="subtle" padding="compact" role="status">⚠️ {STRESS_STALE_NOTE}</Surface>}
       {state.status === "ok" && <StressResult view={state.view} />}
     </section>
   );
@@ -140,7 +144,7 @@ export function StressResult({ view }: { view: StressView }) {
         <h3 className="fcc-section__heading">תזרים נטו נדרש בחודש: {ils(view.net_burn.net_burn_per_month)}</h3>
         <ul className="pl-list">{burnRows(view).map((r) => <li key={r.key}>{r.label}: {r.value}</li>)}</ul>
       </Surface>
-      <Surface padding="compact"><div className="pl-scroll"><table className="pl-table">
+      <Surface padding="compact"><div className="pl-scroll"><table className="pl-table pl-table--stress">
         <thead><tr>{stressHead(view).map((h) => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{stressRows(view).map((r) => <tr key={r.key}><th scope="row">{r.label}</th>{r.cells.map((c, i) => <td key={i} className="pl-num">{c}</td>)}</tr>)}</tbody>
       </table></div></Surface>
