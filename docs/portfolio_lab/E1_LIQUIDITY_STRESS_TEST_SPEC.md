@@ -179,6 +179,12 @@
 | E1d | כרטיס TMA | E1c |
 | E1e | חיבור ל-`funding_plan.loan` (העברת `collateral`) | החלטת בעלים |
 
+### סטטוס E1a (24/10/2026) — בקוד ב-PR זה, לא מחובר
+`portfolio_lab/liquidity_stress.py` + `test_portfolio_lab_liquidity_stress.py`; ללא endpoint, flag, UI או Airtable. סטיות מכוונות מהמפרט: `recovery_years` שלם 1–10 (ברירת מחדל 2 = 24 חודשים) במקום `custom_months`, כי `crisis_asset_monthly` פועל בשנים שלמות; `cash_buckets.free` נגזר ממצב הכרית ונדחה כקלט; `loan`/`cushion_basis` נדחים בשגיאה עד E1b.
+
+### סטטוס E1b (25/10/2026) — בקוד ב-PR זה, לא מחובר
+הלוואה (ריבית בלבד או שפיצר), `max_ltv_pct` חובה כקלט (אין ברירת מחדל), `terms_verified` ברירת מחדל `false`, `use_proceeds` (`none` | `asset_income`), דרישת בטוחות ותיקונה לפי `cure_order`. סטיות מכוונות מהמפרט: `collateral` הוא `risky_and_pledged` (ברירת מחדל) או `risky_only` — מזומן חופשי אינו בטוחה, בהתאם לתיקון הבעלים; מכירה כפויה נושאת `cause` (`cashflow` | `collateral_call`); `initial_collateral`/`initial_ltv`/`trigger_decline_pct` מחושבים לכל מצב כרית (כרית חופשית יוצאת מהבטוחה); חוסר מזומן להחזר הלוואה מצטבר לחוב (שמרני: החזר ההלוואה מכוסה לפני התמיכה). הנכס שנרכש בתמורה (אם הוזן) קבוע נומינלית, אינו בטוחה ואינו מושפע מהמשבר. עדיין ללא endpoint, flag, UI או Airtable; `funding_plan.loan` לא חובר (E1e).
+
 ## 10. שאלות פתוחות — נסגרו ב-24/10/2026 (סעיף 0); נשמר לתיעוד
 
 1. כרית נמדדת בסיס `net_burn` (מומלץ) או `support_only` (כמו במחקר)?
