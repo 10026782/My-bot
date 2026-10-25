@@ -194,6 +194,13 @@
 
 **קבצים עתידיים (לא נבנו; רישום ב-`canonical_boundaries.json` רק עם אישור "קבצים חדשים רישום חדש"):** `portfolio_lab/tax_assumptions.py`, `portfolio_lab/path_comparison/` (ליבה + משווה), מודול לכל סוג מקור; בדיקות בקבצי בדיקה חדשים משלהם.
 
+### 6א. מימוש שלב 1 (25/10/2026) — הבהרות חוזה שנקבעו בקוד
+- **סימן השינוי בהון הנקי:** נמדד מול "לא עושים כלום" (תועלת פחות עלות); הסכום שמומן זהה בכל מסלול מימון ולכן מתקזז. `economic_cost.net_cost` נמדד על בסיס "אחרי מס סמוי".
+- **סוג תנועה נוסף:** `no_movement` למסלול הייחוס `wait` (לא היה ברשימה של §2.2).
+- **`purpose`:** `fund_amount` / `reduce_debt` — מסלולים עם מטרה שונה או סכום ממומן שונה אינם ברי השוואה (המשווה דוחה).
+- **גבולות שלב 1:** בלי נכסים; בלי פירעון חלקי; `available_on` עתידי לא נתמך; ריבית קבועה בלי הצמדה; ריבית ההלוואה אינה ניתנת לניכוי.
+- **קבצים:** `portfolio_lab/tax_assumptions.py`, `portfolio_lab/path_comparison/{core,loan_paths,liquid_paths,comparator}.py`; נרשמו ב-`canonical_boundaries.json` באישור הבעלים.
+
 ## 7. בדיקות נדרשות (לכל שלב)
 - מבנה: אין `score`/`rank`/`best`/`recommended`/`better`/`cheapest`/`total_available` בפלט; שיעור המס מופיע רק במקום היחיד; כל תוצאת מודול עוברת את מאמת `PathResult`.
 - בסיס: תוצאות עם `frame_digest` שונה נדחות.
