@@ -6,6 +6,7 @@ import {
   DEFAULT_STRESS_FORM, STRESS_NOTE, STRESS_SEEDED_NOTE, STRESS_STALE_NOTE, applySeed, isStale, stressKey, type StressSeed, STRESS_PROTECTED_NOTE, STRESS_TITLE, burnRows, netWorthLines, stressHead, stressParams, stressRows, type StressForm,
 } from "../lib/liquidityStress";
 import { LineChart } from "./PortfolioLabCharts";
+import { InputsResultsTabs, type InnerViewKey } from "./FccTabBar";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
 import { Surface } from "./ui/Surface";
@@ -18,6 +19,7 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
   const [form, setForm] = useState<StressForm>(DEFAULT_STRESS_FORM);
   const [seeded, setSeeded] = useState(false);
   const [ranKey, setRanKey] = useState<string | null>(null);   // the request the shown answer belongs to
+  const [view, setView] = useState<InnerViewKey>("inputs");     // inputs first; a run moves to the answer, "קלטים" brings the form back
   const root = useRef<HTMLElement | null>(null);
   const [state, setState] = useState<State>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
@@ -32,6 +34,7 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
     if (!seed) return;
     setForm((f) => applySeed(f, seed));
     setSeeded(true);
+    setView("inputs");                                 // the hand-off leaves the LTV for the user to type
     setState({ status: "idle" });
     setRanKey(null);
     setFormError(null);
@@ -43,6 +46,7 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
     const parsed = stressParams(form);
     if (!parsed.ok) { setFormError(parsed.error); return; }
     setFormError(null);
+    setView("results");
     const id = ++latest.current;                     // a slower, older answer must never overwrite a newer one
     setState({ status: "loading" });
     const key = stressKey(form);
@@ -54,6 +58,9 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
   return (
     <section className="fcc-section" aria-labelledby="stress-h" ref={root}>
       <h2 id="stress-h" className="fcc-section__heading">{STRESS_TITLE} <StatusBadge tone="warning">הנחות</StatusBadge></h2>
+      <InputsResultsTabs
+        view={view} onView={setView} idPrefix="plstress" hasResults={state.status !== "idle"} empty="עוד לא הורץ מבחן — מלאו את הקלטים ולחצו ״הרץ מבחן לחץ״."
+        inputs={<>
       <Surface variant="subtle" padding="compact" role="note">{STRESS_NOTE}</Surface>
       {seeded && <Surface variant="subtle" padding="compact" role="status">{STRESS_SEEDED_NOTE}</Surface>}
       <form className="pl-form" onSubmit={(e) => { e.preventDefault(); run(); }} aria-label="קלטי מבחן הלחץ">
@@ -126,6 +133,8 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
         </button>
         {formError && <p className="fcc-quick__error" role="alert">⚠️ {formError}</p>}
       </form>
+        </>}
+        results={<>
       {state.status === "loading" && <ScreenState state="loading" title="מחשב" message="מריץ את מבחן הלחץ…" />}
       {state.status === "error" && (
         <ScreenState state="error" title={state.code === 404 ? "המסך עדיין לא פעיל" : state.code === 429 ? "יותר מדי חישובים" : "החישוב נכשל"}
@@ -133,6 +142,8 @@ export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}
       )}
       {state.status === "ok" && isStale(form, ranKey) && <Surface variant="subtle" padding="compact" role="status">⚠️ {STRESS_STALE_NOTE}</Surface>}
       {state.status === "ok" && <StressResult view={state.view} />}
+        </>}
+      />
     </section>
   );
 }
@@ -148,12 +159,16 @@ export function StressResult({ view }: { view: StressView }) {
         <thead><tr>{stressHead(view).map((h) => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{stressRows(view).map((r) => <tr key={r.key}><th scope="row">{r.label}</th>{r.cells.map((c, i) => <td key={i} className="pl-num">{c}</td>)}</tr>)}</tbody>
       </table></div></Surface>
-      <Surface padding="compact"><LineChart model={lineChartModel(netWorthLines(view))} xLabel="חודשים" title="שווי נקי לפי גודל הכרית" /></Surface>
-      <Surface padding="compact">
-        <p className="fcc-goal__note">{view.protected_capital.note}</p>
-        <ul className="pl-list pl-list--small" dir="auto">{view.notes.map((n) => <li key={n}>{n}</li>)}</ul>
-        <p className="fcc-goal__note">מנוע portfolio_lab v{view.engine_version} · סוג תוצאה: {view.result_type} · digest {view.replay_digest.slice(0, 12)}</p>
-      </Surface>
+      <p className="fcc-goal__note">{view.protected_capital.note}</p>
+      {/* the chart and the long notes sit behind one fold, so the answer view stays within the tab budget (TAB_BUDGET) */}
+      <details className="fw-assumptions">
+        <summary>גרף שווי נקי, הנחות והערות</summary>
+        <Surface padding="compact"><LineChart model={lineChartModel(netWorthLines(view))} xLabel="חודשים" title="שווי נקי לפי גודל הכרית" /></Surface>
+        <Surface padding="compact">
+          <ul className="pl-list pl-list--small" dir="auto">{view.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+          <p className="fcc-goal__note">מנוע portfolio_lab v{view.engine_version} · סוג תוצאה: {view.result_type} · digest {view.replay_digest.slice(0, 12)}</p>
+        </Surface>
+      </details>
     </>
   );
 }
