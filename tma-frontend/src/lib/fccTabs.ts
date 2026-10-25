@@ -12,6 +12,14 @@ export const FCC_TABS: { key: FccTabKey; label: string }[] = [
 
 export const DEFAULT_TAB: FccTabKey = "monthly";
 
+/** When does content get its own tab? (measured at a 360x800 phone; docs/portfolio_lab/UI.md "כלל חלוקה ללשוניות")
+ *  - one primary task per tab: at most ONE input form (a second independent form -> a new tab);
+ *  - a tab's content (form + the result it shows) stays within ~2 screens (soft) and never beyond 2.5 screens (hard);
+ *  - a form + result that together pass that budget are split INSIDE the tab into "קלטים" / "תוצאות" (InputsResultsTabs);
+ *  - the top strip holds at most 6 tabs (it scrolls sideways beyond 4); more -> group tabs, never a 7th. */
+export const TAB_BUDGET = { screenPx: 800, softScreens: 2, hardScreens: 2.5, maxFormsPerTab: 1, maxTopTabs: 6, scrollFrom: 4 } as const;
+export const tabStripScrolls = (count: number): boolean => count > TAB_BUDGET.scrollFrom;
+
 let remembered: FccTabKey | null = null;
 
 export const isTab = (v: unknown): v is FccTabKey => FCC_TABS.some((t) => t.key === v);

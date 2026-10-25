@@ -36,9 +36,9 @@ const release = { income_net: 10000, income_target: 15000, fixed_level: 8000, sh
 const plan = { mode: "monthly_level", target: 8000, actual: 5000, remaining: 3000, dynamic_target_per_week: 0, goals: 2 };
 const overview = { summary: { savings: plan }, savings_release: release, as_of: "2026-10-14" } as unknown as FccOverview;
 
-test("screen name and the four tabs are the agreed ones", () => {
+test("screen name and the six tabs are the agreed ones", () => {
   assert.equal(SCREEN_TITLE, "תכנון חיסכון לטווח ארוך");
-  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מימון יעד | מעבדת העתיד");
+  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מימון יעד | מעבדת העתיד | קצב בפועל | מבחן לחץ");
 });
 
 test("savings tab: plan = standing level, actual labelled as self-reported, expected is NOT a plan, balance is not invented", () => {
@@ -102,6 +102,10 @@ test("the FCC tab strip is reused unchanged for FCC and works for other tab sets
   assert.equal(tabForKey("savings" as const, "ArrowLeft", true, FAMILY_TABS), "accounts");
   assert.equal(tabForKey("accounts" as const, "ArrowLeft", true, FAMILY_TABS), "funding");
   assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
+  assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
+  assert.equal(tabForKey("lab" as const, "ArrowLeft", true, FAMILY_TABS), "pace");
+  assert.equal(tabForKey("pace" as const, "ArrowLeft", true, FAMILY_TABS), "stress");
+  assert.equal(tabForKey("stress" as const, "ArrowLeft", true, FAMILY_TABS), "savings", "wraps");
   assert.equal(tabForKey("lab" as const, "Home", false, FAMILY_TABS), "savings");
   assert.equal(FCC_TABS.length, 3);
 });

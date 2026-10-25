@@ -6,9 +6,7 @@ import {
   ils, labKpiCards, paceAssumptions, labParams, labTableRows, lineChartModel, pct, CHART_COLORS, type LabForm,
 } from "../lib/familyWealth";
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
-import { PaceTrackerPanel } from "./PaceTrackerPanel";
-import { LiquidityStressPanel } from "./LiquidityStressPanel";
-import type { StressSeed } from "../lib/liquidityStress";
+import { InputsResultsTabs, type InnerViewKey } from "./FccTabBar";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -19,10 +17,11 @@ type State = { status: "idle" } | { status: "loading" } | { status: "ok"; view: 
 const DEMO = <StatusBadge tone="warning">הדגמה</StatusBadge>;
 
 /** "מעבדת העתיד": inputs -> POST /api/portfolio-lab/simulate -> render. All numbers are the server's (portfolio_lab). */
-export function PortfolioLabPanel({ stressSeed }: { stressSeed?: StressSeed | null } = {}) {
+export function PortfolioLabPanel({ onAssumptions }: { onAssumptions?: (a: ReturnType<typeof paceAssumptions>) => void } = {}) {
   const [form, setForm] = useState<LabForm>(DEFAULT_LAB_FORM);
   const [state, setState] = useState<State>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
+  const [view, setView] = useState<InnerViewKey>("results");   // it runs once on open, so the answer comes first; the inputs are one tap away
   const latest = useRef(0);
   const set = <K extends keyof LabForm>(key: K, value: LabForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -30,6 +29,8 @@ export function PortfolioLabPanel({ stressSeed }: { stressSeed?: StressSeed | nu
     const parsed = labParams(f);
     if (!parsed.ok) { setFormError(parsed.error); return; }
     setFormError(null);
+    setView("results");
+    onAssumptions?.(paceAssumptions(f));            // the "קצב בפועל" tab extrapolates with the assumptions of the latest run
     const id = ++latest.current;                     // a slower, older answer must never overwrite a newer one
     setState({ status: "loading" });
     postPortfolioLabSimulate(parsed.params)
@@ -42,7 +43,9 @@ export function PortfolioLabPanel({ stressSeed }: { stressSeed?: StressSeed | nu
     set("strategies", form.strategies.includes(key) ? form.strategies.filter((s) => s !== key) : [...form.strategies, key]);
 
   return (
-    <div className="fcc-stack">
+    <InputsResultsTabs
+      view={view} onView={setView} idPrefix="pllab" hasResults={state.status !== "idle"} empty="עוד לא הורצה סימולציה — מלאו קלטים ולחצו ״חשב״."
+      inputs={<div className="fcc-stack">
       <Surface variant="subtle" padding="compact" className="pl-banner" role="note">
         <strong>נתוני הדגמה.</strong> כל הקלטים והתשואות הם הנחות (assumption-based) ולא נתוני שוק; התוצאות אינן תחזית ואינן המלצה.
         תוצאות מס, אם יוצגו, הן תיאורטיות בלבד אלא אם אומתו חיצונית. שום דבר כאן לא נשמר ואינו משנה את הנתונים שלך.
@@ -119,6 +122,8 @@ export function PortfolioLabPanel({ stressSeed }: { stressSeed?: StressSeed | nu
         </button>
         {formError && <p className="fcc-quick__error" role="alert">⚠️ {formError}</p>}
       </form>
+      </div>}
+      results={<div className="fcc-stack">
 
       {state.status === "loading" && <ScreenState state="loading" title="מחשב" message="המנוע מריץ את הסימולציה…" />}
       {state.status === "error" && (
@@ -126,9 +131,8 @@ export function PortfolioLabPanel({ stressSeed }: { stressSeed?: StressSeed | nu
                      message={state.code === 404 ? "מעבדת העתיד אינה זמינה בחשבון הזה." : state.code === 429 ? "אפשר לנסות שוב בעוד דקה." : state.message} />
       )}
       {state.status === "ok" && <LabResult view={state.view} />}
-      <PaceTrackerPanel assumptions={paceAssumptions(form)} />
-      <LiquidityStressPanel seed={stressSeed} />
-    </div>
+      </div>}
+    />
   );
 }
 

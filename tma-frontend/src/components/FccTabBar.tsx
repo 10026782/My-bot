@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { fetchFccOverview, postFccIntent, postFccWrite } from "../api";
 import type { FccTurn } from "../types";
 import {
-  COMPOSER, DEFAULT_TAB, FCC_TABS, WRITER_WORDS, chipsEnabled, inputVisible, nextWriterState, panelId, tabForKey, tabId, writerView,
+  COMPOSER, DEFAULT_TAB, FCC_TABS, WRITER_WORDS, tabStripScrolls, chipsEnabled, inputVisible, nextWriterState, panelId, tabForKey, tabId, writerView,
   type ComposerChip, type ComposerConfig, type FccTabKey,
 } from "../lib/fccTabs";
 import { Surface } from "./ui/Surface";
 
 /** The FCC tab strip; reused (with its own ``tabs`` / ``idPrefix`` / ``ariaLabel``) by other screens so tabs look and behave the same. */
-export function FccTabBar<K extends string = FccTabKey>({ active, onChange, tabs, idPrefix = "fcc", ariaLabel = "אזורי המרכז הכלכלי" }: {
-  active: K; onChange: (key: K) => void; tabs?: readonly { key: K; label: string }[]; idPrefix?: string; ariaLabel?: string;
+export function FccTabBar<K extends string = FccTabKey>({ active, onChange, tabs, idPrefix = "fcc", ariaLabel = "אזורי המרכז הכלכלי", inner = false }: {
+  active: K; onChange: (key: K) => void; tabs?: readonly { key: K; label: string }[]; idPrefix?: string; ariaLabel?: string; inner?: boolean;
 }) {
   const list = (tabs ?? FCC_TABS) as unknown as readonly { key: K; label: string }[];
+  // a long strip scrolls sideways: keep the selected tab in view (also after a jump made from another tab)
+  useEffect(() => { document.getElementById(tabId(active, idPrefix))?.scrollIntoView?.({ inline: "center", block: "nearest" }); }, [active, idPrefix]);
   // roving tabindex: only the selected tab is in the Tab order, so the arrows must reach the others
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
@@ -22,12 +24,31 @@ export function FccTabBar<K extends string = FccTabKey>({ active, onChange, tabs
     document.getElementById(tabId(next, idPrefix))?.focus();
   };
   return (
-    <div className="fcc-tabs" role="tablist" aria-label={ariaLabel} onKeyDown={onKeyDown}>
+    <div className={`fcc-tabs${tabStripScrolls(list.length) ? " fcc-tabs--scroll" : ""}${inner ? " fcc-tabs--inner" : ""}`} role="tablist" aria-label={ariaLabel} onKeyDown={onKeyDown}>
       {list.map((t) => (
         <button key={t.key} type="button" role="tab" id={tabId(t.key, idPrefix)} aria-selected={active === t.key} aria-controls={panelId(t.key, idPrefix)}
                 tabIndex={active === t.key ? 0 : -1} className={`fcc-tab ${active === t.key ? "fcc-tab--on" : ""}`}
                 onClick={() => onChange(t.key)}>{t.label}</button>
       ))}
+    </div>
+  );
+}
+
+export type InnerViewKey = "inputs" | "results";
+export const INNER_TABS: { key: InnerViewKey; label: string }[] = [{ key: "inputs", label: "קלטים" }, { key: "results", label: "תוצאות" }];
+
+/** Inside ONE tab: inputs and results on two views, so a long form and a long answer never share one scroll. Both stay mounted (hidden),
+ *  so typed values and the shown answer survive switching. `empty` is what the results view says before anything was run. */
+export function InputsResultsTabs({ view, onView, idPrefix, hasResults, empty, inputs, results }: {
+  view: InnerViewKey; onView: (key: InnerViewKey) => void; idPrefix: string; hasResults: boolean; empty: string; inputs: ReactNode; results: ReactNode;
+}) {
+  return (
+    <div className="fcc-stack">
+      <FccTabBar active={view} onChange={onView} tabs={INNER_TABS} idPrefix={idPrefix} ariaLabel="קלטים ותוצאות" inner />
+      <div role="tabpanel" id={panelId("inputs", idPrefix)} aria-labelledby={tabId("inputs", idPrefix)} hidden={view !== "inputs"}>{inputs}</div>
+      <div role="tabpanel" id={panelId("results", idPrefix)} aria-labelledby={tabId("results", idPrefix)} hidden={view !== "results"}>
+        {hasResults ? results : <p className="fcc-goal__note">{empty}</p>}
+      </div>
     </div>
   );
 }

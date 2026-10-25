@@ -2,6 +2,11 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LiquidityStressPanel, StressResult } from "../components/LiquidityStressPanel";
+import { PortfolioLabPanel } from "../components/PortfolioLabPanel";
+import { PaceTrackerPanel } from "../components/PaceTrackerPanel";
+import { InputsResultsTabs } from "../components/FccTabBar";
+import { FAMILY_TABS } from "./familyWealth";
+import { TAB_BUDGET, tabStripScrolls } from "./fccTabs";
 import type { StressView } from "../types";
 import { DEFAULT_STRESS_FORM, STRESS_SEEDED_NOTE, STRESS_STALE_NOTE, applySeed, burnRows, isStale, seedFromLoan, stressHead, stressKey, stressParams, stressRows } from "./liquidityStress";
 
@@ -111,6 +116,36 @@ test("a shown answer goes stale as soon as the inputs no longer match the run th
   assert.equal(isStale({ ...DEFAULT_STRESS_FORM, support: "12000" }, key), true);
   assert.equal(isStale({ ...DEFAULT_STRESS_FORM, loanOn: true }, key), true, "loan switched on without an LTV: invalid, so the old answer is not for it");
   assert.ok(STRESS_STALE_NOTE.includes("הרץ שוב"));
+});
+
+test("tab rule: at most 6 top tabs, one input form per tab, and a strip with more than 4 tabs scrolls sideways", () => {
+  assert.ok(FAMILY_TABS.length <= TAB_BUDGET.maxTopTabs, "more than 6 top tabs: group them instead of adding a 7th");
+  assert.equal(tabStripScrolls(4), false);
+  assert.equal(tabStripScrolls(FAMILY_TABS.length), true);
+  const forms = (node: ReturnType<typeof createElement>) => (renderToStaticMarkup(node).match(/<form\b/g) ?? []).length;
+  assert.ok(forms(createElement(PortfolioLabPanel)) <= TAB_BUDGET.maxFormsPerTab, "lab: one form");
+  assert.ok(forms(createElement(LiquidityStressPanel)) <= TAB_BUDGET.maxFormsPerTab, "stress: one form");
+  assert.ok(forms(createElement(PaceTrackerPanel, { assumptions: null })) <= TAB_BUDGET.maxFormsPerTab, "pace: one form");
+  assert.ok(TAB_BUDGET.softScreens < TAB_BUDGET.hardScreens && TAB_BUDGET.screenPx === 800);
+});
+
+test("the three heavy cards each live in their own tab, not stacked under the lab", () => {
+  const lab = renderToStaticMarkup(createElement(PortfolioLabPanel));
+  assert.ok(!lab.includes("קצב צבירה בפועל") && !lab.includes("מבחן לחץ נזילות"), "the lab tab holds the simulator only");
+  assert.ok(renderToStaticMarkup(createElement(PaceTrackerPanel, { assumptions: null })).includes("קצב צבירה בפועל"));
+  assert.ok(renderToStaticMarkup(createElement(LiquidityStressPanel)).includes("מבחן לחץ נזילות"));
+});
+
+test("inputs / results switch: both views stay mounted, the inactive one hidden; results say what to do before a first run", () => {
+  const render = (view: "inputs" | "results", hasResults: boolean) => renderToStaticMarkup(createElement(InputsResultsTabs, {
+    view, onView: () => undefined, idPrefix: "t", hasResults, empty: "עוד לא הורץ", inputs: createElement("form", null, "טופס"), results: createElement("p", null, "תשובה"),
+  }));
+  const a = render("inputs", false);
+  assert.ok(a.includes("טופס") && a.includes("עוד לא הורץ") && !a.includes("תשובה"));
+  assert.ok(/id="t-panel-results"[^>]*hidden/.test(a) && !/id="t-panel-inputs"[^>]*hidden/.test(a));
+  const b = render("results", true);
+  assert.ok(b.includes("תשובה") && /id="t-panel-inputs"[^>]*hidden/.test(b), "the form stays mounted but hidden");
+  assert.ok(b.includes("קלטים") && b.includes("תוצאות") && b.includes("fcc-tabs--inner"));
 });
 
 if (failures > 0) throw new Error(`${failures} liquidityStress test(s) failed`);

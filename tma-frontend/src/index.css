@@ -3229,6 +3229,12 @@
 .fcc-tab--on { background: var(--boss-color-accent-readable); color: var(--boss-color-surface); font-weight: 650; }
 .fcc-asset__loans { display: grid; gap: 2px; padding-block-start: 4px; border-block-start: 1px dashed var(--boss-color-border); }
 [role="tabpanel"][hidden] { display: none; }
+/* a strip with more than 4 tabs scrolls sideways instead of squeezing every label into a few characters */
+.fcc-tabs--scroll { overflow-x: auto; scrollbar-width: none; }
+.fcc-tabs--scroll::-webkit-scrollbar { display: none; }
+.fcc-tabs--scroll .fcc-tab { flex: 0 0 auto; white-space: nowrap; padding-inline: 14px; overflow-wrap: normal; }
+/* inner "קלטים / תוצאות" switch: not sticky (the top strip already is), and smaller */
+.fcc-tabs--inner { position: static; }
 
 /* Close-loan flow (loans tab) */
 .fcc-loan__actionbtn, .fcc-loan__closebtn { flex: 1 1 auto; }

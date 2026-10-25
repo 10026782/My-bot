@@ -9,7 +9,10 @@ import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } fro
 import { KpiCard } from "./FccKpiCard";
 import { NetWorthCard, type NetWorthState } from "./FccNetWorth";
 import { PortfolioLabPanel } from "./PortfolioLabPanel";
+import { PaceTrackerPanel } from "./PaceTrackerPanel";
+import { LiquidityStressPanel } from "./LiquidityStressPanel";
 import { LOAN_TO_STRESS_LABEL, seedFromLoan, type StressSeed } from "../lib/liquidityStress";
+import { DEFAULT_LAB_FORM, paceAssumptions } from "../lib/familyWealth";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -216,6 +219,8 @@ type SourcesState = { status: "idle" } | { status: "loading" } | { status: "ok";
 
 /** Goal Funding Planner (step 1b): a goal -> typed funding options -> POST /api/fcc/funding/plan -> a neutral comparison. Runs only when asked; the page
  *  converts typed text to numbers once on submit and shows only what the server returns (no ranking, no recommendation, no client arithmetic). */
+const KEEP_MOUNTED: readonly FamilyTabKey[] = ["funding", "lab", "stress"];
+
 export function FundingSection({ overview, onStressTest }: { overview: OverviewState; onStressTest?: (seed: StressSeed) => void }) {
   const [form, setForm] = useState<FundingForm>(DEFAULT_FUNDING_FORM);
   const [accounts, setAccounts] = useState<FccAccount[]>([]);
@@ -642,9 +647,12 @@ function AccountsSection() {
 export function FamilyWealth({ overview, onBack, onRetry }: { overview: OverviewState; onBack: () => void; onRetry: () => void }) {
   const [tab, setTab] = useState<FamilyTabKey>("savings");
   const [stressSeed, setStressSeed] = useState<StressSeed | null>(null);
-  // the funding form stays mounted (hidden) once opened, so the hand-off to the stress test does not wipe what was typed; nothing runs in the background
-  const [fundingOpened, setFundingOpened] = useState(false);
-  const openTab = (key: FamilyTabKey) => { setTab(key); if (key === "funding") setFundingOpened(true); };
+  // these tabs stay mounted (hidden) once opened, so a jump between them (e.g. funding -> stress test) does not wipe what was typed; nothing runs in the background
+  const [opened, setOpened] = useState<readonly FamilyTabKey[]>([]);
+  const shown = (key: FamilyTabKey) => tab === key || opened.includes(key);
+  const openTab = (key: FamilyTabKey) => { setTab(key); if (KEEP_MOUNTED.includes(key)) setOpened((o) => (o.includes(key) ? o : [...o, key])); };
+  // "קצב בפועל" extrapolates with the assumptions of the latest lab run (the defaults until one was made)
+  const [paceAssump, setPaceAssump] = useState(() => paceAssumptions(DEFAULT_LAB_FORM));
   return (
     <main className="ventures-screen fcc-screen">
       <div className="ventures-shell">
@@ -661,11 +669,18 @@ export function FamilyWealth({ overview, onBack, onRetry }: { overview: Overview
           </div>
           {/* funding planner: mounted only when opened; the comparison runs on demand, never in the background */}
           <div role="tabpanel" id={panelId("funding", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("funding", FAMILY_TAB_PREFIX)} hidden={tab !== "funding"}>
-            {(tab === "funding" || fundingOpened) && <FundingSection overview={overview} onStressTest={(seed) => { setStressSeed(seed); openTab("lab"); }} />}
+            {shown("funding") && <FundingSection overview={overview} onStressTest={(seed) => { setStressSeed(seed); openTab("stress"); }} />}
           </div>
           {/* mounted only when opened: the simulation runs on demand, never in the background */}
           <div role="tabpanel" id={panelId("lab", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("lab", FAMILY_TAB_PREFIX)} hidden={tab !== "lab"}>
-            {tab === "lab" && <PortfolioLabPanel stressSeed={stressSeed} />}
+            {shown("lab") && <PortfolioLabPanel onAssumptions={setPaceAssump} />}
+          </div>
+          {/* actual pace vs the plan: reads the owner's accounts on request, so it is mounted only while open */}
+          <div role="tabpanel" id={panelId("pace", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("pace", FAMILY_TAB_PREFIX)} hidden={tab !== "pace"}>
+            {tab === "pace" && <PaceTrackerPanel assumptions={paceAssump} />}
+          </div>
+          <div role="tabpanel" id={panelId("stress", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("stress", FAMILY_TAB_PREFIX)} hidden={tab !== "stress"}>
+            {shown("stress") && <LiquidityStressPanel seed={stressSeed} />}
           </div>
         </div>
       </div>
