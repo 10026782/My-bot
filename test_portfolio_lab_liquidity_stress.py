@@ -155,3 +155,141 @@ def test_deterministic_and_digest():
 def test_no_forbidden_wording_in_output():
     text = json.dumps(build_stress_view({"crisis": CRISIS}), ensure_ascii=False).lower()
     assert not re.search(r"probabilit|success_rate|chance|recommend|\bsafe\b|סיכוי להצליח|הסתברות", text)
+
+
+# ── E1b: הלוואה, LTV, דרישת בטוחות ──
+LOAN = {"amount": 900_000, "annual_rate_pct": 7, "max_ltv_pct": 45}
+FLAT = {"annual_return_pct": 0, "annual_fee_pct": 0}  # מחיר 1, ירידה 40% נקייה: 0.6
+RES = {"crisis": {"decline_pct": 40, "start_month": 1, "recovery_years": 2}, "horizon_months": 12, **FLAT}
+
+
+def _mode(view, months):
+    return next(m for m in view["modes"] if m["cushion_months"] == months)
+
+
+def test_spec_example_numbers():
+    v = build_stress_view({**RES, "loan": LOAN})
+    m0 = _mode(v, 0)
+    assert m0["initial_ltv"] == pytest.approx(0.3) and m0["initial_collateral"] == 3_000_000
+    assert v["loan"]["first_month_interest"] == pytest.approx(5250)
+    assert v["net_burn"]["net_burn_per_month"] == pytest.approx(7250)  # 10,000 + 5,250 − 8,000
+    assert m0["trigger_decline_pct"] == pytest.approx(33.33)
+    assert _mode(v, 24)["initial_collateral"] == pytest.approx(3_000_000 - 24 * 7_250)  # כרית חופשית אינה בטוחה
+    assert v["loan"]["max_ltv_source"] == "owner_entered" and v["loan"]["terms_verified"] is False
+
+
+def test_collateral_call_math_no_cushion():
+    m = _mode(build_stress_view({**RES, "loan": LOAN, "cushion_modes": [0]}), 0)
+    call = m["events"]["collateral_call"]["events"][0]
+    units = 3_000_000 - 7_250 / 0.6  # תזרים חודש 1 נמכר במחיר 0.6
+    coll = units * 0.6
+    gap = 900_000 - 0.45 * coll
+    assert call["month"] == 1 and call["ltv"] == pytest.approx(900_000 / coll, abs=1e-4)
+    assert call["cured_from_risky_sale"] == pytest.approx(gap / 0.55, abs=0.01) and call["cured_from_free_cash"] == 0
+    assert m["forced_sale_by_cause"]["collateral_call"] == pytest.approx(gap / 0.55, abs=0.01)
+
+
+def test_cure_from_free_cash_first_does_not_shrink_collateral():
+    m = _mode(build_stress_view({**RES, "loan": LOAN, "cushion_modes": [24]}), 24)
+    ev = m["events"]
+    assert ev["collateral_call"]["count"] == 1
+    assert ev["collateral_call"]["events"][0]["cured_from_free_cash"] > 0
+    assert ev["collateral_call"]["events"][0]["cured_from_risky_sale"] == 0
+    # התיקון לא גרם למכירה, ואין מחסור; הכרית שנצרכה בתיקון מותירה מכירות תזרים מאוחרות — אירוע נפרד
+    assert m["forced_sale_by_cause"]["collateral_call"] == 0 and ev["cash_shortfall"]["count"] == 0
+    assert all(e["cause"] == "cashflow" for e in ev["forced_sale"]["events"]) and ev["forced_sale"]["count"] > 0
+    assert m["window_24m"]["collateral_call_free"] is False
+
+
+def test_cure_order_risky_sale_first_leaves_cushion():
+    v = build_stress_view({**RES, "loan": {**LOAN, "cure_order": ["risky_sale"]}, "cushion_modes": [24]})
+    call = _mode(v, 24)["events"]["collateral_call"]["events"][0]
+    assert call["cured_from_free_cash"] == 0 and call["cured_from_risky_sale"] > 0
+
+
+def test_no_call_below_trigger_decline():
+    v = build_stress_view({**RES, "crisis": {"decline_pct": 30, "start_month": 1, "recovery_years": 2}, "loan": LOAN, "cushion_modes": [0, 24]})
+    assert _mode(v, 0)["events"]["collateral_call"]["count"] == 0
+    assert _mode(v, 24)["trigger_decline_pct"] == pytest.approx(29.2, abs=0.1)  # כרית חופשית מקטינה את הבטוחה
+    assert _mode(v, 24)["events"]["collateral_call"]["count"] == 1
+
+
+def test_call_distinct_from_shortfall_and_forced_sale():
+    base = {**RES, "loan": LOAN, "cushion_modes": [0]}
+    ev = _mode(build_stress_view(base), 0)["events"]
+    assert ev["collateral_call"]["count"] == 1 and ev["forced_sale"]["count"] > 0 and ev["cash_shortfall"]["count"] == 0
+    causes = {e["cause"] for e in ev["forced_sale"]["events"]}
+    assert causes == {"cashflow", "collateral_call"}
+
+
+def test_unresolved_call_when_collateral_exhausted():
+    v = build_stress_view({"fund_value": 1_000_000, "cash_buckets": {"family_earmarked": 600_000}, "monthly_deposit": 0,
+                           "monthly_support": 0, "cushion_modes": [0], "horizon_months": 6, **FLAT,
+                           "loan": {"amount": 500_000, "annual_rate_pct": 0, "max_ltv_pct": 45}})
+    call = _mode(v, 0)["events"]["collateral_call"]
+    assert call["unresolved_count"] > 0 and call["events"][0]["unresolved"] == pytest.approx(100_000)
+
+
+def test_interest_only_oracle_net_worth():
+    v = build_stress_view({"fund_value": 1_000_000, "monthly_deposit": 0, "monthly_support": 0, "cushion_modes": [0],
+                           "horizon_months": 12, **FLAT, "loan": {"amount": 100_000, "annual_rate_pct": 12, "max_ltv_pct": 90}})
+    m = _mode(v, 0)
+    assert m["final_debt"] == 100_000 and m["final_net_value"] == pytest.approx(1_000_000 - 12 * 1_000)
+    assert m["final_net_worth"] == pytest.approx(1_000_000 - 12 * 1_000 - 100_000)
+
+
+def test_amortizing_loan_fully_repaid_and_cash_flows_match():
+    v = build_stress_view({"fund_value": 1_000_000, "monthly_deposit": 0, "monthly_support": 0, "cushion_modes": [0],
+                           "horizon_months": 24, **FLAT,
+                           "loan": {"amount": 120_000, "annual_rate_pct": 12, "interest_only": False, "term_months": 12, "max_ltv_pct": 90}})
+    m = _mode(v, 0)
+    i = 0.01
+    pmt = 120_000 * i / (1 - (1 + i) ** -12)
+    assert m["final_debt"] == pytest.approx(0, abs=0.01)
+    assert m["final_net_value"] == pytest.approx(1_000_000 - 12 * pmt, abs=0.05)
+    assert v["net_burn"]["components"]["loan_repayments"] == pytest.approx(pmt - 1_200, abs=0.01)
+
+
+def test_asset_income_reduces_burn_and_adds_asset_to_net_worth():
+    plain = build_stress_view({**FLAT, "loan": LOAN})
+    inc = build_stress_view({**FLAT, "loan": {**LOAN, "use_proceeds": {"kind": "asset_income", "monthly_income": 3_000, "asset_value": 900_000}}})
+    assert inc["net_burn"]["net_burn_per_month"] == plain["net_burn"]["net_burn_per_month"] - 3_000
+    assert _mode(inc, 0)["final_net_worth"] > _mode(plain, 0)["final_net_worth"] + 900_000
+    assert "ללא תשואה" in plain["loan"]["proceeds"]["note"]
+
+
+def test_pledged_cash_counts_as_collateral_but_free_cash_does_not():
+    kw = {**RES, "loan": LOAN, "cushion_modes": [0]}
+    without = _mode(build_stress_view(kw), 0)["events"]["collateral_call"]["events"][0]["collateral"]
+    with_pledged = _mode(build_stress_view({**kw, "cash_buckets": {"pledged": 300_000}}), 0)["events"]["collateral_call"]
+    only = _mode(build_stress_view({**kw, "cash_buckets": {"pledged": 300_000}, "loan": {**LOAN, "collateral": "risky_only"}}), 0)["events"]["collateral_call"]
+    assert with_pledged["count"] <= 1 and only["events"][0]["collateral"] < without
+    assert _mode(build_stress_view({**kw, "cash_buckets": {"pledged": 300_000}}), 0)["initial_collateral"] == 3_000_000
+    assert _mode(build_stress_view({**kw, "cash_buckets": {"pledged": 300_000}, "loan": {**LOAN, "collateral": "risky_only"}}), 0)["initial_collateral"] == 2_700_000
+
+
+def test_unpaid_loan_payment_capitalises_into_debt():
+    v = build_stress_view({"fund_value": 1_100_000, "cash_buckets": {"pledged": 1_000_000}, "monthly_deposit": 0, "monthly_support": 50_000,
+                           "cushion_modes": [0], "horizon_months": 6, **FLAT,
+                           "loan": {"amount": 50_000, "annual_rate_pct": 12, "max_ltv_pct": 95}})
+    m = _mode(v, 0)
+    assert m["events"]["cash_shortfall"]["count"] > 0 and m["final_debt"] > 50_000
+
+
+@pytest.mark.parametrize("bad", [
+    {"annual_rate_pct": 7, "max_ltv_pct": 45}, {"amount": 1, "max_ltv_pct": 45}, {"amount": 1_000, "annual_rate_pct": 7},
+    {**LOAN, "term_months": 12}, {**LOAN, "interest_only": False}, {**LOAN, "interest_only": "yes"}, {**LOAN, "terms_verified": 1},
+    {**LOAN, "collateral": "children_capital"}, {**LOAN, "cure_order": ["children_capital"]}, {**LOAN, "cure_order": []},
+    {**LOAN, "unknown": 1}, {**LOAN, "amount": 5_000_000}, {**LOAN, "max_ltv_pct": 99}, {**LOAN, "use_proceeds": {"kind": "none", "monthly_income": 5}},
+    {**LOAN, "use_proceeds": {"kind": "bonus"}},
+])
+def test_invalid_loan_rejected(bad):
+    with pytest.raises(ValueError):
+        build_stress_view({"loan": bad})
+
+
+def test_loan_run_deterministic_and_wording_clean():
+    a, b = build_stress_view({**RES, "loan": LOAN}), build_stress_view({**RES, "loan": LOAN})
+    assert a == b
+    text = json.dumps(a, ensure_ascii=False).lower()
+    assert not re.search(r"probabilit|success_rate|chance|recommend|\bsafe\b|הסתברות", text)
