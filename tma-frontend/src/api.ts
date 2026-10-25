@@ -1,4 +1,4 @@
-import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView } from "./types";
+import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -546,6 +546,22 @@ export async function postPortfolioLabSimulate(params: PortfolioLabParams): Prom
     body: JSON.stringify(params),
   });
   const data = (await r.json().catch(() => ({}))) as PortfolioLabView & { error?: string };
+  if (!r.ok) {
+    const error = new Error(data.error || `API ${r.status}`) as Error & { status?: number };
+    error.status = r.status;
+    throw error;
+  }
+  return data;
+}
+
+/** E1d: liquidity stress test (read-only; FCC flag + canary + owner). The body carries only the assumptions typed on the screen. */
+export async function postLiquidityStress(params: StressParams): Promise<StressView> {
+  const r = await fetch(`${BASE}/api/portfolio-lab/liquidity-stress`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(params),
+  });
+  const data = (await r.json().catch(() => ({}))) as StressView & { error?: string };
   if (!r.ok) {
     const error = new Error(data.error || `API ${r.status}`) as Error & { status?: number };
     error.status = r.status;

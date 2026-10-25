@@ -790,13 +790,16 @@
         "tma-frontend/src/components/MyWork.tsx",
         "tma-frontend/src/components/FinancialControlCenter.tsx",
         "tma-frontend/src/components/FamilyWealth.tsx",
+        "tma-frontend/src/components/LiquidityStressPanel.tsx",
         "tma-frontend/src/components/PaceTrackerPanel.tsx",
         "tma-frontend/src/components/PortfolioLabCharts.tsx",
         "tma-frontend/src/components/PortfolioLabPanel.tsx",
-        "tma-frontend/src/lib/familyWealth.ts"
+        "tma-frontend/src/lib/familyWealth.ts",
+        "tma-frontend/src/lib/liquidityStress.ts"
       ],
       "test_paths": [
-        "tma-frontend/src/lib/familyWealth.test.ts"
+        "tma-frontend/src/lib/familyWealth.test.ts",
+        "tma-frontend/src/lib/liquidityStress.test.ts"
       ],
       "canonical_docs": [],
       "production_evidence": [],
@@ -810,6 +813,7 @@
         "FCC Slice 2 (05/10/2026): FinancialControlCenter.tsx is the private, owner-of-record Financial Control Center screen. Owner explicitly asked for this screen (\"תמשיך לSlice 2\"). Unlike MyWork.tsx it has one write entry point (quick update) but it holds no business authority: it only calls GET /api/fcc/overview and POST /api/fcc/write (preview then confirm), which route through the existing ActionGateway; no client-side parsing or Airtable access. Server side is flag-gated (FEATURE_FINANCIAL_CONTROL_CENTER) plus FCC_CANARY_USER_IDS.",
         "Family wealth screen (PR #1313, 14/10/2026): owner explicitly approved \"APPROVE EXISTING NODE: decision.tma_screens\" for exactly five paths — FamilyWealth.tsx, PortfolioLabCharts.tsx, PortfolioLabPanel.tsx, lib/familyWealth.ts, lib/familyWealth.test.ts. All are presentation (and its tests): they call only the existing FCC overview data and the read-only POST /api/portfolio-lab/simulate (FCC flag + canary + owner); no client-side financial calculation, no writes. familyWealth.ts / its test belong to the view layer, not to the portfolio_lab calculation engine. No new node, no policy change, no new production authority.",
         "Portfolio Lab simulator lane 1d / C4 (PR #1347, 19/10/2026): the owner approved new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this registers exactly tma-frontend/src/components/PaceTrackerPanel.tsx — presentation only (calls the read-only owner-gated POST /api/fcc/pace, shows the server's numbers, no client-side financial calculation, no writes). No other file, no new node, no policy change, no new production authority.",
+        "Liquidity stress E1d (25/10/2026): the owner explicitly approved registering exactly tma-frontend/src/components/LiquidityStressPanel.tsx, tma-frontend/src/lib/liquidityStress.ts and tma-frontend/src/lib/liquidityStress.test.ts in this node (owner answer 25/10/2026: \"מאשר רישום שלשת הקבצים בלבד\"). The panel is an on-demand, read-only card inside the existing lab tab; it only posts the typed assumptions to the owner-gated POST /api/portfolio-lab/liquidity-stress and words the server's numbers (no client-side money arithmetic, nothing stored). No other file, wildcard or future source is approved by this note.",
         "Future TMA screens (e.g. new domain-specific or owner-facing screens) should be evaluated individually against this node's scope and either registered here (if narrow/similar scope) or placed in a different decision node (if sufficiently different concerns)."
       ],
       "extensions": {

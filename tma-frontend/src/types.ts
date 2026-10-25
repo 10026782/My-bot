@@ -937,6 +937,41 @@ export interface PortfolioLabParams {
   compare_to?: Partial<Pick<PortfolioLabParams, "initial" | "monthly_contribution" | "annual_return_pct" | "annual_fee_pct" | "inflation_pct">>;
 }
 
+/** E1d: liquidity stress test (POST /api/portfolio-lab/liquidity-stress). Every number is the server's; scenario under stated assumptions, not a forecast. */
+export interface StressEventBlock {
+  count: number; first_month: number | null; total_amount: number; events: { month: number; amount: number; cause?: string }[]; events_truncated: boolean;
+  status?: string; unresolved_count?: number;
+}
+export interface StressMode {
+  cushion_months: number; label: string; free_cushion: number; months_of_support_covered: number | null;
+  events: { collateral_call: StressEventBlock; forced_sale: StressEventBlock; cash_shortfall: StressEventBlock };
+  forced_sale_by_cause: { cashflow: number; collateral_call: number };
+  initial_collateral: number | null; initial_ltv: number | null; trigger_decline_pct: number | null;
+  cushion_exhausted_month: number | null;
+  window_24m: { months: number; from_month: number; to_month: number; forced_sale_free: boolean; shortfall_free: boolean; collateral_call_free: boolean | null } | null;
+  final_net_value: number; final_real_value: number; final_debt: number; final_net_worth: number; final_net_worth_real: number;
+  max_ltv: number | null; delta_vs_no_crisis: number;
+  series: { month: number; risky: number; free_cash: number; reserved_cash: number; total: number; debt: number; ltv: number | null; net_worth: number }[];
+}
+export interface StressView {
+  schema_version: string; result_type: string; engine_version: string;
+  loan: { principal: number; annual_rate_pct: number; interest_only: boolean; term_months: number | null; first_month_interest: number; first_month_principal_repayment: number;
+          max_ltv_pct: number; terms_verified: boolean; collateral: string; cure_order: string[]; proceeds: { kind: string; monthly_income: number; asset_value: number; note: string } } | null;
+  net_burn: { components: Record<string, number>; net_burn_per_month: number; basis: string };
+  protected_capital: { amount: number; separation: string; note: string };
+  modes: StressMode[]; notes: string[]; replay_digest: string;
+}
+export interface StressParams {
+  fund_value: number; phase: "accumulation" | "withdrawal"; monthly_deposit: number; monthly_support: number;
+  other_monthly_expenses: number; other_monthly_income: number; annual_return_pct: number; annual_fee_pct: number; inflation_pct: number; horizon_months: number;
+  crisis?: { decline_pct: number; start_month: number; recovery_years: number };
+  cushion_modes: number[];
+  cash_buckets: { pledged: number; family_earmarked: number };
+  protected_capital: { amount: number };
+  loan?: { amount: number; annual_rate_pct: number; max_ltv_pct: number; interest_only: boolean; term_months?: number; terms_verified: boolean; collateral: "risky_and_pledged" | "risky_only";
+           cure_order: ("cushion" | "risky_sale")[]; use_proceeds: { kind: "none" } | { kind: "asset_income"; monthly_income: number; asset_value: number } };
+}
+
 /** Goal Funding Planner (step 1b): a neutral comparison of ways to fund one goal. Every number is the server's; nothing here is a recommendation. */
 export type FundingOptionType = "existing_balance" | "new_deposits" | "asset_sale" | "loan" | "work_income" | "receivable_collection" | "obligations_reduction" | "custom";
 export type FundingCertainty = "confirmed" | "expected" | "uncertain" | "unknown";
