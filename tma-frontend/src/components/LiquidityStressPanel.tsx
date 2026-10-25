@@ -1,9 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { postLiquidityStress } from "../api";
 import type { StressView } from "../types";
 import { ils, lineChartModel } from "../lib/familyWealth";
 import {
-  DEFAULT_STRESS_FORM, STRESS_NOTE, STRESS_PROTECTED_NOTE, STRESS_TITLE, burnRows, netWorthLines, stressHead, stressParams, stressRows, type StressForm,
+  DEFAULT_STRESS_FORM, STRESS_NOTE, STRESS_SEEDED_NOTE, applySeed, type StressSeed, STRESS_PROTECTED_NOTE, STRESS_TITLE, burnRows, netWorthLines, stressHead, stressParams, stressRows, type StressForm,
 } from "../lib/liquidityStress";
 import { LineChart } from "./PortfolioLabCharts";
 import { ScreenState } from "./ui/ScreenState";
@@ -14,8 +14,10 @@ type State = { status: "idle" } | { status: "loading" } | { status: "ok"; view: 
 
 /** E1d: "מבחן לחץ נזילות". On demand: cushions of 0/12/24 months of NET burn under a crisis, with an optional loan, LTV and collateral call.
  *  Every number is the server's; a collateral call, a forced sale and a cash shortfall are three separate events. Nothing is stored. */
-export function LiquidityStressPanel() {
+export function LiquidityStressPanel({ seed }: { seed?: StressSeed | null } = {}) {
   const [form, setForm] = useState<StressForm>(DEFAULT_STRESS_FORM);
+  const [seeded, setSeeded] = useState(false);
+  const root = useRef<HTMLElement | null>(null);
   const [state, setState] = useState<State>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
   const latest = useRef(0);
@@ -23,6 +25,17 @@ export function LiquidityStressPanel() {
   const field = (key: keyof StressForm, label: string, mode: "decimal" | "numeric" = "decimal") => (
     <label>{label}<input inputMode={mode} value={String(form[key])} onChange={(e) => set(key, e.target.value as never)} /></label>
   );
+
+  // E1e: a loan typed in the funding planner pre-fills the loan fields (a new hand-off replaces the old one and clears a stale answer)
+  useEffect(() => {
+    if (!seed) return;
+    setForm((f) => applySeed(f, seed));
+    setSeeded(true);
+    setState({ status: "idle" });
+    setFormError(null);
+    latest.current += 1;                              // an answer still in flight belongs to the previous inputs
+    if (typeof root.current?.scrollIntoView === "function") root.current.scrollIntoView({ block: "start" });
+  }, [seed?.id]);                                      // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = () => {
     const parsed = stressParams(form);
@@ -36,9 +49,10 @@ export function LiquidityStressPanel() {
   };
 
   return (
-    <section className="fcc-section" aria-labelledby="stress-h">
+    <section className="fcc-section" aria-labelledby="stress-h" ref={root}>
       <h2 id="stress-h" className="fcc-section__heading">{STRESS_TITLE} <StatusBadge tone="warning">הנחות</StatusBadge></h2>
       <Surface variant="subtle" padding="compact" role="note">{STRESS_NOTE}</Surface>
+      {seeded && <Surface variant="subtle" padding="compact" role="status">{STRESS_SEEDED_NOTE}</Surface>}
       <form className="pl-form" onSubmit={(e) => { e.preventDefault(); run(); }} aria-label="קלטי מבחן הלחץ">
         <div className="pl-grid">
           {field("fundValue", "שווי הקרן (₪)")}

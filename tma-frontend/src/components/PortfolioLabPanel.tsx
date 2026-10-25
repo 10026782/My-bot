@@ -8,6 +8,7 @@ import {
 import { BarChart, LineChart, StackBar } from "./PortfolioLabCharts";
 import { PaceTrackerPanel } from "./PaceTrackerPanel";
 import { LiquidityStressPanel } from "./LiquidityStressPanel";
+import type { StressSeed } from "../lib/liquidityStress";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -18,7 +19,7 @@ type State = { status: "idle" } | { status: "loading" } | { status: "ok"; view: 
 const DEMO = <StatusBadge tone="warning">הדגמה</StatusBadge>;
 
 /** "מעבדת העתיד": inputs -> POST /api/portfolio-lab/simulate -> render. All numbers are the server's (portfolio_lab). */
-export function PortfolioLabPanel() {
+export function PortfolioLabPanel({ stressSeed }: { stressSeed?: StressSeed | null } = {}) {
   const [form, setForm] = useState<LabForm>(DEFAULT_LAB_FORM);
   const [state, setState] = useState<State>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
@@ -126,7 +127,7 @@ export function PortfolioLabPanel() {
       )}
       {state.status === "ok" && <LabResult view={state.view} />}
       <PaceTrackerPanel assumptions={paceAssumptions(form)} />
-      <LiquidityStressPanel />
+      <LiquidityStressPanel seed={stressSeed} />
     </div>
   );
 }

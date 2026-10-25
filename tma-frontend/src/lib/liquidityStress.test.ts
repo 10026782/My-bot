@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LiquidityStressPanel, StressResult } from "../components/LiquidityStressPanel";
 import type { StressView } from "../types";
-import { DEFAULT_STRESS_FORM, burnRows, stressHead, stressParams, stressRows } from "./liquidityStress";
+import { DEFAULT_STRESS_FORM, STRESS_SEEDED_NOTE, applySeed, burnRows, seedFromLoan, stressHead, stressParams, stressRows } from "./liquidityStress";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -85,6 +85,22 @@ test("the panel renders the form, the not-a-forecast note and the child-capital 
   assert.ok(html.includes("מבחן לחץ נזילות") && html.includes("לא תחזית ולא המלצה") && html.includes("הון הילדים מופרד"));
   assert.ok(!html.includes("סף LTV"), "loan fields stay hidden until the loan is chosen");
   assert.ok(html.includes("הרץ מבחן לחץ"));
+});
+
+test("E1e: a loan typed in the funding planner hands over amount, rate, term and the verified flag - and nothing it does not hold", () => {
+  assert.equal(seedFromLoan({ amount: "900000", annual_rate_pct: "7" }, 1), null, "no term -> no hand-off");
+  assert.equal(seedFromLoan({ amount: " ", annual_rate_pct: "7", term_months: "120" }, 1), null, "blank amount -> no hand-off");
+  const seed = seedFromLoan({ amount: "900000", annual_rate_pct: "7", term_months: "120", terms_verified: "true", collateral: "קרן" }, 7);
+  assert.ok(seed && seed.id === 7 && seed.amount === "900000" && seed.rate === "7" && seed.term === "120" && seed.verified === true);
+  const form = applySeed(DEFAULT_STRESS_FORM, seed!);
+  assert.ok(form.loanOn && form.loanAmount === "900000" && form.loanRate === "7" && form.loanTerm === "120" && form.loanInterestOnly === false && form.loanVerified === true);
+  assert.equal(form.loanMaxLtv, "", "the lender's max LTV is never guessed");
+  const refused = stressParams(form);
+  assert.ok(!refused.ok && refused.error.includes("אין ברירת מחדל"), "the request is refused until the user types the LTV");
+  const ready = stressParams({ ...form, loanMaxLtv: "45" });
+  assert.ok(ready.ok && ready.params.loan?.term_months === 120 && ready.params.loan?.interest_only === false && ready.params.loan?.terms_verified === true);
+  assert.equal(applySeed(DEFAULT_STRESS_FORM, { ...seed!, verified: false }).loanVerified, false);
+  assert.ok(STRESS_SEEDED_NOTE.includes("LTV") && STRESS_SEEDED_NOTE.includes("לא נוחשו"));
 });
 
 if (failures > 0) throw new Error(`${failures} liquidityStress test(s) failed`);

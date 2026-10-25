@@ -9,6 +9,7 @@ import { FUNDING_FOLLOWUP_LABELS, FUNDING_FOLLOWUP_NOTE, FUNDING_SAVE_NOTE } fro
 import { KpiCard } from "./FccKpiCard";
 import { NetWorthCard, type NetWorthState } from "./FccNetWorth";
 import { PortfolioLabPanel } from "./PortfolioLabPanel";
+import { LOAN_TO_STRESS_LABEL, seedFromLoan, type StressSeed } from "../lib/liquidityStress";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -215,12 +216,13 @@ type SourcesState = { status: "idle" } | { status: "loading" } | { status: "ok";
 
 /** Goal Funding Planner (step 1b): a goal -> typed funding options -> POST /api/fcc/funding/plan -> a neutral comparison. Runs only when asked; the page
  *  converts typed text to numbers once on submit and shows only what the server returns (no ranking, no recommendation, no client arithmetic). */
-export function FundingSection({ overview }: { overview: OverviewState }) {
+export function FundingSection({ overview, onStressTest }: { overview: OverviewState; onStressTest?: (seed: StressSeed) => void }) {
   const [form, setForm] = useState<FundingForm>(DEFAULT_FUNDING_FORM);
   const [accounts, setAccounts] = useState<FccAccount[]>([]);
   const [state, setState] = useState<FundingState>({ status: "idle" });
   const [formError, setFormError] = useState<string | null>(null);
   const counter = useRef(0);
+  const stressSeedId = useRef(0);
   const latest = useRef(0);
   const [selected, setSelected] = useState<string[]>([]);
   const [savedFor, setSavedFor] = useState<{ goalId: string; types: FundingOptionType[] } | null>(null);
@@ -387,6 +389,11 @@ export function FundingSection({ overview }: { overview: OverviewState }) {
               })}
               <label>סכום לשימוש בתוכנית (₪, אופציונלי)<input inputMode="decimal" value={o.use} onChange={(e) => setOption(o.id, { use: e.target.value })} /></label>
             </div>
+            {o.type === "loan" && onStressTest && (
+              <button type="button" className="boss-button boss-button--quiet boss-bubble--action" disabled={seedFromLoan(o.values, 0) === null}
+                      title={seedFromLoan(o.values, 0) === null ? "יש למלא סכום, ריבית ותקופה" : undefined}
+                      onClick={() => { const fresh = seedFromLoan(o.values, ++stressSeedId.current); if (fresh) onStressTest(fresh); }}>{LOAN_TO_STRESS_LABEL}</button>
+            )}
             <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={() => setForm((f) => ({ ...f, options: f.options.filter((x) => x.id !== o.id) }))}>הסר אפשרות</button>
           </fieldset>
         ))}
@@ -634,13 +641,17 @@ function AccountsSection() {
  *  nothing here writes (deposits are recorded in the FCC as before). Same server gate as the FCC (flag + canary + owner). */
 export function FamilyWealth({ overview, onBack, onRetry }: { overview: OverviewState; onBack: () => void; onRetry: () => void }) {
   const [tab, setTab] = useState<FamilyTabKey>("savings");
+  const [stressSeed, setStressSeed] = useState<StressSeed | null>(null);
+  // the funding form stays mounted (hidden) once opened, so the hand-off to the stress test does not wipe what was typed; nothing runs in the background
+  const [fundingOpened, setFundingOpened] = useState(false);
+  const openTab = (key: FamilyTabKey) => { setTab(key); if (key === "funding") setFundingOpened(true); };
   return (
     <main className="ventures-screen fcc-screen">
       <div className="ventures-shell">
         <PageHeader onBack={onBack} title={SCREEN_TITLE} eyebrow="BOSS · אישי"
                     subtitle={overview.status === "ok" ? `נכון ל-${overview.data.as_of}` : undefined} />
         <div className="fcc-stack">
-          <FccTabBar active={tab} onChange={setTab} tabs={FAMILY_TABS} idPrefix={FAMILY_TAB_PREFIX} ariaLabel={TABS_ARIA_LABEL} />
+          <FccTabBar active={tab} onChange={(key) => { setStressSeed(null); openTab(key); }} tabs={FAMILY_TABS} idPrefix={FAMILY_TAB_PREFIX} ariaLabel={TABS_ARIA_LABEL} />
           <div role="tabpanel" id={panelId("savings", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("savings", FAMILY_TAB_PREFIX)} hidden={tab !== "savings"}>
             <SavingsSection overview={overview} onRetry={onRetry} />
           </div>
@@ -650,11 +661,11 @@ export function FamilyWealth({ overview, onBack, onRetry }: { overview: Overview
           </div>
           {/* funding planner: mounted only when opened; the comparison runs on demand, never in the background */}
           <div role="tabpanel" id={panelId("funding", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("funding", FAMILY_TAB_PREFIX)} hidden={tab !== "funding"}>
-            {tab === "funding" && <FundingSection overview={overview} />}
+            {(tab === "funding" || fundingOpened) && <FundingSection overview={overview} onStressTest={(seed) => { setStressSeed(seed); openTab("lab"); }} />}
           </div>
           {/* mounted only when opened: the simulation runs on demand, never in the background */}
           <div role="tabpanel" id={panelId("lab", FAMILY_TAB_PREFIX)} aria-labelledby={tabId("lab", FAMILY_TAB_PREFIX)} hidden={tab !== "lab"}>
-            {tab === "lab" && <PortfolioLabPanel />}
+            {tab === "lab" && <PortfolioLabPanel stressSeed={stressSeed} />}
           </div>
         </div>
       </div>

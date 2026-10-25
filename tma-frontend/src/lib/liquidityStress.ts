@@ -146,3 +146,19 @@ export function burnRows(view: StressView): { key: string; label: string; value:
 
 export const netWorthLines = (view: StressView) =>
   view.modes.map((m) => ({ name: m.label, pts: m.series.filter((_, i) => i % 3 === 2 || i === 0).map((r): [number, number] => [r.month, r.net_worth]) }));
+
+// E1e: hand-off from a loan option typed in the funding planner. Strings are passed through untouched (no arithmetic). What the plan does not
+// hold is NOT guessed: the max LTV (the lender's own term) and the collateral stay for the user to type.
+export interface StressSeed { id: number; amount: string; rate: string; term: string; verified: boolean }
+export const LOAN_TO_STRESS_LABEL = "בדוק במבחן לחץ נזילות";
+export const STRESS_SEEDED_NOTE = "הערכים הועברו מאפשרות ההלוואה בתוכנית המימון (סכום, ריבית ותקופה). סף ה-LTV והבטוחה לא קיימים בתוכנית ולא נוחשו — יש להזין אותם. התוכנית עצמה לא השתנתה.";
+
+export function seedFromLoan(values: Record<string, string>, id: number): StressSeed | null {
+  const amount = (values.amount ?? "").trim(), rate = (values.annual_rate_pct ?? "").trim(), term = (values.term_months ?? "").trim();
+  if (amount === "" || rate === "" || term === "") return null;
+  return { id, amount, rate, term, verified: values.terms_verified === "true" };
+}
+
+export function applySeed(form: StressForm, seed: StressSeed): StressForm {
+  return { ...form, loanOn: true, loanAmount: seed.amount, loanRate: seed.rate, loanInterestOnly: false, loanTerm: seed.term, loanVerified: seed.verified };
+}
