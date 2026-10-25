@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LiquidityStressPanel, StressResult } from "../components/LiquidityStressPanel";
 import type { StressView } from "../types";
-import { DEFAULT_STRESS_FORM, STRESS_SEEDED_NOTE, applySeed, burnRows, seedFromLoan, stressHead, stressParams, stressRows } from "./liquidityStress";
+import { DEFAULT_STRESS_FORM, STRESS_SEEDED_NOTE, STRESS_STALE_NOTE, applySeed, burnRows, isStale, seedFromLoan, stressHead, stressKey, stressParams, stressRows } from "./liquidityStress";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -101,6 +101,16 @@ test("E1e: a loan typed in the funding planner hands over amount, rate, term and
   assert.ok(ready.ok && ready.params.loan?.term_months === 120 && ready.params.loan?.interest_only === false && ready.params.loan?.terms_verified === true);
   assert.equal(applySeed(DEFAULT_STRESS_FORM, { ...seed!, verified: false }).loanVerified, false);
   assert.ok(STRESS_SEEDED_NOTE.includes("LTV") && STRESS_SEEDED_NOTE.includes("לא נוחשו"));
+});
+
+test("a shown answer goes stale as soon as the inputs no longer match the run that produced it (including an invalid form)", () => {
+  const key = stressKey(DEFAULT_STRESS_FORM);
+  assert.ok(key !== null);
+  assert.equal(isStale(DEFAULT_STRESS_FORM, key), false);
+  assert.equal(isStale(DEFAULT_STRESS_FORM, null), false, "nothing has run yet");
+  assert.equal(isStale({ ...DEFAULT_STRESS_FORM, support: "12000" }, key), true);
+  assert.equal(isStale({ ...DEFAULT_STRESS_FORM, loanOn: true }, key), true, "loan switched on without an LTV: invalid, so the old answer is not for it");
+  assert.ok(STRESS_STALE_NOTE.includes("הרץ שוב"));
 });
 
 if (failures > 0) throw new Error(`${failures} liquidityStress test(s) failed`);

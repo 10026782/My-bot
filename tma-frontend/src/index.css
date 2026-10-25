@@ -3258,7 +3258,13 @@
 .pl-stack__rows { display: grid; gap: 4px; margin: 0; }
 .pl-stack__rows > div { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; border-block-end: 1px solid var(--boss-color-border); padding-block: 4px; }
 .pl-stack__rows dt, .pl-stack__rows dd { margin: 0; }
-.pl-scroll { overflow-x: auto; }
+.pl-scroll { overflow-x: auto; min-inline-size: 0; max-inline-size: 100%; }
+.pl-form, .fcc-section { min-inline-size: 0; max-inline-size: 100%; }
+/* stress table: cells wrap (long Hebrew event text) so the table never widens the whole card on a phone */
+.pl-table.pl-table--stress { table-layout: fixed; }
+.pl-table.pl-table--stress th[scope="row"] { font-weight: 600; inline-size: 34%; }
+.pl-table.pl-table--stress th, .pl-table.pl-table--stress td { overflow-wrap: break-word; }
+.pl-table.pl-table--stress .pl-num { direction: rtl; text-align: start; white-space: normal; }
 .pl-table { inline-size: 100%; border-collapse: collapse; font-size: 14px; }
 .pl-table th, .pl-table td { padding: 6px 8px; text-align: start; border-block-end: 1px solid var(--boss-color-border); }
 .pl-table .pl-num { direction: ltr; text-align: end; white-space: nowrap; }
