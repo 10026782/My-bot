@@ -13,7 +13,7 @@ import re
 import json
 from datetime import date
 
-from airtable_schema import FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
+from airtable_schema import CashflowRuleFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
 from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, loans as fcc_loans
 
@@ -723,6 +723,43 @@ def funding_inputs(identity, today: date | None = None) -> dict:
         "savings_release": ov.get("savings_release"), "monthly_cash_improvement": ov.get("monthly_cash_improvement"),
         "saved_plans": chosen_plan_snapshots_for_funding(identity),
     }
+
+
+# ── Cashflow rules (the owner's own "this description means this" rules; bank / card import) ──────────────────────────
+def my_cashflow_rules(identity) -> list[dict]:
+    """The caller's own Cashflow Rules rows (owner-scoped; a denied identity propagates)."""
+    return policy.filter_records(Tables.CASHFLOW_RULES, _read(Tables.CASHFLOW_RULES), identity)
+
+
+def cashflow_rule_items(records: list[dict], applies_to: str | None = None) -> list[dict]:
+    """Rule rows -> the items ``bank_import.owner_rules_from`` reads. Only DECIDED rules count: an empty Kind (a description still waiting for the
+    owner), ``Status = pending`` / ``disabled`` and a row with neither a Match nor a Row Key are skipped, never guessed. ``applies_to`` ("bank" |
+    "card") keeps the rules of that source and the ones for "any" (an empty value counts as "any")."""
+    F = CashflowRuleFields
+    items: list[dict] = []
+    for rec in records:
+        f = rec.get("fields") or {}
+        kind, status = _sel(f.get(F.KIND)), _sel(f.get(F.STATUS))
+        scope = _sel(f.get(F.APPLIES_TO)) or "any"
+        if not kind or status in ("pending", "disabled") or (applies_to and scope not in ("any", applies_to)):
+            continue
+        direction = _sel(f.get(F.DIRECTION))
+        item = {"kind": kind, "category": str(f.get(F.CATEGORY) or "").strip() or None, "direction": None if direction in (None, "", "any") else direction}
+        key = str(f.get(F.ROW_KEY) or "").strip()
+        if key:
+            item["key"] = key
+        else:
+            item["match"] = str(f.get(F.MATCH) or "").strip()
+        if item.get("match") or item.get("key"):
+            items.append(item)
+    return items
+
+
+def cashflow_rules(identity, applies_to: str | None = None) -> list:
+    """The caller's decided rules as ``bank_import`` rules (the owner's rules win over the built-in ones). A read failure is an error here, not an
+    empty list: importing with the owner's rules silently missing would classify the owner's own descriptions wrongly."""
+    from core.financial_control import bank_import  # noqa: PLC0415 — pure module
+    return bank_import.owner_rules_from(cashflow_rule_items(my_cashflow_rules(identity), applies_to))
 
 
 # ── Monthly cashflow (income by source vs. expenses by category) — read-only ─────────────────────────────────────────

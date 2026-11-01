@@ -475,3 +475,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Loans on the card:** instalments of card loans ("הלוואת אקספרס", "הלוואה מחוץ למסגרת", 72 instalments) are `loans` at the instalment — on this statement ₪3,242.92 a month, on top of the Max card's ₪3,273.26.
 - Verification: `test_fcc_card_import.py` (23). Production: NOT verified.
 
+### Cashflow Rules table (01/11/2026, owner-approved) — 5b step 1
+
+- **Where the owner's classification lives:** table `Cashflow Rules` (`tbl98SEP03oiaQ6uY`, owner-scoped like the other FCC tables). One row = "this description (or ONE imported row, via `Row Key`) means this kind and category". The system will add every description it cannot classify as a `pending` row with no Kind; the owner fills Kind + Category in Airtable and the rule applies to every future statement.
+- **Only decided rows count:** a row with an empty Kind, `Status = pending|disabled`, or neither Match nor Row Key is ignored. `income` is the owner's EXPLICIT approval of a credit as income (with the source name as Category); `transfer` means "between my own accounts". Applies To (`bank` / `card` / `any`) and Direction narrow a rule.
+- **Seeded rows:** only what the owner decided in the chat (12 rows, see the changelog); nothing was inferred. The scholarship and the kids' trips stay `pending`.
+- **Not wired yet:** no app write path touches this table (not in the TMA write allow-list). Next: the import preview (statement -> classified rows, unknown descriptions added as pending rows) and ONE bulk review -> אשר into `Financial Progress Events`. Verification: `test_fcc_cashflow_rules.py`. Production: NOT verified.
+
