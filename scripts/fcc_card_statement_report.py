@@ -81,7 +81,7 @@ def build(source, card_ref, owner_items=None, bank=None, account_ref="bank"):
     return parsed, items, summ, recon
 
 
-def write_pack(outdir: Path, parsed, items, summ, recon) -> list[Path]:
+def emit_report_pack(outdir: Path, parsed, items, summ, recon) -> list[Path]:
     outdir.mkdir(parents=True, exist_ok=True)
     csv_path, md_path, rules_path = outdir / "charges.csv", outdir / "summary.md", outdir / "merchants_rules_template.json"
     with csv_path.open("w", newline="", encoding="utf-8-sig") as fh:
@@ -135,7 +135,7 @@ def main(argv=None) -> int:
         return 2
     owner = json.loads(args.rules.read_text(encoding="utf-8")) if args.rules else None
     parsed, items, summ, recon = build((table_rows(args.xlsx) if args.xlsx else extract_fragments(args.pdf)), args.card_ref, owner, bank_result(args))
-    for p in write_pack(args.outdir, parsed, items, summ, recon):
+    for p in emit_report_pack(args.outdir, parsed, items, summ, recon):
         print(p)
     print(f"charges={len(parsed.charges)} sections={len(parsed.sections)} ok={parsed.ok} unmapped={summ['unmapped_total']}")
     return 0 if parsed.ok else 1

@@ -49,7 +49,7 @@ def report(source, account_ref: str, owner_items=None) -> tuple[bi.ParseResult, 
     return parsed, items, bi.summarize(items)
 
 
-def write_pack(outdir: Path, parsed: bi.ParseResult, items: list[bi.Classified], summ: dict) -> list[Path]:
+def emit_report_pack(outdir: Path, parsed: bi.ParseResult, items: list[bi.Classified], summ: dict) -> list[Path]:
     outdir.mkdir(parents=True, exist_ok=True)
     csv_path, md_path, rules_path = outdir / "classified.csv", outdir / "summary.md", outdir / "rules_template.json"
     review_path = outdir / "review_one_by_one.csv"
@@ -113,7 +113,7 @@ def main(argv=None) -> int:
     source = read_parsed(args.pdf, args.account_ref) if args.pdf else args.text.read_text(encoding="utf-8")
     owner = json.loads(args.rules.read_text(encoding="utf-8")) if args.rules else None
     parsed, items, summ = report(source, args.account_ref, owner)
-    for p in write_pack(args.outdir, parsed, items, summ):
+    for p in emit_report_pack(args.outdir, parsed, items, summ):
         print(p)
     print(f"rows={parsed.summary.get('rows', 0)} ok={parsed.ok} unmapped={summ['unmapped_total']}")
     return 0 if parsed.ok else 1

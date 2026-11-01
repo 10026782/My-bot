@@ -350,7 +350,7 @@ def test_report_pack_with_a_bank_match_and_the_repo_guard(tmp_path):
     bank_text = bank_statement([row("15/10/2026", "מקס איט פיננסי", 93.46, "debit", 906.54), row("14/10/2026", "x", 1000.0, "credit", 1000.0)])
     parsed, items, summ, recon = mod.build(statement(), "max", None, bank_text)
     assert parsed.ok and recon["bank_ok"] and len(recon["matched"]) == 1 and recon["uncovered_bank_settlements"]["count"] == 0
-    paths = mod.write_pack(tmp_path / "pack", parsed, items, summ, recon)
+    paths = mod.emit_report_pack(tmp_path / "pack", parsed, items, summ, recon)
     assert [p.name for p in paths] == ["charges.csv", "summary.md", "merchants_rules_template.json"]
     md = (tmp_path / "pack" / "summary.md").read_text(encoding="utf-8")
     assert "הדוח שלם ומתיישב" in md and "התאמה לדוח הבנק" in md and "שופרסל יש חסד" in md
