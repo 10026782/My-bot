@@ -1,6 +1,6 @@
 """FCC credit-card statement import, stage 5c — pure parser + classifier + matching to the bank. No I/O, no writes, no network, no model.
 
-Input: the TEXT FRAGMENTS of a card statement (``Fragment(page, x, y, text)``; y grows downward; text already in logical Hebrew order — the
+Input: either the rows of a card statement's Excel export (``parse_card_table``: header-driven, the preferred input) or the TEXT FRAGMENTS of its PDF (``Fragment(page, x, y, text)``; y grows downward; text already in logical Hebrew order — the
 extraction layer, ``scripts/fcc_card_statement_report.py``, reads the PDF and fixes the visual order). Written for the Max and the Isracard layouts:
 a section of rows (date, [card at the business], merchant, type / sector, transaction amount, charge amount, remarks) closed by a
 ``סה"כ חיובים בתאריך`` (Max) / ``סה"כ חיוב לתאריך`` (Isracard) ``dd/mm/yy  total`` line; the card's own fee lines (no date) belong to the section they precede.
@@ -32,10 +32,12 @@ from core.financial_control import bank_import as bi
 EXPENSE = "expense"
 CASH = "cash_withdrawal"
 ADJUSTMENT = "adjustment"            # a benefit / discount line (negative)
+CREDIT_SERVICE = "credit_service"    # a rolling-credit line (a debt carried from one bill to the next): neither spending nor income
 UNKNOWN = "unknown"
-KINDS = (EXPENSE, CASH, ADJUSTMENT, UNKNOWN)
+KINDS = (EXPENSE, CASH, ADJUSTMENT, CREDIT_SERVICE, UNKNOWN)
 
 REGULAR, IMMEDIATE, LOAN, BENEFIT, FEE = "regular", "immediate", "loan_installment", "benefit", "fee"
+ATM, ROLLING = "atm", "rolling_credit"     # a cash withdrawal line / a rolling-credit line (Excel exports name them by type and merchant)
 ROW_TOLERANCE = 4.0                  # fragments whose y differs by less than this belong to one row (an icon / date sits a hair off the text)
 SETTLEMENT_WINDOW_DAYS = 3
 TOLERANCE = 0.005
@@ -43,7 +45,7 @@ DEFAULT_TYPE_X = 373.0               # the "סוג העסקה" column, when no h
 MERCHANT_MARGIN = 9.0
 NAME_MARGIN = 8.0                    # the merchant column ends here (right of it: the card-at-the-business column, never part of the name)
 FEE_CATEGORY = "עמלות וריבית"
-SECTOR_CATEGORIES = {"דלק": "transport", "תחבורה": "transport", "ביטוח": "insurance"}   # the issuer's own sector, only where it is unambiguous
+SECTOR_CATEGORIES = {"דלק": "transport", "תחבורה": "transport", "רכב ותחבורה": "transport", "ביטוח": "insurance"}   # the issuer's own sector, ONLY an exact match (e.g. "ביטוח ופיננסים" is not guessed)
 
 _DATE = re.compile(r"^(\d{2}/\d{2}/\d{2})(?!\d)")
 _AMOUNT = re.compile(r"^-?[\d,]+\.\d{2}$")
@@ -84,6 +86,7 @@ class Section:
     ok: bool
     rows: int
     immediate: bool
+    payment: float | None = None      # what the bank is debited, when it differs from ``total`` (a rolling-credit net); None = the total
 
 
 @dataclass
@@ -189,6 +192,107 @@ def parse_card_statement(fragments: list[Fragment], card_ref: str = "") -> CardP
     return CardParse(keyed, sections, problems, ok=not problems and bool(sections))
 
 
+# ── an Excel export (header-driven) ───────────────────────────────────────────────────────────────────────────────
+_TITLE_TOTAL = re.compile(r"לחיוב\s*ב-?\s*(\d{2}/\d{2}/\d{4}|\d{2}/\d{2}/\d{2})\s*:?\s*([\d,]+\.\d{2})")
+_TITLE_CARD = re.compile(r"(?:המסתיים|שמסתיים)\s*ב-?\s*(\d{4})")
+_COLUMNS = {"date": ("תאריך",), "merchant": ("שם",), "amount": ("סכום עסקה", "סכום עסקה"), "charge": ("סכום חיוב",), "type": ("סוג",), "sector": ("ענף",), "remark": ("הערות",)}
+
+
+def _cell_date(v):
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(v.strip()[:10] if fmt == "%Y-%m-%d" else v.strip(), fmt).date()
+            except ValueError:
+                continue
+    return None
+
+
+def _cell_num(v):
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).replace(",", "").replace("₪", "").strip())
+    except ValueError:
+        return None
+
+
+def parse_card_table(rows: list[tuple], card_ref: str = "") -> CardParse:
+    """Parse the rows of a card statement's Excel export (the first sheet, every cell as read). The billing date, the statement's own total
+    and the card's last four digits come from the title lines; the columns are found by their header names (a layout that does not have them is
+    reported, never guessed). A row with no charge amount is not part of this bill (a waived fee, a club accumulation, a credit-purchase's
+    first line) and is skipped. Rolling-credit lines are a debt carried between bills: they are NOT part of the statement's own total (the
+    total must equal the other rows) but they ARE part of what the bank is debited (``Section.payment``)."""
+    problems: list[str] = []
+    billing, total, card, head = None, None, "", None
+    cols: dict[str, int] = {}
+    for i, row in enumerate(rows):
+        text = " ".join(str(c) for c in row if c is not None)
+        if not text.strip():
+            continue
+        if head is None:
+            m = _TITLE_TOTAL.search(text)
+            if m:
+                billing = _cell_date(m.group(1)) or None
+                total = _num(m.group(2))
+            m = _TITLE_CARD.search(text)
+            if m:
+                card = m.group(1)
+            cells = [bi.normalize(str(c)) if c is not None else "" for c in row]
+            if any(c.startswith("תאריך") for c in cells) and any("שם" in c.split() for c in cells) and any("סכום חיוב" in c for c in cells):
+                for name, keys in _COLUMNS.items():
+                    for j, c in enumerate(cells):
+                        if any(c == k or c.startswith(k + " ") or (name in ("merchant",) and c.startswith("שם")) for k in keys):
+                            cols.setdefault(name, j)
+                head = i
+                break
+    missing = [n for n in ("date", "merchant", "amount", "charge") if n not in cols]
+    if head is None or missing or billing is None or total is None:
+        return CardParse([], [], [f"not a recognised card table (missing: {', '.join(missing) or 'header'}{'' if billing and total is not None else ', billing date / total'})"], ok=False)
+    pending: list[dict] = []
+    skipped = 0
+    for row in rows[head + 1:]:
+        if all(c is None or str(c).strip() == "" for c in row):
+            break
+        d, merchant = _cell_date(row[cols["date"]]), re.sub(r"\s+", " ", str(row[cols["merchant"]] or "")).strip()
+        if d is None or not merchant:
+            if any(c is not None for c in row[:3]):
+                problems.append(f"unreadable row: {' | '.join(str(c) for c in row if c is not None)[:80]}")
+            continue
+        charge, amount = _cell_num(row[cols["charge"]]), _cell_num(row[cols["amount"]])
+        if charge is None:
+            skipped += 1
+            continue
+        get = lambda k: re.sub(r"\s+", " ", str(row[cols[k]] or "")).strip() if k in cols and cols[k] < len(row) else ""
+        typ, norm = get("type"), bi.normalize(merchant)
+        kind = (ROLLING if "אשראי מתגלגל" in norm else ATM if "משיכת מזומן" in bi.normalize(typ) or "משיכת מזומן" in norm
+                else LOAN if norm.split()[:1] and norm.split()[0] in ("הלוואה", "הלוואת") else FEE if "דמי כרטיס" in norm
+                else BENEFIT if (amount is None and charge < 0) else REGULAR)
+        pending.append({"date": d, "merchant": merchant, "charge": charge, "amount": amount, "kind": kind, "remark": get("remark"), "sector": get("sector") or typ})
+    regular = round(sum(p["charge"] for p in pending if p["kind"] != ROLLING), 2)
+    payment = round(sum(p["charge"] for p in pending), 2)
+    ok = abs(regular - total) <= TOLERANCE
+    if not ok:
+        problems.append(f"rows add up to {regular:.2f} (rolling credit excluded), the statement says {total:.2f}")
+    if not pending:
+        problems.append("no charged rows")
+    section = Section(1, card, billing, total, regular, ok, len(pending), False, None if abs(payment - regular) <= TOLERANCE else payment)
+    charges = [CardCharge(p["date"], p["merchant"], p["charge"], p["amount"], card, billing, 1, p["kind"], p["remark"], p["sector"]) for p in pending]
+    seen: dict[tuple, int] = {}
+    keyed = []
+    for c in charges:
+        base = (card_ref, c.card, c.date.isoformat(), f"{c.charge:.2f}", bi.normalize(c.merchant), c.billing_date.isoformat())
+        n = seen[base] = seen.get(base, 0) + 1
+        keyed.append(CardCharge(**{**c.__dict__, "key": "card:" + hashlib.sha1(("|".join(base) + f"|{n}").encode("utf-8")).hexdigest()[:20]}))
+    return CardParse(keyed, [section], problems, ok=not problems)
+
+
 # ── classification ────────────────────────────────────────────────────────────────────────────────────────────────
 def _r(match: str, category: str) -> bi.Rule:
     return bi.Rule(bi.normalize(match), bi.EXPENSE, category, None, f"builtin:{bi.normalize(match)}")
@@ -210,6 +314,10 @@ class ClassifiedCharge:
 
 
 def classify_charge(c: CardCharge, owner_rules: list[bi.Rule] | None = None) -> ClassifiedCharge:
+    if c.kind == ROLLING:
+        return ClassifiedCharge(c, CREDIT_SERVICE, None, "card:rolling_credit")
+    if c.kind == ATM:
+        return ClassifiedCharge(c, CASH, None, "card:atm")
     if c.kind == LOAN:
         return ClassifiedCharge(c, EXPENSE, "loans", "card:loan_installment")
     if c.kind == BENEFIT:
@@ -223,9 +331,9 @@ def classify_charge(c: CardCharge, owner_rules: list[bi.Rule] | None = None) -> 
         if rule.key is None and f" {rule.match} " in f" {norm} ":
             kind = {bi.EXPENSE: EXPENSE, bi.IGNORE: ADJUSTMENT}.get(rule.kind, EXPENSE)
             return ClassifiedCharge(c, kind, rule.category, rule.rule_id)
-    for word in bi.normalize(c.sector).split():                                  # the issuer's own sector: only the unambiguous ones
-        if word in SECTOR_CATEGORIES:
-            return ClassifiedCharge(c, EXPENSE, SECTOR_CATEGORIES[word], f"sector:{word}")
+    sector = bi.normalize(c.sector)                                              # the issuer's own sector: only an exact, unambiguous one
+    if sector in SECTOR_CATEGORIES:
+        return ClassifiedCharge(c, EXPENSE, SECTOR_CATEGORIES[sector], f"sector:{sector}")
     return ClassifiedCharge(c, UNKNOWN, None, None)
 
 
@@ -255,7 +363,7 @@ def match_settlements(sections: list[Section], bank_items: list[bi.Classified]) 
         best = None
         for key, c in free.items():
             gap = (c.row.date - s.billing_date).days
-            if abs(c.row.amount - s.total) <= TOLERANCE and 0 <= gap <= SETTLEMENT_WINDOW_DAYS and (best is None or gap < best[0]):
+            if abs(c.row.amount - (s.payment if s.payment is not None else s.total)) <= TOLERANCE and 0 <= gap <= SETTLEMENT_WINDOW_DAYS and (best is None or gap < best[0]):
                 best = (gap, key)
         if best:
             del free[best[1]]
@@ -273,7 +381,7 @@ def reconcile(bank_items: list[bi.Classified], matches: list[Match]) -> dict:
         "matched": [{"billing_date": m.section.billing_date.isoformat(), "card": m.section.card, "total": m.section.total, "bank_key": m.bank_key} for m in matches if m.bank_key],
         "sections_without_bank_line": [{"billing_date": m.section.billing_date.isoformat(), "card": m.section.card, "total": m.section.total} for m in matches if not m.bank_key],
         "uncovered_bank_settlements": {"count": len(rest), "total": round(sum(c.row.amount for c in rest), 2)},
-        "matched_total": round(sum(m.section.total for m in matches if m.bank_key), 2),
+        "matched_total": round(sum((m.section.payment if m.section.payment is not None else m.section.total) for m in matches if m.bank_key), 2),
     }
 
 

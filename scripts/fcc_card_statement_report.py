@@ -2,7 +2,7 @@
 """FCC credit-card statement report (stage 5c) — OFFLINE, read-only: parse a Max / Isracard card statement PDF, classify its lines and (optionally) match its
 sections to a bank statement's card settlements.
 
-    python3 scripts/fcc_card_statement_report.py --pdf card.pdf --card-ref max --outdir ~/fcc_review \
+    python3 scripts/fcc_card_statement_report.py (--xlsx card.xlsx | --pdf card.pdf) --card-ref max --outdir ~/fcc_review \
         [--bank-pdf bank.pdf | --bank-text bank.txt] [--rules my_rules.json]
 
 Max and Isracard layouts. Needs ``pdfminer.six`` (``pip install pdfminer.six``): the card PDF stores Hebrew in visual order, which this script reverses word by word.
@@ -59,6 +59,15 @@ def extract_fragments(pdf: Path) -> list[ci.Fragment]:
     return out
 
 
+def table_rows(xlsx: Path) -> list[tuple]:
+    try:
+        import openpyxl
+    except ImportError:
+        raise SystemExit("openpyxl is required for Excel exports: pip install openpyxl")
+    ws = openpyxl.load_workbook(str(xlsx), data_only=True).worksheets[0]
+    return [tuple(r) for r in ws.iter_rows(values_only=True)]
+
+
 def bank_text(args) -> str | None:
     if args.bank_text:
         return args.bank_text.read_text(encoding="utf-8")
@@ -70,8 +79,9 @@ def bank_text(args) -> str | None:
     return None
 
 
-def build(fragments, card_ref, owner_items=None, bank=None, account_ref="bank"):
-    parsed = ci.parse_card_statement(fragments, card_ref)
+def build(source, card_ref, owner_items=None, bank=None, account_ref="bank"):
+    """``source``: PDF fragments (a list of ``Fragment``) or the rows of an Excel export (a list of tuples)."""
+    parsed = ci.parse_card_table(source, card_ref) if source and not isinstance(source[0], ci.Fragment) else ci.parse_card_statement(source, card_ref)
     rules = bi.owner_rules_from(owner_items)
     items = ci.classify_all(parsed.charges, rules)
     summ = ci.summarize(items)
@@ -122,7 +132,9 @@ def write_pack(outdir: Path, parsed, items, summ, recon) -> list[Path]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--pdf", required=True, type=Path, help="the card statement PDF (Max)")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--pdf", type=Path, help="the card statement PDF (Max / Isracard)")
+    src.add_argument("--xlsx", type=Path, help="the card statement's Excel export (preferred: exact and issuer-independent)")
     ap.add_argument("--card-ref", required=True, help="a label you choose for this card (NOT the card number)")
     ap.add_argument("--outdir", required=True, type=Path)
     bank = ap.add_mutually_exclusive_group()
@@ -134,7 +146,7 @@ def main(argv=None) -> int:
         print("refusing: --outdir is inside the repository; a statement is private data and must not be committed", file=sys.stderr)
         return 2
     owner = json.loads(args.rules.read_text(encoding="utf-8")) if args.rules else None
-    parsed, items, summ, recon = build(extract_fragments(args.pdf), args.card_ref, owner, bank_text(args))
+    parsed, items, summ, recon = build((table_rows(args.xlsx) if args.xlsx else extract_fragments(args.pdf)), args.card_ref, owner, bank_text(args))
     for p in write_pack(args.outdir, parsed, items, summ, recon):
         print(p)
     print(f"charges={len(parsed.charges)} sections={len(parsed.sections)} ok={parsed.ok} unmapped={summ['unmapped_total']}")

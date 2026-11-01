@@ -468,3 +468,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Isracard:** same section-must-add-up rule; columns differ (sector instead of type, a card-at-the-business column, undated fee lines with VAT). Installment purchases ("תשלום 4 מתוך 12") are the purchase's instalment; only a card LOAN (Max) is `loans`.
 - **Open:** the owner's approval to create the owner-scoped rules table (5b) and the remaining card statements ("כרטיסי אשראי ל", Mastercard, other months). Verification: `test_fcc_bank_import.py`, `test_fcc_card_import.py`. Production: NOT verified.
 
+### Excel card statements (01/11/2026) — the preferred input
+
+- **Why Excel:** the issuers' PDFs differ per issuer and (Max) store Hebrew in visual order; the Excel export has named columns. `parse_card_table` finds them by header name, so another issuer's export with the same headers needs no new code; a table without them is reported, not guessed. The three issuers can all export either format — **send Excel**.
+- **Rolling credit ("שירות אשראי מתגלגל"):** a debt carried between bills. On the owner's Cal statement the header total (₪4,253.59) equals the other rows exactly, and the bank was debited ₪3,772.31 = the sum of ALL charge cells (the rolling-credit lines net −₪481.28). So `Section.total` is checked against the rows without them and the bank match uses `Section.payment`. These lines are `credit_service`: neither spending nor income, never imported; the apparent interest (₪1,640.29 charged on ₪1,617.84) is shown, not booked.
+- **Loans on the card:** instalments of card loans ("הלוואת אקספרס", "הלוואה מחוץ למסגרת", 72 instalments) are `loans` at the instalment — on this statement ₪3,242.92 a month, on top of the Max card's ₪3,273.26.
+- Verification: `test_fcc_card_import.py` (23). Production: NOT verified.
+

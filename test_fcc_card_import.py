@@ -201,6 +201,84 @@ def test_isracard_sections_match_the_bank_settlements():
     assert [x.bank_key for x in m] == ["b0", "b1"] and ci.reconcile(b, m)["uncovered_bank_settlements"] == {"count": 1, "total": 1114.44}
 
 
+# ── an Excel export (header-driven; the preferred input) ─────────────────────────────────────────────────────────
+from datetime import datetime as DT
+
+HEAD = ("תאריך\nעסקה", "שם בית עסק", "סכום\nעסקה", "סכום\nחיוב", "סוג\nעסקה", "ענף", "הערות")
+
+
+def table(extra=()):
+    rows = [("פירוט עסקאות לחשבון בנק 111-2222 לכרטיס אשראי משולב המסתיים ב-1234", None, None, None, None, None, None), (None,) * 7,
+            ("עסקאות לחיוב ב-10/10/2026: 1,300.60 ₪*", None, None, None, None, None, None), HEAD,
+            (DT(2026, 9, 30), "החזר מועדון", -6.16, None, "צבירה למועדון", None, None),                           # no charge: not part of this bill
+            (DT(2026, 9, 28), "תוכנה בע\"מ", 60.0, 60.0, "רגילה", "תקשורת ומחשבים", None),
+            (DT(2026, 9, 27), "כביש חוצה צפון", 4.94, 4.94, "הוראת קבע", "רכב ותחבורה", None),
+            (DT(2026, 9, 27), "דמי כרטיס", 17.9, None, "שרותים", "ציוד ומשרד", None),                              # a waived fee: no charge
+            (DT(2026, 9, 27), "הבנק", 400.0, 400.0, "משיכת מזומן", None, None),
+            (DT(2026, 9, 23), "ביטוח ישיר חיים", 168.59, 168.59, "הוראת קבע", "ביטוח ופיננסים", None),
+            (DT(2026, 8, 31), "שירות אשראי מתגלגל", -2121.57, -2121.57, "זיכוי", "ציוד ומשרד", None),
+            (DT(2026, 8, 31), "שירות אשראי מתגלגל", 1617.84, 1640.29, "רכישה בקרדיט", "ציוד ומשרד", "תשלום 1 מתוך 1"),
+            (DT(2026, 3, 11), "הלוואת אקספרס", 2800.0, 52.84, "רכישה בקרדיט", "ציוד ומשרד", "תשלום 6 מתוך 72"),
+            (DT(2026, 3, 11), "הלוואה מחוץ למסגרת", 18400.0, 614.23, "רכישה בקרדיט", "ציוד ומשרד", "תשלום 6 מתוך 72"),
+            *extra, (None,) * 7, ("כרטיסך מחויב בהתאם...", None, None, None, None, None, None)]
+    return rows
+
+
+def test_excel_table_columns_are_found_by_header_name_and_uncharged_rows_are_skipped():
+    p = ci.parse_card_table(table(), "cal")
+    assert p.ok and p.problems == [] and len(p.sections) == 1
+    s = p.sections[0]
+    assert (s.card, s.billing_date, s.total, s.computed, s.ok) == ("1234", date(2026, 10, 10), 1300.6, 1300.6, True)
+    assert sorted(c.merchant for c in p.charges) == sorted(["תוכנה בע\"מ", "כביש חוצה צפון", "הבנק", "ביטוח ישיר חיים", "שירות אשראי מתגלגל", "שירות אשראי מתגלגל", "הלוואת אקספרס", "הלוואה מחוץ למסגרת"])
+    assert not [c for c in p.charges if c.merchant in ("החזר מועדון", "דמי כרטיס")]                      # no charge amount: not in this bill
+
+
+def test_excel_rolling_credit_is_outside_the_statement_total_but_inside_what_the_bank_pays():
+    p = ci.parse_card_table(table(), "cal")
+    s = p.sections[0]
+    assert s.payment == round(1300.6 - 2121.57 + 1640.29, 2) == 819.32                                    # the bank is debited the sum of ALL charge cells
+    b = bank([(date(2026, 10, 11), 819.32, "כרטיסי אשראי ל"), (date(2026, 10, 11), 1300.6, "כרטיסי אשראי ל")])
+    m = ci.match_settlements(p.sections, b)
+    assert m[0].bank_key == "b0" and ci.reconcile(b, m)["matched_total"] == 819.32                         # matched on the payment, not on the header total
+    items = {c.charge.merchant: c for c in ci.classify_all(p.charges) if c.charge.kind != ci.ROLLING}
+    roll = [c for c in ci.classify_all(p.charges) if c.charge.kind == ci.ROLLING]
+    assert [c.kind for c in roll] == [ci.CREDIT_SERVICE, ci.CREDIT_SERVICE] and not any(ci.importable(c) for c in roll)
+
+
+def test_excel_loans_cash_and_sectors():
+    items = {c.charge.merchant: c for c in ci.classify_all(ci.parse_card_table(table(), "cal").charges) if c.charge.kind != ci.ROLLING}
+    assert items["הלוואת אקספרס"].category == "loans" and items["הלוואת אקספרס"].charge.charge == 52.84 and items["הלוואת אקספרס"].charge.amount == 2800.0
+    assert items["הלוואה מחוץ למסגרת"].category == "loans" and items["הבנק"].kind == ci.CASH
+    assert items["כביש חוצה צפון"].category == "transport" and items["ביטוח ישיר חיים"].rule_id == "builtin:ביטוח"          # by the merchant name; the broad sector "ביטוח ופיננסים" alone is never used
+    assert items["תוכנה בע\"מ"].kind == ci.UNKNOWN
+
+
+def test_excel_a_total_that_does_not_add_up_or_an_unknown_layout_is_not_ok():
+    bad = table()
+    bad[2] = ("עסקאות לחיוב ב-10/10/2026: 1,299.00 ₪*", None, None, None, None, None, None)
+    p = ci.parse_card_table(bad)
+    assert not p.ok and p.sections[0].ok is False and "1299.00" in p.problems[0] and "1300.60" in p.problems[0]
+    nope = ci.parse_card_table([("a", "b"), (1, 2)])
+    assert not nope.ok and nope.charges == [] and "not a recognised card table" in nope.problems[0]
+    no_total = table()
+    no_total[2] = ("משהו אחר", None, None, None, None, None, None)
+    assert not ci.parse_card_table(no_total).ok
+
+
+def test_excel_keys_are_stable_and_distinct():
+    extra = [(DT(2026, 9, 1), "קפה", 10.0, 10.0, "רגילה", "מסעדות", None)] * 2
+    rows = table(extra)
+    rows[2] = ("עסקאות לחיוב ב-10/10/2026: 1,320.60 ₪*", None, None, None, None, None, None)
+    a, b = ci.parse_card_table(rows, "cal"), ci.parse_card_table(rows, "cal")
+    assert a.ok and [c.key for c in a.charges] == [c.key for c in b.charges] and len({c.key for c in a.charges}) == len(a.charges)
+
+
+def test_report_script_reads_an_excel_table(tmp_path):
+    mod = _script()
+    parsed, items, summ, recon = mod.build(table(), "cal", None, None)
+    assert parsed.ok and summ["by_kind"]["credit_service"]["count"] == 2 and summ["by_category"]["loans"] == 667.07 and recon is None
+
+
 # ── matching to the bank ────────────────────────────────────────────────────────────────────────────────────────
 def bank(items):
     out = []
