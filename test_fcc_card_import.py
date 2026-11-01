@@ -191,7 +191,7 @@ def test_isracard_classification_cash_fees_and_unambiguous_sectors_only():
     assert items["פז אפליקצית YELLOW"].category == "transport" and items["מגדל בריאות/חיים"].category == "insurance"        # the issuer's own sector
     assert items["לאסט פרייס"].kind == ci.UNKNOWN and items["קליית בראשית"].kind == ci.UNKNOWN                              # a restaurant sector is not guessed into a category
     fee = [c for c in items.values() if c.charge.kind == ci.FEE]
-    assert len(fee) == 2 and all(c.kind == ci.EXPENSE and c.category == "עמלות וריבית" and ci.importable(c) for c in fee)
+    assert len(fee) == 2 and all(c.kind == ci.EXPENSE and c.category == "card_fees" and ci.importable(c) for c in fee)
 
 
 def test_isracard_sections_match_the_bank_settlements():

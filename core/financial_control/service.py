@@ -823,6 +823,37 @@ def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> f
 
 
 
+def classify_waiting(identity) -> list[dict]:
+    """The caller's imported expenses that still have NO category (the owner classifies them one by one on screen). Owner-scoped (``my_events``)."""
+    from core.financial_control import bank_import as bi  # noqa: PLC0415
+    F = FinEventFields
+    waiting = []
+    for ev in my_events(identity, "only"):
+        f = ev.get("fields") or {}
+        amount, day = calc._num(f.get(F.AMOUNT)), calc._d(f.get(F.OCCURRED_AT))
+        if (_sel(f.get(F.KIND)) != "household_expense" or f.get(F.SUPERSEDED_BY) or amount is None or day is None
+                or fcc_cashflow.category_key(_sel(f.get(F.EXPENSE_CATEGORY))) != fcc_cashflow.UNCATEGORIZED):
+            continue
+        label = str(f.get(F.RAW_TEXT) or "").strip()
+        waiting.append({"id": ev.get("id"), "date": day.isoformat(), "amount": round(amount, 2), "label": label,
+                        "source": "card" if str(_sel(f.get(F.SOURCE)) or "").endswith("card") else "bank", "group": bi.normalize(label)})
+    return waiting
+
+
+def classify_view(waiting: list[dict], skip: frozenset[str] = frozenset()) -> dict:
+    """Pure: what the screen shows — the count / sum still waiting and the NEXT one (the largest amount not skipped; ``same_count`` = the other waiting
+    rows with the same description, so one answer can cover them)."""
+    groups: dict[str, int] = {}
+    for w in waiting:
+        groups[w["group"]] = groups.get(w["group"], 0) + 1
+    pool = sorted((w for w in waiting if w["id"] not in skip), key=lambda w: (-abs(w["amount"]), w["date"], w["id"] or ""))
+    item = None
+    if pool:
+        w = pool[0]
+        item = {"id": w["id"], "date": w["date"], "amount": w["amount"], "label": w["label"] or "ללא תיאור", "source": w["source"], "same_count": groups[w["group"]] - 1}
+    return {"total": len(waiting), "total_amount": round(sum(w["amount"] for w in waiting), 2), "item": item}
+
+
 def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
     """Owner-scoped goals + events (already policy-filtered by the caller) -> cashflow model inputs. Pure over its arguments.
 
@@ -923,6 +954,14 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
         logger.exception("[fcc] cashflow commitments read failed")
     view = fcc_cashflow.build(sources, expenses, today, months, scheduled, commitments)
     view["loans_payments_known"] = scheduled is not None
+    try:                                                      # the entry to the one-by-one classification screen (None = unknown, never "nothing waiting")
+        queue = classify_view(classify_waiting(identity))
+        view["to_classify"] = {"total": queue["total"], "total_amount": queue["total_amount"]}
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] cashflow classify queue read failed")
+        view["to_classify"] = None
     return view
 
 

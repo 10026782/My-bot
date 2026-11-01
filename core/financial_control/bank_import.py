@@ -277,8 +277,9 @@ BUILTIN_RULES: tuple[Rule, ...] = (
     # health / insurance
     _r("שירותי בריאות", EXPENSE, "health", DEBIT), _r("מכבי", EXPENSE, "health", DEBIT), _r("כללית", EXPENSE, "health", DEBIT),
     _r("הראל", EXPENSE, "insurance", DEBIT), _r("הפניקס", EXPENSE, "insurance", DEBIT), _r("מגדל", EXPENSE, "insurance", DEBIT), _r("ביטוח", EXPENSE, "insurance", DEBIT),
-    # bank charges (a custom category: it needs no schema change)
-    _r("עמלה", EXPENSE, "עמלות וריבית", DEBIT), _r("רבית", EXPENSE, "עמלות וריבית", DEBIT), _r("ריבית", EXPENSE, "עמלות וריבית", DEBIT),
+    # bank charges and interest; a card's own annual / monthly fee
+    _r("דמי כרטיס", EXPENSE, "card_fees", DEBIT),
+    _r("עמלה", EXPENSE, "fees_interest", DEBIT), _r("עמלת", EXPENSE, "fees_interest", DEBIT), _r("עמלות", EXPENSE, "fees_interest", DEBIT), _r("רבית", EXPENSE, "fees_interest", DEBIT), _r("ריבית", EXPENSE, "fees_interest", DEBIT),
     # credits that are known to be a kind of income source
     _r("קצבת ילדים", INCOME, "קצבאות", CREDIT), _r("בטוח לאומי", INCOME, "קצבאות", CREDIT), _r("ביטוח לאומי", INCOME, "קצבאות", CREDIT),
     _r("הפק מזומן", INCOME, None, CREDIT), _r("העברה הפקדה", INCOME, None, CREDIT),

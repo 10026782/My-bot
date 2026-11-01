@@ -1142,8 +1142,15 @@ export interface FccImportPreview {
     months: Record<string, { expenses: number; income: number; events: number; by_category: Record<string, number>; by_source: Record<string, number> }>;
     skipped: Record<string, { count: number; total: number }>;
     pending_rules: number; pending_row_rules: number;
+    uncategorized?: { count: number; total: number };
     pending_examples: { match: string; direction: "debit" | "credit"; times_seen: number; example_amount: number; row: boolean }[];
   };
+}
+/** One-by-one classification of imported expenses that have no category (GET|POST /api/fcc/classify). Every number is the server's. */
+export interface FccClassifyItem { id: string; date: string; amount: number; label: string; source: "bank" | "card"; same_count: number }
+export interface FccClassifyView {
+  total: number; total_amount: number; item: FccClassifyItem | null; categories: { key: string; label: string }[];
+  state?: "done"; done?: number; same_left?: number;
 }
 export interface FccImportRun { state: "progress" | "done" | "blocked"; step: "events" | "rules" | "done"; written?: number; remaining?: number; rules_to_add?: number; message?: string }
 
@@ -1158,6 +1165,7 @@ export interface FccCashflow {
   };
   thresholds: Record<string, number>;
   loans_payments_known: boolean;
+  to_classify?: { total: number; total_amount: number } | null;       // imported expenses waiting for a category (null = could not be read)
   as_of: string;
 }
 
