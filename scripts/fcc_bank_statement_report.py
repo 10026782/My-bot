@@ -50,6 +50,13 @@ def report(text: str, account_ref: str, owner_items=None) -> tuple[bi.ParseResul
 def write_pack(outdir: Path, parsed: bi.ParseResult, items: list[bi.Classified], summ: dict) -> list[Path]:
     outdir.mkdir(parents=True, exist_ok=True)
     csv_path, md_path, rules_path = outdir / "classified.csv", outdir / "summary.md", outdir / "rules_template.json"
+    review_path = outdir / "review_one_by_one.csv"
+    with review_path.open("w", newline="", encoding="utf-8-sig") as fh:             # every transfer / bit, in or out: the owner decides each row
+        w = csv.writer(fh)
+        w.writerow(["date", "direction", "amount", "description", "key", "decision (own_account | income | loan | other)", "source / note"])
+        for c in items:
+            if c.kind == bi.NEEDS_REVIEW:
+                w.writerow([c.row.date.isoformat(), c.row.direction, f"{c.row.amount:.2f}", c.row.description, c.row.key, "", ""])
     with csv_path.open("w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow(["date", "description", "direction", "amount", "balance", "kind", "category", "rule", "paired_with", "verified", "flags", "key"])
@@ -70,6 +77,10 @@ def write_pack(outdir: Path, parsed: bi.ParseResult, items: list[bi.Classified],
     lines += ["", "## לפי חודש", "", "| חודש | הוצאות (מסווגות + לא ידועות) | חיובי כרטיס (ממתינים לפירוט) | זכויות (מועמדות — לא הכנסה) | הכנסה שאושרה | אחר |", "|---|---:|---:|---:|---:|---:|"]
     for month, v in summ["months"].items():
         lines.append(f"| {month} | {v['spending_candidates']:,.0f} | {v['card_settlements']:,.0f} | {v['income_candidates']:,.0f} | {v['income_approved']:,.0f} | {v['other']:,.0f} |")
+    rv = summ["review"]
+    lines += ["", f"## לבדיקה אחת-אחת: העברות וביט ({rv['count']})", "",
+              f"- זכות ₪{rv['credit']:,.0f} · חובה ₪{rv['debit']:,.0f} — כל העברה (בזכות או בחובה) ו-bit מסומנות לבדיקה: מחשבון אחר שלך? הכנסה? הלוואה? סיבה אחרת? שום דבר מהן לא סווג ולא נספר.",
+              "- הרשימה המלאה, שורה לשורה, ב-review_one_by_one.csv."]
     lines += ["", f"## תיאורים שעדיין לא ממופים ({summ['unmapped_total']})", "", "| תיאור | כיוון | פעמים | סה״כ |", "|---|---|---:|---:|"]
     for u in summ["unmapped"]:
         lines.append(f"| {u['description']} | {u['direction']} | {u['count']} | {u['total']:,.0f} |")
@@ -82,7 +93,7 @@ def write_pack(outdir: Path, parsed: bi.ParseResult, items: list[bi.Classified],
         if c.kind in (bi.UNKNOWN, bi.INCOME) and c.rule_id is None:
             seen.setdefault(bi.normalize(c.row.description), {"match": c.row.description, "direction": c.row.direction, "kind": "", "category": ""})
     rules_path.write_text(json.dumps(list(seen.values()), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return [csv_path, md_path, rules_path]
+    return [csv_path, md_path, rules_path, review_path]
 
 
 def main(argv=None) -> int:

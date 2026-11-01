@@ -1,8 +1,9 @@
 """FCC credit-card statement import, stage 5c — pure parser + classifier + matching to the bank. No I/O, no writes, no network, no model.
 
 Input: the TEXT FRAGMENTS of a card statement (``Fragment(page, x, y, text)``; y grows downward; text already in logical Hebrew order — the
-extraction layer, ``scripts/fcc_card_statement_report.py``, reads the PDF and fixes the visual order). Written for the Max statement layout:
-a section of rows (date, merchant, type, transaction amount, charge amount, remarks) closed by a ``סה"כ חיובים בתאריך dd/mm/yy  ₪total`` line.
+extraction layer, ``scripts/fcc_card_statement_report.py``, reads the PDF and fixes the visual order). Written for the Max and the Isracard layouts:
+a section of rows (date, [card at the business], merchant, type / sector, transaction amount, charge amount, remarks) closed by a
+``סה"כ חיובים בתאריך`` (Max) / ``סה"כ חיוב לתאריך`` (Isracard) ``dd/mm/yy  total`` line; the card's own fee lines (no date) belong to the section they precede.
 
 Iron rules:
 * **A section is trusted only if it adds up.** The sum of its rows' charge amounts must equal the statement's own section total; a section that
@@ -34,12 +35,15 @@ ADJUSTMENT = "adjustment"            # a benefit / discount line (negative)
 UNKNOWN = "unknown"
 KINDS = (EXPENSE, CASH, ADJUSTMENT, UNKNOWN)
 
-REGULAR, IMMEDIATE, LOAN, BENEFIT = "regular", "immediate", "loan_installment", "benefit"
+REGULAR, IMMEDIATE, LOAN, BENEFIT, FEE = "regular", "immediate", "loan_installment", "benefit", "fee"
 ROW_TOLERANCE = 4.0                  # fragments whose y differs by less than this belong to one row (an icon / date sits a hair off the text)
 SETTLEMENT_WINDOW_DAYS = 3
 TOLERANCE = 0.005
 DEFAULT_TYPE_X = 373.0               # the "סוג העסקה" column, when no header row was seen yet
-MERCHANT_MARGIN = 8.0
+MERCHANT_MARGIN = 9.0
+NAME_MARGIN = 8.0                    # the merchant column ends here (right of it: the card-at-the-business column, never part of the name)
+FEE_CATEGORY = "עמלות וריבית"
+SECTOR_CATEGORIES = {"דלק": "transport", "תחבורה": "transport", "ביטוח": "insurance"}   # the issuer's own sector, only where it is unambiguous
 
 _DATE = re.compile(r"^(\d{2}/\d{2}/\d{2})(?!\d)")
 _AMOUNT = re.compile(r"^-?[\d,]+\.\d{2}$")
@@ -66,6 +70,7 @@ class CardCharge:
     section: int
     kind: str                         # regular | immediate | loan_installment | benefit
     remark: str = ""
+    sector: str = ""                  # the issuer's own type (Max) / sector (Isracard) text
     key: str = ""
 
 
@@ -120,11 +125,12 @@ def parse_card_statement(fragments: list[Fragment], card_ref: str = "") -> CardP
     sections: list[Section] = []
     problems: list[str] = []
     pending: list[dict] = []
-    card, type_x = "", DEFAULT_TYPE_X
+    card, type_x, name_x = "", DEFAULT_TYPE_X, None
     for row in _rows(fragments):
         toks = _tokens(row)
-        if {"תאריך", "סוג", "הערות"} <= toks:                               # a column header row: remember where the type column is
-            type_x = next(f.x for f in row if bi.normalize(f.text) == "סוג")
+        if "תאריך" in toks and toks & {"סוג", "ענף"} and toks & {"הערות", "סכום"}:          # a column header row (Max: סוג, Isracard: ענף)
+            type_x = next(f.x for f in row if bi.normalize(f.text) in ("סוג", "ענף"))
+            name_x = next((f.x for f in row if bi.normalize(f.text) == "שם"), name_x)
             continue
         if toks & {"שמסתיים", "שמסתיימים"}:
             digits = [f.text for f in row if _LAST4.match(f.text.strip())]
@@ -134,7 +140,7 @@ def parse_card_statement(fragments: list[Fragment], card_ref: str = "") -> CardP
         dates = [(f, _DATE.match(f.text.strip())) for f in row]
         dates = [(f, m) for f, m in dates if m]
         amounts = [f for f in row if _AMOUNT.match(f.text.strip())]
-        if {"סהכ", "חיובים", "בתאריך"} <= toks and dates and len(amounts) == 1:
+        if "סהכ" in toks and (toks & {"חיובים", "חיוב"}) and (toks & {"בתאריך", "לתאריך"}) and dates and len(amounts) == 1:
             billing, total = _d(dates[0][1].group(1)), _num(amounts[0].text.strip())
             computed = round(sum(p["charge"] for p in pending), 2)
             ok = abs(computed - total) <= TOLERANCE
@@ -142,8 +148,15 @@ def parse_card_statement(fragments: list[Fragment], card_ref: str = "") -> CardP
                 problems.append(f"section {len(sections) + 1} ({card}, {billing}): rows add up to {computed:.2f}, the statement says {total:.2f}")
             sections.append(Section(len(sections) + 1, card, billing, total, computed, ok, len(pending), any(p["kind"] == IMMEDIATE for p in pending)))
             for p in pending:
-                charges.append(CardCharge(p["date"], p["merchant"], p["charge"], p["amount"], card, billing, len(sections), p["kind"], p["remark"]))
+                charges.append(CardCharge(p["date"] or billing, p["merchant"], p["charge"], p["amount"], card, billing, len(sections), p["kind"], p["remark"], p["sector"]))
             pending = []
+            continue
+        if pending and not dates and len(amounts) == 1 and "סהכ" not in toks:                 # the card's own fee lines: no date, they precede the section total
+            fee = "דמי" in toks or ("מעמ" in toks and any(f.text.strip().endswith("%") for f in row))
+            if fee:
+                words = " ".join(f.text.strip() for f in row if f.text.strip() not in ("₪", "") and not _AMOUNT.match(f.text.strip()) and not f.text.strip().endswith("%"))
+                pending.append({"date": None, "merchant": re.sub(r"\s+", " ", words).strip(), "charge": _num(amounts[0].text.strip()), "amount": None,
+                                "kind": FEE, "remark": "", "sector": ""})
             continue
         if not dates or not 1 <= len(amounts) <= 2:
             if dates and len(amounts) > 2:
@@ -154,7 +167,7 @@ def parse_card_statement(fragments: list[Fragment], card_ref: str = "") -> CardP
         amount_f = amounts[0] if len(amounts) == 2 else None
         used = {id(f) for f, _ in dates} | {id(f) for f in amounts}
         rest = [f for f in row if id(f) not in used and f.text.strip() not in ("₪", "")]
-        merchant = " ".join(f.text.strip() for f in rest if f.x > type_x + MERCHANT_MARGIN)
+        merchant = " ".join(f.text.strip() for f in rest if f.x > type_x + MERCHANT_MARGIN and (name_x is None or f.x <= name_x + NAME_MARGIN))
         lo, hi = (amount_f.x + 5.0 if amount_f else charge_f.x), type_x + MERCHANT_MARGIN
         kind_text = " ".join(f.text.strip() for f in rest if lo < f.x <= hi)
         remark = " ".join(f.text.strip() for f in rest if f.x < charge_f.x - 8.0)
@@ -163,7 +176,8 @@ def parse_card_statement(fragments: list[Fragment], card_ref: str = "") -> CardP
         if not merchant and kind == BENEFIT:
             merchant = remark or "הטבה"
         pending.append({"date": _d(dates[0][1].group(1)), "merchant": re.sub(r"\s+", " ", merchant).strip(), "charge": charge,
-                        "amount": _num(amount_f.text.strip()) if amount_f else None, "kind": kind, "remark": re.sub(r"\s+", " ", remark).strip()})
+                        "amount": _num(amount_f.text.strip()) if amount_f else None, "kind": kind, "remark": re.sub(r"\s+", " ", remark).strip(),
+                        "sector": re.sub(r"\s+", " ", kind_text).strip()})
     if pending:
         problems.append(f"{len(pending)} row(s) after the last section total")
     seen: dict[tuple, int] = {}
@@ -200,13 +214,18 @@ def classify_charge(c: CardCharge, owner_rules: list[bi.Rule] | None = None) -> 
         return ClassifiedCharge(c, EXPENSE, "loans", "card:loan_installment")
     if c.kind == BENEFIT:
         return ClassifiedCharge(c, ADJUSTMENT, None, "card:benefit")
+    if c.kind == FEE:
+        return ClassifiedCharge(c, EXPENSE, FEE_CATEGORY, "card:fee")
     norm = bi.normalize(c.merchant)
-    if "כספומט" in norm.split() or c.kind == IMMEDIATE and "כספומט" in norm:
+    if "כספומט" in norm.split() or " משיכת מזומנים " in f" {norm} " or c.kind == IMMEDIATE and "כספומט" in norm:
         return ClassifiedCharge(c, CASH, None, "card:atm")
     for rule in [*(owner_rules or []), *BUILTIN_RULES]:
-        if f" {rule.match} " in f" {norm} ":
+        if rule.key is None and f" {rule.match} " in f" {norm} ":
             kind = {bi.EXPENSE: EXPENSE, bi.IGNORE: ADJUSTMENT}.get(rule.kind, EXPENSE)
             return ClassifiedCharge(c, kind, rule.category, rule.rule_id)
+    for word in bi.normalize(c.sector).split():                                  # the issuer's own sector: only the unambiguous ones
+        if word in SECTOR_CATEGORIES:
+            return ClassifiedCharge(c, EXPENSE, SECTOR_CATEGORIES[word], f"sector:{word}")
     return ClassifiedCharge(c, UNKNOWN, None, None)
 
 

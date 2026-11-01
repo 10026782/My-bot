@@ -138,6 +138,69 @@ def test_classification_builtin_owner_rules_and_unknown():
     assert [u["merchant"] for u in s["unmapped"]][0] == "שופרסל יש חסד" and s["unmapped_total"] == 2
 
 
+# ── the Isracard layout: a "ענף" column, a card-at-the-business column, a different total wording, undated fee lines ─────────────────────────
+def iso_header(page=1, y=0.0):
+    return [F(page, 502, y, "תאריך"), F(page, 456, y, "כרטיס"), F(page, 429, y, "שם"), F(page, 342, y, "ענף"), F(page, 287, y, "סכום"), F(page, 199, y, "פירוט")]
+
+
+def iso_txn(y, day, in_business, words, sector, amount, charge, remark=(), page=1):
+    out = [F(page, 490, y, day)]
+    out += [F(page, 469 - 17 * i, y, w) for i, w in enumerate(in_business)]                  # "לא הוצג" / "ה.קבע": never part of the merchant name
+    out += [F(page, 432 - 18 * i, y, w) for i, w in enumerate(words)]
+    out += [F(page, 336, y, w) for w in sector[:1]] + [F(page, 318, y, w) for w in sector[1:]]
+    if amount is not None:
+        out.append(F(page, 285, y, f"{amount:,.2f}"))
+    out.append(F(page, 243, y, f"{charge:,.2f}"))
+    out += [F(page, 198 - 12 * i, y, w) for i, w in enumerate(remark)]
+    return out
+
+
+def iso_total(y, day, amount, page=1):
+    return [F(page, 503, y, 'סה"כ'), F(page, 485, y, "חיוב"), F(page, 455, y, "לתאריך"), F(page, 414, y, day), F(page, 226, y, f"{amount:,.2f}")]
+
+
+def iso_statement():
+    frags = iso_header() + card_header("3818", y=-20.0)
+    frags += iso_txn(20, "27/09/26", [], ["משיכת", "מזומנים"], ["שונות"], 2000.0, 2000.0) + iso_total(30, "28/09/26", 2000.0)
+    frags += iso_txn(40, "05/07/26", ["לא", "הוצג"], ["לאסט", "פרייס"], ["שונות"], 4405.0, 367.08, remark=("תשלום", "4", "מתוך", "12"))
+    frags += iso_txn(50, "10/09/26", ["תש.", "נייד"], ["פז", "אפליקצית", "YELLOW"], ["דלק"], 16.0, 16.0)
+    frags += iso_txn(60, "20/09/26", ["ה.", "קבע"], ["מגדל", "בריאות/חיים"], ["ביטוח"], 278.11, 278.11)
+    frags += iso_txn(70, "24/09/26", ["לא", "הוצג"], ["קליית", "בראשית"], ["מסעדות/קפה"], 17.52, 17.52)
+    # the card's own fee lines (no date): the fee, its VAT and the fee subtotal (which must not be counted again)
+    frags += [F(2, 430, 80, "דמי"), F(2, 407, 80, "כרטיס"), F(2, 378, 80, "הנפקה/"), F(2, 206, 80, "15.17"), F(2, 198, 80, "₪")]
+    frags += [F(2, 206, 90, "2.73"), F(2, 197, 90, "₪"), F(2, 181, 90, 'מע"מ'), F(2, 159, 90, "18.00%")]
+    frags += [F(2, 245, 100, "17.90"), F(2, 203, 100, 'סה"כ'), F(2, 189, 100, "כולל"), F(2, 172, 100, 'מע"מ')]
+    frags += iso_total(110, "11/10/26", 367.08 + 16 + 278.11 + 17.52 + 15.17 + 2.73, page=2)
+    return frags
+
+
+def test_isracard_layout_sections_fees_and_the_card_at_the_business_column():
+    p = ci.parse_card_statement(iso_statement(), "isracard")
+    assert p.ok and p.problems == [] and [(s.card, s.billing_date.day, s.total, s.ok) for s in p.sections] == [("3818", 28, 2000.0, True), ("3818", 11, 696.61, True)]
+    by = {c.merchant: c for c in p.charges}
+    assert {"משיכת מזומנים", "לאסט פרייס", "פז אפליקצית YELLOW", "מגדל בריאות/חיים", "קליית בראשית"} <= set(by)
+    assert by["לאסט פרייס"].charge == 367.08 and by["לאסט פרייס"].amount == 4405.0 and by["לאסט פרייס"].remark == "תשלום 4 מתוך 12" and by["לאסט פרייס"].kind == ci.REGULAR
+    assert by["לאסט פרייס"].merchant.split() == ["לאסט", "פרייס"] and by["פז אפליקצית YELLOW"].sector == "דלק" and by["מגדל בריאות/חיים"].sector == "ביטוח"
+    fees = [c for c in p.charges if c.kind == ci.FEE]
+    assert [c.charge for c in fees] == [15.17, 2.73] and all(c.date == date(2026, 10, 11) for c in fees)      # the 17.90 subtotal is not a third fee
+
+
+def test_isracard_classification_cash_fees_and_unambiguous_sectors_only():
+    items = {c.charge.merchant: c for c in ci.classify_all(ci.parse_card_statement(iso_statement(), "isracard").charges)}
+    assert items["משיכת מזומנים"].kind == ci.CASH and not ci.importable(items["משיכת מזומנים"])
+    assert items["פז אפליקצית YELLOW"].category == "transport" and items["מגדל בריאות/חיים"].category == "insurance"        # the issuer's own sector
+    assert items["לאסט פרייס"].kind == ci.UNKNOWN and items["קליית בראשית"].kind == ci.UNKNOWN                              # a restaurant sector is not guessed into a category
+    fee = [c for c in items.values() if c.charge.kind == ci.FEE]
+    assert len(fee) == 2 and all(c.kind == ci.EXPENSE and c.category == "עמלות וריבית" and ci.importable(c) for c in fee)
+
+
+def test_isracard_sections_match_the_bank_settlements():
+    p = ci.parse_card_statement(iso_statement(), "isracard")
+    b = bank([(date(2026, 9, 28), 2000.0, 'ישראכרט בע"מ'), (date(2026, 10, 11), 696.61, 'ישראכרט בע"מ'), (date(2026, 10, 11), 1114.44, 'ישראכרט בע"מ')])
+    m = ci.match_settlements(p.sections, b)
+    assert [x.bank_key for x in m] == ["b0", "b1"] and ci.reconcile(b, m)["uncovered_bank_settlements"] == {"count": 1, "total": 1114.44}
+
+
 # ── matching to the bank ────────────────────────────────────────────────────────────────────────────────────────
 def bank(items):
     out = []

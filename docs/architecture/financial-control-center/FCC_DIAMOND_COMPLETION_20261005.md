@@ -460,3 +460,11 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Importable = decided:** an expense with a category, or approved income with its source. Everything else waits.
 - **Owner classification (as rules, kept OUT of the repo — these are personal recipients):** institutions (`institutions`): חכמי דורות, אורחות תורה, מרכז התורה; `loans`: רובי קבוצות (a loan on an asset); donations (`donations`): the other charities named in the statement. To be stored in the owner-scoped rules table of 5b once the owner approves creating it.
 
+### Transfers for review, tax refunds, Isracard (01/11/2026)
+
+- **Transfers are checked one by one (owner decision):** every transfer / bit, credit or debit, and a credit from another bank is `needs_review` — not classified, not counted, not importable. The bank report writes `review_one_by_one.csv` (date, direction, amount, description, key, and an empty decision column: own account / income / loan / other). A single row is settled by an owner rule with its `key`; for now rows are only MARKED. A cash deposit (ATM / teller) is not a transfer: it stays an income candidate.
+- **A tax refund is a refund:** a credit from the tax authorities / a VAT credit is `refund` in `taxes` (a negative expense), importable, never income.
+- **Scholarship:** a recurring credit the owner described as a scholarship stays an income CANDIDATE until the owner approves it as income with a source name (describing it is not approving it).
+- **Isracard:** same section-must-add-up rule; columns differ (sector instead of type, a card-at-the-business column, undated fee lines with VAT). Installment purchases ("תשלום 4 מתוך 12") are the purchase's instalment; only a card LOAN (Max) is `loans`.
+- **Open:** the owner's approval to create the owner-scoped rules table (5b) and the remaining card statements ("כרטיסי אשראי ל", Mastercard, other months). Verification: `test_fcc_bank_import.py`, `test_fcc_card_import.py`. Production: NOT verified.
+

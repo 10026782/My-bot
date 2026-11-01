@@ -125,24 +125,58 @@ def test_classification_builtin_rules_use_token_boundaries_and_direction():
     assert kinds["מרכז התורה"].kind == bi.UNKNOWN and kinds["מרכז התורה"].rule_id is None                  # an institution: never guessed
     assert kinds["מלם מערכות בע\""].kind == bi.INCOME and kinds["מלם מערכות בע\""].category is None        # a credit: income only once a source is assigned
     mk = lambda d, side: bi.BankRow(date(2026, 10, 1), d, 10.0, side, 0.0, True)
-    assert bi.classify_row(mk("מע\"מ", "debit")).category == "taxes" and bi.classify_row(mk("מכס ומע\"מ", "credit")).kind == bi.INCOME
+    assert bi.classify_row(mk("מע\"מ", "debit")).category == "taxes" and bi.classify_row(mk("מכס ומע\"מ", "credit")).kind == bi.REFUND
     assert bi.classify_row(mk("מעמדות", "debit")).kind == bi.UNKNOWN                                          # a rule never matches inside a longer word
     assert bi.classify_row(mk('הו"ק הלוואה', "debit")).category == "loans" and bi.classify_row(mk('הו"ק הלואה קרן', "debit")).category == "loans"   # both spellings
     assert bi.classify_row(mk("ביטוח לאומי", "credit")).category == "קצבאות" and bi.classify_row(mk("ביטוח לאומי", "debit")).category == "taxes"
-    # owner decision: a mobile transfer is NOT assumed to be the owner's own account — a credit is only a candidate, a debit is unknown
-    assert bi.classify_row(mk("העברה-נייד", "credit")).kind == bi.INCOME and bi.classify_row(mk("העברה-נייד", "debit")).kind == bi.UNKNOWN
+    # owner decision: every transfer, in or out, is marked for a one-by-one check — never assumed to be the owner's own account
+    assert bi.classify_row(mk("העברה-נייד", "credit")).kind == bi.NEEDS_REVIEW == bi.classify_row(mk("העברה-נייד", "debit")).kind
 
 
 def test_income_needs_the_owners_explicit_approval_and_a_transfer_is_neutral_only_by_an_owner_rule():
     mk = lambda d, side, amount=10.0: bi.BankRow(date(2026, 10, 1), d, amount, side, 0.0, True)
     for desc in ("הפק מזומן-בנקט", "bitהעברת כסף", "העברה-נייד", "זיכוי מלאומי", "קצבת ילדים", "מלם מערכות"):
-        assert bi.classify_row(mk(desc, "credit")).kind in (bi.INCOME,) and not bi.importable(bi.classify_row(mk(desc, "credit")))      # never income by itself
+        assert bi.classify_row(mk(desc, "credit")).kind in (bi.INCOME, bi.NEEDS_REVIEW) and not bi.importable(bi.classify_row(mk(desc, "credit")))      # never income by itself
     rules = bi.owner_rules_from([{"match": "מלם מערכות", "kind": "income", "category": "משכורת", "direction": "credit"},
                                  {"match": "זיכוי מלאומי", "kind": "transfer", "direction": "credit"}])
     got = bi.classify_row(mk("מלם מערכות בע\"", "credit"), rules)
     assert got.kind == bi.INCOME_APPROVED and got.category == "משכורת" and bi.importable(got)
     assert bi.classify_row(mk("זיכוי מלאומי", "credit"), rules).kind == bi.TRANSFER
     assert not bi.importable(bi.classify_row(mk("מלם מערכות", "credit"), bi.owner_rules_from([{"match": "מלם מערכות", "kind": "income"}])))   # approved but no source: not written
+
+
+def test_every_transfer_and_bit_is_marked_for_a_one_by_one_check_in_both_directions():
+    mk = lambda d, side: bi.BankRow(date(2026, 10, 1), d, 10.0, side, 0.0, True, key="k:" + d + side)
+    for desc in ("העברה", "העברה-נייד", "העברה מיידית", "העב' לאחר-נייד", "bitהעברת כסף", "bit", "ביט", "פייבוקס", "העברת כסף"):
+        for side in ("credit", "debit"):
+            c = bi.classify_row(mk(desc, side))
+            assert c.kind == bi.NEEDS_REVIEW and c.category is None and not bi.importable(c), (desc, side)
+    for desc in ("זיכוי מלאומי", "זיכוי מדיסקונט"):                                       # a credit from another bank
+        assert bi.classify_row(mk(desc, "credit")).kind == bi.NEEDS_REVIEW
+    assert bi.classify_row(mk("העברה/הפקדה-טל", "credit")).kind == bi.INCOME            # a cash deposit is not a transfer
+    assert bi.classify_row(mk("הפק מזומן-בנקט", "credit")).kind == bi.INCOME
+
+
+def test_a_single_row_can_be_settled_by_its_key_without_touching_its_neighbours():
+    rows = [bi.BankRow(date(2026, 10, d), "העברה-נייד", 100.0 * d, "credit", 0.0, True, key=f"bank:{d}") for d in (1, 2, 3)]
+    rules = bi.owner_rules_from([{"key": "bank:2", "kind": "income", "category": "הכנסה מבן משפחה"}, {"key": "bank:3", "kind": "transfer"},
+                                 {"key": "", "kind": "income"}, {"match": "", "kind": "income"}])
+    assert len(rules) == 2
+    got = [bi.classify_row(r, rules) for r in rows]
+    assert [c.kind for c in got] == [bi.NEEDS_REVIEW, bi.INCOME_APPROVED, bi.TRANSFER] and got[1].category == "הכנסה מבן משפחה" and got[1].rule_id.startswith("owner:")
+    assert [bi.importable(c) for c in got] == [False, True, False]
+    both = bi.owner_rules_from([{"match": "העברה נייד", "kind": "transfer"}, {"key": "bank:1", "kind": "income", "category": "x"}])
+    assert bi.classify_row(rows[0], both).kind == bi.INCOME_APPROVED                       # a rule for one row beats a rule for the description
+
+
+def test_a_tax_refund_gives_back_the_category_and_is_never_income():
+    mk = lambda d, side: bi.BankRow(date(2026, 7, 24), d, 1249.0, side, 0.0, True)
+    for desc in ('מכס ומע"מ', 'מע"מ', "מס הכנסה"):
+        c = bi.classify_row(mk(desc, "credit"))
+        assert c.kind == bi.REFUND and c.category == "taxes" and bi.importable(c), desc
+    assert bi.classify_row(mk('מע"מ', "debit")).kind == bi.EXPENSE                        # paying VAT is still an expense
+    s = bi.summarize([bi.classify_row(mk('מכס ומע"מ', "credit")), bi.classify_row(mk("העברה", "credit")), bi.classify_row(mk("bit", "debit"))])
+    assert s["review"] == {"count": 2, "credit": 1249.0, "debit": 1249.0}
 
 
 def test_only_decided_rows_are_importable():
@@ -235,6 +269,19 @@ def test_report_pack_is_written_outside_the_repo_and_lists_what_to_map(tmp_path)
     out2 = tmp_path / "pack2"
     assert mod.main(["--text", str(txt), "--account-ref", "t", "--outdir", str(out2), "--rules", str(rules)]) == 0
     assert json.loads((out2 / "rules_template.json").read_text(encoding="utf-8")) == []
+
+
+def test_report_pack_marks_every_transfer_for_a_one_by_one_check(tmp_path):
+    mod = _script()
+    rows = [row("03/10/2026", "העברה-נייד", 700.0, "credit", 10700.0), row("02/10/2026", "bitהעברת כסף", 300.0, "debit", 10000.0),
+            row("01/10/2026", "הפק מזומן-בנקט", 10300.0, "credit", 10300.0)]
+    txt = tmp_path / "s.txt"
+    txt.write_text(statement(rows), encoding="utf-8")
+    out = tmp_path / "pack"
+    assert mod.main(["--text", str(txt), "--account-ref", "t", "--outdir", str(out)]) == 0
+    review = (out / "review_one_by_one.csv").read_text(encoding="utf-8-sig").strip().splitlines()
+    assert len(review) == 3 and "העברה-נייד" in review[1] + review[2] and "bit" in review[1] + review[2] and "הפק מזומן" not in "".join(review)    # a cash deposit is not a transfer
+    assert "לבדיקה אחת-אחת: העברות וביט (2)" in (out / "summary.md").read_text(encoding="utf-8")
 
 
 def test_report_refuses_an_outdir_inside_the_repo_and_flags_an_incomplete_statement(tmp_path):

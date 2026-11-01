@@ -17,6 +17,11 @@ Iron rules:
 * **Income only by the owner's explicit approval (owner decision 01/11/2026).** Every credit is at most an ``income_candidate`` — a cash deposit,
   a mobile / bank transfer, a refund are not necessarily income. Only an owner rule of kind ``income`` makes a credit income; a built-in rule never
   does. A transfer is ``transfer`` (neutral) only when an owner rule says it is between the owner's own accounts; no built-in rule assumes it.
+* **Transfers are checked one by one (owner decision 01/11/2026).** Every transfer, in or out (העברה / העברה-נייד / העברה מיידית / bit / a credit from
+  another bank), is ``needs_review``: it may be money from another account of the owner, income, a loan, or something else, and it is
+  marked for that check — never classified, never counted, never imported. The owner settles a single row by its key (a rule with ``key``) or a whole
+  description by a rule.
+* **A tax refund is a refund, not income:** a credit from the tax authorities / a VAT refund is ``refund`` (it reduces the ``taxes`` category).
 * **Card payments are not spending until itemized (owner decision 01/11/2026).** A debit to Max / Isracard / a card company is sometimes the monthly
   bill and sometimes a cash withdrawal repaid a day or two later; either way it is ``card_settlement`` and stays out of the spending total until its
   own card statement explains it (``card_import.match_settlements``).
@@ -38,10 +43,12 @@ CARD_SETTLEMENT = "card_settlement"    # the bank paying a credit-card bill: NOT
 INCOME = "income_candidate"            # a credit; NOT income until the owner approves it (an owner rule of kind ``income``)
 INCOME_APPROVED = "income"             # a credit the owner explicitly approved as income (owner rules only; the category is the source name)
 TRANSFER = "transfer"                  # between the owner's own accounts (owner rules only): neither income nor spending
+NEEDS_REVIEW = "needs_review"          # a transfer / bit: to be checked ONE BY ONE (own account? income? loan? other?) — nothing is decided for it
+REFUND = "refund"                      # a credit that gives back a spending category (a tax refund): reduces that category, is not income
 REVERSAL = "reversal"                  # a debit and the credit that returned it: both cancel out
 IGNORE = "ignore"                      # the owner told us to skip it
 UNKNOWN = "unknown"                    # a debit no rule knows
-KINDS = (EXPENSE, CARD_SETTLEMENT, INCOME, INCOME_APPROVED, TRANSFER, REVERSAL, IGNORE, UNKNOWN)
+KINDS = (EXPENSE, CARD_SETTLEMENT, INCOME, INCOME_APPROVED, TRANSFER, NEEDS_REVIEW, REFUND, REVERSAL, IGNORE, UNKNOWN)
 COUNTED_AS_SPENDING = (EXPENSE, UNKNOWN)       # the only kinds shown as spending candidates (a card settlement is NOT: it waits for its card statement)
 
 CREDIT, DEBIT = "credit", "debit"
@@ -190,6 +197,7 @@ class Rule:
     category: str | None = None      # expense category key / custom name, or an income source name (INCOME)
     direction: str | None = None     # None = any
     rule_id: str = ""
+    key: str | None = None           # a rule for ONE row (its idempotency key); such a rule never matches by description
 
 
 def _r(match: str, kind: str, category: str | None = None, direction: str | None = None) -> Rule:
@@ -207,6 +215,8 @@ BUILTIN_RULES: tuple[Rule, ...] = (
     _r("החזר חיוב", REVERSAL, direction=CREDIT),
     # loans
     _r("משכנתא", EXPENSE, "loans", DEBIT), _r("הלואה", EXPENSE, "loans", DEBIT), _r("הלוואה", EXPENSE, "loans", DEBIT), _r("הלו רבית", EXPENSE, "loans", DEBIT),
+    # tax refunds (a credit from the tax authorities): give back the taxes category, never income
+    _r("מכס ומעמ", REFUND, "taxes", CREDIT), _r("החזר מס", REFUND, "taxes", CREDIT), _r("מס הכנסה", REFUND, "taxes", CREDIT), _r("מעמ", REFUND, "taxes", CREDIT),
     # taxes and levies
     _r("מעמ", EXPENSE, "taxes", DEBIT), _r("ביטוח לאומי", EXPENSE, "taxes", DEBIT), _r("עיריית", EXPENSE, "taxes", DEBIT), _r("מס הכנסה", EXPENSE, "taxes", DEBIT),
     _r("רשות המסים", EXPENSE, "taxes", DEBIT), _r("ארנונה", EXPENSE, "taxes", DEBIT),
@@ -218,13 +228,18 @@ BUILTIN_RULES: tuple[Rule, ...] = (
     # credits that are known to be a kind of income source
     _r("קצבת ילדים", INCOME, "קצבאות", CREDIT), _r("בטוח לאומי", INCOME, "קצבאות", CREDIT), _r("ביטוח לאומי", INCOME, "קצבאות", CREDIT),
     _r("הפק מזומן", INCOME, None, CREDIT), _r("העברה הפקדה", INCOME, None, CREDIT),
+    # transfers, in or out, and bit: marked for a one-by-one check (kept AFTER the specific rules above: a cash deposit is not a transfer)
+    _r("העברה", NEEDS_REVIEW), _r("העב לאחר נייד", NEEDS_REVIEW), _r("העברת כסף", NEEDS_REVIEW), _r("bitהעברת", NEEDS_REVIEW), _r("bit", NEEDS_REVIEW),
+    _r("ביט", NEEDS_REVIEW), _r("פייבוקס", NEEDS_REVIEW), _r("paybox", NEEDS_REVIEW), _r("פיבוקס", NEEDS_REVIEW),
+    _r("זיכוי מלאומי", NEEDS_REVIEW, direction=CREDIT), _r("זיכוי מדיסקונט", NEEDS_REVIEW, direction=CREDIT), _r("זיכוי מהפועלים", NEEDS_REVIEW, direction=CREDIT),
+    _r("זיכוי ממזרחי", NEEDS_REVIEW, direction=CREDIT), _r("זיכוי מהבינלאומי", NEEDS_REVIEW, direction=CREDIT),
 )
 
 
 def importable(c: "Classified") -> bool:
     """Only rows the owner's rules (or the high-precision built-ins) fully decided may be imported: an expense WITH a category, or income the owner
     approved WITH its source. Unknown debits, income candidates, card settlements, transfers and reversals are never written on their own."""
-    return (c.kind == EXPENSE and bool(c.category)) or (c.kind == INCOME_APPROVED and bool(c.category))
+    return c.kind in (EXPENSE, INCOME_APPROVED, REFUND) and bool(c.category)
 
 
 def owner_rules_from(items) -> list[Rule]:
@@ -232,15 +247,18 @@ def owner_rules_from(items) -> list[Rule]:
     out = []
     for i, it in enumerate(items or []):
         match = normalize(str((it or {}).get("match") or ""))
+        key = str((it or {}).get("key") or "").strip() or None
         kind = (it or {}).get("kind")
         direction = (it or {}).get("direction") or None
-        if not match or kind not in KINDS or kind == UNKNOWN or direction not in (None, CREDIT, DEBIT):
+        if not (match or key) or kind not in KINDS or kind == UNKNOWN or direction not in (None, CREDIT, DEBIT):
             continue
-        out.append(Rule(match, kind, (it.get("category") or None), direction, f"owner:{i}"))
-    return out
+        out.append(Rule(match if not key else "", kind, (it.get("category") or None), direction, f"owner:{i}", key))
+    return sorted(out, key=lambda r: r.key is None)          # a rule for one row beats a rule for a description
 
 
-def _matches(rule: Rule, norm: str, direction: str) -> bool:
+def _matches(rule: Rule, norm: str, direction: str, key: str = "") -> bool:
+    if rule.key is not None:
+        return bool(key) and rule.key == key and rule.direction in (None, direction)
     return (rule.direction in (None, direction)) and f" {rule.match} " in f" {norm} "
 
 
@@ -256,7 +274,7 @@ class Classified:
 def classify_row(row: BankRow, owner_rules: list[Rule] | None = None) -> Classified:
     norm = normalize(row.description)
     for rule in [*(owner_rules or []), *BUILTIN_RULES]:                 # the owner's rules win; first match wins
-        if _matches(rule, norm, row.direction):
+        if _matches(rule, norm, row.direction, row.key):
             return Classified(row, rule.kind, rule.category, rule.rule_id)
     return Classified(row, UNKNOWN if row.direction == DEBIT else INCOME, None, None)
 
@@ -319,4 +337,7 @@ def summarize(items: list[Classified], top_unknown: int = 15) -> dict:
         for k in v:
             v[k] = round(v[k], 2)
     top = sorted(unknown.values(), key=lambda u: -u["total"])[:top_unknown]
-    return {"importable": sum(1 for c in items if importable(c)), "pending_card_total": by_kind[CARD_SETTLEMENT]["debit"], "by_kind": by_kind, "months": dict(sorted(months.items())), "unmapped": top, "unmapped_total": len(unknown)}
+    review = [c for c in items if c.kind == NEEDS_REVIEW]
+    return {"review": {"count": len(review), "credit": round(sum(c.row.amount for c in review if c.row.direction == CREDIT), 2),
+                       "debit": round(sum(c.row.amount for c in review if c.row.direction == DEBIT), 2)},
+            "importable": sum(1 for c in items if importable(c)), "pending_card_total": by_kind[CARD_SETTLEMENT]["debit"], "by_kind": by_kind, "months": dict(sorted(months.items())), "unmapped": top, "unmapped_total": len(unknown)}

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""FCC credit-card statement report (stage 5c) — OFFLINE, read-only: parse a Max card statement PDF, classify its lines and (optionally) match its
+"""FCC credit-card statement report (stage 5c) — OFFLINE, read-only: parse a Max / Isracard card statement PDF, classify its lines and (optionally) match its
 sections to a bank statement's card settlements.
 
     python3 scripts/fcc_card_statement_report.py --pdf card.pdf --card-ref max --outdir ~/fcc_review \
         [--bank-pdf bank.pdf | --bank-text bank.txt] [--rules my_rules.json]
 
-Needs ``pdfminer.six`` (``pip install pdfminer.six``): the card PDF stores Hebrew in visual order, which this script reverses word by word.
+Max and Isracard layouts. Needs ``pdfminer.six`` (``pip install pdfminer.six``): the card PDF stores Hebrew in visual order, which this script reverses word by word.
 Writes to ``--outdir`` (which must be OUTSIDE this repository: statements are private data) charges.csv, summary.md and merchants_rules_template.json.
 It touches no Airtable table and calls no model. Only the last four digits of a card are read; the holder's name is never read.
 """
@@ -108,7 +108,7 @@ def write_pack(outdir: Path, parsed, items, summ, recon) -> list[Path]:
     if recon is not None:
         lines += ["", "## התאמה לדוח הבנק", "", f"- חיובי הבנק שנפתרו מול הדוח הזה: {len(recon['matched'])} (₪{recon['matched_total']:,.2f}) — הם כבר לא נספרים כהוצאה, השורות שלהם במקומם",
                   f"- חלקי חיוב שלא נמצאו בבנק: {len(recon['sections_without_bank_line'])}",
-                  f"- חיובי כרטיס בבנק שהדוח הזה לא מכסה: {recon['uncovered_bank_settlements']['count']} (₪{recon['uncovered_bank_settlements']['total']:,.2f}) — ימשיכו להיספר עד שייובא הדוח שלהם"]
+                  f"- חיובי כרטיס בבנק שהדוח הזה לא מכסה: {recon['uncovered_bank_settlements']['count']} (₪{recon['uncovered_bank_settlements']['total']:,.2f}) — אינם נספרים כהוצאה עד שייובא הדוח שמפרט אותם"]
     lines += ["", f"## בתי עסק שעדיין לא ממופים ({summ['unmapped_total']})", "", "| בית עסק | פעמים | סה״כ |", "|---|---:|---:|"]
     lines += [f"| {u['merchant']} | {u['count']} | {u['total']:,.2f} |" for u in summ["unmapped"]]
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
