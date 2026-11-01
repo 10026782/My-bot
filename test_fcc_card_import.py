@@ -357,3 +357,16 @@ def test_report_pack_with_a_bank_match_and_the_repo_guard(tmp_path):
     csv_text = (tmp_path / "pack" / "charges.csv").read_text(encoding="utf-8-sig")
     assert "cash_withdrawal" in csv_text and "loans" in csv_text and len(csv_text.strip().splitlines()) == len(parsed.charges) + 1
     assert mod.main(["--pdf", str(tmp_path / "x.pdf"), "--card-ref", "t", "--outdir", str(Path(__file__).parent / "_nope")]) == 2
+
+
+def test_max_transaction_details_export_total_line_and_billing_column():
+    head = ("תאריך עסקה", "שם בית העסק", "קטגוריה", "4 ספרות אחרונות של כרטיס האשראי", "סוג עסקה", "סכום חיוב", "מטבע חיוב", "סכום עסקה מקורי", "מטבע עסקה מקורי", "תאריך חיוב")
+    rows = [("שם בעל כרטיס-123",) + (None,) * 9, ("7716-MAX Back Total",) + (None,) * 9, ("09/2026",) + (None,) * 9, head,
+            ("18-08-2026", "משנת יוסף", "מזון וצריכה", "7716", "רגילה", "100.5", "₪", "100.5", "₪", "15-09-2026"),
+            ("19-08-2026", "בשר יפת", "מזון וצריכה", "7716", "רגילה", "50", "₪", "50", "₪", "15-09-2026"),
+            (None,) * 10, ("סך הכל",) + (None,) * 9, ("150.50₪",) + (None,) * 9]
+    r = ci.parse_card_table(rows, "max")
+    assert r.ok and len(r.charges) == 2 and r.sections[0].card == "7716" and r.sections[0].billing_date.isoformat() == "2026-09-15"
+    assert r.sections[0].total == 150.5
+    rows[-1] = ("999.00₪",) + (None,) * 9
+    assert not ci.parse_card_table(rows, "max").ok          # a total that the rows do not add up to blocks the file

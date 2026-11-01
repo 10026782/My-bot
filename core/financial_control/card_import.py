@@ -195,8 +195,8 @@ def parse_card_statement(fragments: list[Fragment], card_ref: str = "") -> CardP
 
 # ── an Excel export (header-driven) ───────────────────────────────────────────────────────────────────────────────
 _TITLE_TOTAL = re.compile(r"לחיוב\s*ב-?\s*(\d{2}/\d{2}/\d{4}|\d{2}/\d{2}/\d{2})\s*:?\s*([\d,]+\.\d{2})")
-_TITLE_CARD = re.compile(r"(?:המסתיים|שמסתיים)\s*ב-?\s*(\d{4})")
-_COLUMNS = {"date": ("תאריך",), "merchant": ("שם",), "amount": ("סכום עסקה", "סכום עסקה"), "charge": ("סכום חיוב",), "type": ("סוג",), "sector": ("ענף",), "remark": ("הערות",)}
+_TITLE_CARD = re.compile(r"(?:המסתיים|שמסתיים)\s*ב-?\s*(\d{4})|\b(\d{4})-MAX\b")
+_COLUMNS = {"date": ("תאריך",), "merchant": ("שם",), "amount": ("סכום עסקה", "סכום עסקה"), "charge": ("סכום חיוב",), "type": ("סוג",), "sector": ("ענף", "קטגוריה"), "remark": ("הערות",), "billing": ("תאריך חיוב",)}
 
 
 def _cell_date(v):
@@ -205,7 +205,7 @@ def _cell_date(v):
     if isinstance(v, date):
         return v
     if isinstance(v, str):
-        for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+        for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%Y-%m-%d"):
             try:
                 return datetime.strptime(v.strip()[:10] if fmt == "%Y-%m-%d" else v.strip(), fmt).date()
             except ValueError:
@@ -244,7 +244,7 @@ def parse_card_table(rows: list[tuple], card_ref: str = "") -> CardParse:
                 total = _num(m.group(2))
             m = _TITLE_CARD.search(text)
             if m:
-                card = m.group(1)
+                card = m.group(1) or m.group(2)
             cells = [bi.normalize(str(c)) if c is not None else "" for c in row]
             if any(c.startswith("תאריך") for c in cells) and any("שם" in c.split() for c in cells) and any("סכום חיוב" in c for c in cells):
                 for name, keys in _COLUMNS.items():
@@ -254,6 +254,21 @@ def parse_card_table(rows: list[tuple], card_ref: str = "") -> CardParse:
                 head = i
                 break
     missing = [n for n in ("date", "merchant", "amount", "charge") if n not in cols]
+    if head is not None and total is None:                                   # Max "transaction details": the total is a trailing "סך הכל" line
+        for k, row in enumerate(rows[head + 1:], head + 1):
+            if any(str(c).strip() == "סך הכל" for c in row if c is not None):
+                for nxt in rows[k:k + 3]:
+                    vals = [_cell_num(c) for c in nxt if c is not None and "₪" in str(c)]
+                    if vals:
+                        total = vals[0]
+                        break
+                break
+    if head is not None and billing is None and "billing" in cols:           # ...and the billing date is a column of every row
+        dates = {_cell_date(r[cols["billing"]]) for r in rows[head + 1:] if cols["billing"] < len(r) and _cell_date(r[cols["billing"]])}
+        if len(dates) == 1:
+            billing = dates.pop()
+        elif dates:
+            problems.append(f"several billing dates in one file: {', '.join(sorted(d.isoformat() for d in dates))}")
     if head is None or missing or billing is None or total is None:
         return CardParse([], [], [f"not a recognised card table (missing: {', '.join(missing) or 'header'}{'' if billing and total is not None else ', billing date / total'})"], ok=False)
     pending: list[dict] = []
