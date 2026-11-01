@@ -434,3 +434,13 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Boundaries:** obligations are read owner-scoped and are never part of an expense or balance; an unreadable obligations table is `commitments_known: false`. Nothing is written by this stage; acting on a card uses the existing obligation chat/draft flow. Thresholds are exposed in `thresholds`.
 - Verification: `test_fcc_cashflow.py`, `test_fcc_cashflow_service.py`, `fccCashflow.test.ts`. Device/production: NOT verified.
 
+### Stage 5a (01/11/2026): bank-statement parser + classifier (offline, read-only)
+
+- **Source format:** the bank's "תנועות בחשבון" PDF has a text layer (`pdftotext -layout`): date, description, debit, credit, running balance. Verified on the owner's real statement (191 rows, 15/07-19/10/2026): every one of the 190 transitions between neighbouring rows adds up and agrees with the amount's column; the oldest row has no older neighbour and is the only one decided by its column alone.
+- **Trust rule:** a row counts as `verified` only if the balance chain and the column agree; a conflict, a broken chain or an unparsed line makes the whole statement `ok = False` (an incomplete statement is not imported).
+- **A statement is a ledger of movements, not of expenses:** credit-card settlements, own transfers and returned charges are classified apart. In the owner's statement ~68% of all debits are card settlements — their categories exist only on the card statements (stage 5c). Until a card statement covers a period, the settlement is the only trace of that spending (open owner decision: show it as an uncategorized "כרטיס ללא פירוט" line that IS counted, and drop it once the card statement is imported).
+- **Classification:** high-precision built-in rules on whole tokens + direction; unknown stays unknown; the owner's rules (match / kind / category / direction) win. Every credit is an `income_candidate` until a source is assigned.
+- **Idempotency:** each row has a key from (account label, date, direction, amount, balance, description) — the balance keeps two identical same-day charges apart; the account number is never part of it.
+- **Privacy:** the script refuses an output directory inside the repository; tests use synthetic statements only.
+- **Next:** 5b = owner-scoped rules table (owner approval for a new table) + one bulk review -> אשר into `Financial Progress Events` (expenses as `household_expense` with the category, credits as income on the chosen source, `Verification = statement`); 5c = credit-card statements and matching of settlements. Verification: `test_fcc_bank_import.py`. Production: NOT verified.
+

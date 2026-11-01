@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""FCC bank-statement report (stage 5a) — OFFLINE, read-only: parse a bank "תנועות בחשבון" PDF/text, classify it, write a review pack.
+
+    python3 scripts/fcc_bank_statement_report.py --pdf statement.pdf --account-ref poalim-main --outdir ~/fcc_review [--rules my_rules.json]
+
+Writes to ``--outdir`` (which must be OUTSIDE this repository: a statement is private financial data and must never be committed):
+  * classified.csv       every movement with its kind / category / the rule that decided it / the arithmetic check
+  * summary.md           what the statement adds up to, month by month, and the descriptions you still have to map
+  * rules_template.json  one entry per unmapped description for you to fill (kind: expense | income_candidate | transfer | ignore)
+
+It touches no Airtable table and calls no model. The account number / holder name in the header are never read.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from core.financial_control import bank_import as bi  # noqa: E402
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def pdf_text(pdf: Path) -> str:
+    out = subprocess.run(["pdftotext", "-layout", str(pdf), "-"], capture_output=True, text=True, check=False)
+    if out.returncode != 0:
+        raise SystemExit(f"pdftotext failed ({out.returncode}): {out.stderr.strip()[:200]}")
+    return out.stdout
+
+
+def report(text: str, account_ref: str, owner_items=None) -> tuple[bi.ParseResult, list[bi.Classified], dict]:
+    parsed = bi.parse_statement(text, account_ref)
+    items = bi.classify(parsed.rows, bi.owner_rules_from(owner_items))
+    return parsed, items, bi.summarize(items)
+
+
+def write_pack(outdir: Path, parsed: bi.ParseResult, items: list[bi.Classified], summ: dict) -> list[Path]:
+    outdir.mkdir(parents=True, exist_ok=True)
+    csv_path, md_path, rules_path = outdir / "classified.csv", outdir / "summary.md", outdir / "rules_template.json"
+    with csv_path.open("w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.writer(fh)
+        w.writerow(["date", "description", "direction", "amount", "balance", "kind", "category", "rule", "paired_with", "verified", "flags", "key"])
+        for c in items:
+            r = c.row
+            w.writerow([r.date.isoformat(), r.description, r.direction, f"{r.amount:.2f}", f"{r.balance:.2f}", c.kind, c.category or "", c.rule_id or "",
+                        c.paired_key or "", "yes" if r.verified else "no", " ".join(r.flags), r.key])
+    s = parsed.summary
+    lines = [f"# דוח תנועות בנק", "",
+             f"תקופה: {parsed.period[0].isoformat()} – {parsed.period[1].isoformat()}" if parsed.period else "תקופה: לא זוהתה", "",
+             f"- שורות: {s.get('rows', 0)} · אומתו בשרשרת היתרות: {s.get('verified', 0)} · שבירות שרשרת: {s.get('chain_breaks', 0)} · "
+             f"סתירות כיוון: {s.get('conflicts', 0)} · שורות שלא פוענחו: {s.get('unparsed', 0)}",
+             f"- **{'הדוח שלם ומתיישב' if parsed.ok else 'הדוח אינו שלם / אינו מתיישב — לא לייבא לפני בירור'}**", "", "## לפי סוג", "",
+             "| סוג | שורות | חובה | זכות |", "|---|---:|---:|---:|"]
+    for kind, v in summ["by_kind"].items():
+        if v["count"]:
+            lines.append(f"| {kind} | {v['count']} | {v['debit']:,.0f} | {v['credit']:,.0f} |")
+    lines += ["", "## לפי חודש", "", "| חודש | הוצאות (מסווגות + לא ידועות) | חיובי כרטיס אשראי | זכויות (מועמדות להכנסה) | אחר |", "|---|---:|---:|---:|---:|"]
+    for month, v in summ["months"].items():
+        lines.append(f"| {month} | {v['spending_candidates']:,.0f} | {v['card_settlements']:,.0f} | {v['income_candidates']:,.0f} | {v['other']:,.0f} |")
+    lines += ["", f"## תיאורים שעדיין לא ממופים ({summ['unmapped_total']})", "", "| תיאור | כיוון | פעמים | סה״כ |", "|---|---|---:|---:|"]
+    for u in summ["unmapped"]:
+        lines.append(f"| {u['description']} | {u['direction']} | {u['count']} | {u['total']:,.0f} |")
+    lines += ["", "> חיובי כרטיס אשראי אינם הוצאה בפני עצמם: הם מסלקים חשבון כרטיס שפירוטו בדוח הכרטיס. הם נספרים כהוצאה רק כשאין דוח כרטיס לתקופה."]
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    seen = {}
+    for c in items:
+        if c.kind in (bi.UNKNOWN, bi.INCOME) and c.rule_id is None:
+            seen.setdefault(bi.normalize(c.row.description), {"match": c.row.description, "direction": c.row.direction, "kind": "", "category": ""})
+    rules_path.write_text(json.dumps(list(seen.values()), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return [csv_path, md_path, rules_path]
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--pdf", type=Path, help="the bank's statement PDF")
+    src.add_argument("--text", type=Path, help="text already extracted with `pdftotext -layout`")
+    ap.add_argument("--account-ref", required=True, help="a label you choose for this account (NOT the account number)")
+    ap.add_argument("--outdir", required=True, type=Path)
+    ap.add_argument("--rules", type=Path, help="your rules JSON: [{match, kind, category?, direction?}]")
+    args = ap.parse_args(argv)
+    if _inside(args.outdir, REPO):
+        print("refusing: --outdir is inside the repository; a statement is private data and must not be committed", file=sys.stderr)
+        return 2
+    text = pdf_text(args.pdf) if args.pdf else args.text.read_text(encoding="utf-8")
+    owner = json.loads(args.rules.read_text(encoding="utf-8")) if args.rules else None
+    parsed, items, summ = report(text, args.account_ref, owner)
+    for p in write_pack(args.outdir, parsed, items, summ):
+        print(p)
+    print(f"rows={parsed.summary.get('rows', 0)} ok={parsed.ok} unmapped={summ['unmapped_total']}")
+    return 0 if parsed.ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
