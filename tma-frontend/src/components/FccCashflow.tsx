@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchFccCashflow } from "../api";
 import type { FccCashflow } from "../types";
-import { DEFAULT_RANGE, RANGES, cashflowModel } from "../lib/fccCashflow";
+import { DEFAULT_RANGE, RANGES, cashflowModel, recsModel } from "../lib/fccCashflow";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -13,6 +13,7 @@ export function CashflowView({ data, selected, onSelect, range, onRange }: {
   data: FccCashflow; selected: string; onSelect: (month: string) => void; range: number; onRange: (months: number) => void;
 }) {
   const m = cashflowModel(data, selected);
+  const recs = recsModel(data);
   return (
     <div className="fcc-stack">
       <div className="fcc-chips" role="group" aria-label="טווח חודשים">
@@ -54,6 +55,25 @@ export function CashflowView({ data, selected, onSelect, range, onRange }: {
           )}
         </section>
       )}
+
+      <section className="fcc-section" aria-labelledby="cf-recs-heading">
+        <h2 id="cf-recs-heading" className="fcc-section__heading">הזדמנויות לחיסכון</h2>
+        {recs.summary.map((l) => <p key={l} className="fcc-goal__note">{l}</p>)}
+        {recs.empty ? <ScreenState state="empty" title="אין כרגע נקודות לבדיקה" message="סמנו התחייבויות לצמצום או רשמו עוד הוצאות עם קטגוריה." /> : (
+          <div className="fcc-list">
+            {recs.cards.map((c) => (
+              <div key={c.id} className={`fcc-task fcc-rec fcc-rec--${c.tone}`}>
+                <h3>{c.title}</h3>
+                {c.amount && <StatusBadge tone={c.tone === "saving" ? "success" : c.tone === "estimate" ? "info" : "warning"}>{c.amount}</StatusBadge>}
+                {c.facts.map((f) => <p key={f}>{f}</p>)}
+                {c.hint && <p className="fcc-goal__note">{c.hint}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+        {recs.more && <p className="fcc-goal__note">{recs.more}</p>}
+        <p className="fcc-goal__note">{recs.note}</p>
+      </section>
 
       <section className="fcc-section" aria-labelledby="cf-months-heading">
         <h2 id="cf-months-heading" className="fcc-section__heading">חודש אחר חודש</h2>

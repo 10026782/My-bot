@@ -1124,8 +1124,17 @@ export interface FccCashflowMonth {
   balance: number | null; shortfall: number | null; surplus: number | null; missing: ("income" | "expenses")[];
 }
 export interface FccCashflowChange { key: string; label: string; before: number; after: number; delta: number; pct: number | null }
+export interface FccCashflowRec {
+  id: string; kind: "commitment" | "optional" | "rising" | "spike" | "uncategorized" | "focus"; title: string;
+  amount: number | null; basis: "stated" | "inferred" | "upper_bound" | null; facts: string[]; hint: string | null;
+}
+export interface FccCashflowRecs {
+  items: FccCashflowRec[]; total: number; commitments_known: boolean;
+  summary: { monthly_gap: number | null; stated_saving: number; inferred_saving: number; covers_gap_pct: number | null };
+}
 export interface FccCashflow {
   months: FccCashflowMonth[];
+  recommendations: FccCashflowRecs;
   categories: { key: string; label: string; custom?: boolean }[];
   insights: {
     changes: { from: string; to: string; total_before: number; total_after: number; total_delta: number; items: FccCashflowChange[] } | null;

@@ -3,7 +3,7 @@ import type { FccCashflow, FccCashflowMonth } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CashflowView } from "../components/FccCashflow";
-import { MISSING, cashflowModel, defaultMonth, insightLines, monthLabel } from "./fccCashflow";
+import { MISSING, RECS_NOTE, cashflowModel, defaultMonth, insightLines, monthLabel, recsModel } from "./fccCashflow";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -29,6 +29,15 @@ const data: FccCashflow = {
            month("2026-10", { is_current: true, partial: true, day: 20, days_in_month: 31 }),
            month("2026-07", { income: { known: false, sources: [], gross: null, direct_costs: null, net: null }, balance: null, shortfall: null, surplus: null, missing: ["income"] })],
   categories: [], thresholds: {}, loans_payments_known: true, as_of: "2026-10-20",
+  recommendations: {
+    items: [
+      { id: "commitment:סלולר", kind: "commitment", title: "לנהל משא ומתן: סלולר", amount: 60, basis: "stated", facts: ["עלות חודשית ₪200", "ההחלטה שלך: לנהל משא ומתן"], hint: null },
+      { id: "commitment:נטפליקס", kind: "commitment", title: "לבטל: נטפליקס", amount: 70, basis: "inferred", facts: ["עלות חודשית ₪70"], hint: "אחרי ביטול בפועל כתבו: ״ביטלתי את נטפליקס״" },
+      { id: "rising:leisure", kind: "rising", title: "פנאי ובילויים עולה 3 חודשים ברצף", amount: 900, basis: "upper_bound", facts: ["₪500 ← ₪900 ← ₪1,400"], hint: null },
+      { id: "uncategorized:2026-09", kind: "uncategorized", title: "הוצאות לא מסווגות מעוותות את התמונה", amount: null, basis: null, facts: ["36% מההוצאות"], hint: null },
+    ],
+    total: 6, commitments_known: true, summary: { monthly_gap: 1000, stated_saving: 60, inferred_saving: 70, covers_gap_pct: 13 },
+  },
   insights: {
     changes: { from: "2026-08", to: "2026-09", total_before: 6000, total_after: 6500, total_delta: 500, items: [{ key: "living", label: "מחייה", before: 2500, after: 3000, delta: 500, pct: 20 }] },
     spikes: [{ month: "2026-10", key: "leisure", label: "פנאי ובילויים", amount: 1500, baseline: 500, excess: 1000, partial: true }],
@@ -98,6 +107,29 @@ test("markup: range buttons, month rows (newest first), bars, insights; no input
   assert.ok(html.includes('role="progressbar"') && html.includes("שינויים וחריגות") && html.includes("חיות מחמד ✦"));
   assert.ok(!html.includes("<textarea") && !html.includes("<input"));
   assert.equal((html.match(/aria-pressed="true"/g) ?? []).length, 2);                // the selected range + the selected month
+});
+
+test("recommendations: stated saving, inferred cancel and upper bound are worded apart; no-amount cards have no badge", () => {
+  const m = recsModel(data);
+  assert.equal(m.cards[0].amount, "חיסכון ₪60 בחודש"); assert.equal(m.cards[0].tone, "saving");
+  assert.equal(m.cards[1].amount, "≈ ₪70 בחודש (מוסק מהעלות)"); assert.equal(m.cards[1].tone, "estimate");
+  assert.equal(m.cards[2].amount, "עד ₪900"); assert.equal(m.cards[2].tone, "bound");
+  assert.equal(m.cards[3].amount, null); assert.equal(m.cards[3].tone, "plain");
+  assert.equal(m.more, "ועוד 2 נקודות לבדיקה"); assert.equal(m.note, RECS_NOTE);
+});
+
+test("recommendations summary: the gap, the stated and inferred savings and the coverage — never one blended total", () => {
+  const lines = recsModel(data).summary.join(" | ");
+  assert.ok(lines.includes("חסר בממוצע ₪1,000 בחודש") && lines.includes("₪60 בחודש") && lines.includes("≈ ₪70") && lines.includes("כ-13% מהחוסר"));
+  assert.ok(!lines.includes("₪130"));
+  const none = recsModel({ ...data, recommendations: { ...data.recommendations, items: [], total: 0, commitments_known: false, summary: { monthly_gap: 0, stated_saving: 0, inferred_saving: 0, covers_gap_pct: null } } });
+  assert.equal(none.empty, true); assert.ok(none.summary.some((l) => l.includes("לא היה חוסר")) && none.summary.some((l) => l.includes("לא הצלחנו לקרוא")));
+});
+
+test("markup: the recommendations section renders the cards, hints and the not-a-decision note", () => {
+  const html = renderToStaticMarkup(createElement(CashflowView, { data, selected: "2026-09", onSelect: () => undefined, range: 6, onRange: () => undefined }));
+  assert.ok(html.includes("הזדמנויות לחיסכון") && html.includes("לנהל משא ומתן: סלולר") && html.includes("עד ₪900") && html.includes("ביטלתי את נטפליקס"));
+  assert.ok(html.includes("לא החלטה") && html.includes("ועוד 2 נקודות לבדיקה"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

@@ -426,3 +426,11 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **TMA:** the "תזרים" tab has "+ הכנסה" / "+ הוצאה" chips (same intents and the same one shared draft as the monthly tab) and refreshes in place after a saved entry.
 - **Not done:** the classifier / agent (`fcc_update`) does not supply a category (the question is asked); recommendations (stage 4); bank / credit-card import (stage 5). Verification: `test_financial_control_center.py` (399), `fccTabs.test.ts`. Device/production: NOT verified.
 
+### Stage 4 (01/11/2026): savings opportunities ("הזדמנויות לחיסכון")
+
+- **Deterministic, numbers-only** (`cashflow.recommendations`; no model, no invented amount). Each card carries `kind`, a title, optional `amount` with a `basis`, the `facts` it stands on and an optional `hint`.
+- **Amount bases are never blended:** `stated` (a saving the owner entered on an obligation), `inferred` (a `cancel` decision with no stated saving = its monthly cost; a decision is not a cancellation, so the hint is the existing "ביטלתי את X" phrase) and `upper_bound` (a rising category / a spike — a ceiling, not a saving). The summary totals only `stated` and `inferred`, separately, and shows what share of the average monthly gap (up to 3 known complete months) they cover.
+- **Cards:** flagged obligations; optional + unreviewed obligations (no amount; `keep` is respected); a non-loan category that rose 3 known complete months in a row by >= ₪300; category spikes; an uncategorized share >= 20%; the largest non-loan category when >= 30%. Sorted commitment > rising > spike > optional > uncategorized > focus, capped at 12 (`total` says how many exist).
+- **Boundaries:** obligations are read owner-scoped and are never part of an expense or balance; an unreadable obligations table is `commitments_known: false`. Nothing is written by this stage; acting on a card uses the existing obligation chat/draft flow. Thresholds are exposed in `thresholds`.
+- Verification: `test_fcc_cashflow.py`, `test_fcc_cashflow_service.py`, `fccCashflow.test.ts`. Device/production: NOT verified.
+

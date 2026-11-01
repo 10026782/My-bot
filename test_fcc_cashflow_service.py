@@ -25,6 +25,7 @@ import tma_api
 from airtable_schema import FinEventFields as EF
 from airtable_schema import FinGoalFields as GF
 from airtable_schema import LoanFields as LF
+from airtable_schema import RecObFields as RF
 from airtable_schema import Tables
 from core import data_access_policy as policy
 from core import owner_resolution
@@ -190,3 +191,37 @@ def test_http_gate_validation_and_read_only(monkeypatch):
     for method in ("post", "put", "patch", "delete"):
         assert getattr(c, method)("/api/fcc/cashflow", headers=H, json={}).status_code == 405
     assert len(DB[Tables.FIN_EVENTS]) == 10 and len(DB[Tables.LOANS]) == 2
+
+
+def ob(rid, name, amount, owner=ELI, **f):
+    return {"id": rid, "fields": {RF.NAME: name, RF.AMOUNT: amount, RF.FREQUENCY: "monthly", RF.ACTIVE: True, RF.FINANCIAL_OWNER: [owner], **f}}
+
+
+def test_recommendations_read_the_owners_own_commitments_only_and_never_add_them_to_totals(monkeypatch):
+    DB[Tables.REC_OBLIGATIONS] = [
+        ob("recO1", "נטפליקס", 70, **{RF.REVIEW_STATUS: "cancel"}),
+        ob("recO2", "סלולר", 200, **{RF.REVIEW_STATUS: "negotiate", RF.POTENTIAL_SAVING: 60}),
+        ob("recO3", "של אבי", 999, owner=AVI, **{RF.REVIEW_STATUS: "cancel"}),
+        ob("recO4", "ישנה", 50, **{RF.REVIEW_STATUS: "cancel", RF.ACTIVE: False}),
+    ]
+    view = service.cashflow_view(ELIYAHU, TODAY, 2)
+    rec = view["recommendations"]
+    assert rec["commitments_known"] is True
+    assert {i["id"] for i in rec["items"] if i["kind"] == "commitment"} == {"commitment:נטפליקס", "commitment:סלולר"}      # not Avi's, not the cancelled one
+    assert (rec["summary"]["stated_saving"], rec["summary"]["inferred_saving"]) == (60.0, 70.0)
+    assert "של אבי" not in str(view)
+    base = service.cashflow_view(ELIYAHU, TODAY, 2)
+    assert month(view, "2026-10")["expenses"]["total"] == month(base, "2026-10")["expenses"]["total"]                     # commitments are not expenses
+    DB[Tables.REC_OBLIGATIONS] = []
+    assert month(service.cashflow_view(ELIYAHU, TODAY, 2), "2026-10")["expenses"]["total"] == month(view, "2026-10")["expenses"]["total"]
+
+
+def test_a_failed_commitments_read_is_unknown_not_empty(monkeypatch):
+    def broken(table, formula=""):
+        if table == Tables.REC_OBLIGATIONS:
+            raise RuntimeError("airtable down")
+        return list(DB.get(table, []))
+    monkeypatch.setattr(service, "_read", broken)
+    rec = service.cashflow_view(ELIYAHU, TODAY, 2)["recommendations"]
+    assert rec["commitments_known"] is False and not [i for i in rec["items"] if i["kind"] in ("commitment", "optional")]
+

@@ -104,9 +104,12 @@ def test_loans_scheduled_never_added_on_top_of_a_recorded_charge():
     assert octo["expenses"]["total"] == 2400.0 and octo["expenses"]["categories"][0]["basis"] == "recorded"
 
 
-def test_obligations_are_never_part_of_the_expense_total():
-    sig = cf.build.__code__.co_varnames[:cf.build.__code__.co_argcount]
-    assert "obligations" not in sig
+def test_commitments_are_never_part_of_any_total():
+    inc = IncomeSource("x", gross=(T(9000, 2026, 10, 1),))
+    ex = [T(1000, 2026, 10, 2, "living")]
+    plain = cf.build([inc], ex, TODAY, 2)
+    with_c = cf.build([inc], ex, TODAY, 2, commitments=[{"name": "נטפליקס", "monthly": 70.0, "review_status": "cancel", "saving": None}])
+    assert row(plain, "2026-10")["expenses"] == row(with_c, "2026-10")["expenses"] and row(plain, "2026-10")["balance"] == row(with_c, "2026-10")["balance"]
 
 
 def test_partial_current_month_flag():
@@ -164,3 +167,76 @@ def test_pure_module_has_no_io_imports():
     imported = {n.names[0].name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)}
     imported |= {(n.module or "").split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     assert imported <= {"__future__", "calendar", "dataclasses", "datetime", "statistics"}, imported
+
+
+
+# ── recommendations ──────────────────────────────────────────────────────────────────────────────────────────────
+def recs(view):
+    return view["recommendations"]
+
+
+def test_commitment_recommendations_stated_inferred_and_unknown_amounts_stay_apart():
+    commitments = [
+        {"name": "נטפליקס", "monthly": 70.0, "review_status": "cancel", "essentiality": "optional", "saving": None},     # inferred from the cost
+        {"name": "סלולר", "monthly": 200.0, "review_status": "negotiate", "essentiality": "useful", "saving": 60.0},     # stated
+        {"name": "עיתון", "monthly": 40.0, "review_status": "reduce", "essentiality": "optional", "saving": None},       # flagged, no amount
+        {"name": "חדר כושר", "monthly": 300.0, "review_status": None, "essentiality": "optional", "saving": None},        # optional + unreviewed
+        {"name": "ביטוח", "monthly": 500.0, "review_status": "keep", "essentiality": "optional", "saving": None},        # decided to keep: not raised
+        {"name": "ישן", "monthly": None, "review_status": "review", "essentiality": "useful", "saving": None},
+    ]
+    r = recs(cf.build([], [], TODAY, 2, commitments=commitments))
+    by = {i["id"]: i for i in r["items"]}
+    assert by["commitment:נטפליקס"]["amount"] == 70.0 and by["commitment:נטפליקס"]["basis"] == "inferred"
+    assert by["commitment:נטפליקס"]["hint"] == "אחרי ביטול בפועל כתבו: ״ביטלתי את נטפליקס״"
+    assert by["commitment:סלולר"]["amount"] == 60.0 and by["commitment:סלולר"]["basis"] == "stated"
+    assert by["commitment:עיתון"]["amount"] is None and by["commitment:ישן"]["amount"] is None
+    assert "העלות החודשית לא ידועה (תדירות מותאמת)" in by["commitment:ישן"]["facts"]
+    assert "optional:חדר כושר" in by and "optional:ביטוח" not in by and "commitment:ביטוח" not in by
+    assert (r["summary"]["stated_saving"], r["summary"]["inferred_saving"]) == (60.0, 70.0)        # never blended into one invented number
+    assert r["commitments_known"] is True
+
+
+def test_unknown_commitments_are_not_the_same_as_none():
+    assert recs(cf.build([], [], TODAY, 2))["commitments_known"] is False
+    assert recs(cf.build([], [], TODAY, 2, commitments=[]))["commitments_known"] is True
+
+
+def test_rising_category_needs_three_known_complete_months_of_growth():
+    ex = _monthly("leisure", [None, 500, 900, 1400, 50]) + _monthly("living", [None, 3000, 3000, 3100, 100])
+    items = recs(cf.build([], ex, TODAY, 5))["items"]
+    rise = [i for i in items if i["kind"] == "rising"]
+    assert [i["id"] for i in rise] == ["rising:leisure"] and rise[0]["amount"] == 900.0 and rise[0]["basis"] == "upper_bound"
+    assert rise[0]["facts"][0] == "₪500 ← ₪900 ← ₪1,400" and "ספטמבר" not in rise[0]["facts"][1] and "יולי 2026" in rise[0]["facts"][1]
+    assert not [i for i in recs(cf.build([], _monthly("leisure", [None, None, 500, 900, 50]), TODAY, 5))["items"] if i["kind"] == "rising"]   # only 2 complete months
+
+
+def test_rising_ignores_loans_and_small_growth():
+    ex = _monthly("loans", [None, 2000, 2400, 2800, 0]) + _monthly("health", [None, 100, 150, 200, 0])
+    assert not [i for i in recs(cf.build([], ex, TODAY, 5))["items"] if i["kind"] == "rising"]
+
+
+def test_spike_and_uncategorized_and_focus_recommendations():
+    ex = _monthly("leisure", [None, 500, 500, 500, 2000]) + _monthly("living", [None, 3000, 3000, 3000, 100])
+    ex += [T(2000, 2026, 9, 7, None)]                                        # uncategorized 2,000 of 5,500+ in September
+    items = recs(cf.build([], ex, TODAY, 5))["items"]
+    kinds = {i["kind"] for i in items}
+    assert {"spike", "uncategorized", "focus"} <= kinds
+    unc = next(i for i in items if i["kind"] == "uncategorized")
+    assert unc["amount"] is None and "ללא קטגוריה" in unc["facts"][0] and "ספטמבר 2026" in unc["facts"][0]
+    assert next(i for i in items if i["kind"] == "focus")["id"] == "focus:living"
+
+
+def test_gap_summary_uses_known_complete_months_and_states_how_much_the_stated_savings_cover():
+    inc = IncomeSource("x", gross=(T(5000, 2026, 7, 1), T(5000, 2026, 8, 1), T(5000, 2026, 9, 1)))
+    ex = [T(6000, 2026, 7, 2, "living"), T(5000, 2026, 8, 2, "living"), T(7000, 2026, 9, 2, "living")]     # gaps 1000, 0, 2000
+    r = recs(cf.build([inc], ex, TODAY, 4, commitments=[{"name": "סלולר", "monthly": 200.0, "review_status": "negotiate", "saving": 100.0}]))
+    assert r["summary"]["monthly_gap"] == 1000.0 and r["summary"]["covers_gap_pct"] == 10
+    assert recs(cf.build([], [], TODAY, 3))["summary"]["monthly_gap"] is None and recs(cf.build([], [], TODAY, 3))["summary"]["covers_gap_pct"] is None
+
+
+def test_recommendations_are_sorted_and_limited():
+    commitments = [{"name": f"c{i}", "monthly": 10.0 * i, "review_status": "reduce", "saving": 10.0 * i} for i in range(1, 20)]
+    r = recs(cf.build([], [], TODAY, 2, commitments=commitments))
+    assert len(r["items"]) == cf.RECOMMENDATION_LIMIT and r["total"] == 19
+    assert [i["amount"] for i in r["items"]] == sorted((i["amount"] for i in r["items"]), reverse=True)
+

@@ -1,6 +1,6 @@
 // Monthly cashflow — presentation only. No fetching, no storage, no financial arithmetic: every number is the server's
 // (/api/fcc/cashflow); this only words them. A missing value is "חסר" (never 0). The only computation is a bar width (share of the month's total).
-import type { FccCashflow, FccCashflowMonth } from "../types";
+import type { FccCashflow, FccCashflowMonth, FccCashflowRec } from "../types";
 import { money } from "./fccPresentation";
 
 export const MISSING = "חסר";
@@ -88,3 +88,30 @@ export function cashflowModel(v: FccCashflow, selected?: string): CashflowModel 
   if (!v.loans_payments_known) notes.push("לא נמצא החזר הלוואות מתוכנן — הלוואות נספרות רק לפי חיוב שנרשם.");
   return { rows: [...v.months].reverse().map(rowOf), selected: sel, detail: month ? detailOf(month) : null, insights: insightLines(v), notes };
 }
+
+// ── recommendations ("הזדמנויות") — the server decides and words the facts; this only shows them ────────────────────────────────────────
+export const RECS_NOTE = "אלה נקודות לבדיקה מתוך מה שנרשם, לא החלטה. ״עד ₪X״ הוא גבול עליון ולא חיסכון מובטח; רק חיסכון שציינת (או החלטת ביטול) נספר בסיכום. ההתחייבויות לא נוספו להוצאות.";
+export interface RecCard { id: string; title: string; amount: string | null; tone: "saving" | "estimate" | "bound" | "plain"; facts: string[]; hint: string | null }
+export interface RecsModel { summary: string[]; cards: RecCard[]; more: string | null; empty: boolean; note: string }
+
+export function recCard(r: FccCashflowRec): RecCard {
+  const amount = r.amount == null ? null
+    : r.basis === "stated" ? `חיסכון ${money(r.amount)} בחודש`
+    : r.basis === "inferred" ? `≈ ${money(r.amount)} בחודש (מוסק מהעלות)`
+    : `עד ${money(r.amount)}`;
+  return { id: r.id, title: r.title, amount, facts: r.facts, hint: r.hint,
+           tone: r.amount == null ? "plain" : r.basis === "stated" ? "saving" : r.basis === "inferred" ? "estimate" : "bound" };
+}
+
+export function recsModel(v: FccCashflow): RecsModel {
+  const r = v.recommendations, sm = r.summary, lines: string[] = [];
+  if (sm.monthly_gap != null && sm.monthly_gap > 0) lines.push(`חסר בממוצע ${money(sm.monthly_gap)} בחודש (עד 3 החודשים האחרונים שהושלמו).`);
+  else if (sm.monthly_gap === 0) lines.push("בחודשים האחרונים שהושלמו לא היה חוסר.");
+  if (sm.stated_saving > 0) lines.push(`חיסכון שציינת בהתחייבויות: ${money(sm.stated_saving)} בחודש.`);
+  if (sm.inferred_saving > 0) lines.push(`החלטות ביטול בלי חיסכון שצוין: ≈ ${money(sm.inferred_saving)} בחודש (מוסק מהעלות החודשית, רק אחרי ביטול בפועל).`);
+  if (sm.covers_gap_pct != null) lines.push(`זה מכסה כ-${sm.covers_gap_pct}% מהחוסר.`);
+  if (!r.commitments_known) lines.push("לא הצלחנו לקרוא את ההתחייבויות — ההמלצות מבוססות על ההוצאות בלבד.");
+  const hidden = r.total - r.items.length;
+  return { summary: lines, cards: r.items.map(recCard), more: hidden > 0 ? `ועוד ${hidden} נקודות לבדיקה` : null, empty: r.items.length === 0, note: RECS_NOTE };
+}
+

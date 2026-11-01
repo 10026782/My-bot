@@ -7,7 +7,7 @@ Iron rules (same family as ``loans`` / ``net_worth``):
 * **Unknown != 0.** חודש בלי הכנסות רשומות או בלי הוצאות רשומות לא מקבל יתרה (``balance = None``, ``missing`` מפרט מה חסר);
   חודש לא-ידוע לעולם לא נכנס לממוצע, לשינוי או לחריגה.
 * **הוצאה = מה שנרשם בפועל.** התחייבות קבועה (``Recurring Obligations``) היא התחייבות ולא חיוב: היא **לא** נוספת להוצאות כאן, כי
-  החיוב בפועל (ידני או מייבוא בנק/אשראי) כבר נספר כהוצאה — הוספה הייתה סופרת אותו פעמיים. התחייבויות משמשות להמלצות בלבד.
+  החיוב בפועל (ידני או מייבוא בנק/אשראי) כבר נספר כהוצאה — הוספה הייתה סופרת אותו פעמיים. התחייבויות משמשות להמלצות בלבד (``recommendations``) ולעולם לא נכנסות לסכום.
 * **הלוואות הן הוצאה** (קטגוריה ``loans``): חיוב שנרשם בפועל באותו חודש גובר; רק כשאין חיוב רשום וזה החודש הנוכחי נכנס ההחזר
   החודשי המתוכנן מטבלת ``Loans`` — מסומן ``basis="scheduled"`` (הערכה), ולעולם לא בנוסף לחיוב רשום.
 * מקור הכנסה שאינו קבוע נקרא ``GENERAL_SOURCE`` ("כללי") — לא "אחר".
@@ -61,8 +61,17 @@ LARGE_ITEM_FLOOR = 1000.0     # a single expense item is "large" from here ...
 LARGE_ITEM_MULT = 3.0         # ... and, when its category has >= 3 items, at least this many times the category median
 LARGE_ITEM_LIMIT = 5
 
+RISE_MONTHS = 3               # a category that grew in each of its last 3 known complete months ...
+RISE_MIN_TOTAL = 300.0        # ... by at least this much overall is a "rising category"
+UNCATEGORIZED_SHARE = 0.2     # an uncategorized share of the latest month's spending from here is worth classifying
+FOCUS_SHARE = 0.3             # the largest non-loan category from this share of the month
+GAP_MONTHS = 3               # the monthly gap = the average shortfall over up to this many latest known complete months
+RECOMMENDATION_LIMIT = 12
+FLAGGED_REVIEW = ("reduce", "cancel", "negotiate", "review")   # same set as calc.FLAGGED_REVIEW (kept local: this module imports nothing)
+
 THRESHOLDS = {"min_change": MIN_CHANGE, "spike_pct": SPIKE_PCT, "spike_min_excess": SPIKE_MIN_EXCESS,
-              "baseline_months": BASELINE_MONTHS, "large_item_floor": LARGE_ITEM_FLOOR, "large_item_mult": LARGE_ITEM_MULT}
+              "baseline_months": BASELINE_MONTHS, "large_item_floor": LARGE_ITEM_FLOOR, "large_item_mult": LARGE_ITEM_MULT,
+              "rise_months": RISE_MONTHS, "rise_min_total": RISE_MIN_TOTAL, "uncategorized_share": UNCATEGORIZED_SHARE, "focus_share": FOCUS_SHARE}
 
 
 @dataclass(frozen=True)
@@ -88,6 +97,17 @@ class IncomeSource:
 
 
 # ── months ───────────────────────────────────────────────────────────────────────────────────────────────────────
+_HEB_MONTHS = ("ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר")
+
+
+def month_name(key: str) -> str:
+    """"2026-10" -> "אוקטובר 2026" (the wording used inside recommendation facts)."""
+    try:
+        return f"{_HEB_MONTHS[int(key[5:7]) - 1]} {key[:4]}"
+    except (ValueError, IndexError):
+        return key
+
+
 def month_key(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
@@ -183,11 +203,12 @@ def _expense_month(txns: list[Txn], start: date, end: date, today: date, loans_s
 
 
 def build(income_sources: list[IncomeSource], expenses: list[Txn], today: date, months: int = 6,
-          loans_scheduled_monthly: float | None = None) -> dict:
+          loans_scheduled_monthly: float | None = None, commitments: list[dict] | None = None) -> dict:
     """The cashflow view for the last ``months`` months (current, partial month included as the last entry).
 
     ``loans_scheduled_monthly`` is the sum of the active loans' monthly payments (None when unknown); it is used for the CURRENT month only,
-    and only when no loan charge was recorded in it."""
+    and only when no loan charge was recorded in it. ``commitments`` (the owner's active recurring obligations; None = unknown) feed ONLY the
+    recommendations — they are never part of any total."""
     rows: list[dict] = []
     for key, start, end in month_windows(today, months):
         src_rows = [r for r in (_source_month(s, start, end) for s in income_sources) if r]
@@ -210,7 +231,8 @@ def build(income_sources: list[IncomeSource], expenses: list[Txn], today: date, 
     custom = sorted({category_key(t.category) for t in expenses if is_custom(category_key(t.category))})
     return {"months": rows,
             "categories": [{"key": k, "label": v} for k, v in EXPENSE_CATEGORIES] + [{"key": k, "label": k, "custom": True} for k in custom],
-            "insights": insights(rows, expenses, today), "thresholds": THRESHOLDS, "as_of": today.isoformat()}
+            "insights": insights(rows, expenses, today), "recommendations": recommendations(rows, commitments),
+            "thresholds": THRESHOLDS, "as_of": today.isoformat()}
 
 
 # ── insights (deterministic, numbers only — no recommendation wording here) ───────────────────────────────────────
@@ -283,3 +305,104 @@ def large_items(expenses: list[Txn], rows: list[dict]) -> list[dict]:
 
 def insights(rows: list[dict], expenses: list[Txn], today: date) -> dict:
     return {"changes": category_changes(rows), "spikes": category_spikes(rows), "large_items": large_items(expenses, rows)}
+
+
+# ── recommendations (deterministic, every line carries the numbers it stands on; no model, no invented amounts) ──────────────────────────
+def _rec(kind: str, key: str, title: str, facts: list[str], amount: float | None = None, basis: str | None = None, hint: str | None = None) -> dict:
+    return {"id": f"{kind}:{key}", "kind": kind, "title": title, "amount": None if amount is None else _r(amount), "basis": basis,
+            "facts": facts, "hint": hint}
+
+
+def _commitment_recs(commitments: list[dict]) -> tuple[list[dict], float, float]:
+    """Flagged commitments (reduce / cancel / negotiate / review) and optional ones nobody has reviewed. ``stated`` = the saving the owner stated;
+    a cancel without a stated saving counts its monthly cost as ``inferred`` (a cancel decision is not yet a cancellation)."""
+    recs: list[dict] = []
+    stated = inferred = 0.0
+    labels = {"reduce": "להקטין", "cancel": "לבטל", "negotiate": "לנהל משא ומתן", "review": "לבדוק"}
+    for c in commitments:
+        name = str(c.get("name") or "התחייבות ללא שם")
+        monthly, status = c.get("monthly"), c.get("review_status")
+        facts = [f"עלות חודשית ₪{monthly:,.0f}" if monthly is not None else "העלות החודשית לא ידועה (תדירות מותאמת)"]
+        if status in FLAGGED_REVIEW:
+            facts.append(f"ההחלטה שלך: {labels[status]}")
+            saving = c.get("saving")
+            if saving is not None:
+                amount, basis = saving, "stated"
+                stated += saving
+            elif status == "cancel" and monthly is not None:
+                amount, basis = monthly, "inferred"
+                inferred += monthly
+                facts.append("חיסכון מוסק מהעלות החודשית")
+            else:
+                amount, basis = None, None
+            hint = f"אחרי ביטול בפועל כתבו: ״ביטלתי את {name}״" if status == "cancel" else None
+            recs.append(_rec("commitment", name, f"{labels[status]}: {name}", facts, amount, basis, hint))
+        elif c.get("essentiality") == "optional" and status != "keep":
+            facts.append("סומן כאופציונלי ולא נבדק")
+            recs.append(_rec("optional", name, f"לבדוק אם עדיין צריך: {name}", facts))
+    return recs, _r(stated), _r(inferred)
+
+
+def _rising(rows: list[dict]) -> list[dict]:
+    done = [r for r in rows if not r["is_current"] and r["expenses"]["known"]][-RISE_MONTHS:]
+    if len(done) < RISE_MONTHS:
+        return []
+    series = [_cat_amounts(r) for r in done]
+    out = []
+    for key in set().union(*series) - {LOANS}:
+        vals = [m.get(key, 0.0) for m in series]
+        if all(b > a for a, b in zip(vals, vals[1:])) and vals[-1] - vals[0] >= RISE_MIN_TOTAL:
+            out.append(_rec("rising", key, f"{label_of(key)} עולה {RISE_MONTHS} חודשים ברצף",
+                            [" ← ".join(f"₪{v:,.0f}" for v in vals), f"עלייה של ₪{vals[-1] - vals[0]:,.0f} מאז {month_name(done[0]['month'])}"],
+                            vals[-1] - vals[0], "upper_bound"))
+    return out
+
+
+def _spending_recs(rows: list[dict], spikes: list[dict]) -> list[dict]:
+    recs = _rising(rows)
+    for sp in spikes:
+        recs.append(_rec("spike", f"{sp['key']}:{sp['month']}", f"חריגה ב{sp['label']}",
+                         [f"₪{sp['amount']:,.0f} מול רגיל ₪{sp['baseline']:,.0f}", f"חודש: {month_name(sp['month'])}" + (" (עד היום)" if sp["partial"] else "")],
+                         sp["excess"], "upper_bound"))
+    done = [r for r in rows if not r["is_current"] and r["expenses"]["known"]]
+    if done:
+        last = done[-1]
+        total = last["expenses"]["total"] or 0.0
+        cats = _cat_amounts(last)
+        if total > 0 and cats.get(UNCATEGORIZED, 0.0) / total >= UNCATEGORIZED_SHARE:
+            share = cats[UNCATEGORIZED] / total
+            recs.append(_rec("uncategorized", last["month"], "הוצאות לא מסווגות מעוותות את התמונה",
+                             [f"{share * 100:.0f}% מההוצאות ב{month_name(last['month'])} (₪{cats[UNCATEGORIZED]:,.0f}) ללא קטגוריה"]))
+        big = [(v, k) for k, v in cats.items() if k not in (LOANS, UNCATEGORIZED)]
+        if big and total > 0:
+            v, k = max(big)
+            if v / total >= FOCUS_SHARE:
+                recs.append(_rec("focus", k, f"{label_of(k)} היא הקטגוריה הגדולה",
+                                 [f"{v / total * 100:.0f}% מההוצאות ב{month_name(last['month'])} (₪{v:,.0f})"]))
+    return recs
+
+
+def monthly_gap(rows: list[dict]) -> float | None:
+    """The average shortfall over up to GAP_MONTHS latest KNOWN complete months (a surplus month counts as 0). None = no known month."""
+    done = [r for r in rows if not r["is_current"] and r["balance"] is not None][-GAP_MONTHS:]
+    if not done:
+        return None
+    return _r(sum(max(-r["balance"], 0.0) for r in done) / len(done))
+
+
+def recommendations(rows: list[dict], commitments: list[dict] | None) -> dict:
+    """Opportunities to look at, each with the numbers it stands on. Never a command and never summed across kinds: only the savings the owner
+    STATED (and, separately, a cancel decision's inferred monthly cost) are totalled — a rising category or a spike is an upper bound, not a saving."""
+    recs: list[dict] = []
+    stated = inferred = 0.0
+    if commitments is not None:
+        crecs, stated, inferred = _commitment_recs(commitments)
+        recs += crecs
+    recs += _spending_recs(rows, category_spikes(rows))
+    order = {"commitment": 0, "rising": 1, "spike": 2, "optional": 3, "uncategorized": 4, "focus": 5}
+    recs.sort(key=lambda r: (order.get(r["kind"], 9), -(r["amount"] or 0.0), r["title"]))
+    gap = monthly_gap(rows)
+    covered = _r(stated + inferred)
+    return {"items": recs[:RECOMMENDATION_LIMIT], "total": len(recs), "commitments_known": commitments is not None,
+            "summary": {"monthly_gap": gap, "stated_saving": stated, "inferred_saving": inferred,
+                        "covers_gap_pct": (None if not gap else min(100, round(covered / gap * 100)))}}

@@ -348,6 +348,20 @@ def obligation_items(records: list[dict]) -> list[dict]:
     return items
 
 
+def commitment_rows(records: list[dict]) -> list[dict]:
+    """Active obligations with their NAME, for the cashflow recommendations only (never summed into any total)."""
+    from airtable_schema import RecObFields as RF
+    rows = []
+    for rec in records:
+        f = rec.get("fields") or {}
+        if not f.get(RF.ACTIVE):
+            continue
+        rows.append({"name": str(f.get(RF.NAME) or "").strip(), "monthly": calc.monthly_equivalent(f.get(RF.AMOUNT), _sel(f.get(RF.FREQUENCY))),
+                     "review_status": _sel(f.get(RF.REVIEW_STATUS)), "essentiality": _sel(f.get(RF.ESSENTIALITY)),
+                     "saving": calc._num(f.get(RF.POTENTIAL_SAVING))})
+    return rows
+
+
 def obligations_overview(identity) -> dict:
     try:
         return calc.summarize_obligations(obligation_items(my_obligations(identity)))
@@ -805,7 +819,14 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
         raise
     except Exception:
         logger.exception("[fcc] cashflow loans read failed")
-    view = fcc_cashflow.build(sources, expenses, today, months, scheduled)
+    commitments = None                                       # unknown (a failed read) is not "no commitments"
+    try:
+        commitments = commitment_rows(my_obligations(identity))
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] cashflow commitments read failed")
+    view = fcc_cashflow.build(sources, expenses, today, months, scheduled, commitments)
     view["loans_payments_known"] = scheduled is not None
     return view
 

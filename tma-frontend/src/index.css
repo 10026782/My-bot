@@ -3298,3 +3298,5 @@
 .fcc-cf-row--on { border-color: var(--boss-color-accent-readable); }
 .fcc-cf-row--bad strong { color: var(--boss-color-danger, #c0392b); }
 .fcc-cf-row--missing strong { opacity: .7; }
+.fcc-rec { display: grid; gap: var(--boss-space-2); }
+.fcc-rec h3 { margin: 0; }
