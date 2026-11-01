@@ -35,6 +35,8 @@ EXPENSE_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("donations", "תרומות"),
     ("clothing", "ביגוד והנעלה"),
     ("insurance", "ביטוחים"),
+    ("card_fees", "דמי כרטיס"),                  # the owner's: fees that can be negotiated or removed
+    ("fees_interest", "עמלות וריביות"),          # the owner's: bank charges and interest, likewise
     # added (common household categories the owner did not list)
     ("health", "בריאות"),
     ("leisure", "פנאי ובילויים"),

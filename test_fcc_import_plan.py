@@ -36,46 +36,58 @@ def bank_items(rules=RULES):
     return bi.classify(bi.parse_statement(statement(NEWEST_FIRST), "main").rows, rules)
 
 
-def test_only_decided_rows_become_events_with_the_right_sign_category_and_source():
+def test_decided_rows_become_events_with_the_right_sign_category_and_source_and_an_unknown_debit_has_no_category():
     plan = ip.plan_bank(bank_items())
     got = [(e.date.day, e.kind, e.amount, e.category, e.source_name, e.origin) for e in plan.events]
     assert got == [(1, "one_time", 8000.0, None, "עבודת אשתי", "import:bank"), (5, "household_expense", 500.0, "taxes", None, "import:bank"),
-                   (6, "household_expense", -300.0, "taxes", None, "import:bank")]            # the income, the tax, and the VAT refund as a negative expense
+                   (6, "household_expense", -300.0, "taxes", None, "import:bank"),
+                   (8, "household_expense", 100.0, None, None, "import:bank")]            # the income, the tax, the VAT refund as a negative expense, and an UNKNOWN debit with no category yet
     assert all(e.key.startswith("bank:") and e.month == "2026-10" for e in plan.events)
 
 
 def test_what_is_skipped_and_why_nothing_is_written_twice():
     plan = ip.plan_bank(bank_items())
     assert plan.skipped == {"card_settlement": {"count": 1, "total": 3000.0}, "reversal": {"count": 2, "total": 2400.0},
-                            "needs_review": {"count": 1, "total": 700.0}, "needs_classification": {"count": 2, "total": 300.0}}
+                            "needs_review": {"count": 1, "total": 700.0}, "needs_classification": {"count": 1, "total": 200.0}}
     written = {e.key for e in plan.events}
     for c in bank_items():
-        if c.kind in (bi.CARD_SETTLEMENT, bi.REVERSAL, bi.NEEDS_REVIEW, bi.UNKNOWN, bi.INCOME):
-            assert c.row.key not in written                                               # a settlement, a returned charge, a transfer, an unknown, a candidate
+        if c.kind in (bi.CARD_SETTLEMENT, bi.REVERSAL, bi.NEEDS_REVIEW, bi.INCOME):
+            assert c.row.key not in written                                               # a settlement, a returned charge, a transfer, a credit candidate: never
 
 
 def test_the_owner_is_asked_once_per_description_and_per_transfer_row():
     plan = ip.plan_bank(bank_items())
     by = {(r.match, bool(r.row_key)): r for r in plan.pending_rules}
-    assert set(by) == {("חנות לא ידועה", False), ("הפק מזומן-בנקט", False), ("", True)}      # an unknown debit, a cash deposit, ONE row rule for the transfer
+    assert set(by) == {("הפק מזומן-בנקט", False), ("", True)}      # a cash deposit (a credit: never income unasked), ONE row rule for the transfer — the unknown debit is classified on screen
     row_rule = by[("", True)]
     assert (row_rule.applies_to, row_rule.direction, row_rule.example_amount, row_rule.row_key.startswith("bank:")) == ("bank", "credit", 700.0, True)
     again = ip.plan_bank(bank_items(), known_rule_keys=ip.known_rule_keys([
-        {"fields": {CR.MATCH: "חנות לא ידועה"}}, {"fields": {CR.MATCH: "", CR.ROW_KEY: row_rule.row_key}}]))
-    assert {(r.match, bool(r.row_key)) for r in again.pending_rules} == {("הפק מזומן-בנקט", False)}     # already waiting in the table: not added again
+        {"fields": {CR.MATCH: "הפק מזומן-בנקט"}}, {"fields": {CR.MATCH: "", CR.ROW_KEY: row_rule.row_key}}]))
+    assert again.pending_rules == []                                                                      # already waiting in the table: not added again
 
 
 def test_a_second_import_of_the_same_statement_writes_nothing():
     first = ip.plan_bank(bank_items())
     second = ip.plan_bank(bank_items(), existing_keys={e.key for e in first.events})
-    assert second.events == [] and second.skipped["already_imported"] == {"count": 3, "total": 8800.0}
+    assert second.events == [] and second.skipped["already_imported"] == {"count": 4, "total": 8900.0}
 
 
 def test_the_same_description_is_grouped_not_repeated():
-    rows = [row("03/10/2026", "חנות לא ידועה", 30.0, "debit", 70.0), row("02/10/2026", "חנות לא ידועה", 50.0, "debit", 100.0), row("01/10/2026", "x", 150.0, "credit", 150.0)]
+    rows = [row("03/10/2026", "מקור לא ידוע", 30.0, "credit", 250.0), row("02/10/2026", "מקור לא ידוע", 50.0, "credit", 220.0), row("01/10/2026", "x", 170.0, "credit", 170.0)]
     plan = ip.plan_bank(bi.classify(bi.parse_statement(statement(rows), "m").rows))
-    shop = [r for r in plan.pending_rules if r.match == "חנות לא ידועה"]
-    assert len(shop) == 1 and (shop[0].times_seen, shop[0].example_amount, shop[0].last_seen) == (2, 50.0, date(2026, 10, 3))
+    src = [r for r in plan.pending_rules if r.match == "מקור לא ידוע"]
+    assert len(src) == 1 and (src[0].times_seen, src[0].example_amount, src[0].last_seen) == (2, 50.0, date(2026, 10, 3))
+
+
+def test_an_unknown_debit_and_an_unknown_card_purchase_are_written_without_a_category_and_a_card_refund_waits():
+    rows = [row("02/10/2026", "חנות לא ידועה", 30.0, "debit", 70.0), row("01/10/2026", "x", 100.0, "credit", 100.0)]
+    bank = ip.plan_bank(bi.classify(bi.parse_statement(statement(rows), "m").rows))
+    assert [(e.label, e.category, e.amount) for e in bank.events] == [("חנות לא ידועה", None, 30.0)]
+    f = ip.event_fields(bank.events[0])
+    assert f[EF.KIND] == "household_expense" and EF.EXPENSE_CATEGORY not in f and f[EF.RAW_TEXT] == "חנות לא ידועה"
+    assert ip.summarize(bank)["uncategorized"] == {"count": 1, "total": 30.0}
+    card = ip.plan_card(card_items())
+    assert [e.label for e in card.events if e.category is None] == ["תוכנה בע\"מ"] and card.pending_rules == []
 
 
 # ── card ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -86,11 +98,11 @@ def card_items(rules=None):
 def test_card_lines_loans_and_fees_count_on_the_billing_date_and_cash_and_rolling_credit_are_never_written():
     plan = ip.plan_card(card_items())
     got = {e.label: e for e in plan.events}
-    assert set(got) == {"הלוואת אקספרס", "הלוואה מחוץ למסגרת", "כביש חוצה צפון", "ביטוח ישיר חיים"}
+    assert set(got) == {"הלוואת אקספרס", "הלוואה מחוץ למסגרת", "כביש חוצה צפון", "ביטוח ישיר חיים", "תוכנה בע\"מ"}
     assert got["הלוואת אקספרס"].date == date(2026, 10, 10) and got["הלוואת אקספרס"].category == "loans" and got["הלוואת אקספרס"].amount == 52.84      # not March 2026
     assert got["כביש חוצה צפון"].date == date(2026, 9, 27) and got["כביש חוצה צפון"].category == "transport"                                        # a purchase: its own date
     assert plan.skipped["cash_withdrawal"] == {"count": 1, "total": 400.0} and plan.skipped["credit_service"] == {"count": 2, "total": 3761.86}
-    assert {r.match for r in plan.pending_rules} == {"תוכנה בע\"מ"} and plan.pending_rules[0].applies_to == "card"
+    assert got["תוכנה בע\"מ"].category is None and plan.pending_rules == []                                  # a purchase nobody classified: written "לא מסווג"
 
 
 def test_an_owner_rule_turns_an_unknown_merchant_into_an_event_and_installment_purchases_use_the_billing_date():
@@ -114,7 +126,7 @@ def test_merge_keeps_one_copy_of_each_event_and_adds_up_the_skips():
 
 def test_event_rows_have_no_goal_a_negative_refund_the_source_note_and_a_statement_verification():
     plan = ip.plan_bank(bank_items())
-    inc, tax, refund = (ip.event_write(e, "eliyahu") for e in plan.events)
+    inc, tax, refund, _unknown = (ip.event_write(e, "eliyahu") for e in plan.events)
     assert inc["op"] == "post" and inc["table"] == Tables.FIN_EVENTS and EF.GOAL not in inc["fields"] and refund["fields"][EF.AMOUNT] == -300.0
     f = inc["fields"]
     assert f[EF.KIND] == "one_time" and f[EF.NOTE] == "מקור: עבודת אשתי" and f[EF.SOURCE] == "import:bank" and f[EF.VERIFICATION] == "statement"

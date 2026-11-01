@@ -317,8 +317,7 @@ def validate_batch_record(table: str, rec) -> str | None:
         if rec.get("Verification") != "statement":
             return "verification must be statement"
         cat, note = rec.get("Expense Category"), rec.get("Note")
-        if (cat is not None and (kind != "household_expense" or not isinstance(cat, str) or not cat.strip() or len(cat) > 40)) \
-                or (kind == "household_expense" and not cat):
+        if cat is not None and (kind != "household_expense" or not isinstance(cat, str) or not cat.strip() or len(cat) > 40):      # no category = not yet classified (the owner does it on screen)
             return "bad category"
         if note is not None and (kind != "one_time" or not isinstance(note, str) or not note.startswith("מקור: ") or len(note) > 120):
             return "bad note"

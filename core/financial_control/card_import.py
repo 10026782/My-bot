@@ -44,7 +44,7 @@ TOLERANCE = 0.005
 DEFAULT_TYPE_X = 373.0               # the "סוג העסקה" column, when no header row was seen yet
 MERCHANT_MARGIN = 9.0
 NAME_MARGIN = 8.0                    # the merchant column ends here (right of it: the card-at-the-business column, never part of the name)
-FEE_CATEGORY = "עמלות וריבית"
+FEE_CATEGORY = "card_fees"
 SECTOR_CATEGORIES = {"דלק": "transport", "תחבורה": "transport", "רכב ותחבורה": "transport", "ביטוח": "insurance"}   # the issuer's own sector, ONLY an exact match (e.g. "ביטוח ופיננסים" is not guessed)
 
 _DATE = re.compile(r"^(\d{2}/\d{2}/\d{2})(?!\d)")

@@ -19,7 +19,7 @@ export const SKIP_LABEL: Record<string, string> = {
   no_category: "חסרה קטגוריה בכלל",
   no_source: "חסר שם מקור להכנסה",
 };
-export const IMPORT_NOTE = "כל שורה נבנית בשרת מהקובץ ששלחת; נכתבות רק שורות שהוחלטו (עם קטגוריה / מקור מאושר). מה שלא ידוע לא נכתב — הוא נוסף כשורת ״ממתין״ בטבלת Cashflow Rules, ושם אתה מסווג. ייבוא חוזר של אותו דוח לא כותב דבר פעמיים.";
+export const IMPORT_NOTE = "כל שורה נבנית בשרת מהקובץ ששלחת; הוצאה שלא ידועה נכתבת ״לא מסווג״ ואתה מסווג אותה אחת-אחת במסך; הכנסה, החזר והעברה לא נכתבים בלי החלטה שלך (הם נוספים כשורת ״ממתין״ בטבלת Cashflow Rules). ייבוא חוזר של אותו דוח לא כותב דבר פעמיים.";
 
 export interface ImportReview {
   blocked: string[];                  // why nothing can be imported (the statement does not add up ...)
@@ -28,6 +28,7 @@ export interface ImportReview {
   skipped: { key: string; label: string; count: number; total: string }[];
   pending: string[];
   pendingNote: string | null;
+  uncategorizedNote: string | null;
   canImport: boolean;
   confirmLabel: string;
 }
@@ -44,6 +45,7 @@ export function reviewOf(p: FccImportPreview): ImportReview {
     headline: pl.remaining === 0 ? (pl.events > 0 ? "כל השורות שהוחלטו כבר יובאו." : "אין שורות שהוחלטו לייבוא בדוח הזה.")
       : `ייכתבו ${pl.remaining} רישומים${pl.already_imported ? ` (${pl.already_imported} כבר יובאו)` : ""}.`,
     months, skipped, pending: more > 0 ? [...pending, `ועוד ${more}`] : pending,
+    uncategorizedNote: pl.uncategorized && pl.uncategorized.count > 0 ? `${pl.uncategorized.count} מהרישומים (${money(pl.uncategorized.total)}) ייכתבו בלי קטגוריה — תסווג אותם אחת-אחת במסך ״הוצאות לסיווג״.` : null,
     pendingNote: pl.pending_rules > 0 ? `${pl.pending_rules} תיאורים יתווספו לטבלת Cashflow Rules כ״ממתין״${pl.pending_row_rules ? ` (מהם ${pl.pending_row_rules} העברות לבדיקה בודדת)` : ""}.` : null,
     canImport: p.can_import && blocked.length === 0,
     confirmLabel: pl.remaining > 0 ? `אשר ייבוא של ${pl.remaining} רישומים` : "הוסף את התיאורים לסיווג",

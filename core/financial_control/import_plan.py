@@ -2,9 +2,9 @@
 Pure: no I/O, no writes, no network, no model. The plan is data; executing it is a separate, gated step (one review -> אשר, in batches).
 
 Iron rules (every one is a test):
-* **Only decided rows are written.** A bank row is written only if it is an expense WITH a category, a refund WITH a category, or income the owner approved
-  WITH its source (``bank_import.importable``); a card line only if it is an expense with a category (``card_import.importable``). Everything else is
-  skipped and says why.
+* **Decided rows are written with their category; an unclassified OUTFLOW is written WITHOUT one** (a bank debit no rule knows, an itemized card purchase) and
+  the owner classifies it one by one on screen (owner decision 01/11/2026) — it shows as "לא מסווג", never guessed into a category. Income, refunds, and anything that
+  might be a transfer are never written without the owner's explicit decision (``bank_import.importable``). Everything else is skipped and says why.
 * **Never the same money twice.** A bank card-settlement is NEVER written (the card statement carries the merchants); cash withdrawals, rolling-credit lines,
   benefit lines, transfers, returned charges (both halves) and rows marked for review are never written either. A row whose idempotency key already exists is
   skipped (``already_imported``): importing the same statement twice writes nothing the second time.
@@ -129,7 +129,9 @@ def plan_bank(items: list[bi.Classified], existing_keys: set[str] = frozenset(),
             plan.skip("no_category", r.amount)
         elif kind == bi.INCOME_APPROVED:
             plan.skip("no_source", r.amount)
-        else:                                                             # unknown debit / income candidate: waiting for the owner
+        elif kind == bi.UNKNOWN:                                          # an unknown debit is a real outflow: written WITHOUT a category; the owner classifies it on screen
+            plan.events.append(PlannedEvent(r.key, r.date, HOUSEHOLD, r.amount, None, None, r.description, SOURCE_BANK, _month(r.date)))
+        else:                                                             # an income candidate (a credit): waiting for the owner's explicit approval
             plan.skip("needs_classification", r.amount)
             _pending(plan, groups, known_rule_keys, r.description, None, applies_to, r.direction, r.amount, r.date)
     return _finish(plan, groups)
@@ -158,6 +160,9 @@ def plan_card(items: list[ci.ClassifiedCharge], existing_keys: set[str] = frozen
             plan.skip("adjustment", abs(x.charge))
         elif c.kind == ci.EXPENSE:
             plan.skip("no_category", abs(x.charge))
+        elif x.charge > 0:                                                # an itemized purchase nobody classified: written WITHOUT a category, classified on screen
+            day = _card_date(x)
+            plan.events.append(PlannedEvent(x.key, day, HOUSEHOLD, x.charge, None, None, x.merchant, SOURCE_CARD, _month(day)))
         else:
             plan.skip("needs_classification", abs(x.charge))
             _pending(plan, groups, known_rule_keys, x.merchant, None, "card", "debit", abs(x.charge), x.date)
@@ -199,7 +204,9 @@ def summarize(plan: ImportPlan) -> dict:
             m["by_source"][e.source_name or "?"] = round(m["by_source"].get(e.source_name or "?", 0.0) + e.amount, 2)
     for m in months.values():
         m["expenses"], m["income"] = round(m["expenses"], 2), round(m["income"], 2)
+    uncat = [e for e in plan.events if e.kind == HOUSEHOLD and not e.category]
     return {"events": len(plan.events), "months": dict(sorted(months.items())), "skipped": plan.skipped,
+            "uncategorized": {"count": len(uncat), "total": round(sum(e.amount for e in uncat), 2)},
             "pending_rules": len(plan.pending_rules), "pending_row_rules": sum(1 for r in plan.pending_rules if r.row_key)}
 
 

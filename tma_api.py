@@ -4975,6 +4975,78 @@ def fcc_cashflow(identity):
         return jsonify({"error": "internal error"}), 500
 
 
+_FCC_CLASSIFY_SAME_MAX = 10                  # events covered by ONE "the same description" answer per call (each is its own gateway write)
+
+
+def _fcc_classify_payload(identity, skip=frozenset()) -> dict:
+    from core.financial_control import cashflow as fcc_cashflow, service as fcc_service
+    waiting = fcc_service.classify_waiting(identity)
+    view = fcc_service.classify_view(waiting, frozenset(skip))
+    view["categories"] = [{"key": k, "label": v} for k, v in fcc_cashflow.EXPENSE_CATEGORIES]
+    return view
+
+
+@tma_api.route("/api/fcc/classify", methods=["GET"])
+@require_tma_auth
+def fcc_classify_next(identity):
+    """The next imported expense that has no category (largest first), one at a time. Read-only; owner only, 404 for everyone else.
+    ``?skip=id1,id2`` = the ones the owner postponed in this session (stateless)."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    skip = frozenset(x for x in str(request.args.get("skip") or "").split(",") if x.startswith("rec") and len(x) <= 24)
+    try:
+        return jsonify(_fcc_classify_payload(identity, skip))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] classify read failed")
+        return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/classify", methods=["POST"])
+@require_tma_auth
+def fcc_classify_apply(identity):
+    """Body: {"event_id": "rec…", "category": <key or a new category's name>, "apply_same"?: bool}. ONE patch of ONE field (``Expense Category``) of an imported
+    expense that is still uncategorized, through the normal ActionGateway ceremony (same executor as every FCC write). With ``apply_same`` the other waiting
+    rows with the same description get the same category, at most ``_FCC_CLASSIFY_SAME_MAX`` per call (the answer says how many are left). The server
+    chooses the field and the table; the client only names a record and a category."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    from airtable_schema import FinEventFields as EF, Tables
+    from core.financial_control import cashflow as fcc_cashflow, service as fcc_service
+    data = request.get_json(silent=True) or {}
+    event_id = str(data.get("event_id") or "").strip()
+    category = fcc_cashflow.category_key(str(data.get("category") or ""))
+    if not event_id.startswith("rec") or category == fcc_cashflow.UNCATEGORIZED or len(category) > 40:
+        return jsonify({"error": "event_id and category required"}), 400
+    try:
+        waiting = fcc_service.classify_waiting(identity)
+        chosen = next((w for w in waiting if w["id"] == event_id), None)
+        if chosen is None:                                   # not yours / already classified / not an import: answered alike
+            return jsonify({"error": "not found"}), 404
+        targets = [chosen]
+        if data.get("apply_same") is True and chosen["group"]:
+            targets += [w for w in waiting if w["group"] == chosen["group"] and w["id"] != event_id][:_FCC_CLASSIFY_SAME_MAX - 1]
+        done = 0
+        for t in targets:
+            write = {"op": "patch", "table": Tables.FIN_EVENTS, "record_id": t["id"], "fields": {EF.EXPENSE_CATEGORY: category},
+                     "audit_action": "fcc_classify_event", "audit_details": t["id"]}
+            _, response, status = _queue_or_owner_execute("tma_fcc_write", write, identity, "FCC: classify an imported expense")
+            if status >= 300:
+                return jsonify({"state": "partial_failure", "message": "הסיווג לא הושלם — אפשר לנסות שוב.", "done": done}), status
+            done += 1
+        left = [w for w in waiting if w["id"] not in {t["id"] for t in targets}]
+        same_left = sum(1 for w in left if chosen["group"] and w["group"] == chosen["group"])
+        view = fcc_service.classify_view(left)
+        view.update({"state": "done", "done": done, "same_left": same_left, "categories": [{"key": k, "label": v} for k, v in fcc_cashflow.EXPENSE_CATEGORIES]})
+        return jsonify(view)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] classify failed")
+        return jsonify({"error": "internal error"}), 500
+
+
 @tma_api.route("/api/fcc/accounts/forecast", methods=["POST"])
 @require_tma_auth
 def fcc_accounts_forecast(identity):
@@ -5361,7 +5433,7 @@ def fcc_import_preview(identity):
     return jsonify({
         "kind": ctx["kind"], "label": ctx["label"], "parse": ctx["health"], "digest": ctx["digest"] if ctx["health"]["ok"] else None,
         "plan": {"events": summ["events"], "remaining": len(ctx["todo"]), "already_imported": ctx["skipped_existing"], "months": summ["months"], "skipped": summ["skipped"],
-                 "pending_rules": summ["pending_rules"], "pending_row_rules": summ["pending_row_rules"],
+                 "pending_rules": summ["pending_rules"], "uncategorized": summ["uncategorized"], "pending_row_rules": summ["pending_row_rules"],
                  "pending_examples": [{"match": r.match or r.note, "direction": r.direction, "times_seen": r.times_seen, "example_amount": r.example_amount, "row": bool(r.row_key)}
                                       for r in plan.pending_rules[:12]]},
         "can_import": bool(ctx["health"]["ok"] and (ctx["todo"] or plan.pending_rules)), "chunk": _FCC_IMPORT_CHUNK,

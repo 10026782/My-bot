@@ -138,10 +138,11 @@ def test_preview_shows_the_plan_and_writes_nothing(monkeypatch):
     body = r.get_json()
     assert r.status_code == 200 and body["parse"]["ok"] and body["can_import"] and body["digest"]
     plan = body["plan"]
-    assert plan["events"] == 3 and plan["remaining"] == 3 and plan["already_imported"] == 0                       # the income, the tax, the VAT refund
-    assert plan["months"]["2026-10"] == {"expenses": 200.0, "income": 8000.0, "events": 3, "by_category": {"taxes": 200.0}, "by_source": {"עבודת אשתי": 8000.0}}
-    assert plan["skipped"]["card_settlement"]["count"] == 1 and plan["pending_rules"] == 3 and plan["pending_row_rules"] == 1
-    assert {e["match"] for e in plan["pending_examples"]} >= {"חנות לא ידועה", "הפק מזומן-בנקט"}
+    assert plan["events"] == 4 and plan["remaining"] == 4 and plan["already_imported"] == 0                       # the income, the tax, the VAT refund, an unknown debit
+    assert plan["months"]["2026-10"] == {"expenses": 300.0, "income": 8000.0, "events": 4, "by_category": {"taxes": 200.0, "uncategorized": 100.0}, "by_source": {"עבודת אשתי": 8000.0}}
+    assert plan["uncategorized"] == {"count": 1, "total": 100.0}
+    assert plan["skipped"]["card_settlement"]["count"] == 1 and plan["pending_rules"] == 2 and plan["pending_row_rules"] == 1
+    assert {e["match"] for e in plan["pending_examples"]} >= {"הפק מזומן-בנקט"}
     assert CREATED == [] and world.executed == []
 
 
@@ -179,17 +180,17 @@ def test_the_whole_plan_is_written_in_chunks_then_the_pending_rules_and_nothing_
     c = client(monkeypatch)
     digest = post(c, "/api/fcc/import/preview").get_json()["digest"]
     calls = run_all(c, "bank", digest)
-    assert [(x["step"], x["written"]) for x in calls] == [("events", 2), ("events", 1), ("rules", 2), ("rules", 1), ("done", 0)]
+    assert [(x["step"], x["written"]) for x in calls] == [("events", 2), ("events", 2), ("rules", 2), ("done", 0)]
     events = [r for t, r in CREATED if t == Tables.FIN_EVENTS]
     rules = [r for t, r in CREATED if t == Tables.CASHFLOW_RULES]
-    assert len(events) == 3 and len(rules) == 3
+    assert len(events) == 4 and len(rules) == 2
     by = {e["fields"][EF.AMOUNT]: e["fields"] for e in events}
-    assert set(by) == {8000.0, 500.0, -300.0} and EF.GOAL not in by[8000.0] and by[8000.0][EF.NOTE] == "מקור: עבודת אשתי" and by[-300.0][EF.EXPENSE_CATEGORY] == "taxes"
+    assert set(by) == {8000.0, 500.0, -300.0, 100.0} and EF.EXPENSE_CATEGORY not in by[100.0] and EF.GOAL not in by[8000.0] and by[8000.0][EF.NOTE] == "מקור: עבודת אשתי" and by[-300.0][EF.EXPENSE_CATEGORY] == "taxes"
     assert all(e["fields"][EF.SOURCE] == "import:bank" and e["fields"][EF.FINANCIAL_OWNER] == [ELI] for e in events)        # the owner is stamped by the policy
     assert all(r["fields"][CR.STATUS] == "pending" and CR.KIND not in r["fields"] and r["fields"][CR.FINANCIAL_OWNER] == [ELI] for r in rules)
     # a second import of the same statement: nothing to write, the digest is unchanged, no pending rule is asked twice
     again = post(c, "/api/fcc/import/preview").get_json()
-    assert again["plan"]["remaining"] == 0 and again["plan"]["already_imported"] == 3 and again["plan"]["pending_rules"] == 0 and again["digest"] == digest
+    assert again["plan"]["remaining"] == 0 and again["plan"]["already_imported"] == 4 and again["plan"]["pending_rules"] == 0 and again["digest"] == digest
     assert post(c, "/api/fcc/import/run", digest=digest).get_json()["state"] == "done" and len(CREATED) == 6
 
 
@@ -197,7 +198,7 @@ def test_the_run_stops_when_the_rules_or_the_file_change_after_the_review(monkey
     c = client(monkeypatch)
     digest = post(c, "/api/fcc/import/preview").get_json()["digest"]
     assert post(c, "/api/fcc/import/run", digest=digest).status_code == 200
-    DB[Tables.CASHFLOW_RULES].append({"id": "recR2", "fields": {CR.MATCH: "חנות לא ידועה", CR.KIND: "expense", CR.CATEGORY: "living", CR.STATUS: "active", CR.FINANCIAL_OWNER: [ELI]}})
+    DB[Tables.CASHFLOW_RULES].append({"id": "recR2", "fields": {CR.MATCH: "הפק מזומן-בנקט", CR.KIND: "income", CR.CATEGORY: "הכנסה אחרת", CR.DIRECTION: "credit", CR.STATUS: "active", CR.FINANCIAL_OWNER: [ELI]}})
     stale = post(c, "/api/fcc/import/run", digest=digest)
     assert stale.status_code == 409 and "review again" in stale.get_json()["error"]
 
@@ -220,7 +221,7 @@ def test_a_failing_chunk_is_reported_and_the_retry_continues_without_duplicates(
     calls = run_all(c, "bank", digest)
     assert calls[-1]["state"] == "done"
     keys = [e["fields"][EF.IDEMPOTENCY_KEY] for t, e in CREATED if t == Tables.FIN_EVENTS]
-    assert len(keys) == 3 and len(set(keys)) == 3                                                                    # one row per statement row, whatever failed
+    assert len(keys) == 4 and len(set(keys)) == 4                                                                    # one row per statement row, whatever failed
 
 
 def _fail_after_one():
@@ -252,11 +253,11 @@ def _restore_create():
 def test_a_card_statement_is_imported_with_the_billing_date_and_never_the_cash_or_rolling_credit(monkeypatch):
     c = client(monkeypatch)
     pre = post(c, "/api/fcc/import/preview", kind="card").get_json()
-    assert pre["parse"]["ok"] and pre["plan"]["events"] == 4 and pre["plan"]["skipped"]["cash_withdrawal"]["count"] == 1 and pre["plan"]["skipped"]["credit_service"]["count"] == 2
+    assert pre["parse"]["ok"] and pre["plan"]["events"] == 5 and pre["plan"]["uncategorized"]["count"] == 1 and pre["plan"]["skipped"]["cash_withdrawal"]["count"] == 1 and pre["plan"]["skipped"]["credit_service"]["count"] == 2
     run_all(c, "card", pre["digest"])
     events = [r["fields"] for t, r in CREATED if t == Tables.FIN_EVENTS]
     assert {f[EF.SOURCE] for f in events} == {"import:card"} and {f[EF.OCCURRED_AT] for f in events} >= {"2026-10-10", "2026-09-27"}
-    assert sum(f[EF.AMOUNT] for f in events if f[EF.EXPENSE_CATEGORY] == "loans") == 667.07
+    assert sum(f[EF.AMOUNT] for f in events if f.get(EF.EXPENSE_CATEGORY) == "loans") == 667.07
 
 
 # ── the executor and its allow-list ─────────────────────────────────────────────────────────────────────────────

@@ -80,6 +80,7 @@ export function FccImport({ onImported }: { onImported: () => void }) {
                   {review.skipped.map((s) => <div key={s.key} className="fcc-event"><span>{s.label}</span><span>{s.count}</span><span>{s.total}</span></div>)}
                 </div>
               )}
+              {review.uncategorizedNote && <p className="fcc-goal__note">{review.uncategorizedNote}</p>}
               {review.pendingNote && <p className="fcc-goal__note">{review.pendingNote}</p>}
               {review.pending.length > 0 && <ul>{review.pending.map((p) => <li key={p}>{p}</li>)}</ul>}
               {phase.name === "review" && review.canImport && (
