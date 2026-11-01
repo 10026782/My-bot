@@ -745,7 +745,9 @@
         "tma-frontend/src/lib/fccImport.ts",
         "tma-frontend/src/components/FccImport.tsx",
         "tma-frontend/src/lib/fccClassify.ts",
-        "tma-frontend/src/components/FccClassify.tsx"
+        "tma-frontend/src/components/FccClassify.tsx",
+        "tma-frontend/src/lib/fccClassifyRules.ts",
+        "tma-frontend/src/components/FccClassifyRules.tsx"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",
@@ -759,7 +761,8 @@
         "tma-frontend/src/lib/fccCashflow.test.ts",
         "tma-frontend/src/lib/fccImport.test.ts",
         "test_fcc_cashflow.py",
-        "tma-frontend/src/lib/fccClassify.test.ts"
+        "tma-frontend/src/lib/fccClassify.test.ts",
+        "tma-frontend/src/lib/fccClassifyRules.test.ts"
       ],
       "canonical_docs": [],
       "production_evidence": [],
@@ -774,7 +777,8 @@
         "C2 unified net worth (19/10/2026): owner approval \"קבצים חדשים רישום חדש\" (19/10/2026) to create new runtime files and register exactly them under an existing node. Registered here: core/financial_control/net_worth.py, tma-frontend/src/lib/fccNetWorth.ts, tma-frontend/src/components/FccNetWorth.tsx and tests test_fcc_net_worth.py, tma-frontend/src/lib/fccNetWorth.test.ts. net_worth.py is a pure, read-only derivation over already owner-scoped rows (like assets.py/accounts.py), consumed only by the owner-gated GET /api/fcc/net-worth through service.net_worth_view; the frontend files only word server numbers. No I/O, no writes, no schema/flag change, no new authority. No other file or wildcard is approved by this note.",
         "Unified family-wealth screen, step A0 (PR #1358, 19/10/2026): the owner approved the first step of the unified screen (\"מאשר שלב ראשון של המסך המאוחד\", 19/10/2026) and, earlier, new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this registers exactly tma-frontend/src/lib/unifiedScreenTypes.ts — TypeScript types only (no logic, no fetch, no writes, no client-side financial calculation). No other file, no wildcard, no new node, no policy change, no new production authority.",
         "Cashflow tab (owner approved 2026-11-01, \"עם צומת חדש לייבוא\"): the pure monthly model cashflow.py and the display/upload components FccCashflow / FccImport (fccCashflow.ts, fccImport.ts) are registered here; they only transform server payloads and carry no write authority. All statement parsing / import planning / the report scripts are under decision.fcc_statement_import.",
-        "One-by-one classification screen (01/11/2026, owner request): fccClassify.ts / FccClassify.tsx only render the server's queue and send a record id + a category; the field and table of the write are chosen by tma_api.fcc_classify_apply through the normal ActionGateway ceremony. No authority of their own."
+        "One-by-one classification screen (01/11/2026, owner request): fccClassify.ts / FccClassify.tsx only render the server's queue and send a record id + a category; the field and table of the write are chosen by tma_api.fcc_classify_apply through the normal ActionGateway ceremony. No authority of their own.",
+        "Description classification screen (01/11/2026, owner request): fccClassifyRules.ts / FccClassifyRules.tsx only render the server's queue of pending rules and send a rule id + a category; the table, the three fields and the executor validation are the server's (tma_api.fcc_classify_rules_apply, approval_actions.validate_rule_patch). No authority of their own."
       ],
       "extensions": {
         "context_librarian.registration": {
@@ -814,7 +818,8 @@
         "test_fcc_import_api.py",
         "test_fcc_cashflow_rules.py",
         "test_fcc_cashflow_service.py",
-        "test_fcc_classify.py"
+        "test_fcc_classify.py",
+        "test_fcc_classify_rules.py"
       ],
       "canonical_docs": [
         {

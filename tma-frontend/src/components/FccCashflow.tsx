@@ -4,6 +4,7 @@ import type { FccCashflow } from "../types";
 import { DEFAULT_RANGE, RANGES, cashflowModel, recsModel } from "../lib/fccCashflow";
 import { KpiCard } from "./FccKpiCard";
 import { FccClassify } from "./FccClassify";
+import { FccClassifyRules } from "./FccClassifyRules";
 import { FccImport } from "./FccImport";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -126,6 +127,7 @@ export function CashflowSection({ reloadKey }: { reloadKey?: string | null }) {
   }
   return (
     <div className="fcc-stack">
+      <FccClassifyRules summary={state.data.rules_to_classify} onChanged={() => load(range, true)} />
       <FccClassify summary={state.data.to_classify} onChanged={() => load(range, true)} />
       <FccImport onImported={() => load(range, true)} />
       <CashflowView data={state.data} selected={selected} onSelect={setSelected} range={range} onRange={setRange} />

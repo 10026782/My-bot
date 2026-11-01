@@ -203,7 +203,7 @@ _TMA_WRITE_ALLOWED_TABLES = {
     "Ventures",
     "משימות (Tasks)", "Tasks",
     "ProjectsHub",
-    "אנשי קשר (Contacts)", "Contacts", "Financial Goals", "Financial Progress Events", "Recurring Obligations", "Loans", "Funding Plans", "Financial Accounts",  # FCC (Loans = loan close; Financial Accounts = one planned-deposit / expected-return field of the owner's own account): owner-scoped by data_access_policy, record owner re-checked at execution
+    "אנשי קשר (Contacts)", "Contacts", "Financial Goals", "Financial Progress Events", "Recurring Obligations", "Loans", "Funding Plans", "Financial Accounts", "Cashflow Rules",  # FCC (Cashflow Rules: ONLY the owner's one-rule classification patch, see validate_rule_patch); (Loans = loan close; Financial Accounts = one planned-deposit / expected-return field of the owner's own account): owner-scoped by data_access_policy, record owner re-checked at execution
 }
 
 
@@ -345,6 +345,16 @@ def validate_batch_record(table: str, rec) -> str | None:
             return "bad notes"
         return None
     return "table not allowed for a batch"
+
+
+def validate_rule_patch(fields) -> str | None:
+    """None when ``fields`` is exactly the owner's classification of ONE pending rule (Kind expense, Category, Status active); otherwise the reason."""
+    if not isinstance(fields, dict) or set(fields) != {"Kind", "Category", "Status"}:
+        return "a rule patch has exactly Kind, Category and Status"
+    cat = fields.get("Category")
+    if fields.get("Kind") != "expense" or fields.get("Status") != "active" or not isinstance(cat, str) or not cat.strip() or len(cat) > 40:
+        return "a rule patch classifies an expense and activates the rule"
+    return None
 
 
 def _existing_batch_keys(table: str, records: list[dict], identity) -> set[str]:
@@ -519,6 +529,9 @@ def tma_write(
 
     if op == "post_many":                                       # FCC statement import: one contract = one chunk (see the block above)
         return _tma_write_many(table, records, identity, action, requested_by, audit_action, audit_details, _approved_by)
+
+    if table == "Cashflow Rules" and (op != "patch" or validate_rule_patch(fields) is not None):          # the table is writable here ONLY for the classification patch
+        return _tool_result(ok=False, tool="tma_write", user_message="❌ כתיבה לטבלת הכללים מותרת רק לסיווג כלל")
 
     if table not in _TMA_WRITE_ALLOWED_TABLES:
         logger.error("[approval_actions] tma_write: table '%s' not in allowlist — rejected", table)

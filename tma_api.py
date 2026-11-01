@@ -615,6 +615,10 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
             return _reject("batch write refused", code=400)
     elif table not in _TMA_WRITE_ALLOWED_TABLES:
         return _reject(f"table '{table}' is not permitted for TMA writes", code=400)
+    elif table == "Cashflow Rules":                          # the rules table: the owner's one-rule classification patch only
+        from tools.approval_actions import validate_rule_patch  # noqa: PLC0415
+        if not getattr(identity, "is_owner", False) or op != "patch" or not str(payload.get("record_id") or "").startswith("rec") or validate_rule_patch(payload.get("fields")):
+            return _reject("rules write refused", code=400)
 
     # Server-owned fields (op/table/action/requested_by) are applied AFTER
     # the payload spread, so nothing in payload — even a future call site
@@ -5044,6 +5048,59 @@ def fcc_classify_apply(identity):
         return jsonify({"error": "forbidden"}), 403
     except Exception:                                        # noqa: BLE001
         logger.exception("[fcc] classify failed")
+        return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/classify-rules", methods=["GET"])
+@require_tma_auth
+def fcc_classify_rules_next(identity):
+    """The next DESCRIPTION (a pending row of the owner's Cashflow Rules) that still needs a category — the most frequent first. Read-only; owner only."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    from core.financial_control import cashflow as fcc_cashflow, service as fcc_service
+    skip = frozenset(x for x in str(request.args.get("skip") or "").split(",") if x.startswith("rec") and len(x) <= 24)
+    try:
+        view = fcc_service.rules_view(fcc_service.rules_waiting(identity), skip)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] classify-rules read failed")
+        return jsonify({"error": "internal error"}), 500
+    view["categories"] = [{"key": k, "label": v} for k, v in fcc_cashflow.EXPENSE_CATEGORIES]
+    return jsonify(view)
+
+
+@tma_api.route("/api/fcc/classify-rules", methods=["POST"])
+@require_tma_auth
+def fcc_classify_rules_apply(identity):
+    """Body: {"rule_id": "rec…", "category": <key or a new category's name>}. ONE patch of ONE pending rule of the caller's own: Kind=expense, Category,
+    Status=active — through the normal ActionGateway ceremony. The NEXT import then writes every row with that description already classified (and so does
+    every later import). The server chooses the table and the three fields; the executor re-validates them."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    from airtable_schema import CashflowRuleFields as CR, Tables
+    from core.financial_control import cashflow as fcc_cashflow, service as fcc_service
+    data = request.get_json(silent=True) or {}
+    rule_id = str(data.get("rule_id") or "").strip()
+    category = fcc_cashflow.category_key(str(data.get("category") or ""))
+    if not rule_id.startswith("rec") or category == fcc_cashflow.UNCATEGORIZED or len(category) > 40:
+        return jsonify({"error": "rule_id and category required"}), 400
+    try:
+        waiting = fcc_service.rules_waiting(identity)
+        if not any(w["id"] == rule_id for w in waiting):     # not yours / already decided / a credit / a row rule: answered alike
+            return jsonify({"error": "not found"}), 404
+        write = {"op": "patch", "table": Tables.CASHFLOW_RULES, "record_id": rule_id,
+                 "fields": {CR.KIND: "expense", CR.CATEGORY: category, CR.STATUS: "active"}, "audit_action": "fcc_classify_rule", "audit_details": rule_id}
+        _, response, status = _queue_or_owner_execute("tma_fcc_write", write, identity, "FCC: classify a description")
+        if status >= 300:
+            return jsonify({"state": "partial_failure", "message": "הסיווג לא הושלם — אפשר לנסות שוב."}), status
+        view = fcc_service.rules_view([w for w in waiting if w["id"] != rule_id])
+        view.update({"state": "done", "categories": [{"key": k, "label": v} for k, v in fcc_cashflow.EXPENSE_CATEGORIES]})
+        return jsonify(view)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] classify-rules failed")
         return jsonify({"error": "internal error"}), 500
 
 
