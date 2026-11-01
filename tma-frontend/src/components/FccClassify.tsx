@@ -40,7 +40,7 @@ export function FccClassify({ summary, onChanged }: { summary: { total: number; 
   return (
     <section className="fcc-section" aria-labelledby="cf-classify-heading">
       <h2 id="cf-classify-heading" className="fcc-section__heading">הוצאות לסיווג</h2>
-      <p className="fcc-goal__note">{summary.total} הוצאות יובאו בלי קטגוריה ({money(summary.total_amount)}). הן מופיעות כ״לא מסווג״ עד שתסווג.</p>
+      <p className="fcc-goal__note">{summary.total} הוצאות בלי קטגוריה ({money(summary.total_amount)}) — מיובאות או שנרשמו ידנית. הן מופיעות כ״לא מסווג״ עד שתסווג.</p>
       {phase.name === "closed" && (
         <button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={() => void load(skipped)}>סווג הוצאה אחת-אחת</button>
       )}

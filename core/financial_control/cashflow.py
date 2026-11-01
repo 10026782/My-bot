@@ -136,6 +136,7 @@ def _r(v: float) -> float:
 
 
 CUSTOM_MAX_LEN = 40
+LEGACY_LABELS = {"עמלות וריבית": "fees_interest"}      # written as a custom category by the first import (before the built-in one existed): the same thing
 
 
 def category_key(value) -> str:
@@ -153,7 +154,7 @@ def category_key(value) -> str:
     for key, label in EXPENSE_CATEGORIES:
         if v == label:
             return key
-    return v
+    return LEGACY_LABELS.get(v, v)
 
 
 def is_custom(key: str) -> bool:
