@@ -73,8 +73,16 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
     freeText: false,
     hint: "בחרו פעולה — המערכת תשאל רק מה שחסר.",
   },
-  // read-only for now: the tab shows no chips (the composer is hidden on it unless a draft opened elsewhere is still open)
-  cashflow: { title: "עדכון כספי", chips: [], freeText: false, hint: "" },
+  // the two entries the cashflow is made of; same intents and the same draft -> review -> אשר flow as the monthly tab (the server asks the source / category)
+  cashflow: {
+    title: "רישום הכנסה / הוצאה",
+    chips: [
+      { intent: "monthly.income", label: "+ הכנסה" },
+      { intent: "monthly.household_expense", label: "+ הוצאה" },
+    ],
+    freeText: false,
+    hint: "בחרו פעולה — המערכת תשאל מאיזה מקור או לאיזו קטגוריה, ורק אחרי ״אשר ורשום״ זה נשמר.",
+  },
   loans: {
     title: "עדכון הלוואה",
     chips: [

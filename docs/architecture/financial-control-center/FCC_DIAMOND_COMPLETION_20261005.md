@@ -419,3 +419,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Not built yet:** the category / source questions in the write flow (stage 3 — until then new household expenses are uncategorized), recommendations from obligations (stage 4), bank / credit-card history import (stage 5).
 - Verification: `test_fcc_cashflow.py` (17), `test_fcc_cashflow_service.py` (7), `fccCashflow.test.ts`. Device/production: NOT verified.
 
+### Stage 3 (01/11/2026): the write flow asks the category and the income source
+
+- **Expense category:** `fcc_event` gets `expense_category` (-> `Expense Category`), REQUIRED when `kind = household_expense`, asked after the amount. Buttons: the 15 built-in categories, the owner's own categories already in use (own events only, most used first, max 12) and "+ קטגוריה חדשה" (asks a name). Typing a built-in label = clicking it; any other text is a custom category (whitespace collapsed, capped at 40 chars); a command word or a bare number is not a category and the question is asked again. A category that does not exist yet is created by the approval itself and the review says so. Written only for household expenses (never on income / direct-cost / note events).
+- **Income source:** "מקור אחר" is gone. The list ends with **"כללי"** (booked on the total income goal, no name asked; the cashflow reads a note-less total-goal entry as "כללי") and **"+ מקור חדש"** (asks a name, stored as `מקור: <שם>` in the note and grouped by that name in the cashflow). A permanent source is still created with "+ מקור הכנסה". Both choices exist only when there is exactly one total income goal.
+- **TMA:** the "תזרים" tab has "+ הכנסה" / "+ הוצאה" chips (same intents and the same one shared draft as the monthly tab) and refreshes in place after a saved entry.
+- **Not done:** the classifier / agent (`fcc_update`) does not supply a category (the question is asked); recommendations (stage 4); bank / credit-card import (stage 5). Verification: `test_financial_control_center.py` (399), `fccTabs.test.ts`. Device/production: NOT verified.
+

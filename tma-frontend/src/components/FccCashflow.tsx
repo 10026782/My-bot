@@ -80,17 +80,19 @@ export function CashflowView({ data, selected, onSelect, range, onRange }: {
 }
 
 /** The "תזרים" tab: own call, own states (a 404 means the screen is not active for this user). */
-export function CashflowSection() {
+export function CashflowSection({ reloadKey }: { reloadKey?: string | null }) {
   const [range, setRange] = useState<number>(DEFAULT_RANGE);
   const [selected, setSelected] = useState<string>("");
   const [state, setState] = useState<State>({ status: "loading" });
-  const load = useCallback((months: number) => {
-    setState({ status: "loading" });
+  const load = useCallback((months: number, silent = false) => {
+    if (!silent) setState({ status: "loading" });
     fetchFccCashflow(months)
-      .then((data) => { setState({ status: "ok", data }); setSelected(""); })
-      .catch((e: unknown) => setState({ status: "error", code: (e as { status?: number }).status }));
+      .then((data) => { setState({ status: "ok", data }); if (!silent) setSelected(""); })
+      .catch((e: unknown) => { if (!silent) setState({ status: "error", code: (e as { status?: number }).status }); });
   }, []);
   useEffect(() => { load(range); }, [load, range]);
+  // a saved entry (the writer's receipt) refreshes the numbers in place: no loading screen, the selected month stays
+  useEffect(() => { if (reloadKey) load(range, true); }, [reloadKey]);       // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.status === "loading") return <ScreenState state="loading" title="טוען תזרים חודשי" message="מחשב הכנסות והוצאות לפי חודש…" />;
   if (state.status === "error") {

@@ -164,6 +164,13 @@ test("markup: idle monthly shows 8 chips and NO input; loans shows its 12 chips 
   assert.ok(!a.includes("<textarea") && a.includes("עדכון נכס") && a.includes("עדכון שווי") && a.includes("עדכון משכנתא") && a.includes("פעולה הבאה") && a.includes("נכס נמכר"));
 });
 
+test("markup: the cashflow tab has exactly two entry chips (income / expense), no input, and they only name existing intents", () => {
+  const c = composer("cashflow");
+  assert.equal((c.match(/class="fcc-chip /g) || []).length, 2);
+  assert.ok(!c.includes("<textarea") && c.includes("רישום הכנסה / הוצאה") && c.includes("+ הכנסה") && c.includes("+ הוצאה"));
+  assert.equal(COMPOSER.cashflow.chips.map((x) => x.intent).join(), "monthly.income,monthly.household_expense");
+});
+
 test("markup: a review shows the server's text with confirm/edit/cancel and no input; chips are disabled", () => {
   const html = composer("loans", turn("review", "📋 סגירת הלוואה\n• הלוואה: פועלים"));
   assert.ok(html.includes("פועלים") && html.includes("אשר ורשום") && html.includes("ערוך") && html.includes("בטל"));

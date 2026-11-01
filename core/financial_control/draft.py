@@ -172,6 +172,7 @@ INFERENCE: dict[str, dict[str, str]] = {
 }
 
 _CUM = (Condition("calc_method", ("cumulative",)),)
+_HOUSEHOLD = (Condition("kind", ("household_expense",)),)
 _OTHER = (Condition("category", ("other",)),)
 _MONTHLY = (Condition("arrangement", ("monthly",)),)
 _DEADLINE = (Condition("arrangement", ("deadline",)),)
@@ -203,6 +204,8 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
         _f("kind", EF.KIND, InputType.SELECT, required=RequiredMode.ALWAYS, choices=EVENT_KINDS,
            default="one_time"),
         _f("amount", EF.AMOUNT, InputType.CURRENCY, required=RequiredMode.ALWAYS),
+        # a household expense always has a category (cashflow stage 3): a built-in key or the owner's own text (a custom category)
+        _f("expense_category", EF.EXPENSE_CATEGORY, InputType.TEXT, required=RequiredMode.CONDITIONAL, when=_HOUSEHOLD),
         _f("occurred_at", EF.OCCURRED_AT, InputType.DATE, required=RequiredMode.ALWAYS),
         _f("note", EF.NOTE, InputType.TEXT),
     )),
@@ -344,7 +347,7 @@ FCC_CONTRACTS: dict[str, EntityContract] = {
 LABELS = {
     "title": "יעד", "target_amount": "סכום", "category": "קטגוריה", "period_type": "תקופה",
     "calc_method": "שיטת חישוב", "end_date": "תאריך יעד", "start_date": "תאריך התחלה", "date_margin": "מרווח תאריך (± חודשים)",
-    "goal": "יעד", "kind": "סוג", "amount": "סכום", "occurred_at": "תאריך", "note": "הערה", "due_date": "לתאריך",
+    "goal": "יעד", "kind": "סוג", "expense_category": "קטגוריה", "amount": "סכום", "occurred_at": "תאריך", "note": "הערה", "due_date": "לתאריך",
     "name": "התחייבות", "scope": "שייכות", "frequency": "תדירות", "review_status": "החלטה", "saving": "חיסכון חודשי פוטנציאלי",
     "obligation_type": "סוג", "essentiality": "חשיבות", "vendor": "ספק", "next_charge_date": "חיוב הבא", "status": "מצב",
     "balance": "יתרה לסגירה מוקדמת", "payment": "החזר חודשי", "loan_type": "סוג", "rate": "ריבית שנתית", "lender": "מלווה",
@@ -393,6 +396,9 @@ ANSWER_VOCAB["arrangement"].update({"חודשי": "monthly", "פירעון חו�
 
 
 def display_value(field: str, value: Any) -> str:
+    if field == "expense_category":
+        from core.financial_control import cashflow  # noqa: PLC0415 — pure module; a custom category is its own label
+        return cashflow.label_of(cashflow.category_key(value))
     if field in VALUE_LABELS:
         return VALUE_LABELS[field].get(value, str(value))
     if field in ("rate", "expected_return") and isinstance(value, (int, float)):
@@ -500,6 +506,8 @@ def prompt_for(entity: str, field: str, fields: Mapping[str, Any], goal_title: s
         if field == "frequency":
             return "באיזו תדירות? חודשי / רבעוני / שנתי / מותאם"
     noun = record_noun(entity, fields)
+    if field == "expense_category":
+        return "לאיזו קטגוריה שייכת ההוצאה? בחרו, או כתבו שם לקטגוריה חדשה."
     if field == "amount":
         note = str(fields.get("note") or "")
         if noun == "מקור" and note.startswith("מקור: "):         # "מקור אחר": speak of the NAMED source, not the total goal behind it
@@ -621,6 +629,8 @@ def _event_write(values: Mapping[str, Any], ctx: Mapping[str, Any], raw_text: st
     }
     if values.get("note"):
         fields[EF.NOTE] = values["note"]
+    if values.get("kind") == "household_expense" and values.get("expense_category"):
+        fields[EF.EXPENSE_CATEGORY] = values["expense_category"]
     return {"op": "post", "table": Tables.FIN_EVENTS, "fields": fields,
             "audit_action": "fcc_event", "audit_details": key}
 
