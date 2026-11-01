@@ -3,6 +3,7 @@ import { fetchFccCashflow } from "../api";
 import type { FccCashflow } from "../types";
 import { DEFAULT_RANGE, RANGES, cashflowModel, recsModel } from "../lib/fccCashflow";
 import { KpiCard } from "./FccKpiCard";
+import { FccImport } from "./FccImport";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
 
@@ -122,5 +123,10 @@ export function CashflowSection({ reloadKey }: { reloadKey?: string | null }) {
                    action={!hidden && <button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={() => load(range)}>נסו שוב</button>} />
     );
   }
-  return <CashflowView data={state.data} selected={selected} onSelect={setSelected} range={range} onRange={setRange} />;
+  return (
+    <div className="fcc-stack">
+      <FccImport onImported={() => load(range, true)} />
+      <CashflowView data={state.data} selected={selected} onSelect={setSelected} range={range} onRange={setRange} />
+    </div>
+  );
 }

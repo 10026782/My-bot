@@ -56,9 +56,10 @@ _INSTALMENT = re.compile(r"(\d+)\s*מתוך\s*(\d+)")
 @dataclass(frozen=True)
 class Fragment:
     page: int
-    x: float
-    y: float
+    x: float                          # left edge
+    y: float                          # top-down
     text: str
+    x1: float = 0.0                   # right edge (0 = unknown)
 
 
 @dataclass(frozen=True)

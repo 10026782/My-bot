@@ -16,7 +16,6 @@ import argparse
 import csv
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -25,8 +24,9 @@ sys.path.insert(0, str(REPO))
 
 from core.financial_control import bank_import as bi  # noqa: E402
 from core.financial_control import card_import as ci  # noqa: E402
+from core.financial_control import statement_reader as sr  # noqa: E402
 
-_HEBREW_RUN = re.compile(r'[֐-׿][֐-׿"\' .\-]*[֐-׿]|[֐-׿]')
+_HEBREW_RUN = re.compile(r'[֐-׿][֐-׿"\' ./\-]*[֐-׿]|[֐-׿]')
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -38,44 +38,32 @@ def _inside(path: Path, root: Path) -> bool:
 
 
 def logical(text: str) -> str:
-    """The card PDF stores Hebrew in visual order: reverse every Hebrew run (digits / Latin stay as they are)."""
-    return _HEBREW_RUN.sub(lambda m: m.group()[::-1], text)
+    return sr.logical(text)
 
 
 def extract_fragments(pdf: Path) -> list[ci.Fragment]:
     try:
-        from pdfminer.high_level import extract_pages
-        from pdfminer.layout import LAParams, LTTextContainer, LTTextLine
-    except ImportError:
-        raise SystemExit("pdfminer.six is required for card statements: pip install pdfminer.six")
-    out: list[ci.Fragment] = []
-    for number, page in enumerate(extract_pages(str(pdf), laparams=LAParams(line_margin=0.1, char_margin=1.0)), 1):
-        for el in page:
-            if not isinstance(el, LTTextContainer):
-                continue
-            for line in el:
-                if isinstance(line, LTTextLine) and line.get_text().strip():
-                    out.append(ci.Fragment(number, round(line.x0, 1), round(page.height - line.y0, 1), logical(line.get_text().strip())))
-    return out
+        return sr.pdf_fragments(pdf.read_bytes(), visual_hebrew=True)
+    except sr.StatementError as exc:
+        raise SystemExit(str(exc))
 
 
 def table_rows(xlsx: Path) -> list[tuple]:
     try:
-        import openpyxl
-    except ImportError:
-        raise SystemExit("openpyxl is required for Excel exports: pip install openpyxl")
-    ws = openpyxl.load_workbook(str(xlsx), data_only=True).worksheets[0]
-    return [tuple(r) for r in ws.iter_rows(values_only=True)]
+        return sr.xlsx_rows(xlsx.read_bytes())
+    except sr.StatementError as exc:
+        raise SystemExit(str(exc))
 
 
-def bank_text(args) -> str | None:
+def bank_result(args, account_ref="bank"):
+    """The bank statement for the matching: a text file (``pdftotext -layout``) or a PDF read with the same pure-Python reader the server uses."""
     if args.bank_text:
-        return args.bank_text.read_text(encoding="utf-8")
+        return bi.parse_statement(args.bank_text.read_text(encoding="utf-8"), account_ref)
     if args.bank_pdf:
-        out = subprocess.run(["pdftotext", "-layout", str(args.bank_pdf), "-"], capture_output=True, text=True, check=False)
-        if out.returncode != 0:
-            raise SystemExit(f"pdftotext failed ({out.returncode}): {out.stderr.strip()[:200]}")
-        return out.stdout
+        try:
+            return sr.read_bank(args.bank_pdf.read_bytes(), account_ref)
+        except sr.StatementError as exc:
+            raise SystemExit(str(exc))
     return None
 
 
@@ -87,7 +75,7 @@ def build(source, card_ref, owner_items=None, bank=None, account_ref="bank"):
     summ = ci.summarize(items)
     recon = None
     if bank is not None:
-        bank_parsed = bi.parse_statement(bank, account_ref)
+        bank_parsed = bank if isinstance(bank, bi.ParseResult) else bi.parse_statement(bank, account_ref)
         bank_items = bi.classify(bank_parsed.rows, rules)
         recon = {"bank_ok": bank_parsed.ok, **ci.reconcile(bank_items, ci.match_settlements(parsed.sections, bank_items))}
     return parsed, items, summ, recon
@@ -146,7 +134,7 @@ def main(argv=None) -> int:
         print("refusing: --outdir is inside the repository; a statement is private data and must not be committed", file=sys.stderr)
         return 2
     owner = json.loads(args.rules.read_text(encoding="utf-8")) if args.rules else None
-    parsed, items, summ, recon = build((table_rows(args.xlsx) if args.xlsx else extract_fragments(args.pdf)), args.card_ref, owner, bank_text(args))
+    parsed, items, summ, recon = build((table_rows(args.xlsx) if args.xlsx else extract_fragments(args.pdf)), args.card_ref, owner, bank_result(args))
     for p in write_pack(args.outdir, parsed, items, summ, recon):
         print(p)
     print(f"charges={len(parsed.charges)} sections={len(parsed.sections)} ok={parsed.ok} unmapped={summ['unmapped_total']}")

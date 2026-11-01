@@ -8,10 +8,12 @@ writes are never done here (see ``writer`` + the ActionGateway path).
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import json
 import logging
 import re
-import json
-from datetime import date
+from datetime import date, timedelta
 
 from airtable_schema import CashflowRuleFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
@@ -20,11 +22,23 @@ from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_c
 logger = logging.getLogger(__name__)
 
 _MAX_ROWS = 500
+_WIDE_ROWS = 8000                    # statement imports: hundreds of rows a month must not be silently cut at 500
+_ROW_LIMIT = contextvars.ContextVar("fcc_row_limit", default=_MAX_ROWS)
+
+
+@contextlib.contextmanager
+def wide_reads(limit: int = _WIDE_ROWS):
+    """Reads inside the block may return up to ``limit`` rows (only the imported-events reads use it)."""
+    token = _ROW_LIMIT.set(limit)
+    try:
+        yield
+    finally:
+        _ROW_LIMIT.reset(token)
 
 
 def _read(table: str, formula: str = "") -> list[dict]:
     from tools.airtable_read_adapter import list_records
-    return list_records(table, formula, max_records=_MAX_ROWS, paginate=True)
+    return list_records(table, formula, max_records=_ROW_LIMIT.get(), paginate=True)
 
 
 def _record_fields(table: str, record_id: str) -> dict:
@@ -39,8 +53,39 @@ def my_goals(identity) -> list[dict]:
     return sorted(mine, key=lambda r: ((r.get("fields") or {}).get(FinGoalFields.DISPLAY_ORDER) or 9999))
 
 
-def my_events(identity) -> list[dict]:
-    return policy.filter_records(Tables.FIN_EVENTS, _read(Tables.FIN_EVENTS), identity)
+_IMPORT_SOURCE = "import:"          # Financial Progress Events.Source of a row written by a statement import (no goal link)
+
+
+def _is_import(ev: dict) -> bool:
+    return str((ev.get("fields") or {}).get(FinEventFields.SOURCE) or "").startswith(_IMPORT_SOURCE)
+
+
+def my_events(identity, imported: str = "exclude", since: date | None = None) -> list[dict]:
+    """The caller's own events. ``imported``: "exclude" (default — goal progress and every pre-import consumer, unaffected by how many statement rows exist),
+    "only" (statement-import rows, optionally ``since`` a date: they are numerous, so the read is wide and date-limited) or "all"."""
+    F = FinEventFields
+    clauses = []
+    if imported == "exclude":
+        clauses.append(f"NOT(LEFT({{{F.SOURCE}}},{len(_IMPORT_SOURCE)})='{_IMPORT_SOURCE}')")
+    elif imported == "only":
+        clauses.append(f"LEFT({{{F.SOURCE}}},{len(_IMPORT_SOURCE)})='{_IMPORT_SOURCE}'")
+    if since is not None and imported == "only":
+        clauses.append(f"IS_AFTER({{{F.OCCURRED_AT}}},'{(since - timedelta(days=1)).isoformat()}')")
+    formula = clauses[0] if len(clauses) == 1 else f"AND({','.join(clauses)})" if clauses else ""
+    ctx = wide_reads() if imported != "exclude" else contextlib.nullcontext()
+    with ctx:
+        records = policy.filter_records(Tables.FIN_EVENTS, _read(Tables.FIN_EVENTS, formula), identity)
+    if imported == "exclude":                                                  # belt and braces: the formula only saves transfer, this is the rule
+        records = [e for e in records if not _is_import(e)]
+    elif imported == "only":
+        records = [e for e in records if _is_import(e)
+                   and (since is None or (calc._d((e.get("fields") or {}).get(F.OCCURRED_AT)) or date.min) >= since)]
+    return records
+
+
+def existing_import_keys(identity, since: date | None = None) -> set[str]:
+    """Idempotency keys of the caller's own imported rows (a re-imported statement writes nothing)."""
+    return {str((e.get("fields") or {}).get(FinEventFields.IDEMPOTENCY_KEY) or "") for e in my_events(identity, "only", since)} - {""}
 
 
 def _goal_ids_of(event: dict) -> list[str]:
@@ -775,11 +820,7 @@ def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> f
     return fcc_cashflow.Txn(amount if signed else abs(amount), day, category, ev.get("id"), str(f.get(FinEventFields.NOTE) or "").strip())
 
 
-IMPORT_SOURCE_PREFIX = "import:"           # Financial Progress Events.Source of a row written by a statement import (no goal link)
 
-
-def _is_import(ev: dict) -> bool:
-    return str((ev.get("fields") or {}).get(FinEventFields.SOURCE) or "").startswith(IMPORT_SOURCE_PREFIX)
 
 
 def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
@@ -862,7 +903,8 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
     """The owner's monthly cashflow. Owner-scoped reads only; a denied identity propagates. A loans read failure degrades to "no scheduled
     payment" (never to a guessed one)."""
     today = today or date.today()
-    goals, events = my_goals(identity), my_events(identity)
+    window_start = fcc_cashflow.month_windows(today, months)[0][1]
+    goals, events = my_goals(identity), my_events(identity) + my_events(identity, "only", window_start)
     sources, expenses = cashflow_inputs(goals, events, today)
     scheduled = None
     try:
@@ -908,7 +950,7 @@ def overview(identity, today: date | None = None, default_method: str | None = N
         g["id"]: calc.parse_events(by_goal.get(g["id"], []), FinEventFields) for g in goals}
 
     rows, all_events = [], []
-    all_events.extend(calc.parse_events([ev for ev in events if not _goal_ids_of(ev) and _is_import(ev)], FinEventFields))   # imported rows have no goal; the household card still counts them
+    all_events.extend(calc.parse_events(my_events(identity, "only", today.replace(day=1)), FinEventFields))     # imported rows have no goal; the household card still counts the month's
     for goal in goals:
         all_events.extend(own[goal["id"]])
         if goal["id"] not in active_ids:

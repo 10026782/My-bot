@@ -1132,6 +1132,21 @@ export interface FccCashflowRecs {
   items: FccCashflowRec[]; total: number; commitments_known: boolean;
   summary: { monthly_gap: number | null; stated_saving: number; inferred_saving: number; covers_gap_pct: number | null };
 }
+/** Statement import (POST /api/fcc/import/preview | run). The server rebuilds every write from the uploaded file; the client only carries the digest it was shown. */
+export interface FccImportPreview {
+  kind: "bank" | "card"; label: string;
+  parse: { ok: boolean; rows: number; verified: number; problems: string[] };
+  digest: string | null; can_import: boolean; chunk: number;
+  plan: {
+    events: number; remaining: number; already_imported: number;
+    months: Record<string, { expenses: number; income: number; events: number; by_category: Record<string, number>; by_source: Record<string, number> }>;
+    skipped: Record<string, { count: number; total: number }>;
+    pending_rules: number; pending_row_rules: number;
+    pending_examples: { match: string; direction: "debit" | "credit"; times_seen: number; example_amount: number; row: boolean }[];
+  };
+}
+export interface FccImportRun { state: "progress" | "done" | "blocked"; step: "events" | "rules" | "done"; written?: number; remaining?: number; rules_to_add?: number; message?: string }
+
 export interface FccCashflow {
   months: FccCashflowMonth[];
   recommendations: FccCashflowRecs;

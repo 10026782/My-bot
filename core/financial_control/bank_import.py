@@ -121,7 +121,8 @@ def _columns(page: str, previous: tuple[int, int] | None) -> tuple[int, int] | N
 
 
 def parse_statement(text: str, account_ref: str = "") -> ParseResult:
-    """Parse the statement text. ``account_ref`` is a label the CALLER chooses (never the bank account number) that keeps two accounts' keys apart."""
+    """Parse the statement text (``pdftotext -layout``). ``account_ref`` is a label the CALLER chooses (never the bank account number) that keeps two
+    accounts' keys apart."""
     parsed: list[dict] = []
     unparsed: list[str] = []
     cols: tuple[int, int] | None = None
@@ -142,14 +143,67 @@ def parse_statement(text: str, account_ref: str = "") -> ParseResult:
             if cols:
                 column = CREDIT if a.end() <= (cols[0] + cols[1]) / 2 else DEBIT
             desc = body
-            for s, e in sorted([span, (a.start(), a.end())], reverse=True):
-                desc = desc[:s] + " " + desc[e:]
+            for s_, e_ in sorted([span, (a.start(), a.end())], reverse=True):
+                desc = desc[:s_] + " " + desc[e_:]
             desc = re.sub(r"##", " ", desc)
             desc = re.sub(r"\s+", " ", desc).strip()
             parsed.append({"date": _d(dm.group(1)), "desc": desc, "amount": _num(a.group()), "balance": bal, "column": column})
+    return _finalize(parsed, unparsed, account_ref)
+
+
+_FRAG_DATE = re.compile(r"^\d{2}/\d{2}/\d{4}$")
+_FRAG_AMOUNT = re.compile(r"^[\d,]+\.\d{2}$")
+_FRAG_BALANCE = re.compile(r"^(-?)₪\s*(-?)([\d,]+\.\d{2})$|^₪\s*(-?[\d,]+\.\d{2})$")
+_FRAG_ROW_TOLERANCE = 4.0
+
+
+def parse_statement_fragments(fragments, account_ref: str = "") -> ParseResult:
+    """The same statement from PDF text FRAGMENTS (``Fragment(page, x, y, text, x1)`` in logical Hebrew order — what a pure-Python PDF reader gives; no
+    ``pdftotext`` binary needed). A row = fragments within a few points vertically; the credit / debit column of the amount is its right edge against the
+    right edges of the "זכות" / "חובה" header words."""
+    parsed: list[dict] = []
+    unparsed: list[str] = []
+    cols: tuple[float, float] | None = None
+    rows: list[list] = []
+    last = None
+    for f in sorted(fragments, key=lambda f: (f.page, f.y, -f.x)):
+        if last is not None and f.page == last.page and f.y - last.y < _FRAG_ROW_TOLERANCE:
+            rows[-1].append(f)
+        else:
+            rows.append([f])
+        last = f
+    for row in rows:
+        texts = {_BIDI.sub("", f.text).strip(): f for f in row}
+        if "זכות" in texts and "חובה" in texts:                                  # the column header row: where credits / debits end
+            cols = (texts["זכות"].x1 or texts["זכות"].x, texts["חובה"].x1 or texts["חובה"].x)
+            continue
+        dates = [f for f in row if _FRAG_DATE.match(_BIDI.sub("", f.text).strip())]
+        bals = [(f, _FRAG_BALANCE.match(_BIDI.sub("", f.text).strip())) for f in row]
+        bals = [(f, m) for f, m in bals if m]
+        if not dates or not bals:
+            continue
+        amounts = [f for f in row if _FRAG_AMOUNT.match(_BIDI.sub("", f.text).strip())]
+        label = " ".join(f.text.strip() for f in sorted(row, key=lambda f: -f.x))[:80]
+        if len(dates) != 1 or len(bals) != 1 or len(amounts) != 1:
+            unparsed.append(label)
+            continue
+        bf, bm = bals[0]
+        balance = (_num(bm.group(3)) * (-1 if (bm.group(1) or bm.group(2)) else 1)) if bm.group(3) is not None else _num(bm.group(4))
+        a = amounts[0]
+        column = None
+        if cols:
+            right = a.x1 or a.x
+            column = CREDIT if abs(right - cols[0]) <= abs(right - cols[1]) else DEBIT
+        used = {id(dates[0]), id(bf), id(a)}
+        desc = " ".join(f.text.strip() for f in sorted(row, key=lambda f: -f.x) if id(f) not in used and f.text.strip() not in ("##",))
+        desc = re.sub(r"\s+", " ", _BIDI.sub("", desc)).strip()
+        parsed.append({"date": _d(_BIDI.sub("", dates[0].text).strip()), "desc": desc, "amount": _num(a.text.strip()), "balance": balance, "column": column})
+    return _finalize(parsed, unparsed, account_ref)
+
+
+def _finalize(parsed: list[dict], unparsed: list[str], account_ref: str) -> ParseResult:
     if not parsed:
         return ParseResult([], unparsed, None, ok=False, summary={"rows": 0, "unparsed": len(unparsed)})
-
     descending = parsed[0]["date"] >= parsed[-1]["date"]
     n = len(parsed)
     rows: list[BankRow] = []

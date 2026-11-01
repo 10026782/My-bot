@@ -1,4 +1,4 @@
-import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
+import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -454,6 +454,21 @@ export async function fetchFccCashflow(months = 6): Promise<FccCashflow> {
   }
   return r.json() as Promise<FccCashflow>;
 }
+
+/** Statement import — multipart: the file never leaves the server's memory and is re-sent with each step (the server rebuilds the writes from it). */
+async function importCall<T>(path: string, form: FormData): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: form });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const error = new Error((body as { error?: string; message?: string }).error ?? (body as { message?: string }).message ?? `API ${r.status}`) as Error & { status?: number; body?: unknown };
+    error.status = r.status;
+    error.body = body;
+    throw error;
+  }
+  return body as T;
+}
+export const postFccImportPreview = (form: FormData): Promise<FccImportPreview> => importCall<FccImportPreview>("/api/fcc/import/preview", form);
+export const postFccImportRun = (form: FormData): Promise<FccImportRun> => importCall<FccImportRun>("/api/fcc/import/run", form);
 
 /** Per-account + consolidated forecast. The body carries only the assumptions typed on the screen; starting values come from the server. */
 export async function postFccAccountsForecast(params: FccForecastParams): Promise<FccAccountsForecast> {

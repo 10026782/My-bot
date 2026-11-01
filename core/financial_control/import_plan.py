@@ -16,6 +16,7 @@ Iron rules (every one is a test):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -66,6 +67,14 @@ class ImportPlan:
         s["total"] = round(s["total"] + amount, 2)
 
 
+_LONG_NUMBER = re.compile(r"(?<!\d)\d(?:[ \-]{0,3}\d){7,}(?!\d)")        # the same shape the personal-data guard refuses (8+ digits, even grouped)
+
+
+def mask_numbers(text: str) -> str:
+    """A description may carry a full account / card / reference number: it is never copied into the owner's tables."""
+    return _LONG_NUMBER.sub("#", text or "")
+
+
 def _month(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
@@ -75,11 +84,11 @@ def _pending(plan: ImportPlan, groups: dict, norm_known: set[str], match: str, r
     if row_key:
         if row_key in norm_known:
             return
-    elif bi.normalize(match) in norm_known:
+    elif bi.normalize(match) in norm_known or bi.normalize(mask_numbers(match)) in norm_known:        # the table keeps the MASKED text
         return
     g = groups.get(ident)
     if g is None:
-        groups[ident] = {"match": "" if row_key else match, "row_key": row_key, "applies_to": applies_to, "direction": direction, "n": 1, "last": day, "amount": amount, "note": note or match}
+        groups[ident] = {"match": "" if row_key else mask_numbers(match), "row_key": row_key, "applies_to": applies_to, "direction": direction, "n": 1, "last": day, "amount": amount, "note": mask_numbers(note or match)}
     else:
         g["n"] += 1
         g["last"] = max(g["last"], day)
@@ -200,7 +209,7 @@ def event_fields(e: PlannedEvent, user_id: str = "") -> dict:
     ledger (``Financial Owner``) is stamped by the access policy at execution."""
     from airtable_schema import FinEventFields as EF  # noqa: PLC0415
     f = {EF.KIND: e.kind, EF.AMOUNT: e.amount, EF.OCCURRED_AT: e.date.isoformat(), EF.RECORDED_BY: user_id, EF.SOURCE: e.origin, EF.SOURCE_REF: e.key,
-         EF.IDEMPOTENCY_KEY: e.key, EF.RAW_TEXT: e.label[:200], EF.VERIFICATION: VERIFICATION}
+         EF.IDEMPOTENCY_KEY: e.key, EF.RAW_TEXT: mask_numbers(e.label)[:200], EF.VERIFICATION: VERIFICATION}
     if e.kind == HOUSEHOLD and e.category:
         f[EF.EXPENSE_CATEGORY] = e.category
     if e.kind == ONE_TIME and e.source_name:

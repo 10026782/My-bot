@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -24,6 +23,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from core.financial_control import bank_import as bi  # noqa: E402
+from core.financial_control import statement_reader as sr  # noqa: E402
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -34,15 +34,17 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def pdf_text(pdf: Path) -> str:
-    out = subprocess.run(["pdftotext", "-layout", str(pdf), "-"], capture_output=True, text=True, check=False)
-    if out.returncode != 0:
-        raise SystemExit(f"pdftotext failed ({out.returncode}): {out.stderr.strip()[:200]}")
-    return out.stdout
+def read_parsed(pdf: Path, account_ref: str) -> bi.ParseResult:
+    """The statement PDF read with the same pure-Python reader the server uses (no pdftotext binary needed)."""
+    try:
+        return sr.read_bank(pdf.read_bytes(), account_ref)
+    except sr.StatementError as exc:
+        raise SystemExit(str(exc))
 
 
-def report(text: str, account_ref: str, owner_items=None) -> tuple[bi.ParseResult, list[bi.Classified], dict]:
-    parsed = bi.parse_statement(text, account_ref)
+def report(source, account_ref: str, owner_items=None) -> tuple[bi.ParseResult, list[bi.Classified], dict]:
+    """``source``: the statement text (``pdftotext -layout``) or an already parsed ``ParseResult``."""
+    parsed = source if isinstance(source, bi.ParseResult) else bi.parse_statement(source, account_ref)
     items = bi.classify(parsed.rows, bi.owner_rules_from(owner_items))
     return parsed, items, bi.summarize(items)
 
@@ -108,9 +110,9 @@ def main(argv=None) -> int:
     if _inside(args.outdir, REPO):
         print("refusing: --outdir is inside the repository; a statement is private data and must not be committed", file=sys.stderr)
         return 2
-    text = pdf_text(args.pdf) if args.pdf else args.text.read_text(encoding="utf-8")
+    source = read_parsed(args.pdf, args.account_ref) if args.pdf else args.text.read_text(encoding="utf-8")
     owner = json.loads(args.rules.read_text(encoding="utf-8")) if args.rules else None
-    parsed, items, summ = report(text, args.account_ref, owner)
+    parsed, items, summ = report(source, args.account_ref, owner)
     for p in write_pack(args.outdir, parsed, items, summ):
         print(p)
     print(f"rows={parsed.summary.get('rows', 0)} ok={parsed.ok} unmapped={summ['unmapped_total']}")
