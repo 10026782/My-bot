@@ -206,7 +206,7 @@ BUILTIN_RULES: tuple[Rule, ...] = (
     # a charge the bank returned
     _r("החזר חיוב", REVERSAL, direction=CREDIT),
     # loans
-    _r("משכנתא", EXPENSE, "loans", DEBIT), _r("הלואה", EXPENSE, "loans", DEBIT), _r("הלו רבית", EXPENSE, "loans", DEBIT),
+    _r("משכנתא", EXPENSE, "loans", DEBIT), _r("הלואה", EXPENSE, "loans", DEBIT), _r("הלוואה", EXPENSE, "loans", DEBIT), _r("הלו רבית", EXPENSE, "loans", DEBIT),
     # taxes and levies
     _r("מעמ", EXPENSE, "taxes", DEBIT), _r("ביטוח לאומי", EXPENSE, "taxes", DEBIT), _r("עיריית", EXPENSE, "taxes", DEBIT), _r("מס הכנסה", EXPENSE, "taxes", DEBIT),
     _r("רשות המסים", EXPENSE, "taxes", DEBIT), _r("ארנונה", EXPENSE, "taxes", DEBIT),

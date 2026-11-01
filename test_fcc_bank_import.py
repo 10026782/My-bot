@@ -127,6 +127,7 @@ def test_classification_builtin_rules_use_token_boundaries_and_direction():
     mk = lambda d, side: bi.BankRow(date(2026, 10, 1), d, 10.0, side, 0.0, True)
     assert bi.classify_row(mk("מע\"מ", "debit")).category == "taxes" and bi.classify_row(mk("מכס ומע\"מ", "credit")).kind == bi.INCOME
     assert bi.classify_row(mk("מעמדות", "debit")).kind == bi.UNKNOWN                                          # a rule never matches inside a longer word
+    assert bi.classify_row(mk('הו"ק הלוואה', "debit")).category == "loans" and bi.classify_row(mk('הו"ק הלואה קרן', "debit")).category == "loans"   # both spellings
     assert bi.classify_row(mk("ביטוח לאומי", "credit")).category == "קצבאות" and bi.classify_row(mk("ביטוח לאומי", "debit")).category == "taxes"
     # owner decision: a mobile transfer is NOT assumed to be the owner's own account — a credit is only a candidate, a debit is unknown
     assert bi.classify_row(mk("העברה-נייד", "credit")).kind == bi.INCOME and bi.classify_row(mk("העברה-נייד", "debit")).kind == bi.UNKNOWN
