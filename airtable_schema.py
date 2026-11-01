@@ -945,6 +945,9 @@ class FinEventFields:
     ACCOUNT         = "Account"           # link -> Financial Accounts (single record, enforced in data_access_policy)
     COUNTER_ACCOUNT = "Counter Account"   # link -> Financial Accounts (transfer destination; single record)
     VERIFICATION    = "Verification"      # singleSelect self_reported|statement|bank_or_fund_confirmed
+    # Cashflow (live 01/11/2026, owner-approved): singleLineText (NOT a select, so the owner can add categories without a schema change).
+    # A built-in category key (core.financial_control.cashflow.EXPENSE_CATEGORIES) or a custom name; empty = uncategorized.
+    EXPENSE_CATEGORY = "Expense Category"
 
 
 class FinAccountFields:

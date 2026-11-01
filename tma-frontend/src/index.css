@@ -3288,3 +3288,13 @@
 .fw-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--boss-color-border); color: var(--boss-color-text-muted); }
 .fw-add { display: flex; flex-wrap: wrap; gap: 6px; }
 .fw-option-form { display: grid; gap: 8px; }
+
+/* ── FCC cashflow tab ───────────────────────────────────────────────────────────────────────────────────────────── */
+.fcc-cf-cat { display: grid; gap: var(--boss-space-2); padding: var(--boss-space-3) var(--boss-space-4); }
+.fcc-cf-cat__line { display: flex; align-items: center; justify-content: space-between; gap: var(--boss-space-3); }
+.fcc-cf-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--boss-space-2) var(--boss-space-3); text-align: start; width: 100%;
+  padding: var(--boss-space-3) var(--boss-space-4); border: 1px solid var(--boss-color-border); border-radius: var(--boss-radius-md, 12px); background: transparent; color: inherit; }
+.fcc-cf-row__month { grid-column: 1 / -1; font-weight: 600; }
+.fcc-cf-row--on { border-color: var(--boss-color-accent-readable); }
+.fcc-cf-row--bad strong { color: var(--boss-color-danger, #c0392b); }
+.fcc-cf-row--missing strong { opacity: .7; }

@@ -11,6 +11,7 @@ Iron rules (same family as ``loans`` / ``net_worth``):
 * **הלוואות הן הוצאה** (קטגוריה ``loans``): חיוב שנרשם בפועל באותו חודש גובר; רק כשאין חיוב רשום וזה החודש הנוכחי נכנס ההחזר
   החודשי המתוכנן מטבלת ``Loans`` — מסומן ``basis="scheduled"`` (הערכה), ולעולם לא בנוסף לחיוב רשום.
 * מקור הכנסה שאינו קבוע נקרא ``GENERAL_SOURCE`` ("כללי") — לא "אחר".
+* קטגוריה מותאמת: טקסט לא ריק שאינו ברשימה הקבועה הוא קטגוריה שהבעלים הוסיף (המפתח = התווית); ריק = ``UNCATEGORIZED``.
 * סכום הוצאה חיובי = הוצאה, שלילי = זיכוי/החזר (מקטין את הקטגוריה).
 """
 
@@ -112,23 +113,35 @@ def _r(v: float) -> float:
     return round(v, 2)
 
 
+CUSTOM_MAX_LEN = 40
+
+
 def category_key(value) -> str:
-    """Known category key -> itself; a Hebrew label -> its key; anything else (None, unknown) -> UNCATEGORIZED. Never guessed."""
+    """A built-in key -> itself; a built-in Hebrew label -> its key; empty/missing -> UNCATEGORIZED (never guessed into a category);
+    any other non-empty text is a CUSTOM category the owner added (its key and label are that text, whitespace collapsed, capped)."""
     if isinstance(value, dict):
         value = value.get("name")
     if not isinstance(value, str):
         return UNCATEGORIZED
-    v = value.strip()
+    v = " ".join(value.split())[:CUSTOM_MAX_LEN]
+    if not v or v.casefold() in (UNCATEGORIZED, UNCATEGORIZED_LABEL):
+        return UNCATEGORIZED
     if v in CATEGORY_LABEL:
         return v
     for key, label in EXPENSE_CATEGORIES:
         if v == label:
             return key
-    return UNCATEGORIZED
+    return v
+
+
+def is_custom(key: str) -> bool:
+    return key != UNCATEGORIZED and key not in CATEGORY_LABEL
 
 
 def label_of(key: str) -> str:
-    return CATEGORY_LABEL.get(key, UNCATEGORIZED_LABEL)
+    if key == UNCATEGORIZED:
+        return UNCATEGORIZED_LABEL
+    return CATEGORY_LABEL.get(key, key)             # a custom category is its own label
 
 
 # ── one month ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -162,8 +175,9 @@ def _expense_month(txns: list[Txn], start: date, end: date, today: date, loans_s
         by_cat[LOANS] = by_cat.get(LOANS, 0.0) + loans_scheduled   # current month only; never on top of a recorded loan charge
         loans_basis = "scheduled"
     known = bool(by_cat)
-    order = [k for k, _ in EXPENSE_CATEGORIES] + [UNCATEGORIZED]
+    order = ([k for k, _ in EXPENSE_CATEGORIES] + sorted(k for k in by_cat if is_custom(k)) + [UNCATEGORIZED])
     cats = [{"key": k, "label": label_of(k), "amount": _r(by_cat[k]),
+             **({"custom": True} if is_custom(k) else {}),
              **({"basis": loans_basis} if k == LOANS and loans_basis else {})} for k in order if k in by_cat]
     return {"known": known, "count": count, "categories": cats, "total": _r(sum(by_cat.values())) if known else None}
 
@@ -193,7 +207,9 @@ def build(income_sources: list[IncomeSource], expenses: list[Txn], today: date, 
                      "shortfall": _r(max(-balance, 0.0)) if balance is not None else None,
                      "surplus": _r(max(balance, 0.0)) if balance is not None else None,
                      "missing": missing})
-    return {"months": rows, "categories": [{"key": k, "label": v} for k, v in EXPENSE_CATEGORIES],
+    custom = sorted({category_key(t.category) for t in expenses if is_custom(category_key(t.category))})
+    return {"months": rows,
+            "categories": [{"key": k, "label": v} for k, v in EXPENSE_CATEGORIES] + [{"key": k, "label": k, "custom": True} for k in custom],
             "insights": insights(rows, expenses, today), "thresholds": THRESHOLDS, "as_of": today.isoformat()}
 
 

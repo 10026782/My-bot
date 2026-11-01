@@ -15,7 +15,7 @@ from datetime import date
 
 from airtable_schema import FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import assets as fcc_assets, calc, loans as fcc_loans
+from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, loans as fcc_loans
 
 logger = logging.getLogger(__name__)
 
@@ -709,6 +709,105 @@ def funding_inputs(identity, today: date | None = None) -> dict:
         "savings_release": ov.get("savings_release"), "monthly_cash_improvement": ov.get("monthly_cash_improvement"),
         "saved_plans": chosen_plan_snapshots_for_funding(identity),
     }
+
+
+# ── Monthly cashflow (income by source vs. expenses by category) — read-only ─────────────────────────────────────────
+_SOURCE_NOTE = re.compile(r"^\s*מקור\s*:\s*(.+?)\s*$")        # an income booked on the total goal as "מקור אחר": the name is in the note
+
+
+def _event_txn(ev: dict, category: str | None = None) -> fcc_cashflow.Txn | None:
+    f = ev.get("fields") or {}
+    day, amount = calc._d(f.get(FinEventFields.OCCURRED_AT)), calc._num(f.get(FinEventFields.AMOUNT))
+    if day is None or amount is None or f.get(FinEventFields.SUPERSEDED_BY):
+        return None
+    return fcc_cashflow.Txn(abs(amount), day, category, ev.get("id"), str(f.get(FinEventFields.NOTE) or "").strip())
+
+
+def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
+    """Owner-scoped goals + events (already policy-filtered by the caller) -> cashflow model inputs. Pure over its arguments.
+
+    * income goals: a source goal (it has a parent) or a goal with no sources of its own is a source by its title; the events booked
+      directly on a TOTAL goal that has sources are "כללי" unless the note names the source (``מקור: <שם>``);
+    * ``fixed_income`` goals are standing monthly sources at their effective target (a recorded entry replaces it, never adds);
+    * expenses are the ``household_expense`` events with their ``Expense Category`` (empty = uncategorized)."""
+    by_goal: dict[str, list[dict]] = {}
+    for ev in events:
+        for gid in _goal_ids_of(ev):
+            by_goal.setdefault(gid, []).append(ev)
+    parents = {calc.parent_goal_id(g.get("fields") or {}, FinGoalFields) for g in goals} - {None}
+
+    gross: dict[str, list] = {}
+    costs: dict[str, list] = {}
+    kinds: dict[str, str] = {}
+    standing: dict[str, tuple[float, date | None]] = {}
+
+    def add(name: str, kind: str, bucket: dict, txn):
+        kinds.setdefault(name, kind)
+        bucket.setdefault(name, []).append(txn)
+
+    for g in goals:
+        gf = g.get("fields") or {}
+        fixed_goal = _raw_category(gf.get(FinGoalFields.CATEGORY)) == FIXED_INCOME_CATEGORY
+        income_goal = _category_key(gf.get(FinGoalFields.CATEGORY)) == "income"
+        title = str(gf.get(FinGoalFields.TITLE) or "").strip() or fcc_cashflow.GENERAL_SOURCE
+        mine = by_goal.get(g["id"], [])
+        if fixed_goal:
+            base = calc._num(gf.get(FinGoalFields.TARGET_AMOUNT))
+            target = calc.effective_target(base, calc.parse_events(mine, FinEventFields), today)
+            if target:
+                standing[title] = (float(target), calc._d(gf.get(FinGoalFields.START_DATE)))
+            kinds.setdefault(title, fcc_cashflow.FIXED)
+        elif not income_goal:
+            continue
+        is_total = g["id"] in parents
+        for ev in mine:
+            kind = _sel((ev.get("fields") or {}).get(FinEventFields.KIND))
+            if kind not in (calc.ONE_TIME, calc.DIRECT_COST):
+                continue
+            txn = _event_txn(ev)
+            if txn is None:
+                continue
+            name, skind = title, (fcc_cashflow.FIXED if fixed_goal else fcc_cashflow.VARIABLE)
+            if is_total:
+                m = _SOURCE_NOTE.match(txn.label or "")
+                name, skind = (m.group(1), fcc_cashflow.VARIABLE) if m else (fcc_cashflow.GENERAL_SOURCE, fcc_cashflow.GENERAL)
+            add(name, skind, gross if kind == calc.ONE_TIME else costs, txn)
+
+    sources = []
+    for name in sorted(set(gross) | set(costs) | set(standing), key=lambda n: (kinds.get(n) != fcc_cashflow.FIXED, n)):
+        fixed = standing.get(name)
+        sources.append(fcc_cashflow.IncomeSource(
+            name, kinds.get(name, fcc_cashflow.VARIABLE), tuple(gross.get(name, ())), tuple(costs.get(name, ())),
+            fixed[0] if fixed else None, fixed[1] if fixed else None))
+
+    expenses = []
+    for ev in events:
+        f = ev.get("fields") or {}
+        if _sel(f.get(FinEventFields.KIND)) != calc.HOUSEHOLD_EXPENSE:
+            continue
+        txn = _event_txn(ev, _sel(f.get(FinEventFields.EXPENSE_CATEGORY)))
+        if txn is not None:
+            expenses.append(txn)
+    return sources, expenses
+
+
+def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
+    """The owner's monthly cashflow. Owner-scoped reads only; a denied identity propagates. A loans read failure degrades to "no scheduled
+    payment" (never to a guessed one)."""
+    today = today or date.today()
+    goals, events = my_goals(identity), my_events(identity)
+    sources, expenses = cashflow_inputs(goals, events, today)
+    scheduled = None
+    try:
+        summary = loans_overview(identity, today)["summary"]
+        scheduled = summary["total_monthly_payments"] if summary["total_active_loans"] else None
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] cashflow loans read failed")
+    view = fcc_cashflow.build(sources, expenses, today, months, scheduled)
+    view["loans_payments_known"] = scheduled is not None
+    return view
 
 
 def overview(identity, today: date | None = None, default_method: str | None = None) -> dict:

@@ -2,10 +2,11 @@
 // module's memory (i.e. while the app stays open); a fresh open of the app always starts on "התנהלות חודשית".
 import type { FccTurn } from "../types";
 
-export type FccTabKey = "monthly" | "loans" | "assets";
+export type FccTabKey = "monthly" | "cashflow" | "loans" | "assets";
 
 export const FCC_TABS: { key: FccTabKey; label: string }[] = [
   { key: "monthly", label: "התנהלות חודשית" },
+  { key: "cashflow", label: "תזרים" },
   { key: "loans", label: "הלוואות וחוב" },
   { key: "assets", label: "נכסים והון" },
 ];
@@ -72,6 +73,8 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
     freeText: false,
     hint: "בחרו פעולה — המערכת תשאל רק מה שחסר.",
   },
+  // read-only for now: the tab shows no chips (the composer is hidden on it unless a draft opened elsewhere is still open)
+  cashflow: { title: "עדכון כספי", chips: [], freeText: false, hint: "" },
   loans: {
     title: "עדכון הלוואה",
     chips: [

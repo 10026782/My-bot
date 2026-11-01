@@ -38,7 +38,9 @@ def test_category_list_has_owner_categories_and_keys_resolve():
         assert want in labels
     assert cf.category_key("מחייה") == "living" and cf.category_key("living") == "living"
     assert cf.category_key({"name": "transport"}) == "transport"
-    assert cf.category_key("???") == cf.UNCATEGORIZED and cf.category_key(None) == cf.UNCATEGORIZED
+    assert cf.category_key(None) == cf.UNCATEGORIZED and cf.category_key("  ") == cf.UNCATEGORIZED and cf.category_key("לא מסווג") == cf.UNCATEGORIZED
+    assert cf.category_key("  חיות   מחמד ") == "חיות מחמד" and cf.is_custom("חיות מחמד") and not cf.is_custom("living")   # owner-added category
+    assert len(cf.category_key("x" * 100)) == cf.CUSTOM_MAX_LEN
 
 
 def test_income_by_source_standing_recorded_and_general():
@@ -74,9 +76,11 @@ def test_expenses_by_category_uncategorized_apart_and_refund_reduces():
     inc = IncomeSource("x", gross=(T(9000, 2026, 9, 1),))
     sep = row(cf.build([inc], ex, TODAY, 2), "2026-09")
     cats = {c["key"]: c["amount"] for c in sep["expenses"]["categories"]}
-    assert cats == {"living": 1200.0, "transport": 250.0, "uncategorized": 130.0}
+    assert cats == {"living": 1200.0, "transport": 250.0, "bogus": 40.0, "uncategorized": 90.0}      # unknown text = a custom category, empty = uncategorized
     assert sep["expenses"]["total"] == 1580.0 and sep["balance"] == 7420.0 and sep["surplus"] == 7420.0 and sep["shortfall"] == 0.0
-    assert [c["key"] for c in sep["expenses"]["categories"]] == ["living", "transport", "uncategorized"]   # fixed display order
+    assert [c["key"] for c in sep["expenses"]["categories"]] == ["living", "transport", "bogus", "uncategorized"]   # built-ins, custom, uncategorized
+    assert next(c for c in sep["expenses"]["categories"] if c["key"] == "bogus")["custom"] is True
+    assert {"key": "bogus", "label": "bogus", "custom": True} in cf.build([inc], ex, TODAY, 2)["categories"]
 
 
 def test_shortfall_when_expenses_exceed_income():

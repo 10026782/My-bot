@@ -4882,6 +4882,7 @@ def _fcc_build_error(label: str):
 @tma_api.route("/api/fcc/accounts/forecast", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/pace", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/net-worth", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/cashflow", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/save", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/followup", methods=["OPTIONS"])
@@ -4938,6 +4939,30 @@ def fcc_net_worth(identity):
         return jsonify({"error": "forbidden"}), 403
     except Exception:                                        # noqa: BLE001 — never leak internals
         logger.exception("[fcc] net_worth_view failed")
+        return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/cashflow", methods=["GET"])
+@require_tma_auth
+def fcc_cashflow(identity):
+    """Monthly cashflow: income by source vs. expenses by category, balance, month-over-month change, anomalies (read-only). Same gate as
+    /api/fcc/net-worth: flag AND canary AND owner, 404 (not 403) for everyone else. ``?months=`` 1..36 (default 6). No write path, no
+    financial arithmetic in the client."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    try:
+        months = int(request.args.get("months", 6))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid months"}), 400
+    if not 1 <= months <= 36:
+        return jsonify({"error": "invalid months"}), 400
+    from core.financial_control import service as fcc_service
+    try:
+        return jsonify(fcc_service.cashflow_view(identity, months=months))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001 — never leak internals
+        logger.exception("[fcc] cashflow_view failed")
         return jsonify({"error": "internal error"}), 500
 
 

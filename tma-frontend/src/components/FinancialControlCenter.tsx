@@ -6,6 +6,7 @@ import { KpiCard, SavingsFollowUp, SavingsReleaseCard, WeeklySurplusCard } from 
 import { AssetsSection, NextActionPrompt } from "./FccAssets";
 import { ASSET_GONE } from "../lib/fccAssets";
 import { LoansSection } from "./FccLoans";
+import { CashflowSection } from "./FccCashflow";
 import { ContextualComposer, FccTabBar, useFccWriter } from "./FccTabBar";
 import { FamilyWealthCard } from "./FamilyWealth";
 import { initialTab, panelId, rememberTab, tabId, type FccTabKey } from "../lib/fccTabs";
@@ -217,6 +218,7 @@ export function FinancialControlCenter({ onBack, onOpenFamilyWealth }: Props) {
   };
   const panels: Record<FccTabKey, React.ReactNode> = {
     monthly,
+    cashflow: <CashflowSection />,
     loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario}
                                                 actions={{ onAction: (intent, id) => void writer.start(intent, id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
     assets: data.assets ? <AssetsSection assets={data.assets} actions={{ onAction: (intent, id) => void writer.start(intent, id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
@@ -224,9 +226,11 @@ export function FinancialControlCenter({ onBack, onOpenFamilyWealth }: Props) {
   return shell(
     <div className="fcc-stack">
       <FccTabBar active={tab} onChange={changeTab} />
+      {(tab !== "cashflow" || writer.turn != null || writer.receipt != null || writer.error != null) && (
       <ContextualComposer tab={tab} turn={writer.turn} receipt={writer.receipt} error={writer.error} busy={writer.busy}
                           targets={targets} onStart={(i, id) => void writer.start(i, id)} onSend={(t, g) => void writer.send(t, g)}
                           onDismiss={writer.dismiss} />
+      )}
       {writer.followUpAsset && writer.turn == null && (
         <NextActionPrompt assets={data.assets} assetId={writer.followUpAsset} onAdd={(id) => void writer.start("asset.next_step", id)}
                           onDismiss={writer.clearFollowUpAsset} disabled={writer.busy} />

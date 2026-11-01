@@ -408,3 +408,14 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 
 - בכרטיס כל הלוואה פעילה, ובצ׳יפים של לשונית ההלוואות: ״עדכון ריבית״ (`loan.update_rate`) ו־״תשלומים שנותרו״ (`loan.update_term`). כל אחד מעדכן שדה אחד בלבד (`Interest Rate (%)` / `Payments Remaining`) דרך סקירה ואישור, ומציג את הערך הנוכחי.
 - החזר חודשי ויתרה לא מחושבים מחדש בעדכון כזה; לשינוי פריים יש ״שינוי פריים״ שמחשב את ההחזר מחדש.
+
+## Monthly cashflow — "תזרים" tab (01/11/2026, owner-approved; stage 1 `6e56723`, stage 2 this section)
+
+- **Question it answers:** per month, income by source vs. expenses by category, the balance (or the shortfall), month-over-month change, spikes and large items. Pure model `core/financial_control/cashflow.py` (no I/O); owner-scoped reads in `service.cashflow_view`; `GET /api/fcc/cashflow` (same gate as net-worth: flag + canary + owner, 404 otherwise).
+- **Category storage (owner decision):** a new field on `Financial Progress Events` — `Expense Category` (live `fldG6juSyoViNriOf`, **singleLineText**). Text, not a select, so a new category needs no schema change: the 15 built-in keys (`cashflow.EXPENSE_CATEGORIES`: the owner's ten + בריאות, פנאי ובילויים, מיסים ואגרות, מתנות ואירועים, כללי) or any other non-empty text (a custom category, capped at 40 chars). Empty = "לא מסווג" (never guessed). Finer detail later (sub-categories) can be a second text field or a `Parent/Child` naming — not built.
+- **Income sources:** a source goal (it `Contributes To` a parent) or a goal with no sources is a source by its title; events on a TOTAL goal are "כללי" unless the note is `מקור: <שם>`; `fixed_income` goals are standing monthly sources at their effective target from their start date (a recorded entry replaces the standing amount, never adds). `monthly_recurring` income events are not read here (limitation).
+- **Expenses:** `household_expense` events, superseded ignored, `abs(amount)`. **Obligations are not added** (the actual charge is the expense; adding both counts it twice) — they are for the recommendations stage. **Loans are an expense:** a recorded loan charge wins; otherwise the active loans' scheduled monthly payment fills the CURRENT month only, marked "הערכה".
+- **Unknown != 0:** a month with no income or no expenses recorded has no balance (`missing` says which) and is excluded from changes/spikes.
+- **Not built yet:** the category / source questions in the write flow (stage 3 — until then new household expenses are uncategorized), recommendations from obligations (stage 4), bank / credit-card history import (stage 5).
+- Verification: `test_fcc_cashflow.py` (17), `test_fcc_cashflow_service.py` (7), `fccCashflow.test.ts`. Device/production: NOT verified.
+

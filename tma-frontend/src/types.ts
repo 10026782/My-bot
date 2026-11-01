@@ -1114,6 +1114,29 @@ export interface FccNetWorth {
 }
 
 
+/** Monthly cashflow (GET /api/fcc/cashflow, read-only). Every number is the server's; null = missing (never 0). */
+export interface FccCashflowCategory { key: string; label: string; amount: number; custom?: boolean; basis?: "recorded" | "scheduled" }
+export interface FccCashflowSource { name: string; kind: "fixed" | "variable" | "general"; gross: number; direct_costs: number; net: number; basis: "recorded" | "standing" }
+export interface FccCashflowMonth {
+  month: string; is_current: boolean; partial: boolean; day: number | null; days_in_month: number;
+  income: { known: boolean; sources: FccCashflowSource[]; gross: number | null; direct_costs: number | null; net: number | null };
+  expenses: { known: boolean; count: number; categories: FccCashflowCategory[]; total: number | null };
+  balance: number | null; shortfall: number | null; surplus: number | null; missing: ("income" | "expenses")[];
+}
+export interface FccCashflowChange { key: string; label: string; before: number; after: number; delta: number; pct: number | null }
+export interface FccCashflow {
+  months: FccCashflowMonth[];
+  categories: { key: string; label: string; custom?: boolean }[];
+  insights: {
+    changes: { from: string; to: string; total_before: number; total_after: number; total_delta: number; items: FccCashflowChange[] } | null;
+    spikes: { month: string; key: string; label: string; amount: number; baseline: number; excess: number; partial: boolean }[];
+    large_items: { ref: string | null; label: string; amount: number; date: string; key: string; category: string }[];
+  };
+  thresholds: Record<string, number>;
+  loans_payments_known: boolean;
+  as_of: string;
+}
+
 /** C4 — actual accumulation pace vs the plan (POST /api/fcc/pace). Every number is the server's; self_reported data; null = missing (never 0). */
 export interface PaceReturnBlock {
   exact: null; days: number; documented_flow_count: number; undocumented_flows_possible: boolean;
