@@ -42,5 +42,5 @@ export function confirmLine(m: ClassifyModel, categoryLabel: string, applySame: 
 export function resultNote(v: FccClassifyView): string | null {
   if (v.state !== "done") return null;
   const more = v.same_left ? ` · נותרו עוד ${v.same_left} עם אותו שם` : "";
-  return `סווגו ${v.done ?? 1}${more}`;
+  return `סווגו ${v.done ?? 1}${more}${v.rule_saved ? " · נשמר כלל — בדוחות הבאים אותו תיאור יסווג לבד" : ""}`;
 }

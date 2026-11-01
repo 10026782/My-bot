@@ -357,6 +357,22 @@ def validate_rule_patch(fields) -> str | None:
     return None
 
 
+def validate_rule_post(fields) -> str | None:
+    """None when ``fields`` is exactly a NEW decided expense rule for one description (what the owner's classification of an event leaves behind)."""
+    if not isinstance(fields, dict) or set(fields) != {"Match", "Applies To", "Direction", "Kind", "Category", "Status"}:
+        return "a new rule has exactly Match, Applies To, Direction, Kind, Category and Status"
+    match, cat = fields.get("Match"), fields.get("Category")
+    if (not isinstance(match, str) or not match.strip() or len(match) > 200 or fields.get("Applies To") not in ("bank", "card") or fields.get("Direction") != "debit"
+            or fields.get("Kind") != "expense" or fields.get("Status") != "active" or not isinstance(cat, str) or not cat.strip() or len(cat) > 40):
+        return "a new rule is an active expense rule for one description"
+    return None
+
+
+def _rules_write_refused(op, fields) -> bool:
+    """The rules table is writable through tma_write ONLY by these two shapes: the classification patch and the new decided expense rule."""
+    return not ((op == "patch" and validate_rule_patch(fields) is None) or (op == "post" and validate_rule_post(fields) is None))
+
+
 def _existing_batch_keys(table: str, records: list[dict], identity) -> set[str]:
     """What the OWNER already has (so a retried chunk never writes twice): idempotency keys (events) / row keys and exact matches (rules)."""
     from airtable_schema import CashflowRuleFields as CR, FinEventFields as EF, Tables
@@ -530,7 +546,7 @@ def tma_write(
     if op == "post_many":                                       # FCC statement import: one contract = one chunk (see the block above)
         return _tma_write_many(table, records, identity, action, requested_by, audit_action, audit_details, _approved_by)
 
-    if table == "Cashflow Rules" and (op != "patch" or validate_rule_patch(fields) is not None):          # the table is writable here ONLY for the classification patch
+    if table == "Cashflow Rules" and _rules_write_refused(op, fields):          # the table is writable here ONLY for the classification patch / a new decided rule
         return _tool_result(ok=False, tool="tma_write", user_message="❌ כתיבה לטבלת הכללים מותרת רק לסיווג כלל")
 
     if table not in _TMA_WRITE_ALLOWED_TABLES:

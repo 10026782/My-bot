@@ -616,8 +616,9 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
     elif table not in _TMA_WRITE_ALLOWED_TABLES:
         return _reject(f"table '{table}' is not permitted for TMA writes", code=400)
     elif table == "Cashflow Rules":                          # the rules table: the owner's one-rule classification patch only
-        from tools.approval_actions import validate_rule_patch  # noqa: PLC0415
-        if not getattr(identity, "is_owner", False) or op != "patch" or not str(payload.get("record_id") or "").startswith("rec") or validate_rule_patch(payload.get("fields")):
+        from tools.approval_actions import _rules_write_refused  # noqa: PLC0415
+        if (not getattr(identity, "is_owner", False) or _rules_write_refused(op, payload.get("fields"))
+                or (op == "patch" and not str(payload.get("record_id") or "").startswith("rec"))):
             return _reject("rules write refused", code=400)
 
     # Server-owned fields (op/table/action/requested_by) are applied AFTER
@@ -5039,10 +5040,15 @@ def fcc_classify_apply(identity):
             if status >= 300:
                 return jsonify({"state": "partial_failure", "message": "הסיווג לא הושלם — אפשר לנסות שוב.", "done": done}), status
             done += 1
+        rule_write = fcc_service.rule_write_for(chosen, category, fcc_service.my_cashflow_rules(identity)) if chosen["source"] in ("bank", "card") else None
+        if rule_write is not None:                           # the answer must outlive this statement: the same description is classified by the NEXT import too
+            _, response, status = _queue_or_owner_execute("tma_fcc_write", rule_write, identity, "FCC: keep the classification as a rule")
+            if status >= 300:
+                return jsonify({"state": "partial_failure", "message": "הוצאות סווגו, אבל הכלל לייבואים הבאים לא נשמר — אפשר לסווג שוב.", "done": done}), status
         left = [w for w in waiting if w["id"] not in {t["id"] for t in targets}]
         same_left = sum(1 for w in left if chosen["group"] and w["group"] == chosen["group"])
         view = fcc_service.classify_view(left)
-        view.update({"state": "done", "done": done, "same_left": same_left, "categories": [{"key": k, "label": v} for k, v in fcc_cashflow.EXPENSE_CATEGORIES]})
+        view.update({"state": "done", "done": done, "same_left": same_left, "rule_saved": chosen["source"] in ("bank", "card"), "categories": [{"key": k, "label": v} for k, v in fcc_cashflow.EXPENSE_CATEGORIES]})
         return jsonify(view)
     except data_access_policy.PersonalDataAccessDenied:
         return jsonify({"error": "forbidden"}), 403

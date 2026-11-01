@@ -62,6 +62,7 @@ test("a new category is trimmed, collapsed, never empty and never over the serve
 test("the result note counts what was classified and what is left of the same description", () => {
   assert.equal(resultNote(view()), null);
   assert.equal(resultNote(view({ state: "done", done: 10, same_left: 4 })), "סווגו 10 · נותרו עוד 4 עם אותו שם");
+  assert.ok(resultNote(view({ state: "done", done: 1, rule_saved: true }))?.includes("בדוחות הבאים"));
 });
 
 test("the section renders only when something waits", () => {

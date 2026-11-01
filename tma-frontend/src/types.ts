@@ -1150,7 +1150,7 @@ export interface FccImportPreview {
 export interface FccClassifyItem { id: string; date: string; amount: number; label: string; source: "bank" | "card" | "manual"; same_count: number }
 export interface FccClassifyView {
   total: number; total_amount: number; item: FccClassifyItem | null; categories: { key: string; label: string }[];
-  state?: "done"; done?: number; same_left?: number;
+  state?: "done"; done?: number; same_left?: number; rule_saved?: boolean;
 }
 /** Classification of DESCRIPTIONS waiting in the owner's rules table (GET|POST /api/fcc/classify-rules). Every number is the server's. */
 export interface FccRuleItem { id: string; match: string; applies_to: string; times_seen: number; amount: number; last_seen: string }
