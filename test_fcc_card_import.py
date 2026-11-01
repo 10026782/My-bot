@@ -91,6 +91,12 @@ def test_loan_instalment_is_the_instalment_not_the_loan_and_atm_is_cash():
     assert atm.kind == ci.CASH and atm.category is None and atm.charge.kind == ci.IMMEDIATE
 
 
+def test_only_decided_card_lines_are_importable():
+    items = ci.classify_all(ci.parse_card_statement(statement(), "max").charges)
+    ok = [c.charge.merchant for c in items if ci.importable(c)]
+    assert set(ok) == {"מקס", "דן חברה לתחבורה ציבורית"}                                  # the loan instalment and a built-in category; cash / unknown / benefit wait
+
+
 def test_benefit_line_is_an_adjustment_with_its_remark():
     p = ci.parse_card_statement(statement(), "max")
     benefit = next(c for c in p.charges if c.kind == ci.BENEFIT)

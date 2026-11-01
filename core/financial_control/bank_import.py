@@ -13,8 +13,15 @@ Iron rules:
   classified apart (``card_settlement`` / ``transfer`` / ``reversal``) so that importing both a bank and a card statement never counts the
   same money twice.
 * **Unknown is unknown.** A description no rule knows is ``unknown`` (never guessed into a category); the owner's own rules (``owner_rules``)
-  win over the built-in ones and are the only way a new description becomes known. Every credit is an ``income_candidate`` until a source is
-  assigned — a credit is not necessarily income.
+  win over the built-in ones and are the only way a new description becomes known.
+* **Income only by the owner's explicit approval (owner decision 01/11/2026).** Every credit is at most an ``income_candidate`` — a cash deposit,
+  a mobile / bank transfer, a refund are not necessarily income. Only an owner rule of kind ``income`` makes a credit income; a built-in rule never
+  does. A transfer is ``transfer`` (neutral) only when an owner rule says it is between the owner's own accounts; no built-in rule assumes it.
+* **Card payments are not spending until itemized (owner decision 01/11/2026).** A debit to Max / Isracard / a card company is sometimes the monthly
+  bill and sometimes a cash withdrawal repaid a day or two later; either way it is ``card_settlement`` and stays out of the spending total until its
+  own card statement explains it (``card_import.match_settlements``).
+* **Only decided rows are importable** (``importable``): an expense with a category, or income the owner approved. ``unknown`` and every candidate wait
+  for the owner.
 * The account number / holder name in the statement header are never read into the result.
 """
 
@@ -28,13 +35,14 @@ from datetime import date, datetime
 # ── kinds ────────────────────────────────────────────────────────────────────────────────────────────────────────
 EXPENSE = "expense"                    # a known spending category (built-in or owner rule)
 CARD_SETTLEMENT = "card_settlement"    # the bank paying a credit-card bill: NOT spending (the card statement has the merchants)
-INCOME = "income_candidate"            # a credit; the source is assigned by the owner (an owner rule may give it)
-TRANSFER = "transfer"                  # between the owner's own accounts / people: neither income nor spending
+INCOME = "income_candidate"            # a credit; NOT income until the owner approves it (an owner rule of kind ``income``)
+INCOME_APPROVED = "income"             # a credit the owner explicitly approved as income (owner rules only; the category is the source name)
+TRANSFER = "transfer"                  # between the owner's own accounts (owner rules only): neither income nor spending
 REVERSAL = "reversal"                  # a debit and the credit that returned it: both cancel out
 IGNORE = "ignore"                      # the owner told us to skip it
 UNKNOWN = "unknown"                    # a debit no rule knows
-KINDS = (EXPENSE, CARD_SETTLEMENT, INCOME, TRANSFER, REVERSAL, IGNORE, UNKNOWN)
-COUNTED_AS_SPENDING = (EXPENSE, UNKNOWN)       # the only kinds that are spending today (card settlements count only until a card statement covers them)
+KINDS = (EXPENSE, CARD_SETTLEMENT, INCOME, INCOME_APPROVED, TRANSFER, REVERSAL, IGNORE, UNKNOWN)
+COUNTED_AS_SPENDING = (EXPENSE, UNKNOWN)       # the only kinds shown as spending candidates (a card settlement is NOT: it waits for its card statement)
 
 CREDIT, DEBIT = "credit", "debit"
 TOLERANCE = 0.005
@@ -194,8 +202,7 @@ BUILTIN_RULES: tuple[Rule, ...] = (
     _r("ישראכרט", CARD_SETTLEMENT, direction=DEBIT), _r("מקס איט", CARD_SETTLEMENT, direction=DEBIT), _r("כרטיסי אשראי", CARD_SETTLEMENT, direction=DEBIT),
     _r("מסטרקרד", CARD_SETTLEMENT, direction=DEBIT), _r("ויזה כאל", CARD_SETTLEMENT, direction=DEBIT), _r("לאומי קארד", CARD_SETTLEMENT, direction=DEBIT),
     _r("דיינרס", CARD_SETTLEMENT, direction=DEBIT), _r("אמריקן אקספרס", CARD_SETTLEMENT, direction=DEBIT),
-    # between the owner's own accounts / people
-    _r("העברה נייד", TRANSFER), _r("העב לאחר נייד", TRANSFER),
+    # (no built-in transfer rule: "העברה-נייד" etc. are NOT assumed to be the owner's own accounts — the owner decides)
     # a charge the bank returned
     _r("החזר חיוב", REVERSAL, direction=CREDIT),
     # loans
@@ -212,6 +219,12 @@ BUILTIN_RULES: tuple[Rule, ...] = (
     _r("קצבת ילדים", INCOME, "קצבאות", CREDIT), _r("בטוח לאומי", INCOME, "קצבאות", CREDIT), _r("ביטוח לאומי", INCOME, "קצבאות", CREDIT),
     _r("הפק מזומן", INCOME, None, CREDIT), _r("העברה הפקדה", INCOME, None, CREDIT),
 )
+
+
+def importable(c: "Classified") -> bool:
+    """Only rows the owner's rules (or the high-precision built-ins) fully decided may be imported: an expense WITH a category, or income the owner
+    approved WITH its source. Unknown debits, income candidates, card settlements, transfers and reversals are never written on their own."""
+    return (c.kind == EXPENSE and bool(c.category)) or (c.kind == INCOME_APPROVED and bool(c.category))
 
 
 def owner_rules_from(items) -> list[Rule]:
@@ -285,13 +298,15 @@ def summarize(items: list[Classified], top_unknown: int = 15) -> dict:
         side = "debit" if r.direction == DEBIT else "credit"
         by_kind[c.kind]["count"] += 1
         by_kind[c.kind][side] += r.amount
-        m = months.setdefault(f"{r.date.year:04d}-{r.date.month:02d}", {"spending_candidates": 0.0, "card_settlements": 0.0, "income_candidates": 0.0, "other": 0.0})
+        m = months.setdefault(f"{r.date.year:04d}-{r.date.month:02d}", {"spending_candidates": 0.0, "card_settlements": 0.0, "income_candidates": 0.0, "income_approved": 0.0, "other": 0.0})
         if c.kind in COUNTED_AS_SPENDING:
             m["spending_candidates"] += r.amount
         elif c.kind == CARD_SETTLEMENT:
             m["card_settlements"] += r.amount
         elif c.kind == INCOME:
             m["income_candidates"] += r.amount
+        elif c.kind == INCOME_APPROVED:
+            m["income_approved"] += r.amount
         else:
             m["other"] += r.amount
         if c.kind in (UNKNOWN, INCOME) and c.rule_id is None:
@@ -304,4 +319,4 @@ def summarize(items: list[Classified], top_unknown: int = 15) -> dict:
         for k in v:
             v[k] = round(v[k], 2)
     top = sorted(unknown.values(), key=lambda u: -u["total"])[:top_unknown]
-    return {"by_kind": by_kind, "months": dict(sorted(months.items())), "unmapped": top, "unmapped_total": len(unknown)}
+    return {"importable": sum(1 for c in items if importable(c)), "pending_card_total": by_kind[CARD_SETTLEMENT]["debit"], "by_kind": by_kind, "months": dict(sorted(months.items())), "unmapped": top, "unmapped_total": len(unknown)}

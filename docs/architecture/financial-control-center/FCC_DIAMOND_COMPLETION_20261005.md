@@ -452,3 +452,11 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **No double counting:** a section total is matched to the bank's card-settlement debit (same amount, billing date .. +3 days, each bank line once). A matched settlement is no longer spending — its merchant rows take its place; an unmatched one keeps counting until its own card statement is imported. All 7 sections matched (₪21,821.01); the other 48 settlements (₪115,804) need their statements (other months / Isracard / Cal / Mastercard).
 - **Not done:** writing any of this to Airtable (5b), other issuers' layouts. Verification: `test_fcc_card_import.py` (synthetic fragments). The PDF extraction layer was run on the owner's real statement but has no repo test (no real statement may be committed). Production: NOT verified.
 
+### Owner decisions on the bank / card import (01/11/2026)
+
+- **Card payments are not spending until itemized.** Max / Isracard debits are sometimes the monthly bill and sometimes a cash withdrawal repaid after a day or two; neither is counted as an expense until the card statement itemizes it (this supersedes the earlier proposal of counting an un-itemized settlement as a "card without detail" line). The bank report shows the pending amount apart.
+- **Cash:** an ATM withdrawal is neutral (`cash_withdrawal`), and a cash deposit is never income by itself.
+- **Income only by explicit approval:** every credit (cash deposit, bit, mobile transfer, bank credit) is a candidate; only an owner rule `income` + a source name makes income. The owner's accounts are not assumed (no built-in `transfer` rule).
+- **Importable = decided:** an expense with a category, or approved income with its source. Everything else waits.
+- **Owner classification (as rules, kept OUT of the repo — these are personal recipients):** institutions (`institutions`): חכמי דורות, אורחות תורה, מרכז התורה; `loans`: רובי קבוצות (a loan on an asset); donations (`donations`): the other charities named in the statement. To be stored in the owner-scoped rules table of 5b once the owner approves creating it.
+

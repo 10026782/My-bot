@@ -13,6 +13,7 @@ Iron rules:
   counting as spending until its own card statement is imported.
 * **Cash and loans are named for what they are:** an ATM withdrawal is ``cash_withdrawal`` (what was bought with the cash is unknown); a card
   loan instalment is an expense in the ``loans`` category at the INSTALMENT (the loan's full amount is never spending).
+* **Importable only when decided:** an expense with a category (``importable``); cash and unknown merchants wait for the owner.
 * **Unknown merchant = unknown** (the owner's rules are the only way a new merchant becomes known); only high-precision built-in rules exist.
 * Only the last four digits of a card are read; the holder's name is never read into the result.
 """
@@ -207,6 +208,12 @@ def classify_charge(c: CardCharge, owner_rules: list[bi.Rule] | None = None) -> 
             kind = {bi.EXPENSE: EXPENSE, bi.IGNORE: ADJUSTMENT}.get(rule.kind, EXPENSE)
             return ClassifiedCharge(c, kind, rule.category, rule.rule_id)
     return ClassifiedCharge(c, UNKNOWN, None, None)
+
+
+def importable(c: ClassifiedCharge) -> bool:
+    """Only a charge with a decided category is written. Unknown merchants, ATM withdrawals (cash: what it bought is unknown) and benefit lines
+    wait for the owner."""
+    return c.kind == EXPENSE and bool(c.category)
 
 
 def classify_all(charges: list[CardCharge], owner_rules: list[bi.Rule] | None = None) -> list[ClassifiedCharge]:

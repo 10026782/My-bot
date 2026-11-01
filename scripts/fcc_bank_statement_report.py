@@ -67,13 +67,15 @@ def write_pack(outdir: Path, parsed: bi.ParseResult, items: list[bi.Classified],
     for kind, v in summ["by_kind"].items():
         if v["count"]:
             lines.append(f"| {kind} | {v['count']} | {v['debit']:,.0f} | {v['credit']:,.0f} |")
-    lines += ["", "## לפי חודש", "", "| חודש | הוצאות (מסווגות + לא ידועות) | חיובי כרטיס אשראי | זכויות (מועמדות להכנסה) | אחר |", "|---|---:|---:|---:|---:|"]
+    lines += ["", "## לפי חודש", "", "| חודש | הוצאות (מסווגות + לא ידועות) | חיובי כרטיס (ממתינים לפירוט) | זכויות (מועמדות — לא הכנסה) | הכנסה שאושרה | אחר |", "|---|---:|---:|---:|---:|---:|"]
     for month, v in summ["months"].items():
-        lines.append(f"| {month} | {v['spending_candidates']:,.0f} | {v['card_settlements']:,.0f} | {v['income_candidates']:,.0f} | {v['other']:,.0f} |")
+        lines.append(f"| {month} | {v['spending_candidates']:,.0f} | {v['card_settlements']:,.0f} | {v['income_candidates']:,.0f} | {v['income_approved']:,.0f} | {v['other']:,.0f} |")
     lines += ["", f"## תיאורים שעדיין לא ממופים ({summ['unmapped_total']})", "", "| תיאור | כיוון | פעמים | סה״כ |", "|---|---|---:|---:|"]
     for u in summ["unmapped"]:
         lines.append(f"| {u['description']} | {u['direction']} | {u['count']} | {u['total']:,.0f} |")
-    lines += ["", "> חיובי כרטיס אשראי אינם הוצאה בפני עצמם: הם מסלקים חשבון כרטיס שפירוטו בדוח הכרטיס. הם נספרים כהוצאה רק כשאין דוח כרטיס לתקופה."]
+    lines += ["", f"- ניתנות לייבוא כרגע (הוחלט במלואן): {summ['importable']} · חיובי כרטיס שממתינים לפירוט: ₪{summ['pending_card_total']:,.0f}",
+              "", "> חיובי כרטיס אשראי (מקס / ישראכרט וכו׳) הם לפעמים חיוב חודשי ולפעמים משיכת מזומן שנפרעת אחרי יום–יומיים. הם **אינם נספרים כהוצאה** עד שיובא דוח הכרטיס שמפרט אותם.",
+              "> זכות אינה הכנסה: גם הפקדת מזומן והעברה. הכנסה נספרת רק אחרי אישור מפורש שלך (כלל מסוג income עם שם מקור)."]
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     seen = {}
     for c in items:

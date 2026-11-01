@@ -128,7 +128,34 @@ def test_classification_builtin_rules_use_token_boundaries_and_direction():
     assert bi.classify_row(mk("מע\"מ", "debit")).category == "taxes" and bi.classify_row(mk("מכס ומע\"מ", "credit")).kind == bi.INCOME
     assert bi.classify_row(mk("מעמדות", "debit")).kind == bi.UNKNOWN                                          # a rule never matches inside a longer word
     assert bi.classify_row(mk("ביטוח לאומי", "credit")).category == "קצבאות" and bi.classify_row(mk("ביטוח לאומי", "debit")).category == "taxes"
-    assert bi.classify_row(mk("העברה-נייד", "credit")).kind == bi.TRANSFER == bi.classify_row(mk("העברה-נייד", "debit")).kind
+    # owner decision: a mobile transfer is NOT assumed to be the owner's own account — a credit is only a candidate, a debit is unknown
+    assert bi.classify_row(mk("העברה-נייד", "credit")).kind == bi.INCOME and bi.classify_row(mk("העברה-נייד", "debit")).kind == bi.UNKNOWN
+
+
+def test_income_needs_the_owners_explicit_approval_and_a_transfer_is_neutral_only_by_an_owner_rule():
+    mk = lambda d, side, amount=10.0: bi.BankRow(date(2026, 10, 1), d, amount, side, 0.0, True)
+    for desc in ("הפק מזומן-בנקט", "bitהעברת כסף", "העברה-נייד", "זיכוי מלאומי", "קצבת ילדים", "מלם מערכות"):
+        assert bi.classify_row(mk(desc, "credit")).kind in (bi.INCOME,) and not bi.importable(bi.classify_row(mk(desc, "credit")))      # never income by itself
+    rules = bi.owner_rules_from([{"match": "מלם מערכות", "kind": "income", "category": "משכורת", "direction": "credit"},
+                                 {"match": "זיכוי מלאומי", "kind": "transfer", "direction": "credit"}])
+    got = bi.classify_row(mk("מלם מערכות בע\"", "credit"), rules)
+    assert got.kind == bi.INCOME_APPROVED and got.category == "משכורת" and bi.importable(got)
+    assert bi.classify_row(mk("זיכוי מלאומי", "credit"), rules).kind == bi.TRANSFER
+    assert not bi.importable(bi.classify_row(mk("מלם מערכות", "credit"), bi.owner_rules_from([{"match": "מלם מערכות", "kind": "income"}])))   # approved but no source: not written
+
+
+def test_only_decided_rows_are_importable():
+    mk = lambda d, side: bi.BankRow(date(2026, 10, 1), d, 10.0, side, 0.0, True)
+    assert bi.importable(bi.classify_row(mk("עיריית מודיעין", "debit")))                 # an expense with a category
+    for desc in ("מרכז התורה", 'ישראכרט בע"מ'):                                          # unknown debit / card settlement
+        assert not bi.importable(bi.classify_row(mk(desc, "debit")))
+    rules = bi.owner_rules_from([{"match": "מרכז התורה", "kind": "expense", "category": "institutions"}, {"match": "גמח", "kind": "expense"}])
+    assert bi.importable(bi.classify_row(mk("מרכז התורה רחו", "debit"), rules)) and not bi.importable(bi.classify_row(mk("גמח", "debit"), rules))   # no category: not importable
+
+
+def test_card_payments_stay_out_of_spending_and_are_reported_as_pending_itemization():
+    s = bi.summarize(bi.classify(bi.parse_statement(statement(ROWS), "m").rows))
+    assert s["pending_card_total"] == 3000.0 and s["months"]["2026-10"]["spending_candidates"] == 500.0 and s["importable"] == 1
 
 
 def test_owner_rules_win_and_invalid_ones_are_skipped():
