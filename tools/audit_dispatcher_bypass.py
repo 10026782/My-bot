@@ -188,11 +188,11 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 # that IS on the allowlist, just not itself named dispatcher*/scheduler*/etc.
 # Verified by direct caller-graph read (Track D-Structure Audit #7), not a
 # guess:
-#   - tools/approval_actions.py:367 -- tools/dispatcher.py:26 does
+#   - tools/approval_actions.py:540 -- tools/dispatcher.py:26 does
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "post" branch contains this `import crm`.
-#   - tools/approval_actions.py:400 -- tools/dispatcher.py:26 does
+#   - tools/approval_actions.py:573 -- tools/dispatcher.py:26 does
 #     `from . import approval_actions`; its dispatch switch at
 #     tools/dispatcher.py:497 calls approval_actions.tma_write(), whose
 #     "patch" branch contains the B2-02 Contact UPDATE `import crm`.
@@ -212,8 +212,8 @@ ACCEPTED: frozenset[tuple[str, int, str]] = frozenset({
 # debt -- they are permanently excluded from findings, never surfaced as
 # WARN_NEW, and never need baselining.
 _SANCTIONED_CALL_SITES: frozenset[tuple[str, int, str]] = frozenset({
-    ("tools/approval_actions.py", 367, "crm"),
-    ("tools/approval_actions.py", 400, "crm"),
+    ("tools/approval_actions.py", 540, "crm"),
+    ("tools/approval_actions.py", 573, "crm"),
     ("tools/schema_snapshot.py", 286, "tools.airtable_tools"),
 })
 
