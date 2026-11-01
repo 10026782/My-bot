@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchFccClassify, postFccClassify } from "../api";
 import type { FccClassifyView } from "../types";
-import { classifyModel, confirmLine, customCategory, resultNote } from "../lib/fccClassify";
+import { classifyModel, confirmLine, customCategory, refreshAction, resultNote } from "../lib/fccClassify";
 import { money } from "../lib/fccPresentation";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -10,20 +10,27 @@ type Phase = { name: "closed" } | { name: "loading" } | { name: "open"; view: Fc
 
 /** Imported expenses that have no category, one at a time: choose a category -> review line -> אשר. The server patches ONE field of ONE record per answer
  *  through the same ceremony as every other FCC write; "skip" only hides the row for this visit. */
-export function FccClassify({ summary, onChanged }: { summary: { total: number; total_amount: number } | null | undefined; onChanged: () => void }) {
+export function FccClassify({ summary, onChanged, refreshKey = 0 }: { summary: { total: number; total_amount: number } | null | undefined; onChanged: () => void; refreshKey?: number }) {
   const [phase, setPhase] = useState<Phase>({ name: "closed" });
   const [skipped, setSkipped] = useState<string[]>([]);
   const [pick, setPick] = useState<{ key: string; label: string } | null>(null);
   const [custom, setCustom] = useState("");
   const [applySame, setApplySame] = useState(true);
   const [note, setNote] = useState<string | null>(null);
+  const seenKey = useRef(refreshKey);
 
-  if (!summary || summary.total === 0) return null;
   const load = async (skip: string[]) => {
     setPhase({ name: "loading" }); setPick(null); setCustom("");
     try { setPhase({ name: "open", view: await fetchFccClassify(skip) }); }
     catch (e) { setPhase({ name: "error", message: (e as Error).message || "לא הצלחנו לטעון" }); }
   };
+  // a new statement was imported: an open panel loads the new rows by itself (no screen refresh needed)
+  useEffect(() => {
+    const action = refreshAction(phase.name, seenKey.current, refreshKey);
+    seenKey.current = refreshKey;
+    if (action === "reload") { setSkipped([]); setNote(null); void load([]); }
+  }, [refreshKey]);                                                  // eslint-disable-line react-hooks/exhaustive-deps
+  if (!summary || summary.total === 0) return null;
   const confirm = async (view: FccClassifyView) => {
     if (!view.item || !pick) return;
     setPhase({ name: "saving", view });

@@ -107,6 +107,7 @@ export function CashflowSection({ reloadKey }: { reloadKey?: string | null }) {
   const [range, setRange] = useState<number>(DEFAULT_RANGE);
   const [selected, setSelected] = useState<string>("");
   const [state, setState] = useState<State>({ status: "loading" });
+  const [importTick, setImportTick] = useState(0);                      // moves after each completed import: the classification panels reload their queue
   const load = useCallback((months: number, silent = false) => {
     if (!silent) setState({ status: "loading" });
     fetchFccCashflow(months)
@@ -127,9 +128,9 @@ export function CashflowSection({ reloadKey }: { reloadKey?: string | null }) {
   }
   return (
     <div className="fcc-stack">
-      <FccClassifyRules summary={state.data.rules_to_classify} onChanged={() => load(range, true)} />
-      <FccClassify summary={state.data.to_classify} onChanged={() => load(range, true)} />
-      <FccImport onImported={() => load(range, true)} />
+      <FccClassifyRules summary={state.data.rules_to_classify} refreshKey={importTick} onChanged={() => load(range, true)} />
+      <FccClassify summary={state.data.to_classify} refreshKey={importTick} onChanged={() => load(range, true)} />
+      <FccImport onImported={() => { setImportTick((t) => t + 1); load(range, true); }} />
       <CashflowView data={state.data} selected={selected} onSelect={setSelected} range={range} onRange={setRange} />
     </div>
   );

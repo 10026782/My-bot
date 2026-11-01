@@ -44,3 +44,9 @@ export function resultNote(v: FccClassifyView): string | null {
   const more = v.same_left ? ` · נותרו עוד ${v.same_left} עם אותו שם` : "";
   return `סווגו ${v.done ?? 1}${more}${v.rule_saved ? " · נשמר כלל — בדוחות הבאים אותו תיאור יסווג לבד" : ""}`;
 }
+
+/** After a statement import the waiting rows are NEW: a panel that was already open (it may be showing "everything is classified") must load again, with the
+ *  postponed ones forgotten; a closed panel only needs the fresh count. Nothing happens when the import counter did not move. */
+export function refreshAction(phaseName: string, previousKey: number, key: number): "none" | "reload" {
+  return key !== previousKey && phaseName !== "closed" ? "reload" : "none";
+}

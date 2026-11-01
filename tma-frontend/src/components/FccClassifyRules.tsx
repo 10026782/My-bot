@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchFccRules, postFccRule } from "../api";
 import type { FccRuleView } from "../types";
-import { customCategory } from "../lib/fccClassify";
+import { customCategory, refreshAction } from "../lib/fccClassify";
 import { ruleConfirmLine, ruleModel } from "../lib/fccClassifyRules";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -10,19 +10,26 @@ type Phase = { name: "closed" } | { name: "loading" } | { name: "open"; view: Fc
 
 /** Descriptions waiting in the owner's rules table, one at a time: choose a category -> review line -> אשר. The answer becomes a decided rule (ONE patch of ONE
  *  rule through the same ceremony as every FCC write); the next import writes every row with that description already classified. */
-export function FccClassifyRules({ summary, onChanged }: { summary: { total: number } | null | undefined; onChanged: () => void }) {
+export function FccClassifyRules({ summary, onChanged, refreshKey = 0 }: { summary: { total: number } | null | undefined; onChanged: () => void; refreshKey?: number }) {
   const [phase, setPhase] = useState<Phase>({ name: "closed" });
   const [skipped, setSkipped] = useState<string[]>([]);
   const [pick, setPick] = useState<{ key: string; label: string } | null>(null);
   const [custom, setCustom] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const seenKey = useRef(refreshKey);
 
-  if (!summary || summary.total === 0) return null;
   const load = async (skip: string[]) => {
     setPhase({ name: "loading" }); setPick(null); setCustom("");
     try { setPhase({ name: "open", view: await fetchFccRules(skip) }); }
     catch (e) { setPhase({ name: "error", message: (e as Error).message || "לא הצלחנו לטעון" }); }
   };
+  // a new statement was imported: an open panel loads the new rows by itself (no screen refresh needed)
+  useEffect(() => {
+    const action = refreshAction(phase.name, seenKey.current, refreshKey);
+    seenKey.current = refreshKey;
+    if (action === "reload") { setSkipped([]); setNote(null); void load([]); }
+  }, [refreshKey]);                                                  // eslint-disable-line react-hooks/exhaustive-deps
+  if (!summary || summary.total === 0) return null;
   const confirm = async (view: FccRuleView) => {
     if (!view.item || !pick) return;
     setPhase({ name: "saving", view });
