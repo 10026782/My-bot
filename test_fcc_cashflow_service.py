@@ -225,3 +225,28 @@ def test_a_failed_commitments_read_is_unknown_not_empty(monkeypatch):
     rec = service.cashflow_view(ELIYAHU, TODAY, 2)["recommendations"]
     assert rec["commitments_known"] is False and not [i for i in rec["items"] if i["kind"] in ("commitment", "optional")]
 
+
+def imp(eid, kind, amount, day, category=None, note=None, owner=ELI):
+    f = {EF.KIND: kind, EF.AMOUNT: amount, EF.OCCURRED_AT: day, EF.SOURCE: "import:bank", EF.FINANCIAL_OWNER: [owner], EF.IDEMPOTENCY_KEY: f"bank:{eid}"}
+    if category:
+        f[EF.EXPENSE_CATEGORY] = category
+    if note:
+        f[EF.NOTE] = note
+    return {"id": eid, "fields": f}
+
+
+def test_rows_imported_from_a_statement_have_no_goal_and_still_reach_the_cashflow_the_household_card_and_not_the_progress_list():
+    DB[Tables.FIN_EVENTS] += [imp("recI1", "household_expense", 500.0, "2026-10-05", "taxes"), imp("recI2", "household_expense", -300.0, "2026-10-06", "taxes"),
+                              imp("recI3", "one_time", 8000.0, "2026-10-01", note="מקור: עבודת אשתי"),
+                              imp("recI4", "one_time", 99.0, "2026-10-01", note="בלי שם מקור"),                        # no "מקור:" name: not a source
+                              imp("recX9", "household_expense", 77777.0, "2026-10-05", "taxes", owner=AVI)]
+    view = service.cashflow_view(ELIYAHU, TODAY, 2)
+    octo = month(view, "2026-10")
+    taxes = next(c for c in octo["expenses"]["categories"] if c["key"] == "taxes")
+    assert taxes["amount"] == 200.0                                                                                # 500 - 300 refund
+    assert {s["name"]: s["gross"] for s in octo["income"]["sources"]}["עבודת אשתי"] == 8000.0
+    assert "77777" not in str(view) and "99.0" not in str([s for s in octo["income"]["sources"]])
+    ov = service.overview(ELIYAHU, TODAY)
+    assert ov["household"]["month_total"] == 1200 + 300 + 90 + 200                                                # the existing household rows + the imported net 200
+    assert not [e for e in ov["recent_events"] if e.get("Amount") in (500.0, -300.0, 8000.0, 99.0)]               # a statement import is not goal progress
+

@@ -482,3 +482,12 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Seeded rows:** only what the owner decided in the chat (12 rows, see the changelog); nothing was inferred. The scholarship and the kids' trips stay `pending`.
 - **Not wired yet:** no app write path touches this table (not in the TMA write allow-list). Next: the import preview (statement -> classified rows, unknown descriptions added as pending rows) and ONE bulk review -> אשר into `Financial Progress Events`. Verification: `test_fcc_cashflow_rules.py`. Production: NOT verified.
 
+### Import plan (01/11/2026) — 5b step 2
+
+- **Plan before write:** `import_plan` turns classified bank / card rows into data: the events that WOULD be written, what is skipped (with the reason and the amount) and what the owner is asked. Nothing executes here.
+- **Decided rows only; never the same money twice:** a bank settlement, cash withdrawal, rolling-credit line, benefit line, transfer, returned charge and a row marked for review are never written. A second import of the same statement writes nothing (idempotency keys). A card line is written only with a category.
+- **No goal on an imported row** (it is not goal progress and must not inflate an income goal): `Source = import:bank|import:card`, `Verification = statement`; income carries `מקור: <name>`. The read side (cashflow, monthly household card) understands such rows; the "recent progress" list ignores them. A refund is a negative expense.
+- **The owner classifies in Airtable:** every undecided description becomes ONE pending row in `Cashflow Rules` (a pending ROW rule per transfer); a description already in the table (any status) is never added again.
+- **Owner decisions applied in the table (01/11/2026):** the 530 monthly credit from יגדיל תורה is approved income "מלגת לימוד — יגדיל תורה"; the kids' trips merchant is `leisure`.
+- **Next:** the upload + preview endpoint and the BATCHED execution through the ActionGateway (a write per event through the single-write path would exceed one request): one review -> אשר, chunks of N events per approval, idempotent and resumable. Verification: `test_fcc_import_plan.py`. Production: NOT verified.
+

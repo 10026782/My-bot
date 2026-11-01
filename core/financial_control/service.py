@@ -551,7 +551,7 @@ def recent_progress_events(events: list[dict], limit: int = RECENT_EVENTS) -> li
         k = (e.get("fields") or {}).get(FinEventFields.KIND)
         return k.get("name") if isinstance(k, dict) else k
 
-    shown = [e for e in events if kind_of(e) in calc.EVENT_KINDS
+    shown = [e for e in events if kind_of(e) in calc.EVENT_KINDS and not _is_import(e)           # a statement import is not goal progress (hundreds of rows)
              and (kind_of(e) != calc.DEPOSIT or _goal_ids_of(e))]       # an account deposit is goal progress only when linked to a goal
     shown.sort(key=lambda e: str((e.get("fields") or {}).get(FinEventFields.OCCURRED_AT) or ""), reverse=True)
     return [{"goal_ids": _goal_ids_of(e), **{k: (e.get("fields") or {}).get(k) for k in (
@@ -766,12 +766,20 @@ def cashflow_rules(identity, applies_to: str | None = None) -> list:
 _SOURCE_NOTE = re.compile(r"^\s*מקור\s*:\s*(.+?)\s*$")        # an income booked on the total goal as "מקור אחר": the name is in the note
 
 
-def _event_txn(ev: dict, category: str | None = None) -> fcc_cashflow.Txn | None:
+def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> fcc_cashflow.Txn | None:
+    """``signed``: an expense keeps its sign (an imported refund is a negative expense); income and direct costs are always positive."""
     f = ev.get("fields") or {}
     day, amount = calc._d(f.get(FinEventFields.OCCURRED_AT)), calc._num(f.get(FinEventFields.AMOUNT))
     if day is None or amount is None or f.get(FinEventFields.SUPERSEDED_BY):
         return None
-    return fcc_cashflow.Txn(abs(amount), day, category, ev.get("id"), str(f.get(FinEventFields.NOTE) or "").strip())
+    return fcc_cashflow.Txn(amount if signed else abs(amount), day, category, ev.get("id"), str(f.get(FinEventFields.NOTE) or "").strip())
+
+
+IMPORT_SOURCE_PREFIX = "import:"           # Financial Progress Events.Source of a row written by a statement import (no goal link)
+
+
+def _is_import(ev: dict) -> bool:
+    return str((ev.get("fields") or {}).get(FinEventFields.SOURCE) or "").startswith(IMPORT_SOURCE_PREFIX)
 
 
 def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
@@ -824,6 +832,14 @@ def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple
                 name, skind = (m.group(1), fcc_cashflow.VARIABLE) if m else (fcc_cashflow.GENERAL_SOURCE, fcc_cashflow.GENERAL)
             add(name, skind, gross if kind == calc.ONE_TIME else costs, txn)
 
+    for ev in events:                                          # income imported from a statement: no goal, the source name in the note ("מקור: <שם>")
+        if _goal_ids_of(ev) or not _is_import(ev) or _sel((ev.get("fields") or {}).get(FinEventFields.KIND)) != calc.ONE_TIME:
+            continue
+        txn, m = _event_txn(ev), None
+        m = _SOURCE_NOTE.match(txn.label or "") if txn else None
+        if txn and m:
+            add(m.group(1), fcc_cashflow.VARIABLE, gross, txn)
+
     sources = []
     for name in sorted(set(gross) | set(costs) | set(standing), key=lambda n: (kinds.get(n) != fcc_cashflow.FIXED, n)):
         fixed = standing.get(name)
@@ -836,7 +852,7 @@ def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple
         f = ev.get("fields") or {}
         if _sel(f.get(FinEventFields.KIND)) != calc.HOUSEHOLD_EXPENSE:
             continue
-        txn = _event_txn(ev, _sel(f.get(FinEventFields.EXPENSE_CATEGORY)))
+        txn = _event_txn(ev, _sel(f.get(FinEventFields.EXPENSE_CATEGORY)), signed=True)
         if txn is not None:
             expenses.append(txn)
     return sources, expenses
@@ -892,6 +908,7 @@ def overview(identity, today: date | None = None, default_method: str | None = N
         g["id"]: calc.parse_events(by_goal.get(g["id"], []), FinEventFields) for g in goals}
 
     rows, all_events = [], []
+    all_events.extend(calc.parse_events([ev for ev in events if not _goal_ids_of(ev) and _is_import(ev)], FinEventFields))   # imported rows have no goal; the household card still counts them
     for goal in goals:
         all_events.extend(own[goal["id"]])
         if goal["id"] not in active_ids:
