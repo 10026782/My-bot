@@ -4,7 +4,7 @@ import type { FccClassifyView } from "../types";
 import { money } from "./fccPresentation";
 
 export const CUSTOM_MAX = 40;
-export const SOURCE_LABEL = { bank: "בנק", card: "כרטיס אשראי" } as const;
+export const SOURCE_LABEL = { bank: "בנק", card: "כרטיס אשראי", manual: "רישום ידני" } as const;
 
 export interface ClassifyModel {
   empty: boolean;

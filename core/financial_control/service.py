@@ -824,19 +824,22 @@ def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> f
 
 
 def classify_waiting(identity) -> list[dict]:
-    """The caller's imported expenses that still have NO category (the owner classifies them one by one on screen). Owner-scoped (``my_events``)."""
+    """The caller's expenses that still have NO category — imported ones and manually recorded ones — for the one-by-one screen. Owner-scoped
+    (``my_events``). A manual entry has no meaningful description and is never grouped with another."""
     from core.financial_control import bank_import as bi  # noqa: PLC0415
     F = FinEventFields
     waiting = []
-    for ev in my_events(identity, "only"):
+    for ev in my_events(identity) + my_events(identity, "only"):
         f = ev.get("fields") or {}
         amount, day = calc._num(f.get(F.AMOUNT)), calc._d(f.get(F.OCCURRED_AT))
         if (_sel(f.get(F.KIND)) != "household_expense" or f.get(F.SUPERSEDED_BY) or amount is None or day is None
                 or fcc_cashflow.category_key(_sel(f.get(F.EXPENSE_CATEGORY))) != fcc_cashflow.UNCATEGORIZED):
             continue
-        label = str(f.get(F.RAW_TEXT) or "").strip()
-        waiting.append({"id": ev.get("id"), "date": day.isoformat(), "amount": round(amount, 2), "label": label,
-                        "source": "card" if str(_sel(f.get(F.SOURCE)) or "").endswith("card") else "bank", "group": bi.normalize(label)})
+        source = str(_sel(f.get(F.SOURCE)) or "")
+        kind = "card" if source == "import:card" else "bank" if source == "import:bank" else "manual"
+        label = str(f.get(F.RAW_TEXT) or "").strip() if kind != "manual" else ""
+        waiting.append({"id": ev.get("id"), "date": day.isoformat(), "amount": round(amount, 2), "label": label or "הוצאה שנרשמה ידנית",
+                        "source": kind, "group": bi.normalize(label) if label else ""})
     return waiting
 
 
@@ -850,7 +853,7 @@ def classify_view(waiting: list[dict], skip: frozenset[str] = frozenset()) -> di
     item = None
     if pool:
         w = pool[0]
-        item = {"id": w["id"], "date": w["date"], "amount": w["amount"], "label": w["label"] or "ללא תיאור", "source": w["source"], "same_count": groups[w["group"]] - 1}
+        item = {"id": w["id"], "date": w["date"], "amount": w["amount"], "label": w["label"], "source": w["source"], "same_count": groups[w["group"]] - 1 if w["group"] else 0}
     return {"total": len(waiting), "total_amount": round(sum(w["amount"] for w in waiting), 2), "item": item}
 
 

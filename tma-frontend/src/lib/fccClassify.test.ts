@@ -28,6 +28,11 @@ test("the model states the count, the sum and the next expense as the server sen
   assert.ok(m.sameLabel?.includes("2 הוצאות נוספות")); assert.equal(m.empty, false);
 });
 
+test("a manually recorded expense is labelled as such", () => {
+  const m = classifyModel(view({ item: { id: "recBBBBBBBBBBBBBB", date: "2026-10-11", amount: 420, label: "הוצאה שנרשמה ידנית", source: "manual", same_count: 0 } }));
+  assert.ok(m.item?.meta.includes("רישום ידני") && m.sameLabel === null);
+});
+
 test("the two new fee categories are offered", () => {
   const labels = classifyModel(view()).categories.map((c) => c.label);
   assert.ok(labels.includes("דמי כרטיס") && labels.includes("עמלות וריביות"));

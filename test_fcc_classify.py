@@ -76,12 +76,14 @@ def test_an_import_record_without_a_category_is_accepted_but_a_bad_one_is_not():
 
 
 # ── the queue ───────────────────────────────────────────────────────────────────────────────────────────────────
-def test_the_queue_has_only_the_owners_uncategorized_imported_expenses_largest_first(monkeypatch):
+def test_the_queue_has_only_the_owners_uncategorized_expenses_imported_or_manual_largest_first(monkeypatch):
     seed()
     waiting = service.classify_waiting(ELIYAHU)
-    assert sorted(w["id"] for w in waiting) == [f"rec{i:014d}" for i in (1, 2, 3)]
+    assert sorted(w["id"] for w in waiting) == [f"rec{i:014d}" for i in (1, 2, 3, 7)]                 # not: another owner's, classified, income
+    manual = next(w for w in waiting if w["id"] == f"rec{7:014d}")
+    assert manual["source"] == "manual" and manual["label"] == "הוצאה שנרשמה ידנית" and manual["group"] == ""
     view = service.classify_view(waiting)
-    assert view["total"] == 3 and view["total_amount"] == 640.0
+    assert view["total"] == 4 and view["total_amount"] == 660.0
     assert view["item"]["label"] == "מסעדה" and view["item"]["source"] == "card" and view["item"]["same_count"] == 0
     nxt = service.classify_view(waiting, frozenset({f"rec{3:014d}"}))["item"]
     assert nxt["label"] == "חנות לא ידועה" and nxt["amount"] == 100.0 and nxt["same_count"] == 1
@@ -91,7 +93,7 @@ def test_the_queue_has_only_the_owners_uncategorized_imported_expenses_largest_f
 def test_the_cashflow_view_tells_how_many_wait(monkeypatch):
     seed()
     view = service.cashflow_view(ELIYAHU)
-    assert view["to_classify"] == {"total": 3, "total_amount": 640.0}
+    assert view["to_classify"] == {"total": 4, "total_amount": 660.0}
 
 
 # ── the endpoints ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -100,7 +102,7 @@ def test_get_is_owner_only_and_returns_the_next_one_with_the_category_list(monke
     assert client(monkeypatch, flag=False).get("/api/fcc/classify", headers=H).status_code == 404
     assert client(monkeypatch, who=PARTNER).get("/api/fcc/classify", headers=H).status_code == 404
     body = client(monkeypatch).get("/api/fcc/classify", headers=H).get_json()
-    assert body["item"]["label"] == "מסעדה" and body["total"] == 3
+    assert body["item"]["label"] == "מסעדה" and body["total"] == 4
     assert {"card_fees", "fees_interest"} <= {c["key"] for c in body["categories"]}
     skipped = client(monkeypatch).get(f"/api/fcc/classify?skip=rec{3:014d}", headers=H).get_json()
     assert skipped["item"]["label"] == "חנות לא ידועה"
@@ -110,7 +112,7 @@ def test_post_patches_one_field_of_one_record_through_the_executor(monkeypatch, 
     seed()
     r = client(monkeypatch).post("/api/fcc/classify", json={"event_id": f"rec{3:014d}", "category": "fees_interest"}, headers=H)
     body = r.get_json()
-    assert r.status_code == 200 and body["state"] == "done" and body["done"] == 1 and body["total"] == 2
+    assert r.status_code == 200 and body["state"] == "done" and body["done"] == 1 and body["total"] == 3
     assert patched == [(Tables.FIN_EVENTS, f"rec{3:014d}", {EF.EXPENSE_CATEGORY: "fees_interest"})]            # one record, one field, the server's choice
     assert body["item"]["label"] == "חנות לא ידועה"
 
@@ -118,7 +120,7 @@ def test_post_patches_one_field_of_one_record_through_the_executor(monkeypatch, 
 def test_apply_same_covers_the_other_rows_with_the_same_description_only(monkeypatch, patched):
     seed()
     body = client(monkeypatch).post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": "קייטרינג חדש", "apply_same": True}, headers=H).get_json()
-    assert body["done"] == 2 and body["total"] == 1 and body["same_left"] == 0
+    assert body["done"] == 2 and body["total"] == 2 and body["same_left"] == 0
     assert sorted(c[1] for c in patched) == [f"rec{1:014d}", f"rec{2:014d}"] and all(c[2] == {EF.EXPENSE_CATEGORY: "קייטרינג חדש"} for c in patched)
     assert [r for r in DB[Tables.FIN_EVENTS] if r["id"] == f"rec{3:014d}"][0]["fields"].get(EF.EXPENSE_CATEGORY) is None      # a different description: untouched
 
@@ -126,7 +128,7 @@ def test_apply_same_covers_the_other_rows_with_the_same_description_only(monkeyp
 def test_post_refuses_other_peoples_classified_non_import_or_income_rows_and_bad_input(monkeypatch, patched):
     seed()
     c = client(monkeypatch)
-    for rid in (5, 4, 6, 7, 99):                      # another owner's, already classified, income, not an import, missing: all answered alike
+    for rid in (5, 4, 6, 99):                         # another owner's, already classified, income, missing: all answered alike
         assert c.post("/api/fcc/classify", json={"event_id": f"rec{rid:014d}", "category": "living"}, headers=H).status_code == 404
     assert c.post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": ""}, headers=H).status_code == 400
     assert c.post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": "uncategorized"}, headers=H).status_code == 400
@@ -140,3 +142,15 @@ def test_a_failing_write_is_reported_and_nothing_is_marked_done(monkeypatch, pat
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute", lambda *a, **k: ("a", {"error": "x"}, 500))
     r = client(monkeypatch).post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": "living", "apply_same": True}, headers=H)
     assert r.status_code == 500 and r.get_json()["state"] == "partial_failure" and r.get_json()["done"] == 0
+
+
+def test_a_manually_recorded_expense_without_a_category_can_be_classified_and_is_never_grouped(monkeypatch, patched):
+    seed()
+    DB[Tables.FIN_EVENTS].append(ev(8, "intent:monthly.household_expense#ab12", 30.0, source="fcc_free_text"))
+    body = client(monkeypatch).post("/api/fcc/classify", json={"event_id": f"rec{7:014d}", "category": "home", "apply_same": True}, headers=H).get_json()
+    assert body["done"] == 1                                                                           # the other manual row has no description: not "the same"
+    assert patched == [(Tables.FIN_EVENTS, f"rec{7:014d}", {EF.EXPENSE_CATEGORY: "home"})]
+
+
+def test_the_first_import_s_singular_label_is_the_built_in_fees_category():
+    assert cashflow.category_key("עמלות וריבית") == "fees_interest" and not cashflow.is_custom(cashflow.category_key("עמלות וריבית"))

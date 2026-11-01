@@ -1147,7 +1147,7 @@ export interface FccImportPreview {
   };
 }
 /** One-by-one classification of imported expenses that have no category (GET|POST /api/fcc/classify). Every number is the server's. */
-export interface FccClassifyItem { id: string; date: string; amount: number; label: string; source: "bank" | "card"; same_count: number }
+export interface FccClassifyItem { id: string; date: string; amount: number; label: string; source: "bank" | "card" | "manual"; same_count: number }
 export interface FccClassifyView {
   total: number; total_amount: number; item: FccClassifyItem | null; categories: { key: string; label: string }[];
   state?: "done"; done?: number; same_left?: number;
