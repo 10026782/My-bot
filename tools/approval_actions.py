@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,173 @@ def _verify_active_execution_claim(contract_id: str, claim_execution_id: str, ap
     )
 
 
+# ── FCC statement import: ONE approved contract = one chunk of records (op "post_many") ───────────────────────────────────────────────
+# A statement of ~200 rows must not become 200 contracts (each costs a projection row, a claim, an audit row and a receipt). The chunk is still ONE
+# ActionGateway contract: proposed, approved, claimed and executed through the same ceremony as every other TMA write, and validated here record by
+# record against a strict allow-list (the client never chooses the fields, the server builds the records from the uploaded statement).
+BATCH_MAX = 25
+_BATCH_EVENT_KEYS = {"Kind", "Amount", "Occurred At", "Recorded By", "Source", "Source Ref", "Idempotency Key", "Raw Text", "Verification",
+                     "Expense Category", "Note"}
+_BATCH_RULE_KEYS = {"Match", "Applies To", "Direction", "Status", "Times Seen", "Last Seen", "Example Amount", "Notes", "Row Key"}
+_IMPORT_KEY_RE = re.compile(r"^(bank|card):[0-9a-f]{20}$")
+_ISO_DATE_RE_ = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def validate_batch_record(table: str, rec) -> str | None:
+    """None when the record is an acceptable import record for ``table``; otherwise the reason. Fail-closed: any key outside the list is refused."""
+    from datetime import date as _date
+    from airtable_schema import Tables
+    if not isinstance(rec, dict) or not rec:
+        return "record is not an object"
+    if table == Tables.FIN_EVENTS:
+        if set(rec) - _BATCH_EVENT_KEYS:
+            return f"field not allowed: {sorted(set(rec) - _BATCH_EVENT_KEYS)[0]}"
+        kind, source, key = rec.get("Kind"), rec.get("Source"), rec.get("Idempotency Key")
+        if kind not in ("household_expense", "one_time") or source not in ("import:bank", "import:card"):
+            return "kind / source not allowed for an import"
+        if not isinstance(key, str) or not _IMPORT_KEY_RE.match(key) or rec.get("Source Ref") != key or not key.startswith(source.split(":")[1] + ":"):
+            return "bad idempotency key"
+        amount = rec.get("Amount")
+        if not _is_num(amount) or amount == 0 or abs(amount) > 10_000_000:
+            return "bad amount"
+        day = rec.get("Occurred At")
+        try:
+            if not isinstance(day, str) or not _ISO_DATE_RE_.match(day):
+                raise ValueError
+            _date.fromisoformat(day)
+        except ValueError:
+            return "bad date"
+        if rec.get("Verification") != "statement":
+            return "verification must be statement"
+        cat, note = rec.get("Expense Category"), rec.get("Note")
+        if cat is not None and (kind != "household_expense" or not isinstance(cat, str) or not cat.strip() or len(cat) > 40):      # no category = not yet classified (the owner does it on screen)
+            return "bad category"
+        if note is not None and (kind != "one_time" or not isinstance(note, str) or not note.startswith("מקור: ") or len(note) > 120):
+            return "bad note"
+        if kind == "one_time" and amount < 0:
+            return "income must be positive"
+        for name in ("Raw Text", "Recorded By"):
+            if rec.get(name) is not None and (not isinstance(rec[name], str) or len(rec[name]) > 200):
+                return f"bad {name}"
+        return None
+    if table == Tables.CASHFLOW_RULES:
+        if set(rec) - _BATCH_RULE_KEYS:
+            return f"field not allowed: {sorted(set(rec) - _BATCH_RULE_KEYS)[0]}"
+        match, row_key = rec.get("Match") or "", rec.get("Row Key")
+        if rec.get("Status") != "pending" or rec.get("Applies To") not in ("bank", "card") or rec.get("Direction") not in ("debit", "credit"):
+            return "a new rule must be pending with a source and direction"
+        if not isinstance(match, str) or len(match) > 200 or (row_key is not None and (not isinstance(row_key, str) or not _IMPORT_KEY_RE.match(row_key))):
+            return "bad match / row key"
+        if not match.strip() and not row_key:
+            return "a rule needs a match or a row key"
+        if not (isinstance(rec.get("Times Seen"), int) and 1 <= rec["Times Seen"] <= 100000) or not _is_num(rec.get("Example Amount")) or not 0 <= rec["Example Amount"] <= 1e9:
+            return "bad numbers"
+        if not isinstance(rec.get("Last Seen"), str) or not _ISO_DATE_RE_.match(rec["Last Seen"]):
+            return "bad date"
+        if rec.get("Notes") is not None and (not isinstance(rec["Notes"], str) or len(rec["Notes"]) > 300):
+            return "bad notes"
+        return None
+    return "table not allowed for a batch"
+
+
+def _existing_batch_keys(table: str, records: list[dict], identity) -> set[str]:
+    """What the OWNER already has (so a retried chunk never writes twice): idempotency keys (events) / row keys and exact matches (rules)."""
+    from airtable_schema import CashflowRuleFields as CR, FinEventFields as EF, Tables
+    from core import data_access_policy
+    from tools.airtable_gateway import escape_formula_value
+    from tools.airtable_read_adapter import list_records
+    if table == Tables.FIN_EVENTS:
+        keys = [r["Idempotency Key"] for r in records]
+        formula = "OR(" + ",".join(f"{{{EF.IDEMPOTENCY_KEY}}}='{escape_formula_value(k)}'" for k in keys) + ")"
+        found = list_records(table, formula, max_records=len(keys) + 5, paginate=True)
+        return {str((f.get("fields") or {}).get(EF.IDEMPOTENCY_KEY) or "") for f in data_access_policy.filter_records(table, found, identity)}
+    terms = []
+    for r in records:
+        if r.get("Row Key"):
+            terms.append(f"{{{CR.ROW_KEY}}}='{escape_formula_value(r['Row Key'])}'")
+        else:
+            terms.append(f"{{{CR.MATCH}}}='{escape_formula_value(r['Match'])}'")
+    found = list_records(table, "OR(" + ",".join(terms) + ")", max_records=len(records) * 3 + 5, paginate=True)
+    out = set()
+    for rec in data_access_policy.filter_records(table, found, identity):
+        f = rec.get("fields") or {}
+        out.add("row:" + str(f.get(CR.ROW_KEY) or "") if f.get(CR.ROW_KEY) else "match:" + str(f.get(CR.MATCH) or ""))
+    return out
+
+
+def _tma_write_many(table, records, identity, action, requested_by, audit_action, audit_details, approved_by) -> dict:
+    """Execute ONE chunk (already authorized by the caller's claim check). Validates EVERY record and the owner policy for EVERY record before the
+    first write, skips what the owner already has, then creates the rest one by one; a failure stops the chunk with what was done in the evidence
+    (the retry skips those)."""
+    from datetime import datetime, timezone
+    from airtable_schema import InteractionLogFields, Tables
+    from tools.airtable_gateway import airtable_create
+
+    if table not in (Tables.FIN_EVENTS, Tables.CASHFLOW_RULES):
+        return _tool_result(ok=False, tool="tma_write", user_message=f"❌ טבלה '{table}' אינה מורשית לכתיבה בקבוצה")
+    if not isinstance(records, list) or not 1 <= len(records) <= BATCH_MAX:
+        return _tool_result(ok=False, tool="tma_write", user_message=f"❌ קבוצה חייבת להכיל 1–{BATCH_MAX} רשומות")
+    for i, rec in enumerate(records):
+        reason = validate_batch_record(table, rec)
+        if reason:
+            logger.error("[approval_actions] tma_write post_many: record %s refused: %s", i, reason)
+            return _tool_result(ok=False, tool="tma_write", user_message=f"❌ רשומה {i + 1} נדחתה: {reason}")
+    scoped = []
+    for rec in records:
+        fields, denied = _enforce_personal_data_policy("post", table, "", dict(rec), identity)
+        if denied is not None:
+            return denied
+        scoped.append(fields)
+    try:
+        existing = _existing_batch_keys(table, records, identity)
+    except Exception as exc:                                                       # fail closed: unknown != "nothing exists yet"
+        logger.error("[approval_actions] tma_write post_many: existing-keys lookup failed: %s", exc)
+        return _tool_result(ok=False, tool="tma_write", user_message="❌ לא ניתן לוודא אילו רשומות כבר קיימות — לא נכתב דבר")
+    created, skipped, ids = 0, 0, []
+    for rec, fields in zip(records, scoped):
+        ident = (rec.get("Idempotency Key") if table == Tables.FIN_EVENTS else ("row:" + rec["Row Key"] if rec.get("Row Key") else "match:" + rec["Match"]))
+        if ident in existing:
+            skipped += 1
+            continue
+        out = airtable_create(table, fields, source="tma_write_many")
+        if not out:
+            return _tool_result(ok=False, tool="tma_write", evidence={"table": table, "created": created, "skipped_existing": skipped, "record_ids": ids},
+                                user_message=f"❌ הכתיבה נעצרה אחרי {created} רשומות — אפשר להמשיך (מה שנכתב לא ייכתב שוב)")
+        created += 1
+        ids.append(out.get("id", ""))
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        airtable_create(Tables.INTERACTION_LOG, {
+            InteractionLogFields.TITLE: f"[TMA] {audit_action or action}",
+            InteractionLogFields.SUMMARY: f"{audit_details or audit_action or action} — {created} new, {skipped} existing"[:200],
+            InteractionLogFields.PARTICIPANTS: getattr(identity, "display_name", "") or getattr(identity, "user_id", ""),
+        }, source="tma_write_audit")
+    except Exception as exc:
+        logger.warning("[approval_actions] tma_write post_many audit failed: %s", exc)
+    receipt = {"action": action, "table": table, "created": created, "skipped_existing": skipped, "requested_by": requested_by or "unknown",
+               "approved_by": approved_by, "status": "executed", "timestamp": now}
+    receipt_warning = ""
+    try:
+        rec = airtable_create(Tables.INTERACTION_LOG, {
+            InteractionLogFields.TITLE: f"[TMA receipt] {action}", InteractionLogFields.SUMMARY: json.dumps(receipt, ensure_ascii=False),
+            InteractionLogFields.TIMESTAMP: now, InteractionLogFields.PARTICIPANTS: approved_by,
+            InteractionLogFields.KEY_INSIGHTS: f"executed {table} +{created}",
+        }, source="tma_write_receipt")
+        if not rec:
+            receipt_warning = "receipt persistence failed: Interaction Log write returned no record"
+    except Exception as exc:
+        receipt_warning = f"receipt persistence failed: {type(exc).__name__}"
+    evidence = {"table": table, "created": created, "skipped_existing": skipped, "record_ids": ids, "receipt": receipt}
+    if receipt_warning:
+        evidence["receipt_warning"] = receipt_warning
+    return _tool_result(ok=True, tool="tma_write", external_id=ids[0] if ids else "", evidence=evidence,
+                        user_message=f"✅ נכתבו {created} רשומות ({skipped} כבר היו)")
+
+
 def tma_write(
     op: str,
     table: str,
@@ -285,6 +453,7 @@ def tma_write(
     identity=None,
     trusted_source: str | None = None,
     execution_context: dict | None = None,
+    records: list | None = None,
 ) -> dict:
     """Executes a TMA-originated Airtable write after ActionGateway approval.
 
@@ -347,6 +516,9 @@ def tma_write(
             ok=False, tool="tma_write",
             user_message="❌ tma_write יכול לרוץ רק דרך זרימת האישור של ActionGateway",
         )
+
+    if op == "post_many":                                       # FCC statement import: one contract = one chunk (see the block above)
+        return _tma_write_many(table, records, identity, action, requested_by, audit_action, audit_details, _approved_by)
 
     if table not in _TMA_WRITE_ALLOWED_TABLES:
         logger.error("[approval_actions] tma_write: table '%s' not in allowlist — rejected", table)

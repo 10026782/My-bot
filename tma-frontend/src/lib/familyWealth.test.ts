@@ -36,9 +36,9 @@ const release = { income_net: 10000, income_target: 15000, fixed_level: 8000, sh
 const plan = { mode: "monthly_level", target: 8000, actual: 5000, remaining: 3000, dynamic_target_per_week: 0, goals: 2 };
 const overview = { summary: { savings: plan }, savings_release: release, as_of: "2026-10-14" } as unknown as FccOverview;
 
-test("screen name and the four tabs are the agreed ones", () => {
+test("screen name and the six tabs are the agreed ones", () => {
   assert.equal(SCREEN_TITLE, "תכנון חיסכון לטווח ארוך");
-  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מימון יעד | מעבדת העתיד");
+  assert.equal(FAMILY_TABS.map((t) => t.label).join(" | "), "החיסכון שלי | החשבונות | מימון יעד | מעבדת העתיד | קצב בפועל | מבחן לחץ");
 });
 
 test("savings tab: plan = standing level, actual labelled as self-reported, expected is NOT a plan, balance is not invented", () => {
@@ -98,12 +98,16 @@ test("the FCC tab strip is reused unchanged for FCC and works for other tab sets
   assert.ok(fcc.includes('id="fcc-tab-loans"') && fcc.includes("אזורי המרכז הכלכלי"));
   assert.equal(tabId("x"), "fcc-tab-x");
   assert.equal(panelId("x", "fw"), "fw-panel-x");
-  assert.equal(tabForKey("monthly", "ArrowLeft", true), "loans");
+  assert.equal(tabForKey("monthly", "ArrowLeft", true), "cashflow");
   assert.equal(tabForKey("savings" as const, "ArrowLeft", true, FAMILY_TABS), "accounts");
   assert.equal(tabForKey("accounts" as const, "ArrowLeft", true, FAMILY_TABS), "funding");
   assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
+  assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
+  assert.equal(tabForKey("lab" as const, "ArrowLeft", true, FAMILY_TABS), "pace");
+  assert.equal(tabForKey("pace" as const, "ArrowLeft", true, FAMILY_TABS), "stress");
+  assert.equal(tabForKey("stress" as const, "ArrowLeft", true, FAMILY_TABS), "savings", "wraps");
   assert.equal(tabForKey("lab" as const, "Home", false, FAMILY_TABS), "savings");
-  assert.equal(FCC_TABS.length, 3);
+  assert.equal(FCC_TABS.length, 4);
 });
 
 test("form -> request: percentages stay as typed, blank/invalid is an error (never silently 0)", () => {
@@ -433,7 +437,7 @@ test("accounts composer: two chips that only name an intent + an account; no chi
   assert.ok(ACCOUNTS_COMPOSER.chips.every((c) => c.pick === "account"), "every account action starts from ONE chosen account");
   assert.ok(ACCOUNTS_COMPOSER.chips.every((c) => c.pick === "account") && !ACCOUNTS_COMPOSER.freeText);
   assert.ok(!ACCOUNTS_COMPOSER.chips.some((c) => /create|new/.test(c.intent)));
-  assert.equal(Object.keys(COMPOSER).join(), "monthly,loans,assets");
+  assert.equal(Object.keys(COMPOSER).join(), "monthly,cashflow,loans,assets");
 });
 
 test("composer renders with the accounts config (no FCC tab needed) and shows the two account actions", () => {

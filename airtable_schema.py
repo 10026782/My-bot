@@ -77,6 +77,7 @@ class Tables:
     FIN_ACCOUNTS    = "Financial Accounts"         # FCC/D1 — live: tblhV9f86iXMIwKx1 (created 15/10/2026), owner-scoped, EMPTY until the access policy is merged
     FUNDING_PLANS = "Funding Plans"                # FCC/funding planner step 2 — live: tbl98DXJJgLceESgr (created 18/10/2026), owner-scoped, written ONLY after the owner's אשר
     GOAL_ALLOCATIONS = "Goal Allocations"          # FCC/B2 — live: tblZgqHiBbSeyRTCA (created 18/10/2026), owner-scoped, EMPTY (manual entry)
+    CASHFLOW_RULES = "Cashflow Rules"              # FCC cashflow import — live: tbl98SEP03oiaQ6uY (created 01/11/2026, owner-approved), owner-scoped classification rules
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
@@ -945,6 +946,9 @@ class FinEventFields:
     ACCOUNT         = "Account"           # link -> Financial Accounts (single record, enforced in data_access_policy)
     COUNTER_ACCOUNT = "Counter Account"   # link -> Financial Accounts (transfer destination; single record)
     VERIFICATION    = "Verification"      # singleSelect self_reported|statement|bank_or_fund_confirmed
+    # Cashflow (live 01/11/2026, owner-approved): singleLineText (NOT a select, so the owner can add categories without a schema change).
+    # A built-in category key (core.financial_control.cashflow.EXPENSE_CATEGORIES) or a custom name; empty = uncategorized.
+    EXPENSE_CATEGORY = "Expense Category"
 
 
 class FinAccountFields:
@@ -975,6 +979,25 @@ class FinAccountFields:
     INSURANCE_COST_MONTHLY = "Insurance Cost Monthly"  # number, ₪/month (disability + survivors); nominal, held flat
     INSURANCE_COST_AS_OF = "Insurance Cost As Of"      # date
     # reverse links created by Airtable (not read by code): "Financial Progress Events", "Incoming Transfers"
+
+
+class CashflowRuleFields:
+    """Cashflow Rules (FCC bank / card import) — LIVE (tbl98SEP03oiaQ6uY, created 01/11/2026 with owner approval). One row = "this description (or ONE
+    imported row) means this kind and category". Owner-scoped via FINANCIAL_OWNER. A row with an empty Kind (Status = pending) is a description waiting
+    for the owner. NEVER store account or card numbers."""
+    MATCH           = "Match"             # the description (whole words, quotes ignored); empty when ROW_KEY is used
+    APPLIES_TO      = "Applies To"        # singleSelect: any|bank|card
+    DIRECTION       = "Direction"         # singleSelect: any|debit|credit
+    KIND            = "Kind"              # singleSelect: expense|income|refund|transfer|ignore (empty = undecided)
+    CATEGORY        = "Category"          # expense category key / the owner's own category; for income: the source name
+    ROW_KEY         = "Row Key"           # a rule for ONE imported row (its idempotency key)
+    STATUS          = "Status"            # singleSelect: active|pending|disabled
+    TIMES_SEEN      = "Times Seen"
+    LAST_SEEN       = "Last Seen"
+    EXAMPLE_AMOUNT  = "Example Amount"
+    NOTES           = "Notes"
+    FINANCIAL_OWNER = "Financial Owner"   # multipleRecordLinks -> Profile (PERMISSION only)
+    CREATED_AT      = "Created At"        # createdTime
 
 
 class GoalAllocationFields:

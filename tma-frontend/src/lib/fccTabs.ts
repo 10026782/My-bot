@@ -2,15 +2,24 @@
 // module's memory (i.e. while the app stays open); a fresh open of the app always starts on "התנהלות חודשית".
 import type { FccTurn } from "../types";
 
-export type FccTabKey = "monthly" | "loans" | "assets";
+export type FccTabKey = "monthly" | "cashflow" | "loans" | "assets";
 
 export const FCC_TABS: { key: FccTabKey; label: string }[] = [
   { key: "monthly", label: "התנהלות חודשית" },
+  { key: "cashflow", label: "תזרים" },
   { key: "loans", label: "הלוואות וחוב" },
   { key: "assets", label: "נכסים והון" },
 ];
 
 export const DEFAULT_TAB: FccTabKey = "monthly";
+
+/** When does content get its own tab? (measured at a 360x800 phone; docs/portfolio_lab/UI.md "כלל חלוקה ללשוניות")
+ *  - one primary task per tab: at most ONE input form (a second independent form -> a new tab);
+ *  - a tab's content (form + the result it shows) stays within ~2 screens (soft) and never beyond 2.5 screens (hard);
+ *  - a form + result that together pass that budget are split INSIDE the tab into "קלטים" / "תוצאות" (InputsResultsTabs);
+ *  - the top strip holds at most 6 tabs (it scrolls sideways beyond 4); more -> group tabs, never a 7th. */
+export const TAB_BUDGET = { screenPx: 800, softScreens: 2, hardScreens: 2.5, maxFormsPerTab: 1, maxTopTabs: 6, scrollFrom: 4 } as const;
+export const tabStripScrolls = (count: number): boolean => count > TAB_BUDGET.scrollFrom;
 
 let remembered: FccTabKey | null = null;
 
@@ -63,6 +72,16 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
     ],
     freeText: false,
     hint: "בחרו פעולה — המערכת תשאל רק מה שחסר.",
+  },
+  // the two entries the cashflow is made of; same intents and the same draft -> review -> אשר flow as the monthly tab (the server asks the source / category)
+  cashflow: {
+    title: "רישום הכנסה / הוצאה",
+    chips: [
+      { intent: "monthly.income", label: "+ הכנסה" },
+      { intent: "monthly.household_expense", label: "+ הוצאה" },
+    ],
+    freeText: false,
+    hint: "בחרו פעולה — המערכת תשאל מאיזה מקור או לאיזו קטגוריה, ורק אחרי ״אשר ורשום״ זה נשמר.",
   },
   loans: {
     title: "עדכון הלוואה",

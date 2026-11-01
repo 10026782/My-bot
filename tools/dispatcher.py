@@ -1294,6 +1294,7 @@ def dispatch_tool(
                     requested_by=inputs.get("requested_by", ""),
                     fields=inputs.get("fields", {}),
                     record_id=inputs.get("record_id", ""),
+                    records=inputs.get("records"),
                     audit_action=inputs.get("audit_action", ""),
                     audit_details=inputs.get("audit_details", ""),
                     identity=identity,

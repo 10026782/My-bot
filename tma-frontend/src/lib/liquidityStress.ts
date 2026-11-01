@@ -27,6 +27,15 @@ export const DEFAULT_STRESS_FORM: StressForm = {
 export const STRESS_TITLE = "מבחן לחץ נזילות";
 export const STRESS_NOTE = "תרחיש לפי ההנחות שהזנת — לא תחזית ולא המלצה, ואין כאן הערכת סיכוי. סף ה-LTV והריבית הם נתונים שלך ולא אומתו מול בנק. שום דבר כאן לא נשמר.";
 export const STRESS_PROTECTED_NOTE = "הון הילדים מופרד: אינו בטוחה ואינו מממן הפסדים של הקרן המרכזית.";
+export const STRESS_STALE_NOTE = "התוצאה למטה חושבה לפי הנחות קודמות — הקלטים השתנו. הרץ שוב כדי לעדכן.";
+
+/** The request key of a run, and whether the form no longer matches it (an invalid form also counts: the old answer is not for these inputs). */
+export function stressKey(form: StressForm): string | null {
+  const parsed = stressParams(form);
+  return parsed.ok ? JSON.stringify(parsed.params) : null;
+}
+export const isStale = (form: StressForm, ranKey: string | null): boolean => ranKey !== null && stressKey(form) !== ranKey;
+
 export const CASHFLOW_LABEL = "תזרים", CALL_LABEL = "דרישת בטוחות";
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -97,7 +106,7 @@ const yesNo = (ok: boolean | null | undefined): string => (ok === null || ok ===
 function eventCell(b: StressMode["events"]["forced_sale"], withAmount: boolean): string {
   if (b.status === "not_applicable_no_loan") return "לא רלוונטי (אין הלוואה)";
   if (!b.count) return "לא אירע";
-  const base = `${b.count} חודשים · ראשון: ${monthText(b.first_month)}`;
+  const base = `${b.count === 1 ? "חודש אחד" : `${b.count} חודשים`} · ראשון: ${monthText(b.first_month)}`;
   return withAmount ? `${base} · ${ils(b.total_amount)}` : base;
 }
 

@@ -3229,6 +3229,12 @@
 .fcc-tab--on { background: var(--boss-color-accent-readable); color: var(--boss-color-surface); font-weight: 650; }
 .fcc-asset__loans { display: grid; gap: 2px; padding-block-start: 4px; border-block-start: 1px dashed var(--boss-color-border); }
 [role="tabpanel"][hidden] { display: none; }
+/* a strip with more than 4 tabs scrolls sideways instead of squeezing every label into a few characters */
+.fcc-tabs--scroll { overflow-x: auto; scrollbar-width: none; }
+.fcc-tabs--scroll::-webkit-scrollbar { display: none; }
+.fcc-tabs--scroll .fcc-tab { flex: 0 0 auto; white-space: nowrap; padding-inline: 14px; overflow-wrap: normal; }
+/* inner "קלטים / תוצאות" switch: not sticky (the top strip already is), and smaller */
+.fcc-tabs--inner { position: static; }
 
 /* Close-loan flow (loans tab) */
 .fcc-loan__actionbtn, .fcc-loan__closebtn { flex: 1 1 auto; }
@@ -3258,7 +3264,13 @@
 .pl-stack__rows { display: grid; gap: 4px; margin: 0; }
 .pl-stack__rows > div { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; border-block-end: 1px solid var(--boss-color-border); padding-block: 4px; }
 .pl-stack__rows dt, .pl-stack__rows dd { margin: 0; }
-.pl-scroll { overflow-x: auto; }
+.pl-scroll { overflow-x: auto; min-inline-size: 0; max-inline-size: 100%; }
+.pl-form, .fcc-section { min-inline-size: 0; max-inline-size: 100%; }
+/* stress table: cells wrap (long Hebrew event text) so the table never widens the whole card on a phone */
+.pl-table.pl-table--stress { table-layout: fixed; }
+.pl-table.pl-table--stress th[scope="row"] { font-weight: 600; inline-size: 34%; }
+.pl-table.pl-table--stress th, .pl-table.pl-table--stress td { overflow-wrap: break-word; }
+.pl-table.pl-table--stress .pl-num { direction: rtl; text-align: start; white-space: normal; }
 .pl-table { inline-size: 100%; border-collapse: collapse; font-size: 14px; }
 .pl-table th, .pl-table td { padding: 6px 8px; text-align: start; border-block-end: 1px solid var(--boss-color-border); }
 .pl-table .pl-num { direction: ltr; text-align: end; white-space: nowrap; }
@@ -3276,3 +3288,15 @@
 .fw-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--boss-color-border); color: var(--boss-color-text-muted); }
 .fw-add { display: flex; flex-wrap: wrap; gap: 6px; }
 .fw-option-form { display: grid; gap: 8px; }
+
+/* ── FCC cashflow tab ───────────────────────────────────────────────────────────────────────────────────────────── */
+.fcc-cf-cat { display: grid; gap: var(--boss-space-2); padding: var(--boss-space-3) var(--boss-space-4); }
+.fcc-cf-cat__line { display: flex; align-items: center; justify-content: space-between; gap: var(--boss-space-3); }
+.fcc-cf-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--boss-space-2) var(--boss-space-3); text-align: start; width: 100%;
+  padding: var(--boss-space-3) var(--boss-space-4); border: 1px solid var(--boss-color-border); border-radius: var(--boss-radius-md, 12px); background: transparent; color: inherit; }
+.fcc-cf-row__month { grid-column: 1 / -1; font-weight: 600; }
+.fcc-cf-row--on { border-color: var(--boss-color-accent-readable); }
+.fcc-cf-row--bad strong { color: var(--boss-color-danger, #c0392b); }
+.fcc-cf-row--missing strong { opacity: .7; }
+.fcc-rec { display: grid; gap: var(--boss-space-2); }
+.fcc-rec h3 { margin: 0; }

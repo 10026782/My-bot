@@ -28,7 +28,7 @@ from core.business_draft import (
     DraftOperation, DraftState, create_draft,
 )
 from core.draft_flow import CANCEL_WORDS, CONFIRM_WORDS, EDIT_WORDS, SKIP_WORDS
-from core.financial_control import calc, draft as fd, loans as fcc_loans, service, writer
+from core.financial_control import calc, cashflow, draft as fd, loans as fcc_loans, service, writer
 from airtable_schema import AssetFields as AF, FinAccountFields as AF_ACCOUNT, FinEventFields as EF, FinGoalFields as GF, FundingPlanFields as FPF, LoanFields as LF, RecObFields as RF, TaskFields, Tables
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ def _render(d: BusinessDraft) -> TurnResult:
             note=(_sale_note(d) if d.entity_type == fd.FCC_ASSET_SOLD else _partial_note(d) if d.entity_type == fd.FCC_LOAN_PARTIAL
                   else _prime_note(d) if d.entity_type == fd.FCC_PRIME_CHANGE
                   else _week_surplus_note(d) if d.entity_type == fd.FCC_WEEK_SURPLUS
-                  else _recurring_note(d) or str(d.source_context.get("review_note") or ""))),
+                  else "\n".join(x for x in (_recurring_note(d) or str(d.source_context.get("review_note") or ""), _category_note(d)) if x))),
             d.entity_type, None, _view(d))
     if d.source_context.get("ask_count"):                      # D1 step 8: a deposit is counted in a goal's history only by an explicit choice
         return TurnResult("ask", f"לספור את ההפקדה גם בהיסטוריית ההפקדות של {d.source_context.get('count_goal_title') or 'היעד'}?", d.entity_type,
@@ -172,6 +172,10 @@ def _render(d: BusinessDraft) -> TurnResult:
                                       fd.FCC_ASSET_STEP, fd.FCC_LOAN_ARRANGEMENT, fd.FCC_SOURCE_NEW, fd.FCC_PRIME_CHANGE,
                                       fd.FCC_ACCOUNT_BALANCE, *fd.ACCOUNT_PLAN_ENTITIES) and d.source_context.get("review_note"):
         msg += f"\n({d.source_context['review_note']})"
+    if awaiting == "expense_category":
+        if d.source_context.get("ask_new_category"):
+            return TurnResult("ask", "איך לקרוא לקטגוריה החדשה? (למשל: חיות מחמד)", d.entity_type, awaiting, _view(d), candidates=[])
+        return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_category_buttons(d))
     return TurnResult("ask", msg, d.entity_type, awaiting, _view(d), candidates=_choice_buttons(d.entity_type, awaiting))
 
 
@@ -348,6 +352,11 @@ def _deterministic_answer(field_name: str, text: str, today: date | None = None)
     """Every answer is parsed by rule: a number / percent, a date, one of the presented choices, or — for the free-text fields in
     ``_VERBATIM_FIELDS`` (titles, names, notes, a next step) — the user's own words exactly as written. Nothing is guessed."""
     t = text.strip()
+    if field_name == "expense_category":
+        if not t or t.lower() in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS | CANCEL_WORDS or t == NEW_CATEGORY_TITLE or re.fullmatch(r"[\d\s.,%₪-]+", t):
+            return None                                       # a command, the "new category" button or a bare number is not a category name
+        key = cashflow.category_key(t)
+        return None if key == cashflow.UNCATEGORIZED else key
     if field_name in _VERBATIM_FIELDS:
         if not t or t.lower() in SKIP_WORDS | CONFIRM_WORDS | EDIT_WORDS | CANCEL_WORDS:
             return None
@@ -798,8 +807,49 @@ def _is_income_goal(g: dict) -> bool:
     return service._category_key((g.get("fields") or {}).get(GF.CATEGORY)) == "income"
 
 
-OTHER_SOURCE_ID = "other"           # synthetic choice id: "מקור אחר" -> booked on the total income goal + the named source in the note
-OTHER_SOURCE_TITLE = "מקור אחר"
+OTHER_SOURCE_ID = "other"           # synthetic choice id: "+ מקור חדש" -> booked on the total income goal + the named source in the note
+OTHER_SOURCE_TITLE = "+ מקור חדש"
+GENERAL_SOURCE_ID = "general"       # synthetic choice id: "כללי" -> booked on the total income goal, no name asked (a non-fixed, unnamed source)
+GENERAL_SOURCE_TITLE = cashflow.GENERAL_SOURCE
+NEW_CATEGORY_TITLE = "+ קטגוריה חדשה"
+CATEGORY_CHOICE_LIMIT = 12          # the owner's own (custom) categories offered as buttons, most used first
+
+
+def _source_choices() -> list[dict]:
+    return [{"goal_id": GENERAL_SOURCE_ID, "title": GENERAL_SOURCE_TITLE}, {"goal_id": OTHER_SOURCE_ID, "title": OTHER_SOURCE_TITLE}]
+
+
+def _custom_categories(identity) -> list[str]:
+    """The owner's own expense categories already in use (custom text outside the built-in list), most used first. Own events only."""
+    counts: dict[str, int] = {}
+    try:
+        for ev in service.my_events(identity):
+            f = ev.get("fields") or {}
+            key = cashflow.category_key(service._sel(f.get(EF.EXPENSE_CATEGORY)))
+            if cashflow.is_custom(key) and not f.get(EF.SUPERSEDED_BY):
+                counts[key] = counts.get(key, 0) + 1
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:                                      # a read failure only means fewer buttons, never a failed turn
+        logging.getLogger(__name__).exception("[fcc] custom categories read failed")
+    return [k for k, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))][:CATEGORY_CHOICE_LIMIT]
+
+
+def _category_buttons(d: BusinessDraft) -> list[dict]:
+    """Built-in categories, then the owner's own, then "+ קטגוריה חדשה". A click sends the label, like typing it."""
+    buttons = [{"goal_id": k, "title": v} for k, v in cashflow.EXPENSE_CATEGORIES]
+    buttons += [{"goal_id": c, "title": c} for c in d.source_context.get("custom_categories") or []]
+    return buttons + [{"goal_id": "new_category", "title": NEW_CATEGORY_TITLE}]
+
+
+def _category_note(d: BusinessDraft) -> str:
+    """Review line for a category that does not exist yet: it is created by the approval itself (there is no separate category table)."""
+    if d.entity_type != fd.FCC_EVENT or d.fields.get("kind") != calc.HOUSEHOLD_EXPENSE:
+        return ""
+    key = cashflow.category_key(d.fields.get("expense_category"))
+    if cashflow.is_custom(key) and key not in (d.source_context.get("custom_categories") or []):
+        return f"קטגוריה חדשה: {key} — תיווצר עם האישור."
+    return ""
 
 
 KIND_CHOICES = [{"goal_id": "one_time", "title": "חד-פעמית"}, {"goal_id": "monthly_recurring", "title": "חודשית קבועה"}]
@@ -892,7 +942,7 @@ def _total_income_goal(goals: list[dict]) -> dict | None:
 def _choices_for(d: BusinessDraft, goals: list[dict]) -> list[dict]:
     cands = writer._cand(goals)
     if d.source_context.get("offer_other"):
-        cands.append({"goal_id": OTHER_SOURCE_ID, "title": OTHER_SOURCE_TITLE})
+        cands.extend(_source_choices())
     return cands
 
 
@@ -1151,6 +1201,8 @@ def start_intent(identity, intent_id: str, entity_id: str | None = None, *, stor
         extra["offer_other"] = True
     if intent_id == "monthly.income":                          # one-time vs recurring is the user's call, not a silent default
         extra["ask_kind"] = True
+    if spec.get("kind") == calc.HOUSEHOLD_EXPENSE:             # the category question offers the owner's own categories too
+        extra["custom_categories"] = _custom_categories(identity)
     if chosen is not None:
         fields["goal"] = chosen["id"]
         extra["goal_title"] = chosen["fields"].get(GF.TITLE, "")
@@ -1274,14 +1326,18 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
     awaiting = None if editing else (_missing(d) or [None])[0]
     if awaiting and lower in SKIP_WORDS:
         return replace_result(_render(d), message=f"שדה חובה — אי אפשר לדלג.\n{_render(d).message}")
+    if awaiting == "expense_category" and (goal_id == "new_category" or text.strip() == NEW_CATEGORY_TITLE):
+        return _render(_save(store, ids, replace(d, source_context={**d.source_context, "ask_new_category": True}), expected=expected))
 
     updates: dict[str, Any] = {}
     det_failed = fill_failed = False
     goals = service.my_goals(identity) if d.entity_type in (fd.FCC_EVENT, fd.FCC_FOLLOWUP) else []
     if awaiting == "goal":                                    # choose among the caller's OWN goals only
         chosen = None
-        other = bool(d.source_context.get("offer_other")) and (goal_id == OTHER_SOURCE_ID or (not goal_id and text.strip() == OTHER_SOURCE_TITLE))
-        if other:
+        offered = bool(d.source_context.get("offer_other"))
+        other = offered and (goal_id == OTHER_SOURCE_ID or (not goal_id and text.strip() == OTHER_SOURCE_TITLE))
+        general = offered and (goal_id == GENERAL_SOURCE_ID or (not goal_id and text.strip() == GENERAL_SOURCE_TITLE))
+        if other or general:
             chosen = _total_income_goal(goals)                # the caller's OWN total income goal; none -> "not recognised" below
         elif goal_id:
             chosen = next((g for g in goals if g["id"] == goal_id), None)
@@ -1294,7 +1350,8 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
             return TurnResult("needs_goal", f"לא זיהיתי את ה{noun} — בחר מהרשימה.", d.entity_type, "goal",
                               _view(d), candidates=_choices_for(d, goals))
         updates["goal"] = chosen["id"]
-        d = replace(d, source_context={**d.source_context, "goal_title": chosen["fields"].get(GF.TITLE, ""),
+        d = replace(d, source_context={**d.source_context,
+                                       "goal_title": GENERAL_SOURCE_TITLE if general else chosen["fields"].get(GF.TITLE, ""),
                                        "goal_method": _goal_method(chosen), **({"ask_source": True} if other else {})})
         pending_level = d.source_context.get("level")
         if pending_level is not None and d.fields.get("amount") in (None, ""):
@@ -1344,6 +1401,8 @@ def _continue(identity, ids, d: BusinessDraft, text, goal_id, extractor, store, 
                     fill_failed = True
 
     d2, rejected = _set_fields(d, updates, strict=False) if updates else (d, [])
+    if "expense_category" in updates and d2.source_context.get("ask_new_category"):
+        d2 = replace(d2, source_context={k: v for k, v in d2.source_context.items() if k != "ask_new_category"})
     if d.entity_type in _ACCOUNT_ENTITIES and str(d2.fields.get("occurred_at") or "") > today.isoformat():
         return replace_result(_render(d), message=f"התאריך לא יכול להיות עתידי.\n{_render(d).message}")      # a future snapshot would be ignored by the read model
     for entity, name, cap, unit in ((fd.FCC_ACCOUNT_PLAN_DEPOSIT, "planned_deposit", fd.ACCOUNT_PLAN_MAX_DEPOSIT, "₪"),
@@ -1530,7 +1589,7 @@ def _persist_new(store, ids, d: BusinessDraft) -> TurnResult:
 def _with_goal_choices(res: TurnResult, goals: list[dict], other: bool = False) -> TurnResult:
     """A draft that still lacks its goal asks for it, offering only the caller's own goals (+ "מקור אחר" for income)."""
     if res.awaiting == "goal":
-        cands = writer._cand(goals) + ([{"goal_id": OTHER_SOURCE_ID, "title": OTHER_SOURCE_TITLE}] if other else [])
+        cands = writer._cand(goals) + (_source_choices() if other else [])
         return replace(res, state="needs_goal", candidates=cands)
     return res
 
@@ -1686,6 +1745,8 @@ def _start(identity, actor, ids, text, goal_id, extractor, store, today) -> Turn
         if amount is not None:
             fields["amount"] = amount
         extra = {}
+        if fields.get("kind") == calc.HOUSEHOLD_EXPENSE:
+            extra["custom_categories"] = _custom_categories(identity)
         if goal is not None:
             fields["goal"] = goal["id"]
             extra["goal_title"] = goal["fields"].get(GF.TITLE, "")
