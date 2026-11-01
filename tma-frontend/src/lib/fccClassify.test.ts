@@ -3,7 +3,7 @@ import type { FccClassifyView } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FccClassify } from "../components/FccClassify";
-import { CUSTOM_MAX, classifyModel, confirmLine, customCategory, resultNote } from "./fccClassify";
+import { CUSTOM_MAX, classifyModel, confirmLine, customCategory, refreshAction, resultNote } from "./fccClassify";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -62,6 +62,12 @@ test("a new category is trimmed, collapsed, never empty and never over the serve
 test("the result note counts what was classified and what is left of the same description", () => {
   assert.equal(resultNote(view()), null);
   assert.equal(resultNote(view({ state: "done", done: 10, same_left: 4 })), "סווגו 10 · נותרו עוד 4 עם אותו שם");
+  assert.ok(resultNote(view({ state: "done", done: 1, rule_saved: true }))?.includes("בדוחות הבאים"));
+});
+
+test("after a new import an open panel reloads; a closed one and an unchanged counter do nothing", () => {
+  assert.equal(refreshAction("open", 0, 1), "reload"); assert.equal(refreshAction("saving", 1, 2), "reload"); assert.equal(refreshAction("error", 0, 1), "reload");
+  assert.equal(refreshAction("closed", 0, 1), "none"); assert.equal(refreshAction("open", 3, 3), "none");
 });
 
 test("the section renders only when something waits", () => {

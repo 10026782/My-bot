@@ -823,6 +823,53 @@ def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> f
 
 
 
+def rule_change_for(chosen: dict, category: str, rule_rows: list[dict]) -> dict | None:
+    """The ONE write that makes the owner's classification of an imported expense permanent: patch the rule row that already carries this description
+    (pending, or decided with another category — the owner changed his mind) or create a decided rule when there is none. None when the existing rule
+    already says exactly this. Pure over its arguments; ``chosen`` is a ``classify_waiting`` item."""
+    from core.financial_control import bank_import as bi  # noqa: PLC0415
+    F = CashflowRuleFields
+    group = chosen.get("group") or bi.normalize(chosen.get("label") or "")
+    if not group:
+        return None
+    for rec in rule_rows:
+        f = rec.get("fields") or {}
+        if f.get(F.ROW_KEY) or bi.normalize(str(f.get(F.MATCH) or "")) != group or str(_sel(f.get(F.DIRECTION)) or "debit") not in ("debit", "any"):
+            continue
+        if str(_sel(f.get(F.STATUS)) or "") == "active" and _sel(f.get(F.KIND)) == "expense" and str(f.get(F.CATEGORY) or "") == category:
+            return None
+        if str(_sel(f.get(F.STATUS)) or "") in ("pending", "active") and _sel(f.get(F.KIND)) in (None, "expense"):
+            return {"op": "patch", "table": Tables.CASHFLOW_RULES, "record_id": rec.get("id"), "fields": {F.KIND: "expense", F.CATEGORY: category, F.STATUS: "active"},
+                    "audit_action": "fcc_classify_rule", "audit_details": str(rec.get("id"))}
+    from core.financial_control import import_plan as ip  # noqa: PLC0415
+    return {"op": "post", "table": Tables.CASHFLOW_RULES,
+            "fields": {F.MATCH: ip.mask_numbers(chosen.get("label") or "")[:200], F.APPLIES_TO: chosen["source"], F.DIRECTION: "debit", F.KIND: "expense", F.CATEGORY: category,
+                       F.STATUS: "active"}, "audit_action": "fcc_rule_from_classification", "audit_details": group[:100]}
+
+
+def rules_waiting(identity) -> list[dict]:
+    """The caller's DESCRIPTIONS still waiting for a decision (``Cashflow Rules`` rows, Status pending, no Kind): expenses only — a credit is never
+    classified here (income needs the owner's explicit approval) and a row-key rule (a transfer to check one by one) is not a description."""
+    F = CashflowRuleFields
+    out = []
+    for rec in my_cashflow_rules(identity):
+        f = rec.get("fields") or {}
+        match = str(f.get(F.MATCH) or "").strip()
+        if (not match or f.get(F.ROW_KEY) or str(_sel(f.get(F.STATUS)) or "") != "pending" or _sel(f.get(F.KIND))
+                or str(_sel(f.get(F.DIRECTION)) or "") != "debit"):
+            continue
+        out.append({"id": rec.get("id"), "match": match, "applies_to": str(_sel(f.get(F.APPLIES_TO)) or "any"),
+                    "times_seen": int(calc._num(f.get(F.TIMES_SEEN)) or 1), "amount": round(calc._num(f.get(F.EXAMPLE_AMOUNT)) or 0.0, 2),
+                    "last_seen": str(f.get(F.LAST_SEEN) or "")})
+    return out
+
+
+def rules_view(waiting: list[dict], skip: frozenset[str] = frozenset()) -> dict:
+    """Pure: the count and the NEXT description (the most seen, then the largest amount, not skipped)."""
+    pool = sorted((w for w in waiting if w["id"] not in skip), key=lambda w: (-w["times_seen"], -w["amount"], w["match"]))
+    return {"total": len(waiting), "item": pool[0] if pool else None}
+
+
 def classify_waiting(identity) -> list[dict]:
     """The caller's expenses that still have NO category — imported ones and manually recorded ones — for the one-by-one screen. Owner-scoped
     (``my_events``). A manual entry has no meaningful description and is never grouped with another."""
@@ -965,6 +1012,13 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
     except Exception:
         logger.exception("[fcc] cashflow classify queue read failed")
         view["to_classify"] = None
+    try:
+        view["rules_to_classify"] = {"total": len(rules_waiting(identity))}
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] cashflow pending rules read failed")
+        view["rules_to_classify"] = None
     return view
 
 

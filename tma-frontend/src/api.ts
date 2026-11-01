@@ -1,4 +1,4 @@
-import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
+import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -480,6 +480,20 @@ export async function fetchFccClassify(skip: string[] = []): Promise<FccClassify
 export async function postFccClassify(body: { event_id: string; category: string; apply_same: boolean }): Promise<FccClassifyView> {
   const r = await fetch(`${BASE}/api/fcc/classify`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
   const data = (await r.json().catch(() => ({}))) as FccClassifyView & { message?: string; error?: string };
+  if (!r.ok) throw new Error(data.message || data.error || `API ${r.status}`);
+  return data;
+}
+
+/** Descriptions (rows of the owner's rules table) waiting for a category: the client names a rule and a category; the server chooses the table and the fields. */
+export async function fetchFccRules(skip: string[] = []): Promise<FccRuleView> {
+  const q = skip.length ? `?skip=${encodeURIComponent(skip.slice(0, 60).join(","))}` : "";
+  const r = await fetch(`${BASE}/api/fcc/classify-rules${q}`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json() as Promise<FccRuleView>;
+}
+export async function postFccRule(body: { rule_id: string; category: string }): Promise<FccRuleView> {
+  const r = await fetch(`${BASE}/api/fcc/classify-rules`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+  const data = (await r.json().catch(() => ({}))) as FccRuleView & { message?: string; error?: string };
   if (!r.ok) throw new Error(data.message || data.error || `API ${r.status}`);
   return data;
 }

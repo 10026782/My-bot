@@ -1150,8 +1150,11 @@ export interface FccImportPreview {
 export interface FccClassifyItem { id: string; date: string; amount: number; label: string; source: "bank" | "card" | "manual"; same_count: number }
 export interface FccClassifyView {
   total: number; total_amount: number; item: FccClassifyItem | null; categories: { key: string; label: string }[];
-  state?: "done"; done?: number; same_left?: number;
+  state?: "done"; done?: number; same_left?: number; rule_saved?: boolean;
 }
+/** Classification of DESCRIPTIONS waiting in the owner's rules table (GET|POST /api/fcc/classify-rules). Every number is the server's. */
+export interface FccRuleItem { id: string; match: string; applies_to: string; times_seen: number; amount: number; last_seen: string }
+export interface FccRuleView { total: number; item: FccRuleItem | null; categories: { key: string; label: string }[]; state?: "done" }
 export interface FccImportRun { state: "progress" | "done" | "blocked"; step: "events" | "rules" | "done"; written?: number; remaining?: number; rules_to_add?: number; message?: string }
 
 export interface FccCashflow {
@@ -1165,7 +1168,8 @@ export interface FccCashflow {
   };
   thresholds: Record<string, number>;
   loans_payments_known: boolean;
-  to_classify?: { total: number; total_amount: number } | null;       // imported expenses waiting for a category (null = could not be read)
+  to_classify?: { total: number; total_amount: number } | null;
+  rules_to_classify?: { total: number } | null;                      // descriptions waiting for a category (null = could not be read)       // imported expenses waiting for a category (null = could not be read)
   as_of: string;
 }
 

@@ -154,3 +154,69 @@ def test_a_manually_recorded_expense_without_a_category_can_be_classified_and_is
 
 def test_the_first_import_s_singular_label_is_the_built_in_fees_category():
     assert cashflow.category_key("עמלות וריבית") == "fees_interest" and not cashflow.is_custom(cashflow.category_key("עמלות וריבית"))
+
+
+# ── the answer outlives the statement: classifying an imported expense leaves a RULE behind ─────────────────────────
+from airtable_schema import CashflowRuleFields as CR  # noqa: E402
+from test_fcc_import_api import CREATED as CREATED_ROWS  # noqa: E402
+
+
+def rules_created():
+    return [r["fields"] for t, r in CREATED_ROWS if t == Tables.CASHFLOW_RULES]
+
+
+def test_classifying_creates_a_decided_rule_and_the_next_statement_is_classified_by_it(monkeypatch, patched):
+    DB[Tables.FIN_EVENTS] = [ev(1, "יש חסד אלעד", 100.0, source="import:card"), ev(2, "יש חסד אלעד", 40.0, "2026-10-07", source="import:card")]
+    body = client(monkeypatch).post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": "living", "apply_same": True}, headers=H).get_json()
+    assert body["done"] == 2 and body["rule_saved"] is True
+    made = rules_created()
+    assert len(made) == 1 and made[0][CR.MATCH] == "יש חסד אלעד" and made[0][CR.APPLIES_TO] == "card" and made[0][CR.DIRECTION] == "debit"
+    assert (made[0][CR.KIND], made[0][CR.CATEGORY], made[0][CR.STATUS]) == ("expense", "living", "active") and made[0][CR.FINANCIAL_OWNER] == [ELI]
+    # the NEXT month's statement: the same merchant is decided by the rule, never asked again
+    rules = bi.owner_rules_from(service.cashflow_rule_items(service.my_cashflow_rules(ELIYAHU), "card"))
+    charge = ci.CardCharge(__import__("datetime").date(2026, 11, 3), "יש חסד אלעד", 77.0, 77.0, "7716", __import__("datetime").date(2026, 11, 15), 1, ci.REGULAR, "", "")
+    c = ci.classify_charge(charge, rules)
+    assert c.kind == ci.EXPENSE and c.category == "living" and ci.importable(c)
+
+
+def test_a_pending_rule_for_the_same_description_is_activated_not_duplicated(monkeypatch, patched):
+    DB[Tables.FIN_EVENTS] = [ev(1, "פיצה אליה", 36.0, source="import:card")]
+    DB[Tables.CASHFLOW_RULES].append({"id": "recP1", "fields": {CR.MATCH: "פיצה אליה", CR.APPLIES_TO: "card", CR.DIRECTION: "debit", CR.STATUS: "pending",
+                                                              CR.TIMES_SEEN: 2, CR.EXAMPLE_AMOUNT: 36.0, CR.FINANCIAL_OWNER: [ELI]}})
+    client(monkeypatch).post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": "leisure"}, headers=H)
+    assert rules_created() == [] and ("Cashflow Rules", "recP1", {CR.KIND: "expense", CR.CATEGORY: "leisure", CR.STATUS: "active"}) in patched
+
+
+def test_changing_your_mind_updates_the_decided_rule_and_the_same_answer_writes_nothing_more(monkeypatch, patched):
+    DB[Tables.FIN_EVENTS] = [ev(1, "בזק", 199.0, source="import:card"), ev(2, "ויקטורי", 90.0, source="import:card")]
+    DB[Tables.CASHFLOW_RULES].append({"id": "recD1", "fields": {CR.MATCH: "בזק", CR.APPLIES_TO: "card", CR.DIRECTION: "debit", CR.KIND: "expense", CR.CATEGORY: "home",
+                                                              CR.STATUS: "active", CR.FINANCIAL_OWNER: [ELI]}})
+    DB[Tables.CASHFLOW_RULES].append({"id": "recD2", "fields": {CR.MATCH: "ויקטורי", CR.APPLIES_TO: "card", CR.DIRECTION: "debit", CR.KIND: "expense", CR.CATEGORY: "living",
+                                                              CR.STATUS: "active", CR.FINANCIAL_OWNER: [ELI]}})
+    c = client(monkeypatch)
+    c.post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": "communication"}, headers=H)       # a different category: the rule follows
+    c.post("/api/fcc/classify", json={"event_id": f"rec{2:014d}", "category": "living"}, headers=H)             # the same category: no second write to the rule
+    rule_patches = [p for p in patched if p[0] == "Cashflow Rules"]
+    assert rule_patches == [("Cashflow Rules", "recD1", {CR.KIND: "expense", CR.CATEGORY: "communication", CR.STATUS: "active"})] and rules_created() == []
+
+
+def test_a_manual_expense_leaves_no_rule_and_a_failing_rule_write_is_reported(monkeypatch, patched):
+    DB[Tables.FIN_EVENTS] = [ev(1, "intent:monthly.household_expense#x", 20.0, source="fcc_free_text"), ev(2, "חנות", 50.0, source="import:bank")]
+    c = client(monkeypatch)
+    assert c.post("/api/fcc/classify", json={"event_id": f"rec{1:014d}", "category": "home"}, headers=H).status_code == 200 and rules_created() == []
+    real = tma_api._queue_or_owner_execute
+
+    def flaky(action, payload, identity, label):
+        return ("a", {"error": "x"}, 500) if payload["table"] == "Cashflow Rules" else real(action, payload, identity, label)
+    monkeypatch.setattr(tma_api, "_queue_or_owner_execute", flaky)
+    r = c.post("/api/fcc/classify", json={"event_id": f"rec{2:014d}", "category": "home"}, headers=H)
+    assert r.status_code == 500 and r.get_json()["state"] == "partial_failure" and r.get_json()["done"] == 1
+
+
+def test_the_new_rule_validator_and_the_gateway_accept_only_that_shape(monkeypatch):
+    good = {"Match": "יש חסד", "Applies To": "card", "Direction": "debit", "Kind": "expense", "Category": "living", "Status": "active"}
+    assert aa.validate_rule_post(good) is None
+    for bad in (None, {}, {**good, "Kind": "income"}, {**good, "Status": "pending"}, {**good, "Direction": "credit"}, {**good, "Applies To": "any"}, {**good, "Match": ""},
+                {**good, "Category": ""}, {**good, "Row Key": "bank:" + "a" * 20}, {k: v for k, v in good.items() if k != "Match"}):
+        assert aa.validate_rule_post(bad) is not None
+    assert aa._rules_write_refused("post", good) is False and aa._rules_write_refused("post", {**good, "Kind": "income"}) is True and aa._rules_write_refused("delete", good) is True

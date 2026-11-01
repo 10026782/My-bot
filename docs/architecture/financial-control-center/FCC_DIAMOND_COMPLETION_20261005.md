@@ -514,3 +514,17 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Finding:** the first import (120 rows, checked in Airtable) had every expense categorized — the rows no rule decides were skipped by the code that ran at that time — so the "הוצאות לסיווג" section, which counted only imported rows, correctly showed nothing, while the cashflow's "לא מסווג ₪420" was a manually recorded household expense. The first import also wrote the card's fee lines and bank charges under the custom label "עמלות וריבית" (shown with ✦).
 - **Change:** the screen's queue now includes manually recorded uncategorized household expenses (labelled "רישום ידני", never grouped); the legacy singular label maps to the built-in `fees_interest`. Re-importing the same statements after the deploy of the previous change writes only the rows that were skipped, uncategorized, and the screen then lists them.
 - **Not done:** verification on a device and in production.
+
+### Classifying descriptions from the rules table (01/11/2026) — owner request
+
+- **Why:** the first import left ~120 pending rows in `Cashflow Rules` (a description, an example amount, a count). A pending row has no per-row date or amount, so it cannot be turned into events; but classifying the DESCRIPTION once decides every row with it, now and in every later import — the owner no longer has to classify the same merchant per event or per month.
+- **Flow:** `GET /api/fcc/classify-rules` (the caller's pending expense descriptions, most seen first) -> the owner picks a category (built-in, own, or new) -> a review line -> "אשר סיווג" -> `POST /api/fcc/classify-rules` patches ONE rule (Kind expense, Category, Status active) through the ActionGateway ceremony. The next import writes the rows already classified.
+- **Guard:** `tma_write` may patch `Cashflow Rules` only with exactly Kind / Category / Status (`validate_rule_patch`, checked at proposal and at execution, owner only). Credits (income needs the owner's explicit approval) and row-key rules (transfers checked one by one) are never offered.
+- **Not done:** verification on a device and in production; previously imported events that were written uncategorized keep their category until classified on the events screen.
+
+### Classifying an imported expense leaves a rule behind (01/11/2026) — owner report
+
+- **Report:** "יש חסד" was classified for all five rows of one statement; the next statement asked again. **Cause:** the event screen patched only the written events (the limitation noted when it was built); nothing told the importer about the description.
+- **Change:** after the events are patched, `POST /api/fcc/classify` patches the existing rule row for that description (pending, or decided with another category) or creates one decided expense rule; the same category as the existing rule writes nothing. The next import classifies every row with that description by itself. A manual entry has no description and leaves no rule.
+- **Guard:** the rules table is writable through `tma_write` only with the one-rule classification patch or that exact new-rule shape (owner only; checked at proposal and at execution).
+- **Not done:** verification on a device and in production; rows already classified before this change have no rule until they are classified again (or until their description is classified on the descriptions screen).
