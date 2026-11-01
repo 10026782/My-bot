@@ -469,6 +469,7 @@ ACTION_RISK = {
     "tma_create_project":     "Medium",
     "tma_update_asset":       "Medium",
     "tma_fcc_write":          "Medium",
+    "tma_fcc_import":         "Medium",
     "tma_create_venture":     "Medium",
     "tma_update_venture":     "Medium",
     "tma_update_lead_status": "Low",
@@ -603,10 +604,16 @@ def _queue_tma_write_approval(action: str, payload: dict, identity, label: str) 
 
     op = payload.get("op", "")
     table = payload.get("table", "")
-    if op not in ("post", "patch"):
+    if op not in ("post", "patch", "post_many"):
         return _reject(f"unsupported TMA write operation: {op!r}", code=400)
-    from tools.approval_actions import _TMA_WRITE_ALLOWED_TABLES  # noqa: PLC0415
-    if table not in _TMA_WRITE_ALLOWED_TABLES:
+    from tools.approval_actions import _TMA_WRITE_ALLOWED_TABLES, BATCH_MAX, validate_batch_record  # noqa: PLC0415
+    if op == "post_many":                    # FCC statement import: owner only, two tables, every record validated before a contract exists
+        recs = payload.get("records")
+        if (not getattr(identity, "is_owner", False) or table not in ("Financial Progress Events", "Cashflow Rules")
+                or not isinstance(recs, list) or not 1 <= len(recs) <= BATCH_MAX
+                or any(validate_batch_record(table, r) for r in recs)):
+            return _reject("batch write refused", code=400)
+    elif table not in _TMA_WRITE_ALLOWED_TABLES:
         return _reject(f"table '{table}' is not permitted for TMA writes", code=400)
 
     # Server-owned fields (op/table/action/requested_by) are applied AFTER
@@ -4882,12 +4889,15 @@ def _fcc_build_error(label: str):
 @tma_api.route("/api/fcc/accounts/forecast", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/pace", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/net-worth", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/cashflow", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/save", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/funding/plan/followup", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/write", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/loans/scenario", methods=["OPTIONS"])
 @tma_api.route("/api/fcc/intent/start", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/import/preview", methods=["OPTIONS"])
+@tma_api.route("/api/fcc/import/run", methods=["OPTIONS"])
 def _preflight_fcc():
     return "", 204
 
@@ -4938,6 +4948,30 @@ def fcc_net_worth(identity):
         return jsonify({"error": "forbidden"}), 403
     except Exception:                                        # noqa: BLE001 — never leak internals
         logger.exception("[fcc] net_worth_view failed")
+        return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/cashflow", methods=["GET"])
+@require_tma_auth
+def fcc_cashflow(identity):
+    """Monthly cashflow: income by source vs. expenses by category, balance, month-over-month change, anomalies (read-only). Same gate as
+    /api/fcc/net-worth: flag AND canary AND owner, 404 (not 403) for everyone else. ``?months=`` 1..36 (default 6). No write path, no
+    financial arithmetic in the client."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    try:
+        months = int(request.args.get("months", 6))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid months"}), 400
+    if not 1 <= months <= 36:
+        return jsonify({"error": "invalid months"}), 400
+    from core.financial_control import service as fcc_service
+    try:
+        return jsonify(fcc_service.cashflow_view(identity, months=months))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001 — never leak internals
+        logger.exception("[fcc] cashflow_view failed")
         return jsonify({"error": "internal error"}), 500
 
 
@@ -5240,6 +5274,137 @@ def fcc_write(identity):
     return jsonify({"state": "executed", "message": "נרשם ✓", "results": results,
                     "follow_up": "savings" if fcc_conv.income_followup(identity, result.snapshot) else None,
                     "follow_up_asset": fcc_conv.next_step_followup(result.snapshot)})
+
+
+# ══════════════════════════════════════════════════════════════════
+# FCC statement import (bank / card statement -> the owner's cashflow). Owner only, same gate as the cashflow (flag AND canary AND owner, 404 else).
+# preview: parse + classify + PLAN (nothing is written). run: ONE confirmed digest authorizes the whole plan; each call writes the NEXT chunk through
+# the normal ActionGateway ceremony (one contract per chunk: tma_write op=post_many), so the client loops until done. The writes are always rebuilt
+# on the server from the uploaded file — the client never sends a record. A changed file / rule set changes the digest and stops the run (409).
+# ══════════════════════════════════════════════════════════════════
+_FCC_IMPORT_CHUNK = 20
+_FCC_IMPORT_LOCK = threading.BoundedSemaphore(1)           # a statement parse is the heaviest thing here; one at a time on the single worker
+_FCC_IMPORT_KINDS = ("bank", "card")
+
+
+class _ImportRefused(Exception):
+    def __init__(self, message: str, code: int = 400):
+        super().__init__(message)
+        self.message, self.code = message, code
+
+
+def _fcc_import_gate(identity):
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        raise _ImportRefused("not found", 404)
+
+
+def _fcc_import_plan(identity):
+    """Read the uploaded file, classify it with the owner's rules and build the FULL plan (nothing skipped for being already imported yet)."""
+    from core.financial_control import bank_import as bi, card_import as ci, import_plan as ip, service as svc, statement_reader as sr  # noqa: PLC0415
+    kind = str(request.form.get("kind") or "").strip()
+    if kind not in _FCC_IMPORT_KINDS:
+        raise _ImportRefused("kind must be bank or card")
+    label = re.sub(r"[^\w\-]", "", str(request.form.get("label") or "main"))[:20] or "main"
+    upload = request.files.get("file")
+    if upload is None:
+        raise _ImportRefused("file required")
+    data = upload.read(sr.MAX_BYTES + 1)
+    try:
+        rules = svc.cashflow_rules(identity, kind)
+        known = ip.known_rule_keys(svc.my_cashflow_rules(identity))
+        if kind == "bank":
+            parsed = sr.read_bank(data, label)
+            items = bi.classify(parsed.rows, rules)
+            health = {"ok": parsed.ok, "rows": parsed.summary.get("rows", 0), "verified": parsed.summary.get("verified", 0),
+                      "problems": ([f"{parsed.summary.get('chain_breaks', 0)} breaks in the balance chain"] if parsed.summary.get("chain_breaks") else [])
+                      + ([f"{parsed.summary.get('conflicts', 0)} direction conflicts"] if parsed.summary.get("conflicts") else [])
+                      + ([f"{len(parsed.unparsed)} unreadable rows"] if parsed.unparsed else []) + ([] if parsed.rows else ["no rows found"])}
+            full = ip.plan_bank(items, set(), known, "bank")
+        else:
+            parsed = sr.read_card(data, "card")
+            items = ci.classify_all(parsed.charges, rules)
+            health = {"ok": parsed.ok, "rows": len(parsed.charges), "verified": sum(1 for s_ in parsed.sections if s_.ok), "problems": list(parsed.problems)[:5]}
+            full = ip.plan_card(items, set(), known)
+    except sr.StatementError as exc:
+        raise _ImportRefused(str(exc))
+    first = min((e.date for e in full.events), default=None)
+    existing = svc.existing_import_keys(identity, first) if first else set()
+    digest = hashlib.sha256("|".join([identity.user_id, kind, label, *sorted(e.key for e in full.events)]).encode("utf-8")).hexdigest()[:24]
+    todo = [e for e in full.events if e.key not in existing]
+    return {"kind": kind, "label": label, "health": health, "full": full, "todo": todo, "digest": digest,
+            "summary": ip.summarize(full), "skipped_existing": len(full.events) - len(todo)}
+
+
+def _fcc_import_error(exc: Exception):
+    if isinstance(exc, _ImportRefused):
+        return jsonify({"error": exc.message}), exc.code
+    if isinstance(exc, data_access_policy.PersonalDataAccessDenied):
+        return jsonify({"error": "forbidden"}), 403
+    logger.exception("[fcc] import failed")
+    return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/import/preview", methods=["POST"])
+@require_tma_auth
+def fcc_import_preview(identity):
+    try:
+        _fcc_import_gate(identity)
+        if not _FCC_IMPORT_LOCK.acquire(blocking=False):
+            raise _ImportRefused("another import is running — try again in a moment", 429)
+        try:
+            ctx = _fcc_import_plan(identity)
+        finally:
+            _FCC_IMPORT_LOCK.release()
+    except Exception as exc:                                  # noqa: BLE001 — never leak internals
+        return _fcc_import_error(exc)
+    plan, summ = ctx["full"], ctx["summary"]
+    return jsonify({
+        "kind": ctx["kind"], "label": ctx["label"], "parse": ctx["health"], "digest": ctx["digest"] if ctx["health"]["ok"] else None,
+        "plan": {"events": summ["events"], "remaining": len(ctx["todo"]), "already_imported": ctx["skipped_existing"], "months": summ["months"], "skipped": summ["skipped"],
+                 "pending_rules": summ["pending_rules"], "pending_row_rules": summ["pending_row_rules"],
+                 "pending_examples": [{"match": r.match or r.note, "direction": r.direction, "times_seen": r.times_seen, "example_amount": r.example_amount, "row": bool(r.row_key)}
+                                      for r in plan.pending_rules[:12]]},
+        "can_import": bool(ctx["health"]["ok"] and (ctx["todo"] or plan.pending_rules)), "chunk": _FCC_IMPORT_CHUNK,
+    })
+
+
+@tma_api.route("/api/fcc/import/run", methods=["POST"])
+@require_tma_auth
+def fcc_import_run(identity):
+    from core.financial_control import import_plan as ip  # noqa: PLC0415
+    try:
+        _fcc_import_gate(identity)
+        if not _FCC_IMPORT_LOCK.acquire(blocking=False):
+            raise _ImportRefused("another import is running — try again in a moment", 429)
+        try:
+            ctx = _fcc_import_plan(identity)
+            if not ctx["health"]["ok"]:
+                raise _ImportRefused("the statement does not add up — nothing was written", 409)
+            if str(request.form.get("digest") or "") != ctx["digest"]:
+                raise _ImportRefused("the file or the rules changed since the review — review again", 409)
+            todo = ctx["todo"]
+            if todo:
+                chunk = todo[:_FCC_IMPORT_CHUNK]
+                payload = {"op": "post_many", "table": "Financial Progress Events", "records": [ip.event_fields(e, identity.user_id) for e in chunk],
+                           "audit_action": "fcc_import_events", "audit_details": f"{ctx['kind']} import: {len(chunk)} events"}
+                step, left = "events", len(todo) - len(chunk)
+            else:
+                pend = ctx["full"].pending_rules[:_FCC_IMPORT_CHUNK]
+                if not pend:
+                    return jsonify({"state": "done", "step": "done", "written": 0, "remaining": 0})
+                payload = {"op": "post_many", "table": "Cashflow Rules", "records": [ip.pending_rule_fields(r) for r in pend],
+                           "audit_action": "fcc_import_rules", "audit_details": f"{ctx['kind']} import: {len(pend)} pending rules"}
+                step, left = "rules", len(ctx["full"].pending_rules) - len(pend)
+        finally:
+            _FCC_IMPORT_LOCK.release()
+        _, response, status = _queue_or_owner_execute("tma_fcc_import", payload, identity, f"FCC import ({step})")
+    except Exception as exc:                                  # noqa: BLE001
+        return _fcc_import_error(exc)
+    if status >= 300:
+        return jsonify({"state": "blocked", "step": step, "message": "הכתיבה לא הושלמה — אפשר לנסות שוב (מה שנכתב לא ייכתב פעמיים)",
+                        "detail": response.get("error") or response.get("message")}), status
+    return jsonify({"state": "progress", "step": step, "written": len(payload["records"]), "remaining": left,
+                    "rules_to_add": len(ctx["full"].pending_rules) if step == "events" else left})
 
 
 # ══════════════════════════════════════════════════════════════════

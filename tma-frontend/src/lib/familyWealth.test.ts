@@ -98,7 +98,7 @@ test("the FCC tab strip is reused unchanged for FCC and works for other tab sets
   assert.ok(fcc.includes('id="fcc-tab-loans"') && fcc.includes("אזורי המרכז הכלכלי"));
   assert.equal(tabId("x"), "fcc-tab-x");
   assert.equal(panelId("x", "fw"), "fw-panel-x");
-  assert.equal(tabForKey("monthly", "ArrowLeft", true), "loans");
+  assert.equal(tabForKey("monthly", "ArrowLeft", true), "cashflow");
   assert.equal(tabForKey("savings" as const, "ArrowLeft", true, FAMILY_TABS), "accounts");
   assert.equal(tabForKey("accounts" as const, "ArrowLeft", true, FAMILY_TABS), "funding");
   assert.equal(tabForKey("funding" as const, "ArrowLeft", true, FAMILY_TABS), "lab");
@@ -107,7 +107,7 @@ test("the FCC tab strip is reused unchanged for FCC and works for other tab sets
   assert.equal(tabForKey("pace" as const, "ArrowLeft", true, FAMILY_TABS), "stress");
   assert.equal(tabForKey("stress" as const, "ArrowLeft", true, FAMILY_TABS), "savings", "wraps");
   assert.equal(tabForKey("lab" as const, "Home", false, FAMILY_TABS), "savings");
-  assert.equal(FCC_TABS.length, 3);
+  assert.equal(FCC_TABS.length, 4);
 });
 
 test("form -> request: percentages stay as typed, blank/invalid is an error (never silently 0)", () => {
@@ -437,7 +437,7 @@ test("accounts composer: two chips that only name an intent + an account; no chi
   assert.ok(ACCOUNTS_COMPOSER.chips.every((c) => c.pick === "account"), "every account action starts from ONE chosen account");
   assert.ok(ACCOUNTS_COMPOSER.chips.every((c) => c.pick === "account") && !ACCOUNTS_COMPOSER.freeText);
   assert.ok(!ACCOUNTS_COMPOSER.chips.some((c) => /create|new/.test(c.intent)));
-  assert.equal(Object.keys(COMPOSER).join(), "monthly,loans,assets");
+  assert.equal(Object.keys(COMPOSER).join(), "monthly,cashflow,loans,assets");
 });
 
 test("composer renders with the accounts config (no FCC tab needed) and shows the two account actions", () => {

@@ -2,10 +2,11 @@
 // module's memory (i.e. while the app stays open); a fresh open of the app always starts on "התנהלות חודשית".
 import type { FccTurn } from "../types";
 
-export type FccTabKey = "monthly" | "loans" | "assets";
+export type FccTabKey = "monthly" | "cashflow" | "loans" | "assets";
 
 export const FCC_TABS: { key: FccTabKey; label: string }[] = [
   { key: "monthly", label: "התנהלות חודשית" },
+  { key: "cashflow", label: "תזרים" },
   { key: "loans", label: "הלוואות וחוב" },
   { key: "assets", label: "נכסים והון" },
 ];
@@ -71,6 +72,16 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
     ],
     freeText: false,
     hint: "בחרו פעולה — המערכת תשאל רק מה שחסר.",
+  },
+  // the two entries the cashflow is made of; same intents and the same draft -> review -> אשר flow as the monthly tab (the server asks the source / category)
+  cashflow: {
+    title: "רישום הכנסה / הוצאה",
+    chips: [
+      { intent: "monthly.income", label: "+ הכנסה" },
+      { intent: "monthly.household_expense", label: "+ הוצאה" },
+    ],
+    freeText: false,
+    hint: "בחרו פעולה — המערכת תשאל מאיזה מקור או לאיזו קטגוריה, ורק אחרי ״אשר ורשום״ זה נשמר.",
   },
   loans: {
     title: "עדכון הלוואה",

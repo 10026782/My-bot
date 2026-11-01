@@ -412,9 +412,9 @@ def deposit_status(events: list[Event], today: date) -> dict:
 
 
 def household_month_total(events: list[Event], today: date) -> float:
-    """Household spend in the calendar month of ``today`` (separate from income/net, superseded ignored)."""
+    """Household spend in the calendar month of ``today`` (separate from income/net, superseded ignored; a refund counts negative)."""
     start = today.replace(day=1)
-    return round(sum(abs(e.amount) for e in events
+    return round(sum(e.amount for e in events                     # signed: an imported refund is a negative expense
                      if e.kind == HOUSEHOLD_EXPENSE and not e.superseded and start <= e.occurred <= today), 2)
 
 

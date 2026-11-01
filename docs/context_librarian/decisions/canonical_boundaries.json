@@ -738,7 +738,12 @@
         "core/financial_control/net_worth.py",
         "tma-frontend/src/lib/fccNetWorth.ts",
         "tma-frontend/src/components/FccNetWorth.tsx",
-        "tma-frontend/src/lib/unifiedScreenTypes.ts"
+        "tma-frontend/src/lib/unifiedScreenTypes.ts",
+        "core/financial_control/cashflow.py",
+        "tma-frontend/src/lib/fccCashflow.ts",
+        "tma-frontend/src/components/FccCashflow.tsx",
+        "tma-frontend/src/lib/fccImport.ts",
+        "tma-frontend/src/components/FccImport.tsx"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",
@@ -748,7 +753,10 @@
         "tma-frontend/src/lib/fccAssets.test.ts",
         "test_financial_accounts_overview.py",
         "test_fcc_net_worth.py",
-        "tma-frontend/src/lib/fccNetWorth.test.ts"
+        "tma-frontend/src/lib/fccNetWorth.test.ts",
+        "tma-frontend/src/lib/fccCashflow.test.ts",
+        "tma-frontend/src/lib/fccImport.test.ts",
+        "test_fcc_cashflow.py"
       ],
       "canonical_docs": [],
       "production_evidence": [],
@@ -761,7 +769,8 @@
         "Pure by construction: synchronous transforms over FccGoalRow/FccOverview only.",
         "D1 accounts read model (PR #1323, 15/10/2026): owner explicitly approved \"APPROVE EXISTING NODE: decision.fcc_presentation_helper\" for core/financial_control/accounts.py and its test test_financial_accounts_overview.py. accounts.py is a pure, read-only derivation (latest valid balance snapshots, labelled estimate, transfers netting to zero) over already owner-scoped rows, like assets.py and payoff.py; no I/O, no writes, not wired to any route, screen or flag. Bounded to those two paths; no new node, no policy change, no new production authority.",
         "C2 unified net worth (19/10/2026): owner approval \"קבצים חדשים רישום חדש\" (19/10/2026) to create new runtime files and register exactly them under an existing node. Registered here: core/financial_control/net_worth.py, tma-frontend/src/lib/fccNetWorth.ts, tma-frontend/src/components/FccNetWorth.tsx and tests test_fcc_net_worth.py, tma-frontend/src/lib/fccNetWorth.test.ts. net_worth.py is a pure, read-only derivation over already owner-scoped rows (like assets.py/accounts.py), consumed only by the owner-gated GET /api/fcc/net-worth through service.net_worth_view; the frontend files only word server numbers. No I/O, no writes, no schema/flag change, no new authority. No other file or wildcard is approved by this note.",
-        "Unified family-wealth screen, step A0 (PR #1358, 19/10/2026): the owner approved the first step of the unified screen (\"מאשר שלב ראשון של המסך המאוחד\", 19/10/2026) and, earlier, new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this registers exactly tma-frontend/src/lib/unifiedScreenTypes.ts — TypeScript types only (no logic, no fetch, no writes, no client-side financial calculation). No other file, no wildcard, no new node, no policy change, no new production authority."
+        "Unified family-wealth screen, step A0 (PR #1358, 19/10/2026): the owner approved the first step of the unified screen (\"מאשר שלב ראשון של המסך המאוחד\", 19/10/2026) and, earlier, new runtime files and their registration (\"קבצים חדשים רישום חדש\", 19/10/2026); this registers exactly tma-frontend/src/lib/unifiedScreenTypes.ts — TypeScript types only (no logic, no fetch, no writes, no client-side financial calculation). No other file, no wildcard, no new node, no policy change, no new production authority.",
+        "Cashflow tab (owner approved 2026-11-01, \"עם צומת חדש לייבוא\"): the pure monthly model cashflow.py and the display/upload components FccCashflow / FccImport (fccCashflow.ts, fccImport.ts) are registered here; they only transform server payloads and carry no write authority. All statement parsing / import planning / the report scripts are under decision.fcc_statement_import."
       ],
       "extensions": {
         "context_librarian.registration": {
@@ -773,6 +782,52 @@
         }
       },
       "last_observed_commit": "6e3e203d67b4de187c63e752f5027c8272184d51"
+    },
+    {
+      "id": "decision.fcc_statement_import",
+      "name": "FCC statement import: pure bank/card parsers and the import plan; the write itself stays in ActionGateway (tma_write post_many)",
+      "type": "decision",
+      "status": "active",
+      "authority_level": "implementation_note",
+      "source_of_truth": {
+        "is_authority": false,
+        "scope": "turns an uploaded bank (PDF) or card (PDF/Excel) statement into a verified, classified import plan (running-balance / section-total checks, owner rules, idempotency keys) for the Financial Control Center cashflow",
+        "precedence": "carries no write authority: the plan is only built here; writing is done by tma_api /api/fcc/import/run through ActionGateway tma_write op=post_many (owner only, strict record allow-list), and classification rules live in the Airtable Cashflow Rules table"
+      },
+      "owner": "governance",
+      "code_paths": [
+        "core/financial_control/bank_import.py",
+        "core/financial_control/card_import.py",
+        "core/financial_control/import_plan.py",
+        "core/financial_control/statement_reader.py",
+        "scripts/fcc_bank_statement_report.py",
+        "scripts/fcc_card_statement_report.py"
+      ],
+      "test_paths": [
+        "test_fcc_bank_import.py",
+        "test_fcc_card_import.py",
+        "test_fcc_import_plan.py",
+        "test_fcc_import_api.py",
+        "test_fcc_cashflow_rules.py",
+        "test_fcc_cashflow_service.py"
+      ],
+      "canonical_docs": [
+        {
+          "path": "docs/architecture/financial-control-center/FCC_DIAMOND_COMPLETION_20261005.md",
+          "role": "FCC cashflow and statement import design",
+          "status": "active"
+        }
+      ],
+      "production_evidence": [],
+      "feature_flags": [],
+      "valid_from": "2026-11-01",
+      "last_verified_commit": "1b78acf23f0bb5ff9e170c4013faa810e979f579",
+      "confidence": 0.8,
+      "notes": [
+        "Registered to resolve Context Librarian REVIEW_REQUIRED findings (new runtime source, NO_POLICY_MATCH) in PR #1393; owner approved \"CREATE NEW NODE\" for the import files on 2026-11-01.",
+        "Pure by construction: bank_import / card_import / import_plan do no I/O; statement_reader is the single file-reading boundary (pdfminer, openpyxl, no network); the report scripts are offline and refuse an output directory inside the repo.",
+        "Imported rows never link to a Goal; transfers, cash, card settlements and rolling credit are never written; income only by explicit owner approval."
+      ]
     },
     {
       "id": "decision.tma_screens",

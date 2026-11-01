@@ -2114,10 +2114,12 @@ def test_intent_household_expense_is_household_never_direct_cost():
     r = intent("monthly.household_expense")                  # a unique "הוצאות בית" goal is selected without asking
     assert r.state == "ask" and r.awaiting == "amount"
     r = conv.handle_turn(ELIYAHU, "300", extractor=Ex(fill={"300": {"amount": 300}}), today=TODAY)
-    assert r.state == "review" and "הוצאה ביתית" in r.message
+    assert r.state == "ask" and r.awaiting == "expense_category"          # a household expense always has a category
+    r = conv.handle_turn(ELIYAHU, "מחייה", goal_id="living", extractor=Ex(), today=TODAY)
+    assert r.state == "review" and "הוצאה ביתית" in r.message and "קטגוריה: מחייה" in r.message
     c = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY)
     (w,) = c.snapshot["writes"]
-    assert w["fields"][EF.KIND] == "household_expense" and w["fields"][EF.GOAL] == ["recGH"]
+    assert w["fields"][EF.KIND] == "household_expense" and w["fields"][EF.GOAL] == ["recGH"] and w["fields"][EF.EXPENSE_CATEGORY] == "living"
 
 
 def test_intent_direct_cost_prefills_direct_cost_on_an_income_goal():
@@ -2174,6 +2176,7 @@ def test_two_legitimate_entries_of_the_same_amount_are_not_deduplicated():
     for _ in range(2):
         intent("monthly.household_expense")
         conv.handle_turn(ELIYAHU, "300", extractor=ex, today=TODAY)
+        conv.handle_turn(ELIYAHU, "תחבורה", goal_id="transport", extractor=Ex(), today=TODAY)
         (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
         keys.append(w["fields"][EF.IDEMPOTENCY_KEY])
         conv.complete_execution(ELIYAHU, "fcc_event")
@@ -2582,14 +2585,14 @@ def test_income_chip_speaks_of_a_source_and_offers_other_source():
     seed_sources()
     r = intent("monthly.income")
     assert r.state == "needs_goal" and "מקור" in r.message and "יעד" not in r.message
-    assert [c["goal_id"] for c in r.candidates] == ["recP", "recT", conv.OTHER_SOURCE_ID]
-    assert r.candidates[-1]["title"] == "מקור אחר"
+    assert [c["goal_id"] for c in r.candidates] == ["recP", "recT", conv.GENERAL_SOURCE_ID, conv.OTHER_SOURCE_ID]
+    assert [c["title"] for c in r.candidates[-2:]] == ["כללי", "+ מקור חדש"]          # never a bare "אחר": general, or a NEW named source
 
 
 def test_other_source_books_on_the_total_goal_with_the_named_source_in_the_note():
     seed_sources()
     intent("monthly.income")
-    r = conv.handle_turn(ELIYAHU, "מקור אחר", goal_id=conv.OTHER_SOURCE_ID, extractor=Ex(), today=TODAY)
+    r = conv.handle_turn(ELIYAHU, "+ מקור חדש", goal_id=conv.OTHER_SOURCE_ID, extractor=Ex(), today=TODAY)
     assert r.state == "ask" and r.awaiting == "source"
     r = conv.handle_turn(ELIYAHU, "אבי", extractor=Ex(), today=TODAY)
     assert r.awaiting == "kind" and [c["goal_id"] for c in r.candidates] == ["one_time", "monthly_recurring"]
@@ -5256,3 +5259,93 @@ def test_a_target_change_event_from_the_free_text_flow_mirrors_the_cell_but_othe
     assert [w["op"] for w in other] == ["post"]                                           # a deposit / income / note never touches the target cell
     backdated = ADAPTER.build_create_payload(W(goal="recG", kind="target_change", amount=18000, occurred_at="2026-10-01"))["writes"]
     assert [w["op"] for w in backdated] == ["post"]                                       # the event is kept, the cell is not guessed
+
+
+# ── Cashflow stage 3: expense category + "כללי" / named income source ───────────────────────────────────────────
+def _start_expense_to_category(amount="300"):
+    seed_sources()
+    intent("monthly.household_expense")
+    return conv.handle_turn(ELIYAHU, amount, extractor=Ex(fill={amount: {"amount": float(amount)}}), today=TODAY)
+
+
+def test_category_question_offers_builtins_the_owners_own_and_a_new_category_button():
+    seed_sources()
+    DB[Tables.FIN_EVENTS] = [
+        {"id": "recC1", "fields": {EF.KIND: "household_expense", EF.AMOUNT: 50, EF.OCCURRED_AT: "2026-10-01", EF.GOAL: ["recGH"],
+                                   EF.EXPENSE_CATEGORY: "חיות מחמד", EF.FINANCIAL_OWNER: [ELI]}},
+        {"id": "recC2", "fields": {EF.KIND: "household_expense", EF.AMOUNT: 9, EF.OCCURRED_AT: "2026-10-01", EF.GOAL: ["recGH"],
+                                   EF.EXPENSE_CATEGORY: "living", EF.FINANCIAL_OWNER: [ELI]}},
+    ]
+    intent("monthly.household_expense")
+    r = conv.handle_turn(ELIYAHU, "300", extractor=Ex(fill={"300": {"amount": 300}}), today=TODAY)
+    titles = [c["title"] for c in r.candidates]
+    assert r.awaiting == "expense_category" and "קטגוריה" in r.message
+    assert titles[:3] == ["מחייה", "תקשורת", "הלוואות"] and "ביטוחים" in titles and "בריאות" in titles      # the owner's ten + the added ones
+    assert titles[-2:] == ["חיות מחמד", "+ קטגוריה חדשה"] and titles.count("מחייה") == 1                      # own categories (no built-in repeated)
+
+
+def test_a_typed_built_in_label_maps_to_its_key_and_a_new_name_is_a_custom_category_with_a_review_note():
+    r = _start_expense_to_category()
+    r = conv.handle_turn(ELIYAHU, "ביטוחים", extractor=Ex(), today=TODAY)                                  # typing the label = clicking it
+    assert r.state == "review" and "קטגוריה: ביטוחים" in r.message and "קטגוריה חדשה" not in r.message
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    _start_expense_to_category()
+    r = conv.handle_turn(ELIYAHU, "  חיות   מחמד ", extractor=Ex(), today=TODAY)
+    assert r.state == "review" and "קטגוריה: חיות מחמד" in r.message and "קטגוריה חדשה: חיות מחמד" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"][EF.EXPENSE_CATEGORY] == "חיות מחמד" and w["fields"][EF.KIND] == "household_expense"
+
+
+def test_new_category_button_asks_for_a_name_then_stores_it():
+    _start_expense_to_category()
+    r = conv.handle_turn(ELIYAHU, "+ קטגוריה חדשה", goal_id="new_category", extractor=Ex(), today=TODAY)
+    assert r.state == "ask" and r.awaiting == "expense_category" and "איך לקרוא" in r.message and r.candidates == []
+    r = conv.handle_turn(ELIYAHU, "ספורט", extractor=Ex(), today=TODAY)
+    assert r.state == "review" and "קטגוריה: ספורט" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"][EF.EXPENSE_CATEGORY] == "ספורט"
+
+
+def test_category_is_required_and_commands_or_bare_numbers_are_not_categories():
+    _start_expense_to_category()
+    r = conv.handle_turn(ELIYAHU, "דלג", extractor=Ex(), today=TODAY)
+    assert r.awaiting == "expense_category" and "אי אפשר לדלג" in r.message
+    for bad in ("אשר", "123"):
+        r = conv.handle_turn(ELIYAHU, bad, extractor=Ex(), today=TODAY)
+        assert r.state in ("unrelated", "ask") and r.awaiting == "expense_category"
+    assert conv.handle_turn(ELIYAHU, "x" * 100, extractor=Ex(), today=TODAY).state == "review"       # capped to the stored length
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert len(w["fields"][EF.EXPENSE_CATEGORY]) == 40
+
+
+def test_category_is_only_written_for_household_expenses():
+    seed_intents()
+    intent("monthly.income", "recGI")
+    conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
+    conv.handle_turn(ELIYAHU, "500", extractor=Ex(fill={"500": {"amount": 500}}), today=TODAY)
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert EF.EXPENSE_CATEGORY not in w["fields"]
+
+
+def test_general_source_books_on_the_total_goal_without_asking_a_name():
+    seed_sources()
+    intent("monthly.income")
+    r = conv.handle_turn(ELIYAHU, "כללי", goal_id=conv.GENERAL_SOURCE_ID, extractor=Ex(), today=TODAY)
+    assert r.awaiting == "kind"                                                      # no source-name question
+    r = conv.handle_turn(ELIYAHU, "חד-פעמית", goal_id="one_time", extractor=Ex(), today=TODAY)
+    assert r.awaiting == "amount" and r.message == "כמה לרשום במקור כללי?"
+    r = conv.handle_turn(ELIYAHU, "800", extractor=Ex(fill={"800": {"amount": 800}}), today=TODAY)
+    assert r.state == "review" and "• מקור: כללי" in r.message
+    (w,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
+    assert w["fields"][EF.GOAL] == ["recP"] and EF.NOTE not in w["fields"]           # the cashflow read model names a note-less total-goal entry "כללי"
+
+
+def test_general_source_can_be_typed_and_is_not_offered_without_one_total_goal():
+    seed_sources()
+    intent("monthly.income")
+    assert conv.handle_turn(ELIYAHU, "כללי", extractor=Ex(), today=TODAY).awaiting == "kind"
+    conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
+    seed_intents()
+    r = intent("monthly.income")
+    assert conv.GENERAL_SOURCE_ID not in {c["goal_id"] for c in r.candidates}
+

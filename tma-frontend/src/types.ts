@@ -1114,6 +1114,53 @@ export interface FccNetWorth {
 }
 
 
+/** Monthly cashflow (GET /api/fcc/cashflow, read-only). Every number is the server's; null = missing (never 0). */
+export interface FccCashflowCategory { key: string; label: string; amount: number; custom?: boolean; basis?: "recorded" | "scheduled" }
+export interface FccCashflowSource { name: string; kind: "fixed" | "variable" | "general"; gross: number; direct_costs: number; net: number; basis: "recorded" | "standing" }
+export interface FccCashflowMonth {
+  month: string; is_current: boolean; partial: boolean; day: number | null; days_in_month: number;
+  income: { known: boolean; sources: FccCashflowSource[]; gross: number | null; direct_costs: number | null; net: number | null };
+  expenses: { known: boolean; count: number; categories: FccCashflowCategory[]; total: number | null };
+  balance: number | null; shortfall: number | null; surplus: number | null; missing: ("income" | "expenses")[];
+}
+export interface FccCashflowChange { key: string; label: string; before: number; after: number; delta: number; pct: number | null }
+export interface FccCashflowRec {
+  id: string; kind: "commitment" | "optional" | "rising" | "spike" | "uncategorized" | "focus"; title: string;
+  amount: number | null; basis: "stated" | "inferred" | "upper_bound" | null; facts: string[]; hint: string | null;
+}
+export interface FccCashflowRecs {
+  items: FccCashflowRec[]; total: number; commitments_known: boolean;
+  summary: { monthly_gap: number | null; stated_saving: number; inferred_saving: number; covers_gap_pct: number | null };
+}
+/** Statement import (POST /api/fcc/import/preview | run). The server rebuilds every write from the uploaded file; the client only carries the digest it was shown. */
+export interface FccImportPreview {
+  kind: "bank" | "card"; label: string;
+  parse: { ok: boolean; rows: number; verified: number; problems: string[] };
+  digest: string | null; can_import: boolean; chunk: number;
+  plan: {
+    events: number; remaining: number; already_imported: number;
+    months: Record<string, { expenses: number; income: number; events: number; by_category: Record<string, number>; by_source: Record<string, number> }>;
+    skipped: Record<string, { count: number; total: number }>;
+    pending_rules: number; pending_row_rules: number;
+    pending_examples: { match: string; direction: "debit" | "credit"; times_seen: number; example_amount: number; row: boolean }[];
+  };
+}
+export interface FccImportRun { state: "progress" | "done" | "blocked"; step: "events" | "rules" | "done"; written?: number; remaining?: number; rules_to_add?: number; message?: string }
+
+export interface FccCashflow {
+  months: FccCashflowMonth[];
+  recommendations: FccCashflowRecs;
+  categories: { key: string; label: string; custom?: boolean }[];
+  insights: {
+    changes: { from: string; to: string; total_before: number; total_after: number; total_delta: number; items: FccCashflowChange[] } | null;
+    spikes: { month: string; key: string; label: string; amount: number; baseline: number; excess: number; partial: boolean }[];
+    large_items: { ref: string | null; label: string; amount: number; date: string; key: string; category: string }[];
+  };
+  thresholds: Record<string, number>;
+  loans_payments_known: boolean;
+  as_of: string;
+}
+
 /** C4 — actual accumulation pace vs the plan (POST /api/fcc/pace). Every number is the server's; self_reported data; null = missing (never 0). */
 export interface PaceReturnBlock {
   exact: null; days: number; documented_flow_count: number; undocumented_flows_possible: boolean;

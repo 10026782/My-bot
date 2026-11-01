@@ -8,23 +8,37 @@ writes are never done here (see ``writer`` + the ActionGateway path).
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import json
 import logging
 import re
-import json
-from datetime import date
+from datetime import date, timedelta
 
-from airtable_schema import FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
+from airtable_schema import CashflowRuleFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import assets as fcc_assets, calc, loans as fcc_loans
+from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, loans as fcc_loans
 
 logger = logging.getLogger(__name__)
 
 _MAX_ROWS = 500
+_WIDE_ROWS = 8000                    # statement imports: hundreds of rows a month must not be silently cut at 500
+_ROW_LIMIT = contextvars.ContextVar("fcc_row_limit", default=_MAX_ROWS)
+
+
+@contextlib.contextmanager
+def wide_reads(limit: int = _WIDE_ROWS):
+    """Reads inside the block may return up to ``limit`` rows (only the imported-events reads use it)."""
+    token = _ROW_LIMIT.set(limit)
+    try:
+        yield
+    finally:
+        _ROW_LIMIT.reset(token)
 
 
 def _read(table: str, formula: str = "") -> list[dict]:
     from tools.airtable_read_adapter import list_records
-    return list_records(table, formula, max_records=_MAX_ROWS, paginate=True)
+    return list_records(table, formula, max_records=_ROW_LIMIT.get(), paginate=True)
 
 
 def _record_fields(table: str, record_id: str) -> dict:
@@ -39,8 +53,39 @@ def my_goals(identity) -> list[dict]:
     return sorted(mine, key=lambda r: ((r.get("fields") or {}).get(FinGoalFields.DISPLAY_ORDER) or 9999))
 
 
-def my_events(identity) -> list[dict]:
-    return policy.filter_records(Tables.FIN_EVENTS, _read(Tables.FIN_EVENTS), identity)
+_IMPORT_SOURCE = "import:"          # Financial Progress Events.Source of a row written by a statement import (no goal link)
+
+
+def _is_import(ev: dict) -> bool:
+    return str((ev.get("fields") or {}).get(FinEventFields.SOURCE) or "").startswith(_IMPORT_SOURCE)
+
+
+def my_events(identity, imported: str = "exclude", since: date | None = None) -> list[dict]:
+    """The caller's own events. ``imported``: "exclude" (default — goal progress and every pre-import consumer, unaffected by how many statement rows exist),
+    "only" (statement-import rows, optionally ``since`` a date: they are numerous, so the read is wide and date-limited) or "all"."""
+    F = FinEventFields
+    clauses = []
+    if imported == "exclude":
+        clauses.append(f"NOT(LEFT({{{F.SOURCE}}},{len(_IMPORT_SOURCE)})='{_IMPORT_SOURCE}')")
+    elif imported == "only":
+        clauses.append(f"LEFT({{{F.SOURCE}}},{len(_IMPORT_SOURCE)})='{_IMPORT_SOURCE}'")
+    if since is not None and imported == "only":
+        clauses.append(f"IS_AFTER({{{F.OCCURRED_AT}}},'{(since - timedelta(days=1)).isoformat()}')")
+    formula = clauses[0] if len(clauses) == 1 else f"AND({','.join(clauses)})" if clauses else ""
+    ctx = wide_reads() if imported != "exclude" else contextlib.nullcontext()
+    with ctx:
+        records = policy.filter_records(Tables.FIN_EVENTS, _read(Tables.FIN_EVENTS, formula), identity)
+    if imported == "exclude":                                                  # belt and braces: the formula only saves transfer, this is the rule
+        records = [e for e in records if not _is_import(e)]
+    elif imported == "only":
+        records = [e for e in records if _is_import(e)
+                   and (since is None or (calc._d((e.get("fields") or {}).get(F.OCCURRED_AT)) or date.min) >= since)]
+    return records
+
+
+def existing_import_keys(identity, since: date | None = None) -> set[str]:
+    """Idempotency keys of the caller's own imported rows (a re-imported statement writes nothing)."""
+    return {str((e.get("fields") or {}).get(FinEventFields.IDEMPOTENCY_KEY) or "") for e in my_events(identity, "only", since)} - {""}
 
 
 def _goal_ids_of(event: dict) -> list[str]:
@@ -348,6 +393,20 @@ def obligation_items(records: list[dict]) -> list[dict]:
     return items
 
 
+def commitment_rows(records: list[dict]) -> list[dict]:
+    """Active obligations with their NAME, for the cashflow recommendations only (never summed into any total)."""
+    from airtable_schema import RecObFields as RF
+    rows = []
+    for rec in records:
+        f = rec.get("fields") or {}
+        if not f.get(RF.ACTIVE):
+            continue
+        rows.append({"name": str(f.get(RF.NAME) or "").strip(), "monthly": calc.monthly_equivalent(f.get(RF.AMOUNT), _sel(f.get(RF.FREQUENCY))),
+                     "review_status": _sel(f.get(RF.REVIEW_STATUS)), "essentiality": _sel(f.get(RF.ESSENTIALITY)),
+                     "saving": calc._num(f.get(RF.POTENTIAL_SAVING))})
+    return rows
+
+
 def obligations_overview(identity) -> dict:
     try:
         return calc.summarize_obligations(obligation_items(my_obligations(identity)))
@@ -537,7 +596,7 @@ def recent_progress_events(events: list[dict], limit: int = RECENT_EVENTS) -> li
         k = (e.get("fields") or {}).get(FinEventFields.KIND)
         return k.get("name") if isinstance(k, dict) else k
 
-    shown = [e for e in events if kind_of(e) in calc.EVENT_KINDS
+    shown = [e for e in events if kind_of(e) in calc.EVENT_KINDS and not _is_import(e)           # a statement import is not goal progress (hundreds of rows)
              and (kind_of(e) != calc.DEPOSIT or _goal_ids_of(e))]       # an account deposit is goal progress only when linked to a goal
     shown.sort(key=lambda e: str((e.get("fields") or {}).get(FinEventFields.OCCURRED_AT) or ""), reverse=True)
     return [{"goal_ids": _goal_ids_of(e), **{k: (e.get("fields") or {}).get(k) for k in (
@@ -711,6 +770,162 @@ def funding_inputs(identity, today: date | None = None) -> dict:
     }
 
 
+# ── Cashflow rules (the owner's own "this description means this" rules; bank / card import) ──────────────────────────
+def my_cashflow_rules(identity) -> list[dict]:
+    """The caller's own Cashflow Rules rows (owner-scoped; a denied identity propagates)."""
+    return policy.filter_records(Tables.CASHFLOW_RULES, _read(Tables.CASHFLOW_RULES), identity)
+
+
+def cashflow_rule_items(records: list[dict], applies_to: str | None = None) -> list[dict]:
+    """Rule rows -> the items ``bank_import.owner_rules_from`` reads. Only DECIDED rules count: an empty Kind (a description still waiting for the
+    owner), ``Status = pending`` / ``disabled`` and a row with neither a Match nor a Row Key are skipped, never guessed. ``applies_to`` ("bank" |
+    "card") keeps the rules of that source and the ones for "any" (an empty value counts as "any")."""
+    F = CashflowRuleFields
+    items: list[dict] = []
+    for rec in records:
+        f = rec.get("fields") or {}
+        kind, status = _sel(f.get(F.KIND)), _sel(f.get(F.STATUS))
+        scope = _sel(f.get(F.APPLIES_TO)) or "any"
+        if not kind or status in ("pending", "disabled") or (applies_to and scope not in ("any", applies_to)):
+            continue
+        direction = _sel(f.get(F.DIRECTION))
+        item = {"kind": kind, "category": str(f.get(F.CATEGORY) or "").strip() or None, "direction": None if direction in (None, "", "any") else direction}
+        key = str(f.get(F.ROW_KEY) or "").strip()
+        if key:
+            item["key"] = key
+        else:
+            item["match"] = str(f.get(F.MATCH) or "").strip()
+        if item.get("match") or item.get("key"):
+            items.append(item)
+    return items
+
+
+def cashflow_rules(identity, applies_to: str | None = None) -> list:
+    """The caller's decided rules as ``bank_import`` rules (the owner's rules win over the built-in ones). A read failure is an error here, not an
+    empty list: importing with the owner's rules silently missing would classify the owner's own descriptions wrongly."""
+    from core.financial_control import bank_import  # noqa: PLC0415 — pure module
+    return bank_import.owner_rules_from(cashflow_rule_items(my_cashflow_rules(identity), applies_to))
+
+
+# ── Monthly cashflow (income by source vs. expenses by category) — read-only ─────────────────────────────────────────
+_SOURCE_NOTE = re.compile(r"^\s*מקור\s*:\s*(.+?)\s*$")        # an income booked on the total goal as "מקור אחר": the name is in the note
+
+
+def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> fcc_cashflow.Txn | None:
+    """``signed``: an expense keeps its sign (an imported refund is a negative expense); income and direct costs are always positive."""
+    f = ev.get("fields") or {}
+    day, amount = calc._d(f.get(FinEventFields.OCCURRED_AT)), calc._num(f.get(FinEventFields.AMOUNT))
+    if day is None or amount is None or f.get(FinEventFields.SUPERSEDED_BY):
+        return None
+    return fcc_cashflow.Txn(amount if signed else abs(amount), day, category, ev.get("id"), str(f.get(FinEventFields.NOTE) or "").strip())
+
+
+
+
+
+def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
+    """Owner-scoped goals + events (already policy-filtered by the caller) -> cashflow model inputs. Pure over its arguments.
+
+    * income goals: a source goal (it has a parent) or a goal with no sources of its own is a source by its title; the events booked
+      directly on a TOTAL goal that has sources are "כללי" unless the note names the source (``מקור: <שם>``);
+    * ``fixed_income`` goals are standing monthly sources at their effective target (a recorded entry replaces it, never adds);
+    * expenses are the ``household_expense`` events with their ``Expense Category`` (empty = uncategorized)."""
+    by_goal: dict[str, list[dict]] = {}
+    for ev in events:
+        for gid in _goal_ids_of(ev):
+            by_goal.setdefault(gid, []).append(ev)
+    parents = {calc.parent_goal_id(g.get("fields") or {}, FinGoalFields) for g in goals} - {None}
+
+    gross: dict[str, list] = {}
+    costs: dict[str, list] = {}
+    kinds: dict[str, str] = {}
+    standing: dict[str, tuple[float, date | None]] = {}
+
+    def add(name: str, kind: str, bucket: dict, txn):
+        kinds.setdefault(name, kind)
+        bucket.setdefault(name, []).append(txn)
+
+    for g in goals:
+        gf = g.get("fields") or {}
+        fixed_goal = _raw_category(gf.get(FinGoalFields.CATEGORY)) == FIXED_INCOME_CATEGORY
+        income_goal = _category_key(gf.get(FinGoalFields.CATEGORY)) == "income"
+        title = str(gf.get(FinGoalFields.TITLE) or "").strip() or fcc_cashflow.GENERAL_SOURCE
+        mine = by_goal.get(g["id"], [])
+        if fixed_goal:
+            base = calc._num(gf.get(FinGoalFields.TARGET_AMOUNT))
+            target = calc.effective_target(base, calc.parse_events(mine, FinEventFields), today)
+            if target:
+                standing[title] = (float(target), calc._d(gf.get(FinGoalFields.START_DATE)))
+            kinds.setdefault(title, fcc_cashflow.FIXED)
+        elif not income_goal:
+            continue
+        is_total = g["id"] in parents
+        for ev in mine:
+            kind = _sel((ev.get("fields") or {}).get(FinEventFields.KIND))
+            if kind not in (calc.ONE_TIME, calc.DIRECT_COST):
+                continue
+            txn = _event_txn(ev)
+            if txn is None:
+                continue
+            name, skind = title, (fcc_cashflow.FIXED if fixed_goal else fcc_cashflow.VARIABLE)
+            if is_total:
+                m = _SOURCE_NOTE.match(txn.label or "")
+                name, skind = (m.group(1), fcc_cashflow.VARIABLE) if m else (fcc_cashflow.GENERAL_SOURCE, fcc_cashflow.GENERAL)
+            add(name, skind, gross if kind == calc.ONE_TIME else costs, txn)
+
+    for ev in events:                                          # income imported from a statement: no goal, the source name in the note ("מקור: <שם>")
+        if _goal_ids_of(ev) or not _is_import(ev) or _sel((ev.get("fields") or {}).get(FinEventFields.KIND)) != calc.ONE_TIME:
+            continue
+        txn, m = _event_txn(ev), None
+        m = _SOURCE_NOTE.match(txn.label or "") if txn else None
+        if txn and m:
+            add(m.group(1), fcc_cashflow.VARIABLE, gross, txn)
+
+    sources = []
+    for name in sorted(set(gross) | set(costs) | set(standing), key=lambda n: (kinds.get(n) != fcc_cashflow.FIXED, n)):
+        fixed = standing.get(name)
+        sources.append(fcc_cashflow.IncomeSource(
+            name, kinds.get(name, fcc_cashflow.VARIABLE), tuple(gross.get(name, ())), tuple(costs.get(name, ())),
+            fixed[0] if fixed else None, fixed[1] if fixed else None))
+
+    expenses = []
+    for ev in events:
+        f = ev.get("fields") or {}
+        if _sel(f.get(FinEventFields.KIND)) != calc.HOUSEHOLD_EXPENSE:
+            continue
+        txn = _event_txn(ev, _sel(f.get(FinEventFields.EXPENSE_CATEGORY)), signed=True)
+        if txn is not None:
+            expenses.append(txn)
+    return sources, expenses
+
+
+def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
+    """The owner's monthly cashflow. Owner-scoped reads only; a denied identity propagates. A loans read failure degrades to "no scheduled
+    payment" (never to a guessed one)."""
+    today = today or date.today()
+    window_start = fcc_cashflow.month_windows(today, months)[0][1]
+    goals, events = my_goals(identity), my_events(identity) + my_events(identity, "only", window_start)
+    sources, expenses = cashflow_inputs(goals, events, today)
+    scheduled = None
+    try:
+        summary = loans_overview(identity, today)["summary"]
+        scheduled = summary["total_monthly_payments"] if summary["total_active_loans"] else None
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] cashflow loans read failed")
+    commitments = None                                       # unknown (a failed read) is not "no commitments"
+    try:
+        commitments = commitment_rows(my_obligations(identity))
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] cashflow commitments read failed")
+    view = fcc_cashflow.build(sources, expenses, today, months, scheduled, commitments)
+    view["loans_payments_known"] = scheduled is not None
+    return view
+
+
 def overview(identity, today: date | None = None, default_method: str | None = None) -> dict:
     """Private screen payload: goals with derived numbers + monthly cash improvement. ``default_method`` (funding planner only) is the Calc Method
     assumed for a goal whose own field is empty; None keeps ``calc.compute_goal``'s default (period_sum) for every other screen."""
@@ -735,6 +950,7 @@ def overview(identity, today: date | None = None, default_method: str | None = N
         g["id"]: calc.parse_events(by_goal.get(g["id"], []), FinEventFields) for g in goals}
 
     rows, all_events = [], []
+    all_events.extend(calc.parse_events(my_events(identity, "only", today.replace(day=1)), FinEventFields))     # imported rows have no goal; the household card still counts the month's
     for goal in goals:
         all_events.extend(own[goal["id"]])
         if goal["id"] not in active_ids:

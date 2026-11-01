@@ -21,9 +21,9 @@ function test(name: string, fn: () => void) {
   try { fn(); console.log(`ok - ${name}`); } catch (error) { failures += 1; console.error(`FAIL - ${name}`); console.error(error); }
 }
 
-test("three tabs, in order, with the agreed Hebrew names", () => {
-  assert.equal(FCC_TABS.map((t) => t.label).join(" | "), "התנהלות חודשית | הלוואות וחוב | נכסים והון");
-  assert.equal(FCC_TABS.map((t) => t.key).join(), "monthly,loans,assets");
+test("four tabs, in order, with the agreed Hebrew names", () => {
+  assert.equal(FCC_TABS.map((t) => t.label).join(" | "), "התנהלות חודשית | תזרים | הלוואות וחוב | נכסים והון");
+  assert.equal(FCC_TABS.map((t) => t.key).join(), "monthly,cashflow,loans,assets");
 });
 
 test("default tab is התנהלות חודשית; a fresh session always starts there", () => {
@@ -52,7 +52,7 @@ test("an unknown tab key is ignored", () => {
 test("tab bar: accessible tablist, selected state, ids wired to the panels", () => {
   const html = renderToStaticMarkup(createElement(FccTabBar, { active: "loans", onChange: () => undefined }));
   assert.ok(html.includes('role="tablist"'));
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 3);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
   assert.ok(html.includes(`id="${tabId("loans")}"`) && html.includes(`aria-controls="${panelId("loans")}"`));
   assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.ok(/aria-selected="true"[^>]*>הלוואות וחוב|>הלוואות וחוב<\/button>/.test(html));
@@ -68,10 +68,10 @@ test("390px smoke (css): tabs share the width and can shrink; hidden panels are 
 });
 
 test("keyboard: arrows follow the visual order (mirrored in RTL), wrap, Home/End jump, other keys ignored", () => {
-  assert.equal(tabForKey("monthly", "ArrowLeft", true), "loans");        // RTL: next tab is on the left
+  assert.equal(tabForKey("monthly", "ArrowLeft", true), "cashflow");     // RTL: next tab is on the left
   assert.equal(tabForKey("monthly", "ArrowRight", true), "assets");      // wraps to the last
   assert.equal(tabForKey("assets", "ArrowLeft", true), "monthly");
-  assert.equal(tabForKey("monthly", "ArrowRight", false), "loans");      // LTR is the mirror image
+  assert.equal(tabForKey("monthly", "ArrowRight", false), "cashflow");   // LTR is the mirror image
   assert.equal(tabForKey("loans", "Home", true), "monthly");
   assert.equal(tabForKey("loans", "End", true), "assets");
   assert.equal(tabForKey("loans", "Enter", true), null);
@@ -81,7 +81,7 @@ test("keyboard: arrows follow the visual order (mirrored in RTL), wrap, Home/End
 test("only the selected tab is in the Tab order; every tab points at an existing panel id", () => {
   const html = renderToStaticMarkup(createElement(FccTabBar, { active: "loans", onChange: () => undefined }));
   assert.equal((html.match(/tabindex="0"/g) || []).length, 1);
-  assert.equal((html.match(/tabindex="-1"/g) || []).length, 2);
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 3);
   for (const t of FCC_TABS) assert.ok(html.includes(`aria-controls="${panelId(t.key)}"`) && html.includes(`id="${tabId(t.key)}"`));
 });
 
@@ -162,6 +162,13 @@ test("markup: idle monthly shows 8 chips and NO input; loans shows its 12 chips 
   const a = composer("assets");
   assert.equal((a.match(/class="fcc-chip /g) || []).length, 4);
   assert.ok(!a.includes("<textarea") && a.includes("עדכון נכס") && a.includes("עדכון שווי") && a.includes("עדכון משכנתא") && a.includes("פעולה הבאה") && a.includes("נכס נמכר"));
+});
+
+test("markup: the cashflow tab has exactly two entry chips (income / expense), no input, and they only name existing intents", () => {
+  const c = composer("cashflow");
+  assert.equal((c.match(/class="fcc-chip /g) || []).length, 2);
+  assert.ok(!c.includes("<textarea") && c.includes("רישום הכנסה / הוצאה") && c.includes("+ הכנסה") && c.includes("+ הוצאה"));
+  assert.equal(COMPOSER.cashflow.chips.map((x) => x.intent).join(), "monthly.income,monthly.household_expense");
 });
 
 test("markup: a review shows the server's text with confirm/edit/cancel and no input; chips are disabled", () => {
