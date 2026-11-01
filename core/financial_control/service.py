@@ -823,7 +823,7 @@ def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> f
 
 
 
-def rule_write_for(chosen: dict, category: str, rule_rows: list[dict]) -> dict | None:
+def rule_change_for(chosen: dict, category: str, rule_rows: list[dict]) -> dict | None:
     """The ONE write that makes the owner's classification of an imported expense permanent: patch the rule row that already carries this description
     (pending, or decided with another category — the owner changed his mind) or create a decided rule when there is none. None when the existing rule
     already says exactly this. Pure over its arguments; ``chosen`` is a ``classify_waiting`` item."""

@@ -5040,7 +5040,7 @@ def fcc_classify_apply(identity):
             if status >= 300:
                 return jsonify({"state": "partial_failure", "message": "הסיווג לא הושלם — אפשר לנסות שוב.", "done": done}), status
             done += 1
-        rule_write = fcc_service.rule_write_for(chosen, category, fcc_service.my_cashflow_rules(identity)) if chosen["source"] in ("bank", "card") else None
+        rule_write = fcc_service.rule_change_for(chosen, category, fcc_service.my_cashflow_rules(identity)) if chosen["source"] in ("bank", "card") else None
         if rule_write is not None:                           # the answer must outlive this statement: the same description is classified by the NEXT import too
             _, response, status = _queue_or_owner_execute("tma_fcc_write", rule_write, identity, "FCC: keep the classification as a rule")
             if status >= 300:
