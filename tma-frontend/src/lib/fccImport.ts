@@ -69,3 +69,51 @@ export function progressText(p: Progress): string {
   if (p.step === "billing") return `מעדכן תאריך חיוב לרישומים קיימים · נותרו ${p.remaining}…`;
   return p.step === "events" ? `נכתבו ${p.written} · נותרו ${p.remaining}…` : `מוסיף תיאורים לסיווג (${p.rules})…`;
 }
+
+// ── several statements at once: each file is checked and written on its own (the server is unchanged), ONE confirmation covers the whole batch ──────────────
+export type FileStatus = "waiting" | "checking" | "ready" | "nothing" | "error" | "running" | "done" | "blocked";
+export interface BatchItem { id: number; name: string; status: FileStatus; preview?: FccImportPreview; error?: string; progress?: Progress }
+
+/** The state of one file after its preview came back: can be written, has nothing to write, or does not add up (never written). */
+export function checkedItem(item: BatchItem, preview: FccImportPreview): BatchItem {
+  const r = reviewOf(preview);
+  if (r.blocked.length > 0) return { ...item, preview, status: "error", error: r.blocked.join(" ") };
+  return { ...item, preview, status: r.canImport ? "ready" : "nothing", error: undefined };
+}
+
+export interface BatchTotals { files: number; ready: number; nothing: number; errors: number; toWrite: number; backfill: number; pendingRules: number }
+
+export function batchTotals(items: BatchItem[]): BatchTotals {
+  const t: BatchTotals = { files: items.length, ready: 0, nothing: 0, errors: 0, toWrite: 0, backfill: 0, pendingRules: 0 };
+  for (const i of items) {
+    if (i.status === "error") t.errors += 1;
+    else if (i.status === "nothing") t.nothing += 1;
+    else if (i.status === "ready" || i.status === "blocked" || i.status === "running") {
+      t.ready += 1;
+      t.toWrite += i.preview?.plan.remaining ?? 0; t.backfill += i.preview?.plan.backfill ?? 0; t.pendingRules += i.preview?.plan.pending_rules ?? 0;
+    }
+  }
+  return t;
+}
+
+/** The ONE confirm button of a batch. */
+export function batchConfirmLabel(t: BatchTotals): string {
+  const parts = [t.toWrite > 0 ? `${t.toWrite} רישומים` : null, t.backfill > 0 ? `תאריך חיוב ל-${t.backfill} קיימים` : null].filter(Boolean).join(" + ");
+  return `אשר ייבוא של ${t.ready} ${t.ready === 1 ? "קובץ" : "קבצים"}${parts ? ` (${parts})` : ""}`;
+}
+
+export function itemLine(i: BatchItem): string {
+  switch (i.status) {
+    case "waiting": return "ממתין לבדיקה";
+    case "checking": return "קורא ומסווג…";
+    case "ready": return reviewOf(i.preview as FccImportPreview).headline;
+    case "nothing": return reviewOf(i.preview as FccImportPreview).headline;
+    case "error": return i.error ?? "לא ניתן לקרוא את הקובץ — לא נכתב דבר";
+    case "running": return progressText(i.progress ?? START);
+    case "done": return progressText(i.progress ?? START);
+    case "blocked": return i.progress?.blocked ?? "הכתיבה נעצרה — אפשר לנסות שוב (מה שנכתב לא ייכתב פעמיים)";
+  }
+}
+
+/** Files still to be written, in the order the owner chose them (a retry takes the blocked ones again, never the done ones). */
+export const runnable = (items: BatchItem[]): BatchItem[] => items.filter((i) => i.status === "ready" || i.status === "blocked");
