@@ -8,7 +8,8 @@ from __future__ import annotations
 from ..models import ENGINE_VERSION
 from . import core, liquid_paths, loan_paths
 
-COMPARATOR_VERSION = "comparator-1"
+COMPARATOR_VERSION = "comparator-3"
+_SCAN_STEPS = 24
 _MODULES = {t: loan_paths for t in loan_paths.TYPES} | {t: liquid_paths for t in liquid_paths.TYPES}
 GAP_FIELDS = (
     ("cash_at_compare_date", "result.cash_at_compare_date"),
@@ -50,9 +51,8 @@ def _basis_check(frame: dict, results: list) -> None:
             raise ValueError("every path must use the same tax and inflation basis (no gross against net)")
     if len({r["purpose"] for r in results}) != 1:
         raise ValueError("paths with different purposes cannot be compared")
-    funds = {r["funds_amount"] for r in results if r["funds_amount"] is not None}
-    if len(funds) > 1:
-        raise ValueError("paths must fund the same amount")
+    if len({r["funds_amount"] for r in results}) > 1:                    # None counts as a value: an unknown amount never matches a known one
+        raise ValueError("paths must fund the same, known amount")
 
 
 def compare_paths(frame: dict, results: list, *, reference: str | None = None) -> dict:
@@ -71,11 +71,17 @@ def compare_paths(frame: dict, results: list, *, reference: str | None = None) -
         paths.append(out)
     warnings = ["השוואה בהנחות שהוזנו בלבד — לא המלצה ולא בחירה עבורך.", "ראשוני — לבדוק בזמן אמת ובייעוץ מס/פיננסי לפני כל פעולה.",
                 "ההפרש חתום מול מסלול הייחוס שבחרת: מספר חיובי = ערך גבוה יותר מהייחוס באותו שדה, לא ״טוב יותר״."]
+    not_funded = [r["path_id"] for r in results if r["goal_funding"]["funds_on_time"] is False]
+    if not_funded:
+        by_status = ", ".join(f'{r["path_id"]}: {r["goal_funding"]["status"]}' for r in results if r["goal_funding"]["funds_on_time"] is False)
+        warnings.append("מסלולים שאינם מממנים את היעד במלואו, בזמן ובלי תנאי מוצגים כחלופה בלבד, לא כשווי ערך (" + by_status + ")")
+    if any(r["certainty"] == "uncertain" and "default_input_used" in r["risks"] for r in results):
+        warnings.append("בחלק מהמסלולים נתון שלא הוזן חושב בברירת מחדל — המספר אינו ודאי עד שיוזן.")
     if any(r["missing_inputs"] for r in results):
         warnings.append("נתון חסר מוצג חסר, לא אפס; הפרש שאחד מצדדיו חסר אינו מחושב.")
     return {"schema_version": core.SCHEMA_VERSION, "engine_version": ENGINE_VERSION, "comparator_version": COMPARATOR_VERSION,
             "result_type": "assumption_based_projection", "compare_at": frame["compare_at"], "frame_echo": frame, "purpose": results[0]["purpose"],
-            "paths": paths, "reference": reference, "warnings": warnings}
+            "paths": paths, "reference": reference, "not_funded_on_time": not_funded, "warnings": warnings}
 
 
 def _get(result: dict, path: str):
@@ -118,25 +124,36 @@ def break_even(frame: dict, spec_a: dict, spec_b: dict, parameter: str, lo: floa
         value = _get(evaluate_path(frame, {**spec_a, parameter: x}), metric)
         return None if value is None or target is None else value - target
 
-    d_lo, d_hi = diff(lo), diff(hi)
-    out = {"parameter": parameter, "metric_path": metric, "range": [lo, hi], "value": None, "reason": None,
-           "note": "a threshold under the entered assumptions, not a conclusion"}
-    if d_lo is None or d_hi is None:
+    out = {"parameter": parameter, "metric_path": metric, "range": [lo, hi], "value": None, "crossings": [], "reason": None,
+           "note": "a threshold under the entered assumptions, not a conclusion; found on a %d-step scan, so two crossings closer than one step can be missed" % _SCAN_STEPS}
+    xs = [lo + (hi - lo) * i / _SCAN_STEPS for i in range(_SCAN_STEPS + 1)]
+    ds = [diff(x) for x in xs]
+    if any(d is None for d in ds):
         out["reason"] = "missing_inputs"
-    elif d_lo == 0:
-        out["value"] = lo
-    elif d_hi == 0:
-        out["value"] = hi
-    elif (d_lo > 0) == (d_hi > 0):
-        out["reason"] = "no_crossing_in_range"
-    else:
-        a, b, fa = lo, hi, d_lo
-        for _ in range(iterations):
+        return out
+    brackets = []
+    for i in range(_SCAN_STEPS):
+        if ds[i] == 0:
+            brackets.append((xs[i], xs[i], ds[i]))
+        elif ds[i] * ds[i + 1] < 0:
+            brackets.append((xs[i], xs[i + 1], ds[i]))
+    if ds[-1] == 0:
+        brackets.append((xs[-1], xs[-1], 0.0))
+    crossings = []
+    for a, b, fa in brackets:
+        for _ in range(iterations if a != b else 0):
             mid = (a + b) / 2
             fm = diff(mid)
             if (fm > 0) == (fa > 0):
                 a, fa = mid, fm
             else:
                 b = mid
-        out["value"] = round((a + b) / 2, 6)
+        crossings.append(round((a + b) / 2, 6))
+    out["crossings"] = crossings
+    if not crossings:
+        out["reason"] = "no_crossing_in_range"
+    elif len(crossings) == 1:
+        out["value"] = crossings[0]
+    else:
+        out["reason"] = "multiple_crossings"                         # no single threshold exists; all are listed
     return out

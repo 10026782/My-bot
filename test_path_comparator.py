@@ -115,7 +115,7 @@ def test_the_comparator_output_has_no_ranking_summary_or_recommendation_and_does
     text = json.dumps(out, ensure_ascii=False)
     assert not re.search(r'"(score|rank|ranking|best|recommended|recommendation|better|cheapest|optimal|total_available)"', text.lower())
     assert not re.search(r"מומלץ|כדאי|הטוב ביותר|עדיף|הזול ביותר", text)
-    assert set(out) == {"schema_version", "engine_version", "comparator_version", "result_type", "compare_at", "frame_echo", "purpose", "paths", "reference", "warnings"}
+    assert set(out) == {"schema_version", "engine_version", "comparator_version", "result_type", "compare_at", "frame_echo", "purpose", "paths", "reference", "not_funded_on_time", "warnings"}
 
 
 def test_the_comparison_is_deterministic_and_a_stored_run_replays_to_the_same_result():
@@ -191,3 +191,85 @@ def test_describe_inputs_routes_by_type_and_rejects_unknown_types():
         describe_inputs("sell_asset")
     with pytest.raises(ValueError):
         evaluate_path(frame(), {"id": "x", "label": "x", "type": "sell_asset"})
+
+
+# ═══ review hardening ═══
+
+def test_a_path_with_an_unknown_or_different_funded_amount_is_rejected_not_skipped():
+    f = frame()
+    res = results(f, LOAN, CASH)
+    other = copy.deepcopy(res[1])
+    other["funds_amount"] = None
+    with pytest.raises(ValueError):
+        compare_paths(f, [res[0], other])
+    other["funds_amount"] = res[0]["funds_amount"] + 1
+    with pytest.raises(ValueError):
+        compare_paths(f, [res[0], other])
+
+
+def test_waiting_is_shown_but_flagged_as_not_funding_the_goal_on_time():
+    f = frame()
+    out = compare_paths(f, results(f, LOAN, CASH, WAIT))
+    statuses = {p["path_id"]: p["goal_funding"]["status"] for p in out["paths"]}
+    assert statuses == {"loan": "conditional", "cash": "funded", "wait": "not_funded"}      # the loan is not approved
+    assert out["not_funded_on_time"] == ["loan", "wait"]
+    assert any("wait: not_funded" in w and "לא כשווי ערך" in w for w in out["warnings"])
+    approved = compare_paths(f, results(f, LOAN | {"approved": True}, CASH))
+    assert approved["not_funded_on_time"] == []
+
+
+def test_a_default_fee_shows_up_as_uncertain_and_in_the_comparison_warnings():
+    f = frame()
+    no_fee = {k: v for k, v in CASH.items() if k != "fee_pct"}
+    res = results(f, LOAN, no_fee)
+    cash = next(r for r in res if r["path_id"] == "cash")
+    assert cash["certainty"] == "uncertain" and "default_input_used" in cash["risks"]
+    assert any("ברירת מחדל" in w for w in compare_paths(f, res)["warnings"])
+
+
+def test_break_even_lists_every_crossing_and_gives_no_single_value_when_there_are_several(monkeypatch):
+    f = frame()
+    import portfolio_lab.path_comparison.comparator as cmp
+
+    def fake(frame_, spec):
+        x = spec.get("annual_rate_pct")
+        base = {"measures": {"net_worth": {"after_latent_tax": {"nominal": (x - 10) * (x - 20) if spec["id"] == "a" else 0.0}}}}
+        return base
+
+    monkeypatch.setattr(cmp, "evaluate_path", fake)
+    out = cmp.break_even(f, {"id": "a"}, {"id": "b"}, "annual_rate_pct", 0, 30)
+    assert out["value"] is None and out["reason"] == "multiple_crossings" and len(out["crossings"]) == 2
+    assert abs(out["crossings"][0] - 10) < 1e-3 and abs(out["crossings"][1] - 20) < 1e-3
+
+
+def funding(f, spec):
+    return evaluate_path(f, spec)["goal_funding"]
+
+
+def test_funding_status_distinguishes_net_amount_approval_timing_and_unknown_fees():
+    f = frame()
+    ok = LOAN | {"approved": True}
+    assert funding(f, ok)["status"] == "funded" and funding(f, ok)["net_available"] == 250000
+    short = funding(f, ok | {"fees": 2000})
+    assert short["status"] == "partial" and short["funds_on_time"] is False and short["shortfall"] == 2000 and short["net_available"] == 248000
+    assert funding(f, LOAN)["status"] == "conditional" and funding(f, LOAN)["funds_on_time"] is False
+    unknown = funding(f, {k: v for k, v in ok.items() if k != "fees"})
+    assert unknown["status"] == "unknown" and unknown["funds_on_time"] is False and unknown["net_available"] is None
+    late = funding(f, ok | {"starts_on": "2027-03-01", "needed_by": "2027-01-15"})
+    assert late["status"] == "late" and late["available_on"] == "2027-03-01" and late["needed_by"] == "2027-01-15"
+    assert funding(f, ok | {"starts_on": "2027-01-01", "needed_by": "2027-01-15"})["status"] == "funded"
+
+
+def test_liquid_cash_funding_uses_the_net_after_a_withdraw_fee_and_the_liquidity_state():
+    f = frame()
+    assert funding(f, CASH)["status"] == "funded"
+    assert funding(f, CASH | {"withdraw_fee": 500})["status"] == "partial"
+    assert funding(f, CASH | {"liquidity_state": "conditional"})["status"] == "conditional"
+    assert funding(f, {k: v for k, v in CASH.items() if k != "withdraw_fee"})["status"] == "unknown"
+
+
+def test_contract_versions_moved_with_the_funding_change():
+    f = frame()
+    assert core.SCHEMA_VERSION == "1.1" and f["calc_versions"]["core"] == "path-core-2"
+    r = evaluate_path(f, LOAN)
+    assert r["calc_version"]["module"] == "loans-2" and evaluate_path(f, CASH)["calc_version"]["module"] == "liquid-2"

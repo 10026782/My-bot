@@ -257,3 +257,12 @@
 - **Cross-Layer Impact: NONE** למסמך זה (docs בלבד). מימוש עתידי = **FULL** (חוזה חדש, runtime, ייתכן ואחסון) — הערכה משלו.
 - אין רישום ב-`canonical_boundaries.json`; אין קוד, סכמה, flag, Airtable.
 - המסמך אינו מתיר מימוש ואינו מצהיר שתנאי המעבר להמלצה התקיימו.
+
+### 6ב. הקשחת חוזה אחרי ביקורת עצמאית (02/11/2026)
+- `goal_funding {funds_on_time, by}` חובה בכל תוצאה; ב־`fund_amount` — `funds_amount` ידוע וחיובי, אחרת ValueError. המשווה לא מדלג על סכום לא ידוע.
+- ברירת מחדל על קלט שלא הוזן ⇒ `certainty=uncertain`, סיכון `default_input_used`, אזהרה בהשוואה (החישוב ממשיך; המספר לא "צפוי").
+- `break_even`: סריקה ב־24 צעדים, כל החציות מוחזרות; יותר מאחת ⇒ `multiple_crossings` בלי ערך יחיד.
+- שיעור G6/G7 עדיין פתוחים לפני endpoint.
+- `goal_funding.status` (funded/conditional/partial/late/not_funded/unknown): `funded` רק כשהסכום נטו אחרי עמלות מגיע במלואו, בזמן (`needed_by` אופציונלי, נפרד מ־`available_on`) ובלי תנאי (הלוואה לא מאושרת / כסף מותנה ⇒ conditional). גרסאות: schema 1.1, path-core-2, loans-2, liquid-2, comparator-3.
+- G7: לדרוש בדיקת זהות חשבונאית לכל סוג מסלול שכל המדדים נמדדים מול "לא עושים כלום".
+- `break_even` ללא חציה אינו הוכחה שאין חציה (סריקה ב־24 צעדים).
