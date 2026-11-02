@@ -21,9 +21,9 @@ function test(name: string, fn: () => void) {
   try { fn(); console.log(`ok - ${name}`); } catch (error) { failures += 1; console.error(`FAIL - ${name}`); console.error(error); }
 }
 
-test("four tabs, in order, with the agreed Hebrew names", () => {
-  assert.equal(FCC_TABS.map((t) => t.label).join(" | "), "התנהלות חודשית | תזרים | הלוואות וחוב | נכסים והון");
-  assert.equal(FCC_TABS.map((t) => t.key).join(), "monthly,cashflow,loans,assets");
+test("five tabs, in order, with the agreed Hebrew names", () => {
+  assert.equal(FCC_TABS.map((t) => t.label).join(" | "), "התנהלות חודשית | תזרים | צריכה | הלוואות וחוב | נכסים והון");
+  assert.equal(FCC_TABS.map((t) => t.key).join(), "monthly,cashflow,consumption,loans,assets");
 });
 
 test("default tab is התנהלות חודשית; a fresh session always starts there", () => {
@@ -52,7 +52,7 @@ test("an unknown tab key is ignored", () => {
 test("tab bar: accessible tablist, selected state, ids wired to the panels", () => {
   const html = renderToStaticMarkup(createElement(FccTabBar, { active: "loans", onChange: () => undefined }));
   assert.ok(html.includes('role="tablist"'));
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 4);
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 5);
   assert.ok(html.includes(`id="${tabId("loans")}"`) && html.includes(`aria-controls="${panelId("loans")}"`));
   assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.ok(/aria-selected="true"[^>]*>הלוואות וחוב|>הלוואות וחוב<\/button>/.test(html));
@@ -81,7 +81,7 @@ test("keyboard: arrows follow the visual order (mirrored in RTL), wrap, Home/End
 test("only the selected tab is in the Tab order; every tab points at an existing panel id", () => {
   const html = renderToStaticMarkup(createElement(FccTabBar, { active: "loans", onChange: () => undefined }));
   assert.equal((html.match(/tabindex="0"/g) || []).length, 1);
-  assert.equal((html.match(/tabindex="-1"/g) || []).length, 3);
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 4);
   for (const t of FCC_TABS) assert.ok(html.includes(`aria-controls="${panelId(t.key)}"`) && html.includes(`id="${tabId(t.key)}"`));
 });
 

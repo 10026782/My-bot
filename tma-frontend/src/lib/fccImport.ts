@@ -42,17 +42,17 @@ export function reviewOf(p: FccImportPreview): ImportReview {
   const more = pl.pending_rules - pl.pending_examples.length;
   return {
     blocked,
-    headline: pl.remaining === 0 ? (pl.events > 0 ? "כל השורות שהוחלטו כבר יובאו." : "אין שורות שהוחלטו לייבוא בדוח הזה.")
-      : `ייכתבו ${pl.remaining} רישומים${pl.already_imported ? ` (${pl.already_imported} כבר יובאו)` : ""}.`,
+    headline: pl.remaining === 0 ? (pl.backfill ? `${pl.backfill} רישומים שכבר יובאו יקבלו תאריך חיוב.` : pl.events > 0 ? "כל השורות שהוחלטו כבר יובאו." : "אין שורות שהוחלטו לייבוא בדוח הזה.")
+      : `ייכתבו ${pl.remaining} רישומים${pl.already_imported ? ` (${pl.already_imported} כבר יובאו)` : ""}${pl.backfill ? ` · ${pl.backfill} קיימים יקבלו תאריך חיוב` : ""}.`,
     months, skipped, pending: more > 0 ? [...pending, `ועוד ${more}`] : pending,
     uncategorizedNote: pl.uncategorized && pl.uncategorized.count > 0 ? `${pl.uncategorized.count} מהרישומים (${money(pl.uncategorized.total)}) ייכתבו בלי קטגוריה — תסווג אותם אחת-אחת במסך ״הוצאות לסיווג״.` : null,
     pendingNote: pl.pending_rules > 0 ? `${pl.pending_rules} תיאורים יתווספו לטבלת Cashflow Rules כ״ממתין״${pl.pending_row_rules ? ` (מהם ${pl.pending_row_rules} העברות לבדיקה בודדת)` : ""}.` : null,
     canImport: p.can_import && blocked.length === 0,
-    confirmLabel: pl.remaining > 0 ? `אשר ייבוא של ${pl.remaining} רישומים` : "הוסף את התיאורים לסיווג",
+    confirmLabel: pl.remaining > 0 ? `אשר ייבוא של ${pl.remaining} רישומים` : pl.backfill ? `אשר עדכון תאריך חיוב ל-${pl.backfill} רישומים` : "הוסף את התיאורים לסיווג",
   };
 }
 
-export interface Progress { written: number; rules: number; step: "events" | "rules" | "done"; remaining: number; done: boolean; blocked: string | null }
+export interface Progress { written: number; rules: number; step: "events" | "billing" | "rules" | "done"; remaining: number; done: boolean; blocked: string | null }
 
 export function advance(prev: Progress, r: FccImportRun): Progress {
   if (r.state === "blocked") return { ...prev, blocked: r.message ?? "הכתיבה לא הושלמה — אפשר לנסות שוב." };
@@ -66,5 +66,6 @@ export const START: Progress = { written: 0, rules: 0, step: "events", remaining
 export function progressText(p: Progress): string {
   if (p.blocked) return p.blocked;
   if (p.done) return `הושלם: ${p.written} רישומים נכתבו${p.rules ? ` · ${p.rules} תיאורים נוספו לסיווג` : ""}.`;
+  if (p.step === "billing") return `מעדכן תאריך חיוב לרישומים קיימים · נותרו ${p.remaining}…`;
   return p.step === "events" ? `נכתבו ${p.written} · נותרו ${p.remaining}…` : `מוסיף תיאורים לסיווג (${p.rules})…`;
 }

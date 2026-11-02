@@ -3,7 +3,7 @@ import type { FccCashflow, FccCashflowMonth } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CashflowView } from "../components/FccCashflow";
-import { MISSING, RECS_NOTE, cashflowModel, defaultMonth, insightLines, monthLabel, recsModel } from "./fccCashflow";
+import { MISSING, RECS_NOTE, cashflowModel, defaultMonth, insightLines, monthLabel, monthNav, recsModel } from "./fccCashflow";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -130,6 +130,16 @@ test("markup: the recommendations section renders the cards, hints and the not-a
   const html = renderToStaticMarkup(createElement(CashflowView, { data, selected: "2026-09", onSelect: () => undefined, range: 6, onRange: () => undefined }));
   assert.ok(html.includes("הזדמנויות לחיסכון") && html.includes("לנהל משא ומתן: סלולר") && html.includes("עד ₪900") && html.includes("ביטלתי את נטפליקס"));
   assert.ok(html.includes("לא החלטה") && html.includes("ועוד 2 נקודות לבדיקה"));
+});
+
+test("month navigation: the arrows lead to the neighbouring months and stop at the ends", () => {
+  const rows = cashflowModel(data, "2026-09").rows;
+  const n = monthNav(rows, "2026-09");
+  assert.ok(n.older === null || n.older.month < "2026-09"); assert.ok(n.newer === null || n.newer.month > "2026-09");
+  assert.equal(monthNav(rows, "nope").older, null); assert.equal(monthNav(rows, "nope").newer, null);
+  assert.equal(monthNav(rows, rows[0].month).newer, null); assert.equal(monthNav(rows, rows[rows.length - 1].month).older, null);
+  const html = renderToStaticMarkup(createElement(CashflowView, { data, selected: "2026-09", onSelect: () => undefined, range: 6, onRange: () => undefined }));
+  assert.ok(html.includes("מעבר בין חודשים"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

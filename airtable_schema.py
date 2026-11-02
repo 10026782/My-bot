@@ -949,6 +949,8 @@ class FinEventFields:
     # Cashflow (live 01/11/2026, owner-approved): singleLineText (NOT a select, so the owner can add categories without a schema change).
     # A built-in category key (core.financial_control.cashflow.EXPENSE_CATEGORIES) or a custom name; empty = uncategorized.
     EXPENSE_CATEGORY = "Expense Category"
+    # live 02/11/2026 (owner-approved, fldzXOVaX0KMhRdB1): date field — the card statement's billing date of an imported CARD row (the cashflow tab counts by it; Occurred At stays the consumption date)
+    BILLING_DATE = "Billing Date"
 
 
 class FinAccountFields:

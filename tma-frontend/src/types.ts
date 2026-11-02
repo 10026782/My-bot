@@ -852,6 +852,9 @@ export interface FccOverview {
   tasks: { id: string; title: string | null; due_date: string | null; status: string | null }[];
   monthly_cash_improvement: number;
   household?: { month_total: number };
+  /** The current month's bottom line, the SAME numbers as the cashflow tab (card rows by billing date). null = could not be derived. */
+  month_summary?: { month: string; partial: boolean; day: number | null; days_in_month: number; income: number | null; expenses: number | null; balance: number | null;
+                    surplus: number | null; shortfall: number | null; missing: ("income" | "expenses")[] } | null;
   receipts?: { missing_count: number; missing_amount: number };
   obligations?: { total_monthly: number; flagged_count: number; flagged_monthly: number; cancel_pending?: number; potential_saving: number; count: number };
   /** Latest income entries (own only), newest first, so nothing is booked twice. */
@@ -1138,7 +1141,7 @@ export interface FccImportPreview {
   parse: { ok: boolean; rows: number; verified: number; problems: string[] };
   digest: string | null; can_import: boolean; chunk: number;
   plan: {
-    events: number; remaining: number; already_imported: number;
+    events: number; remaining: number; already_imported: number; backfill?: number;
     months: Record<string, { expenses: number; income: number; events: number; by_category: Record<string, number>; by_source: Record<string, number> }>;
     skipped: Record<string, { count: number; total: number }>;
     pending_rules: number; pending_row_rules: number;
@@ -1155,7 +1158,7 @@ export interface FccClassifyView {
 /** Classification of DESCRIPTIONS waiting in the owner's rules table (GET|POST /api/fcc/classify-rules). Every number is the server's. */
 export interface FccRuleItem { id: string; match: string; applies_to: string; times_seen: number; amount: number; last_seen: string }
 export interface FccRuleView { total: number; item: FccRuleItem | null; categories: { key: string; label: string }[]; state?: "done" }
-export interface FccImportRun { state: "progress" | "done" | "blocked"; step: "events" | "rules" | "done"; written?: number; remaining?: number; rules_to_add?: number; message?: string }
+export interface FccImportRun { state: "progress" | "done" | "blocked"; step: "events" | "billing" | "rules" | "done"; written?: number; remaining?: number; rules_to_add?: number; message?: string }
 
 export interface FccCashflow {
   months: FccCashflowMonth[];
@@ -1170,6 +1173,19 @@ export interface FccCashflow {
   loans_payments_known: boolean;
   to_classify?: { total: number; total_amount: number } | null;
   rules_to_classify?: { total: number } | null;                      // descriptions waiting for a category (null = could not be read)       // imported expenses waiting for a category (null = could not be read)
+  as_of: string;
+}
+
+/** GET /api/fcc/consumption — when the money was consumed (by the day of the purchase; no loans; instalments summed apart). */
+export interface FccConsumptionMonth {
+  month: string; is_current: boolean; partial: boolean;
+  expenses: { known: boolean; count: number; categories: FccCashflowCategory[]; total: number | null };
+  installments: number;
+}
+export interface FccConsumption {
+  months: FccConsumptionMonth[];
+  categories: { key: string; label: string; custom?: boolean }[];
+  insights: FccCashflow["insights"];
   as_of: string;
 }
 

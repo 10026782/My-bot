@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`); same conventions as commandCenterPresentation.test.ts.
 import type { FccGoalRow, FccSavingsRelease } from "../types";
-import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, weeklySurplusChoices, weeklySurplusQuestion, recentIncomeRows, goalPickLabel, headerCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
+import { CATEGORY_LABEL, dmy, GOAL_ACTION_BUTTONS, goalCardModel, weeklyQuotaMetrics, weeklySurplusChoices, weeklySurplusQuestion, recentIncomeRows, goalPickLabel, headerCards, monthSummaryCards, savingsFollowUp, savingsReleaseModel } from "./fccPresentation";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -122,6 +122,21 @@ test("gross -> direct costs -> net shows only when there are direct costs", () =
   assert.equal(without.find((c) => c.key === "income")?.hint, undefined);
   const m = goalCardModel({ ...base, mode: "recurring", target: 15000, actual: 3000, remaining: 12000, direct_costs: 500, net: 2500 });
   assert.deepEqual(m.metrics.slice(-3).map((x) => x.label), ["ברוטו", "הוצאות ישירות", "נטו"]);
+});
+
+test("month summary: income, expenses and what is left for saving replace the household card; a missing side is חסר; a gap says so", () => {
+  const ok = headerCards({ monthly_cash_improvement: 0, summary: {}, household: { month_total: 2400 },
+    month_summary: { month: "2026-10", partial: true, day: 20, days_in_month: 31, income: 10600, expenses: 6500, balance: 4100, surplus: 4100, shortfall: 0, missing: [] } });
+  assert.equal(ok.some((c) => c.key === "household"), false);
+  assert.equal(ok.find((c) => c.key === "month_income")?.value, "₪10,600"); assert.equal(ok.find((c) => c.key === "month_income")?.hint, "עד ה-20 בחודש (מתוך 31)");
+  assert.equal(ok.find((c) => c.key === "month_expenses")?.value, "₪6,500");
+  assert.equal(ok.find((c) => c.key === "month_balance")?.label, "יתרה לחיסכון"); assert.equal(ok.find((c) => c.key === "month_balance")?.value, "₪4,100");
+  const gap = monthSummaryCards({ month: "2026-10", partial: false, day: null, days_in_month: 31, income: 5000, expenses: 6500, balance: -1500, surplus: 0, shortfall: 1500, missing: [] });
+  assert.equal(gap[2].label, "חסר החודש"); assert.equal(gap[2].value, "₪1,500");
+  const missing = monthSummaryCards({ month: "2026-10", partial: false, day: null, days_in_month: 31, income: null, expenses: 6500, balance: null, surplus: null, shortfall: null, missing: ["income"] });
+  assert.equal(missing[0].value, "חסר"); assert.equal(missing[2].value, "חסר"); assert.equal(missing[2].hint, "חסר: הכנסות");
+  const none = headerCards({ monthly_cash_improvement: 0, summary: {}, household: { month_total: 2400 }, month_summary: null });
+  assert.equal(none.some((c) => c.key === "household"), true);                                    // not derivable: the old household card stays
 });
 
 test("household spend and missing receipts are separate cards that appear only when relevant", () => {

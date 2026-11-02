@@ -280,7 +280,7 @@ def _verify_active_execution_claim(contract_id: str, claim_execution_id: str, ap
 # record against a strict allow-list (the client never chooses the fields, the server builds the records from the uploaded statement).
 BATCH_MAX = 25
 _BATCH_EVENT_KEYS = {"Kind", "Amount", "Occurred At", "Recorded By", "Source", "Source Ref", "Idempotency Key", "Raw Text", "Verification",
-                     "Expense Category", "Note"}
+                     "Expense Category", "Note", "Billing Date"}
 _BATCH_RULE_KEYS = {"Match", "Applies To", "Direction", "Status", "Times Seen", "Last Seen", "Example Amount", "Notes", "Row Key"}
 _IMPORT_KEY_RE = re.compile(r"^(bank|card):[0-9a-f]{20}$")
 _ISO_DATE_RE_ = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -319,8 +319,17 @@ def validate_batch_record(table: str, rec) -> str | None:
         cat, note = rec.get("Expense Category"), rec.get("Note")
         if cat is not None and (kind != "household_expense" or not isinstance(cat, str) or not cat.strip() or len(cat) > 40):      # no category = not yet classified (the owner does it on screen)
             return "bad category"
-        if note is not None and (kind != "one_time" or not isinstance(note, str) or not note.startswith("מקור: ") or len(note) > 120):
+        if note is not None and not ((kind == "one_time" and isinstance(note, str) and note.startswith("מקור: ") and len(note) <= 120)
+                                     or (kind == "household_expense" and source == "import:card" and note == "תשלומים")):
             return "bad note"
+        billing = rec.get("Billing Date")
+        if billing is not None:                                                    # a CARD row only: the statement's billing date
+            try:
+                if source != "import:card" or not isinstance(billing, str) or not _ISO_DATE_RE_.match(billing):
+                    raise ValueError
+                _date.fromisoformat(billing)
+            except ValueError:
+                return "bad billing date"
         if kind == "one_time" and amount < 0:
             return "income must be positive"
         for name in ("Raw Text", "Recorded By"):
@@ -398,13 +407,32 @@ def _existing_batch_keys(table: str, records: list[dict], identity) -> set[str]:
     return out
 
 
+def _existing_event_rows(records: list[dict], identity) -> dict[str, dict]:
+    """The OWNER's existing imported events among ``records`` (by idempotency key) with their record id — a re-imported statement fills what the earlier
+    import did not know (the card's billing date, the instalments label) on the row that is already there."""
+    from airtable_schema import FinEventFields as EF, Tables
+    from core import data_access_policy
+    from tools.airtable_gateway import escape_formula_value
+    from tools.airtable_read_adapter import list_records
+    keys = [r["Idempotency Key"] for r in records]
+    formula = "OR(" + ",".join(f"{{{EF.IDEMPOTENCY_KEY}}}='{escape_formula_value(k)}'" for k in keys) + ")"
+    found = list_records(Tables.FIN_EVENTS, formula, max_records=len(keys) + 5, paginate=True)
+    out = {}
+    for rec in data_access_policy.filter_records(Tables.FIN_EVENTS, found, identity):
+        out[str((rec.get("fields") or {}).get(EF.IDEMPOTENCY_KEY) or "")] = rec
+    return out
+
+
+_BACKFILL_FIELDS = ("Billing Date", "Note")           # the only fields a re-import may fill on an existing event, and only when it is still empty
+
+
 def _tma_write_many(table, records, identity, action, requested_by, audit_action, audit_details, approved_by) -> dict:
     """Execute ONE chunk (already authorized by the caller's claim check). Validates EVERY record and the owner policy for EVERY record before the
     first write, skips what the owner already has, then creates the rest one by one; a failure stops the chunk with what was done in the evidence
     (the retry skips those)."""
     from datetime import datetime, timezone
     from airtable_schema import InteractionLogFields, Tables
-    from tools.airtable_gateway import airtable_create
+    from tools.airtable_gateway import airtable_create, airtable_patch
 
     if table not in (Tables.FIN_EVENTS, Tables.CASHFLOW_RULES):
         return _tool_result(ok=False, tool="tma_write", user_message=f"❌ טבלה '{table}' אינה מורשית לכתיבה בקבוצה")
@@ -421,16 +449,28 @@ def _tma_write_many(table, records, identity, action, requested_by, audit_action
         if denied is not None:
             return denied
         scoped.append(fields)
+    existing_rows: dict[str, dict] = {}
     try:
-        existing = _existing_batch_keys(table, records, identity)
+        if table == Tables.FIN_EVENTS:
+            existing_rows = _existing_event_rows(records, identity)
+            existing = set(existing_rows)
+        else:
+            existing = _existing_batch_keys(table, records, identity)
     except Exception as exc:                                                       # fail closed: unknown != "nothing exists yet"
         logger.error("[approval_actions] tma_write post_many: existing-keys lookup failed: %s", exc)
         return _tool_result(ok=False, tool="tma_write", user_message="❌ לא ניתן לוודא אילו רשומות כבר קיימות — לא נכתב דבר")
-    created, skipped, ids = 0, 0, []
+    created, skipped, backfilled, ids = 0, 0, 0, []
     for rec, fields in zip(records, scoped):
         ident = (rec.get("Idempotency Key") if table == Tables.FIN_EVENTS else ("row:" + rec["Row Key"] if rec.get("Row Key") else "match:" + rec["Match"]))
         if ident in existing:
             skipped += 1
+            row = existing_rows.get(ident)
+            fill = {k: rec[k] for k in _BACKFILL_FIELDS if rec.get(k) and not ((row or {}).get("fields") or {}).get(k)} if row else {}
+            if fill and row.get("id"):                                             # an earlier import did not know these: fill them, never overwrite
+                if not airtable_patch(table, row["id"], fill, source="tma_write_many"):
+                    return _tool_result(ok=False, tool="tma_write", evidence={"table": table, "created": created, "skipped_existing": skipped, "backfilled": backfilled, "record_ids": ids},
+                                        user_message=f"❌ הכתיבה נעצרה אחרי {created} רשומות — אפשר להמשיך (מה שנכתב לא ייכתב שוב)")
+                backfilled += 1
             continue
         out = airtable_create(table, fields, source="tma_write_many")
         if not out:
@@ -442,12 +482,12 @@ def _tma_write_many(table, records, identity, action, requested_by, audit_action
     try:
         airtable_create(Tables.INTERACTION_LOG, {
             InteractionLogFields.TITLE: f"[TMA] {audit_action or action}",
-            InteractionLogFields.SUMMARY: f"{audit_details or audit_action or action} — {created} new, {skipped} existing"[:200],
+            InteractionLogFields.SUMMARY: f"{audit_details or audit_action or action} — {created} new, {skipped} existing, {backfilled} filled"[:200],
             InteractionLogFields.PARTICIPANTS: getattr(identity, "display_name", "") or getattr(identity, "user_id", ""),
         }, source="tma_write_audit")
     except Exception as exc:
         logger.warning("[approval_actions] tma_write post_many audit failed: %s", exc)
-    receipt = {"action": action, "table": table, "created": created, "skipped_existing": skipped, "requested_by": requested_by or "unknown",
+    receipt = {"action": action, "table": table, "created": created, "skipped_existing": skipped, "backfilled": backfilled, "requested_by": requested_by or "unknown",
                "approved_by": approved_by, "status": "executed", "timestamp": now}
     receipt_warning = ""
     try:
@@ -460,11 +500,11 @@ def _tma_write_many(table, records, identity, action, requested_by, audit_action
             receipt_warning = "receipt persistence failed: Interaction Log write returned no record"
     except Exception as exc:
         receipt_warning = f"receipt persistence failed: {type(exc).__name__}"
-    evidence = {"table": table, "created": created, "skipped_existing": skipped, "record_ids": ids, "receipt": receipt}
+    evidence = {"table": table, "created": created, "skipped_existing": skipped, "backfilled": backfilled, "record_ids": ids, "receipt": receipt}
     if receipt_warning:
         evidence["receipt_warning"] = receipt_warning
     return _tool_result(ok=True, tool="tma_write", external_id=ids[0] if ids else "", evidence=evidence,
-                        user_message=f"✅ נכתבו {created} רשומות ({skipped} כבר היו)")
+                        user_message=f"✅ נכתבו {created} רשומות ({skipped} כבר היו" + (f", {backfilled} עודכנו" if backfilled else "") + ")")
 
 
 def tma_write(
