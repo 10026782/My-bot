@@ -196,7 +196,20 @@ export function weeklyQuotaHint(w: FccWeekly): string {
 
 export interface HeaderCardModel { key: string; label: string; value: string; hint?: string }
 
-export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_improvement"> & Partial<Pick<FccOverview, "household" | "receipts" | "obligations">>): HeaderCardModel[] {
+/** The month's bottom line (income, expenses, what is left for saving) — the cashflow tab's numbers, worded here. A missing side is "חסר", never 0. */
+export function monthSummaryCards(m: NonNullable<FccOverview["month_summary"]>): HeaderCardModel[] {
+  const part = m.partial && m.day ? `עד ה-${m.day} בחודש (מתוך ${m.days_in_month})` : undefined;
+  const gap = m.balance != null && m.balance < 0;
+  return [
+    { key: "month_income", label: "הכנסה נטו החודש", value: m.income == null ? "חסר" : money(m.income), hint: part },
+    { key: "month_expenses", label: "הוצאות החודש", value: m.expenses == null ? "חסר" : money(m.expenses),
+      hint: m.expenses == null ? undefined : "לפי חיוב בפועל, כולל הלוואות" },
+    { key: "month_balance", label: gap ? "חסר החודש" : "יתרה לחיסכון", value: m.balance == null ? "חסר" : money(gap ? (m.shortfall ?? 0) : (m.surplus ?? 0)),
+      hint: m.balance == null ? `חסר: ${m.missing.map((x) => (x === "income" ? "הכנסות" : "הוצאות")).join(", ")}` : gap ? "הוצאות גבוהות מההכנסות" : "הכנסות פחות הוצאות" },
+  ];
+}
+
+export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_improvement"> & Partial<Pick<FccOverview, "household" | "month_summary" | "receipts" | "obligations">>): HeaderCardModel[] {
   const s = data.summary;
   const ratio = (card: { actual: number; target: number } | undefined, hint = "לא הוגדר יעד") =>
     card ? { value: `${money(card.actual)} / ${money(card.target)}`, hint: undefined as string | undefined }
@@ -222,7 +235,7 @@ export function headerCards(data: Pick<FccOverview, "summary" | "monthly_cash_im
     { key: "reduction", label: "הפחתה בהחזרים (לחודש)", ...reduction },
     { key: "cash", label: "שיפור תזרים חודשי", value: money(data.monthly_cash_improvement) },
     // separate from income/net: private household spend this month, and business receipts still missing
-    ...(data.household?.month_total ? [{ key: "household", label: "הוצאות בית החודש", value: money(data.household.month_total) }] : []),
+    ...(data.month_summary ? monthSummaryCards(data.month_summary) : data.household?.month_total ? [{ key: "household", label: "הוצאות בית החודש", value: money(data.household.month_total) }] : []),
     // recurring commitments (not actual spend): total per month, how many are marked reduce/cancel/negotiate, potential saving
     ...(data.obligations?.count ? [
       { key: "obligations", label: "התחייבויות חודשיות", value: money(data.obligations.total_monthly),

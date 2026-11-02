@@ -287,3 +287,16 @@ def test_the_consumption_endpoint_is_owner_only_and_validates_months(monkeypatch
     assert c.get("/api/fcc/consumption?months=0", headers=H).status_code == 400 and c.get("/api/fcc/consumption?months=x", headers=H).status_code == 400
     r = c.get("/api/fcc/consumption", headers=H)
     assert r.status_code == 200 and len(r.get_json()["months"]) == 6
+
+
+def test_the_monthly_tab_carries_the_same_bottom_line_as_the_cashflow_tab():
+    DB[Tables.FIN_EVENTS] = [e for e in DB[Tables.FIN_EVENTS] if e["id"] in ("e1", "e2", "e3", "e4", "x1", "x2")] + [
+        _imp("c1", 200, "2026-09-28", billing="2026-10-10"),                                   # bought in September, billed in October: it is this month's money
+        _imp("c2", 100, "2026-10-04", billing="2026-11-10"),                                   # billed next month: not this month's
+    ]
+    ov = service.overview(ELIYAHU, TODAY)
+    cash = month(service.cashflow_view(ELIYAHU, TODAY), "2026-10")
+    ms = ov["month_summary"]
+    assert ms and ms["income"] == cash["income"]["net"] and ms["expenses"] == cash["expenses"]["total"] and ms["balance"] == cash["balance"]
+    assert ms["expenses"] == 200 + 2500                                                         # the billed card row + the scheduled loan payment (no loan charge recorded)
+    assert ms["partial"] is True and ms["day"] == 20 and ms["missing"] == []

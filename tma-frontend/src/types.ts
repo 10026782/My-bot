@@ -852,6 +852,9 @@ export interface FccOverview {
   tasks: { id: string; title: string | null; due_date: string | null; status: string | null }[];
   monthly_cash_improvement: number;
   household?: { month_total: number };
+  /** The current month's bottom line, the SAME numbers as the cashflow tab (card rows by billing date). null = could not be derived. */
+  month_summary?: { month: string; partial: boolean; day: number | null; days_in_month: number; income: number | null; expenses: number | null; balance: number | null;
+                    surplus: number | null; shortfall: number | null; missing: ("income" | "expenses")[] } | null;
   receipts?: { missing_count: number; missing_amount: number };
   obligations?: { total_monthly: number; flagged_count: number; flagged_monthly: number; cancel_pending?: number; potential_saving: number; count: number };
   /** Latest income entries (own only), newest first, so nothing is booked twice. */

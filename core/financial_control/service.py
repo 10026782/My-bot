@@ -1037,6 +1037,24 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
     return view
 
 
+_BILLING_LOOKBACK_DAYS = 45          # how far before the month an imported card row's purchase can lie and still be billed in it
+
+
+def month_summary(goals: list[dict], events: list[dict], today: date, loans_summary: dict) -> dict | None:
+    """The CURRENT month's bottom line for the monthly-conduct tab: income (net), expenses and what is left for saving — the SAME numbers as the cashflow tab
+    (card rows by their billing date; the scheduled loan payment only when no loan charge was recorded). None when it cannot be derived (never a guess)."""
+    try:
+        sources, expenses = cashflow_inputs(goals, events, today)
+        scheduled = loans_summary.get("total_monthly_payments") if loans_summary.get("total_active_loans") else None
+        m = fcc_cashflow.build(sources, expenses, today, 1, scheduled, None)["months"][-1]
+        return {"month": m["month"], "partial": m["partial"], "day": m["day"], "days_in_month": m["days_in_month"],
+                "income": m["income"]["net"], "expenses": m["expenses"]["total"], "balance": m["balance"],
+                "surplus": m["surplus"], "shortfall": m["shortfall"], "missing": m["missing"]}
+    except Exception:                                        # noqa: BLE001 — the monthly screen must load without it
+        logger.exception("[fcc] month summary failed")
+        return None
+
+
 def consumption_view(identity, today: date | None = None, months: int = 6) -> dict:
     """When the money was CONSUMED (the owner's "צריכה" tab): expenses by category per month by the day of the purchase, never loans (a loan is a business
     decision taken when it was taken, not monthly consumption). A purchase paid in instalments counts on each payment's billing month and is also summed
@@ -1082,7 +1100,8 @@ def overview(identity, today: date | None = None, default_method: str | None = N
         g["id"]: calc.parse_events(by_goal.get(g["id"], []), FinEventFields) for g in goals}
 
     rows, all_events = [], []
-    all_events.extend(calc.parse_events(my_events(identity, "only", today.replace(day=1)), FinEventFields))     # imported rows have no goal; the household card still counts the month's
+    imported = my_events(identity, "only", today.replace(day=1) - timedelta(days=_BILLING_LOOKBACK_DAYS))      # a card row bought last month can be BILLED this month
+    all_events.extend(calc.parse_events(imported, FinEventFields))                           # imported rows have no goal; the household card still counts the month's
     for goal in goals:
         all_events.extend(own[goal["id"]])
         if goal["id"] not in active_ids:
@@ -1112,6 +1131,7 @@ def overview(identity, today: date | None = None, default_method: str | None = N
         "assets": assets_overview(identity, loans_payload["items"]),
         "recent_incomes": recent_incomes(goals, events),
         "household": {"month_total": calc.household_month_total(all_events, today)},
+        "month_summary": month_summary(goals, events + imported, today, loans_payload.get("summary") or {}),
         "receipts": receipts_overview(identity),
         "obligations": obligations_overview(identity),
         "tasks": tasks,
