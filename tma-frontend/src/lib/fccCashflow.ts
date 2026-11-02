@@ -69,7 +69,7 @@ export function detailOf(m: FccCashflowMonth): CashflowDetail {
   };
 }
 
-export function insightLines(v: FccCashflow): string[] {
+export function insightLines(v: Pick<FccCashflow, "insights">): string[] {
   const out: string[] = [];
   const ch = v.insights.changes;
   if (ch) {
@@ -87,6 +87,13 @@ export function cashflowModel(v: FccCashflow, selected?: string): CashflowModel 
   const notes = [...CASHFLOW_NOTES];
   if (!v.loans_payments_known) notes.push("לא נמצא החזר הלוואות מתוכנן — הלוואות נספרות רק לפי חיוב שנרשם.");
   return { rows: [...v.months].reverse().map(rowOf), selected: sel, detail: month ? detailOf(month) : null, insights: insightLines(v), notes };
+}
+
+/** Neighbouring months of the selected one (``rows`` newest first, as ``cashflowModel`` returns them): the arrows above the month's detail. */
+export function monthNav(rows: { month: string; label: string }[], selected: string): { older: { month: string; label: string } | null; newer: { month: string; label: string } | null } {
+  const i = rows.findIndex((r) => r.month === selected);
+  if (i < 0) return { older: null, newer: null };
+  return { newer: i > 0 ? rows[i - 1] : null, older: i < rows.length - 1 ? rows[i + 1] : null };
 }
 
 // ── recommendations ("הזדמנויות") — the server decides and words the facts; this only shows them ────────────────────────────────────────

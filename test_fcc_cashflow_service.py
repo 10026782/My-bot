@@ -250,3 +250,53 @@ def test_rows_imported_from_a_statement_have_no_goal_and_still_reach_the_cashflo
     assert ov["household"]["month_total"] == 1200 + 300 + 90 + 200                                                # the existing household rows + the imported net 200
     assert not [e for e in ov["recent_events"] if e.get("Amount") in (500.0, -300.0, 8000.0, 99.0)]               # a statement import is not goal progress
 
+
+
+def _imp(eid, amount, occurred, billing=None, category="living", note=None):
+    f = {EF.KIND: "household_expense", EF.AMOUNT: amount, EF.OCCURRED_AT: occurred, EF.SOURCE: "import:card", EF.EXPENSE_CATEGORY: category, EF.FINANCIAL_OWNER: [ELI]}
+    if billing:
+        f[EF.BILLING_DATE] = billing
+    if note:
+        f[EF.NOTE] = note
+    return {"id": eid, "fields": f}
+
+
+def test_the_cashflow_counts_a_card_row_by_its_billing_date_and_the_consumption_by_the_purchase_day_without_loans():
+    DB[Tables.FIN_EVENTS] = [
+        _imp("c1", 200, "2026-09-28", billing="2026-10-10"),                                   # bought in September, charged in October
+        _imp("c2", 100, "2026-10-04", billing="2026-11-10"),                                   # bought in October, charged in November
+        _imp("c3", 450, "2026-10-10", billing="2026-10-10", note="תשלומים"),                   # an instalment: dated by its billing already
+        _imp("c4", 3000, "2026-10-10", billing="2026-10-10", category="loans"),                # a card loan: cashflow only
+        _imp("c5", 70, "2026-10-06"),                                                          # imported before the billing field existed: the purchase day
+    ]
+    cash = service.cashflow_view(ELIYAHU, TODAY)
+    assert {c["key"]: c["amount"] for c in month(cash, "2026-10")["expenses"]["categories"]}["living"] == 200 + 450 + 70
+    assert {c["key"]: c["amount"] for c in month(cash, "2026-10")["expenses"]["categories"]}["loans"] == 3000
+    cons = service.consumption_view(ELIYAHU, TODAY)
+    sep, octo = month(cons, "2026-09"), month(cons, "2026-10")
+    assert {c["key"]: c["amount"] for c in sep["expenses"]["categories"]} == {"living": 200}
+    cats = {c["key"]: c["amount"] for c in octo["expenses"]["categories"]}
+    assert cats == {"living": 100 + 450 + 70} and "loans" not in cats and octo["installments"] == 450 and sep["installments"] == 0
+    assert "recommendations" not in cons and "income" not in octo
+
+
+def test_the_consumption_endpoint_is_owner_only_and_validates_months(monkeypatch):
+    assert http(monkeypatch, AVI_I).get("/api/fcc/consumption", headers=H).status_code == 404
+    assert http(monkeypatch, ELIYAHU, flag=False).get("/api/fcc/consumption", headers=H).status_code == 404
+    c = http(monkeypatch, ELIYAHU)
+    assert c.get("/api/fcc/consumption?months=0", headers=H).status_code == 400 and c.get("/api/fcc/consumption?months=x", headers=H).status_code == 400
+    r = c.get("/api/fcc/consumption", headers=H)
+    assert r.status_code == 200 and len(r.get_json()["months"]) == 6
+
+
+def test_the_monthly_tab_carries_the_same_bottom_line_as_the_cashflow_tab():
+    DB[Tables.FIN_EVENTS] = [e for e in DB[Tables.FIN_EVENTS] if e["id"] in ("e1", "e2", "e3", "e4", "x1", "x2")] + [
+        _imp("c1", 200, "2026-09-28", billing="2026-10-10"),                                   # bought in September, billed in October: it is this month's money
+        _imp("c2", 100, "2026-10-04", billing="2026-11-10"),                                   # billed next month: not this month's
+    ]
+    ov = service.overview(ELIYAHU, TODAY)
+    cash = month(service.cashflow_view(ELIYAHU, TODAY), "2026-10")
+    ms = ov["month_summary"]
+    assert ms and ms["income"] == cash["income"]["net"] and ms["expenses"] == cash["expenses"]["total"] and ms["balance"] == cash["balance"]
+    assert ms["expenses"] == 200 + 2500                                                         # the billed card row + the scheduled loan payment (no loan charge recorded)
+    assert ms["partial"] is True and ms["day"] == 20 and ms["missing"] == []

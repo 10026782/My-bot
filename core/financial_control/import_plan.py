@@ -26,6 +26,7 @@ from core.financial_control import card_import as ci
 SOURCE_BANK, SOURCE_CARD = "import:bank", "import:card"
 HOUSEHOLD, ONE_TIME = "household_expense", "one_time"
 VERIFICATION = "statement"
+INSTALMENTS_NOTE = "תשלומים"       # the Note of an imported purchase paid in instalments (the consumption tab shows them apart)
 SKIP_REASONS = ("already_imported", "card_settlement", "cash_withdrawal", "credit_service", "adjustment", "transfer", "reversal", "ignore", "needs_review",
                 "needs_classification", "no_category", "no_source")
 
@@ -41,6 +42,8 @@ class PlannedEvent:
     label: str                       # the statement's own description
     origin: str                      # import:bank | import:card
     month: str = ""
+    billing: date | None = None      # a CARD row: the statement's billing date (the cashflow tab counts by it; ``date`` stays the consumption date)
+    installments: bool = False       # a purchase paid in instalments (not a loan): the consumption tab labels it
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,11 @@ def _card_date(c: ci.CardCharge) -> date:
     return c.billing_date if instalment else c.date
 
 
+def _is_instalments(c: ci.CardCharge) -> bool:
+    """A purchase paid in instalments (NOT a loan or a card fee): the statement says "תשלום" in the remarks."""
+    return c.kind not in (ci.LOAN, ci.FEE) and "תשלום" in c.remark
+
+
 def plan_card(items: list[ci.ClassifiedCharge], existing_keys: set[str] = frozenset(), known_rule_keys: set[str] = frozenset()) -> ImportPlan:
     plan, groups = ImportPlan(), {}
     for c in items:
@@ -151,7 +159,7 @@ def plan_card(items: list[ci.ClassifiedCharge], existing_keys: set[str] = frozen
             continue
         if ci.importable(c):
             day = _card_date(x)
-            plan.events.append(PlannedEvent(x.key, day, HOUSEHOLD, x.charge, c.category, None, x.merchant, SOURCE_CARD, _month(day)))
+            plan.events.append(PlannedEvent(x.key, day, HOUSEHOLD, x.charge, c.category, None, x.merchant, SOURCE_CARD, _month(day), x.billing_date, _is_instalments(x)))
         elif c.kind == ci.CASH:
             plan.skip("cash_withdrawal", abs(x.charge))
         elif c.kind == ci.CREDIT_SERVICE:
@@ -162,7 +170,7 @@ def plan_card(items: list[ci.ClassifiedCharge], existing_keys: set[str] = frozen
             plan.skip("no_category", abs(x.charge))
         elif x.charge > 0:                                                # an itemized purchase nobody classified: written WITHOUT a category, classified on screen
             day = _card_date(x)
-            plan.events.append(PlannedEvent(x.key, day, HOUSEHOLD, x.charge, None, None, x.merchant, SOURCE_CARD, _month(day)))
+            plan.events.append(PlannedEvent(x.key, day, HOUSEHOLD, x.charge, None, None, x.merchant, SOURCE_CARD, _month(day), x.billing_date, _is_instalments(x)))
         else:
             plan.skip("needs_classification", abs(x.charge))
             _pending(plan, groups, known_rule_keys, x.merchant, None, "card", "debit", abs(x.charge), x.date)
@@ -219,6 +227,10 @@ def event_fields(e: PlannedEvent, user_id: str = "") -> dict:
          EF.IDEMPOTENCY_KEY: e.key, EF.RAW_TEXT: mask_numbers(e.label)[:200], EF.VERIFICATION: VERIFICATION}
     if e.kind == HOUSEHOLD and e.category:
         f[EF.EXPENSE_CATEGORY] = e.category
+    if e.origin == SOURCE_CARD and e.billing:
+        f[EF.BILLING_DATE] = e.billing.isoformat()
+    if e.kind == HOUSEHOLD and e.installments:
+        f[EF.NOTE] = INSTALMENTS_NOTE
     if e.kind == ONE_TIME and e.source_name:
         f[EF.NOTE] = f"מקור: {e.source_name}"
     return f

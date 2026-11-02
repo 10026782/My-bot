@@ -5204,6 +5204,29 @@ def fcc_cashflow(identity):
         return jsonify({"error": "internal error"}), 500
 
 
+@tma_api.route("/api/fcc/consumption", methods=["GET"])
+@require_tma_auth
+def fcc_consumption(identity):
+    """When the money was consumed: expenses by category per month by the day of the purchase (no loans), instalments apart, changes / spikes / large
+    items (read-only). Same gate as /api/fcc/cashflow: flag AND canary AND owner, 404 for everyone else. ``?months=`` 1..36 (default 6)."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    try:
+        months = int(request.args.get("months", 6))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid months"}), 400
+    if not 1 <= months <= 36:
+        return jsonify({"error": "invalid months"}), 400
+    from core.financial_control import service as fcc_service
+    try:
+        return jsonify(fcc_service.consumption_view(identity, months=months))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001 — never leak internals
+        logger.exception("[fcc] consumption_view failed")
+        return jsonify({"error": "internal error"}), 500
+
+
 _FCC_CLASSIFY_SAME_MAX = 10                  # events covered by ONE "the same description" answer per call (each is its own gateway write)
 
 
@@ -5687,10 +5710,14 @@ def _fcc_import_plan(identity):
     except sr.StatementError as exc:
         raise _ImportRefused(str(exc))
     first = min((e.date for e in full.events), default=None)
-    existing = svc.existing_import_keys(identity, first) if first else set()
+    existing_fields = svc.existing_import_fields(identity, first) if first else {}
+    existing = set(existing_fields)
     digest = hashlib.sha256("|".join([identity.user_id, kind, label, *sorted(e.key for e in full.events)]).encode("utf-8")).hexdigest()[:24]
     todo = [e for e in full.events if e.key not in existing]
-    return {"kind": kind, "label": label, "health": health, "full": full, "todo": todo, "digest": digest,
+    from airtable_schema import FinEventFields as EF  # noqa: PLC0415
+    backfill = [e for e in full.events if e.key in existing and (                 # an earlier import did not know the billing date / the instalments label: fill them
+        (e.billing and not existing_fields[e.key].get(EF.BILLING_DATE)) or (e.installments and not existing_fields[e.key].get(EF.NOTE)))]
+    return {"kind": kind, "label": label, "health": health, "full": full, "todo": todo, "backfill": backfill, "digest": digest,
             "summary": ip.summarize(full), "skipped_existing": len(full.events) - len(todo)}
 
 
@@ -5719,11 +5746,11 @@ def fcc_import_preview(identity):
     plan, summ = ctx["full"], ctx["summary"]
     return jsonify({
         "kind": ctx["kind"], "label": ctx["label"], "parse": ctx["health"], "digest": ctx["digest"] if ctx["health"]["ok"] else None,
-        "plan": {"events": summ["events"], "remaining": len(ctx["todo"]), "already_imported": ctx["skipped_existing"], "months": summ["months"], "skipped": summ["skipped"],
+        "plan": {"events": summ["events"], "remaining": len(ctx["todo"]), "already_imported": ctx["skipped_existing"], "backfill": len(ctx["backfill"]), "months": summ["months"], "skipped": summ["skipped"],
                  "pending_rules": summ["pending_rules"], "uncategorized": summ["uncategorized"], "pending_row_rules": summ["pending_row_rules"],
                  "pending_examples": [{"match": r.match or r.note, "direction": r.direction, "times_seen": r.times_seen, "example_amount": r.example_amount, "row": bool(r.row_key)}
                                       for r in plan.pending_rules[:12]]},
-        "can_import": bool(ctx["health"]["ok"] and (ctx["todo"] or plan.pending_rules)), "chunk": _FCC_IMPORT_CHUNK,
+        "can_import": bool(ctx["health"]["ok"] and (ctx["todo"] or ctx["backfill"] or plan.pending_rules)), "chunk": _FCC_IMPORT_CHUNK,
     })
 
 
@@ -5746,7 +5773,12 @@ def fcc_import_run(identity):
                 chunk = todo[:_FCC_IMPORT_CHUNK]
                 payload = {"op": "post_many", "table": "Financial Progress Events", "records": [ip.event_fields(e, identity.user_id) for e in chunk],
                            "audit_action": "fcc_import_events", "audit_details": f"{ctx['kind']} import: {len(chunk)} events"}
-                step, left = "events", len(todo) - len(chunk)
+                step, left = "events", len(todo) - len(chunk) + len(ctx["backfill"])
+            elif ctx["backfill"]:
+                chunk = ctx["backfill"][:_FCC_IMPORT_CHUNK]
+                payload = {"op": "post_many", "table": "Financial Progress Events", "records": [ip.event_fields(e, identity.user_id) for e in chunk],
+                           "audit_action": "fcc_import_backfill", "audit_details": f"{ctx['kind']} import: {len(chunk)} existing events filled"}
+                step, left = "billing", len(ctx["backfill"]) - len(chunk)
             else:
                 pend = ctx["full"].pending_rules[:_FCC_IMPORT_CHUNK]
                 if not pend:
