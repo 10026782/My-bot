@@ -67,6 +67,7 @@ def _use_cash(frame: dict, spec: dict) -> dict:
     cost_after = core.total_or_none([growth_after, withdraw_fee])
     r = core.blank_result(frame, path_id=spec["id"], module=MODULE, module_version=VERSION, type_="use_liquid_cash", label=spec["label"].strip(),
                           movement_kind="equity_conversion", purpose="fund_amount", funds_amount=amount)
+    r["goal_funding"] = {"funds_on_time": True, "by": today.isoformat()}
     r["cash_flows"] = [{"date": today.isoformat(), "amount": amount, "kind": "withdrawal"}] + ([{"date": today.isoformat(), "amount": -withdraw_fee, "kind": "fee"}] if withdraw_fee else [])
     r["cost"].update(fees_total=withdraw_fee, opportunity_cost=growth_before)
     r["measures"]["liquidity"] = {"cash_available": None if withdraw_fee is None else amount - withdraw_fee, "available_on": today.isoformat(), "state": state}
@@ -103,6 +104,7 @@ def _wait(frame: dict, spec: dict) -> dict:
     extra = None if price is None else amount * price / 100.0
     r = core.blank_result(frame, path_id=spec["id"], module=MODULE, module_version=VERSION, type_="wait", label=spec["label"].strip(),
                           movement_kind="no_movement", purpose="fund_amount", funds_amount=amount)
+    r["goal_funding"] = {"funds_on_time": False, "by": None}
     r["measures"]["liquidity"] = {"cash_available": 0.0, "available_on": None, "state": None}
     r["measures"]["economic_cost"] = {"net_cost": extra, "components": ["price_change_while_waiting"]}
     r["measures"]["net_worth"] = core.net_worth_block(frame, None if extra is None else -extra, None if extra is None else -extra)

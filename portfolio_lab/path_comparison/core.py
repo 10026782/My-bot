@@ -159,6 +159,7 @@ def blank_result(frame: dict, *, path_id: str, module: str, module_version: str,
                                                               "assumptions": frame["assumptions_version"]},
         "basis": {"compare_at": frame["compare_at"], "tax_basis": frame["tax_basis"], "inflation_basis": frame["inflation_basis"]},
         "movement_kind": movement_kind,
+        "goal_funding": {"funds_on_time": None, "by": None},
         "after_action": {"capital_remaining": None, "assets_remaining": [], "future_income_remaining": None,
                          "given_up": {"assets": [], "future_income": None, "lost_future_value": None}},
         "measures": {"liquidity": {"cash_available": None, "available_on": None, "state": None},
@@ -186,6 +187,12 @@ def total_or_none(parts: list) -> float | None:
 
 def finalize(result: dict) -> dict:
     """מסמן הסתייגויות קבועות לפי מה שיש בתוצאה, מעגל לאגורה, ומאמת מבנה. מחזיר את אותה תוצאה."""
+    if any(a.get("source") == "default" for a in result["assumptions"]):
+        # נתון שלא הוזן חושב בברירת מחדל — המספר אינו "צפוי" עד שהבעלים מזין אותו (חסר ≠ אפס)
+        if result["certainty"] in ("confirmed", "expected"):
+            result["certainty"] = "uncertain"
+        if "default_input_used" not in result["risks"]:
+            result["risks"].append("default_input_used")
     caveats = [c for c in CAVEATS if c["when"] == "always"
                or (c["when"] == "tax" and result["tax"]["status"] == "preliminary_estimate")
                or (c["when"] == "missing" and result["missing_inputs"])
@@ -211,7 +218,7 @@ def _round(node):
                 _round(v)
 
 
-_REQUIRED_TOP = ("path_id", "module", "type", "label", "purpose", "funds_amount", "frame_digest", "calc_version", "basis", "movement_kind", "after_action",
+_REQUIRED_TOP = ("path_id", "module", "type", "label", "purpose", "funds_amount", "goal_funding", "frame_digest", "calc_version", "basis", "movement_kind", "after_action",
                  "measures", "index_used", "cash_flows", "cost", "tax", "lost_future_value", "result", "assumptions", "missing_inputs", "risks", "certainty",
                  "provenance", "not_applicable", "caveats")
 
@@ -236,6 +243,17 @@ def validate_path_result(result) -> dict:
         raise ValueError("a result must be on the after-latent-tax basis")
     if not any(c["caveat_id"] == "preliminary" for c in result["caveats"]):
         raise ValueError("the standing caveat is missing")
+    gf = result["goal_funding"]
+    if not isinstance(gf, dict) or set(gf) != {"funds_on_time", "by"}:
+        raise ValueError("goal_funding is {funds_on_time, by}")
+    if result["purpose"] == "fund_amount":
+        fa = result["funds_amount"]
+        if isinstance(fa, bool) or not isinstance(fa, (int, float)) or not math.isfinite(fa) or fa <= 0:
+            raise ValueError("a fund_amount path needs a known positive funds_amount")
+        if not isinstance(gf["funds_on_time"], bool):
+            raise ValueError("a fund_amount path must state whether it funds the goal on time")
+    elif gf["funds_on_time"] is not None:
+        raise ValueError("funds_on_time applies only to fund_amount paths")
     if result["tax"]["status"] not in ("preliminary_estimate", "not_assessed"):
         raise ValueError("a tax figure is never marked verified here")
     if result["missing_inputs"] and not any(c["caveat_id"] == "missing_is_missing" for c in result["caveats"]):

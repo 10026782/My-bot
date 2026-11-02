@@ -92,6 +92,7 @@ def _take_loan(frame: dict, spec: dict) -> dict:
     net_cost = core.total_or_none([sched["interest_through"], fees])
     r = core.blank_result(frame, path_id=spec["id"], module=MODULE, module_version=VERSION, type_="take_loan", label=spec["label"].strip(),
                           movement_kind="liability", purpose="fund_amount", funds_amount=amount)
+    r["goal_funding"] = {"funds_on_time": True, "by": starts_on.isoformat()}
     flows = [{"date": starts_on.isoformat(), "amount": amount, "kind": "loan_proceeds"}]
     if fees:
         flows.append({"date": starts_on.isoformat(), "amount": -fees, "kind": "fee"})
