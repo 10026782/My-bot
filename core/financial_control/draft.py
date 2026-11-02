@@ -688,11 +688,15 @@ def loan_close_writes(values: Mapping[str, Any], ctx: Mapping[str, Any], source:
     """Closing a loan = ONE confirmation, two canonical writes, nothing else: the loan's Payment Status becomes
     Paid Off (the only thing the loans read model treats as closed) and — when the owner has a debt goal — one
     progress event with the amount actually paid. The event key is derived from the loan, so a retry or a second tap
-    can never log the same closing twice. No loan balance/payment field is rewritten."""
+    can never log the same closing twice. The closing day is also written as the loan's End Date (the cashflow counts a loan's monthly payment only up to it). No loan balance/payment field is rewritten."""
     loan_id = str(source.get("record_id") or "")
     if not loan_id:
         raise UnsupportedOperationError("loan close without a loan record")
-    writes = [{"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": {LF.STATUS: LOAN_PAID_OFF},
+    fields = {LF.STATUS: LOAN_PAID_OFF}
+    closed_on = str(values.get("occurred_at") or "")[:10]
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", closed_on):                    # the day it was closed: the cashflow stops counting the loan's monthly payment after it
+        fields[LF.END_DATE] = closed_on
+    writes = [{"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": fields,
                "audit_action": "fcc_loan_close", "audit_details": loan_id}]
     goal_id = str(source.get("debt_goal_id") or "")
     if goal_id:

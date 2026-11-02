@@ -194,8 +194,8 @@ def _expense_month(txns: list[Txn], start: date, end: date, today: date, loans_s
         count += 1
         by_cat[category_key(t.category)] = by_cat.get(category_key(t.category), 0.0) + t.amount
     loans_basis = "recorded" if by_cat.get(LOANS) else None
-    if not loans_basis and loans_scheduled is not None and start <= today <= end:
-        by_cat[LOANS] = by_cat.get(LOANS, 0.0) + loans_scheduled   # current month only; never on top of a recorded loan charge
+    if not loans_basis and loans_scheduled:
+        by_cat[LOANS] = by_cat.get(LOANS, 0.0) + loans_scheduled   # the loans tab's payment for THIS month (the caller decides which months); never on top of a recorded loan charge
         loans_basis = "scheduled"
     known = bool(by_cat)
     order = ([k for k, _ in EXPENSE_CATEGORIES] + sorted(k for k in by_cat if is_custom(k)) + [UNCATEGORIZED])
@@ -206,7 +206,7 @@ def _expense_month(txns: list[Txn], start: date, end: date, today: date, loans_s
 
 
 def build(income_sources: list[IncomeSource], expenses: list[Txn], today: date, months: int = 6,
-          loans_scheduled_monthly: float | None = None, commitments: list[dict] | None = None) -> dict:
+          loans_scheduled_monthly: float | None = None, commitments: list[dict] | None = None, loans_by_month: dict[str, float] | None = None) -> dict:
     """The cashflow view for the last ``months`` months (current, partial month included as the last entry).
 
     ``loans_scheduled_monthly`` is the sum of the active loans' monthly payments (None when unknown); it is used for the CURRENT month only,
@@ -220,7 +220,11 @@ def build(income_sources: list[IncomeSource], expenses: list[Txn], today: date, 
                   "gross": _r(sum(r["gross"] for r in src_rows)) if income_known else None,
                   "direct_costs": _r(sum(r["direct_costs"] for r in src_rows)) if income_known else None,
                   "net": _r(sum(r["net"] for r in src_rows)) if income_known else None}
-        exp = _expense_month(expenses, start, end, today, loans_scheduled_monthly)
+        if loans_by_month is not None:                                    # the loans tab's own schedule: every month a loan was running
+            scheduled = loans_by_month.get(key)
+        else:                                                              # legacy: one figure, the current month only
+            scheduled = loans_scheduled_monthly if start <= today <= end else None
+        exp = _expense_month(expenses, start, end, today, scheduled)
         missing = [name for name, ok in (("income", income_known), ("expenses", exp["known"])) if not ok]
         balance = _r(income["net"] - exp["total"]) if not missing else None
         is_current = start <= today <= end

@@ -549,3 +549,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** a row classified as a loan (bank rules "הלוואה / משכנתא", card loan lines, a purchase the owner classified as `loans`) is recognised but not written (`import_plan` skip reason `loan`). The cashflow ignores imported loan rows already stored (not deleted), so the loan figure comes only from the loans tab's scheduled monthly payment (current month, an estimate). Consumption never counted loans.
 - **Consequence stated to the owner:** previous months show no loan repayments in the cashflow. Applying today's scheduled payment to earlier months would be a guess and was not done.
 - **Not done:** deleting the loan rows already imported; verification on a device and in production.
+
+### The loans tab's schedule in every month (02/11/2026) — owner decision
+
+- **Decision:** a loan is a cost from the month it started until it ends (or is closed early), per the loans tab — not guessed from statements and not only in the current month.
+- **Change:** `loans.monthly_schedule` (pure) gives each month's total from `Start Date` / `End Date` (else start + term; active with neither -> to today) × the current monthly payment; the cashflow and the monthly tab's month summary use it (`cashflow.build(..., loans_by_month=...)`). Closing a loan writes its closing day as `End Date`. Undated loans are counted in the current month only and named; closed loans without an end date are not counted and named; debts owed TO the owner are not costs.
+- **Limit (stated to the owner):** the payment used for past months is today's `Current Monthly Payment`; a payment that changed over time is not reconstructed. Loans without start dates are shown in a note until the owner fills them.
+- **Not done:** verification on a device and in production; backfilling End Date for loans closed before this change.

@@ -1915,7 +1915,7 @@ def test_close_confirm_freezes_exactly_two_writes_status_and_one_event():
     assert r.state == "confirmed"
     status, ev = r.snapshot["writes"]
     assert status["op"] == "patch" and status["table"] == Tables.LOANS and status["record_id"] == "recC1"
-    assert status["fields"] == {LF.STATUS: "Paid Off"}                  # only the status: no balance / payment rewritten
+    assert {k: v for k, v in status["fields"].items() if k != LF.END_DATE} == {LF.STATUS: "Paid Off"} and status["fields"][LF.END_DATE]                  # only the status: no balance / payment rewritten
     assert ev["op"] == "post" and ev["table"] == Tables.FIN_EVENTS
     assert ev["fields"][EF.GOAL] == ["recGD"] and ev["fields"][EF.AMOUNT] == 118400 and ev["fields"][EF.KIND] == "one_time"
     assert ev["fields"][EF.OCCURRED_AT] == "2026-10-08" and "פועלים" in ev["fields"][EF.NOTE]
@@ -1976,7 +1976,7 @@ def test_close_without_a_unique_debt_goal_updates_only_the_status_and_says_so():
     r = start_close()
     assert "בלי אירוע התקדמות" in r.message
     (status,) = conv.handle_turn(ELIYAHU, "אשר", extractor=Ex(), today=TODAY).snapshot["writes"]
-    assert status["fields"] == {LF.STATUS: "Paid Off"}
+    assert {k: v for k, v in status["fields"].items() if k != LF.END_DATE} == {LF.STATUS: "Paid Off"} and status["fields"][LF.END_DATE]
     seed_close()
     DB[Tables.FIN_GOALS].append(goal("recGD2", "חוב נוסף", ELI, 10000, **{GF.CATEGORY: "debt"}))       # two -> never guess
     conv.handle_turn(ELIYAHU, "בטל", extractor=Ex(), today=TODAY)
@@ -2024,7 +2024,7 @@ def test_close_http_open_then_confirm_executes_the_frozen_writes(monkeypatch):
     assert opened["state"] == "review" and sent == []                              # opening writes nothing
     done = c.post("/api/fcc/write", json={"text": "אשר"}, headers=H).get_json()
     assert done["state"] == "executed" and [p["table"] for _, p in sent] == [Tables.LOANS, Tables.FIN_EVENTS]
-    assert sent[0][1]["fields"] == {LF.STATUS: "Paid Off"}
+    assert {k: v for k, v in sent[0][1]["fields"].items() if k != LF.END_DATE} == {LF.STATUS: "Paid Off"} and sent[0][1]["fields"][LF.END_DATE]
 
 
 def test_close_http_guards_flag_off_missing_id_foreign_loan(monkeypatch):
@@ -3261,7 +3261,7 @@ def test_closing_a_debt_owed_to_the_owner_marks_it_paid_without_a_goal_event(no_
     r = conv.start_loan_close(ELIYAHU, "recR", today=TODAY)
     assert "חוב שחייבים לך" in r.message
     writes = _confirm_one()
-    assert len(writes) == 1 and writes[0]["fields"] == {LF.STATUS: "Paid Off"}
+    assert len(writes) == 1 and {k: v for k, v in writes[0]["fields"].items() if k != LF.END_DATE} == {LF.STATUS: "Paid Off"} and writes[0]["fields"][LF.END_DATE]
 
 
 def loan_step_task(tid, loan_id, title, **kw):

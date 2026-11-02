@@ -95,7 +95,9 @@ test("insights: change, spike (partial marked) and large item all worded from se
 test("notes state that obligations are not added and that missing months are excluded; missing loans info is stated", () => {
   const n = cashflowModel(data).notes.join(" ");
   assert.ok(n.includes("התחייבויות קבועות לא נוספות") && n.includes("חסר"));
-  assert.ok(cashflowModel({ ...data, loans_payments_known: false }).notes.some((x) => x.includes("לא נמצא החזר הלוואות")));
+  assert.ok(cashflowModel({ ...data, loans_payments_known: false }).notes.some((x) => x.includes("לא הצלחנו לקרוא את לשונית ההלוואות")));
+  const u = cashflowModel({ ...data, loans_undated: ["רכב"], loans_closed_undated: ["ישנה"] }).notes.join(" ");
+  assert.ok(u.includes("חסר תאריך התחלה להלוואה: רכב") && u.includes("הלוואה סגורה בלי תאריך סיום: ישנה"));
 });
 
 test("markup: range buttons, month rows (newest first), bars, insights; no input fields (read-only)", () => {

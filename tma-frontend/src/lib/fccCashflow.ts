@@ -8,7 +8,7 @@ export const RANGES = [3, 6, 12] as const;
 export const DEFAULT_RANGE = 6;
 export const CASHFLOW_NOTES = [
   "הוצאה = מה שנרשם בפועל. התחייבויות קבועות לא נוספות לסכום (החיוב עצמו כבר נרשם כהוצאה) והן משמשות להמלצות בלבד.",
-  "הלוואות לא נקראות מהדוחות (סכומים מדויקים יש בלשונית ״הלוואות וחוב״): ההחזר החודשי המתוכנן נכנס לחודש הנוכחי בלבד (מסומן כהערכה); חודשים קודמים מוצגים בלי החזרי הלוואות.",
+  "הלוואות לא נקראות מהדוחות: הן נספרות מלשונית ״הלוואות וחוב״, בכל חודש מתאריך ההתחלה ועד תאריך הסיום (או סגירה מוקדמת), לפי ההחזר החודשי הנוכחי (מסומן כהערכה).",
   "חודש בלי הכנסות או בלי הוצאות רשומות מוצג כ״חסר״ ולא נכנס להשוואות.",
 ];
 const HEB_MONTHS = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"];
@@ -85,7 +85,9 @@ export function cashflowModel(v: FccCashflow, selected?: string): CashflowModel 
   const sel = selected && v.months.some((m) => m.month === selected) ? selected : defaultMonth(v);
   const month = v.months.find((m) => m.month === sel);
   const notes = [...CASHFLOW_NOTES];
-  if (!v.loans_payments_known) notes.push("לא נמצא החזר הלוואות מתוכנן — הלוואות נספרות רק לפי חיוב שנרשם.");
+  if (!v.loans_payments_known) notes.push("לא הצלחנו לקרוא את לשונית ההלוואות — החזרי הלוואות חסרים בחישוב.");
+  if (v.loans_undated?.length) notes.push(`חסר תאריך התחלה להלוואה: ${v.loans_undated.join(", ")} — נספרת רק בחודש הנוכחי. הוסף תאריך התחלה כדי שתופיע בחודשים הקודמים.`);
+  if (v.loans_closed_undated?.length) notes.push(`הלוואה סגורה בלי תאריך סיום: ${v.loans_closed_undated.join(", ")} — לא נספרת. הוסף תאריך סיום (סגירה דרך הלשונית מוסיפה אותו לבד).`);
   return { rows: [...v.months].reverse().map(rowOf), selected: sel, detail: month ? detailOf(month) : null, insights: insightLines(v), notes };
 }
 

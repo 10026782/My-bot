@@ -998,6 +998,19 @@ def cashflow_inputs(goals: list[dict], events: list[dict], today: date, basis: s
     return sources, expenses
 
 
+def loans_by_month(identity, today: date, months: int) -> tuple[dict[str, float] | None, list[str], list[str]]:
+    """The loans tab's monthly cost for each month of the window (``fcc_loans.monthly_schedule``). A read failure is None = unknown (never a guess); a denied
+    identity propagates."""
+    try:
+        windows = fcc_cashflow.month_windows(today, months)
+        return fcc_loans.monthly_schedule(my_loans(identity), windows, today)
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] loans schedule read failed")
+        return None, [], []
+
+
 def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
     """The owner's monthly cashflow. Owner-scoped reads only; a denied identity propagates. A loans read failure degrades to "no scheduled
     payment" (never to a guessed one)."""
@@ -1005,14 +1018,7 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
     window_start = fcc_cashflow.month_windows(today, months)[0][1]
     goals, events = my_goals(identity), my_events(identity) + my_events(identity, "only", window_start)
     sources, expenses = cashflow_inputs(goals, events, today)
-    scheduled = None
-    try:
-        summary = loans_overview(identity, today)["summary"]
-        scheduled = summary["total_monthly_payments"] if summary["total_active_loans"] else None
-    except policy.PersonalDataAccessDenied:
-        raise
-    except Exception:
-        logger.exception("[fcc] cashflow loans read failed")
+    by_month, undated, closed_undated = loans_by_month(identity, today, months)
     commitments = None                                       # unknown (a failed read) is not "no commitments"
     try:
         commitments = commitment_rows(my_obligations(identity))
@@ -1020,8 +1026,10 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
         raise
     except Exception:
         logger.exception("[fcc] cashflow commitments read failed")
-    view = fcc_cashflow.build(sources, expenses, today, months, scheduled, commitments)
-    view["loans_payments_known"] = scheduled is not None
+    view = fcc_cashflow.build(sources, expenses, today, months, None, commitments, by_month)
+    view["loans_payments_known"] = by_month is not None
+    view["loans_undated"] = undated[:5]                                   # loans with no start date: counted in the current month only
+    view["loans_closed_undated"] = closed_undated[:5]                      # closed loans with no end date: not counted
     try:                                                      # the entry to the one-by-one classification screen (None = unknown, never "nothing waiting")
         queue = classify_view(classify_waiting(identity))
         view["to_classify"] = {"total": queue["total"], "total_amount": queue["total_amount"]}
@@ -1043,13 +1051,12 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
 _BILLING_LOOKBACK_DAYS = 45          # how far before the month an imported card row's purchase can lie and still be billed in it
 
 
-def month_summary(goals: list[dict], events: list[dict], today: date, loans_summary: dict) -> dict | None:
+def month_summary(goals: list[dict], events: list[dict], today: date, loans_by_month_: dict[str, float] | None) -> dict | None:
     """The CURRENT month's bottom line for the monthly-conduct tab: income (net), expenses and what is left for saving — the SAME numbers as the cashflow tab
     (card rows by their billing date; the scheduled loan payment only when no loan charge was recorded). None when it cannot be derived (never a guess)."""
     try:
         sources, expenses = cashflow_inputs(goals, events, today)
-        scheduled = loans_summary.get("total_monthly_payments") if loans_summary.get("total_active_loans") else None
-        m = fcc_cashflow.build(sources, expenses, today, 1, scheduled, None)["months"][-1]
+        m = fcc_cashflow.build(sources, expenses, today, 1, None, None, loans_by_month_)["months"][-1]
         return {"month": m["month"], "partial": m["partial"], "day": m["day"], "days_in_month": m["days_in_month"],
                 "income": m["income"]["net"], "expenses": m["expenses"]["total"], "balance": m["balance"],
                 "surplus": m["surplus"], "shortfall": m["shortfall"], "missing": m["missing"]}
@@ -1134,7 +1141,7 @@ def overview(identity, today: date | None = None, default_method: str | None = N
         "assets": assets_overview(identity, loans_payload["items"]),
         "recent_incomes": recent_incomes(goals, events),
         "household": {"month_total": calc.household_month_total(all_events, today)},
-        "month_summary": month_summary(goals, events + imported, today, loans_payload.get("summary") or {}),
+        "month_summary": month_summary(goals, events + imported, today, loans_by_month(identity, today, 1)[0]),
         "receipts": receipts_overview(identity),
         "obligations": obligations_overview(identity),
         "tasks": tasks,

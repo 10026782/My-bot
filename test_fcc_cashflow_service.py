@@ -300,3 +300,41 @@ def test_the_monthly_tab_carries_the_same_bottom_line_as_the_cashflow_tab():
     assert ms and ms["income"] == cash["income"]["net"] and ms["expenses"] == cash["expenses"]["total"] and ms["balance"] == cash["balance"]
     assert ms["expenses"] == 200 + 2500                                                         # the billed card row + the scheduled loan payment (no loan charge recorded)
     assert ms["partial"] is True and ms["day"] == 20 and ms["missing"] == []
+
+
+def _loan_row(rid, name, payment, start=None, end=None, status="Current", term=None, owner=ELI, **extra):
+    f = {LF.NAME: name, "Owner": [owner], LF.ACTIVE: status != "Paid Off", LF.MONTHLY_PAYMENT: payment, LF.STATUS: status, **extra}
+    if start:
+        f[LF.START_DATE] = start
+    if end:
+        f[LF.END_DATE] = end
+    if term:
+        f[LF.TERM_MONTHS] = term
+    return {"id": rid, "fields": f}
+
+
+def test_the_loans_tab_schedule_counts_each_loan_from_its_start_to_its_end_and_a_closed_one_stops_at_its_closing_day():
+    DB[Tables.FIN_EVENTS] = []
+    DB[Tables.LOANS] = [
+        _loan_row("l1", "רכב", 1000, start="2026-08-15"),                         # open-ended: from August on
+        _loan_row("l2", "קצרה", 500, start="2026-07-01", term=2),                  # July + August only (term 2)
+        _loan_row("l3", "נסגרה", 300, start="2026-06-01", end="2026-09-10", status="Paid Off"),   # closed early: counted up to its closing day
+        _loan_row("l4", "בלי תאריך", 200),                                         # no start date: the current month only, and named
+        _loan_row("l5", "נסגרה בלי תאריך", 700, start="2026-06-01", status="Paid Off"),           # closed, no end date: not counted, named
+        _loan_row("l6", "חייבים לי", 9999, start="2026-06-01", **{LF.DIRECTION: "חייבים לי"}),    # a debt owed TO the owner: not a cost
+    ]
+    cash = service.cashflow_view(ELIYAHU, TODAY)
+    loans = {m["month"]: {c["key"]: c["amount"] for c in m["expenses"]["categories"]}.get("loans") for m in cash["months"]}
+    assert loans["2026-05"] is None
+    assert loans["2026-06"] == 300 + 700 * 0                                       # only l3 (l5 is not counted)
+    assert loans["2026-07"] == 500 + 300
+    assert loans["2026-08"] == 1000 + 500 + 300
+    assert loans["2026-09"] == 1000 + 300                                          # l2 ended; l3 ends 10/09 (that month still counts)
+    assert loans["2026-10"] == 1000 + 200                                          # l3 is over; the undated l4 is in the current month only
+    assert cash["loans_undated"] == ["בלי תאריך"] and cash["loans_closed_undated"] == ["נסגרה בלי תאריך"] and cash["loans_payments_known"] is True
+
+
+def test_closing_a_loan_writes_its_closing_day_as_the_end_date():
+    from core.financial_control import draft as fd
+    w = fd.loan_close_writes({"amount": 5000, "occurred_at": "2026-10-08"}, {}, {"record_id": "recL", "debt_goal_id": ""})
+    assert w[0]["fields"] == {LF.STATUS: "Paid Off", LF.END_DATE: "2026-10-08"}
