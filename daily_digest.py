@@ -277,6 +277,29 @@ def _leads_scoring_summary(errors: list, identity=None) -> str:
         return "📊 *לידים:* שגיאה"
 
 
+def _missed_deadlines(errors: list, identity=None) -> str:
+    """⏰ פספסת — משימות עם מועד אחרון שפקע אתמול ולא בוצעו (תזכורת חד-פעמית;
+    המשימה נשארת מסומנת ב'העבודה שלי' עד בוצע/הארכה)."""
+    try:
+        yday = (date.today() - timedelta(days=1)).isoformat()
+        recs = _fetch(
+            "משימות (Tasks)",
+            "AND({Hard Deadline}, {סטטוס}!='בוצע')",
+            max_rec=50, identity=identity,
+        )
+        missed = [
+            record_fields(r).get("כותרת המשימה", "?")
+            for r in recs
+            if str(record_fields(r).get("תאריך יעד", ""))[:10] == yday
+        ]
+        if not missed:
+            return ""
+        return "\n".join(["⏰ *פספסת (מועד אחרון שפקע אתמול):*"] + [f"• {t}" for t in missed])
+    except Exception as e:
+        errors.append(f"מועדים אחרונים: {e}")
+        return "⏰ *פספסת:* שגיאה"
+
+
 def _yesterday_changes(errors: list, identity=None) -> str:
     """🧠 מה השתנה אתמול — לידים חדשים, עסקאות חדשות, משימות שהושלמו"""
     try:
@@ -357,6 +380,7 @@ def build_digest(identity=None) -> str:
         _hot_leads(errors, identity),
         _followups_today(errors, identity),
         _roadmap_tasks_today(errors, identity),
+        _missed_deadlines(errors, identity),
         _open_deals(errors, identity),
         _upcoming_payments(errors, identity),
         _yesterday_changes(errors, identity),
@@ -374,6 +398,8 @@ def build_digest(identity=None) -> str:
 
     parts = header + [""]
     for section in sections:
+        if not section:
+            continue
         parts.append(section)
         parts.append("")
 

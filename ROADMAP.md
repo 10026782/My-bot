@@ -1,6 +1,14 @@
 # BOSS Bot — ROADMAP
 
-עודכן: 25/10/2026
+עודכן: 02/11/2026
+
+## TMA-TASKS-1 — יצירת משימות חוזרות / עם מועד אחרון ב"העבודה שלי" + שיקוף ב-Boss Daily — CODE DONE, NOT VERIFIED IN PROD — 02/11/2026
+
+מצב נוכחי: PR #1400 פתוח (לא ממוזג); קוד + בדיקות (`test_my_work_create_task.py`) בלבד — לא אומתה פריסה ולא נבדק מול Airtable אמיתי.
+
+- **מה**: טופס "משימה חדשה" ב"העבודה שלי" (ממשיכה עד לביצוע / חוזרת Daily-Weekly-Monthly דרך `Cadence` הקיים / עם מועד אחרון דרך שדה `Hard Deadline` חדש); Boss Daily משקף משימות חוזרות של היום ומשימות עם מועד אחרון (הדגשה ביום האחרון, "פספסת" אחרי הפקיעה + הארכה); סעיף "פספסת" חד-פעמי בדוח הבוקר. חלוקת "דחיפות"/"מקור" הוסרה — נשארה חלוקת Topic בלבד.
+- **סכמה**: נוסף שדה checkbox `Hard Deadline` (`fldDFBip1v0LiowJb`) לטבלת Tasks ב-Airtable (באישור הבעלים).
+- **צעדים הבאים**: ביקורת → merge → deploy → אימות ידני ב-TMA.
 
 ## DECISION-HUB-INSIGHT-1 — `/decision from-insight` (PR1 מתוך SPEC_Insight_to_Decision_to_Task) — CODE DONE, NOT VERIFIED IN PROD — 13/10/2026
 
