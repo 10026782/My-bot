@@ -3,7 +3,7 @@ import type { FccImportPreview } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FccImport } from "../components/FccImport";
-import { IMPORT_NOTE, SKIP_LABEL, START, advance, progressText, reviewOf } from "./fccImport";
+import { IMPORT_NOTE, SKIP_LABEL, START, advance, batchConfirmLabel, batchTotals, checkedItem, itemLine, progressText, reviewOf, runnable, type BatchItem } from "./fccImport";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -75,6 +75,39 @@ test("every reason the server can give for skipping has a Hebrew label", () => {
 test("markup: the import card is closed by default (one button, no file input until opened)", () => {
   const html = renderToStaticMarkup(createElement(FccImport, { onImported: () => undefined }));
   assert.ok(html.includes("ייבוא דוח") && html.includes('aria-expanded="false"') && !html.includes('type="file"'));
+});
+
+const item = (id: number, over: Partial<BatchItem> = {}): BatchItem => ({ id, name: `s${id}.pdf`, status: "waiting", ...over });
+
+test("batch: each file is classified on its own — writable, nothing to write, or does not add up (never written)", () => {
+  assert.equal(checkedItem(item(0), preview()).status, "ready");
+  const none = preview({ can_import: false, plan: { ...preview().plan, remaining: 0, already_imported: 3, pending_rules: 0 } });
+  assert.equal(checkedItem(item(1), none).status, "nothing");
+  const bad = checkedItem(item(2), preview({ parse: { ok: false, rows: 10, verified: 5, problems: ["2 breaks in the balance chain"] }, digest: null, can_import: false }));
+  assert.equal(bad.status, "error"); assert.ok(bad.error!.includes("לא נכתב דבר"));
+});
+
+test("batch: ONE confirm label totals what is written; unreadable and finished files are not in it; a retry takes only the blocked", () => {
+  const items = [checkedItem(item(0), preview()), checkedItem(item(1), preview({ plan: { ...preview().plan, remaining: 5, backfill: 4 } })),
+                 checkedItem(item(2), preview({ parse: { ok: false, rows: 1, verified: 0, problems: [] }, digest: null, can_import: false })), item(3, { status: "done" }), item(4, { status: "blocked" })];
+  const t = batchTotals(items);
+  assert.equal(t.files, 5); assert.equal(t.errors, 1); assert.equal(t.ready, 3); assert.equal(t.toWrite, 8); assert.equal(t.backfill, 4);
+  assert.equal(batchConfirmLabel(t), "אשר ייבוא של 3 קבצים (8 רישומים + תאריך חיוב ל-4 קיימים)");
+  assert.equal(batchConfirmLabel({ ...t, ready: 1, toWrite: 3, backfill: 0 }), "אשר ייבוא של 1 קובץ (3 רישומים)");
+  assert.equal(runnable(items).map((i) => i.id).join(), "0,1,4");
+});
+
+test("batch: every status has a line; a blocked file says it can be retried", () => {
+  assert.ok(itemLine(item(0)).includes("ממתין") && itemLine(item(1, { status: "checking" })).includes("קורא"));
+  assert.ok(itemLine(item(2, { status: "blocked" })).includes("אפשר לנסות שוב"));
+  assert.equal(itemLine(item(3, { status: "done", progress: { ...START, written: 4, done: true } })), "הושלם: 4 רישומים נכתבו.");
+  assert.equal(itemLine(checkedItem(item(4), preview())), "ייכתבו 3 רישומים.");
+});
+
+test("markup: the file input takes several files", () => {
+  // closed by default, so the input is not rendered: the card text says several files are supported once opened
+  const html = renderToStaticMarkup(createElement(FccImport, { onImported: () => undefined }));
+  assert.ok(html.includes("ייבוא דוחות בנק / כרטיס אשראי"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
