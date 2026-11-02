@@ -89,6 +89,13 @@ export function cashflowModel(v: FccCashflow, selected?: string): CashflowModel 
   return { rows: [...v.months].reverse().map(rowOf), selected: sel, detail: month ? detailOf(month) : null, insights: insightLines(v), notes };
 }
 
+/** Neighbouring months of the selected one (``rows`` newest first, as ``cashflowModel`` returns them): the arrows above the month's detail. */
+export function monthNav(rows: { month: string; label: string }[], selected: string): { older: { month: string; label: string } | null; newer: { month: string; label: string } | null } {
+  const i = rows.findIndex((r) => r.month === selected);
+  if (i < 0) return { older: null, newer: null };
+  return { newer: i > 0 ? rows[i - 1] : null, older: i < rows.length - 1 ? rows[i + 1] : null };
+}
+
 // ── recommendations ("הזדמנויות") — the server decides and words the facts; this only shows them ────────────────────────────────────────
 export const RECS_NOTE = "אלה נקודות לבדיקה מתוך מה שנרשם, לא החלטה. ״עד ₪X״ הוא גבול עליון ולא חיסכון מובטח; רק חיסכון שציינת (או החלטת ביטול) נספר בסיכום. ההתחייבויות לא נוספו להוצאות.";
 export interface RecCard { id: string; title: string; amount: string | null; tone: "saving" | "estimate" | "bound" | "plain"; facts: string[]; hint: string | null }

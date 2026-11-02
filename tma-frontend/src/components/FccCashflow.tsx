@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchFccCashflow } from "../api";
 import type { FccCashflow } from "../types";
-import { DEFAULT_RANGE, RANGES, cashflowModel, recsModel } from "../lib/fccCashflow";
+import { DEFAULT_RANGE, RANGES, cashflowModel, monthNav, recsModel } from "../lib/fccCashflow";
 import { KpiCard } from "./FccKpiCard";
 import { FccClassify } from "./FccClassify";
 import { FccClassifyRules } from "./FccClassifyRules";
@@ -17,6 +17,7 @@ export function CashflowView({ data, selected, onSelect, range, onRange }: {
 }) {
   const m = cashflowModel(data, selected);
   const recs = recsModel(data);
+  const nav = monthNav(m.rows, m.selected);
   return (
     <div className="fcc-stack">
       <div className="fcc-chips" role="group" aria-label="טווח חודשים">
@@ -27,6 +28,10 @@ export function CashflowView({ data, selected, onSelect, range, onRange }: {
 
       {m.detail && (
         <section className="fcc-section" aria-labelledby="cf-month-heading">
+          <div className="fcc-chips" role="group" aria-label="מעבר בין חודשים">
+            <button type="button" className="fcc-chip" disabled={!nav.older} onClick={() => nav.older && onSelect(nav.older.month)}>{nav.older ? `← ${nav.older.label}` : "← אין חודש קודם"}</button>
+            <button type="button" className="fcc-chip" disabled={!nav.newer} onClick={() => nav.newer && onSelect(nav.newer.month)}>{nav.newer ? `${nav.newer.label} →` : "אין חודש הבא →"}</button>
+          </div>
           <h2 id="cf-month-heading" className="fcc-section__heading">{m.detail.label}</h2>
           {m.detail.partialNote && <p className="fcc-goal__note">{m.detail.partialNote}</p>}
           <div className="fcc-kpis">{m.detail.kpis.map((k) => <KpiCard key={k.key} label={k.label} value={k.value} hint={k.hint} />)}</div>
