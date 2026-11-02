@@ -266,12 +266,12 @@ def test_the_cashflow_counts_a_card_row_by_its_billing_date_and_the_consumption_
         _imp("c1", 200, "2026-09-28", billing="2026-10-10"),                                   # bought in September, charged in October
         _imp("c2", 100, "2026-10-04", billing="2026-11-10"),                                   # bought in October, charged in November
         _imp("c3", 450, "2026-10-10", billing="2026-10-10", note="תשלומים"),                   # an instalment: dated by its billing already
-        _imp("c4", 3000, "2026-10-10", billing="2026-10-10", category="loans"),                # a card loan: cashflow only
+        _imp("c4", 3000, "2026-10-10", billing="2026-10-10", category="loans"),                # an imported loan row: ignored everywhere (the loans tab holds the exact amount)
         _imp("c5", 70, "2026-10-06"),                                                          # imported before the billing field existed: the purchase day
     ]
     cash = service.cashflow_view(ELIYAHU, TODAY)
     assert {c["key"]: c["amount"] for c in month(cash, "2026-10")["expenses"]["categories"]}["living"] == 200 + 450 + 70
-    assert {c["key"]: c["amount"] for c in month(cash, "2026-10")["expenses"]["categories"]}["loans"] == 3000
+    assert {c["key"]: c["amount"] for c in month(cash, "2026-10")["expenses"]["categories"]}["loans"] == 2500          # the imported loan row (3000) is ignored: the loans tab's payment counts
     cons = service.consumption_view(ELIYAHU, TODAY)
     sep, octo = month(cons, "2026-09"), month(cons, "2026-10")
     assert {c["key"]: c["amount"] for c in sep["expenses"]["categories"]} == {"living": 200}

@@ -989,7 +989,10 @@ def cashflow_inputs(goals: list[dict], events: list[dict], today: date, basis: s
         f = ev.get("fields") or {}
         if _sel(f.get(FinEventFields.KIND)) != calc.HOUSEHOLD_EXPENSE:
             continue
-        txn = _event_txn(ev, _sel(f.get(FinEventFields.EXPENSE_CATEGORY)), signed=True, basis=basis)
+        category = _sel(f.get(FinEventFields.EXPENSE_CATEGORY))
+        if _is_import(ev) and fcc_cashflow.category_key(category) == fcc_cashflow.LOANS:
+            continue                                         # an imported loan row (written before loans stopped being imported) is ignored: the loans tab holds the exact amounts
+        txn = _event_txn(ev, category, signed=True, basis=basis)
         if txn is not None:
             expenses.append(txn)
     return sources, expenses

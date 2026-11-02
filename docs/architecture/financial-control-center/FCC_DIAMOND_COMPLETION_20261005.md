@@ -542,3 +542,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Why it was single-file:** the import card's file input took one file; the server already processes ONE statement per request (it rebuilds every record from the uploaded file at each chunk, by design — the client never sends records) and allows one import at a time.
 - **Change (frontend only):** `<input multiple>`; each file gets its own preview (sequential), status and detail; a file that does not parse or add up is marked and skipped, the others go on; ONE confirm covers the batch and the files are written one after the other (the same chunked `run` per file, with the digest of its own preview); a blocked file can be retried alone. Files are kept in the browser for the session; nothing is stored on a server / Drive / Airtable (they carry account and card numbers).
 - **Not done:** automatic bank-vs-card detection (the owner picks the type once per batch); verification on a device and in production.
+
+### Loans are not imported (02/11/2026) — owner decision
+
+- **Why:** loan rows from the statements produced errors, and the loans tab already holds the exact balances and monthly payments; the system is not yet accurate enough to warn about inaccuracies it cannot check.
+- **Change:** a row classified as a loan (bank rules "הלוואה / משכנתא", card loan lines, a purchase the owner classified as `loans`) is recognised but not written (`import_plan` skip reason `loan`). The cashflow ignores imported loan rows already stored (not deleted), so the loan figure comes only from the loans tab's scheduled monthly payment (current month, an estimate). Consumption never counted loans.
+- **Consequence stated to the owner:** previous months show no loan repayments in the cashflow. Applying today's scheduled payment to earlier months would be a guess and was not done.
+- **Not done:** deleting the loan rows already imported; verification on a device and in production.
