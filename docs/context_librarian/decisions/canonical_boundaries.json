@@ -747,7 +747,9 @@
         "tma-frontend/src/lib/fccClassify.ts",
         "tma-frontend/src/components/FccClassify.tsx",
         "tma-frontend/src/lib/fccClassifyRules.ts",
-        "tma-frontend/src/components/FccClassifyRules.tsx"
+        "tma-frontend/src/components/FccClassifyRules.tsx",
+        "tma-frontend/src/lib/fccConsumption.ts",
+        "tma-frontend/src/components/FccConsumption.tsx"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",
@@ -762,7 +764,8 @@
         "tma-frontend/src/lib/fccImport.test.ts",
         "test_fcc_cashflow.py",
         "tma-frontend/src/lib/fccClassify.test.ts",
-        "tma-frontend/src/lib/fccClassifyRules.test.ts"
+        "tma-frontend/src/lib/fccClassifyRules.test.ts",
+        "tma-frontend/src/lib/fccConsumption.test.ts"
       ],
       "canonical_docs": [],
       "production_evidence": [],

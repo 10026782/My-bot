@@ -326,3 +326,61 @@ def test_a_batch_cannot_be_proposed_by_a_non_owner_or_for_other_tables_or_with_b
                                   (ELIYAHU, Tables.FIN_EVENTS, []), (ELIYAHU, Tables.FIN_EVENTS, [good_event(i) for i in range(aa.BATCH_MAX + 1)])):
             _, resp, status = tma_api._queue_tma_write_approval("tma_fcc_import", {"op": "post_many", "table": table_, "records": recs}, who, "x")
             assert status == 400 and resp["error"] == "batch write refused", (who.role, table_)
+
+
+# ── billing date + instalments label (cashflow counts by billing, consumption by purchase) ───────────────────────────────────────────────
+def card_event(i=0, **over):
+    key = f"card:{i:020x}"
+    f = {"Kind": "household_expense", "Amount": 10.0, "Occurred At": "2026-10-01", "Recorded By": "eliyahu", "Source": "import:card", "Source Ref": key,
+         "Idempotency Key": key, "Raw Text": "x", "Verification": "statement", "Expense Category": "living", "Billing Date": "2026-10-10"}
+    f.update(over)
+    return f
+
+
+@pytest.mark.parametrize("over,ok", [
+    ({}, True), ({"Note": "תשלומים"}, True), ({"Note": "אחר"}, False), ({"Billing Date": "10/10/2026"}, False), ({"Billing Date": "2026-13-40"}, False),
+    ({"Source": "import:bank", "Source Ref": "bank:" + "0" * 20, "Idempotency Key": "bank:" + "0" * 20}, False),          # a bank row has no billing date
+])
+def test_the_billing_date_is_for_card_rows_and_the_note_is_only_the_instalments_label(over, ok):
+    assert (aa.validate_batch_record(Tables.FIN_EVENTS, card_event(**over)) is None) is ok
+
+
+def test_a_re_imported_row_fills_the_billing_date_and_the_label_it_lacked_and_never_overwrites(monkeypatch):
+    patched = []
+    monkeypatch.setattr("tools.airtable_gateway.airtable_create", lambda t, f, source="x", **kw: {"id": "recLog"})
+    monkeypatch.setattr("tools.airtable_gateway.airtable_patch", lambda t, rid, f, source="x", **kw: patched.append((rid, dict(f))) or True)
+    monkeypatch.setattr(aa, "_verify_active_execution_claim", lambda *a, **k: True)
+    monkeypatch.setattr("tools.airtable_read_adapter.list_records", lambda table_, formula="", **kw: list(DB.get(table_, [])))
+    old = card_event(1)["Idempotency Key"]
+    kept = card_event(2)["Idempotency Key"]
+    DB[Tables.FIN_EVENTS].extend([
+        {"id": "recOld", "fields": {EF.IDEMPOTENCY_KEY: old, EF.FINANCIAL_OWNER: [ELI]}},                                            # imported before the field existed
+        {"id": "recKept", "fields": {EF.IDEMPOTENCY_KEY: kept, EF.FINANCIAL_OWNER: [ELI], EF.BILLING_DATE: "2026-09-10", EF.NOTE: "תשלומים"}},   # already filled
+    ])
+    out = call_batch(Tables.FIN_EVENTS, [card_event(1, Note="תשלומים"), card_event(2, **{"Billing Date": "2026-10-10"})])
+    assert out["ok"] and out["evidence"]["created"] == 0 and out["evidence"]["skipped_existing"] == 2 and out["evidence"]["backfilled"] == 1
+    assert patched == [("recOld", {"Billing Date": "2026-10-10", "Note": "תשלומים"})]
+
+
+def test_an_earlier_card_import_is_filled_with_the_billing_dates_by_importing_the_same_statement_again(monkeypatch):
+    c = client(monkeypatch)
+    pre = post(c, "/api/fcc/import/preview", kind="card").get_json()
+    run_all(c, "card", pre["digest"])
+    rows = [r for t, r in CREATED if t == Tables.FIN_EVENTS]
+    assert rows and all(EF.BILLING_DATE in r["fields"] for r in rows)
+    for r in rows:                                                                  # simulate an import from before the field existed
+        r["fields"].pop(EF.BILLING_DATE)
+        r["fields"].pop(EF.NOTE, None)
+    again = post(c, "/api/fcc/import/preview", kind="card").get_json()
+    assert again["plan"]["remaining"] == 0 and again["plan"]["backfill"] == len(rows) and again["can_import"]
+    patched = []
+
+    def fake_patch(table_, rid, fields, source="x", **kw):
+        patched.append(rid)
+        next(r for r in DB[table_] if r["id"] == rid)["fields"].update(fields)
+        return True
+    monkeypatch.setattr("tools.airtable_gateway.airtable_patch", fake_patch)
+    calls = run_all(c, "card", again["digest"])
+    assert any(b.get("step") == "billing" for b in calls) and len(patched) == len(rows)
+    assert all(EF.BILLING_DATE in r["fields"] for r in rows)
+    assert post(c, "/api/fcc/import/preview", kind="card").get_json()["plan"]["backfill"] == 0                # filled once, nothing left

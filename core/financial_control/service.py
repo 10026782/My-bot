@@ -83,6 +83,17 @@ def my_events(identity, imported: str = "exclude", since: date | None = None) ->
     return records
 
 
+def existing_import_fields(identity, since: date | None = None) -> dict[str, dict]:
+    """The caller's own imported rows by idempotency key -> their fields (what a re-import may still fill: the billing date, the instalments label)."""
+    out = {}
+    for e in my_events(identity, "only", since):
+        f = e.get("fields") or {}
+        key = str(f.get(FinEventFields.IDEMPOTENCY_KEY) or "")
+        if key:
+            out[key] = f
+    return out
+
+
 def existing_import_keys(identity, since: date | None = None) -> set[str]:
     """Idempotency keys of the caller's own imported rows (a re-imported statement writes nothing)."""
     return {str((e.get("fields") or {}).get(FinEventFields.IDEMPOTENCY_KEY) or "") for e in my_events(identity, "only", since)} - {""}
@@ -811,10 +822,14 @@ def cashflow_rules(identity, applies_to: str | None = None) -> list:
 _SOURCE_NOTE = re.compile(r"^\s*מקור\s*:\s*(.+?)\s*$")        # an income booked on the total goal as "מקור אחר": the name is in the note
 
 
-def _event_txn(ev: dict, category: str | None = None, signed: bool = False) -> fcc_cashflow.Txn | None:
-    """``signed``: an expense keeps its sign (an imported refund is a negative expense); income and direct costs are always positive."""
+def _event_txn(ev: dict, category: str | None = None, signed: bool = False, basis: str = "billing") -> fcc_cashflow.Txn | None:
+    """``signed``: an expense keeps its sign (an imported refund is a negative expense); income and direct costs are always positive.
+    ``basis``: "billing" (the cashflow tab: a card row counts on its statement's billing date when it has one) or "occurred" (the consumption
+    tab: the day of the purchase; an instalment, a loan and a card fee are dated by their billing in ``Occurred At`` already)."""
     f = ev.get("fields") or {}
     day, amount = calc._d(f.get(FinEventFields.OCCURRED_AT)), calc._num(f.get(FinEventFields.AMOUNT))
+    if basis == "billing":
+        day = calc._d(f.get(FinEventFields.BILLING_DATE)) or day
     if day is None or amount is None or f.get(FinEventFields.SUPERSEDED_BY):
         return None
     return fcc_cashflow.Txn(amount if signed else abs(amount), day, category, ev.get("id"), str(f.get(FinEventFields.NOTE) or "").strip())
@@ -904,7 +919,7 @@ def classify_view(waiting: list[dict], skip: frozenset[str] = frozenset()) -> di
     return {"total": len(waiting), "total_amount": round(sum(w["amount"] for w in waiting), 2), "item": item}
 
 
-def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
+def cashflow_inputs(goals: list[dict], events: list[dict], today: date, basis: str = "billing") -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
     """Owner-scoped goals + events (already policy-filtered by the caller) -> cashflow model inputs. Pure over its arguments.
 
     * income goals: a source goal (it has a parent) or a goal with no sources of its own is a source by its title; the events booked
@@ -974,7 +989,7 @@ def cashflow_inputs(goals: list[dict], events: list[dict], today: date) -> tuple
         f = ev.get("fields") or {}
         if _sel(f.get(FinEventFields.KIND)) != calc.HOUSEHOLD_EXPENSE:
             continue
-        txn = _event_txn(ev, _sel(f.get(FinEventFields.EXPENSE_CATEGORY)), signed=True)
+        txn = _event_txn(ev, _sel(f.get(FinEventFields.EXPENSE_CATEGORY)), signed=True, basis=basis)
         if txn is not None:
             expenses.append(txn)
     return sources, expenses
@@ -1020,6 +1035,27 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
         logger.exception("[fcc] cashflow pending rules read failed")
         view["rules_to_classify"] = None
     return view
+
+
+def consumption_view(identity, today: date | None = None, months: int = 6) -> dict:
+    """When the money was CONSUMED (the owner's "צריכה" tab): expenses by category per month by the day of the purchase, never loans (a loan is a business
+    decision taken when it was taken, not monthly consumption). A purchase paid in instalments counts on each payment's billing month and is also summed
+    apart (``installments``). Insights only (changes, spikes, large items) — the gap / surplus and the commitments belong to the cashflow tab."""
+    from core.financial_control import import_plan as ip  # noqa: PLC0415
+    today = today or date.today()
+    window_start = fcc_cashflow.month_windows(today, months)[0][1]
+    goals, events = my_goals(identity), my_events(identity) + my_events(identity, "only", window_start)
+    _, expenses = cashflow_inputs(goals, events, today, basis="occurred")
+    expenses = [t for t in expenses if fcc_cashflow.category_key(t.category) != fcc_cashflow.LOANS]
+    view = fcc_cashflow.build([], expenses, today, months)
+    inst: dict[str, float] = {}
+    for t in expenses:
+        if t.label == ip.INSTALMENTS_NOTE and t.amount > 0:
+            key = f"{t.occurred.year:04d}-{t.occurred.month:02d}"
+            inst[key] = round(inst.get(key, 0.0) + t.amount, 2)
+    rows = [{"month": r["month"], "is_current": r["is_current"], "partial": r["partial"], "expenses": r["expenses"], "installments": inst.get(r["month"], 0.0)}
+            for r in view["months"]]
+    return {"months": rows, "insights": view["insights"], "categories": view["categories"], "as_of": view["as_of"]}
 
 
 def overview(identity, today: date | None = None, default_method: str | None = None) -> dict:

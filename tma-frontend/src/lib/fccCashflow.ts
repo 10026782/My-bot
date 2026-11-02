@@ -69,7 +69,7 @@ export function detailOf(m: FccCashflowMonth): CashflowDetail {
   };
 }
 
-export function insightLines(v: FccCashflow): string[] {
+export function insightLines(v: Pick<FccCashflow, "insights">): string[] {
   const out: string[] = [];
   const ch = v.insights.changes;
   if (ch) {

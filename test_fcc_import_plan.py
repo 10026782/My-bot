@@ -140,3 +140,17 @@ def test_pending_rule_rows_are_undecided_and_carry_context():
         f = ip.pending_rule_fields(r)
         assert f[CR.STATUS] == "pending" and CR.KIND not in f and f[CR.APPLIES_TO] == "bank" and f[CR.LAST_SEEN] and f[CR.EXAMPLE_AMOUNT] > 0
         assert (CR.ROW_KEY in f) == bool(r.row_key) and (f[CR.MATCH] == "") == bool(r.row_key)
+
+
+def test_a_card_event_carries_the_billing_date_and_the_instalments_label_but_a_loan_and_a_fee_do_not():
+    from airtable_schema import FinEventFields as EF
+    inst = ci.CardCharge(date(2026, 7, 5), "לאסט פרייס", 367.08, 4405.0, "3818", date(2026, 10, 11), 1, ci.REGULAR, "תשלום 4 מתוך 12")
+    plain = ci.CardCharge(date(2026, 10, 5), "פיצה", 50.0, 50.0, "3818", date(2026, 11, 10), 1, ci.REGULAR, "")
+    loan = ci.CardCharge(date(2026, 7, 5), "הלוואה", 700.0, 700.0, "3818", date(2026, 10, 11), 1, ci.LOAN, "תשלום 4 מתוך 12")
+    ev = {e.label: e for e in ip.plan_card([ci.ClassifiedCharge(x, ci.EXPENSE, "living", "owner:0") for x in (inst, plain, loan)], set()).events}
+    assert ev["לאסט פרייס"].installments and ev["לאסט פרייס"].billing == date(2026, 10, 11)
+    f = ip.event_fields(ev["לאסט פרייס"], "eliyahu")
+    assert f[EF.BILLING_DATE] == "2026-10-11" and f[EF.NOTE] == ip.INSTALMENTS_NOTE and f[EF.OCCURRED_AT] == "2026-10-11"
+    g = ip.event_fields(ev["פיצה"], "eliyahu")
+    assert g[EF.BILLING_DATE] == "2026-11-10" and g[EF.OCCURRED_AT] == "2026-10-05" and EF.NOTE not in g           # the purchase day, billed next month
+    assert not ev["הלוואה"].installments and EF.NOTE not in ip.event_fields(ev["הלוואה"], "eliyahu")
