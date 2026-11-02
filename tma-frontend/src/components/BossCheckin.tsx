@@ -3,8 +3,8 @@
 // Visual style intentionally unchanged from prototype — only data layer upgraded.
 
 import { useState, useEffect, useRef } from "react";
-import { fetchGameCheckin, saveGameCheckin } from "../api";
-import type { GameWorld, CheckinTask } from "../types";
+import { fetchGameCheckin, saveGameCheckin, updateTaskStatus } from "../api";
+import type { GameWorld, CheckinTask, RecurringTodayTask, DeadlineTodayTask } from "../types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -19,24 +19,7 @@ const TOPICS = [
   { id: "learning",  label: "למידה",         emoji: "📚" },
 ] as const;
 
-// Urgency: HOW important is this right now?
-const URGENCY = [
-  { id: "burning",     label: "בוער",   emoji: "🔥" },
-  { id: "roadmap",     label: "רואדמאפ", emoji: "🗺" },
-  { id: "maintenance", label: "תחזוקה", emoji: "📋" },
-] as const;
-
-// Source: WHERE did this task come from?
-const SOURCE = [
-  { id: "burning_today", label: "היום",       emoji: "🔥" },
-  { id: "roadmap",       label: "רואדמאפ",   emoji: "🗺" },
-  { id: "timeline",      label: "לוח זמנים", emoji: "📅" },
-  { id: "maintenance",   label: "תחזוקה",    emoji: "🔧" },
-] as const;
-
 type TopicId   = typeof TOPICS[number]["id"];
-type UrgencyId = typeof URGENCY[number]["id"];
-type SourceId  = typeof SOURCE[number]["id"];
 
 // ─── Task Model ───────────────────────────────────────────────────────────────
 
@@ -44,8 +27,6 @@ interface Task {
   id:                   string;
   title:                string;
   topic:                TopicId | null;
-  urgency:              UrgencyId | null;
-  source:               SourceId | null;
   required:             boolean;
   xp:                   number;   // auto-calculated — never set manually
   status:               "todo" | "done";
@@ -59,8 +40,6 @@ function makeEmptyTask(): Task {
     id:                   `local-${crypto.randomUUID()}`,
     title:                "",
     topic:                null,
-    urgency:              null,
-    source:               null,
     required:             false,
     xp:                   25,
     status:               "todo",
@@ -72,27 +51,20 @@ function makeEmptyTask(): Task {
 
 // ─── XP Calculation ───────────────────────────────────────────────────────────
 
-function calculateXP(task: Pick<Task, "required" | "urgency" | "source">): number {
-  let xp = 25; // base
-  if (task.required)                     xp += 25;
-  if (task.urgency === "burning")        xp += 50;
-  else if (task.urgency === "roadmap")   xp += 25;
-  else if (task.urgency === "maintenance") xp += 10;
-  if (task.source === "roadmap")         xp += 15;
-  else if (task.source === "timeline")   xp += 15;
-  return Math.min(xp, 200);
+function calculateXP(task: Pick<Task, "required">): number {
+  return task.required ? 50 : 25;
 }
 
 // ─── Data Layer ───────────────────────────────────────────────────────────────
 
-async function loadCheckinData(): Promise<{ tasks: Task[]; world: GameWorld | null }> {
+async function loadCheckinData(): Promise<{
+  tasks: Task[]; world: GameWorld | null; recurring: RecurringTodayTask[]; deadlines: DeadlineTodayTask[]; recurringError: boolean;
+}> {
   const data = await fetchGameCheckin();
   const tasks: Task[] = (data.tasks ?? []).map(t => ({
     id:                   t.id,
     title:                t.title,
     topic:                t.topic as TopicId | null,
-    urgency:              t.urgency as UrgencyId | null,
-    source:               t.source as SourceId | null,
     required:             t.required,
     xp:                   t.xp,
     status:               t.status,
@@ -102,7 +74,7 @@ async function loadCheckinData(): Promise<{ tasks: Task[]; world: GameWorld | nu
   }));
   // Pad to 3 blank slots when fewer than 3 tasks returned
   while (tasks.length < 3) tasks.push(makeEmptyTask());
-  return { tasks: tasks.slice(0, 3), world: data.world ?? null };
+  return { tasks: tasks.slice(0, 3), world: data.world ?? null, recurring: data.recurring ?? [], deadlines: data.deadlines ?? [], recurringError: !!data.recurring_error };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -117,7 +89,7 @@ function TaskCard({
 }) {
   const isDone = task.status === "done";
   const xp     = calculateXP(task);
-  const canComplete = !!(task.title && task.topic && task.urgency && task.source);
+  const canComplete = !!(task.title && task.topic);
 
   function update(patch: Partial<Task>) {
     if (isDone) return;
@@ -158,42 +130,6 @@ function TaskCard({
             fontFamily:     "inherit", direction: "rtl",
           }}
         />
-      </div>
-
-      {/* Urgency */}
-      <div style={{ fontSize: 10, color: "#4b5563", fontWeight: 700, marginBottom: 4, letterSpacing: 1 }}>
-        דחיפות
-      </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-        {URGENCY.map(u => (
-          <button key={u.id}
-            onClick={() => update({ urgency: task.urgency === u.id ? null : u.id })}
-            style={{
-              padding:    "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-              border:     `1.5px solid ${task.urgency === u.id ? "#f97316" : "#1f2937"}`,
-              background: task.urgency === u.id ? "#1a0a00" : "transparent",
-              color:      task.urgency === u.id ? "#f97316" : "#4b5563",
-              cursor:     isDone ? "default" : "pointer", transition: "all 0.2s", fontFamily: "inherit",
-            }}>{u.emoji} {u.label}</button>
-        ))}
-      </div>
-
-      {/* Source */}
-      <div style={{ fontSize: 10, color: "#4b5563", fontWeight: 700, marginBottom: 4, letterSpacing: 1 }}>
-        מקור
-      </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-        {SOURCE.map(s => (
-          <button key={s.id}
-            onClick={() => update({ source: task.source === s.id ? null : s.id })}
-            style={{
-              padding:    "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-              border:     `1.5px solid ${task.source === s.id ? "#38bdf8" : "#1f2937"}`,
-              background: task.source === s.id ? "#001a2e" : "transparent",
-              color:      task.source === s.id ? "#38bdf8" : "#4b5563",
-              cursor:     isDone ? "default" : "pointer", transition: "all 0.2s", fontFamily: "inherit",
-            }}>{s.emoji} {s.label}</button>
-        ))}
       </div>
 
       {/* Topic */}
@@ -248,12 +184,8 @@ function TaskCard({
       </div>
 
       {/* Validation hint */}
-      {!isDone && task.title && !(task.topic && task.urgency && task.source) && (
-        <div style={{ marginTop: 8, fontSize: 10, color: "#4b5563" }}>
-          {!task.urgency && "· בחר דחיפות "}
-          {!task.source  && "· בחר מקור "}
-          {!task.topic   && "· בחר עולם"}
-        </div>
+      {!isDone && task.title && !task.topic && (
+        <div style={{ marginTop: 8, fontSize: 10, color: "#4b5563" }}>· בחר תחום</div>
       )}
     </div>
   );
@@ -321,6 +253,10 @@ interface Props {
 export function BossCheckin({ onBack, streak = 0 }: Props) {
   const [tasks,     setTasks]     = useState<Task[]>([]);
   const [world,     setWorld]     = useState<GameWorld | null>(null);
+  const [recurring, setRecurring] = useState<RecurringTodayTask[]>([]);
+  const [deadlines, setDeadlines] = useState<DeadlineTodayTask[]>([]);
+  const [recurringError, setRecurringError] = useState(false);
+  const [recurringBusy, setRecurringBusy] = useState<string | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [toast,     setToast]     = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -334,7 +270,7 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   function load() {
     setLoading(true);
     loadCheckinData()
-      .then(({ tasks, world }) => { setTasks(tasks); setWorld(world); })
+      .then(({ tasks, world, recurring, deadlines, recurringError }) => { setTasks(tasks); setWorld(world); setRecurring(recurring); setDeadlines(deadlines); setRecurringError(recurringError); })
       .finally(() => setLoading(false));
   }
 
@@ -371,8 +307,6 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   const doneTasks      = tasks.filter(t => t.status === "done");
   const totalXP        = doneTasks.reduce((s, t) => s + t.xp, 0);
   const allDone        = tasks.length > 0 && tasks.every(t => t.status === "done");
-  const burningCount   = doneTasks.filter(t => t.urgency === "burning").length;
-  const roadmapCount   = doneTasks.filter(t => t.urgency === "roadmap").length;
   const requiredCount  = doneTasks.filter(t => t.required).length;
   const optionalCount  = doneTasks.filter(t => !t.required).length;
 
@@ -388,7 +322,7 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
 
   async function handleDone(index: number) {
     const task = tasks[index];
-    if (!task.title || !task.topic || !task.urgency || !task.source) return;
+    if (!task.title || !task.topic) return;
     const completedAt = new Date().toISOString();
     const finalXP     = calculateXP(task);
     const updated: Task = { ...task, status: "done", completed_at: completedAt, xp: finalXP };
@@ -399,6 +333,36 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
     } catch {
       setTasks(tasks);
       showToast("⚠️ שגיאה בשמירה — נסה שוב");
+    }
+  }
+
+  // סימון משימה חוזרת כבוצעה: אותו נתיב כמו "העבודה שלי" — הרשומה מתקדמת
+  // למופע הבא (Cadence) ולא נסגרת. מרעננים מהשרת, בלי הצלחה אופטימית.
+  async function handleRecurringDone(id: string) {
+    if (recurringBusy) return;
+    setRecurringBusy(id);
+    try {
+      await updateTaskStatus(id, "done");
+      setRecurring(prev => prev.filter(r => r.id !== id));
+      showToast("✓ בוצע — המופע הבא נקבע");
+    } catch (e) {
+      showToast(`⚠️ ${(e as Error).message || "העדכון נכשל"}`);
+    } finally {
+      setRecurringBusy(null);
+    }
+  }
+
+  async function handleDeadlineDone(id: string) {
+    if (recurringBusy) return;
+    setRecurringBusy(id);
+    try {
+      await updateTaskStatus(id, "done");
+      setDeadlines(prev => prev.filter(d => d.id !== id));
+      showToast("✓ בוצע");
+    } catch (e) {
+      showToast(`⚠️ ${(e as Error).message || "העדכון נכשל"}`);
+    } finally {
+      setRecurringBusy(null);
     }
   }
 
@@ -517,6 +481,75 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
           </div>
         )}
 
+        {/* משימות קבועות של היום — מתוך "העבודה שלי" (Cadence) */}
+        {recurringError && (
+          <div style={{ fontSize: 11, color: "#ef4444", textAlign: "center", marginBottom: 12 }}>
+            ⚠️ לא הצלחנו לטעון משימות קבועות
+          </div>
+        )}
+        {recurring.length > 0 && (
+          <div style={{ background: "#0d1117", border: "1.5px solid #1f2937", borderRadius: 14, padding: "14px 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: "#4b5563", fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>
+              🔁 קבועות להיום ({recurring.length})
+            </div>
+            {recurring.map(r => {
+              const topic = TOPICS.find(tp => tp.label === r.topic);
+              return (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: "1px solid #1f2937" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#f9fafb" }}>{r.title}</div>
+                    <div style={{ fontSize: 10, color: r.overdue ? "#f97316" : "#4b5563", marginTop: 2 }}>
+                      {topic ? `${topic.emoji} ${topic.label} · ` : ""}
+                      {r.cadence === "Daily" ? "יומית" : r.cadence === "Weekly" ? "שבועית" : "חודשית"}
+                      {r.overdue ? ` · באיחור (${r.due_date})` : ""}
+                    </div>
+                  </div>
+                  <button onClick={() => handleRecurringDone(r.id)} disabled={recurringBusy !== null}
+                    style={{
+                      padding: "5px 14px", borderRadius: 20, background: "#22c55e", color: "#000",
+                      border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                      opacity: recurringBusy === r.id ? 0.5 : 1,
+                    }}>✓ בוצע</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* משימות עם מועד אחרון — מודגשות ביום האחרון, "פספסת" אחרי הפקיעה */}
+        {deadlines.length > 0 && (
+          <div style={{ background: "#0d1117", border: "1.5px solid #1f2937", borderRadius: 14, padding: "14px 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: "#4b5563", fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>
+              ⏳ עם מועד אחרון ({deadlines.length})
+            </div>
+            {deadlines.map(d => {
+              const topic = TOPICS.find(tp => tp.label === d.topic);
+              const color = d.state === "missed" ? "#ef4444" : d.state === "last_day" ? "#f97316" : "#4b5563";
+              return (
+                <div key={d.id} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginTop: 6, borderRadius: 10,
+                  border: `1.5px solid ${d.state === "active" ? "#1f2937" : color}`,
+                  background: d.state === "last_day" ? "#1a0a00" : d.state === "missed" ? "#1a0505" : "transparent",
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#f9fafb" }}>{d.title}</div>
+                    <div style={{ fontSize: 10, color, marginTop: 2, fontWeight: d.state === "active" ? 400 : 700 }}>
+                      {topic ? `${topic.emoji} ${topic.label} · ` : ""}
+                      {d.state === "missed" ? `פספסת (${d.due_date})` : d.state === "last_day" ? "⏳ אחרון היום" : `עד ${d.due_date}`}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDeadlineDone(d.id)} disabled={recurringBusy !== null}
+                    style={{
+                      padding: "5px 14px", borderRadius: 20, background: "#22c55e", color: "#000",
+                      border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                      opacity: recurringBusy === d.id ? 0.5 : 1,
+                    }}>✓ בוצע</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Task Cards */}
         {tasks.slice(0, 3).map((task, i) => (
           <TaskCard key={task.id} task={task} index={i}
@@ -544,18 +577,11 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
                   <div key={i} style={{ textAlign: "center" }}>
                     <div style={{ fontSize: 18 }}>{topic?.emoji}</div>
                     <div style={{ fontSize: 10, color: "#4ade80", fontWeight: 600 }}>{topic?.label}</div>
-                    <div style={{ fontSize: 9, color: "#166534" }}>
-                      {t.urgency === "burning" ? "🔥" : t.urgency === "roadmap" ? "🗺" : "📋"}
-                    </div>
                   </div>
                 );
               })}
             </div>
 
-            <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 6 }}>
-              {burningCount > 0 && `🔥 ${burningCount} בוערות`}
-              {roadmapCount > 0 && ` · 🗺 ${roadmapCount} רואדמאפ`}
-            </div>
             <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 14 }}>
               ✓ {requiredCount} חובה · {optionalCount} רשות
             </div>

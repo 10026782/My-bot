@@ -904,6 +904,7 @@ class TaskFields:
     LEAD_LINK       = "Leads"           # linked record to Leads table (Airtable linked field name)
     TOPIC           = "Topic"           # singleSelect קיים; FCC משתמש ב-"כספים" לזיהוי משימות המשך
     RECURRENCE      = "Cadence"         # singleSelect קיים (fldcQk3DisdkzhPMX) — ראה TaskRecurrence. ריק = חד-פעמי
+    HARD_DEADLINE   = "Hard Deadline"   # checkbox (fldDFBip1v0LiowJb, נוצר 02/11/2026): "משימה עם מועד אחרון" — תאריך יעד = היום האחרון; לא ממשיכה לבד, אחרי הפקיעה מסומנת "פספסת"
 
 
 class FinGoalFields:
