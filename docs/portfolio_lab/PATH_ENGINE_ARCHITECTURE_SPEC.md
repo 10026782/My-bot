@@ -263,3 +263,6 @@
 - ברירת מחדל על קלט שלא הוזן ⇒ `certainty=uncertain`, סיכון `default_input_used`, אזהרה בהשוואה (החישוב ממשיך; המספר לא "צפוי").
 - `break_even`: סריקה ב־24 צעדים, כל החציות מוחזרות; יותר מאחת ⇒ `multiple_crossings` בלי ערך יחיד.
 - שיעור G6/G7 עדיין פתוחים לפני endpoint.
+- `goal_funding.status` (funded/conditional/partial/late/not_funded/unknown): `funded` רק כשהסכום נטו אחרי עמלות מגיע במלואו, בזמן (`needed_by` אופציונלי, נפרד מ־`available_on`) ובלי תנאי (הלוואה לא מאושרת / כסף מותנה ⇒ conditional). גרסאות: schema 1.1, path-core-2, loans-2, liquid-2, comparator-3.
+- G7: לדרוש בדיקת זהות חשבונאית לכל סוג מסלול שכל המדדים נמדדים מול "לא עושים כלום".
+- `break_even` ללא חציה אינו הוכחה שאין חציה (סריקה ב־24 צעדים).

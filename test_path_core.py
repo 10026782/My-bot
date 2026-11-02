@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import date
 import re
 from pathlib import Path
 
@@ -107,7 +108,7 @@ def test_the_tax_on_growth_is_taxed_only_on_the_real_part():
 def good_result():
     f = frame()
     r = core.blank_result(f, path_id="p", module="m", module_version="m-1", type_="t", label="l", movement_kind="liability", purpose="fund_amount", funds_amount=100.0)
-    r["goal_funding"] = {"funds_on_time": True, "by": "2026-11-01"}
+    core.set_funding(r, amount=100.0, net_available=100.0, available_on=date(2026, 11, 1), needed_by=None, conditional=False)
     r["not_applicable"] = ["cost.holding_costs"]
     return core.finalize(r)
 
@@ -137,7 +138,7 @@ def test_the_validator_rejects_ranking_merged_measures_unverified_tax_and_malfor
 def test_missing_inputs_require_the_missing_is_not_zero_caveat_and_a_total_with_a_missing_part_is_none():
     f = frame()
     r = core.blank_result(f, path_id="p", module="m", module_version="m-1", type_="t", label="l", movement_kind="new_money", purpose="fund_amount", funds_amount=100.0)
-    r["goal_funding"] = {"funds_on_time": True, "by": None}
+    core.set_funding(r, amount=100.0, net_available=100.0, available_on=date(2026, 11, 1), needed_by=None, conditional=False)
     r["missing_inputs"] = ["fees"]
     assert any(c["caveat_id"] == "missing_is_missing" for c in core.finalize(r)["caveats"])
     assert core.total_or_none([1.0, 2.5]) == 3.5 and core.total_or_none([1.0, None]) is None and core.total_or_none([]) == 0.0
@@ -179,12 +180,16 @@ def test_a_fund_amount_result_needs_a_known_positive_amount_and_an_explicit_on_t
     r["goal_funding"] = {"funds_on_time": True}
     with pytest.raises(ValueError):
         core.validate_path_result(r)
+    r = good_result()
+    r["goal_funding"]["net_available"] = 90.0            # claimed funded while the net amount falls short
+    with pytest.raises(ValueError):
+        core.validate_path_result(r)
 
 
 def test_an_input_computed_from_a_default_makes_the_result_uncertain_never_expected():
     f = frame()
     r = core.blank_result(f, path_id="p", module="m", module_version="m-1", type_="t", label="l", movement_kind="liability", purpose="fund_amount", funds_amount=100.0)
-    r["goal_funding"] = {"funds_on_time": True, "by": None}
+    core.set_funding(r, amount=100.0, net_available=100.0, available_on=date(2026, 11, 1), needed_by=None, conditional=False)
     r["certainty"] = "expected"
     r["assumptions"] = [{"id": "fee_zero", "text": "x", "source": "default"}]
     out = core.finalize(r)

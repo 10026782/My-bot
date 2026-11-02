@@ -10,11 +10,11 @@ from datetime import date
 
 from . import core
 
-MODULE, VERSION = "liquid", "liquid-1"
+MODULE, VERSION = "liquid", "liquid-2"
 TYPES = ("use_liquid_cash", "wait")
 _COMMON = {"id", "label", "type"}
 _ALLOWED = {
-    "use_liquid_cash": _COMMON | {"amount", "balance", "expected_return_pct", "fee_pct", "withdraw_fee", "liquidity_state", "available_on"},
+    "use_liquid_cash": _COMMON | {"needed_by", "amount", "balance", "expected_return_pct", "fee_pct", "withdraw_fee", "liquidity_state", "available_on"},
     "wait": _COMMON | {"amount", "until", "price_change_pct"},
 }
 
@@ -67,7 +67,9 @@ def _use_cash(frame: dict, spec: dict) -> dict:
     cost_after = core.total_or_none([growth_after, withdraw_fee])
     r = core.blank_result(frame, path_id=spec["id"], module=MODULE, module_version=VERSION, type_="use_liquid_cash", label=spec["label"].strip(),
                           movement_kind="equity_conversion", purpose="fund_amount", funds_amount=amount)
-    r["goal_funding"] = {"funds_on_time": True, "by": today.isoformat()}
+    needed_by = core.to_date(spec["needed_by"], "needed_by") if spec.get("needed_by") else None
+    core.set_funding(r, amount=amount, net_available=None if withdraw_fee is None else amount - withdraw_fee, available_on=today, needed_by=needed_by,
+                     conditional=state == "conditional")
     r["cash_flows"] = [{"date": today.isoformat(), "amount": amount, "kind": "withdrawal"}] + ([{"date": today.isoformat(), "amount": -withdraw_fee, "kind": "fee"}] if withdraw_fee else [])
     r["cost"].update(fees_total=withdraw_fee, opportunity_cost=growth_before)
     r["measures"]["liquidity"] = {"cash_available": None if withdraw_fee is None else amount - withdraw_fee, "available_on": today.isoformat(), "state": state}
@@ -83,7 +85,7 @@ def _use_cash(frame: dict, spec: dict) -> dict:
     r["assumptions"] = [{"id": "forgone_growth", "text": "הצמיחה העתידית של הסכום שנמשך אבדה (מנוע הצמיחה הקיים)", "source": "assumed"},
                         {"id": "growth_taxed_preliminary", "text": "המס הראשוני על הצמיחה שאבדה מופחת בשורת אחרי מס סמוי", "source": "assumed"}]
     if ret is not None and fee_pct is None:
-        r["assumptions"].append({"id": "fee_zero", "text": "דמי ניהול של החשבון לא הוזנו — 0 בחישוב", "source": "default"})
+        r["assumptions"].append({"id": "fee_zero", "text": "דמי ניהול של החשבון לא הוזנו — חושב בהנחת 0% לצורך סימולציה בלבד", "source": "default"})
     r["missing_inputs"] = [n for n, v in (("expected_return_pct", ret), ("withdraw_fee", withdraw_fee)) if v is None]
     r["risks"] = ["depends_on_assumed_return"] + (["release_not_verified"] if state == "conditional" else [])
     r["not_applicable"] = ["cost.interest_total", "cost.holding_costs", "cost.lost_income", "cost.forced_sale_discount_amount", "tax.deferral_benefit", "tax.deferral_lost"]
@@ -104,7 +106,7 @@ def _wait(frame: dict, spec: dict) -> dict:
     extra = None if price is None else amount * price / 100.0
     r = core.blank_result(frame, path_id=spec["id"], module=MODULE, module_version=VERSION, type_="wait", label=spec["label"].strip(),
                           movement_kind="no_movement", purpose="fund_amount", funds_amount=amount)
-    r["goal_funding"] = {"funds_on_time": False, "by": None}
+    core.set_funding(r, amount=amount, net_available=0.0, available_on=None, needed_by=None, conditional=False, funds_goal=False)
     r["measures"]["liquidity"] = {"cash_available": 0.0, "available_on": None, "state": None}
     r["measures"]["economic_cost"] = {"net_cost": extra, "components": ["price_change_while_waiting"]}
     r["measures"]["net_worth"] = core.net_worth_block(frame, None if extra is None else -extra, None if extra is None else -extra)

@@ -8,7 +8,7 @@ from __future__ import annotations
 from ..models import ENGINE_VERSION
 from . import core, liquid_paths, loan_paths
 
-COMPARATOR_VERSION = "comparator-2"
+COMPARATOR_VERSION = "comparator-3"
 _SCAN_STEPS = 24
 _MODULES = {t: loan_paths for t in loan_paths.TYPES} | {t: liquid_paths for t in liquid_paths.TYPES}
 GAP_FIELDS = (
@@ -73,7 +73,8 @@ def compare_paths(frame: dict, results: list, *, reference: str | None = None) -
                 "ההפרש חתום מול מסלול הייחוס שבחרת: מספר חיובי = ערך גבוה יותר מהייחוס באותו שדה, לא ״טוב יותר״."]
     not_funded = [r["path_id"] for r in results if r["goal_funding"]["funds_on_time"] is False]
     if not_funded:
-        warnings.append("מסלולים שאינם מממנים את היעד בזמן מוצגים כחלופה בלבד, לא כשווי ערך: " + ", ".join(not_funded))
+        by_status = ", ".join(f'{r["path_id"]}: {r["goal_funding"]["status"]}' for r in results if r["goal_funding"]["funds_on_time"] is False)
+        warnings.append("מסלולים שאינם מממנים את היעד במלואו, בזמן ובלי תנאי מוצגים כחלופה בלבד, לא כשווי ערך (" + by_status + ")")
     if any(r["certainty"] == "uncertain" and "default_input_used" in r["risks"] for r in results):
         warnings.append("בחלק מהמסלולים נתון שלא הוזן חושב בברירת מחדל — המספר אינו ודאי עד שיוזן.")
     if any(r["missing_inputs"] for r in results):
