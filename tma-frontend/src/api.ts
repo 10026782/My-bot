@@ -231,6 +231,15 @@ export async function updateTaskStatus(taskId: string, status: "done"): Promise<
   if (!r.ok) await throwApiError(r, `Task update failed (${r.status})`);
 }
 
+export async function extendTaskDeadline(taskId: string, dueDate: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ due_date: dueDate }),
+  });
+  if (!r.ok) await throwApiError(r, `Task extend failed (${r.status})`);
+}
+
 export async function createOwnerTask(input: NewTaskInput): Promise<void> {
   const r = await fetch(`${BASE}/api/owner/my-work`, {
     method: "POST",

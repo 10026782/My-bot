@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { fetchGameCheckin, saveGameCheckin, updateTaskStatus } from "../api";
-import type { GameWorld, CheckinTask, RecurringTodayTask } from "../types";
+import type { GameWorld, CheckinTask, RecurringTodayTask, DeadlineTodayTask } from "../types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ function calculateXP(task: Pick<Task, "required">): number {
 // ─── Data Layer ───────────────────────────────────────────────────────────────
 
 async function loadCheckinData(): Promise<{
-  tasks: Task[]; world: GameWorld | null; recurring: RecurringTodayTask[]; recurringError: boolean;
+  tasks: Task[]; world: GameWorld | null; recurring: RecurringTodayTask[]; deadlines: DeadlineTodayTask[]; recurringError: boolean;
 }> {
   const data = await fetchGameCheckin();
   const tasks: Task[] = (data.tasks ?? []).map(t => ({
@@ -74,7 +74,7 @@ async function loadCheckinData(): Promise<{
   }));
   // Pad to 3 blank slots when fewer than 3 tasks returned
   while (tasks.length < 3) tasks.push(makeEmptyTask());
-  return { tasks: tasks.slice(0, 3), world: data.world ?? null, recurring: data.recurring ?? [], recurringError: !!data.recurring_error };
+  return { tasks: tasks.slice(0, 3), world: data.world ?? null, recurring: data.recurring ?? [], deadlines: data.deadlines ?? [], recurringError: !!data.recurring_error };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -254,6 +254,7 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   const [tasks,     setTasks]     = useState<Task[]>([]);
   const [world,     setWorld]     = useState<GameWorld | null>(null);
   const [recurring, setRecurring] = useState<RecurringTodayTask[]>([]);
+  const [deadlines, setDeadlines] = useState<DeadlineTodayTask[]>([]);
   const [recurringError, setRecurringError] = useState(false);
   const [recurringBusy, setRecurringBusy] = useState<string | null>(null);
   const [loading,   setLoading]   = useState(true);
@@ -269,7 +270,7 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
   function load() {
     setLoading(true);
     loadCheckinData()
-      .then(({ tasks, world, recurring, recurringError }) => { setTasks(tasks); setWorld(world); setRecurring(recurring); setRecurringError(recurringError); })
+      .then(({ tasks, world, recurring, deadlines, recurringError }) => { setTasks(tasks); setWorld(world); setRecurring(recurring); setDeadlines(deadlines); setRecurringError(recurringError); })
       .finally(() => setLoading(false));
   }
 
@@ -344,6 +345,20 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
       await updateTaskStatus(id, "done");
       setRecurring(prev => prev.filter(r => r.id !== id));
       showToast("✓ בוצע — המופע הבא נקבע");
+    } catch (e) {
+      showToast(`⚠️ ${(e as Error).message || "העדכון נכשל"}`);
+    } finally {
+      setRecurringBusy(null);
+    }
+  }
+
+  async function handleDeadlineDone(id: string) {
+    if (recurringBusy) return;
+    setRecurringBusy(id);
+    try {
+      await updateTaskStatus(id, "done");
+      setDeadlines(prev => prev.filter(d => d.id !== id));
+      showToast("✓ בוצע");
     } catch (e) {
       showToast(`⚠️ ${(e as Error).message || "העדכון נכשל"}`);
     } finally {
@@ -494,6 +509,40 @@ export function BossCheckin({ onBack, streak = 0 }: Props) {
                       padding: "5px 14px", borderRadius: 20, background: "#22c55e", color: "#000",
                       border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
                       opacity: recurringBusy === r.id ? 0.5 : 1,
+                    }}>✓ בוצע</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* משימות עם מועד אחרון — מודגשות ביום האחרון, "פספסת" אחרי הפקיעה */}
+        {deadlines.length > 0 && (
+          <div style={{ background: "#0d1117", border: "1.5px solid #1f2937", borderRadius: 14, padding: "14px 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: "#4b5563", fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>
+              ⏳ עם מועד אחרון ({deadlines.length})
+            </div>
+            {deadlines.map(d => {
+              const topic = TOPICS.find(tp => tp.label === d.topic);
+              const color = d.state === "missed" ? "#ef4444" : d.state === "last_day" ? "#f97316" : "#4b5563";
+              return (
+                <div key={d.id} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginTop: 6, borderRadius: 10,
+                  border: `1.5px solid ${d.state === "active" ? "#1f2937" : color}`,
+                  background: d.state === "last_day" ? "#1a0a00" : d.state === "missed" ? "#1a0505" : "transparent",
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#f9fafb" }}>{d.title}</div>
+                    <div style={{ fontSize: 10, color, marginTop: 2, fontWeight: d.state === "active" ? 400 : 700 }}>
+                      {topic ? `${topic.emoji} ${topic.label} · ` : ""}
+                      {d.state === "missed" ? `פספסת (${d.due_date})` : d.state === "last_day" ? "⏳ אחרון היום" : `עד ${d.due_date}`}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDeadlineDone(d.id)} disabled={recurringBusy !== null}
+                    style={{
+                      padding: "5px 14px", borderRadius: 20, background: "#22c55e", color: "#000",
+                      border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                      opacity: recurringBusy === d.id ? 0.5 : 1,
                     }}>✓ בוצע</button>
                 </div>
               );

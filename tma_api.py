@@ -3174,6 +3174,7 @@ def _process_owner_tasks(
             "actionable": True,
             "topic": fields.get(TaskFields.TOPIC, "") or "",
             "cadence": _task_cadence_label(fields),
+            "deadline": _deadline_state(fields, today),
         }
 
         # Categorize by due date
@@ -3271,6 +3272,44 @@ def _task_cadence_label(fields: dict) -> str:
     return task_writer.normalize_recurrence(fields.get(TaskFields.RECURRENCE)) or TaskRecurrence.ONE_TIME
 
 
+def _deadline_state(fields: dict, today: str) -> str | None:
+    """משימה עם מועד אחרון (Hard Deadline): active / last_day / missed.
+    None = משימה רגילה. תאריך יעד = היום האחרון (כולל)."""
+    if not fields.get(TaskFields.HARD_DEADLINE):
+        return None
+    due = (fields.get(TaskFields.DUE_DATE) or "")[:10]
+    if not due:
+        return "active"
+    if due < today:
+        return "missed"
+    return "last_day" if due == today else "active"
+
+
+def _deadlines_open(records: list, owner_record_id: str, today: str, *, claim_ownerless: bool) -> list[dict]:
+    """משימות עם מועד אחרון שעדיין פתוחות (פעילות, יום אחרון, או פספסת) —
+    המקור לבלוק "⏳ עם מועד אחרון" ב-Boss Daily."""
+    out = []
+    for rec in records:
+        f = record_fields(rec)
+        state = _deadline_state(f, today)
+        if not state or f.get(TaskFields.STATUS) == TaskStatus.DONE:
+            continue
+        if not data_access_policy.task_in_actor_queue(
+            f, data_access_policy.ActorScope(owner_record_id, "ok"), claim_ownerless=claim_ownerless,
+        ):
+            continue
+        out.append({
+            "id": record_id(rec) or "",
+            "title": f.get(TaskFields.NAME, ""),
+            "topic": f.get(TaskFields.TOPIC, "") or None,
+            "due_date": (f.get(TaskFields.DUE_DATE) or "")[:10],
+            "state": state,
+        })
+    order = {"missed": 0, "last_day": 1, "active": 2}
+    out.sort(key=lambda t: (order[t["state"]], t["due_date"], t["title"]))
+    return out
+
+
 def _recurring_due_today(records: list, owner_record_id: str, today: str, *, claim_ownerless: bool) -> list[dict]:
     """משימות חוזרות (Daily/Weekly/Monthly) של הבעלים שמועד המופע שלהן היום
     או עבר ועדיין לא בוצעו — המקור ל"משימות הקבועות" ב-Boss Daily."""
@@ -3319,6 +3358,7 @@ def owner_my_work_create(identity):
     if topic and topic not in TASK_TOPICS:
         return jsonify({"error": "invalid topic", "valid": list(TASK_TOPICS)}), 400
 
+    is_deadline = str(data.get("kind") or "").strip().lower() == "deadline"
     cadence = _TASK_CADENCE_INPUTS.get(str(data.get("cadence") or "once").strip().lower())
     if not cadence:
         return jsonify({"error": task_writer.INVALID_RECURRENCE_MESSAGE, "code": "invalid_cadence"}), 400
@@ -3326,6 +3366,8 @@ def owner_my_work_create(identity):
     fields: dict = {TaskFields.NAME: title, TaskFields.STATUS: TaskStatus.PENDING}
     if topic:
         fields[TaskFields.TOPIC] = topic
+    if is_deadline and cadence != TaskRecurrence.ONE_TIME:
+        return jsonify({"error": "משימה עם מועד אחרון אינה יכולה להיות חוזרת", "code": "deadline_recurring"}), 400
     if cadence != TaskRecurrence.ONE_TIME:
         fields[TaskFields.RECURRENCE] = cadence
     raw_due = data.get("due_date")
@@ -3334,6 +3376,12 @@ def owner_my_work_create(identity):
         return jsonify({"error": "invalid due_date (YYYY-MM-DD)"}), 400
     if due:
         fields[TaskFields.DUE_DATE] = due
+    if is_deadline:
+        if not due:
+            return jsonify({"error": "עד מתי? חובה לבחור מועד אחרון", "code": "deadline_missing"}), 400
+        if due < task_writer.local_today().isoformat():
+            return jsonify({"error": "המועד האחרון כבר עבר", "code": "deadline_past"}), 400
+        fields[TaskFields.HARD_DEADLINE] = True
     description = str(data.get("description") or "").strip()
     if description:
         fields[TaskFields.DESCRIPTION] = description
@@ -3376,6 +3424,41 @@ def owner_my_work_create(identity):
 _TASK_STATUS_ALIASES = {"done": TaskStatus.DONE}
 
 
+def _extend_deadline_task(task_id: str, raw_due, identity):
+    """"הארך" למשימה עם מועד אחרון: מזיז את תאריך היעד קדימה (אותה בדיקת
+    בעלות כמו סימון בוצע). משימה רגילה/חוזרת — לא מורחבת מכאן."""
+    from core import task_writer
+    new_due = task_writer.iso_date_or_none(raw_due)
+    if not new_due or new_due < task_writer.local_today().isoformat():
+        return jsonify({"error": "תאריך לא תקין (YYYY-MM-DD, לא בעבר)"}), 400
+    task_rec = _at_get_record(Tables.TASKS, task_id)
+    if not task_rec:
+        return jsonify({"error": "task not found"}), 404
+    profile_record_id = _resolve_profile_record_id(identity.user_id)
+    if not profile_record_id or not data_access_policy.task_in_actor_queue(
+        record_fields(task_rec),
+        data_access_policy.ActorScope(profile_record_id, "ok"),
+        claim_ownerless=data_access_policy.ownerless_task_claimable(identity),
+    ):
+        return jsonify({"error": "forbidden"}), 403
+    if not record_fields(task_rec).get(TaskFields.HARD_DEADLINE):
+        return jsonify({"error": "הארכה זמינה רק למשימה עם מועד אחרון"}), 409
+    _, response, status = _queue_or_owner_execute(
+        "tma_update_task_status",
+        {
+            "op": "patch",
+            "table": Tables.TASKS,
+            "record_id": task_id,
+            "fields": {TaskFields.DUE_DATE: new_due},
+            "audit_action": "task_deadline_extend",
+            "audit_details": f"{task_id} -> {new_due}",
+        },
+        identity,
+        f"Extend task deadline: {task_id} -> {new_due}",
+    )
+    return jsonify(response), status
+
+
 @tma_api.route("/api/tasks/<task_id>", methods=["PATCH"])
 @require_tma_auth
 def update_task_status(task_id, identity):
@@ -3393,6 +3476,8 @@ def update_task_status(task_id, identity):
         return jsonify({"error": "forbidden"}), 403
 
     data = request.get_json(force=True) or {}
+    if "due_date" in data and not data.get("status"):
+        return _extend_deadline_task(task_id, data.get("due_date"), identity)
     requested_status = str(data.get("status") or "").strip().lower()
     new_status = _TASK_STATUS_ALIASES.get(requested_status)
     if not new_status:
@@ -4855,14 +4940,15 @@ def game_checkin_get(identity):
     # משימות חוזרות של היום מטבלת Tasks — משקף, לא כותב ל-Daily_Checkin.
     # כשל בקריאה לא מפיל את המסך: recurring_error מסמן שהרשימה לא אומתה.
     recurring: list = []
+    deadlines: list = []
     recurring_error = False
     try:
         profile_id = _resolve_profile_record_id(identity.user_id)
         if profile_id:
-            recurring = _recurring_due_today(
-                _at_list(Tables.TASKS, max_records=100), profile_id, today_str,
-                claim_ownerless=data_access_policy.ownerless_task_claimable(identity),
-            )
+            task_recs = _at_list(Tables.TASKS, max_records=100)
+            claim = data_access_policy.ownerless_task_claimable(identity)
+            recurring = _recurring_due_today(task_recs, profile_id, today_str, claim_ownerless=claim)
+            deadlines = _deadlines_open(task_recs, profile_id, today_str, claim_ownerless=claim)
     except Exception as e:
         logger.error(f"[checkin] recurring tasks load failed: {e}")
         recurring_error = True
@@ -4871,6 +4957,7 @@ def game_checkin_get(identity):
         "date":        today_str,
         "tasks":       tasks,
         "recurring":   recurring,
+        "deadlines":   deadlines,
         "recurring_error": recurring_error,
         "total_xp":    int(cf.get(DailyCheckinFields.TOTAL_XP, 0) or 0),
         "updated_at":  cf.get(DailyCheckinFields.UPDATED_AT, ""),

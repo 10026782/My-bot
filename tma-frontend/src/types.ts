@@ -249,6 +249,7 @@ export interface GameCheckin {
   date: string;
   tasks: CheckinTask[];
   recurring?: RecurringTodayTask[];
+  deadlines?: DeadlineTodayTask[];
   recurring_error?: boolean;
   total_xp: number;
   updated_at: string;
@@ -410,6 +411,18 @@ export interface TaskWorkItem {
   actionable: boolean;
   topic?: string;
   cadence?: string;
+  /** מועד אחרון: active | last_day | missed (null = משימה רגילה) */
+  deadline?: DeadlineState | null;
+}
+
+export type DeadlineState = "active" | "last_day" | "missed";
+
+export interface DeadlineTodayTask {
+  id: string;
+  title: string;
+  topic: string | null;
+  due_date: string;
+  state: DeadlineState;
 }
 
 export type TaskCadence = "once" | "daily" | "weekly" | "monthly";
@@ -418,6 +431,7 @@ export interface NewTaskInput {
   title: string;
   topic?: string;
   cadence: TaskCadence;
+  kind?: "deadline";
   due_date?: string;
 }
 
