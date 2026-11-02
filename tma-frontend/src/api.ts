@@ -1,4 +1,4 @@
-import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
+import type { FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, NewTaskInput, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -229,6 +229,15 @@ export async function updateTaskStatus(taskId: string, status: "done"): Promise<
     body: JSON.stringify({ status }),
   });
   if (!r.ok) await throwApiError(r, `Task update failed (${r.status})`);
+}
+
+export async function createOwnerTask(input: NewTaskInput): Promise<void> {
+  const r = await fetch(`${BASE}/api/owner/my-work`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!r.ok) await throwApiError(r, `Task create failed (${r.status})`);
 }
 
 export async function emergencyStop(action: string): Promise<void> {

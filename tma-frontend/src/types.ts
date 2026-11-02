@@ -235,8 +235,8 @@ export interface CheckinTask {
   id: string;
   title: string;
   topic: string | null;
-  urgency: string | null;
-  source: string | null;
+  urgency?: string | null; // legacy — לא בשימוש (נשארה רק חלוקת Topic)
+  source?: string | null; // legacy — לא בשימוש
   required: boolean;
   xp: number;
   status: "todo" | "done";
@@ -248,6 +248,8 @@ export interface CheckinTask {
 export interface GameCheckin {
   date: string;
   tasks: CheckinTask[];
+  recurring?: RecurringTodayTask[];
+  recurring_error?: boolean;
   total_xp: number;
   updated_at: string;
   updated_by: string;
@@ -406,6 +408,26 @@ export interface TaskWorkItem {
   overdue: boolean;
   destination: string;
   actionable: boolean;
+  topic?: string;
+  cadence?: string;
+}
+
+export type TaskCadence = "once" | "daily" | "weekly" | "monthly";
+
+export interface NewTaskInput {
+  title: string;
+  topic?: string;
+  cadence: TaskCadence;
+  due_date?: string;
+}
+
+export interface RecurringTodayTask {
+  id: string;
+  title: string;
+  topic: string | null;
+  cadence: string;
+  due_date: string;
+  overdue: boolean;
 }
 
 export interface MyWorkResponse {
@@ -533,7 +555,7 @@ export interface FccRecentIncome {
   id: string | null;
   date: string;
   goal_id: string;
-  source: string | null;
+  source?: string | null; // legacy — לא בשימוש
   kind: "one_time" | "direct_cost";
   amount: number;
   note: string | null;

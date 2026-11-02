@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { fetchMyWork, updateTaskStatus } from "../api";
-import type { MyWorkResponse, TaskWorkItem } from "../types";
+import { useEffect, useState, type CSSProperties } from "react";
+import { createOwnerTask, fetchMyWork, updateTaskStatus } from "../api";
+import type { MyWorkResponse, TaskCadence, TaskWorkItem } from "../types";
 import { PageHeader } from "./ui/PageHeader";
 import { ScreenState } from "./ui/ScreenState";
 import { StatusBadge } from "./ui/StatusBadge";
@@ -14,6 +14,131 @@ type State =
   | { status: "loading" }
   | { status: "ok"; data: MyWorkResponse }
   | { status: "error"; code?: number; message: string };
+
+// החלוקה היחידה: Topic (אפשרויות קיימות בשדה Topic של Tasks).
+const TOPICS = [
+  { label: "שיווק", emoji: "📣" },
+  { label: "מכירות", emoji: "🤝" },
+  { label: "שירות", emoji: "💬" },
+  { label: "תפעול", emoji: "⚙️" },
+  { label: "כספים", emoji: "💰" },
+  { label: "אדמיניסטרציה", emoji: "📋" },
+  { label: "מערכת", emoji: "🖥️" },
+  { label: "למידה", emoji: "📚" },
+] as const;
+
+const CADENCES: { id: TaskCadence; label: string }[] = [
+  { id: "once", label: "חד-פעמית" },
+  { id: "daily", label: "יומית" },
+  { id: "weekly", label: "שבועית" },
+  { id: "monthly", label: "חודשית" },
+];
+
+const CADENCE_LABEL: Record<string, string> = {
+  Daily: "🔁 יומית",
+  Weekly: "🔁 שבועית",
+  Monthly: "🔁 חודשית",
+};
+
+function NewTaskForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [topic, setTopic] = useState<string | null>(null);
+  const [cadence, setCadence] = useState<TaskCadence>("once");
+  const [dueDate, setDueDate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // שבועית/חודשית דורשות תאריך התחלה (עוגן); יומית ברירת מחדל = היום.
+  const needsDate = cadence === "weekly" || cadence === "monthly";
+  const canSubmit = !!title.trim() && (!needsDate || !!dueDate) && !saving;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    setError(null);
+    createOwnerTask({
+      title: title.trim(),
+      topic: topic ?? undefined,
+      cadence,
+      due_date: dueDate || undefined,
+    })
+      .then(() => {
+        setTitle("");
+        setTopic(null);
+        setCadence("once");
+        setDueDate("");
+        setOpen(false);
+        onCreated();
+      })
+      .catch((e: unknown) => setError((e as Error).message || "היצירה נכשלה"))
+      .finally(() => setSaving(false));
+  };
+
+  if (!open) {
+    return (
+      <button type="button" className="boss-button boss-button--primary boss-bubble--action" onClick={() => setOpen(true)}>
+        ＋ משימה חדשה
+      </button>
+    );
+  }
+
+  const chip = (active: boolean): CSSProperties => ({
+    padding: "4px 10px",
+    borderRadius: 20,
+    fontSize: 12,
+    fontWeight: 600,
+    border: `1.5px solid ${active ? "#22c55e" : "#374151"}`,
+    background: active ? "#052e16" : "transparent",
+    color: active ? "#22c55e" : "#9ca3af",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  });
+
+  return (
+    <Surface className="my-work-new">
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="מה צריך לעשות?"
+        aria-label="כותרת המשימה"
+        style={{ width: "100%", padding: 10, borderRadius: 10, border: "1.5px solid #374151", background: "transparent", color: "inherit", fontSize: 14, fontFamily: "inherit", direction: "rtl", marginBottom: 10 }}
+      />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+        {TOPICS.map((t) => (
+          <button key={t.label} type="button" style={chip(topic === t.label)} onClick={() => setTopic(topic === t.label ? null : t.label)}>
+            {t.emoji} {t.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+        {CADENCES.map((c) => (
+          <button key={c.id} type="button" style={chip(cadence === c.id)} onClick={() => setCadence(c.id)}>
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <label style={{ display: "block", fontSize: 12, marginBottom: 10 }}>
+        {needsDate ? "תאריך התחלה (חובה)" : cadence === "daily" ? "מתחילה מ- (ברירת מחדל: היום)" : "תאריך יעד (אופציונלי)"}
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          style={{ display: "block", marginTop: 4, padding: 8, borderRadius: 8, border: "1.5px solid #374151", background: "transparent", color: "inherit", fontFamily: "inherit" }}
+        />
+      </label>
+      {error && <p className="my-work-card__error">⚠️ {error}</p>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button type="button" className="boss-button boss-button--primary boss-bubble--action" disabled={!canSubmit} onClick={submit}>
+          {saving ? "שומר…" : "הוסף משימה"}
+        </button>
+        <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={() => setOpen(false)}>
+          ביטול
+        </button>
+      </div>
+    </Surface>
+  );
+}
 
 function TaskCard({
   task,
@@ -30,6 +155,8 @@ function TaskCard({
     <div className={`my-work-card${task.overdue ? " my-work-card--overdue" : ""}`}>
       <div className="my-work-card__topline">
         {task.overdue && <StatusBadge tone="danger">דחוף</StatusBadge>}
+        {task.topic && <StatusBadge tone="neutral">{task.topic}</StatusBadge>}
+        {task.cadence && CADENCE_LABEL[task.cadence] && <StatusBadge tone="neutral">{CADENCE_LABEL[task.cadence]}</StatusBadge>}
         {task.domain && <StatusBadge tone="neutral">{task.domain}</StatusBadge>}
       </div>
       <h3>{task.title}</h3>
@@ -150,6 +277,7 @@ export function MyWork({ onBack }: Props) {
         />
 
         <div className="my-work-stack">
+          <NewTaskForm onCreated={load} />
           <div className="my-work-summary">
             <Surface className="my-work-stat">
               <p className="my-work-stat__value my-work-stat__value--urgent">{immediateCount}</p>
