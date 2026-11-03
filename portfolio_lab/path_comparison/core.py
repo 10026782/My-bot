@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from datetime import date
 
 from .. import tax_assumptions
@@ -22,6 +23,8 @@ TAX_BASIS = "after_latent_tax"                # the one basis every comparison i
 MOVEMENT_KINDS = ("new_money", "liability", "equity_conversion", "claim_realization", "no_movement")      # no_movement: the "do nothing / wait" reference path
 CERTAINTIES = ("confirmed", "expected", "uncertain", "unknown")
 PURPOSES = ("fund_amount", "reduce_debt")
+_RECOMMENDATION_RE = re.compile(r"\b(best|recommend\w*|cheapest|optimal|better|should|top pick)\b|מומלץ|כדאי|הטוב ביותר|הכי טוב|עדיף|הזול ביותר|האופטימלי|הכי משתלם", re.IGNORECASE)
+MAX_TEXT = 80
 FORBIDDEN_KEYS = ("score", "rank", "ranking", "best", "recommended", "recommendation", "better", "cheapest", "optimal", "total_available")
 
 CAVEATS = (
@@ -210,6 +213,8 @@ def total_or_none(parts: list) -> float | None:
 
 def finalize(result: dict) -> dict:
     """מסמן הסתייגויות קבועות לפי מה שיש בתוצאה, מעגל לאגורה, ומאמת מבנה. מחזיר את אותה תוצאה."""
+    if result["missing_inputs"] and result["certainty"] in ("confirmed", "expected"):
+        result["certainty"] = "unknown"                               # חסר ≠ צפוי
     if any(a.get("source") == "default" for a in result["assumptions"]):
         # נתון שלא הוזן חושב בברירת מחדל — המספר אינו "צפוי" עד שהבעלים מזין אותו (חסר ≠ אפס)
         if result["certainty"] in ("confirmed", "expected"):
@@ -256,6 +261,17 @@ def validate_path_result(result) -> dict:
     bad = sorted({k for k in _all_keys(result) if k.lower() in FORBIDDEN_KEYS})
     if bad:
         raise ValueError(f"forbidden fields in a path result: {', '.join(bad)}")
+    for name in ("path_id", "label"):
+        text = result[name]
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
+            raise ValueError(f"{name} must be a short non-empty text")
+        if _RECOMMENDATION_RE.search(text):
+            raise ValueError(f"{name} reads as a recommendation; labels are neutral names")
+    for value in _all_numbers(result):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("a result holds a non-finite number")
+    if result["missing_inputs"] and result["certainty"] in ("confirmed", "expected"):
+        raise ValueError("a result with a missing input cannot be expected or confirmed")
     if result["movement_kind"] not in MOVEMENT_KINDS or result["certainty"] not in CERTAINTIES or result["purpose"] not in PURPOSES:
         raise ValueError("unknown movement_kind / certainty / purpose")
     if set(result["measures"]) != {"liquidity", "net_worth", "economic_cost"}:
@@ -292,6 +308,17 @@ def validate_path_result(result) -> dict:
         if set(flow) != {"date", "amount", "kind"}:
             raise ValueError("cash_flows entries are {date, amount, kind}")
     return result
+
+
+def _all_numbers(node):
+    if isinstance(node, dict):
+        for v in node.values():
+            yield from _all_numbers(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _all_numbers(v)
+    else:
+        yield node
 
 
 def _all_keys(node):

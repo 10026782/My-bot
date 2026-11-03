@@ -8,8 +8,9 @@ from __future__ import annotations
 from ..models import ENGINE_VERSION
 from . import core, liquid_paths, loan_paths
 
-COMPARATOR_VERSION = "comparator-3"
+COMPARATOR_VERSION = "comparator-4"
 _SCAN_STEPS = 24
+MAX_PATHS = 12
 _MODULES = {t: loan_paths for t in loan_paths.TYPES} | {t: liquid_paths for t in liquid_paths.TYPES}
 GAP_FIELDS = (
     ("cash_at_compare_date", "result.cash_at_compare_date"),
@@ -39,6 +40,8 @@ def describe_inputs(type_: str) -> dict:
 def _basis_check(frame: dict, results: list) -> None:
     if not results:
         raise ValueError("at least one path result is required")
+    if len(results) > MAX_PATHS:
+        raise ValueError(f"at most {MAX_PATHS} paths per comparison")
     seen = set()
     for r in results:
         core.validate_path_result(r)
