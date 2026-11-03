@@ -26,9 +26,10 @@ from core.financial_control import card_import as ci
 SOURCE_BANK, SOURCE_CARD = "import:bank", "import:card"
 HOUSEHOLD, ONE_TIME = "household_expense", "one_time"
 VERIFICATION = "statement"
+LOANS = "loans"                  # a loan repayment is never imported: the loans tab holds the exact amounts (the owner's decision 02/11/2026)
 INSTALMENTS_NOTE = "תשלומים"       # the Note of an imported purchase paid in instalments (the consumption tab shows them apart)
 SKIP_REASONS = ("already_imported", "card_settlement", "cash_withdrawal", "credit_service", "adjustment", "transfer", "reversal", "ignore", "needs_review",
-                "needs_classification", "no_category", "no_source")
+                "needs_classification", "no_category", "no_source", "loan")
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,8 @@ def plan_bank(items: list[bi.Classified], existing_keys: set[str] = frozenset(),
         if bi.importable(c):
             if kind == bi.INCOME_APPROVED:
                 plan.events.append(PlannedEvent(r.key, r.date, ONE_TIME, r.amount, None, c.category, r.description, SOURCE_BANK, _month(r.date)))
+            elif c.category == LOANS:                                     # classified as a loan: recognised, but neither read nor saved (the loans tab is exact)
+                plan.skip("loan", r.amount)
             else:
                 sign = -1.0 if kind == bi.REFUND else 1.0
                 plan.events.append(PlannedEvent(r.key, r.date, HOUSEHOLD, sign * r.amount, c.category, None, r.description, SOURCE_BANK, _month(r.date)))
@@ -157,7 +160,9 @@ def plan_card(items: list[ci.ClassifiedCharge], existing_keys: set[str] = frozen
         if x.key in existing_keys:
             plan.skip("already_imported", abs(x.charge))
             continue
-        if ci.importable(c):
+        if ci.importable(c) and c.category == LOANS:                      # a card loan / a purchase classified as a loan: not imported (see the loans tab)
+            plan.skip("loan", abs(x.charge))
+        elif ci.importable(c):
             day = _card_date(x)
             plan.events.append(PlannedEvent(x.key, day, HOUSEHOLD, x.charge, c.category, None, x.merchant, SOURCE_CARD, _month(day), x.billing_date, _is_instalments(x)))
         elif c.kind == ci.CASH:

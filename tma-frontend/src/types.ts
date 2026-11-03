@@ -1207,6 +1207,8 @@ export interface FccCashflow {
   };
   thresholds: Record<string, number>;
   loans_payments_known: boolean;
+  loans_undated?: string[];           // loans with no start date (counted in the current month only)
+  loans_closed_undated?: string[];    // closed loans with no end date (not counted)
   to_classify?: { total: number; total_amount: number } | null;
   rules_to_classify?: { total: number } | null;                      // descriptions waiting for a category (null = could not be read)       // imported expenses waiting for a category (null = could not be read)
   as_of: string;

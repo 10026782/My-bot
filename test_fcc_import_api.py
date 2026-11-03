@@ -253,11 +253,11 @@ def _restore_create():
 def test_a_card_statement_is_imported_with_the_billing_date_and_never_the_cash_or_rolling_credit(monkeypatch):
     c = client(monkeypatch)
     pre = post(c, "/api/fcc/import/preview", kind="card").get_json()
-    assert pre["parse"]["ok"] and pre["plan"]["events"] == 5 and pre["plan"]["uncategorized"]["count"] == 1 and pre["plan"]["skipped"]["cash_withdrawal"]["count"] == 1 and pre["plan"]["skipped"]["credit_service"]["count"] == 2
+    assert pre["parse"]["ok"] and pre["plan"]["events"] == 3 and pre["plan"]["skipped"]["loan"]["count"] == 2 and pre["plan"]["uncategorized"]["count"] == 1 and pre["plan"]["skipped"]["cash_withdrawal"]["count"] == 1 and pre["plan"]["skipped"]["credit_service"]["count"] == 2
     run_all(c, "card", pre["digest"])
     events = [r["fields"] for t, r in CREATED if t == Tables.FIN_EVENTS]
-    assert {f[EF.SOURCE] for f in events} == {"import:card"} and {f[EF.OCCURRED_AT] for f in events} >= {"2026-10-10", "2026-09-27"}
-    assert sum(f[EF.AMOUNT] for f in events if f.get(EF.EXPENSE_CATEGORY) == "loans") == 667.07
+    assert {f[EF.SOURCE] for f in events} == {"import:card"} and {f[EF.OCCURRED_AT] for f in events} >= {"2026-09-27"}
+    assert not any(f.get(EF.EXPENSE_CATEGORY) == "loans" for f in events)                    # loans are never imported (the loans tab is exact)
 
 
 # ── the executor and its allow-list ─────────────────────────────────────────────────────────────────────────────

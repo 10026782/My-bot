@@ -98,8 +98,8 @@ def card_items(rules=None):
 def test_card_lines_loans_and_fees_count_on_the_billing_date_and_cash_and_rolling_credit_are_never_written():
     plan = ip.plan_card(card_items())
     got = {e.label: e for e in plan.events}
-    assert set(got) == {"הלוואת אקספרס", "הלוואה מחוץ למסגרת", "כביש חוצה צפון", "ביטוח ישיר חיים", "תוכנה בע\"מ"}
-    assert got["הלוואת אקספרס"].date == date(2026, 10, 10) and got["הלוואת אקספרס"].category == "loans" and got["הלוואת אקספרס"].amount == 52.84      # not March 2026
+    assert set(got) == {"כביש חוצה צפון", "ביטוח ישיר חיים", "תוכנה בע\"מ"}                                                                     # the two loan lines are recognised but NOT imported
+    assert plan.skipped["loan"]["count"] == 2 and plan.skipped["loan"]["total"] > 52 and not any(e.category == "loans" for e in plan.events)
     assert got["כביש חוצה צפון"].date == date(2026, 9, 27) and got["כביש חוצה צפון"].category == "transport"                                        # a purchase: its own date
     assert plan.skipped["cash_withdrawal"] == {"count": 1, "total": 400.0} and plan.skipped["credit_service"] == {"count": 2, "total": 3761.86}
     assert got["תוכנה בע\"מ"].category is None and plan.pending_rules == []                                  # a purchase nobody classified: written "לא מסווג"

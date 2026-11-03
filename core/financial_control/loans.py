@@ -388,3 +388,38 @@ def scenarios(records: list[dict], today: date, budget: float) -> dict:
     """Budget simulator over the owner's active loans (read-only; nothing is executed or written)."""
     items = [loan_item(r, today) for r in records]
     return payoff.scenarios(payoff.metrics([i for i in items if i["active"] and i["direction"] == OWED_BY_ME]), budget)
+
+
+def monthly_schedule(records: list[dict], windows: list[tuple[str, date, date]], today: date) -> tuple[dict[str, float], list[str], list[str]]:
+    """What the owner's own loans cost per month, from the loans tab itself (never from the statements): a loan counts in every month from its START date
+    to its END date (the stated end, else start + term; an ACTIVE loan with neither runs to today), at its current monthly payment. A loan closed early
+    (Paid Off) stops at its End Date — the closing writes it. A loan with no start date is counted in the current month only (when active) and named in the
+    second list; a closed loan with no end date is not counted and is named in the third (never a guess). Debts owed TO the owner are not a cost."""
+    totals = {key: 0.0 for key, _s, _e in windows}
+    undated: list[str] = []
+    closed_undated: list[str] = []
+    for rec in records:
+        f = rec.get("fields") or {}
+        pay = _num(f.get(LF.MONTHLY_PAYMENT))
+        if not pay or pay <= 0 or str(_sel(f.get(LF.DIRECTION)) or "").strip() == DIRECTION_TO_ME_STORED:
+            continue
+        name = str(f.get(LF.NAME) or "הלוואה")
+        start, end, closed = _iso_date(f.get(LF.START_DATE)), _iso_date(f.get(LF.END_DATE)), not is_active(f)
+        term = _num(f.get(LF.TERM_MONTHS))
+        if start and end is None and term and not closed:
+            idx = start.year * 12 + start.month - 1 + max(int(term) - 1, 0)          # the last payment falls in the (term-1)th month after the first
+            end = date(idx // 12, idx % 12 + 1, min(start.day, 28))
+        if start is None:
+            undated.append(name)
+        if closed and end is None:
+            closed_undated.append(name)
+            continue
+        for key, ms, me in windows:
+            if start is None:
+                counted = ms <= today <= me and not closed
+            else:
+                counted = start <= me and (end is None or end >= ms)
+            if counted:
+                totals[key] += pay
+    return {k: round(v, 2) for k, v in totals.items()}, undated, closed_undated
+
