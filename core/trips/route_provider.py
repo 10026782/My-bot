@@ -1,7 +1,8 @@
 """חוזה RouteProvider של Smart Trips: מקור אחיד לק"מ ולדקות של רגל נסיעה.
 
-שלושה מצבים (SMART_TRIPS_P0_CALCULATION_CONTRACT.md §14.4/§15.5):
-  LOCAL_ROUTE   — ניתוב מקומי (עתידי; אין מימוש חי)
+ארבעה מצבים (SMART_TRIPS_P0_CALCULATION_CONTRACT.md §14.4/§15.5/§17):
+  ROAD_ROUTE    — כבישים ללא פקקים (OpenRouteService; דורש מפתח, ללא מפתח "לא מוגדר")
+  LOCAL_ROUTE   — ניתוב מקומי עצמאי (עתידי; אין מימוש חי)
   TRAFFIC_AWARE — Google, רק בפעולה מפורשת של המשתמש (עתידי; stub כבוי)
   MANUAL        — המשתמש מקליד ק"מ ודקות
 
@@ -19,7 +20,8 @@ from typing import Any, Protocol
 
 
 class RouteMode(str, Enum):
-    LOCAL_ROUTE = "LOCAL_ROUTE"
+    ROAD_ROUTE = "ROAD_ROUTE"        # כבישים ללא פקקים (ספק מנוהל או עצמאי), זרימה חופשית
+    LOCAL_ROUTE = "LOCAL_ROUTE"      # שמור לניתוב עצמאי עתידי
     TRAFFIC_AWARE = "TRAFFIC_AWARE"
     MANUAL = "MANUAL"
 
@@ -91,6 +93,9 @@ class ProviderHealth:
 
 
 class RouteProvider(Protocol):
+    """ספק רגלים. מתודה אופציונלית (duck-typed, לא חלק מהפרוטוקול): `prefetch(requests: list[LegRequest]) -> None`
+    שמאפשרת לספק לאחד את כל הרגליים של בדיקה אחת לבקשה אחת. `compare`/`order_stops` קוראים לה אם קיימת."""
+
     mode: RouteMode
     requests_used: int
 

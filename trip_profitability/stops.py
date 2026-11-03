@@ -14,6 +14,7 @@ from decimal import Decimal
 from core.trips.provider_factory import select_provider
 from core.trips.providers.local_route import LocalRouteProvider
 from core.trips.providers.manual import ManualProvider
+from core.trips.providers.ors import OrsProvider
 from core.trips.providers.traffic_aware import TrafficAwareProvider
 from core.trips.route_provider import MatrixRequest, RouteProvider
 
@@ -157,7 +158,8 @@ def order_stops(params, *, provider: RouteProvider | None = None) -> dict:
     end_node = n + 1 if parsed["end"] else None
     if provider is None:
         manual = ManualProvider(matrix=params.get("manual_matrix") if params.get("manual_matrix") is not None else None)
-        provider = select_provider(parsed["mode"], manual=manual, local=LocalRouteProvider(),
+        mode = parsed["mode"] or ("MANUAL" if params.get("manual_matrix") is not None else None)
+        provider = select_provider(mode, manual=manual, road=OrsProvider.from_env(), local=LocalRouteProvider(),
                                    traffic=TrafficAwareProvider(), traffic_confirm=parsed["traffic_confirm"])
     result = provider.matrix(MatrixRequest(nodes, parsed["departure"]))
     base = {"engine_version": ENGINE_VERSION, "timezone": "Asia/Jerusalem",

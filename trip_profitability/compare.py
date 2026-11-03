@@ -12,6 +12,7 @@ from decimal import Decimal
 from core.trips.provider_factory import select_provider
 from core.trips.providers.local_route import LocalRouteProvider
 from core.trips.providers.manual import ManualProvider
+from core.trips.providers.ors import OrsProvider
 from core.trips.providers.traffic_aware import TrafficAwareProvider
 from core.trips.route_provider import LegRequest, LegStatus, RouteProvider
 
@@ -74,6 +75,17 @@ def _steps(kind: str, offer: OfferInput, req: CompareRequest):
     if ret.destination is not None:
         steps.append(("to_final_after_return", ret.destination, req.final, False, ZERO))
     return steps, wait
+
+
+def _all_leg_requests(req: CompareRequest) -> list[LegRequest]:
+    """כל הרגליים של כל ההצעות וכל התרחישים, כדי שספק מנוהל יאחד אותן לבקשה אחת (prefetch). ללא תוצאות ספק."""
+    requests = []
+    for offer in req.offers:
+        kinds = (["empty"] if offer.p < 1 or offer.has_return_data else []) + (["return"] if offer.has_return_data else [])
+        for kind in dict.fromkeys(kinds):
+            for key, origin, dest, _loaded, _delay in _steps(kind, offer, req)[0]:
+                requests.append(LegRequest(origin, dest, req.departure, key, offer.id))
+    return requests
 
 
 def _scenario(kind: str, offer: OfferInput, req: CompareRequest, provider: RouteProvider) -> eco.ScenarioCalc:
@@ -217,8 +229,14 @@ def compare(params, *, provider: RouteProvider | None = None, now: datetime | No
     if provider is None:
         manual = ManualProvider(legs={o["id"].strip(): o["manual_legs"] for o in params["offers"]
                                       if isinstance(o.get("id"), str) and o.get("manual_legs") is not None})
-        provider = select_provider(req.routing_mode, manual=manual, local=LocalRouteProvider(),
+        has_manual_legs = any(isinstance(o, dict) and o.get("manual_legs") is not None for o in params["offers"])
+        # רגלים שהוזנו ידנית גוברות על ספק אוטומטי, אלא אם המשתמש ביקש מצב ספציפי
+        mode = req.routing_mode or ("MANUAL" if has_manual_legs else None)
+        provider = select_provider(mode, manual=manual, road=OrsProvider.from_env(), local=LocalRouteProvider(),
                                    traffic=TrafficAwareProvider(), traffic_confirm=req.traffic_confirm)
+    prefetch = getattr(provider, "prefetch", None)
+    if prefetch is not None:
+        prefetch(_all_leg_requests(req))
     results = [_evaluate(offer, req, provider) for offer in req.offers]
     complete = [r for r in results if r["complete"]]
     by_id = {r["id"]: r for r in complete}
