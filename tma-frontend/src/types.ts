@@ -637,6 +637,10 @@ export interface FccLoan {
   future_cost_exact: boolean;
   monthly_cash_freed_if_closed: number | null;
   annual_interest_cost: number | null;
+  /** This month's instalment split (balance × rate / 12 = interest; the rest = principal); null = an input is missing. */
+  interest_this_month?: number | null;
+  principal_this_month?: number | null;
+  balance_after_this_month?: number | null;
   missing: string[];
 }
 
@@ -711,6 +715,10 @@ export interface FccLoans {
     weighted_average_interest_rate: number | null;
     total_estimated_future_cost: number | null;
     total_monthly_cash_freed_if_all_closed: number | null;
+    interest_this_month?: number | null;
+    principal_this_month?: number | null;
+    balance_after_this_month?: number | null;
+    split_coverage?: { known: number; of: number };
     coverage: { original_amount: number; early_closure_balance: number; monthly_payment: number; future_cost: number; interest_rate: number };
     incomplete_count: number;
     unknown_status_count: number;

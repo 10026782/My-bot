@@ -69,6 +69,32 @@ export function loanHeaderCards(loans: FccLoans): LoanHeaderCard[] {
   ];
 }
 
+export const SPLIT_NOTE = "פירוק התשלום מחושב מהיתרה, הריבית וההחזר שרשומים בטבלת Loans (ריבית = יתרה × ריבית ÷ 12; השאר קרן). במשכנתאות צמודות או בריבית משתנה זו הערכה.";
+
+export interface SplitModel { lines: LoanRow[]; hint?: string }
+
+/** Whole-portfolio split of this month's payments into interest and principal, plus the balance after the month. */
+export function splitSummaryModel(loans: FccLoans): SplitModel | null {
+  const s = loans.summary;
+  if (s.principal_this_month == null && s.interest_this_month == null) return null;
+  const c = s.split_coverage;
+  return {
+    lines: [
+      { label: "ריבית החודש", value: val(s.interest_this_month) },
+      { label: "קרן החודש", value: val(s.principal_this_month) },
+      { label: "יתרת חוב בסוף החודש", value: val(s.balance_after_this_month) },
+    ],
+    hint: c && c.known < c.of ? `מבוסס על ${c.known} מתוך ${c.of} הלוואות (בשאר חסר ריבית, יתרה או החזר)` : undefined,
+  };
+}
+
+/** One loan's split line: "ריבית ₪581 · קרן ₪2,235 · יתרה בסוף החודש ₪113,941"; null when it cannot be computed. */
+export function splitLine(l: FccLoan): string | null {
+  if (l.interest_this_month == null || l.principal_this_month == null) return null;
+  const after = l.balance_after_this_month == null ? "" : ` · יתרה בסוף החודש ${money(l.balance_after_this_month)}`;
+  return `ריבית ${money(l.interest_this_month)} · קרן ${money(l.principal_this_month)}${after}`;
+}
+
 export const owedToMe = (l: { direction?: string }): boolean => l.direction === "owed_to_me";
 
 export function filterLoans(items: FccLoan[], filter: LoanFilter): FccLoan[] {
@@ -94,6 +120,7 @@ export interface LoanCardModel {
   keyRows: LoanRow[];                  // the three headline figures: closure balance, monthly payment, rate
   metaRows: LoanRow[];                 // payments remaining, end date
   rows: LoanRow[];                     // keyRows + metaRows
+  splitLine: string | null;            // this month's interest / principal / balance-after; null = not computable
   freedLine: string;
   freedKnown: boolean;                 // true -> emphasised line; false -> plain "unknown" line
   incomplete: boolean;
@@ -129,6 +156,7 @@ export function loanCardModel(l: FccLoan): LoanCardModel {
     tags,
     assetLine: l.related_asset ? `נכס: ${l.related_asset_name || "נכס מקושר"}` : null,
     keyRows, metaRows, rows: [...keyRows, ...metaRows],
+    splitLine: splitLine(l),
     freedLine: freed == null ? `החזר חודשי: ${UNKNOWN}` : `בסגירה משתחררים ${money(freed)} לחודש`,
     freedKnown: freed != null,
     incomplete: isPartial(l),

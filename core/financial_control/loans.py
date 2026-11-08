@@ -81,6 +81,20 @@ def status_unknown(fields: dict) -> bool:
     return not fields.get(LF.ACTIVE) and is_active(fields)
 
 
+def payment_split(balance, rate, pay, left=None) -> dict | None:
+    """One instalment split into interest and principal from the stored balance, rate and payment (no guessing: any missing
+    input, or a payment that does not cover the interest, gives None). The last payment (1 left) clears the balance."""
+    if balance is None or rate is None or pay is None or pay <= 0 or balance <= 0:
+        return None
+    interest = balance * rate / 1200.0
+    if pay <= interest:
+        return None
+    principal = min(pay - interest, balance)
+    if left is not None and left == 1:
+        principal = balance
+    return {"interest": round(interest, 2), "principal": round(principal, 2), "balance_after": round(max(balance - principal, 0.0), 2)}
+
+
 def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = None) -> dict:
     f = record.get("fields") or {}
     loan_type = _sel(f.get(LF.LOAN_TYPE))
@@ -101,6 +115,8 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     if future_cost is not None and future_cost < 0:
         future_cost = None                      # inconsistent inputs: show unknown rather than a negative "cost"
     annual_interest = round(closure * rate / 100.0, 2) if closure is not None and rate is not None else None   # SSOT balance only
+
+    split = payment_split(closure, rate, monthly, left)
 
     missing = [name for name, v in (("early_closure_balance", closure), ("interest_rate", rate),
                                     ("monthly_payment", monthly), ("months_remaining", months)) if v is None]
@@ -133,6 +149,10 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "future_cost_exact": future_cost is not None and fee_known,
         "monthly_cash_freed_if_closed": monthly,
         "annual_interest_cost": annual_interest,       # simple burden metric: balance × rate (₪/year)
+        # this month's payment split (balance × rate / 12 is the interest, the rest is principal); None = an input is missing
+        "interest_this_month": split["interest"] if split else None,
+        "principal_this_month": split["principal"] if split else None,
+        "balance_after_this_month": split["balance_after"] if split else None,
         "missing": missing,
     }
 
@@ -177,6 +197,11 @@ def summarize(items: list[dict]) -> dict:
     total_b = sum(b for _, b in weighted)
     avg_rate = round(sum(r * b for r, b in weighted) / total_b, 2) if total_b else None
 
+    own = [i for i in active if i["direction"] == OWED_BY_ME]
+    interest_m, interest_n = _sum(i["interest_this_month"] for i in own)
+    principal_m, principal_n = _sum(i["principal_this_month"] for i in own)
+    after_m, _ = _sum(i["balance_after_this_month"] for i in own if i["principal_this_month"] is not None)
+
     by_type: dict[str, list[dict]] = {}
     by_asset: dict[str, list[dict]] = {}
     for i in active:
@@ -191,6 +216,10 @@ def summarize(items: list[dict]) -> dict:
         "weighted_average_interest_rate": avg_rate,
         "total_estimated_future_cost": cost,
         "total_monthly_cash_freed_if_all_closed": pay,
+        "interest_this_month": interest_m,
+        "principal_this_month": principal_m,
+        "balance_after_this_month": after_m,
+        "split_coverage": {"known": principal_n, "of": len(own)},
         # how many loans each figure is actually based on (a total over 4 of 9 loans must not look complete)
         "coverage": {"original_amount": orig_n, "early_closure_balance": bal_n, "monthly_payment": pay_n,
                      "future_cost": cost_n, "interest_rate": len(weighted)},
