@@ -56,7 +56,9 @@ export function rowModel(r: FccRefinanceRow): RefinanceRowModel {
   const lines = [
     r.balance != null ? `יתרה ${money(r.balance)}${r.rate != null ? ` · ריבית ${r.rate}%` : ""}${r.payment != null ? ` · החזר ${money(r.payment)}` : ""}` : "",
     r.interest_left != null ? `ריבית שנותרה ${money(r.interest_left)}${r.exact ? "" : " (הערכה)"}${r.months != null ? ` ב-${r.months} חודשים` : ""}` : "",
-    r.net_saving != null ? `אחרי ריבית ההצעה ועמלת פירעון: ${saving(r.net_saving)}` : "",
+    r.interest_share != null ? `${Math.round(r.interest_share * 100)}% מהתשלומים שנותרו הם ריבית (השאר קרן)` : "",
+    r.net_saving != null ? `באותו קצב פירעון, אחרי עמלה: ${saving(r.net_saving)}` : "",
+    r.full_term_net != null ? `אם תישאר לכל תקופת המשכנתא: ${saving(r.full_term_net)}` : "",
     r.reason ?? "",
   ].filter(Boolean);
   return { id: r.id, title: r.name ?? UNKNOWN, verdict: VERDICT_LABEL[r.verdict], tone: r.verdict === "worth" ? "good" : r.verdict === "not_worth" ? "bad" : "muted", lines, needsFee: r.verdict === "unknown_fee" };

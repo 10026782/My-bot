@@ -1311,6 +1311,7 @@ export interface FccRefinanceRow {
   id: string; name: string | null; balance: number | null; rate: number | null; payment: number | null; months: number | null;
   interest_left: number | null; exact: boolean | null; prepay_fee: number | null; fee_known: boolean;
   same_term_payment: number | null; same_term_interest: number | null; net_saving: number | null;
+  interest_share?: number | null; full_term_interest?: number | null; full_term_net?: number | null;
   verdict: "worth" | "not_worth" | "unknown_fee" | "missing"; reason: string | null;
 }
 export interface FccRefinanceTotals {

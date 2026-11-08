@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from core.financial_control import amortization, loans as fcc_loans
 
+MIN_GAIN_RATIO = 0.01     # a loan is worth rolling only if it saves at least 1% of its balance net of fees: a loan whose interest is mostly paid already saves pennies
 MAX_RATE = 30.0
 MIN_TERM, MAX_TERM = 12, 420
 MAX_MONEY = 50_000_000.0
@@ -81,7 +82,8 @@ def _row(item: dict, offer: dict) -> dict:
     row = {"id": item["id"], "name": item["name"], "balance": item["early_closure_balance"], "rate": item["interest_rate"],
            "payment": item["monthly_payment"], "months": rem["months"] if rem else None, "interest_left": rem["interest"] if rem else None,
            "exact": rem["exact"] if rem else None, "prepay_fee": fee, "fee_known": fee_known or item["id"] in offer["fee_overrides"],
-           "same_term_payment": None, "same_term_interest": None, "net_saving": None, "verdict": "missing", "reason": None}
+           "same_term_payment": None, "same_term_interest": None, "net_saving": None, "interest_share": None,
+           "full_term_interest": None, "full_term_net": None, "verdict": "missing", "reason": None}
     if rem is None or item["early_closure_balance"] is None or item["monthly_payment"] is None:
         row["reason"] = "חסרים יתרה, החזר חודשי או תשלומים שנותרו"
         return row
@@ -90,14 +92,25 @@ def _row(item: dict, offer: dict) -> dict:
     row["same_term_payment"] = round(pay, 2)
     row["same_term_interest"] = round(pay * n - bal, 2)
     row["net_saving"] = round(rem["interest"] - row["same_term_interest"] - (fee or 0.0), 2)
+    row["interest_share"] = round(rem["interest"] / (bal + rem["interest"]), 3) if bal + rem["interest"] > 0 else None       # how much of the payments still ahead is interest
+    full = fcc_loans._pmt(bal, offer["rate"], offer["term_months"]) * offer["term_months"] - bal        # the same principal left in the mortgage for its whole term
+    row["full_term_interest"] = round(full, 2)
+    row["full_term_net"] = round(rem["interest"] - full - (fee or 0.0), 2)
     if not row["fee_known"]:
         row["verdict"] = "unknown_fee"
         row["reason"] = "עמלת הפירעון לא ידועה — הזן אותה כדי לדעת"
-    elif row["net_saving"] > 0:
+    elif row["net_saving"] >= MIN_GAIN_RATIO * bal and row["net_saving"] > 0:
         row["verdict"] = "worth"
+        if row["full_term_net"] < 0:
+            row["reason"] = "כדאי רק אם תפרע אותה בקצב הנוכחי; אם תשאיר אותה לכל תקופת המשכנתא היא תייקר"
     else:
         row["verdict"] = "not_worth"
-        row["reason"] = "הריבית כבר נמוכה מההצעה או שהעמלה גדולה מהחיסכון" if (item["interest_rate"] or 0) <= offer["rate"] else "החיסכון בריבית קטן מעמלת הפירעון"
+        if (item["interest_rate"] or 0) <= offer["rate"]:
+            row["reason"] = "הריבית כבר נמוכה מההצעה או שווה לה"
+        elif row["net_saving"] > 0:
+            row["reason"] = f"רוב הריבית כבר שולמה — נשארו {n} תשלומים והחיסכון קטן מדי כדי להצדיק מחזור"
+        else:
+            row["reason"] = "החיסכון בריבית קטן מעמלת הפירעון"
     return row
 
 
@@ -140,6 +153,7 @@ def simulate(items: list[dict], offer: dict) -> dict:
     selected = [r for r in rows if r["id"] in chosen]
     worth = [r for r in rows if r["verdict"] == "worth"]
     notes = ["כל החישובים מניחים שהפריים והריביות נשארים כפי שהם היום; במסלולים צמודים או בריבית משתנה זו הערכה.",
+             "הריבית בהלוואה נפרעת בעיקר בתחילתה: ככל שההלוואה מתקדמת, מה שנשאר בה קרן בעיקר, ולכן מחזור שלה מרוויח מעט — לכל הלוואה מוצג כמה מהתשלומים שנותרו הם ריבית.",
              "״אותו טווח״ מראה כמה שווה הריבית בלבד; ״טווח ההצעה״ מראה את הקלת ההחזר — טווח ארוך מקטין את ההחזר ובדרך כלל מגדיל את הריבית הכוללת."]
     if any(r["exact"] is False for r in rows if r["verdict"] != "missing"):
         notes.append("בהלוואות בלי לוח סילוקין הריבית שנותרה מוערכת (החזר × תשלומים − יתרה).")
