@@ -133,7 +133,7 @@ test("progress bar: 0 closed is a clean 0%, partial closed is a rounded %, never
 test("compact loan card: three headline figures first, meta line, emphasised freed-cash line", () => {
   const m = loanCardModel(full);
   assert.equal(m.keyRows.map((r) => r.label).join(), "יתרת סילוק,החזר חודשי,ריבית");
-  assert.equal(m.metaRows.map((r) => r.label).join(), "תשלומים שנותרו,ריבית שנותרה עד הסיום,תאריך סיום");
+  assert.equal(m.metaRows.map((r) => r.label).join(), "תשלומים שנותרו,ריבית שנותרה עד הסיום,לפרוע הכל היום,תאריך סיום");
   assert.equal(m.keyRows[0].value, "₪100,000");
   assert.ok(m.freedKnown);
   assert.equal(loanCardModel(empty).freedKnown, false);
@@ -295,6 +295,14 @@ test("loan card: the practical interest until the end — exact from the schedul
   const est = loanCardModel(mk({ interest_remaining: 8000, interest_remaining_exact: false }));
   assert.ok(est.metaRows.find((r) => r.label === "ריבית שנותרה עד הסיום")!.value.startsWith("≈ "));
   assert.equal(loanCardModel(mk({})).metaRows.find((r) => r.label === "ריבית שנותרה עד הסיום")!.value, UNKNOWN);
+});
+
+test("loan card: what closing the loan today costs — balance + a known fee, never a guessed fee", () => {
+  const find = (l: FccLoan) => loanCardModel(l).metaRows.find((r) => r.label === "לפרוע הכל היום")!.value;
+  assert.equal(find(mk({ early_closure_balance: 10000, payoff_now_total: 10150 })), `${val(10150)} (יתרה ${val(10000)} + עמלה ${val(150)})`);
+  assert.ok(find(mk({ early_closure_balance: 10000, payoff_now_total: 10000 })).includes("ללא עמלה"));
+  assert.ok(find(mk({ early_closure_balance: 10000, payoff_now_total: null })).endsWith("+ עמלה (לא ידועה)"));
+  assert.equal(find(mk({})), UNKNOWN);
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

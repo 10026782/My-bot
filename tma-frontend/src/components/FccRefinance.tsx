@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { postFccRefinance } from "../api";
-import { REFINANCE_HELP, REFINANCE_HOW, REFINANCE_TITLE, offerBody, refinanceModel, type OfferInput, type RefinanceLine, type ScenarioTable } from "../lib/fccRefinance";
+import { REFINANCE_HELP, REFINANCE_HOW, REFINANCE_TITLE, monthRows, offerBody, refinanceModel, totalsGroups, yearRows, type OfferInput, type RefinanceLine, type ScenarioTable } from "../lib/fccRefinance";
+import type { FccRefinanceTotals } from "../types";
 import type { FccRefinance } from "../types";
 import { Surface } from "./ui/Surface";
 
@@ -9,6 +10,39 @@ function Lines({ lines }: { lines: RefinanceLine[] }) {
     <dl className="fcc-loans-goal__grid">
       {lines.map((l) => <div key={l.label}><dt>{l.label}</dt><dd className={l.tone === "good" ? "fcc-pay__saving" : l.tone === "bad" ? "fcc-unknown" : undefined}>{l.value}</dd></div>)}
     </dl>
+  );
+}
+
+function Totals({ t, detail, onDetail }: { t: FccRefinanceTotals; detail?: boolean; onDetail?: () => void }) {
+  const years = yearRows(t), months = monthRows(t);
+  return (
+    <>
+      {totalsGroups(t).map((g) => (
+        <section key={g.title} aria-label={g.title}>
+          <h5 className="fcc-pay__subhead">{g.title}</h5>
+          {g.hint && <p className="fcc-loan__meta">{g.hint}</p>}
+          <Lines lines={g.lines} />
+        </section>
+      ))}
+      {t.uses_estimates && <p className="fcc-goal__note">חלק מהחישוב בקירוב — הלוואות בלי לוח מהבנק: {(t.estimated_loans ?? []).join(", ")}</p>}
+      {years.length > 0 && (
+        <details>
+          <summary>שנה אחרי שנה: כמה תשלם בכל חלופה</summary>
+          <table className="fcc-compare__table fcc-pay__table">
+            <thead><tr><th>שנה</th><th>היום</th><th>כמו היום</th><th>פריסה</th><th>הפרש בפריסה</th><th>מצטבר</th></tr></thead>
+            <tbody>{years.map((y) => <tr key={y.year}><th scope="row">{y.year}</th><td>{y.today}</td><td>{y.keep}</td><td>{y.stretch}</td><td>{y.diff}</td><td className={y.tone === "good" ? "fcc-pay__saving" : y.tone === "bad" ? "fcc-unknown" : undefined}>{y.cum}</td></tr>)}</tbody>
+          </table>
+          <p className="fcc-loan__meta">ההפרש הוא מה שאתה חוסך (פלוס) או משלם יותר (מינוס) ביחס להיום. בשנים שההלוואות המקוריות כבר נגמרו, ״היום״ הוא 0.</p>
+          {onDetail && <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onDetail}>{detail ? "הסתר תשלום אחרי תשלום" : "הצג תשלום אחרי תשלום"}</button>}
+          {detail && months.length > 0 && (
+            <table className="fcc-compare__table fcc-pay__table">
+              <thead><tr><th>חודש</th><th>היום</th><th>כמו היום</th><th>פריסה</th></tr></thead>
+              <tbody>{months.map((m) => <tr key={m.month}><th scope="row">{m.month}</th><td>{m.today}</td><td>{m.keep}</td><td>{m.stretch}</td></tr>)}</tbody>
+            </table>
+          )}
+        </details>
+      )}
+    </>
   );
 }
 
@@ -36,9 +70,10 @@ export function RefinanceSimulator() {
   const [result, setResult] = useState<FccRefinance | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detail, setDetail] = useState(false);                             // payment-by-payment rows for the selected loans (asked for on demand)
 
-  const run = async (ids: string[] | null) => {
-    const built = offerBody(input, ids, fees);
+  const run = async (ids: string[] | null, withDetail: boolean = detail) => {
+    const built = offerBody(input, ids, fees, withDetail);
     if ("error" in built) { setError(built.error); return; }
     setBusy(true); setError(null);
     try { setResult(await postFccRefinance(built.body)); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -50,6 +85,7 @@ export function RefinanceSimulator() {
     setPicked(next);
     void run(next);
   };
+  const toggleDetail = () => { const next = !detail; setDetail(next); void run(picked, next); };
   const set = (k: keyof OfferInput) => (e: React.ChangeEvent<HTMLInputElement>) => setInput((cur) => ({ ...cur, [k]: e.target.value }));
   const m = result ? refinanceModel(result) : null;
   const chosen = picked ?? result?.rows.map((r) => r.id) ?? [];
@@ -73,20 +109,20 @@ export function RefinanceSimulator() {
               {m.recommended && (
                 <section aria-label="ההלוואות שכדאי לכלול">
                   <h4 className="fcc-pay__subhead">{m.recommendedPays ? `כדאי למחזר: ${m.recommendedNames.join(", ")}` : "בהצעה הזו המחזור לא משתלם"}</h4>
-                  <Lines lines={m.recommended} />
+                  {result?.recommended && <Totals t={result.recommended} />}
                 </section>
               )}
               {!m.recommended && <p className="fcc-goal__note">אין הלוואה שהמחזור שלה חוסך ריבית בהצעה הזו.</p>}
               {m.relief && (
                 <section aria-label="הקלה בהחזר החודשי">
                   <h4 className="fcc-pay__subhead">אם המטרה היא להקל על ההחזר החודשי (מהזולה ליקרה): {m.reliefNames.join(", ")}</h4>
-                  <Lines lines={m.relief} />
+                  {result?.relief && <Totals t={result.relief} />}
                 </section>
               )}
               {m.selected && (
                 <section aria-label="ההלוואות שנבחרו">
                   <h4 className="fcc-pay__subhead">סיכום לפי ההלוואות שסימנת ({result?.selected?.loans})</h4>
-                  <Lines lines={m.selected} />
+                  {result?.selected && <Totals t={result.selected} detail={detail} onDetail={toggleDetail} />}
                 </section>
               )}
               <div className="fcc-list fcc-list--tight">

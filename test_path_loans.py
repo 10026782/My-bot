@@ -236,3 +236,21 @@ def test_the_payoff_engine_uses_the_schedule_s_real_remaining_interest():
     plain = L.loan_item({"id": "p", "fields": {k: v for k, v in rec["fields"].items() if k != "Amortization Schedule"}}, date(2026, 11, 8))
     assert payoff.metrics([plain])[0]["interest_from_schedule"] is False
     assert plain["interest_remaining"] == 20.0 and plain["interest_remaining_exact"] is False            # no schedule: payment x payments left - balance, labelled an estimate
+
+
+def test_a_loan_shows_what_it_costs_to_close_today_with_a_known_fee_only():
+    from datetime import date
+    from core.financial_control import loans as L
+    def rec(fee):
+        f = {"Loan Name/ID": "x", "Active Loan": True, "Outstanding Principal for Early Closure": 10000, "Interest Rate (%)": 6, "Current Monthly Payment": 500, "Payments Remaining": 24, "Monthly Due Day": 10}
+        if fee is not None:
+            f["Early Repayment Fee/Penalty"] = fee
+        return {"id": "x", "fields": f}
+    known = L.loan_item(rec("150"), date(2026, 11, 8))
+    assert known["payoff_now_total"] == 10150.0 and known["payoff_now_fee_known"] is True
+    none = L.loan_item(rec("אין"), date(2026, 11, 8))
+    assert none["payoff_now_total"] == 10000.0 and none["payoff_now_fee_known"] is True
+    unknown = L.loan_item(rec("2%"), date(2026, 11, 8))
+    assert unknown["payoff_now_total"] is None and unknown["payoff_now_fee_known"] is False           # a fee that is not a number is never turned into a total
+    assert known["first_payment_date"] == "2026-11-10"
+    assert L.loan_item(rec("אין"), date(2026, 11, 20))["first_payment_date"] == "2026-12-10"

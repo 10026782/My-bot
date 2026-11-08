@@ -14,6 +14,8 @@ export const REFINANCE_HOW = [
   `״${SCENARIO_STRETCH}״: היתרה נפרסת על כל שנות המשכנתא. ההחזר החודשי יורד, אבל מכיוון שמשלמים ריבית על יותר זמן, בדרך כלל משלמים יותר ריבית בסך הכל.`,
   "ה״כדאי״ של כל הלוואה: אחרי ריבית ההצעה ואחרי עמלת הפירעון, האם נשאר חיסכון ממשי (לפחות 1% מהיתרה). הלוואה שכמעט נגמרה לא תצא כדאית, כי כמעט אין בה ריבית לחסוך.",
   "הסיכום כולל גם את העלויות החד-פעמיות של ההצעה (פתיחת תיק, שמאי וכו׳), ומראה אחרי כמה חודשים הן חוזרות בזכות הירידה בהחזר החודשי.",
+  "כמה הלוואות יחד: כל הלוואה נספרת לפי החודשים שלה, והסכומים מצטרפים חודש אחרי חודש על ציר זמן אחד, כולל חודשים שבהם ההלוואות המקוריות כבר נגמרו. עלויות חד-פעמיות נספרות פעם אחת.",
+  "שלוש הקריאות מוצגות בנפרד: חיסכון (פחות כסף בסך הכל), הקלה בהחזר החודשי (תזרים בלבד, לא חיסכון) וכמה חוב יישאר בעוד שנים.",
   "הכול מניח שהריביות נשארות כמו היום. בריבית משתנה (פריים) או בהצמדה למדד התוצאה היא הערכה.",
 ];
 
@@ -25,7 +27,7 @@ const num = (s: string): number | null => {
 };
 
 /** -> the request body, or the message to show. Costs may be blank (0); rate and term are required. */
-export function offerBody(i: OfferInput, loanIds: string[] | null, feeOverrides: Record<string, string>): { body: FccRefinanceBody } | { error: string } {
+export function offerBody(i: OfferInput, loanIds: string[] | null, feeOverrides: Record<string, string>, detail = false): { body: FccRefinanceBody } | { error: string } {
   const rate = num(i.rate), years = num(i.years);
   if (rate == null || rate < 0 || rate > 30) return { error: "ריבית בין 0 ל-30 אחוז" };
   if (years == null || years < 1 || years > 35) return { error: "תקופה בין שנה ל-35 שנים" };
@@ -35,6 +37,7 @@ export function offerBody(i: OfferInput, loanIds: string[] | null, feeOverrides:
   for (const [id, v] of Object.entries(feeOverrides)) { const n = num(v); if (n != null && n >= 0) overrides[id] = n; }
   const body: FccRefinanceBody = { rate, term_months: Math.round(years * 12), fees, insurance_monthly: insurance, fee_overrides: overrides };
   if (loanIds) body.loan_ids = loanIds;
+  if (detail) body.detail = true;
   return { body };
 }
 
@@ -47,19 +50,49 @@ const signed = (n: number): RefinanceLine["tone"] => (n > 0 ? "good" : n < 0 ? "
 const gain = (n: number) => (n >= 0 ? `תחסוך ${money(n)}` : `תשלם ${money(-n)} יותר`);
 const delta = (n: number) => (n === 0 ? "ללא שינוי" : n > 0 ? `+${money(n)}` : `-${money(-n)}`);
 
-/** The summary of a set of loans, in plain words. */
-export function totalsLines(t: FccRefinanceTotals): RefinanceLine[] {
+export interface TotalsGroup { title: string; hint?: string; lines: RefinanceLine[] }
+
+/** The summary of a set of loans, in three SEPARATE readings: a saving (interest and costs), the monthly relief (never called a saving), and the debt still owed later. */
+export function totalsGroups(t: FccRefinanceTotals): TotalsGroup[] {
+  const debt = (t.debt_ahead ?? []).map((d): RefinanceLine => ({ label: `אחרי ${d.years} שנים`, value: `היום ${money(d.keep)} · כמו היום ${money(d.same_pace)} · פריסה ${money(d.stretch)}` }));
   return [
-    { label: "היום אתה משלם בחודש", value: money(t.current_payment) },
-    { label: "אחרי המחזור תשלם בחודש", value: money(t.offer_payment) },
-    { label: "ההחזר החודשי", value: t.monthly_saving >= 0 ? `יורד ב-${money(t.monthly_saving)}` : `עולה ב-${money(-t.monthly_saving)}`, tone: signed(t.monthly_saving) },
-    { label: "ריבית שנשארה לשלם היום", value: money(t.current_interest_left) },
-    { label: "ריבית שתשלם אחרי המחזור (לכל התקופה)", value: money(t.offer_interest) },
-    { label: `${SCENARIO_KEEP} (${t.same_term_months} חודשים)`, value: gain(t.total_saving_same_term), tone: signed(t.total_saving_same_term) },
-    { label: SCENARIO_STRETCH, value: gain(t.total_saving_offer_term), tone: signed(t.total_saving_offer_term) },
-    { label: "עלויות חד-פעמיות", value: money(t.one_time_costs) },
-    { label: "העלויות חוזרות אחרי", value: t.payback_months == null ? UNKNOWN : t.payback_months === 0 ? "מיד" : `${t.payback_months} חודשים` },
+    { title: "חיסכון בריבית ובעלויות", hint: "זה החיסכון האמיתי: כמה פחות כסף תשלם בסך הכל", lines: [
+      { label: "ריבית שנשארה לשלם היום", value: money(t.current_interest_left) },
+      { label: `ריבית ${SCENARIO_KEEP.replace("אם ", "")} (${t.same_term_months} חודשים)`, value: money(t.same_term_interest) },
+      { label: `ריבית ${SCENARIO_STRETCH.replace("אם ", "")}`, value: money(t.offer_interest) },
+      { label: SCENARIO_KEEP, value: gain(t.total_saving_same_term), tone: signed(t.total_saving_same_term) },
+      { label: SCENARIO_STRETCH, value: gain(t.total_saving_offer_term), tone: signed(t.total_saving_offer_term) },
+      { label: "עלויות חד-פעמיות (נספרות פעם אחת)", value: money(t.one_time_costs) },
+    ] },
+    { title: "הקלה בהחזר החודשי", hint: "זה לא חיסכון: ההחזר יורד, אבל זה יכול לעלות לך בריבית", lines: [
+      { label: "היום אתה משלם בחודש", value: money(t.current_payment) },
+      { label: `${SCENARIO_KEEP}`, value: money(t.same_term_payment) },
+      { label: `${SCENARIO_STRETCH}`, value: money(t.offer_payment) },
+      { label: "ההחזר החודשי בפריסה", value: t.monthly_saving >= 0 ? `יורד ב-${money(t.monthly_saving)}` : `עולה ב-${money(-t.monthly_saving)}`, tone: signed(t.monthly_saving) },
+      { label: "העלויות החד-פעמיות חוזרות אחרי", value: t.payback_months == null ? UNKNOWN : t.payback_months === 0 ? "מיד" : `${t.payback_months} חודשים` },
+    ] },
+    ...(debt.length ? [{ title: "כמה חוב יישאר", hint: "יתרת החוב בעוד שנים, בשלוש החלופות", lines: debt }] : []),
   ];
+}
+
+/** Flat list of the same lines (kept for callers that want one list). */
+export const totalsLines = (t: FccRefinanceTotals): RefinanceLine[] => totalsGroups(t).flatMap((g) => g.lines);
+
+export interface YearRow { year: string; today: string; keep: string; stretch: string; diff: string; cum: string; tone?: "good" | "bad" }
+
+/** The same time axis, year by year: what you pay in each alternative, the difference and the running difference. Years after the original loans ended show 0 for "today". */
+export function yearRows(t: FccRefinanceTotals): YearRow[] {
+  return (t.timeline?.years ?? []).map((y) => ({
+    year: String(y.year), today: money(y.keep.payment), keep: money(y.same_pace.payment), stretch: money(y.stretch.payment),
+    diff: delta(y.diff_stretch), cum: delta(y.cum_diff_stretch), tone: y.cum_diff_stretch > 0 ? "good" : y.cum_diff_stretch < 0 ? "bad" : undefined,
+  }));
+}
+
+export interface MonthRow { month: string; today: string; keep: string; stretch: string }
+const cell = (x: number[]) => `${money(x[0])} (ריבית ${money(x[1])} · קרן ${money(x[2])})`;
+/** Payment by payment: each cell is the payment with its interest and principal. */
+export function monthRows(t: FccRefinanceTotals): MonthRow[] {
+  return (t.monthly ?? []).map((m) => ({ month: String(m.month), today: m.keep[0] ? cell(m.keep) : "—", keep: m.same_pace[0] ? cell(m.same_pace) : "—", stretch: m.stretch[0] ? cell(m.stretch) : "—" }));
 }
 
 export interface TableRow { label: string; today: string; after: string; diff: string; tone?: "good" | "bad" }
@@ -86,7 +119,8 @@ export interface RefinanceRowModel {
 export function rowModel(r: FccRefinanceRow): RefinanceRowModel {
   const facts = [
     r.balance != null ? `יתרה ${money(r.balance)}${r.rate != null ? ` · ריבית ${r.rate}%` : ""}${r.payment != null ? ` · החזר חודשי ${money(r.payment)}` : ""}` : "",
-    r.interest_left != null ? `עד סוף ההלוואה תשלם עוד ${money(r.interest_left)} ריבית${r.months != null ? ` (${r.months} חודשים)` : ""}${r.exact ? "" : ", בקירוב"}` : "",
+    r.balance != null ? (r.payoff_now != null ? `לפרוע הכל היום: ${money(r.payoff_now)} (יתרה ${money(r.balance)}${r.payoff_now - r.balance > 0 ? ` + עמלה ${money(r.payoff_now - r.balance)}` : ", ללא עמלה"})` : `לפרוע הכל היום: ${money(r.balance)} + עמלה (לא ידועה)`) : "",
+    r.interest_left != null ? `עד סוף ההלוואה תשלם עוד ${money(r.interest_left)} ריבית${r.months != null ? ` (${r.months} חודשים)` : ""}${r.exact ? " (לפי לוח הבנק)" : ", בקירוב — הערכה, לא לוח מהבנק"}` : "",
   ].filter(Boolean);
   const priced = r.balance != null && r.payment != null && r.interest_left != null && r.same_term_payment != null && r.same_term_interest != null && r.offer_payment != null && r.full_term_interest != null;
   const fee = r.prepay_fee ?? 0;

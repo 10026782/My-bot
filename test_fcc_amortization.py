@@ -135,6 +135,16 @@ def test_prime_change_writes_project_the_stored_schedule_again():
     assert with_schedule["Current Monthly Payment"] == new_rows[2][3] < rows[2][3] and "לוח הסילוקין חושב מחדש" in with_schedule["Notes"]
 
 
+def test_annuity_rows_is_one_correct_formula():
+    rows = A.annuity_rows(12000.0, 6.0, 12, date(2026, 12, 10))
+    assert len(rows) == 12 and rows[0][0] == "2026-12-10" and rows[-1][0] == "2027-11-10" and rows[-1][4] == 0.0
+    assert rows[0][3] == 1032.8 and rows[0][2] == 60.0 and rows[0][1] == 972.8                          # 12000 at 6% over 12 months: 1,032.80, 60.00 of it interest
+    assert abs(sum(r[2] for r in rows) - 393.6) < 0.2 and abs(sum(r[1] for r in rows) - 12000.0) < 0.01
+    assert A.annuity_rows(0, 6.0, 12, date(2026, 12, 10)) == [] and A.annuity_rows(1000, 6.0, 0, date(2026, 12, 10)) == []
+    zero = A.annuity_rows(1200.0, 0.0, 12, date(2026, 12, 10))
+    assert all(r[3] == 100.0 and r[2] == 0.0 for r in zero)
+
+
 if __name__ == "__main__":
     test_parse_dates_future_rows_and_checks(); test_stored_form_roundtrip_and_garbage_is_ignored()
     test_match_loan_by_amount_and_payment(); test_cal_letter_follows_the_balance_when_the_printed_split_is_off(); test_reproject_keeps_charged_months_and_follows_the_new_prime(); test_prime_change_writes_project_the_stored_schedule_again(); test_loan_item_uses_the_schedule_and_cashflow_uses_its_months(); print("ok amortization")

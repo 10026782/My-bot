@@ -269,9 +269,17 @@ def last_date(rows: list[list]) -> date | None:
     return _date(rows[-1][0]) if rows else None
 
 
-def remaining(rows: list[list]) -> dict:
+def ahead(rows: list[list], today: date | None = None) -> list[list]:
+    """The payments still to come: dated after ``today`` when given (the charged flag stored with the schedule is only as fresh as the day it was imported),
+    else the rows not flagged as charged."""
+    if today is None:
+        return [r for r in rows if not r[5]]
+    return [r for r in rows if (d := _date(r[0])) and d > today]
+
+
+def remaining(rows: list[list], today: date | None = None) -> dict:
     """What the not-yet-charged part of the schedule still costs: payments left, interest, principal."""
-    up = [r for r in rows if not r[5]]
+    up = ahead(rows, today)
     return {"payments": len(up), "interest": round(sum(r[2] for r in up), 2), "principal": round(sum(r[1] for r in up), 2), "total": round(sum(r[3] for r in up), 2)}
 
 
@@ -306,6 +314,25 @@ def unpack(blob) -> str | None:
         return None
 
 
+def annuity_rows(balance: float, rate_pct: float, n: int, first: date, payment: float | None = None, dates: list | None = None) -> list[list]:
+    """A Spitzer (annuity) schedule built from scratch: ``n`` payments, the first on ``first`` (then monthly) or on the given ``dates``; every payment is the same
+    except the last, which clears the balance. ONE formula for every schedule the system builds (a prime change's re-projection, a refinance offer, an estimate)."""
+    n = int(n)
+    if n < 1 or balance is None or balance <= 0:
+        return []
+    pay = round(payment if payment is not None else _pmt(balance, rate_pct, n), 2)
+    rows, bal = [], round(balance, 2)
+    for k in range(n):
+        interest = round(bal * rate_pct / 1200.0, 2)
+        if k == n - 1:
+            principal, total = round(bal, 2), round(bal + interest, 2)
+        else:
+            principal, total = round(pay - interest, 2), pay
+        bal = round(max(bal - principal, 0.0), 2)
+        rows.append([dates[k] if dates else _plus_months(first, k).isoformat(), principal, interest, total, bal, 0, 0])
+    return rows
+
+
 def reproject(rows: list[list], delta: float, today: date) -> list[list] | None:
     """The schedule after the prime moves by ``delta`` points: payments already charged (dated up to today) stay exactly as they were; the rest is
     recomputed from the balance after the last charged payment at the new rate over the SAME remaining payments (the end date stays), with the
@@ -327,15 +354,7 @@ def reproject(rows: list[list], delta: float, today: date) -> list[list] | None:
     base, moved = _pmt(opening, old_rate, n), _pmt(opening, new_rate, n)
     if base <= 0:
         return None
-    pay = round(future[0][3] * moved / base, 2)
-    out = [list(r) for r in kept]
-    bal = opening
-    for k, r in enumerate(future):
-        interest = round(bal * new_rate / 1200.0, 2)
-        if k == n - 1:
-            principal, total = round(bal, 2), round(bal + interest, 2)
-        else:
-            principal, total = round(pay - interest, 2), pay
-        bal = round(max(bal - principal, 0.0), 2)
-        out.append([r[0], principal, interest, total, bal, 0, 1])
-    return out
+    rolled = annuity_rows(opening, new_rate, n, today, payment=future[0][3] * moved / base, dates=[r[0] for r in future])
+    for r in rolled:
+        r[6] = 1
+    return [list(r) for r in kept] + rolled

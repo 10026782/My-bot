@@ -601,3 +601,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Decision:** the simulator must speak plainly: the practical interest in shekels until the end of each loan (not a share of the payments), the relief price as two shekel figures (not "₪X per ₪100"), and everything explained in everyday words. The owner chose the layout from options.
 - **Change:** per-loan before / after tables for two scenarios ("אם תמשיך לשלם כמו היום" / "אם תפרוס לכל התקופה"), a one-sentence reason per verdict, a plain-language "איך חישבתי?" section; the numbers are unchanged.
 - **Not done:** verification on a device and in production.
+
+### Refinance comparison — phase 1 accuracy (08/11/2026) — owner decision
+
+- **Decision (clarifications of 08/11/2026):** use the lender's real schedule when it exists, otherwise a clearly labelled estimate; for several loans sum each loan's cash flows by its own payment dates; compare every alternative on one time axis; show the saving, the monthly relief and the future debt separately; count one-time costs once.
+- **Change:** `refinance.simulate` builds, per loan, its payments ahead (stored schedule or estimate) and the alternatives from scratch with one formula (`amortization.annuity_rows`), sums them month by month on a shared axis, and reports the nominal saving, the monthly relief and the debt left after N years. The old "same pace" group figure (one annuity over the longest loan) is gone. `loan_item` adds `payoff_now_total` and `first_payment_date`; stored schedules are read by date.
+- **Stated limits:** estimated schedules are not the bank's; rates are assumed constant; a single rate per offer.
+- **Not done:** verification on a device and in production; phase 2 (alternatives engine: prepay, invest, scenarios) is design only and not built.
