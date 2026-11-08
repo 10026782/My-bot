@@ -13,11 +13,11 @@ from core.financial_control.loans import pmt
 
 from . import core
 
-MODULE, VERSION = "loans", "loans-1"
+MODULE, VERSION = "loans", "loans-2"
 TYPES = ("take_loan", "prepay_loan")
 _COMMON = {"id", "label", "type"}
 _ALLOWED = {
-    "take_loan": _COMMON | {"amount", "annual_rate_pct", "term_months", "fees", "starts_on", "linkage", "approved", "terms_verified", "retained_capital",
+    "take_loan": _COMMON | {"needed_by", "amount", "annual_rate_pct", "term_months", "fees", "starts_on", "linkage", "approved", "terms_verified", "retained_capital",
                             "retained_return_pct", "retained_fee_pct"},
     "prepay_loan": _COMMON | {"balance", "annual_rate_pct", "remaining_months", "early_fee", "source_return_pct", "source_fee_pct"},
 }
@@ -92,6 +92,8 @@ def _take_loan(frame: dict, spec: dict) -> dict:
     net_cost = core.total_or_none([sched["interest_through"], fees])
     r = core.blank_result(frame, path_id=spec["id"], module=MODULE, module_version=VERSION, type_="take_loan", label=spec["label"].strip(),
                           movement_kind="liability", purpose="fund_amount", funds_amount=amount)
+    needed_by = core.to_date(spec["needed_by"], "needed_by") if spec.get("needed_by") else None
+    core.set_funding(r, amount=amount, net_available=None if fees is None else amount - fees, available_on=starts_on, needed_by=needed_by, conditional=not approved)
     flows = [{"date": starts_on.isoformat(), "amount": amount, "kind": "loan_proceeds"}]
     if fees:
         flows.append({"date": starts_on.isoformat(), "amount": -fees, "kind": "fee"})
@@ -125,7 +127,7 @@ def _take_loan(frame: dict, spec: dict) -> dict:
         r["after_action"]["assets_remaining"] = [{"name": "retained_capital", "value": rc, "growth_to_compare": growth, "latent_tax_on_growth": latent}]
         r["tax"].update(latent_at_compare=latent, status="preliminary_estimate", reason="latent tax on the retained capital's growth (same with or without the loan)")
         if fee_pct is None:
-            r["assumptions"].append({"id": "retained_fee_zero", "text": "דמי ניהול של ההון שנשאר לא הוזנו — 0 בחישוב", "source": "default"})
+            r["assumptions"].append({"id": "retained_fee_zero", "text": "דמי ניהול של ההון שנשאר לא הוזנו — חושב בהנחת 0% לצורך סימולציה בלבד", "source": "default"})
     r["not_applicable"] += ["tax.deferral_benefit", "tax.deferral_lost"]       # needs the sale counterfactual (the real-estate module, a later stage)
     r["certainty"] = "expected" if approved else "uncertain"
     r["provenance"] = {"payment": sched["payment"], "payments_through_compare": sched["payments_through"], "liability_at_compare": sched["balance_at_compare"]}
@@ -173,7 +175,7 @@ def _prepay_loan(frame: dict, spec: dict) -> dict:
                         {"id": "interest_through_compare", "text": "הריבית שנחסכת נספרת רק עד תאריך ההשוואה", "source": "assumed"},
                         {"id": "growth_taxed_preliminary", "text": "הצמיחה שאבדה מחויבת במס ראשוני לפי הרשומה היחידה", "source": "assumed"}]
     if src_ret is not None and src_fee is None:
-        r["assumptions"].append({"id": "source_fee_zero", "text": "דמי ניהול של הכסף שנפרע בו לא הוזנו — 0 בחישוב", "source": "default"})
+        r["assumptions"].append({"id": "source_fee_zero", "text": "דמי ניהול של הכסף שנפרע בו לא הוזנו — חושב בהנחת 0% לצורך סימולציה בלבד", "source": "default"})
     r["missing_inputs"] = [n for n, v in (("early_fee", fee), ("source_return_pct", src_ret)) if v is None]
     r["risks"] = ["fixed_rate_assumed", "early_fee_as_entered"] if fee is not None else ["fixed_rate_assumed"]
     r["not_applicable"] = ["cost.interest_total", "cost.holding_costs", "cost.lost_income", "cost.forced_sale_discount_amount", "tax.deferral_benefit", "tax.deferral_lost"]

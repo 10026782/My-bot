@@ -15,8 +15,8 @@ from .. import tax_assumptions
 from ..engine import simulate
 from ..models import ENGINE_VERSION, Asset, Scenario
 
-SCHEMA_VERSION = "1.0"
-CORE_VERSION = "path-core-1"
+SCHEMA_VERSION = "1.1"
+CORE_VERSION = "path-core-2"
 MAX_MONTHS = 360                              # compare_at at most 30 years ahead
 TAX_BASIS = "after_latent_tax"                # the one basis every comparison is made on
 MOVEMENT_KINDS = ("new_money", "liability", "equity_conversion", "claim_realization", "no_movement")      # no_movement: the "do nothing / wait" reference path
@@ -159,6 +159,7 @@ def blank_result(frame: dict, *, path_id: str, module: str, module_version: str,
                                                               "assumptions": frame["assumptions_version"]},
         "basis": {"compare_at": frame["compare_at"], "tax_basis": frame["tax_basis"], "inflation_basis": frame["inflation_basis"]},
         "movement_kind": movement_kind,
+        "goal_funding": {"funds_on_time": None, "status": "unknown", "available_on": None, "needed_by": None, "net_available": None, "shortfall": None},
         "after_action": {"capital_remaining": None, "assets_remaining": [], "future_income_remaining": None,
                          "given_up": {"assets": [], "future_income": None, "lost_future_value": None}},
         "measures": {"liquidity": {"cash_available": None, "available_on": None, "state": None},
@@ -179,6 +180,29 @@ def blank_result(frame: dict, *, path_id: str, module: str, module_version: str,
     }
 
 
+FUNDING_STATUSES = ("funded", "conditional", "partial", "late", "not_funded", "unknown")
+
+
+def set_funding(result: dict, *, amount: float, net_available: float | None, available_on, needed_by, conditional: bool, funds_goal: bool = True) -> None:
+    """מצב המימון של מטרת `fund_amount`: `funded` רק כשהסכום נטו (אחרי עמלות) מגיע במלואו, בזמן, ובלי תנאי; אחרת `partial` / `late` / `conditional` /
+    `not_funded` / `unknown`. `funds_on_time` = (status == funded). תאריך קבלת הכסף (`available_on`) נפרד מתאריך הצורך (`needed_by`, אופציונלי)."""
+    shortfall = None if net_available is None else max(0.0, amount - net_available)
+    if not funds_goal:
+        status = "not_funded"
+    elif net_available is None:
+        status = "unknown"
+    elif shortfall > 0.005:
+        status = "partial"
+    elif needed_by is not None and available_on is not None and available_on > needed_by:
+        status = "late"
+    elif conditional:
+        status = "conditional"
+    else:
+        status = "funded"
+    result["goal_funding"] = {"funds_on_time": status == "funded", "status": status, "available_on": None if available_on is None else available_on.isoformat(),
+                              "needed_by": None if needed_by is None else needed_by.isoformat(), "net_available": net_available, "shortfall": shortfall}
+
+
 def total_or_none(parts: list) -> float | None:
     """סכום רק כשכל הרכיבים ידועים; אחרת `None` (לא סכום חלקי מוסתר)."""
     return None if any(p is None for p in parts) else float(sum(parts))
@@ -186,6 +210,12 @@ def total_or_none(parts: list) -> float | None:
 
 def finalize(result: dict) -> dict:
     """מסמן הסתייגויות קבועות לפי מה שיש בתוצאה, מעגל לאגורה, ומאמת מבנה. מחזיר את אותה תוצאה."""
+    if any(a.get("source") == "default" for a in result["assumptions"]):
+        # נתון שלא הוזן חושב בברירת מחדל — המספר אינו "צפוי" עד שהבעלים מזין אותו (חסר ≠ אפס)
+        if result["certainty"] in ("confirmed", "expected"):
+            result["certainty"] = "uncertain"
+        if "default_input_used" not in result["risks"]:
+            result["risks"].append("default_input_used")
     caveats = [c for c in CAVEATS if c["when"] == "always"
                or (c["when"] == "tax" and result["tax"]["status"] == "preliminary_estimate")
                or (c["when"] == "missing" and result["missing_inputs"])
@@ -211,7 +241,7 @@ def _round(node):
                 _round(v)
 
 
-_REQUIRED_TOP = ("path_id", "module", "type", "label", "purpose", "funds_amount", "frame_digest", "calc_version", "basis", "movement_kind", "after_action",
+_REQUIRED_TOP = ("path_id", "module", "type", "label", "purpose", "funds_amount", "goal_funding", "frame_digest", "calc_version", "basis", "movement_kind", "after_action",
                  "measures", "index_used", "cash_flows", "cost", "tax", "lost_future_value", "result", "assumptions", "missing_inputs", "risks", "certainty",
                  "provenance", "not_applicable", "caveats")
 
@@ -236,6 +266,21 @@ def validate_path_result(result) -> dict:
         raise ValueError("a result must be on the after-latent-tax basis")
     if not any(c["caveat_id"] == "preliminary" for c in result["caveats"]):
         raise ValueError("the standing caveat is missing")
+    gf = result["goal_funding"]
+    if not isinstance(gf, dict) or set(gf) != {"funds_on_time", "status", "available_on", "needed_by", "net_available", "shortfall"}:
+        raise ValueError("goal_funding is {funds_on_time, status, available_on, needed_by, net_available, shortfall}")
+    if gf["status"] not in FUNDING_STATUSES:
+        raise ValueError("unknown funding status")
+    if result["purpose"] == "fund_amount":
+        fa = result["funds_amount"]
+        if isinstance(fa, bool) or not isinstance(fa, (int, float)) or not math.isfinite(fa) or fa <= 0:
+            raise ValueError("a fund_amount path needs a known positive funds_amount")
+        if not isinstance(gf["funds_on_time"], bool) or gf["funds_on_time"] != (gf["status"] == "funded"):
+            raise ValueError("funds_on_time must be true exactly when the funding status is funded")
+        if gf["status"] == "funded" and (gf["net_available"] is None or gf["net_available"] < fa - 0.005):
+            raise ValueError("a funded path must have the full net amount available")
+    elif gf["funds_on_time"] is not None or gf["status"] != "unknown":
+        raise ValueError("goal funding applies only to fund_amount paths")
     if result["tax"]["status"] not in ("preliminary_estimate", "not_assessed"):
         raise ValueError("a tax figure is never marked verified here")
     if result["missing_inputs"] and not any(c["caveat_id"] == "missing_is_missing" for c in result["caveats"]):
