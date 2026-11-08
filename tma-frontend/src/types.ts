@@ -637,6 +637,8 @@ export interface FccLoan {
   future_cost_exact: boolean;
   monthly_cash_freed_if_closed: number | null;
   annual_interest_cost: number | null;
+  /** True = end_date was derived from the remaining payments. */
+  end_date_inferred?: boolean;
   /** This month's instalment split (balance × rate / 12 = interest; the rest = principal); null = an input is missing. */
   interest_this_month?: number | null;
   principal_this_month?: number | null;

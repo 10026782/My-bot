@@ -140,7 +140,7 @@ export function loanCardModel(l: FccLoan): LoanCardModel {
   ];
   const metaRows: LoanRow[] = [
     { label: "תשלומים שנותרו", value: months(l.payments_remaining) },
-    { label: "תאריך סיום", value: dmy(l.end_date) || UNKNOWN },
+    { label: "תאריך סיום", value: l.end_date ? `${l.end_date_inferred ? "≈ " : ""}${dmy(l.end_date)}` : UNKNOWN },
     ...(l.next_payment_due ? [{ label: "תשלום הבא", value: dmy(l.next_payment_due) }] : []),
   ];
   const typeLabel = l.loan_type ?? UNCLASSIFIED;

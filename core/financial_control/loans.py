@@ -95,6 +95,21 @@ def payment_split(balance, rate, pay, left=None) -> dict | None:
     return {"interest": round(interest, 2), "principal": round(principal, 2), "balance_after": round(max(balance - principal, 0.0), 2)}
 
 
+def inferred_end(fields: dict, today: date) -> date | None:
+    """The month of the LAST payment, from the stored "Payments Remaining" (never from a guess): the first remaining payment is the stored
+    ``Next Payment Due``, else this month when the due day has not passed (or there is no due day), else next month; the last is (remaining − 1) months later.
+    None when the loan has no remaining count or it is zero."""
+    left = _num(fields.get(LF.PAYMENTS_LEFT))
+    if left is None or left < 1:
+        return None
+    first = _iso_date(fields.get(LF.NEXT_PAYMENT))
+    if first is None:
+        day = _num(fields.get(LF.DUE_DAY))
+        first = today if day is None else _due_on(today.year, today.month, int(day)) if day >= today.day else _plus_month(today, int(day))
+    idx = first.year * 12 + first.month - 1 + int(left) - 1
+    return date(idx // 12, idx % 12 + 1, min(first.day, 28))
+
+
 def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = None) -> dict:
     f = record.get("fields") or {}
     loan_type = _sel(f.get(LF.LOAN_TYPE))
@@ -105,6 +120,10 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     rate = _num(f.get(LF.INTEREST_RATE))
     left = _num(f.get(LF.PAYMENTS_LEFT))
     end = _iso_date(f.get(LF.END_DATE))
+    end_inferred = False
+    if end is None and is_active(f):
+        end = inferred_end(f, today)
+        end_inferred = end is not None
     fee_amount, fee_known = parse_fee(f.get(LF.EARLY_FEE))
     next_due = _iso_date(f.get(LF.NEXT_PAYMENT))
     direction = OWED_TO_ME if str(_sel(f.get(LF.DIRECTION)) or "").strip() == DIRECTION_TO_ME_STORED else OWED_BY_ME      # tolerant of a stray space in the choice name
@@ -133,6 +152,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "monthly_payment": monthly,
         "payments_remaining": int(left) if left is not None else None,
         "end_date": end.isoformat() if end else None,
+        "end_date_inferred": end_inferred,               # True = derived from "Payments Remaining" (a computed date, not a typed one)
         "early_repayment_fee": str(f.get(LF.EARLY_FEE)).strip() if f.get(LF.EARLY_FEE) else None,
         "early_fee_amount": fee_amount,
         "active": is_active(f),
@@ -435,6 +455,8 @@ def monthly_schedule(records: list[dict], windows: list[tuple[str, date, date]],
         name = str(f.get(LF.NAME) or "הלוואה")
         start, end, closed = _iso_date(f.get(LF.START_DATE)), _iso_date(f.get(LF.END_DATE)), not is_active(f)
         term = _num(f.get(LF.TERM_MONTHS))
+        if end is None and not closed:
+            end = inferred_end(f, today)                                              # "Payments Remaining" is the freshest fact about the end
         if start and end is None and term and not closed:
             idx = start.year * 12 + start.month - 1 + max(int(term) - 1, 0)          # the last payment falls in the (term-1)th month after the first
             end = date(idx // 12, idx % 12 + 1, min(start.day, 28))
@@ -445,7 +467,8 @@ def monthly_schedule(records: list[dict], windows: list[tuple[str, date, date]],
             continue
         for key, ms, me in windows:
             if start is None:
-                counted = ms <= today <= me and not closed
+                # no start date: the current month, and (when the end is known) every month up to it; the past stays unknown
+                counted = not closed and me >= today and (ms <= today <= me or (end is not None and ms <= end))
             else:
                 counted = start <= me and (end is None or end >= ms)
             if counted:

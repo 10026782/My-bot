@@ -195,5 +195,27 @@ def test_summary_interest_principal_totals():
     assert s["split_coverage"] == {"known": 2, "of": 3}, s["split_coverage"]
 
 
+def test_end_date_inferred_from_payments_remaining():
+    from datetime import date
+    from core.financial_control import loans as L
+    t = date(2026, 11, 8)
+    f = {"Payments Remaining": 3, "Monthly Due Day": 10}
+    assert L.inferred_end(f, t) == date(2027, 1, 10)
+    assert L.inferred_end({**f, "Monthly Due Day": 5}, t) == date(2027, 2, 5)
+    assert L.inferred_end({**f, "Next Payment Due": "2026-12-02"}, t) == date(2027, 2, 2)
+    assert L.inferred_end({"Payments Remaining": 0}, t) is None and L.inferred_end({}, t) is None
+    rec = {"id": "x", "fields": {"Loan Name/ID": "x", "Active Loan": True, "Current Monthly Payment": 100, **f}}
+    item = L.loan_item(rec, t)
+    assert item["end_date"] == "2027-01-10" and item["end_date_inferred"] is True
+    typed = L.loan_item({"id": "y", "fields": {**rec["fields"], "End Date": "2030-01-01"}}, t)
+    assert typed["end_date"] == "2030-01-01" and typed["end_date_inferred"] is False
+    # schedule: no start date but remaining payments -> current month through the inferred end, not beyond
+    from datetime import date as D
+    wins = [("2026-11", D(2026, 11, 1), D(2026, 11, 30)), ("2027-01", D(2027, 1, 1), D(2027, 1, 31)), ("2027-02", D(2027, 2, 1), D(2027, 2, 28)), ("2026-10", D(2026, 10, 1), D(2026, 10, 31))]
+    totals, undated, _ = L.monthly_schedule([rec], wins, t)
+    assert totals == {"2026-11": 100.0, "2027-01": 100.0, "2027-02": 0.0, "2026-10": 0.0}, totals
+    assert undated == ["x"]
+
+
 if __name__ == "__main__":
-    test_payment_split_interest_principal(); test_summary_interest_principal_totals(); print("ok split")
+    test_end_date_inferred_from_payments_remaining(); test_payment_split_interest_principal(); test_summary_interest_principal_totals(); print("ok split")
