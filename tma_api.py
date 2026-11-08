@@ -5828,7 +5828,8 @@ def fcc_loan_schedule(identity):
         month = am.month_split(parsed.rows, today.year, today.month)
         digest = hashlib.sha256((identity.user_id + "|" + am.dumps(parsed)).encode("utf-8")).hexdigest()[:24]
         info = [{"id": r["id"], "name": (r.get("fields") or {}).get("Loan Name/ID") or "הלוואה", "lender": (r.get("fields") or {}).get("Lender") or None,
-                 "has_schedule": am.loads((r.get("fields") or {}).get("Amortization Schedule")) is not None} for r in candidates]
+                 "has_schedule": am.loads((r.get("fields") or {}).get("Amortization Schedule")) is not None,
+                 "identical": am.loads((r.get("fields") or {}).get("Amortization Schedule")) == parsed.rows} for r in candidates]
         out = {"state": "preview", "original": parsed.original, "payment_now": parsed.payment_now, "payments_left": am.remaining(parsed.rows)["payments"],
                "interest_left": am.remaining(parsed.rows)["interest"], "ends": (am.last_date(parsed.rows).isoformat() if parsed.rows else None),
                "this_month": month, "notes": parsed.notes, "candidates": info, "digest": digest}
@@ -5839,6 +5840,8 @@ def fcc_loan_schedule(identity):
             raise _ImportRefused("choose one of the loans this schedule fits")
         if str(request.form.get("digest") or "") != digest:
             raise _ImportRefused("the file changed since the review — review again", 409)
+        if next(c for c in info if c["id"] == loan_id)["identical"]:           # the same schedule is already saved on this loan (e.g. the file was sent twice): nothing to write
+            return jsonify({**out, "state": "saved", "already": True, "loan_id": loan_id})
         write = {"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": {"Amortization Schedule": am.dumps(parsed)},
                  "audit_action": "fcc_loan_schedule", "audit_details": loan_id}
         _, response, status = _queue_or_owner_execute("tma_fcc_write", write, identity, "FCC: loan amortization schedule")

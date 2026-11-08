@@ -16,7 +16,7 @@ export interface SchedulePreviewModel {
 
 export function schedulePreviewModel(p: FccLoanSchedulePreview): SchedulePreviewModel {
   if (p.state === "rejected") return { lines: [], candidates: [], canSave: false, needsChoice: false, problems: p.problems?.length ? p.problems : ["הקובץ לא נקרא"] };
-  const cands = (p.candidates ?? []).map((c) => ({ id: c.id, label: `${c.name}${c.lender && c.lender !== c.name ? ` · ${c.lender}` : ""}${c.has_schedule ? " (יוחלף לוח קיים)" : ""}` }));
+  const cands = (p.candidates ?? []).map((c) => ({ id: c.id, label: `${c.name}${c.lender && c.lender !== c.name ? ` · ${c.lender}` : ""}${c.identical ? " (אותו לוח כבר שמור)" : c.has_schedule ? " (יוחלף לוח קיים)" : ""}` }));
   const m = p.this_month;
   const lines = [
     p.original != null ? `סכום מקורי ${money(p.original)}${p.payment_now != null ? ` · תשלום אחרון ${money(p.payment_now)}` : ""}` : "",

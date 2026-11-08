@@ -70,3 +70,12 @@ def test_a_bad_file_is_rejected_and_non_owner_gets_404(api, monkeypatch):
     assert send(api[0]).get_json()["state"] == "rejected" and not WRITES
     monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: ident("avi", Role.PARTNER))
     assert send(api[0]).status_code == 404
+
+
+def test_the_same_schedule_sent_twice_is_not_written_again(api, monkeypatch):
+    saved = am.dumps(am.parse_sheets([CHARGED, UPCOMING]))
+    monkeypatch.setattr(service, "my_loans", lambda identity: [{**LOANS[0], "fields": {**LOANS[0]["fields"], "Amortization Schedule": saved}}, LOANS[1]])
+    pre = send(api[0]).get_json()
+    assert pre["candidates"][0]["identical"] is True
+    out = send(api[0], confirm="1", loan_id="recA", digest=pre["digest"]).get_json()
+    assert out["state"] == "saved" and out["already"] is True and not WRITES

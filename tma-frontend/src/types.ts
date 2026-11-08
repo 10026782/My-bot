@@ -1299,7 +1299,8 @@ export interface FccLoanSchedulePreview {
   ends?: string | null;
   this_month?: { principal: number; interest: number; total: number; balance_after: number; charged: boolean } | null;
   notes?: string[];
-  candidates?: { id: string; name: string; lender: string | null; has_schedule: boolean }[];
+  candidates?: { id: string; name: string; lender: string | null; has_schedule: boolean; identical?: boolean }[];
+  already?: boolean;
   digest?: string;
   loan_id?: string;
   message?: string;
