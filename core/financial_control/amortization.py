@@ -226,8 +226,18 @@ def parse_file(data: bytes, today: date | None = None) -> Schedule:
 
 
 # ── stored form ───────────────────────────────────────────────────────────────────────────────────────────────────
-def dumps(s: Schedule) -> str:
-    return json.dumps({"v": 1, "rows": s.rows}, separators=(",", ":"))
+def dumps(s: Schedule, asof: date | None = None) -> str:
+    """The stored form. ``asof`` = the day the lender's schedule was issued / imported: the FUTURE rows assume the prime rate of that day (every
+    prime-linked payment is recalculated when the prime moves), so the date is kept to tell the owner how fresh the projection is."""
+    return json.dumps({"v": 1, "asof": (asof or date.today()).isoformat(), "rows": s.rows}, separators=(",", ":"))
+
+
+def asof(text) -> date | None:
+    try:
+        obj = json.loads(text) if isinstance(text, str) and text else None
+        return _date(obj.get("asof")) if isinstance(obj, dict) else None
+    except ValueError:
+        return None
 
 
 def loads(text) -> list[list] | None:

@@ -641,6 +641,7 @@ export interface FccLoan {
   end_date_inferred?: boolean;
   /** True = this month's split comes from the lender's schedule (else an estimate); schedule_remaining = what is still ahead per the schedule. */
   split_exact?: boolean;
+  schedule_asof?: string | null;
   schedule_remaining?: { payments: number; interest: number; principal: number } | null;
   /** This month's instalment split (balance × rate / 12 = interest; the rest = principal); null = an input is missing. */
   interest_this_month?: number | null;

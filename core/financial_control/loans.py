@@ -138,13 +138,14 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
 
     split = payment_split(closure, rate, monthly, left)
     sched = amortization.loads(f.get(LF.SCHEDULE))           # the bank's own schedule beats the balance × rate estimate
-    split_exact, sched_left = False, None
+    split_exact, sched_left, sched_asof = False, None, None
     if sched:
         ms = amortization.month_split(sched, today.year, today.month)
         if ms:
             split = {"interest": ms["interest"], "principal": ms["principal"], "balance_after": ms["balance_after"]}
             split_exact = True
         sched_left = amortization.remaining(sched)
+        sched_asof = amortization.asof(f.get(LF.SCHEDULE))
         if end is None and is_active(f):
             end, end_inferred = amortization.last_date(sched), True
 
@@ -182,6 +183,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "annual_interest_cost": annual_interest,       # simple burden metric: balance × rate (₪/year)
         # this month's payment split (balance × rate / 12 is the interest, the rest is principal); None = an input is missing
         "split_exact": split_exact,                     # True = from the bank's schedule, False = estimated from balance × rate
+        "schedule_asof": sched_asof.isoformat() if sched_asof else None,   # the day the stored schedule was issued: its future rows hold the prime of that day
         "schedule_remaining": sched_left,               # {payments, interest, principal} still ahead per the schedule, else None
         "interest_this_month": split["interest"] if split else None,
         "principal_this_month": split["principal"] if split else None,

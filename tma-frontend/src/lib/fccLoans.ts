@@ -69,6 +69,7 @@ export function loanHeaderCards(loans: FccLoans): LoanHeaderCard[] {
   ];
 }
 
+export const SCHEDULE_PRIME_NOTE = "לוחות הסילוקין מניחים את הפריים של יום הפקתם. כשהפריים משתנה כל התשלומים העתידיים מתעדכנים — כדאי להעלות לוח חדש אחרי שינוי פריים.";
 export const SPLIT_NOTE = "פירוק התשלום מחושב מהיתרה, הריבית וההחזר שרשומים בטבלת Loans (ריבית = יתרה × ריבית ÷ 12; השאר קרן). במשכנתאות צמודות או בריבית משתנה זו הערכה.";
 
 export interface SplitModel { lines: LoanRow[]; hint?: string }
@@ -92,7 +93,7 @@ export function splitSummaryModel(loans: FccLoans): SplitModel | null {
 export function splitLine(l: FccLoan): string | null {
   if (l.interest_this_month == null || l.principal_this_month == null) return null;
   const after = l.balance_after_this_month == null ? "" : ` · יתרה בסוף החודש ${money(l.balance_after_this_month)}`;
-  return `ריבית ${money(l.interest_this_month)} · קרן ${money(l.principal_this_month)}${after} · ${l.split_exact ? "מלוח סילוקין" : "הערכה"}`;
+  return `ריבית ${money(l.interest_this_month)} · קרן ${money(l.principal_this_month)}${after} · ${l.split_exact ? `מלוח סילוקין${l.schedule_asof ? ` מ-${dmy(l.schedule_asof)}` : ""}` : "הערכה"}`;
 }
 
 export const owedToMe = (l: { direction?: string }): boolean => l.direction === "owed_to_me";

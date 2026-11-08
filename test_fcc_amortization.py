@@ -29,6 +29,8 @@ def test_stored_form_roundtrip_and_garbage_is_ignored():
     s = _parsed()
     rows = A.loads(A.dumps(s))
     assert rows == s.rows
+    from datetime import date as D
+    assert A.asof(A.dumps(s, D(2026, 11, 8))) == D(2026, 11, 8) and A.asof("") is None and A.asof(A.dumps(s)) == D.today()
     assert A.loads("") is None and A.loads("not json") is None and A.loads('{"v":2,"rows":[]}') is None
     assert A.month_split(rows, 2026, 11) == {"principal": 300.0, "interest": 6.0, "total": 306.0, "balance_after": 300.0, "charged": False}
     assert A.month_split(rows, 2027, 6) is None

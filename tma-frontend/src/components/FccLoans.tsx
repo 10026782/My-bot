@@ -3,7 +3,7 @@ import type { FccLoans } from "../types";
 import {
   ARRANGEMENT_BUTTON, AUTO_STEP_NOTE, BALANCE_BUTTON, balanceCardModel, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RATE_BUTTON, TERM_BUTTON, ORIGINAL_BUTTON, RECEIVED_BUTTON,
   FILTERS, RANK_MODES, STATUS_UNKNOWN, UNKNOWN, actionRows, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards,
-  receivableCardModel, receivableItems, receivablesSummary, sortLoans, splitSummaryModel, SPLIT_NOTE, togglePick, canClose,
+  receivableCardModel, receivableItems, receivablesSummary, sortLoans, splitSummaryModel, SPLIT_NOTE, SCHEDULE_PRIME_NOTE, togglePick, canClose,
   type ActionRow, type LoanFilter, type RankMode,
 } from "../lib/fccLoans";
 import { STEP_ACTIONS } from "./FccAssets";
@@ -136,6 +136,7 @@ export function LoansSection({ loans, loadScenario, actions, onScheduleSaved }: 
                 </dl>
                 {sp.hint && <p className="fcc-loan__meta">{sp.hint}</p>}
                 <p className="fcc-loan__meta">{SPLIT_NOTE}</p>
+                <p className="fcc-loan__meta">{SCHEDULE_PRIME_NOTE}</p>
               </Surface>
             );
           })()}
