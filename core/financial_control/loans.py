@@ -96,17 +96,25 @@ def payment_split(balance, rate, pay, left=None) -> dict | None:
     return {"interest": round(interest, 2), "principal": round(principal, 2), "balance_after": round(max(balance - principal, 0.0), 2)}
 
 
+def first_payment_date(fields: dict, today: date) -> date:
+    """The date of the next payment: the stored ``Next Payment Due`` (never earlier than today), else this month's due day if it has not passed (or today when
+    there is no due day), else next month's."""
+    first = _iso_date(fields.get(LF.NEXT_PAYMENT))
+    if first is not None:
+        return max(first, today)
+    day = _num(fields.get(LF.DUE_DAY))
+    if day is None:
+        return today
+    return _due_on(today.year, today.month, int(day)) if day >= today.day else _plus_month(today, int(day))
+
+
 def inferred_end(fields: dict, today: date) -> date | None:
-    """The month of the LAST payment, from the stored "Payments Remaining" (never from a guess): the first remaining payment is the stored
-    ``Next Payment Due``, else this month when the due day has not passed (or there is no due day), else next month; the last is (remaining − 1) months later.
-    None when the loan has no remaining count or it is zero."""
+    """The month of the LAST payment, from the stored "Payments Remaining" (never from a guess): the first remaining payment is
+    ``first_payment_date``; the last is (remaining − 1) months later. None when the loan has no remaining count or it is zero."""
     left = _num(fields.get(LF.PAYMENTS_LEFT))
     if left is None or left < 1:
         return None
-    first = _iso_date(fields.get(LF.NEXT_PAYMENT))
-    if first is None:
-        day = _num(fields.get(LF.DUE_DAY))
-        first = today if day is None else _due_on(today.year, today.month, int(day)) if day >= today.day else _plus_month(today, int(day))
+    first = _iso_date(fields.get(LF.NEXT_PAYMENT)) or first_payment_date(fields, today)       # a stored date is used as typed, as before
     idx = first.year * 12 + first.month - 1 + int(left) - 1
     return date(idx // 12, idx % 12 + 1, min(first.day, 28))
 
@@ -144,7 +152,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         if ms:
             split = {"interest": ms["interest"], "principal": ms["principal"], "balance_after": ms["balance_after"]}
             split_exact = True
-        sched_left = amortization.remaining(sched)
+        sched_left = amortization.remaining(sched, today)             # by DATE: the charged flag stored with the schedule is only as fresh as its import day
         if sched_left["payments"]:                           # the lender's own remaining payments and interest replace payment × payments left − balance
             total_remaining, future_cost = sched_left["total"], sched_left["interest"]
         sched_asof = amortization.asof(f.get(LF.SCHEDULE))
@@ -179,6 +187,9 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         # derived
         "months_remaining": months,
         "estimated_total_remaining_payments": total_remaining,
+        "first_payment_date": first_payment_date(f, today).isoformat(),
+        "payoff_now_total": round(closure + fee_amount, 2) if closure is not None and fee_amount is not None else None,      # balance + a known early-repayment fee
+        "payoff_now_fee_known": fee_known,
         "interest_remaining": future_cost,                 # the interest still to be paid until the loan ends: the lender's schedule when stored, else payment × payments left − balance
         "interest_remaining_exact": bool(sched_left and sched_left["payments"]),
         "estimated_future_cost": future_cost,

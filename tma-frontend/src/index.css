@@ -3212,6 +3212,12 @@
   border: 1px solid var(--boss-color-border-strong); border-radius: 10px; background: var(--boss-color-surface);
 }
 .fcc-pay__table { table-layout: auto; }
+/* wide tables (refinance year-by-year / payment-by-payment) scroll INSIDE their box: they never widen the page on a phone */
+.fcc-refi, .fcc-refi > *, .fcc-refi details, .fcc-refi section, .fcc-refi article, .fcc-refi .fcc-stack { min-inline-size: 0; max-inline-size: 100%; }   /* grid items may shrink below their widest table */
+.fcc-table-scroll { overflow-x: auto; max-inline-size: 100%; min-inline-size: 0; -webkit-overflow-scrolling: touch; }
+.fcc-table-scroll > .fcc-compare__table { inline-size: max-content; min-inline-size: 100%; }
+.fcc-table-scroll td, .fcc-table-scroll th { white-space: nowrap; }
+.fcc-table-scroll .fcc-cell__split { display: block; font-size: 11px; opacity: 0.75; }
 .fcc-pay__table th, .fcc-pay__table td { overflow-wrap: normal; word-break: normal; }
 .fcc-pay__table td, .fcc-pay__table thead th:not(:first-child) { white-space: nowrap; text-align: center; }
 .fcc-pay__row--on { font-weight: 650; background: color-mix(in srgb, var(--boss-color-accent-readable) 10%, transparent); }

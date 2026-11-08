@@ -640,6 +640,10 @@ export interface FccLoan {
   /** The interest still to be paid until the loan ends (the lender's schedule when stored = exact, else payment × payments left − balance = estimate). */
   interest_remaining?: number | null;
   interest_remaining_exact?: boolean;
+  /** What closing the loan today costs: the balance + a KNOWN early-repayment fee (null when the fee is not a number). */
+  payoff_now_total?: number | null;
+  payoff_now_fee_known?: boolean;
+  first_payment_date?: string;
   /** True = end_date was derived from the remaining payments. */
   end_date_inferred?: boolean;
   /** True = this month's split comes from the lender's schedule (else an estimate); schedule_remaining = what is still ahead per the schedule. */
@@ -1316,15 +1320,28 @@ export interface FccRefinanceRow {
   id: string; name: string | null; balance: number | null; rate: number | null; payment: number | null; months: number | null;
   interest_left: number | null; exact: boolean | null; prepay_fee: number | null; fee_known: boolean;
   same_term_payment: number | null; same_term_interest: number | null; net_saving: number | null;
+  payoff_now?: number | null;
   interest_share?: number | null; full_term_interest?: number | null; full_term_net?: number | null;
   offer_payment?: number | null; monthly_relief?: number | null; relief_cost?: number | null; relief_cost_per_100?: number | null;
   verdict: "worth" | "not_worth" | "unknown_fee" | "missing"; reason: string | null;
 }
+export interface FccRefinanceYear {
+  year: number;
+  keep: FccRefinancePathYear; same_pace: FccRefinancePathYear; stretch: FccRefinancePathYear;
+  diff_same_pace: number; diff_stretch: number; cum_diff_same_pace: number; cum_diff_stretch: number;
+}
+export interface FccRefinancePathYear { payment: number; interest: number; principal: number; debt_end: number }
 export interface FccRefinanceTotals {
-  loans: number; balance: number; current_payment: number; current_interest_left: number; one_time_costs: number;
-  offer_payment: number; offer_interest: number; monthly_saving: number; total_saving_offer_term: number;
-  same_term_months: number; same_term_payment: number; same_term_interest: number; total_saving_same_term: number;
-  payback_months: number | null; any_unknown_fee: boolean; uses_estimates: boolean;
+  loans: number; balance: number; one_time_costs: number;
+  /** (1) nominal saving: interest + insurance + one-time costs (the same principal is repaid on both sides). */
+  current_interest_left: number; same_term_months: number; same_term_interest: number; total_saving_same_term: number; offer_interest: number; total_saving_offer_term: number;
+  /** (2) monthly relief: the first month's payments, today vs after. A cash-flow effect, never a saving. */
+  current_payment: number; same_term_payment: number; offer_payment: number; monthly_saving: number; payback_months: number | null;
+  /** (3) the debt still owed after N years, on the same time axis. */
+  debt_ahead?: { years: number; keep: number; same_pace: number; stretch: number }[];
+  timeline?: { months: number; years: FccRefinanceYear[] };
+  monthly?: { month: number; keep: number[]; same_pace: number[]; stretch: number[] }[];
+  any_unknown_fee: boolean; uses_estimates: boolean; estimated_loans?: string[];
 }
 export interface FccRefinance {
   offer: { rate: number; term_months: number; fees: number; insurance_monthly: number };
@@ -1332,4 +1349,4 @@ export interface FccRefinance {
   recommended_ids: string[]; recommended: FccRefinanceTotals | null; recommended_pays: boolean;
   relief_ids?: string[]; relief?: FccRefinanceTotals | null; notes: string[];
 }
-export interface FccRefinanceBody { rate: number; term_months: number; fees: number; insurance_monthly: number; loan_ids?: string[]; fee_overrides?: Record<string, number> }
+export interface FccRefinanceBody { rate: number; term_months: number; fees: number; insurance_monthly: number; detail?: boolean; loan_ids?: string[]; fee_overrides?: Record<string, number> }

@@ -595,3 +595,22 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Decision:** every loan shows the interest still to be paid until it ends, besides the monthly interest and the other figures.
 - **Change:** `loan_item` carries `interest_remaining` (+ `interest_remaining_exact`): the lender's schedule when stored, else payment × payments left − balance; the loan card shows it as "ריבית שנותרה עד הסיום" (exact / "≈ הערכה" / unknown).
 - **Not done:** verification on a device and in production; a total across all loans in the header.
+
+### The refinance simulator in plain language (08/11/2026) — owner decision
+
+- **Decision:** the simulator must speak plainly: the practical interest in shekels until the end of each loan (not a share of the payments), the relief price as two shekel figures (not "₪X per ₪100"), and everything explained in everyday words. The owner chose the layout from options.
+- **Change:** per-loan before / after tables for two scenarios ("אם תמשיך לשלם כמו היום" / "אם תפרוס לכל התקופה"), a one-sentence reason per verdict, a plain-language "איך חישבתי?" section; the numbers are unchanged.
+- **Not done:** verification on a device and in production.
+
+### Refinance comparison — phase 1 accuracy (08/11/2026) — owner decision
+
+- **Decision (clarifications of 08/11/2026):** use the lender's real schedule when it exists, otherwise a clearly labelled estimate; for several loans sum each loan's cash flows by its own payment dates; compare every alternative on one time axis; show the saving, the monthly relief and the future debt separately; count one-time costs once.
+- **Change:** `refinance.simulate` builds, per loan, its payments ahead (stored schedule or estimate) and the alternatives from scratch with one formula (`amortization.annuity_rows`), sums them month by month on a shared axis, and reports the nominal saving, the monthly relief and the debt left after N years. The old "same pace" group figure (one annuity over the longest loan) is gone. `loan_item` adds `payoff_now_total` and `first_payment_date`; stored schedules are read by date.
+- **Stated limits:** estimated schedules are not the bank's; rates are assumed constant; a single rate per offer.
+- **Not done:** verification on a device and in production; phase 2 (alternatives engine: prepay, invest, scenarios) is design only and not built.
+
+### Refinance simulator on a phone (08/11/2026) — owner decision
+
+- **Decision:** a focused display fix only: wide tables scroll inside their own box instead of widening the page, and a payment-by-payment cell has two lines. The calculation engines and the loans data are unchanged; the 150 ₪ materiality threshold was NOT approved (small or negligible savings are reported separately, without a new rule).
+- **Change:** `.fcc-table-scroll` / `.fcc-refi` in `index.css` and the wrappers in `FccRefinance.tsx`; `monthRows` returns a payment line and an interest / principal line.
+- **Verification:** mobile Chromium emulation at 390 / 360 / 320 / 280px (page width unchanged, tables scroll inside); not on a real phone or in Telegram.

@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from airtable_schema import CashflowRuleFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, loans as fcc_loans, refinance as fcc_refinance
+from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, amortization as fcc_amortization, loans as fcc_loans, refinance as fcc_refinance
 
 logger = logging.getLogger(__name__)
 
@@ -477,10 +477,13 @@ def loan_scenarios(identity, budget: float, today: date | None = None) -> dict:
 
 
 def loan_refinance(identity, params: dict, today: date | None = None) -> dict:
-    """Refinance simulation: the caller's own active loans rolled into ONE mortgage at the typed offer. Pure computation over their own rows: nothing is saved."""
+    """Refinance simulation: the caller's own active loans rolled into ONE mortgage at the typed offer. Pure computation over their own rows (and their own stored lender
+    schedules, read once): nothing is saved."""
     offer = fcc_refinance.parse_offer(params)
     day = today or date.today()
-    return fcc_refinance.simulate([fcc_loans.loan_item(r, day) for r in my_loans(identity)], offer)
+    records = my_loans(identity)
+    schedules = {r.get("id"): fcc_amortization.loads((r.get("fields") or {}).get(LoanFields.SCHEDULE)) for r in records}
+    return fcc_refinance.simulate([fcc_loans.loan_item(r, day) for r in records], offer, {k: v for k, v in schedules.items() if v}, day)
 
 
 def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict:
