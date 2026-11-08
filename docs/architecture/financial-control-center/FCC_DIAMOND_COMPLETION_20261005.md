@@ -608,3 +608,9 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** `refinance.simulate` builds, per loan, its payments ahead (stored schedule or estimate) and the alternatives from scratch with one formula (`amortization.annuity_rows`), sums them month by month on a shared axis, and reports the nominal saving, the monthly relief and the debt left after N years. The old "same pace" group figure (one annuity over the longest loan) is gone. `loan_item` adds `payoff_now_total` and `first_payment_date`; stored schedules are read by date.
 - **Stated limits:** estimated schedules are not the bank's; rates are assumed constant; a single rate per offer.
 - **Not done:** verification on a device and in production; phase 2 (alternatives engine: prepay, invest, scenarios) is design only and not built.
+
+### Refinance simulator on a phone (08/11/2026) — owner decision
+
+- **Decision:** a focused display fix only: wide tables scroll inside their own box instead of widening the page, and a payment-by-payment cell has two lines. The calculation engines and the loans data are unchanged; the 150 ₪ materiality threshold was NOT approved (small or negligible savings are reported separately, without a new rule).
+- **Change:** `.fcc-table-scroll` / `.fcc-refi` in `index.css` and the wrappers in `FccRefinance.tsx`; `monthRows` returns a payment line and an interest / principal line.
+- **Verification:** mobile Chromium emulation at 390 / 360 / 320 / 280px (page width unchanged, tables scroll inside); not on a real phone or in Telegram.

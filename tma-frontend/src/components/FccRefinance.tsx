@@ -28,17 +28,21 @@ function Totals({ t, detail, onDetail }: { t: FccRefinanceTotals; detail?: boole
       {years.length > 0 && (
         <details>
           <summary>שנה אחרי שנה: כמה תשלם בכל חלופה</summary>
+          <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="שנה אחרי שנה">
           <table className="fcc-compare__table fcc-pay__table">
             <thead><tr><th>שנה</th><th>היום</th><th>כמו היום</th><th>פריסה</th><th>הפרש בפריסה</th><th>מצטבר</th></tr></thead>
             <tbody>{years.map((y) => <tr key={y.year}><th scope="row">{y.year}</th><td>{y.today}</td><td>{y.keep}</td><td>{y.stretch}</td><td>{y.diff}</td><td className={y.tone === "good" ? "fcc-pay__saving" : y.tone === "bad" ? "fcc-unknown" : undefined}>{y.cum}</td></tr>)}</tbody>
           </table>
+          </div>
           <p className="fcc-loan__meta">ההפרש הוא מה שאתה חוסך (פלוס) או משלם יותר (מינוס) ביחס להיום. בשנים שההלוואות המקוריות כבר נגמרו, ״היום״ הוא 0.</p>
           {onDetail && <button type="button" className="boss-button boss-button--quiet boss-bubble--action" onClick={onDetail}>{detail ? "הסתר תשלום אחרי תשלום" : "הצג תשלום אחרי תשלום"}</button>}
           {detail && months.length > 0 && (
-            <table className="fcc-compare__table fcc-pay__table">
-              <thead><tr><th>חודש</th><th>היום</th><th>כמו היום</th><th>פריסה</th></tr></thead>
-              <tbody>{months.map((m) => <tr key={m.month}><th scope="row">{m.month}</th><td>{m.today}</td><td>{m.keep}</td><td>{m.stretch}</td></tr>)}</tbody>
-            </table>
+            <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="תשלום אחרי תשלום">
+              <table className="fcc-compare__table fcc-pay__table">
+                <thead><tr><th>חודש</th><th>היום</th><th>כמו היום</th><th>פריסה</th></tr></thead>
+                <tbody>{months.map((m) => <tr key={m.month}><th scope="row">{m.month}</th>{[m.today, m.keep, m.stretch].map((c, i) => <td key={i}>{c.pay}{c.split && <span className="fcc-cell__split">{c.split}</span>}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
           )}
         </details>
       )}
@@ -50,6 +54,7 @@ function Table({ t }: { t: ScenarioTable }) {
   return (
     <div className="fcc-pay__scenario">
       <h5 className="fcc-pay__subhead">{t.title}</h5>
+      <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label={t.title}>
       <table className="fcc-compare__table fcc-pay__table">
         <thead><tr><th></th><th>היום</th><th>אחרי מחזור</th><th>הפרש</th></tr></thead>
         <tbody>
@@ -58,6 +63,7 @@ function Table({ t }: { t: ScenarioTable }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -91,7 +97,7 @@ export function RefinanceSimulator() {
   const chosen = picked ?? result?.rows.map((r) => r.id) ?? [];
 
   return (
-    <Surface variant="subtle" padding="compact" className="fcc-loans-goal" aria-label={REFINANCE_TITLE}>
+    <Surface variant="subtle" padding="compact" className="fcc-loans-goal fcc-refi" aria-label={REFINANCE_TITLE}>
       <details>
         <summary><strong>{REFINANCE_TITLE}</strong></summary>
         <div className="fcc-stack fcc-stack--tight">

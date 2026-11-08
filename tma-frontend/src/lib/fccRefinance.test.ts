@@ -51,7 +51,8 @@ test("the year-by-year table is on one axis: years after the original loans ende
   assert.equal(rows[0].tone, "good"); assert.ok(rows[0].diff.startsWith("+"));
   assert.equal(rows[1].today, "₪0"); assert.ok(rows[1].diff.startsWith("-"));
   const months = monthRows(totals);
-  assert.ok(months[0].today.includes("ריבית") && months[0].today.includes("קרן") && months[1].today === "—" && months[1].stretch.includes("קרן"));
+  assert.equal(months[0].today.pay, "₪1,000"); assert.ok(months[0].today.split.includes("ריבית") && months[0].today.split.includes("קרן"));      // two lines: the payment, then its interest and principal
+  assert.equal(months[1].today.pay, "—"); assert.equal(months[1].today.split, ""); assert.ok(months[1].stretch.split.includes("קרן"));
   assert.equal(monthRows({ ...totals, monthly: undefined }).length, 0);
 });
 

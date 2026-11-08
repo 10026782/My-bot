@@ -88,11 +88,12 @@ export function yearRows(t: FccRefinanceTotals): YearRow[] {
   }));
 }
 
-export interface MonthRow { month: string; today: string; keep: string; stretch: string }
-const cell = (x: number[]) => `${money(x[0])} (ריבית ${money(x[1])} · קרן ${money(x[2])})`;
-/** Payment by payment: each cell is the payment with its interest and principal. */
+export interface MonthCell { pay: string; split: string }
+export interface MonthRow { month: string; today: MonthCell; keep: MonthCell; stretch: MonthCell }
+const cell = (x: number[]): MonthCell => (x[0] ? { pay: money(x[0]), split: `ריבית ${money(x[1])} · קרן ${money(x[2])}` } : { pay: "—", split: "" });
+/** Payment by payment: each cell is the payment (first line) and its interest and principal (second line). */
 export function monthRows(t: FccRefinanceTotals): MonthRow[] {
-  return (t.monthly ?? []).map((m) => ({ month: String(m.month), today: m.keep[0] ? cell(m.keep) : "—", keep: m.same_pace[0] ? cell(m.same_pace) : "—", stretch: m.stretch[0] ? cell(m.stretch) : "—" }));
+  return (t.monthly ?? []).map((m) => ({ month: String(m.month), today: cell(m.keep), keep: cell(m.same_pace), stretch: cell(m.stretch) }));
 }
 
 export interface TableRow { label: string; today: string; after: string; diff: string; tone?: "good" | "bad" }
