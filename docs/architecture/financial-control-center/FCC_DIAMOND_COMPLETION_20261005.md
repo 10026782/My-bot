@@ -589,3 +589,9 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** each refinance row carries the monthly relief and its price per ₪100; the answer lists the relief set (cheapest first) with totals next to the interest-worthy set. For loans with a stored schedule `loan_item` takes the remaining payments and interest from the schedule and the payoff engine's cost / saving use it (`interest_from_schedule`).
 - **Limit:** loans without a schedule still use the estimate (labelled "משוער"); the monthly relief assumes the loan alone at the offer's term.
 - **Not done:** verification on a device and in production.
+
+### The practical remaining interest on every loan (08/11/2026) — owner decision
+
+- **Decision:** every loan shows the interest still to be paid until it ends, besides the monthly interest and the other figures.
+- **Change:** `loan_item` carries `interest_remaining` (+ `interest_remaining_exact`): the lender's schedule when stored, else payment × payments left − balance; the loan card shows it as "ריבית שנותרה עד הסיום" (exact / "≈ הערכה" / unknown).
+- **Not done:** verification on a device and in production; a total across all loans in the header.

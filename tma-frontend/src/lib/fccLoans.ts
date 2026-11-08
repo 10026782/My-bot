@@ -133,6 +133,12 @@ export function isPartial(l: FccLoan): boolean {
   return l.missing.some((m) => m !== "months_remaining");
 }
 
+/** The practical interest still ahead until the loan ends: exact from the lender's schedule, "≈" (an estimate) otherwise, unknown when it cannot be computed. */
+export function interestRemainingLabel(l: FccLoan): string {
+  if (l.interest_remaining == null) return UNKNOWN;
+  return l.interest_remaining_exact ? `${money(l.interest_remaining)} (מלוח סילוקין)` : `≈ ${money(l.interest_remaining)} (הערכה)`;
+}
+
 export function loanCardModel(l: FccLoan): LoanCardModel {
   const keyRows: LoanRow[] = [
     { label: "יתרת סילוק", value: val(l.early_closure_balance) },
@@ -141,6 +147,7 @@ export function loanCardModel(l: FccLoan): LoanCardModel {
   ];
   const metaRows: LoanRow[] = [
     { label: "תשלומים שנותרו", value: months(l.payments_remaining) },
+    { label: "ריבית שנותרה עד הסיום", value: interestRemainingLabel(l) },
     { label: "תאריך סיום", value: l.end_date ? `${l.end_date_inferred ? "≈ " : ""}${dmy(l.end_date)}` : UNKNOWN },
     ...(l.next_payment_due ? [{ label: "תשלום הבא", value: dmy(l.next_payment_due) }] : []),
   ];

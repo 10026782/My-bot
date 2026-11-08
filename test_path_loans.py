@@ -229,8 +229,10 @@ def test_the_payoff_engine_uses_the_schedule_s_real_remaining_interest():
     rec = {"id": "s", "fields": {"Loan Name/ID": "s", "Active Loan": True, "Outstanding Principal for Early Closure": 280, "Interest Rate (%)": 12, "Current Monthly Payment": 100,
                                  "Payments Remaining": 3, "Early Repayment Fee/Penalty": "אין", "Amortization Schedule": A.dumps(sched)}}
     item = L.loan_item(rec, date(2026, 11, 8))
+    assert item["interest_remaining"] == 17.5 and item["interest_remaining_exact"] is True
     assert item["estimated_future_cost"] == 17.5 and item["estimated_total_remaining_payments"] == 297.5       # the schedule's own remaining payments and interest
     row = payoff.metrics([item])[0]
     assert row["interest_from_schedule"] is True and row["estimated_future_cost"] == 17.5 and row["cost_saving"] == 17.5 and row["future_cost_exact"] is True
     plain = L.loan_item({"id": "p", "fields": {k: v for k, v in rec["fields"].items() if k != "Amortization Schedule"}}, date(2026, 11, 8))
     assert payoff.metrics([plain])[0]["interest_from_schedule"] is False
+    assert plain["interest_remaining"] == 20.0 and plain["interest_remaining_exact"] is False            # no schedule: payment x payments left - balance, labelled an estimate

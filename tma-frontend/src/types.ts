@@ -637,6 +637,9 @@ export interface FccLoan {
   future_cost_exact: boolean;
   monthly_cash_freed_if_closed: number | null;
   annual_interest_cost: number | null;
+  /** The interest still to be paid until the loan ends (the lender's schedule when stored = exact, else payment × payments left − balance = estimate). */
+  interest_remaining?: number | null;
+  interest_remaining_exact?: boolean;
   /** True = end_date was derived from the remaining payments. */
   end_date_inferred?: boolean;
   /** True = this month's split comes from the lender's schedule (else an estimate); schedule_remaining = what is still ahead per the schedule. */
