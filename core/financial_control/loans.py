@@ -12,6 +12,7 @@ import calendar
 import re
 from datetime import date
 
+from core.financial_control import amortization
 from airtable_schema import LoanFields as LF
 from core.financial_control import payoff
 
@@ -81,6 +82,35 @@ def status_unknown(fields: dict) -> bool:
     return not fields.get(LF.ACTIVE) and is_active(fields)
 
 
+def payment_split(balance, rate, pay, left=None) -> dict | None:
+    """One instalment split into interest and principal from the stored balance, rate and payment (no guessing: any missing
+    input, or a payment that does not cover the interest, gives None). The last payment (1 left) clears the balance."""
+    if balance is None or rate is None or pay is None or pay <= 0 or balance <= 0:
+        return None
+    interest = balance * rate / 1200.0
+    if pay <= interest:
+        return None
+    principal = min(pay - interest, balance)
+    if left is not None and left == 1:
+        principal = balance
+    return {"interest": round(interest, 2), "principal": round(principal, 2), "balance_after": round(max(balance - principal, 0.0), 2)}
+
+
+def inferred_end(fields: dict, today: date) -> date | None:
+    """The month of the LAST payment, from the stored "Payments Remaining" (never from a guess): the first remaining payment is the stored
+    ``Next Payment Due``, else this month when the due day has not passed (or there is no due day), else next month; the last is (remaining − 1) months later.
+    None when the loan has no remaining count or it is zero."""
+    left = _num(fields.get(LF.PAYMENTS_LEFT))
+    if left is None or left < 1:
+        return None
+    first = _iso_date(fields.get(LF.NEXT_PAYMENT))
+    if first is None:
+        day = _num(fields.get(LF.DUE_DAY))
+        first = today if day is None else _due_on(today.year, today.month, int(day)) if day >= today.day else _plus_month(today, int(day))
+    idx = first.year * 12 + first.month - 1 + int(left) - 1
+    return date(idx // 12, idx % 12 + 1, min(first.day, 28))
+
+
 def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = None) -> dict:
     f = record.get("fields") or {}
     loan_type = _sel(f.get(LF.LOAN_TYPE))
@@ -91,6 +121,10 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     rate = _num(f.get(LF.INTEREST_RATE))
     left = _num(f.get(LF.PAYMENTS_LEFT))
     end = _iso_date(f.get(LF.END_DATE))
+    end_inferred = False
+    if end is None and is_active(f):
+        end = inferred_end(f, today)
+        end_inferred = end is not None
     fee_amount, fee_known = parse_fee(f.get(LF.EARLY_FEE))
     next_due = _iso_date(f.get(LF.NEXT_PAYMENT))
     direction = OWED_TO_ME if str(_sel(f.get(LF.DIRECTION)) or "").strip() == DIRECTION_TO_ME_STORED else OWED_BY_ME      # tolerant of a stray space in the choice name
@@ -101,6 +135,19 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     if future_cost is not None and future_cost < 0:
         future_cost = None                      # inconsistent inputs: show unknown rather than a negative "cost"
     annual_interest = round(closure * rate / 100.0, 2) if closure is not None and rate is not None else None   # SSOT balance only
+
+    split = payment_split(closure, rate, monthly, left)
+    sched = amortization.loads(f.get(LF.SCHEDULE))           # the bank's own schedule beats the balance × rate estimate
+    split_exact, sched_left, sched_asof = False, None, None
+    if sched:
+        ms = amortization.month_split(sched, today.year, today.month)
+        if ms:
+            split = {"interest": ms["interest"], "principal": ms["principal"], "balance_after": ms["balance_after"]}
+            split_exact = True
+        sched_left = amortization.remaining(sched)
+        sched_asof = amortization.asof(f.get(LF.SCHEDULE))
+        if end is None and is_active(f):
+            end, end_inferred = amortization.last_date(sched), True
 
     missing = [name for name, v in (("early_closure_balance", closure), ("interest_rate", rate),
                                     ("monthly_payment", monthly), ("months_remaining", months)) if v is None]
@@ -117,6 +164,7 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "monthly_payment": monthly,
         "payments_remaining": int(left) if left is not None else None,
         "end_date": end.isoformat() if end else None,
+        "end_date_inferred": end_inferred,               # True = derived from "Payments Remaining" (a computed date, not a typed one)
         "early_repayment_fee": str(f.get(LF.EARLY_FEE)).strip() if f.get(LF.EARLY_FEE) else None,
         "early_fee_amount": fee_amount,
         "active": is_active(f),
@@ -133,6 +181,13 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "future_cost_exact": future_cost is not None and fee_known,
         "monthly_cash_freed_if_closed": monthly,
         "annual_interest_cost": annual_interest,       # simple burden metric: balance × rate (₪/year)
+        # this month's payment split (balance × rate / 12 is the interest, the rest is principal); None = an input is missing
+        "split_exact": split_exact,                     # True = from the bank's schedule, False = estimated from balance × rate
+        "schedule_asof": sched_asof.isoformat() if sched_asof else None,   # the day the stored schedule was issued: its future rows hold the prime of that day
+        "schedule_remaining": sched_left,               # {payments, interest, principal} still ahead per the schedule, else None
+        "interest_this_month": split["interest"] if split else None,
+        "principal_this_month": split["principal"] if split else None,
+        "balance_after_this_month": split["balance_after"] if split else None,
         "missing": missing,
     }
 
@@ -177,6 +232,11 @@ def summarize(items: list[dict]) -> dict:
     total_b = sum(b for _, b in weighted)
     avg_rate = round(sum(r * b for r, b in weighted) / total_b, 2) if total_b else None
 
+    own = [i for i in active if i["direction"] == OWED_BY_ME]
+    interest_m, interest_n = _sum(i["interest_this_month"] for i in own)
+    principal_m, principal_n = _sum(i["principal_this_month"] for i in own)
+    after_m, _ = _sum(i["balance_after_this_month"] for i in own if i["principal_this_month"] is not None)
+
     by_type: dict[str, list[dict]] = {}
     by_asset: dict[str, list[dict]] = {}
     for i in active:
@@ -191,6 +251,10 @@ def summarize(items: list[dict]) -> dict:
         "weighted_average_interest_rate": avg_rate,
         "total_estimated_future_cost": cost,
         "total_monthly_cash_freed_if_all_closed": pay,
+        "interest_this_month": interest_m,
+        "principal_this_month": principal_m,
+        "balance_after_this_month": after_m,
+        "split_coverage": {"known": principal_n, "of": len(own), "exact": sum(1 for i in own if i.get("split_exact"))},
         # how many loans each figure is actually based on (a total over 4 of 9 loans must not look complete)
         "coverage": {"original_amount": orig_n, "early_closure_balance": bal_n, "monthly_payment": pay_n,
                      "future_cost": cost_n, "interest_rate": len(weighted)},
@@ -307,7 +371,9 @@ def prime_rows(records: list[dict], today: date) -> list[dict]:
             continue
         rows.append({"id": item["id"], "name": item["name"], "rate": item["interest_rate"], "payment": item["monthly_payment"],
                      "balance": item["early_closure_balance"], "left": item["payments_remaining"],
-                     "notes": str((rec.get("fields") or {}).get(LF.NOTES) or "")})
+                     "notes": str((rec.get("fields") or {}).get(LF.NOTES) or ""),
+                     # the stored schedule (compressed) rides in the draft so the change can project it again: None = the loan has none
+                     "schedule": amortization.pack(str(rec["fields"][LF.SCHEDULE])) if amortization.loads((rec.get("fields") or {}).get(LF.SCHEDULE)) else None})
     return rows
 
 
@@ -406,6 +472,8 @@ def monthly_schedule(records: list[dict], windows: list[tuple[str, date, date]],
         name = str(f.get(LF.NAME) or "הלוואה")
         start, end, closed = _iso_date(f.get(LF.START_DATE)), _iso_date(f.get(LF.END_DATE)), not is_active(f)
         term = _num(f.get(LF.TERM_MONTHS))
+        if end is None and not closed:
+            end = inferred_end(f, today)                                              # "Payments Remaining" is the freshest fact about the end
         if start and end is None and term and not closed:
             idx = start.year * 12 + start.month - 1 + max(int(term) - 1, 0)          # the last payment falls in the (term-1)th month after the first
             end = date(idx // 12, idx % 12 + 1, min(start.day, 28))
@@ -414,9 +482,15 @@ def monthly_schedule(records: list[dict], windows: list[tuple[str, date, date]],
         if closed and end is None:
             closed_undated.append(name)
             continue
+        sched = amortization.loads(f.get(LF.SCHEDULE)) if not closed else None
+        first_sched = amortization._date(sched[0][0]) if sched else None
         for key, ms, me in windows:
+            if sched and first_sched and me >= first_sched.replace(day=1):
+                totals[key] += sum(r[3] for r in sched if ms <= amortization._date(r[0]) <= me)       # the bank's own amount for that month (0 after the last payment)
+                continue
             if start is None:
-                counted = ms <= today <= me and not closed
+                # no start date: the current month, and (when the end is known) every month up to it; the past stays unknown
+                counted = not closed and me >= today and (ms <= today <= me or (end is not None and ms <= end))
             else:
                 counted = start <= me and (end is None or end >= ms)
             if counted:

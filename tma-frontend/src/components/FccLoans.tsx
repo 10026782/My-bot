@@ -3,11 +3,12 @@ import type { FccLoans } from "../types";
 import {
   ARRANGEMENT_BUTTON, AUTO_STEP_NOTE, BALANCE_BUTTON, balanceCardModel, CLOSE_BUTTON, NEXT_ACTION_BUTTON, PARTIAL_BUTTON, PAYMENT_BUTTON, RATE_BUTTON, TERM_BUTTON, ORIGINAL_BUTTON, RECEIVED_BUTTON,
   FILTERS, RANK_MODES, STATUS_UNKNOWN, UNKNOWN, actionRows, compareRows, filterLoans, loanCardModel, loanGoalModel, loanHeaderCards,
-  receivableCardModel, receivableItems, receivablesSummary, sortLoans, togglePick, canClose,
+  receivableCardModel, receivableItems, receivablesSummary, sortLoans, splitSummaryModel, SPLIT_NOTE, SCHEDULE_PRIME_NOTE, togglePick, canClose,
   type ActionRow, type LoanFilter, type RankMode,
 } from "../lib/fccLoans";
 import { STEP_ACTIONS } from "./FccAssets";
 import { KpiCard } from "./FccKpiCard";
+import { LoanScheduleImport } from "./FccLoanSchedule";
 import { PayoffEngine, type LoadScenario } from "./FccPayoff";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -103,7 +104,7 @@ function ReceivablesSection({ loans, actions }: { loans: FccLoans; actions?: Loa
   );
 }
 
-export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans; loadScenario?: LoadScenario; actions?: LoanActions }) {
+export function LoansSection({ loans, loadScenario, actions, onScheduleSaved }: { loans: FccLoans; loadScenario?: LoadScenario; actions?: LoanActions; onScheduleSaved?: () => void }) {
   const [filter, setFilter] = useState<LoanFilter>("all");
   const [mode, setMode] = useState<RankMode>("high_interest");
   const [picked, setPicked] = useState<string[]>([]);
@@ -125,6 +126,21 @@ export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans
           <div className="fcc-kpis">
             {loanHeaderCards(loans).map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}
           </div>
+          {(() => {
+            const sp = splitSummaryModel(loans);
+            return sp && (
+              <Surface variant="subtle" padding="compact" className="fcc-loans-goal" aria-label="ריבית מול קרן החודש">
+                <h3 className="fcc-loans-goal__title">ריבית מול קרן החודש</h3>
+                <dl className="fcc-loans-goal__grid">
+                  {sp.lines.map((l) => <div key={l.label}><dt>{l.label}</dt><dd className={l.value === UNKNOWN ? "fcc-unknown" : undefined}>{l.value}</dd></div>)}
+                </dl>
+                {sp.hint && <p className="fcc-loan__meta">{sp.hint}</p>}
+                <p className="fcc-loan__meta">{SPLIT_NOTE}</p>
+                <p className="fcc-loan__meta">{SCHEDULE_PRIME_NOTE}</p>
+              </Surface>
+            );
+          })()}
+          {onScheduleSaved && <LoanScheduleImport onSaved={onScheduleSaved} />}
           {loans.auto_step && <p className="fcc-goal__note" role="note">{AUTO_STEP_NOTE}</p>}
           {loans.summary.unknown_status_count > 0 && (
             <p className="fcc-goal__note">{loans.summary.unknown_status_count} הלוואות עם {STATUS_UNKNOWN} (Active Loan לא מסומן) — כלולות בסיכומים.</p>
@@ -186,6 +202,7 @@ export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans
                         <div key={r.label} className={i === 0 ? "fcc-loan__key-main" : undefined}><dt>{r.label}</dt><dd className={r.value === UNKNOWN ? "fcc-unknown" : undefined}>{r.value}</dd></div>
                       ))}
                     </dl>
+                    {m.splitLine && <p className="fcc-loan__meta">{m.splitLine}</p>}
                     <p className="fcc-loan__meta">{m.metaRows.map((r) => `${r.label}: ${r.value}`).join(" · ")}</p>
                     <p className={`fcc-loan__freed ${m.freedKnown ? "" : "fcc-loan__freed--unknown"}`}>{m.freedLine}</p>
                     <OpenActions rows={actionRows(l)} actions={actions} />

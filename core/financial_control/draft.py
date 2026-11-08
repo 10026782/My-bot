@@ -16,12 +16,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import date
 from typing import Any, Mapping
 
 from airtable_schema import FinAccountFields as AF_ACCOUNT
 from airtable_schema import FinEventFields as EF
 from airtable_schema import AssetFields as AF
 from airtable_schema import LoanFields as LF
+from core.financial_control import amortization
 from airtable_schema import FinGoalFields as GF
 from airtable_schema import FundingPlanFields as FPF
 from airtable_schema import RecObFields as RF
@@ -906,6 +908,7 @@ def prime_change_writes(values: Mapping[str, Any], source: Mapping[str, Any]) ->
     rows = list(source.get("prime_rows") or [])
     delta = float(values["delta"])
     notes = {r["id"]: r.get("notes", "") for r in rows}
+    schedules = {r["id"]: r.get("schedule") for r in rows}
     writes = []
     for p in fcc_loans.prime_plan(rows, delta):
         if p["skip"]:
@@ -915,6 +918,20 @@ def prime_change_writes(values: Mapping[str, Any], source: Mapping[str, Any]) ->
         if p["new_payment"] is not None:
             fields[LF.MONTHLY_PAYMENT] = p["new_payment"]
             line += f", החזר {display_value('payment', p['old_payment'])} ← {display_value('payment', p['new_payment'])}"
+        blob = schedules.get(p["id"])
+        if blob:                                                      # the lender's schedule: charged months stay, the rest follows the new prime
+            stored = amortization.loads(amortization.unpack(blob))
+            today = str(source.get("today") or "")[:10]
+            try:
+                moved = amortization.reproject(stored, delta, date.fromisoformat(today)) if stored else None
+            except ValueError:
+                moved = None
+            if moved:
+                fields[LF.SCHEDULE] = amortization.dumps(amortization.Schedule(ok=True, rows=moved), date.fromisoformat(today))
+                nxt = next((r for r in moved if r[0] > today), None)
+                if nxt:
+                    fields[LF.MONTHLY_PAYMENT] = nxt[3]               # the schedule's own recalculated payment beats the generic estimate
+                    line += f"; לוח הסילוקין חושב מחדש (החזר {display_value('payment', nxt[3])})"
         fields[LF.NOTES] = _note_line(notes.get(p["id"]), line)
         writes.append({"op": "patch", "table": Tables.LOANS, "record_id": p["id"], "fields": fields,
                        "audit_action": "fcc_prime_change", "audit_details": p["id"]})

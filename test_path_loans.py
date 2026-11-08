@@ -171,3 +171,51 @@ def test_the_ranking_helpers_of_payoff_are_never_used():
     tree = ast.parse(Path("portfolio_lab/path_comparison/loan_paths.py").read_text(encoding="utf-8"))
     imported = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     assert "core.financial_control.loans" in imported and not any("payoff" in m for m in imported)
+
+
+def test_payment_split_interest_principal():
+    from core.financial_control import loans as L
+    s = L.payment_split(116175.84, 6, 2816.16, 62)
+    assert s == {"interest": 580.88, "principal": 2235.28, "balance_after": 113940.56}, s
+    assert L.payment_split(None, 6, 100) is None and L.payment_split(1000, None, 100) is None
+    assert L.payment_split(100000, 12, 500) is None                       # payment below the interest: no invented split
+    assert L.payment_split(700, 6, 784, 1)["balance_after"] == 0.0         # last payment clears the balance
+
+
+def test_summary_interest_principal_totals():
+    from datetime import date
+    from core.financial_control import loans as L
+    def rec(i, bal, rate, pay, direction=None):
+        f = {"Loan Name/ID": i, "Outstanding Principal for Early Closure": bal, "Interest Rate (%)": rate, "Current Monthly Payment": pay, "Active Loan": True}
+        if direction: f["Direction"] = direction
+        return {"id": i, "fields": f}
+    items = [L.loan_item(r, date(2026, 11, 8)) for r in (rec("a", 120000, 6, 2000), rec("b", 1200, 12, 300), rec("c", 5000, None, 100), rec("d", 9999, None, None, "חייבים לי"))]
+    s = L.summarize(items)
+    assert s["interest_this_month"] == 612.0 and s["principal_this_month"] == 1688.0 and s["balance_after_this_month"] == 119512.0, s
+    assert s["split_coverage"] == {"known": 2, "of": 3, "exact": 0}, s["split_coverage"]
+
+
+def test_end_date_inferred_from_payments_remaining():
+    from datetime import date
+    from core.financial_control import loans as L
+    t = date(2026, 11, 8)
+    f = {"Payments Remaining": 3, "Monthly Due Day": 10}
+    assert L.inferred_end(f, t) == date(2027, 1, 10)
+    assert L.inferred_end({**f, "Monthly Due Day": 5}, t) == date(2027, 2, 5)
+    assert L.inferred_end({**f, "Next Payment Due": "2026-12-02"}, t) == date(2027, 2, 2)
+    assert L.inferred_end({"Payments Remaining": 0}, t) is None and L.inferred_end({}, t) is None
+    rec = {"id": "x", "fields": {"Loan Name/ID": "x", "Active Loan": True, "Current Monthly Payment": 100, **f}}
+    item = L.loan_item(rec, t)
+    assert item["end_date"] == "2027-01-10" and item["end_date_inferred"] is True
+    typed = L.loan_item({"id": "y", "fields": {**rec["fields"], "End Date": "2030-01-01"}}, t)
+    assert typed["end_date"] == "2030-01-01" and typed["end_date_inferred"] is False
+    # schedule: no start date but remaining payments -> current month through the inferred end, not beyond
+    from datetime import date as D
+    wins = [("2026-11", D(2026, 11, 1), D(2026, 11, 30)), ("2027-01", D(2027, 1, 1), D(2027, 1, 31)), ("2027-02", D(2027, 2, 1), D(2027, 2, 28)), ("2026-10", D(2026, 10, 1), D(2026, 10, 31))]
+    totals, undated, _ = L.monthly_schedule([rec], wins, t)
+    assert totals == {"2026-11": 100.0, "2027-01": 100.0, "2027-02": 0.0, "2026-10": 0.0}, totals
+    assert undated == ["x"]
+
+
+if __name__ == "__main__":
+    test_end_date_inferred_from_payments_remaining(); test_payment_split_interest_principal(); test_summary_interest_principal_totals(); print("ok split")

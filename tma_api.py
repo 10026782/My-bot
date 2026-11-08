@@ -5798,6 +5798,57 @@ def fcc_import_run(identity):
                     "rules_to_add": len(ctx["full"].pending_rules) if step == "events" else left})
 
 
+@tma_api.route("/api/fcc/loans/schedule", methods=["OPTIONS"])
+def _preflight_fcc_loan_schedule():
+    return "", 204
+
+
+@tma_api.route("/api/fcc/loans/schedule", methods=["POST"])
+@require_tma_auth
+def fcc_loan_schedule(identity):
+    """A loan's amortization schedule (Excel from the lender): without ``confirm`` it only READS the file and names the loan(s) it fits; with ``confirm=1``
+    and a ``loan_id`` among those candidates it writes the compact schedule to THAT loan's ``Amortization Schedule`` field (owner approval ceremony, one patch).
+    Owner only (404 otherwise). Nothing of the file is kept except the payments table."""
+    from core.financial_control import amortization as am, loans as fcc_loans, service as svc, statement_reader as sr  # noqa: PLC0415
+    try:
+        _fcc_import_gate(identity)
+        upload = request.files.get("file")
+        if upload is None:
+            raise _ImportRefused("file required")
+        data = upload.read(sr.MAX_BYTES + 1)
+        if len(data) > sr.MAX_BYTES:
+            raise _ImportRefused("file too large", 413)
+        parsed = am.parse_file(data)
+        if not parsed.ok:
+            return jsonify({"state": "rejected", "problems": parsed.problems[:5]}), 200
+        mine = [r for r in svc.my_loans(identity) if fcc_loans.is_active(r.get("fields") or {})
+                and str(fcc_loans._sel((r.get("fields") or {}).get("Direction")) or "").strip() != fcc_loans.DIRECTION_TO_ME_STORED]
+        candidates = am.match_loan(parsed, mine)
+        today = date.today()
+        month = am.month_split(parsed.rows, today.year, today.month)
+        digest = hashlib.sha256((identity.user_id + "|" + am.dumps(parsed)).encode("utf-8")).hexdigest()[:24]
+        info = [{"id": r["id"], "name": (r.get("fields") or {}).get("Loan Name/ID") or "הלוואה", "lender": (r.get("fields") or {}).get("Lender") or None,
+                 "has_schedule": am.loads((r.get("fields") or {}).get("Amortization Schedule")) is not None} for r in candidates]
+        out = {"state": "preview", "original": parsed.original, "payment_now": parsed.payment_now, "payments_left": am.remaining(parsed.rows)["payments"],
+               "interest_left": am.remaining(parsed.rows)["interest"], "ends": (am.last_date(parsed.rows).isoformat() if parsed.rows else None),
+               "this_month": month, "notes": parsed.notes, "candidates": info, "digest": digest}
+        if str(request.form.get("confirm") or "") != "1":
+            return jsonify(out)
+        loan_id = str(request.form.get("loan_id") or "")
+        if loan_id not in {c["id"] for c in info}:
+            raise _ImportRefused("choose one of the loans this schedule fits")
+        if str(request.form.get("digest") or "") != digest:
+            raise _ImportRefused("the file changed since the review — review again", 409)
+        write = {"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": {"Amortization Schedule": am.dumps(parsed)},
+                 "audit_action": "fcc_loan_schedule", "audit_details": loan_id}
+        _, response, status = _queue_or_owner_execute("tma_fcc_write", write, identity, "FCC: loan amortization schedule")
+        if status >= 300:
+            return jsonify({"state": "blocked", "message": "הכתיבה לא הושלמה — אפשר לנסות שוב", "detail": response.get("error") or response.get("message")}), status
+        return jsonify({**out, "state": "saved", "loan_id": loan_id})
+    except Exception as exc:                                  # noqa: BLE001 — never leak internals
+        return _fcc_import_error(exc)
+
+
 # ══════════════════════════════════════════════════════════════════
 # Portfolio Lab — "מעבדת העתיד" (read-only simulation view for the family-wealth screen)
 # One pure function (portfolio_lab.simulator_view.build_simulator_view): no Airtable, no LLM, no writes,

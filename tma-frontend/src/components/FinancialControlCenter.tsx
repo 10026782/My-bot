@@ -221,7 +221,7 @@ export function FinancialControlCenter({ onBack, onOpenFamilyWealth }: Props) {
     monthly,
     cashflow: <CashflowSection reloadKey={writer.receipt} />,
     consumption: <ConsumptionSection active={tab === "consumption"} reloadKey={writer.receipt} />,
-    loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario}
+    loans: data.loans ? <LoansSection loans={data.loans} loadScenario={fetchFccLoanScenario} onScheduleSaved={refresh}
                                                 actions={{ onAction: (intent, id) => void writer.start(intent, id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני הלוואות" />,
     assets: data.assets ? <AssetsSection assets={data.assets} actions={{ onAction: (intent, id) => void writer.start(intent, id), disabled: writer.busy || writer.turn != null }} /> : <ScreenState state="empty" title="אין נתוני נכסים" />,
   };

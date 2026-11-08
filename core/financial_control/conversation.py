@@ -212,7 +212,8 @@ def _prime_note(d: BusinessDraft) -> str:
             continue
         pay = (f" · החזר {fd.display_value('payment', p['old_payment'])} ← {fd.display_value('payment', p['new_payment'])}"
                if p["new_payment"] is not None else " · ההחזר לא מחושב (חסרה יתרה / החזר / תשלומים שנותרו)")
-        lines.append(f"• {p['name']}: ריבית {p['old_rate']:g}% ← {p['new_rate']:g}%{pay}")
+        has_schedule = any(r.get("id") == p["id"] and r.get("schedule") for r in rows)
+        lines.append(f"• {p['name']}: ריבית {p['old_rate']:g}% ← {p['new_rate']:g}%{pay}{' · לוח הסילוקין יחושב מחדש' if has_schedule else ''}")
     return "\n".join(lines)
 
 

@@ -4,7 +4,7 @@ import type { FccLoan, FccLoans } from "../types";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LoansSection } from "../components/FccLoans";
-import { AUTO_STEP_NOTE, PAYMENTS_DONE, balanceCardModel, BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, NO_ARRANGEMENT, UNKNOWN, canClose, receivableCardModel, receivableItems, receivablesSummary, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, pct, sortLoans, togglePick, val } from "./fccLoans";
+import { AUTO_STEP_NOTE, PAYMENTS_DONE, balanceCardModel, BALANCE_BUTTON, CLOSE_BUTTON, PAYMENT_BUTTON, FILTERS, NO_ARRANGEMENT, UNKNOWN, canClose, receivableCardModel, receivableItems, receivablesSummary, compareRows, filterLoans, futureCostLabel, loanCardModel, loanGoalModel, loanHeaderCards, splitLine, splitSummaryModel, pct, sortLoans, togglePick, val } from "./fccLoans";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -276,6 +276,17 @@ test("loan card: next instalment date and 'all paid — close?' show only when k
   assert.ok(!plain.metaRows.some((r) => r.label === "תשלום הבא") && !plain.tags.some((t) => t.text === PAYMENTS_DONE));
   assert.ok(!renderToStaticMarkup(createElement(LoansSection, { loans })).includes("מתעדכנות אוטומטית"));
   assert.ok(renderToStaticMarkup(createElement(LoansSection, { loans: { ...loans, auto_step: true } })).includes(AUTO_STEP_NOTE));
+});
+
+test("interest / principal split: per loan, summary and unknown stays unknown", () => {
+  const l = mk({ interest_this_month: 580.88, principal_this_month: 2235.28, balance_after_this_month: 113940.56 });
+  assert.ok(splitLine(l)!.includes("ריבית") && splitLine(l)!.includes("קרן") && splitLine(l)!.includes("יתרה בסוף החודש"));
+  assert.equal(splitLine(mk({})), null);
+  assert.equal(loanCardModel(mk({})).splitLine, null);
+  assert.equal(splitSummaryModel({ ...loans, summary: { ...loans.summary } }), null);
+  const m = splitSummaryModel({ ...loans, summary: { ...loans.summary, interest_this_month: 612, principal_this_month: 1688, balance_after_this_month: 119512, split_coverage: { known: 2, of: 3 } } })!;
+  assert.equal(m.lines.length, 3);
+  assert.ok(m.hint!.includes("2 מתוך 3"));
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
