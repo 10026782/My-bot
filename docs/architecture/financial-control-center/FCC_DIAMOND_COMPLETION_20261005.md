@@ -569,3 +569,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **What happened:** the Max ₪30,000 file was uploaded twice; the first write saved it, the second identical proposal was refused as a duplicate and the card showed "הכתיבה לא הושלמה". Checked in Airtable: all seven schedules (Max 105k and 30k, five Cal letters) are stored.
 - **Change:** the schedule preview marks a loan whose stored schedule is identical, and confirming an identical schedule reports "saved" (`already`) without a write.
 - **Not done:** verification on a device and in production.
+
+### Refinance simulator (08/11/2026) — owner decision
+
+- **Decision:** the owner can test an offer for rolling loans into one mortgage: what to include, the payment relief, the interest, and when the costs pay back — not every loan is worth including.
+- **Change:** `refinance.simulate` (pure) + `POST /api/fcc/loans/refinance` (owner only, read-only) + the loans tab's "סימולטור מחזור" card. Per-loan verdicts; unknown early-repayment fees and loans without balance / payment / payments left are never guessed; the same-term and offer-term comparisons are always shown together, and the worthwhile set must cover the offer's fixed costs (`recommended_pays`).
+- **Limit (stated to the owner):** every figure assumes today's prime and rates stay; a single rate per offer (no track mix, no index-linking); the result is a comparison, not advice to sign.
+- **Not done:** verification on a device and in production; multi-track offers and several offers side by side.

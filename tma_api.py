@@ -5596,6 +5596,36 @@ def fcc_loans_scenario(identity):
         return jsonify({"error": "forbidden"}), 403
 
 
+@tma_api.route("/api/fcc/loans/refinance", methods=["OPTIONS"])
+def _preflight_fcc_loans_refinance():
+    return "", 204
+
+
+@tma_api.route("/api/fcc/loans/refinance", methods=["POST"])
+@require_tma_auth
+def fcc_loans_refinance(identity):
+    """Read-only refinance simulation over the owner's own loans for ONE typed offer (rate, term, costs). Owner only (404 otherwise); nothing is written."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    if request.mimetype != "application/json":
+        return jsonify({"error": "Content-Type must be application/json"}), 415
+    if not 0 < (request.content_length or 0) <= 16 * 1024:
+        return jsonify({"error": "body too large or missing"}), 413
+    try:
+        params = json.loads(request.get_data(cache=False))
+    except (ValueError, UnicodeDecodeError):
+        return jsonify({"error": "invalid JSON"}), 400
+    if not isinstance(params, dict):
+        return jsonify({"error": "invalid JSON"}), 400
+    from core.financial_control import refinance as fcc_refinance, service as fcc_service  # noqa: PLC0415
+    try:
+        return jsonify(fcc_service.loan_refinance(identity, params))
+    except fcc_refinance.RefinanceInputError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+
+
 @tma_api.route("/api/fcc/intent/start", methods=["POST"])
 @require_tma_auth
 def fcc_intent_start(identity):
