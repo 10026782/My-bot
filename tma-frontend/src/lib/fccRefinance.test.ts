@@ -1,6 +1,6 @@
 // Plain node + esbuild test (see package.json `npm test`).
 import type { FccRefinance, FccRefinanceRow } from "../types";
-import { offerBody, refinanceModel, rowModel, totalsLines } from "./fccRefinance";
+import { REFINANCE_HOW, offerBody, refinanceModel, rowModel, totalsLines } from "./fccRefinance";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) { if (actual !== expected) throw new Error(message ?? `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`); },
@@ -26,28 +26,34 @@ test("offer input: required rate and term, blank costs are 0, bad numbers are re
   assert.ok("body" in sel && sel.body.loan_ids?.[0] === "a" && sel.body.fee_overrides?.a === 250 && !("b" in (sel.body.fee_overrides ?? {})));
 });
 
-test("totals: a lower payment is not shown as a saving when the total costs more; both comparisons are present", () => {
+test("totals in plain words: the payment drop and the two scenarios are separate sentences, nothing is a bare percent", () => {
   const lines = totalsLines(totals);
   const get = (l: string) => lines.find((x) => x.label.startsWith(l))!;
-  assert.ok(get("הפרש בהחזר").value.startsWith("יורד") && get("הפרש בהחזר").tone === "good");
-  assert.ok(get("סה״כ בתקופת ההצעה").value.startsWith("מייקר") && get("סה״כ בתקופת ההצעה").tone === "bad");
-  assert.ok(get("סה״כ באותו טווח").value.startsWith("מייקר"));
-  assert.equal(get("החזר העלויות").value, "6 חודשים");
-  assert.equal(totalsLines({ ...totals, payback_months: null }).find((x) => x.label === "החזר העלויות")!.value, "לא הוגדר");
+  assert.ok(get("ההחזר החודשי").value.startsWith("יורד ב-") && get("ההחזר החודשי").tone === "good");
+  assert.ok(get("אם תמשיך לשלם כמו היום").value.startsWith("תשלום") || get("אם תמשיך לשלם כמו היום").value.includes("יותר"));
+  assert.ok(get("אם תפרוס לכל התקופה").value.includes("יותר") && get("אם תפרוס לכל התקופה").tone === "bad");
+  assert.equal(get("העלויות חוזרות אחרי").value, "6 חודשים");
+  assert.equal(totalsLines({ ...totals, payback_months: null }).find((x) => x.label === "העלויות חוזרות אחרי")!.value, "לא הוגדר");
+  assert.ok(!lines.some((l) => l.value.includes("%") || l.label.includes("%")));
 });
 
-test("row: verdicts, estimate marker, and the fee input appears only when the fee is unknown", () => {
-  const w = rowModel(row({}));
-  assert.equal(w.verdict, "כדאי לכלול"); assert.equal(w.tone, "good"); assert.ok(w.lines.some((l) => l.includes("(הערכה)"))); assert.equal(w.needsFee, false);
-  assert.ok(w.lines.some((l) => l.includes("17% מהתשלומים שנותרו הם ריבית")) && w.lines.some((l) => l.includes("לכל תקופת המשכנתא: מייקר")));
-  assert.ok(w.lines.some((l) => l.includes("הקלה בהחזר החודשי") && l.includes("מחיר ההקלה")));
-  assert.ok(rowModel(row({ monthly_relief: -20, relief_cost_per_100: null })).lines.includes("אין הקלה בהחזר החודשי"));
-  const near = rowModel(row({ verdict: "not_worth", net_saving: 22, interest_share: 0.018, reason: "רוב הריבית כבר שולמה" }));
-  assert.ok(near.lines.some((l) => l.startsWith("2% מהתשלומים")) && near.lines.includes("רוב הריבית כבר שולמה") && near.tone === "bad");
-  const u = rowModel(row({ verdict: "unknown_fee", reason: "עמלת הפירעון לא ידועה" }));
-  assert.ok(u.needsFee && u.tone === "muted");
-  const m = rowModel(row({ verdict: "missing", balance: null, interest_left: null, net_saving: null, interest_share: null, full_term_net: null, monthly_relief: null, reason: "חסרים יתרה" }));
-  assert.equal(m.lines.length, 1);
+test("row: the interest ahead is in shekels, two before/after tables, the relief in two shekel figures, the fee box only when the fee is unknown", () => {
+  const w = rowModel(row({ same_term_payment: 939, same_term_interest: 5091, offer_payment: 450, full_term_interest: 13000 }));
+  assert.equal(w.verdict, "כדאי למחזר"); assert.equal(w.tone, "good"); assert.equal(w.needsFee, false);
+  assert.ok(w.facts.some((f) => f.includes("תשלם עוד") && f.includes("ריבית") && f.includes("48 חודשים") && f.includes("בקירוב")));
+  assert.ok(!w.facts.some((f) => f.includes("%  ") || f.includes("מהתשלומים")));
+  assert.equal(w.tables.map((t) => t.title).join("|"), "אם תמשיך לשלם כמו היום|אם תפרוס לכל התקופה");
+  const keep = w.tables[0].rows, stretch = w.tables[1].rows;
+  assert.equal(keep.map((r) => r.label).join(), "החזר חודשי,ריבית עד הסוף,סה״כ לתשלום");
+  assert.equal(keep[1].tone, "good"); assert.ok(keep[1].diff.startsWith("-"));            // the same pace saves interest
+  assert.equal(stretch[0].tone, "good"); assert.equal(stretch[1].tone, "bad"); assert.ok(stretch[1].diff.startsWith("+"));   // the long term lowers the payment and costs interest
+  assert.ok(w.reliefLine!.includes("ההחזר יורד ב-") && w.reliefLine!.includes("יותר ריבית"));
+  assert.ok(!w.reliefLine!.includes("₪100"));
+  const u = rowModel(row({ verdict: "unknown_fee", reason: "לא ידועה עמלת הפירעון" }));
+  assert.ok(u.needsFee && u.tone === "muted" && u.reason === "לא ידועה עמלת הפירעון");
+  const m = rowModel(row({ verdict: "missing", balance: null, interest_left: null, net_saving: null, interest_share: null, full_term_net: null, monthly_relief: null, same_term_payment: null, offer_payment: null, reason: "חסרים נתונים" }));
+  assert.equal(m.tables.length, 0); assert.equal(m.reliefLine, null);
+  assert.equal(rowModel(row({ monthly_relief: -20, relief_cost: 100 })).reliefLine, "במשכנתא ההחזר החודשי על ההלוואה הזו לא יורד.");
 });
 
 test("model: names the recommended loans and says when refinancing does not pay", () => {
@@ -58,6 +64,10 @@ test("model: names the recommended loans and says when refinancing does not pay"
   const withRelief = refinanceModel({ ...r, relief_ids: ["b", "a"], relief: totals });
   assert.equal(withRelief.reliefNames.join(","), "כאל,מקס"); assert.ok(withRelief.relief !== null);
   assert.equal(refinanceModel({ ...r, recommended: null, recommended_ids: [] }).recommended, null);
+});
+test("the explanation is plain: no formula symbols, and it names both scenarios", () => {
+  assert.ok(REFINANCE_HOW.length >= 5 && REFINANCE_HOW.some((h) => h.includes("אם תמשיך לשלם כמו היום")) && REFINANCE_HOW.some((h) => h.includes("אם תפרוס לכל התקופה")));
+  assert.ok(!REFINANCE_HOW.some((h) => /[=×÷]/.test(h.replace("ריבית שנשארה =", ""))));
 });
 if (failures > 0) throw new Error(`${failures} test(s) failed`);
 console.log("all fccRefinance tests passed");

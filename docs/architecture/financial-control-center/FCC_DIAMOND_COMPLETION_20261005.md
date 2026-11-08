@@ -595,3 +595,9 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Decision:** every loan shows the interest still to be paid until it ends, besides the monthly interest and the other figures.
 - **Change:** `loan_item` carries `interest_remaining` (+ `interest_remaining_exact`): the lender's schedule when stored, else payment × payments left − balance; the loan card shows it as "ריבית שנותרה עד הסיום" (exact / "≈ הערכה" / unknown).
 - **Not done:** verification on a device and in production; a total across all loans in the header.
+
+### The refinance simulator in plain language (08/11/2026) — owner decision
+
+- **Decision:** the simulator must speak plainly: the practical interest in shekels until the end of each loan (not a share of the payments), the relief price as two shekel figures (not "₪X per ₪100"), and everything explained in everyday words. The owner chose the layout from options.
+- **Change:** per-loan before / after tables for two scenarios ("אם תמשיך לשלם כמו היום" / "אם תפרוס לכל התקופה"), a one-sentence reason per verdict, a plain-language "איך חישבתי?" section; the numbers are unchanged.
+- **Not done:** verification on a device and in production.

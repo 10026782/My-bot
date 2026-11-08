@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { postFccRefinance } from "../api";
-import { REFINANCE_HELP, REFINANCE_TITLE, offerBody, refinanceModel, type OfferInput, type RefinanceLine } from "../lib/fccRefinance";
+import { REFINANCE_HELP, REFINANCE_HOW, REFINANCE_TITLE, offerBody, refinanceModel, type OfferInput, type RefinanceLine, type ScenarioTable } from "../lib/fccRefinance";
 import type { FccRefinance } from "../types";
 import { Surface } from "./ui/Surface";
 
@@ -9,6 +9,22 @@ function Lines({ lines }: { lines: RefinanceLine[] }) {
     <dl className="fcc-loans-goal__grid">
       {lines.map((l) => <div key={l.label}><dt>{l.label}</dt><dd className={l.tone === "good" ? "fcc-pay__saving" : l.tone === "bad" ? "fcc-unknown" : undefined}>{l.value}</dd></div>)}
     </dl>
+  );
+}
+
+function Table({ t }: { t: ScenarioTable }) {
+  return (
+    <div className="fcc-pay__scenario">
+      <h5 className="fcc-pay__subhead">{t.title}</h5>
+      <table className="fcc-compare__table fcc-pay__table">
+        <thead><tr><th></th><th>היום</th><th>אחרי מחזור</th><th>הפרש</th></tr></thead>
+        <tbody>
+          {t.rows.map((r) => (
+            <tr key={r.label}><th scope="row">{r.label}</th><td>{r.today}</td><td>{r.after}</td><td className={r.tone === "good" ? "fcc-pay__saving" : r.tone === "bad" ? "fcc-unknown" : undefined}>{r.diff}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -56,20 +72,20 @@ export function RefinanceSimulator() {
             <>
               {m.recommended && (
                 <section aria-label="ההלוואות שכדאי לכלול">
-                  <h4 className="fcc-pay__subhead">{m.recommendedPays ? `כדאי לכלול: ${m.recommendedNames.join(", ")}` : "במצב הזה המחזור לא משתלם"}</h4>
+                  <h4 className="fcc-pay__subhead">{m.recommendedPays ? `כדאי למחזר: ${m.recommendedNames.join(", ")}` : "בהצעה הזו המחזור לא משתלם"}</h4>
                   <Lines lines={m.recommended} />
                 </section>
               )}
-              {!m.recommended && <p className="fcc-goal__note">אף הלוואה לא חוסכת ריבית בהצעה הזו.</p>}
+              {!m.recommended && <p className="fcc-goal__note">אין הלוואה שהמחזור שלה חוסך ריבית בהצעה הזו.</p>}
               {m.relief && (
                 <section aria-label="הקלה בהחזר החודשי">
-                  <h4 className="fcc-pay__subhead">אם המטרה היא להקל על ההחזר החודשי (הזול קודם): {m.reliefNames.join(", ")}</h4>
+                  <h4 className="fcc-pay__subhead">אם המטרה היא להקל על ההחזר החודשי (מהזולה ליקרה): {m.reliefNames.join(", ")}</h4>
                   <Lines lines={m.relief} />
                 </section>
               )}
               {m.selected && (
                 <section aria-label="ההלוואות שנבחרו">
-                  <h4 className="fcc-pay__subhead">לפי ההלוואות שסימנת ({result?.selected?.loans})</h4>
+                  <h4 className="fcc-pay__subhead">סיכום לפי ההלוואות שסימנת ({result?.selected?.loans})</h4>
                   <Lines lines={m.selected} />
                 </section>
               )}
@@ -77,14 +93,26 @@ export function RefinanceSimulator() {
                 {m.rows.map((r) => (
                   <article key={r.id} className="fcc-loan">
                     <label className="fcc-loan__title"><input type="checkbox" checked={chosen.includes(r.id)} onChange={() => toggle(r.id)} /> {r.title} <span className={`fcc-tag fcc-tag--${r.tone === "good" ? "plain" : "muted"}`}>{r.verdict}</span></label>
-                    {r.lines.map((l) => <p key={l} className="fcc-loan__meta">{l}</p>)}
+                    {r.facts.map((l) => <p key={l} className="fcc-loan__meta">{l}</p>)}
+                    {r.reason && <p className="fcc-goal__note">{r.reason}</p>}
+                    {r.tables.length > 0 && (
+                      <details>
+                        <summary>לפני ואחרי המחזור</summary>
+                        {r.tables.map((t) => <Table key={t.title} t={t} />)}
+                      </details>
+                    )}
+                    {r.reliefLine && <p className="fcc-loan__meta">{r.reliefLine}</p>}
                     {r.needsFee && (
-                      <label className="fcc-loan__meta">עמלת פירעון ₪ <input inputMode="decimal" value={fees[r.id] ?? ""} onChange={(e) => setFees((cur) => ({ ...cur, [r.id]: e.target.value }))} onBlur={() => void run(picked)} /></label>
+                      <label className="fcc-loan__meta">עמלת פירעון של ההלוואה (₪) <input inputMode="decimal" value={fees[r.id] ?? ""} onChange={(e) => setFees((cur) => ({ ...cur, [r.id]: e.target.value }))} onBlur={() => void run(picked)} /></label>
                     )}
                   </article>
                 ))}
               </div>
               {m.notes.map((n) => <p key={n} className="fcc-loan__meta">{n}</p>)}
+              <details>
+                <summary>איך חישבתי?</summary>
+                {REFINANCE_HOW.map((h) => <p key={h} className="fcc-loan__meta">{h}</p>)}
+              </details>
             </>
           )}
         </div>

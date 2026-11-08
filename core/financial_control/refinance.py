@@ -85,7 +85,7 @@ def _row(item: dict, offer: dict) -> dict:
            "same_term_payment": None, "same_term_interest": None, "net_saving": None, "interest_share": None,
            "full_term_interest": None, "full_term_net": None, "offer_payment": None, "monthly_relief": None, "relief_cost": None, "relief_cost_per_100": None, "verdict": "missing", "reason": None}
     if rem is None or item["early_closure_balance"] is None or item["monthly_payment"] is None:
-        row["reason"] = "חסרים יתרה, החזר חודשי או תשלומים שנותרו"
+        row["reason"] = "חסרים נתונים בהלוואה (יתרה, החזר חודשי או כמה תשלומים נשארו), ולכן לא חישבתי אותה"
         return row
     n, bal = rem["months"], item["early_closure_balance"]
     pay = fcc_loans._pmt(bal, offer["rate"], n)
@@ -105,19 +105,19 @@ def _row(item: dict, offer: dict) -> dict:
         row["relief_cost_per_100"] = round(row["relief_cost"] / row["monthly_relief"] * 100.0, 2)     # total extra cost for every ₪100 of monthly relief
     if not row["fee_known"]:
         row["verdict"] = "unknown_fee"
-        row["reason"] = "עמלת הפירעון לא ידועה — הזן אותה כדי לדעת"
+        row["reason"] = "לא ידועה עמלת הפירעון של ההלוואה. הזן אותה כדי שאדע אם כדאי"
     elif row["net_saving"] >= MIN_GAIN_RATIO * bal and row["net_saving"] > 0:
         row["verdict"] = "worth"
         if row["full_term_net"] < 0:
-            row["reason"] = "כדאי רק אם תפרע אותה בקצב הנוכחי; אם תשאיר אותה לכל תקופת המשכנתא היא תייקר"
+            row["reason"] = "כדאי רק אם תמשיך לשלם אותה בקצב של היום. אם תפרוס אותה לכל תקופת המשכנתא היא תתייקר"
     else:
         row["verdict"] = "not_worth"
         if (item["interest_rate"] or 0) <= offer["rate"]:
-            row["reason"] = "הריבית כבר נמוכה מההצעה או שווה לה"
+            row["reason"] = "הריבית שלה כבר נמוכה מהריבית בהצעה או שווה לה"
         elif row["net_saving"] > 0:
-            row["reason"] = f"רוב הריבית כבר שולמה — נשארו {n} תשלומים והחיסכון קטן מדי כדי להצדיק מחזור"
+            row["reason"] = f"כמעט נגמרה: נשארו רק {n} תשלומים וכמעט כל מה שנשאר בה הוא קרן, אז אין ריבית שמשתלם לחסוך"
         else:
-            row["reason"] = "החיסכון בריבית קטן מעמלת הפירעון"
+            row["reason"] = "עמלת הפירעון גדולה מהריבית שאפשר לחסוך"
     return row
 
 
@@ -159,14 +159,14 @@ def simulate(items: list[dict], offer: dict) -> dict:
     chosen = set(offer["loan_ids"]) if offer["loan_ids"] is not None else {r["id"] for r in rows}
     selected = [r for r in rows if r["id"] in chosen]
     worth = [r for r in rows if r["verdict"] == "worth"]
-    notes = ["כל החישובים מניחים שהפריים והריביות נשארים כפי שהם היום; במסלולים צמודים או בריבית משתנה זו הערכה.",
-             "הריבית בהלוואה נפרעת בעיקר בתחילתה: ככל שההלוואה מתקדמת, מה שנשאר בה קרן בעיקר, ולכן מחזור שלה מרוויח מעט — לכל הלוואה מוצג כמה מהתשלומים שנותרו הם ריבית.",
-             "גם הלוואה שלא כדאית בריבית יכולה להיות כדאית להקלת ההחזר החודשי — ״מחיר ההקלה״ מראה כמה ריבית נוספת תשלם בסך הכל על כל ₪100 הקלה בחודש.",
-             "״אותו טווח״ מראה כמה שווה הריבית בלבד; ״טווח ההצעה״ מראה את הקלת ההחזר — טווח ארוך מקטין את ההחזר ובדרך כלל מגדיל את הריבית הכוללת."]
+    notes = ["החישוב מניח שהריביות נשארות כמו שהן היום. בריבית משתנה או בהצמדה למדד התוצאה היא הערכה בלבד.",
+             "הריבית משולמת בעיקר בתחילת ההלוואה. ככל שהיא מתקדמת, מה שנשאר בה הוא בעיקר קרן, ולכן מחזור הלוואה שמתקדמת חוסך מעט.",
+             "גם הלוואה שלא חוסכת ריבית יכולה להיות שווה בשביל להקל על ההחזר החודשי. בכל הלוואה כתוב בכמה ההחזר יורד וכמה ריבית נוספת תשלם בסך הכל.",
+             "״אם תמשיך לשלם כמו היום״ מראה כמה שווה ההפרש בריבית לבדו. ״אם תפרוס לכל התקופה״ מראה את הקלת ההחזר החודשי, אבל פריסה ארוכה מייקרת בדרך כלל את הריבית."]
     if any(r["exact"] is False for r in rows if r["verdict"] != "missing"):
-        notes.append("בהלוואות בלי לוח סילוקין הריבית שנותרה מוערכת (החזר × תשלומים − יתרה).")
+        notes.append("בהלוואות בלי לוח סילוקין מהבנק הריבית שנשארה מחושבת בקירוב (ההחזר כפול מספר התשלומים פחות היתרה).")
     if any(r["verdict"] == "unknown_fee" for r in rows):
-        notes.append("בהלוואות שעמלת הפירעון שלהן לא ידועה אין המלצה עד שתוזן עמלה.")
+        notes.append("בהלוואות שעמלת הפירעון שלהן לא ידועה אין המלצה עד שתזין עמלה.")
     if any(r["verdict"] == "missing" for r in rows):
         notes.append("הלוואות שחסרים בהן נתונים לא נכנסו לחישוב.")
     # the monthly-relief view: every priced loan that frees cash in the mortgage, the cheapest relief (extra cost per ₪100 a month) first
@@ -176,9 +176,9 @@ def simulate(items: list[dict], offer: dict) -> dict:
     # a loan's own verdict is BEFORE the offer's fixed costs (opening fee, appraiser...): the set as a whole has to cover them too
     pays = bool(recommended and recommended["total_saving_same_term"] > 0)
     if worth and not pays:
-        notes.append("גם ההלוואות שחוסכות ריבית בנפרד לא מכסות יחד את העלויות הקבועות של ההצעה — במצב הזה המחזור לא משתלם.")
+        notes.append("גם ההלוואות שחוסכות ריבית כל אחת לבד לא מכסות יחד את העלויות הקבועות של ההצעה, ולכן במצב הזה המחזור לא משתלם.")
     elif offer["fees"] > 0:
-        notes.append("הכדאיות של כל הלוואה היא לפני העלויות הקבועות של ההצעה; הסיכום שלמטה כולל אותן.")
+        notes.append("ה״כדאי״ של כל הלוואה נבדק לפני העלויות הקבועות של ההצעה (פתיחת תיק, שמאי וכו׳). הסיכום למטה כולל אותן.")
     return {"offer": {k: offer[k] for k in ("rate", "term_months", "fees", "insurance_monthly")},
             "rows": rows, "selected_ids": [r["id"] for r in selected],
             "selected": _totals(selected, offer), "recommended_ids": [r["id"] for r in worth], "recommended": recommended, "recommended_pays": pays,

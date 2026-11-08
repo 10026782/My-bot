@@ -56,7 +56,7 @@ def test_a_loan_whose_interest_is_mostly_paid_is_not_worth_rolling_even_at_a_low
     big = L.loan_item(rec("big", 93719.73, 6.96, 1378.22, 85, fee="אין"), TODAY)
     out = R.simulate([near, big], R.parse_offer({"rate": 5.5, "term_months": 240}))
     by = {r["id"]: r for r in out["rows"]}
-    assert by["near"]["net_saving"] > 0 and by["near"]["verdict"] == "not_worth" and "רוב הריבית כבר שולמה" in by["near"]["reason"]    # a few shekels of saving is not a reason
+    assert by["near"]["net_saving"] > 0 and by["near"]["verdict"] == "not_worth" and "כמעט נגמרה" in by["near"]["reason"]    # a few shekels of saving is not a reason
     assert by["near"]["interest_share"] < 0.05 < by["big"]["interest_share"]
     assert by["near"]["full_term_net"] < 0                                                  # left in a 20-year mortgage it would cost far more than it has left
     assert by["big"]["verdict"] == "worth" and by["big"]["full_term_net"] < 0 and "לכל תקופת המשכנתא" in by["big"]["reason"]

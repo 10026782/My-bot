@@ -1,11 +1,21 @@
-// Pure presentation of the refinance simulator. Unknown stays unknown; both comparisons (same term / the offer's term) are always shown, because a longer term
-// lowers the payment and usually raises the total interest — a lower payment alone is never presented as a saving.
+// Pure presentation of the refinance simulator, in plain words. Unknown stays unknown. Two comparisons are always shown together: "if you keep paying like today"
+// (what the lower rate alone is worth) and "if you spread it over the whole mortgage" (a lower payment, but usually more interest in total).
 import type { FccRefinance, FccRefinanceBody, FccRefinanceRow, FccRefinanceTotals } from "../types";
 import { money } from "./fccPresentation";
 import { UNKNOWN } from "./fccLoans";
 
 export const REFINANCE_TITLE = "סימולטור מחזור למשכנתא";
-export const REFINANCE_HELP = "הזן הצעה אחת: ריבית, תקופה ועלויות. המערכת תראה אילו הלוואות כדאי לכלול, כמה יורד ההחזר החודשי, מה קורה לריבית הכוללת ותוך כמה חודשים העלויות חוזרות. לא נשמר דבר.";
+export const REFINANCE_HELP = "הזן הצעה אחת: ריבית, כמה שנים ועלויות. תראה אילו הלוואות כדאי לכלול, כמה יורד ההחזר החודשי וכמה ריבית תשלם בסך הכל עד הסוף, לפני ואחרי. לא נשמר דבר.";
+export const SCENARIO_KEEP = "אם תמשיך לשלם כמו היום";
+export const SCENARIO_STRETCH = "אם תפרוס לכל התקופה";
+export const REFINANCE_HOW = [
+  "ריבית שנשארה = כמה ריבית עוד תשלם עד סוף ההלוואה. בהלוואה עם לוח סילוקין מהבנק זה המספר האמיתי; בלי לוח זה חישוב בקירוב (ההחזר כפול מספר התשלומים פחות היתרה).",
+  `״${SCENARIO_KEEP}״: את היתרה של ההלוואה אתה פורע באותם חודשים שנשארו לה, אבל בריבית של ההצעה. כך רואים מה שווה ההפרש בריבית לבד.`,
+  `״${SCENARIO_STRETCH}״: היתרה נפרסת על כל שנות המשכנתא. ההחזר החודשי יורד, אבל מכיוון שמשלמים ריבית על יותר זמן, בדרך כלל משלמים יותר ריבית בסך הכל.`,
+  "ה״כדאי״ של כל הלוואה: אחרי ריבית ההצעה ואחרי עמלת הפירעון, האם נשאר חיסכון ממשי (לפחות 1% מהיתרה). הלוואה שכמעט נגמרה לא תצא כדאית, כי כמעט אין בה ריבית לחסוך.",
+  "הסיכום כולל גם את העלויות החד-פעמיות של ההצעה (פתיחת תיק, שמאי וכו׳), ומראה אחרי כמה חודשים הן חוזרות בזכות הירידה בהחזר החודשי.",
+  "הכול מניח שהריביות נשארות כמו היום. בריבית משתנה (פריים) או בהצמדה למדד התוצאה היא הערכה.",
+];
 
 export interface OfferInput { rate: string; years: string; fees: string; insurance: string }
 
@@ -29,42 +39,70 @@ export function offerBody(i: OfferInput, loanIds: string[] | null, feeOverrides:
 }
 
 export const VERDICT_LABEL: Record<FccRefinanceRow["verdict"], string> = {
-  worth: "כדאי לכלול", not_worth: "לא כדאי", unknown_fee: "עמלה לא ידועה", missing: "חסרים נתונים",
+  worth: "כדאי למחזר", not_worth: "לא כדאי", unknown_fee: "חסרה עמלת פירעון", missing: "חסרים נתונים",
 };
 
 export interface RefinanceLine { label: string; value: string; tone?: "good" | "bad" }
 const signed = (n: number): RefinanceLine["tone"] => (n > 0 ? "good" : n < 0 ? "bad" : undefined);
-const saving = (n: number) => (n >= 0 ? `חוסך ${money(n)}` : `מייקר ב-${money(-n)}`);
+const gain = (n: number) => (n >= 0 ? `תחסוך ${money(n)}` : `תשלם ${money(-n)} יותר`);
+const delta = (n: number) => (n === 0 ? "ללא שינוי" : n > 0 ? `+${money(n)}` : `-${money(-n)}`);
 
+/** The summary of a set of loans, in plain words. */
 export function totalsLines(t: FccRefinanceTotals): RefinanceLine[] {
   return [
-    { label: "החזר חודשי היום", value: money(t.current_payment) },
-    { label: "החזר חודשי לפי ההצעה", value: money(t.offer_payment) },
-    { label: "הפרש בהחזר החודשי", value: t.monthly_saving >= 0 ? `יורד ב-${money(t.monthly_saving)}` : `עולה ב-${money(-t.monthly_saving)}`, tone: signed(t.monthly_saving) },
-    { label: "ריבית שנותרה היום", value: money(t.current_interest_left) },
-    { label: "ריבית לפי ההצעה (כל התקופה)", value: money(t.offer_interest) },
-    { label: "סה״כ בתקופת ההצעה", value: saving(t.total_saving_offer_term), tone: signed(t.total_saving_offer_term) },
-    { label: `סה״כ באותו טווח (${t.same_term_months} חודשים)`, value: saving(t.total_saving_same_term), tone: signed(t.total_saving_same_term) },
+    { label: "היום אתה משלם בחודש", value: money(t.current_payment) },
+    { label: "אחרי המחזור תשלם בחודש", value: money(t.offer_payment) },
+    { label: "ההחזר החודשי", value: t.monthly_saving >= 0 ? `יורד ב-${money(t.monthly_saving)}` : `עולה ב-${money(-t.monthly_saving)}`, tone: signed(t.monthly_saving) },
+    { label: "ריבית שנשארה לשלם היום", value: money(t.current_interest_left) },
+    { label: "ריבית שתשלם אחרי המחזור (לכל התקופה)", value: money(t.offer_interest) },
+    { label: `${SCENARIO_KEEP} (${t.same_term_months} חודשים)`, value: gain(t.total_saving_same_term), tone: signed(t.total_saving_same_term) },
+    { label: SCENARIO_STRETCH, value: gain(t.total_saving_offer_term), tone: signed(t.total_saving_offer_term) },
     { label: "עלויות חד-פעמיות", value: money(t.one_time_costs) },
-    { label: "החזר העלויות", value: t.payback_months == null ? UNKNOWN : t.payback_months === 0 ? "מיידי" : `${t.payback_months} חודשים` },
+    { label: "העלויות חוזרות אחרי", value: t.payback_months == null ? UNKNOWN : t.payback_months === 0 ? "מיד" : `${t.payback_months} חודשים` },
   ];
 }
 
-export interface RefinanceRowModel { id: string; title: string; verdict: string; tone: "good" | "bad" | "muted"; lines: string[]; needsFee: boolean }
+export interface TableRow { label: string; today: string; after: string; diff: string; tone?: "good" | "bad" }
+export interface ScenarioTable { title: string; rows: TableRow[] }
+
+function tableRows(today: { pay: number; interest: number; total: number }, after: { pay: number; interest: number; total: number }): TableRow[] {
+  const d = (a: number, b: number): TableRow["tone"] => (b < a ? "good" : b > a ? "bad" : undefined);
+  return [
+    { label: "החזר חודשי", today: money(today.pay), after: money(after.pay), diff: delta(after.pay - today.pay), tone: d(today.pay, after.pay) },
+    { label: "ריבית עד הסוף", today: money(today.interest), after: money(after.interest), diff: delta(after.interest - today.interest), tone: d(today.interest, after.interest) },
+    { label: "סה״כ לתשלום", today: money(today.total), after: money(after.total), diff: delta(after.total - today.total), tone: d(today.total, after.total) },
+  ];
+}
+
+export interface RefinanceRowModel {
+  id: string; title: string; verdict: string; tone: "good" | "bad" | "muted";
+  facts: string[];            // balance / rate / payment, and the interest still ahead in shekels
+  reason: string | null;      // one plain sentence: why this verdict
+  tables: ScenarioTable[];    // today vs after, per scenario (empty when the loan is not priced)
+  reliefLine: string | null;  // the monthly aspect, in two shekel figures
+  needsFee: boolean;
+}
 
 export function rowModel(r: FccRefinanceRow): RefinanceRowModel {
-  const lines = [
-    r.balance != null ? `יתרה ${money(r.balance)}${r.rate != null ? ` · ריבית ${r.rate}%` : ""}${r.payment != null ? ` · החזר ${money(r.payment)}` : ""}` : "",
-    r.interest_left != null ? `ריבית שנותרה ${money(r.interest_left)}${r.exact ? "" : " (הערכה)"}${r.months != null ? ` ב-${r.months} חודשים` : ""}` : "",
-    r.interest_share != null ? `${Math.round(r.interest_share * 100)}% מהתשלומים שנותרו הם ריבית (השאר קרן)` : "",
-    r.net_saving != null ? `באותו קצב פירעון, אחרי עמלה: ${saving(r.net_saving)}` : "",
-    r.full_term_net != null ? `אם תישאר לכל תקופת המשכנתא: ${saving(r.full_term_net)}` : "",
-    r.monthly_relief != null && r.monthly_relief > 0
-      ? `הקלה בהחזר החודשי: ${money(r.monthly_relief)}${r.relief_cost_per_100 != null ? ` · מחיר ההקלה: ${money(r.relief_cost_per_100)} ריבית נוספת על כל ₪100 הקלה בחודש` : ""}`
-      : r.monthly_relief != null ? "אין הקלה בהחזר החודשי" : "",
-    r.reason ?? "",
+  const facts = [
+    r.balance != null ? `יתרה ${money(r.balance)}${r.rate != null ? ` · ריבית ${r.rate}%` : ""}${r.payment != null ? ` · החזר חודשי ${money(r.payment)}` : ""}` : "",
+    r.interest_left != null ? `עד סוף ההלוואה תשלם עוד ${money(r.interest_left)} ריבית${r.months != null ? ` (${r.months} חודשים)` : ""}${r.exact ? "" : ", בקירוב"}` : "",
   ].filter(Boolean);
-  return { id: r.id, title: r.name ?? UNKNOWN, verdict: VERDICT_LABEL[r.verdict], tone: r.verdict === "worth" ? "good" : r.verdict === "not_worth" ? "bad" : "muted", lines, needsFee: r.verdict === "unknown_fee" };
+  const priced = r.balance != null && r.payment != null && r.interest_left != null && r.same_term_payment != null && r.same_term_interest != null && r.offer_payment != null && r.full_term_interest != null;
+  const fee = r.prepay_fee ?? 0;
+  const tables: ScenarioTable[] = [];
+  if (priced) {
+    const bal = r.balance as number, pay = r.payment as number, left = r.interest_left as number;
+    const today = { pay, interest: left, total: bal + left };
+    tables.push({ title: SCENARIO_KEEP, rows: tableRows(today, { pay: r.same_term_payment as number, interest: r.same_term_interest as number, total: bal + (r.same_term_interest as number) + fee }) });
+    tables.push({ title: SCENARIO_STRETCH, rows: tableRows(today, { pay: r.offer_payment as number, interest: r.full_term_interest as number, total: bal + (r.full_term_interest as number) + fee }) });
+  }
+  const relief = r.monthly_relief;
+  const reliefLine = relief != null && relief > 0 && r.relief_cost != null
+    ? `אם המטרה היא להקל על החודש: ההחזר יורד ב-${money(relief)}, ${r.relief_cost >= 0 ? `אבל בסך הכל תשלם ${money(r.relief_cost)} יותר ריבית ועמלות` : `ובנוסף תחסוך ${money(-r.relief_cost)}`}.`
+    : relief != null && relief <= 0 ? "במשכנתא ההחזר החודשי על ההלוואה הזו לא יורד." : null;
+  return { id: r.id, title: r.name ?? UNKNOWN, verdict: VERDICT_LABEL[r.verdict], tone: r.verdict === "worth" ? "good" : r.verdict === "not_worth" ? "bad" : "muted",
+    facts, reason: r.reason ?? null, tables, reliefLine, needsFee: r.verdict === "unknown_fee" };
 }
 
 export interface RefinanceModel {
