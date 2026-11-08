@@ -174,6 +174,7 @@ export function togglePick(picked: string[], id: string): string[] {
 /** Future cost is approximate unless every input (incl. a numeric early-repayment fee) is known. */
 export function futureCostLabel(l: FccLoan): string {
   if (l.estimated_future_cost == null) return UNKNOWN;
+  if (l.schedule_remaining && l.future_cost_exact) return `${money(l.estimated_future_cost)} (מלוח סילוקין)`;
   return l.future_cost_exact ? money(l.estimated_future_cost) : `≈ ${money(l.estimated_future_cost)} (משוער${l.early_repayment_fee ? ", עמלת פירעון לא מספרית" : ", עמלת פירעון לא ידועה"})`;
 }
 

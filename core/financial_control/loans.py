@@ -145,6 +145,8 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
             split = {"interest": ms["interest"], "principal": ms["principal"], "balance_after": ms["balance_after"]}
             split_exact = True
         sched_left = amortization.remaining(sched)
+        if sched_left["payments"]:                           # the lender's own remaining payments and interest replace payment × payments left − balance
+            total_remaining, future_cost = sched_left["total"], sched_left["interest"]
         sched_asof = amortization.asof(f.get(LF.SCHEDULE))
         if end is None and is_active(f):
             end, end_inferred = amortization.last_date(sched), True

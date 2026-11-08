@@ -582,3 +582,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Decision:** a loan near its end (mostly principal left) is not worth rolling into a mortgage even at a lower rate.
 - **Change:** each row of the refinance simulator shows the interest share of the payments still ahead and the full-term cost of leaving the principal in the mortgage; a loan is "worth" only if its net saving (same repayment pace, after the early-repayment fee) is at least 1% of its balance; a worthwhile loan that costs more over the mortgage's whole term is marked as worth it only if repaid at the current pace.
 - **Not done:** verification on a device and in production; the 1% threshold is a stated heuristic, not a bank rule.
+
+### Refinance by monthly relief; payoff engine on the real remaining interest (08/11/2026) — owner decision
+
+- **Decision:** the refinance simulator must not only say worth / not worth by interest — a loan can be worth it for the monthly relief, with its price shown; and the early-payoff engine must use the real remaining interest, not payment × months − balance.
+- **Change:** each refinance row carries the monthly relief and its price per ₪100; the answer lists the relief set (cheapest first) with totals next to the interest-worthy set. For loans with a stored schedule `loan_item` takes the remaining payments and interest from the schedule and the payoff engine's cost / saving use it (`interest_from_schedule`).
+- **Limit:** loans without a schedule still use the estimate (labelled "משוער"); the monthly relief assumes the loan alone at the offer's term.
+- **Not done:** verification on a device and in production.

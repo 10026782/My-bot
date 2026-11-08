@@ -59,19 +59,26 @@ export function rowModel(r: FccRefinanceRow): RefinanceRowModel {
     r.interest_share != null ? `${Math.round(r.interest_share * 100)}% מהתשלומים שנותרו הם ריבית (השאר קרן)` : "",
     r.net_saving != null ? `באותו קצב פירעון, אחרי עמלה: ${saving(r.net_saving)}` : "",
     r.full_term_net != null ? `אם תישאר לכל תקופת המשכנתא: ${saving(r.full_term_net)}` : "",
+    r.monthly_relief != null && r.monthly_relief > 0
+      ? `הקלה בהחזר החודשי: ${money(r.monthly_relief)}${r.relief_cost_per_100 != null ? ` · מחיר ההקלה: ${money(r.relief_cost_per_100)} ריבית נוספת על כל ₪100 הקלה בחודש` : ""}`
+      : r.monthly_relief != null ? "אין הקלה בהחזר החודשי" : "",
     r.reason ?? "",
   ].filter(Boolean);
   return { id: r.id, title: r.name ?? UNKNOWN, verdict: VERDICT_LABEL[r.verdict], tone: r.verdict === "worth" ? "good" : r.verdict === "not_worth" ? "bad" : "muted", lines, needsFee: r.verdict === "unknown_fee" };
 }
 
 export interface RefinanceModel {
+  relief: RefinanceLine[] | null; reliefNames: string[];
   recommended: RefinanceLine[] | null; recommendedPays: boolean; recommendedNames: string[];
   selected: RefinanceLine[] | null; rows: RefinanceRowModel[]; notes: string[];
 }
 
 export function refinanceModel(r: FccRefinance): RefinanceModel {
   const names = r.rows.filter((x) => r.recommended_ids.includes(x.id)).map((x) => x.name ?? UNKNOWN);
+  const reliefIds = r.relief_ids ?? [];
+  const reliefNames = reliefIds.map((id) => r.rows.find((x) => x.id === id)?.name ?? UNKNOWN);
   return {
+    relief: r.relief ? totalsLines(r.relief) : null, reliefNames,
     recommended: r.recommended ? totalsLines(r.recommended) : null, recommendedPays: r.recommended_pays, recommendedNames: names,
     selected: r.selected ? totalsLines(r.selected) : null, rows: r.rows.map(rowModel), notes: r.notes,
   };

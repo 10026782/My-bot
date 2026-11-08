@@ -63,6 +63,18 @@ def test_a_loan_whose_interest_is_mostly_paid_is_not_worth_rolling_even_at_a_low
     assert out["recommended_ids"] == ["big"]
 
 
+def test_monthly_relief_is_a_separate_aspect_with_its_price():
+    near = L.loan_item(rec("near", 2309.25, 12.85, 784.24, 3, fee="אין"), TODAY)
+    big = L.loan_item(rec("big", 93719.73, 6.96, 1378.22, 85, fee="אין"), TODAY)
+    out = R.simulate([near, big], R.parse_offer({"rate": 5.5, "term_months": 240}))
+    by = {r["id"]: r for r in out["rows"]}
+    assert by["near"]["verdict"] == "not_worth" and by["near"]["monthly_relief"] > 700           # useless for interest, but it would free most of its payment...
+    assert 0 < by["near"]["relief_cost_per_100"] < by["big"]["relief_cost_per_100"]             # ...and cheaply: little principal is stretched, the big loan costs far more per shekel of relief
+    assert out["relief_ids"] == ["near", "big"]                                                  # cheapest relief first and out["relief"]["monthly_saving"] > 0 and out["relief"]["loans"] == 2
+    cheap = R.simulate([big], R.parse_offer({"rate": 5.5, "term_months": 240}))
+    assert cheap["relief_ids"] == ["big"]
+
+
 def test_totals_show_both_comparisons_and_payback():
     out = R.simulate(ITEMS, OFFER)
     t = out["selected"]

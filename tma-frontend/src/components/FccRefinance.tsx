@@ -61,6 +61,12 @@ export function RefinanceSimulator() {
                 </section>
               )}
               {!m.recommended && <p className="fcc-goal__note">אף הלוואה לא חוסכת ריבית בהצעה הזו.</p>}
+              {m.relief && (
+                <section aria-label="הקלה בהחזר החודשי">
+                  <h4 className="fcc-pay__subhead">אם המטרה היא להקל על ההחזר החודשי (הזול קודם): {m.reliefNames.join(", ")}</h4>
+                  <Lines lines={m.relief} />
+                </section>
+              )}
               {m.selected && (
                 <section aria-label="ההלוואות שנבחרו">
                   <h4 className="fcc-pay__subhead">לפי ההלוואות שסימנת ({result?.selected?.loans})</h4>

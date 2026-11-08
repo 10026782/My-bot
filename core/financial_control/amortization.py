@@ -272,7 +272,7 @@ def last_date(rows: list[list]) -> date | None:
 def remaining(rows: list[list]) -> dict:
     """What the not-yet-charged part of the schedule still costs: payments left, interest, principal."""
     up = [r for r in rows if not r[5]]
-    return {"payments": len(up), "interest": round(sum(r[2] for r in up), 2), "principal": round(sum(r[1] for r in up), 2)}
+    return {"payments": len(up), "interest": round(sum(r[2] for r in up), 2), "principal": round(sum(r[1] for r in up), 2), "total": round(sum(r[3] for r in up), 2)}
 
 
 def match_loan(s: Schedule, loans: list[dict]) -> list[dict]:

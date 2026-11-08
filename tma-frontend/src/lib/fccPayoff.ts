@@ -31,7 +31,8 @@ const ISSUE_TEXT: Record<"inconsistent" | "suspicious", string> = {
 function continuationCost(r: FccPayoffRow): string {
   if (r.data_issue) return "לא מחושב";
   if (r.estimated_future_cost == null) return UNKNOWN;
-  return r.future_cost_exact ? money(r.estimated_future_cost) : `משוער ${money(r.estimated_future_cost)}`;
+  const base = r.future_cost_exact ? money(r.estimated_future_cost) : `משוער ${money(r.estimated_future_cost)}`;
+  return r.interest_from_schedule ? `${base} (ריבית אמיתית מלוח סילוקין)` : base;
 }
 
 /** Cost saving line: never a positive "saving" after the fee, and "משוער" (not "נטו") while the fee is unknown. */

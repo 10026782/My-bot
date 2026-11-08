@@ -219,3 +219,18 @@ def test_end_date_inferred_from_payments_remaining():
 
 if __name__ == "__main__":
     test_end_date_inferred_from_payments_remaining(); test_payment_split_interest_principal(); test_summary_interest_principal_totals(); print("ok split")
+
+
+def test_the_payoff_engine_uses_the_schedule_s_real_remaining_interest():
+    from datetime import date
+    from core.financial_control import amortization as A, loans as L, payoff
+    # payment x months - balance would say 100 x 3 - 280 = 20; the lender's schedule says the interest still ahead is 12.5
+    sched = A.Schedule(ok=True, rows=[["2026-11-10", 90.0, 10.0, 100.0, 190.0, 0, 1], ["2026-12-10", 95.0, 5.0, 100.0, 95.0, 0, 1], ["2027-01-10", 95.0, 2.5, 97.5, 0.0, 0, 1]])
+    rec = {"id": "s", "fields": {"Loan Name/ID": "s", "Active Loan": True, "Outstanding Principal for Early Closure": 280, "Interest Rate (%)": 12, "Current Monthly Payment": 100,
+                                 "Payments Remaining": 3, "Early Repayment Fee/Penalty": "אין", "Amortization Schedule": A.dumps(sched)}}
+    item = L.loan_item(rec, date(2026, 11, 8))
+    assert item["estimated_future_cost"] == 17.5 and item["estimated_total_remaining_payments"] == 297.5       # the schedule's own remaining payments and interest
+    row = payoff.metrics([item])[0]
+    assert row["interest_from_schedule"] is True and row["estimated_future_cost"] == 17.5 and row["cost_saving"] == 17.5 and row["future_cost_exact"] is True
+    plain = L.loan_item({"id": "p", "fields": {k: v for k, v in rec["fields"].items() if k != "Amortization Schedule"}}, date(2026, 11, 8))
+    assert payoff.metrics([plain])[0]["interest_from_schedule"] is False
