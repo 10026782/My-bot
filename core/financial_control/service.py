@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from airtable_schema import CashflowRuleFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, loans as fcc_loans
+from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, loans as fcc_loans, refinance as fcc_refinance
 
 logger = logging.getLogger(__name__)
 
@@ -474,6 +474,13 @@ def loan_scenarios(identity, budget: float, today: date | None = None) -> dict:
     """Early-payoff budget simulation over the caller's own active loans. Pure computation: no write, no execution."""
     records = policy.filter_records(Tables.LOANS, _read(Tables.LOANS), identity)
     return fcc_loans.scenarios(records, today or date.today(), budget)
+
+
+def loan_refinance(identity, params: dict, today: date | None = None) -> dict:
+    """Refinance simulation: the caller's own active loans rolled into ONE mortgage at the typed offer. Pure computation over their own rows: nothing is saved."""
+    offer = fcc_refinance.parse_offer(params)
+    day = today or date.today()
+    return fcc_refinance.simulate([fcc_loans.loan_item(r, day) for r in my_loans(identity)], offer)
 
 
 def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict:

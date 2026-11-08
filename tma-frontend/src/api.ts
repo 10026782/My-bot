@@ -1,5 +1,5 @@
 import type {
-  FccConsumption, FccLoanSchedulePreview, FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, NewTaskInput, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
+  FccConsumption, FccLoanSchedulePreview, FccRefinance, FccRefinanceBody, FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, NewTaskInput, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -487,6 +487,13 @@ async function importCall<T>(path: string, form: FormData): Promise<T> {
   return body as T;
 }
 export const postFccImportPreview = (form: FormData): Promise<FccImportPreview> => importCall<FccImportPreview>("/api/fcc/import/preview", form);
+/** Refinance simulation for ONE typed offer (read-only; owner only). The server validates every number. */
+export async function postFccRefinance(body: FccRefinanceBody): Promise<FccRefinance> {
+  const r = await fetch(`${BASE}/api/fcc/loans/refinance`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+  const data = (await r.json().catch(() => ({}))) as FccRefinance & { error?: string };
+  if (!r.ok) throw new Error(data.error ?? `API ${r.status}`);
+  return data;
+}
 export const postFccLoanSchedule = (form: FormData): Promise<FccLoanSchedulePreview> => importCall<FccLoanSchedulePreview>("/api/fcc/loans/schedule", form);
 export const postFccImportRun = (form: FormData): Promise<FccImportRun> => importCall<FccImportRun>("/api/fcc/import/run", form);
 

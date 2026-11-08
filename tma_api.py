@@ -5596,6 +5596,36 @@ def fcc_loans_scenario(identity):
         return jsonify({"error": "forbidden"}), 403
 
 
+@tma_api.route("/api/fcc/loans/refinance", methods=["OPTIONS"])
+def _preflight_fcc_loans_refinance():
+    return "", 204
+
+
+@tma_api.route("/api/fcc/loans/refinance", methods=["POST"])
+@require_tma_auth
+def fcc_loans_refinance(identity):
+    """Read-only refinance simulation over the owner's own loans for ONE typed offer (rate, term, costs). Owner only (404 otherwise); nothing is written."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    if request.mimetype != "application/json":
+        return jsonify({"error": "Content-Type must be application/json"}), 415
+    if not 0 < (request.content_length or 0) <= 16 * 1024:
+        return jsonify({"error": "body too large or missing"}), 413
+    try:
+        params = json.loads(request.get_data(cache=False))
+    except (ValueError, UnicodeDecodeError):
+        return jsonify({"error": "invalid JSON"}), 400
+    if not isinstance(params, dict):
+        return jsonify({"error": "invalid JSON"}), 400
+    from core.financial_control import refinance as fcc_refinance, service as fcc_service  # noqa: PLC0415
+    try:
+        return jsonify(fcc_service.loan_refinance(identity, params))
+    except fcc_refinance.RefinanceInputError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+
+
 @tma_api.route("/api/fcc/intent/start", methods=["POST"])
 @require_tma_auth
 def fcc_intent_start(identity):
@@ -5828,7 +5858,8 @@ def fcc_loan_schedule(identity):
         month = am.month_split(parsed.rows, today.year, today.month)
         digest = hashlib.sha256((identity.user_id + "|" + am.dumps(parsed)).encode("utf-8")).hexdigest()[:24]
         info = [{"id": r["id"], "name": (r.get("fields") or {}).get("Loan Name/ID") or "הלוואה", "lender": (r.get("fields") or {}).get("Lender") or None,
-                 "has_schedule": am.loads((r.get("fields") or {}).get("Amortization Schedule")) is not None} for r in candidates]
+                 "has_schedule": am.loads((r.get("fields") or {}).get("Amortization Schedule")) is not None,
+                 "identical": am.loads((r.get("fields") or {}).get("Amortization Schedule")) == parsed.rows} for r in candidates]
         out = {"state": "preview", "original": parsed.original, "payment_now": parsed.payment_now, "payments_left": am.remaining(parsed.rows)["payments"],
                "interest_left": am.remaining(parsed.rows)["interest"], "ends": (am.last_date(parsed.rows).isoformat() if parsed.rows else None),
                "this_month": month, "notes": parsed.notes, "candidates": info, "digest": digest}
@@ -5839,6 +5870,8 @@ def fcc_loan_schedule(identity):
             raise _ImportRefused("choose one of the loans this schedule fits")
         if str(request.form.get("digest") or "") != digest:
             raise _ImportRefused("the file changed since the review — review again", 409)
+        if next(c for c in info if c["id"] == loan_id)["identical"]:           # the same schedule is already saved on this loan (e.g. the file was sent twice): nothing to write
+            return jsonify({**out, "state": "saved", "already": True, "loan_id": loan_id})
         write = {"op": "patch", "table": Tables.LOANS, "record_id": loan_id, "fields": {"Amortization Schedule": am.dumps(parsed)},
                  "audit_action": "fcc_loan_schedule", "audit_details": loan_id}
         _, response, status = _queue_or_owner_execute("tma_fcc_write", write, identity, "FCC: loan amortization schedule")

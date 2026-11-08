@@ -563,3 +563,16 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** `loans.payment_split` (estimate: balance × rate ÷ 12) is replaced by the lender's figures when `Loans."Amortization Schedule"` (long text JSON, live fld52A7z7dN8O7U1N, created 08/11/2026) holds a schedule. `amortization.parse_file` reads the Max Excel and the Cal PDF letter and trusts a schedule only if it adds up. `POST /api/fcc/loans/schedule` (owner only, 404 otherwise) previews without writing and, on confirm, patches ONE loan through the approval ceremony. A missing `End Date` is derived from `Payments Remaining` (shown ≈). A confirmed prime change recomputes the not-yet-charged rows in the same patch as the new rate and payment (`amortization.reproject`; charged months stay).
 - **Limit (stated to the owner):** future rows assume the prime of the schedule's issue date (`asof`); without a prime change recorded in the system a new schedule must be uploaded. Loans without a schedule keep the estimate and are labelled "הערכה".
 - **Not done:** verification on a device and in production; schedules for the loans the owner has not yet uploaded.
+
+### Loan schedule sent twice (08/11/2026) — owner report
+
+- **What happened:** the Max ₪30,000 file was uploaded twice; the first write saved it, the second identical proposal was refused as a duplicate and the card showed "הכתיבה לא הושלמה". Checked in Airtable: all seven schedules (Max 105k and 30k, five Cal letters) are stored.
+- **Change:** the schedule preview marks a loan whose stored schedule is identical, and confirming an identical schedule reports "saved" (`already`) without a write.
+- **Not done:** verification on a device and in production.
+
+### Refinance simulator (08/11/2026) — owner decision
+
+- **Decision:** the owner can test an offer for rolling loans into one mortgage: what to include, the payment relief, the interest, and when the costs pay back — not every loan is worth including.
+- **Change:** `refinance.simulate` (pure) + `POST /api/fcc/loans/refinance` (owner only, read-only) + the loans tab's "סימולטור מחזור" card. Per-loan verdicts; unknown early-repayment fees and loans without balance / payment / payments left are never guessed; the same-term and offer-term comparisons are always shown together, and the worthwhile set must cover the offer's fixed costs (`recommended_pays`).
+- **Limit (stated to the owner):** every figure assumes today's prime and rates stay; a single rate per offer (no track mix, no index-linking); the result is a comparison, not advice to sign.
+- **Not done:** verification on a device and in production; multi-track offers and several offers side by side.

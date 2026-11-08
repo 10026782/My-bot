@@ -4,7 +4,7 @@ import { SCHEDULE_HELP, SCHEDULE_TITLE, schedulePreviewModel } from "../lib/fccL
 import type { FccLoanSchedulePreview } from "../types";
 import { Surface } from "./ui/Surface";
 
-interface Item { name: string; file: File; preview?: FccLoanSchedulePreview; loanId?: string; status: "reading" | "ready" | "saving" | "saved" | "error"; error?: string }
+interface Item { name: string; file: File; preview?: FccLoanSchedulePreview; loanId?: string; status: "reading" | "ready" | "saving" | "saved" | "error"; error?: string; already?: boolean }
 
 /** The lender's amortization schedule (Excel): read first (nothing written), then ONE confirm per file saves it on the chosen loan. */
 export function LoanScheduleImport({ onSaved }: { onSaved?: () => void }) {
@@ -41,7 +41,7 @@ export function LoanScheduleImport({ onSaved }: { onSaved?: () => void }) {
     form.append("digest", it.preview.digest);
     try {
       const out = await postFccLoanSchedule(form);
-      patch(i, { status: out.state === "saved" ? "saved" : "error", error: out.state === "saved" ? undefined : out.message ?? "השמירה נכשלה" });
+      patch(i, { status: out.state === "saved" ? "saved" : "error", already: out.already, error: out.state === "saved" ? undefined : out.message ?? "השמירה נכשלה" });
       if (out.state === "saved") onSaved?.();
     } catch (e) {
       patch(i, { status: "error", error: (e as Error).message });
@@ -57,7 +57,7 @@ export function LoanScheduleImport({ onSaved }: { onSaved?: () => void }) {
         const m = it.preview ? schedulePreviewModel(it.preview) : null;
         return (
           <div key={`${it.name}-${i}`} className="fcc-stack fcc-stack--tight">
-            <p><strong>{it.name}</strong> {it.status === "reading" && "· קורא…"}{it.status === "saved" && "· נשמר ✓"}{it.status === "error" && `· ${it.error ?? "שגיאה"}`}</p>
+            <p><strong>{it.name}</strong> {it.status === "reading" && "· קורא…"}{it.status === "saved" && (it.already ? "· אותו לוח כבר היה שמור ✓" : "· נשמר ✓")}{it.status === "error" && `· ${it.error ?? "שגיאה"}`}</p>
             {m?.problems.map((p) => <p key={p} className="fcc-goal__note">{p}</p>)}
             {m && m.lines.map((l) => <p key={l} className="fcc-loan__meta">{l}</p>)}
             {m && m.canSave && it.status !== "saved" && (

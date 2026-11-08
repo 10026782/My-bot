@@ -1299,8 +1299,29 @@ export interface FccLoanSchedulePreview {
   ends?: string | null;
   this_month?: { principal: number; interest: number; total: number; balance_after: number; charged: boolean } | null;
   notes?: string[];
-  candidates?: { id: string; name: string; lender: string | null; has_schedule: boolean }[];
+  candidates?: { id: string; name: string; lender: string | null; has_schedule: boolean; identical?: boolean }[];
+  already?: boolean;
   digest?: string;
   loan_id?: string;
   message?: string;
 }
+
+/** Refinance simulator (POST /api/fcc/loans/refinance): the owner's loans rolled into one mortgage at a typed offer. Read-only. */
+export interface FccRefinanceRow {
+  id: string; name: string | null; balance: number | null; rate: number | null; payment: number | null; months: number | null;
+  interest_left: number | null; exact: boolean | null; prepay_fee: number | null; fee_known: boolean;
+  same_term_payment: number | null; same_term_interest: number | null; net_saving: number | null;
+  verdict: "worth" | "not_worth" | "unknown_fee" | "missing"; reason: string | null;
+}
+export interface FccRefinanceTotals {
+  loans: number; balance: number; current_payment: number; current_interest_left: number; one_time_costs: number;
+  offer_payment: number; offer_interest: number; monthly_saving: number; total_saving_offer_term: number;
+  same_term_months: number; same_term_payment: number; same_term_interest: number; total_saving_same_term: number;
+  payback_months: number | null; any_unknown_fee: boolean; uses_estimates: boolean;
+}
+export interface FccRefinance {
+  offer: { rate: number; term_months: number; fees: number; insurance_monthly: number };
+  rows: FccRefinanceRow[]; selected_ids: string[]; selected: FccRefinanceTotals | null;
+  recommended_ids: string[]; recommended: FccRefinanceTotals | null; recommended_pays: boolean; notes: string[];
+}
+export interface FccRefinanceBody { rate: number; term_months: number; fees: number; insurance_monthly: number; loan_ids?: string[]; fee_overrides?: Record<string, number> }
