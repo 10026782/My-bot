@@ -65,7 +65,13 @@ def _cost_block(item: dict) -> dict:
     fee = item.get("early_fee_amount")                       # None = unknown / non-numeric; 0.0 = known "none"
     rate, months = item.get("interest_rate"), item.get("months_remaining")
     out = {"estimated_future_cost": None, "future_cost_exact": False, "cost_saving": None, "cost_saving_exact": False,
-           "no_saving": False, "data_inconsistent": False, "data_suspicious": False, "data_issue": None}
+           "no_saving": False, "data_inconsistent": False, "data_suspicious": False, "data_issue": None, "interest_from_schedule": False}
+    sched_interest = item.get("estimated_future_cost") if item.get("schedule_remaining") else None
+    if sched_interest is not None:                            # the lender's own schedule: the real interest still ahead, not payment × months − balance
+        net = round(sched_interest - (fee or 0.0), 2)
+        out.update(estimated_future_cost=round(sched_interest, 2), future_cost_exact=fee is not None, interest_from_schedule=True,
+                   no_saving=net <= 0, cost_saving=max(net, 0.0), cost_saving_exact=fee is not None)
+        return out
     if closure is None or total is None:
         return out
     if total < closure - _EPS:                                # hard: the remaining payments cannot even repay the closure amount

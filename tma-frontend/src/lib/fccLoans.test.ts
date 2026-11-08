@@ -133,7 +133,7 @@ test("progress bar: 0 closed is a clean 0%, partial closed is a rounded %, never
 test("compact loan card: three headline figures first, meta line, emphasised freed-cash line", () => {
   const m = loanCardModel(full);
   assert.equal(m.keyRows.map((r) => r.label).join(), "יתרת סילוק,החזר חודשי,ריבית");
-  assert.equal(m.metaRows.map((r) => r.label).join(), "תשלומים שנותרו,תאריך סיום");
+  assert.equal(m.metaRows.map((r) => r.label).join(), "תשלומים שנותרו,ריבית שנותרה עד הסיום,תאריך סיום");
   assert.equal(m.keyRows[0].value, "₪100,000");
   assert.ok(m.freedKnown);
   assert.equal(loanCardModel(empty).freedKnown, false);
@@ -287,6 +287,14 @@ test("interest / principal split: per loan, summary and unknown stays unknown", 
   const m = splitSummaryModel({ ...loans, summary: { ...loans.summary, interest_this_month: 612, principal_this_month: 1688, balance_after_this_month: 119512, split_coverage: { known: 2, of: 3 } } })!;
   assert.equal(m.lines.length, 3);
   assert.ok(m.hint!.includes("2 מתוך 3"));
+});
+
+test("loan card: the practical interest until the end — exact from the schedule, an estimate otherwise, unknown when missing", () => {
+  const exact = loanCardModel(mk({ interest_remaining: 12169.56, interest_remaining_exact: true }));
+  assert.equal(exact.metaRows.find((r) => r.label === "ריבית שנותרה עד הסיום")!.value, `${val(12169.56)} (מלוח סילוקין)`);
+  const est = loanCardModel(mk({ interest_remaining: 8000, interest_remaining_exact: false }));
+  assert.ok(est.metaRows.find((r) => r.label === "ריבית שנותרה עד הסיום")!.value.startsWith("≈ "));
+  assert.equal(loanCardModel(mk({})).metaRows.find((r) => r.label === "ריבית שנותרה עד הסיום")!.value, UNKNOWN);
 });
 
 if (failures > 0) throw new Error(`${failures} test(s) failed`);

@@ -637,6 +637,9 @@ export interface FccLoan {
   future_cost_exact: boolean;
   monthly_cash_freed_if_closed: number | null;
   annual_interest_cost: number | null;
+  /** The interest still to be paid until the loan ends (the lender's schedule when stored = exact, else payment × payments left − balance = estimate). */
+  interest_remaining?: number | null;
+  interest_remaining_exact?: boolean;
   /** True = end_date was derived from the remaining payments. */
   end_date_inferred?: boolean;
   /** True = this month's split comes from the lender's schedule (else an estimate); schedule_remaining = what is still ahead per the schedule. */
@@ -665,6 +668,8 @@ export interface FccPayoffRow {
   /** Continuation cost estimate = monthly × remaining payments − closure (null when data is inconsistent/suspicious). */
   estimated_future_cost: number | null;
   future_cost_exact: boolean;
+  /** True = the interest still ahead comes from the lender's own schedule (exact), not payment × months − balance. */
+  interest_from_schedule?: boolean;
   /** What closing now could avoid: continuation cost − known early-repayment fee (null = unknown / excluded). */
   cost_saving: number | null;
   cost_saving_exact: boolean;
@@ -1311,6 +1316,8 @@ export interface FccRefinanceRow {
   id: string; name: string | null; balance: number | null; rate: number | null; payment: number | null; months: number | null;
   interest_left: number | null; exact: boolean | null; prepay_fee: number | null; fee_known: boolean;
   same_term_payment: number | null; same_term_interest: number | null; net_saving: number | null;
+  interest_share?: number | null; full_term_interest?: number | null; full_term_net?: number | null;
+  offer_payment?: number | null; monthly_relief?: number | null; relief_cost?: number | null; relief_cost_per_100?: number | null;
   verdict: "worth" | "not_worth" | "unknown_fee" | "missing"; reason: string | null;
 }
 export interface FccRefinanceTotals {
@@ -1322,6 +1329,7 @@ export interface FccRefinanceTotals {
 export interface FccRefinance {
   offer: { rate: number; term_months: number; fees: number; insurance_monthly: number };
   rows: FccRefinanceRow[]; selected_ids: string[]; selected: FccRefinanceTotals | null;
-  recommended_ids: string[]; recommended: FccRefinanceTotals | null; recommended_pays: boolean; notes: string[];
+  recommended_ids: string[]; recommended: FccRefinanceTotals | null; recommended_pays: boolean;
+  relief_ids?: string[]; relief?: FccRefinanceTotals | null; notes: string[];
 }
 export interface FccRefinanceBody { rate: number; term_months: number; fees: number; insurance_monthly: number; loan_ids?: string[]; fee_overrides?: Record<string, number> }

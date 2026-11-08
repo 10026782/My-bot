@@ -576,3 +576,22 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** `refinance.simulate` (pure) + `POST /api/fcc/loans/refinance` (owner only, read-only) + the loans tab's "סימולטור מחזור" card. Per-loan verdicts; unknown early-repayment fees and loans without balance / payment / payments left are never guessed; the same-term and offer-term comparisons are always shown together, and the worthwhile set must cover the offer's fixed costs (`recommended_pays`).
 - **Limit (stated to the owner):** every figure assumes today's prime and rates stay; a single rate per offer (no track mix, no index-linking); the result is a comparison, not advice to sign.
 - **Not done:** verification on a device and in production; multi-track offers and several offers side by side.
+
+### Refinance: loans whose interest is mostly paid (08/11/2026) — owner decision
+
+- **Decision:** a loan near its end (mostly principal left) is not worth rolling into a mortgage even at a lower rate.
+- **Change:** each row of the refinance simulator shows the interest share of the payments still ahead and the full-term cost of leaving the principal in the mortgage; a loan is "worth" only if its net saving (same repayment pace, after the early-repayment fee) is at least 1% of its balance; a worthwhile loan that costs more over the mortgage's whole term is marked as worth it only if repaid at the current pace.
+- **Not done:** verification on a device and in production; the 1% threshold is a stated heuristic, not a bank rule.
+
+### Refinance by monthly relief; payoff engine on the real remaining interest (08/11/2026) — owner decision
+
+- **Decision:** the refinance simulator must not only say worth / not worth by interest — a loan can be worth it for the monthly relief, with its price shown; and the early-payoff engine must use the real remaining interest, not payment × months − balance.
+- **Change:** each refinance row carries the monthly relief and its price per ₪100; the answer lists the relief set (cheapest first) with totals next to the interest-worthy set. For loans with a stored schedule `loan_item` takes the remaining payments and interest from the schedule and the payoff engine's cost / saving use it (`interest_from_schedule`).
+- **Limit:** loans without a schedule still use the estimate (labelled "משוער"); the monthly relief assumes the loan alone at the offer's term.
+- **Not done:** verification on a device and in production.
+
+### The practical remaining interest on every loan (08/11/2026) — owner decision
+
+- **Decision:** every loan shows the interest still to be paid until it ends, besides the monthly interest and the other figures.
+- **Change:** `loan_item` carries `interest_remaining` (+ `interest_remaining_exact`): the lender's schedule when stored, else payment × payments left − balance; the loan card shows it as "ריבית שנותרה עד הסיום" (exact / "≈ הערכה" / unknown).
+- **Not done:** verification on a device and in production; a total across all loans in the header.

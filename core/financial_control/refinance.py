@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from core.financial_control import amortization, loans as fcc_loans
 
+MIN_GAIN_RATIO = 0.01     # a loan is worth rolling only if it saves at least 1% of its balance net of fees: a loan whose interest is mostly paid already saves pennies
 MAX_RATE = 30.0
 MIN_TERM, MAX_TERM = 12, 420
 MAX_MONEY = 50_000_000.0
@@ -81,7 +82,8 @@ def _row(item: dict, offer: dict) -> dict:
     row = {"id": item["id"], "name": item["name"], "balance": item["early_closure_balance"], "rate": item["interest_rate"],
            "payment": item["monthly_payment"], "months": rem["months"] if rem else None, "interest_left": rem["interest"] if rem else None,
            "exact": rem["exact"] if rem else None, "prepay_fee": fee, "fee_known": fee_known or item["id"] in offer["fee_overrides"],
-           "same_term_payment": None, "same_term_interest": None, "net_saving": None, "verdict": "missing", "reason": None}
+           "same_term_payment": None, "same_term_interest": None, "net_saving": None, "interest_share": None,
+           "full_term_interest": None, "full_term_net": None, "offer_payment": None, "monthly_relief": None, "relief_cost": None, "relief_cost_per_100": None, "verdict": "missing", "reason": None}
     if rem is None or item["early_closure_balance"] is None or item["monthly_payment"] is None:
         row["reason"] = "חסרים יתרה, החזר חודשי או תשלומים שנותרו"
         return row
@@ -90,14 +92,32 @@ def _row(item: dict, offer: dict) -> dict:
     row["same_term_payment"] = round(pay, 2)
     row["same_term_interest"] = round(pay * n - bal, 2)
     row["net_saving"] = round(rem["interest"] - row["same_term_interest"] - (fee or 0.0), 2)
+    row["interest_share"] = round(rem["interest"] / (bal + rem["interest"]), 3) if bal + rem["interest"] > 0 else None       # how much of the payments still ahead is interest
+    full = fcc_loans._pmt(bal, offer["rate"], offer["term_months"]) * offer["term_months"] - bal        # the same principal left in the mortgage for its whole term
+    row["full_term_interest"] = round(full, 2)
+    row["full_term_net"] = round(rem["interest"] - full - (fee or 0.0), 2)
+    # the monthly aspect: this loan alone inside the mortgage at the offer's term. A loan can fail on interest and still be worth it for the cash it frees every month.
+    pay_in = fcc_loans._pmt(bal, offer["rate"], offer["term_months"])
+    row["offer_payment"] = round(pay_in, 2)
+    row["monthly_relief"] = round(item["monthly_payment"] - pay_in, 2)
+    row["relief_cost"] = round(full + (fee or 0.0) - rem["interest"], 2)                  # the extra interest and fee paid in total for that relief (negative = it also saves interest)
+    if row["monthly_relief"] > 0:
+        row["relief_cost_per_100"] = round(row["relief_cost"] / row["monthly_relief"] * 100.0, 2)     # total extra cost for every ₪100 of monthly relief
     if not row["fee_known"]:
         row["verdict"] = "unknown_fee"
         row["reason"] = "עמלת הפירעון לא ידועה — הזן אותה כדי לדעת"
-    elif row["net_saving"] > 0:
+    elif row["net_saving"] >= MIN_GAIN_RATIO * bal and row["net_saving"] > 0:
         row["verdict"] = "worth"
+        if row["full_term_net"] < 0:
+            row["reason"] = "כדאי רק אם תפרע אותה בקצב הנוכחי; אם תשאיר אותה לכל תקופת המשכנתא היא תייקר"
     else:
         row["verdict"] = "not_worth"
-        row["reason"] = "הריבית כבר נמוכה מההצעה או שהעמלה גדולה מהחיסכון" if (item["interest_rate"] or 0) <= offer["rate"] else "החיסכון בריבית קטן מעמלת הפירעון"
+        if (item["interest_rate"] or 0) <= offer["rate"]:
+            row["reason"] = "הריבית כבר נמוכה מההצעה או שווה לה"
+        elif row["net_saving"] > 0:
+            row["reason"] = f"רוב הריבית כבר שולמה — נשארו {n} תשלומים והחיסכון קטן מדי כדי להצדיק מחזור"
+        else:
+            row["reason"] = "החיסכון בריבית קטן מעמלת הפירעון"
     return row
 
 
@@ -140,6 +160,8 @@ def simulate(items: list[dict], offer: dict) -> dict:
     selected = [r for r in rows if r["id"] in chosen]
     worth = [r for r in rows if r["verdict"] == "worth"]
     notes = ["כל החישובים מניחים שהפריים והריביות נשארים כפי שהם היום; במסלולים צמודים או בריבית משתנה זו הערכה.",
+             "הריבית בהלוואה נפרעת בעיקר בתחילתה: ככל שההלוואה מתקדמת, מה שנשאר בה קרן בעיקר, ולכן מחזור שלה מרוויח מעט — לכל הלוואה מוצג כמה מהתשלומים שנותרו הם ריבית.",
+             "גם הלוואה שלא כדאית בריבית יכולה להיות כדאית להקלת ההחזר החודשי — ״מחיר ההקלה״ מראה כמה ריבית נוספת תשלם בסך הכל על כל ₪100 הקלה בחודש.",
              "״אותו טווח״ מראה כמה שווה הריבית בלבד; ״טווח ההצעה״ מראה את הקלת ההחזר — טווח ארוך מקטין את ההחזר ובדרך כלל מגדיל את הריבית הכוללת."]
     if any(r["exact"] is False for r in rows if r["verdict"] != "missing"):
         notes.append("בהלוואות בלי לוח סילוקין הריבית שנותרה מוערכת (החזר × תשלומים − יתרה).")
@@ -147,6 +169,9 @@ def simulate(items: list[dict], offer: dict) -> dict:
         notes.append("בהלוואות שעמלת הפירעון שלהן לא ידועה אין המלצה עד שתוזן עמלה.")
     if any(r["verdict"] == "missing" for r in rows):
         notes.append("הלוואות שחסרים בהן נתונים לא נכנסו לחישוב.")
+    # the monthly-relief view: every priced loan that frees cash in the mortgage, the cheapest relief (extra cost per ₪100 a month) first
+    relief_rows = sorted((r for r in rows if r["verdict"] != "missing" and (r["monthly_relief"] or 0) > 0),
+                         key=lambda r: (r["relief_cost_per_100"] if r["relief_cost_per_100"] is not None else 0.0))
     recommended = _totals(worth, offer)
     # a loan's own verdict is BEFORE the offer's fixed costs (opening fee, appraiser...): the set as a whole has to cover them too
     pays = bool(recommended and recommended["total_saving_same_term"] > 0)
@@ -156,4 +181,5 @@ def simulate(items: list[dict], offer: dict) -> dict:
         notes.append("הכדאיות של כל הלוואה היא לפני העלויות הקבועות של ההצעה; הסיכום שלמטה כולל אותן.")
     return {"offer": {k: offer[k] for k in ("rate", "term_months", "fees", "insurance_monthly")},
             "rows": rows, "selected_ids": [r["id"] for r in selected],
-            "selected": _totals(selected, offer), "recommended_ids": [r["id"] for r in worth], "recommended": recommended, "recommended_pays": pays, "notes": notes}
+            "selected": _totals(selected, offer), "recommended_ids": [r["id"] for r in worth], "recommended": recommended, "recommended_pays": pays,
+            "relief_ids": [r["id"] for r in relief_rows], "relief": _totals(relief_rows, offer), "notes": notes}
