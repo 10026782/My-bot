@@ -8,6 +8,7 @@ import {
 } from "../lib/fccLoans";
 import { STEP_ACTIONS } from "./FccAssets";
 import { KpiCard } from "./FccKpiCard";
+import { LoanScheduleImport } from "./FccLoanSchedule";
 import { PayoffEngine, type LoadScenario } from "./FccPayoff";
 import { ScreenState } from "./ui/ScreenState";
 import { Surface } from "./ui/Surface";
@@ -103,7 +104,7 @@ function ReceivablesSection({ loans, actions }: { loans: FccLoans; actions?: Loa
   );
 }
 
-export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans; loadScenario?: LoadScenario; actions?: LoanActions }) {
+export function LoansSection({ loans, loadScenario, actions, onScheduleSaved }: { loans: FccLoans; loadScenario?: LoadScenario; actions?: LoanActions; onScheduleSaved?: () => void }) {
   const [filter, setFilter] = useState<LoanFilter>("all");
   const [mode, setMode] = useState<RankMode>("high_interest");
   const [picked, setPicked] = useState<string[]>([]);
@@ -138,6 +139,7 @@ export function LoansSection({ loans, loadScenario, actions }: { loans: FccLoans
               </Surface>
             );
           })()}
+          {onScheduleSaved && <LoanScheduleImport onSaved={onScheduleSaved} />}
           {loans.auto_step && <p className="fcc-goal__note" role="note">{AUTO_STEP_NOTE}</p>}
           {loans.summary.unknown_status_count > 0 && (
             <p className="fcc-goal__note">{loans.summary.unknown_status_count} הלוואות עם {STATUS_UNKNOWN} (Active Loan לא מסומן) — כלולות בסיכומים.</p>

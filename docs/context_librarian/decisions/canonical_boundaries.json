@@ -749,7 +749,10 @@
         "tma-frontend/src/lib/fccClassifyRules.ts",
         "tma-frontend/src/components/FccClassifyRules.tsx",
         "tma-frontend/src/lib/fccConsumption.ts",
-        "tma-frontend/src/components/FccConsumption.tsx"
+        "tma-frontend/src/components/FccConsumption.tsx",
+        "core/financial_control/amortization.py",
+        "tma-frontend/src/lib/fccLoanSchedule.ts",
+        "tma-frontend/src/components/FccLoanSchedule.tsx"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",
@@ -765,7 +768,10 @@
         "test_fcc_cashflow.py",
         "tma-frontend/src/lib/fccClassify.test.ts",
         "tma-frontend/src/lib/fccClassifyRules.test.ts",
-        "tma-frontend/src/lib/fccConsumption.test.ts"
+        "tma-frontend/src/lib/fccConsumption.test.ts",
+        "test_fcc_amortization.py",
+        "test_fcc_loan_schedule_api.py",
+        "tma-frontend/src/lib/fccLoanSchedule.test.ts"
       ],
       "canonical_docs": [],
       "production_evidence": [],

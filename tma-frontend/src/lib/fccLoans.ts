@@ -92,7 +92,7 @@ export function splitSummaryModel(loans: FccLoans): SplitModel | null {
 export function splitLine(l: FccLoan): string | null {
   if (l.interest_this_month == null || l.principal_this_month == null) return null;
   const after = l.balance_after_this_month == null ? "" : ` · יתרה בסוף החודש ${money(l.balance_after_this_month)}`;
-  return `ריבית ${money(l.interest_this_month)} · קרן ${money(l.principal_this_month)}${after}`;
+  return `ריבית ${money(l.interest_this_month)} · קרן ${money(l.principal_this_month)}${after} · ${l.split_exact ? "מלוח סילוקין" : "הערכה"}`;
 }
 
 export const owedToMe = (l: { direction?: string }): boolean => l.direction === "owed_to_me";

@@ -213,6 +213,7 @@ class LoanFields:
     DUE_DAY         = "Monthly Due Day"
     EARLY_FEE       = "Early Repayment Fee/Penalty"  # free text (e.g. "אין", "2%")
     ACTIVE          = "Active Loan"                  # checkbox
+    SCHEDULE        = "Amortization Schedule"        # long text (JSON) — live 08/11/2026 (fld52A7z7dN8O7U1N): the bank's exact payment schedule, written by the FCC schedule import
     DIRECTION       = "Direction"                    # אני חייב (empty = same) | חייבים לי — a debt owed TO the owner (FCC receivables)
 
 

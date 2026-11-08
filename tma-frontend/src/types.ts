@@ -639,6 +639,9 @@ export interface FccLoan {
   annual_interest_cost: number | null;
   /** True = end_date was derived from the remaining payments. */
   end_date_inferred?: boolean;
+  /** True = this month's split comes from the lender's schedule (else an estimate); schedule_remaining = what is still ahead per the schedule. */
+  split_exact?: boolean;
+  schedule_remaining?: { payments: number; interest: number; principal: number } | null;
   /** This month's instalment split (balance × rate / 12 = interest; the rest = principal); null = an input is missing. */
   interest_this_month?: number | null;
   principal_this_month?: number | null;
@@ -720,7 +723,7 @@ export interface FccLoans {
     interest_this_month?: number | null;
     principal_this_month?: number | null;
     balance_after_this_month?: number | null;
-    split_coverage?: { known: number; of: number };
+    split_coverage?: { known: number; of: number; exact?: number };
     coverage: { original_amount: number; early_closure_balance: number; monthly_payment: number; future_cost: number; interest_rate: number };
     incomplete_count: number;
     unknown_status_count: number;
@@ -1283,3 +1286,20 @@ export interface PaceView {
   assumptions: string[];
 }
 export interface PaceParams { years?: number; annual_return_pct?: number; annual_fee_pct?: number; inflation_pct?: number }
+
+/** A loan amortization schedule read from the lender's Excel (POST /api/fcc/loans/schedule): a preview names the loan(s) it fits; "saved" after the confirm. */
+export interface FccLoanSchedulePreview {
+  state: "preview" | "saved" | "rejected" | "blocked";
+  problems?: string[];
+  original?: number | null;
+  payment_now?: number | null;
+  payments_left?: number;
+  interest_left?: number;
+  ends?: string | null;
+  this_month?: { principal: number; interest: number; total: number; balance_after: number; charged: boolean } | null;
+  notes?: string[];
+  candidates?: { id: string; name: string; lender: string | null; has_schedule: boolean }[];
+  digest?: string;
+  loan_id?: string;
+  message?: string;
+}

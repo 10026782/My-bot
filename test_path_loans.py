@@ -192,7 +192,7 @@ def test_summary_interest_principal_totals():
     items = [L.loan_item(r, date(2026, 11, 8)) for r in (rec("a", 120000, 6, 2000), rec("b", 1200, 12, 300), rec("c", 5000, None, 100), rec("d", 9999, None, None, "חייבים לי"))]
     s = L.summarize(items)
     assert s["interest_this_month"] == 612.0 and s["principal_this_month"] == 1688.0 and s["balance_after_this_month"] == 119512.0, s
-    assert s["split_coverage"] == {"known": 2, "of": 3}, s["split_coverage"]
+    assert s["split_coverage"] == {"known": 2, "of": 3, "exact": 0}, s["split_coverage"]
 
 
 def test_end_date_inferred_from_payments_remaining():

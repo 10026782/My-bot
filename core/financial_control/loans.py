@@ -12,6 +12,7 @@ import calendar
 import re
 from datetime import date
 
+from core.financial_control import amortization
 from airtable_schema import LoanFields as LF
 from core.financial_control import payoff
 
@@ -136,6 +137,16 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
     annual_interest = round(closure * rate / 100.0, 2) if closure is not None and rate is not None else None   # SSOT balance only
 
     split = payment_split(closure, rate, monthly, left)
+    sched = amortization.loads(f.get(LF.SCHEDULE))           # the bank's own schedule beats the balance × rate estimate
+    split_exact, sched_left = False, None
+    if sched:
+        ms = amortization.month_split(sched, today.year, today.month)
+        if ms:
+            split = {"interest": ms["interest"], "principal": ms["principal"], "balance_after": ms["balance_after"]}
+            split_exact = True
+        sched_left = amortization.remaining(sched)
+        if end is None and is_active(f):
+            end, end_inferred = amortization.last_date(sched), True
 
     missing = [name for name, v in (("early_closure_balance", closure), ("interest_rate", rate),
                                     ("monthly_payment", monthly), ("months_remaining", months)) if v is None]
@@ -170,6 +181,8 @@ def loan_item(record: dict, today: date, asset_names: dict[str, str] | None = No
         "monthly_cash_freed_if_closed": monthly,
         "annual_interest_cost": annual_interest,       # simple burden metric: balance × rate (₪/year)
         # this month's payment split (balance × rate / 12 is the interest, the rest is principal); None = an input is missing
+        "split_exact": split_exact,                     # True = from the bank's schedule, False = estimated from balance × rate
+        "schedule_remaining": sched_left,               # {payments, interest, principal} still ahead per the schedule, else None
         "interest_this_month": split["interest"] if split else None,
         "principal_this_month": split["principal"] if split else None,
         "balance_after_this_month": split["balance_after"] if split else None,
@@ -239,7 +252,7 @@ def summarize(items: list[dict]) -> dict:
         "interest_this_month": interest_m,
         "principal_this_month": principal_m,
         "balance_after_this_month": after_m,
-        "split_coverage": {"known": principal_n, "of": len(own)},
+        "split_coverage": {"known": principal_n, "of": len(own), "exact": sum(1 for i in own if i.get("split_exact"))},
         # how many loans each figure is actually based on (a total over 4 of 9 loans must not look complete)
         "coverage": {"original_amount": orig_n, "early_closure_balance": bal_n, "monthly_payment": pay_n,
                      "future_cost": cost_n, "interest_rate": len(weighted)},
@@ -465,7 +478,12 @@ def monthly_schedule(records: list[dict], windows: list[tuple[str, date, date]],
         if closed and end is None:
             closed_undated.append(name)
             continue
+        sched = amortization.loads(f.get(LF.SCHEDULE)) if not closed else None
+        first_sched = amortization._date(sched[0][0]) if sched else None
         for key, ms, me in windows:
+            if sched and first_sched and me >= first_sched.replace(day=1):
+                totals[key] += sum(r[3] for r in sched if ms <= amortization._date(r[0]) <= me)       # the bank's own amount for that month (0 after the last payment)
+                continue
             if start is None:
                 # no start date: the current month, and (when the end is known) every month up to it; the past stays unknown
                 counted = not closed and me >= today and (ms <= today <= me or (end is not None and ms <= end))
