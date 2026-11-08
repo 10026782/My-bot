@@ -12,9 +12,11 @@ DERIVED month by month after the last charged payment (flagged), never typed. No
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import re
+import zlib
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -284,3 +286,56 @@ def match_loan(s: Schedule, loans: list[dict]) -> list[dict]:
     by_amount = [r for r in loans if (a := _num(f(r).get("Loan Amount"))) is not None and abs(a - amt) < 1]
     both = [r for r in by_amount if pay is not None and (p := _num(f(r).get("Current Monthly Payment"))) is not None and abs(p - pay) < 1]
     return both or by_amount
+
+
+# ── a prime change: the not-yet-charged part is projected again ───────────────────────────────────────────────────────
+def _pmt(balance: float, rate: float, n: int) -> float:
+    i = rate / 1200.0
+    return balance / n if i == 0 else balance * i / (1 - (1 + i) ** -n)
+
+
+def pack(text: str) -> str:
+    """The stored schedule, compressed for a draft's snapshot (a prime-change draft carries every loan's schedule until the owner confirms)."""
+    return base64.b64encode(zlib.compress(text.encode("utf-8"), 9)).decode("ascii")
+
+
+def unpack(blob) -> str | None:
+    try:
+        return zlib.decompress(base64.b64decode(blob)).decode("utf-8") if blob else None
+    except Exception:                                    # noqa: BLE001 — a damaged blob means "no schedule", never a half-read one
+        return None
+
+
+def reproject(rows: list[list], delta: float, today: date) -> list[list] | None:
+    """The schedule after the prime moves by ``delta`` points: payments already charged (dated up to today) stay exactly as they were; the rest is
+    recomputed from the balance after the last charged payment at the new rate over the SAME remaining payments (the end date stays), with the
+    payment scaled the way the bank does it (the same payment times the instalment ratio at the new vs the old rate — the bank's own baseline is
+    kept). The old rate is read from the schedule itself (next payment's interest / its opening balance), not from a typed field. None when there is
+    nothing ahead, the rate cannot be read, or the new rate would be negative — the old schedule is then left as it is."""
+    kept = [r for r in rows if _date(r[0]) and _date(r[0]) <= today]
+    future = [r for r in rows if _date(r[0]) and _date(r[0]) > today]
+    if not future:
+        return None
+    opening = round(sum(r[1] for r in future), 2)
+    if opening <= 0 or future[0][2] <= 0:
+        return None
+    old_rate = future[0][2] / opening * 1200.0
+    new_rate = old_rate + delta
+    n = len(future)
+    if new_rate < 0:
+        return None
+    base, moved = _pmt(opening, old_rate, n), _pmt(opening, new_rate, n)
+    if base <= 0:
+        return None
+    pay = round(future[0][3] * moved / base, 2)
+    out = [list(r) for r in kept]
+    bal = opening
+    for k, r in enumerate(future):
+        interest = round(bal * new_rate / 1200.0, 2)
+        if k == n - 1:
+            principal, total = round(bal, 2), round(bal + interest, 2)
+        else:
+            principal, total = round(pay - interest, 2), pay
+        bal = round(max(bal - principal, 0.0), 2)
+        out.append([r[0], principal, interest, total, bal, 0, 1])
+    return out

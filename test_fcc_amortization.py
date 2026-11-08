@@ -87,6 +87,54 @@ def test_cal_letter_follows_the_balance_when_the_printed_split_is_off():
     assert not A.parse_cal_fragments(_cal(rows[:2]), date(2026, 11, 8)).ok                     # the balance does not reach 0
 
 
+def _annuity(balance, rate, n, start=date(2026, 9, 15), charged=2):
+    """A clean annuity schedule: `charged` payments dated up to Oct 2026, the rest after."""
+    pay = round(A._pmt(balance, rate, n), 2)
+    rows, bal = [], balance
+    for k in range(n):
+        idx = start.year * 12 + start.month - 1 + k
+        d = date(idx // 12, idx % 12 + 1, 15)
+        i = round(bal * rate / 1200, 2)
+        pr = round(bal, 2) if k == n - 1 else round(pay - i, 2)
+        tot = round(pr + i, 2)
+        bal = round(bal - pr, 2)
+        rows.append([d.isoformat(), pr, i, tot, bal, 1 if k < charged else 0, 1])
+    return rows
+
+
+def test_reproject_keeps_charged_months_and_follows_the_new_prime():
+    rows = _annuity(12000, 6.0, 12)
+    today = date(2026, 11, 8)
+    same = A.reproject(rows, 0.0, today)
+    assert same[:2] == rows[:2]                                             # charged months untouched
+    assert all(abs(a[3] - b[3]) < 0.1 and abs(a[4] - b[4]) < 0.5 for a, b in zip(same, rows))      # no change in prime: the same schedule
+    down = A.reproject(rows, -0.5, today)
+    assert [r[0] for r in down] == [r[0] for r in rows] and down[-1][4] == 0.0       # same dates, same end, balance reaches 0
+    assert down[2][3] < rows[2][3] and down[2][2] < rows[2][2] and down[2][1] > rows[2][1]     # lower prime: smaller payment, less interest, MORE principal
+    up = A.reproject(rows, 1.0, today)
+    assert up[2][3] > rows[2][3] and up[2][2] > rows[2][2]
+    assert A.reproject(rows, -9.0, today) is None and A.reproject(rows[:2], 0.5, today) is None
+    assert A.unpack(A.pack("x" * 500)) == "x" * 500 and A.unpack("not base64!") is None
+
+
+def test_prime_change_writes_project_the_stored_schedule_again():
+    from core.financial_control import draft as D, loans as L
+    rows = _annuity(12000, 6.0, 12)
+    s = A.Schedule(ok=True, rows=rows)
+    rec = {"id": "recS", "fields": {"Loan Name/ID": "מקס", "Active Loan": True, "Outstanding Principal for Early Closure": 10000, "Interest Rate (%)": 6, "Current Monthly Payment": rows[3][3],
+                                    "Payments Remaining": 10, "Amortization Schedule": A.dumps(s, date(2026, 10, 1))}}
+    plain = {"id": "recT", "fields": {"Loan Name/ID": "בלי לוח", "Active Loan": True, "Outstanding Principal for Early Closure": 10000, "Interest Rate (%)": 6, "Current Monthly Payment": 900, "Payments Remaining": 12}}
+    prime = L.prime_rows([rec, plain], date(2026, 11, 8))
+    assert prime[0]["schedule"] and prime[1]["schedule"] is None
+    writes = D.prime_change_writes({"delta": -0.5}, {"prime_rows": prime, "today": "2026-11-08"})
+    with_schedule = next(w for w in writes if w["record_id"] == "recS")["fields"]
+    without = next(w for w in writes if w["record_id"] == "recT")["fields"]
+    assert "Amortization Schedule" not in without
+    new_rows = A.loads(with_schedule["Amortization Schedule"])
+    assert new_rows[:2] == rows[:2] and A.asof(with_schedule["Amortization Schedule"]) == date(2026, 11, 8)
+    assert with_schedule["Current Monthly Payment"] == new_rows[2][3] < rows[2][3] and "לוח הסילוקין חושב מחדש" in with_schedule["Notes"]
+
+
 if __name__ == "__main__":
     test_parse_dates_future_rows_and_checks(); test_stored_form_roundtrip_and_garbage_is_ignored()
-    test_match_loan_by_amount_and_payment(); test_cal_letter_follows_the_balance_when_the_printed_split_is_off(); test_loan_item_uses_the_schedule_and_cashflow_uses_its_months(); print("ok amortization")
+    test_match_loan_by_amount_and_payment(); test_cal_letter_follows_the_balance_when_the_printed_split_is_off(); test_reproject_keeps_charged_months_and_follows_the_new_prime(); test_prime_change_writes_project_the_stored_schedule_again(); test_loan_item_uses_the_schedule_and_cashflow_uses_its_months(); print("ok amortization")

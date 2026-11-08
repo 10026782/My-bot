@@ -371,7 +371,9 @@ def prime_rows(records: list[dict], today: date) -> list[dict]:
             continue
         rows.append({"id": item["id"], "name": item["name"], "rate": item["interest_rate"], "payment": item["monthly_payment"],
                      "balance": item["early_closure_balance"], "left": item["payments_remaining"],
-                     "notes": str((rec.get("fields") or {}).get(LF.NOTES) or "")})
+                     "notes": str((rec.get("fields") or {}).get(LF.NOTES) or ""),
+                     # the stored schedule (compressed) rides in the draft so the change can project it again: None = the loan has none
+                     "schedule": amortization.pack(str(rec["fields"][LF.SCHEDULE])) if amortization.loads((rec.get("fields") or {}).get(LF.SCHEDULE)) else None})
     return rows
 
 
