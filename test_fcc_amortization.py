@@ -19,7 +19,7 @@ def test_parse_dates_future_rows_and_checks():
     assert s.ok, s.problems
     assert s.original == 1000.0 and s.payment_now == 410.0
     assert [r[0] for r in s.rows] == ["2026-09-15", "2026-10-15", "2026-11-15", "2026-12-15"]
-    assert [r[5] for r in s.rows] == [1, 1, 0, 0] and A.remaining(s.rows) == {"payments": 2, "interest": 9.0, "principal": 600.0}
+    assert [r[5] for r in s.rows] == [1, 1, 0, 0] and A.remaining(s.rows) == {"payments": 2, "interest": 9.0, "principal": 600.0, "total": 609.0}
     broken = [UPCOMING[0], (3, 600.0, 300.0, 6.0, 306.0, 300.0), (4, 300.0, 100.0, 3.0, 103.0, 200.0)]   # the principals do not add up to the opening balance
     assert not A.parse_sheets([CHARGED, broken]).ok
     assert not A.parse_sheets([[("x",)]]).ok
