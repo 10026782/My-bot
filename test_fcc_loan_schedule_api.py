@@ -40,7 +40,7 @@ def api(monkeypatch):
     monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: who)
     monkeypatch.setattr(tma_api, "_fcc_enabled", lambda identity=None: True)
     monkeypatch.setattr(service, "my_loans", lambda identity: LOANS)
-    monkeypatch.setattr(am, "parse_workbook", lambda data: am.parse_sheets([CHARGED, UPCOMING]))
+    monkeypatch.setattr(am, "parse_file", lambda data: am.parse_sheets([CHARGED, UPCOMING]))
     monkeypatch.setattr(tma_api, "_queue_or_owner_execute", lambda action, payload, identity, label: (WRITES.append(payload) or ("a", {"ok": True}, 200)))
     return app, who
 
@@ -66,7 +66,7 @@ def test_confirm_writes_one_patch_on_the_chosen_loan_only(api):
 
 
 def test_a_bad_file_is_rejected_and_non_owner_gets_404(api, monkeypatch):
-    monkeypatch.setattr(am, "parse_workbook", lambda data: am.parse_sheets([[("x",)]]))
+    monkeypatch.setattr(am, "parse_file", lambda data: am.parse_sheets([[("x",)]]))
     assert send(api[0]).get_json()["state"] == "rejected" and not WRITES
     monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: ident("avi", Role.PARTNER))
     assert send(api[0]).status_code == 404

@@ -3,7 +3,7 @@ import type { FccLoanSchedulePreview } from "../types";
 import { dmy, money } from "./fccPresentation";
 
 export const SCHEDULE_TITLE = "לוח סילוקין מדויק";
-export const SCHEDULE_HELP = "אפשר לצרף קובץ Excel של לוח הסילוקין מהבנק / חברת האשראי (ה״תשלומים שחויבו״ וה״תשלומים שטרם חויבו״). הפירוק לקרן וריבית של ההלוואה יהיה מדויק במקום הערכה. נשמרת רק טבלת התשלומים — לא הקובץ.";
+export const SCHEDULE_HELP = "אפשר לצרף את לוח הסילוקין של ההלוואה: קובץ Excel (מקס — ״תשלומים שחויבו״ ו״תשלומים שטרם חויבו״) או מכתב PDF של כאל. כמה קבצים יחד אפשר. הפירוק לקרן וריבית של ההלוואה יהיה מדויק במקום הערכה. נשמרת רק טבלת התשלומים — לא הקובץ.";
 export const NO_MATCH = "לא נמצאה הלוואה פעילה עם אותו סכום מקורי — לא נשמר דבר.";
 
 export interface SchedulePreviewModel {

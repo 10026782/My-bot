@@ -57,6 +57,34 @@ def test_loan_item_uses_the_schedule_and_cashflow_uses_its_months():
     assert totals == {"2026-10": 410.0, "2026-11": 306.0, "2026-12": 303.0, "2027-01": 0.0}, totals
 
 
+def _frag(page, x, y, text):
+    from core.financial_control.card_import import Fragment
+    return Fragment(page, x, y, text, x + 10)
+
+
+def _cal(rows, amount="3000", count="3"):
+    fr = [_frag(1, 200, 288.4, f'ש"ח {amount}'), _frag(1, 466, 288.4, "סכום ההלוואה"), _frag(1, 236, 308.1, count), _frag(1, 470, 308.1, "מס' תשלומים")]
+    for k, (bal, intr, princ, tot, d, no) in enumerate(rows):
+        y = 226.0 + 20 * k
+        fr += [_frag(2, 75, y, str(bal)), _frag(2, 150, y, str(intr)), _frag(2, 237, y, str(princ)), _frag(2, 300, y, str(tot)), _frag(2, 383, y, d), _frag(2, 460, y, str(no))]
+    return fr
+
+
+def test_cal_letter_follows_the_balance_when_the_printed_split_is_off():
+    rows = [(2010.0, 30.0, 990.0, 1020.0, "02/10/2026", 1), (1006.0, 20.0, 1004.0, 1024.0, "02/11/2026", 2), (0, 10.0, 1006.0, 1016.0, "02/12/2026", 3)]
+    s = A.parse_cal_fragments(_cal(rows), date(2026, 11, 8))
+    assert s.ok, s.problems
+    assert [r[5] for r in s.rows] == [1, 1, 0] and s.original == 3000.0 and s.payment_now == 1024.0
+    assert s.rows[1][1] == 1004.0 and s.rows[1][2] == 20.0                 # principal = the fall of the balance, interest = the rest of the payment
+    off = [rows[0], (1000.0, 20.0, 1004.0, 1024.0, "02/11/2026", 2), rows[2]]      # printed principal 1004 vs the balance's fall 1010: within the tolerance, noted
+    s2 = A.parse_cal_fragments(_cal(off), date(2026, 11, 8))
+    assert s2.ok and s2.rows[1][1] == 1010.0 and s2.notes
+    bad = [rows[0], (1500.0, 20.0, 1004.0, 1024.0, "02/11/2026", 2), rows[2]]          # a balance far from the printed principal: refused
+    assert not A.parse_cal_fragments(_cal(bad), date(2026, 11, 8)).ok
+    assert not A.parse_cal_fragments(_cal(rows, count="4"), date(2026, 11, 8)).ok             # the letter says 4 payments, the table has 3
+    assert not A.parse_cal_fragments(_cal(rows[:2]), date(2026, 11, 8)).ok                     # the balance does not reach 0
+
+
 if __name__ == "__main__":
     test_parse_dates_future_rows_and_checks(); test_stored_form_roundtrip_and_garbage_is_ignored()
-    test_match_loan_by_amount_and_payment(); test_loan_item_uses_the_schedule_and_cashflow_uses_its_months(); print("ok amortization")
+    test_match_loan_by_amount_and_payment(); test_cal_letter_follows_the_balance_when_the_printed_split_is_off(); test_loan_item_uses_the_schedule_and_cashflow_uses_its_months(); print("ok amortization")

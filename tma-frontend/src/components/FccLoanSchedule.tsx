@@ -52,7 +52,7 @@ export function LoanScheduleImport({ onSaved }: { onSaved?: () => void }) {
     <Surface variant="subtle" padding="compact" className="fcc-loans-goal" aria-label={SCHEDULE_TITLE}>
       <h3 className="fcc-loans-goal__title">{SCHEDULE_TITLE}</h3>
       <p className="fcc-loan__meta">{SCHEDULE_HELP}</p>
-      <input ref={input} type="file" multiple accept=".xlsx" aria-label="בחירת קבצי לוח סילוקין" onChange={(e) => void pick(e.target.files)} />
+      <input ref={input} type="file" multiple accept=".xlsx,.pdf" aria-label="בחירת קבצי לוח סילוקין" onChange={(e) => void pick(e.target.files)} />
       {items.map((it, i) => {
         const m = it.preview ? schedulePreviewModel(it.preview) : null;
         return (

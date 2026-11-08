@@ -5818,7 +5818,7 @@ def fcc_loan_schedule(identity):
         data = upload.read(sr.MAX_BYTES + 1)
         if len(data) > sr.MAX_BYTES:
             raise _ImportRefused("file too large", 413)
-        parsed = am.parse_workbook(data)
+        parsed = am.parse_file(data)
         if not parsed.ok:
             return jsonify({"state": "rejected", "problems": parsed.problems[:5]}), 200
         mine = [r for r in svc.my_loans(identity) if fcc_loans.is_active(r.get("fields") or {})

@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 _TOL = 0.06                      # rounding tolerance per row (₪)
 _SUM_TOL = 1.0                   # tolerance of the whole-schedule principal sum (₪)
 MAX_ROWS = 600
+_CAL_TOL = 25.0                  # the most a printed principal may differ from the fall of the balance at a rate change (₪)
+_CAL_NOTE = "בכמה תשלומים (בשינוי ריבית) הקרן והריבית שבמכתב שונות בשקלים בודדים מירידת היתרה — הפירוק חושב מירידת היתרה ומסכום התשלום"
 
 
 @dataclass
@@ -139,6 +142,87 @@ def parse_sheets(sheets: list[list[tuple]]) -> Schedule:
         out.notes.append("תאריכי התשלומים העתידיים נגזרים מחודש לחודש אחרי התשלום האחרון ששולם")
     out.ok = True
     return out
+
+
+# ── Cal (כאל) loan letter: a PDF with the FULL dated schedule ─────────────────────────────────────────────────────────
+_DMY = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
+_NUM = re.compile(r"^-?\d+(?:\.\d+)?$")
+
+
+def _cal_rows(fragments) -> list[tuple]:
+    """(balance, interest, principal, total, date, no) per table row: the fragments of one printed line share a y; read left to right."""
+    lines: dict[tuple, list] = {}
+    for f in fragments:
+        if f.page >= 2:
+            lines.setdefault((f.page, round(f.y / 3)), []).append(f)
+    rows = []
+    for key in sorted(lines):
+        cells = [c.text.strip() for c in sorted(lines[key], key=lambda c: c.x)]
+        if len(cells) != 6 or not _DMY.match(cells[4]) or not all(_NUM.match(c) for c in (cells[0], cells[1], cells[2], cells[3], cells[5])):
+            continue
+        d, m, y = (int(x) for x in _DMY.match(cells[4]).groups())
+        try:
+            rows.append((float(cells[0]), float(cells[1]), float(cells[2]), float(cells[3]), date(y, m, d), int(cells[5])))
+        except ValueError:
+            continue
+    return rows
+
+
+def parse_cal_fragments(fragments, today: date | None = None) -> Schedule:
+    today = today or date.today()
+    out = Schedule()
+    loan_amount = None
+    for f in fragments:                                  # the amount sits on the same printed line as its label (same y)
+        if f.page == 1 and f.text.startswith('ש"ח'):
+            label = [g for g in fragments if g.page == 1 and abs(g.y - f.y) < 3 and "סכום ההלוואה" in g.text]
+            if label:
+                loan_amount = _num(f.text.replace('ש"ח', ""))
+    n_stated = None
+    for f in fragments:
+        if f.page == 1 and re.fullmatch(r"\d{1,3}", f.text.strip()):
+            if [g for g in fragments if g.page == 1 and abs(g.y - f.y) < 3 and "מס' תשלומים" in g.text]:
+                n_stated = int(f.text)
+    rows = _cal_rows(fragments)
+    if not rows or loan_amount is None:
+        out.problems.append("לא זוהה לוח סילוקין של כאל (סכום ההלוואה או טבלת התשלומים חסרים)")
+        return out
+    if len(rows) > MAX_ROWS or (n_stated is not None and n_stated != len(rows)):
+        out.problems.append("מספר התשלומים בטבלה אינו מתאים למספר שבמכתב")
+        return out
+    prev = loan_amount
+    for balance, interest, principal, total, d, no in rows:
+        # the balance column is the chain that ends at 0 and the total is what is charged; at a rate change the printed principal / interest columns can
+        # differ from them by a few shekels, so the split follows the balance (principal = the fall of the balance, interest = the rest of the payment)
+        eff_principal = round(prev - balance, 2)
+        eff_interest = round(total - eff_principal, 2)
+        if eff_principal < -_TOL or eff_interest < -_TOL or abs(eff_principal - principal) > _CAL_TOL:
+            out.problems.append(f"תשלום {no} אינו מתיישב")
+            return out
+        if abs(eff_principal - principal) > _TOL and _CAL_NOTE not in out.notes:
+            out.notes.append(_CAL_NOTE)
+        out.rows.append([d.isoformat(), eff_principal, max(eff_interest, 0.0), round(total, 2), round(balance, 2), 1 if d <= today else 0, 1])
+        prev = balance
+    if abs(prev) > _TOL:
+        out.problems.append("היתרה בסוף הלוח אינה אפס")
+        return out
+    done = [r for r in out.rows if r[5]]
+    out.original = round(loan_amount, 2)
+    out.payment_now = (done[-1][3] if done else out.rows[0][3])
+    out.ok = True
+    return out
+
+
+def parse_file(data: bytes, today: date | None = None) -> Schedule:
+    """The lender's schedule from an Excel (Max) or a PDF letter (Cal). Anything else is refused."""
+    if data[:5] == b"%PDF-":
+        from core.financial_control import statement_reader as sr
+        try:
+            return parse_cal_fragments(sr.pdf_fragments(data, visual_hebrew=True), today)
+        except sr.StatementError as exc:
+            return Schedule(problems=[str(exc)])
+    if data[:4] == b"PK\x03\x04":
+        return parse_workbook(data)
+    return Schedule(problems=["הקובץ אינו PDF או Excel (xlsx)"])
 
 
 # ── stored form ───────────────────────────────────────────────────────────────────────────────────────────────────
