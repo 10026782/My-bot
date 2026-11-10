@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from airtable_schema import CashflowRuleFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, amortization as fcc_amortization, loans as fcc_loans, refinance as fcc_refinance
+from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, amortization as fcc_amortization, loans as fcc_loans, loan_timeline as fcc_loan_timeline, refinance as fcc_refinance
 
 logger = logging.getLogger(__name__)
 
@@ -514,6 +514,11 @@ def loans_overview(identity, today: date, debt_goal: dict | None = None) -> dict
         tasks = []
     payload = fcc_loans.build(records, today, {k: v for k, v in names.items() if v}, debt_goal, tasks)
     payload["auto_step"] = loan_auto_step_enabled()          # the screen says balances follow their schedule only when the job is on
+    try:                                                     # when the payment drops / when the interest share falls — from the same schedules; never blocks the screen
+        schedules = {r.get("id"): fcc_amortization.loads((r.get("fields") or {}).get(LoanFields.SCHEDULE)) for r in records}
+        payload["timeline"] = fcc_loan_timeline.build(payload["items"], {k: v for k, v in schedules.items() if v}, today)
+    except Exception:
+        logger.exception("[fcc] loans timeline failed")
     return payload
 
 

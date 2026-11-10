@@ -621,3 +621,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** `loans.summarize` adds `split_no_mortgage` (sums of the existing per-loan split); `payoff.partial_prepay` / `_leftover_partial` add `partial_prepay` to every scenario and combination result, as an estimate in two ways (same instalment: ends sooner; same term: lower instalment). `used` / `remaining_budget` and the whole-loan figures are unchanged. Display in `FccPayoff.tsx` / `fccPayoff.ts`, `fccLoans.ts`.
 - **Stated limits:** fixed rate, level instalments from the loan's balance / rate / months left; no partial-prepayment fee; the lender's schedule is not re-cut. The refinance simulator is not changed (comparing refinance vs prepayment is phase 2, not built).
 - **Not done:** verification on a device and in production.
+
+### Loans timeline — when the payment drops and the interest share falls (10/11/2026) — owner decision
+
+- **Decision:** a read-only timeline over the owner's active loans, without and with mortgages: the months in which the monthly payment drops, the months in which the interest falls below 30 / 25 / 20 / 15 / 10 / 5% of the payment, a year-by-year table and the remaining interest split into schedule-based and estimated.
+- **Change:** `core/financial_control/loan_timeline.py` (pure) sums each loan's payments ahead from the stored lender schedule or the existing labelled estimate (`refinance._remaining`) — no new formula; `service.loans_overview` adds `timeline`; `LoanTimeline` card + `fccLoanTimeline.ts` in the loans tab.
+- **Stated limits:** assumes today's rates (a prime change re-cuts schedules); loans without a schedule are estimates and shown apart; a loan without balance / payment / payments left is not priced and is counted ("N of M").
+- **Not done:** verification on a device and in production.

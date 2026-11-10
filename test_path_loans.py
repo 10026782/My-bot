@@ -269,3 +269,25 @@ def test_a_loan_shows_what_it_costs_to_close_today_with_a_known_fee_only():
     assert unknown["payoff_now_total"] is None and unknown["payoff_now_fee_known"] is False           # a fee that is not a number is never turned into a total
     assert known["first_payment_date"] == "2026-11-10"
     assert L.loan_item(rec("אין"), date(2026, 11, 20))["first_payment_date"] == "2026-12-10"
+
+
+def test_loan_timeline_drops_thresholds_and_scopes():
+    from datetime import date
+    from core.financial_control import loans as L, loan_timeline as T
+    today = date(2026, 11, 8)
+    def rec(i, bal, rate, pay, left, typ=None):
+        f = {"Loan Name/ID": i, "Outstanding Principal for Early Closure": bal, "Interest Rate (%)": rate, "Current Monthly Payment": pay,
+             "Payments Remaining": left, "Active Loan": True, "Next Payment Due": "2026-11-15", "Monthly Due Day": 15}
+        if typ: f["Loan Type"] = typ
+        return {"id": i, "fields": f}
+    items = [L.loan_item(r, today) for r in (rec("short", 3000, 12, 1010, 3), rec("long", 60000, 6, 1500, 48), rec("mort", 300000, 5, 2000, 240, "משכנתא"))]
+    out = T.build(items, {}, today)
+    nm, allv = out["no_mortgage"], out["all"]
+    assert nm["loans"] == 2 and allv["loans"] == 3 and nm["of"] == 2 and allv["of"] == 3
+    assert nm["payment_now"] > 2400 and allv["payment_now"] > nm["payment_now"] + 1900
+    assert [d["ended"] for d in nm["drops"]][0] == ["short"] and nm["drops"][0]["drop"] >= 1000    # the short loan ends -> the payment falls by its instalment
+    assert nm["interest_remaining"] == round(nm["interest_remaining_exact"] + nm["interest_remaining_estimated"], 2) and nm["interest_remaining_exact"] == 0
+    th = {t["limit"]: t for t in nm["thresholds"]}
+    assert th[0.25]["sustained"] and th[0.25]["sustained"] <= (th[0.15]["sustained"] or "9999")      # the lower the limit, the later it is reached
+    assert nm["yearly"][0]["month"] == nm["first_month"] and nm["yearly"][-1]["month"] == nm["last_month"]
+    assert T.build([], {}, today)["no_mortgage"] is None
