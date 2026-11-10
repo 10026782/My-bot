@@ -614,3 +614,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Decision:** a focused display fix only: wide tables scroll inside their own box instead of widening the page, and a payment-by-payment cell has two lines. The calculation engines and the loans data are unchanged; the 150 ₪ materiality threshold was NOT approved (small or negligible savings are reported separately, without a new rule).
 - **Change:** `.fcc-table-scroll` / `.fcc-refi` in `index.css` and the wrappers in `FccRefinance.tsx`; `monthRows` returns a payment line and an interest / principal line.
 - **Verification:** mobile Chromium emulation at 390 / 360 / 320 / 280px (page width unchanged, tables scroll inside); not on a real phone or in Telegram.
+
+### Interest vs principal without mortgages + partial prepayment in the budget simulator (10/11/2026) — owner decision
+
+- **Decision:** (1) the "ריבית מול קרן החודש" card also shows the same split over the non-mortgage loans only; (2) the budget simulator drops the assumption "whole-loan payoffs only": the budget left after the whole-loan closures is applied as one partial prepayment of the next loan in the strategy order.
+- **Change:** `loans.summarize` adds `split_no_mortgage` (sums of the existing per-loan split); `payoff.partial_prepay` / `_leftover_partial` add `partial_prepay` to every scenario and combination result, as an estimate in two ways (same instalment: ends sooner; same term: lower instalment). `used` / `remaining_budget` and the whole-loan figures are unchanged. Display in `FccPayoff.tsx` / `fccPayoff.ts`, `fccLoans.ts`.
+- **Stated limits:** fixed rate, level instalments from the loan's balance / rate / months left; no partial-prepayment fee; the lender's schedule is not re-cut. The refinance simulator is not changed (comparing refinance vs prepayment is phase 2, not built).
+- **Not done:** verification on a device and in production.
