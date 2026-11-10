@@ -285,9 +285,29 @@ def test_loan_timeline_drops_thresholds_and_scopes():
     nm, allv = out["no_mortgage"], out["all"]
     assert nm["loans"] == 2 and allv["loans"] == 3 and nm["of"] == 2 and allv["of"] == 3
     assert nm["payment_now"] > 2400 and allv["payment_now"] > nm["payment_now"] + 1900
-    assert [d["ended"] for d in nm["drops"]][0] == ["short"] and nm["drops"][0]["drop"] >= 1000    # the short loan ends -> the payment falls by its instalment
+    assert [d["ended"] for d in nm["drops"]][0][0].startswith("short") and nm["drops"][0]["drop"] >= 1000    # the short loan ends -> the payment falls by its instalment
     assert nm["interest_remaining"] == round(nm["interest_remaining_exact"] + nm["interest_remaining_estimated"], 2) and nm["interest_remaining_exact"] == 0
     th = {t["limit"]: t for t in nm["thresholds"]}
     assert th[0.25]["sustained"] and th[0.25]["sustained"] <= (th[0.15]["sustained"] or "9999")      # the lower the limit, the later it is reached
     assert nm["yearly"][0]["month"] == nm["first_month"] and nm["yearly"][-1]["month"] == nm["last_month"]
     assert T.build([], {}, today)["no_mortgage"] is None
+
+
+def test_loan_timeline_this_month_is_full_and_same_named_loans_stay_distinct():
+    import json
+    from datetime import date
+    from core.financial_control import loans as L, loan_timeline as T, amortization as A
+    today = date(2026, 11, 10)
+    def sched(rows):
+        return A.loads(json.dumps({"v": 1, "asof": "2026-11-08", "rows": rows}))
+    # same lender name, two loans; the first one's November instalment is dated TODAY (already charged) and must still count in this month
+    a_rows = [["2026-10-10", 90.0, 10.0, 100.0, 910.0, 1, 1], ["2026-11-10", 91.0, 9.0, 100.0, 819.0, 1, 1], ["2026-12-10", 92.0, 8.0, 100.0, 727.0, 0, 1]]
+    b_rows = [["2026-11-15", 95.0, 5.0, 100.0, 905.0, 0, 1], ["2026-12-15", 96.0, 4.0, 100.0, 809.0, 0, 1]]
+    def rec(i, rate):
+        return {"id": i, "fields": {"Loan Name/ID": "כאל", "Outstanding Principal for Early Closure": 800, "Interest Rate (%)": rate, "Current Monthly Payment": 100, "Active Loan": True}}
+    c_rows = [["2026-11-20", 98.0, 2.0, 100.0, 902.0, 0, 1], ["2026-12-20", 98.0, 2.0, 100.0, 804.0, 0, 1], ["2027-01-20", 98.0, 2.0, 100.0, 706.0, 0, 1]]
+    c = {"id": "c", "fields": {"Loan Name/ID": "מקס", "Outstanding Principal for Early Closure": 800, "Interest Rate (%)": 5, "Current Monthly Payment": 100, "Active Loan": True}}
+    items = [L.loan_item(rec("a", 10), today), L.loan_item(rec("b", 6), today), L.loan_item(c, today)]
+    out = T.build(items, {"a": sched(a_rows), "b": sched(b_rows), "c": sched(c_rows)}, today)["no_mortgage"]
+    assert out["first_month"] == "2026-11" and out["payment_now"] == 300.0 and out["interest_now"] == 16.0, out      # all three November instalments, charged (a) or not
+    assert out["drops"] and len(set(out["drops"][0]["ended"])) == 2 and all("%" in n for n in out["drops"][0]["ended"]), out["drops"]   # two "כאל" loans, two labels
