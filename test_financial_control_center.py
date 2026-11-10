@@ -1777,6 +1777,24 @@ def test_no_scenario_may_exceed_budget_700k_with_a_loan_larger_than_the_budget()
         assert "recBig" not in {c["id"] for c in result["closed"]}
 
 
+def test_partial_prepayment_of_the_leftover_budget_is_an_estimate_and_never_breaks_the_budget():
+    rows = _rows([("recA", 100000, 6.0, 1110, 120), ("recB", 40000, 8.0, 600, 90)])
+    out = fcc_payoff.simulate(rows, ["recA", "recB"], 30000)          # nothing fits whole: the whole budget is one partial prepayment
+    pp = out["partial_prepay"]
+    assert out["closed_count"] == 0 and pp["id"] == "recA" and pp["amount"] == 30000 and pp["exact"] is False
+    assert pp["balance_after"] == 70000
+    assert pp["keep_payment"]["months_saved"] > 0 and pp["keep_payment"]["interest_saved"] > 0
+    assert 0 < pp["lower_payment"]["monthly_relief"] < 1110 and pp["lower_payment"]["interest_saved"] > 0
+    assert pp["keep_payment"]["interest_saved"] > pp["lower_payment"]["interest_saved"]      # ending sooner saves more interest than a lower instalment
+    assert out["used"] == 0 and out["remaining_budget"] == 30000                              # whole-loan figures are unchanged
+    one = fcc_payoff.simulate(rows, ["recB", "recA"], 50000)          # recB closes whole, the remaining 10,000 goes into recA
+    assert [c["id"] for c in one["closed"]] == ["recB"] and one["partial_prepay"]["id"] == "recA" and one["partial_prepay"]["amount"] == 10000
+    assert fcc_payoff.simulate(rows, ["recA", "recB"], 140000)["partial_prepay"] is None       # everything closed: nothing left to prepay
+    assert fcc_payoff.partial_prepay(rows[0], 100000) is None and fcc_payoff.partial_prepay(rows[0], 0) is None
+    zero = fcc_payoff.partial_prepay({**rows[0], "interest_rate": 0.0}, 12000)                  # no interest: nothing to save
+    assert zero["keep_payment"]["interest_saved"] == 0 and zero["lower_payment"]["interest_saved"] == 0
+
+
 def test_budget_invariants_hold_for_random_portfolios_in_every_mode():
     rnd = random.Random(20261007)
     for _ in range(60):

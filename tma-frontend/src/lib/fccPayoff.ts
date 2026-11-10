@@ -1,6 +1,6 @@
 // Pure presentation of the FCC early-payoff engine. All numbers come from the server (scores, metrics, scenarios);
 // this file only orders, labels and explains them. It never recommends: it shows the data and why a loan sits where it does.
-import type { FccLoans, FccPayoffRow, FccScenarioResult, FccScenarios, PayoffStrategy } from "../types";
+import type { FccLoans, FccPartialPrepay, FccPayoffRow, FccScenarioResult, FccScenarios, PayoffStrategy } from "../types";
 import { UNKNOWN, pct, val } from "./fccLoans";
 import { money } from "./fccPresentation";
 
@@ -121,10 +121,28 @@ export function scenarioRows(s: FccScenarios): ScenarioRow[] {
   ];
 }
 
+export const PARTIAL_NOTE = "הערכה בלבד: ריבית קבועה ותשלומים שווים מהיתרה, הריבית והחודשים שנותרו; עמלת פרעון חלקי לא נכללת ולוח הסילוקין של הבנק לא מחושב מחדש.";
+
+/** The leftover budget as ONE partial prepayment, shown the two ways the owner can use it (no recommendation). */
+export function partialPrepayModel(p: FccPartialPrepay | null | undefined): { title: string; lines: { label: string; value: string }[]; note: string } | null {
+  if (!p) return null;
+  return {
+    title: `פרעון חלקי של ${money(p.amount)} מתוך ${p.name ?? UNKNOWN} (הערכה)`,
+    lines: [
+      { label: "יתרה לפני → אחרי", value: `${money(p.balance_before)} → ${money(p.balance_after)}` },
+      { label: "אם ההחזר נשאר זהה: ההלוואה מסתיימת מוקדם ב", value: `${p.keep_payment.months_saved} חודשים` },
+      { label: "אם ההחזר נשאר זהה: ריבית שנחסכת", value: `≈ ${money(p.keep_payment.interest_saved)}` },
+      { label: "אם תקופת ההלוואה נשארת: ההחזר החודשי יורד ב", value: `≈ ${money(p.lower_payment.monthly_relief)}` },
+      { label: "אם תקופת ההלוואה נשארת: ריבית שנחסכת", value: `≈ ${money(p.lower_payment.interest_saved)}` },
+    ],
+    note: PARTIAL_NOTE,
+  };
+}
+
 export function scenarioDetail(r: FccScenarioResult): { lines: { label: string; value: string }[]; notes: string[] } {
   const saved = r.future_cost_saved == null ? UNKNOWN : r.future_cost_saved_exact ? money(r.future_cost_saved) : `משוער ${money(r.future_cost_saved)}`;
   const notes: string[] = [];
-  if (r.skipped_over_budget.length) notes.push(`${r.skipped_over_budget.length} הלוואות לא נכנסו בתקציב — אין פרעון חלקי`);
+  if (r.skipped_over_budget.length) notes.push(`${r.skipped_over_budget.length} הלוואות לא נכנסו בתקציב לסגירה מלאה${r.partial_prepay ? " — מה שנשאר מהתקציב מוצג כפרעון חלקי" : ""}`);
   if (r.excluded_unknown_amount.length) notes.push(`${r.excluded_unknown_amount.length} הלוואות בלי יתרת סילוק לא נכללו בסימולציה`);
   if (r.excluded_no_data.length) notes.push(`${r.excluded_no_data.length} הלוואות ללא נתון לאסטרטגיה הזו לא נכללו בחישוב`);
   if (r.partial) notes.push("נתונים חלקיים: חלק מהסכומים כוללים רק הלוואות עם נתון ידוע");

@@ -712,6 +712,14 @@ export interface FccScenarioResult {
   skipped_over_budget: string[];
   excluded_unknown_amount: string[];
   excluded_no_data: string[];
+  /** The budget left after the whole-loan closures, put into one loan as a partial prepayment — an estimate (fixed rate), never exact. */
+  partial_prepay?: FccPartialPrepay | null;
+}
+
+export interface FccPartialPrepay {
+  id: string; name: string | null; amount: number; balance_before: number; balance_after: number; exact: boolean;
+  keep_payment: { months_saved: number; new_months: number; interest_saved: number };
+  lower_payment: { monthly_relief: number; new_payment: number; interest_saved: number };
 }
 
 export interface FccScenarios {
