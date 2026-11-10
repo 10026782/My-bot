@@ -9,6 +9,7 @@ import {
 import { STEP_ACTIONS } from "./FccAssets";
 import { KpiCard } from "./FccKpiCard";
 import { LoanScheduleImport } from "./FccLoanSchedule";
+import { LoanTimeline } from "./FccLoanTimeline";
 import { RefinanceSimulator } from "./FccRefinance";
 import { PayoffEngine, type LoadScenario } from "./FccPayoff";
 import { ScreenState } from "./ui/ScreenState";
@@ -141,6 +142,7 @@ export function LoansSection({ loans, loadScenario, actions, onScheduleSaved }: 
               </Surface>
             );
           })()}
+          <LoanTimeline loans={loans} />
           {onScheduleSaved && <RefinanceSimulator />}
           {onScheduleSaved && <LoanScheduleImport onSaved={onScheduleSaved} />}
           {loans.auto_step && <p className="fcc-goal__note" role="note">{AUTO_STEP_NOTE}</p>}

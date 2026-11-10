@@ -728,6 +728,16 @@ export interface FccScenarios {
   optimal: { cash: FccScenarioResult | null; saved: FccScenarioResult | null };
 }
 
+export interface FccTimelineScope {
+  loans: number; of: number; exact: number; balance: number;
+  payment_now: number; interest_now: number; share_now: number; first_month: string; last_month: string;
+  interest_remaining: number; interest_remaining_exact: number; interest_remaining_estimated: number;
+  drops: { month: string; from: number; to: number; drop: number; interest: number; ended: string[] }[];
+  thresholds: { limit: number; first: string; sustained: string | null; payment: number | null; interest: number | null }[];
+  yearly: { month: string; payment: number; interest: number; share: number }[];
+}
+export interface FccLoanTimeline { no_mortgage: FccTimelineScope | null; all: FccTimelineScope | null; assumption: string }
+
 export interface FccLoans {
   items: FccLoan[];
   summary: {
@@ -753,6 +763,8 @@ export interface FccLoans {
   rankings: { high_interest: string[]; cash_freed: string[]; small_balance: string[] };
   goal: { target: number; closed: number | null; remaining: number | null; active_closure_balance: number | null } | null;
   payoff?: FccPayoff;
+  /** When the monthly payment drops and when the interest share of it falls below a quarter / 15% / … (null scope = nothing priced). */
+  timeline?: FccLoanTimeline;
   /** Debts owed TO the owner (apart from the liabilities above). */
   receivables?: { count: number; total_balance: number | null; coverage: number; no_arrangement: number };
   /** Owed TO the owner vs owed BY him (asset-linked loans left out: that debt is already inside the asset's equity). */
