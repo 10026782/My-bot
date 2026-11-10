@@ -10,8 +10,9 @@ Works on the owner-scoped, active loan items produced by ``loans.loan_item``. It
   * four normalised 0-100 factor scores (relative to the owner's own active loans — no arbitrary cut-offs)
   * a weighted balanced score that renormalises over the factors that are actually known
   * four ranking strategies (never an automatic "winner")
-  * a budget simulator (whole-loan payoffs only; no partial payoff) per strategy, plus the best combination by
-    monthly cash released / future cost saved
+  * a budget simulator per strategy, plus the best combination by monthly cash released / future cost saved:
+    whole loans are closed first, and the budget that is left (too little to close the next loan) goes into ONE partial
+    prepayment of that next loan, shown as an estimate in two ways (same payment -> ends sooner; same term -> lower payment)
 
 Unknown stays unknown: a missing factor is never scored as 0, it is dropped from the weighting and reported in
 ``missing_factors`` / ``score_coverage``.
@@ -20,6 +21,7 @@ Unknown stays unknown: a missing factor is never scored as 0, it is dropped from
 from __future__ import annotations
 
 from itertools import combinations
+from math import log
 
 # Balanced-score weights (sum = 1). Change here only; the engine renormalises when a factor is unknown.
 WEIGHTS = {"interest": 0.30, "cash": 0.30, "closure": 0.25, "time": 0.15}
@@ -151,7 +153,54 @@ def _sum_known(rows: list[dict], key: str) -> float | None:
     return round(sum(known), 2) if known else None
 
 
-def _result(selected: list[dict], budget: float, skipped_over: list[str], unknown: list[str], no_data: list[str] | None = None) -> dict:
+def _annuity_payment(balance: float, rate_pct: float, months: int) -> float:
+    r = rate_pct / 1200.0
+    return balance / months if r <= 0 else balance * r / (1.0 - (1.0 + r) ** -months)
+
+
+def partial_prepay(row: dict, amount: float) -> dict | None:
+    """What a PARTIAL prepayment of ``amount`` does to one loan, as an ESTIMATE (fixed rate, level instalments from the
+    loan's own balance / rate / months left; the lender's real schedule is not re-cut and no partial-prepayment fee is known).
+    Two ways to use the same money — never a recommendation:
+      * ``keep_payment``  — same instalment, the loan ends sooner (months saved, interest saved)
+      * ``lower_payment`` — same end date, a lower instalment (monthly relief, interest saved)
+    None when the loan lacks balance / rate / months or the amount is not strictly between 0 and the balance."""
+    bal, rate, n = row.get("amount_to_close"), row.get("interest_rate"), row.get("months_remaining")
+    if bal is None or rate is None or not n or n <= 0 or amount is None or not 0 < amount < bal - _EPS:
+        return None
+    n = int(n)
+    pay = _annuity_payment(bal, rate, n)
+    new_bal = bal - amount
+    interest_now = pay * n - bal
+    r = rate / 1200.0
+    new_n = new_bal / pay if r <= 0 else -log(1.0 - new_bal * r / pay) / log(1.0 + r)
+    new_n = min(float(n), new_n)
+    keep = {"months_saved": max(0, n - int(-(-new_n // 1))), "new_months": int(-(-new_n // 1)),
+            "interest_saved": round(max(0.0, interest_now - (pay * new_n - new_bal)), 2)}
+    new_pay = _annuity_payment(new_bal, rate, n)
+    lower = {"monthly_relief": round(max(0.0, pay - new_pay), 2), "new_payment": round(new_pay, 2),
+             "interest_saved": round(max(0.0, interest_now - (new_pay * n - new_bal)), 2)}
+    return {"id": row["id"], "name": row.get("name"), "amount": round(amount, 2), "balance_before": round(bal, 2),
+            "balance_after": round(new_bal, 2), "keep_payment": keep, "lower_payment": lower, "exact": False}
+
+
+def _leftover_partial(rows: list[dict], order: list[str], left: float, taken: set[str], need: str | None) -> dict | None:
+    """The first loan in the strategy order that was not closed and can take a partial prepayment of what is left."""
+    if left <= _EPS:
+        return None
+    by_id = {r["id"]: r for r in rows}
+    for iid in order:
+        row = by_id[iid]
+        if iid in taken or (need and row[need] is None):
+            continue
+        out = partial_prepay(row, left)
+        if out:
+            return out
+    return None
+
+
+def _result(selected: list[dict], budget: float, skipped_over: list[str], unknown: list[str], no_data: list[str] | None = None,
+            partial: dict | None = None) -> dict:
     used = round(sum(r["amount_to_close"] for r in selected), 2)
     return {
         "budget": budget,
@@ -168,12 +217,15 @@ def _result(selected: list[dict], budget: float, skipped_over: list[str], unknow
         "skipped_over_budget": skipped_over,
         "excluded_unknown_amount": unknown,
         "excluded_no_data": no_data or [],          # loans the strategy's own metric is unknown for (never used as filler)
+        # the budget left after the whole-loan closures, put into one loan as a partial prepayment (estimate; None = nothing to apply)
+        "partial_prepay": partial,
     }
 
 
 def simulate(rows: list[dict], order: list[str], budget: float, need: str | None = None) -> dict:
     """Walk the strategy order and close every loan whose full closure amount still fits (<= remaining budget).
-    A loan that does not fit is skipped whole — there is no partial payoff — and the walk continues."""
+    A loan that does not fit is skipped and the walk continues; what is left of the budget is then offered as one partial
+    prepayment of the first loan (in the same order) that was not closed — ``partial_prepay`` in the result."""
     by_id = {r["id"]: r for r in rows}
     left, selected, skipped, unknown, no_data = float(budget), [], [], [], []
     for iid in order:
@@ -188,10 +240,11 @@ def simulate(rows: list[dict], order: list[str], budget: float, need: str | None
             left -= amount
         else:
             skipped.append(iid)
-    return _result(selected, float(budget), skipped, unknown, no_data)
+    partial = _leftover_partial(rows, order, left, {r["id"] for r in selected}, need)
+    return _result(selected, float(budget), skipped, unknown, no_data, partial)
 
 
-def optimal(rows: list[dict], budget: float, objective: str) -> dict | None:
+def optimal(rows: list[dict], budget: float, objective: str, order: list[str] | None = None) -> dict | None:
     """Best whole-loan combination within the budget by ``objective`` ('cash' = monthly cash released,
     'saved' = estimated future cost saved). Exact (exhaustive) for up to MAX_OPTIMAL_LOANS eligible loans,
     otherwise None. Loans with an unknown value contribute 0 to the objective (never a guess)."""
@@ -214,7 +267,9 @@ def optimal(rows: list[dict], budget: float, objective: str) -> dict | None:
                 best, best_rank = list(combo), rank
     chosen = {r["id"] for r in best}
     skipped = [r["id"] for r in eligible if r["id"] not in chosen]
-    return _result(sorted(best, key=lambda r: r["id"]), float(budget), skipped, unknown, no_data)
+    left = float(budget) - sum(r["amount_to_close"] for r in best)
+    partial = _leftover_partial(rows, order, left, chosen, need) if order else None
+    return _result(sorted(best, key=lambda r: r["id"]), float(budget), skipped, unknown, no_data, partial)
 
 
 def scenarios(rows: list[dict], budget: float) -> dict:
@@ -222,7 +277,7 @@ def scenarios(rows: list[dict], budget: float) -> dict:
     return {
         "budget": float(budget),
         "strategies": {s: simulate(rows, ranks[s], budget, "cost_saving" if s == "savings" else None) for s in STRATEGIES},
-        "optimal": {"cash": optimal(rows, budget, "cash"), "saved": optimal(rows, budget, "saved")},
+        "optimal": {"cash": optimal(rows, budget, "cash", ranks["cash"]), "saved": optimal(rows, budget, "saved", ranks["savings"])},
     }
 
 

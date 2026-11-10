@@ -287,6 +287,10 @@ test("interest / principal split: per loan, summary and unknown stays unknown", 
   const m = splitSummaryModel({ ...loans, summary: { ...loans.summary, interest_this_month: 612, principal_this_month: 1688, balance_after_this_month: 119512, split_coverage: { known: 2, of: 3 } } })!;
   assert.equal(m.lines.length, 3);
   assert.ok(m.hint!.includes("2 מתוך 3"));
+  const nm = splitSummaryModel({ ...loans, summary: { ...loans.summary, interest_this_month: 612, principal_this_month: 1688, balance_after_this_month: 119512,
+    split_no_mortgage: { interest_this_month: 100, principal_this_month: 400, balance_after_this_month: 9000, known: 1, of: 1 } } })!;
+  assert.equal(nm.lines.length, 6);
+  assert.equal(nm.lines[3].label, "ריבית החודש — ללא משכנתא");
 });
 
 test("loan card: the practical interest until the end — exact from the schedule, an estimate otherwise, unknown when missing", () => {

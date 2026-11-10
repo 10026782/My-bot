@@ -79,12 +79,21 @@ export function splitSummaryModel(loans: FccLoans): SplitModel | null {
   const s = loans.summary;
   if (s.principal_this_month == null && s.interest_this_month == null) return null;
   const c = s.split_coverage;
+  const nm = s.split_no_mortgage;
+  const lines: LoanRow[] = [
+    { label: "ריבית החודש", value: val(s.interest_this_month) },
+    { label: "קרן החודש", value: val(s.principal_this_month) },
+    { label: "יתרת חוב בסוף החודש", value: val(s.balance_after_this_month) },
+  ];
+  if (nm && nm.of > 0) {
+    lines.push(
+      { label: "ריבית החודש — ללא משכנתא", value: val(nm.interest_this_month) },
+      { label: "קרן החודש — ללא משכנתא", value: val(nm.principal_this_month) },
+      { label: "יתרת חוב בסוף החודש — ללא משכנתא", value: val(nm.balance_after_this_month) },
+    );
+  }
   return {
-    lines: [
-      { label: "ריבית החודש", value: val(s.interest_this_month) },
-      { label: "קרן החודש", value: val(s.principal_this_month) },
-      { label: "יתרת חוב בסוף החודש", value: val(s.balance_after_this_month) },
-    ],
+    lines,
     hint: c && c.known < c.of ? `מבוסס על ${c.known} מתוך ${c.of} הלוואות (בשאר חסר ריבית, יתרה או החזר)` : undefined,
   };
 }

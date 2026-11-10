@@ -5,7 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PayoffEngine, ScenarioView } from "../components/FccPayoff";
 import { UNKNOWN } from "./fccLoans";
-import { STRATEGY_TABS, orderedRows, parseBudget, payoffCardModel, presetBudget, savingLine, scenarioDetail, scenarioRows } from "./fccPayoff";
+import { STRATEGY_TABS, orderedRows, parseBudget, partialPrepayModel, payoffCardModel, presetBudget, savingLine, scenarioDetail, scenarioRows } from "./fccPayoff";
 
 const assert = {
   equal(actual: unknown, expected: unknown, message?: string) {
@@ -161,6 +161,19 @@ test("budget input parsing and the ₪700K preset", () => {
   assert.equal(presetBudget({ ...loans, goal: null } as FccLoans), null);
 });
 
+test("partial prepayment: the leftover budget as an estimate in two ways, nothing when absent", () => {
+  assert.equal(partialPrepayModel(null), null);
+  const m = partialPrepayModel({ id: "a", name: "הלוואה א", amount: 30000, balance_before: 100000, balance_after: 70000, exact: false,
+    keep_payment: { months_saved: 44, new_months: 76, interest_saved: 18925 }, lower_payment: { monthly_relief: 333.06, new_payment: 777.14, interest_saved: 9967.38 } })!;
+  assert.ok(m.title.includes("הערכה") && m.title.includes("הלוואה א"));
+  assert.equal(m.lines.length, 5);
+  assert.ok(m.lines[1].value.includes("44"));
+  assert.ok(m.note.includes("עמלת פרעון חלקי"));
+  const html = renderToStaticMarkup(createElement(ScenarioView, { scenarios: { ...scenarios, strategies: { ...scenarios.strategies, interest: { ...scenarios.strategies.interest, partial_prepay: { id: "a", name: "הלוואה א", amount: 30000, balance_before: 100000, balance_after: 70000, exact: false,
+    keep_payment: { months_saved: 44, new_months: 76, interest_saved: 18925 }, lower_payment: { monthly_relief: 333.06, new_payment: 777.14, interest_saved: 9967.38 } } } } }, strategy: "interest" }));
+  assert.ok(html.includes("פרעון חלקי של"));
+});
+
 test("budget simulator view: four strategies + two combinations, detail, notes, unknown stays unknown", () => {
   assert.equal(scenarioRows(scenarios).length, 6);
   assert.equal(scenarioRows(scenarios)[1].released, UNKNOWN);
@@ -168,7 +181,7 @@ test("budget simulator view: four strategies + two combinations, detail, notes, 
   assert.equal(scenarioRows(scenarios)[3].label, "חיסכון בעלות");
   assert.equal(scenarioRows(scenarios)[5].closed, UNKNOWN);                   // combination not computed
   const d = scenarioDetail(scenarios.strategies.interest);
-  assert.ok(d.notes.some((n) => n.includes("אין פרעון חלקי")));
+  assert.ok(d.notes.some((n) => n.includes("לא נכנסו בתקציב לסגירה מלאה")));
   assert.ok(d.notes.some((n) => n.includes("בלי יתרת סילוק")));
   assert.ok(d.notes.some((n) => n.includes("נתונים חלקיים")));
   assert.ok(scenarioDetail(res({ excluded_no_data: ["x", "y"] })).notes.some((n) => n.includes("2 הלוואות ללא נתון לאסטרטגיה הזו")));

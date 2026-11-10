@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FccLoans, FccScenarios, PayoffStrategy } from "../types";
-import { orderedRows, parseBudget, payoffCardModel, presetBudget, scenarioDetail, scenarioRows, STRATEGY_TABS } from "../lib/fccPayoff";
+import { orderedRows, parseBudget, payoffCardModel, partialPrepayModel, presetBudget, scenarioDetail, scenarioRows, STRATEGY_TABS } from "../lib/fccPayoff";
 import { UNKNOWN } from "../lib/fccLoans";
 import { Surface } from "./ui/Surface";
 
@@ -27,6 +27,18 @@ export function ScenarioView({ scenarios, strategy }: { scenarios: FccScenarios;
       {scenarios.strategies[strategy].closed.length > 0 && (
         <p className="fcc-loan__meta">נסגרות: {scenarios.strategies[strategy].closed.map((c) => c.name ?? UNKNOWN).join(", ")}</p>
       )}
+      {(() => {
+        const pp = partialPrepayModel(scenarios.strategies[strategy].partial_prepay);
+        return pp && (
+          <div className="fcc-pay__partial">
+            <h4 className="fcc-pay__subhead">{pp.title}</h4>
+            <dl className="fcc-loans-goal__grid">
+              {pp.lines.map((l) => <div key={l.label}><dt>{l.label}</dt><dd>{l.value}</dd></div>)}
+            </dl>
+            <p className="fcc-loan__meta">{pp.note}</p>
+          </div>
+        );
+      })()}
       {detail.notes.map((n) => <p key={n} className="fcc-goal__note">{n}</p>)}
     </div>
   );
