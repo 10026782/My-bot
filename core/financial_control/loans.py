@@ -252,6 +252,14 @@ def summarize(items: list[dict]) -> dict:
     principal_m, principal_n = _sum(i["principal_this_month"] for i in own)
     after_m, _ = _sum(i["balance_after_this_month"] for i in own if i["principal_this_month"] is not None)
 
+    # the same split without the mortgages (a mortgage dominates the totals; the owner wants the rest on its own line)
+    own_nm = [i for i in own if i["loan_type"] != "משכנתא"]
+    int_nm, _ = _sum(i["interest_this_month"] for i in own_nm)
+    prin_nm, prin_nm_n = _sum(i["principal_this_month"] for i in own_nm)
+    after_nm, _ = _sum(i["balance_after_this_month"] for i in own_nm if i["principal_this_month"] is not None)
+    split_no_mortgage = {"interest_this_month": int_nm, "principal_this_month": prin_nm, "balance_after_this_month": after_nm,
+                         "known": prin_nm_n, "of": len(own_nm)}
+
     by_type: dict[str, list[dict]] = {}
     by_asset: dict[str, list[dict]] = {}
     for i in active:
@@ -269,6 +277,7 @@ def summarize(items: list[dict]) -> dict:
         "interest_this_month": interest_m,
         "principal_this_month": principal_m,
         "balance_after_this_month": after_m,
+        "split_no_mortgage": split_no_mortgage,
         "split_coverage": {"known": principal_n, "of": len(own), "exact": sum(1 for i in own if i.get("split_exact"))},
         # how many loans each figure is actually based on (a total over 4 of 9 loans must not look complete)
         "coverage": {"original_amount": orig_n, "early_closure_balance": bal_n, "monthly_payment": pay_n,

@@ -195,6 +195,21 @@ def test_summary_interest_principal_totals():
     assert s["split_coverage"] == {"known": 2, "of": 3, "exact": 0}, s["split_coverage"]
 
 
+def test_summary_split_without_mortgage():
+    from datetime import date
+    from core.financial_control import loans as L
+    from airtable_schema import LoanFields as LF
+    def rec(i, bal, rate, pay, typ=None):
+        f = {"Loan Name/ID": i, "Outstanding Principal for Early Closure": bal, "Interest Rate (%)": rate, "Current Monthly Payment": pay, "Active Loan": True}
+        if typ: f[LF.LOAN_TYPE] = typ
+        return {"id": i, "fields": f}
+    items = [L.loan_item(r, date(2026, 11, 8)) for r in (rec("a", 120000, 6, 2000, "פרטית"), rec("m", 300000, 6, 2500, "משכנתא"))]
+    s = L.summarize(items)
+    nm = s["split_no_mortgage"]
+    assert nm["of"] == 1 and nm["known"] == 1 and nm["interest_this_month"] == 600.0 and nm["principal_this_month"] == 1400.0, nm
+    assert s["interest_this_month"] == 600.0 + 1500.0, s["interest_this_month"]
+
+
 def test_end_date_inferred_from_payments_remaining():
     from datetime import date
     from core.financial_control import loans as L

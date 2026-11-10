@@ -734,6 +734,7 @@ export interface FccLoans {
     principal_this_month?: number | null;
     balance_after_this_month?: number | null;
     split_coverage?: { known: number; of: number; exact?: number };
+    split_no_mortgage?: { interest_this_month: number | null; principal_this_month: number | null; balance_after_this_month: number | null; known: number; of: number };
     coverage: { original_amount: number; early_closure_balance: number; monthly_payment: number; future_cost: number; interest_rate: number };
     incomplete_count: number;
     unknown_status_count: number;
