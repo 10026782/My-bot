@@ -20,9 +20,19 @@ MIN_DROP = 100.0          # a month-on-month fall of at least this much is "the 
 MORTGAGE = "משכנתא"
 
 
+def _label(item: dict) -> str:
+    """Loans share names ("כאל", "מקס"), so the label carries the rate and the instalment that tell them apart."""
+    parts = [item["name"] or "הלוואה"]
+    if item.get("interest_rate") is not None:
+        parts.append(f"{item['interest_rate']:g}%")
+    if item.get("monthly_payment") is not None:
+        parts.append(f"₪{item['monthly_payment']:,.0f}")
+    return " · ".join(parts)
+
+
 def _scope(items: list[dict], schedules: dict, today: date) -> dict | None:
     months: dict[str, list[float]] = {}          # month -> [payment, interest]
-    ends: dict[str, str] = {}                    # loan name -> last payment month
+    ends: dict[str, tuple[str, str]] = {}        # loan id -> (display label, last payment month)
     priced = exact = 0
     balance = interest_exact = interest_est = 0.0
     for item in items:
@@ -36,12 +46,15 @@ def _scope(items: list[dict], schedules: dict, today: date) -> dict | None:
             interest_exact += rem["interest"]
         else:
             interest_est += rem["interest"]
-        for r in rem["rows"]:
+        this_month = today.isoformat()[:7]
+        # the payments of THIS calendar month count in full: a stored-schedule row dated on / before today is already "charged", yet it is part of this month's payment
+        stored = [r for r in (schedules.get(item["id"]) or []) if r[0][:7] == this_month and r[0] <= today.isoformat()]
+        for r in stored + list(rem["rows"]):
             m = r[0][:7]
             cell = months.setdefault(m, [0.0, 0.0])
             cell[0] += r[3]
             cell[1] += r[2]
-        ends[item["name"] or item["id"]] = rem["rows"][-1][0][:7]
+        ends[item["id"]] = (_label(item), rem["rows"][-1][0][:7])
     if not months:
         return None
     keys = sorted(months)
@@ -53,7 +66,7 @@ def _scope(items: list[dict], schedules: dict, today: date) -> dict | None:
     for prev, cur in zip(keys, keys[1:]):
         if pay[prev] - pay[cur] < MIN_DROP:
             continue
-        ended = sorted(n for n, last in ends.items() if last == prev)
+        ended = sorted(n for n, last in ends.values() if last == prev)
         if drops and drops[-1]["_last"] == prev:             # consecutive months of one fall (a final small payment): one event
             d = drops[-1]
             d.update(to=pay[cur], drop=round(d["from"] - pay[cur], 2), interest=inte[cur], _last=cur, ended=d["ended"] + ended)

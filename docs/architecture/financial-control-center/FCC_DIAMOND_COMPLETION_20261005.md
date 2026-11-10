@@ -628,3 +628,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** `core/financial_control/loan_timeline.py` (pure) sums each loan's payments ahead from the stored lender schedule or the existing labelled estimate (`refinance._remaining`) — no new formula; `service.loans_overview` adds `timeline`; `LoanTimeline` card + `fccLoanTimeline.ts` in the loans tab.
 - **Stated limits:** assumes today's rates (a prime change re-cuts schedules); loans without a schedule are estimates and shown apart; a loan without balance / payment / payments left is not priced and is counted ("N of M").
 - **Not done:** verification on a device and in production.
+
+### Loans timeline — this month in full, distinct loan labels (10/11/2026) — owner report
+
+- **Report:** the first figures of the timeline were wrong (payment ₪6,083, interest ₪1,008) and the loans that end were missing from the drop list.
+- **Root cause:** the series was built from the payments still ahead of today, so instalments of this month dated on / before today were dropped; and loans were keyed by name, so same-named loans (several "כאל") overwrote each other.
+- **Change:** `loan_timeline._scope` adds this month's stored-schedule rows to the monthly series and keys the ending loans by id with a label of name · rate · instalment. Balance and remaining interest stay as the loan cards show them (payments ahead).
+- **Not done:** verification on a device and in production.
