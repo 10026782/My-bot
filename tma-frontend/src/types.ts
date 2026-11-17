@@ -1372,20 +1372,57 @@ export interface FccRefinance {
 }
 export interface FccRefinanceBody { rate: number; term_months: number; fees: number; insurance_monthly: number; detail?: boolean; loan_ids?: string[]; fee_overrides?: Record<string, number> }
 
-// ── Commute income (a recurring paid ride answered day by day; every number comes from the server) ──
-export interface FccCommuteDay { date: string; weekday: string; is_tomorrow: boolean; is_today: boolean; outcome: "yes" | "no" | null; stops: number | null; trip_id: string | null }
+// ── Commute income (rides answered day by day, one-off trips and deliveries, the leased car's free allowance; every number comes from the server) ──
+export type CommuteClass = "regular" | "large";
+export type CommuteReturn = "empty" | "waited" | "continuation";
+export type CommuteKind = "ride" | "delivery";
+export interface FccCommuteDay { date: string; weekday: string; is_tomorrow: boolean; is_today: boolean; rest_day: boolean; outcome: "yes" | "no" | null; stops: number | null; trip_id: string | null }
 export interface FccCommuteEconomics {
   price: number | null; km_per_day: number | null; minutes_per_day: number | null; hours_per_day: number | null; gross_per_hour: number | null; gross_per_km: number | null;
   vehicle_cost_per_day: number | null; net_per_day: number | null; net_per_hour: number | null; net_per_km: number | null; monthly_potential: number | null;
+  return_status: CommuteReturn | null; vehicle_class: CommuteClass | null;
 }
 export interface FccCommuteMonth {
   month: string; yes_days: number; no_days: number; income: number; stops: Record<string, number>; stops_recorded: number; three_share: number | null;
   weeks: { week_start: string; yes_days: number; income: number }[];
 }
 export interface FccCommuteRoute {
-  id: string; name: string; price: number | null; km_one_way: number | null; minutes_one_way: number | null; cost_per_km: number | null; planned_days: number | null;
-  active: boolean; notes: string | null; economics: FccCommuteEconomics; days: FccCommuteDay[]; this_month: FccCommuteMonth; history: FccCommuteMonth[]; stops_note: string | null;
+  id: string; name: string; kind: "paid" | "own"; weekdays: string[]; price: number | null; km_one_way: number | null; minutes_one_way: number | null; cost_per_km: number | null; planned_days: number | null;
+  active: boolean; notes: string | null; vehicle_class: CommuteClass | null; return_status: CommuteReturn; waiting_minutes: number;
+  economics: FccCommuteEconomics; days: FccCommuteDay[]; this_month: FccCommuteMonth; history: FccCommuteMonth[]; stops_note: string | null;
 }
-export interface FccCommuteTrip { id: string; date: string; weekday: string; route: string | null; outcome: "yes" | "no"; stops: number | null; amount: number }
-export interface FccCommute { month: string; today: string; routes: FccCommuteRoute[]; trips: FccCommuteTrip[]; income_this_month: number; unanswered_past: number; state?: string }
-export interface FccCommuteRouteBody { route_id?: string; name?: string; price?: number; km_one_way?: number; minutes_one_way?: number; cost_per_km?: number; planned_days?: number; status?: "active" | "paused" }
+export interface FccCommuteTrip {
+  id: string; date: string; weekday: string; route: string | null; one_off: boolean; kind: CommuteKind; outcome: "yes" | "no"; stops: number | null; amount: number;
+  vehicle_class: CommuteClass | null; return_status: CommuteReturn | null; on_the_way_of: string | null; km: number | null; minutes: number | null;
+  gross_per_hour: number | null; gross_per_km: number | null; net_per_hour: number | null;
+}
+export interface FccCommuteStats {
+  rides: number; avg_price: number | null; measured_rides: number; gross_per_hour: number | null; gross_per_km: number | null; net_per_hour: number | null; net_per_km: number | null;
+  empty_return_share: number | null; continuation_share: number | null; waited_share: number | null; on_the_way_share: number | null;
+}
+export interface FccCommuteProfit {
+  cost_per_km: number | null; overall: FccCommuteStats | null;
+  by_destination: (FccCommuteStats & { destination: string; classes: CommuteClass[]; kinds: CommuteKind[]; vs_average_per_km: number | null })[];
+  by_class: (FccCommuteStats & { class: CommuteClass; label: string })[];
+  by_kind: (FccCommuteStats & { kind: CommuteKind; label: string })[];
+  by_way: (FccCommuteStats & { on_the_way: boolean; label: string })[];
+}
+export interface FccCommuteQuota {
+  month: string; allowed_km: number | null; free_km: number | null; fuel_km: number | null; other_km: number; other_km_stale: boolean; rides_km: number; rides_without_km: number;
+  used_km: number; remaining_km: number | null; over_km: number | null; days_left: number; km_per_day_left: number | null; avg_per_km: number | null; worth_of_remaining: number | null; fuel_note: string | null;
+}
+export interface FccCommuteSettings { free_km: number | null; free_fuel: number | null; fuel_cost_per_km: number | null; cost_per_km: number | null; other_km_used: number | null; other_km_month: string | null }
+export interface FccCommute {
+  month: string; today: string; routes: FccCommuteRoute[]; own_trips: { id: string; name: string; weekdays: string[]; km_one_way: number | null; minutes_one_way: number | null }[];
+  trips: FccCommuteTrip[]; one_off: { month: string; trips: number; income: number }; profitability: FccCommuteProfit; quota: FccCommuteQuota | null; settings: FccCommuteSettings | null;
+  income_this_month: number; default_cost_per_km: number | null; unanswered_past: number; state?: string;
+}
+export interface FccCommuteRouteBody {
+  route_id?: string; name?: string; price?: number; km_one_way?: number; minutes_one_way?: number; cost_per_km?: number; planned_days?: number; status?: "active" | "paused";
+  vehicle_class?: CommuteClass; return_status?: CommuteReturn; waiting_minutes?: number; route_kind?: "paid" | "own"; weekdays?: string[];
+}
+export interface FccCommuteTripBody {
+  trip_id?: string; destination?: string; date?: string; price?: number; vehicle_class?: CommuteClass; kind?: CommuteKind; km_one_way?: number; minutes_one_way?: number;
+  return_status?: CommuteReturn; waiting_minutes?: number; extra_km?: number; extra_minutes?: number; on_the_way_of?: string;
+}
+export interface FccCommuteSettingsBody { free_km?: number; free_fuel?: number; fuel_cost_per_km?: number; cost_per_km?: number; other_km_used?: number }

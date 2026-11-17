@@ -465,6 +465,11 @@ def my_commute_routes(identity) -> list[dict]:
     return policy.filter_records(Tables.COMMUTE_ROUTES, _read(Tables.COMMUTE_ROUTES), identity)
 
 
+def my_commute_settings(identity) -> list[dict]:
+    """The caller's own Commute Settings row (the leased car's free allowance; owner-scoped, a denied identity propagates)."""
+    return policy.filter_records(Tables.COMMUTE_SETTINGS, _read(Tables.COMMUTE_SETTINGS), identity)
+
+
 def my_commute_trips(identity, since: date | None = None) -> list[dict]:
     """The caller's own Commute Trips rows, optionally only those on / after ``since`` (owner-scoped; a denied identity propagates)."""
     formula = f"IS_AFTER({{{CommuteTripFields.TRIP_DATE}}},'{(since - timedelta(days=1)).isoformat()}')" if since else ""
@@ -475,7 +480,7 @@ def commute_view(identity, today: date | None = None, months: int = 6) -> dict:
     """The owner's commute tab: routes with their economics, the days that can be answered, the month's income and the trips table (read-only)."""
     today = today or date.today()
     since = fcc_cashflow.month_windows(today, months)[0][1]
-    return fcc_commute.build(my_commute_routes(identity), my_commute_trips(identity, since), today, months)
+    return fcc_commute.build(my_commute_routes(identity), my_commute_trips(identity, since), today, months, my_commute_settings(identity))
 
 
 def commute_income_sources(identity, today: date, since: date, taken_names: set[str] = frozenset()) -> list[fcc_cashflow.IncomeSource]:

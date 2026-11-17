@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchFccCommute, postFccCommuteDay, postFccCommuteRoute } from "../api";
-import type { FccCommute, FccCommuteRoute } from "../types";
+import { fetchFccCommute, postFccCommuteDay, postFccCommuteRoute, postFccCommuteSettings, postFccCommuteTrip } from "../api";
+import type { CommuteClass, CommuteKind, CommuteReturn, FccCommute, FccCommuteRoute } from "../types";
 import {
-  ANSWERS, EMPTY_FORM, answerBody, answerOf, dayLabel, economicsHint, economicsRows, formFromRoute, routeBody, summaryModel, tripRows, weekRows,
-  type AnswerKey, type RouteForm,
+  ANSWERS, CLASS_OPTIONS, EMPTY_FORM, EMPTY_OWN_FORM, KIND_OPTIONS, RETURN_OPTIONS, WEEKDAYS, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromRoute,
+  formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
 } from "../lib/fccCommute";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -22,37 +22,133 @@ function AnswerButtons({ route, day, busy, onAnswer }: { route: FccCommuteRoute;
   );
 }
 
+function Field({ label, value, onChange, mode = "decimal" }: { label: string; value: string; onChange: (v: string) => void; mode?: "text" | "decimal" | "date" }) {
+  return <label className="fcc-field"><span>{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} inputMode={mode === "date" ? undefined : mode} type={mode === "date" ? "date" : "text"} className="boss-input" /></label>;
+}
+function Select<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  return <label className="fcc-field"><span>{label}</span><select value={value} onChange={(e) => onChange(e.target.value as T)} className="boss-input">{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>;
+}
+
 function RouteFormView({ initial, submitLabel, busy, onSubmit }: { initial: RouteForm; submitLabel: string; busy: boolean; onSubmit: (form: RouteForm) => void }) {
   const [form, setForm] = useState<RouteForm>(initial);
-  const set = (k: keyof RouteForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
-  const field = (k: keyof RouteForm, label: string, mode: "text" | "decimal" = "decimal") => (
-    <label className="fcc-field"><span>{label}</span><input value={form[k]} onChange={set(k)} inputMode={mode} className="boss-input" /></label>
-  );
+  const set = <K extends keyof RouteForm>(k: K) => (v: RouteForm[K]) => setForm({ ...form, [k]: v });
   return (
     <form className="fcc-stack fcc-stack--tight" onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}>
-      {field("name", "שם המסלול", "text")}
-      {field("price", "מחיר ליום נסיעה (₪)")}
-      {field("km", 'ק"מ לכל כיוון (חד פעמי)')}
-      {field("minutes", "דקות לכל כיוון")}
-      {field("cost", 'עלות רכב לק"מ (₪, לא חובה — בלי זה אין נטו)')}
-      {field("days", "ימי נסיעה בשבוע")}
+      <Field label={form.own ? "שם הנסיעה הקבועה שלי (למשל: עבודה)" : "שם המסלול"} value={form.name} onChange={set("name")} mode="text" />
+      {!form.own && <Field label="מחיר ליום נסיעה (₪)" value={form.price} onChange={set("price")} />}
+      <Field label='ק"מ לכל כיוון (חד פעמי)' value={form.km} onChange={set("km")} />
+      <Field label="דקות לכל כיוון" value={form.minutes} onChange={set("minutes")} />
+      {!form.own && (
+        <>
+          <Field label="ימי נסיעה בשבוע" value={form.days} onChange={set("days")} />
+          <Select label="סוג מחיר" value={form.cls} options={CLASS_OPTIONS} onChange={set("cls")} />
+          <Select<CommuteReturn> label="חזרה" value={form.ret} options={RETURN_OPTIONS} onChange={set("ret")} />
+          {form.ret === "waited" && <Field label="דקות המתנה ליום" value={form.waiting} onChange={set("waiting")} />}
+        </>
+      )}
+      {form.own && (
+        <div className="fcc-chips" role="group" aria-label="ימים בשבוע">
+          {WEEKDAYS.map((d) => (
+            <button key={d} type="button" aria-pressed={form.weekdays.includes(d)} className={`fcc-chip${form.weekdays.includes(d) ? " fcc-chip--on" : ""}`}
+                    onClick={() => set("weekdays")(form.weekdays.includes(d) ? form.weekdays.filter((x) => x !== d) : [...form.weekdays, d])}>{d}</button>
+          ))}
+        </div>
+      )}
       <button type="submit" disabled={busy} className="boss-button boss-button--primary">{submitLabel}</button>
     </form>
   );
 }
 
+function TripFormView({ today, ownTrips, busy, onSubmit }: { today: string; ownTrips: FccCommute["own_trips"]; busy: boolean; onSubmit: (form: TripForm) => void }) {
+  const [form, setForm] = useState<TripForm>(emptyTripForm(today));
+  const set = <K extends keyof TripForm>(k: K) => (v: TripForm[K]) => setForm({ ...form, [k]: v });
+  const onWay = form.onWay !== "";
+  return (
+    <form className="fcc-stack fcc-stack--tight" onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}>
+      <Select<CommuteKind> label="סוג" value={form.kind} options={KIND_OPTIONS} onChange={set("kind")} />
+      <Field label="יעד / תיאור" value={form.destination} onChange={set("destination")} mode="text" />
+      <Field label="תאריך" value={form.date} onChange={set("date")} mode="date" />
+      <Field label="המחיר שקיבלת (₪)" value={form.price} onChange={set("price")} />
+      <Select label="מחיר ששולם" value={form.cls} options={CLASS_OPTIONS} onChange={set("cls")} />
+      {ownTrips.length > 0 && (
+        <Select label="על הדרך של אחת הנסיעות הקבועות שלי?" value={form.onWay} options={[{ value: "", label: "לא — נסיעה ייעודית" }, ...ownTrips.map((o) => ({ value: o.name, label: o.name }))]} onChange={set("onWay")} />
+      )}
+      {onWay ? (
+        <>
+          <Field label='ק"מ עיקוף (מעבר למה שהיית נוסע בכל מקרה)' value={form.extraKm} onChange={set("extraKm")} />
+          <Field label="דקות עיקוף" value={form.extraMinutes} onChange={set("extraMinutes")} />
+        </>
+      ) : (
+        <>
+          <Field label='ק"מ לכיוון אחד' value={form.km} onChange={set("km")} />
+          <Field label="דקות לכיוון אחד" value={form.minutes} onChange={set("minutes")} />
+          <Select<CommuteReturn> label="חזרה" value={form.ret} options={RETURN_OPTIONS} onChange={set("ret")} />
+          {form.ret === "waited" && <Field label="דקות המתנה" value={form.waiting} onChange={set("waiting")} />}
+        </>
+      )}
+      <button type="submit" disabled={busy} className="boss-button boss-button--primary">הוספה</button>
+    </form>
+  );
+}
+
+function SettingsFormView({ initial, busy, onSubmit }: { initial: SettingsForm; busy: boolean; onSubmit: (form: SettingsForm) => void }) {
+  const [form, setForm] = useState<SettingsForm>(initial);
+  const set = <K extends keyof SettingsForm>(k: K) => (v: string) => setForm({ ...form, [k]: v });
+  return (
+    <form className="fcc-stack fcc-stack--tight" onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}>
+      <Field label='מכסת ק"מ חינם בחודש' value={form.freeKm} onChange={set("freeKm")} />
+      <Field label="מכסת דלק חינם בחודש (₪)" value={form.freeFuel} onChange={set("freeFuel")} />
+      <Field label='עלות דלק לק"מ (₪) — להמרת מכסת הדלק לק"מ' value={form.fuelCost} onChange={set("fuelCost")} />
+      <Field label='עלות כל ק"מ מעל המכסה (₪)' value={form.costPerKm} onChange={set("costPerKm")} />
+      <Field label='ק"מ שכבר נסעת החודש בנסיעות אחרות' value={form.otherKm} onChange={set("otherKm")} />
+      <button type="submit" disabled={busy} className="boss-button boss-button--primary">שמירת הגדרות</button>
+    </form>
+  );
+}
+
+function ProfitTable({ rows, label }: { rows: ProfitRow[]; label: string }) {
+  return (
+    <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label={label}>
+      <table className="fcc-compare__table">
+        <thead><tr><th>{label}</th><th>נסיעות</th><th>מחיר ממוצע</th><th>לק״מ</th><th>לשעה</th><th>נטו לשעה</th></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              <th scope="row">{r.label}{r.extra && <small className="fcc-cell__split">{r.extra}</small>}</th>
+              <td>{r.rides}</td><td>{r.avgPrice}</td><td>{r.perKm}</td><td>{r.perHour}</td><td>{r.netPerHour}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Presentational part (also rendered in tests): server numbers only. */
-export function CommuteView({ data, busy, error, onAnswer, onSaveRoute }: {
+export function CommuteView({ data, busy, error, onAnswer, onSaveRoute, onSaveTrip, onSaveSettings }: {
   data: FccCommute; busy: boolean; error: string | null; onAnswer: (routeId: string, date: string, key: AnswerKey) => void; onSaveRoute: (form: RouteForm, routeId?: string) => void;
+  onSaveTrip: (form: TripForm) => void; onSaveSettings: (form: SettingsForm) => void;
 }) {
   const summary = summaryModel(data);
   const trips = tripRows(data);
+  const quota = quotaRows(data.quota);
+  const profit = profitModel(data.profitability);
   return (
     <div className="fcc-stack">
       {error && <p className="fcc-goal__note" role="alert">{error}</p>}
-      {data.routes.length > 0 && <div className="fcc-kpis">{summary.cards.map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}</div>}
+      {(data.routes.length > 0 || data.one_off.trips > 0) && <div className="fcc-kpis">{summary.cards.map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}</div>}
 
-      {data.routes.length === 0 && <ScreenState state="empty" title="אין מסלול עדיין" message="הוסיפו את הנסיעה הקבועה למטה — מחיר ליום, ק״מ וזמן לכל כיוון." />}
+      <Surface variant="subtle" padding="compact" className="fcc-loans-goal fcc-refi" aria-label="מכסת רכב הליסינג">
+        <h3 className="fcc-loans-goal__title">מכסת הרכב (ק״מ ודלק חינם)</h3>
+        {quota ? (
+          <>
+            <dl className="fcc-loans-goal__grid">{quota.rows.map((r) => <div key={r.label}><dt>{r.label}</dt><dd>{r.value}</dd></div>)}</dl>
+            {quota.notes.map((n) => <p key={n} className="fcc-goal__note">{n}</p>)}
+          </>
+        ) : <p className="fcc-loan__meta">עוד לא הוגדרה מכסה — הזינו אותה בהגדרות הרכב למטה, וכך תראו כמה נותר ואילו נסיעות מנצלות אותה הכי טוב.</p>}
+      </Surface>
+
+      {data.routes.length === 0 && <ScreenState state="empty" title="אין נסיעה קבועה עדיין" message="הוסיפו אותה למטה — מחיר ליום, ק״מ וזמן לכל כיוון." />}
 
       {data.routes.map((r) => (
         <Surface key={r.id} variant="subtle" padding="compact" className="fcc-loans-goal fcc-refi" aria-label={r.name}>
@@ -70,7 +166,7 @@ export function CommuteView({ data, busy, error, onAnswer, onSaveRoute }: {
                 <div className="fcc-stack fcc-stack--tight">
                   {r.days.filter((d) => !d.is_tomorrow).map((d) => (
                     <div key={d.date}>
-                      <div className="fcc-loan__meta">{dayLabel(d)}{d.outcome == null && " · לא עודכן"}</div>
+                      <div className="fcc-loan__meta">{dayLabel(d)}{d.outcome == null && (d.rest_day ? " · יום מנוחה" : " · לא עודכן")}</div>
                       <AnswerButtons route={r} day={d} busy={busy} onAnswer={(date, key) => onAnswer(r.id, date, key)} />
                     </div>
                   ))}
@@ -92,7 +188,7 @@ export function CommuteView({ data, busy, error, onAnswer, onSaveRoute }: {
 
           <h4 className="fcc-pay__subhead">כדאיות ליום נסיעה</h4>
           <dl className="fcc-loans-goal__grid">
-            {economicsRows(r).map((m) => <div key={m.label}><dt>{m.label}</dt><dd>{m.value}</dd></div>)}
+            {economicsRows(r).map((x) => <div key={x.label}><dt>{x.label}</dt><dd>{x.value}</dd></div>)}
           </dl>
           {economicsHint(r) && <p className="fcc-loan__meta">{economicsHint(r)}</p>}
 
@@ -103,23 +199,49 @@ export function CommuteView({ data, busy, error, onAnswer, onSaveRoute }: {
         </Surface>
       ))}
 
+      <section className="fcc-section" aria-labelledby="commute-profit-heading">
+        <h2 id="commute-profit-heading" className="fcc-section__heading">אילו נסיעות השתלמו</h2>
+        {profit.destinations.length === 0 ? <p className="fcc-loan__meta">עוד אין נסיעות שנרשמו להשוואה</p> : (
+          <>
+            <ProfitTable rows={profit.destinations} label="יעד" />
+            {profit.groups.length > 0 && <ProfitTable rows={profit.groups} label="לפי סוג" />}
+            <p className="fcc-loan__meta">מסודר לפי ₪ לכל ק״מ מהמכסה, מהגבוה לנמוך. {profit.note}</p>
+          </>
+        )}
+      </section>
+
       <section className="fcc-section" aria-labelledby="commute-trips-heading">
         <h2 id="commute-trips-heading" className="fcc-section__heading">טבלת נסיעות</h2>
         {trips.length === 0 ? <p className="fcc-loan__meta">עוד לא נרשמו נסיעות</p> : (
           <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="נסיעות">
             <table className="fcc-compare__table">
-              <thead><tr><th>יום</th><th>מסלול</th><th>תוצאה</th><th>סכום</th></tr></thead>
-              <tbody>{trips.map((t) => <tr key={t.key}><th scope="row">{t.date}</th><td>{t.route}</td><td>{t.result}</td><td>{t.amount}</td></tr>)}</tbody>
+              <thead><tr><th>יום</th><th>מסלול / יעד</th><th>תוצאה</th><th>סכום</th><th>לק״מ</th></tr></thead>
+              <tbody>{trips.map((t) => <tr key={t.key}><th scope="row">{t.date}</th><td>{t.route}{t.detail && <small className="fcc-cell__split">{t.detail}</small>}</td><td>{t.result}</td><td>{t.amount}</td><td>{t.perKm}</td></tr>)}</tbody>
             </table>
           </div>
         )}
       </section>
 
       <details>
-        <summary>הוספת מסלול</summary>
+        <summary>הוספת נסיעה / משלוח (חד פעמי)</summary>
+        <TripFormView today={data.today} ownTrips={data.own_trips} busy={busy} onSubmit={onSaveTrip} />
+      </details>
+      <details>
+        <summary>הנסיעות הקבועות שלי (לנצל על הדרך)</summary>
+        {data.own_trips.length === 0 ? <p className="fcc-loan__meta">עוד לא הוזנו</p> : (
+          <ul className="fcc-list">{data.own_trips.map((o) => <li key={o.id}><strong>{o.name}</strong><div className="fcc-loan__meta">{o.weekdays.join(", ") || "בלי ימים"} · {o.km_one_way == null ? "—" : `${o.km_one_way} ק״מ`} לכיוון</div></li>)}</ul>
+        )}
+        <RouteFormView initial={EMPTY_OWN_FORM} submitLabel="הוספת נסיעה קבועה שלי" busy={busy} onSubmit={(f) => onSaveRoute(f)} />
+      </details>
+      <details>
+        <summary>הגדרות הרכב (מכסה ועלות)</summary>
+        <SettingsFormView initial={formFromSettings(data.settings)} busy={busy} onSubmit={onSaveSettings} />
+      </details>
+      <details>
+        <summary>הוספת מסלול קבוע בתשלום</summary>
         <RouteFormView initial={EMPTY_FORM} submitLabel="הוספת מסלול" busy={busy} onSubmit={(f) => onSaveRoute(f)} />
       </details>
-      <p className="fcc-loan__meta">הכנסה = ימי נסיעה שסומנו × מחיר ליום. מספר התחנות נרשם למעקב ואינו משנה את הסכום. ההכנסה נכנסת להכנסה החודשית בתזרים.</p>
+      <p className="fcc-loan__meta">הכנסה = ימי נסיעה שסומנו × מחיר ליום + נסיעות ומשלוחים שהוזנו. מספר התחנות נרשם למעקב ואינו משנה את הסכום. ההכנסה נכנסת להכנסה החודשית בתזרים.</p>
     </div>
   );
 }
@@ -158,6 +280,16 @@ export function CommuteSection({ active, reloadKey }: { active: boolean; reloadK
                    const parsed = routeBody(form, routeId);
                    if ("error" in parsed) { setError(parsed.error); return; }
                    void run(() => postFccCommuteRoute(parsed.body));
+                 }}
+                 onSaveTrip={(form) => {
+                   const parsed = tripBody(form);
+                   if ("error" in parsed) { setError(parsed.error); return; }
+                   void run(() => postFccCommuteTrip(parsed.body));
+                 }}
+                 onSaveSettings={(form) => {
+                   const parsed = settingsBody(form);
+                   if ("error" in parsed) { setError(parsed.error); return; }
+                   void run(() => postFccCommuteSettings(parsed.body));
                  }} />
   );
 }

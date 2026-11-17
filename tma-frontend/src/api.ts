@@ -1,5 +1,5 @@
 import type {
-  FccCommute, FccCommuteRouteBody, FccConsumption, FccLoanSchedulePreview, FccRefinance, FccRefinanceBody, FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, NewTaskInput, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
+  FccCommute, FccCommuteRouteBody, FccCommuteSettingsBody, FccCommuteTripBody, FccConsumption, FccLoanSchedulePreview, FccRefinance, FccRefinanceBody, FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, NewTaskInput, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -697,3 +697,5 @@ async function commutePost(path: string, body: unknown): Promise<FccCommute> {
 /** One day's answer for one route: no ride, or a ride with 2 / 3 stops. The server picks the table, the fields and the price. */
 export const postFccCommuteDay = (body: { route_id: string; date: string; outcome: "yes" | "no"; stops?: number }): Promise<FccCommute> => commutePost("/api/fcc/commute/day", body);
 export const postFccCommuteRoute = (body: FccCommuteRouteBody): Promise<FccCommute> => commutePost("/api/fcc/commute/route", body);
+export const postFccCommuteTrip = (body: FccCommuteTripBody): Promise<FccCommute> => commutePost("/api/fcc/commute/trip", body);
+export const postFccCommuteSettings = (body: FccCommuteSettingsBody): Promise<FccCommute> => commutePost("/api/fcc/commute/settings", body);

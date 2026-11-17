@@ -5247,7 +5247,7 @@ def fcc_commute_day(identity):
         return jsonify({"error": "date outside the answerable window"}), 400
     try:
         route = next((r for r in map(fcc_commute.parse_route, fcc_service.my_commute_routes(identity)) if r["id"] == route_id), None)
-        if route is None or not route["active"] or route["price"] is None:                 # not yours / paused / no price yet: answered alike
+        if route is None or route["kind"] != "paid" or not route["active"] or route["price"] is None:      # not yours / an own drive / paused / no price yet: answered alike
             return jsonify({"error": "not found"}), 404
         existing = next((t for t in map(lambda r: (fcc_commute.parse_trip(r), r), fcc_service.my_commute_trips(identity, day))
                          if t[0] and t[0]["route_id"] == route_id and t[0]["date"] == day), None)
@@ -5278,7 +5278,9 @@ def fcc_commute_day(identity):
 @tma_api.route("/api/fcc/commute/route", methods=["POST"])
 @require_tma_auth
 def fcc_commute_route(identity):
-    """Body: {"route_id"?: "rec…" (edit), "name", "price", "km_one_way", "minutes_one_way", "cost_per_km", "planned_days", "status"?: "active"|"paused"}. Creates the
+    """Body: {"route_id"?: "rec…" (edit), "name", "price", "km_one_way", "minutes_one_way", "cost_per_km", "planned_days", "status"?: "active"|"paused",
+    "vehicle_class"?: "regular"|"large", "return_status"?: "empty"|"waited"|"continuation", "waiting_minutes", "route_kind"?: "paid"|"own" (an OWN weekly drive of the owner: no
+    price, the rides and deliveries are fitted on the way of it), "weekdays"?: ["ראשון", …]}. Creates the
     owner's route, or edits one of his own (only the keys sent). The km and minutes are entered once; an empty cost per km means profitability stays gross. The server
     names the table and the fields; every value is range-checked (tools.approval_actions.validate_commute_write) before and again at execution."""
     if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
@@ -5288,14 +5290,15 @@ def fcc_commute_route(identity):
     from tools.approval_actions import validate_commute_write
     data = request.get_json(silent=True) or {}
     mapping = {"name": RF.NAME, "price": RF.DAY_PRICE, "km_one_way": RF.KM_ONE_WAY, "minutes_one_way": RF.MINUTES_ONE_WAY, "cost_per_km": RF.COST_PER_KM,
-               "planned_days": RF.PLANNED_DAYS, "status": RF.STATUS}
+               "planned_days": RF.PLANNED_DAYS, "status": RF.STATUS, "vehicle_class": RF.VEHICLE_CLASS, "return_status": RF.RETURN_STATUS, "waiting_minutes": RF.WAITING_MINUTES,
+               "route_kind": RF.ROUTE_KIND, "weekdays": RF.WEEKDAYS}
     fields = {}
     for key, field in mapping.items():
-        if key in data and data[key] not in (None, ""):
+        if key in data and data[key] not in (None, "", []):
             v = data[key]
             if key == "name":
                 v = str(v).strip()
-            elif key != "status":
+            elif key not in ("status", "vehicle_class", "return_status", "route_kind", "weekdays"):
                 try:
                     v = float(v)
                 except (TypeError, ValueError):
@@ -5323,6 +5326,129 @@ def fcc_commute_route(identity):
         return jsonify({"error": "forbidden"}), 403
     except Exception:                                        # noqa: BLE001
         logger.exception("[fcc] commute route failed")
+        return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/commute/trip", methods=["POST"])
+@require_tma_auth
+def fcc_commute_trip(identity):
+    """A ONE-OFF paid trip (no route). Body: {"trip_id"?: "rec…" (edit one of his own one-off trips), "destination", "date", "price" (typed each time — there is no price list),
+    "vehicle_class"?: "regular"|"large", "kind"?: "ride"|"delivery", "km_one_way"?, "minutes_one_way"?, "return_status"?: "empty"|"waited"|"continuation", "waiting_minutes"?,
+    "extra_km"? / "extra_minutes"? (what the trip ADDED over what he would have driven anyway — a trip on the way of one of his own weekly drives), "on_the_way_of"?: its name}. ONE write (a new row, or a patch of
+    his own one-off row) through the ActionGateway ceremony; the record is built here and range-checked again at execution. The date may be up to two months back and tomorrow."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    import uuid
+    from datetime import date as _date
+    from airtable_schema import CommuteTripFields as TF, Tables
+    from core.financial_control import commute as fcc_commute, service as fcc_service
+    from tools.approval_actions import validate_commute_write
+    data = request.get_json(silent=True) or {}
+    trip_id = str(data.get("trip_id") or "")
+    fields: dict = {}
+    if "destination" in data and str(data.get("destination") or "").strip():
+        fields[TF.DESTINATION] = str(data["destination"]).strip()
+    for key, field in (("price", TF.AMOUNT), ("km_one_way", TF.KM_ONE_WAY), ("minutes_one_way", TF.MINUTES_ONE_WAY), ("waiting_minutes", TF.WAITING_MINUTES)):
+        if key in data and data[key] not in (None, ""):
+            try:
+                fields[field] = float(data[key])
+            except (TypeError, ValueError):
+                return jsonify({"error": f"bad {key}"}), 400
+    for key, field in (("extra_km", TF.EXTRA_KM), ("extra_minutes", TF.EXTRA_MINUTES)):
+        if key in data and data[key] not in (None, ""):
+            try:
+                fields[field] = float(data[key])
+            except (TypeError, ValueError):
+                return jsonify({"error": f"bad {key}"}), 400
+    for key, field in (("vehicle_class", TF.VEHICLE_CLASS), ("return_status", TF.RETURN_STATUS), ("kind", TF.KIND)):
+        if data.get(key) not in (None, ""):
+            fields[field] = data[key]
+    if str(data.get("on_the_way_of") or "").strip():
+        fields[TF.ON_THE_WAY_OF] = str(data["on_the_way_of"]).strip()
+    today = _date.today()
+    day = None
+    if data.get("date") not in (None, "") or not trip_id:
+        try:
+            day = _date.fromisoformat(str(data.get("date") or today.isoformat()))
+        except ValueError:
+            return jsonify({"error": "bad date"}), 400
+        if not today - timedelta(days=62) <= day <= today + timedelta(days=1):
+            return jsonify({"error": "date outside the allowed window"}), 400
+    if not trip_id:
+        if TF.DESTINATION not in fields or TF.AMOUNT not in fields:
+            return jsonify({"error": "destination and price required"}), 400
+        fields.update({TF.NAME: f"{fields[TF.DESTINATION]} · {day.isoformat()}", TF.TRIP_DATE: day.isoformat(), TF.OUTCOME: "yes", TF.IDEMPOTENCY_KEY: f"oneoff:{uuid.uuid4().hex[:16]}"})
+    elif not fields:
+        return jsonify({"error": "nothing to change"}), 400
+    reason = validate_commute_write(Tables.COMMUTE_TRIPS, "patch" if trip_id else "post", fields)
+    if reason:
+        return jsonify({"error": "invalid trip", "detail": reason}), 400
+    try:
+        if trip_id:
+            mine = next((t for t in map(fcc_commute.parse_trip, [r for r in fcc_service.my_commute_trips(identity, today - timedelta(days=62)) if r.get("id") == trip_id]) if t), None)
+            if mine is None or mine["route_id"] is not None:                    # not yours / not a one-off trip / too old: answered alike
+                return jsonify({"error": "not found"}), 404
+            write = {"op": "patch", "table": Tables.COMMUTE_TRIPS, "record_id": trip_id, "fields": fields, "audit_action": "fcc_commute_trip", "audit_details": trip_id}
+        else:
+            write = {"op": "post", "table": Tables.COMMUTE_TRIPS, "fields": fields, "audit_action": "fcc_commute_trip", "audit_details": "one-off trip"}
+        _, response, status = _queue_or_owner_execute("tma_fcc_write", write, identity, "FCC: commute one-off trip")
+        if status >= 300:
+            return jsonify({"state": "failed", "message": "הנסיעה לא נשמרה — אפשר לנסות שוב."}), status
+        view = fcc_service.commute_view(identity)
+        view["state"] = "done"
+        return jsonify(view)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] commute trip failed")
+        return jsonify({"error": "internal error"}), 500
+
+
+@tma_api.route("/api/fcc/commute/settings", methods=["POST"])
+@require_tma_auth
+def fcc_commute_settings(identity):
+    """The leased car's free allowance (ONE row per owner). Body (only the keys sent change): {"free_km", "free_fuel", "fuel_cost_per_km", "cost_per_km", "other_km_used"}. ``other_km_used``
+    (km already used this month on other driving) is stored with the CURRENT month, so a new month starts again from zero. Creates the row the first time, else patches it; one
+    ActionGateway write; range-checked here and again at execution. Owner only, 404 for anyone else."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    from datetime import date as _date
+    from airtable_schema import CommuteSettingsFields as SF, Tables
+    from core.financial_control import service as fcc_service
+    from tools.approval_actions import validate_commute_write
+    data = request.get_json(silent=True) or {}
+    mapping = {"free_km": SF.FREE_KM, "free_fuel": SF.FREE_FUEL, "fuel_cost_per_km": SF.FUEL_COST_PER_KM, "cost_per_km": SF.COST_PER_KM, "other_km_used": SF.OTHER_KM_USED}
+    fields = {}
+    for key, field in mapping.items():
+        if key in data and data[key] not in (None, ""):
+            try:
+                fields[field] = float(data[key])
+            except (TypeError, ValueError):
+                return jsonify({"error": f"bad {key}"}), 400
+    if SF.OTHER_KM_USED in fields:
+        fields[SF.OTHER_KM_MONTH] = _date.today().strftime("%Y-%m")
+    if not fields:
+        return jsonify({"error": "nothing to change"}), 400
+    try:
+        rows = fcc_service.my_commute_settings(identity)
+        if rows:
+            write = {"op": "patch", "table": Tables.COMMUTE_SETTINGS, "record_id": rows[0]["id"], "fields": fields, "audit_action": "fcc_commute_settings", "audit_details": rows[0]["id"]}
+        else:
+            fields = {SF.NAME: "הגדרות רכב", **fields}
+            write = {"op": "post", "table": Tables.COMMUTE_SETTINGS, "fields": fields, "audit_action": "fcc_commute_settings", "audit_details": "new settings"}
+        reason = validate_commute_write(Tables.COMMUTE_SETTINGS, write["op"], write["fields"])
+        if reason:
+            return jsonify({"error": "invalid settings", "detail": reason}), 400
+        _, response, status = _queue_or_owner_execute("tma_fcc_write", write, identity, "FCC: commute settings")
+        if status >= 300:
+            return jsonify({"state": "failed", "message": "ההגדרות לא נשמרו — אפשר לנסות שוב."}), status
+        view = fcc_service.commute_view(identity)
+        view["state"] = "done"
+        return jsonify(view)
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001
+        logger.exception("[fcc] commute settings failed")
         return jsonify({"error": "internal error"}), 500
 
 
