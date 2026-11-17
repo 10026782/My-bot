@@ -338,3 +338,17 @@ def test_closing_a_loan_writes_its_closing_day_as_the_end_date():
     from core.financial_control import draft as fd
     w = fd.loan_close_writes({"amount": 5000, "occurred_at": "2026-10-08"}, {}, {"record_id": "recL", "debt_goal_id": ""})
     assert w[0]["fields"] == {LF.STATUS: "Paid Off", LF.END_DATE: "2026-10-08"}
+
+
+def test_commute_rides_answered_yes_count_in_the_months_income_and_stay_apart_from_a_same_named_source():
+    DB[Tables.COMMUTE_ROUTES] = [{"id": "recRt", "fields": {"Name": "נסיעות", "Day Price": 130, "Status": "active", "Financial Owner": [ELI]}},
+                                 {"id": "recRtAvi", "fields": {"Name": "של אבי", "Day Price": 999, "Status": "active", "Financial Owner": [AVI]}}]
+    trip = lambda tid, route, day, outcome, owner: {"id": tid, "fields": {"Route": [route], "Trip Date": day, "Outcome": outcome, "Stops": 3, "Amount": 130, "Financial Owner": [owner]}}
+    DB[Tables.COMMUTE_TRIPS] = [trip("t1", "recRt", "2026-10-12", "yes", ELI), trip("t2", "recRt", "2026-10-13", "yes", ELI), trip("t3", "recRt", "2026-10-14", "no", ELI),
+                                trip("tx", "recRtAvi", "2026-10-12", "yes", AVI)]
+    oct_ = month(service.cashflow_view(ELIYAHU, TODAY, 3), "2026-10")["income"]
+    by = {s["name"]: s for s in oct_["sources"]}
+    assert by["נסיעות"]["gross"] == 3000.0 and by["נסיעות (מדווח יומי)"]["gross"] == 260.0           # the lump-sum source is untouched; the rides are a source of their own
+    assert "של אבי" not in by and oct_["net"] == 8000 + 2600 + 700 + 300 + 260
+    summary = service.month_summary(service.my_goals(ELIYAHU), service.my_events(ELIYAHU), TODAY, None, service.commute_income_sources(ELIYAHU, TODAY, TODAY.replace(day=1), {"נסיעות"}))
+    assert summary["income"] >= 260.0

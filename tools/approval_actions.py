@@ -203,7 +203,7 @@ _TMA_WRITE_ALLOWED_TABLES = {
     "Ventures",
     "משימות (Tasks)", "Tasks",
     "ProjectsHub",
-    "אנשי קשר (Contacts)", "Contacts", "Financial Goals", "Financial Progress Events", "Recurring Obligations", "Loans", "Funding Plans", "Financial Accounts", "Cashflow Rules",  # FCC (Cashflow Rules: ONLY the owner's one-rule classification patch, see validate_rule_patch); (Loans = loan close; Financial Accounts = one planned-deposit / expected-return field of the owner's own account): owner-scoped by data_access_policy, record owner re-checked at execution
+    "אנשי קשר (Contacts)", "Contacts", "Financial Goals", "Financial Progress Events", "Recurring Obligations", "Loans", "Funding Plans", "Financial Accounts", "Cashflow Rules", "Commute Routes", "Commute Trips",  # FCC (Commute *: ONLY the shapes of validate_commute_write) (Cashflow Rules: ONLY the owner's one-rule classification patch, see validate_rule_patch); (Loans = loan close; Financial Accounts = one planned-deposit / expected-return field of the owner's own account): owner-scoped by data_access_policy, record owner re-checked at execution
 }
 
 
@@ -380,6 +380,61 @@ def validate_rule_post(fields) -> str | None:
 def _rules_write_refused(op, fields) -> bool:
     """The rules table is writable through tma_write ONLY by these two shapes: the classification patch and the new decided expense rule."""
     return not ((op == "patch" and validate_rule_patch(fields) is None) or (op == "post" and validate_rule_post(fields) is None))
+
+
+_COMMUTE_ROUTE_KEYS = {"Name", "Day Price", "Km One Way", "Minutes One Way", "Cost Per Km", "Planned Days Per Week", "Status", "Notes"}
+_COMMUTE_TRIP_POST_KEYS = {"Name", "Route", "Trip Date", "Outcome", "Stops", "Amount", "Idempotency Key", "Note"}
+_COMMUTE_TRIP_PATCH_KEYS = {"Outcome", "Stops", "Amount", "Note"}
+_COMMUTE_TRIP_KEY_RE = re.compile(r"^rec[A-Za-z0-9]{14}:\d{4}-\d{2}-\d{2}$")
+
+
+def validate_commute_write(table: str, op: str, fields) -> str | None:
+    """None when ``fields`` is an acceptable write for one of the two commute tables; otherwise the reason. Fail-closed: any key outside the lists is refused —
+    the client names a route / a day / an answer, the server builds the record (tma_api.fcc_commute_day / fcc_commute_route)."""
+    from datetime import date as _date
+    if not isinstance(fields, dict) or not fields or op not in ("post", "patch"):
+        return "not an object / unsupported op"
+    def num(key, lo, hi):
+        v = fields.get(key)
+        return v is None or (_is_num(v) and lo <= v <= hi)
+    if table == "Commute Routes":
+        if set(fields) - _COMMUTE_ROUTE_KEYS:
+            return f"field not allowed: {sorted(set(fields) - _COMMUTE_ROUTE_KEYS)[0]}"
+        if op == "post" and (not isinstance(fields.get("Name"), str) or not fields["Name"].strip() or not _is_num(fields.get("Day Price"))):
+            return "a new route needs a name and a day price"
+        if "Name" in fields and (not isinstance(fields["Name"], str) or not fields["Name"].strip() or len(fields["Name"]) > 80):
+            return "bad name"
+        if not (num("Day Price", 0, 100000) and num("Km One Way", 0, 2000) and num("Minutes One Way", 0, 1440) and num("Cost Per Km", 0, 100) and num("Planned Days Per Week", 0, 7)):
+            return "bad number"
+        if fields.get("Status") not in (None, "active", "paused"):
+            return "bad status"
+        if fields.get("Notes") is not None and (not isinstance(fields["Notes"], str) or len(fields["Notes"]) > 500):
+            return "bad notes"
+        return None
+    if table == "Commute Trips":
+        allowed = _COMMUTE_TRIP_POST_KEYS if op == "post" else _COMMUTE_TRIP_PATCH_KEYS
+        if set(fields) - allowed:
+            return f"field not allowed: {sorted(set(fields) - allowed)[0]}"
+        if fields.get("Outcome") not in (None, "yes", "no") or (op == "post" and fields.get("Outcome") is None):
+            return "bad outcome"
+        if not (num("Stops", 1, 6) and num("Amount", 0, 100000)):
+            return "bad number"
+        if fields.get("Outcome") == "yes" and (fields.get("Stops") is None or fields.get("Amount") is None):
+            return "a ride that happened needs stops and an amount"
+        if op == "post":
+            route, day, key = fields.get("Route"), fields.get("Trip Date"), fields.get("Idempotency Key")
+            if not (isinstance(route, list) and len(route) == 1 and isinstance(route[0], str) and route[0].startswith("rec")):
+                return "a trip needs exactly one route"
+            try:
+                _date.fromisoformat(str(day))
+            except ValueError:
+                return "bad date"
+            if not isinstance(key, str) or not _COMMUTE_TRIP_KEY_RE.match(key) or key != f"{route[0]}:{day}":
+                return "bad idempotency key"
+        if fields.get("Note") is not None and (not isinstance(fields["Note"], str) or len(fields["Note"]) > 300):
+            return "bad note"
+        return None
+    return "not a commute table"
 
 
 def _existing_batch_keys(table: str, records: list[dict], identity) -> set[str]:
@@ -588,6 +643,9 @@ def tma_write(
 
     if table == "Cashflow Rules" and _rules_write_refused(op, fields):          # the table is writable here ONLY for the classification patch / a new decided rule
         return _tool_result(ok=False, tool="tma_write", user_message="❌ כתיבה לטבלת הכללים מותרת רק לסיווג כלל")
+
+    if table in ("Commute Routes", "Commute Trips") and validate_commute_write(table, op, fields) is not None:      # writable here ONLY by the shapes the commute endpoints build
+        return _tool_result(ok=False, tool="tma_write", user_message="❌ כתיבה לטבלאות הנסיעות מותרת רק במבנה המוכר")
 
     if table not in _TMA_WRITE_ALLOWED_TABLES:
         logger.error("[approval_actions] tma_write: table '%s' not in allowlist — rejected", table)

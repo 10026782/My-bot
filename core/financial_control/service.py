@@ -15,9 +15,9 @@ import logging
 import re
 from datetime import date, timedelta
 
-from airtable_schema import CashflowRuleFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
+from airtable_schema import CashflowRuleFields, CommuteTripFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, LoanFields, Tables
 from core import data_access_policy as policy
-from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, amortization as fcc_amortization, loans as fcc_loans, loan_timeline as fcc_loan_timeline, refinance as fcc_refinance
+from core.financial_control import assets as fcc_assets, calc, cashflow as fcc_cashflow, amortization as fcc_amortization, commute as fcc_commute, loans as fcc_loans, loan_timeline as fcc_loan_timeline, refinance as fcc_refinance
 
 logger = logging.getLogger(__name__)
 
@@ -458,6 +458,35 @@ def receipts_overview(identity) -> dict:
 def my_loans(identity) -> list[dict]:
     """The caller's own Loans rows (owner-scoped; a denied identity propagates)."""
     return policy.filter_records(Tables.LOANS, _read(Tables.LOANS), identity)
+
+
+def my_commute_routes(identity) -> list[dict]:
+    """The caller's own Commute Routes rows (owner-scoped; a denied identity propagates)."""
+    return policy.filter_records(Tables.COMMUTE_ROUTES, _read(Tables.COMMUTE_ROUTES), identity)
+
+
+def my_commute_trips(identity, since: date | None = None) -> list[dict]:
+    """The caller's own Commute Trips rows, optionally only those on / after ``since`` (owner-scoped; a denied identity propagates)."""
+    formula = f"IS_AFTER({{{CommuteTripFields.TRIP_DATE}}},'{(since - timedelta(days=1)).isoformat()}')" if since else ""
+    return policy.filter_records(Tables.COMMUTE_TRIPS, _read(Tables.COMMUTE_TRIPS, formula), identity)
+
+
+def commute_view(identity, today: date | None = None, months: int = 6) -> dict:
+    """The owner's commute tab: routes with their economics, the days that can be answered, the month's income and the trips table (read-only)."""
+    today = today or date.today()
+    since = fcc_cashflow.month_windows(today, months)[0][1]
+    return fcc_commute.build(my_commute_routes(identity), my_commute_trips(identity, since), today, months)
+
+
+def commute_income_sources(identity, today: date, since: date, taken_names: set[str] = frozenset()) -> list[fcc_cashflow.IncomeSource]:
+    """The rides as income sources for the monthly income model. A read failure degrades to NO commute income (logged) — never to a guess; a denied identity propagates."""
+    try:
+        return fcc_commute.income_sources(my_commute_routes(identity), my_commute_trips(identity, since), taken_names)
+    except policy.PersonalDataAccessDenied:
+        raise
+    except Exception:
+        logger.exception("[fcc] commute income read failed")
+        return []
 
 
 def my_assets(identity) -> list[dict]:
@@ -934,13 +963,15 @@ def classify_view(waiting: list[dict], skip: frozenset[str] = frozenset()) -> di
     return {"total": len(waiting), "total_amount": round(sum(w["amount"] for w in waiting), 2), "item": item}
 
 
-def cashflow_inputs(goals: list[dict], events: list[dict], today: date, basis: str = "billing") -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
+def cashflow_inputs(goals: list[dict], events: list[dict], today: date, basis: str = "billing",
+                    extra_sources: tuple | list = ()) -> tuple[list[fcc_cashflow.IncomeSource], list[fcc_cashflow.Txn]]:
     """Owner-scoped goals + events (already policy-filtered by the caller) -> cashflow model inputs. Pure over its arguments.
 
     * income goals: a source goal (it has a parent) or a goal with no sources of its own is a source by its title; the events booked
       directly on a TOTAL goal that has sources are "כללי" unless the note names the source (``מקור: <שם>``);
     * ``fixed_income`` goals are standing monthly sources at their effective target (a recorded entry replaces it, never adds);
-    * expenses are the ``household_expense`` events with their ``Expense Category`` (empty = uncategorized)."""
+    * expenses are the ``household_expense`` events with their ``Expense Category`` (empty = uncategorized);
+    * ``extra_sources`` are income sources derived elsewhere (the commute rides, see ``commute.income_sources``): appended as they are."""
     by_goal: dict[str, list[dict]] = {}
     for ev in events:
         for gid in _goal_ids_of(ev):
@@ -998,6 +1029,7 @@ def cashflow_inputs(goals: list[dict], events: list[dict], today: date, basis: s
         sources.append(fcc_cashflow.IncomeSource(
             name, kinds.get(name, fcc_cashflow.VARIABLE), tuple(gross.get(name, ())), tuple(costs.get(name, ())),
             fixed[0] if fixed else None, fixed[1] if fixed else None))
+    sources.extend(extra_sources)
 
     expenses = []
     for ev in events:
@@ -1033,6 +1065,7 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
     window_start = fcc_cashflow.month_windows(today, months)[0][1]
     goals, events = my_goals(identity), my_events(identity) + my_events(identity, "only", window_start)
     sources, expenses = cashflow_inputs(goals, events, today)
+    sources = sources + commute_income_sources(identity, today, window_start, {x.name for x in sources})     # the rides answered "yes": days × the day price
     by_month, undated, closed_undated = loans_by_month(identity, today, months)
     commitments = None                                       # unknown (a failed read) is not "no commitments"
     try:
@@ -1066,11 +1099,11 @@ def cashflow_view(identity, today: date | None = None, months: int = 6) -> dict:
 _BILLING_LOOKBACK_DAYS = 45          # how far before the month an imported card row's purchase can lie and still be billed in it
 
 
-def month_summary(goals: list[dict], events: list[dict], today: date, loans_by_month_: dict[str, float] | None) -> dict | None:
+def month_summary(goals: list[dict], events: list[dict], today: date, loans_by_month_: dict[str, float] | None, extra_sources: tuple | list = ()) -> dict | None:
     """The CURRENT month's bottom line for the monthly-conduct tab: income (net), expenses and what is left for saving — the SAME numbers as the cashflow tab
     (card rows by their billing date; the scheduled loan payment only when no loan charge was recorded). None when it cannot be derived (never a guess)."""
     try:
-        sources, expenses = cashflow_inputs(goals, events, today)
+        sources, expenses = cashflow_inputs(goals, events, today, extra_sources=extra_sources)
         m = fcc_cashflow.build(sources, expenses, today, 1, None, None, loans_by_month_)["months"][-1]
         return {"month": m["month"], "partial": m["partial"], "day": m["day"], "days_in_month": m["days_in_month"],
                 "income": m["income"]["net"], "expenses": m["expenses"]["total"], "balance": m["balance"],
@@ -1156,7 +1189,8 @@ def overview(identity, today: date | None = None, default_method: str | None = N
         "assets": assets_overview(identity, loans_payload["items"]),
         "recent_incomes": recent_incomes(goals, events),
         "household": {"month_total": calc.household_month_total(all_events, today)},
-        "month_summary": month_summary(goals, events + imported, today, loans_by_month(identity, today, 1)[0]),
+        "month_summary": month_summary(goals, events + imported, today, loans_by_month(identity, today, 1)[0],
+                                       commute_income_sources(identity, today, today.replace(day=1), {str((g.get("fields") or {}).get(FinGoalFields.TITLE) or "").strip() for g in goals})),
         "receipts": receipts_overview(identity),
         "obligations": obligations_overview(identity),
         "tasks": tasks,

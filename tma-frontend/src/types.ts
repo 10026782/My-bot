@@ -1371,3 +1371,21 @@ export interface FccRefinance {
   relief_ids?: string[]; relief?: FccRefinanceTotals | null; notes: string[];
 }
 export interface FccRefinanceBody { rate: number; term_months: number; fees: number; insurance_monthly: number; detail?: boolean; loan_ids?: string[]; fee_overrides?: Record<string, number> }
+
+// ── Commute income (a recurring paid ride answered day by day; every number comes from the server) ──
+export interface FccCommuteDay { date: string; weekday: string; is_tomorrow: boolean; is_today: boolean; outcome: "yes" | "no" | null; stops: number | null; trip_id: string | null }
+export interface FccCommuteEconomics {
+  price: number | null; km_per_day: number | null; minutes_per_day: number | null; hours_per_day: number | null; gross_per_hour: number | null; gross_per_km: number | null;
+  vehicle_cost_per_day: number | null; net_per_day: number | null; net_per_hour: number | null; net_per_km: number | null; monthly_potential: number | null;
+}
+export interface FccCommuteMonth {
+  month: string; yes_days: number; no_days: number; income: number; stops: Record<string, number>; stops_recorded: number; three_share: number | null;
+  weeks: { week_start: string; yes_days: number; income: number }[];
+}
+export interface FccCommuteRoute {
+  id: string; name: string; price: number | null; km_one_way: number | null; minutes_one_way: number | null; cost_per_km: number | null; planned_days: number | null;
+  active: boolean; notes: string | null; economics: FccCommuteEconomics; days: FccCommuteDay[]; this_month: FccCommuteMonth; history: FccCommuteMonth[]; stops_note: string | null;
+}
+export interface FccCommuteTrip { id: string; date: string; weekday: string; route: string | null; outcome: "yes" | "no"; stops: number | null; amount: number }
+export interface FccCommute { month: string; today: string; routes: FccCommuteRoute[]; trips: FccCommuteTrip[]; income_this_month: number; unanswered_past: number; state?: string }
+export interface FccCommuteRouteBody { route_id?: string; name?: string; price?: number; km_one_way?: number; minutes_one_way?: number; cost_per_km?: number; planned_days?: number; status?: "active" | "paused" }

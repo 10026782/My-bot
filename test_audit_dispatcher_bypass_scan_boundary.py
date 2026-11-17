@@ -151,7 +151,7 @@ def test_real_sanctioned_call_sites_are_never_reported(scratch_repo: Path) -> No
     _git(scratch_repo, "commit", "-q", "-m", "real sanctioned call site fixtures")
 
     findings = adb.scan()
-    assert ("tools/approval_actions.py", 608, "crm") not in findings
+    assert ("tools/approval_actions.py", 666, "crm") not in findings
     assert ("tools/schema_snapshot.py", 286, "tools.airtable_tools") not in findings
 
 

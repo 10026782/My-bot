@@ -758,7 +758,10 @@
         "tma-frontend/src/components/FccRefinance.tsx",
         "core/financial_control/loan_timeline.py",
         "tma-frontend/src/lib/fccLoanTimeline.ts",
-        "tma-frontend/src/components/FccLoanTimeline.tsx"
+        "tma-frontend/src/components/FccLoanTimeline.tsx",
+        "core/financial_control/commute.py",
+        "tma-frontend/src/lib/fccCommute.ts",
+        "tma-frontend/src/components/FccCommute.tsx"
       ],
       "test_paths": [
         "tma-frontend/src/lib/fccPresentation.test.ts",
@@ -780,7 +783,9 @@
         "tma-frontend/src/lib/fccLoanSchedule.test.ts",
         "test_fcc_refinance.py",
         "tma-frontend/src/lib/fccRefinance.test.ts",
-        "tma-frontend/src/lib/fccLoanTimeline.test.ts"
+        "tma-frontend/src/lib/fccLoanTimeline.test.ts",
+        "test_fcc_commute.py",
+        "tma-frontend/src/lib/fccCommute.test.ts"
       ],
       "canonical_docs": [],
       "production_evidence": [],

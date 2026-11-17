@@ -78,6 +78,8 @@ class Tables:
     FUNDING_PLANS = "Funding Plans"                # FCC/funding planner step 2 — live: tbl98DXJJgLceESgr (created 18/10/2026), owner-scoped, written ONLY after the owner's אשר
     GOAL_ALLOCATIONS = "Goal Allocations"          # FCC/B2 — live: tblZgqHiBbSeyRTCA (created 18/10/2026), owner-scoped, EMPTY (manual entry)
     CASHFLOW_RULES = "Cashflow Rules"              # FCC cashflow import — live: tbl98SEP03oiaQ6uY (created 01/11/2026, owner-approved), owner-scoped classification rules
+    COMMUTE_ROUTES = "Commute Routes"              # FCC commute income — live: tbltnXvt96x52bYfw (created 17/11/2026, owner-approved), one row per paid recurring ride route
+    COMMUTE_TRIPS  = "Commute Trips"               # FCC commute income — live: tblrPjCvC9IK5OLo0 (created 17/11/2026, owner-approved), one row per route per day
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
@@ -983,6 +985,32 @@ class FinAccountFields:
     INSURANCE_COST_MONTHLY = "Insurance Cost Monthly"  # number, ₪/month (disability + survivors); nominal, held flat
     INSURANCE_COST_AS_OF = "Insurance Cost As Of"      # date
     # reverse links created by Airtable (not read by code): "Financial Progress Events", "Incoming Transfers"
+
+
+class CommuteRouteFields:
+    """Commute Routes (FCC) — LIVE (tbltnXvt96x52bYfw, 17/11/2026). One recurring paid ride route. Owner-scoped via FINANCIAL_OWNER."""
+    NAME            = "Name"
+    DAY_PRICE       = "Day Price"            # number ₪ — what one trip day is charged (the same for 2 or 3 stops, owner decision 17/11/2026)
+    KM_ONE_WAY      = "Km One Way"           # number — entered once by the owner
+    MINUTES_ONE_WAY = "Minutes One Way"      # number
+    COST_PER_KM     = "Cost Per Km"          # number ₪ — the owner's own vehicle cost per km (fuel etc.); empty = unknown, profitability is then gross only
+    PLANNED_DAYS    = "Planned Days Per Week"  # number — how many days a week the ride is expected (6)
+    STATUS          = "Status"               # singleSelect active|paused
+    NOTES           = "Notes"
+    FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
+
+
+class CommuteTripFields:
+    """Commute Trips (FCC) — LIVE (tblrPjCvC9IK5OLo0, 17/11/2026). One route on one day: did the ride happen, and with how many stops."""
+    NAME            = "Name"                 # "<route> · <date>" (display only)
+    ROUTE           = "Route"                # link -> Commute Routes (single record, enforced in data_access_policy)
+    TRIP_DATE       = "Trip Date"            # date (ISO)
+    OUTCOME         = "Outcome"              # singleSelect yes|no — an empty value means "not answered yet"
+    STOPS           = "Stops"                # number (2 or 3) — recorded to see whether most rides have 3 stops; it does not change the price
+    AMOUNT          = "Amount"               # number ₪ — the route's Day Price on the day it was answered "yes"; 0 for "no"
+    IDEMPOTENCY_KEY = "Idempotency Key"      # "<route record id>:<date>" — one row per route per day
+    NOTE            = "Note"
+    FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
 
 
 class CashflowRuleFields:

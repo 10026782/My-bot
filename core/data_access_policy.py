@@ -33,7 +33,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from airtable_schema import TABLE_ALIASES, CashflowRuleFields, FinAccountFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, Tables, TaskFields
+from airtable_schema import TABLE_ALIASES, CashflowRuleFields, CommuteRouteFields, CommuteTripFields, FinAccountFields, FinEventFields, FinGoalFields, FundingPlanFields, GoalAllocationFields, Tables, TaskFields
 from core import owner_resolution
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,18 @@ _POLICIES: dict[str, TablePolicy] = {
     Tables.CASHFLOW_RULES: TablePolicy(
         Tables.CASHFLOW_RULES, OWNER_SCOPED, owner_field=CashflowRuleFields.FINANCIAL_OWNER,
         digit_guard=(CashflowRuleFields.MATCH, CashflowRuleFields.CATEGORY, CashflowRuleFields.NOTES),
+    ),
+    # Commute income (17/11/2026): the owner's recurring paid ride routes and the day-by-day answers. Owner-of-record only; a trip may only point at a route the caller owns
+    # and at exactly one route. Only free-text fields are digit-guarded (the numbers are the point of these tables).
+    Tables.COMMUTE_ROUTES: TablePolicy(
+        Tables.COMMUTE_ROUTES, OWNER_SCOPED, owner_field=CommuteRouteFields.FINANCIAL_OWNER,
+        digit_guard=(CommuteRouteFields.NAME, CommuteRouteFields.NOTES),
+    ),
+    Tables.COMMUTE_TRIPS: TablePolicy(
+        Tables.COMMUTE_TRIPS, OWNER_SCOPED, owner_field=CommuteTripFields.FINANCIAL_OWNER,
+        linked_owner_checks=((CommuteTripFields.ROUTE, Tables.COMMUTE_ROUTES),),
+        single_links=(CommuteTripFields.ROUTE,),
+        digit_guard=(CommuteTripFields.NAME, CommuteTripFields.NOTE),
     ),
     # Funding Plans (funding planner step 2): a saved plan snapshot for ONE of the owner's goals. Owner-of-record only; the goal link must be
     # the caller's own and a single record. The snapshots are server-built JSON (not user text), so only the free-text fields are digit-guarded.
