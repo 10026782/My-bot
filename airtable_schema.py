@@ -78,6 +78,9 @@ class Tables:
     FUNDING_PLANS = "Funding Plans"                # FCC/funding planner step 2 — live: tbl98DXJJgLceESgr (created 18/10/2026), owner-scoped, written ONLY after the owner's אשר
     GOAL_ALLOCATIONS = "Goal Allocations"          # FCC/B2 — live: tblZgqHiBbSeyRTCA (created 18/10/2026), owner-scoped, EMPTY (manual entry)
     CASHFLOW_RULES = "Cashflow Rules"              # FCC cashflow import — live: tbl98SEP03oiaQ6uY (created 01/11/2026, owner-approved), owner-scoped classification rules
+    COMMUTE_ROUTES = "Commute Routes"              # FCC commute income — live: tbltnXvt96x52bYfw (created 17/11/2026, owner-approved), one row per paid recurring ride route
+    COMMUTE_SETTINGS = "Commute Settings"          # FCC commute — live: tblIHtnwJFjghvBCX (created 17/11/2026, owner-approved), ONE row per owner: the leased car's free monthly km / fuel allowance
+    COMMUTE_TRIPS  = "Commute Trips"               # FCC commute income — live: tblrPjCvC9IK5OLo0 (created 17/11/2026, owner-approved), one row per route per day
     EMERGENCY_WINDOW = "Emergency_Window"  # חריג מבוקר ל-High מהטלפון — ראה Approval_Policy_Spec.md
     # F16 — Media Layer
     MEDIA_FILES      = "Media Files"       # F16 — voice notes + file uploads (drive_url + metadata). Must be created manually in Airtable.
@@ -983,6 +986,68 @@ class FinAccountFields:
     INSURANCE_COST_MONTHLY = "Insurance Cost Monthly"  # number, ₪/month (disability + survivors); nominal, held flat
     INSURANCE_COST_AS_OF = "Insurance Cost As Of"      # date
     # reverse links created by Airtable (not read by code): "Financial Progress Events", "Incoming Transfers"
+
+
+class CommuteRouteFields:
+    """Commute Routes (FCC) — LIVE (tbltnXvt96x52bYfw, 17/11/2026). One recurring paid ride route. Owner-scoped via FINANCIAL_OWNER."""
+    NAME            = "Name"
+    DAY_PRICE       = "Day Price"            # number ₪ — what one trip day is charged (the same for 2 or 3 stops, owner decision 17/11/2026)
+    KM_ONE_WAY      = "Km One Way"           # number — entered once by the owner
+    MINUTES_ONE_WAY = "Minutes One Way"      # number
+    COST_PER_KM     = "Cost Per Km"          # number ₪ — the owner's own vehicle cost per km (fuel etc.); empty = unknown, profitability is then gross only
+    PLANNED_DAYS    = "Planned Days Per Week"  # number — how many days a week the ride is expected (6)
+    STATUS          = "Status"               # singleSelect active|paused
+    NOTES           = "Notes"
+    VEHICLE_CLASS   = "Vehicle Class"        # singleSelect regular|large — the price class this route is charged at (regular = small-car price, large = the 6-seater price)
+    RETURN_STATUS   = "Return Status"        # singleSelect empty|continuation|waited — what happens on the way back (see CommuteTripFields); empty = the price covers the return
+    WAITING_MINUTES = "Waiting Minutes"      # number — minutes waited at the destination per ride day (waited)
+    ROUTE_KIND      = "Route Kind"           # singleSelect paid|own — empty = paid; own = one of the owner's OWN regular weekly drives (no price) that a ride / delivery can be fitted "on the way" of
+    START_TIME      = "Start Time"           # text "HH:MM" — the usual start time of the recurring ride
+    WEEKDAYS        = "Weekdays"             # multipleSelects (ראשון..שבת) — the days an own weekly drive happens on
+    FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
+
+
+class CommuteTripFields:
+    """Commute Trips (FCC) — LIVE (tblrPjCvC9IK5OLo0, 17/11/2026). One route on one day: did the ride happen, and with how many stops."""
+    NAME            = "Name"                 # "<route> · <date>" (display only)
+    ROUTE           = "Route"                # link -> Commute Routes (single record, enforced in data_access_policy)
+    TRIP_DATE       = "Trip Date"            # date (ISO)
+    OUTCOME         = "Outcome"              # singleSelect yes|no — an empty value means "not answered yet"
+    STOPS           = "Stops"                # number (2 or 3) — recorded to see whether most rides have 3 stops; it does not change the price
+    AMOUNT          = "Amount"               # number ₪ — the route's Day Price on the day it was answered "yes"; 0 for "no"
+    IDEMPOTENCY_KEY = "Idempotency Key"      # "<route record id>:<date>" — one row per route per day
+    NOTE            = "Note"
+    # A ONE-OFF trip (no route): the owner types the price he was paid each time (there is no price list) and what the ride was.
+    DESTINATION     = "Destination"          # text — where it went (empty on a recurring-route day)
+    VEHICLE_CLASS   = "Vehicle Class"        # singleSelect regular|large — the price class charged (a customer who needs less pays the regular price)
+    KM_ONE_WAY      = "Km One Way"           # number
+    MINUTES_ONE_WAY = "Minutes One Way"      # number
+    RETURN_STATUS   = "Return Status"        # singleSelect empty|continuation|waited: empty = return empty (price covers the return) / continuation = a paid ride back or onward (the price covers one way) / waited = waiting hours (the price covers the return and the wait)
+    WAITING_MINUTES = "Waiting Minutes"      # number
+    KIND            = "Kind"                 # singleSelect ride|delivery — empty = ride
+    EXTRA_KM        = "Extra Km"             # number — km the trip ADDED over what the owner would have driven anyway (replaces the one-way based km when present)
+    EXTRA_MINUTES   = "Extra Minutes"        # number — minutes the trip ADDED (replaces the one-way based minutes when present)
+    CITY            = "City"                 # text — the city of a one-off trip's destination (a city's profitability is not another's)
+    AREA            = "Area"                 # text — the area inside the city (the entrance to Jerusalem is not a remote neighbourhood)
+    ADDED_STOPS     = "Added Stops"          # number — extra stops the passenger added
+    STOPS_PRICE     = "Stops Price"          # number ₪ — the part of Amount that is the surcharge for those stops (already inside Amount)
+    STOPS_KM        = "Stops Km"             # number — km the stops added to the ride
+    STOPS_MINUTES   = "Stops Minutes"        # number — minutes the stops added (with that hour's traffic: a stop on the way is not a stop across the city in the rush hour)
+    START_TIME      = "Start Time"           # text "HH:MM" — when the trip started: with the minutes it shows what traffic does to a ride's length at that hour
+    ON_THE_WAY_OF   = "On The Way Of"        # text — the name of the own weekly drive the trip was fitted onto (display only)
+    FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
+
+
+class CommuteSettingsFields:
+    """Commute Settings (FCC) — LIVE (tblIHtnwJFjghvBCX, 17/11/2026). ONE row per owner: the leased car's free allowance. Owner-scoped via FINANCIAL_OWNER."""
+    NAME            = "Name"
+    FREE_KM         = "Free Km Monthly"      # number — km a month that cost the owner nothing
+    FREE_FUEL       = "Free Fuel Monthly"    # number ₪ — fuel a month that costs the owner nothing
+    FUEL_COST_PER_KM = "Fuel Cost Per Km"    # number ₪ — turns the fuel allowance into km
+    COST_PER_KM     = "Cost Per Km"          # number ₪ — what a km costs the owner BEYOND the free allowance
+    OTHER_KM_USED   = "Other Km Used"        # number — km already used this month on other driving (the rides' own km are counted by the system)
+    OTHER_KM_MONTH  = "Other Km Month"       # text "YYYY-MM" — the month ``Other Km Used`` belongs to (a new month starts again from zero)
+    FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
 
 
 class CashflowRuleFields:

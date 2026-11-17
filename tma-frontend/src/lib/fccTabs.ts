@@ -2,7 +2,7 @@
 // module's memory (i.e. while the app stays open); a fresh open of the app always starts on "התנהלות חודשית".
 import type { FccTurn } from "../types";
 
-export type FccTabKey = "monthly" | "cashflow" | "consumption" | "loans" | "assets";
+export type FccTabKey = "monthly" | "cashflow" | "consumption" | "loans" | "assets" | "commute";
 
 export const FCC_TABS: { key: FccTabKey; label: string }[] = [
   { key: "monthly", label: "התנהלות חודשית" },
@@ -10,6 +10,7 @@ export const FCC_TABS: { key: FccTabKey; label: string }[] = [
   { key: "consumption", label: "צריכה" },
   { key: "loans", label: "הלוואות וחוב" },
   { key: "assets", label: "נכסים והון" },
+  { key: "commute", label: "נסיעות" },
 ];
 
 export const DEFAULT_TAB: FccTabKey = "monthly";
@@ -109,6 +110,13 @@ export const COMPOSER: Record<FccTabKey, ComposerConfig> = {
     ],
     freeText: false,
     hint: "בחרו פעולה — המערכת תשאל רק מה שחסר.",
+  },
+  // commute income: the tab has its own one-tap answers (no draft -> review flow); no chip opens a draft here
+  commute: {
+    title: "נסיעות",
+    chips: [],
+    freeText: false,
+    hint: "סמנו כל יום אם יש נסיעה ובכמה תחנות.",
   },
   assets: {
     title: "עדכון נכס",
