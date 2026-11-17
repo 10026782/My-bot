@@ -1393,7 +1393,8 @@ export interface FccCommuteRoute {
 }
 export interface FccCommuteTrip {
   id: string; date: string; weekday: string; route: string | null; one_off: boolean; kind: CommuteKind; outcome: "yes" | "no"; stops: number | null; amount: number;
-  vehicle_class: CommuteClass | null; return_status: CommuteReturn | null; on_the_way_of: string | null; start_time: string | null; band: string | null; km: number | null; minutes: number | null;
+  vehicle_class: CommuteClass | null; return_status: CommuteReturn | null; on_the_way_of: string | null; start_time: string | null; band: string | null;
+  city: string | null; area: string | null; added_stops: number; stops_price: number; stops_minutes: number; km: number | null; minutes: number | null;
   gross_per_hour: number | null; gross_per_km: number | null; net_per_hour: number | null;
 }
 export interface FccCommuteStats {
@@ -1401,8 +1402,13 @@ export interface FccCommuteStats {
   empty_return_share: number | null; continuation_share: number | null; waited_share: number | null; on_the_way_share: number | null;
 }
 export interface FccCommuteTimeBand { band: string; label: string; rides: number; avg_minutes: number | null; gross_per_hour: number | null; gross_per_km: number | null; avg_price: number | null }
+export interface FccCommuteStopsView {
+  rides: number; measured_rides: number; stops: number; avg_price: number; avg_minutes_per_stop: number | null; avg_km_per_stop: number | null; per_hour: number | null; per_km: number | null;
+  ride_per_hour_with: number | null; ride_per_hour_without: number | null; by_band: { band: string; label: string; rides: number; avg_minutes_per_stop: number | null; per_hour: number | null }[]; note: string | null;
+}
+export type FccCommutePlaceRow = FccCommuteStats & { city: string; area: string | null; vs_average_per_km: number | null };
 export interface FccCommuteProfit {
-  cost_per_km: number | null; overall: FccCommuteStats | null; without_time: number;
+  cost_per_km: number | null; overall: FccCommuteStats | null; without_time: number; without_place: number; by_city: FccCommutePlaceRow[]; by_area: FccCommutePlaceRow[]; stops: FccCommuteStopsView | null;
   by_time: (FccCommuteStats & { band: string; label: string; avg_minutes: number | null })[];
   time_insights: { destination: string; fastest: string; slowest: string; extra_minutes: number; bands: FccCommuteTimeBand[] }[];
   by_destination: (FccCommuteStats & { destination: string; classes: CommuteClass[]; kinds: CommuteKind[]; vs_average_per_km: number | null })[];
@@ -1417,19 +1423,28 @@ export interface FccCommuteQuota {
 export interface FccCommuteSettings { free_km: number | null; free_fuel: number | null; fuel_cost_per_km: number | null; cost_per_km: number | null; other_km_used: number | null; other_km_month: string | null }
 export interface FccCommutePending { id: string; date: string; weekday: string; destination: string | null; price: number | null; km_one_way: number | null; minutes_one_way: number | null; start_time: string | null; kind: CommuteKind }
 export interface FccCommuteReturnBlock { known: number; empty: number; continuation: number; waited: number; avg_wait_minutes: number | null }
-export interface FccCommuteReturnStats { overall: FccCommuteReturnBlock; by_destination: (FccCommuteReturnBlock & { destination: string })[]; min_destination: number; min_overall: number }
+export interface FccCommuteReturnStats {
+  overall: FccCommuteReturnBlock; by_destination: (FccCommuteReturnBlock & { destination: string })[]; by_city: (FccCommuteReturnBlock & { city: string })[];
+  by_area: (FccCommuteReturnBlock & { city: string; area: string })[]; min_destination: number; min_overall: number;
+}
 export interface FccCommuteScenario {
   key: string; label: string; km: number | null; minutes: number | null; gross_per_hour: number | null; gross_per_km: number | null; net_per_hour: number | null; net_per_km: number | null; net: number | null;
   free_km: number | null; beyond_km: number | null; cost_beyond: number | null; net_after_allowance: number | null;
 }
 export interface FccCommuteEvaluation {
-  offer: { destination: string | null; price: number | null; km_one_way: number | null; minutes_one_way: number | null; start_time: string | null; on_the_way: boolean };
+  offer: { destination: string | null; city: string | null; area: string | null; price: number | null; km_one_way: number | null; minutes_one_way: number | null; start_time: string | null; on_the_way: boolean };
   scenarios: FccCommuteScenario[]; expected: FccCommuteScenario | null;
-  basis: { used: "destination" | "overall" | null; destination_sample: number; overall_sample: number; weights: { empty: number; continuation: number; waited: number } | null };
+  basis: { used: "area" | "city" | "destination" | "overall" | null; sample: number; destination_sample: number; overall_sample: number; weights: { empty: number; continuation: number; waited: number } | null };
   average: { gross_per_km: number | null; gross_per_hour: number | null; rides: number } | null; vs_average: { per_km: number | null; per_hour: number | null } | null;
-  typical_at_this_hour: { band: string; rides: number; avg_minutes_one_way: number } | null; allowance_remaining_km: number | null; cost_per_km: number | null; notes: string[];
+  typical_at_this_hour: { band: string; rides: number; avg_minutes_one_way: number } | null;
+  place: { level: "area" | "city"; label: string; rides: number; avg_price: number | null; gross_per_km: number | null; gross_per_hour: number | null } | null;
+  stops: { added: number; price: number; km: number; minutes: number; per_hour: number | null; per_km: number | null; base_gross_per_hour: number | null; total_gross_per_hour: number | null; owner_per_hour: number | null; owner_rides: number; band: string | null } | null;
+  allowance_remaining_km: number | null; cost_per_km: number | null; notes: string[];
 }
-export interface FccCommuteOfferBody { price: number; km_one_way?: number; minutes_one_way?: number; start_time?: string; destination?: string; waiting_minutes?: number; extra_km?: number; extra_minutes?: number }
+export interface FccCommuteOfferBody {
+  price: number; km_one_way?: number; minutes_one_way?: number; start_time?: string; destination?: string; city?: string; area?: string; waiting_minutes?: number; extra_km?: number; extra_minutes?: number;
+  added_stops?: number; stops_price?: number; stops_km?: number; stops_minutes?: number;
+}
 export interface FccCommute {
   pending_updates: FccCommutePending[]; return_stats: FccCommuteReturnStats;
   month: string; today: string; routes: FccCommuteRoute[]; own_trips: { id: string; name: string; weekdays: string[]; km_one_way: number | null; minutes_one_way: number | null }[];
@@ -1442,6 +1457,7 @@ export interface FccCommuteRouteBody {
 }
 export interface FccCommuteTripBody {
   trip_id?: string; destination?: string; date?: string; price?: number; vehicle_class?: CommuteClass; kind?: CommuteKind; km_one_way?: number; minutes_one_way?: number;
-  return_status?: CommuteReturn; waiting_minutes?: number; extra_km?: number; extra_minutes?: number; on_the_way_of?: string; start_time?: string;
+  return_status?: CommuteReturn; waiting_minutes?: number; extra_km?: number; extra_minutes?: number; on_the_way_of?: string; start_time?: string; city?: string; area?: string;
+  added_stops?: number; stops_price?: number; stops_km?: number; stops_minutes?: number;
 }
 export interface FccCommuteSettingsBody { free_km?: number; free_fuel?: number; fuel_cost_per_km?: number; cost_per_km?: number; other_km_used?: number }

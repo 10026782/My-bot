@@ -409,3 +409,80 @@ def test_evaluate_endpoint_is_read_only_validated_and_owner_only(api, monkeypatc
         assert post(app, "/api/fcc/commute/evaluate", bad).status_code == 400, bad
     monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: ident("avi", Role.PARTNER))
     assert post(app, "/api/fcc/commute/evaluate", {"price": 5}).status_code == 404 and not WRITES
+
+
+# ── where (city / area) and extra stops ───────────────────────────────────────────────────────────────────────────
+def trip_at(day, price, city, area, km=20, minutes=25, status="empty", **fields):
+    t = one_off(date(2026, 11, day), price, f"{city} {area or ''}".strip(), km_one_way=km, minutes_one_way=minutes, return_status=status)
+    t["fields"].update({"City": city, **({"Area": area} if area else {}), **fields})
+    return t
+
+
+def test_a_cities_and_areas_profitability_are_read_apart():
+    today = date(2026, 11, 17)
+    trips = [trip_at(1, 120, "ירושלים", "כניסה לעיר", 15, 20), trip_at(2, 130, "ירושלים", "כניסה לעיר", 15, 20), trip_at(3, 160, "ירושלים", "הר חומה", 40, 55), trip_at(4, 150, "תל אביב", None, 30, 40)]
+    p = C.build([ROUTE], trips, today, 6, [SETTINGS])["profitability"]
+    cities = {r["city"]: r for r in p["by_city"]}
+    areas = {(r["city"], r["area"]): r for r in p["by_area"]}
+    assert cities["ירושלים"]["rides"] == 3 and cities["תל אביב"]["rides"] == 1 and set(areas) == {("ירושלים", "כניסה לעיר"), ("ירושלים", "הר חומה")}
+    assert areas[("ירושלים", "כניסה לעיר")]["gross_per_km"] == 4.17 and areas[("ירושלים", "הר חומה")]["gross_per_km"] == 2.0           # 250 / 60 km vs 160 / 80 km
+    assert p["by_area"][0]["area"] == "כניסה לעיר" and p["without_place"] == 0
+
+
+def test_the_way_back_is_read_from_the_area_then_the_city_then_the_overall_history():
+    today = date(2026, 11, 17)
+    entrance = [trip_at(d, 100, "ירושלים", "כניסה לעיר", status="continuation") for d in range(1, 7)]
+    remote = [trip_at(d, 100, "ירושלים", "הר חומה", status="empty") for d in range(7, 13)]
+    hist = entrance + remote
+    area = C.evaluate_offer({"price": 200, "km_one_way": 20, "minutes_one_way": 25, "city": "ירושלים", "area": "כניסה לעיר"}, [ROUTE], hist, today, [SETTINGS])
+    assert area["basis"]["used"] == "area" and area["basis"]["sample"] == 6 and area["basis"]["weights"]["continuation"] == 1.0
+    far = C.evaluate_offer({"price": 200, "km_one_way": 20, "minutes_one_way": 25, "city": "ירושלים", "area": "הר חומה"}, [ROUTE], hist, today, [SETTINGS])
+    assert far["basis"]["used"] == "area" and far["basis"]["weights"]["empty"] == 1.0
+    city = C.evaluate_offer({"price": 200, "km_one_way": 20, "minutes_one_way": 25, "city": "ירושלים", "area": "שכונה חדשה"}, [ROUTE], hist, today, [SETTINGS])
+    assert city["basis"]["used"] == "city" and city["basis"]["sample"] == 12 and city["basis"]["weights"] == {"empty": 0.5, "continuation": 0.5, "waited": 0.0}
+    assert area["place"]["level"] == "area" and area["place"]["rides"] == 6 and city["place"]["level"] == "city" and city["place"]["rides"] == 12     # an area with no rides falls back to the city
+
+
+def test_extra_stops_add_their_own_km_and_minutes_and_show_what_they_earned_on_their_own():
+    e = C.ride_economics(200, 20, 25, "empty", 0.0, 0.8, None, None, stops_km=8.0, stops_minutes=30.0, stops_price=40.0)
+    assert e["km"] == 48.0 and e["minutes"] == 80.0                                             # 40 km + 8, 50 min + 30
+    assert e["stops_per_hour"] == 80.0 and e["stops_per_km"] == 5.0                              # 40 / 0.5 h, 40 / 8 km
+    assert e["base_gross_per_hour"] == 192.0 and e["gross_per_hour"] == 150.0                    # without the stops 160 / (50/60) h; with them 200 / (80/60) h
+    plain = C.ride_economics(200, 20, 25, "empty", 0.0, 0.8)
+    assert plain["stops_per_hour"] is None and plain["base_gross_per_hour"] == plain["gross_per_hour"]
+
+
+def test_a_stop_in_the_rush_hour_is_compared_with_a_stop_at_other_times():
+    today = date(2026, 11, 17)
+    def stopped(day, start, minutes):
+        return trip_at(day, 200, "ירושלים", "מרכז", 20, 25, **{"Added Stops": 1, "Stops Price": 30, "Stops Km": 5, "Stops Minutes": minutes, "Start Time": start})
+    trips = [stopped(1, "08:00", 40), stopped(2, "07:45", 36), stopped(3, "11:00", 15), stopped(4, "12:00", 17)]
+    st = C.build([ROUTE], trips, today, 6, [SETTINGS])["profitability"]["stops"]
+    assert st["rides"] == 4 and st["stops"] == 4 and st["avg_price"] == 30.0 and st["avg_minutes_per_stop"] == 27.0
+    by = {b["band"]: b for b in st["by_band"]}
+    assert by["morning_rush"]["avg_minutes_per_stop"] == 38.0 and by["midday"]["avg_minutes_per_stop"] == 16.0 and by["morning_rush"]["per_hour"] == 47.37
+    assert st["note"] == "תחנה בשעת עומס לוקחת בממוצע 38.0 דק׳ לעומת 16.0 דק׳ בשעות אחרות"
+    assert C.build([ROUTE], [trip_at(1, 100, "חיפה", None)], today, 6, [])["profitability"]["stops"] is None
+
+
+def test_an_offer_with_stops_shows_the_stops_on_their_own_and_the_whole_ride_with_and_without_them():
+    today = date(2026, 11, 17)
+    r = C.evaluate_offer({"price": 200, "km_one_way": 20, "minutes_one_way": 25, "added_stops": 1, "stops_price": 40, "stops_km": 8, "stops_minutes": 30, "start_time": "08:00"}, [ROUTE], [], today, [SETTINGS])
+    s = r["stops"]
+    assert s["added"] == 1 and s["per_hour"] == 80.0 and s["per_km"] == 5.0 and s["base_gross_per_hour"] == 192.0 and s["total_gross_per_hour"] == 150.0 and s["band"] == "בוקר (שעת עומס)"
+    assert C.evaluate_offer({"price": 200, "km_one_way": 20, "minutes_one_way": 25}, [ROUTE], [], today, [SETTINGS])["stops"] is None
+
+
+def test_where_and_stops_pass_the_guard_and_travel_through_the_endpoints(api):
+    app, _ = api
+    ok = aa.validate_commute_write
+    base = {"Name": "x", "Trip Date": "2026-11-18", "Outcome": "yes", "Amount": 200.0, "Destination": "ירושלים", "Idempotency Key": "oneoff:0123456789abcdef"}
+    assert ok("Commute Trips", "post", {**base, "City": "ירושלים", "Area": "הר חומה", "Added Stops": 2, "Stops Price": 40.0, "Stops Km": 8.0, "Stops Minutes": 30.0}) is None
+    assert ok("Commute Trips", "post", {**base, "Stops Price": 250.0}) and ok("Commute Trips", "post", {**base, "Added Stops": 50}) and ok("Commute Trips", "post", {**base, "City": "  "})
+    post(app, "/api/fcc/commute/trip", {"destination": "ירושלים", "price": 200, "city": "ירושלים", "area": "הר חומה", "added_stops": 1, "stops_price": 40, "stops_km": 8, "stops_minutes": 30})
+    f = WRITES[0]["fields"]
+    assert f["City"] == "ירושלים" and f["Area"] == "הר חומה" and f["Added Stops"] == 1.0 and f["Stops Price"] == 40.0 and aa.validate_commute_write("Commute Trips", "post", f) is None
+    assert post(app, "/api/fcc/commute/trip", {"destination": "x", "price": 100, "stops_price": 150}).status_code == 400
+    ev = post(app, "/api/fcc/commute/evaluate", {"price": 200, "km_one_way": 20, "minutes_one_way": 25, "city": "ירושלים", "area": "הר חומה", "added_stops": 1, "stops_price": 40, "stops_km": 8, "stops_minutes": 30})
+    assert ev.status_code == 200 and ev.get_json()["stops"]["per_hour"] == 80.0 and not WRITES[1:]
+    assert post(app, "/api/fcc/commute/evaluate", {"price": 100, "stops_price": 150}).status_code == 400

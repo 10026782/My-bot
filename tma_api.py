@@ -5334,7 +5334,7 @@ def fcc_commute_route(identity):
 def fcc_commute_trip(identity):
     """A ONE-OFF paid trip (no route). Body: {"trip_id"?: "rec…" (edit one of his own one-off trips), "destination", "date", "price" (typed each time — there is no price list),
     "vehicle_class"?: "regular"|"large", "kind"?: "ride"|"delivery", "km_one_way"?, "minutes_one_way"?, "return_status"?: "empty"|"waited"|"continuation", "waiting_minutes"?,
-    "start_time"? ("HH:MM" — when it started: the same ride takes different minutes at different hours), "extra_km"? / "extra_minutes"? (what the trip ADDED over what he would have driven anyway — a trip on the way of one of his own weekly drives), "on_the_way_of"?: its name}. ONE write (a new row, or a patch of
+    "start_time"? ("HH:MM" — when it started: the same ride takes different minutes at different hours), "city"? / "area"? (where: a city's profitability is not another's, and the entrance to a city is not a remote neighbourhood), "added_stops"? / "stops_price"? (the part of the price that is the surcharge for them) / "stops_km"? / "stops_minutes"? (what THEY added), "extra_km"? / "extra_minutes"? (what the trip ADDED over what he would have driven anyway — a trip on the way of one of his own weekly drives), "on_the_way_of"?: its name}. ONE write (a new row, or a patch of
     his own one-off row) through the ActionGateway ceremony; the record is built here and range-checked again at execution. The date may be up to two months back and tomorrow."""
     if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
         return jsonify({"error": "not found"}), 404
@@ -5354,7 +5354,8 @@ def fcc_commute_trip(identity):
                 fields[field] = float(data[key])
             except (TypeError, ValueError):
                 return jsonify({"error": f"bad {key}"}), 400
-    for key, field in (("extra_km", TF.EXTRA_KM), ("extra_minutes", TF.EXTRA_MINUTES)):
+    for key, field in (("extra_km", TF.EXTRA_KM), ("extra_minutes", TF.EXTRA_MINUTES), ("added_stops", TF.ADDED_STOPS), ("stops_price", TF.STOPS_PRICE), ("stops_km", TF.STOPS_KM),
+                       ("stops_minutes", TF.STOPS_MINUTES)):
         if key in data and data[key] not in (None, ""):
             try:
                 fields[field] = float(data[key])
@@ -5367,6 +5368,9 @@ def fcc_commute_trip(identity):
         fields[TF.ON_THE_WAY_OF] = str(data["on_the_way_of"]).strip()
     if str(data.get("start_time") or "").strip():
         fields[TF.START_TIME] = str(data["start_time"]).strip()
+    for key, field in (("city", TF.CITY), ("area", TF.AREA)):
+        if str(data.get(key) or "").strip():
+            fields[field] = str(data[key]).strip()
     today = _date.today()
     day = None
     if data.get("date") not in (None, "") or not trip_id:
@@ -5458,7 +5462,7 @@ def fcc_commute_settings(identity):
 @require_tma_auth
 def fcc_commute_evaluate(identity):
     """A ride offer, BEFORE it is taken — READ-ONLY, nothing is written. Body: {"price", "km_one_way"?, "minutes_one_way"?, "start_time"? "HH:MM", "destination"?, "waiting_minutes"?,
-    "extra_km"? / "extra_minutes"? (a detour on the way of one of his own drives)}. Answers with the offer priced under each way back (empty / a paid continuation / waiting), an expected
+    "city"? / "area"?, "added_stops"? / "stops_price"? / "stops_km"? / "stops_minutes"?, "extra_km"? / "extra_minutes"? (a detour on the way of one of his own drives)}. Answers with the offer priced under each way back (empty / a paid continuation / waiting), an expected
     figure when his history has enough known outcomes, the free allowance it would use, and a comparison with his own average. Owner only, 404 for anyone else."""
     if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
         return jsonify({"error": "not found"}), 404
@@ -5466,7 +5470,8 @@ def fcc_commute_evaluate(identity):
     from core.financial_control import service as fcc_service
     data = request.get_json(silent=True) or {}
     offer: dict = {}
-    for key, hi in (("price", 100000), ("km_one_way", 2000), ("minutes_one_way", 1440), ("waiting_minutes", 1440), ("extra_km", 2000), ("extra_minutes", 1440)):
+    for key, hi in (("price", 100000), ("km_one_way", 2000), ("minutes_one_way", 1440), ("waiting_minutes", 1440), ("extra_km", 2000), ("extra_minutes", 1440), ("added_stops", 20),
+                    ("stops_price", 100000), ("stops_km", 2000), ("stops_minutes", 1440)):
         if data.get(key) not in (None, ""):
             try:
                 v = float(data[key])
@@ -5483,6 +5488,11 @@ def fcc_commute_evaluate(identity):
         offer["start_time"] = str(data["start_time"])
     if str(data.get("destination") or "").strip():
         offer["destination"] = str(data["destination"]).strip()[:80]
+    for key in ("city", "area"):
+        if str(data.get(key) or "").strip():
+            offer[key] = str(data[key]).strip()[:60]
+    if offer.get("stops_price", 0) > offer["price"]:
+        return jsonify({"error": "bad stops_price"}), 400
     try:
         return jsonify(fcc_service.commute_evaluate(identity, offer))
     except data_access_policy.PersonalDataAccessDenied:

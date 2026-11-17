@@ -388,7 +388,8 @@ _COMMUTE_SETTINGS_KEYS = {"Name", "Free Km Monthly", "Free Fuel Monthly", "Fuel 
 _COMMUTE_WEEKDAYS = ("ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת")
 _COMMUTE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _COMMUTE_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
-_COMMUTE_TRIP_EXTRA = {"Destination", "Vehicle Class", "Km One Way", "Minutes One Way", "Return Status", "Waiting Minutes", "Kind", "Extra Km", "Extra Minutes", "On The Way Of", "Start Time"}      # a one-off trip's own facts
+_COMMUTE_TRIP_EXTRA = {"Destination", "Vehicle Class", "Km One Way", "Minutes One Way", "Return Status", "Waiting Minutes", "Kind", "Extra Km", "Extra Minutes", "On The Way Of", "Start Time",
+                       "City", "Area", "Added Stops", "Stops Price", "Stops Km", "Stops Minutes"}      # a one-off trip's own facts
 _COMMUTE_TRIP_POST_KEYS = {"Name", "Route", "Trip Date", "Outcome", "Stops", "Amount", "Idempotency Key", "Note"} | _COMMUTE_TRIP_EXTRA
 _COMMUTE_TRIP_PATCH_KEYS = {"Outcome", "Stops", "Amount", "Note"} | _COMMUTE_TRIP_EXTRA
 _COMMUTE_TRIP_KEY_RE = re.compile(r"^rec[A-Za-z0-9]{14}:\d{4}-\d{2}-\d{2}$")
@@ -446,6 +447,13 @@ def validate_commute_write(table: str, op: str, fields) -> str | None:
             return "bad number"
         if fields.get("Kind") not in (None, "ride", "delivery"):
             return "bad kind"
+        if not (num("Added Stops", 0, 20) and num("Stops Price", 0, 100000) and num("Stops Km", 0, 2000) and num("Stops Minutes", 0, 1440)):
+            return "bad stops number"
+        for text in ("City", "Area"):
+            if fields.get(text) is not None and (not isinstance(fields[text], str) or not fields[text].strip() or len(fields[text]) > 60):
+                return f"bad {text.lower()}"
+        if fields.get("Stops Price") is not None and fields.get("Amount") is not None and fields["Stops Price"] > fields["Amount"]:
+            return "the stops price cannot be more than the price"
         if fields.get("On The Way Of") is not None and (not isinstance(fields["On The Way Of"], str) or len(fields["On The Way Of"]) > 80):
             return "bad on-the-way name"
         if (reason := common()) is not None:

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CommuteView } from "../components/FccCommute";
 import {
-  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, evaluateBody, evaluationModel, pendingRows, returnBody, returnModel, timeModel, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
+  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, placeModel, stopsModel, evaluateBody, evaluationModel, pendingRows, returnBody, returnModel, timeModel, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
   tripBody, tripRows, weekRows,
 } from "./fccCommute";
 import type { FccCommute, FccCommuteDay, FccCommuteEvaluation, FccCommuteProfit, FccCommuteRoute, FccCommuteStats } from "../types";
@@ -24,7 +24,12 @@ const route: FccCommuteRoute = {
 };
 const stats = (o: Partial<FccCommuteStats> = {}): FccCommuteStats => ({ rides: 2, avg_price: 185, measured_rides: 2, gross_per_hour: 120, gross_per_km: 2.5, net_per_hour: 90, net_per_km: 1.7, empty_return_share: 0.5, continuation_share: 0, waited_share: 0.5, on_the_way_share: 0, ...o });
 const profitability: FccCommuteProfit = {
-  cost_per_km: 0.8, overall: stats(), without_time: 1,
+  cost_per_km: 0.8, overall: stats(), without_time: 1, without_place: 2,
+  by_city: [{ city: "ירושלים", area: null, ...stats({ rides: 3, gross_per_km: 3 }), vs_average_per_km: 0.5 }],
+  by_area: [{ city: "ירושלים", area: "כניסה לעיר", ...stats({ rides: 2, gross_per_km: 4.17 }), vs_average_per_km: 2.1 }, { city: "ירושלים", area: "הר חומה", ...stats({ rides: 1, gross_per_km: 2 }), vs_average_per_km: -0.1 }],
+  stops: { rides: 4, measured_rides: 4, stops: 4, avg_price: 30, avg_minutes_per_stop: 27, avg_km_per_stop: 5, per_hour: 66.67, per_km: 6, ride_per_hour_with: 150, ride_per_hour_without: 190,
+    by_band: [{ band: "morning_rush", label: "בוקר (שעת עומס)", rides: 2, avg_minutes_per_stop: 38, per_hour: 47.37 }, { band: "midday", label: "צהריים", rides: 2, avg_minutes_per_stop: 16, per_hour: 112.5 }],
+    note: "תחנה בשעת עומס לוקחת בממוצע 38.0 דק׳ לעומת 16.0 דק׳ בשעות אחרות" },
   by_time: [{ band: "morning_rush", label: "בוקר (שעת עומס)", ...stats({ rides: 2 }), avg_minutes: 63 }, { band: "midday", label: "צהריים", ...stats({ rides: 2 }), avg_minutes: 29 }],
   time_insights: [{ destination: "תל אביב", fastest: "midday", slowest: "morning_rush", extra_minutes: 34, bands: [{ band: "midday", label: "צהריים", rides: 2, avg_minutes: 29, gross_per_hour: 310.34, gross_per_km: 5, avg_price: 150 }, { band: "morning_rush", label: "בוקר (שעת עומס)", rides: 2, avg_minutes: 63, gross_per_hour: 142.86, gross_per_km: 5, avg_price: 150 }] }],
   by_destination: [{ destination: "קיסריה", ...stats({ rides: 1, gross_per_km: 24, on_the_way_share: 1, empty_return_share: 0 }), classes: [], kinds: ["ride"], vs_average_per_km: 21.5 },
@@ -33,27 +38,30 @@ const profitability: FccCommuteProfit = {
 };
 const view: FccCommute = {
   pending_updates: [{ id: "recP", date: "2026-11-16", weekday: "שני", destination: "נתב״ג", price: 220, km_one_way: 50, minutes_one_way: 40, start_time: "07:30", kind: "ride" }],
-  return_stats: { overall: { known: 12, empty: 5, continuation: 4, waited: 3, avg_wait_minutes: 80 }, by_destination: [{ destination: "נתב״ג", known: 8, empty: 3, continuation: 3, waited: 2, avg_wait_minutes: 90 }], min_destination: 5, min_overall: 10 },
+  return_stats: { overall: { known: 12, empty: 5, continuation: 4, waited: 3, avg_wait_minutes: 80 }, by_destination: [{ destination: "נתב״ג", known: 8, empty: 3, continuation: 3, waited: 2, avg_wait_minutes: 90 }],
+    by_city: [{ city: "ירושלים", known: 6, empty: 2, continuation: 4, waited: 0, avg_wait_minutes: null }], by_area: [{ city: "ירושלים", area: "כניסה לעיר", known: 5, empty: 1, continuation: 4, waited: 0, avg_wait_minutes: null }], min_destination: 5, min_overall: 10 },
   month: "2026-11", today: "2026-11-17", routes: [route], own_trips: [{ id: "o1", name: "עבודה", weekdays: ["ראשון", "שלישי"], km_one_way: 30, minutes_one_way: 25 }], income_this_month: 970, default_cost_per_km: 0.8,
   one_off: { month: "2026-11", trips: 2, income: 320 }, unanswered_past: 4, profitability, settings: { free_km: 1000, free_fuel: 300, fuel_cost_per_km: 0.5, cost_per_km: 0.8, other_km_used: 400, other_km_month: "2026-11" },
   quota: { month: "2026-11", allowed_km: 600, free_km: 1000, fuel_km: 600, other_km: 400, other_km_stale: false, rides_km: 100, rides_without_km: 1, used_km: 500, remaining_km: 100, over_km: 0, days_left: 14, km_per_day_left: 7.1, avg_per_km: 2.2, worth_of_remaining: 220, fuel_note: null },
   trips: [
-    { id: "t1", date: "2026-11-12", weekday: "חמישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "yes", stops: 3, amount: 130, vehicle_class: null, return_status: "empty", on_the_way_of: null, start_time: "06:30", band: "morning_rush", km: 44, minutes: 70, gross_per_hour: 111.43, gross_per_km: 2.95, net_per_hour: null },
-    { id: "t2", date: "2026-11-13", weekday: "שישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "no", stops: null, amount: 0, vehicle_class: null, return_status: null, on_the_way_of: null, start_time: null, band: null, km: null, minutes: null, gross_per_hour: null, gross_per_km: null, net_per_hour: null },
-    { id: "t3", date: "2026-11-09", weekday: "שני", route: "קיסריה", one_off: true, kind: "delivery", outcome: "yes", stops: null, amount: 120, vehicle_class: "large", return_status: "empty", on_the_way_of: "עבודה", start_time: "17:45", band: "evening_rush", km: 5, minutes: 12, gross_per_hour: 600, gross_per_km: 24, net_per_hour: 580 },
+    { id: "t1", date: "2026-11-12", weekday: "חמישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "yes", stops: 3, amount: 130, vehicle_class: null, return_status: "empty", on_the_way_of: null, start_time: "06:30", band: "morning_rush", city: null, area: null, added_stops: 0, stops_price: 0, stops_minutes: 0, km: 44, minutes: 70, gross_per_hour: 111.43, gross_per_km: 2.95, net_per_hour: null },
+    { id: "t2", date: "2026-11-13", weekday: "שישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "no", stops: null, amount: 0, vehicle_class: null, return_status: null, on_the_way_of: null, start_time: null, band: null, city: null, area: null, added_stops: 0, stops_price: 0, stops_minutes: 0, km: null, minutes: null, gross_per_hour: null, gross_per_km: null, net_per_hour: null },
+    { id: "t3", date: "2026-11-09", weekday: "שני", route: "קיסריה", one_off: true, kind: "delivery", outcome: "yes", stops: null, amount: 120, vehicle_class: "large", return_status: "empty", on_the_way_of: "עבודה", start_time: "17:45", band: "evening_rush", city: "ירושלים", area: "הר חומה", added_stops: 1, stops_price: 30, stops_minutes: 20, km: 5, minutes: 12, gross_per_hour: 600, gross_per_km: 24, net_per_hour: 580 },
   ],
 };
 const noop = () => undefined;
 const evaluation: FccCommuteEvaluation = {
-  offer: { destination: "נתב״ג", price: 220, km_one_way: 50, minutes_one_way: 40, start_time: "07:30", on_the_way: false },
+  offer: { destination: "נתב״ג", city: "ירושלים", area: "הר חומה", price: 220, km_one_way: 50, minutes_one_way: 40, start_time: "07:30", on_the_way: false },
   scenarios: [
     { key: "empty", label: "חזרה ריקה", km: 100, minutes: 80, gross_per_hour: 165, gross_per_km: 2.2, net_per_hour: 105, net_per_km: 1.4, net: 140, free_km: 100, beyond_km: 0, cost_beyond: 0, net_after_allowance: 220 },
     { key: "continuation", label: "יש נסיעת המשך (המחיר לכיוון אחד)", km: 50, minutes: 40, gross_per_hour: 330, gross_per_km: 4.4, net_per_hour: 270, net_per_km: 3.6, net: 180, free_km: 50, beyond_km: 0, cost_beyond: 0, net_after_allowance: 220 },
     { key: "waited", label: "המתנה של 120 דק׳", km: 100, minutes: 200, gross_per_hour: 66, gross_per_km: 2.2, net_per_hour: 42, net_per_km: 1.4, net: 140, free_km: 60, beyond_km: 40, cost_beyond: 32, net_after_allowance: 188 },
   ],
   expected: { key: "expected", label: "צפוי (לפי ההיסטוריה שלך)", km: 85, minutes: 110, gross_per_hour: 120, gross_per_km: 2.59, net_per_hour: 80, net_per_km: 1.8, net: 152, free_km: 85, beyond_km: 0, cost_beyond: 0, net_after_allowance: 220 },
-  basis: { used: "destination", destination_sample: 8, overall_sample: 12, weights: { empty: 0.5, continuation: 0.3, waited: 0.2 } }, average: { gross_per_km: 2.1, gross_per_hour: 100, rides: 12 }, vs_average: { per_km: 0.49, per_hour: 20 },
-  typical_at_this_hour: { band: "בוקר (שעת עומס)", rides: 3, avg_minutes_one_way: 55 }, allowance_remaining_km: 440, cost_per_km: 0.8, notes: ["הערה לדוגמה"],
+  basis: { used: "area", sample: 8, destination_sample: 8, overall_sample: 12, weights: { empty: 0.5, continuation: 0.3, waited: 0.2 } }, average: { gross_per_km: 2.1, gross_per_hour: 100, rides: 12 }, vs_average: { per_km: 0.49, per_hour: 20 },
+  typical_at_this_hour: { band: "בוקר (שעת עומס)", rides: 3, avg_minutes_one_way: 55 },
+  place: { level: "area", label: "ירושלים · הר חומה", rides: 4, avg_price: 160, gross_per_km: 2.1, gross_per_hour: 95 },
+  stops: { added: 1, price: 40, km: 8, minutes: 30, per_hour: 80, per_km: 5, base_gross_per_hour: 192, total_gross_per_hour: 150, owner_per_hour: 66.67, owner_rides: 4, band: "בוקר (שעת עומס)" }, allowance_remaining_km: 440, cost_per_km: 0.8, notes: ["הערה לדוגמה"],
 };
 const render = (data: FccCommute, error: string | null = null, ev: FccCommuteEvaluation | null = null) =>
   renderToStaticMarkup(createElement(CommuteView, { data, busy: false, error, evaluation: ev, onAnswer: noop, onSaveRoute: noop, onSaveTrip: noop, onSaveSettings: noop, onEvaluate: noop, onReturn: noop }));
@@ -158,10 +166,10 @@ test("an offer: the price is required, only the detour counts on the way, the ex
   assert.ok("body" in way && way.body.extra_km === 5 && way.body.km_one_way === undefined && way.body.extra_minutes === 12);
   assert.ok("error" in evaluateBody({ ...f, price: "120", onWay: "עבודה" }) && "error" in evaluateBody({ ...f, price: "5", start: "7pm" }));
   const e = evaluationModel(evaluation);
-  assert.ok(e.headline!.startsWith("צפוי") && e.rows.length === 3 && e.expected!.key === "expected" && e.basis!.includes("8 נסיעות קודמות ליעד") && e.basis!.includes("50%"));
+  assert.ok(e.headline!.startsWith("צפוי") && e.rows.length === 3 && e.expected!.key === "expected" && e.basis!.includes("8 נסיעות קודמות לאזור") && e.basis!.includes("50%"));
   assert.ok(e.vsAverage!.includes("+") && e.typical!.includes("55 דק׳") && e.allowance!.includes("440") && e.notes[0] === "הערה לדוגמה");
   assert.ok(e.rows[2].allowance.includes("חורג ב-40") && e.rows[0].allowance === "בתוך המכסה");
-  const thin = evaluationModel({ ...evaluation, expected: null, basis: { used: null, destination_sample: 1, overall_sample: 2, weights: null } });
+  const thin = evaluationModel({ ...evaluation, expected: null, basis: { used: null, sample: 1, destination_sample: 1, overall_sample: 2, weights: null } });
   assert.ok(thin.headline!.startsWith("בין") && thin.expected === null && thin.basis === null);
   const overall = evaluationModel({ ...evaluation, basis: { ...evaluation.basis, used: "overall" } });
   assert.ok(overall.basis!.includes("אין מספיק היסטוריה"));
@@ -178,10 +186,36 @@ test("the way back is learned over time: trips wait for the update, the body, th
   assert.ok("body" in waited && waited.body.waiting_minutes === 90 && "error" in returnBody("recP", "waited", "") && "error" in returnBody("recP", "waited", "x"));
   const r = returnModel(view.return_stats);
   assert.equal(r.rows[0].label, "הכול");
-  assert.ok(r.rows[0].empty === "42%" && r.rows[0].waited.includes("25%") && r.rows[0].waited.includes("80") && r.rows[1].known === "8");
+  assert.ok(r.rows[0].empty === "42%" && r.rows[0].waited.includes("25%") && r.rows[0].waited.includes("80") && r.rows.find((x) => x.label === "נתב״ג")!.known === "8");
   assert.ok(r.note.includes("אקראי ועם תחרות") && r.note.includes("5 נסיעות") && r.note.includes("10 בסך הכול"));
   const html = render(view);
   assert.ok(html.includes("חזרתי ריק") && html.includes("היה המשך") && html.includes("ישבתי בצד"));
+});
+
+test("where and stops: the trip forms carry the city, the area and the stops; the tables read a place apart and the stops on their own", () => {
+  const f = emptyTripForm("2026-11-17");
+  const ok = tripBody({ ...f, destination: "ירושלים", price: "200", city: " ירושלים ", area: "הר חומה", stops: "1", stopsPrice: "40", stopsKm: "8", stopsMinutes: "30" });
+  assert.ok("body" in ok && ok.body.city === "ירושלים" && ok.body.area === "הר חומה" && ok.body.added_stops === 1 && ok.body.stops_price === 40 && ok.body.stops_km === 8 && ok.body.stops_minutes === 30);
+  assert.ok("error" in tripBody({ ...f, destination: "x", price: "100", stopsPrice: "150" }) && "error" in tripBody({ ...f, destination: "x", price: "100", stopsKm: "8x" }));
+  const ev = evaluateBody({ ...f, price: "200", km: "20", minutes: "25", city: "ירושלים", area: "הר חומה", stops: "1", stopsPrice: "40", stopsKm: "8", stopsMinutes: "30" });
+  assert.ok("body" in ev && ev.body.city === "ירושלים" && ev.body.stops_price === 40 && ev.body.stops_minutes === 30);
+  assert.ok("error" in evaluateBody({ ...f, price: "100", stopsPrice: "150" }));
+  const p = placeModel(profitability);
+  assert.ok(p.cities[0].label === "ירושלים" && p.areas[0].label === "ירושלים · כניסה לעיר" && p.areas[0].perKm.includes("4") && p.areas[0].vsAverage.startsWith("+") && p.areas[1].vsAverage.startsWith("−"));
+  assert.ok(p.note!.includes("2 נסיעות בלי עיר"));
+  assert.equal(placeModel({ ...profitability, without_place: 0 }).note, null);
+  const st = stopsModel(profitability)!;
+  assert.ok(st.lines[0].value.includes("4 תחנות") && st.lines[4].label === "התחנות לבדן — לשעה" && st.lines[4].value.includes("67") && st.bands.length === 2 && st.note!.includes("38.0 דק׳"));
+  assert.equal(stopsModel({ ...profitability, stops: null }), null);
+  const e = evaluationModel(evaluation);
+  assert.ok(e.place!.includes("ירושלים · הר חומה") && e.place!.includes("4 נסיעות") && e.stops!.includes("התחנות לבדן") && e.stops!.includes("192") && e.stops!.includes("בנסיעות קודמות שלך"));
+  assert.ok(evaluationModel({ ...evaluation, place: null, stops: null }).stops === null);
+  const t = tripRows(view)[2];
+  assert.ok(t.detail.includes("ירושלים · הר חומה") && t.detail.includes("1 תחנות (+"));
+  const r = returnModel(view.return_stats);
+  assert.ok(r.rows.some((x) => x.label === "ירושלים · כניסה לעיר") && r.rows.some((x) => x.label === "ירושלים (כל העיר)") && r.note.includes("לאזור (אחרת לעיר"));
+  const html = render(view);
+  assert.ok(html.includes("לפי עיר ואזור") && html.includes("תחנות נוספות: האם הן משתלמות") && html.includes("תחנות נוספות בנסיעה"));
 });
 
 test("settings form: shows what is saved, blank is left out, nothing to save is an error", () => {

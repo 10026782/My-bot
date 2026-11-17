@@ -1027,6 +1027,12 @@ class CommuteTripFields:
     KIND            = "Kind"                 # singleSelect ride|delivery — empty = ride
     EXTRA_KM        = "Extra Km"             # number — km the trip ADDED over what the owner would have driven anyway (replaces the one-way based km when present)
     EXTRA_MINUTES   = "Extra Minutes"        # number — minutes the trip ADDED (replaces the one-way based minutes when present)
+    CITY            = "City"                 # text — the city of a one-off trip's destination (a city's profitability is not another's)
+    AREA            = "Area"                 # text — the area inside the city (the entrance to Jerusalem is not a remote neighbourhood)
+    ADDED_STOPS     = "Added Stops"          # number — extra stops the passenger added
+    STOPS_PRICE     = "Stops Price"          # number ₪ — the part of Amount that is the surcharge for those stops (already inside Amount)
+    STOPS_KM        = "Stops Km"             # number — km the stops added to the ride
+    STOPS_MINUTES   = "Stops Minutes"        # number — minutes the stops added (with that hour's traffic: a stop on the way is not a stop across the city in the rush hour)
     START_TIME      = "Start Time"           # text "HH:MM" — when the trip started: with the minutes it shows what traffic does to a ride's length at that hour
     ON_THE_WAY_OF   = "On The Way Of"        # text — the name of the own weekly drive the trip was fitted onto (display only)
     FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)

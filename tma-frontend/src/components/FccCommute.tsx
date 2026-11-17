@@ -3,7 +3,7 @@ import { fetchFccCommute, postFccCommuteDay, postFccCommuteEvaluate, postFccComm
 import type { CommuteKind, CommuteReturn, FccCommute, FccCommuteEvaluation, FccCommuteRoute } from "../types";
 import {
   ANSWERS, CLASS_OPTIONS, EMPTY_FORM, EMPTY_OWN_FORM, KIND_OPTIONS, RETURN_OPTIONS, WEEKDAYS, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromRoute,
-  TRIP_RETURN_OPTIONS, evaluateBody, evaluationModel, formFromSettings, pendingRows, profitModel, quotaRows, returnBody, returnModel, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
+  placeModel, stopsModel, TRIP_RETURN_OPTIONS, evaluateBody, evaluationModel, formFromSettings, pendingRows, profitModel, quotaRows, returnBody, returnModel, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
 } from "../lib/fccCommute";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -75,6 +75,8 @@ function EvaluationView({ ev }: { ev: FccCommuteEvaluation }) {
       {e.basis && <p className="fcc-loan__meta">{e.basis}</p>}
       {e.vsAverage && <p className="fcc-loan__meta">{e.vsAverage}</p>}
       {e.typical && <p className="fcc-loan__meta">{e.typical}</p>}
+      {e.place && <p className="fcc-loan__meta">{e.place}</p>}
+      {e.stops && <p className="fcc-loan__meta">{e.stops}</p>}
       {e.allowance && <p className="fcc-loan__meta">{e.allowance}</p>}
       {e.notes.map((n) => <p key={n} className="fcc-goal__note">{n}</p>)}
     </div>
@@ -90,6 +92,8 @@ function TripFormView({ today, ownTrips, busy, evaluation, onEvaluate, onSubmit 
   return (
     <form className="fcc-stack fcc-stack--tight" onSubmit={(e) => { e.preventDefault(); onEvaluate(form); }}>
       <Select<CommuteKind> label="סוג" value={form.kind} options={KIND_OPTIONS} onChange={set("kind")} />
+      <Field label="עיר" value={form.city} onChange={set("city")} mode="text" />
+      <Field label="אזור בעיר (למשל: כניסה לעיר / שכונה רחוקה)" value={form.area} onChange={set("area")} mode="text" />
       <Field label="יעד / תיאור" value={form.destination} onChange={set("destination")} mode="text" />
       <Field label="המחיר שהוצע / שקיבלת (₪)" value={form.price} onChange={set("price")} />
       <Field label="שעת יציאה (איך הפקקים משפיעים)" value={form.start} onChange={set("start")} mode="time" />
@@ -110,6 +114,15 @@ function TripFormView({ today, ownTrips, busy, evaluation, onEvaluate, onSubmit 
         </>
       )}
       <Select label="מחיר ששולם" value={form.cls} options={CLASS_OPTIONS} onChange={set("cls")} />
+      <details>
+        <summary>תחנות נוספות בנסיעה</summary>
+        <div className="fcc-stack fcc-stack--tight">
+          <Field label="כמה תחנות נוספות" value={form.stops} onChange={set("stops")} />
+          <Field label="כמה מהמחיר הוא התוספת על התחנות (₪)" value={form.stopsPrice} onChange={set("stopsPrice")} />
+          <Field label='כמה ק"מ הוסיפו התחנות' value={form.stopsKm} onChange={set("stopsKm")} />
+          <Field label="כמה דקות הוסיפו התחנות (עם הפקקים של אותה שעה)" value={form.stopsMinutes} onChange={set("stopsMinutes")} />
+        </div>
+      </details>
       <Field label="תאריך (לתיעוד נסיעה)" value={form.date} onChange={set("date")} mode="date" />
       <div className="fcc-chips">
         <button type="submit" disabled={busy} className="boss-button boss-button--primary">בדיקת כדאיות</button>
@@ -182,6 +195,8 @@ export function CommuteView({ data, busy, error, evaluation, onAnswer, onSaveRou
   const quota = quotaRows(data.quota);
   const profit = profitModel(data.profitability);
   const timing = timeModel(data.profitability);
+  const place = placeModel(data.profitability);
+  const stops = stopsModel(data.profitability);
   const pending = pendingRows(data.pending_updates);
   const back = returnModel(data.return_stats);
   return (
@@ -274,6 +289,35 @@ export function CommuteView({ data, busy, error, evaluation, onAnswer, onSaveRou
           </>
         )}
       </section>
+
+      <section className="fcc-section" aria-labelledby="commute-place-heading">
+        <h2 id="commute-place-heading" className="fcc-section__heading">לפי עיר ואזור</h2>
+        {place.cities.length === 0 ? <p className="fcc-loan__meta">הוסיפו עיר ואזור לנסיעות — וכאן יוצג איפה כדאי יותר (כניסה לעיר מול שכונה רחוקה).</p> : (
+          <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="ערים ואזורים">
+            <table className="fcc-compare__table">
+              <thead><tr><th>מקום</th><th>נסיעות</th><th>מחיר ממוצע</th><th>לק״מ</th><th>לשעה</th><th>מהממוצע (לק״מ)</th></tr></thead>
+              <tbody>{[...place.cities.map((r) => ({ ...r, label: `${r.label} (כל העיר)` })), ...place.areas].map((r) => <tr key={r.key}><th scope="row">{r.label}</th><td>{r.rides}</td><td>{r.avgPrice}</td><td>{r.perKm}</td><td>{r.perHour}</td><td>{r.vsAverage}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        {place.note && <p className="fcc-loan__meta">{place.note}</p>}
+      </section>
+
+      {stops && (
+        <section className="fcc-section" aria-labelledby="commute-stops-heading">
+          <h2 id="commute-stops-heading" className="fcc-section__heading">תחנות נוספות: האם הן משתלמות</h2>
+          <dl className="fcc-loans-goal__grid">{stops.lines.map((l) => <div key={l.label}><dt>{l.label}</dt><dd>{l.value}</dd></div>)}</dl>
+          {stops.bands.length > 0 && (
+            <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="תחנות לפי שעות">
+              <table className="fcc-compare__table">
+                <thead><tr><th>שעות</th><th>נסיעות</th><th>דקות לתחנה</th><th>התחנות לשעה</th></tr></thead>
+                <tbody>{stops.bands.map((b) => <tr key={b.key}><th scope="row">{b.label}</th><td>{b.rides}</td><td>{b.minutes}</td><td>{b.perHour}</td></tr>)}</tbody>
+              </table>
+            </div>
+          )}
+          {stops.note && <p className="fcc-goal__note">{stops.note}</p>}
+        </section>
+      )}
 
       <section className="fcc-section" aria-labelledby="commute-back-heading">
         <h2 id="commute-back-heading" className="fcc-section__heading">מה קורה בדרך חזרה</h2>

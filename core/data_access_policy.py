@@ -126,7 +126,7 @@ _POLICIES: dict[str, TablePolicy] = {
         Tables.COMMUTE_TRIPS, OWNER_SCOPED, owner_field=CommuteTripFields.FINANCIAL_OWNER,
         linked_owner_checks=((CommuteTripFields.ROUTE, Tables.COMMUTE_ROUTES),),
         single_links=(CommuteTripFields.ROUTE,),
-        digit_guard=(CommuteTripFields.NAME, CommuteTripFields.NOTE, CommuteTripFields.DESTINATION, CommuteTripFields.ON_THE_WAY_OF),
+        digit_guard=(CommuteTripFields.NAME, CommuteTripFields.NOTE, CommuteTripFields.DESTINATION, CommuteTripFields.ON_THE_WAY_OF, CommuteTripFields.CITY, CommuteTripFields.AREA),
     ),
     # Funding Plans (funding planner step 2): a saved plan snapshot for ONE of the owner's goals. Owner-of-record only; the goal link must be
     # the caller's own and a single record. The snapshots are server-built JSON (not user text), so only the free-text fields are digit-guarded.

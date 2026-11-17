@@ -95,7 +95,7 @@ const KIND_LABEL: Record<CommuteKind, string> = { ride: "נסיעה", delivery: 
 export interface TripRow { key: string; date: string; route: string; result: string; detail: string; amount: string; perKm: string }
 export function tripRows(v: FccCommute): TripRow[] {
   return v.trips.map((t) => {
-    const bits = [t.start_time ? `יציאה ${t.start_time}` : null, t.vehicle_class ? CLASS_LABEL[t.vehicle_class] : null, t.return_status ? RETURN_LABEL[t.return_status] : null, t.on_the_way_of ? `על הדרך של ${t.on_the_way_of}` : null,
+    const bits = [t.city ? (t.area ? `${t.city} · ${t.area}` : t.city) : null, t.added_stops ? `${t.added_stops} תחנות (+${money(t.stops_price)})` : null, t.start_time ? `יציאה ${t.start_time}` : null, t.vehicle_class ? CLASS_LABEL[t.vehicle_class] : null, t.return_status ? RETURN_LABEL[t.return_status] : null, t.on_the_way_of ? `על הדרך של ${t.on_the_way_of}` : null,
       t.km != null ? `${num(t.km)} ק"מ` : null].filter((x): x is string => !!x);
     return {
       key: t.id, date: `${t.weekday} ${dmy(t.date)}`, route: t.route ?? UNKNOWN,
@@ -129,6 +129,38 @@ const profitRow = (key: string, label: string, s: FccCommuteStats, extra = ""): 
   ({ key, label, rides: String(s.rides), avgPrice: m(s.avg_price), perKm: m(s.gross_per_km), perHour: m(s.gross_per_hour), netPerHour: m(s.net_per_hour), extra });
 
 /** Which rides were worth it, best ₪ per allowance-km first. "vs average" is a number, never a verdict: the owner decides. */
+export interface PlaceRow { key: string; label: string; rides: string; avgPrice: string; perKm: string; perHour: string; vsAverage: string }
+const placeRow = (r: FccCommuteProfit["by_city"][number]): PlaceRow => ({
+  key: `${r.city}|${r.area ?? ""}`, label: r.area ? `${r.city} · ${r.area}` : r.city, rides: String(r.rides), avgPrice: m(r.avg_price), perKm: m(r.gross_per_km), perHour: m(r.gross_per_hour),
+  vsAverage: r.vs_average_per_km == null ? UNKNOWN : `${r.vs_average_per_km >= 0 ? "+" : "−"}${money(Math.abs(r.vs_average_per_km))}`,
+});
+
+/** Where: a city's profitability is not another's, and inside a city the entrance is not a remote neighbourhood — cities, then areas, each against his average per km. */
+export function placeModel(p: FccCommuteProfit): { cities: PlaceRow[]; areas: PlaceRow[]; note: string | null } {
+  return { cities: p.by_city.map(placeRow), areas: p.by_area.map(placeRow), note: p.without_place ? `${p.without_place} נסיעות בלי עיר לא נכנסו להשוואת המקומות — הוסיפו עיר ואזור` : null };
+}
+
+export interface StopsModel { lines: MetricRow[]; bands: { key: string; label: string; rides: string; minutes: string; perHour: string }[]; note: string | null }
+/** The extra stops: what they earned on their own (the surcharge against the km and minutes THEY added), what they did to the whole ride, and by hour — a stop on the way is not a stop across the city in the rush hour. */
+export function stopsModel(p: FccCommuteProfit): StopsModel | null {
+  const s = p.stops;
+  if (!s) return null;
+  return {
+    lines: [
+      { label: "נסיעות עם תחנות", value: `${s.rides} (${s.stops} תחנות)` },
+      { label: "תוספת ממוצעת לנסיעה", value: m(s.avg_price) },
+      { label: "דקות לתחנה (ממוצע)", value: s.avg_minutes_per_stop == null ? UNKNOWN : `${num(s.avg_minutes_per_stop)} דק׳` },
+      { label: 'ק"מ לתחנה (ממוצע)', value: s.avg_km_per_stop == null ? UNKNOWN : num(s.avg_km_per_stop) },
+      { label: "התחנות לבדן — לשעה", value: m(s.per_hour) },
+      { label: 'התחנות לבדן — לק"מ', value: m(s.per_km) },
+      { label: "כל הנסיעה לשעה: עם התחנות", value: m(s.ride_per_hour_with) },
+      { label: "כל הנסיעה לשעה: בלי התחנות", value: m(s.ride_per_hour_without) },
+    ],
+    bands: s.by_band.map((b) => ({ key: b.band, label: b.label, rides: String(b.rides), minutes: b.avg_minutes_per_stop == null ? UNKNOWN : `${num(b.avg_minutes_per_stop)} דק׳`, perHour: m(b.per_hour) })),
+    note: s.note,
+  };
+}
+
 export interface TimeRow { key: string; label: string; rides: string; avgMinutes: string; perHour: string; perKm: string }
 export interface TimeInsight { key: string; title: string; detail: string }
 
@@ -204,8 +236,8 @@ export function routeBody(form: RouteForm, routeId?: string): { body: FccCommute
   return { body };
 }
 
-export interface TripForm { start: string; destination: string; date: string; price: string; cls: CommuteClass | ""; kind: CommuteKind; km: string; minutes: string; ret: CommuteReturn | ""; waiting: string; onWay: string; extraKm: string; extraMinutes: string }
-export const emptyTripForm = (today: string): TripForm => ({ start: "", destination: "", date: today, price: "", cls: "", kind: "ride", km: "", minutes: "", ret: "", waiting: "", onWay: "", extraKm: "", extraMinutes: "" });
+export interface TripForm { city: string; area: string; stops: string; stopsPrice: string; stopsKm: string; stopsMinutes: string; start: string; destination: string; date: string; price: string; cls: CommuteClass | ""; kind: CommuteKind; km: string; minutes: string; ret: CommuteReturn | ""; waiting: string; onWay: string; extraKm: string; extraMinutes: string }
+export const emptyTripForm = (today: string): TripForm => ({ city: "", area: "", stops: "", stopsPrice: "", stopsKm: "", stopsMinutes: "", start: "", destination: "", date: today, price: "", cls: "", kind: "ride", km: "", minutes: "", ret: "", waiting: "", onWay: "", extraKm: "", extraMinutes: "" });
 
 /** One typed trip: the price is typed every time (there is no price list). "On the way" = the km / minutes it ADDED replace the one-way based ones. */
 export function tripBody(form: TripForm): { body: FccCommuteTripBody } | { error: string } {
@@ -213,9 +245,13 @@ export function tripBody(form: TripForm): { body: FccCommuteTripBody } | { error
   const body: FccCommuteTripBody = { destination: form.destination.trim(), kind: form.kind };
   if (/^\d{4}-\d{2}-\d{2}$/.test(form.date)) body.date = form.date;
   const err = fill(body, [["price", form.price, "מחיר"], ["km_one_way", form.km, 'ק"מ'], ["minutes_one_way", form.minutes, "דקות"], ["waiting_minutes", form.ret === "waited" ? form.waiting : "", "דקות המתנה"],
-    ["extra_km", form.extraKm, 'ק"מ עיקוף'], ["extra_minutes", form.extraMinutes, "דקות עיקוף"]]);
+    ["extra_km", form.extraKm, 'ק"מ עיקוף'], ["extra_minutes", form.extraMinutes, "דקות עיקוף"], ["added_stops", form.stops, "מספר תחנות"], ["stops_price", form.stopsPrice, "תוספת התחנות"],
+    ["stops_km", form.stopsKm, 'ק"מ התחנות'], ["stops_minutes", form.stopsMinutes, "דקות התחנות"]]);
   if (err) return { error: err };
   if (body.price == null) return { error: "צריך מחיר" };
+  if (body.stops_price != null && body.stops_price > body.price) return { error: "תוספת התחנות לא יכולה להיות יותר מהמחיר" };
+  if (form.city.trim()) body.city = form.city.trim();
+  if (form.area.trim()) body.area = form.area.trim();
   if (form.cls) body.vehicle_class = form.cls;
   if (form.start) { if (!TIME_RE.test(form.start)) return { error: "שעת יציאה: HH:MM" }; body.start_time = form.start; }
   if (form.ret) body.return_status = form.ret;
@@ -242,9 +278,13 @@ export function settingsBody(form: SettingsForm): { body: FccCommuteSettingsBody
 export function evaluateBody(form: TripForm): { body: FccCommuteOfferBody } | { error: string } {
   const body = {} as FccCommuteOfferBody;
   const err = fill(body, [["price", form.price, "מחיר"], ["km_one_way", form.onWay ? "" : form.km, 'ק"מ'], ["minutes_one_way", form.onWay ? "" : form.minutes, "דקות"],
-    ["waiting_minutes", !form.onWay && form.ret !== "empty" && form.ret !== "continuation" ? form.waiting : "", "דקות המתנה"], ["extra_km", form.onWay ? form.extraKm : "", 'ק"מ עיקוף'], ["extra_minutes", form.onWay ? form.extraMinutes : "", "דקות עיקוף"]]);
+    ["waiting_minutes", !form.onWay && form.ret !== "empty" && form.ret !== "continuation" ? form.waiting : "", "דקות המתנה"], ["extra_km", form.onWay ? form.extraKm : "", 'ק"מ עיקוף'], ["extra_minutes", form.onWay ? form.extraMinutes : "", "דקות עיקוף"],
+    ["added_stops", form.stops, "מספר תחנות"], ["stops_price", form.stopsPrice, "תוספת התחנות"], ["stops_km", form.stopsKm, 'ק"מ התחנות'], ["stops_minutes", form.stopsMinutes, "דקות התחנות"]]);
   if (err) return { error: err };
   if (body.price == null || body.price <= 0) return { error: "צריך מחיר" };
+  if (body.stops_price != null && body.stops_price > body.price) return { error: "תוספת התחנות לא יכולה להיות יותר מהמחיר" };
+  if (form.city.trim()) body.city = form.city.trim();
+  if (form.area.trim()) body.area = form.area.trim();
   if (form.destination.trim()) body.destination = form.destination.trim();
   if (form.start) { if (!TIME_RE.test(form.start)) return { error: "שעת יציאה: HH:MM" }; body.start_time = form.start; }
   if (form.onWay && body.extra_km == null) return { error: 'הזינו ק"מ עיקוף' };
@@ -252,7 +292,7 @@ export function evaluateBody(form: TripForm): { body: FccCommuteOfferBody } | { 
 }
 
 export interface ScenarioRow { key: string; label: string; km: string; minutes: string; perKm: string; perHour: string; netPerHour: string; allowance: string }
-export interface EvaluationModel { headline: string | null; rows: ScenarioRow[]; expected: ScenarioRow | null; basis: string | null; vsAverage: string | null; typical: string | null; allowance: string | null; notes: string[] }
+export interface EvaluationModel { headline: string | null; rows: ScenarioRow[]; expected: ScenarioRow | null; basis: string | null; vsAverage: string | null; typical: string | null; allowance: string | null; place: string | null; stops: string | null; notes: string[] }
 
 const scenarioRow = (s: FccCommuteScenario): ScenarioRow => ({
   key: s.key, label: s.label, km: s.km == null ? UNKNOWN : num(s.km, ' ק"מ'), minutes: s.minutes == null ? UNKNOWN : `${num(s.minutes)} דק׳`, perKm: m(s.gross_per_km), perHour: m(s.gross_per_hour), netPerHour: m(s.net_per_hour),
@@ -265,14 +305,20 @@ export function evaluationModel(ev: FccCommuteEvaluation): EvaluationModel {
   const hours = ev.scenarios.map((s) => s.gross_per_hour).filter((x): x is number => x != null);
   const sign = (n: number | null | undefined): string => (n == null ? UNKNOWN : `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`);
   const w = ev.basis.weights;
-  const basis = ev.basis.used === "destination" ? `לפי ${ev.basis.destination_sample} נסיעות קודמות ליעד: חוזר ריק ${pct(w?.empty)}, יש המשך ${pct(w?.continuation)}, המתנה ${pct(w?.waited)}`
-    : ev.basis.used === "overall" ? `ליעד הזה אין מספיק היסטוריה — לפי ${ev.basis.overall_sample} נסיעות שלך בסך הכול: חוזר ריק ${pct(w?.empty)}, יש המשך ${pct(w?.continuation)}, המתנה ${pct(w?.waited)}` : null;
+  const split = `חוזר ריק ${pct(w?.empty)}, יש המשך ${pct(w?.continuation)}, המתנה ${pct(w?.waited)}`;
+  const level = { area: "אזור", city: "עיר", destination: "יעד" } as const;
+  const basis = ev.basis.used && ev.basis.used !== "overall" ? `לפי ${ev.basis.sample} נסיעות קודמות ל${level[ev.basis.used]} הזה: ${split}`
+    : ev.basis.used === "overall" ? `לאזור/ליעד הזה אין מספיק היסטוריה — לפי ${ev.basis.overall_sample} נסיעות שלך בסך הכול: ${split}` : null;
   return {
     headline: ev.expected ? `צפוי: ${m(ev.expected.gross_per_hour)} לשעה · ${m(ev.expected.gross_per_km)} לק"מ` : hours.length > 1 ? `בין ${money(Math.min(...hours))} ל-${money(Math.max(...hours))} לשעה, לפי הדרך חזרה` : hours.length === 1 ? `${money(hours[0])} לשעה` : null,
     rows: ev.expected ? rows.filter((r) => r.key !== "expected") : rows, expected: ev.expected ? scenarioRow(ev.expected) : null, basis,
     vsAverage: ev.vs_average && (ev.vs_average.per_km != null || ev.vs_average.per_hour != null) ? `לעומת הממוצע שלך (${ev.average?.rides ?? 0} נסיעות): ${sign(ev.vs_average.per_km)} לק"מ · ${sign(ev.vs_average.per_hour)} לשעה` : null,
     typical: ev.typical_at_this_hour ? `ליעד הזה בשעות ${ev.typical_at_this_hour.band} נסעת בממוצע ${num(ev.typical_at_this_hour.avg_minutes_one_way)} דק׳ לכיוון (${ev.typical_at_this_hour.rides} נסיעות)` : null,
     allowance: ev.allowance_remaining_km == null ? null : `נותרו במכסה ${num(ev.allowance_remaining_km)} ק"מ החודש`, notes: ev.notes,
+    place: ev.place ? `${ev.place.level === "area" ? "באזור" : "בעיר"} ${ev.place.label} (${ev.place.rides} נסיעות שלך): ממוצע ${m(ev.place.avg_price)} · ${m(ev.place.gross_per_km)} לק"מ · ${m(ev.place.gross_per_hour)} לשעה` : null,
+    stops: ev.stops ? [`${ev.stops.added ? `${ev.stops.added} תחנות` : "תחנות"}: תוספת ${m(ev.stops.price)} על ${num(ev.stops.km)} ק"מ ו-${num(ev.stops.minutes)} דק׳${ev.stops.band ? ` (${ev.stops.band})` : ""}`,
+      `התחנות לבדן: ${m(ev.stops.per_hour)} לשעה · ${m(ev.stops.per_km)} לק"מ${ev.stops.owner_per_hour == null ? "" : ` (בנסיעות קודמות שלך: ${m(ev.stops.owner_per_hour)} לשעה)`}`,
+      `כל הנסיעה: ${m(ev.stops.total_gross_per_hour)} לשעה עם התחנות מול ${m(ev.stops.base_gross_per_hour)} בלעדיהן`].join(" · ") : null,
   };
 }
 
@@ -301,7 +347,8 @@ export function returnModel(r: FccCommuteReturnStats): { rows: ReturnRow[]; note
     return { key, label, known: String(b.known), empty: share(b.empty), continuation: share(b.continuation), waited: `${share(b.waited)}${b.avg_wait_minutes ? ` (${num(b.avg_wait_minutes)} דק׳)` : ""}` };
   };
   return {
-    rows: [row("all", "הכול", r.overall), ...r.by_destination.map((d) => row(d.destination, d.destination, d))],
-    note: `זה מה שקרה בנסיעות שתיעדת — אקראי ועם תחרות, לא הבטחה. הממוצע המשוקלל בבדיקת הצעה מופיע אחרי ${r.min_destination} נסיעות מתועדות ליעד או ${r.min_overall} בסך הכול.`,
+    rows: [row("all", "הכול", r.overall), ...r.by_area.map((a) => row(`a-${a.city}-${a.area}`, `${a.city} · ${a.area}`, a)), ...r.by_city.map((c) => row(`c-${c.city}`, `${c.city} (כל העיר)`, c)),
+      ...r.by_destination.map((d) => row(`d-${d.destination}`, d.destination, d))],
+    note: `זה מה שקרה בנסיעות שתיעדת — אקראי ועם תחרות, לא הבטחה. הממוצע המשוקלל בבדיקת הצעה מופיע אחרי ${r.min_destination} נסיעות מתועדות לאזור (אחרת לעיר, אחרת ליעד) או ${r.min_overall} בסך הכול.`,
   };
 }

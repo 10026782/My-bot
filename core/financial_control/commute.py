@@ -18,6 +18,10 @@ This module only *derives*:
 * the leased car's free monthly allowance (km and fuel ₪, entered once): what is left of it this month, and which rides use it best — inside the allowance a km costs nothing, so
   the ride's gross IS its profit and the scarce thing is the km (₪ per allowance-km); beyond it a km costs the owner's cost per km;
 * a ride "on the way" of one of the owner's OWN weekly drives (a delivery counts the same): only the km and minutes it ADDED count (``Extra Km`` / ``Extra Minutes``);
+* WHERE: a city's profitability is not another's, and inside Jerusalem the entrance to the city is not a remote neighbourhood — a trip carries its city and area, and the profitability
+  and the way-back history are read per area (else per city);
+* EXTRA STOPS: a stop on the way is not a stop from one end of the city to the other in the rush hour — a trip carries how many stops, the surcharge for them and the km and minutes THEY
+  added, so the stops' own ₪ per hour (and what they did to the whole ride) is visible, per band of the day;
 * the time of day: what traffic does to a ride's length — the same destination compared across bands of the day (minutes, ₪ per hour); a fact is said only with a real sample;
 * the profitability by destination, by price class and by kind (ride / delivery) — which rides were worth it — as numbers and a comparison with the average, never a verdict by a threshold;
 * income entries (``cashflow.Txn``) for the monthly income model — the SAME numbers, no second formula.
@@ -120,7 +124,9 @@ def parse_trip(rec: dict) -> dict | None:
             "km_one_way": _num(f.get("Km One Way")), "minutes_one_way": _num(f.get("Minutes One Way")), "return_status": _ret(f.get("Return Status")),
             "waiting_minutes": _num(f.get("Waiting Minutes")) or 0.0, "kind": "delivery" if _sel(f.get("Kind")) == "delivery" else "ride",
             "extra_km": _num(f.get("Extra Km")), "extra_minutes": _num(f.get("Extra Minutes")), "on_the_way_of": str(f.get("On The Way Of") or "").strip() or None,
-            "start_time": _time(f.get("Start Time"))}
+            "start_time": _time(f.get("Start Time")), "city": str(f.get("City") or "").strip() or None, "area": str(f.get("Area") or "").strip() or None,
+            "added_stops": int(_num(f.get("Added Stops")) or 0), "stops_price": _num(f.get("Stops Price")) or 0.0, "stops_km": _num(f.get("Stops Km")) or 0.0,
+            "stops_minutes": _num(f.get("Stops Minutes")) or 0.0}
 
 
 def parse_settings(records: list[dict]) -> dict | None:
@@ -150,9 +156,11 @@ def default_cost_per_km(routes: list[dict], settings: dict | None = None) -> flo
 
 
 def ride_economics(price: float | None, km_one_way: float | None, minutes_one_way: float | None, return_status: str | None, waiting_minutes: float,
-                   cost_per_km: float | None, extra_km: float | None = None, extra_minutes: float | None = None) -> dict:
+                   cost_per_km: float | None, extra_km: float | None = None, extra_minutes: float | None = None, stops_km: float = 0.0, stops_minutes: float = 0.0,
+                   stops_price: float = 0.0) -> dict:
     """One ride. A ride with a paid continuation counts ONE way; every other ride is there and back, plus the waiting minutes. A ride fitted on the way of the owner's own
-    drive counts only what it ADDED (``extra_km`` / ``extra_minutes`` replace the one-way based figures). Every figure is None while an input is missing.
+    drive counts only what it ADDED (``extra_km`` / ``extra_minutes`` replace the one-way based figures). EXTRA STOPS add their own km and minutes on top, and their surcharge is part
+    of the price: ``stops_*`` shows what the stops earned on their own and ``base_*`` what the ride would have earned without them. Every figure is None while an input is missing.
     ``gross_*`` is what the ride earns while the km are free (inside the allowance); ``net_*`` also takes the cost per km (beyond it)."""
     legs = 1 if return_status == "continuation" else 2
     km = extra_km if extra_km is not None else (round(km_one_way * legs, 2) if km_one_way is not None else None)
@@ -160,13 +168,24 @@ def ride_economics(price: float | None, km_one_way: float | None, minutes_one_wa
         minutes = extra_minutes
     else:
         minutes = round(minutes_one_way * legs + (waiting_minutes or 0.0), 2) if minutes_one_way is not None else None
+    base_km, base_minutes = km, minutes
+    if km is not None:
+        km = round(km + (stops_km or 0.0), 2)
+    if minutes is not None:
+        minutes = round(minutes + (stops_minutes or 0.0), 2)
     hours = minutes / 60 if minutes else None
     vehicle = round(km * cost_per_km, 2) if km is not None and cost_per_km is not None else None
     net = round(price - vehicle, 2) if price is not None and vehicle is not None else None
     r = lambda x: None if x is None else round(x, 2)
+    base_price = price - (stops_price or 0.0) if price is not None else None
+    stops_hours = (stops_minutes or 0.0) / 60
     return {"price": price, "legs": legs, "km": km, "minutes": minutes, "hours": r(hours), "on_the_way": extra_km is not None,
             "gross_per_hour": r(price / hours) if price is not None and hours else None, "gross_per_km": r(price / km) if price is not None and km else None,
-            "vehicle_cost": vehicle, "net": net, "net_per_hour": r(net / hours) if net is not None and hours else None, "net_per_km": r(net / km) if net is not None and km else None}
+            "vehicle_cost": vehicle, "net": net, "net_per_hour": r(net / hours) if net is not None and hours else None, "net_per_km": r(net / km) if net is not None and km else None,
+            "stops_price": stops_price or 0.0, "stops_km": stops_km or 0.0, "stops_minutes": stops_minutes or 0.0,
+            "stops_per_hour": r(stops_price / stops_hours) if stops_price and stops_hours else None, "stops_per_km": r(stops_price / stops_km) if stops_price and stops_km else None,
+            "base_gross_per_hour": r(base_price / (base_minutes / 60)) if base_price is not None and base_minutes else None,
+            "base_gross_per_km": r(base_price / base_km) if base_price is not None and base_km else None}
 
 
 def economics(route: dict) -> dict:
@@ -244,7 +263,7 @@ def _trip_ride(trip: dict, routes_by_id: dict, cost: float | None) -> tuple[str,
         e = ride_economics(price, route["km_one_way"], route["minutes_one_way"], route["return_status"], route["waiting_minutes"], route["cost_per_km"] if route["cost_per_km"] is not None else cost)
         return route["name"], e, route
     return trip["destination"] or ONE_OFF_SOURCE, ride_economics(price, trip["km_one_way"], trip["minutes_one_way"], trip["return_status"], trip["waiting_minutes"], cost,
-                                                                 trip["extra_km"], trip["extra_minutes"]), None
+                                                                 trip["extra_km"], trip["extra_minutes"], trip["stops_km"], trip["stops_minutes"], trip["stops_price"]), None
 
 
 def _sum(values: list[float | None]) -> float | None:
@@ -294,10 +313,8 @@ def _time_insights(groups: dict[str, list[dict]]) -> list[dict]:
     return sorted(out, key=lambda x: -x["extra_minutes"])
 
 
-def profitability(routes: list[dict], trips: list[dict], settings: dict | None = None) -> dict:
-    """Which rides were worth it: per destination (a route or a one-off destination, by name), per price class, per kind (ride / delivery) and "on the way" vs not.
-    The owner's constraint is the free km of the leased car, so the destinations are ranked by ₪ per allowance-km (gross per km); the ₪ per hour sits beside it, and the net
-    figures (beyond the allowance) when a cost per km is known. Where each stands against the average is a number, never a verdict by a threshold: the owner decides."""
+def _profit_rides(routes: list[dict], trips: list[dict], settings: dict | None) -> list[dict]:
+    """Every "yes" ride with its economics and the facts the profitability groups by."""
     cost = default_cost_per_km(routes, settings)
     by_id = {r["id"]: r for r in routes}
     rides = []
@@ -307,18 +324,78 @@ def profitability(routes: list[dict], trips: list[dict], settings: dict | None =
         name, e, route = _trip_ride(t, by_id, cost)
         start = t["start_time"] or (route or {}).get("start_time")
         rides.append({"name": name.strip(), "key": name.strip().casefold(), "class": t["vehicle_class"] or (route or {}).get("vehicle_class"), "kind": t["kind"],
-                      "return": t["return_status"] or (route or {}).get("return_status"), "e": e, "price": e["price"], "band": band_of(start)})
+                      "return": t["return_status"] or (route or {}).get("return_status"), "e": e, "price": e["price"], "band": band_of(start), "city": t["city"], "area": t["area"],
+                      "added": t["added_stops"]})
+    return rides
+
+
+def _stops_view(rides: list[dict]) -> dict | None:
+    """What the extra stops were worth: on their own (the surcharge against the km and minutes THEY added) and what they did to the whole ride (₪ per hour with them vs without), and by
+    band of the day — a stop on the way is not a stop across the city in the rush hour. Facts and numbers only."""
+    withs = [g for g in rides if g["added"] or g["e"]["stops_price"] or g["e"]["stops_km"] or g["e"]["stops_minutes"]]
+    if not withs:
+        return None
+    timed = [g for g in withs if g["e"]["stops_minutes"] and g["e"]["minutes"]]
+    div = lambda a, b: round(a / b, 2) if a is not None and b else None
+    sp, sm, sk = sum(g["e"]["stops_price"] for g in timed), sum(g["e"]["stops_minutes"] for g in timed), sum(g["e"]["stops_km"] for g in timed)
+    count = sum(g["added"] for g in timed if g["added"])
+    total_price, total_min = sum(g["e"]["price"] or 0.0 for g in timed), sum(g["e"]["minutes"] for g in timed)
+    base_price, base_min = total_price - sp, total_min - sm
+    bands = []
+    for _, _, key, label in BANDS:
+        part = [g for g in timed if g["band"] == key]
+        if part:
+            minutes = sum(g["e"]["stops_minutes"] for g in part)
+            n = sum(g["added"] for g in part if g["added"])
+            bands.append({"band": key, "label": label, "rides": len(part), "avg_minutes_per_stop": div(minutes, n), "per_hour": div(sum(g["e"]["stops_price"] for g in part), minutes / 60)})
+    rush = [b for b in bands if "rush" in b["band"] and b["avg_minutes_per_stop"] is not None]
+    calm = [b for b in bands if "rush" not in b["band"] and b["avg_minutes_per_stop"] is not None]
+    note = None
+    if rush and calm and sum(b["rides"] for b in rush) >= MIN_BAND_RIDES and sum(b["rides"] for b in calm) >= MIN_BAND_RIDES:
+        r_avg = sum(b["avg_minutes_per_stop"] * b["rides"] for b in rush) / sum(b["rides"] for b in rush)
+        c_avg = sum(b["avg_minutes_per_stop"] * b["rides"] for b in calm) / sum(b["rides"] for b in calm)
+        if r_avg >= c_avg * (1 + MIN_BAND_GAP):
+            note = f"תחנה בשעת עומס לוקחת בממוצע {round(r_avg, 1)} דק׳ לעומת {round(c_avg, 1)} דק׳ בשעות אחרות"
+    return {"rides": len(withs), "measured_rides": len(timed), "stops": count, "avg_price": round(sum(g["e"]["stops_price"] for g in withs) / len(withs), 2),
+            "avg_minutes_per_stop": div(sm, count), "avg_km_per_stop": div(sk, count), "per_hour": div(sp, sm / 60) if sm else None, "per_km": div(sp, sk),
+            "ride_per_hour_with": div(total_price, total_min / 60) if total_min else None, "ride_per_hour_without": div(base_price, base_min / 60) if base_min else None, "by_band": bands, "note": note}
+
+
+def profitability(routes: list[dict], trips: list[dict], settings: dict | None = None) -> dict:
+    """Which rides were worth it: per destination (a route or a one-off destination, by name), per CITY and per AREA (the entrance to a city is not a remote neighbourhood), per price class,
+    per kind (ride / delivery) and "on the way" vs not — plus what the extra stops were worth. The owner's constraint is the free km of the leased car, so the destinations are ranked by
+    ₪ per allowance-km (gross per km); the ₪ per hour sits beside it, and the net figures (beyond the allowance) when a cost per km is known. Where each stands against the average is a
+    number, never a verdict by a threshold: the owner decides."""
+    cost = default_cost_per_km(routes, settings)
+    rides = _profit_rides(routes, trips, settings)
     overall = _stats(rides) if rides else None
+    base = overall["gross_per_km"] if overall else None
+    vs = lambda row: round(row["gross_per_km"] - base, 2) if row["gross_per_km"] is not None and base is not None else None
     groups: dict[str, list[dict]] = {}
     for g in rides:
         groups.setdefault(g["key"], []).append(g)
     rows = []
     for group in groups.values():
         row = {"destination": group[0]["name"], **_stats(group), "classes": sorted({g["class"] for g in group if g["class"]}), "kinds": sorted({g["kind"] for g in group})}
-        base = overall["gross_per_km"] if overall else None
-        row["vs_average_per_km"] = round(row["gross_per_km"] - base, 2) if row["gross_per_km"] is not None and base is not None else None
+        row["vs_average_per_km"] = vs(row)
         rows.append(row)
     rows.sort(key=lambda r: (r["gross_per_km"] is None, -(r["gross_per_km"] or 0), r["destination"]))
+
+    cities: dict[str, list[dict]] = {}
+    areas: dict[str, list[dict]] = {}
+    for g in rides:
+        if g["city"]:
+            cities.setdefault(_place_key(g["city"]), []).append(g)
+            if g["area"]:
+                areas.setdefault(_place_key(g["city"], g["area"]), []).append(g)
+    def place_rows(groups_: dict[str, list[dict]]) -> list[dict]:
+        out = []
+        for group in groups_.values():
+            row = {"city": group[0]["city"], "area": group[0]["area"] if group[0]["area"] and groups_ is areas else None, **_stats(group)}
+            row["vs_average_per_km"] = vs(row)
+            out.append(row)
+        return sorted(out, key=lambda r: (r["gross_per_km"] is None, -(r["gross_per_km"] or 0), r["city"], r["area"] or ""))
+
     def split(field, labels):
         out = []
         for value, label in labels.items():
@@ -329,7 +406,10 @@ def profitability(routes: list[dict], trips: list[dict], settings: dict | None =
     on_way = [g for g in rides if g["e"]["on_the_way"]]
     off_way = [g for g in rides if not g["e"]["on_the_way"]]
     by_time = [{"band": key, "label": label, **_stats(g), "avg_minutes": _avg_minutes(g)} for _, _, key, label in BANDS if (g := [x for x in rides if x["band"] == key])]
-    return {"time_insights": _time_insights(groups), "by_time": by_time, "without_time": sum(1 for g in rides if g["band"] is None), "cost_per_km": cost, "overall": overall, "by_destination": rows, "by_class": split("class", CLASS_LABEL), "by_kind": split("kind", KIND_LABEL),
+    return {"time_insights": _time_insights(groups), "by_time": by_time, "without_time": sum(1 for g in rides if g["band"] is None), "cost_per_km": cost, "overall": overall,
+            "by_destination": rows, "by_city": place_rows(cities), "by_area": place_rows(areas), "without_place": sum(1 for g in rides if not g["city"]),
+            "stops": _stops_view(rides),
+            "by_class": split("class", CLASS_LABEL), "by_kind": split("kind", KIND_LABEL),
             "by_way": ([{"on_the_way": True, "label": "על הדרך", **_stats(on_way)}] if on_way else []) + ([{"on_the_way": False, "label": "נסיעה ייעודית", **_stats(off_way)}] if off_way else [])}
 
 
@@ -394,27 +474,39 @@ def income_sources(route_records: list[dict], trip_records: list[dict], taken_na
     return sources
 
 
+def _place_key(city: str | None, area: str | None = None) -> str:
+    return f"{(city or '').strip().casefold()}|{(area or '').strip().casefold()}"
+
+
 def return_stats(trips: list[dict]) -> dict:
-    """What happened on the way back of the owner's ONE-OFF trips, where he recorded it: per destination and overall, the counts of ``empty`` / ``continuation`` / ``waited``, and the
-    average minutes waited. A trip whose way back is not recorded yet (``return_status`` empty) is not in these numbers — it waits for the owner and does not hold the engine back.
-    The history is random and has competition: this is what happened, with its sample size, never a promise."""
+    """What happened on the way back of the owner's ONE-OFF trips, where he recorded it: per area, per city, per destination and overall — the counts of ``empty`` /
+    ``continuation`` / ``waited`` and the average minutes waited. A trip whose way back is not recorded yet (``return_status`` empty) is not in these numbers — it waits for the owner
+    and does not hold the engine back. The history is random and has competition: this is what happened, with its sample size, never a promise."""
     def block(group: list[dict]) -> dict:
         known = [t for t in group if t["return_status"]]
         waited = [t["waiting_minutes"] for t in known if t["return_status"] == "waited"]
-        out = {"known": len(known), "empty": sum(1 for t in known if t["return_status"] == "empty"), "continuation": sum(1 for t in known if t["return_status"] == "continuation"),
-               "waited": len(waited), "avg_wait_minutes": round(sum(waited) / len(waited), 1) if waited else None}
-        return out
+        return {"known": len(known), "empty": sum(1 for t in known if t["return_status"] == "empty"), "continuation": sum(1 for t in known if t["return_status"] == "continuation"),
+                "waited": len(waited), "avg_wait_minutes": round(sum(waited) / len(waited), 1) if waited else None}
     one_off = [t for t in trips if t["route_id"] is None and t["outcome"] == "yes"]
-    groups: dict[str, list[dict]] = {}
+    by_dest: dict[str, list[dict]] = {}
+    by_city: dict[str, list[dict]] = {}
+    by_area: dict[str, list[dict]] = {}
     for t in one_off:
-        groups.setdefault((t["destination"] or "").strip().casefold(), []).append(t)
-    return {"overall": block(one_off), "by_destination": {k: {"destination": g[0]["destination"], **block(g)} for k, g in groups.items() if any(t["return_status"] for t in g)}}
+        by_dest.setdefault((t["destination"] or "").strip().casefold(), []).append(t)
+        if t["city"]:
+            by_city.setdefault(_place_key(t["city"]), []).append(t)
+            if t["area"]:
+                by_area.setdefault(_place_key(t["city"], t["area"]), []).append(t)
+    known_only = lambda groups, label: {k: {**label(g[0]), **block(g)} for k, g in groups.items() if any(t["return_status"] for t in g)}
+    return {"overall": block(one_off), "by_destination": known_only(by_dest, lambda t: {"destination": t["destination"]}),
+            "by_city": known_only(by_city, lambda t: {"city": t["city"]}), "by_area": known_only(by_area, lambda t: {"city": t["city"], "area": t["area"]})}
 
 
 def _return_view(stats: dict) -> dict:
-    """The return statistics for the screen: overall and per destination (most known outcomes first)."""
-    rows = sorted(stats["by_destination"].values(), key=lambda r: (-r["known"], r["destination"]))
-    return {"overall": stats["overall"], "by_destination": rows, "min_destination": MIN_RETURN_SAMPLE, "min_overall": MIN_OVERALL_SAMPLE}
+    """The return statistics for the screen: overall and per destination / city / area (most known outcomes first)."""
+    rows = lambda d, key: sorted(d.values(), key=lambda r: (-r["known"], str(r.get(key))))
+    return {"overall": stats["overall"], "by_destination": rows(stats["by_destination"], "destination"), "by_city": rows(stats["by_city"], "city"), "by_area": rows(stats["by_area"], "area"),
+            "min_destination": MIN_RETURN_SAMPLE, "min_overall": MIN_OVERALL_SAMPLE}
 
 
 def pending_updates(trips: list[dict], today: date) -> list[dict]:
@@ -424,17 +516,29 @@ def pending_updates(trips: list[dict], today: date) -> list[dict]:
              "minutes_one_way": t["minutes_one_way"], "start_time": t["start_time"], "kind": t["kind"]} for t in sorted(out, key=lambda t: t["date"], reverse=True)]
 
 
-def _expected_weights(destination: str | None, stats: dict) -> tuple[dict[str, float] | None, str | None, int, int, float]:
-    """(weights over the three ways back, which history was used, destination sample, overall sample, average wait). The destination's own history when it has at least
-    ``MIN_RETURN_SAMPLE`` known outcomes, else the overall history when it has ``MIN_OVERALL_SAMPLE``, else None — no number is invented."""
-    own = stats["by_destination"].get((destination or "").strip().casefold()) if destination else None
+def _expected_weights(destination: str | None, city: str | None, area: str | None, stats: dict) -> tuple[dict[str, float] | None, str | None, int, int, float]:
+    """(weights over the three ways back, which history was used, its sample, overall sample, average wait). The most specific history that has at least ``MIN_RETURN_SAMPLE`` known
+    outcomes — the AREA, else the CITY, else the destination typed — else the overall history when it has ``MIN_OVERALL_SAMPLE``, else None: no number is invented."""
     overall = stats["overall"]
-    pick, used = (own, "destination") if own and own["known"] >= MIN_RETURN_SAMPLE else ((overall, "overall") if overall["known"] >= MIN_OVERALL_SAMPLE else (None, None))
-    if pick is None:
-        return None, None, own["known"] if own else 0, overall["known"], 0.0
-    n = pick["known"]
-    weights = {"empty": pick["empty"] / n, "continuation": pick["continuation"] / n, "waited": pick["waited"] / n}
-    return weights, used, own["known"] if own else 0, overall["known"], pick["avg_wait_minutes"] or 0.0
+    levels = []
+    if city and area:
+        levels.append(("area", stats["by_area"].get(_place_key(city, area))))
+    if city:
+        levels.append(("city", stats["by_city"].get(_place_key(city))))
+    if destination:
+        levels.append(("destination", stats["by_destination"].get(destination.strip().casefold())))
+    best = max((x for _, x in levels if x), key=lambda x: x["known"], default=None)
+    for name, pick in levels:
+        if pick and pick["known"] >= MIN_RETURN_SAMPLE:
+            used, chosen = name, pick
+            break
+    else:
+        used, chosen = (("overall", overall) if overall["known"] >= MIN_OVERALL_SAMPLE else (None, None))
+    sample = chosen["known"] if chosen else (best["known"] if best else 0)
+    if chosen is None:
+        return None, None, sample, overall["known"], 0.0
+    n = chosen["known"]
+    return {"empty": chosen["empty"] / n, "continuation": chosen["continuation"] / n, "waited": chosen["waited"] / n}, used, sample, overall["known"], chosen["avg_wait_minutes"] or 0.0
 
 
 def evaluate_offer(offer: dict, route_records: list[dict], trip_records: list[dict], today: date, settings_records: list[dict] | None = None) -> dict:
@@ -451,9 +555,12 @@ def evaluate_offer(offer: dict, route_records: list[dict], trip_records: list[di
     km1, min1 = _num(offer.get("km_one_way")), _num(offer.get("minutes_one_way"))
     extra_km, extra_min = _num(offer.get("extra_km")), _num(offer.get("extra_minutes"))
     destination = str(offer.get("destination") or "").strip() or None
+    city, area = str(offer.get("city") or "").strip() or None, str(offer.get("area") or "").strip() or None
     start = _time(offer.get("start_time"))
+    stops_price, stops_km, stops_min = _num(offer.get("stops_price")) or 0.0, _num(offer.get("stops_km")) or 0.0, _num(offer.get("stops_minutes")) or 0.0
+    added = int(_num(offer.get("added_stops")) or 0)
     stats = return_stats(trips)
-    weights, used, dest_n, overall_n, hist_wait = _expected_weights(destination, stats)
+    weights, used, sample_n, overall_n, hist_wait = _expected_weights(destination, city, area, stats)
     typed_wait = _num(offer.get("waiting_minutes"))
     wait = typed_wait if typed_wait is not None else hist_wait
 
@@ -467,17 +574,18 @@ def evaluate_offer(offer: dict, route_records: list[dict], trip_records: list[di
         beyond = round(km - free, 1) if free is not None else None
         paid = round(beyond * cost, 2) if beyond is not None and cost is not None else None
         return {"key": key, "label": label, "km": km, "minutes": e["minutes"], "gross_per_hour": e["gross_per_hour"], "gross_per_km": e["gross_per_km"], "net_per_hour": e["net_per_hour"],
-                "net_per_km": e["net_per_km"], "net": e["net"], "free_km": free, "beyond_km": beyond, "cost_beyond": paid,
+                "net_per_km": e["net_per_km"], "net": e["net"], "free_km": free, "beyond_km": beyond, "cost_beyond": paid, "stops_per_hour": e["stops_per_hour"], "stops_per_km": e["stops_per_km"],
+                "base_gross_per_hour": e["base_gross_per_hour"],
                 "net_after_allowance": round(price - paid, 2) if paid is not None and price is not None else None}
     notes: list[str] = []
     if extra_km is not None:                                   # fitted on the way of an own drive: only the detour counts, the way back does not matter
-        scenarios = [scenario("on_the_way", "על הדרך (רק העיקוף)", ride_economics(price, km1, min1, "empty", 0.0, cost, extra_km, extra_min))]
+        scenarios = [scenario("on_the_way", "על הדרך (רק העיקוף)", ride_economics(price, km1, min1, "empty", 0.0, cost, extra_km, extra_min, stops_km, stops_min, stops_price))]
         expected = scenarios[0]
     else:
-        scenarios = [scenario("empty", RETURN_LABEL["empty"], ride_economics(price, km1, min1, "empty", 0.0, cost)),
-                     scenario("continuation", RETURN_LABEL["continuation"] + " (המחיר לכיוון אחד)", ride_economics(price, km1, min1, "continuation", 0.0, cost))]
+        scenarios = [scenario("empty", RETURN_LABEL["empty"], ride_economics(price, km1, min1, "empty", 0.0, cost, None, None, stops_km, stops_min, stops_price)),
+                     scenario("continuation", RETURN_LABEL["continuation"] + " (המחיר לכיוון אחד)", ride_economics(price, km1, min1, "continuation", 0.0, cost, None, None, stops_km, stops_min, stops_price))]
         if wait:
-            scenarios.append(scenario("waited", f"המתנה של {round(wait)} דק׳", ride_economics(price, km1, min1, "waited", wait, cost)))
+            scenarios.append(scenario("waited", f"המתנה של {round(wait)} דק׳", ride_economics(price, km1, min1, "waited", wait, cost, None, None, stops_km, stops_min, stops_price)))
         else:
             notes.append("לא חושב תרחיש המתנה: הזינו דקות המתנה אפשריות")
         expected = None
@@ -494,7 +602,7 @@ def evaluate_offer(offer: dict, route_records: list[dict], trip_records: list[di
                             "net_per_km": r((price - e_km * cost) / e_km) if price is not None and cost is not None and e_km else None, "net": r(price - e_km * cost) if price is not None and cost is not None else None,
                             "free_km": free, "beyond_km": r(e_km - free) if free is not None else None, "cost_beyond": paid, "net_after_allowance": r(price - paid) if paid is not None and price is not None else None}
         if expected is None and weights is None:
-            notes.append(f"עוד אין מספיק היסטוריה על הדרך חזרה ({dest_n} נסיעות ליעד, {overall_n} בסך הכול; נדרשות {MIN_RETURN_SAMPLE} ליעד או {MIN_OVERALL_SAMPLE} בסך הכול) — מוצגים שלושת התרחישים בלי ממוצע משוקלל")
+            notes.append(f"עוד אין מספיק היסטוריה על הדרך חזרה ({sample_n} נסיעות לאזור/עיר/יעד הזה, {overall_n} בסך הכול; נדרשות {MIN_RETURN_SAMPLE} או {MIN_OVERALL_SAMPLE} בסך הכול) — מוצגים שלושת התרחישים בלי ממוצע משוקלל")
     stats_all = profitability(routes, trips, settings)["overall"]
     average = {"gross_per_km": stats_all["gross_per_km"], "gross_per_hour": stats_all["gross_per_hour"], "rides": stats_all["rides"]} if stats_all else None
     vs = None
@@ -502,18 +610,42 @@ def evaluate_offer(offer: dict, route_records: list[dict], trip_records: list[di
         diff = lambda a, b: round(a - b, 2) if a is not None and b is not None else None
         vs = {"per_km": diff(expected["gross_per_km"], average["gross_per_km"]), "per_hour": diff(expected["gross_per_hour"], average["gross_per_hour"])}
     typical = None
-    if destination and start:
-        same = [t for t in trips if t["route_id"] is None and t["outcome"] == "yes" and (t["destination"] or "").strip().casefold() == destination.casefold() and band_of(t["start_time"]) == band_of(start)
-                and t["minutes_one_way"]]
+    if (destination or city) and start:
+        def same_place(t):
+            if city and area and t["city"] and t["area"]:
+                return _place_key(t["city"], t["area"]) == _place_key(city, area)
+            if city and t["city"]:
+                return _place_key(t["city"]) == _place_key(city)
+            return bool(destination) and (t["destination"] or "").strip().casefold() == destination.casefold()
+        same = [t for t in trips if t["route_id"] is None and t["outcome"] == "yes" and same_place(t) and band_of(t["start_time"]) == band_of(start) and t["minutes_one_way"]]
         if len(same) >= MIN_BAND_RIDES:
             typical = {"band": BAND_LABEL[band_of(start)], "rides": len(same), "avg_minutes_one_way": round(sum(t["minutes_one_way"] for t in same) / len(same), 1)}
     if price is None:
         notes.append("חסר מחיר")
     if km1 is None and extra_km is None:
         notes.append('חסר ק"מ — בלעדיו אין חישוב לק"מ ולמכסה')
-    return {"offer": {"destination": destination, "price": price, "km_one_way": km1, "minutes_one_way": min1, "start_time": start, "on_the_way": extra_km is not None},
-            "scenarios": scenarios, "expected": expected, "basis": {"used": used, "destination_sample": dest_n, "overall_sample": overall_n, "weights": weights},
-            "average": average, "vs_average": vs, "typical_at_this_hour": typical, "allowance_remaining_km": remaining, "cost_per_km": cost, "notes": notes}
+    place = None
+    if city:
+        mine_rides = _profit_rides(routes, trips, settings)
+        in_area = [g for g in mine_rides if area and g["city"] and g["area"] and _place_key(g["city"], g["area"]) == _place_key(city, area)]
+        in_city = [g for g in mine_rides if g["city"] and _place_key(g["city"]) == _place_key(city)]
+        level, mine = ("area", in_area) if in_area else ("city", in_city)       # the area when he has rides there, else the whole city
+        if mine:
+            st = _stats(mine)
+            place = {"level": level, "label": f"{city} · {area}" if level == "area" else city, "rides": st["rides"], "avg_price": st["avg_price"], "gross_per_km": st["gross_per_km"],
+                     "gross_per_hour": st["gross_per_hour"]}
+    first = scenarios[0]
+    stops = None
+    if added or stops_price or stops_km or stops_min:
+        owner_stops = profitability(routes, trips, settings)["stops"]
+        stops = {"added": added, "price": stops_price, "km": stops_km, "minutes": stops_min, "per_hour": first["stops_per_hour"], "per_km": first["stops_per_km"], "base_gross_per_hour": first["base_gross_per_hour"],
+                 "total_gross_per_hour": first["gross_per_hour"], "owner_per_hour": owner_stops["per_hour"] if owner_stops else None, "owner_rides": owner_stops["rides"] if owner_stops else 0,
+                 "band": BAND_LABEL.get(band_of(start)) if start else None}
+    return {"offer": {"destination": destination, "city": city, "area": area, "price": price, "km_one_way": km1, "minutes_one_way": min1, "start_time": start, "on_the_way": extra_km is not None},
+            "scenarios": scenarios, "expected": expected,
+            "basis": {"used": used, "sample": sample_n, "destination_sample": (stats["by_destination"].get(destination.casefold()) or {}).get("known", 0) if destination else 0,
+                      "overall_sample": overall_n, "weights": weights},
+            "average": average, "vs_average": vs, "typical_at_this_hour": typical, "place": place, "stops": stops, "allowance_remaining_km": remaining, "cost_per_km": cost, "notes": notes}
 
 
 def build(route_records: list[dict], trip_records: list[dict], today: date, months: int = 6, settings_records: list[dict] | None = None) -> dict:
@@ -544,6 +676,7 @@ def build(route_records: list[dict], trip_records: list[dict], today: date, mont
         table.append({"id": t["id"], "date": t["date"].isoformat(), "weekday": WEEKDAYS_HE[t["date"].weekday()], "route": name or None, "one_off": t["route_id"] is None,
                       "kind": t["kind"], "outcome": t["outcome"], "stops": t["stops"], "amount": _amount(t, by_id.get(t["route_id"])) if t["outcome"] == "yes" else 0.0,
                       "vehicle_class": t["vehicle_class"] or (route or {}).get("vehicle_class"), "return_status": (t["return_status"] or (route or {}).get("return_status")) if e else None,
+                      "city": t["city"], "area": t["area"], "added_stops": t["added_stops"], "stops_price": t["stops_price"], "stops_minutes": t["stops_minutes"],
                       "on_the_way_of": t["on_the_way_of"], "start_time": (t["start_time"] or (route or {}).get("start_time")), "band": band_of(t["start_time"] or (route or {}).get("start_time")),
                       "km": e["km"] if e else None, "minutes": e["minutes"] if e else None,
                       "gross_per_hour": e["gross_per_hour"] if e else None, "gross_per_km": e["gross_per_km"] if e else None, "net_per_hour": e["net_per_hour"] if e else None})
