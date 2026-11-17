@@ -483,6 +483,12 @@ def commute_view(identity, today: date | None = None, months: int = 6) -> dict:
     return fcc_commute.build(my_commute_routes(identity), my_commute_trips(identity, since), today, months, my_commute_settings(identity))
 
 
+def commute_evaluate(identity, offer: dict, today: date | None = None) -> dict:
+    """A ride offer, priced before it is taken (read-only, nothing is saved): the owner's own routes, trips (a year back, for the way-back history) and allowance."""
+    today = today or date.today()
+    return fcc_commute.evaluate_offer(offer, my_commute_routes(identity), my_commute_trips(identity, today - timedelta(days=365)), today, my_commute_settings(identity))
+
+
 def commute_income_sources(identity, today: date, since: date, taken_names: set[str] = frozenset()) -> list[fcc_cashflow.IncomeSource]:
     """The rides as income sources for the monthly income model. A read failure degrades to NO commute income (logged) — never to a guess; a denied identity propagates."""
     try:

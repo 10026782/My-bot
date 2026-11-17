@@ -5454,6 +5454,44 @@ def fcc_commute_settings(identity):
         return jsonify({"error": "internal error"}), 500
 
 
+@tma_api.route("/api/fcc/commute/evaluate", methods=["POST"])
+@require_tma_auth
+def fcc_commute_evaluate(identity):
+    """A ride offer, BEFORE it is taken — READ-ONLY, nothing is written. Body: {"price", "km_one_way"?, "minutes_one_way"?, "start_time"? "HH:MM", "destination"?, "waiting_minutes"?,
+    "extra_km"? / "extra_minutes"? (a detour on the way of one of his own drives)}. Answers with the offer priced under each way back (empty / a paid continuation / waiting), an expected
+    figure when his history has enough known outcomes, the free allowance it would use, and a comparison with his own average. Owner only, 404 for anyone else."""
+    if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
+        return jsonify({"error": "not found"}), 404
+    import re
+    from core.financial_control import service as fcc_service
+    data = request.get_json(silent=True) or {}
+    offer: dict = {}
+    for key, hi in (("price", 100000), ("km_one_way", 2000), ("minutes_one_way", 1440), ("waiting_minutes", 1440), ("extra_km", 2000), ("extra_minutes", 1440)):
+        if data.get(key) not in (None, ""):
+            try:
+                v = float(data[key])
+            except (TypeError, ValueError):
+                return jsonify({"error": f"bad {key}"}), 400
+            if not 0 <= v <= hi:
+                return jsonify({"error": f"bad {key}"}), 400
+            offer[key] = v
+    if not offer.get("price"):
+        return jsonify({"error": "price required"}), 400
+    if data.get("start_time") not in (None, ""):
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(data["start_time"])):
+            return jsonify({"error": "bad start_time"}), 400
+        offer["start_time"] = str(data["start_time"])
+    if str(data.get("destination") or "").strip():
+        offer["destination"] = str(data["destination"]).strip()[:80]
+    try:
+        return jsonify(fcc_service.commute_evaluate(identity, offer))
+    except data_access_policy.PersonalDataAccessDenied:
+        return jsonify({"error": "forbidden"}), 403
+    except Exception:                                        # noqa: BLE001 — never leak internals
+        logger.exception("[fcc] commute evaluate failed")
+        return jsonify({"error": "internal error"}), 500
+
+
 @tma_api.route("/api/fcc/consumption", methods=["GET"])
 @require_tma_auth
 def fcc_consumption(identity):

@@ -2,7 +2,7 @@
 // this file only words them and turns typed text into a request body. Unknown stays unknown: a missing km / minutes / cost is shown as "—", never as zero.
 import type {
   CommuteClass, CommuteKind, CommuteReturn, FccCommute, FccCommuteDay, FccCommuteProfit, FccCommuteQuota, FccCommuteRoute, FccCommuteRouteBody, FccCommuteSettingsBody, FccCommuteStats,
-  FccCommuteTripBody,
+  FccCommuteEvaluation, FccCommuteOfferBody, FccCommutePending, FccCommuteReturnStats, FccCommuteScenario, FccCommuteTripBody,
 } from "../types";
 import { money } from "./fccPresentation";
 
@@ -20,6 +20,8 @@ export const RETURN_OPTIONS: { value: CommuteReturn; label: string; hint: string
   { value: "waited", label: "מחכה שעות — המחיר כולל חזור והמתנה", hint: "הלוך ושוב + דקות המתנה" },
   { value: "continuation", label: "יש נסיעת המשך/חזור בתשלום", hint: "המחיר הזה הוא לכיוון אחד בלבד" },
 ];
+/** On a one-off trip the way back is usually not known yet: it is recorded after the ride (the trip waits in "ממתינות לעדכון"). */
+export const TRIP_RETURN_OPTIONS: { value: CommuteReturn | ""; label: string }[] = [{ value: "", label: "עוד לא ידוע — אעדכן אחרי הנסיעה" }, ...RETURN_OPTIONS];
 export const KIND_OPTIONS: { value: CommuteKind; label: string }[] = [{ value: "ride", label: "נסיעה" }, { value: "delivery", label: "משלוח" }];
 export const WEEKDAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
@@ -202,8 +204,8 @@ export function routeBody(form: RouteForm, routeId?: string): { body: FccCommute
   return { body };
 }
 
-export interface TripForm { start: string; destination: string; date: string; price: string; cls: CommuteClass | ""; kind: CommuteKind; km: string; minutes: string; ret: CommuteReturn; waiting: string; onWay: string; extraKm: string; extraMinutes: string }
-export const emptyTripForm = (today: string): TripForm => ({ start: "", destination: "", date: today, price: "", cls: "", kind: "ride", km: "", minutes: "", ret: "empty", waiting: "", onWay: "", extraKm: "", extraMinutes: "" });
+export interface TripForm { start: string; destination: string; date: string; price: string; cls: CommuteClass | ""; kind: CommuteKind; km: string; minutes: string; ret: CommuteReturn | ""; waiting: string; onWay: string; extraKm: string; extraMinutes: string }
+export const emptyTripForm = (today: string): TripForm => ({ start: "", destination: "", date: today, price: "", cls: "", kind: "ride", km: "", minutes: "", ret: "", waiting: "", onWay: "", extraKm: "", extraMinutes: "" });
 
 /** One typed trip: the price is typed every time (there is no price list). "On the way" = the km / minutes it ADDED replace the one-way based ones. */
 export function tripBody(form: TripForm): { body: FccCommuteTripBody } | { error: string } {
@@ -216,7 +218,7 @@ export function tripBody(form: TripForm): { body: FccCommuteTripBody } | { error
   if (body.price == null) return { error: "צריך מחיר" };
   if (form.cls) body.vehicle_class = form.cls;
   if (form.start) { if (!TIME_RE.test(form.start)) return { error: "שעת יציאה: HH:MM" }; body.start_time = form.start; }
-  body.return_status = form.ret;
+  if (form.ret) body.return_status = form.ret;
   if (form.onWay) body.on_the_way_of = form.onWay;
   if (body.extra_km != null && !form.onWay) return { error: "ק״מ עיקוף שייכים לנסיעה על הדרך — בחרו על הדרך של איזו נסיעה" };
   return { body };
@@ -233,4 +235,73 @@ export function settingsBody(form: SettingsForm): { body: FccCommuteSettingsBody
     ["other_km_used", form.otherKm, 'ק"מ אחרים החודש']]);
   if (err) return { error: err };
   return Object.keys(body).length ? { body } : { error: "אין מה לשמור" };
+}
+
+// ── an offer, priced before it is taken ──
+/** The same typed fields as a trip: price (required), km / minutes of one way, start time, and — on the way of an own drive — only the detour. Nothing here is saved. */
+export function evaluateBody(form: TripForm): { body: FccCommuteOfferBody } | { error: string } {
+  const body = {} as FccCommuteOfferBody;
+  const err = fill(body, [["price", form.price, "מחיר"], ["km_one_way", form.onWay ? "" : form.km, 'ק"מ'], ["minutes_one_way", form.onWay ? "" : form.minutes, "דקות"],
+    ["waiting_minutes", !form.onWay && form.ret !== "empty" && form.ret !== "continuation" ? form.waiting : "", "דקות המתנה"], ["extra_km", form.onWay ? form.extraKm : "", 'ק"מ עיקוף'], ["extra_minutes", form.onWay ? form.extraMinutes : "", "דקות עיקוף"]]);
+  if (err) return { error: err };
+  if (body.price == null || body.price <= 0) return { error: "צריך מחיר" };
+  if (form.destination.trim()) body.destination = form.destination.trim();
+  if (form.start) { if (!TIME_RE.test(form.start)) return { error: "שעת יציאה: HH:MM" }; body.start_time = form.start; }
+  if (form.onWay && body.extra_km == null) return { error: 'הזינו ק"מ עיקוף' };
+  return { body };
+}
+
+export interface ScenarioRow { key: string; label: string; km: string; minutes: string; perKm: string; perHour: string; netPerHour: string; allowance: string }
+export interface EvaluationModel { headline: string | null; rows: ScenarioRow[]; expected: ScenarioRow | null; basis: string | null; vsAverage: string | null; typical: string | null; allowance: string | null; notes: string[] }
+
+const scenarioRow = (s: FccCommuteScenario): ScenarioRow => ({
+  key: s.key, label: s.label, km: s.km == null ? UNKNOWN : num(s.km, ' ק"מ'), minutes: s.minutes == null ? UNKNOWN : `${num(s.minutes)} דק׳`, perKm: m(s.gross_per_km), perHour: m(s.gross_per_hour), netPerHour: m(s.net_per_hour),
+  allowance: s.beyond_km == null ? UNKNOWN : s.beyond_km > 0 ? `חורג ב-${num(s.beyond_km)} ק"מ${s.cost_beyond == null ? "" : ` (עלות ${money(s.cost_beyond)})`}` : "בתוך המכסה",
+});
+
+/** The answer to "is this offer worth it": the three ways back side by side, the expected figure when the history allows it (with its sample), the allowance and the comparison with his average. */
+export function evaluationModel(ev: FccCommuteEvaluation): EvaluationModel {
+  const rows = ev.scenarios.map(scenarioRow);
+  const hours = ev.scenarios.map((s) => s.gross_per_hour).filter((x): x is number => x != null);
+  const sign = (n: number | null | undefined): string => (n == null ? UNKNOWN : `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`);
+  const w = ev.basis.weights;
+  const basis = ev.basis.used === "destination" ? `לפי ${ev.basis.destination_sample} נסיעות קודמות ליעד: חוזר ריק ${pct(w?.empty)}, יש המשך ${pct(w?.continuation)}, המתנה ${pct(w?.waited)}`
+    : ev.basis.used === "overall" ? `ליעד הזה אין מספיק היסטוריה — לפי ${ev.basis.overall_sample} נסיעות שלך בסך הכול: חוזר ריק ${pct(w?.empty)}, יש המשך ${pct(w?.continuation)}, המתנה ${pct(w?.waited)}` : null;
+  return {
+    headline: ev.expected ? `צפוי: ${m(ev.expected.gross_per_hour)} לשעה · ${m(ev.expected.gross_per_km)} לק"מ` : hours.length > 1 ? `בין ${money(Math.min(...hours))} ל-${money(Math.max(...hours))} לשעה, לפי הדרך חזרה` : hours.length === 1 ? `${money(hours[0])} לשעה` : null,
+    rows: ev.expected ? rows.filter((r) => r.key !== "expected") : rows, expected: ev.expected ? scenarioRow(ev.expected) : null, basis,
+    vsAverage: ev.vs_average && (ev.vs_average.per_km != null || ev.vs_average.per_hour != null) ? `לעומת הממוצע שלך (${ev.average?.rides ?? 0} נסיעות): ${sign(ev.vs_average.per_km)} לק"מ · ${sign(ev.vs_average.per_hour)} לשעה` : null,
+    typical: ev.typical_at_this_hour ? `ליעד הזה בשעות ${ev.typical_at_this_hour.band} נסעת בממוצע ${num(ev.typical_at_this_hour.avg_minutes_one_way)} דק׳ לכיוון (${ev.typical_at_this_hour.rides} נסיעות)` : null,
+    allowance: ev.allowance_remaining_km == null ? null : `נותרו במכסה ${num(ev.allowance_remaining_km)} ק"מ החודש`, notes: ev.notes,
+  };
+}
+
+// ── trips that wait for the way back, and what the history says ──
+export interface PendingRow { id: string; title: string; detail: string }
+export const pendingRows = (pending: FccCommutePending[]): PendingRow[] => pending.map((p) => ({
+  id: p.id, title: `${p.weekday} ${dmy(p.date)} · ${p.destination ?? UNKNOWN}${p.kind === "delivery" ? " (משלוח)" : ""}`,
+  detail: [p.price == null ? null : money(p.price), p.km_one_way == null ? null : `${num(p.km_one_way)} ק"מ`, p.start_time ? `יציאה ${p.start_time}` : null].filter(Boolean).join(" · "),
+}));
+
+/** The way back of a trip that was taken: empty / a paid continuation / waited N minutes. */
+export function returnBody(tripId: string, status: CommuteReturn, waitingText = ""): { body: FccCommuteTripBody } | { error: string } {
+  const body: FccCommuteTripBody = { trip_id: tripId, return_status: status };
+  if (status === "waited") {
+    const v = parseNum(waitingText);
+    if (v === "bad" || v == null) return { error: "כמה דקות חיכית?" };
+    body.waiting_minutes = v;
+  }
+  return { body };
+}
+
+export interface ReturnRow { key: string; label: string; known: string; empty: string; continuation: string; waited: string }
+export function returnModel(r: FccCommuteReturnStats): { rows: ReturnRow[]; note: string } {
+  const row = (key: string, label: string, b: FccCommuteReturnStats["overall"]): ReturnRow => {
+    const share = (n: number): string => (b.known ? pct(n / b.known) : UNKNOWN);
+    return { key, label, known: String(b.known), empty: share(b.empty), continuation: share(b.continuation), waited: `${share(b.waited)}${b.avg_wait_minutes ? ` (${num(b.avg_wait_minutes)} דק׳)` : ""}` };
+  };
+  return {
+    rows: [row("all", "הכול", r.overall), ...r.by_destination.map((d) => row(d.destination, d.destination, d))],
+    note: `זה מה שקרה בנסיעות שתיעדת — אקראי ועם תחרות, לא הבטחה. הממוצע המשוקלל בבדיקת הצעה מופיע אחרי ${r.min_destination} נסיעות מתועדות ליעד או ${r.min_overall} בסך הכול.`,
+  };
 }

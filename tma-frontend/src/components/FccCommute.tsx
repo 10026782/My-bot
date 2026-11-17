@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchFccCommute, postFccCommuteDay, postFccCommuteRoute, postFccCommuteSettings, postFccCommuteTrip } from "../api";
-import type { CommuteClass, CommuteKind, CommuteReturn, FccCommute, FccCommuteRoute } from "../types";
+import { fetchFccCommute, postFccCommuteDay, postFccCommuteEvaluate, postFccCommuteRoute, postFccCommuteSettings, postFccCommuteTrip } from "../api";
+import type { CommuteKind, CommuteReturn, FccCommute, FccCommuteEvaluation, FccCommuteRoute } from "../types";
 import {
   ANSWERS, CLASS_OPTIONS, EMPTY_FORM, EMPTY_OWN_FORM, KIND_OPTIONS, RETURN_OPTIONS, WEEKDAYS, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromRoute,
-  formFromSettings, profitModel, quotaRows, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
+  TRIP_RETURN_OPTIONS, evaluateBody, evaluationModel, formFromSettings, pendingRows, profitModel, quotaRows, returnBody, returnModel, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
 } from "../lib/fccCommute";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -60,18 +60,39 @@ function RouteFormView({ initial, submitLabel, busy, onSubmit }: { initial: Rout
   );
 }
 
-function TripFormView({ today, ownTrips, busy, onSubmit }: { today: string; ownTrips: FccCommute["own_trips"]; busy: boolean; onSubmit: (form: TripForm) => void }) {
+function EvaluationView({ ev }: { ev: FccCommuteEvaluation }) {
+  const e = evaluationModel(ev);
+  const table = (rows: typeof e.rows) => rows.map((r) => <tr key={r.key}><th scope="row">{r.label}</th><td>{r.km}</td><td>{r.minutes}</td><td>{r.perKm}</td><td>{r.perHour}</td><td>{r.netPerHour}</td><td>{r.allowance}</td></tr>);
+  return (
+    <div className="fcc-stack fcc-stack--tight" role="status">
+      {e.headline && <h4 className="fcc-pay__subhead">{e.headline}</h4>}
+      <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="תרחישי חזרה">
+        <table className="fcc-compare__table">
+          <thead><tr><th>הדרך חזרה</th><th>ק״מ</th><th>זמן</th><th>לק״מ</th><th>לשעה</th><th>נטו לשעה</th><th>מהמכסה</th></tr></thead>
+          <tbody>{table(e.rows)}{e.expected && table([e.expected])}</tbody>
+        </table>
+      </div>
+      {e.basis && <p className="fcc-loan__meta">{e.basis}</p>}
+      {e.vsAverage && <p className="fcc-loan__meta">{e.vsAverage}</p>}
+      {e.typical && <p className="fcc-loan__meta">{e.typical}</p>}
+      {e.allowance && <p className="fcc-loan__meta">{e.allowance}</p>}
+      {e.notes.map((n) => <p key={n} className="fcc-goal__note">{n}</p>)}
+    </div>
+  );
+}
+
+function TripFormView({ today, ownTrips, busy, evaluation, onEvaluate, onSubmit }: {
+  today: string; ownTrips: FccCommute["own_trips"]; busy: boolean; evaluation: FccCommuteEvaluation | null; onEvaluate: (form: TripForm) => void; onSubmit: (form: TripForm) => void;
+}) {
   const [form, setForm] = useState<TripForm>(emptyTripForm(today));
   const set = <K extends keyof TripForm>(k: K) => (v: TripForm[K]) => setForm({ ...form, [k]: v });
   const onWay = form.onWay !== "";
   return (
-    <form className="fcc-stack fcc-stack--tight" onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}>
+    <form className="fcc-stack fcc-stack--tight" onSubmit={(e) => { e.preventDefault(); onEvaluate(form); }}>
       <Select<CommuteKind> label="סוג" value={form.kind} options={KIND_OPTIONS} onChange={set("kind")} />
       <Field label="יעד / תיאור" value={form.destination} onChange={set("destination")} mode="text" />
-      <Field label="תאריך" value={form.date} onChange={set("date")} mode="date" />
+      <Field label="המחיר שהוצע / שקיבלת (₪)" value={form.price} onChange={set("price")} />
       <Field label="שעת יציאה (איך הפקקים משפיעים)" value={form.start} onChange={set("start")} mode="time" />
-      <Field label="המחיר שקיבלת (₪)" value={form.price} onChange={set("price")} />
-      <Select label="מחיר ששולם" value={form.cls} options={CLASS_OPTIONS} onChange={set("cls")} />
       {ownTrips.length > 0 && (
         <Select label="על הדרך של אחת הנסיעות הקבועות שלי?" value={form.onWay} options={[{ value: "", label: "לא — נסיעה ייעודית" }, ...ownTrips.map((o) => ({ value: o.name, label: o.name }))]} onChange={set("onWay")} />
       )}
@@ -84,12 +105,36 @@ function TripFormView({ today, ownTrips, busy, onSubmit }: { today: string; ownT
         <>
           <Field label='ק"מ לכיוון אחד' value={form.km} onChange={set("km")} />
           <Field label="דקות לכיוון אחד (בפועל, עם הפקקים)" value={form.minutes} onChange={set("minutes")} />
-          <Select<CommuteReturn> label="חזרה" value={form.ret} options={RETURN_OPTIONS} onChange={set("ret")} />
-          {form.ret === "waited" && <Field label="דקות המתנה" value={form.waiting} onChange={set("waiting")} />}
+          <Select<CommuteReturn | ""> label="הדרך חזרה" value={form.ret} options={TRIP_RETURN_OPTIONS} onChange={set("ret")} />
+          {form.ret !== "empty" && form.ret !== "continuation" && <Field label="דקות המתנה אפשריות (לתרחיש המתנה)" value={form.waiting} onChange={set("waiting")} />}
         </>
       )}
-      <button type="submit" disabled={busy} className="boss-button boss-button--primary">הוספה</button>
+      <Select label="מחיר ששולם" value={form.cls} options={CLASS_OPTIONS} onChange={set("cls")} />
+      <Field label="תאריך (לתיעוד נסיעה)" value={form.date} onChange={set("date")} mode="date" />
+      <div className="fcc-chips">
+        <button type="submit" disabled={busy} className="boss-button boss-button--primary">בדיקת כדאיות</button>
+        <button type="button" disabled={busy} className="boss-button" onClick={() => onSubmit(form)}>קיבלתי — שמירה כנסיעה</button>
+      </div>
+      {evaluation && <EvaluationView ev={evaluation} />}
     </form>
+  );
+}
+
+function PendingRowView({ row, busy, onReturn }: { row: ReturnType<typeof pendingRows>[number]; busy: boolean; onReturn: (tripId: string, status: CommuteReturn, waiting: string) => void }) {
+  const [wait, setWait] = useState("");
+  return (
+    <li>
+      <strong>{row.title}</strong>
+      <div className="fcc-loan__meta">{row.detail}</div>
+      <div className="fcc-chips" role="group" aria-label={`הדרך חזרה — ${row.title}`}>
+        <button type="button" disabled={busy} className="fcc-chip" onClick={() => onReturn(row.id, "empty", "")}>חזרתי ריק</button>
+        <button type="button" disabled={busy} className="fcc-chip" onClick={() => onReturn(row.id, "continuation", "")}>היה המשך</button>
+      </div>
+      <div className="fcc-chips">
+        <input value={wait} onChange={(e) => setWait(e.target.value)} inputMode="decimal" className="boss-input" aria-label="דקות המתנה" placeholder="דקות המתנה" />
+        <button type="button" disabled={busy} className="fcc-chip" onClick={() => onReturn(row.id, "waited", wait)}>ישבתי בצד</button>
+      </div>
+    </li>
   );
 }
 
@@ -127,19 +172,36 @@ function ProfitTable({ rows, label }: { rows: ProfitRow[]; label: string }) {
 }
 
 /** Presentational part (also rendered in tests): server numbers only. */
-export function CommuteView({ data, busy, error, onAnswer, onSaveRoute, onSaveTrip, onSaveSettings }: {
-  data: FccCommute; busy: boolean; error: string | null; onAnswer: (routeId: string, date: string, key: AnswerKey) => void; onSaveRoute: (form: RouteForm, routeId?: string) => void;
-  onSaveTrip: (form: TripForm) => void; onSaveSettings: (form: SettingsForm) => void;
+export function CommuteView({ data, busy, error, evaluation, onAnswer, onSaveRoute, onSaveTrip, onSaveSettings, onEvaluate, onReturn }: {
+  data: FccCommute; busy: boolean; error: string | null; evaluation: FccCommuteEvaluation | null; onAnswer: (routeId: string, date: string, key: AnswerKey) => void;
+  onSaveRoute: (form: RouteForm, routeId?: string) => void; onSaveTrip: (form: TripForm) => void; onSaveSettings: (form: SettingsForm) => void; onEvaluate: (form: TripForm) => void;
+  onReturn: (tripId: string, status: CommuteReturn, waiting: string) => void;
 }) {
   const summary = summaryModel(data);
   const trips = tripRows(data);
   const quota = quotaRows(data.quota);
   const profit = profitModel(data.profitability);
   const timing = timeModel(data.profitability);
+  const pending = pendingRows(data.pending_updates);
+  const back = returnModel(data.return_stats);
   return (
     <div className="fcc-stack">
       {error && <p className="fcc-goal__note" role="alert">{error}</p>}
       {(data.routes.length > 0 || data.one_off.trips > 0) && <div className="fcc-kpis">{summary.cards.map((c) => <KpiCard key={c.key} label={c.label} value={c.value} hint={c.hint} />)}</div>}
+
+      <Surface variant="subtle" padding="compact" className="fcc-loans-goal fcc-refi" aria-label="הצעה לנסיעה">
+        <h3 className="fcc-loans-goal__title">הצעה לנסיעה — כדאי?</h3>
+        <p className="fcc-loan__meta">הזינו מחיר, ק״מ וזמן שהוצעו וקבלו את הכדאיות לפני שמחליטים. מה שלא ידוע עדיין (הדרך חזרה) מחושב בשלושה תרחישים, ומתעדכן אחרי הנסיעה.</p>
+        <TripFormView today={data.today} ownTrips={data.own_trips} busy={busy} evaluation={evaluation} onEvaluate={onEvaluate} onSubmit={onSaveTrip} />
+      </Surface>
+
+      {pending.length > 0 && (
+        <Surface variant="subtle" padding="compact" className="fcc-loans-goal fcc-refi" aria-label="ממתינות לעדכון">
+          <h3 className="fcc-loans-goal__title">ממתינות לעדכון: איך חזרת?</h3>
+          <p className="fcc-loan__meta">עד שתעדכנו, החישוב מניח הלוך ושוב בלי המתנה (הנחה שמרנית). זה לא מעכב את שאר החישובים.</p>
+          <ul className="fcc-list">{pending.map((p) => <PendingRowView key={p.id} row={p} busy={busy} onReturn={onReturn} />)}</ul>
+        </Surface>
+      )}
 
       <Surface variant="subtle" padding="compact" className="fcc-loans-goal fcc-refi" aria-label="מכסת רכב הליסינג">
         <h3 className="fcc-loans-goal__title">מכסת הרכב (ק״מ ודלק חינם)</h3>
@@ -213,6 +275,19 @@ export function CommuteView({ data, busy, error, onAnswer, onSaveRoute, onSaveTr
         )}
       </section>
 
+      <section className="fcc-section" aria-labelledby="commute-back-heading">
+        <h2 id="commute-back-heading" className="fcc-section__heading">מה קורה בדרך חזרה</h2>
+        {back.rows[0].known === "0" ? <p className="fcc-loan__meta">עוד לא תועדה דרך חזרה — עדכנו אחרי כל נסיעה והנתונים יצטברו.</p> : (
+          <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="דרך חזרה">
+            <table className="fcc-compare__table">
+              <thead><tr><th>יעד</th><th>נסיעות מתועדות</th><th>חוזר ריק</th><th>יש המשך</th><th>המתנה</th></tr></thead>
+              <tbody>{back.rows.map((r) => <tr key={r.key}><th scope="row">{r.label}</th><td>{r.known}</td><td>{r.empty}</td><td>{r.continuation}</td><td>{r.waited}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        <p className="fcc-loan__meta">{back.note}</p>
+      </section>
+
       <section className="fcc-section" aria-labelledby="commute-time-heading">
         <h2 id="commute-time-heading" className="fcc-section__heading">פקקים: איך שעת היציאה משנה את הנסיעה</h2>
         {timing.rows.length === 0 ? <p className="fcc-loan__meta">הוסיפו שעת יציאה ודקות בפועל לנסיעות — וכאן יוצג כמה זמן אותה נסיעה לוקחת בכל שעה ומה המחיר לשעה.</p> : (
@@ -243,10 +318,6 @@ export function CommuteView({ data, busy, error, onAnswer, onSaveRoute, onSaveTr
       </section>
 
       <details>
-        <summary>הוספת נסיעה / משלוח (חד פעמי)</summary>
-        <TripFormView today={data.today} ownTrips={data.own_trips} busy={busy} onSubmit={onSaveTrip} />
-      </details>
-      <details>
         <summary>הנסיעות הקבועות שלי (לנצל על הדרך)</summary>
         {data.own_trips.length === 0 ? <p className="fcc-loan__meta">עוד לא הוזנו</p> : (
           <ul className="fcc-list">{data.own_trips.map((o) => <li key={o.id}><strong>{o.name}</strong><div className="fcc-loan__meta">{o.weekdays.join(", ") || "בלי ימים"} · {o.km_one_way == null ? "—" : `${o.km_one_way} ק״מ`} לכיוון</div></li>)}</ul>
@@ -272,6 +343,7 @@ export function CommuteSection({ active, reloadKey }: { active: boolean; reloadK
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [seen, setSeen] = useState(false);
+  const [evaluation, setEvaluation] = useState<FccCommuteEvaluation | null>(null);
   const load = useCallback((silent = false) => {
     if (!silent) setState({ status: "loading" });
     fetchFccCommute().then((data) => setState({ status: "ok", data })).catch((e: unknown) => { if (!silent) setState({ status: "error", code: (e as { status?: number }).status }); });
@@ -294,7 +366,18 @@ export function CommuteSection({ active, reloadKey }: { active: boolean; reloadK
     );
   }
   return (
-    <CommuteView data={state.data} busy={busy} error={error}
+    <CommuteView data={state.data} busy={busy} error={error} evaluation={evaluation}
+                 onEvaluate={(form) => {
+                   const parsed = evaluateBody(form);
+                   if ("error" in parsed) { setError(parsed.error); return; }
+                   setBusy(true); setError(null);
+                   postFccCommuteEvaluate(parsed.body).then(setEvaluation).catch((e: Error) => setError(e.message || "הבדיקה נכשלה")).finally(() => setBusy(false));
+                 }}
+                 onReturn={(tripId, status, waiting) => {
+                   const parsed = returnBody(tripId, status, waiting);
+                   if ("error" in parsed) { setError(parsed.error); return; }
+                   void run(() => postFccCommuteTrip(parsed.body));
+                 }}
                  onAnswer={(routeId, date, key) => void run(() => postFccCommuteDay(answerBody(routeId, date, key)))}
                  onSaveRoute={(form, routeId) => {
                    const parsed = routeBody(form, routeId);
@@ -304,6 +387,7 @@ export function CommuteSection({ active, reloadKey }: { active: boolean; reloadK
                  onSaveTrip={(form) => {
                    const parsed = tripBody(form);
                    if ("error" in parsed) { setError(parsed.error); return; }
+                   setEvaluation(null);
                    void run(() => postFccCommuteTrip(parsed.body));
                  }}
                  onSaveSettings={(form) => {

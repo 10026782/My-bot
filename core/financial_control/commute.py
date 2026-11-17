@@ -38,6 +38,8 @@ MIN_STOPS_SAMPLE = 10         # rides with a recorded stops count before "most a
 THREE_STOPS_SHARE = 0.5
 WINDOW_BACK, WINDOW_FORWARD = 6, 1       # the days the owner can answer: the last week and tomorrow
 SATURDAY = 5                              # date.weekday(): a route of up to 6 days a week rests on Saturday (Friday is a ride day)
+MIN_RETURN_SAMPLE = 5         # known way-back outcomes at ONE destination before that destination's own history weights the expected return
+MIN_OVERALL_SAMPLE = 10       # ... or across all the owner's one-off trips before the overall history is used instead
 ONE_OFF_SOURCE = "נסיעות נוספות"
 CLASS_LABEL = {"regular": "רגיל", "large": "גדול"}
 KIND_LABEL = {"ride": "נסיעה", "delivery": "משלוח"}
@@ -392,6 +394,128 @@ def income_sources(route_records: list[dict], trip_records: list[dict], taken_na
     return sources
 
 
+def return_stats(trips: list[dict]) -> dict:
+    """What happened on the way back of the owner's ONE-OFF trips, where he recorded it: per destination and overall, the counts of ``empty`` / ``continuation`` / ``waited``, and the
+    average minutes waited. A trip whose way back is not recorded yet (``return_status`` empty) is not in these numbers — it waits for the owner and does not hold the engine back.
+    The history is random and has competition: this is what happened, with its sample size, never a promise."""
+    def block(group: list[dict]) -> dict:
+        known = [t for t in group if t["return_status"]]
+        waited = [t["waiting_minutes"] for t in known if t["return_status"] == "waited"]
+        out = {"known": len(known), "empty": sum(1 for t in known if t["return_status"] == "empty"), "continuation": sum(1 for t in known if t["return_status"] == "continuation"),
+               "waited": len(waited), "avg_wait_minutes": round(sum(waited) / len(waited), 1) if waited else None}
+        return out
+    one_off = [t for t in trips if t["route_id"] is None and t["outcome"] == "yes"]
+    groups: dict[str, list[dict]] = {}
+    for t in one_off:
+        groups.setdefault((t["destination"] or "").strip().casefold(), []).append(t)
+    return {"overall": block(one_off), "by_destination": {k: {"destination": g[0]["destination"], **block(g)} for k, g in groups.items() if any(t["return_status"] for t in g)}}
+
+
+def _return_view(stats: dict) -> dict:
+    """The return statistics for the screen: overall and per destination (most known outcomes first)."""
+    rows = sorted(stats["by_destination"].values(), key=lambda r: (-r["known"], r["destination"]))
+    return {"overall": stats["overall"], "by_destination": rows, "min_destination": MIN_RETURN_SAMPLE, "min_overall": MIN_OVERALL_SAMPLE}
+
+
+def pending_updates(trips: list[dict], today: date) -> list[dict]:
+    """One-off trips taken in the last two months whose way back the owner has not recorded yet: they wait for him (a conservative there-and-back is assumed meanwhile)."""
+    out = [t for t in trips if t["route_id"] is None and t["outcome"] == "yes" and not t["return_status"] and t["date"] >= today - timedelta(days=62)]
+    return [{"id": t["id"], "date": t["date"].isoformat(), "weekday": WEEKDAYS_HE[t["date"].weekday()], "destination": t["destination"], "price": t["amount"], "km_one_way": t["km_one_way"],
+             "minutes_one_way": t["minutes_one_way"], "start_time": t["start_time"], "kind": t["kind"]} for t in sorted(out, key=lambda t: t["date"], reverse=True)]
+
+
+def _expected_weights(destination: str | None, stats: dict) -> tuple[dict[str, float] | None, str | None, int, int, float]:
+    """(weights over the three ways back, which history was used, destination sample, overall sample, average wait). The destination's own history when it has at least
+    ``MIN_RETURN_SAMPLE`` known outcomes, else the overall history when it has ``MIN_OVERALL_SAMPLE``, else None — no number is invented."""
+    own = stats["by_destination"].get((destination or "").strip().casefold()) if destination else None
+    overall = stats["overall"]
+    pick, used = (own, "destination") if own and own["known"] >= MIN_RETURN_SAMPLE else ((overall, "overall") if overall["known"] >= MIN_OVERALL_SAMPLE else (None, None))
+    if pick is None:
+        return None, None, own["known"] if own else 0, overall["known"], 0.0
+    n = pick["known"]
+    weights = {"empty": pick["empty"] / n, "continuation": pick["continuation"] / n, "waited": pick["waited"] / n}
+    return weights, used, own["known"] if own else 0, overall["known"], pick["avg_wait_minutes"] or 0.0
+
+
+def evaluate_offer(offer: dict, route_records: list[dict], trip_records: list[dict], today: date, settings_records: list[dict] | None = None) -> dict:
+    """A ride offer, BEFORE it is taken: the owner types the price, the km and minutes of one way (and the start time), and this answers whether it is worth it — read-only, nothing is saved.
+    The way back is not known yet, so the offer is priced under each of the three ways back; when the owner's history has enough known outcomes (this destination's, else all of them) the
+    scenarios are also weighted into an EXPECTED figure and the sample is shown. Beside it: the free allowance this ride would use (and what part would be beyond it), the owner's average
+    ₪ per km / per hour for comparison, and what a ride to this destination usually takes at this hour when he has recorded that. Unknown stays unknown."""
+    routes = [r for r in (parse_route(x) for x in route_records) if r["kind"] == "paid"]
+    trips = [t for t in (parse_trip(r) for r in trip_records) if t]
+    settings = parse_settings(settings_records or [])
+    by_id = {r["id"]: r for r in routes}
+    cost = default_cost_per_km(routes, settings)
+    price = _num(offer.get("price"))
+    km1, min1 = _num(offer.get("km_one_way")), _num(offer.get("minutes_one_way"))
+    extra_km, extra_min = _num(offer.get("extra_km")), _num(offer.get("extra_minutes"))
+    destination = str(offer.get("destination") or "").strip() or None
+    start = _time(offer.get("start_time"))
+    stats = return_stats(trips)
+    weights, used, dest_n, overall_n, hist_wait = _expected_weights(destination, stats)
+    typed_wait = _num(offer.get("waiting_minutes"))
+    wait = typed_wait if typed_wait is not None else hist_wait
+
+    rides = [{"month": month_key(t["date"]), "e": _trip_ride(t, by_id, cost)[1]} for t in trips if t["outcome"] == "yes" and (t["route_id"] is None or t["route_id"] in by_id)]
+    quota = quota_view(settings, rides, today)
+    remaining = quota["remaining_km"] if quota else None
+
+    def scenario(key: str, label: str, e: dict) -> dict:
+        km = e["km"]
+        free = round(min(km, remaining), 1) if km is not None and remaining is not None else None
+        beyond = round(km - free, 1) if free is not None else None
+        paid = round(beyond * cost, 2) if beyond is not None and cost is not None else None
+        return {"key": key, "label": label, "km": km, "minutes": e["minutes"], "gross_per_hour": e["gross_per_hour"], "gross_per_km": e["gross_per_km"], "net_per_hour": e["net_per_hour"],
+                "net_per_km": e["net_per_km"], "net": e["net"], "free_km": free, "beyond_km": beyond, "cost_beyond": paid,
+                "net_after_allowance": round(price - paid, 2) if paid is not None and price is not None else None}
+    notes: list[str] = []
+    if extra_km is not None:                                   # fitted on the way of an own drive: only the detour counts, the way back does not matter
+        scenarios = [scenario("on_the_way", "על הדרך (רק העיקוף)", ride_economics(price, km1, min1, "empty", 0.0, cost, extra_km, extra_min))]
+        expected = scenarios[0]
+    else:
+        scenarios = [scenario("empty", RETURN_LABEL["empty"], ride_economics(price, km1, min1, "empty", 0.0, cost)),
+                     scenario("continuation", RETURN_LABEL["continuation"] + " (המחיר לכיוון אחד)", ride_economics(price, km1, min1, "continuation", 0.0, cost))]
+        if wait:
+            scenarios.append(scenario("waited", f"המתנה של {round(wait)} דק׳", ride_economics(price, km1, min1, "waited", wait, cost)))
+        else:
+            notes.append("לא חושב תרחיש המתנה: הזינו דקות המתנה אפשריות")
+        expected = None
+        by_key = {sc["key"]: sc for sc in scenarios}
+        if weights and all(by_key.get(k) or weights[k] == 0 for k in weights):
+            parts = [(weights[k], by_key[k]) for k in weights if weights[k] > 0]
+            if all(sc["km"] is not None and sc["minutes"] is not None for _, sc in parts):
+                e_km, e_min = sum(w * sc["km"] for w, sc in parts), sum(w * sc["minutes"] for w, sc in parts)
+                free = round(min(e_km, remaining), 1) if remaining is not None else None
+                paid = round((e_km - free) * cost, 2) if free is not None and cost is not None else None
+                r = lambda x: None if x is None else round(x, 2)
+                expected = {"key": "expected", "label": "צפוי (לפי ההיסטוריה שלך)", "km": r(e_km), "minutes": r(e_min), "gross_per_hour": r(price / (e_min / 60)) if price is not None and e_min else None,
+                            "gross_per_km": r(price / e_km) if price is not None and e_km else None, "net_per_hour": r((price - e_km * cost) / (e_min / 60)) if price is not None and cost is not None and e_min else None,
+                            "net_per_km": r((price - e_km * cost) / e_km) if price is not None and cost is not None and e_km else None, "net": r(price - e_km * cost) if price is not None and cost is not None else None,
+                            "free_km": free, "beyond_km": r(e_km - free) if free is not None else None, "cost_beyond": paid, "net_after_allowance": r(price - paid) if paid is not None and price is not None else None}
+        if expected is None and weights is None:
+            notes.append(f"עוד אין מספיק היסטוריה על הדרך חזרה ({dest_n} נסיעות ליעד, {overall_n} בסך הכול; נדרשות {MIN_RETURN_SAMPLE} ליעד או {MIN_OVERALL_SAMPLE} בסך הכול) — מוצגים שלושת התרחישים בלי ממוצע משוקלל")
+    stats_all = profitability(routes, trips, settings)["overall"]
+    average = {"gross_per_km": stats_all["gross_per_km"], "gross_per_hour": stats_all["gross_per_hour"], "rides": stats_all["rides"]} if stats_all else None
+    vs = None
+    if average and expected:
+        diff = lambda a, b: round(a - b, 2) if a is not None and b is not None else None
+        vs = {"per_km": diff(expected["gross_per_km"], average["gross_per_km"]), "per_hour": diff(expected["gross_per_hour"], average["gross_per_hour"])}
+    typical = None
+    if destination and start:
+        same = [t for t in trips if t["route_id"] is None and t["outcome"] == "yes" and (t["destination"] or "").strip().casefold() == destination.casefold() and band_of(t["start_time"]) == band_of(start)
+                and t["minutes_one_way"]]
+        if len(same) >= MIN_BAND_RIDES:
+            typical = {"band": BAND_LABEL[band_of(start)], "rides": len(same), "avg_minutes_one_way": round(sum(t["minutes_one_way"] for t in same) / len(same), 1)}
+    if price is None:
+        notes.append("חסר מחיר")
+    if km1 is None and extra_km is None:
+        notes.append('חסר ק"מ — בלעדיו אין חישוב לק"מ ולמכסה')
+    return {"offer": {"destination": destination, "price": price, "km_one_way": km1, "minutes_one_way": min1, "start_time": start, "on_the_way": extra_km is not None},
+            "scenarios": scenarios, "expected": expected, "basis": {"used": used, "destination_sample": dest_n, "overall_sample": overall_n, "weights": weights},
+            "average": average, "vs_average": vs, "typical_at_this_hour": typical, "allowance_remaining_km": remaining, "cost_per_km": cost, "notes": notes}
+
+
 def build(route_records: list[dict], trip_records: list[dict], today: date, months: int = 6, settings_records: list[dict] | None = None) -> dict:
     all_routes = [parse_route(r) for r in route_records]
     routes = [r for r in all_routes if r["kind"] == "paid"]
@@ -426,7 +550,7 @@ def build(route_records: list[dict], trip_records: list[dict], today: date, mont
     one_off = one_off_month(trips, this_month)
     return {"month": this_month, "today": today.isoformat(), "routes": rows, "own_trips": [{"id": r["id"], "name": r["name"], "weekdays": r["weekdays"], "km_one_way": r["km_one_way"],
                                                                                        "minutes_one_way": r["minutes_one_way"]} for r in own],
-            "trips": table[:120], "one_off": one_off, "profitability": profitability(routes, trips, settings), "quota": quota_view(settings, rides, today),
+            "trips": table[:120], "one_off": one_off, "pending_updates": pending_updates(trips, today), "return_stats": _return_view(return_stats(trips)), "profitability": profitability(routes, trips, settings), "quota": quota_view(settings, rides, today),
             "settings": {k: settings[k] for k in ("free_km", "free_fuel", "fuel_cost_per_km", "cost_per_km", "other_km_used", "other_km_month")} if settings else None,
             "income_this_month": round(sum(r["this_month"]["income"] for r in rows) + one_off["income"], 2), "default_cost_per_km": cost,
             # past days (not today / tomorrow, not a resting Saturday) still without an answer: a missing day is never counted as "no ride" or as income

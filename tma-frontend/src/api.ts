@@ -1,5 +1,5 @@
 import type {
-  FccCommute, FccCommuteRouteBody, FccCommuteSettingsBody, FccCommuteTripBody, FccConsumption, FccLoanSchedulePreview, FccRefinance, FccRefinanceBody, FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, NewTaskInput, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
+  FccCommute, FccCommuteEvaluation, FccCommuteOfferBody, FccCommuteRouteBody, FccCommuteSettingsBody, FccCommuteTripBody, FccConsumption, FccLoanSchedulePreview, FccRefinance, FccRefinanceBody, FundingPlan, FundingRequestBody, ProjectsResponse, DashboardResponse, LeadsResponse, LeadDetail, ActivityResponse, ApprovalsResponse, FinancePulse, AssetsResponse, Asset, SystemHealth, GameToday, GameCheckin, CheckinTask, OwnerControlCenter, AuthResponse, Venture, VenturesResponse, MarketingStatusResponse, CommandCenterResponse, MyWorkResponse, NewTaskInput, FccOverview, FccAccountsView, FccNetWorth, FccCashflow, FccImportPreview, FccImportRun, FccClassifyView, FccRuleView, FccAccountsForecast, FccForecastParams, FccScenarios, FccTurn, PortfolioLabParams, PortfolioLabView, PaceParams, PaceView, StressParams, StressView } from "./types";
 
 const BASE = (import.meta.env.VITE_API_URL as string) ?? "";
 const DEV_ID = (import.meta.env.VITE_DEV_TELEGRAM_ID as string) ?? "";
@@ -699,3 +699,10 @@ export const postFccCommuteDay = (body: { route_id: string; date: string; outcom
 export const postFccCommuteRoute = (body: FccCommuteRouteBody): Promise<FccCommute> => commutePost("/api/fcc/commute/route", body);
 export const postFccCommuteTrip = (body: FccCommuteTripBody): Promise<FccCommute> => commutePost("/api/fcc/commute/trip", body);
 export const postFccCommuteSettings = (body: FccCommuteSettingsBody): Promise<FccCommute> => commutePost("/api/fcc/commute/settings", body);
+/** A ride offer priced BEFORE it is taken — read-only on the server (nothing is saved). */
+export async function postFccCommuteEvaluate(body: FccCommuteOfferBody): Promise<FccCommuteEvaluation> {
+  const r = await fetch(`${BASE}/api/fcc/commute/evaluate`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+  const data = (await r.json().catch(() => ({}))) as FccCommuteEvaluation & { error?: string };
+  if (!r.ok) throw new Error(data.error ?? `API ${r.status}`);
+  return data;
+}

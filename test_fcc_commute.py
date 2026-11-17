@@ -334,3 +334,78 @@ def test_start_time_is_validated_and_travels_through_the_endpoints(api):
     assert post(app, "/api/fcc/commute/trip", {"destination": "x", "price": 1, "start_time": "7pm"}).status_code == 400
     post(app, "/api/fcc/commute/route", {"route_id": ROUTE["id"], "start_time": "06:30"})
     assert WRITES[1]["fields"] == {"Start Time": "06:30"}
+
+
+# ── an offer, priced before it is taken; what happened on the way back, learned over time ─────────────────────────
+def known(day, dest, status, wait=0, price=150, km=30, minutes=40, **extra):
+    return one_off(date(2026, 11, day), price, dest, km_one_way=km, minutes_one_way=minutes, return_status=status, waiting_minutes=wait, **extra)
+
+
+def test_return_stats_count_only_what_the_owner_recorded_and_pending_trips_wait_for_him():
+    trips = [C.parse_trip(t) for t in (known(2, "נתב\"ג", "empty"), known(3, "נתב\"ג", "continuation"), known(4, "נתב\"ג", "waited", 120), known(5, "נתב\"ג", "waited", 60),
+                                       one_off(date(2026, 11, 6), 200, "נתב\"ג", km_one_way=50, minutes_one_way=40, tid="recPENDINGAAAAAAA"))]
+    st = C.return_stats(trips)
+    assert st["overall"] == {"known": 4, "empty": 1, "continuation": 1, "waited": 2, "avg_wait_minutes": 90.0}
+    assert st["by_destination"]["נתב\"ג"]["known"] == 4
+    pend = C.pending_updates(trips, date(2026, 11, 17))
+    assert [p["id"] for p in pend] == ["recPENDINGAAAAAAA"] and pend[0]["price"] == 200 and C.pending_updates(trips, date(2027, 3, 1)) == []
+
+
+def test_an_offer_is_priced_under_each_way_back_with_no_invented_expectation_on_a_thin_history():
+    today = date(2026, 11, 17)
+    r = C.evaluate_offer({"price": 220, "km_one_way": 50, "minutes_one_way": 40, "destination": "נתב\"ג", "waiting_minutes": 120}, [ROUTE], [], today, [SETTINGS])
+    by = {s["key"]: s for s in r["scenarios"]}
+    assert by["empty"]["km"] == 100 and by["empty"]["gross_per_km"] == 2.2 and by["continuation"]["km"] == 50 and by["continuation"]["gross_per_km"] == 4.4
+    assert by["waited"]["minutes"] == 200 and by["waited"]["gross_per_hour"] == 66.0 and by["empty"]["net"] == 140.0
+    assert r["expected"] is None and r["basis"]["used"] is None and any("אין מספיק היסטוריה" in n for n in r["notes"])
+
+
+def test_the_expected_figure_comes_from_the_destinations_own_history_else_the_overall_one():
+    today = date(2026, 11, 17)
+    hist = [known(d, "נתב\"ג", st, 60 if st == "waited" else 0) for d, st in zip(range(1, 11), ["empty", "empty", "empty", "continuation", "continuation", "waited", "empty", "continuation", "empty", "waited"])]
+    r = C.evaluate_offer({"price": 200, "km_one_way": 50, "minutes_one_way": 40, "destination": "נתב\"ג"}, [ROUTE], hist, today, [SETTINGS])
+    assert r["basis"]["used"] == "destination" and r["basis"]["destination_sample"] == 10 and r["basis"]["weights"] == {"empty": 0.5, "continuation": 0.3, "waited": 0.2}
+    e = r["expected"]
+    assert e["km"] == 0.5 * 100 + 0.3 * 50 + 0.2 * 100 == 85.0 and e["minutes"] == round(0.5 * 80 + 0.3 * 40 + 0.2 * 140, 2) and e["gross_per_km"] == round(200 / 85, 2)
+    assert r["average"]["rides"] == 10 and r["vs_average"]["per_km"] is not None
+    other = C.evaluate_offer({"price": 200, "km_one_way": 50, "minutes_one_way": 40, "destination": "מקום חדש"}, [ROUTE], hist, today, [SETTINGS])
+    assert other["basis"]["used"] == "overall" and other["basis"]["destination_sample"] == 0 and other["expected"] is not None          # 10 known outcomes overall
+
+
+def test_an_offer_shows_what_it_uses_of_the_allowance_and_the_part_beyond_it():
+    today = date(2026, 11, 17)
+    settings = [{"id": "r", "fields": {**SETTINGS["fields"], "Other Km Used": 560, "Free Fuel Monthly": None}}]            # 1000 allowed, 560 used -> 440 left
+    r = C.evaluate_offer({"price": 300, "km_one_way": 300, "minutes_one_way": 200}, [ROUTE], [], today, settings)
+    empty = {s["key"]: s for s in r["scenarios"]}["empty"]
+    assert r["allowance_remaining_km"] == 440.0 and empty["km"] == 600 and empty["free_km"] == 440.0 and empty["beyond_km"] == 160.0 and empty["cost_beyond"] == 128.0 and empty["net_after_allowance"] == 172.0
+    cont = {s["key"]: s for s in r["scenarios"]}["continuation"]
+    assert cont["beyond_km"] == 0.0 and cont["net_after_allowance"] == 300.0                                                  # a paid way back: 300 km all inside the allowance
+
+
+def test_a_detour_offer_counts_only_what_it_adds_and_the_typical_minutes_at_the_hour_are_shown_when_known():
+    today = date(2026, 11, 17)
+    r = C.evaluate_offer({"price": 120, "extra_km": 5, "extra_minutes": 12, "km_one_way": 30, "minutes_one_way": 25}, [ROUTE], [], today, [SETTINGS])
+    (sc,) = r["scenarios"]
+    assert sc["key"] == "on_the_way" and sc["km"] == 5 and sc["gross_per_km"] == 24.0 and r["expected"] == sc
+    hist = [known(2, "ת\"א", "empty", minutes=60, start_time="07:45"), known(3, "ת\"א", "empty", minutes=70, start_time="08:00"), known(4, "ת\"א", "empty", minutes=30, start_time="11:00")]
+    t = C.evaluate_offer({"price": 150, "km_one_way": 30, "minutes_one_way": 40, "destination": "ת\"א", "start_time": "07:30"}, [ROUTE], hist, today, [SETTINGS])
+    assert t["typical_at_this_hour"] == {"band": "בוקר (שעת עומס)", "rides": 2, "avg_minutes_one_way": 65.0}
+
+
+def test_the_build_lists_the_trips_waiting_for_an_update_and_the_return_history(api):
+    app, state = api
+    state["trips"] = [known(d, "נתב\"ג", "empty") for d in (1, 2)] + [one_off(date.today(), 100, "ממתין", km_one_way=20, minutes_one_way=20, tid="recWAITINGAAAAAAA")]
+    v = app.test_client().get("/api/fcc/commute", headers=H).get_json()
+    assert [p["id"] for p in v["pending_updates"]] == ["recWAITINGAAAAAAA"] and v["return_stats"]["overall"]["known"] == 2 and v["return_stats"]["by_destination"][0]["destination"] == "נתב\"ג"
+
+
+def test_evaluate_endpoint_is_read_only_validated_and_owner_only(api, monkeypatch):
+    app, state = api
+    state["trips"] = [known(d, "נתב\"ג", "empty") for d in range(1, 8)]
+    ok = post(app, "/api/fcc/commute/evaluate", {"price": "220", "km_one_way": 50, "minutes_one_way": 40, "destination": "נתב\"ג", "start_time": "07:30"})
+    body = ok.get_json()
+    assert ok.status_code == 200 and not WRITES and [s["key"] for s in body["scenarios"]][:2] == ["empty", "continuation"] and body["basis"]["destination_sample"] == 7
+    for bad in ({}, {"price": 0}, {"price": "x"}, {"price": 5, "km_one_way": -1}, {"price": 5, "start_time": "7pm"}, {"price": 5, "minutes_one_way": 99999}):
+        assert post(app, "/api/fcc/commute/evaluate", bad).status_code == 400, bad
+    monkeypatch.setattr(tma_api, "resolve_identity", lambda *_: ident("avi", Role.PARTNER))
+    assert post(app, "/api/fcc/commute/evaluate", {"price": 5}).status_code == 404 and not WRITES
