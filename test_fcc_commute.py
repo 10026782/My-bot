@@ -186,7 +186,7 @@ SETTINGS = {"id": "recSETTINGSAAAAAA", "fields": {"Free Km Monthly": 1000, "Free
 
 
 FIELD = {"km_one_way": "Km One Way", "minutes_one_way": "Minutes One Way", "return_status": "Return Status", "vehicle_class": "Vehicle Class", "kind": "Kind",
-         "extra_km": "Extra Km", "extra_minutes": "Extra Minutes", "on_the_way_of": "On The Way Of", "waiting_minutes": "Waiting Minutes"}
+         "extra_km": "Extra Km", "extra_minutes": "Extra Minutes", "on_the_way_of": "On The Way Of", "waiting_minutes": "Waiting Minutes", "start_time": "Start Time"}
 
 
 def one_off(day: date, price, destination="נתב\"ג", tid=None, **extra):
@@ -299,3 +299,38 @@ def test_an_own_weekly_drive_is_created_without_a_price_and_cannot_be_answered_a
     assert aa.validate_commute_write(w["table"], w["op"], w["fields"]) is None
     state["routes"] = [{"id": "recOWNAAAAAAAAAAA", "fields": {"Name": "עבודה", "Route Kind": "own"}}]
     assert post(app, "/api/fcc/commute/day", {"route_id": "recOWNAAAAAAAAAAA", "date": (date.today() + timedelta(days=1)).isoformat(), "outcome": "no"}).status_code == 404
+
+
+# ── time of day: the same ride at different hours ─────────────────────────────────────────────────────────────────
+def test_start_time_falls_in_a_band_and_a_bad_time_is_none():
+    assert C.band_of("07:30") == "morning_rush" and C.band_of("06:00") == "morning_rush" and C.band_of("09:29") == "morning_rush" and C.band_of("09:30") == "midday"
+    assert C.band_of("17:45") == "evening_rush" and C.band_of("23:59") == "evening" and C.band_of("00:00") == "night" and C.band_of("5") is None and C.band_of(None) is None and C.band_of("24:00") is None
+
+
+def test_the_same_destination_is_compared_across_the_hours_and_a_thin_sample_says_nothing():
+    today = date(2026, 11, 17)
+    def ride(day, price, minutes, start, dest="תל אביב"):
+        return one_off(date(2026, 11, day), price, dest, km_one_way=30, minutes_one_way=minutes, return_status="continuation", start_time=start)
+    trips = [ride(2, 150, 30, "11:00"), ride(3, 150, 28, "11:30"), ride(4, 150, 60, "08:00"), ride(5, 150, 66, "07:45"), ride(6, 150, 40, "20:00", "חיפה")]
+    p = C.build([ROUTE], trips, today, 6, [SETTINGS])["profitability"]
+    assert [t["label"] for t in p["by_time"]] == ["בוקר (שעת עומס)", "צהריים", "ערב"] and p["by_time"][0]["avg_minutes"] == 63.0 and p["without_time"] == 0
+    (ins,) = p["time_insights"]                                                # חיפה has one ride in one band: nothing to compare
+    assert ins["destination"] == "תל אביב" and ins["fastest"] == "midday" and ins["slowest"] == "morning_rush" and ins["extra_minutes"] == 34.0
+    by = {b["band"]: b for b in ins["bands"]}
+    assert by["midday"]["gross_per_hour"] == 310.34 and by["morning_rush"]["gross_per_hour"] == 142.86           # 150 / 29 min vs 150 / 63 min
+    one_each = C.build([ROUTE], [ride(2, 150, 30, "11:00"), ride(4, 150, 60, "08:00")], today, 6, [])["profitability"]
+    assert one_each["time_insights"] == []                                      # one ride per band is an anecdote, not a pattern
+    flat = C.build([ROUTE], [ride(2, 150, 30, "11:00"), ride(3, 150, 31, "11:10"), ride(4, 150, 32, "08:00"), ride(5, 150, 33, "08:30")], today, 6, [])["profitability"]
+    assert flat["time_insights"] == []                                          # a difference of under 20% is not worth saying
+
+
+def test_start_time_is_validated_and_travels_through_the_endpoints(api):
+    app, _ = api
+    ok = aa.validate_commute_write
+    assert ok("Commute Trips", "patch", {"Start Time": "07:45"}) is None and ok("Commute Trips", "patch", {"Start Time": "7:45"}) and ok("Commute Routes", "patch", {"Start Time": "25:00"})
+    assert ok("Commute Routes", "patch", {"Start Time": "06:30"}) is None
+    post(app, "/api/fcc/commute/trip", {"destination": "תל אביב", "price": 150, "start_time": "07:45", "km_one_way": 30, "minutes_one_way": 60})
+    assert WRITES[0]["fields"]["Start Time"] == "07:45"
+    assert post(app, "/api/fcc/commute/trip", {"destination": "x", "price": 1, "start_time": "7pm"}).status_code == 400
+    post(app, "/api/fcc/commute/route", {"route_id": ROUTE["id"], "start_time": "06:30"})
+    assert WRITES[1]["fields"] == {"Start Time": "06:30"}

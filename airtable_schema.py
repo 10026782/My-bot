@@ -1002,6 +1002,7 @@ class CommuteRouteFields:
     RETURN_STATUS   = "Return Status"        # singleSelect empty|continuation|waited — what happens on the way back (see CommuteTripFields); empty = the price covers the return
     WAITING_MINUTES = "Waiting Minutes"      # number — minutes waited at the destination per ride day (waited)
     ROUTE_KIND      = "Route Kind"           # singleSelect paid|own — empty = paid; own = one of the owner's OWN regular weekly drives (no price) that a ride / delivery can be fitted "on the way" of
+    START_TIME      = "Start Time"           # text "HH:MM" — the usual start time of the recurring ride
     WEEKDAYS        = "Weekdays"             # multipleSelects (ראשון..שבת) — the days an own weekly drive happens on
     FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
 
@@ -1026,6 +1027,7 @@ class CommuteTripFields:
     KIND            = "Kind"                 # singleSelect ride|delivery — empty = ride
     EXTRA_KM        = "Extra Km"             # number — km the trip ADDED over what the owner would have driven anyway (replaces the one-way based km when present)
     EXTRA_MINUTES   = "Extra Minutes"        # number — minutes the trip ADDED (replaces the one-way based minutes when present)
+    START_TIME      = "Start Time"           # text "HH:MM" — when the trip started: with the minutes it shows what traffic does to a ride's length at that hour
     ON_THE_WAY_OF   = "On The Way Of"        # text — the name of the own weekly drive the trip was fitted onto (display only)
     FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
 

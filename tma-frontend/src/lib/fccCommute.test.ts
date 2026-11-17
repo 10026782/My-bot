@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CommuteView } from "../components/FccCommute";
 import {
-  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
+  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, timeModel, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
   tripBody, tripRows, weekRows,
 } from "./fccCommute";
 import type { FccCommute, FccCommuteDay, FccCommuteProfit, FccCommuteRoute, FccCommuteStats } from "../types";
@@ -16,7 +16,7 @@ function test(name: string, fn: () => void) { try { fn(); console.log(`ok - ${na
 
 const day = (date: string, o: Partial<FccCommuteDay> = {}): FccCommuteDay => ({ date, weekday: "רביעי", is_tomorrow: false, is_today: false, rest_day: false, outcome: null, stops: null, trip_id: null, ...o });
 const route: FccCommuteRoute = {
-  id: "recR", name: "נסיעה", kind: "paid", weekdays: [], price: 130, km_one_way: 22, minutes_one_way: 35, cost_per_km: null, planned_days: 6, active: true, notes: null, vehicle_class: null, return_status: "empty", waiting_minutes: 0,
+  id: "recR", name: "נסיעה", kind: "paid", weekdays: [], price: 130, km_one_way: 22, minutes_one_way: 35, cost_per_km: null, planned_days: 6, active: true, notes: null, vehicle_class: null, return_status: "empty", waiting_minutes: 0, start_time: "06:30",
   economics: { price: 130, km_per_day: 44, minutes_per_day: 70, hours_per_day: 1.17, gross_per_hour: 111.43, gross_per_km: 2.95, vehicle_cost_per_day: null, net_per_day: null, net_per_hour: null, net_per_km: null, monthly_potential: 3380, return_status: "empty", vehicle_class: null },
   days: [day("2026-11-18", { is_tomorrow: true, outcome: "yes", stops: 3 }), day("2026-11-16")],
   this_month: { month: "2026-11", yes_days: 5, no_days: 1, income: 650, stops: { "2": 3, "3": 2 }, stops_recorded: 5, three_share: 0.4, weeks: [{ week_start: "2026-11-08", yes_days: 5, income: 650 }] },
@@ -24,7 +24,9 @@ const route: FccCommuteRoute = {
 };
 const stats = (o: Partial<FccCommuteStats> = {}): FccCommuteStats => ({ rides: 2, avg_price: 185, measured_rides: 2, gross_per_hour: 120, gross_per_km: 2.5, net_per_hour: 90, net_per_km: 1.7, empty_return_share: 0.5, continuation_share: 0, waited_share: 0.5, on_the_way_share: 0, ...o });
 const profitability: FccCommuteProfit = {
-  cost_per_km: 0.8, overall: stats(),
+  cost_per_km: 0.8, overall: stats(), without_time: 1,
+  by_time: [{ band: "morning_rush", label: "בוקר (שעת עומס)", ...stats({ rides: 2 }), avg_minutes: 63 }, { band: "midday", label: "צהריים", ...stats({ rides: 2 }), avg_minutes: 29 }],
+  time_insights: [{ destination: "תל אביב", fastest: "midday", slowest: "morning_rush", extra_minutes: 34, bands: [{ band: "midday", label: "צהריים", rides: 2, avg_minutes: 29, gross_per_hour: 310.34, gross_per_km: 5, avg_price: 150 }, { band: "morning_rush", label: "בוקר (שעת עומס)", rides: 2, avg_minutes: 63, gross_per_hour: 142.86, gross_per_km: 5, avg_price: 150 }] }],
   by_destination: [{ destination: "קיסריה", ...stats({ rides: 1, gross_per_km: 24, on_the_way_share: 1, empty_return_share: 0 }), classes: [], kinds: ["ride"], vs_average_per_km: 21.5 },
     { destination: "נתב״ג", ...stats(), classes: ["large"], kinds: ["delivery"], vs_average_per_km: -0.3 }],
   by_class: [{ class: "large", label: "גדול", ...stats() }], by_kind: [{ kind: "delivery", label: "משלוח", ...stats() }], by_way: [{ on_the_way: true, label: "על הדרך", ...stats() }],
@@ -34,9 +36,9 @@ const view: FccCommute = {
   one_off: { month: "2026-11", trips: 2, income: 320 }, unanswered_past: 4, profitability, settings: { free_km: 1000, free_fuel: 300, fuel_cost_per_km: 0.5, cost_per_km: 0.8, other_km_used: 400, other_km_month: "2026-11" },
   quota: { month: "2026-11", allowed_km: 600, free_km: 1000, fuel_km: 600, other_km: 400, other_km_stale: false, rides_km: 100, rides_without_km: 1, used_km: 500, remaining_km: 100, over_km: 0, days_left: 14, km_per_day_left: 7.1, avg_per_km: 2.2, worth_of_remaining: 220, fuel_note: null },
   trips: [
-    { id: "t1", date: "2026-11-12", weekday: "חמישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "yes", stops: 3, amount: 130, vehicle_class: null, return_status: "empty", on_the_way_of: null, km: 44, minutes: 70, gross_per_hour: 111.43, gross_per_km: 2.95, net_per_hour: null },
-    { id: "t2", date: "2026-11-13", weekday: "שישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "no", stops: null, amount: 0, vehicle_class: null, return_status: null, on_the_way_of: null, km: null, minutes: null, gross_per_hour: null, gross_per_km: null, net_per_hour: null },
-    { id: "t3", date: "2026-11-09", weekday: "שני", route: "קיסריה", one_off: true, kind: "delivery", outcome: "yes", stops: null, amount: 120, vehicle_class: "large", return_status: "empty", on_the_way_of: "עבודה", km: 5, minutes: 12, gross_per_hour: 600, gross_per_km: 24, net_per_hour: 580 },
+    { id: "t1", date: "2026-11-12", weekday: "חמישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "yes", stops: 3, amount: 130, vehicle_class: null, return_status: "empty", on_the_way_of: null, start_time: "06:30", band: "morning_rush", km: 44, minutes: 70, gross_per_hour: 111.43, gross_per_km: 2.95, net_per_hour: null },
+    { id: "t2", date: "2026-11-13", weekday: "שישי", route: "נסיעה", one_off: false, kind: "ride", outcome: "no", stops: null, amount: 0, vehicle_class: null, return_status: null, on_the_way_of: null, start_time: null, band: null, km: null, minutes: null, gross_per_hour: null, gross_per_km: null, net_per_hour: null },
+    { id: "t3", date: "2026-11-09", weekday: "שני", route: "קיסריה", one_off: true, kind: "delivery", outcome: "yes", stops: null, amount: 120, vehicle_class: "large", return_status: "empty", on_the_way_of: "עבודה", start_time: "17:45", band: "evening_rush", km: 5, minutes: 12, gross_per_hour: 600, gross_per_km: 24, net_per_hour: 580 },
   ],
 };
 const noop = () => undefined;
@@ -91,6 +93,22 @@ test("profitability: ranked rows with a number against the average (never a verd
   assert.ok(profitModel({ ...profitability, cost_per_km: null }).note.includes("הזינו עלות"));
 });
 
+test("time of day: bands, the traffic fact per destination (minutes and ₪ per hour of each band), the trips without a time, the start time in the forms", () => {
+  const t = timeModel(profitability);
+  assert.equal(t.rows.length, 2);
+  assert.equal(t.rows[0].avgMinutes.includes("63"), true);
+  assert.ok(t.insights[0].title.includes("תל אביב") && t.insights[0].title.includes("34") && t.insights[0].detail.includes("29 דק׳"));
+  assert.ok(t.note!.includes("1 נסיעות בלי שעת יציאה"));
+  assert.equal(timeModel({ ...profitability, without_time: 0, by_time: [], time_insights: [] }).note, null);
+  assert.ok(tripRows(view)[0].detail.includes("יציאה 06:30"));
+  const f = emptyTripForm("2026-11-17");
+  const ok = tripBody({ ...f, destination: "תל אביב", price: "150", start: "07:45", km: "30", minutes: "60" });
+  assert.ok("body" in ok && ok.body.start_time === "07:45");
+  assert.ok("error" in tripBody({ ...f, destination: "x", price: "5", start: "7pm" }) && "error" in routeBody({ ...EMPTY_FORM, name: "x", price: "5", start: "25:00" }));
+  const r = routeBody({ ...EMPTY_FORM, name: "x", price: "5", start: "06:30" });
+  assert.ok("body" in r && r.body.start_time === "06:30");
+});
+
 test("route form: blank is left out, bad is an error, a new paid route needs a name and a price, an own drive needs no price", () => {
   assert.ok("error" in routeBody(EMPTY_FORM));
   const ok = routeBody({ ...EMPTY_FORM, name: " נסיעה ", price: "130", km: "22", minutes: "35", cls: "large", ret: "waited", waiting: "90" });
@@ -126,7 +144,7 @@ test("settings form: shows what is saved, blank is left out, nothing to save is 
 
 test("view: allowance, tomorrow with three buttons (the pressed one marked), profitability, trips, the forms; empty states", () => {
   const html = render(view);
-  assert.ok(html.includes("מכסת הרכב") && html.includes("יש נסיעה?") && html.includes('aria-pressed="true"') && html.includes("אילו נסיעות השתלמו") && html.includes("טבלת נסיעות"));
+  assert.ok(html.includes("פקקים: איך שעת היציאה משנה") && html.includes("מכסת הרכב") && html.includes("יש נסיעה?") && html.includes('aria-pressed="true"') && html.includes("אילו נסיעות השתלמו") && html.includes("טבלת נסיעות"));
   assert.ok(html.includes("הוספת נסיעה / משלוח") && html.includes("הנסיעות הקבועות שלי") && html.includes("הגדרות הרכב") && html.includes("הוספת מסלול קבוע בתשלום") && html.includes("על הדרך של עבודה"));
   const empty = render({ ...view, routes: [], trips: [], own_trips: [], quota: null, settings: null, one_off: { month: "2026-11", trips: 0, income: 0 }, profitability: { ...profitability, by_destination: [], by_class: [], by_kind: [], by_way: [], overall: null } }, "אופס");
   assert.ok(empty.includes("אין נסיעה קבועה עדיין") && empty.includes("אופס") && empty.includes("עוד לא הוגדרה מכסה") && empty.includes("עוד אין נסיעות שנרשמו להשוואה"));

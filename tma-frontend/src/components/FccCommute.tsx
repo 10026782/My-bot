@@ -3,7 +3,7 @@ import { fetchFccCommute, postFccCommuteDay, postFccCommuteRoute, postFccCommute
 import type { CommuteClass, CommuteKind, CommuteReturn, FccCommute, FccCommuteRoute } from "../types";
 import {
   ANSWERS, CLASS_OPTIONS, EMPTY_FORM, EMPTY_OWN_FORM, KIND_OPTIONS, RETURN_OPTIONS, WEEKDAYS, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromRoute,
-  formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
+  formFromSettings, profitModel, quotaRows, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
 } from "../lib/fccCommute";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -22,8 +22,8 @@ function AnswerButtons({ route, day, busy, onAnswer }: { route: FccCommuteRoute;
   );
 }
 
-function Field({ label, value, onChange, mode = "decimal" }: { label: string; value: string; onChange: (v: string) => void; mode?: "text" | "decimal" | "date" }) {
-  return <label className="fcc-field"><span>{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} inputMode={mode === "date" ? undefined : mode} type={mode === "date" ? "date" : "text"} className="boss-input" /></label>;
+function Field({ label, value, onChange, mode = "decimal" }: { label: string; value: string; onChange: (v: string) => void; mode?: "text" | "decimal" | "date" | "time" }) {
+  return <label className="fcc-field"><span>{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} inputMode={mode === "date" || mode === "time" ? undefined : mode} type={mode === "date" ? "date" : mode === "time" ? "time" : "text"} className="boss-input" /></label>;
 }
 function Select<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return <label className="fcc-field"><span>{label}</span><select value={value} onChange={(e) => onChange(e.target.value as T)} className="boss-input">{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>;
@@ -37,7 +37,8 @@ function RouteFormView({ initial, submitLabel, busy, onSubmit }: { initial: Rout
       <Field label={form.own ? "שם הנסיעה הקבועה שלי (למשל: עבודה)" : "שם המסלול"} value={form.name} onChange={set("name")} mode="text" />
       {!form.own && <Field label="מחיר ליום נסיעה (₪)" value={form.price} onChange={set("price")} />}
       <Field label='ק"מ לכל כיוון (חד פעמי)' value={form.km} onChange={set("km")} />
-      <Field label="דקות לכל כיוון" value={form.minutes} onChange={set("minutes")} />
+      <Field label="דקות לכל כיוון (בשעת היציאה הרגילה)" value={form.minutes} onChange={set("minutes")} />
+      <Field label="שעת יציאה רגילה" value={form.start} onChange={set("start")} mode="time" />
       {!form.own && (
         <>
           <Field label="ימי נסיעה בשבוע" value={form.days} onChange={set("days")} />
@@ -68,6 +69,7 @@ function TripFormView({ today, ownTrips, busy, onSubmit }: { today: string; ownT
       <Select<CommuteKind> label="סוג" value={form.kind} options={KIND_OPTIONS} onChange={set("kind")} />
       <Field label="יעד / תיאור" value={form.destination} onChange={set("destination")} mode="text" />
       <Field label="תאריך" value={form.date} onChange={set("date")} mode="date" />
+      <Field label="שעת יציאה (איך הפקקים משפיעים)" value={form.start} onChange={set("start")} mode="time" />
       <Field label="המחיר שקיבלת (₪)" value={form.price} onChange={set("price")} />
       <Select label="מחיר ששולם" value={form.cls} options={CLASS_OPTIONS} onChange={set("cls")} />
       {ownTrips.length > 0 && (
@@ -76,12 +78,12 @@ function TripFormView({ today, ownTrips, busy, onSubmit }: { today: string; ownT
       {onWay ? (
         <>
           <Field label='ק"מ עיקוף (מעבר למה שהיית נוסע בכל מקרה)' value={form.extraKm} onChange={set("extraKm")} />
-          <Field label="דקות עיקוף" value={form.extraMinutes} onChange={set("extraMinutes")} />
+          <Field label="דקות עיקוף (בפועל, עם הפקקים)" value={form.extraMinutes} onChange={set("extraMinutes")} />
         </>
       ) : (
         <>
           <Field label='ק"מ לכיוון אחד' value={form.km} onChange={set("km")} />
-          <Field label="דקות לכיוון אחד" value={form.minutes} onChange={set("minutes")} />
+          <Field label="דקות לכיוון אחד (בפועל, עם הפקקים)" value={form.minutes} onChange={set("minutes")} />
           <Select<CommuteReturn> label="חזרה" value={form.ret} options={RETURN_OPTIONS} onChange={set("ret")} />
           {form.ret === "waited" && <Field label="דקות המתנה" value={form.waiting} onChange={set("waiting")} />}
         </>
@@ -133,6 +135,7 @@ export function CommuteView({ data, busy, error, onAnswer, onSaveRoute, onSaveTr
   const trips = tripRows(data);
   const quota = quotaRows(data.quota);
   const profit = profitModel(data.profitability);
+  const timing = timeModel(data.profitability);
   return (
     <div className="fcc-stack">
       {error && <p className="fcc-goal__note" role="alert">{error}</p>}
@@ -208,6 +211,23 @@ export function CommuteView({ data, busy, error, onAnswer, onSaveRoute, onSaveTr
             <p className="fcc-loan__meta">מסודר לפי ₪ לכל ק״מ מהמכסה, מהגבוה לנמוך. {profit.note}</p>
           </>
         )}
+      </section>
+
+      <section className="fcc-section" aria-labelledby="commute-time-heading">
+        <h2 id="commute-time-heading" className="fcc-section__heading">פקקים: איך שעת היציאה משנה את הנסיעה</h2>
+        {timing.rows.length === 0 ? <p className="fcc-loan__meta">הוסיפו שעת יציאה ודקות בפועל לנסיעות — וכאן יוצג כמה זמן אותה נסיעה לוקחת בכל שעה ומה המחיר לשעה.</p> : (
+          <>
+            <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="שעות ביום">
+              <table className="fcc-compare__table">
+                <thead><tr><th>שעות</th><th>נסיעות</th><th>זמן ממוצע</th><th>לשעה</th><th>לק״מ</th></tr></thead>
+                <tbody>{timing.rows.map((r) => <tr key={r.key}><th scope="row">{r.label}</th><td>{r.rides}</td><td>{r.avgMinutes}</td><td>{r.perHour}</td><td>{r.perKm}</td></tr>)}</tbody>
+              </table>
+            </div>
+            {timing.insights.length > 0 && <ul className="fcc-list">{timing.insights.map((i) => <li key={i.key}><strong>{i.title}</strong><div className="fcc-loan__meta">{i.detail}</div></li>)}</ul>}
+            {timing.insights.length === 0 && <p className="fcc-loan__meta">עוד אין מספיק נסיעות לאותו יעד בשעות שונות כדי להשוות (לפחות 2 בכל טווח שעות).</p>}
+          </>
+        )}
+        {timing.note && <p className="fcc-loan__meta">{timing.note}</p>}
       </section>
 
       <section className="fcc-section" aria-labelledby="commute-trips-heading">

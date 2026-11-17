@@ -383,11 +383,12 @@ def _rules_write_refused(op, fields) -> bool:
 
 
 _COMMUTE_ROUTE_KEYS = {"Name", "Day Price", "Km One Way", "Minutes One Way", "Cost Per Km", "Planned Days Per Week", "Status", "Notes",
-                       "Vehicle Class", "Return Status", "Waiting Minutes", "Route Kind", "Weekdays"}
+                       "Vehicle Class", "Return Status", "Waiting Minutes", "Route Kind", "Weekdays", "Start Time"}
 _COMMUTE_SETTINGS_KEYS = {"Name", "Free Km Monthly", "Free Fuel Monthly", "Fuel Cost Per Km", "Cost Per Km", "Other Km Used", "Other Km Month"}
 _COMMUTE_WEEKDAYS = ("ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת")
+_COMMUTE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _COMMUTE_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
-_COMMUTE_TRIP_EXTRA = {"Destination", "Vehicle Class", "Km One Way", "Minutes One Way", "Return Status", "Waiting Minutes", "Kind", "Extra Km", "Extra Minutes", "On The Way Of"}      # a one-off trip's own facts
+_COMMUTE_TRIP_EXTRA = {"Destination", "Vehicle Class", "Km One Way", "Minutes One Way", "Return Status", "Waiting Minutes", "Kind", "Extra Km", "Extra Minutes", "On The Way Of", "Start Time"}      # a one-off trip's own facts
 _COMMUTE_TRIP_POST_KEYS = {"Name", "Route", "Trip Date", "Outcome", "Stops", "Amount", "Idempotency Key", "Note"} | _COMMUTE_TRIP_EXTRA
 _COMMUTE_TRIP_PATCH_KEYS = {"Outcome", "Stops", "Amount", "Note"} | _COMMUTE_TRIP_EXTRA
 _COMMUTE_TRIP_KEY_RE = re.compile(r"^rec[A-Za-z0-9]{14}:\d{4}-\d{2}-\d{2}$")
@@ -410,6 +411,8 @@ def validate_commute_write(table: str, op: str, fields) -> str | None:
             return "bad vehicle class"
         if fields.get("Return Status") not in _COMMUTE_RETURNS:
             return "bad return status"
+        if fields.get("Start Time") is not None and (not isinstance(fields["Start Time"], str) or not _COMMUTE_TIME_RE.match(fields["Start Time"])):
+            return "bad start time"
         if not (num("Km One Way", 0, 2000) and num("Minutes One Way", 0, 1440) and num("Waiting Minutes", 0, 1440)):
             return "bad number"
         return None

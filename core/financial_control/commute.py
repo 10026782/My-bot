@@ -18,6 +18,7 @@ This module only *derives*:
 * the leased car's free monthly allowance (km and fuel ₪, entered once): what is left of it this month, and which rides use it best — inside the allowance a km costs nothing, so
   the ride's gross IS its profit and the scarce thing is the km (₪ per allowance-km); beyond it a km costs the owner's cost per km;
 * a ride "on the way" of one of the owner's OWN weekly drives (a delivery counts the same): only the km and minutes it ADDED count (``Extra Km`` / ``Extra Minutes``);
+* the time of day: what traffic does to a ride's length — the same destination compared across bands of the day (minutes, ₪ per hour); a fact is said only with a real sample;
 * the profitability by destination, by price class and by kind (ride / delivery) — which rides were worth it — as numbers and a comparison with the average, never a verdict by a threshold;
 * income entries (``cashflow.Txn``) for the monthly income model — the SAME numbers, no second formula.
 
@@ -42,6 +43,12 @@ CLASS_LABEL = {"regular": "רגיל", "large": "גדול"}
 KIND_LABEL = {"ride": "נסיעה", "delivery": "משלוח"}
 RETURN_LABEL = {"empty": "חזרה ריקה", "waited": "המתנה", "continuation": "יש נסיעת המשך"}
 DEFAULT_RETURN = "empty"
+# time-of-day bands (start hour, end hour exclusive, key, label): the rush hours are separate bands because that is where a ride's length changes
+BANDS = ((0.0, 6.0, "night", "לילה ובוקר מוקדם"), (6.0, 9.5, "morning_rush", "בוקר (שעת עומס)"), (9.5, 15.0, "midday", "צהריים"), (15.0, 19.5, "evening_rush", "אחה״צ (שעת עומס)"),
+         (19.5, 24.0, "evening", "ערב"))
+BAND_LABEL = {key: label for _, _, key, label in BANDS}
+MIN_BAND_RIDES = 2            # rides in EACH band before the length of a ride is compared across bands
+MIN_BAND_GAP = 0.2            # a difference of at least 20% in minutes is "a difference" worth saying
 
 
 def _num(v) -> float | None:
@@ -57,6 +64,21 @@ def _day(v) -> date | None:
         return date.fromisoformat(str(v)[:10])
     except (TypeError, ValueError):
         return None
+
+
+def band_of(start_time: str | None) -> str | None:
+    """The band of the day for an "HH:MM" start time; None when there is no (valid) time."""
+    try:
+        hh, mm = str(start_time).split(":")
+        hour = int(hh) + int(mm) / 60
+    except (ValueError, AttributeError):
+        return None
+    return next((key for lo, hi, key, _ in BANDS if lo <= hour < hi), None)
+
+
+def _time(v) -> str | None:
+    v = str(v or "").strip()
+    return v if band_of(v) else None
 
 
 def _cls(v):
@@ -76,7 +98,8 @@ def parse_route(rec: dict) -> dict:
     return {"id": rec.get("id"), "kind": "own" if kind == "own" else "paid", "weekdays": weekdays, "name": str(f.get("Name") or "").strip() or "נסיעה", "price": _num(f.get("Day Price")),
             "km_one_way": _num(f.get("Km One Way")), "minutes_one_way": _num(f.get("Minutes One Way")), "cost_per_km": _num(f.get("Cost Per Km")),
             "planned_days": _num(f.get("Planned Days Per Week")), "active": _sel(f.get("Status")) != "paused", "notes": f.get("Notes") or None,
-            "vehicle_class": _cls(f.get("Vehicle Class")), "return_status": _ret(f.get("Return Status"), DEFAULT_RETURN), "waiting_minutes": _num(f.get("Waiting Minutes")) or 0.0}
+            "vehicle_class": _cls(f.get("Vehicle Class")), "return_status": _ret(f.get("Return Status"), DEFAULT_RETURN), "waiting_minutes": _num(f.get("Waiting Minutes")) or 0.0,
+            "start_time": _time(f.get("Start Time"))}
 
 
 def parse_trip(rec: dict) -> dict | None:
@@ -94,7 +117,8 @@ def parse_trip(rec: dict) -> dict | None:
             "stops": int(stops) if stops else None, "amount": _num(f.get("Amount")), "vehicle_class": _cls(f.get("Vehicle Class")),
             "km_one_way": _num(f.get("Km One Way")), "minutes_one_way": _num(f.get("Minutes One Way")), "return_status": _ret(f.get("Return Status")),
             "waiting_minutes": _num(f.get("Waiting Minutes")) or 0.0, "kind": "delivery" if _sel(f.get("Kind")) == "delivery" else "ride",
-            "extra_km": _num(f.get("Extra Km")), "extra_minutes": _num(f.get("Extra Minutes")), "on_the_way_of": str(f.get("On The Way Of") or "").strip() or None}
+            "extra_km": _num(f.get("Extra Km")), "extra_minutes": _num(f.get("Extra Minutes")), "on_the_way_of": str(f.get("On The Way Of") or "").strip() or None,
+            "start_time": _time(f.get("Start Time"))}
 
 
 def parse_settings(records: list[dict]) -> dict | None:
@@ -242,6 +266,32 @@ def _stats(group: list[dict]) -> dict:
             "on_the_way_share": round(sum(1 for g in group if g["e"]["on_the_way"]) / len(group), 4) if group else None}
 
 
+def _avg_minutes(group: list[dict]) -> float | None:
+    known = [g["e"]["minutes"] for g in group if g["e"]["minutes"]]
+    return round(sum(known) / len(known), 1) if known else None
+
+
+def _time_insights(groups: dict[str, list[dict]]) -> list[dict]:
+    """The same destination at different hours: for every destination with at least ``MIN_BAND_RIDES`` rides in two or more bands of the day, the average minutes and the gross ₪ per hour
+    of each band, and — when the slowest band takes at least ``MIN_BAND_GAP`` more minutes than the fastest — the facts. No verdict on whether to drive at that hour."""
+    out = []
+    for group in groups.values():
+        bands = []
+        for _, _, key, label in BANDS:
+            part = [g for g in group if g["band"] == key and g["e"]["minutes"]]
+            if len(part) >= MIN_BAND_RIDES:
+                st = _stats(part)
+                bands.append({"band": key, "label": label, "rides": len(part), "avg_minutes": _avg_minutes(part), "gross_per_hour": st["gross_per_hour"], "gross_per_km": st["gross_per_km"],
+                              "avg_price": st["avg_price"]})
+        if len(bands) < 2:
+            continue
+        fast, slow = min(bands, key=lambda b: b["avg_minutes"]), max(bands, key=lambda b: b["avg_minutes"])
+        if slow["avg_minutes"] >= fast["avg_minutes"] * (1 + MIN_BAND_GAP):
+            out.append({"destination": group[0]["name"], "fastest": fast["band"], "slowest": slow["band"], "bands": bands,
+                        "extra_minutes": round(slow["avg_minutes"] - fast["avg_minutes"], 1)})
+    return sorted(out, key=lambda x: -x["extra_minutes"])
+
+
 def profitability(routes: list[dict], trips: list[dict], settings: dict | None = None) -> dict:
     """Which rides were worth it: per destination (a route or a one-off destination, by name), per price class, per kind (ride / delivery) and "on the way" vs not.
     The owner's constraint is the free km of the leased car, so the destinations are ranked by ₪ per allowance-km (gross per km); the ₪ per hour sits beside it, and the net
@@ -253,8 +303,9 @@ def profitability(routes: list[dict], trips: list[dict], settings: dict | None =
         if t["outcome"] != "yes":
             continue
         name, e, route = _trip_ride(t, by_id, cost)
+        start = t["start_time"] or (route or {}).get("start_time")
         rides.append({"name": name.strip(), "key": name.strip().casefold(), "class": t["vehicle_class"] or (route or {}).get("vehicle_class"), "kind": t["kind"],
-                      "return": t["return_status"] or (route or {}).get("return_status"), "e": e, "price": e["price"]})
+                      "return": t["return_status"] or (route or {}).get("return_status"), "e": e, "price": e["price"], "band": band_of(start)})
     overall = _stats(rides) if rides else None
     groups: dict[str, list[dict]] = {}
     for g in rides:
@@ -275,7 +326,8 @@ def profitability(routes: list[dict], trips: list[dict], settings: dict | None =
         return out
     on_way = [g for g in rides if g["e"]["on_the_way"]]
     off_way = [g for g in rides if not g["e"]["on_the_way"]]
-    return {"cost_per_km": cost, "overall": overall, "by_destination": rows, "by_class": split("class", CLASS_LABEL), "by_kind": split("kind", KIND_LABEL),
+    by_time = [{"band": key, "label": label, **_stats(g), "avg_minutes": _avg_minutes(g)} for _, _, key, label in BANDS if (g := [x for x in rides if x["band"] == key])]
+    return {"time_insights": _time_insights(groups), "by_time": by_time, "without_time": sum(1 for g in rides if g["band"] is None), "cost_per_km": cost, "overall": overall, "by_destination": rows, "by_class": split("class", CLASS_LABEL), "by_kind": split("kind", KIND_LABEL),
             "by_way": ([{"on_the_way": True, "label": "על הדרך", **_stats(on_way)}] if on_way else []) + ([{"on_the_way": False, "label": "נסיעה ייעודית", **_stats(off_way)}] if off_way else [])}
 
 
@@ -368,7 +420,8 @@ def build(route_records: list[dict], trip_records: list[dict], today: date, mont
         table.append({"id": t["id"], "date": t["date"].isoformat(), "weekday": WEEKDAYS_HE[t["date"].weekday()], "route": name or None, "one_off": t["route_id"] is None,
                       "kind": t["kind"], "outcome": t["outcome"], "stops": t["stops"], "amount": _amount(t, by_id.get(t["route_id"])) if t["outcome"] == "yes" else 0.0,
                       "vehicle_class": t["vehicle_class"] or (route or {}).get("vehicle_class"), "return_status": (t["return_status"] or (route or {}).get("return_status")) if e else None,
-                      "on_the_way_of": t["on_the_way_of"], "km": e["km"] if e else None, "minutes": e["minutes"] if e else None,
+                      "on_the_way_of": t["on_the_way_of"], "start_time": (t["start_time"] or (route or {}).get("start_time")), "band": band_of(t["start_time"] or (route or {}).get("start_time")),
+                      "km": e["km"] if e else None, "minutes": e["minutes"] if e else None,
                       "gross_per_hour": e["gross_per_hour"] if e else None, "gross_per_km": e["gross_per_km"] if e else None, "net_per_hour": e["net_per_hour"] if e else None})
     one_off = one_off_month(trips, this_month)
     return {"month": this_month, "today": today.isoformat(), "routes": rows, "own_trips": [{"id": r["id"], "name": r["name"], "weekdays": r["weekdays"], "km_one_way": r["km_one_way"],

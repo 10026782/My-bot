@@ -5291,14 +5291,14 @@ def fcc_commute_route(identity):
     data = request.get_json(silent=True) or {}
     mapping = {"name": RF.NAME, "price": RF.DAY_PRICE, "km_one_way": RF.KM_ONE_WAY, "minutes_one_way": RF.MINUTES_ONE_WAY, "cost_per_km": RF.COST_PER_KM,
                "planned_days": RF.PLANNED_DAYS, "status": RF.STATUS, "vehicle_class": RF.VEHICLE_CLASS, "return_status": RF.RETURN_STATUS, "waiting_minutes": RF.WAITING_MINUTES,
-               "route_kind": RF.ROUTE_KIND, "weekdays": RF.WEEKDAYS}
+               "route_kind": RF.ROUTE_KIND, "weekdays": RF.WEEKDAYS, "start_time": RF.START_TIME}
     fields = {}
     for key, field in mapping.items():
         if key in data and data[key] not in (None, "", []):
             v = data[key]
             if key == "name":
                 v = str(v).strip()
-            elif key not in ("status", "vehicle_class", "return_status", "route_kind", "weekdays"):
+            elif key not in ("status", "vehicle_class", "return_status", "route_kind", "weekdays", "start_time"):
                 try:
                     v = float(v)
                 except (TypeError, ValueError):
@@ -5334,7 +5334,7 @@ def fcc_commute_route(identity):
 def fcc_commute_trip(identity):
     """A ONE-OFF paid trip (no route). Body: {"trip_id"?: "rec…" (edit one of his own one-off trips), "destination", "date", "price" (typed each time — there is no price list),
     "vehicle_class"?: "regular"|"large", "kind"?: "ride"|"delivery", "km_one_way"?, "minutes_one_way"?, "return_status"?: "empty"|"waited"|"continuation", "waiting_minutes"?,
-    "extra_km"? / "extra_minutes"? (what the trip ADDED over what he would have driven anyway — a trip on the way of one of his own weekly drives), "on_the_way_of"?: its name}. ONE write (a new row, or a patch of
+    "start_time"? ("HH:MM" — when it started: the same ride takes different minutes at different hours), "extra_km"? / "extra_minutes"? (what the trip ADDED over what he would have driven anyway — a trip on the way of one of his own weekly drives), "on_the_way_of"?: its name}. ONE write (a new row, or a patch of
     his own one-off row) through the ActionGateway ceremony; the record is built here and range-checked again at execution. The date may be up to two months back and tomorrow."""
     if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
         return jsonify({"error": "not found"}), 404
@@ -5365,6 +5365,8 @@ def fcc_commute_trip(identity):
             fields[field] = data[key]
     if str(data.get("on_the_way_of") or "").strip():
         fields[TF.ON_THE_WAY_OF] = str(data["on_the_way_of"]).strip()
+    if str(data.get("start_time") or "").strip():
+        fields[TF.START_TIME] = str(data["start_time"]).strip()
     today = _date.today()
     day = None
     if data.get("date") not in (None, "") or not trip_id:

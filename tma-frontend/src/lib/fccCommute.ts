@@ -93,7 +93,7 @@ const KIND_LABEL: Record<CommuteKind, string> = { ride: "נסיעה", delivery: 
 export interface TripRow { key: string; date: string; route: string; result: string; detail: string; amount: string; perKm: string }
 export function tripRows(v: FccCommute): TripRow[] {
   return v.trips.map((t) => {
-    const bits = [t.vehicle_class ? CLASS_LABEL[t.vehicle_class] : null, t.return_status ? RETURN_LABEL[t.return_status] : null, t.on_the_way_of ? `על הדרך של ${t.on_the_way_of}` : null,
+    const bits = [t.start_time ? `יציאה ${t.start_time}` : null, t.vehicle_class ? CLASS_LABEL[t.vehicle_class] : null, t.return_status ? RETURN_LABEL[t.return_status] : null, t.on_the_way_of ? `על הדרך של ${t.on_the_way_of}` : null,
       t.km != null ? `${num(t.km)} ק"מ` : null].filter((x): x is string => !!x);
     return {
       key: t.id, date: `${t.weekday} ${dmy(t.date)}`, route: t.route ?? UNKNOWN,
@@ -127,6 +127,24 @@ const profitRow = (key: string, label: string, s: FccCommuteStats, extra = ""): 
   ({ key, label, rides: String(s.rides), avgPrice: m(s.avg_price), perKm: m(s.gross_per_km), perHour: m(s.gross_per_hour), netPerHour: m(s.net_per_hour), extra });
 
 /** Which rides were worth it, best ₪ per allowance-km first. "vs average" is a number, never a verdict: the owner decides. */
+export interface TimeRow { key: string; label: string; rides: string; avgMinutes: string; perHour: string; perKm: string }
+export interface TimeInsight { key: string; title: string; detail: string }
+
+/** What traffic does to a ride's length: the day in bands, and — per destination with a real sample in two bands — the minutes and the ₪ per hour of each band. Facts, no verdict. */
+export function timeModel(p: FccCommuteProfit): { rows: TimeRow[]; insights: TimeInsight[]; note: string | null } {
+  const label = (key: string): string => p.by_time.find((b) => b.band === key)?.label ?? key;
+  const insights = p.time_insights.map((i) => ({
+    key: i.destination,
+    title: `${i.destination}: ${label(i.slowest)} לוקחת ${num(i.extra_minutes)} דק׳ יותר מ${label(i.fastest)}`,
+    detail: i.bands.map((b) => `${b.label}: ${num(b.avg_minutes)} דק׳ · ${m(b.gross_per_hour)} לשעה (${b.rides} נסיעות)`).join(" | "),
+  }));
+  return {
+    rows: p.by_time.map((b) => ({ key: b.band, label: b.label, rides: String(b.rides), avgMinutes: b.avg_minutes == null ? UNKNOWN : `${num(b.avg_minutes)} דק׳`, perHour: m(b.gross_per_hour), perKm: m(b.gross_per_km) })),
+    insights,
+    note: p.without_time ? `${p.without_time} נסיעות בלי שעת יציאה לא נכנסו להשוואת השעות — הוסיפו שעה כדי לראות איך הפקקים משפיעים` : null,
+  };
+}
+
 export function profitModel(p: FccCommuteProfit): { destinations: ProfitRow[]; groups: ProfitRow[]; overall: ProfitRow | null; note: string } {
   const dest = p.by_destination.map((d) => {
     const parts = [d.vs_average_per_km == null ? "" : `${d.vs_average_per_km >= 0 ? "+" : "−"}${money(Math.abs(d.vs_average_per_km))} לק"מ מהממוצע`,
@@ -143,6 +161,7 @@ export function profitModel(p: FccCommuteProfit): { destinations: ProfitRow[]; g
 }
 
 // ── forms: typed text -> request body (a blank number is left out, never silently 0; an invalid one is an error) ──
+export const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const parseNum = (text: string): number | null | "bad" => {
   const t = text.replace(/[₪,\s]/g, "");
   if (t === "") return null;
@@ -159,13 +178,13 @@ function fill<B extends object>(body: B, spec: Spec<B>): string | null {
   return null;
 }
 
-export interface RouteForm { name: string; price: string; km: string; minutes: string; cost: string; days: string; cls: CommuteClass | ""; ret: CommuteReturn; waiting: string; own: boolean; weekdays: string[] }
-export const EMPTY_FORM: RouteForm = { name: "", price: "", km: "", minutes: "", cost: "", days: "6", cls: "", ret: "empty", waiting: "", own: false, weekdays: [] };
+export interface RouteForm { name: string; price: string; km: string; minutes: string; cost: string; days: string; cls: CommuteClass | ""; ret: CommuteReturn; waiting: string; own: boolean; weekdays: string[]; start: string }
+export const EMPTY_FORM: RouteForm = { name: "", price: "", km: "", minutes: "", cost: "", days: "6", cls: "", ret: "empty", waiting: "", own: false, weekdays: [], start: "" };
 export const EMPTY_OWN_FORM: RouteForm = { ...EMPTY_FORM, days: "", own: true };
 export const formFromRoute = (r: FccCommuteRoute): RouteForm => ({
   name: r.name, price: r.price == null ? "" : String(r.price), km: r.km_one_way == null ? "" : String(r.km_one_way), minutes: r.minutes_one_way == null ? "" : String(r.minutes_one_way),
   cost: r.cost_per_km == null ? "" : String(r.cost_per_km), days: r.planned_days == null ? "" : String(r.planned_days), cls: r.vehicle_class ?? "", ret: r.return_status,
-  waiting: r.waiting_minutes ? String(r.waiting_minutes) : "", own: r.kind === "own", weekdays: r.weekdays,
+  waiting: r.waiting_minutes ? String(r.waiting_minutes) : "", own: r.kind === "own", weekdays: r.weekdays, start: r.start_time ?? "",
 });
 
 /** A new paid route needs a name and a price; an own weekly drive needs only a name (and the weekdays are for the list). */
@@ -175,6 +194,7 @@ export function routeBody(form: RouteForm, routeId?: string): { body: FccCommute
   const err = fill(body, [["price", form.own ? "" : form.price, "מחיר"], ["km_one_way", form.km, 'ק"מ'], ["minutes_one_way", form.minutes, "דקות"], ["cost_per_km", form.cost, 'עלות לק"מ'],
     ["planned_days", form.days, "ימים בשבוע"], ["waiting_minutes", form.waiting, "דקות המתנה"]]);
   if (err) return { error: err };
+  if (form.start) { if (!TIME_RE.test(form.start)) return { error: "שעת יציאה: HH:MM" }; body.start_time = form.start; }
   if (!form.own) { if (form.cls) body.vehicle_class = form.cls; body.return_status = form.ret; } else { body.route_kind = "own"; if (form.weekdays.length) body.weekdays = form.weekdays; }
   if (!routeId && !body.name) return { error: "צריך שם" };
   if (!routeId && !form.own && body.price == null) return { error: "מסלול חדש צריך שם ומחיר ליום נסיעה" };
@@ -182,8 +202,8 @@ export function routeBody(form: RouteForm, routeId?: string): { body: FccCommute
   return { body };
 }
 
-export interface TripForm { destination: string; date: string; price: string; cls: CommuteClass | ""; kind: CommuteKind; km: string; minutes: string; ret: CommuteReturn; waiting: string; onWay: string; extraKm: string; extraMinutes: string }
-export const emptyTripForm = (today: string): TripForm => ({ destination: "", date: today, price: "", cls: "", kind: "ride", km: "", minutes: "", ret: "empty", waiting: "", onWay: "", extraKm: "", extraMinutes: "" });
+export interface TripForm { start: string; destination: string; date: string; price: string; cls: CommuteClass | ""; kind: CommuteKind; km: string; minutes: string; ret: CommuteReturn; waiting: string; onWay: string; extraKm: string; extraMinutes: string }
+export const emptyTripForm = (today: string): TripForm => ({ start: "", destination: "", date: today, price: "", cls: "", kind: "ride", km: "", minutes: "", ret: "empty", waiting: "", onWay: "", extraKm: "", extraMinutes: "" });
 
 /** One typed trip: the price is typed every time (there is no price list). "On the way" = the km / minutes it ADDED replace the one-way based ones. */
 export function tripBody(form: TripForm): { body: FccCommuteTripBody } | { error: string } {
@@ -195,6 +215,7 @@ export function tripBody(form: TripForm): { body: FccCommuteTripBody } | { error
   if (err) return { error: err };
   if (body.price == null) return { error: "צריך מחיר" };
   if (form.cls) body.vehicle_class = form.cls;
+  if (form.start) { if (!TIME_RE.test(form.start)) return { error: "שעת יציאה: HH:MM" }; body.start_time = form.start; }
   body.return_status = form.ret;
   if (form.onWay) body.on_the_way_of = form.onWay;
   if (body.extra_km != null && !form.onWay) return { error: "ק״מ עיקוף שייכים לנסיעה על הדרך — בחרו על הדרך של איזו נסיעה" };
