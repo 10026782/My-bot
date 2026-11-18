@@ -486,3 +486,44 @@ def test_where_and_stops_pass_the_guard_and_travel_through_the_endpoints(api):
     ev = post(app, "/api/fcc/commute/evaluate", {"price": 200, "km_one_way": 20, "minutes_one_way": 25, "city": "ירושלים", "area": "הר חומה", "added_stops": 1, "stops_price": 40, "stops_km": 8, "stops_minutes": 30})
     assert ev.status_code == 200 and ev.get_json()["stops"]["per_hour"] == 80.0 and not WRITES[1:]
     assert post(app, "/api/fcc/commute/evaluate", {"price": 100, "stops_price": 150}).status_code == 400
+
+
+# ── a recurring-route day timed afterwards: when it left and how long one way took that day ───────────────────────
+def timed_day(day, minutes, start, stops=2):
+    t = trip(day, "yes", stops, 130)
+    t["fields"].update({"Minutes One Way": minutes, "Start Time": start})
+    return t
+
+
+def test_a_route_day_uses_its_own_minutes_and_hour_and_the_route_compares_the_hours():
+    today = date(2026, 11, 18)
+    days = [timed_day(date(2026, 11, 1), 60, "07:30"), timed_day(date(2026, 11, 2), 66, "07:45"), timed_day(date(2026, 11, 3), 30, "11:00"), timed_day(date(2026, 11, 4), 28, "11:15"),
+            trip(date(2026, 11, 5), "yes", 3, 130)]
+    v = C.build([ROUTE], days, today, 6, [SETTINGS])
+    month = v["routes"][0]["this_month"]
+    assert month["timed_days"] == 4 and month["avg_minutes_one_way"] == 46.0 and month["yes_days"] == 5
+    (ins,) = v["profitability"]["time_insights"]
+    assert ins["destination"] == "נסיעה" and ins["slowest"] == "morning_rush" and ins["fastest"] == "midday" and ins["extra_minutes"] == 68.0      # the whole ride (there and back): 126 vs 58 minutes
+    by = {t["date"]: t for t in v["trips"]}
+    assert by["2026-11-01"]["minutes"] == 120 and by["2026-11-03"]["minutes"] == 60 and by["2026-11-05"]["minutes"] == 70          # a day without a time keeps the route's 35 x 2
+    day1 = next(d for d in C.build([ROUTE], days, date(2026, 11, 3), 6, [SETTINGS])["routes"][0]["days"] if d["date"] == "2026-11-03")
+    assert day1["start_time"] == "11:00" and day1["minutes_one_way"] == 30.0
+
+
+def test_the_day_endpoint_takes_the_hour_and_minutes_for_a_ride_that_happened_and_keeps_the_answer(api):
+    app, state = api
+    day = date.today() - timedelta(days=1)
+    state["trips"] = [trip(day, "yes", 2, 120, tid="recEXISTINGAAAAAAA")]
+    ok = post(app, "/api/fcc/commute/day", {"route_id": ROUTE["id"], "date": day.isoformat(), "outcome": "yes", "stops": 2, "start_time": "07:45", "minutes_one_way": "55"})
+    assert ok.status_code == 200
+    w = WRITES[0]
+    assert w["op"] == "patch" and w["fields"] == {"Outcome": "yes", "Stops": 2, "Amount": 120.0, "Start Time": "07:45", "Minutes One Way": 55.0}
+    assert aa.validate_commute_write(w["table"], w["op"], w["fields"]) is None
+    new_day = date.today() - timedelta(days=2)
+    post(app, "/api/fcc/commute/day", {"route_id": ROUTE["id"], "date": new_day.isoformat(), "outcome": "yes", "stops": 3, "minutes_one_way": 40})
+    assert WRITES[1]["op"] == "post" and WRITES[1]["fields"]["Minutes One Way"] == 40.0 and "Start Time" not in WRITES[1]["fields"] and aa.validate_commute_write("Commute Trips", "post", WRITES[1]["fields"]) is None
+    for bad in ({"start_time": "7pm"}, {"start_time": "7:45"}, {"minutes_one_way": 0}, {"minutes_one_way": "x"}, {"minutes_one_way": 5000}):
+        assert post(app, "/api/fcc/commute/day", {"route_id": ROUTE["id"], "date": day.isoformat(), "outcome": "yes", "stops": 2, **bad}).status_code == 400, bad
+    post(app, "/api/fcc/commute/day", {"route_id": ROUTE["id"], "date": day.isoformat(), "outcome": "no", "start_time": "07:45", "minutes_one_way": 55})
+    assert WRITES[2]["fields"] == {"Outcome": "no", "Amount": 0.0}              # a day without a ride has no hour or minutes
+    assert len(WRITES) == 3

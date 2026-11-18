@@ -5226,7 +5226,7 @@ def fcc_commute(identity):
 def fcc_commute_day(identity):
     """Body: {"route_id": "rec…", "date": "YYYY-MM-DD", "outcome": "yes"|"no", "stops": 2|3 (when yes)}. ONE row of Commute Trips per route per day: created, or
     — when the day already has an answer — patched. The day must lie in the answerable window (the last week and tomorrow), the route must be the owner's own
-    active route; the amount is the route's day price (kept as it was when the day was already answered "yes", so a later price change never rewrites history).
+    active route; for a ride that happened it may also carry "start_time" ("HH:MM") and "minutes_one_way" (how long one way took THAT day — the traffic of that hour); the amount is the route's day price (kept as it was when the day was already answered "yes", so a later price change never rewrites history).
     Through the normal ActionGateway ceremony."""
     if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
         return jsonify({"error": "not found"}), 404
@@ -5242,6 +5242,20 @@ def fcc_commute_day(identity):
     stops = data.get("stops")
     if outcome not in ("yes", "no") or not route_id.startswith("rec") or (outcome == "yes" and stops not in fcc_commute.STOP_CHOICES):
         return jsonify({"error": "route_id, outcome (yes/no) and, for yes, stops (2 or 3) required"}), 400
+    timing: dict = {}                                          # optional, for a ride that happened: when it left and how long one way took that day (traffic)
+    if outcome == "yes":
+        if str(data.get("start_time") or "").strip():
+            if fcc_commute.band_of(str(data["start_time"]).strip()) is None or len(str(data["start_time"]).strip()) != 5:
+                return jsonify({"error": "bad start_time"}), 400
+            timing[TF.START_TIME] = str(data["start_time"]).strip()
+        if data.get("minutes_one_way") not in (None, ""):
+            try:
+                minutes = float(data["minutes_one_way"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "bad minutes_one_way"}), 400
+            if not 0 < minutes <= 1440:
+                return jsonify({"error": "bad minutes_one_way"}), 400
+            timing[TF.MINUTES_ONE_WAY] = minutes
     today = _date.today()
     if not today - timedelta(days=fcc_commute.WINDOW_BACK) <= day <= today + timedelta(days=fcc_commute.WINDOW_FORWARD):
         return jsonify({"error": "date outside the answerable window"}), 400
@@ -5253,7 +5267,7 @@ def fcc_commute_day(identity):
                          if t[0] and t[0]["route_id"] == route_id and t[0]["date"] == day), None)
         if outcome == "yes":
             kept = existing[0]["amount"] if existing and existing[0]["outcome"] == "yes" and existing[0]["amount"] else None
-            fields = {TF.OUTCOME: "yes", TF.STOPS: int(stops), TF.AMOUNT: float(kept if kept is not None else route["price"])}
+            fields = {TF.OUTCOME: "yes", TF.STOPS: int(stops), TF.AMOUNT: float(kept if kept is not None else route["price"]), **timing}
         else:
             fields = {TF.OUTCOME: "no", TF.AMOUNT: 0.0}
         if existing:

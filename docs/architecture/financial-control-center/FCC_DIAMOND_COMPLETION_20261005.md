@@ -670,3 +670,10 @@ draft-reviewed payload = approved snapshot = ActionContract payload = written fi
 - **Change:** City / Area / Added Stops / Stops Price / Stops Km / Stops Minutes on Commute Trips (owner approval); `ride_economics` adds the stops' km and minutes to the ride and shows the stops on their own and the ride without them; `profitability` gains `by_city`, `by_area`, `stops` (incl. by band of the day); the way-back history and the expected figure are read per area, else city, else destination, else overall; the tab shows the place table, the stops table and, in an offer, its place history and its stops.
 - **Stated limits:** a place or stops comparison is only as good as the entries (an unentered city or area is counted apart and the screen says how many); the surcharge for the stops is typed by the owner (it is a part of the price, not added to it); no verdict by a threshold — a number against his own average; the stops' minutes are what the owner measured, with that hour's traffic.
 - **Not done:** verification on a device and in production; the profitability score engine; offers that were declined or lost.
+
+### Commute — timing a recurring-route day (18/11/2026) — owner decision
+
+- **Decision (owner, 18/11/2026):** the daily tracking of the recurring route must also record how long the ride took and its hour, besides whether it happened and with how many stops.
+- **Change:** `POST /api/fcc/commute/day` accepts optional `start_time` / `minutes_one_way` for a "yes" day (stored in the existing Commute Trips fields — no schema change); `commute._trip_ride` uses a day's own minutes, `days_window` returns them, `route_month` returns `timed_days` / `avg_minutes_one_way`; the route card has the two fields per past day.
+- **Stated limits:** the minutes are one way (the ride counts there and back from them); the hour and minutes are entered afterwards for a past day, not at the daily tap; a day without them uses the route's usual minutes and start time; the same-destination comparison needs >= 2 timed rides in each of two bands.
+- **Not done:** verification on a device and in production.

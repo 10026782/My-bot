@@ -695,7 +695,7 @@ async function commutePost(path: string, body: unknown): Promise<FccCommute> {
   return data;
 }
 /** One day's answer for one route: no ride, or a ride with 2 / 3 stops. The server picks the table, the fields and the price. */
-export const postFccCommuteDay = (body: { route_id: string; date: string; outcome: "yes" | "no"; stops?: number }): Promise<FccCommute> => commutePost("/api/fcc/commute/day", body);
+export const postFccCommuteDay = (body: { route_id: string; date: string; outcome: "yes" | "no"; stops?: number; start_time?: string; minutes_one_way?: number }): Promise<FccCommute> => commutePost("/api/fcc/commute/day", body);
 export const postFccCommuteRoute = (body: FccCommuteRouteBody): Promise<FccCommute> => commutePost("/api/fcc/commute/route", body);
 export const postFccCommuteTrip = (body: FccCommuteTripBody): Promise<FccCommute> => commutePost("/api/fcc/commute/trip", body);
 export const postFccCommuteSettings = (body: FccCommuteSettingsBody): Promise<FccCommute> => commutePost("/api/fcc/commute/settings", body);

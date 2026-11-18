@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CommuteView } from "../components/FccCommute";
 import {
-  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, placeModel, stopsModel, evaluateBody, evaluationModel, pendingRows, returnBody, returnModel, timeModel, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
+  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, dayTiming, dayTimingBody, timedLine, placeModel, stopsModel, evaluateBody, evaluationModel, pendingRows, returnBody, returnModel, timeModel, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
   tripBody, tripRows, weekRows,
 } from "./fccCommute";
 import type { FccCommute, FccCommuteDay, FccCommuteEvaluation, FccCommuteProfit, FccCommuteRoute, FccCommuteStats } from "../types";
@@ -14,12 +14,12 @@ const assert = {
 };
 function test(name: string, fn: () => void) { try { fn(); console.log(`ok - ${name}`); } catch (e) { failures++; console.error(`not ok - ${name}: ${(e as Error).message}`); } }
 
-const day = (date: string, o: Partial<FccCommuteDay> = {}): FccCommuteDay => ({ date, weekday: "רביעי", is_tomorrow: false, is_today: false, rest_day: false, outcome: null, stops: null, trip_id: null, ...o });
+const day = (date: string, o: Partial<FccCommuteDay> = {}): FccCommuteDay => ({ date, weekday: "רביעי", is_tomorrow: false, is_today: false, rest_day: false, outcome: null, stops: null, trip_id: null, start_time: null, minutes_one_way: null, ...o });
 const route: FccCommuteRoute = {
   id: "recR", name: "נסיעה", kind: "paid", weekdays: [], price: 130, km_one_way: 22, minutes_one_way: 35, cost_per_km: null, planned_days: 6, active: true, notes: null, vehicle_class: null, return_status: "empty", waiting_minutes: 0, start_time: "06:30",
   economics: { price: 130, km_per_day: 44, minutes_per_day: 70, hours_per_day: 1.17, gross_per_hour: 111.43, gross_per_km: 2.95, vehicle_cost_per_day: null, net_per_day: null, net_per_hour: null, net_per_km: null, monthly_potential: 3380, return_status: "empty", vehicle_class: null },
   days: [day("2026-11-18", { is_tomorrow: true, outcome: "yes", stops: 3 }), day("2026-11-16")],
-  this_month: { month: "2026-11", yes_days: 5, no_days: 1, income: 650, stops: { "2": 3, "3": 2 }, stops_recorded: 5, three_share: 0.4, weeks: [{ week_start: "2026-11-08", yes_days: 5, income: 650 }] },
+  this_month: { month: "2026-11", yes_days: 5, no_days: 1, income: 650, timed_days: 3, avg_minutes_one_way: 46, stops: { "2": 3, "3": 2 }, stops_recorded: 5, three_share: 0.4, weeks: [{ week_start: "2026-11-08", yes_days: 5, income: 650 }] },
   history: [], stops_note: null,
 };
 const stats = (o: Partial<FccCommuteStats> = {}): FccCommuteStats => ({ rides: 2, avg_price: 185, measured_rides: 2, gross_per_hour: 120, gross_per_km: 2.5, net_per_hour: 90, net_per_km: 1.7, empty_return_share: 0.5, continuation_share: 0, waited_share: 0.5, on_the_way_share: 0, ...o });
@@ -64,7 +64,7 @@ const evaluation: FccCommuteEvaluation = {
   stops: { added: 1, price: 40, km: 8, minutes: 30, per_hour: 80, per_km: 5, base_gross_per_hour: 192, total_gross_per_hour: 150, owner_per_hour: 66.67, owner_rides: 4, band: "בוקר (שעת עומס)" }, allowance_remaining_km: 440, cost_per_km: 0.8, notes: ["הערה לדוגמה"],
 };
 const render = (data: FccCommute, error: string | null = null, ev: FccCommuteEvaluation | null = null) =>
-  renderToStaticMarkup(createElement(CommuteView, { data, busy: false, error, evaluation: ev, onAnswer: noop, onSaveRoute: noop, onSaveTrip: noop, onSaveSettings: noop, onEvaluate: noop, onReturn: noop }));
+  renderToStaticMarkup(createElement(CommuteView, { data, busy: false, error, evaluation: ev, onAnswer: noop, onTiming: noop, onSaveRoute: noop, onSaveTrip: noop, onSaveSettings: noop, onEvaluate: noop, onReturn: noop }));
 
 test("answers: the pressed button, the request body and the day label", () => {
   assert.equal(ANSWERS.map((a) => a.label).join("|"), "אין נסיעה|2 תחנות|3 תחנות");
@@ -216,6 +216,22 @@ test("where and stops: the trip forms carry the city, the area and the stops; th
   assert.ok(r.rows.some((x) => x.label === "ירושלים · כניסה לעיר") && r.rows.some((x) => x.label === "ירושלים (כל העיר)") && r.note.includes("לאזור (אחרת לעיר"));
   const html = render(view);
   assert.ok(html.includes("לפי עיר ואזור") && html.includes("תחנות נוספות: האם הן משתלמות") && html.includes("תחנות נוספות בנסיעה"));
+});
+
+test("a past day of the route: timed afterwards (the hour it left, the minutes one way that day), the same answer is sent with it", () => {
+  const yes = day("2026-11-16", { outcome: "yes", stops: 3, start_time: "07:45", minutes_one_way: 55 });
+  assert.equal(dayTiming(yes), "יציאה 07:45 · 55 דק׳ לכיוון");
+  assert.equal(dayTiming(day("2026-11-15")), null);
+  const ok = dayTimingBody("recR", yes, "08:10", "62");
+  assert.ok("body" in ok && ok.body.outcome === "yes" && ok.body.stops === 3 && ok.body.date === "2026-11-16" && ok.body.start_time === "08:10" && ok.body.minutes_one_way === 62);
+  const onlyMinutes = dayTimingBody("recR", yes, "", "40");
+  assert.ok("body" in onlyMinutes && onlyMinutes.body.start_time === undefined && onlyMinutes.body.minutes_one_way === 40);
+  assert.ok("error" in dayTimingBody("recR", day("2026-11-16"), "08:10", "62") && "error" in dayTimingBody("recR", day("2026-11-16", { outcome: "no" }), "08:10", "62"));
+  assert.ok("error" in dayTimingBody("recR", yes, "8pm", "") && "error" in dayTimingBody("recR", yes, "", "0") && "error" in dayTimingBody("recR", yes, "", "x") && "error" in dayTimingBody("recR", yes, "", ""));
+  assert.ok(timedLine(route)!.includes("46") && timedLine(route)!.includes("3 ימים נמדדו"));
+  assert.equal(timedLine({ ...route, this_month: { ...route.this_month, timed_days: 0, avg_minutes_one_way: null } }), null);
+  const html = render({ ...view, routes: [{ ...route, days: [day("2026-11-18", { is_tomorrow: true }), yes] }] });
+  assert.ok(html.includes("שמירת שעה וזמן") && html.includes("זמן בפועל החודש") && html.includes("שעת יציאה — ") && html.includes("יציאה 07:45"));
 });
 
 test("settings form: shows what is saved, blank is left out, nothing to save is an error", () => {

@@ -219,7 +219,8 @@ def route_month(route: dict, trips: list[dict], month: str) -> dict:
         cell[0] += 1
         cell[1] += _amount(t, route)
     income = round(sum(c[1] for c in weeks.values()), 2)
-    return {"month": month, "yes_days": len(yes), "no_days": len(no), "income": income, "stops": {str(n): c for n, c in stops.items()},
+    timed = [t["minutes_one_way"] for t in yes if t["minutes_one_way"]]
+    return {"month": month, "yes_days": len(yes), "no_days": len(no), "income": income, "timed_days": len(timed), "avg_minutes_one_way": round(sum(timed) / len(timed), 1) if timed else None, "stops": {str(n): c for n, c in stops.items()},
             "stops_recorded": known, "three_share": round(stops[3] / known, 4) if known else None,
             "weeks": [{"week_start": w.isoformat(), "yes_days": c[0], "income": round(c[1], 2)} for w, c in sorted(weeks.items())]}
 
@@ -251,7 +252,8 @@ def days_window(route: dict, trips: list[dict], today: date) -> list[dict]:
         d = today - timedelta(days=back)
         t = by_day.get(d)
         out.append({"date": d.isoformat(), "weekday": WEEKDAYS_HE[d.weekday()], "is_tomorrow": d == today + timedelta(days=1), "is_today": d == today,
-                    "rest_day": rests and d.weekday() == SATURDAY, "outcome": t["outcome"] if t else None, "stops": t["stops"] if t else None, "trip_id": t["id"] if t else None})
+                    "rest_day": rests and d.weekday() == SATURDAY, "outcome": t["outcome"] if t else None, "stops": t["stops"] if t else None, "trip_id": t["id"] if t else None,
+                    "start_time": t["start_time"] if t else None, "minutes_one_way": t["minutes_one_way"] if t else None})
     return out
 
 
@@ -260,7 +262,8 @@ def _trip_ride(trip: dict, routes_by_id: dict, cost: float | None) -> tuple[str,
     route = routes_by_id.get(trip["route_id"]) if trip["route_id"] else None
     price = _amount(trip, route)
     if route is not None:
-        e = ride_economics(price, route["km_one_way"], route["minutes_one_way"], route["return_status"], route["waiting_minutes"], route["cost_per_km"] if route["cost_per_km"] is not None else cost)
+        minutes = trip["minutes_one_way"] if trip["minutes_one_way"] else route["minutes_one_way"]        # the minutes of THAT day when the owner timed it (traffic), else the route's usual
+        e = ride_economics(price, route["km_one_way"], minutes, route["return_status"], route["waiting_minutes"], route["cost_per_km"] if route["cost_per_km"] is not None else cost)
         return route["name"], e, route
     return trip["destination"] or ONE_OFF_SOURCE, ride_economics(price, trip["km_one_way"], trip["minutes_one_way"], trip["return_status"], trip["waiting_minutes"], cost,
                                                                  trip["extra_km"], trip["extra_minutes"], trip["stops_km"], trip["stops_minutes"], trip["stops_price"]), None

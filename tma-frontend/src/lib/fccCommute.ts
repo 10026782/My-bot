@@ -39,6 +39,28 @@ export function answerBody(routeId: string, date: string, key: AnswerKey): { rou
   return key === "no" ? { route_id: routeId, date, outcome: "no" } : { route_id: routeId, date, outcome: "yes", stops: Number(key) };
 }
 
+/** How a past day was timed (the hour it left and the minutes one way that day), or null. */
+export const dayTiming = (d: FccCommuteDay): string | null => {
+  const bits = [d.start_time ? `יציאה ${d.start_time}` : null, d.minutes_one_way ? `${d.minutes_one_way} דק׳ לכיוון` : null].filter(Boolean);
+  return bits.length ? bits.join(" · ") : null;
+};
+
+/** The same answer of the day (a ride with 2 / 3 stops) with the hour it left and the minutes one way took that day — only for a day that had a ride. */
+export function dayTimingBody(routeId: string, day: FccCommuteDay, startText: string, minutesText: string):
+  { body: { route_id: string; date: string; outcome: "yes"; stops: number; start_time?: string; minutes_one_way?: number } } | { error: string } {
+  const key = answerOf(day);
+  if (key == null || key === "no") return { error: "קודם סמנו שהייתה נסיעה ובכמה תחנות" };
+  const body: { route_id: string; date: string; outcome: "yes"; stops: number; start_time?: string; minutes_one_way?: number } = { route_id: routeId, date: day.date, outcome: "yes", stops: Number(key) };
+  if (startText) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startText)) return { error: "שעת יציאה: HH:MM" }; body.start_time = startText; }
+  if (minutesText.trim()) {
+    const v = Number(minutesText.replace(/[,\s]/g, ""));
+    if (!Number.isFinite(v) || v <= 0 || v > 1440) return { error: "דקות לכיוון: מספר חיובי" };
+    body.minutes_one_way = v;
+  }
+  if (body.start_time == null && body.minutes_one_way == null) return { error: "הזינו שעת יציאה או דקות" };
+  return { body };
+}
+
 const num = (n: number | null | undefined, unit = ""): string => (n == null ? UNKNOWN : `${new Intl.NumberFormat("he-IL", { maximumFractionDigits: 2 }).format(n)}${unit}`);
 const m = (n: number | null | undefined): string => (n == null ? UNKNOWN : money(n));
 const pct = (x: number | null | undefined): string => (x == null ? UNKNOWN : `${Math.round(x * 100)}%`);
@@ -59,6 +81,10 @@ export function summaryModel(v: FccCommute): CommuteSummary {
     ],
   };
 }
+
+/** The route's month in one line about the minutes the owner timed: how many days and the average one way. */
+export const timedLine = (r: FccCommuteRoute): string | null =>
+  r.this_month.timed_days ? `זמן בפועל החודש: ${r.this_month.avg_minutes_one_way == null ? UNKNOWN : `${new Intl.NumberFormat("he-IL", { maximumFractionDigits: 1 }).format(r.this_month.avg_minutes_one_way)} דק׳ לכיוון`} (${r.this_month.timed_days} ימים נמדדו)` : null;
 
 export interface WeekRow { key: string; label: string; days: string; income: string }
 export function weekRows(r: FccCommuteRoute): WeekRow[] {

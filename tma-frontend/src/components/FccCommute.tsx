@@ -3,7 +3,7 @@ import { fetchFccCommute, postFccCommuteDay, postFccCommuteEvaluate, postFccComm
 import type { CommuteKind, CommuteReturn, FccCommute, FccCommuteEvaluation, FccCommuteRoute } from "../types";
 import {
   ANSWERS, CLASS_OPTIONS, EMPTY_FORM, EMPTY_OWN_FORM, KIND_OPTIONS, RETURN_OPTIONS, WEEKDAYS, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromRoute,
-  placeModel, stopsModel, TRIP_RETURN_OPTIONS, evaluateBody, evaluationModel, formFromSettings, pendingRows, profitModel, quotaRows, returnBody, returnModel, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
+  placeModel, stopsModel, dayTiming, dayTimingBody, timedLine, TRIP_RETURN_OPTIONS, evaluateBody, evaluationModel, formFromSettings, pendingRows, profitModel, quotaRows, returnBody, returnModel, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
 } from "../lib/fccCommute";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -18,6 +18,29 @@ function AnswerButtons({ route, day, busy, onAnswer }: { route: FccCommuteRoute;
       {ANSWERS.map((a) => (
         <button key={a.key} type="button" disabled={busy} aria-pressed={current === a.key} className={`fcc-chip${current === a.key ? " fcc-chip--on" : ""}`} onClick={() => onAnswer(day.date, a.key)}>{a.label}</button>
       ))}
+    </div>
+  );
+}
+
+type TimingBody = { route_id: string; date: string; outcome: "yes"; stops: number; start_time?: string; minutes_one_way?: number };
+
+/** For a past day that had a ride: when it left and how long one way took (the traffic of that hour). */
+function DayTiming({ route, day, busy, onSave }: { route: FccCommuteRoute; day: FccCommuteRoute["days"][number]; busy: boolean; onSave: (body: TimingBody) => void }) {
+  const [start, setStart] = useState(day.start_time ?? "");
+  const [minutes, setMinutes] = useState(day.minutes_one_way ? String(day.minutes_one_way) : "");
+  const [error, setError] = useState<string | null>(null);
+  if (day.outcome !== "yes") return null;
+  return (
+    <div className="fcc-chips">
+      <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className="boss-input" aria-label={`שעת יציאה — ${dayLabel(day)}`} />
+      <input value={minutes} onChange={(e) => setMinutes(e.target.value)} inputMode="decimal" className="boss-input" aria-label={`דקות בפועל לכיוון — ${dayLabel(day)}`} placeholder="דקות בפועל לכיוון" />
+      <button type="button" disabled={busy} className="fcc-chip" onClick={() => {
+        const parsed = dayTimingBody(route.id, day, start, minutes);
+        if ("error" in parsed) { setError(parsed.error); return; }
+        setError(null);
+        onSave(parsed.body);
+      }}>שמירת שעה וזמן</button>
+      {error && <span className="fcc-goal__note" role="alert">{error}</span>}
     </div>
   );
 }
@@ -185,8 +208,9 @@ function ProfitTable({ rows, label }: { rows: ProfitRow[]; label: string }) {
 }
 
 /** Presentational part (also rendered in tests): server numbers only. */
-export function CommuteView({ data, busy, error, evaluation, onAnswer, onSaveRoute, onSaveTrip, onSaveSettings, onEvaluate, onReturn }: {
+export function CommuteView({ data, busy, error, evaluation, onAnswer, onTiming, onSaveRoute, onSaveTrip, onSaveSettings, onEvaluate, onReturn }: {
   data: FccCommute; busy: boolean; error: string | null; evaluation: FccCommuteEvaluation | null; onAnswer: (routeId: string, date: string, key: AnswerKey) => void;
+  onTiming: (body: TimingBody) => void;
   onSaveRoute: (form: RouteForm, routeId?: string) => void; onSaveTrip: (form: TripForm) => void; onSaveSettings: (form: SettingsForm) => void; onEvaluate: (form: TripForm) => void;
   onReturn: (tripId: string, status: CommuteReturn, waiting: string) => void;
 }) {
@@ -242,12 +266,13 @@ export function CommuteView({ data, busy, error, evaluation, onAnswer, onSaveRou
                 </div>
               ))}
               <details>
-                <summary>עדכון ימים אחרונים</summary>
+                <summary>עדכון ימים אחרונים (תחנות, שעת יציאה, זמן בפועל)</summary>
                 <div className="fcc-stack fcc-stack--tight">
                   {r.days.filter((d) => !d.is_tomorrow).map((d) => (
                     <div key={d.date}>
-                      <div className="fcc-loan__meta">{dayLabel(d)}{d.outcome == null && (d.rest_day ? " · יום מנוחה" : " · לא עודכן")}</div>
+                      <div className="fcc-loan__meta">{dayLabel(d)}{d.outcome == null && (d.rest_day ? " · יום מנוחה" : " · לא עודכן")}{dayTiming(d) && ` · ${dayTiming(d)}`}</div>
                       <AnswerButtons route={r} day={d} busy={busy} onAnswer={(date, key) => onAnswer(r.id, date, key)} />
+                      <DayTiming key={`${d.date}-${d.start_time}-${d.minutes_one_way}`} route={r} day={d} busy={busy} onSave={onTiming} />
                     </div>
                   ))}
                 </div>
@@ -264,6 +289,7 @@ export function CommuteView({ data, busy, error, evaluation, onAnswer, onSaveRou
               </table>
             </div>
           )}
+          {timedLine(r) && <p className="fcc-loan__meta">{timedLine(r)}</p>}
           {r.stops_note && <p className="fcc-goal__note">{r.stops_note}</p>}
 
           <h4 className="fcc-pay__subhead">כדאיות ליום נסיעה</h4>
@@ -423,6 +449,7 @@ export function CommuteSection({ active, reloadKey }: { active: boolean; reloadK
                    void run(() => postFccCommuteTrip(parsed.body));
                  }}
                  onAnswer={(routeId, date, key) => void run(() => postFccCommuteDay(answerBody(routeId, date, key)))}
+                 onTiming={(body) => void run(() => postFccCommuteDay(body))}
                  onSaveRoute={(form, routeId) => {
                    const parsed = routeBody(form, routeId);
                    if ("error" in parsed) { setError(parsed.error); return; }

@@ -1376,14 +1376,14 @@ export interface FccRefinanceBody { rate: number; term_months: number; fees: num
 export type CommuteClass = "regular" | "large";
 export type CommuteReturn = "empty" | "waited" | "continuation";
 export type CommuteKind = "ride" | "delivery";
-export interface FccCommuteDay { date: string; weekday: string; is_tomorrow: boolean; is_today: boolean; rest_day: boolean; outcome: "yes" | "no" | null; stops: number | null; trip_id: string | null }
+export interface FccCommuteDay { date: string; weekday: string; is_tomorrow: boolean; is_today: boolean; rest_day: boolean; outcome: "yes" | "no" | null; stops: number | null; trip_id: string | null; start_time: string | null; minutes_one_way: number | null }
 export interface FccCommuteEconomics {
   price: number | null; km_per_day: number | null; minutes_per_day: number | null; hours_per_day: number | null; gross_per_hour: number | null; gross_per_km: number | null;
   vehicle_cost_per_day: number | null; net_per_day: number | null; net_per_hour: number | null; net_per_km: number | null; monthly_potential: number | null;
   return_status: CommuteReturn | null; vehicle_class: CommuteClass | null;
 }
 export interface FccCommuteMonth {
-  month: string; yes_days: number; no_days: number; income: number; stops: Record<string, number>; stops_recorded: number; three_share: number | null;
+  month: string; yes_days: number; no_days: number; income: number; timed_days: number; avg_minutes_one_way: number | null; stops: Record<string, number>; stops_recorded: number; three_share: number | null;
   weeks: { week_start: string; yes_days: number; income: number }[];
 }
 export interface FccCommuteRoute {
