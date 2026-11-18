@@ -1,7 +1,7 @@
 // Pure presentation of the commute tab (rides answered day by day, one-off trips and deliveries, the leased car's free allowance). All numbers come from the server;
 // this file only words them and turns typed text into a request body. Unknown stays unknown: a missing km / minutes / cost is shown as "—", never as zero.
 import type {
-  CommuteClass, CommuteKind, CommuteReturn, FccCommute, FccCommuteDay, FccCommuteProfit, FccCommuteQuota, FccCommuteRoute, FccCommuteRouteBody, FccCommuteSettingsBody, FccCommuteStats,
+  CommuteClass, CommuteKind, CommuteLoad, CommuteReturn, FccCommute, FccCommuteDay, FccCommuteProfit, FccCommuteQuota, FccCommuteRoute, FccCommuteRouteBody, FccCommuteSettingsBody, FccCommuteStats,
   FccCommuteEvaluation, FccCommuteOfferBody, FccCommutePending, FccCommuteReturnStats, FccCommuteScenario, FccCommuteTripBody,
 } from "../types";
 import { money } from "./fccPresentation";
@@ -22,6 +22,7 @@ export const RETURN_OPTIONS: { value: CommuteReturn; label: string; hint: string
 ];
 /** On a one-off trip the way back is usually not known yet: it is recorded after the ride (the trip waits in "ממתינות לעדכון"). */
 export const TRIP_RETURN_OPTIONS: { value: CommuteReturn | ""; label: string }[] = [{ value: "", label: "עוד לא ידוע — אעדכן אחרי הנסיעה" }, ...RETURN_OPTIONS];
+export const LOAD_OPTIONS: { value: CommuteLoad | ""; label: string }[] = [{ value: "", label: "לא צוין" }, { value: "full", label: "מלא (עם נוסעים)" }, { value: "empty", label: "ריק" }];
 export const KIND_OPTIONS: { value: CommuteKind; label: string }[] = [{ value: "ride", label: "נסיעה" }, { value: "delivery", label: "משלוח" }];
 export const WEEKDAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
@@ -39,25 +40,36 @@ export function answerBody(routeId: string, date: string, key: AnswerKey): { rou
   return key === "no" ? { route_id: routeId, date, outcome: "no" } : { route_id: routeId, date, outcome: "yes", stops: Number(key) };
 }
 
-/** How a past day was timed (the hour it left and the minutes one way that day), or null. */
+/** How a past day was timed: the outbound leg (the hour it left, the minutes) and the return leg, or null. */
 export const dayTiming = (d: FccCommuteDay): string | null => {
-  const bits = [d.start_time ? `יציאה ${d.start_time}` : null, d.minutes_one_way ? `${d.minutes_one_way} דק׳ לכיוון` : null].filter(Boolean);
+  const out = [d.start_time ? `יציאה ${d.start_time}` : null, d.minutes_one_way ? `${d.minutes_one_way} דק׳` : null].filter(Boolean).join(" ");
+  const ret = [d.return_start_time ? `יציאה ${d.return_start_time}` : null, d.return_minutes ? `${d.return_minutes} דק׳` : null].filter(Boolean).join(" ");
+  const bits = [out ? `הלוך: ${out}` : null, ret ? `חזור: ${ret}` : null].filter(Boolean);
   return bits.length ? bits.join(" · ") : null;
 };
 
-/** The same answer of the day (a ride with 2 / 3 stops) with the hour it left and the minutes one way took that day — only for a day that had a ride. */
-export function dayTimingBody(routeId: string, day: FccCommuteDay, startText: string, minutesText: string):
-  { body: { route_id: string; date: string; outcome: "yes"; stops: number; start_time?: string; minutes_one_way?: number } } | { error: string } {
+export interface DayTimingBody { route_id: string; date: string; outcome: "yes"; stops: number; start_time?: string; minutes_one_way?: number; return_start_time?: string; return_minutes?: number }
+export interface DayTimingText { start: string; minutes: string; retStart: string; retMinutes: string }
+const parseMinutes = (text: string): number | null | "bad" => {
+  if (!text.trim()) return null;
+  const v = Number(text.replace(/[,\s]/g, ""));
+  return Number.isFinite(v) && v > 0 && v <= 1440 ? v : "bad";
+};
+
+/** The same answer of the day (a ride with 2 / 3 stops) with each leg's hour and minutes that day — only for a day that had a ride. */
+export function dayTimingBody(routeId: string, day: FccCommuteDay, t: DayTimingText): { body: DayTimingBody } | { error: string } {
   const key = answerOf(day);
   if (key == null || key === "no") return { error: "קודם סמנו שהייתה נסיעה ובכמה תחנות" };
-  const body: { route_id: string; date: string; outcome: "yes"; stops: number; start_time?: string; minutes_one_way?: number } = { route_id: routeId, date: day.date, outcome: "yes", stops: Number(key) };
-  if (startText) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startText)) return { error: "שעת יציאה: HH:MM" }; body.start_time = startText; }
-  if (minutesText.trim()) {
-    const v = Number(minutesText.replace(/[,\s]/g, ""));
-    if (!Number.isFinite(v) || v <= 0 || v > 1440) return { error: "דקות לכיוון: מספר חיובי" };
-    body.minutes_one_way = v;
-  }
-  if (body.start_time == null && body.minutes_one_way == null) return { error: "הזינו שעת יציאה או דקות" };
+  const body: DayTimingBody = { route_id: routeId, date: day.date, outcome: "yes", stops: Number(key) };
+  for (const [text, label] of [[t.start, "שעת יציאה (הלוך)"], [t.retStart, "שעת יציאה (חזור)"]] as const) if (text && !TIME_RE.test(text)) return { error: `${label}: HH:MM` };
+  if (t.start) body.start_time = t.start;
+  if (t.retStart) body.return_start_time = t.retStart;
+  const out = parseMinutes(t.minutes);
+  const ret = parseMinutes(t.retMinutes);
+  if (out === "bad" || ret === "bad") return { error: "דקות: מספר חיובי" };
+  if (out != null) body.minutes_one_way = out;
+  if (ret != null) body.return_minutes = ret;
+  if (Object.keys(body).length === 4) return { error: "הזינו שעה או דקות" };
   return { body };
 }
 
@@ -82,9 +94,12 @@ export function summaryModel(v: FccCommute): CommuteSummary {
   };
 }
 
-/** The route's month in one line about the minutes the owner timed: how many days and the average one way. */
-export const timedLine = (r: FccCommuteRoute): string | null =>
-  r.this_month.timed_days ? `זמן בפועל החודש: ${r.this_month.avg_minutes_one_way == null ? UNKNOWN : `${new Intl.NumberFormat("he-IL", { maximumFractionDigits: 1 }).format(r.this_month.avg_minutes_one_way)} דק׳ לכיוון`} (${r.this_month.timed_days} ימים נמדדו)` : null;
+/** The route's month in one line about the minutes the owner timed: how many days and the average of each leg. */
+export const timedLine = (r: FccCommuteRoute): string | null => {
+  const a = (n: number | null): string => (n == null ? UNKNOWN : new Intl.NumberFormat("he-IL", { maximumFractionDigits: 1 }).format(n));
+  if (!r.this_month.timed_days && !r.this_month.timed_return_days) return null;
+  return `זמן בפועל החודש: הלוך ${a(r.this_month.avg_minutes_one_way)} דק׳ (${r.this_month.timed_days} ימים) · חזור ${a(r.this_month.avg_return_minutes)} דק׳ (${r.this_month.timed_return_days} ימים)`;
+};
 
 export interface WeekRow { key: string; label: string; days: string; income: string }
 export function weekRows(r: FccCommuteRoute): WeekRow[] {
@@ -97,8 +112,10 @@ export function economicsRows(r: FccCommuteRoute): MetricRow[] {
   const e = r.economics;
   return [
     { label: "מחיר ליום נסיעה", value: m(e.price) },
-    { label: 'ק"מ ליום', value: num(e.km_per_day) },
-    { label: "זמן ליום", value: e.minutes_per_day == null ? UNKNOWN : `${num(e.minutes_per_day)} דק׳` },
+    { label: 'ק"מ ליום (שני הצדדים + בלי תשלום)', value: num(e.km_per_day) },
+    { label: "זמן ליום (בלי ההמתנה החופשית בין הצדדים)", value: e.minutes_per_day == null ? UNKNOWN : `${num(e.minutes_per_day)} דק׳` },
+    { label: 'ק"מ בלי תשלום ליום', value: e.unpaid_km ? num(e.unpaid_km) : UNKNOWN },
+    { label: 'ק"מ ריקים ליום', value: e.empty_km == null ? UNKNOWN : `${num(e.empty_km)}${e.empty_share == null ? "" : ` (${pct(e.empty_share)})`}` },
     { label: 'בתוך המכסה — לשעה', value: m(e.gross_per_hour) },
     { label: 'בתוך המכסה — לק"מ', value: m(e.gross_per_km) },
     { label: "עלות רכב ליום (מעל המכסה)", value: m(e.vehicle_cost_per_day) },
@@ -112,6 +129,39 @@ export function economicsRows(r: FccCommuteRoute): MetricRow[] {
 export function economicsHint(r: FccCommuteRoute): string | null {
   const missing = [r.km_one_way == null ? 'ק"מ' : null, r.minutes_one_way == null ? "זמן" : null].filter(Boolean);
   return missing.length ? `חסר: ${missing.join(", ")}` : null;
+}
+
+const LOAD_LABEL = { full: "מלא", empty: "ריק" } as const;
+export interface LegRow { key: string; label: string; start: string; km: string; minutes: string; load: string; unpaid: string }
+/** The two legs of a usual day, side by side: when it leaves, km, minutes, full / empty and the unpaid driving around it. */
+export function legRows(r: FccCommuteRoute): LegRow[] {
+  return r.economics.legs.map((l) => ({
+    key: l.key, label: l.label, start: l.start ?? UNKNOWN, km: num(l.km), minutes: l.minutes == null ? UNKNOWN : `${num(l.minutes)} דק׳`, load: l.load ? LOAD_LABEL[l.load] : UNKNOWN,
+    unpaid: l.unpaid_km || l.unpaid_minutes ? `${num(l.unpaid_km)} ק"מ · ${num(l.unpaid_minutes)} דק׳` : UNKNOWN,
+  }));
+}
+
+export interface DecisionModel { lines: MetricRow[]; legs: { key: string; label: string; avg: string; total: string; days: string; slow: boolean }[]; note: string | null }
+/** The month's decision "do I keep this route": the income against BOTH legs and the unpaid driving, and each leg's average minutes so the slow one shows. Numbers only — the owner decides. */
+export function decisionModel(r: FccCommuteRoute): DecisionModel | null {
+  const d = r.this_month.decision;
+  if (!d.days && !d.unknown_days) return null;
+  const slow = d.slowest ? d.legs.find((l) => l.key === d.slowest) : null;
+  return {
+    lines: [
+      { label: "ימי נסיעה שחושבו", value: String(d.days) },
+      { label: "הכנסה", value: money(d.income) },
+      { label: 'ק"מ בסך הכול (שני הצדדים + בלי תשלום)', value: num(d.km) },
+      { label: "שעות בסך הכול", value: d.minutes ? `${num(d.minutes / 60)} (בלי ההמתנה החופשית בין הצדדים)` : UNKNOWN },
+      { label: "הכנסה לשעה", value: m(d.gross_per_hour) },
+      { label: 'הכנסה לק"מ', value: m(d.gross_per_km) },
+      { label: "נטו אחרי עלות הרכב", value: m(d.net) },
+      { label: "נטו לשעה", value: m(d.net_per_hour) },
+      { label: 'ק"מ ריקים', value: d.empty_km == null ? UNKNOWN : `${num(d.empty_km)}${d.empty_share == null ? "" : ` (${pct(d.empty_share)})`}` },
+    ],
+    legs: d.legs.map((l) => ({ key: l.key, label: l.label, avg: `${num(l.avg_minutes)} דק׳`, total: `${num(l.avg_total_minutes)} דק׳ עם הנסיעה בלי תשלום`, days: `${l.timed_days} ימים נמדדו`, slow: l.key === d.slowest })),
+    note: slow ? `הצד האיטי יותר: ${slow.label}` : null,
+  };
 }
 
 const RETURN_LABEL: Record<CommuteReturn, string> = { empty: "חזרה ריקה", waited: "המתנה", continuation: "יש נסיעת המשך" };
@@ -238,13 +288,19 @@ function fill<B extends object>(body: B, spec: Spec<B>): string | null {
   return null;
 }
 
-export interface RouteForm { name: string; price: string; km: string; minutes: string; cost: string; days: string; cls: CommuteClass | ""; ret: CommuteReturn; waiting: string; own: boolean; weekdays: string[]; start: string }
-export const EMPTY_FORM: RouteForm = { name: "", price: "", km: "", minutes: "", cost: "", days: "6", cls: "", ret: "empty", waiting: "", own: false, weekdays: [], start: "" };
+export interface RouteForm {
+  name: string; price: string; km: string; minutes: string; cost: string; days: string; cls: CommuteClass | ""; ret: CommuteReturn; waiting: string; own: boolean; weekdays: string[]; start: string;
+  retStart: string; retKm: string; retMinutes: string; outLoad: CommuteLoad | ""; retLoad: CommuteLoad | ""; outUnpaidKm: string; outUnpaidMin: string; retUnpaidKm: string; retUnpaidMin: string;
+}
+export const EMPTY_FORM: RouteForm = { name: "", price: "", km: "", minutes: "", cost: "", days: "6", cls: "", ret: "empty", waiting: "", own: false, weekdays: [], start: "", retStart: "", retKm: "", retMinutes: "", outLoad: "", retLoad: "", outUnpaidKm: "", outUnpaidMin: "", retUnpaidKm: "", retUnpaidMin: "" };
 export const EMPTY_OWN_FORM: RouteForm = { ...EMPTY_FORM, days: "", own: true };
 export const formFromRoute = (r: FccCommuteRoute): RouteForm => ({
   name: r.name, price: r.price == null ? "" : String(r.price), km: r.km_one_way == null ? "" : String(r.km_one_way), minutes: r.minutes_one_way == null ? "" : String(r.minutes_one_way),
   cost: r.cost_per_km == null ? "" : String(r.cost_per_km), days: r.planned_days == null ? "" : String(r.planned_days), cls: r.vehicle_class ?? "", ret: r.return_status,
   waiting: r.waiting_minutes ? String(r.waiting_minutes) : "", own: r.kind === "own", weekdays: r.weekdays, start: r.start_time ?? "",
+  retStart: r.return_start_time ?? "", retKm: r.return_km == null ? "" : String(r.return_km), retMinutes: r.return_minutes == null ? "" : String(r.return_minutes), outLoad: r.outbound_load ?? "", retLoad: r.return_load ?? "",
+  outUnpaidKm: r.out_unpaid_km ? String(r.out_unpaid_km) : "", outUnpaidMin: r.out_unpaid_minutes ? String(r.out_unpaid_minutes) : "", retUnpaidKm: r.ret_unpaid_km ? String(r.ret_unpaid_km) : "",
+  retUnpaidMin: r.ret_unpaid_minutes ? String(r.ret_unpaid_minutes) : "",
 });
 
 /** A new paid route needs a name and a price; an own weekly drive needs only a name (and the weekdays are for the list). */
@@ -252,9 +308,13 @@ export function routeBody(form: RouteForm, routeId?: string): { body: FccCommute
   const body: FccCommuteRouteBody = routeId ? { route_id: routeId } : {};
   if (form.name.trim()) body.name = form.name.trim();
   const err = fill(body, [["price", form.own ? "" : form.price, "מחיר"], ["km_one_way", form.km, 'ק"מ'], ["minutes_one_way", form.minutes, "דקות"], ["cost_per_km", form.cost, 'עלות לק"מ'],
-    ["planned_days", form.days, "ימים בשבוע"], ["waiting_minutes", form.waiting, "דקות המתנה"]]);
+    ["planned_days", form.days, "ימים בשבוע"], ["waiting_minutes", form.waiting, "דקות המתנה"], ["return_km", form.own ? "" : form.retKm, 'ק"מ חזור'], ["return_minutes", form.own ? "" : form.retMinutes, "דקות חזור"],
+    ["out_unpaid_km", form.own ? "" : form.outUnpaidKm, 'ק"מ בלי תשלום (הלוך)'], ["out_unpaid_minutes", form.own ? "" : form.outUnpaidMin, "דקות בלי תשלום (הלוך)"],
+    ["ret_unpaid_km", form.own ? "" : form.retUnpaidKm, 'ק"מ בלי תשלום (חזור)'], ["ret_unpaid_minutes", form.own ? "" : form.retUnpaidMin, "דקות בלי תשלום (חזור)"]]);
   if (err) return { error: err };
   if (form.start) { if (!TIME_RE.test(form.start)) return { error: "שעת יציאה: HH:MM" }; body.start_time = form.start; }
+  if (!form.own && form.retStart) { if (!TIME_RE.test(form.retStart)) return { error: "שעת יציאה (חזור): HH:MM" }; body.return_start_time = form.retStart; }
+  if (!form.own) { if (form.outLoad) body.outbound_load = form.outLoad; if (form.retLoad) body.return_load = form.retLoad; }
   if (!form.own) { if (form.cls) body.vehicle_class = form.cls; body.return_status = form.ret; } else { body.route_kind = "own"; if (form.weekdays.length) body.weekdays = form.weekdays; }
   if (!routeId && !body.name) return { error: "צריך שם" };
   if (!routeId && !form.own && body.price == null) return { error: "מסלול חדש צריך שם ומחיר ליום נסיעה" };

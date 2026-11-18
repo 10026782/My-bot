@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CommuteView } from "../components/FccCommute";
 import {
-  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, dayTiming, dayTimingBody, timedLine, placeModel, stopsModel, evaluateBody, evaluationModel, pendingRows, returnBody, returnModel, timeModel, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
+  ANSWERS, EMPTY_FORM, EMPTY_OWN_FORM, dayTiming, dayTimingBody, decisionModel, legRows, timedLine, placeModel, stopsModel, evaluateBody, evaluationModel, pendingRows, returnBody, returnModel, timeModel, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromSettings, profitModel, quotaRows, routeBody, settingsBody, summaryModel,
   tripBody, tripRows, weekRows,
 } from "./fccCommute";
 import type { FccCommute, FccCommuteDay, FccCommuteEvaluation, FccCommuteProfit, FccCommuteRoute, FccCommuteStats } from "../types";
@@ -14,12 +14,18 @@ const assert = {
 };
 function test(name: string, fn: () => void) { try { fn(); console.log(`ok - ${name}`); } catch (e) { failures++; console.error(`not ok - ${name}: ${(e as Error).message}`); } }
 
-const day = (date: string, o: Partial<FccCommuteDay> = {}): FccCommuteDay => ({ date, weekday: "רביעי", is_tomorrow: false, is_today: false, rest_day: false, outcome: null, stops: null, trip_id: null, start_time: null, minutes_one_way: null, ...o });
+const day = (date: string, o: Partial<FccCommuteDay> = {}): FccCommuteDay => ({ date, weekday: "רביעי", is_tomorrow: false, is_today: false, rest_day: false, outcome: null, stops: null, trip_id: null, start_time: null, minutes_one_way: null, return_start_time: null, return_minutes: null, ...o });
 const route: FccCommuteRoute = {
-  id: "recR", name: "נסיעה", kind: "paid", weekdays: [], price: 130, km_one_way: 22, minutes_one_way: 35, cost_per_km: null, planned_days: 6, active: true, notes: null, vehicle_class: null, return_status: "empty", waiting_minutes: 0, start_time: "06:30",
-  economics: { price: 130, km_per_day: 44, minutes_per_day: 70, hours_per_day: 1.17, gross_per_hour: 111.43, gross_per_km: 2.95, vehicle_cost_per_day: null, net_per_day: null, net_per_hour: null, net_per_km: null, monthly_potential: 3380, return_status: "empty", vehicle_class: null },
+  id: "recR", name: "נסיעה", kind: "paid", weekdays: [], price: 130, km_one_way: 22, minutes_one_way: 35, cost_per_km: null, planned_days: 6, active: true, notes: null, vehicle_class: null, return_status: "empty", waiting_minutes: 0, start_time: "07:30",
+  return_start_time: "15:00", return_km: 25, return_minutes: 30, outbound_load: "full", return_load: "empty", out_unpaid_km: 6, out_unpaid_minutes: 10, ret_unpaid_km: 4, ret_unpaid_minutes: 8,
+  economics: { price: 130, km_per_day: 44, minutes_per_day: 70, hours_per_day: 1.17, gross_per_hour: 111.43, gross_per_km: 2.95, vehicle_cost_per_day: null, net_per_day: null, net_per_hour: null, net_per_km: null, monthly_potential: 3380, return_status: "empty", vehicle_class: null,
+    legs: [{ key: "out", label: "הלוך", start: "07:30", km: 22, minutes: 35, load: "full", unpaid_km: 6, unpaid_minutes: 10, timed: false, band: "morning_rush", total_minutes: 45 },
+      { key: "ret", label: "חזור", start: "15:00", km: 25, minutes: 30, load: "empty", unpaid_km: 4, unpaid_minutes: 8, timed: false, band: "evening_rush", total_minutes: 38 }],
+    unpaid_km: 10, unpaid_minutes: 18, empty_km: 35, empty_share: 0.614 },
   days: [day("2026-11-18", { is_tomorrow: true, outcome: "yes", stops: 3 }), day("2026-11-16")],
-  this_month: { month: "2026-11", yes_days: 5, no_days: 1, income: 650, timed_days: 3, avg_minutes_one_way: 46, stops: { "2": 3, "3": 2 }, stops_recorded: 5, three_share: 0.4, weeks: [{ week_start: "2026-11-08", yes_days: 5, income: 650 }] },
+  this_month: { month: "2026-11", yes_days: 5, no_days: 1, income: 650, timed_days: 3, avg_minutes_one_way: 66.7, timed_return_days: 3, avg_return_minutes: 30.7,
+    decision: { days: 3, unknown_days: 0, income: 390, km: 171, minutes: 346, gross_per_hour: 67.63, gross_per_km: 2.28, net: 253.2, net_per_hour: 43.9, empty_km: 105, empty_share: 0.614,
+      legs: [{ key: "out", label: "הלוך", avg_minutes: 66.7, avg_total_minutes: 76.7, timed_days: 3 }, { key: "ret", label: "חזור", avg_minutes: 30.7, avg_total_minutes: 38.7, timed_days: 3 }], slowest: "out" }, stops: { "2": 3, "3": 2 }, stops_recorded: 5, three_share: 0.4, weeks: [{ week_start: "2026-11-08", yes_days: 5, income: 650 }] },
   history: [], stops_note: null,
 };
 const stats = (o: Partial<FccCommuteStats> = {}): FccCommuteStats => ({ rides: 2, avg_price: 185, measured_rides: 2, gross_per_hour: 120, gross_per_km: 2.5, net_per_hour: 90, net_per_km: 1.7, empty_return_share: 0.5, continuation_share: 0, waited_share: 0.5, on_the_way_share: 0, ...o });
@@ -219,19 +225,40 @@ test("where and stops: the trip forms carry the city, the area and the stops; th
 });
 
 test("a past day of the route: timed afterwards (the hour it left, the minutes one way that day), the same answer is sent with it", () => {
-  const yes = day("2026-11-16", { outcome: "yes", stops: 3, start_time: "07:45", minutes_one_way: 55 });
-  assert.equal(dayTiming(yes), "יציאה 07:45 · 55 דק׳ לכיוון");
+  const yes = day("2026-11-16", { outcome: "yes", stops: 3, start_time: "07:45", minutes_one_way: 55, return_start_time: "15:10", return_minutes: 33 });
+  assert.equal(dayTiming(yes), "הלוך: יציאה 07:45 55 דק׳ · חזור: יציאה 15:10 33 דק׳");
   assert.equal(dayTiming(day("2026-11-15")), null);
-  const ok = dayTimingBody("recR", yes, "08:10", "62");
-  assert.ok("body" in ok && ok.body.outcome === "yes" && ok.body.stops === 3 && ok.body.date === "2026-11-16" && ok.body.start_time === "08:10" && ok.body.minutes_one_way === 62);
-  const onlyMinutes = dayTimingBody("recR", yes, "", "40");
-  assert.ok("body" in onlyMinutes && onlyMinutes.body.start_time === undefined && onlyMinutes.body.minutes_one_way === 40);
-  assert.ok("error" in dayTimingBody("recR", day("2026-11-16"), "08:10", "62") && "error" in dayTimingBody("recR", day("2026-11-16", { outcome: "no" }), "08:10", "62"));
-  assert.ok("error" in dayTimingBody("recR", yes, "8pm", "") && "error" in dayTimingBody("recR", yes, "", "0") && "error" in dayTimingBody("recR", yes, "", "x") && "error" in dayTimingBody("recR", yes, "", ""));
-  assert.ok(timedLine(route)!.includes("46") && timedLine(route)!.includes("3 ימים נמדדו"));
-  assert.equal(timedLine({ ...route, this_month: { ...route.this_month, timed_days: 0, avg_minutes_one_way: null } }), null);
+  const T = (o: Partial<{ start: string; minutes: string; retStart: string; retMinutes: string }> = {}) => ({ start: "", minutes: "", retStart: "", retMinutes: "", ...o });
+  const ok = dayTimingBody("recR", yes, T({ start: "08:10", minutes: "62", retStart: "15:20", retMinutes: "35" }));
+  assert.ok("body" in ok && ok.body.outcome === "yes" && ok.body.stops === 3 && ok.body.date === "2026-11-16" && ok.body.start_time === "08:10" && ok.body.minutes_one_way === 62 && ok.body.return_start_time === "15:20" && ok.body.return_minutes === 35);
+  const onlyReturn = dayTimingBody("recR", yes, T({ retMinutes: "40" }));
+  assert.ok("body" in onlyReturn && onlyReturn.body.start_time === undefined && onlyReturn.body.minutes_one_way === undefined && onlyReturn.body.return_minutes === 40);
+  assert.ok("error" in dayTimingBody("recR", day("2026-11-16"), T({ start: "08:10" })) && "error" in dayTimingBody("recR", day("2026-11-16", { outcome: "no" }), T({ start: "08:10" })));
+  assert.ok("error" in dayTimingBody("recR", yes, T({ start: "8pm" })) && "error" in dayTimingBody("recR", yes, T({ retStart: "3pm" })) && "error" in dayTimingBody("recR", yes, T({ minutes: "0" })) && "error" in dayTimingBody("recR", yes, T({ retMinutes: "x" })) && "error" in dayTimingBody("recR", yes, T()));
+  assert.ok(timedLine(route)!.includes("הלוך 66.7") && timedLine(route)!.includes("חזור 30.7") && timedLine(route)!.includes("3 ימים"));
+  assert.equal(timedLine({ ...route, this_month: { ...route.this_month, timed_days: 0, timed_return_days: 0, avg_minutes_one_way: null, avg_return_minutes: null } }), null);
   const html = render({ ...view, routes: [{ ...route, days: [day("2026-11-18", { is_tomorrow: true }), yes] }] });
-  assert.ok(html.includes("שמירת שעה וזמן") && html.includes("זמן בפועל החודש") && html.includes("שעת יציאה — ") && html.includes("יציאה 07:45"));
+  assert.ok(html.includes("שמירת שעה וזמן") && html.includes("זמן בפועל החודש") && html.includes("שעת יציאה הלוך — ") && html.includes("שעת יציאה חזור — ") && html.includes("יציאה 07:45"));
+});
+
+test("two legs a day: the legs side by side, the unpaid driving, the month decision on both legs with the slow leg named, the route form", () => {
+  const rows = legRows(route);
+  assert.equal(rows.length, 2);
+  assert.ok(rows[0].label === "הלוך" && rows[0].start === "07:30" && rows[0].load === "מלא" && rows[0].unpaid.includes("6") && rows[1].label === "חזור" && rows[1].start === "15:00" && rows[1].load === "ריק" && rows[1].km.includes("25"));
+  const e = Object.fromEntries(economicsRows(route).map((r) => [r.label, r.value]));
+  assert.ok(e['ק"מ ריקים ליום'].includes("35") && e['ק"מ ריקים ליום'].includes("61%") && e['ק"מ בלי תשלום ליום'].includes("10"));
+  const d = decisionModel(route)!;
+  const lines = Object.fromEntries(d.lines.map((l) => [l.label, l.value]));
+  assert.ok(lines["הכנסה"].includes("390") && lines['ק"מ בסך הכול (שני הצדדים + בלי תשלום)'].includes("171") && lines["הכנסה לשעה"].includes("68") && lines["נטו אחרי עלות הרכב"].includes("253"));
+  assert.ok(d.legs[0].slow && !d.legs[1].slow && d.legs[0].avg.includes("66.7") && d.note === "הצד האיטי יותר: הלוך");
+  assert.equal(decisionModel({ ...route, this_month: { ...route.this_month, decision: { ...route.this_month.decision, days: 0, unknown_days: 0 } } }), null);
+  const f = routeBody({ ...EMPTY_FORM, name: "בית ספר", price: "130", km: "22", minutes: "35", start: "07:30", retStart: "15:00", retKm: "25", retMinutes: "30", outLoad: "full", retLoad: "empty", outUnpaidKm: "6", outUnpaidMin: "10", retUnpaidKm: "4", retUnpaidMin: "8" });
+  assert.ok("body" in f && f.body.return_start_time === "15:00" && f.body.return_km === 25 && f.body.return_minutes === 30 && f.body.outbound_load === "full" && f.body.return_load === "empty" && f.body.out_unpaid_km === 6 && f.body.ret_unpaid_minutes === 8);
+  assert.ok("error" in routeBody({ ...EMPTY_FORM, name: "x", price: "5", retStart: "3pm" }) && "error" in routeBody({ ...EMPTY_FORM, name: "x", price: "5", retKm: "9x" }));
+  const own = routeBody({ ...EMPTY_OWN_FORM, name: "עבודה", retKm: "25", retLoad: "empty" });
+  assert.ok("body" in own && own.body.return_km === undefined && own.body.return_load === undefined);
+  const html = render(view);
+  assert.ok(html.includes("שני הצדדים ביום רגיל") && html.includes("החלטה לחודש") && html.includes("האיטי יותר") && html.includes("הלוך — שעת יציאה") && html.includes("הזמן בין שני הצדדים"));
 });
 
 test("settings form: shows what is saved, blank is left out, nothing to save is an error", () => {

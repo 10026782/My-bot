@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchFccCommute, postFccCommuteDay, postFccCommuteEvaluate, postFccCommuteRoute, postFccCommuteSettings, postFccCommuteTrip } from "../api";
-import type { CommuteKind, CommuteReturn, FccCommute, FccCommuteEvaluation, FccCommuteRoute } from "../types";
+import type { CommuteKind, CommuteLoad, CommuteReturn, FccCommute, FccCommuteEvaluation, FccCommuteRoute } from "../types";
 import {
   ANSWERS, CLASS_OPTIONS, EMPTY_FORM, EMPTY_OWN_FORM, KIND_OPTIONS, RETURN_OPTIONS, WEEKDAYS, answerBody, answerOf, dayLabel, economicsHint, economicsRows, emptyTripForm, formFromRoute,
-  placeModel, stopsModel, dayTiming, dayTimingBody, timedLine, TRIP_RETURN_OPTIONS, evaluateBody, evaluationModel, formFromSettings, pendingRows, profitModel, quotaRows, returnBody, returnModel, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
+  placeModel, stopsModel, dayTiming, dayTimingBody, decisionModel, legRows, LOAD_OPTIONS, timedLine, type DayTimingBody, TRIP_RETURN_OPTIONS, evaluateBody, evaluationModel, formFromSettings, pendingRows, profitModel, quotaRows, returnBody, returnModel, timeModel, routeBody, settingsBody, summaryModel, tripBody, tripRows, weekRows, type AnswerKey, type ProfitRow, type RouteForm, type SettingsForm, type TripForm,
 } from "../lib/fccCommute";
 import { KpiCard } from "./FccKpiCard";
 import { ScreenState } from "./ui/ScreenState";
@@ -22,24 +22,32 @@ function AnswerButtons({ route, day, busy, onAnswer }: { route: FccCommuteRoute;
   );
 }
 
-type TimingBody = { route_id: string; date: string; outcome: "yes"; stops: number; start_time?: string; minutes_one_way?: number };
+type TimingBody = DayTimingBody;
 
-/** For a past day that had a ride: when it left and how long one way took (the traffic of that hour). */
+/** For a past day that had a ride: each leg's hour and minutes that day (the traffic of that hour). */
 function DayTiming({ route, day, busy, onSave }: { route: FccCommuteRoute; day: FccCommuteRoute["days"][number]; busy: boolean; onSave: (body: TimingBody) => void }) {
-  const [start, setStart] = useState(day.start_time ?? "");
-  const [minutes, setMinutes] = useState(day.minutes_one_way ? String(day.minutes_one_way) : "");
+  const [t, setT] = useState({ start: day.start_time ?? "", minutes: day.minutes_one_way ? String(day.minutes_one_way) : "", retStart: day.return_start_time ?? "", retMinutes: day.return_minutes ? String(day.return_minutes) : "" });
   const [error, setError] = useState<string | null>(null);
   if (day.outcome !== "yes") return null;
+  const set = (k: keyof typeof t) => (e: React.ChangeEvent<HTMLInputElement>) => setT({ ...t, [k]: e.target.value });
   return (
-    <div className="fcc-chips">
-      <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className="boss-input" aria-label={`שעת יציאה — ${dayLabel(day)}`} />
-      <input value={minutes} onChange={(e) => setMinutes(e.target.value)} inputMode="decimal" className="boss-input" aria-label={`דקות בפועל לכיוון — ${dayLabel(day)}`} placeholder="דקות בפועל לכיוון" />
-      <button type="button" disabled={busy} className="fcc-chip" onClick={() => {
-        const parsed = dayTimingBody(route.id, day, start, minutes);
-        if ("error" in parsed) { setError(parsed.error); return; }
-        setError(null);
-        onSave(parsed.body);
-      }}>שמירת שעה וזמן</button>
+    <div className="fcc-stack fcc-stack--tight">
+      <div className="fcc-chips">
+        <span className="fcc-loan__meta">הלוך</span>
+        <input type="time" value={t.start} onChange={set("start")} className="boss-input" aria-label={`שעת יציאה הלוך — ${dayLabel(day)}`} />
+        <input value={t.minutes} onChange={set("minutes")} inputMode="decimal" className="boss-input" aria-label={`דקות הלוך בפועל — ${dayLabel(day)}`} placeholder="דקות בפועל" />
+      </div>
+      <div className="fcc-chips">
+        <span className="fcc-loan__meta">חזור</span>
+        <input type="time" value={t.retStart} onChange={set("retStart")} className="boss-input" aria-label={`שעת יציאה חזור — ${dayLabel(day)}`} />
+        <input value={t.retMinutes} onChange={set("retMinutes")} inputMode="decimal" className="boss-input" aria-label={`דקות חזור בפועל — ${dayLabel(day)}`} placeholder="דקות בפועל" />
+        <button type="button" disabled={busy} className="fcc-chip" onClick={() => {
+          const parsed = dayTimingBody(route.id, day, t);
+          if ("error" in parsed) { setError(parsed.error); return; }
+          setError(null);
+          onSave(parsed.body);
+        }}>שמירת שעה וזמן</button>
+      </div>
       {error && <span className="fcc-goal__note" role="alert">{error}</span>}
     </div>
   );
@@ -59,9 +67,23 @@ function RouteFormView({ initial, submitLabel, busy, onSubmit }: { initial: Rout
     <form className="fcc-stack fcc-stack--tight" onSubmit={(e) => { e.preventDefault(); onSubmit(form); }}>
       <Field label={form.own ? "שם הנסיעה הקבועה שלי (למשל: עבודה)" : "שם המסלול"} value={form.name} onChange={set("name")} mode="text" />
       {!form.own && <Field label="מחיר ליום נסיעה (₪)" value={form.price} onChange={set("price")} />}
-      <Field label='ק"מ לכל כיוון (חד פעמי)' value={form.km} onChange={set("km")} />
-      <Field label="דקות לכל כיוון (בשעת היציאה הרגילה)" value={form.minutes} onChange={set("minutes")} />
-      <Field label="שעת יציאה רגילה" value={form.start} onChange={set("start")} mode="time" />
+      <Field label={form.own ? 'ק"מ לכל כיוון (חד פעמי)' : 'הלוך — ק"מ (חד פעמי)'} value={form.km} onChange={set("km")} />
+      <Field label={form.own ? "דקות לכל כיוון (בשעת היציאה הרגילה)" : "הלוך — דקות (בשעת היציאה הרגילה)"} value={form.minutes} onChange={set("minutes")} />
+      <Field label={form.own ? "שעת יציאה רגילה" : "הלוך — שעת יציאה (למשל 07:30)"} value={form.start} onChange={set("start")} mode="time" />
+      {!form.own && (
+        <>
+          <Select<CommuteLoad | ""> label="הלוך — מלא או ריק" value={form.outLoad} options={LOAD_OPTIONS} onChange={set("outLoad")} />
+          <Field label='הלוך — ק"מ בלי תשלום (מהבית לאיסוף ומההורדה הביתה)' value={form.outUnpaidKm} onChange={set("outUnpaidKm")} />
+          <Field label="הלוך — דקות בלי תשלום" value={form.outUnpaidMin} onChange={set("outUnpaidMin")} />
+          <Field label='חזור — ק"מ (ריק = כמו בהלוך)' value={form.retKm} onChange={set("retKm")} />
+          <Field label="חזור — דקות (ריק = כמו בהלוך)" value={form.retMinutes} onChange={set("retMinutes")} />
+          <Field label="חזור — שעת יציאה (למשל 15:00)" value={form.retStart} onChange={set("retStart")} mode="time" />
+          <Select<CommuteLoad | ""> label="חזור — מלא או ריק" value={form.retLoad} options={LOAD_OPTIONS} onChange={set("retLoad")} />
+          <Field label='חזור — ק"מ בלי תשלום' value={form.retUnpaidKm} onChange={set("retUnpaidKm")} />
+          <Field label="חזור — דקות בלי תשלום" value={form.retUnpaidMin} onChange={set("retUnpaidMin")} />
+          <p className="fcc-loan__meta">הזמן בין שני הצדדים (למשל בין 7:30 ל-15:00) פנוי ולא נספר.</p>
+        </>
+      )}
       {!form.own && (
         <>
           <Field label="ימי נסיעה בשבוע" value={form.days} onChange={set("days")} />
@@ -291,6 +313,27 @@ export function CommuteView({ data, busy, error, evaluation, onAnswer, onTiming,
           )}
           {timedLine(r) && <p className="fcc-loan__meta">{timedLine(r)}</p>}
           {r.stops_note && <p className="fcc-goal__note">{r.stops_note}</p>}
+
+          <h4 className="fcc-pay__subhead">שני הצדדים ביום רגיל</h4>
+          <div className="fcc-table-scroll" role="region" tabIndex={0} aria-label="שני הצדדים">
+            <table className="fcc-compare__table">
+              <thead><tr><th>צד</th><th>יציאה</th><th>ק״מ</th><th>דקות</th><th>מלא/ריק</th><th>בלי תשלום</th></tr></thead>
+              <tbody>{legRows(r).map((l) => <tr key={l.key}><th scope="row">{l.label}</th><td>{l.start}</td><td>{l.km}</td><td>{l.minutes}</td><td>{l.load}</td><td>{l.unpaid}</td></tr>)}</tbody>
+            </table>
+          </div>
+          {(() => {
+            const dec = decisionModel(r);
+            return dec && (
+              <>
+                <h4 className="fcc-pay__subhead">החלטה לחודש: לשמור את הנסיעה?</h4>
+                <dl className="fcc-loans-goal__grid">{dec.lines.map((x) => <div key={x.label}><dt>{x.label}</dt><dd>{x.value}</dd></div>)}</dl>
+                {dec.legs.length > 0 && (
+                  <ul className="fcc-list">{dec.legs.map((l) => <li key={l.key}><strong>{l.label}{l.slow ? " (האיטי יותר)" : ""}</strong><div className="fcc-loan__meta">ממוצע {l.avg} · {l.total} · {l.days}</div></li>)}</ul>
+                )}
+                {dec.note && <p className="fcc-loan__meta">{dec.note}</p>}
+              </>
+            );
+          })()}
 
           <h4 className="fcc-pay__subhead">כדאיות ליום נסיעה</h4>
           <dl className="fcc-loans-goal__grid">

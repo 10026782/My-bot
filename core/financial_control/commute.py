@@ -22,6 +22,9 @@ This module only *derives*:
   and the way-back history are read per area (else per city);
 * EXTRA STOPS: a stop on the way is not a stop from one end of the city to the other in the rush hour — a trip carries how many stops, the surcharge for them and the km and minutes THEY
   added, so the stops' own ₪ per hour (and what they did to the whole ride) is visible, per band of the day;
+* TWO LEGS A DAY: a recurring day has an outbound leg (say 07:30) and a return leg (say 15:00), each with its own start time, km, minutes and load (full / empty), and the unpaid km and
+  minutes around each (home to the pickup, the drop-off back home). The price is per DAY, so the decision is made on the day (and the month) as a whole — both legs and the unpaid driving
+  summed — while every leg stays visible beside it, so the slow leg shows. The time BETWEEN the legs is free (the owner is not tied up) and is not counted;
 * the time of day: what traffic does to a ride's length — the same destination compared across bands of the day (minutes, ₪ per hour); a fact is said only with a real sample;
 * the profitability by destination, by price class and by kind (ride / delivery) — which rides were worth it — as numbers and a comparison with the average, never a verdict by a threshold;
 * income entries (``cashflow.Txn``) for the monthly income model — the SAME numbers, no second formula.
@@ -87,6 +90,11 @@ def _time(v) -> str | None:
     return v if band_of(v) else None
 
 
+def _load(v):
+    v = _sel(v)
+    return v if v in ("full", "empty") else None
+
+
 def _cls(v):
     v = _sel(v)
     return v if v in CLASS_LABEL else None
@@ -105,7 +113,9 @@ def parse_route(rec: dict) -> dict:
             "km_one_way": _num(f.get("Km One Way")), "minutes_one_way": _num(f.get("Minutes One Way")), "cost_per_km": _num(f.get("Cost Per Km")),
             "planned_days": _num(f.get("Planned Days Per Week")), "active": _sel(f.get("Status")) != "paused", "notes": f.get("Notes") or None,
             "vehicle_class": _cls(f.get("Vehicle Class")), "return_status": _ret(f.get("Return Status"), DEFAULT_RETURN), "waiting_minutes": _num(f.get("Waiting Minutes")) or 0.0,
-            "start_time": _time(f.get("Start Time"))}
+            "start_time": _time(f.get("Start Time")), "return_start_time": _time(f.get("Return Start Time")), "return_km": _num(f.get("Return Km")), "return_minutes": _num(f.get("Return Minutes")),
+            "outbound_load": _load(f.get("Outbound Load")), "return_load": _load(f.get("Return Load")), "out_unpaid_km": _num(f.get("Out Unpaid Km")) or 0.0,
+            "out_unpaid_minutes": _num(f.get("Out Unpaid Minutes")) or 0.0, "ret_unpaid_km": _num(f.get("Ret Unpaid Km")) or 0.0, "ret_unpaid_minutes": _num(f.get("Ret Unpaid Minutes")) or 0.0}
 
 
 def parse_trip(rec: dict) -> dict | None:
@@ -124,7 +134,8 @@ def parse_trip(rec: dict) -> dict | None:
             "km_one_way": _num(f.get("Km One Way")), "minutes_one_way": _num(f.get("Minutes One Way")), "return_status": _ret(f.get("Return Status")),
             "waiting_minutes": _num(f.get("Waiting Minutes")) or 0.0, "kind": "delivery" if _sel(f.get("Kind")) == "delivery" else "ride",
             "extra_km": _num(f.get("Extra Km")), "extra_minutes": _num(f.get("Extra Minutes")), "on_the_way_of": str(f.get("On The Way Of") or "").strip() or None,
-            "start_time": _time(f.get("Start Time")), "city": str(f.get("City") or "").strip() or None, "area": str(f.get("Area") or "").strip() or None,
+            "start_time": _time(f.get("Start Time")), "return_start_time": _time(f.get("Return Start Time")), "return_minutes": _num(f.get("Return Minutes")),
+            "city": str(f.get("City") or "").strip() or None, "area": str(f.get("Area") or "").strip() or None,
             "added_stops": int(_num(f.get("Added Stops")) or 0), "stops_price": _num(f.get("Stops Price")) or 0.0, "stops_km": _num(f.get("Stops Km")) or 0.0,
             "stops_minutes": _num(f.get("Stops Minutes")) or 0.0}
 
@@ -157,7 +168,7 @@ def default_cost_per_km(routes: list[dict], settings: dict | None = None) -> flo
 
 def ride_economics(price: float | None, km_one_way: float | None, minutes_one_way: float | None, return_status: str | None, waiting_minutes: float,
                    cost_per_km: float | None, extra_km: float | None = None, extra_minutes: float | None = None, stops_km: float = 0.0, stops_minutes: float = 0.0,
-                   stops_price: float = 0.0) -> dict:
+                   stops_price: float = 0.0, total_km: float | None = None, total_minutes: float | None = None) -> dict:
     """One ride. A ride with a paid continuation counts ONE way; every other ride is there and back, plus the waiting minutes. A ride fitted on the way of the owner's own
     drive counts only what it ADDED (``extra_km`` / ``extra_minutes`` replace the one-way based figures). EXTRA STOPS add their own km and minutes on top, and their surcharge is part
     of the price: ``stops_*`` shows what the stops earned on their own and ``base_*`` what the ride would have earned without them. Every figure is None while an input is missing.
@@ -168,6 +179,8 @@ def ride_economics(price: float | None, km_one_way: float | None, minutes_one_wa
         minutes = extra_minutes
     else:
         minutes = round(minutes_one_way * legs + (waiting_minutes or 0.0), 2) if minutes_one_way is not None else None
+    if total_km is not None or total_minutes is not None:        # a recurring day: the km and minutes of both legs plus the unpaid driving, summed by ``route_day``
+        km, minutes = total_km, total_minutes
     base_km, base_minutes = km, minutes
     if km is not None:
         km = round(km + (stops_km or 0.0), 2)
@@ -188,14 +201,45 @@ def ride_economics(price: float | None, km_one_way: float | None, minutes_one_wa
             "base_gross_per_km": r(base_price / base_km) if base_price is not None and base_km else None}
 
 
+def route_day(route: dict, trip: dict | None = None) -> dict:
+    """ONE day of a recurring route: the outbound leg and the return leg (each with its start time, km, minutes and load), the unpaid km and minutes around each, and the day's totals —
+    the figures the day's price is weighed against. A day the owner timed afterwards uses that day's minutes for each leg (else the route's usual); a route with no separate return leg
+    values drives the same km and minutes back. The return leg is not driven when the route's way back is a paid continuation; waiting minutes (``waited``) count, the free time between the
+    legs does not. A figure the route has no km / minutes for is None."""
+    t = trip or {}
+    legs = []
+    out_minutes = t.get("minutes_one_way") or route["minutes_one_way"]
+    legs.append({"key": "out", "label": "הלוך", "start": t.get("start_time") or route["start_time"], "km": route["km_one_way"], "minutes": out_minutes, "load": route["outbound_load"],
+                 "unpaid_km": route["out_unpaid_km"], "unpaid_minutes": route["out_unpaid_minutes"], "timed": bool(t.get("minutes_one_way"))})
+    if route["return_status"] != "continuation":
+        ret_km = route["return_km"] if route["return_km"] is not None else route["km_one_way"]
+        ret_minutes = t.get("return_minutes") or route["return_minutes"] or route["minutes_one_way"]
+        legs.append({"key": "ret", "label": "חזור", "start": t.get("return_start_time") or route["return_start_time"], "km": ret_km, "minutes": ret_minutes, "load": route["return_load"],
+                     "unpaid_km": route["ret_unpaid_km"], "unpaid_minutes": route["ret_unpaid_minutes"], "timed": bool(t.get("return_minutes"))})
+    waiting = route["waiting_minutes"] if route["return_status"] == "waited" else 0.0
+    known = all(l["km"] is not None and l["minutes"] is not None for l in legs)
+    total_km = round(sum(l["km"] + l["unpaid_km"] for l in legs), 2) if known else None
+    total_minutes = round(sum(l["minutes"] + l["unpaid_minutes"] for l in legs) + waiting, 2) if known else None
+    unpaid_km = round(sum(l["unpaid_km"] for l in legs), 2)
+    empty_km = round(unpaid_km + sum(l["km"] for l in legs if l["load"] == "empty" and l["km"] is not None), 2) if known else None
+    for l in legs:
+        l["band"] = band_of(l["start"])
+        l["total_minutes"] = round(l["minutes"] + l["unpaid_minutes"], 2) if l["minutes"] is not None else None
+    return {"legs": legs, "total_km": total_km, "total_minutes": total_minutes, "unpaid_km": unpaid_km, "unpaid_minutes": round(sum(l["unpaid_minutes"] for l in legs), 2),
+            "empty_km": empty_km, "empty_share": round(empty_km / total_km, 4) if empty_km is not None and total_km else None, "waiting_minutes": waiting}
+
+
 def economics(route: dict) -> dict:
-    """One trip day of a route (the same ``ride_economics``), with the planned monthly potential. The field names are the screen's."""
-    e = ride_economics(route["price"], route["km_one_way"], route["minutes_one_way"], route["return_status"], route["waiting_minutes"], route["cost_per_km"])
+    """One trip day of a route (the same ``ride_economics`` over the day's two legs and the unpaid driving), with the planned monthly potential. The field names are the screen's."""
+    day = route_day(route)
+    e = ride_economics(route["price"], route["km_one_way"], route["minutes_one_way"], route["return_status"], route["waiting_minutes"], route["cost_per_km"],
+                       total_km=day["total_km"], total_minutes=day["total_minutes"])
     price, planned = route["price"], route["planned_days"]
     return {"price": price, "km_per_day": e["km"], "minutes_per_day": e["minutes"], "hours_per_day": e["hours"], "gross_per_hour": e["gross_per_hour"],
             "gross_per_km": e["gross_per_km"], "vehicle_cost_per_day": e["vehicle_cost"], "net_per_day": e["net"], "net_per_hour": e["net_per_hour"], "net_per_km": e["net_per_km"],
             "monthly_potential": round(price * planned * WEEKS_PER_MONTH, 2) if price is not None and planned else None,
-            "return_status": route["return_status"], "vehicle_class": route["vehicle_class"]}
+            "return_status": route["return_status"], "vehicle_class": route["vehicle_class"], "legs": day["legs"], "unpaid_km": day["unpaid_km"], "unpaid_minutes": day["unpaid_minutes"],
+            "empty_km": day["empty_km"], "empty_share": day["empty_share"]}
 
 
 def week_start(d: date) -> date:
@@ -207,7 +251,30 @@ def month_key(d: date) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
 
-def route_month(route: dict, trips: list[dict], month: str) -> dict:
+def route_decision(route: dict, yes: list[dict], cost: float | None) -> dict:
+    """The month of a recurring route, for the decision "do I keep it": over the days that had a ride, the income against BOTH legs and the unpaid driving summed — ₪ per hour, ₪ per km
+    (net of the cost per km when known), how much of the km was empty — and each leg's average minutes, so the slow leg shows. The free time between the legs is not counted."""
+    days = [(t, route_day(route, t)) for t in yes]
+    known = [(t, d) for t, d in days if d["total_km"] is not None and d["total_minutes"]]
+    income = round(sum(_amount(t, route) for t, _ in known), 2)
+    km = round(sum(d["total_km"] for _, d in known), 1)
+    minutes = round(sum(d["total_minutes"] for _, d in known), 1)
+    hours = minutes / 60 if minutes else None
+    net = round(income - km * cost, 2) if cost is not None else None
+    empty = [d["empty_km"] for _, d in known if d["empty_km"] is not None]
+    legs = []
+    for key, label in (("out", "הלוך"), ("ret", "חזור")):
+        part = [leg for _, d in known for leg in d["legs"] if leg["key"] == key and leg["minutes"]]
+        if part:
+            legs.append({"key": key, "label": label, "avg_minutes": round(sum(l["minutes"] for l in part) / len(part), 1), "avg_total_minutes": round(sum(l["total_minutes"] for l in part) / len(part), 1),
+                         "timed_days": sum(1 for l in part if l["timed"])})
+    slowest = max(legs, key=lambda l: l["avg_minutes"])["key"] if len(legs) == 2 and legs[0]["avg_minutes"] != legs[1]["avg_minutes"] else None
+    return {"days": len(known), "unknown_days": len(days) - len(known), "income": income, "km": km, "minutes": minutes, "gross_per_hour": round(income / hours, 2) if hours else None,
+            "gross_per_km": round(income / km, 2) if km else None, "net": net, "net_per_hour": round(net / hours, 2) if net is not None and hours else None,
+            "empty_km": round(sum(empty), 1) if empty else None, "empty_share": round(sum(empty) / km, 4) if empty and km else None, "legs": legs, "slowest": slowest}
+
+
+def route_month(route: dict, trips: list[dict], month: str, cost: float | None = None) -> dict:
     mine = [t for t in trips if t["route_id"] == route["id"] and month_key(t["date"]) == month]
     yes = [t for t in mine if t["outcome"] == "yes"]
     no = [t for t in mine if t["outcome"] == "no"]
@@ -220,7 +287,9 @@ def route_month(route: dict, trips: list[dict], month: str) -> dict:
         cell[1] += _amount(t, route)
     income = round(sum(c[1] for c in weeks.values()), 2)
     timed = [t["minutes_one_way"] for t in yes if t["minutes_one_way"]]
-    return {"month": month, "yes_days": len(yes), "no_days": len(no), "income": income, "timed_days": len(timed), "avg_minutes_one_way": round(sum(timed) / len(timed), 1) if timed else None, "stops": {str(n): c for n, c in stops.items()},
+    timed_return = [t["return_minutes"] for t in yes if t["return_minutes"]]
+    return {"month": month, "yes_days": len(yes), "no_days": len(no), "income": income, "timed_days": len(timed), "avg_minutes_one_way": round(sum(timed) / len(timed), 1) if timed else None,
+            "timed_return_days": len(timed_return), "avg_return_minutes": round(sum(timed_return) / len(timed_return), 1) if timed_return else None, "decision": route_decision(route, yes, cost), "stops": {str(n): c for n, c in stops.items()},
             "stops_recorded": known, "three_share": round(stops[3] / known, 4) if known else None,
             "weeks": [{"week_start": w.isoformat(), "yes_days": c[0], "income": round(c[1], 2)} for w, c in sorted(weeks.items())]}
 
@@ -253,7 +322,8 @@ def days_window(route: dict, trips: list[dict], today: date) -> list[dict]:
         t = by_day.get(d)
         out.append({"date": d.isoformat(), "weekday": WEEKDAYS_HE[d.weekday()], "is_tomorrow": d == today + timedelta(days=1), "is_today": d == today,
                     "rest_day": rests and d.weekday() == SATURDAY, "outcome": t["outcome"] if t else None, "stops": t["stops"] if t else None, "trip_id": t["id"] if t else None,
-                    "start_time": t["start_time"] if t else None, "minutes_one_way": t["minutes_one_way"] if t else None})
+                    "start_time": t["start_time"] if t else None, "minutes_one_way": t["minutes_one_way"] if t else None,
+                    "return_start_time": t["return_start_time"] if t else None, "return_minutes": t["return_minutes"] if t else None})
     return out
 
 
@@ -262,8 +332,9 @@ def _trip_ride(trip: dict, routes_by_id: dict, cost: float | None) -> tuple[str,
     route = routes_by_id.get(trip["route_id"]) if trip["route_id"] else None
     price = _amount(trip, route)
     if route is not None:
-        minutes = trip["minutes_one_way"] if trip["minutes_one_way"] else route["minutes_one_way"]        # the minutes of THAT day when the owner timed it (traffic), else the route's usual
-        e = ride_economics(price, route["km_one_way"], minutes, route["return_status"], route["waiting_minutes"], route["cost_per_km"] if route["cost_per_km"] is not None else cost)
+        day = route_day(route, trip)                      # both legs of THAT day (its own minutes when the owner timed it — traffic — else the route's usual) and the unpaid driving
+        e = ride_economics(price, route["km_one_way"], route["minutes_one_way"], route["return_status"], route["waiting_minutes"], route["cost_per_km"] if route["cost_per_km"] is not None else cost,
+                           total_km=day["total_km"], total_minutes=day["total_minutes"])
         return route["name"], e, route
     return trip["destination"] or ONE_OFF_SOURCE, ride_economics(price, trip["km_one_way"], trip["minutes_one_way"], trip["return_status"], trip["waiting_minutes"], cost,
                                                                  trip["extra_km"], trip["extra_minutes"], trip["stops_km"], trip["stops_minutes"], trip["stops_price"]), None
@@ -664,9 +735,9 @@ def build(route_records: list[dict], trip_records: list[dict], today: date, mont
     rows = []
     for route in routes:
         yes = [t for t in trips if t["route_id"] == route["id"] and t["outcome"] == "yes"]
-        history = [route_month(route, trips, m) for m in keys]
+        history = [route_month(route, trips, m, cost) for m in keys]
         rows.append({**route, "economics": economics(route), "days": days_window(route, trips, today) if route["active"] else [],
-                     "this_month": route_month(route, trips, this_month), "history": history, "stops_note": stops_note(yes)})
+                     "this_month": route_month(route, trips, this_month, cost), "history": history, "stops_note": stops_note(yes)})
     recent = sorted((t for t in trips if t["date"] >= today - timedelta(days=62)), key=lambda t: t["date"], reverse=True)
     table, rides = [], []
     for t in trips:                                           # every "yes" ride, with its economics: the allowance this month and the profitability read from the same list

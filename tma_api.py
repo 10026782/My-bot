@@ -5226,7 +5226,7 @@ def fcc_commute(identity):
 def fcc_commute_day(identity):
     """Body: {"route_id": "rec…", "date": "YYYY-MM-DD", "outcome": "yes"|"no", "stops": 2|3 (when yes)}. ONE row of Commute Trips per route per day: created, or
     — when the day already has an answer — patched. The day must lie in the answerable window (the last week and tomorrow), the route must be the owner's own
-    active route; for a ride that happened it may also carry "start_time" ("HH:MM") and "minutes_one_way" (how long one way took THAT day — the traffic of that hour); the amount is the route's day price (kept as it was when the day was already answered "yes", so a later price change never rewrites history).
+    active route; for a ride that happened it may also carry "start_time" ("HH:MM") and "minutes_one_way" (how long the OUTBOUND leg took THAT day — the traffic of that hour) and "return_start_time" / "return_minutes" (the return leg of that day); the amount is the route's day price (kept as it was when the day was already answered "yes", so a later price change never rewrites history).
     Through the normal ActionGateway ceremony."""
     if not _fcc_enabled(identity) or not getattr(identity, "is_owner", False):
         return jsonify({"error": "not found"}), 404
@@ -5256,6 +5256,18 @@ def fcc_commute_day(identity):
             if not 0 < minutes <= 1440:
                 return jsonify({"error": "bad minutes_one_way"}), 400
             timing[TF.MINUTES_ONE_WAY] = minutes
+        if str(data.get("return_start_time") or "").strip():
+            if fcc_commute.band_of(str(data["return_start_time"]).strip()) is None or len(str(data["return_start_time"]).strip()) != 5:
+                return jsonify({"error": "bad return_start_time"}), 400
+            timing[TF.RETURN_START_TIME] = str(data["return_start_time"]).strip()
+        if data.get("return_minutes") not in (None, ""):
+            try:
+                rminutes = float(data["return_minutes"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "bad return_minutes"}), 400
+            if not 0 < rminutes <= 1440:
+                return jsonify({"error": "bad return_minutes"}), 400
+            timing[TF.RETURN_MINUTES] = rminutes
     today = _date.today()
     if not today - timedelta(days=fcc_commute.WINDOW_BACK) <= day <= today + timedelta(days=fcc_commute.WINDOW_FORWARD):
         return jsonify({"error": "date outside the answerable window"}), 400
@@ -5293,7 +5305,8 @@ def fcc_commute_day(identity):
 @require_tma_auth
 def fcc_commute_route(identity):
     """Body: {"route_id"?: "rec…" (edit), "name", "price", "km_one_way", "minutes_one_way", "cost_per_km", "planned_days", "status"?: "active"|"paused",
-    "vehicle_class"?: "regular"|"large", "return_status"?: "empty"|"waited"|"continuation", "waiting_minutes", "route_kind"?: "paid"|"own" (an OWN weekly drive of the owner: no
+    "vehicle_class"?: "regular"|"large", "return_status"?: "empty"|"waited"|"continuation", "waiting_minutes", "return_start_time"? / "return_km"? / "return_minutes"? / "outbound_load"? / "return_load"? ("full"|"empty") / "out_unpaid_km"? / "out_unpaid_minutes"? / "ret_unpaid_km"? / "ret_unpaid_minutes"? (the return leg of the day and the unpaid driving
+    around each leg — the time between the legs is free and not counted), "route_kind"?: "paid"|"own" (an OWN weekly drive of the owner: no
     price, the rides and deliveries are fitted on the way of it), "weekdays"?: ["ראשון", …]}. Creates the
     owner's route, or edits one of his own (only the keys sent). The km and minutes are entered once; an empty cost per km means profitability stays gross. The server
     names the table and the fields; every value is range-checked (tools.approval_actions.validate_commute_write) before and again at execution."""
@@ -5305,14 +5318,16 @@ def fcc_commute_route(identity):
     data = request.get_json(silent=True) or {}
     mapping = {"name": RF.NAME, "price": RF.DAY_PRICE, "km_one_way": RF.KM_ONE_WAY, "minutes_one_way": RF.MINUTES_ONE_WAY, "cost_per_km": RF.COST_PER_KM,
                "planned_days": RF.PLANNED_DAYS, "status": RF.STATUS, "vehicle_class": RF.VEHICLE_CLASS, "return_status": RF.RETURN_STATUS, "waiting_minutes": RF.WAITING_MINUTES,
-               "route_kind": RF.ROUTE_KIND, "weekdays": RF.WEEKDAYS, "start_time": RF.START_TIME}
+               "route_kind": RF.ROUTE_KIND, "weekdays": RF.WEEKDAYS, "start_time": RF.START_TIME, "return_start_time": RF.RETURN_START_TIME, "return_km": RF.RETURN_KM,
+               "return_minutes": RF.RETURN_MINUTES, "outbound_load": RF.OUTBOUND_LOAD, "return_load": RF.RETURN_LOAD, "out_unpaid_km": RF.OUT_UNPAID_KM, "out_unpaid_minutes": RF.OUT_UNPAID_MINUTES,
+               "ret_unpaid_km": RF.RET_UNPAID_KM, "ret_unpaid_minutes": RF.RET_UNPAID_MINUTES}
     fields = {}
     for key, field in mapping.items():
         if key in data and data[key] not in (None, "", []):
             v = data[key]
             if key == "name":
                 v = str(v).strip()
-            elif key not in ("status", "vehicle_class", "return_status", "route_kind", "weekdays", "start_time"):
+            elif key not in ("status", "vehicle_class", "return_status", "route_kind", "weekdays", "start_time", "return_start_time", "outbound_load", "return_load"):
                 try:
                     v = float(v)
                 except (TypeError, ValueError):

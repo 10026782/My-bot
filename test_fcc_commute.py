@@ -503,9 +503,9 @@ def test_a_route_day_uses_its_own_minutes_and_hour_and_the_route_compares_the_ho
     month = v["routes"][0]["this_month"]
     assert month["timed_days"] == 4 and month["avg_minutes_one_way"] == 46.0 and month["yes_days"] == 5
     (ins,) = v["profitability"]["time_insights"]
-    assert ins["destination"] == "נסיעה" and ins["slowest"] == "morning_rush" and ins["fastest"] == "midday" and ins["extra_minutes"] == 68.0      # the whole ride (there and back): 126 vs 58 minutes
+    assert ins["destination"] == "נסיעה" and ins["slowest"] == "morning_rush" and ins["fastest"] == "midday" and ins["extra_minutes"] == 34.0      # only the outbound leg was timed (63 vs 29); the return leg keeps the route's usual 35
     by = {t["date"]: t for t in v["trips"]}
-    assert by["2026-11-01"]["minutes"] == 120 and by["2026-11-03"]["minutes"] == 60 and by["2026-11-05"]["minutes"] == 70          # a day without a time keeps the route's 35 x 2
+    assert by["2026-11-01"]["minutes"] == 95 and by["2026-11-03"]["minutes"] == 65 and by["2026-11-05"]["minutes"] == 70          # outbound as timed + the route's usual return; a day without a time keeps 35 + 35
     day1 = next(d for d in C.build([ROUTE], days, date(2026, 11, 3), 6, [SETTINGS])["routes"][0]["days"] if d["date"] == "2026-11-03")
     assert day1["start_time"] == "11:00" and day1["minutes_one_way"] == 30.0
 
@@ -527,3 +527,73 @@ def test_the_day_endpoint_takes_the_hour_and_minutes_for_a_ride_that_happened_an
     post(app, "/api/fcc/commute/day", {"route_id": ROUTE["id"], "date": day.isoformat(), "outcome": "no", "start_time": "07:45", "minutes_one_way": 55})
     assert WRITES[2]["fields"] == {"Outcome": "no", "Amount": 0.0}              # a day without a ride has no hour or minutes
     assert len(WRITES) == 3
+
+
+# ── two legs a day (outbound 07:30, return 15:00), the unpaid driving around them, one decision on the day ─────────
+LEGS_ROUTE = {"id": "recLEGSAAAAAAAAAA", "fields": {"Name": "בית ספר", "Day Price": 130, "Km One Way": 22, "Minutes One Way": 35, "Cost Per Km": 0.7, "Planned Days Per Week": 6, "Status": "active",
+                                                    "Start Time": "07:30", "Return Start Time": "15:00", "Return Km": 25, "Return Minutes": 30, "Outbound Load": "full", "Return Load": "empty",
+                                                    "Out Unpaid Km": 6, "Out Unpaid Minutes": 10, "Ret Unpaid Km": 4, "Ret Unpaid Minutes": 8}}
+
+
+def test_a_day_is_two_legs_plus_the_unpaid_driving_and_the_time_between_the_legs_is_free():
+    route = C.parse_route(LEGS_ROUTE)
+    day = C.route_day(route)
+    out, ret = day["legs"]
+    assert out["start"] == "07:30" and out["km"] == 22 and out["minutes"] == 35 and out["load"] == "full" and out["band"] == "morning_rush" and out["total_minutes"] == 45
+    assert ret["start"] == "15:00" and ret["km"] == 25 and ret["minutes"] == 30 and ret["load"] == "empty" and ret["band"] == "evening_rush" and ret["total_minutes"] == 38
+    assert day["total_km"] == 22 + 25 + 6 + 4 == 57 and day["total_minutes"] == 35 + 30 + 10 + 8 == 83         # 07:30 -> 15:00 in between counts for nothing
+    assert day["unpaid_km"] == 10 and day["empty_km"] == 10 + 25 == 35 and day["empty_share"] == round(35 / 57, 4)
+    e = C.economics(route)
+    assert e["km_per_day"] == 57 and e["minutes_per_day"] == 83 and e["gross_per_hour"] == round(130 / (83 / 60), 2) and e["gross_per_km"] == round(130 / 57, 2)
+    assert e["vehicle_cost_per_day"] == round(57 * 0.7, 2) and [l["label"] for l in e["legs"]] == ["הלוך", "חזור"]
+
+
+def test_a_route_with_no_separate_return_values_drives_the_same_back_and_a_paid_continuation_drops_the_return_leg():
+    plain = C.route_day(C.parse_route(ROUTE))
+    assert plain["total_km"] == 44 and plain["total_minutes"] == 70 and plain["unpaid_km"] == 0 and [l["km"] for l in plain["legs"]] == [22, 22]
+    cont = C.route_day(C.parse_route({**ROUTE, "fields": {**ROUTE["fields"], "Return Status": "continuation"}}))
+    assert len(cont["legs"]) == 1 and cont["total_km"] == 22 and cont["total_minutes"] == 35
+    waited = C.route_day(C.parse_route({**ROUTE, "fields": {**ROUTE["fields"], "Return Status": "waited", "Waiting Minutes": 40}}))
+    assert waited["total_minutes"] == 110 and C.route_day(C.parse_route({"id": "r", "fields": {"Name": "x", "Day Price": 1}}))["total_km"] is None
+
+
+def test_a_timed_day_uses_each_legs_own_minutes_and_the_month_decision_sums_both_legs_and_names_the_slow_one():
+    today = date(2026, 11, 18)
+    def day_(d, out_min, ret_min):
+        t = trip(date(2026, 11, d), "yes", 2, 130)
+        t["fields"].update({"Route": [LEGS_ROUTE["id"]], "Minutes One Way": out_min, "Return Minutes": ret_min, "Start Time": "07:30", "Return Start Time": "15:00"})
+        return t
+    trips = [day_(2, 70, 30), day_(3, 66, 28), day_(4, 64, 34)]
+    v = C.build([LEGS_ROUTE], trips, today, 6, [SETTINGS])
+    month = v["routes"][0]["this_month"]
+    assert month["timed_days"] == 3 and month["avg_minutes_one_way"] == 66.7 and month["timed_return_days"] == 3 and month["avg_return_minutes"] == 30.7
+    d = month["decision"]
+    assert d["days"] == 3 and d["income"] == 390.0 and d["km"] == 171.0                                          # 3 x (22 + 25 + 10)
+    assert d["minutes"] == round((70 + 30 + 18) + (66 + 28 + 18) + (64 + 34 + 18), 1) == 346.0 and d["gross_per_hour"] == round(390 / (346 / 60), 2)
+    assert d["net"] == round(390 - 171 * 0.8, 2) and d["empty_km"] == 105.0                                       # the cost per km is the settings' 0.8
+    assert [l["key"] for l in d["legs"]] == ["out", "ret"] and d["slowest"] == "out" and d["legs"][0]["avg_minutes"] == 66.7 and d["legs"][1]["avg_minutes"] == 30.7
+    first = next(t for t in v["trips"] if t["date"] == "2026-11-02")
+    assert first["minutes"] == 70 + 30 + 18
+    assert C.build([LEGS_ROUTE], [], today, 6, [])["routes"][0]["this_month"]["decision"]["days"] == 0
+
+
+def test_the_legs_fields_pass_the_guard_and_travel_through_the_endpoints(api):
+    app, state = api
+    ok = aa.validate_commute_write
+    full = {"Name": "x", "Day Price": 130.0, "Return Start Time": "15:00", "Return Km": 25.0, "Return Minutes": 30.0, "Outbound Load": "full", "Return Load": "empty", "Out Unpaid Km": 6.0,
+            "Out Unpaid Minutes": 10.0, "Ret Unpaid Km": 4.0, "Ret Unpaid Minutes": 8.0}
+    assert ok("Commute Routes", "post", full) is None
+    assert ok("Commute Routes", "patch", {"Return Load": "half"}) and ok("Commute Routes", "patch", {"Return Start Time": "3pm"}) and ok("Commute Routes", "patch", {"Ret Unpaid Km": -1})
+    assert ok("Commute Trips", "patch", {"Return Start Time": "15:10", "Return Minutes": 33.0}) is None and ok("Commute Trips", "patch", {"Return Minutes": 5000.0})
+    post(app, "/api/fcc/commute/route", {"route_id": ROUTE["id"], "return_start_time": "15:00", "return_km": 25, "return_minutes": 30, "outbound_load": "full", "return_load": "empty", "out_unpaid_km": 6,
+                                         "out_unpaid_minutes": 10, "ret_unpaid_km": 4, "ret_unpaid_minutes": 8})
+    f = WRITES[0]["fields"]
+    assert f["Return Start Time"] == "15:00" and f["Return Km"] == 25.0 and f["Return Load"] == "empty" and f["Ret Unpaid Minutes"] == 8.0 and aa.validate_commute_write("Commute Routes", "patch", f) is None
+    assert post(app, "/api/fcc/commute/route", {"route_id": ROUTE["id"], "return_load": "half"}).status_code == 400
+    day = date.today() - timedelta(days=1)
+    state["trips"] = [trip(day, "yes", 2, 120, tid="recEXISTINGAAAAAAA")]
+    post(app, "/api/fcc/commute/day", {"route_id": ROUTE["id"], "date": day.isoformat(), "outcome": "yes", "stops": 2, "start_time": "07:30", "minutes_one_way": 60, "return_start_time": "15:10", "return_minutes": 33})
+    g = WRITES[1]["fields"]
+    assert g["Start Time"] == "07:30" and g["Minutes One Way"] == 60.0 and g["Return Start Time"] == "15:10" and g["Return Minutes"] == 33.0 and aa.validate_commute_write("Commute Trips", "patch", g) is None
+    for bad in ({"return_start_time": "3pm"}, {"return_minutes": 0}, {"return_minutes": "x"}, {"return_minutes": 9999}):
+        assert post(app, "/api/fcc/commute/day", {"route_id": ROUTE["id"], "date": day.isoformat(), "outcome": "yes", "stops": 2, **bad}).status_code == 400, bad

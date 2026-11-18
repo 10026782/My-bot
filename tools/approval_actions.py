@@ -383,13 +383,14 @@ def _rules_write_refused(op, fields) -> bool:
 
 
 _COMMUTE_ROUTE_KEYS = {"Name", "Day Price", "Km One Way", "Minutes One Way", "Cost Per Km", "Planned Days Per Week", "Status", "Notes",
-                       "Vehicle Class", "Return Status", "Waiting Minutes", "Route Kind", "Weekdays", "Start Time"}
+                       "Vehicle Class", "Return Status", "Waiting Minutes", "Route Kind", "Weekdays", "Start Time",
+                       "Return Start Time", "Return Km", "Return Minutes", "Outbound Load", "Return Load", "Out Unpaid Km", "Out Unpaid Minutes", "Ret Unpaid Km", "Ret Unpaid Minutes"}
 _COMMUTE_SETTINGS_KEYS = {"Name", "Free Km Monthly", "Free Fuel Monthly", "Fuel Cost Per Km", "Cost Per Km", "Other Km Used", "Other Km Month"}
 _COMMUTE_WEEKDAYS = ("ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת")
 _COMMUTE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _COMMUTE_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 _COMMUTE_TRIP_EXTRA = {"Destination", "Vehicle Class", "Km One Way", "Minutes One Way", "Return Status", "Waiting Minutes", "Kind", "Extra Km", "Extra Minutes", "On The Way Of", "Start Time",
-                       "City", "Area", "Added Stops", "Stops Price", "Stops Km", "Stops Minutes"}      # a one-off trip's own facts
+                       "City", "Area", "Added Stops", "Stops Price", "Stops Km", "Stops Minutes", "Return Start Time", "Return Minutes"}      # a one-off trip's own facts
 _COMMUTE_TRIP_POST_KEYS = {"Name", "Route", "Trip Date", "Outcome", "Stops", "Amount", "Idempotency Key", "Note"} | _COMMUTE_TRIP_EXTRA
 _COMMUTE_TRIP_PATCH_KEYS = {"Outcome", "Stops", "Amount", "Note"} | _COMMUTE_TRIP_EXTRA
 _COMMUTE_TRIP_KEY_RE = re.compile(r"^rec[A-Za-z0-9]{14}:\d{4}-\d{2}-\d{2}$")
@@ -412,8 +413,11 @@ def validate_commute_write(table: str, op: str, fields) -> str | None:
             return "bad vehicle class"
         if fields.get("Return Status") not in _COMMUTE_RETURNS:
             return "bad return status"
-        if fields.get("Start Time") is not None and (not isinstance(fields["Start Time"], str) or not _COMMUTE_TIME_RE.match(fields["Start Time"])):
-            return "bad start time"
+        for key in ("Start Time", "Return Start Time"):
+            if fields.get(key) is not None and (not isinstance(fields[key], str) or not _COMMUTE_TIME_RE.match(fields[key])):
+                return "bad start time"
+        if not num("Return Minutes", 0, 1440):
+            return "bad number"
         if not (num("Km One Way", 0, 2000) and num("Minutes One Way", 0, 1440) and num("Waiting Minutes", 0, 1440)):
             return "bad number"
         return None
@@ -431,6 +435,10 @@ def validate_commute_write(table: str, op: str, fields) -> str | None:
             return "bad status"
         if fields.get("Route Kind") not in (None, "paid", "own"):
             return "bad route kind"
+        if fields.get("Outbound Load") not in (None, "full", "empty") or fields.get("Return Load") not in (None, "full", "empty"):
+            return "bad load"
+        if not (num("Return Km", 0, 2000) and num("Out Unpaid Km", 0, 2000) and num("Ret Unpaid Km", 0, 2000) and num("Out Unpaid Minutes", 0, 1440) and num("Ret Unpaid Minutes", 0, 1440)):
+            return "bad number"
         wd = fields.get("Weekdays")
         if wd is not None and (not isinstance(wd, list) or len(wd) > 7 or any(x not in _COMMUTE_WEEKDAYS for x in wd)):
             return "bad weekdays"

@@ -1376,19 +1376,30 @@ export interface FccRefinanceBody { rate: number; term_months: number; fees: num
 export type CommuteClass = "regular" | "large";
 export type CommuteReturn = "empty" | "waited" | "continuation";
 export type CommuteKind = "ride" | "delivery";
-export interface FccCommuteDay { date: string; weekday: string; is_tomorrow: boolean; is_today: boolean; rest_day: boolean; outcome: "yes" | "no" | null; stops: number | null; trip_id: string | null; start_time: string | null; minutes_one_way: number | null }
+export type CommuteLoad = "full" | "empty";
+export interface FccCommuteDay {
+  date: string; weekday: string; is_tomorrow: boolean; is_today: boolean; rest_day: boolean; outcome: "yes" | "no" | null; stops: number | null; trip_id: string | null;
+  start_time: string | null; minutes_one_way: number | null; return_start_time: string | null; return_minutes: number | null;
+}
+export interface FccCommuteLeg { key: "out" | "ret"; label: string; start: string | null; km: number | null; minutes: number | null; load: CommuteLoad | null; unpaid_km: number; unpaid_minutes: number; timed: boolean; band: string | null; total_minutes: number | null }
+export interface FccCommuteDecision {
+  days: number; unknown_days: number; income: number; km: number; minutes: number; gross_per_hour: number | null; gross_per_km: number | null; net: number | null; net_per_hour: number | null;
+  empty_km: number | null; empty_share: number | null; legs: { key: "out" | "ret"; label: string; avg_minutes: number; avg_total_minutes: number; timed_days: number }[]; slowest: "out" | "ret" | null;
+}
 export interface FccCommuteEconomics {
   price: number | null; km_per_day: number | null; minutes_per_day: number | null; hours_per_day: number | null; gross_per_hour: number | null; gross_per_km: number | null;
   vehicle_cost_per_day: number | null; net_per_day: number | null; net_per_hour: number | null; net_per_km: number | null; monthly_potential: number | null;
-  return_status: CommuteReturn | null; vehicle_class: CommuteClass | null;
+  return_status: CommuteReturn | null; vehicle_class: CommuteClass | null; legs: FccCommuteLeg[]; unpaid_km: number; unpaid_minutes: number; empty_km: number | null; empty_share: number | null;
 }
 export interface FccCommuteMonth {
-  month: string; yes_days: number; no_days: number; income: number; timed_days: number; avg_minutes_one_way: number | null; stops: Record<string, number>; stops_recorded: number; three_share: number | null;
+  month: string; yes_days: number; no_days: number; income: number; timed_days: number; avg_minutes_one_way: number | null; timed_return_days: number; avg_return_minutes: number | null; decision: FccCommuteDecision; stops: Record<string, number>; stops_recorded: number; three_share: number | null;
   weeks: { week_start: string; yes_days: number; income: number }[];
 }
 export interface FccCommuteRoute {
   id: string; name: string; kind: "paid" | "own"; weekdays: string[]; price: number | null; km_one_way: number | null; minutes_one_way: number | null; cost_per_km: number | null; planned_days: number | null;
   active: boolean; notes: string | null; vehicle_class: CommuteClass | null; return_status: CommuteReturn; waiting_minutes: number; start_time: string | null;
+  return_start_time: string | null; return_km: number | null; return_minutes: number | null; outbound_load: CommuteLoad | null; return_load: CommuteLoad | null;
+  out_unpaid_km: number; out_unpaid_minutes: number; ret_unpaid_km: number; ret_unpaid_minutes: number;
   economics: FccCommuteEconomics; days: FccCommuteDay[]; this_month: FccCommuteMonth; history: FccCommuteMonth[]; stops_note: string | null;
 }
 export interface FccCommuteTrip {
@@ -1454,6 +1465,8 @@ export interface FccCommute {
 export interface FccCommuteRouteBody {
   route_id?: string; name?: string; price?: number; km_one_way?: number; minutes_one_way?: number; cost_per_km?: number; planned_days?: number; status?: "active" | "paused";
   vehicle_class?: CommuteClass; return_status?: CommuteReturn; waiting_minutes?: number; route_kind?: "paid" | "own"; weekdays?: string[]; start_time?: string;
+  return_start_time?: string; return_km?: number; return_minutes?: number; outbound_load?: CommuteLoad; return_load?: CommuteLoad; out_unpaid_km?: number; out_unpaid_minutes?: number;
+  ret_unpaid_km?: number; ret_unpaid_minutes?: number;
 }
 export interface FccCommuteTripBody {
   trip_id?: string; destination?: string; date?: string; price?: number; vehicle_class?: CommuteClass; kind?: CommuteKind; km_one_way?: number; minutes_one_way?: number;

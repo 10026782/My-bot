@@ -1002,7 +1002,17 @@ class CommuteRouteFields:
     RETURN_STATUS   = "Return Status"        # singleSelect empty|continuation|waited — what happens on the way back (see CommuteTripFields); empty = the price covers the return
     WAITING_MINUTES = "Waiting Minutes"      # number — minutes waited at the destination per ride day (waited)
     ROUTE_KIND      = "Route Kind"           # singleSelect paid|own — empty = paid; own = one of the owner's OWN regular weekly drives (no price) that a ride / delivery can be fitted "on the way" of
-    START_TIME      = "Start Time"           # text "HH:MM" — the usual start time of the recurring ride
+    START_TIME      = "Start Time"           # text "HH:MM" — the usual start time of the recurring ride (the OUTBOUND leg)
+    # The two legs of a recurring day: outbound (Km One Way / Minutes One Way / Start Time) and return (below; empty = the same as the outbound). The time BETWEEN the legs is free and is not counted.
+    RETURN_START_TIME = "Return Start Time"  # text "HH:MM"
+    RETURN_KM       = "Return Km"            # number
+    RETURN_MINUTES  = "Return Minutes"       # number
+    OUTBOUND_LOAD   = "Outbound Load"        # singleSelect full|empty — descriptive (the price is per day); an empty leg is room for another paid ride
+    RETURN_LOAD     = "Return Load"          # singleSelect full|empty
+    OUT_UNPAID_KM   = "Out Unpaid Km"        # number — unpaid km around the outbound leg (home to the pickup, the drop-off back home)
+    OUT_UNPAID_MINUTES = "Out Unpaid Minutes"
+    RET_UNPAID_KM   = "Ret Unpaid Km"        # number — unpaid km around the return leg
+    RET_UNPAID_MINUTES = "Ret Unpaid Minutes"
     WEEKDAYS        = "Weekdays"             # multipleSelects (ראשון..שבת) — the days an own weekly drive happens on
     FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
 
@@ -1033,6 +1043,8 @@ class CommuteTripFields:
     STOPS_PRICE     = "Stops Price"          # number ₪ — the part of Amount that is the surcharge for those stops (already inside Amount)
     STOPS_KM        = "Stops Km"             # number — km the stops added to the ride
     STOPS_MINUTES   = "Stops Minutes"        # number — minutes the stops added (with that hour's traffic: a stop on the way is not a stop across the city in the rush hour)
+    RETURN_START_TIME = "Return Start Time"  # text "HH:MM" — a recurring-route day: when the RETURN leg left (Start Time is the outbound leg)
+    RETURN_MINUTES  = "Return Minutes"       # number — a recurring-route day: how long the RETURN leg took (Minutes One Way is the outbound leg)
     START_TIME      = "Start Time"           # text "HH:MM" — when the trip started: with the minutes it shows what traffic does to a ride's length at that hour
     ON_THE_WAY_OF   = "On The Way Of"        # text — the name of the own weekly drive the trip was fitted onto (display only)
     FINANCIAL_OWNER = "Financial Owner"      # multipleRecordLinks -> Profile (PERMISSION only)
